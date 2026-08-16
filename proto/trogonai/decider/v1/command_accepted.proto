@@ -1,0 +1,42 @@
+edition = "2024";
+
+package trogonai.decider.v1;
+
+import "google/protobuf/any.proto";
+
+// A command the decider accepted: its events were decided and appended.
+message CommandAccepted {
+  // Stream high-watermark after the append, so a caller can read its own write.
+  //
+  // The position of the append as a whole, not of any one event below. It is
+  // not a next-expected-version and no arithmetic on it is meaningful, so a
+  // caller that needs to identify individual events uses their ids.
+  uint64 stream_position = 1 [features.field_presence = LEGACY_REQUIRED];
+
+  // The events that were appended, in append order.
+  repeated DecidedEvent events = 2;
+}
+
+// One appended event, carried back to the caller that submitted the command.
+//
+// The payloads and not just their types, because a caller warming a cache from
+// its own write would otherwise have to wait for the event to come back around
+// off the stream, and the reply already holds everything it needs.
+message DecidedEvent {
+  // The event's id, identical to the `Nats-Msg-Id` it was published under.
+  //
+  // What makes the reply and the event stream deduplicable against each other:
+  // a caller that both applies this reply and tails the stream sees the same
+  // id twice and applies it once. A stream position could not serve here,
+  // because the append reports one high-watermark for the batch rather than a
+  // position per event.
+  string id = 1 [features.field_presence = LEGACY_REQUIRED];
+
+  // The event itself.
+  //
+  // `Any` rather than a type/bytes pair, because that pair is what `Any`
+  // already is. The type URL carries the `type.googleapis.com/` prefix the
+  // encoding requires, while the event stream stores the bare full name in its
+  // `Trogon-Event-Type` header; the prefix is the whole of the difference.
+  google.protobuf.Any event = 2 [features.field_presence = LEGACY_REQUIRED];
+}

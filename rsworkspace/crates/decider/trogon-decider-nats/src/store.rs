@@ -18,8 +18,8 @@ use trogon_decider_runtime::snapshot::{
 };
 #[cfg(not(coverage))]
 use trogon_decider_runtime::{
-    AppendStreamRequest, AppendStreamResponse, ReadStreamRequest, ReadStreamResponse, SnapshotRead, SnapshotWrite,
-    StreamAppend, StreamRead,
+    AppendFailure, AppendStreamRequest, AppendStreamResponse, ReadStreamRequest, ReadStreamResponse, SnapshotRead,
+    SnapshotWrite, StreamAppend, StreamRead,
 };
 use trogon_decider_runtime::{StreamPosition, StreamWritePrecondition};
 #[cfg(not(coverage))]
@@ -365,6 +365,13 @@ where
         }
         .instrument(span)
         .await
+    }
+
+    fn classify_append_failure(&self, error: &Self::Error) -> AppendFailure {
+        match error {
+            JetStreamStoreError::OptimisticConcurrencyConflict(_) => AppendFailure::WriteConflict,
+            _ => AppendFailure::Fatal,
+        }
     }
 }
 

@@ -29,7 +29,14 @@ impl Decider for RecordCommand {
     type DecideError = Infallible;
     type EvolveError = Infallible;
 
-    const WRITE_PRECONDITION: Option<WritePrecondition> = Some(WritePrecondition::Any);
+    #[cfg_attr(
+        dylint_lib = "trogon_lints",
+        allow(
+            weakened_write_precondition,
+            reason = "the fixture exists to observe telemetry, and appends against a stream no other writer touches"
+        )
+    )]
+    const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::Any;
 
     fn stream_id(&self) -> &Self::StreamId {
         &self.id

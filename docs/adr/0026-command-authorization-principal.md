@@ -1,7 +1,7 @@
 ---
 number: "0026"
 slug: command-authorization-principal
-status: draft
+status: accepted
 date: 2026-07-15
 ---
 
@@ -63,42 +63,55 @@ from it, the same way they derive any other required header today.
 `CommandPrincipal` models a principal kind (agent, person, service),
 a stable principal identifier, and an opaque claims/scope set -- structured
 enough for an authorizer to make a decision, without prescribing a policy
-language.
+language. It also carries the directed-principal hint Decision 4 describes,
+in its own field, so a value that was never verified cannot be mistaken for a
+claim that was.
 
 ### 2. An authorizer trait hook that runs before `decide`
 
-Add a `CommandAuthorizer<C: Decider>` trait with one method that takes the
-principal and the command and returns either `Ok(())` or a typed denial.
-`CommandExecution`/`WasmCommandExecution` gain an optional builder slot for
-an authorizer, defaulting to an `AllowAll` no-op -- the same opt-in shape
-`WithoutSnapshots` already uses for the snapshot builder slot. `AllowAll`
-preserves runtime behavior only: existing call sites keep building and
-behaving exactly as they do today, but the `Unauthorized` variant Decision 5
-adds to the shared error enums is source-breaking for any exhaustive match on
-them, including in consumers that never configure an authorizer. When an
-authorizer is configured, `execute()` calls it after the command's stream id
-and the loaded state are available (an authorizer may need to know the
-target stream) but strictly before `evaluate_decision`/`decide` runs, so a
-denied command never reaches domain logic and never appends.
+Add a `CommandAuthorizer<C>` trait whose method takes the principal and the
+command and returns either `Ok(())` or a typed denial. The command is a plain
+generic parameter rather than a `Decider` bound: the WASM path's command is a
+`CommandEnvelope`, which is not a `Decider`, so a `Decider` bound would make
+Decision 3 unimplementable and split the trait in two.
 
-What a denial avoids is path-specific, and the two guarantees are not
-interchangeable. On the native path the state an authorizer sees is the
-replayed state, so a denial still pays the stream read and the fold; only
-`decide` and the append are skipped. Decision 3's WASM placement is the one
-that runs before any replay, so a WASM denial additionally avoids guest
-session creation and the guest [fuel](../glossary/fuel) that replay and
-`decide` would spend.
+`CommandExecution`/`WasmCommandExecution` gain an optional builder slot for an
+authorizer, defaulting to a `WithoutAuthorization` no-op -- the same opt-in
+shape `WithoutSnapshots` and `WithoutAdmission` already use. The default is
+named for the absence of a policy rather than for a permissive one: "allow
+all" reads like a decision somebody made, and nothing here was decided.
+`WithoutAuthorization` preserves runtime behavior only: existing call sites
+keep building and behaving exactly as they do today, but the `Unauthorized`
+variant Decision 5 adds to the shared error enums is source-breaking for any
+exhaustive match on them, including in consumers that never configure an
+authorizer.
 
-### 3. Both native and WASM dispatch paths
+The trait carries two methods rather than one. Implementations write
+`authorize`, which is only ever handed a principal that exists. The runtime
+calls `authorize_execution`, whose default turns an absent principal into a
+denial before `authorize` is consulted. Decision 5's fail-closed rule is
+therefore the behavior an implementation gets by writing nothing, rather than
+a rule each implementation is trusted to remember.
 
-For the WASM path, the authorizer check sits in
-`WasmCommandExecution::execute` right after `call_stream_id` resolves the
-target stream, before `create_session`/`replay_events`/`decide` run --
-mirroring the native placement and avoiding the cost of instantiating guest
-session state for a command that will be denied. The trait itself does not
-differ between paths; only where each path can cheaply evaluate it differs,
-because the WASM path does not have `state` available in host-native form at
-that point (only the stream id and the command envelope).
+### 3. Both native and WASM dispatch paths, at the same point
+
+The check runs once per execution on both paths, immediately after the
+admission permit and before anything else: before the snapshot read, the
+stream read, the guest instantiation, the replay, and `decide`. It sits
+outside the conflict-retry loop, so a retried command is authorized exactly
+once however many attempts it makes. A denial therefore costs one call and
+nothing else on either path, and the guarantee the two paths offer is the
+same guarantee rather than two path-specific ones.
+
+The price of that placement is what the authorizer is handed: the principal
+and the command, not the target stream and not the replayed state. On the
+native path an authorizer that needs the stream calls `Decider::stream_id` on
+the command it already has. On the WASM path the stream id is a guest-computed
+value that does not exist until the guest has been instantiated and called, so
+a WASM authorizer decides from the command envelope alone. Running the guest
+first to hand an authorizer a stream id would mean paying guest instantiation
+and [fuel](../glossary/fuel) for a command that is about to be denied, which
+is the cost the placement exists to avoid.
 
 ### 4. Composing with AAuth given its optional-string principal
 
@@ -151,18 +164,16 @@ be composed, tested, or swapped independently of the domain type.
 
 ### Authorize in an application-owned wrapper, outside the decider crates
 
-Unresolved; this is the open acceptance question (see Open Questions). The
-decider crate family is reusable and business-agnostic, and its admission
-bar is that a concern is domain-level and makes sense for every consumer
-with no business context; authorization is application-level policy. Under
-that boundary the natural shape is a wrapper the application composes around
-`CommandExecution` (authorize, then execute): no hook in the shared crates,
-no new builder slot, no new variant on the shared error enums. Its cost is
-the property Decisions 1-3 buy by moving the hook inside: the runtime itself
-can no longer state that a given execution was ever checked, and every
-non-gateway caller must remember to go through the wrapper. Choosing between
-these two placements has not been done; the in-crate Decision above is one
-side of the choice, not a settled answer.
+Rejected, with the reasoning in Resolved Question 1. The decider crate family
+is reusable and business-agnostic, and its admission bar is that a concern is
+domain-level and makes sense for every consumer with no business context;
+authorization is application-level policy. Under that boundary the natural
+shape is a wrapper the application composes around `CommandExecution`
+(authorize, then execute): no hook in the shared crates, no new builder slot,
+no new variant on the shared error enums. Its cost is the property Decisions
+1-3 buy by moving the hook inside: the runtime itself can no longer state that
+a given execution was ever checked, and every non-gateway caller must remember
+to go through the wrapper.
 
 An illustrative sketch of the wrapper shape, in application code only.
 Every name here is placeholder, and whether the pieces live per-app or in a
@@ -232,34 +243,47 @@ path to an append goes through the gate.
 - Specifying how an application composes multiple authorizers (allow-list,
   policy callout, or otherwise). One trait, one hook per execution.
 
-## Open Questions
+## Resolved Questions
 
-This ADR is a draft: the Decision sections above are proposals, and the
-following must be resolved before it can be accepted. None of the types it
-names (`CommandPrincipal`, `CommandAuthorizer`, `Unauthorized`) exist, and
-no other document may treat them as existing or scheduled surface until
-then; any reference to them must be hedged as a proposal.
+1. **Placement.** Resolved in favour of the in-crate seam. The boundary rule
+   the wrapper argument invokes is about *policy*, and the seam holds no
+   policy: it owns a principal type, a trait, and a no-op default, the same
+   three pieces [ADR#0028](./0028-decider-admission-control-and-backpressure.md)
+   accepted for admission control, which is equally an operational concern the
+   crate refuses to have an opinion about. What the wrapper cannot give is the
+   property the audit asked for. A wrapper's guarantee holds only for callers
+   who go through it, is unverifiable by the runtime, and is unavailable to
+   consumers outside the application that defines it, including
+   `trogon-scheduler`'s worker processor and any WASM host. With the hook
+   inside, "was this execution authorized" is answerable from the execution's
+   own type: an execution parameterized on `WithoutAuthorization` was not, and
+   one parameterized on anything else was. The wrapper stays viable as a
+   composition on top for applications that want one; it is no longer the only
+   way to get a check.
 
-1. **Placement.** Does an authorization hook belong inside
-   `trogon_decider_runtime`/`trogon_decider_wasm_runtime` at all? The
-   decider crates are business-agnostic and domain-level; authorization is
-   application-level policy, and the wrapper alternative above keeps it out
-   of the shared crates entirely. The Decision assumes in-crate placement
-   without rebutting that boundary; the rebuttal, or the move outward, is
-   owed before acceptance.
-2. **Error surface.** The `Unauthorized` variant on the shared
-   `CommandError`/`WasmCommandError` enums breaks every consumer's
-   exhaustive match, including consumers that never configure an authorizer.
-   Whether the denial belongs on the shared enums or on a wrapper's own
-   error type follows directly from the placement question.
-3. **Upstream protocol churn.** Decision 4 maps identities out of AAuth's
-   optional-string `principal` claim, a shape accepted
-   [ADR#0017](./0017-aauth-agent-authentication.md) pins to a moving IETF
-   Internet-Draft, not a stable RFC. If that specification churns and
-   [ADR#0017](./0017-aauth-agent-authentication.md) re-pins, Decision 4's
-   mapping rules may need revisiting;
-   acceptance here should state how tightly the mapping is coupled to the
-   pinned revision.
+2. **Error surface.** Resolved: on the shared enums, following the placement.
+   `CommandError`/`WasmCommandError` are phase taxonomies, and authorization is
+   a phase. The source-breaking cost is real and is the same cost `Overloaded`
+   already imposed when ADR#0028 was accepted; paying it twice in one release
+   cycle is cheaper than a denial that arrives as an opaque wrapper error a
+   phase-matching consumer cannot classify.
+
+3. **Upstream protocol churn.** Resolved: the coupling is confined to the
+   ingress mapper and does not reach the runtime. `CommandPrincipal` is
+   deliberately not an AAuth type and names nothing from that protocol. It
+   carries a kind, a stable identifier, a claim set, and a separate
+   `directed_principal` field holding the `aa-auth+jwt` `principal` string as
+   an explicitly untrusted hint, never as a claim. If
+   [ADR#0017](./0017-aauth-agent-authentication.md) re-pins its Internet-Draft
+   revision, what changes is Decision 4's mapping at the boundary that
+   performs the verification; the principal type, the trait, and every
+   authorizer implementation are unaffected.
+
+The resolutions above were reached at acceptance time and have not been
+reviewed by a second party. Only the seam described in Decisions 1-3 and 5 is
+implemented. Decision 4 remains unimplemented: no ingress boundary maps an
+AAuth identity into a `CommandPrincipal` yet, so in practice every principal
+the runtime sees today is one a caller constructed directly.
 
 ## Consequences
 
@@ -276,7 +300,18 @@ then; any reference to them must be hedged as a proposal.
 - Authorization becomes a distinguishable phase in logging and metrics,
   separate from a domain rejection (`Decide`) or an infrastructure failure
   (`Append`), matching this crate's existing philosophy of phase-tagged
-  errors.
+  errors. The `decision_outcome` attribute gains a `denied` member alongside
+  `shed`, so a denial is countable without being confused for either a domain
+  rejection or a fault.
+- An authorizer sees the principal and the command, never the target stream's
+  state. That is a deliberate limit of the placement, not an oversight: a
+  policy that must inspect stream state to decide is expressing a domain rule,
+  and a domain rule belongs in `decide`, where a rejection is already a
+  first-class outcome.
+- The seam ships; the ingress half does not. Decision 4's AAuth mapping is
+  unimplemented, so nothing yet produces a `CommandPrincipal` from a verified
+  identity. Until something does, a configured authorizer is only as
+  trustworthy as whatever constructed the principal handed to it.
 - Gets harder: the authorizer hook runs on every command execution, including
   hot paths, so a slow or blocking authorizer implementation directly adds
   latency to every command; this ADR does not mandate a cost bound on

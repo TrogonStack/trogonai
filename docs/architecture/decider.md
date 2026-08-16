@@ -35,30 +35,41 @@ state and returns a `Decision`, never mutating anything itself. When a rejection
 WASM boundary, the bridge surfaces it with the constant `"rejected"` code on the WIT
 `domain-error` and carries the typed error's causal chain in its `details` pairs.
 
-`WRITE_PRECONDITION` (`crates/decider/trogon-decider/src/write_precondition.rs`) is the optional
-concurrency guard applied when the decided events are appended:
+`WRITE_PRECONDITION` (`crates/decider/trogon-decider/src/write_precondition.rs`) is the
+concurrency guard applied when the decided events are appended. It is a total enum with no
+`Option` wrapper and no "unspecified" variant, so every decider states its intent:
 
 ```rust
 pub enum WritePrecondition {
-    Any,           // append regardless of current stream state
-    StreamExists,  // append only if the stream already has events
-    NoStream,      // append only if the stream is empty (first writer wins)
+    StreamUnchanged,  // the default: append only if the stream is still as replay observed it
+    NoStream,         // append only if the stream is empty (first writer wins)
+    StreamExists,     // append only if the stream already has events
+    Any,              // append regardless of current stream state
 }
 ```
 
-The storage layer's `StreamWritePrecondition`
-(`crates/decider/trogon-decider-runtime/src/stream/append_stream.rs`) adds a fourth variant
-the domain-level enum above cannot express: `At(StreamPosition)`, an OCC guard over an
-observed stream position rather than a revision count, enforced server-side via the
+`StreamUnchanged` is the `Decider` trait's default associated const, which is why real
+optimistic concurrency ships without anyone opting in. It names an intent rather than a
+revision because a compile-time `const` cannot carry one: the storage layer's
+`StreamWritePrecondition`
+(`crates/decider/trogon-decider-runtime/src/stream/append_stream.rs`) has a fourth variant
+the domain enum cannot express, `At(StreamPosition)`, an OCC guard over an observed stream
+position rather than a revision count, enforced server-side via the
 expected-last-subject-sequence guard and tracked as `at` in the `write_precondition`
-telemetry attribute. `WRITE_PRECONDITION` is a compile-time `const`, so a decider can never
-supply the position `At` needs; only `CommandExecution`, which has already read the stream,
-can. The effective guard resolves in three steps: `C::WRITE_PRECONDITION` wins if the decider
-declares one; otherwise the value passed to `.with_write_precondition(...)` applies if the
-caller set one; only when neither is present does `CommandExecution` fall back to
-`At(current_position)` if the stream already has events or `NoStream` if it does not. That
-last step is why real optimistic concurrency ships by default without any decider or caller
-opting in, and it never overrides an explicit builder value.
+telemetry attribute. Only the execution, which has already read the stream, can supply that
+position.
+
+`resolve_write_precondition(declared, expected_revision, observed)`
+(`crates/decider/trogon-decider-runtime/src/execution.rs`) is the single shared function both
+the native and the WASM path call to turn the declared intent into a storage guard. Without a
+caller-supplied expected revision, each variant maps to its storage counterpart, and
+`StreamUnchanged` becomes `At(observed)` when the stream has events or `NoStream` when it does
+not. A caller-supplied revision *strengthens* the guard to exactly `At(expected)` rather than
+replacing it, and two combinations are rejected outright rather than silently reinterpreted:
+`NoStream` with any expected revision fails as `PreconditionConflictError::CreateWithRevision`
+(a command that can only create a stream cannot also assert the stream reached a revision),
+and a revision ahead of what the stream can prove fails as
+`PreconditionConflictError::RevisionAheadOfStream`.
 [ADR#0035](../adr/0035-session-store-decider-aggregate.md) rejects adding a trait-level
 `At(N)` variant to `WritePrecondition` for exactly this reason: it could only let a decider
 weaken the default guard, never strengthen it.
@@ -99,24 +110,29 @@ reimplements the stepping logic.
 
 ## The native path: `CommandExecution`
 
-`trogon-decider-runtime`'s `CommandExecution<'a, E, C, S, G>`
+`trogon-decider-runtime`'s
+`CommandExecution<'a, E, C, S, G, A = WithoutAdmission, Auth = WithoutAuthorization>`
 (`crates/decider/trogon-decider-runtime/src/execution.rs`) is the runtime boundary that applies one
-command to one stream: read, replay, decide, append. There is no authorization phase in that
-sequence, and no builder input represents who is submitting the command: whoever can construct
-a `CommandExecution` can apply any command the decider accepts. Callers that need caller
-identity enforced must do it before this boundary.
-[ADR#0026](../adr/0026-command-authorization-principal.md) proposes an authorization phase and
-a principal input, but it is a draft and none of it ships today.
+command to one stream: authorize, read, replay, decide, append. Both defaults are the absence
+of a policy, so an execution that configures neither behaves exactly as it did before either
+seam existed: whoever can construct a `CommandExecution` can apply any command the decider
+accepts, unless the host configures an authorizer (see Authorization below).
 
 Build one with `CommandExecution::new` and configure it with builder methods before calling
 `execute`:
 
 ```rust
 CommandExecution::new(&event_store, &command)
-    .with_write_precondition(precondition)   // ignored if C::WRITE_PRECONDITION is set
+    .with_expected_revision(revision)        // strengthens C::WRITE_PRECONDITION to At(revision)
     .with_headers(headers)
+    .with_command_id(command_id)             // derives deterministic event ids for a redelivery
     .with_event_id_generator(generator)
     .with_replay_limit(limit)                // optional cap on replayed events per command
+    .with_replay_chunk_size(chunk_size)      // optional bound on how much of it is resident at once
+    .with_conflict_retry(retry_limit)        // optional in-place OCC retry, off by default
+    .with_admission(&limiter)                // optional concurrency gate, off by default
+    .with_principal(principal)               // who is submitting; None unless the caller sets it
+    .with_authorizer(&authorizer)            // optional authorization gate, off by default
     .with_snapshot(snapshot_store)           // moves to the snapshot-enabled type state
     .with_task_runtime(scheduler)
     .with_snapshot_failure_policy(policy)
@@ -124,23 +140,27 @@ CommandExecution::new(&event_store, &command)
     .await
 ```
 
-There are two `execute` methods, selected by type state (whether `.with_snapshot(...)` was
-called):
+There is one `execute`. Whether `.with_snapshot(...)` was called is a type state (`S`, either
+`WithoutSnapshots` or `Snapshots`), and the difference between the two is confined to the
+`ExecutionSnapshots<C>` trait that type state implements: it owns loading the replay context
+and storing a new snapshot, and `execute` calls it the same way either way. The trait is
+public because it appears in `execute`'s signature, but it is sealed, so the two shipped type
+states are the only implementations. The phases are:
 
-- **Without snapshots**: if the effective write precondition is `NoStream`, the stream isn't
-  read at all and the command is decided straight against `C::initial_state()`. The decider's
-  declared precondition takes precedence; the builder value applies when the decider does not
-  declare one. Otherwise the stream is read from the beginning (`ReadFrom::Beginning`), folded
-  through `evolve`, decided, and appended.
-- **With snapshots**: the same effective `NoStream` precondition skips both snapshot and stream
-  reads. Otherwise a snapshot is read first. On a snapshot the configured
-  `SnapshotFailurePolicy` cannot trust, the policy decides `Fail` or `DiscardAndReplay`; a
-  discarded snapshot falls back to a full replay from the beginning. Otherwise only the
-  stream events *after* the snapshot's position are read (`ReadFrom::after(position)`). A
-  snapshot whose position is ahead of the stream's current position is also routed through
-  the failure policy. After decide and append succeed, a snapshot write is scheduled: always,
-  if a bad snapshot was just discarded and overwritten with a trustworthy one; otherwise only
-  when the configured `SnapshotPolicy::decide_snapshot` returns `SnapshotDecision::Take`.
+- **Load.** If the effective write precondition is `NoStream`, neither the snapshot store nor
+  the stream is read and the command is decided straight against `C::initial_state()`: any
+  history at all would already violate the guard the append is about to use. Otherwise
+  `WithoutSnapshots` reads the stream from the beginning (`ReadFrom::Beginning`), while
+  `Snapshots` reads a snapshot first and then reads only the stream events *after* the
+  snapshot's position (`ReadFrom::after(position)`).
+- **Recover.** On a snapshot the configured `SnapshotFailurePolicy` cannot trust, either
+  because reading it failed or because it claims a position ahead of the stream, the policy
+  decides `Fail` or `DiscardAndReplay`; a discarded snapshot falls back to a full replay from
+  the beginning.
+- **Decide and append**, guarded by the resolved `StreamWritePrecondition`.
+- **Snapshot.** After decide and append succeed, a snapshot write is scheduled: always, if a
+  bad snapshot was just discarded and overwritten with a trustworthy one; otherwise only when
+  the configured `SnapshotPolicy::decide_snapshot` returns `SnapshotDecision::Take`.
 
 `with_replay_limit` (`ReplayLimit`, a non-zero event count) bounds how much history one
 command execution may replay. Once a limit is configured, the read itself is capped to one
@@ -163,11 +183,128 @@ Nothing forces the override when a limit is configured, so "a stream far past th
 never read in full" is a property of the store, not of `ReplayLimit`. The default is
 unlimited.
 
+### Chunked replay
+
+`with_replay_chunk_size` (`ReplayChunkSize`, a non-zero event count) answers a different
+question than `ReplayLimit` does, which is why the two are separate value objects and either
+can be set alone. The limit is a correctness tripwire: past it, replaying is the wrong thing
+to do at all. The chunk size says nothing about how much history is acceptable, only how much
+of it may be resident at one time. A chunked replay reads the stream in steps of at most that
+many events, folding each step before reading the next, so peak memory is the chunk rather
+than the stream. When both are set, each read is bounded by whichever is tighter, and the
+limit still fails the command the moment the fold passes it. The default is a single read.
+
+The walk is pinned to the tail the first read observed. Reads happen one after another, so the
+stream can grow between them; folding whatever a later read happens to return would build
+state from history the append is not guarded against, and the write precondition would then
+assert a position the decision never saw. Every chunk is therefore cut off at the first read's
+`current_position`, and events past it are left for the next execution, exactly as an
+unchunked replay leaves them.
+
+One behavior does change with chunking, and only in the failure case: an unchunked replay
+rejects an over-limit stream before folding anything, while a chunked one has already folded
+the earlier chunks by the time the limit is reached. The command still fails with
+`CommandError::ReplayLimitExceeded` and still appends nothing, so nothing observable outside
+the execution differs.
+
 `CommandError<DecideError, EvolveError, ReadSnapshotError, ReadStreamError, AppendStreamError,
 EventTypeError, PayloadEncodeError, DecodeError>` normalizes failures by phase
 (`Decide`, `Evolve`, `ReadSnapshot`, `ReadStream`, `Append`, `EventType`, `EventEncode`,
-`DecodeEvent`, `SnapshotAheadOfStream`, `ReadAfterOverflow`, `ReplayLimitExceeded`) while
-preserving each phase's concrete source error type.
+`DecodeEvent`, `SnapshotAheadOfStream`, `ReadAfterOverflow`, `ReplayLimitExceeded`,
+`PreconditionConflict`, `Overloaded`) while preserving each phase's concrete source error
+type.
+
+### Conflict retry
+
+An optimistic-concurrency conflict is not a failure of the command. It says the state the
+decision was made from is no longer the state the append would land on, and the only thing
+that can be done about it is to read the stream again and decide again. By default that round
+is the caller's to run: the conflict surfaces as `CommandError::Append` carrying the store's
+own error and the command is over. `with_conflict_retry(ConflictRetryLimit)` runs it in place
+instead, up to that many extra attempts, and the caller only sees a conflict that outlived all
+of them. The limit counts retries rather than attempts, and it is a `NonZeroU32` value object,
+because "no retries" is the absence of a limit rather than a limit of none.
+
+A retry needs three things to be true at once, and the default of every one of them is "do not
+retry":
+
+- **The store says so.** `StreamAppend::classify_append_failure` maps a store's own error to
+  `AppendFailure::WriteConflict` or `AppendFailure::Fatal`. Only the store knows which of its
+  errors mean "the stream moved", so naming it there keeps the distinction typed rather than
+  inferred from an error message. The default is `Fatal`, so a store that has not classified
+  its errors never has a command retried behind its back. `InMemoryStore` and
+  `JetStreamStore` both override it.
+- **The decider declared `StreamUnchanged`.** Every other precondition asserts something a
+  re-read cannot change: `NoStream` conflicts because the stream now exists, `StreamExists`
+  because it does not, and `Any` never conflicts at all.
+- **No caller-supplied expected revision.** A revision is the caller's own assertion about
+  what they read. Re-reading past it would substitute the runtime's judgment for theirs.
+
+A retry repeats the whole round, snapshot read included, so a stale snapshot cannot pin
+successive attempts to the same state. Each attempt is counted by
+`decider.command.conflict_retries`, so contention that is being absorbed is still visible
+rather than hidden by the loop.
+
+### Admission control
+
+Per [ADR#0028](../adr/0028-decider-admission-control-and-backpressure.md), `with_admission`
+gates an execution on a `CommandAdmission` limiter
+(`crates/decider/trogon-decider-runtime/src/admission.rs`). The permit is acquired before the
+first read and held until the execution ends, so one slot covers the reads, the decide, and
+the append rather than only the moment of admission; dropping the permit releases the slot,
+so a failing or panicking execution cannot leak one.
+
+This is a seam, not a policy. The crate owns the trait, the `AdmissionLimit` value object, the
+`OverloadedError` rejection, and one semaphore-shaped implementation (`ConcurrencyAdmission`, whose
+clones share a single budget so several consumers in a process can be bounded together). It
+owns no bound: the number worth choosing is a limit against a specific host's memory budget,
+which is a deployment fact rather than a property of any decider. The type parameter therefore
+defaults to `WithoutAdmission`, which admits unconditionally, and a host that never configures
+a limiter behaves exactly as it did before admission control existed.
+
+`admit` is synchronous. An admission decision that can await is a queue, and an unbounded queue
+relocates the memory pressure a limiter exists to bound while hiding it behind latency instead
+of surfacing it as a distinguishable error. A shed command fails with `CommandError::Overloaded`
+before any work begins and is recorded as `decision_outcome=shed`, distinct from both a domain
+rejection and a fault. A host that wants a bounded wait before shedding owns that wait in its
+own dispatch loop, before it builds the execution.
+
+### Authorization
+
+Per [ADR#0026](../adr/0026-command-authorization-principal.md), `with_principal` names who is
+submitting a command and `with_authorizer` gates the execution on a `CommandAuthorizer`
+(`crates/decider/trogon-decider-runtime/src/authorization.rs`). The check runs immediately
+after the admission permit and before the first snapshot read, stream read, decide, or append,
+and it runs outside the conflict-retry loop, so a denied command costs one call and a command
+that conflicts three times still answers to one authorization decision.
+
+Like admission control this is a seam and not a policy. The crate owns the trait, the
+`CommandPrincipal` value object and the `PrincipalKind`, `PrincipalId`, `PrincipalClaim`, and
+`PrincipalClaims` pieces it is built from, the `AuthorizationDenied` and `UnauthorizedError`
+rejections, and nothing else. It ships no rule and no claim vocabulary: which claim a command
+requires is an application fact. The type parameter defaults to `WithoutAuthorization`, named
+for the absence of a decision rather than for a permissive one, so an unconfigured execution
+carries that absence in its own type.
+
+The trait has two methods and implementations write only one. An implementation writes
+`authorize(&self, principal: &CommandPrincipal, command: &C)`; the runtime calls
+`authorize_execution(&self, principal: Option<&CommandPrincipal>, command: &C)`, whose default
+refuses an absent principal with `UnauthorizedError::MissingPrincipal` before `authorize` is
+consulted. Fail-closed is therefore what an implementation gets by writing nothing. A refused
+command fails with `CommandError::Unauthorized` (`WasmCommandError::Unauthorized` on the WASM
+path) and is recorded as `decision_outcome=denied`, distinct from a shed command, a domain
+rejection, and a fault.
+
+`C` is a plain generic parameter rather than a `Decider` bound, which is what lets one trait
+cover both dispatch paths: the WASM path's command is a `CommandEnvelope`, not a `Decider`.
+The cost of checking this early is that an authorizer sees the principal and the command and
+nothing else, never the target stream or its replayed state. That is deliberate: a policy that
+must read stream state to decide is expressing a domain rule, and a domain rule belongs in
+`decide`.
+
+Only the seam ships. The ingress half of ADR#0026, which would map a verified AAuth credential
+onto a `CommandPrincipal`, does not exist yet, so nothing in this crate family populates a
+principal on its own.
 
 ### Snapshot policy and failure recovery
 
@@ -187,6 +324,24 @@ Scheduled snapshot writes run through a `SnapshotTaskScheduler` (`fn schedule`, 
 `drain` future that defaults to resolving immediately). `TokioSnapshotTaskScheduler` is
 fire-and-forget: its `drain` never actually waits. `DrainableSnapshotTaskScheduler` tracks
 in-flight writes so a host can `drain().await` outstanding snapshot writes before shutdown.
+
+### Command-level idempotency
+
+`with_command_id` takes a `CommandId`, the stable identity of the command across every delivery
+of it. Every event the execution appends then derives its `EventId` from that identity
+(`CommandId::event_id(index)`, a UUIDv5 over the command id and the event's big-endian position
+in the decided batch), so a redelivered command produces byte-identical ids in the same order.
+That is what lets a storage adapter recognize a retry: `trogon-decider-nats` publishes
+`event.id` as the JetStream `Nats-Msg-Id`, so its deduplication window collapses the second
+append instead of duplicating the events under fresh ids. Without a command id, ids come from
+the configured generator and every at-least-once redelivery looks like new history.
+
+The id has to come from the transport. A value the execution generated would be as fresh on the
+retry as the UUIDv7 it replaces. A delivery that carries no id of its own but does carry a key
+the sender cannot vary between attempts can use `CommandId::derive(namespace, key)`, as the
+scheduler's timer wakeups do, naming the occurrence they fire for. Distinct kinds of key need
+distinct namespaces, or two unrelated commands whose keys render alike collapse onto one
+identity.
 
 ### Headers
 
@@ -262,6 +417,31 @@ bucket (`read_snapshot`, `write_snapshot`, `read_checkpoint`, `write_checkpoint`
 `NatsSnapshotConfig` carries the checkpoint key name; `SnapshotChange<T>` is either an
 `Upsert` or a `Delete` mutation applied atomically alongside the checkpoint update.
 
+### Retention watermarks
+
+`retention.rs` answers the question snapshots make answerable: which events is nobody going
+to read again? Replay resumes from `ReadFrom::after(snapshot.position)`, so the oldest
+outstanding snapshot for a stream is the boundary below which its history is dead weight.
+`RetentionWatermarksBuilder` folds one snapshot type's `read_snapshot_map` result at a time,
+plus any `CheckpointSequence` tracking progress over the same physical stream, into a
+`RetentionWatermarks` report keyed by snapshot id (which both execution paths set to the
+stream id).
+
+The watermark itself is total: `RetainAll` or `DiscardBelow(StreamPosition)`, ordered so that
+`RetainAll` is the least element and combining constraints is `min`. Every case the fold
+cannot justify a boundary for resolves to `RetainAll` -- a stream nobody snapshotted, a
+checkpoint at `NONE`, a stream one observed snapshot type covers and another does not -- so an
+incomplete picture over-retains rather than over-deletes. The one thing it cannot defend
+against is a marker it was never shown: a snapshot type or checkpoint left out of the fold
+produces a watermark that is too high, which is why the aggregate over a physical stream is
+only sound when every stream id on it is declared.
+
+Nothing here purges. Per [ADR#0029](../adr/0029-decider-retention-and-truncation-watermark.md)
+the store never truncates as a side effect of a read, append, or snapshot write; the watermark
+is a read-only query an operator or scheduled job consumes, and that job is not part of this
+crate family. Watermarks are physical JetStream sequences, never
+`Trogon-Origin-Stream-Sequence`.
+
 ## Read-side primitives: `Projector` and `Processor`
 
 `trogon-decider-nats` also ships two generic read-side primitives, so consumers of decider
@@ -306,10 +486,14 @@ export_decider!(
         module = "scheduler.schedules",
         version = "0.1.0",
         state_schema_version = SCHEDULES_STATE_SCHEMA_VERSION,
-        write_precondition = no_stream,
     },
 );
 ```
+
+Neither the write precondition nor the snapshot cadence is restated here. The macro reads both
+off the `Decider` itself, `C::WRITE_PRECONDITION` and `C::SNAPSHOT_CADENCE`, and emits them into
+the descriptor, so a decider declares each policy once and keeps it across both execution paths
+instead of having a wasm-only copy that can drift from the native one.
 
 It expands to a hidden module containing `wit_bindgen::generate!` bindings, a `Component`
 unit struct implementing the WIT `Guest` trait (`descriptor()`, `stream_id(command)`), and a
@@ -321,9 +505,11 @@ into `trogon-decider-wit` at that crate's own compile time, so a component crate
 any directory depth relative to it.
 
 The contract itself lives in `trogon-decider-wit`'s `wit/world.wit` (package
-`trogon:decider@0.2.0`, world `decider`, interface `handler`): `descriptor()` returns a
-`module-descriptor { name, version, commands }`; `stream-id(command)` resolves a
-`command-envelope` to its target stream; the `session` resource exposes
+`trogon:decider@0.3.0`, world `decider`, interface `handler`): `descriptor()` returns a
+`module-descriptor { name, version, commands }`, where each `command-spec` carries the
+command's `write-precondition` and its `snapshot-policy`, both total variants with no
+`option<>` wrapper so a module states each policy rather than leaving the host to infer one;
+`stream-id(command)` resolves a `command-envelope` to its target stream; the `session` resource exposes
 `evolve(events)`, `decide(command) -> result<list<any-envelope>, decide-error>`, and
 `snapshot() -> option<list<u8>>`. A successful `decide` must return a non-empty event list;
 WIT cannot express that constraint, so the guest SDK preserves it by construction (`Events`
@@ -365,15 +551,50 @@ for cheap per-command instantiation, and probes the guest's `descriptor()` expor
 
 ### Execution ordering: decide, fold, then snapshot
 
-`WasmCommandExecution` mirrors the native `CommandExecution` boundary against the WIT
-`session` resource. Guest calls run via `spawn_guest`, which wraps
-`tokio::task::spawn_blocking` so a guest's fuel- and epoch-bounded call never occupies the
-async executor for its duration.
+`WasmCommandExecution<'a, E, Snapshots, G, A = WithoutAdmission, Auth = WithoutAuthorization>`
+mirrors the native
+`CommandExecution` boundary against the WIT `session` resource. Guest calls run via
+`spawn_guest`, which wraps `tokio::task::spawn_blocking` so a guest's fuel- and epoch-bounded
+call never occupies the async executor for its duration. Like the native path it has one
+`execute`, with the snapshot-store type state confined behind its own sealed trait,
+`WasmExecutionSnapshots`. The seam is per-crate rather than shared: a single session
+abstraction spanning both paths would have to split the wasm path's guest calls into
+separately awaited phases and pay a thread hop for each, so the two crates keep parallel
+skeletons that are verified against each other by tests rather than one skeleton reused. The
+crates do share the pieces that carry no session state: `resolve_write_precondition`,
+`read_stream_for_execution`, `ensure_replay_within_limit`, and the `ReplayBounds` and
+`ReplayCursor` that drive a chunked replay.
 
-Before loading state, execution resolves the command descriptor's write precondition ahead of
-the builder override. An effective `NoStream` precondition starts the guest from initial state
-without reading a snapshot or stream history. The same resolved value is later used for append,
-so replay planning and optimistic concurrency cannot disagree about precedence.
+Before loading state, execution resolves the command descriptor's write precondition through
+the same shared `resolve_write_precondition` the native path uses, so a caller's expected
+revision strengthens the module's declared guard by exactly the rules described above. An
+effective `NoStream` precondition starts the guest from initial state without reading a
+snapshot or stream history. The same resolved value is later used for append, so replay
+planning and optimistic concurrency cannot disagree about precedence.
+
+`with_replay_limit`, `with_replay_chunk_size`, `with_conflict_retry`, `with_admission`,
+`with_principal`, and `with_authorizer`
+mirror their native
+counterparts, including the bounded read: a configured `ReplayLimit` caps the read at one past the limit through
+`StreamRead::read_stream_bounded` on both the store-less and the snapshot-resumed path, and a
+`ReplayLimitExceeded` command fails before any of that history reaches the guest. A limiter
+that cannot admit fails the command with `WasmCommandError::Overloaded` before a wasm store
+exists at all, which is what makes `limit x max_memory_bytes` a real bound on the host's
+worst-case guest memory rather than an estimate. An authorizer that refuses fails the command
+with `WasmCommandError::Unauthorized` at the same point, before any guest is instantiated and
+therefore before the stream id the guest would compute exists, which is why an authorizer on
+this path is handed the `CommandEnvelope` and nothing else. A retried conflict costs a fresh guest
+session, a fresh replay, and a fresh decide, which is why it is bounded by the same
+`ConflictRetryLimit` and refused under the same three conditions as on the native path.
+
+A chunk size buys the guest path one thing more than it buys the native one. An unchunked
+replay hands the whole stream to a single `evolve` call, whose fuel and epoch budget is
+therefore scaled by the stream's length; a long enough stream is one guest call that has to be
+allowed to run for a proportionally long time. A chunked replay folds each chunk in its own
+`evolve` call, so the budget is per chunk, and the session crosses the blocking boundary
+between chunks while the next read happens on the async executor. The session's destructor is
+owed either way: a fold that fails runs it before returning, and so does a read between two
+chunks that fails.
 
 The guest's generated `decide` export only reads session state; it never folds its own
 newly decided events back into it (`evolve` mutates the session's `RefCell<State>`, `decide`
@@ -503,7 +724,7 @@ attribute group. All decider telemetry is `stability: development`.
 
 Attributes: `command_type`, `module_name`, `module_version`, `write_precondition`
 (`any`/`stream_exists`/`no_stream`/`at`), `decision_outcome`
-(`decided`/`rejected`/`faulted`), `snapshot_outcome`
+(`decided`/`rejected`/`faulted`/`shed`/`denied`), `snapshot_outcome`
 (`hit`/`miss`/`discarded_read_failure`/`discarded_ahead_of_stream`/`failed`),
 `snapshot_write_success`, `guest_phase` (`instantiate`/`replay`/`decide`/`snapshot`/`drop`), and
 `trap_classification` (`deadline_exceeded`/`trap`). `stream_id` is defined once in
@@ -518,6 +739,7 @@ Metrics: `decider.replay.events` (counter), `decider.snapshot.reads` (counter, b
 `decider.snapshot.kv_read_failures` / `decider.snapshot.kv_write_failures` (counters),
 `decider.append.duration` (histogram), `decider.append.conflicts` (counter),
 `decider.replay.duration` (histogram), `decider.replay.retries` (counter),
+`decider.command.conflict_retries` (counter),
 `decider.wasm.execution.duration` (histogram, by `guest_phase`),
 `decider.wasm.fuel.consumed` (histogram, by `guest_phase`), `decider.wasm.traps` (counter, by
 `trap_classification`).
@@ -533,10 +755,19 @@ Accepted and reflected in the platform as built:
   vocabulary requirement behind the Observability section above.
 - [ADR#0013: Origin Stream Sequence Header](../adr/0013-origin-stream-sequence-header.md):
   the `Trogon-Origin-Stream-Sequence` header described under Headers above.
+- [ADR#0026: Command Authorization Principal](../adr/0026-command-authorization-principal.md):
+  the `CommandAuthorizer` seam described under Authorization above. Only the seam is built. The
+  ingress half, which would derive a principal from a verified credential, is not, so no
+  principal reaches an execution unless a caller puts one there.
+- [ADR#0028: Decider Admission Control and Backpressure](../adr/0028-decider-admission-control-and-backpressure.md):
+  the `CommandAdmission` seam described under Admission control above. The shared crates own
+  the seam and one implementation; no bound is chosen anywhere in the decider stack, so a host
+  that configures no limiter is exactly as unprotected as it was before.
+- [ADR#0029: Snapshot-Derived Retention Watermark for Decider Streams](../adr/0029-decider-retention-and-truncation-watermark.md):
+  the read-only watermark described under Retention watermarks above. The purge that would
+  consume it is an explicit Non-Goal there and does not exist; no code in this crate family
+  truncates anything.
 
 Draft, **not yet implemented**; do not treat these as current behavior:
 
-- [ADR#0026: Command Authorization Principal](../adr/0026-command-authorization-principal.md)
 - [ADR#0027: Decider Multi-Tenancy Primitive](../adr/0027-decider-multi-tenancy-primitive.md)
-- [ADR#0028: Decider Admission Control and Backpressure](../adr/0028-decider-admission-control-and-backpressure.md)
-- [ADR#0029: Decider Retention and Truncation Watermark](../adr/0029-decider-retention-and-truncation-watermark.md)

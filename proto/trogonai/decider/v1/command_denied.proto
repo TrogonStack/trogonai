@@ -1,0 +1,18 @@
+edition = "2024";
+
+package trogonai.decider.v1;
+
+// A command authorization refused before any work began.
+//
+// Nothing was read, decided, or appended. Separate from a rejection because no
+// module was asked: the refusal is about who submitted the command, not about
+// what the command says. Separate from a fault because the host is working
+// exactly as configured.
+message CommandDenied {
+  // Why the command was refused, as the configured authorizer stated it.
+  //
+  // Written for the caller to read, not to branch on: the host defines no
+  // vocabulary of denial codes, so a policy that wants one carries it inside
+  // this string and owns its meaning.
+  string reason = 1 [features.field_presence = LEGACY_REQUIRED];
+}

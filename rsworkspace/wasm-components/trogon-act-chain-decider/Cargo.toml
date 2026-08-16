@@ -20,3 +20,6 @@ wit-bindgen = { workspace = true }
 
 [package.metadata.component]
 package = "trogon:decider"
+
+[package.metadata.decider-test]
+exempt = "a wasm-runtime fixture, not a shipped decider: its command and events are hand-rolled buffa messages with no generated proto descriptors, so decider-test has no type registry to encode a YAML suite against. Covered by trogon-decider-wasm-runtime/tests/act_chain_execution.rs."

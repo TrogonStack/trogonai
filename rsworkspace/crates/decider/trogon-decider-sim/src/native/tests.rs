@@ -1,4 +1,6 @@
-use trogon_decider::{Decider, Decision, EventData, EventDecode, EventDecodeOutcome, EventEncode, EventType};
+use trogon_decider::{
+    Decider, Decision, EventData, EventDecode, EventDecodeOutcome, EventEncode, EventType, WritePrecondition,
+};
 use trogon_decider_guest_sdk::DomainErrorParts;
 
 use super::*;
@@ -93,6 +95,7 @@ impl Decider for Increment {
     type Event = CounterEvent;
     type DecideError = CounterError;
     type EvolveError = CounterEvolveError;
+    const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 
     fn stream_id(&self) -> &Self::StreamId {
         "counter"

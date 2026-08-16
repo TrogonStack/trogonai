@@ -4,9 +4,12 @@
 //! has no way to exercise an Act chain across the real WIT/wasmtime boundary. This crate
 //! exists solely to give it one: `decide` returns a two-step chain whose second step reads
 //! the state the first step's event evolved, proving native/WASM parity for `Decision::Act`.
-//! Not registered with `cli/trogon-decider-test` and not consumed by any other crate.
+//! Not registered with `cli/trogon-decider-test`, which the conformance gate knows about through
+//! this crate's `[package.metadata.decider-test] exempt` key, and not consumed by any other crate.
 
-use trogon_decider::{Decider, Decision, EventData, EventDecode, EventDecodeOutcome, EventEncode, EventType};
+use trogon_decider::{
+    Decider, Decision, EventData, EventDecode, EventDecodeOutcome, EventEncode, EventType, WritePrecondition,
+};
 use trogon_decider_guest_sdk::export_decider;
 
 pub mod constants;
@@ -161,6 +164,7 @@ impl Decider for RunTwoStepPlan {
     type Event = PlanEvent;
     type DecideError = PlanDecideError;
     type EvolveError = PlanEvolveError;
+    const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 
     fn stream_id(&self) -> &str {
         &self.stream_id

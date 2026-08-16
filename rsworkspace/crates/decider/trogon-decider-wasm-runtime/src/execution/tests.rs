@@ -19,67 +19,6 @@ impl NowV7 for FixedUuidGenerator {
 }
 
 #[test]
-fn spec_precondition_wins_over_override_and_position() {
-    let resolved = resolve_write_precondition(
-        Some(host::WritePrecondition::NoStream),
-        Some(StreamWritePrecondition::Any),
-        Some(position(7)),
-    );
-    assert_eq!(resolved, StreamWritePrecondition::NoStream);
-}
-
-#[test]
-fn override_wins_over_observed_position() {
-    let resolved = resolve_write_precondition(None, Some(StreamWritePrecondition::StreamExists), Some(position(7)));
-    assert_eq!(resolved, StreamWritePrecondition::StreamExists);
-}
-
-#[test]
-fn observed_position_is_the_fallback() {
-    let resolved = resolve_write_precondition(None, None, Some(position(7)));
-    assert_eq!(resolved, StreamWritePrecondition::At(position(7)));
-}
-
-#[test]
-fn missing_position_falls_back_to_no_stream() {
-    let resolved = resolve_write_precondition(None, None, None);
-    assert_eq!(resolved, StreamWritePrecondition::NoStream);
-}
-
-#[test]
-fn configured_no_stream_uses_the_fast_path() {
-    assert!(has_no_stream_write_precondition(
-        Some(host::WritePrecondition::NoStream),
-        None
-    ));
-    assert!(has_no_stream_write_precondition(
-        None,
-        Some(StreamWritePrecondition::NoStream)
-    ));
-    assert!(!has_no_stream_write_precondition(
-        Some(host::WritePrecondition::Any),
-        Some(StreamWritePrecondition::NoStream)
-    ));
-    assert!(!has_no_stream_write_precondition(None, None));
-}
-
-#[test]
-fn wit_preconditions_map_onto_stream_preconditions() {
-    assert_eq!(
-        to_stream_write_precondition(host::WritePrecondition::Any),
-        StreamWritePrecondition::Any
-    );
-    assert_eq!(
-        to_stream_write_precondition(host::WritePrecondition::StreamExists),
-        StreamWritePrecondition::StreamExists
-    );
-    assert_eq!(
-        to_stream_write_precondition(host::WritePrecondition::NoStream),
-        StreamWritePrecondition::NoStream
-    );
-}
-
-#[test]
 fn snapshot_at_or_behind_stream_is_accepted() {
     assert!(ensure_snapshot_not_ahead(position(3), Some(position(3))).is_ok());
     assert!(ensure_snapshot_not_ahead(position(3), Some(position(9))).is_ok());
@@ -105,13 +44,40 @@ fn encode_events_assigns_host_ids_and_headers() {
         payload: vec![1, 2, 3],
     }];
 
-    let events = encode_events(envelopes, &headers, &FixedUuidGenerator(id));
+    let events = encode_events(envelopes, &headers, None, &FixedUuidGenerator(id));
 
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].id, EventId::new(id));
     assert_eq!(events[0].r#type, "test.v1.Happened");
     assert_eq!(events[0].content, vec![1, 2, 3]);
     assert_eq!(events[0].headers, headers);
+}
+
+#[test]
+fn a_command_id_makes_the_encoded_event_ids_survive_redelivery() {
+    let command_id = CommandId::new(Uuid::now_v7());
+    let headers = Headers::empty();
+    let envelopes = || {
+        vec![
+            AnyEnvelope {
+                type_: "test.v1.Happened".to_string(),
+                payload: vec![1],
+            },
+            AnyEnvelope {
+                type_: "test.v1.HappenedAgain".to_string(),
+                payload: vec![2],
+            },
+        ]
+    };
+    let generator = FixedUuidGenerator(Uuid::now_v7());
+
+    let first_delivery = encode_events(envelopes(), &headers, Some(command_id), &generator);
+    let redelivery = encode_events(envelopes(), &headers, Some(command_id), &generator);
+
+    let ids = |events: &[Event]| events.iter().map(|event| event.id).collect::<Vec<_>>();
+    assert_eq!(ids(&first_delivery), ids(&redelivery));
+    assert_ne!(first_delivery[0].id, first_delivery[1].id);
+    assert_ne!(first_delivery[0].id, EventId::new(generator.0));
 }
 
 #[test]

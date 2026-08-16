@@ -1,0 +1,27 @@
+edition = "2024";
+
+package trogonai.decider.v1;
+
+import "trogonai/decider/v1/command_accepted.proto";
+import "trogonai/decider/v1/command_denied.proto";
+import "trogonai/decider/v1/command_faulted.proto";
+import "trogonai/decider/v1/command_rejected.proto";
+import "trogonai/decider/v1/command_shed.proto";
+
+// The reply body for every decider command, whatever became of it.
+//
+// One total type rather than a success body plus a separate error body: a
+// caller decodes once and matches, and no outcome can be added without every
+// caller's match seeing it. The `Trogon-Decider-Outcome` reply header carries
+// the same discriminant so middleware can meter without decoding, and its
+// value space is the `decision_outcome` telemetry attribute's, so the wire and
+// the traces cannot drift apart.
+message CommandOutcome {
+  oneof outcome {
+    CommandAccepted decided = 1;
+    CommandRejected rejected = 2;
+    CommandFaulted faulted = 3;
+    CommandShed shed = 4;
+    CommandDenied denied = 5;
+  }
+}

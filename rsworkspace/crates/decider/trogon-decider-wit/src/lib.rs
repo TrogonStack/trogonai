@@ -11,8 +11,8 @@
 //!
 //! Both sides re-export the same WIT-derived types (`AnyEnvelope`, `CommandEnvelope`,
 //! `CommandSpec`, `DecideError`, `DomainError`, `Guest`, `GuestSession`, `ModuleDescriptor`,
-//! `WritePrecondition`) so application code can reason about one contract regardless of which
-//! side it is compiled into.
+//! `SnapshotPolicy`, `WritePrecondition`) so application code can reason about one contract
+//! regardless of which side it is compiled into.
 
 pub mod constants;
 
@@ -41,7 +41,7 @@ pub mod guest {
 
     pub use bindings::exports::trogon::decider::handler::{
         AnyEnvelope, CommandEnvelope, CommandSpec, DecideError, DomainError, Guest, GuestSession, ModuleDescriptor,
-        WritePrecondition,
+        SnapshotPolicy, WritePrecondition,
     };
 }
 
@@ -140,7 +140,7 @@ pub mod host {
 
     pub use bindings::exports::trogon::decider::handler::{
         AnyEnvelope, CommandEnvelope, CommandSpec, DecideError, DomainError, Guest, GuestSession, ModuleDescriptor,
-        WritePrecondition,
+        SnapshotPolicy, WritePrecondition,
     };
     pub use bindings::{
         Decider, DeciderPre, call_descriptor, call_stream_id, create_session, decide, drop_session, evolve, snapshot,

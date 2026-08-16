@@ -1,7 +1,7 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 #[allow(clippy::all)]
-#[cfg(any(feature = "schedules", feature = "agents", feature = "sessions"))]
+#[cfg(any(feature = "schedules", feature = "agents", feature = "sessions", feature = "decider"))]
 mod r#gen;
 
 #[cfg(any(feature = "schedules", feature = "agents", feature = "sessions"))]
@@ -17,6 +17,9 @@ pub mod scheduler;
 
 #[cfg(feature = "agents")]
 pub mod agents;
+
+#[cfg(feature = "decider")]
+pub mod decider;
 
 #[cfg(feature = "sessions")]
 pub mod session;

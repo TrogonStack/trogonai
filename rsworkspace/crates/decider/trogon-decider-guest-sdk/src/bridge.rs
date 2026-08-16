@@ -266,13 +266,14 @@ where
 }
 
 /// Projects the native [`trogon_decider::WritePrecondition`] into the guest-side
-/// [`WritePreconditionTag`], preserving `None` (no precondition) as `None`.
-pub fn map_write_precondition(value: Option<trogon_decider::WritePrecondition>) -> Option<WritePreconditionTag> {
-    value.map(|precondition| match precondition {
-        trogon_decider::WritePrecondition::Any => WritePreconditionTag::Any,
-        trogon_decider::WritePrecondition::StreamExists => WritePreconditionTag::StreamExists,
+/// [`WritePreconditionTag`].
+pub fn map_write_precondition(value: trogon_decider::WritePrecondition) -> WritePreconditionTag {
+    match value {
+        trogon_decider::WritePrecondition::StreamUnchanged => WritePreconditionTag::StreamUnchanged,
         trogon_decider::WritePrecondition::NoStream => WritePreconditionTag::NoStream,
-    })
+        trogon_decider::WritePrecondition::StreamExists => WritePreconditionTag::StreamExists,
+        trogon_decider::WritePrecondition::Any => WritePreconditionTag::Any,
+    }
 }
 
 /// Guest-side mirror of [`trogon_decider::WritePrecondition`].
@@ -283,12 +284,38 @@ pub fn map_write_precondition(value: Option<trogon_decider::WritePrecondition>) 
 /// own generated `WritePrecondition` type (see `map_write_precondition_tag` in
 /// `trogon-decider-guest-macros`).
 pub enum WritePreconditionTag {
-    /// No constraint on the stream's current state.
-    Any,
-    /// The stream must already exist.
-    StreamExists,
+    /// The stream must still be exactly as replay observed it.
+    StreamUnchanged,
     /// The stream must not yet exist.
     NoStream,
+    /// The stream must already exist.
+    StreamExists,
+    /// No constraint on the stream's current state.
+    Any,
+}
+
+/// Projects the native [`trogon_decider::SnapshotCadence`] into the guest-side
+/// [`SnapshotPolicyTag`].
+///
+/// The WIT `frequency` case carries a plain `u64`, so a cadence that never snapshots crosses as
+/// [`SnapshotPolicyTag::NoSnapshot`] rather than as a zero frequency.
+pub fn map_snapshot_cadence(value: trogon_decider::SnapshotCadence) -> SnapshotPolicyTag {
+    match value.frequency() {
+        None => SnapshotPolicyTag::NoSnapshot,
+        Some(frequency) => SnapshotPolicyTag::Frequency(frequency.get()),
+    }
+}
+
+/// Guest-side mirror of the WIT `snapshot-policy` variant.
+///
+/// Carries the same per-crate binding constraint as [`WritePreconditionTag`]: callers convert it
+/// into their generated `SnapshotPolicy` type (see `map_snapshot_policy_tag` in
+/// `trogon-decider-guest-macros`).
+pub enum SnapshotPolicyTag {
+    /// The host never snapshots this command's state.
+    NoSnapshot,
+    /// The host snapshots once this many events accumulate since the last snapshot.
+    Frequency(u64),
 }
 
 #[cfg(test)]

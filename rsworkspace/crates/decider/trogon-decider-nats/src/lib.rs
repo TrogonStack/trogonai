@@ -18,6 +18,8 @@ pub mod processor;
 pub mod projector;
 /// Idempotent create-or-open provisioning for JetStream streams and buckets.
 pub mod provision;
+/// Snapshot-derived retention watermarks for decider streams.
+pub mod retention;
 /// Snapshot storage helpers backed by JetStream Key/Value.
 pub mod snapshot_store;
 /// Event stream storage helpers backed by JetStream streams.
@@ -33,6 +35,7 @@ pub use provision::{
     InvalidDuplicateWindowError, KvConfigMismatchError, StreamConfigMismatchError, apply_duplicate_window,
     ensure_bucket, ensure_stream,
 };
+pub use retention::{RetentionWatermark, RetentionWatermarks, RetentionWatermarksBuilder, read_retention_watermarks};
 pub use snapshot_store::{
     NatsSnapshotConfig, SnapshotChange, SnapshotCodecError, SnapshotKvError, SnapshotStoreError, checkpoint_key,
     list_snapshots, maybe_advance_checkpoint, persist_snapshot_change, read_checkpoint, read_snapshot,

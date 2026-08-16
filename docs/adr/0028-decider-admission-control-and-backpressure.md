@@ -1,7 +1,7 @@
 ---
 number: "0028"
 slug: decider-admission-control-and-backpressure
-status: draft
+status: accepted
 date: 2026-07-15
 ---
 
@@ -12,10 +12,9 @@ date: 2026-07-15
 `trogon_decider_wasm_runtime::engine::WasmDeciderEngine::new_store` creates a
 fresh `wasmtime::Store<GuestState>` for every [command](../glossary/command) execution, with a fixed
 per-store memory ceiling (`DEFAULT_MAX_MEMORY_BYTES`, 64 MiB) and a [fuel](../glossary/fuel)
-budget consumed per guest export call. Both
-`WasmCommandExecution::execute` implementations (with and without a snapshot
-store) call `engine.new_store()` unconditionally at the top of every
-execution, with no check on how many stores already exist concurrently. The
+budget consumed per guest export call. `WasmCommandExecution::execute` calls
+`engine.new_store()` unconditionally on every execution, with no check on how
+many stores already exist concurrently. The
 per-store limiter bounds one store's worst case; it says nothing about how
 many worst cases can exist at once. A burst of concurrent [WASM](../glossary/wasm)-routed
 commands can pin `N x 64 MiB` of linear memory well before any individual
@@ -36,17 +35,37 @@ mechanism to shed load when concurrency spikes.
 
 ### 1. A configurable admission limiter at the execution layer
 
-Introduce an `AdmissionLimiter`-shaped hook (a bounded-concurrency permit,
+Introduce a `CommandAdmission`-shaped hook (a bounded-concurrency permit,
 semaphore-shaped) acquired at the top of `CommandExecution::execute` and
 `WasmCommandExecution::execute`, released on completion (RAII permit), before
-any I/O or [wasmtime](../glossary/wasmtime) work begins. Whether an
-unconfigured execution defaults to today's unlimited behavior (an opt-in
-no-op slot, the shape draft
-[ADR#0026](./0026-command-authorization-principal.md) proposes for its
-authorizer) or the limiter is mandatory-on with a default bound is
-deliberately left open (Open Question 2); the two readings differ by
-exactly one unconditional behavior change to every existing caller. It sits
-at the execution layer, not inside
+any I/O or [wasmtime](../glossary/wasmtime) work begins.
+
+The hook is a **seam, not a policy**. The shared crates own the trait, the
+`AdmissionLimit` value object, the `OverloadedError` rejection, and one
+semaphore-shaped implementation callers may reuse. They do not own a bound:
+no default limit is chosen anywhere in the decider stack, because the number
+worth choosing is `admission_limit x max_memory_bytes` against a specific
+host's memory budget, which is a deployment fact and not a property of any
+decider.
+
+Admission is therefore **opt-in and no-op by default** (Open Question 2,
+resolved): the hook is a type parameter on the execution builder defaulting
+to a no-op that admits unconditionally, so an execution nobody configured
+carries no limiter, no counter, and no runtime branch. Mandatory-on was
+rejected because it forces the crate to invent the one number it has no basis
+to invent, and because it would change the runtime behavior of every existing
+caller to enforce a bound none of them asked for. Adding `Overloaded` to the
+shared error enums is source-breaking for exhaustive matches either way, as
+noted below; what opt-in buys is that the variant is unreachable at runtime
+until a caller wires a limiter.
+
+`admit` is **synchronous**, returning `Result<Permit, OverloadedError>` rather than
+a future. An admission decision that can await is a queue, and queueing at
+this layer is rejected below; a sync signature makes that structural rather
+than advisory. A host that wants a bounded wait before shedding owns that
+wait in its own dispatch loop, before it builds the execution.
+
+The hook sits at the execution layer, not inside
 `DeciderRegistry` or `WasmDeciderEngine`: the registry is deliberately
 stateless and shared read-only, and making every `route()` lookup also
 mutate a shared counter would add contention to what is today a lock-free
@@ -113,18 +132,26 @@ shed or retry, unlike this codebase's existing fail-loudly posture
 
 ### Bound concurrency at the consumer or gateway boundary, outside the decider crates
 
-Unresolved; the alternatives above all argue placement *within* the decider
-stack (registry vs. engine vs. execution layer) and never weigh leaving the
-stack alone. Each consumer already owns a dispatch loop (the scheduler's
+Rejected as the sole placement, and partly adopted (Open Question 1,
+resolved). Each consumer already owns a dispatch loop (the scheduler's
 worker, the gateway's handler); a semaphore there bounds the same
-concurrency without the shared crates growing a scheduling concern or a new
-error variant, and each consumer sizes its own bound. Its cost: the bound
-is per-consumer rather than per-host (two consumers in one process do not
-share a budget), and nothing in the shared crates can assert an execution
-was ever admitted. Since admission control is operational mechanism rather
-than domain logic, the decider crates' domain-level admission bar cuts
-against the in-crate placement unless this alternative is explicitly
-rebutted (Open Question 1).
+concurrency without the shared crates growing a scheduling concern, and each
+consumer sizes its own bound. Its costs, both named in the original draft:
+the bound is per-consumer rather than per-host, so two consumers in one
+process do not share a budget, and nothing in the shared crates can assert
+an execution was ever admitted.
+
+The seam resolves both without importing a scheduling policy into the
+decider stack. The shared crates contribute the shareable limiter *type*, so
+two consumers in one process can hold clones of one budget, which a
+consumer-local semaphore cannot express: there is no shared vocabulary for
+the two to agree on. Sizing, ownership, and the decision to enforce anything
+at all stay with the consumer, which is what the domain-level admission bar
+actually asks for. What the bar rejects is business or operational *policy*
+in a business-agnostic crate; a permit trait with a no-op default is not
+policy, it is the same shape the crate already uses for `SnapshotPolicy`,
+`SnapshotFailurePolicy`, and `SnapshotTaskScheduler`, all of which are
+operational concerns injected by the caller.
 
 ## Non-Goals
 
@@ -141,35 +168,31 @@ rebutted (Open Question 1).
 - Changing wasmtime fuel or memory defaults themselves. The admission
   limiter is additive to those existing knobs, not a replacement for them.
 
-## Open Questions
+## Resolved Questions
 
-This ADR is a draft: the Decision sections above are proposals, and
-`AdmissionLimiter`/`Overloaded` do not exist. No other document may treat
-them as existing or scheduled surface until acceptance.
+1. **Placement.** Resolved: the seam lives in the shared execution layer, the
+   policy and its sizing stay with the consumer. See the consumer-boundary
+   alternative above for the rebuttal.
+2. **Default behavior.** Resolved: opt-in, no-op by default, as a defaulted
+   type parameter on the execution builder. See the Decision above.
 
-1. **Placement.** Admission control is operational mechanism, not domain
-   logic. Whether it belongs inside the shared execution layer at all, or
-   at each consumer's dispatch boundary (the alternative above), must be
-   answered against the decider crates' business-agnostic, domain-level
-   admission bar before acceptance.
-2. **Default behavior.** Opt-in no-op slot versus mandatory-on with a
-   default bound. The first leaves every existing caller's runtime behavior
-   unchanged; the second actually protects hosts whose operators never tuned
-   the knob. The choice does not move source compatibility either way: adding
-   `Overloaded` to the shared error enums is immediately source-breaking for
-   exhaustive matches under both readings. What the choice decides is only
-   whether the runtime path that can produce the variant is live on every
-   execution or only where a caller opted in.
+Both readings of question 2 were source-breaking for exhaustive matches on
+`CommandError`/`WasmCommandError`, and the accepted one still is. That cost
+was unavoidable and is recorded in the Consequences.
 
 ## Consequences
 
 - Command execution paths gain a new failure mode (rejected for lack of
-  admission) -- on every path if the limiter is mandatory-on, only on
-  opted-in paths otherwise (Open Question 2) -- and a breaking addition to
-  `CommandError`/`WasmCommandError` that existing callers must handle, the
-  same category of change draft
+  admission), reachable only where a caller wired a limiter, and a breaking
+  addition to `CommandError`/`WasmCommandError` that existing callers must
+  handle whether or not they wire one, the same category of change draft
   [ADR#0026](./0026-command-authorization-principal.md) proposes for its
   authorization variant.
+- A host that never configures a limiter is exactly as unprotected as it is
+  today. This ADR ships the mechanism and the vocabulary; it does not, by
+  itself, bound any running host. The L5 NATS host is the first consumer
+  expected to configure one, and it is where the
+  `admission_limit x max_memory_bytes` sizing becomes a concrete number.
 - Legitimate bursts are slowed or explicitly rejected rather than silently
   degrading the whole host, but only if callers actually implement retry or
   backoff against the new error; without that, callers just see more

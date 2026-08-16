@@ -1,21 +1,98 @@
-#!/usr/bin/env bash
+#!/usr/bin/env python3
 #MISE description="Run wasm decider conformance: sim schedules suite, macro compile-fail tests, and every decider-test YAML fixture"
-set -euo pipefail
+#
+# The gate is on coverage, not just on results. Every wasm-components/* decider
+# must either have a decider-test suite that passes, or declare in its own
+# Cargo.toml why it has none:
+#
+#     [package.metadata.decider-test]
+#     exempt = "why this component is not conformance-tested"
+#
+# A component that has neither fails this task. The declaration lives in the
+# component's manifest rather than in a list here so that deleting a component
+# deletes its exemption, and so that adding one makes the question unavoidable
+# instead of answering it by silence.
+import os
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
 
-ROOT="${GITHUB_WORKSPACE:-$(git rev-parse --show-toplevel)}"
-cd "$ROOT/rsworkspace"
+root = Path(
+    os.environ.get("GITHUB_WORKSPACE")
+    or subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip()
+)
+workspace = root / "rsworkspace"
+suites_dir = workspace / "cli" / "trogon-decider-test"
+components_dir = workspace / "wasm-components"
+artifacts_dir = workspace / "dist" / "decider"
 
-cargo test -p trogon-decider-sim --test schedules --features test-support
-cargo test -p trogon-decider-guest-macros --test compile_fail
-cargo build -p trogon-decider-test --release
 
-shopt -s nullglob
-for wasm in dist/decider/*.wasm; do
-    alias="$(basename "$wasm" .wasm)"
-    yaml="cli/trogon-decider-test/${alias}.yaml"
-    if [[ -f "$yaml" ]]; then
-        ./target/release/decider-test "$wasm" "$yaml"
-    else
-        echo "no decider-test fixture for $alias ($yaml not found); skipping"
-    fi
-done
+def run(*command):
+    completed = subprocess.run(command, cwd=workspace, check=False)
+    if completed.returncode != 0:
+        sys.exit(f"{' '.join(command)} exited {completed.returncode}")
+
+
+def alias_of(crate):
+    return crate.removeprefix("trogon-").removesuffix("-decider")
+
+
+def exemption(manifest_path):
+    with open(manifest_path, "rb") as manifest_file:
+        manifest = tomllib.load(manifest_file)
+    metadata = manifest.get("package", {}).get("metadata", {}).get("decider-test", {})
+    return metadata.get("exempt")
+
+
+manifests = sorted(components_dir.glob("*/Cargo.toml"))
+if not manifests:
+    sys.exit(f"no decider components found under {components_dir}")
+
+# Coverage is resolved before anything is run, so a component that nobody wrote
+# a suite for is reported in seconds rather than after a full test build.
+violations = []
+runnable = []
+claimed = set()
+
+for manifest in manifests:
+    alias = alias_of(manifest.parent.name)
+    suite = suites_dir / f"{alias}.yaml"
+    exempt = exemption(manifest)
+    if suite.exists():
+        claimed.add(suite.name)
+
+    if exempt and suite.exists():
+        violations.append(
+            f"{manifest}: declares a decider-test exemption but {suite.name} exists; "
+            "drop the exemption so the suite is enforced"
+        )
+    elif exempt:
+        print(f"exempt {alias}: {exempt}")
+    elif not suite.exists():
+        violations.append(
+            f"{manifest.parent.name}: no conformance suite at {suite} and no "
+            '[package.metadata.decider-test] exempt = "..." explaining why'
+        )
+    else:
+        component = artifacts_dir / f"{alias}.wasm"
+        if component.exists():
+            runnable.append((component, suite))
+        else:
+            violations.append(f"{component} was not built; run 'mise run artifacts:wasm-components' first")
+
+for suite in sorted(suites_dir.glob("*.yaml")):
+    if suite.name not in claimed:
+        violations.append(f"{suite} is not the suite of any wasm-components/* decider")
+
+if violations:
+    print("decider conformance gate failed:", file=sys.stderr)
+    print("\n".join(f"  {violation}" for violation in violations), file=sys.stderr)
+    sys.exit(1)
+
+run("cargo", "test", "-p", "trogon-decider-sim", "--test", "schedules", "--features", "test-support")
+run("cargo", "test", "-p", "trogon-decider-guest-macros", "--test", "compile_fail")
+run("cargo", "build", "-p", "trogon-decider-test", "--release")
+
+for component, suite in runnable:
+    run(str(workspace / "target" / "release" / "decider-test"), str(component), str(suite))

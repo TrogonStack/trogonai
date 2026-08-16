@@ -1,7 +1,7 @@
 ---
 number: "0029"
 slug: decider-retention-and-truncation-watermark
-status: draft
+status: accepted
 date: 2026-07-15
 ---
 
@@ -43,16 +43,30 @@ common case of an ordinary append.
 
 ### 1. A safe-truncation watermark API
 
-Define a watermark computation, `MinimumRequiredSequence` (or equivalent),
-that reports the minimum physical stream sequence that must be retained for
-a given logical stream: `min(snapshot.position)` across every outstanding
-snapshot and checkpoint that currently exists for that stream id, using the
-`StreamPosition` values `SnapshotWrite`/`Snapshot` already record. Everything
-strictly below that minimum is safe to discard for that logical stream,
-because no execution path resumes from earlier than the newest retained
-snapshot's position. The API is a read-only query: it reports a watermark
-per stream id (or in aggregate across a physical stream), and computing it
-has no side effect.
+Define a watermark computation that reports the minimum physical stream
+sequence that must be retained for a given logical stream:
+`min(snapshot.position)` across every outstanding snapshot and checkpoint
+that currently exists for that stream id, using the `StreamPosition` values
+`SnapshotWrite`/`Snapshot` already record. Everything strictly below that
+minimum is safe to discard for that logical stream, because no execution path
+resumes from earlier than the newest retained snapshot's position. The API is
+a read-only query: it reports a watermark per stream id (or in aggregate
+across a physical stream), and computing it has no side effect.
+
+"Nothing may be discarded" is a real answer, not a missing one, so the
+watermark is a total type rather than a bare sequence: `RetentionWatermark`
+is `RetainAll` or `DiscardBelow(StreamPosition)`, ordered so that `RetainAll`
+is the least element and combining two constraints is their minimum. Every
+case the computation cannot justify a boundary for -- a stream nobody has
+snapshotted, a checkpoint that has recorded no progress, a stream one
+observed snapshot type covers and another does not -- resolves to
+`RetainAll`, so an incomplete picture over-retains instead of over-deleting.
+
+Snapshot types are folded one at a time, because each carries its own payload
+type and no single call can see them all. That makes the completeness of the
+fold the caller's obligation, which the ADR already records as its sharpest
+consequence; the builder's job is to make the unsafe direction unreachable
+for whatever it *was* shown, not to pretend it was shown everything.
 
 ### 2. Truncation is invoked by an operator or a scheduled job, never by the store
 
@@ -66,7 +80,25 @@ from "execute a command," the store's actual job -- the same separation
 [ADR#0023](./0023-secret-management-and-key-custody-direction.md) draws
 between routine operation and an operator-invoked, out-of-band action.
 
-### 3. Recommended retention policy posture
+### 3. The read-only query lives in `trogon-decider-nats`
+
+The watermark is derivable only from things that crate owns: the
+`snapshots.data.*` and `snapshots.checkpoint.*` key grammar, the encoded
+snapshot envelope that carries the `StreamPosition`, and the fact that
+positions on this adapter *are* physical JetStream sequences. A maintenance
+layer above it could not compute a watermark without reimplementing that
+grammar, and a second implementation of the key layout is exactly the kind of
+duplication that turns a rename into a data-loss bug.
+
+This does not import operational policy into a business-agnostic crate,
+because the query decides nothing: it reports what the store already knows,
+the way `subject_current_position` and `read_checkpoint` do. The policy --
+whether to truncate, how often, how far behind to trail -- stays with the
+operator or job, and the purge call stays out of the crate entirely, per
+Decision 2. That line, query in, action out, is what keeps the placement
+consistent with the domain-level admission bar.
+
+### 4. Recommended retention policy posture
 
 Default to no automatic stream-wide `max_age`/`max_msgs` limit on the shared
 physical stream: a stream-wide limit cannot know which logical streams still
@@ -77,7 +109,7 @@ that a needed event disappears prematurely. A conservative stream-wide
 `max_age` far longer than any expected snapshot interval is a reasonable
 backstop, but it is a safety net, not the retention mechanism.
 
-### 4. Interplay with [ADR#0013](./0013-origin-stream-sequence-header.md) physical positions
+### 5. Interplay with [ADR#0013](./0013-origin-stream-sequence-header.md) physical positions
 
 The watermark is computed and purge is executed exclusively in terms of
 physical JetStream stream sequence, never `Trogon-Origin-Stream-Sequence`. A
@@ -101,6 +133,18 @@ downstream cost (a purge call), removes the operator's ability to pause,
 review, or rate-limit truncation independently of command traffic, and makes
 a bug in watermark computation immediately destructive instead of surfacing
 first as an observable, reviewable report.
+
+### Put the watermark query in a separate maintenance or tooling layer
+
+Rejected (Open Question 1, resolved). The appeal is that retention is an
+operational concern and the decider crates are meant to stay
+business-agnostic. But the query reads the snapshot bucket's own key grammar
+and envelope format, so a layer above would have to reimplement both, and the
+two copies would disagree the first time either changed. The concern the bar
+actually protects against is policy, not knowledge: this ADR keeps the purge
+itself out of the crate (Decision 2), which is where the operational decision
+lives. A maintenance layer remains the right home for the job that consumes
+the watermark.
 
 ### Key the watermark off `Trogon-Origin-Stream-Sequence`
 
@@ -131,23 +175,23 @@ origin positions diverge by design.
   a dependency previously acknowledged only in
   [ADR#0027](./0027-decider-multi-tenancy-primitive.md)'s own Consequences.
 
-## Open Questions
+## Resolved Questions
 
-This ADR is a draft; the watermark API does not exist, and no other
-document may treat it as existing or scheduled surface until acceptance.
-
-1. **Placement.** The Decision argues mechanism (what the watermark reads,
-   and that only an operator or job invokes the purge) but never altitude:
-   whether a read-only operational query belongs inside
-   `trogon-decider-nats` or in a separate maintenance/tooling layer has not
-   been weighed against the decider crates' business-agnostic, domain-level
-   admission bar. Deciding that placement is an acceptance item.
+1. **Placement.** Resolved: the read-only query lives in
+   `trogon-decider-nats` (Decision 3); the purge stays outside it
+   (Decision 2). See the maintenance-layer alternative above for the
+   rebuttal.
 2. **Relationship to [ADR#0035](./0035-session-store-decider-aggregate.md).**
-   That draft declares session streams keep-forever and claims to supersede
-   this ADR's purge for session streams, keeping only the read-only
-   watermark as a diagnostic. Both documents are drafts; the supersession
-   is provisional until both are accepted, and whichever is accepted first
-   constrains the other.
+   Resolved for now by scope rather than by precedence: what this ADR ships
+   is the read-only watermark, which that draft explicitly retains as a
+   diagnostic even where it declares session streams keep-forever. The two
+   documents therefore do not conflict on anything either of them currently
+   specifies. The supersession claim only bites once a purge job exists, and
+   designing that job is a Non-Goal here, so ADR#0035 stays free to settle
+   session-stream retention on its own terms.
+
+Only the watermark computation and its placement were accepted. The purge
+job remains unspecified and unbuilt, and nothing in the store calls one.
 
 ## Consequences
 
@@ -163,6 +207,17 @@ document may treat it as existing or scheduled surface until acceptance.
   by whatever aggregates "all outstanding snapshots for this stream," or the
   watermark silently ignores it and a purge could delete events it still
   needs.
+- The aggregate watermark across a physical stream is the one number that can
+  be wrong by omission rather than by miscalculation: a logical stream nobody
+  has ever snapshotted does not appear in the report at all, so a trim of the
+  whole physical stream at that aggregate would delete exactly the history
+  that stream still needs. Callers that want a sound aggregate have to
+  declare the stream ids they know exist, and a report over an incomplete set
+  of ids is only safe to act on per stream.
+- Watermarks are keyed by snapshot id, which both execution paths set to the
+  stream id, so mapping a watermark onto the subject a purge would target
+  needs the same `StreamSubjectResolver` the caller configured. The crate
+  reports positions, not subjects.
 - Because retention purges by subject against one shared physical stream,
   purge operations for many logical streams still serialize against that one
   stream's admin surface. Operators truncating frequently across many

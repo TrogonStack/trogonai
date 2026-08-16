@@ -44,8 +44,8 @@ concept the store or the resolver contract has any way to check against.
 Introduce `Tenant` as a validated, non-empty identifier type. A `Tenant` is
 constructed once, at the application boundary that knows which tenant is
 operating, the same place that already assembles `Headers` and would
-assemble draft [ADR#0026](./0026-command-authorization-principal.md)'s
-proposed `CommandPrincipal` before execution.
+assemble [ADR#0026](./0026-command-authorization-principal.md)'s
+`CommandPrincipal` before execution.
 
 Where `Tenant` lives is Open Question 1, not part of this decision.
 `trogon_decider_runtime` is the placement this draft proposes, but grouping

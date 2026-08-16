@@ -88,6 +88,24 @@ pub fn build_decider_append_duration(meter: &opentelemetry::metrics::Meter) -> o
         .build()
 }
 
+/// Command execution attempts retried in place after an optimistic concurrency conflict
+///
+/// Instrument: `counter`. Unit: `{attempt}`.
+pub const DECIDER_COMMAND_CONFLICT_RETRIES: &str = "decider.command.conflict_retries";
+
+/// Command execution attempts retried in place after an optimistic concurrency conflict
+///
+/// Instrument: `counter`. Unit: `{attempt}`.
+pub fn build_decider_command_conflict_retries(
+    meter: &opentelemetry::metrics::Meter,
+) -> opentelemetry::metrics::Counter<u64> {
+    meter
+        .u64_counter(DECIDER_COMMAND_CONFLICT_RETRIES)
+        .with_description("Command execution attempts retried in place after an optimistic concurrency conflict.")
+        .with_unit("{attempt}")
+        .build()
+}
+
 /// Duration of replaying events from an ordered, subject-filtered JetStream consumer
 ///
 /// Instrument: `histogram`. Unit: `s`.

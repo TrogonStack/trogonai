@@ -1,0 +1,61 @@
+edition = "2024";
+
+package trogonai.decider.v1;
+
+import "trogonai/decider/v1/domain_error_detail.proto";
+
+// A command the decider could not execute.
+//
+// Distinct from a rejection: the module never got to answer, or answered in a
+// way that broke its own contract. These are the outcomes that count against a
+// host's health rather than against the caller's input.
+message CommandFaulted {
+  // A oneof rather than an enum so each class can grow the fields only it
+  // needs without adding fields the other classes have no meaning for.
+  oneof kind {
+    Unroutable unroutable = 1;
+    InvalidRequest invalid_request = 2;
+    Conflict conflict = 3;
+    Guest guest = 4;
+    DeadlineExceeded deadline_exceeded = 5;
+    Storage storage = 6;
+    Internal internal = 7;
+  }
+
+  string message = 8 [features.field_presence = LEGACY_REQUIRED];
+
+  repeated DomainErrorDetail details = 9;
+
+  // No activated module claims the command type the subject names. Retrying
+  // helps only once a module claiming it is activated.
+  message Unroutable {}
+
+  // The request body is not a decodable payload for the subject's command
+  // type, or a header carried a value the host could not parse. Retrying the
+  // same request produces the same fault.
+  message InvalidRequest {}
+
+  // The stream's state at append time did not satisfy the command's write
+  // precondition, or the caller's expected revision could not be reconciled
+  // with it. Safe to retry: a retry replays the stream as it now stands and
+  // decides again against it.
+  message Conflict {}
+
+  // The guest faulted, trapped, or violated the WIT contract (an empty
+  // decision, a failed evolve, an unresolvable stream id). Retrying repeats
+  // the same guest call.
+  message Guest {}
+
+  // The guest exceeded its wall-clock deadline while the host was still
+  // waiting on it. Retrying is reasonable only if the load that slowed it
+  // down has passed.
+  message DeadlineExceeded {}
+
+  // Event or snapshot storage failed. Safe to retry once storage recovers.
+  message Storage {}
+
+  // The host could not run the command for a reason that is neither the
+  // guest's nor storage's: a replay limit exceeded, a snapshot ahead of its
+  // stream, a panicked worker.
+  message Internal {}
+}

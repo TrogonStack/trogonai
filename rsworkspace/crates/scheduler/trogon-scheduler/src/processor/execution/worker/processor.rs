@@ -14,7 +14,7 @@ use async_nats::HeaderMap;
 use chrono::{DateTime, Utc};
 use tracing::Instrument;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
-use trogon_decider_runtime::{CommandError, CommandExecution, StreamAppend, StreamEvent, StreamRead};
+use trogon_decider_runtime::{CommandError, CommandExecution, CommandId, StreamAppend, StreamEvent, StreamRead};
 
 use crate::commands::domain::{Delivery, MessageContent, Schedule, ScheduleHeaders, ScheduleId, ScheduleMessage};
 use crate::commands::{ScheduleNextOccurrence, ScheduleNextOccurrenceError};
@@ -429,7 +429,8 @@ where
         }
 
         let trace_headers = execution_trace_headers(&stream_event.event.headers);
-        self.apply_action(&reconciliation.action, event_id, &trace_headers)
+        let command_id = CommandId::new(stream_event.event.id.as_uuid());
+        self.apply_action(&reconciliation.action, event_id, command_id, &trace_headers)
             .await?;
 
         // The save error is not `Send`, so it is converted into a `Send` step
@@ -461,10 +462,14 @@ where
 
     /// Applies one reconciled side effect. Each schedule event maps to a single
     /// action, so the durable event id is a stable, unique `Nats-Msg-Id`.
+    ///
+    /// `command_id` names that same event for the one action that raises a command rather than
+    /// publishing a message, so its appended events are deduplicated on redelivery too.
     async fn apply_action(
         &self,
         action: &ReconcileAction,
         event_id: &str,
+        command_id: CommandId,
         trace_headers: &HeaderMap,
     ) -> Result<(), RetryableError> {
         match action {
@@ -483,14 +488,25 @@ where
                 .purge(subject)
                 .await
                 .map_err(|source| RetryableError::ExecutionSchedule { source }),
-            ReconcileAction::ArmNext { schedule_id, now } => self.arm_next_occurrence(schedule_id, *now).await,
+            ReconcileAction::ArmNext { schedule_id, now } => {
+                self.arm_next_occurrence(schedule_id, *now, command_id).await
+            }
             ReconcileAction::CheckpointOnly => Ok(()),
         }
     }
 
-    async fn arm_next_occurrence(&self, schedule_id: &ScheduleId, now: DateTime<Utc>) -> Result<(), RetryableError> {
+    async fn arm_next_occurrence(
+        &self,
+        schedule_id: &ScheduleId,
+        now: DateTime<Utc>,
+        command_id: CommandId,
+    ) -> Result<(), RetryableError> {
         let command = ScheduleNextOccurrence::new(schedule_id.clone(), now);
-        match CommandExecution::new(&self.event_store, &command).execute().await {
+        match CommandExecution::new(&self.event_store, &command)
+            .with_command_id(command_id)
+            .execute()
+            .await
+        {
             Ok(_) => Ok(()),
             Err(CommandError::Decide(rejection)) => match rejection {
                 ScheduleNextOccurrenceError::AlreadyArmed { .. }

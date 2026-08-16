@@ -187,6 +187,10 @@ pub enum DecisionOutcome {
     Rejected,
     /// Command execution faulted on an infrastructure or guest execution failure
     Faulted,
+    /// The command was shed by admission control before any work began
+    Shed,
+    /// The command was denied by authorization before any work began
+    Denied,
 }
 
 impl DecisionOutcome {
@@ -197,6 +201,8 @@ impl DecisionOutcome {
             Self::Decided => "decided",
             Self::Rejected => "rejected",
             Self::Faulted => "faulted",
+            Self::Shed => "shed",
+            Self::Denied => "denied",
         }
     }
 }

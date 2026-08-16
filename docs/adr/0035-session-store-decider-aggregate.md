@@ -73,16 +73,23 @@ lease, not JetStream's native expected-sequence guard -- a real lost-update
 hazard the substrate on the curated line already closes. This ADR **ratifies that
 domain model and deliberately supersedes its persistence mechanism**.
 
-Several primitives this decision leans on are themselves `draft`, not accepted,
-and some are not yet implemented in the substrate: [ADR#0026](./0026-command-authorization-principal.md)'s `CommandPrincipal`/
-`CommandAuthorizer`, [ADR#0027](./0027-decider-multi-tenancy-primitive.md)'s `Tenant`/`TenantBinding`, [ADR#0028](./0028-decider-admission-control-and-backpressure.md)'s admission
-limiter, [ADR#0029](./0029-decider-retention-and-truncation-watermark.md)'s snapshot-derived
-[retention watermark](../glossary/retention-watermark), and [ADR#0031](./0031-agent-implementation-and-session-plan.md)'s Session
-model. Where this ADR names those types it is naming proposed primitives it
-depends on, not shipped code, and decisions that build on them are provisional to
-that extent. The two facts marked "already ships, by default" above
-(expected-sequence OCC and physical-sequence order) are the exception -- those are
-implemented in `trogon-decider`/`trogon-decider-nats` today.
+Several primitives this decision leans on are themselves `draft`, not accepted:
+[ADR#0026](./0026-command-authorization-principal.md)'s `CommandPrincipal`/
+`CommandAuthorizer`, [ADR#0027](./0027-decider-multi-tenancy-primitive.md)'s
+`Tenant`/`TenantBinding`, and [ADR#0031](./0031-agent-implementation-and-session-plan.md)'s
+Session model. Where this ADR names those types it is naming proposed primitives
+it depends on, not shipped code, and decisions that build on them are provisional
+to that extent.
+
+Three of its dependencies are no longer in that category. The two facts marked
+"already ships, by default" above (expected-sequence OCC and physical-sequence
+order) were always implemented in `trogon-decider`/`trogon-decider-nats`.
+[ADR#0028](./0028-decider-admission-control-and-backpressure.md)'s admission
+limiter has since been accepted and implemented on both execution paths, and
+[ADR#0029](./0029-decider-retention-and-truncation-watermark.md)'s snapshot-derived
+[retention watermark](../glossary/retention-watermark) has since been accepted and
+is computed by `trogon-decider-nats`, though the purge that would consume it is
+still unspecified.
 
 ## Decision
 
@@ -117,8 +124,9 @@ Proto lives under `proto/trogonai/session/sessions/v1alpha1/` (domain `session`,
 aggregate `sessions`), per [ADR#0009](./0009-protocol-buffers-wire-contracts.md).
 
 The `v1alpha1` suffix is the honest stability signal, not a placeholder to drop
-casually: the contract depends on five still-draft ADRs (0026, 0027, 0028, 0029,
-0031) and on the substrate obligations facet 2 lists as prerequisites, so it is
+casually: the contract depends on two still-draft ADRs (0027, 0031),
+on three since accepted (0026, 0028, 0029), and on the substrate obligations facet 2
+lists as prerequisites, so it is
 promoted to `v1` only by a later decision, once this ADR and those dependencies
 are accepted and those obligations are met. `v1alpha1` is also the room in which
 [ADR#0027](./0027-decider-multi-tenancy-primitive.md)'s tenant scoping, once accepted, lands additively rather than as a
@@ -299,7 +307,7 @@ carries a caller-supplied idempotency key, stable across redelivery, and no
 domain payload gains a separate identity field of its own. Where that key
 structurally lives -- a field on the command struct, or an execution-layer
 input beside it -- is an open design question this ADR does not settle
-(draft [ADR#0026](./0026-command-authorization-principal.md) rejected the
+([ADR#0026](./0026-command-authorization-principal.md) rejected the
 analogous command-struct placement for its principal, which cuts against a
 struct field here too). Each appended event's envelope `Event.id` is derived
 deterministically: UUIDv5 over
@@ -1043,12 +1051,13 @@ artifact-byte erasure, not cryptographic shredding.
 **This explicitly supersedes [ADR#0029](./0029-decider-retention-and-truncation-watermark.md)
 for session streams.** Session streams never issue the
 [ADR#0029](./0029-decider-retention-and-truncation-watermark.md) purge; its
-`MinimumRequiredSequence` [retention watermark](../glossary/retention-watermark)
+`RetentionWatermark` [retention watermark](../glossary/retention-watermark)
 stays a read-only diagnostic for this store, and this ADR states that
-supersession explicitly rather than leaving the two decisions in tension.
-Both documents are drafts, so the supersession is provisional until both are
-accepted; [ADR#0029](./0029-decider-retention-and-truncation-watermark.md)
-carries the reciprocal note.
+supersession explicitly rather than leaving the two decisions in tension. What
+[ADR#0029](./0029-decider-retention-and-truncation-watermark.md) accepted is
+exactly that read-only computation, and it defers the purge job as a Non-Goal,
+so there is nothing to supersede until such a job is designed; this ADR remains
+free to settle session-stream retention on its own terms when it is accepted.
 
 Storage is otherwise managed without ever removing a fact:
 
@@ -1367,8 +1376,8 @@ list.
   are accepted. Erasure-grade deletion
   (crypto-shredding) is still a named gap, deferred to a follow-up ADR, not
   silently unresolved.
-- This decision depends on five still-draft ADRs (0026, 0027, 0028, 0029,
-  0031); each that changes before acceptance can reopen the facet that builds
+- This decision depends on five ADRs (0026, 0027, 0028, 0029, 0031), two of
+  them still draft (0027, 0031); each that changes before acceptance can reopen the facet that builds
   on it. The package is named `v1alpha1`, not `v1`, precisely because of that
   dependency and because the substrate obligations facet 2 lists are not yet
   met; promotion to `v1` is a later, separate decision. Shared multi-tenant

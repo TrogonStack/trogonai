@@ -19,7 +19,7 @@ use futures::stream::{Iter, iter};
 use std::vec::IntoIter;
 use time::OffsetDateTime;
 use trogon_decider_runtime::{
-    AppendStreamRequest, AppendStreamResponse, Event, EventEncode, EventId, EventType, Headers, ReadFrom,
+    AppendStreamRequest, AppendStreamResponse, CommandId, Event, EventEncode, EventId, EventType, Headers, ReadFrom,
     ReadStreamRequest, ReadStreamResponse, StreamAppend, StreamEvent, StreamPosition, StreamRead,
     StreamWritePrecondition,
 };
@@ -412,6 +412,10 @@ pub fn recorded_at() -> DateTime<Utc> {
     DateTime::parse_from_rfc3339("2026-06-04T00:00:00Z")
         .unwrap()
         .with_timezone(&Utc)
+}
+
+pub fn command_id() -> CommandId {
+    CommandId::new(uuid::Uuid::parse_str("0198fa2f-6d0a-7b1a-8cf9-f762e73a1c99").unwrap())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

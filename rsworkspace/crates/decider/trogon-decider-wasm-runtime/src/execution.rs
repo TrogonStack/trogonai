@@ -38,10 +38,14 @@ use opentelemetry::metrics::{Counter, Histogram};
 use opentelemetry::{KeyValue, global};
 use thiserror::Error;
 use trogon_decider_runtime::{
-    AppendStreamRequest, DiscardAndReplaySnapshotFailure, Event, EventId, FailOnSnapshotFailure, Headers,
-    ReadAfterOverflowError, ReadFrom, ReadSnapshotRequest, ReadStreamRequest, Snapshot, SnapshotAheadOfStream,
-    SnapshotFailure, SnapshotFailureDecision, SnapshotRead, SnapshotTaskScheduler, SnapshotWrite, StreamAppend,
-    StreamPosition, StreamRead, StreamWritePrecondition, WriteSnapshotRequest,
+    AppendFailure, AppendStreamRequest, CommandAdmission, CommandAuthorizer, CommandId, CommandPrincipal,
+    ConflictRetryLimit, DiscardAndReplaySnapshotFailure, Event, EventId, FailOnSnapshotFailure, Headers,
+    OverloadedError, PreconditionConflictError, ReadAfterOverflowError, ReadFrom, ReadSnapshotRequest,
+    ReadStreamRequest, ReplayBounds, ReplayChunkSize, ReplayCursor, ReplayLimit, ReplayLimitExceeded, Snapshot,
+    SnapshotAheadOfStream, SnapshotCadence, SnapshotFailure, SnapshotFailureDecision, SnapshotRead,
+    SnapshotTaskScheduler, SnapshotWrite, StreamAppend, StreamEvent, StreamPosition, StreamRead, UnauthorizedError,
+    WithoutAdmission, WithoutAuthorization, WritePrecondition, WriteSnapshotRequest, ensure_replay_within_limit,
+    read_stream_for_execution, resolve_write_precondition,
 };
 use trogon_decider_wit::host::{self, AnyEnvelope, CommandEnvelope, DecideError};
 use trogon_semconv::{attribute, metric, span};
@@ -49,12 +53,15 @@ use trogon_std::NowV7;
 use wasmtime::Store;
 
 use crate::constants::METER_NAME;
-use crate::{GuestDomainError, OpaqueSnapshotPayload, WasmDeciderEngine, WasmDeciderModule, WasmSnapshotId};
+use crate::{
+    GuestDomainError, OpaqueSnapshotPayload, WasmCommandSpec, WasmDeciderEngine, WasmDeciderModule, WasmSnapshotId,
+};
 
 struct WasmExecutionMetrics {
     execution_duration: Histogram<f64>,
     fuel_consumed: Histogram<u64>,
     traps: Counter<u64>,
+    conflict_retries: Counter<u64>,
 }
 
 impl WasmExecutionMetrics {
@@ -64,6 +71,7 @@ impl WasmExecutionMetrics {
             execution_duration: metric::build_decider_wasm_execution_duration(&meter),
             fuel_consumed: metric::build_decider_wasm_fuel_consumed(&meter),
             traps: metric::build_decider_wasm_traps(&meter),
+            conflict_retries: metric::build_decider_command_conflict_retries(&meter),
         }
     }
 }
@@ -142,8 +150,13 @@ fn trap_classification(error: &wasmtime::Error) -> attribute::TrapClassification
 pub struct WasmExecutionResult {
     /// The stream high-watermark after the command append completed.
     pub stream_position: StreamPosition,
-    /// Domain event envelopes emitted by the guest decider and appended to the stream.
-    pub events: Vec<AnyEnvelope>,
+    /// Domain events emitted by the guest decider and appended to the stream.
+    ///
+    /// The appended [`Event`]s rather than the guest's raw envelopes, so the
+    /// event ids the host minted for the append survive into the result. A
+    /// caller applying this result and also consuming the event stream needs
+    /// those ids to recognize the two as the same events.
+    pub events: Vec<Event>,
 }
 
 /// Error taxonomy for a WASM command execution attempt.
@@ -200,9 +213,25 @@ pub enum WasmCommandError<ReadSnapshotError, ReadStreamError, AppendStreamError>
     /// The snapshot's recorded position cannot be advanced (u64 overflow).
     #[error("{0}")]
     ReadAfterOverflow(#[source] ReadAfterOverflowError),
+    /// The stream read for this command returned more events than the
+    /// configured [`ReplayLimit`] allows to replay into the guest session.
+    #[error("{0}")]
+    ReplayLimitExceeded(ReplayLimitExceeded),
+    /// The caller's expected revision cannot be reconciled with the write
+    /// precondition the module declares for this command.
+    #[error("{0}")]
+    PreconditionConflict(#[source] PreconditionConflictError),
     /// The blocking task running guest calls panicked or was cancelled.
     #[error("guest execution task failed")]
     Blocking(#[source] tokio::task::JoinError),
+    /// The configured [`CommandAdmission`] limiter had no capacity, so the
+    /// command was shed before any guest store was created.
+    #[error("{0}")]
+    Overloaded(OverloadedError),
+    /// The configured [`CommandAuthorizer`] refused this principal, or none was
+    /// supplied, so the command was denied before any guest store was created.
+    #[error("{0}")]
+    Unauthorized(#[source] UnauthorizedError),
 }
 
 /// Module identity, command type, and stream id a [`WasmSnapshotFailurePolicy`]
@@ -274,14 +303,22 @@ pub struct WithSnapshotStore<'a, S, Sched, F = FailOnSnapshotFailure> {
 }
 
 /// Builder for one command execution against a [`WasmDeciderModule`].
-pub struct WasmCommandExecution<'a, E, Snapshots, G> {
+pub struct WasmCommandExecution<'a, E, Snapshots, G, A = WithoutAdmission, Auth = WithoutAuthorization> {
     module: &'a WasmDeciderModule,
     event_store: &'a E,
     command: &'a CommandEnvelope,
     snapshots: Snapshots,
-    write_precondition: Option<StreamWritePrecondition>,
+    expected_revision: Option<StreamPosition>,
+    replay_limit: Option<ReplayLimit>,
+    replay_chunk_size: Option<ReplayChunkSize>,
+    conflict_retry_limit: Option<ConflictRetryLimit>,
+    snapshot_cadence: Option<SnapshotCadence>,
     headers: Headers,
+    command_id: Option<CommandId>,
     event_id_generator: G,
+    admission: A,
+    principal: Option<CommandPrincipal>,
+    authorizer: Auth,
 }
 
 impl<'a, E> WasmCommandExecution<'a, E, WithoutSnapshotStore, trogon_std::UuidV7Generator> {
@@ -292,14 +329,22 @@ impl<'a, E> WasmCommandExecution<'a, E, WithoutSnapshotStore, trogon_std::UuidV7
             event_store,
             command,
             snapshots: WithoutSnapshotStore,
-            write_precondition: None,
+            expected_revision: None,
+            replay_limit: None,
+            replay_chunk_size: None,
+            conflict_retry_limit: None,
+            snapshot_cadence: None,
             headers: Headers::empty(),
+            command_id: None,
             event_id_generator: trogon_std::UuidV7Generator,
+            admission: WithoutAdmission,
+            principal: None,
+            authorizer: WithoutAuthorization,
         }
     }
 }
 
-impl<'a, E, G> WasmCommandExecution<'a, E, WithoutSnapshotStore, G> {
+impl<'a, E, G, A, Auth> WasmCommandExecution<'a, E, WithoutSnapshotStore, G, A, Auth> {
     /// Attaches a snapshot store and best-effort snapshot task scheduler.
     ///
     /// Defaults to [`FailOnSnapshotFailure`], which fails the command on an
@@ -310,7 +355,7 @@ impl<'a, E, G> WasmCommandExecution<'a, E, WithoutSnapshotStore, G> {
         self,
         snapshot_store: &'a S,
         snapshot_task_scheduler: &'a Sched,
-    ) -> WasmCommandExecution<'a, E, WithSnapshotStore<'a, S, Sched, FailOnSnapshotFailure>, G> {
+    ) -> WasmCommandExecution<'a, E, WithSnapshotStore<'a, S, Sched, FailOnSnapshotFailure>, G, A, Auth> {
         WasmCommandExecution {
             module: self.module,
             event_store: self.event_store,
@@ -320,14 +365,22 @@ impl<'a, E, G> WasmCommandExecution<'a, E, WithoutSnapshotStore, G> {
                 task_scheduler: snapshot_task_scheduler,
                 failure_policy: FailOnSnapshotFailure,
             },
-            write_precondition: self.write_precondition,
+            expected_revision: self.expected_revision,
+            replay_limit: self.replay_limit,
+            replay_chunk_size: self.replay_chunk_size,
+            conflict_retry_limit: self.conflict_retry_limit,
+            snapshot_cadence: self.snapshot_cadence,
+            command_id: self.command_id,
             headers: self.headers,
             event_id_generator: self.event_id_generator,
+            admission: self.admission,
+            principal: self.principal,
+            authorizer: self.authorizer,
         }
     }
 }
 
-impl<'a, E, S, Sched, F, G> WasmCommandExecution<'a, E, WithSnapshotStore<'a, S, Sched, F>, G> {
+impl<'a, E, S, Sched, F, G, A, Auth> WasmCommandExecution<'a, E, WithSnapshotStore<'a, S, Sched, F>, G, A, Auth> {
     /// Sets how this execution reacts to a snapshot it cannot trust.
     ///
     /// Defaults to [`FailOnSnapshotFailure`], which fails the command exactly
@@ -336,7 +389,7 @@ impl<'a, E, S, Sched, F, G> WasmCommandExecution<'a, E, WithSnapshotStore<'a, S,
     pub fn with_snapshot_failure_policy<NextF>(
         self,
         failure_policy: NextF,
-    ) -> WasmCommandExecution<'a, E, WithSnapshotStore<'a, S, Sched, NextF>, G> {
+    ) -> WasmCommandExecution<'a, E, WithSnapshotStore<'a, S, Sched, NextF>, G, A, Auth> {
         WasmCommandExecution {
             module: self.module,
             event_store: self.event_store,
@@ -346,21 +399,101 @@ impl<'a, E, S, Sched, F, G> WasmCommandExecution<'a, E, WithSnapshotStore<'a, S,
                 task_scheduler: self.snapshots.task_scheduler,
                 failure_policy,
             },
-            write_precondition: self.write_precondition,
+            expected_revision: self.expected_revision,
+            replay_limit: self.replay_limit,
+            replay_chunk_size: self.replay_chunk_size,
+            conflict_retry_limit: self.conflict_retry_limit,
+            snapshot_cadence: self.snapshot_cadence,
+            command_id: self.command_id,
             headers: self.headers,
             event_id_generator: self.event_id_generator,
+            admission: self.admission,
+            principal: self.principal,
+            authorizer: self.authorizer,
         }
     }
 }
 
-impl<'a, E, Snapshots, G> WasmCommandExecution<'a, E, Snapshots, G> {
-    /// Overrides the stream write precondition used when the module descriptor
-    /// does not pin one for this command type.
-    pub fn with_write_precondition<W>(mut self, write_precondition: W) -> Self
+impl<'a, E, Snapshots, G, A, Auth> WasmCommandExecution<'a, E, Snapshots, G, A, Auth> {
+    /// Records the stream revision a client observed before issuing this command.
+    ///
+    /// Strengthens the guard the module declares in its descriptor rather than replacing it: the
+    /// append is pinned to that exact revision, so a stream that has advanced since the client read
+    /// it rejects the write. A command declaring [`WritePrecondition::NoStream`] fails with
+    /// [`WasmCommandError::PreconditionConflict`] instead, because it can only create a stream that
+    /// has no revision yet.
+    pub fn with_expected_revision<R>(mut self, expected_revision: R) -> Self
     where
-        W: Into<Option<StreamWritePrecondition>>,
+        R: Into<Option<StreamPosition>>,
     {
-        self.write_precondition = write_precondition.into();
+        self.expected_revision = expected_revision.into();
+        self
+    }
+
+    /// Caps how many stream events one execution may replay into the guest session.
+    ///
+    /// Without a limit, a long stream is handed to a single fuel-bounded guest `evolve` call, so it
+    /// fails as an `OutOfFuel` trap that is indistinguishable from a buggy guest. With a limit the
+    /// read is bounded to `limit + 1` events and the command fails with
+    /// [`WasmCommandError::ReplayLimitExceeded`] before any of them reach the guest, matching
+    /// [`trogon_decider_runtime::CommandExecution`].
+    pub fn with_replay_limit<L>(mut self, replay_limit: L) -> Self
+    where
+        L: Into<Option<ReplayLimit>>,
+    {
+        self.replay_limit = replay_limit.into();
+        self
+    }
+
+    /// Walks the replay in chunks of at most `replay_chunk_size` events instead of reading the
+    /// whole stream at once.
+    ///
+    /// Mirrors
+    /// [`CommandExecution::with_replay_chunk_size`](trogon_decider_runtime::CommandExecution::with_replay_chunk_size),
+    /// and buys the guest path one thing more than the native one: each chunk is folded by its own
+    /// `evolve` call, so the fuel and epoch budget [`replay_fuel`] scales is per chunk rather than
+    /// per stream. A stream long enough to exhaust a single call's budget no longer has to.
+    pub fn with_replay_chunk_size<C>(mut self, replay_chunk_size: C) -> Self
+    where
+        C: Into<Option<ReplayChunkSize>>,
+    {
+        self.replay_chunk_size = replay_chunk_size.into();
+        self
+    }
+
+    /// Retries this execution in place, up to `conflict_retry_limit` times, when another writer
+    /// beat it to the stream.
+    ///
+    /// Mirrors [`CommandExecution::with_conflict_retry`](trogon_decider_runtime::CommandExecution::with_conflict_retry),
+    /// including what it refuses to retry: the event store has to classify the failure as
+    /// [`AppendFailure::WriteConflict`], the module's descriptor has to declare
+    /// [`WritePrecondition::StreamUnchanged`] for this command, and no
+    /// [`with_expected_revision`](Self::with_expected_revision) may be set. Anything else asserts
+    /// something a second read cannot change.
+    ///
+    /// A retry is a whole new round: a fresh guest session, a fresh replay, and a fresh decide. The
+    /// cost of one is roughly the cost of the command, which is what the limit is there to bound.
+    pub fn with_conflict_retry<L>(mut self, conflict_retry_limit: L) -> Self
+    where
+        L: Into<Option<ConflictRetryLimit>>,
+    {
+        self.conflict_retry_limit = conflict_retry_limit.into();
+        self
+    }
+
+    /// Overrides the snapshot cadence the module declares for this command.
+    ///
+    /// The descriptor's cadence is what keeps this path in parity with
+    /// [`trogon_decider_runtime::CommandExecution`], so prefer leaving it alone. This exists for
+    /// the same reason the native path accepts an explicit
+    /// [`Snapshots`](trogon_decider_runtime::Snapshots) policy instead of the decider's own:
+    /// cadence is a cost trade rather than a correctness one, so a host that knows its storage
+    /// costs better than the module's author does may set its own.
+    pub fn with_snapshot_cadence<S>(mut self, snapshot_cadence: S) -> Self
+    where
+        S: Into<Option<SnapshotCadence>>,
+    {
+        self.snapshot_cadence = snapshot_cadence.into();
         self
     }
 
@@ -370,11 +503,30 @@ impl<'a, E, Snapshots, G> WasmCommandExecution<'a, E, Snapshots, G> {
         self
     }
 
+    /// Records the identity of the delivery that carries this command.
+    ///
+    /// Every event this execution appends then derives its [`EventId`] from that identity, so a
+    /// redelivered command produces byte-identical ids and a storage adapter that dedupes on event
+    /// identity can recognize the retry. Without one, ids come from
+    /// [`with_event_id_generator`](Self::with_event_id_generator) and each attempt looks new.
+    ///
+    /// The id has to come from the transport, not from this builder: a value generated here would
+    /// be as fresh on the retry as the UUIDv7 it replaces.
+    pub fn with_command_id<I>(mut self, command_id: I) -> Self
+    where
+        I: Into<Option<CommandId>>,
+    {
+        self.command_id = command_id.into();
+        self
+    }
+
     /// Overrides the event id generator (defaults to [`trogon_std::UuidV7Generator`]).
+    ///
+    /// Only reached for events that no [`with_command_id`](Self::with_command_id) derivation covers.
     pub fn with_event_id_generator<NextG>(
         self,
         event_id_generator: NextG,
-    ) -> WasmCommandExecution<'a, E, Snapshots, NextG>
+    ) -> WasmCommandExecution<'a, E, Snapshots, NextG, A, Auth>
     where
         NextG: NowV7,
     {
@@ -383,269 +535,294 @@ impl<'a, E, Snapshots, G> WasmCommandExecution<'a, E, Snapshots, G> {
             event_store: self.event_store,
             command: self.command,
             snapshots: self.snapshots,
-            write_precondition: self.write_precondition,
+            expected_revision: self.expected_revision,
+            replay_limit: self.replay_limit,
+            replay_chunk_size: self.replay_chunk_size,
+            conflict_retry_limit: self.conflict_retry_limit,
+            snapshot_cadence: self.snapshot_cadence,
+            command_id: self.command_id,
             headers: self.headers,
             event_id_generator,
+            admission: self.admission,
+            principal: self.principal,
+            authorizer: self.authorizer,
+        }
+    }
+
+    /// Gates this execution on a [`CommandAdmission`] limiter.
+    ///
+    /// Defaults to [`WithoutAdmission`]: execution is unbounded, exactly as it
+    /// was before admission control existed. Once set, the limiter is
+    /// consulted before the guest store is created, so a command it cannot
+    /// admit fails with [`WasmCommandError::Overloaded`] without reserving any
+    /// of the linear memory a wasm store would.
+    ///
+    /// The bound worth choosing here is
+    /// `limit x WasmEngineConfig::max_memory_bytes` against the host's memory
+    /// budget, which is why no default exists.
+    pub fn with_admission<NextA>(self, admission: NextA) -> WasmCommandExecution<'a, E, Snapshots, G, NextA, Auth>
+    where
+        NextA: CommandAdmission,
+    {
+        WasmCommandExecution {
+            module: self.module,
+            event_store: self.event_store,
+            command: self.command,
+            snapshots: self.snapshots,
+            expected_revision: self.expected_revision,
+            replay_limit: self.replay_limit,
+            replay_chunk_size: self.replay_chunk_size,
+            conflict_retry_limit: self.conflict_retry_limit,
+            snapshot_cadence: self.snapshot_cadence,
+            command_id: self.command_id,
+            headers: self.headers,
+            event_id_generator: self.event_id_generator,
+            admission,
+            principal: self.principal,
+            authorizer: self.authorizer,
+        }
+    }
+
+    /// Names the [`CommandPrincipal`] this command is executed on behalf of.
+    ///
+    /// Only read by a configured [`CommandAuthorizer`]. It is not persisted:
+    /// [`Headers`] remains the envelope metadata contract, so an application that wants an audit
+    /// trail of who acted derives its own header from the principal and sets it with
+    /// [`with_headers`](Self::with_headers).
+    ///
+    /// Setting this without an authorizer configured changes nothing, and configuring an authorizer
+    /// without setting this fails every execution with [`UnauthorizedError::MissingPrincipal`].
+    pub fn with_principal<P>(mut self, principal: P) -> Self
+    where
+        P: Into<Option<CommandPrincipal>>,
+    {
+        self.principal = principal.into();
+        self
+    }
+
+    /// Gates this execution on a [`CommandAuthorizer`].
+    ///
+    /// Defaults to [`WithoutAuthorization`]: any caller able to build an execution may run any
+    /// command, exactly as it was before authorization existed. Once set, the authorizer is
+    /// consulted after the admission permit and before the guest store is created, so a command it
+    /// refuses fails with [`WasmCommandError::Unauthorized`] without instantiating the module,
+    /// spending guest fuel, or reading anything.
+    ///
+    /// The authorizer is handed the [`CommandEnvelope`] rather than a typed command, and never the
+    /// target stream: on this path the stream id is a value the guest computes, so it does not
+    /// exist until the guest has already run. See
+    /// [ADR#0026](https://github.com/TrogonStack/trogonai/blob/main/docs/adr/0026-command-authorization-principal.md).
+    pub fn with_authorizer<NextAuth>(
+        self,
+        authorizer: NextAuth,
+    ) -> WasmCommandExecution<'a, E, Snapshots, G, A, NextAuth>
+    where
+        NextAuth: CommandAuthorizer<CommandEnvelope>,
+    {
+        WasmCommandExecution {
+            module: self.module,
+            event_store: self.event_store,
+            command: self.command,
+            snapshots: self.snapshots,
+            expected_revision: self.expected_revision,
+            replay_limit: self.replay_limit,
+            replay_chunk_size: self.replay_chunk_size,
+            conflict_retry_limit: self.conflict_retry_limit,
+            snapshot_cadence: self.snapshot_cadence,
+            command_id: self.command_id,
+            headers: self.headers,
+            event_id_generator: self.event_id_generator,
+            admission: self.admission,
+            principal: self.principal,
+            authorizer,
         }
     }
 }
 
-/// Prior stream events replayed as guest envelopes, the stream's current
+/// The first chunk of prior stream events to replay, the stream's current
 /// position, and the raw snapshot bytes passed to the guest session
 /// constructor.
-struct ReplayContext {
-    replayed_envelopes: Vec<AnyEnvelope>,
+///
+/// The events stay [`StreamEvent`]s rather than guest envelopes because a
+/// chunked replay walks from the position of the last event it folded, which
+/// an envelope no longer carries.
+pub struct ReplayContext {
+    stream_events: Vec<StreamEvent>,
     current_position: Option<StreamPosition>,
     snapshot_bytes: Option<Vec<u8>>,
 }
 
-impl<E, G> WasmCommandExecution<'_, E, WithoutSnapshotStore, G>
-where
-    E: StreamRead<str> + StreamAppend<str>,
-    G: NowV7,
+mod sealed;
+
+/// Why a sandboxed command execution could not assemble the session state and history to replay.
+///
+/// Widened into the matching [`WasmCommandError`] variants by the skeleton that called it.
+#[derive(Debug, Error)]
+pub enum WasmLoadReplayError<ReadSnapshotError, ReadStreamError> {
+    /// The snapshot store could not be read, and the failure policy chose to fail.
+    #[error("{0}")]
+    ReadSnapshot(#[source] ReadSnapshotError),
+    /// The stream could not be read.
+    #[error("{0}")]
+    ReadStream(#[source] ReadStreamError),
+    /// A snapshot claimed a position the stream cannot prove, and the failure policy chose to fail.
+    #[error("{0}")]
+    SnapshotAheadOfStream(SnapshotAheadOfStream),
+    /// A snapshot's position cannot be advanced to the first event after it.
+    #[error("{0}")]
+    ReadAfterOverflow(#[source] ReadAfterOverflowError),
+}
+
+impl<ReadSnapshotError, ReadStreamError, AppendStreamError>
+    From<WasmLoadReplayError<ReadSnapshotError, ReadStreamError>>
+    for WasmCommandError<ReadSnapshotError, ReadStreamError, AppendStreamError>
 {
-    /// Runs the command against a fresh guest session and appends its decided events.
-    pub async fn execute(
-        self,
-    ) -> Result<
-        WasmExecutionResult,
-        WasmCommandError<std::convert::Infallible, <E as StreamRead<str>>::Error, <E as StreamAppend<str>>::Error>,
-    > {
-        let engine = self.module.engine().clone();
-        let decider_pre = self.module.decider_pre().clone();
-        let command = self.command.clone();
-        let phase_context = GuestPhaseContext::new(self.module, self.command);
-        let (mut store, bindings, stream_id) = spawn_guest(move || {
-            let mut store = engine.new_store();
-            let bindings = instantiate(&mut store, &decider_pre, &engine, &phase_context)?;
-            let stream_id = call_stream_id(&mut store, &bindings, &engine, &command)?;
-            Ok((store, bindings, stream_id))
-        })
-        .await?;
-
-        let write_precondition = command_write_precondition(self.module, &self.command.type_);
-        let (replayed_envelopes, current_position) =
-            if has_no_stream_write_precondition(write_precondition, self.write_precondition) {
-                (Vec::new(), None)
-            } else {
-                let stream_read = <E as StreamRead<str>>::read_stream(
-                    self.event_store,
-                    ReadStreamRequest {
-                        stream_id: stream_id.as_str(),
-                        from: ReadFrom::Beginning,
-                    },
-                )
-                .await
-                .map_err(WasmCommandError::ReadStream)?;
-                let current_position = stream_read.current_position;
-                (to_any_envelopes(stream_read.events), current_position)
-            };
-
-        let engine = self.module.engine().clone();
-        let command = self.command.clone();
-        let phase_context = GuestPhaseContext::new(self.module, self.command);
-        let decided_envelopes = spawn_guest(move || {
-            let session = create_session(&mut store, &bindings, &engine, None, &phase_context)?;
-            // No snapshot observes this session, so the decided events are not
-            // folded back into it; folding here would only burn guest fuel.
-            let outcome = replay_and_decide(
-                &mut store,
-                &bindings,
-                &engine,
-                session,
-                &replayed_envelopes,
-                &command,
-                &phase_context,
-            );
-            conclude_session(
-                &mut store,
-                &bindings,
-                &engine,
-                session,
-                &phase_context,
-                outcome.as_ref().err(),
-            );
-            outcome
-        })
-        .await?;
-
-        let precondition = resolve_write_precondition(write_precondition, self.write_precondition, current_position);
-        let events = encode_events(decided_envelopes.clone(), &self.headers, &self.event_id_generator);
-        let append_response = <E as StreamAppend<str>>::append_stream(
-            self.event_store,
-            AppendStreamRequest {
-                stream_id: stream_id.as_str(),
-                stream_write_precondition: precondition,
-                events,
-            },
-        )
-        .await
-        .map_err(WasmCommandError::Append)?;
-
-        Ok(WasmExecutionResult {
-            stream_position: append_response.stream_position,
-            events: decided_envelopes,
-        })
+    fn from(error: WasmLoadReplayError<ReadSnapshotError, ReadStreamError>) -> Self {
+        match error {
+            WasmLoadReplayError::ReadSnapshot(error) => Self::ReadSnapshot(error),
+            WasmLoadReplayError::ReadStream(error) => Self::ReadStream(error),
+            WasmLoadReplayError::SnapshotAheadOfStream(ahead) => Self::SnapshotAheadOfStream(ahead),
+            WasmLoadReplayError::ReadAfterOverflow(error) => Self::ReadAfterOverflow(error),
+        }
     }
 }
 
-impl<E, S, Sched, F, G> WasmCommandExecution<'_, E, WithSnapshotStore<'_, S, Sched, F>, G>
+/// What [`WasmExecutionSnapshots::load_replay_context`] hands back to the execution skeleton.
+pub type WasmLoadReplayResult<ReadSnapshotError, ReadStreamError> =
+    Result<ReplayContext, WasmLoadReplayError<ReadSnapshotError, ReadStreamError>>;
+
+/// The snapshot half of one sandboxed command execution.
+///
+/// The counterpart of [`trogon_decider_runtime::ExecutionSnapshots`] for the guest path, and it
+/// exists for the same reason: instantiation, the stream read, the guest session, the append, and
+/// the write precondition run once for both configurations, so a change to any of them is a change
+/// in one place. Only what a snapshot store contributes varies.
+pub trait WasmExecutionSnapshots: sealed::Sealed {
+    /// How a snapshot read can fail. [`Infallible`](std::convert::Infallible) when there is no
+    /// store to read from.
+    type ReadError;
+
+    /// Loads the snapshot to resume the guest session from and the stream events recorded after it.
+    fn load_replay_context<E>(
+        &self,
+        module: &WasmDeciderModule,
+        command: &CommandEnvelope,
+        event_store: &E,
+        stream_id: &str,
+        bounds: ReplayBounds,
+    ) -> impl Future<Output = WasmLoadReplayResult<Self::ReadError, <E as StreamRead<str>>::Error>> + Send
+    where
+        E: StreamRead<str>;
+
+    /// Narrows the cadence the module declares to the one this configuration can honor.
+    ///
+    /// Without a store nothing would ever read a snapshot, so the guest is not asked to fold its
+    /// decided events back in or to serialize itself: both would burn fuel producing bytes that go
+    /// nowhere.
+    fn snapshot_cadence(&self, declared: SnapshotCadence) -> SnapshotCadence;
+
+    /// Persists the bytes the guest serialized itself into, if there is a store to persist them to.
+    fn store(&self, module: &WasmDeciderModule, stream_id: &str, stream_position: StreamPosition, bytes: Vec<u8>);
+}
+
+impl sealed::Sealed for WithoutSnapshotStore {}
+
+impl WasmExecutionSnapshots for WithoutSnapshotStore {
+    type ReadError = std::convert::Infallible;
+
+    async fn load_replay_context<E>(
+        &self,
+        _module: &WasmDeciderModule,
+        _command: &CommandEnvelope,
+        event_store: &E,
+        stream_id: &str,
+        bounds: ReplayBounds,
+    ) -> WasmLoadReplayResult<Self::ReadError, <E as StreamRead<str>>::Error>
+    where
+        E: StreamRead<str>,
+    {
+        let stream_read = read_stream_for_execution(
+            event_store,
+            ReadStreamRequest {
+                stream_id,
+                from: ReadFrom::Beginning,
+            },
+            bounds.read_bound(0),
+        )
+        .await
+        .map_err(WasmLoadReplayError::ReadStream)?;
+
+        Ok(ReplayContext {
+            stream_events: stream_read.events,
+            current_position: stream_read.current_position,
+            snapshot_bytes: None,
+        })
+    }
+
+    fn snapshot_cadence(&self, _declared: SnapshotCadence) -> SnapshotCadence {
+        SnapshotCadence::Never
+    }
+
+    fn store(&self, _module: &WasmDeciderModule, _stream_id: &str, _position: StreamPosition, _bytes: Vec<u8>) {}
+}
+
+impl<S, Sched, F> WithSnapshotStore<'_, S, Sched, F> {
+    /// Builds the context a [`WasmSnapshotFailurePolicy`] inspects for one
+    /// snapshot failure this execution encountered.
+    fn snapshot_failure_context<'ctx, ReadSnapshotError>(
+        module: &'ctx WasmDeciderModule,
+        command: &'ctx CommandEnvelope,
+        stream_id: &'ctx str,
+        failure: SnapshotFailure<'ctx, ReadSnapshotError>,
+    ) -> WasmSnapshotFailureContext<'ctx, ReadSnapshotError> {
+        WasmSnapshotFailureContext {
+            module_name: module.name().as_str(),
+            module_version: module.version().as_str(),
+            command_type: command.type_.as_str(),
+            stream_id,
+            failure,
+        }
+    }
+}
+
+impl<S, Sched, F> sealed::Sealed for WithSnapshotStore<'_, S, Sched, F> {}
+
+impl<S, Sched, F> WasmExecutionSnapshots for WithSnapshotStore<'_, S, Sched, F>
 where
-    E: StreamRead<str> + StreamAppend<str>,
     S: SnapshotRead<OpaqueSnapshotPayload, str>
         + SnapshotWrite<OpaqueSnapshotPayload, str>
         + Clone
         + Send
         + Sync
         + 'static,
-    Sched: SnapshotTaskScheduler,
-    F: WasmSnapshotFailurePolicy<<S as SnapshotRead<OpaqueSnapshotPayload, str>>::Error>,
-    G: NowV7,
+    Sched: SnapshotTaskScheduler + Sync,
+    F: WasmSnapshotFailurePolicy<<S as SnapshotRead<OpaqueSnapshotPayload, str>>::Error> + Sync,
 {
-    /// Runs the command against a fresh guest session, appends its decided
-    /// events, and best-effort schedules a snapshot write when the guest
-    /// returns one.
-    #[allow(clippy::type_complexity)]
-    pub async fn execute(
-        self,
-    ) -> Result<
-        WasmExecutionResult,
-        WasmCommandError<
-            <S as SnapshotRead<OpaqueSnapshotPayload, str>>::Error,
-            <E as StreamRead<str>>::Error,
-            <E as StreamAppend<str>>::Error,
-        >,
-    > {
-        let engine = self.module.engine().clone();
-        let decider_pre = self.module.decider_pre().clone();
-        let command = self.command.clone();
-        let phase_context = GuestPhaseContext::new(self.module, self.command);
-        let (mut store, bindings, stream_id) = spawn_guest(move || {
-            let mut store = engine.new_store();
-            let bindings = instantiate(&mut store, &decider_pre, &engine, &phase_context)?;
-            let stream_id = call_stream_id(&mut store, &bindings, &engine, &command)?;
-            Ok((store, bindings, stream_id))
-        })
-        .await?;
+    type ReadError = <S as SnapshotRead<OpaqueSnapshotPayload, str>>::Error;
 
-        let write_precondition = command_write_precondition(self.module, &self.command.type_);
-        let ReplayContext {
-            replayed_envelopes,
-            current_position,
-            snapshot_bytes,
-        } = if has_no_stream_write_precondition(write_precondition, self.write_precondition) {
-            ReplayContext {
-                replayed_envelopes: Vec::new(),
-                current_position: None,
-                snapshot_bytes: None,
-            }
-        } else {
-            self.load_replay_context(&stream_id).await?
-        };
-
-        let engine = self.module.engine().clone();
-        let command = self.command.clone();
-        let phase_context = GuestPhaseContext::new(self.module, self.command);
-        let (decided_envelopes, new_snapshot_bytes) = spawn_guest(move || {
-            let session = create_session(
-                &mut store,
-                &bindings,
-                &engine,
-                snapshot_bytes.as_deref(),
-                &phase_context,
-            )?;
-            let outcome = replay_decide_fold_and_snapshot(
-                &mut store,
-                &bindings,
-                &engine,
-                session,
-                &replayed_envelopes,
-                &command,
-                &phase_context,
-            );
-            conclude_session(
-                &mut store,
-                &bindings,
-                &engine,
-                session,
-                &phase_context,
-                outcome.as_ref().err(),
-            );
-            outcome
-        })
-        .await?;
-
-        let precondition = resolve_write_precondition(write_precondition, self.write_precondition, current_position);
-        let events = encode_events(decided_envelopes.clone(), &self.headers, &self.event_id_generator);
-        let append_response = <E as StreamAppend<str>>::append_stream(
-            self.event_store,
-            AppendStreamRequest {
-                stream_id: stream_id.as_str(),
-                stream_write_precondition: precondition,
-                events,
-            },
-        )
-        .await
-        .map_err(WasmCommandError::Append)?;
-
-        if let Some(bytes) = new_snapshot_bytes {
-            let snapshot_id = WasmSnapshotId::new(self.module.name(), self.module.version(), &stream_id);
-            schedule_snapshot_write(
-                self.snapshots.task_scheduler,
-                self.snapshots.store,
-                snapshot_id,
-                Snapshot::new(append_response.stream_position, OpaqueSnapshotPayload::new(bytes)),
-            );
-        }
-
-        Ok(WasmExecutionResult {
-            stream_position: append_response.stream_position,
-            events: decided_envelopes,
-        })
-    }
-
-    /// Builds the context a [`WasmSnapshotFailurePolicy`] inspects for one
-    /// snapshot failure this execution encountered.
-    fn snapshot_failure_context<'ctx, ReadSnapshotError>(
-        &'ctx self,
-        stream_id: &'ctx str,
-        failure: SnapshotFailure<'ctx, ReadSnapshotError>,
-    ) -> WasmSnapshotFailureContext<'ctx, ReadSnapshotError> {
-        WasmSnapshotFailureContext {
-            module_name: self.module.name().as_str(),
-            module_version: self.module.version().as_str(),
-            command_type: self.command.type_.as_str(),
-            stream_id,
-            failure,
-        }
-    }
-
-    /// Loads the snapshot (if any) and the stream events replayed after it.
-    ///
     /// A snapshot the configured [`WasmSnapshotFailurePolicy`] cannot trust,
     /// whether it failed to read or claims a position ahead of the stream, is
     /// routed through that policy. [`SnapshotFailureDecision::Fail`] returns
-    /// the concrete [`WasmCommandError`] for the failure, matching this
-    /// execution's behavior before the policy existed.
-    /// [`SnapshotFailureDecision::DiscardAndReplay`] discards the untrusted
-    /// snapshot and replays the stream from the beginning instead, exactly as
-    /// [`trogon_decider_runtime::CommandExecution`] does natively.
-    #[allow(clippy::type_complexity)]
-    async fn load_replay_context(
+    /// the concrete failure, matching this execution's behavior before the
+    /// policy existed. [`SnapshotFailureDecision::DiscardAndReplay`] discards
+    /// the untrusted snapshot and replays the stream from the beginning
+    /// instead, exactly as [`trogon_decider_runtime::CommandExecution`] does
+    /// natively.
+    async fn load_replay_context<E>(
         &self,
+        module: &WasmDeciderModule,
+        command: &CommandEnvelope,
+        event_store: &E,
         stream_id: &str,
-    ) -> Result<
-        ReplayContext,
-        WasmCommandError<
-            <S as SnapshotRead<OpaqueSnapshotPayload, str>>::Error,
-            <E as StreamRead<str>>::Error,
-            <E as StreamAppend<str>>::Error,
-        >,
-    > {
-        let snapshot_id = WasmSnapshotId::new(self.module.name(), self.module.version(), stream_id);
+        bounds: ReplayBounds,
+    ) -> WasmLoadReplayResult<Self::ReadError, <E as StreamRead<str>>::Error>
+    where
+        E: StreamRead<str>,
+    {
+        let snapshot_id = WasmSnapshotId::new(module.name(), module.version(), stream_id);
         let (snapshot_position, mut snapshot_bytes) =
             match <S as SnapshotRead<OpaqueSnapshotPayload, str>>::read_snapshot(
-                self.snapshots.store,
+                self.store,
                 ReadSnapshotRequest {
                     snapshot_id: snapshot_id.as_str(),
                 },
@@ -657,54 +834,376 @@ where
                     None => (None, None),
                 },
                 Err(error) => {
-                    let context = self.snapshot_failure_context(stream_id, SnapshotFailure::ReadFailed(&error));
-                    match self.snapshots.failure_policy.decide_snapshot_failure(context) {
-                        SnapshotFailureDecision::Fail => return Err(WasmCommandError::ReadSnapshot(error)),
+                    let context =
+                        Self::snapshot_failure_context(module, command, stream_id, SnapshotFailure::ReadFailed(&error));
+                    match self.failure_policy.decide_snapshot_failure(context) {
+                        SnapshotFailureDecision::Fail => return Err(WasmLoadReplayError::ReadSnapshot(error)),
                         SnapshotFailureDecision::DiscardAndReplay => (None, None),
                     }
                 }
             };
 
         let from = match snapshot_position {
-            Some(position) => ReadFrom::after(position).map_err(WasmCommandError::ReadAfterOverflow)?,
+            Some(position) => ReadFrom::after(position).map_err(WasmLoadReplayError::ReadAfterOverflow)?,
             None => ReadFrom::Beginning,
         };
-        let stream_read = <E as StreamRead<str>>::read_stream(self.event_store, ReadStreamRequest { stream_id, from })
-            .await
-            .map_err(WasmCommandError::ReadStream)?;
+        let stream_read =
+            read_stream_for_execution(event_store, ReadStreamRequest { stream_id, from }, bounds.read_bound(0))
+                .await
+                .map_err(WasmLoadReplayError::ReadStream)?;
         let mut current_position = stream_read.current_position;
-        let mut replayed_envelopes = to_any_envelopes(stream_read.events);
+        let mut stream_events = stream_read.events;
 
         if let Some(position) = snapshot_position
             && let Err(ahead_of_stream) = ensure_snapshot_not_ahead(position, current_position)
         {
-            let context = self.snapshot_failure_context(stream_id, SnapshotFailure::AheadOfStream(ahead_of_stream));
-            match self.snapshots.failure_policy.decide_snapshot_failure(context) {
+            let context = Self::snapshot_failure_context(
+                module,
+                command,
+                stream_id,
+                SnapshotFailure::AheadOfStream(ahead_of_stream),
+            );
+            match self.failure_policy.decide_snapshot_failure(context) {
                 SnapshotFailureDecision::Fail => {
-                    return Err(WasmCommandError::SnapshotAheadOfStream(ahead_of_stream));
+                    return Err(WasmLoadReplayError::SnapshotAheadOfStream(ahead_of_stream));
                 }
                 SnapshotFailureDecision::DiscardAndReplay => {
                     snapshot_bytes = None;
 
-                    let replay = <E as StreamRead<str>>::read_stream(
-                        self.event_store,
+                    let replay = read_stream_for_execution(
+                        event_store,
                         ReadStreamRequest {
                             stream_id,
                             from: ReadFrom::Beginning,
                         },
+                        bounds.read_bound(0),
                     )
                     .await
-                    .map_err(WasmCommandError::ReadStream)?;
+                    .map_err(WasmLoadReplayError::ReadStream)?;
                     current_position = replay.current_position;
-                    replayed_envelopes = to_any_envelopes(replay.events);
+                    stream_events = replay.events;
                 }
             }
         }
 
         Ok(ReplayContext {
-            replayed_envelopes,
+            stream_events,
             current_position,
             snapshot_bytes,
+        })
+    }
+
+    fn snapshot_cadence(&self, declared: SnapshotCadence) -> SnapshotCadence {
+        declared
+    }
+
+    fn store(&self, module: &WasmDeciderModule, stream_id: &str, stream_position: StreamPosition, bytes: Vec<u8>) {
+        let snapshot_id = WasmSnapshotId::new(module.name(), module.version(), stream_id);
+        schedule_snapshot_write(
+            self.task_scheduler,
+            self.store,
+            snapshot_id,
+            Snapshot::new(stream_position, OpaqueSnapshotPayload::new(bytes)),
+        );
+    }
+}
+
+impl<E, Sn, G, A, Auth> WasmCommandExecution<'_, E, Sn, G, A, Auth>
+where
+    E: StreamRead<str> + StreamAppend<str>,
+    Sn: WasmExecutionSnapshots + Sync,
+    Sn::ReadError: Send + 'static,
+    G: NowV7,
+    A: CommandAdmission,
+    Auth: CommandAuthorizer<CommandEnvelope>,
+{
+    /// Runs the command against a fresh guest session and appends its decided events.
+    ///
+    /// What [`with_snapshot_store`](WasmCommandExecution::with_snapshot_store) adds is the snapshot
+    /// half: the session resumes from stored bytes so only the events after them are replayed, and
+    /// the guest is asked to serialize itself again when the declared
+    /// [`SnapshotCadence`] falls due. Without a store the session starts empty and the guest is
+    /// never asked to serialize.
+    ///
+    /// A [`with_admission`](Self::with_admission) limiter, if one is configured, gates all of that:
+    /// the permit is taken before the first guest store exists and released when this future
+    /// resolves. A [`with_authorizer`](Self::with_authorizer) authorizer, if one is configured, is
+    /// consulted immediately after that permit, so a denied command never instantiates the module.
+    #[allow(clippy::type_complexity)]
+    pub async fn execute(
+        self,
+    ) -> Result<
+        WasmExecutionResult,
+        WasmCommandError<Sn::ReadError, <E as StreamRead<str>>::Error, <E as StreamAppend<str>>::Error>,
+    > {
+        // Held until this execution ends, so the slot covers the guest store's linear memory for
+        // as long as that memory is actually allocated rather than only the moment of admission.
+        // Held across retries too: a command that re-reads is still one command.
+        let _permit = self.admission.admit().map_err(WasmCommandError::Overloaded)?;
+
+        // Before the guest exists and outside the retry loop below: a denied command costs one call
+        // and no fuel, and a command that re-reads is still one command answering to one
+        // authorization decision.
+        self.authorizer
+            .authorize_execution(self.principal.as_ref(), self.command)
+            .map_err(WasmCommandError::Unauthorized)?;
+
+        let mut retries_left = self.resolved_conflict_retry_budget();
+        loop {
+            let result = self.attempt().await;
+
+            let WasmCommandError::Append(append_error) = (match result {
+                Err(ref error) => error,
+                Ok(_) => return result,
+            }) else {
+                return result;
+            };
+            if retries_left == 0
+                || <E as StreamAppend<str>>::classify_append_failure(self.event_store, append_error)
+                    != AppendFailure::WriteConflict
+            {
+                return result;
+            }
+
+            retries_left -= 1;
+            metrics().conflict_retries.add(1, &[]);
+            tracing::debug!(
+                retries_left,
+                "another writer advanced the stream; replaying and deciding again"
+            );
+        }
+    }
+
+    /// How many retries this execution may spend, once the configured limit is checked against the
+    /// preconditions that make a retry meaningful.
+    ///
+    /// Resolved once rather than per attempt, because none of its inputs can change while the
+    /// command runs.
+    /// The replay limit and chunk size this execution was configured with.
+    fn replay_bounds(&self) -> ReplayBounds {
+        ReplayBounds::new(self.replay_limit, self.replay_chunk_size)
+    }
+
+    fn resolved_conflict_retry_budget(&self) -> u32 {
+        let declared = command_spec(self.module, &self.command.type_)
+            .map_or(WritePrecondition::StreamUnchanged, WasmCommandSpec::write_precondition);
+        let retryable = declared == WritePrecondition::StreamUnchanged && self.expected_revision.is_none();
+        match self.conflict_retry_limit {
+            Some(limit) if retryable => limit.as_u32(),
+            _ => 0,
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    async fn attempt(
+        &self,
+    ) -> Result<
+        WasmExecutionResult,
+        WasmCommandError<Sn::ReadError, <E as StreamRead<str>>::Error, <E as StreamAppend<str>>::Error>,
+    > {
+        let engine = self.module.engine().clone();
+        let decider_pre = self.module.decider_pre().clone();
+        let command = self.command.clone();
+        let phase_context = GuestPhaseContext::new(self.module, self.command);
+        let (mut store, bindings, stream_id) = spawn_guest(move || {
+            let mut store = engine.new_store();
+            let bindings = instantiate(&mut store, &decider_pre, &engine, &phase_context)?;
+            let stream_id = call_stream_id(&mut store, &bindings, &engine, &command)?;
+            Ok((store, bindings, stream_id))
+        })
+        .await?;
+
+        let spec = command_spec(self.module, &self.command.type_);
+        let declared = spec.map_or(WritePrecondition::StreamUnchanged, WasmCommandSpec::write_precondition);
+        let snapshot_cadence = self.snapshots.snapshot_cadence(
+            self.snapshot_cadence
+                .unwrap_or_else(|| spec.map_or(SnapshotCadence::Never, WasmCommandSpec::snapshot_cadence)),
+        );
+
+        // A command that may only create its stream has no history to load: any history at all
+        // would already violate the precondition the append is about to be guarded on.
+        let ReplayContext {
+            stream_events,
+            current_position,
+            snapshot_bytes,
+        } = if declared == WritePrecondition::NoStream {
+            ReplayContext {
+                stream_events: Vec::new(),
+                current_position: None,
+                snapshot_bytes: None,
+            }
+        } else {
+            self.snapshots
+                .load_replay_context(
+                    self.module,
+                    self.command,
+                    self.event_store,
+                    stream_id.as_str(),
+                    self.replay_bounds(),
+                )
+                .await?
+        };
+
+        let mut cursor = ReplayCursor::new(self.replay_bounds(), current_position);
+        let mut first_chunk = stream_events;
+        cursor.truncate_to_tail(&mut first_chunk);
+        ensure_replay_within_limit(self.replay_limit, cursor.advance(&first_chunk))
+            .map_err(WasmCommandError::ReplayLimitExceeded)?;
+
+        let precondition = resolve_write_precondition(declared, self.expected_revision, current_position)
+            .map_err(WasmCommandError::PreconditionConflict)?;
+
+        let engine = self.module.engine().clone();
+        let phase_context = GuestPhaseContext::new(self.module, self.command);
+        let first_envelopes = to_any_envelopes(first_chunk);
+        let mut guest = spawn_guest(move || {
+            let session = create_session(
+                &mut store,
+                &bindings,
+                &engine,
+                snapshot_bytes.as_deref(),
+                &phase_context,
+            )?;
+            match replay_events(
+                &mut store,
+                &bindings,
+                &engine,
+                session,
+                &first_envelopes,
+                &phase_context,
+            ) {
+                Ok(()) => Ok(GuestSession {
+                    store,
+                    bindings,
+                    session,
+                }),
+                Err(error) => {
+                    conclude_session(&mut store, &bindings, &engine, session, &phase_context, Some(&error));
+                    Err(error)
+                }
+            }
+        })
+        .await?;
+
+        // Everything that can go wrong from here to the end of the walk leaves a live guest session
+        // behind, so the loop reports the failure rather than returning through it.
+        let replay_failure = loop {
+            let Some(next_read) = cursor.next_read() else {
+                break None;
+            };
+            let from = match next_read {
+                Ok(from) => from,
+                Err(error) => break Some(WasmCommandError::ReadAfterOverflow(error)),
+            };
+            let read = read_stream_for_execution(
+                self.event_store,
+                ReadStreamRequest {
+                    stream_id: stream_id.as_str(),
+                    from,
+                },
+                cursor.read_bound(),
+            )
+            .await;
+            let mut chunk = match read {
+                Ok(response) => response.events,
+                Err(error) => break Some(WasmCommandError::ReadStream(error)),
+            };
+            cursor.truncate_to_tail(&mut chunk);
+            if chunk.is_empty() {
+                break None;
+            }
+            if let Err(exceeded) = ensure_replay_within_limit(self.replay_limit, cursor.advance(&chunk)) {
+                break Some(WasmCommandError::ReplayLimitExceeded(exceeded));
+            }
+
+            guest = fold_chunk(
+                guest,
+                self.module.engine().clone(),
+                GuestPhaseContext::new(self.module, self.command),
+                to_any_envelopes(chunk),
+            )
+            .await?;
+        };
+
+        if let Some(failure) = replay_failure {
+            discard_session(
+                guest,
+                self.module.engine().clone(),
+                GuestPhaseContext::new(self.module, self.command),
+            )
+            .await;
+            return Err(failure);
+        }
+
+        let replayed_event_count = cursor.replayed_event_count();
+        let engine = self.module.engine().clone();
+        let command = self.command.clone();
+        let phase_context = GuestPhaseContext::new(self.module, self.command);
+        let (decided_envelopes, new_snapshot_bytes) = spawn_guest(move || {
+            let GuestSession {
+                mut store,
+                bindings,
+                session,
+            } = guest;
+            let outcome = decide(&mut store, &bindings, &engine, session, &command, &phase_context)
+                .and_then(ensure_decided_events_are_non_empty)
+                .and_then(|decided_envelopes| {
+                    // Folding the decided events back into the session is what makes the snapshot
+                    // correct (see the module-level ordering note), so it is skipped alongside the
+                    // snapshot: on a command that is not due, folding would burn guest fuel producing
+                    // state nothing reads.
+                    let events_since_snapshot = replayed_event_count.saturating_add(decided_envelopes.len() as u64);
+                    if !snapshot_cadence.is_due(events_since_snapshot) {
+                        return Ok((decided_envelopes, None));
+                    }
+                    fold_decided_events(
+                        &mut store,
+                        &bindings,
+                        &engine,
+                        session,
+                        &decided_envelopes,
+                        &phase_context,
+                    )?;
+                    let new_snapshot_bytes = take_snapshot(&mut store, &bindings, &engine, session, &phase_context)?;
+                    Ok((decided_envelopes, new_snapshot_bytes))
+                });
+            conclude_session(
+                &mut store,
+                &bindings,
+                &engine,
+                session,
+                &phase_context,
+                outcome.as_ref().err(),
+            );
+            outcome
+        })
+        .await?;
+
+        let events = encode_events(
+            decided_envelopes,
+            &self.headers,
+            self.command_id,
+            &self.event_id_generator,
+        );
+        let append_response = <E as StreamAppend<str>>::append_stream(
+            self.event_store,
+            AppendStreamRequest {
+                stream_id: stream_id.as_str(),
+                stream_write_precondition: precondition,
+                events: events.clone(),
+            },
+        )
+        .await
+        .map_err(WasmCommandError::Append)?;
+
+        if let Some(bytes) = new_snapshot_bytes {
+            self.snapshots
+                .store(self.module, stream_id.as_str(), append_response.stream_position, bytes);
+        }
+
+        Ok(WasmExecutionResult {
+            stream_position: append_response.stream_position,
+            events,
         })
     }
 }
@@ -1019,44 +1518,70 @@ fn take_snapshot<T, ReadSnapshotError, ReadStreamError, AppendStreamError>(
     })
 }
 
-/// Runs the guest-call sequence shared by both execution paths: replay prior
-/// events, decide the command, and enforce the WIT `decide` contract's
-/// non-empty invariant.
-fn replay_and_decide<T, ReadSnapshotError, ReadStreamError, AppendStreamError>(
-    store: &mut Store<T>,
-    bindings: &host::Decider,
-    engine: &WasmDeciderEngine,
+/// A live guest session between the reads of a chunked replay.
+///
+/// Each chunk is folded by its own guest call on the blocking pool while the reads between them
+/// happen on the async executor, so the three handles cross that boundary together, over and over,
+/// until the walk reaches the pinned tail.
+struct GuestSession {
+    store: Store<crate::engine::GuestState>,
+    bindings: host::Decider,
     session: host::Session,
-    replayed_envelopes: &[AnyEnvelope],
-    command: &CommandEnvelope,
-    context: &GuestPhaseContext,
-) -> Result<Vec<AnyEnvelope>, WasmCommandError<ReadSnapshotError, ReadStreamError, AppendStreamError>> {
-    replay_events(store, bindings, engine, session, replayed_envelopes, context)?;
-    let decided_envelopes = decide(store, bindings, engine, session, command, context)?;
-    ensure_decided_events_are_non_empty(decided_envelopes)
 }
 
-/// [`replay_and_decide`], then folds the decided events back into the session
-/// and serializes its snapshot, the extra steps only the snapshot-enabled
-/// path needs.
-#[allow(
-    clippy::type_complexity,
-    reason = "the tuple mirrors what the snapshot execution path destructures"
-)]
-fn replay_decide_fold_and_snapshot<T, ReadSnapshotError, ReadStreamError, AppendStreamError>(
-    store: &mut Store<T>,
-    bindings: &host::Decider,
-    engine: &WasmDeciderEngine,
-    session: host::Session,
-    replayed_envelopes: &[AnyEnvelope],
-    command: &CommandEnvelope,
-    context: &GuestPhaseContext,
-) -> Result<(Vec<AnyEnvelope>, Option<Vec<u8>>), WasmCommandError<ReadSnapshotError, ReadStreamError, AppendStreamError>>
+/// Folds one replay chunk into the session, concluding the session if the fold fails.
+///
+/// Concluding here rather than at the call site is what keeps the WIT `session` destructor
+/// guaranteed: a failed fold has no session left to hand back, so nothing downstream could run it.
+async fn fold_chunk<ReadSnapshotError, ReadStreamError, AppendStreamError>(
+    guest: GuestSession,
+    engine: WasmDeciderEngine,
+    context: GuestPhaseContext,
+    envelopes: Vec<AnyEnvelope>,
+) -> Result<GuestSession, WasmCommandError<ReadSnapshotError, ReadStreamError, AppendStreamError>>
+where
+    ReadSnapshotError: Send + 'static,
+    ReadStreamError: Send + 'static,
+    AppendStreamError: Send + 'static,
 {
-    let decided_envelopes = replay_and_decide(store, bindings, engine, session, replayed_envelopes, command, context)?;
-    fold_decided_events(store, bindings, engine, session, &decided_envelopes, context)?;
-    let new_snapshot_bytes = take_snapshot(store, bindings, engine, session, context)?;
-    Ok((decided_envelopes, new_snapshot_bytes))
+    spawn_guest(move || {
+        let GuestSession {
+            mut store,
+            bindings,
+            session,
+        } = guest;
+        match replay_events(&mut store, &bindings, &engine, session, &envelopes, &context) {
+            Ok(()) => Ok(GuestSession {
+                store,
+                bindings,
+                session,
+            }),
+            Err(error) => {
+                conclude_session(&mut store, &bindings, &engine, session, &context, Some(&error));
+                Err(error)
+            }
+        }
+    })
+    .await
+}
+
+/// Concludes a session abandoned part-way through a chunked replay.
+///
+/// The guest is blameless here: what failed was a read the host issued between two chunks, and it
+/// still has a destructor owed to it. A failure to even reach the blocking pool is discarded for
+/// the same reason [`drop_session_discarding_trap`] discards a destructor trap.
+async fn discard_session(guest: GuestSession, engine: WasmDeciderEngine, context: GuestPhaseContext) {
+    let _ =
+        spawn_guest::<(), std::convert::Infallible, std::convert::Infallible, std::convert::Infallible>(move || {
+            let GuestSession {
+                mut store,
+                bindings,
+                session,
+            } = guest;
+            drop_session_discarding_trap(&mut store, &bindings, &engine, session, &context);
+            Ok(())
+        })
+        .await;
 }
 
 /// Disposes a guest session once the command's outcome is determined, whether
@@ -1141,14 +1666,23 @@ fn to_any_envelopes(stream_events: Vec<trogon_decider_runtime::StreamEvent>) -> 
         .collect()
 }
 
-fn encode_events<G>(envelopes: Vec<AnyEnvelope>, headers: &Headers, event_id_generator: &G) -> Vec<Event>
+fn encode_events<G>(
+    envelopes: Vec<AnyEnvelope>,
+    headers: &Headers,
+    command_id: Option<CommandId>,
+    event_id_generator: &G,
+) -> Vec<Event>
 where
     G: NowV7,
 {
     envelopes
         .into_iter()
-        .map(|envelope| Event {
-            id: EventId::new(event_id_generator.now_v7()),
+        .enumerate()
+        .map(|(index, envelope)| Event {
+            id: match command_id {
+                Some(command_id) => command_id.event_id(index),
+                None => EventId::new(event_id_generator.now_v7()),
+            },
             r#type: envelope.type_,
             content: envelope.payload,
             headers: headers.clone(),
@@ -1156,52 +1690,15 @@ where
         .collect()
 }
 
-fn command_write_precondition(module: &WasmDeciderModule, command_type: &str) -> Option<host::WritePrecondition> {
+/// Looks up the policies the module descriptor declares for the command being executed.
+///
+/// A command the descriptor does not declare is not routable to this module, so reaching this
+/// point with an unknown type is a host routing bug rather than a domain condition.
+fn command_spec<'a>(module: &'a WasmDeciderModule, command_type: &str) -> Option<&'a WasmCommandSpec> {
     module
         .commands()
         .iter()
         .find(|spec| spec.command_type().as_str() == command_type)
-        .and_then(|spec| spec.write_precondition())
-}
-
-fn has_no_stream_write_precondition(
-    spec_write_precondition: Option<host::WritePrecondition>,
-    override_write_precondition: Option<StreamWritePrecondition>,
-) -> bool {
-    matches!(
-        configured_write_precondition(spec_write_precondition, override_write_precondition),
-        Some(StreamWritePrecondition::NoStream)
-    )
-}
-
-fn resolve_write_precondition(
-    spec_write_precondition: Option<host::WritePrecondition>,
-    override_write_precondition: Option<StreamWritePrecondition>,
-    current_position: Option<StreamPosition>,
-) -> StreamWritePrecondition {
-    configured_write_precondition(spec_write_precondition, override_write_precondition)
-        .unwrap_or_else(|| current_position.into())
-}
-
-fn configured_write_precondition(
-    spec_write_precondition: Option<host::WritePrecondition>,
-    override_write_precondition: Option<StreamWritePrecondition>,
-) -> Option<StreamWritePrecondition> {
-    spec_write_precondition
-        .map(to_stream_write_precondition)
-        .or(override_write_precondition)
-}
-
-/// Maps the WIT write precondition onto the storage port's precondition type.
-///
-/// Both types are foreign to this crate, so a `From` impl would violate the
-/// orphan rules; a plain function keeps the mapping local instead.
-fn to_stream_write_precondition(value: host::WritePrecondition) -> StreamWritePrecondition {
-    match value {
-        host::WritePrecondition::Any => StreamWritePrecondition::Any,
-        host::WritePrecondition::StreamExists => StreamWritePrecondition::StreamExists,
-        host::WritePrecondition::NoStream => StreamWritePrecondition::NoStream,
-    }
 }
 
 fn ensure_snapshot_not_ahead(

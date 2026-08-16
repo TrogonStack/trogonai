@@ -14,7 +14,6 @@ export_decider!(
         module = "scheduler.schedules",
         version = "0.1.0",
         state_schema_version = SCHEDULES_STATE_SCHEMA_VERSION,
-        write_precondition = no_stream,
     },
     PauseSchedule {
         type_url = PAUSE_SCHEDULE_TYPE_URL,

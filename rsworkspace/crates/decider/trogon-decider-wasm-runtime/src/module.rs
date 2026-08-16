@@ -4,6 +4,7 @@ use thiserror::Error;
 use trogon_decider_wit::host::{DeciderPre, ModuleDescriptor};
 use wasmtime::component::{Component, Linker};
 
+use crate::command_spec::{to_snapshot_cadence, to_write_precondition};
 use crate::{CommandType, ModuleName, ModuleVersion, WasmCommandSpec, WasmDeciderEngine};
 
 /// Failure loading a compiled WASM decider component.
@@ -179,7 +180,11 @@ fn validate_commands(descriptor: ModuleDescriptor) -> Result<Vec<WasmCommandSpec
         if !seen.insert(command_type.clone()) {
             return Err(InvalidDescriptorError::DuplicateCommandType { command_type });
         }
-        commands.push(WasmCommandSpec::new(command_type, spec.write_precondition));
+        commands.push(WasmCommandSpec::new(
+            command_type,
+            to_write_precondition(spec.write_precondition),
+            to_snapshot_cadence(spec.snapshot_policy),
+        ));
     }
     Ok(commands)
 }

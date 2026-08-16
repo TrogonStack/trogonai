@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use trogon_decider_runtime::{
     CommandError, CommandExecution, Decider, Decision, EventData, EventDecode, EventDecodeOutcome, EventEncode,
     EventIdentity, EventType, ReadFrom, ReadStreamRequest, ReplayLimit, ReplayLimitExceeded, StreamRead,
-    StreamWritePrecondition,
+    StreamWritePrecondition, WritePrecondition,
 };
 use trogon_nats::test_support::JetStreamTestServer;
 
@@ -89,6 +89,7 @@ impl Decider for CreateCommand {
     type Event = CreatedEvent;
     type DecideError = AlreadyExistsError;
     type EvolveError = Infallible;
+    const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::NoStream;
 
     fn stream_id(&self) -> &Self::StreamId {
         &self.stream_id
@@ -179,6 +180,100 @@ impl Decider for AppendCommand {
     type Event = AppendedEvent;
     type DecideError = Infallible;
     type EvolveError = Infallible;
+    const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
+
+    fn stream_id(&self) -> &Self::StreamId {
+        &self.stream_id
+    }
+
+    fn initial_state() -> Self::State {
+        0
+    }
+
+    fn evolve(state: Self::State, _event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
+        Ok(state + 1)
+    }
+
+    fn decide(_state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
+        Ok(Decision::event(AppendedEvent {
+            stream_id: command.stream_id.clone(),
+        }))
+    }
+}
+
+/// [`AppendCommand`]'s sibling declaring [`WritePrecondition::StreamExists`].
+///
+/// The guard under test has to come from the decider now that a caller cannot supply one, so each
+/// variant this file exercises needs its own declaration.
+#[derive(Debug, Clone)]
+struct ExistingAppendCommand {
+    stream_id: String,
+}
+
+impl ExistingAppendCommand {
+    fn new(stream_id: &str) -> Self {
+        Self {
+            stream_id: stream_id.to_string(),
+        }
+    }
+}
+
+impl Decider for ExistingAppendCommand {
+    type StreamId = str;
+    type State = u32;
+    type Event = AppendedEvent;
+    type DecideError = Infallible;
+    type EvolveError = Infallible;
+    const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamExists;
+
+    fn stream_id(&self) -> &Self::StreamId {
+        &self.stream_id
+    }
+
+    fn initial_state() -> Self::State {
+        0
+    }
+
+    fn evolve(state: Self::State, _event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
+        Ok(state + 1)
+    }
+
+    fn decide(_state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
+        Ok(Decision::event(AppendedEvent {
+            stream_id: command.stream_id.clone(),
+        }))
+    }
+}
+
+/// [`AppendCommand`]'s sibling declaring [`WritePrecondition::Any`], used to seed a stream without
+/// its own guard getting in the way of the guard the test is actually about.
+#[derive(Debug, Clone)]
+struct UnguardedAppendCommand {
+    stream_id: String,
+}
+
+impl UnguardedAppendCommand {
+    fn new(stream_id: &str) -> Self {
+        Self {
+            stream_id: stream_id.to_string(),
+        }
+    }
+}
+
+impl Decider for UnguardedAppendCommand {
+    type StreamId = str;
+    type State = u32;
+    type Event = AppendedEvent;
+    type DecideError = Infallible;
+    type EvolveError = Infallible;
+    #[cfg_attr(
+        dylint_lib = "trogon_lints",
+        allow(
+            weakened_write_precondition,
+            reason = "the fixture exists to prove an unguarded append reaches the store as one, which is the case it cannot make with a guard"
+        )
+    )]
+    const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::Any;
 
     fn stream_id(&self) -> &Self::StreamId {
         &self.stream_id
@@ -261,12 +356,11 @@ impl Harness {
 }
 
 #[tokio::test]
-async fn builder_no_stream_creates_a_fresh_stream_through_command_execution() {
+async fn a_no_stream_command_creates_a_fresh_stream_through_command_execution() {
     let harness = Harness::start().await;
     let command = CreateCommand::new("fresh");
 
     let result = CommandExecution::new(&harness.store, &command)
-        .with_write_precondition(StreamWritePrecondition::NoStream)
         .execute()
         .await
         .expect("fresh create should succeed");
@@ -282,18 +376,16 @@ async fn builder_no_stream_creates_a_fresh_stream_through_command_execution() {
 }
 
 #[tokio::test]
-async fn builder_no_stream_rejects_an_existing_stream_at_append_without_replay() {
+async fn a_no_stream_command_rejects_an_existing_stream_at_append_without_replay() {
     let harness = Harness::start().await;
     let first = CreateCommand::new("existing");
     let first_result = CommandExecution::new(&harness.store, &first)
-        .with_write_precondition(StreamWritePrecondition::NoStream)
         .execute()
         .await
         .expect("first create should succeed");
     let second = CreateCommand::new("existing");
 
     let error = CommandExecution::new(&harness.store, &second)
-        .with_write_precondition(StreamWritePrecondition::NoStream)
         .execute()
         .await
         .expect_err("second create should conflict");
@@ -315,18 +407,14 @@ async fn builder_no_stream_rejects_an_existing_stream_at_append_without_replay()
 }
 
 #[tokio::test]
-async fn concurrent_builder_no_stream_creates_have_one_winner_and_one_append_conflict() {
+async fn concurrent_no_stream_creates_have_one_winner_and_one_append_conflict() {
     let harness = Harness::start().await;
     let first = CreateCommand::new("concurrent");
     let second = CreateCommand::new("concurrent");
 
     let (first_result, second_result) = tokio::join!(
-        CommandExecution::new(&harness.store, &first)
-            .with_write_precondition(StreamWritePrecondition::NoStream)
-            .execute(),
-        CommandExecution::new(&harness.store, &second)
-            .with_write_precondition(StreamWritePrecondition::NoStream)
-            .execute(),
+        CommandExecution::new(&harness.store, &first).execute(),
+        CommandExecution::new(&harness.store, &second).execute(),
     );
 
     let (success, conflict) = match (first_result, second_result) {
@@ -366,12 +454,11 @@ async fn concurrent_builder_no_stream_creates_have_one_winner_and_one_append_con
 }
 
 #[tokio::test]
-async fn builder_stream_exists_rejects_a_missing_stream() {
+async fn a_stream_exists_command_rejects_a_missing_stream() {
     let harness = Harness::start().await;
-    let command = AppendCommand::new("stream-exists-missing");
+    let command = ExistingAppendCommand::new("stream-exists-missing");
 
     let error = CommandExecution::new(&harness.store, &command)
-        .with_write_precondition(StreamWritePrecondition::StreamExists)
         .execute()
         .await
         .expect_err("StreamExists should reject a stream with no prior events");
@@ -391,19 +478,17 @@ async fn builder_stream_exists_rejects_a_missing_stream() {
 }
 
 #[tokio::test]
-async fn builder_stream_exists_accepts_an_already_created_stream() {
+async fn a_stream_exists_command_accepts_an_already_created_stream() {
     let harness = Harness::start().await;
     let stream_id = "stream-exists-present";
-    let first = AppendCommand::new(stream_id);
+    let first = UnguardedAppendCommand::new(stream_id);
     CommandExecution::new(&harness.store, &first)
-        .with_write_precondition(StreamWritePrecondition::NoStream)
         .execute()
         .await
         .expect("first append should succeed");
 
-    let second = AppendCommand::new(stream_id);
+    let second = ExistingAppendCommand::new(stream_id);
     let result = CommandExecution::new(&harness.store, &second)
-        .with_write_precondition(StreamWritePrecondition::StreamExists)
         .execute()
         .await
         .expect("StreamExists should accept a stream with a prior event");
@@ -412,50 +497,48 @@ async fn builder_stream_exists_accepts_an_already_created_stream() {
 }
 
 #[tokio::test]
-async fn builder_at_precondition_accepts_the_expected_position() {
+async fn an_expected_revision_matching_the_current_position_is_accepted() {
     let harness = Harness::start().await;
     let stream_id = "at-precondition-expected";
-    let first = AppendCommand::new(stream_id);
+    let first = UnguardedAppendCommand::new(stream_id);
     let first_result = CommandExecution::new(&harness.store, &first)
-        .with_write_precondition(StreamWritePrecondition::NoStream)
         .execute()
         .await
         .expect("first append should succeed");
 
     let second = AppendCommand::new(stream_id);
     let result = CommandExecution::new(&harness.store, &second)
-        .with_write_precondition(StreamWritePrecondition::At(first_result.stream_position))
+        .with_expected_revision(first_result.stream_position)
         .execute()
         .await
-        .expect("At precondition matching the current position should succeed");
+        .expect("an expected revision matching the current position should succeed");
 
     assert_eq!(result.state, 2);
 }
 
 #[tokio::test]
-async fn builder_at_precondition_rejects_a_stale_position() {
+async fn a_stale_expected_revision_is_rejected() {
     let harness = Harness::start().await;
     let stream_id = "at-precondition-stale";
-    let first = AppendCommand::new(stream_id);
+    let first = UnguardedAppendCommand::new(stream_id);
     let first_result = CommandExecution::new(&harness.store, &first)
-        .with_write_precondition(StreamWritePrecondition::NoStream)
         .execute()
         .await
         .expect("first append should succeed");
 
     let second = AppendCommand::new(stream_id);
     CommandExecution::new(&harness.store, &second)
-        .with_write_precondition(StreamWritePrecondition::At(first_result.stream_position))
+        .with_expected_revision(first_result.stream_position)
         .execute()
         .await
         .expect("second append should succeed");
 
     let third = AppendCommand::new(stream_id);
     let error = CommandExecution::new(&harness.store, &third)
-        .with_write_precondition(StreamWritePrecondition::At(first_result.stream_position))
+        .with_expected_revision(first_result.stream_position)
         .execute()
         .await
-        .expect_err("At precondition against a stale position should conflict");
+        .expect_err("an expected revision against a stale position should conflict");
 
     assert!(
         matches!(
@@ -478,17 +561,15 @@ async fn append_with_replay_limit_caps_the_replay_read_below_the_stream_length()
     let stream_id = "replay-limit-bounded";
 
     for _ in 0..5 {
-        CommandExecution::new(&harness.store, &AppendCommand::new(stream_id))
-            .with_write_precondition(StreamWritePrecondition::Any)
+        CommandExecution::new(&harness.store, &UnguardedAppendCommand::new(stream_id))
             .execute()
             .await
             .expect("seed append should succeed");
     }
 
     let limit = ReplayLimit::try_new(2).expect("non-zero replay limit");
-    let command = AppendCommand::new(stream_id);
+    let command = UnguardedAppendCommand::new(stream_id);
     let error = CommandExecution::new(&harness.store, &command)
-        .with_write_precondition(StreamWritePrecondition::Any)
         .with_replay_limit(limit)
         .execute()
         .await
