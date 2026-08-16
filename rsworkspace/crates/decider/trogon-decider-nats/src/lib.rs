@@ -43,6 +43,7 @@ pub use snapshot_store::{
 };
 pub use store::{JetStreamStore, JetStreamStoreBuilder, JetStreamStoreError, OptimisticConcurrencyConflictError};
 pub use stream_store::{
-    PublishStreamError, ReadStreamError, StreamStoreError, StreamSubject, StreamSubjectResolver, SubjectState,
-    append_stream, read_stream, read_stream_range, record_stream_message, subject_current_position,
+    PublishStreamError, ReadStreamError, StreamStoreError, StreamSubject, StreamSubjectResolver, SubjectScope,
+    SubjectScopeError, SubjectState, append_stream, read_stream, read_stream_range, record_stream_message,
+    subject_current_position,
 };

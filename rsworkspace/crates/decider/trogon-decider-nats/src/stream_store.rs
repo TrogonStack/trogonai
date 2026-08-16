@@ -17,7 +17,7 @@ use async_nats::{
     subject::ToSubject,
 };
 use chrono::{DateTime, Utc};
-use std::{fmt, future::IntoFuture};
+use std::{fmt, future::IntoFuture, sync::Arc};
 use trogon_decider_runtime::{
     Event, EventId, FromEntriesError, Headers, InvalidStreamPositionError, StreamEvent, StreamPosition,
 };
@@ -77,15 +77,123 @@ pub struct SubjectState {
     pub current_position: Option<StreamPosition>,
 }
 
+/// The subtree a resolver promises every subject it returns falls inside.
+///
+/// A resolver fixes its topology when it is constructed: to one module, one
+/// aggregate family, or one tenant. The subject it hands back, by contrast, is
+/// derived per call from a stream id the resolver did not choose. Those are two
+/// independent facts, which is what makes comparing them a real check rather
+/// than a resolver agreeing with itself, and it is why the scope is declared
+/// separately from the subject rather than read off it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubjectScope {
+    /// The shared prefix, always stored ending on a token boundary.
+    prefix: Arc<str>,
+}
+
+impl SubjectScope {
+    /// Creates a scope from the subject prefix every resolved subject shares.
+    ///
+    /// A trailing dot is optional and normalized away, because the prefix is
+    /// stored ending on a token boundary either way: a scope over `orders` must
+    /// not contain `orders_archive.7`.
+    pub fn new(prefix: impl AsRef<str>) -> Result<Self, SubjectScopeError> {
+        let prefix = prefix.as_ref().trim_end_matches('.');
+        if prefix.is_empty() {
+            return Err(SubjectScopeError::Empty);
+        }
+        if prefix.contains(['*', '>']) {
+            return Err(SubjectScopeError::Wildcard {
+                prefix: prefix.to_owned(),
+            });
+        }
+        if prefix.starts_with('.') || prefix.contains("..") {
+            return Err(SubjectScopeError::MalformedDots {
+                prefix: prefix.to_owned(),
+            });
+        }
+
+        Ok(Self {
+            prefix: Arc::from(format!("{prefix}.")),
+        })
+    }
+
+    /// Whether the subject falls inside this scope.
+    ///
+    /// A subject equal to the bare prefix is outside it: the scope is a
+    /// subtree, and a stream has to occupy a token of its own within it.
+    pub fn contains(&self, subject: &StreamSubject) -> bool {
+        subject
+            .as_str()
+            .strip_prefix(self.prefix.as_ref())
+            .is_some_and(|rest| !rest.is_empty())
+    }
+
+    /// The prefix every subject in this scope shares, ending on a token
+    /// boundary so composing a stream id onto it cannot widen the scope.
+    pub fn as_prefix(&self) -> &str {
+        &self.prefix
+    }
+
+    /// The subscription pattern covering the whole scope.
+    pub fn pattern(&self) -> String {
+        format!("{}>", self.prefix)
+    }
+}
+
+impl fmt::Display for SubjectScope {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.pattern())
+    }
+}
+
+/// Why a subject prefix cannot serve as a resolver's scope.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum SubjectScopeError {
+    /// The prefix was empty, or was nothing but dots.
+    #[error("a subject scope cannot be empty")]
+    Empty,
+    /// The prefix carried a wildcard, which would make containment vacuous.
+    #[error("subject scope '{prefix}' contains a wildcard; a scope is a concrete prefix")]
+    Wildcard {
+        /// The rejected prefix.
+        prefix: String,
+    },
+    /// The prefix had a leading or doubled dot, so it names no token boundary.
+    #[error("subject scope '{prefix}' has a leading or doubled dot")]
+    MalformedDots {
+        /// The rejected prefix.
+        prefix: String,
+    },
+}
+
 /// Resolves a domain stream identifier to the JetStream subject that stores it.
 ///
-/// Implementations usually compose a tenant or aggregate prefix with the
-/// caller's stream id, then use [`subject_current_position`] to fetch the
-/// subject's latest sequence. Keeping this resolver outside [`crate::JetStreamStore`]
-/// lets applications own their subject naming scheme.
+/// Implementations compose a prefix, typically a tenant or an aggregate family,
+/// with the caller's stream id, then use [`subject_current_position`] to fetch
+/// the subject's latest sequence. Keeping this resolver outside
+/// [`crate::JetStreamStore`] lets applications own their subject naming scheme.
+///
+/// The resolver is therefore the isolation boundary: nothing below it can tell
+/// one tenant's subject from another's. An implementation that declares a
+/// [`SubjectScope`] hands the store enough to hold it to that, which is the
+/// difference between an isolation guarantee and a naming convention.
 pub trait StreamSubjectResolver<StreamId: ?Sized>: Send + Sync + Clone + 'static {
     /// Error raised while resolving a stream subject or reading its state.
     type Error: std::error::Error + Send + Sync + 'static;
+
+    /// The subtree every subject this resolver returns falls inside, if it has
+    /// one.
+    ///
+    /// `None` is the default because it is the honest answer for a resolver
+    /// spanning an open topology, and because a resolver that predates this
+    /// method never promised anything for the store to check. A resolver that
+    /// does declare a scope gets [`crate::JetStreamStore`] to refuse any read
+    /// or write whose resolved subject escapes it, so a resolver bug becomes a
+    /// caught error instead of a silent cross-scope read or write.
+    fn subject_scope(&self) -> Option<&SubjectScope> {
+        None
+    }
 
     /// Resolves the stream id into a subject and current position.
     fn resolve_subject_state(

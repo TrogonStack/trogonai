@@ -280,7 +280,7 @@ that conflicts three times still answers to one authorization decision.
 
 Like admission control this is a seam and not a policy. The crate owns the trait, the
 `CommandPrincipal` value object and the `PrincipalKind`, `PrincipalId`, `PrincipalClaim`, and
-`PrincipalClaims` pieces it is built from, the `AuthorizationDenied` and `UnauthorizedError`
+`PrincipalClaims` pieces it is built from, the `AuthorizationDeniedError` and `UnauthorizedError`
 rejections, and nothing else. It ships no rule and no claim vocabulary: which claim a command
 requires is an application fact. The type parameter defaults to `WithoutAuthorization`, named
 for the absence of a decision rather than for a permissive one, so an unconfigured execution
@@ -770,4 +770,4 @@ Accepted and reflected in the platform as built:
 
 Draft, **not yet implemented**; do not treat these as current behavior:
 
-- [ADR#0027: Decider Multi-Tenancy Primitive](../adr/0027-decider-multi-tenancy-primitive.md)
+- [ADR#0027: Declared Subject Scope for Decider Stream Resolution](../adr/0027-decider-multi-tenancy-primitive.md)

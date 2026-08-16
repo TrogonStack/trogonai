@@ -1,7 +1,7 @@
 ---
 term: "Admission control"
 section: "Event sourcing and the decider"
-order: 15
+order: 16
 ---
 
 # Admission control

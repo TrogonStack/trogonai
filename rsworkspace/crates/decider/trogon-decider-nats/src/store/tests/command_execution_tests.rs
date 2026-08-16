@@ -14,7 +14,7 @@ use trogon_nats::test_support::JetStreamTestServer;
 
 use crate::{
     JetStreamStore, JetStreamStoreError, OptimisticConcurrencyConflictError, StreamStoreError, StreamSubject,
-    StreamSubjectResolver, SubjectState, subject_current_position,
+    StreamSubjectResolver, SubjectScope, SubjectState, subject_current_position,
 };
 
 const CREATED_EVENT_TYPE: &str = "test.command-execution.created.v1";
@@ -585,4 +585,165 @@ async fn append_with_replay_limit_caps_the_replay_read_below_the_stream_length()
         ),
         "expected the read to stop at limit + 1 events instead of the full five-event stream, got {error:?}"
     );
+}
+
+/// A resolver that declares one subtree and resolves into another.
+///
+/// The bug this stands in for is not exotic: a resolver composing a prefix it
+/// took from the wrong variable, or a caller handing it an id that already
+/// carries someone else's prefix. Nothing below the resolver can tell that
+/// subject from a legitimate one, which is the whole reason the scope is
+/// declared separately.
+#[derive(Debug, Clone)]
+struct EscapingSubjectResolver {
+    scope: SubjectScope,
+}
+
+impl StreamSubjectResolver<str> for EscapingSubjectResolver {
+    type Error = TestSubjectResolverError;
+
+    fn subject_scope(&self) -> Option<&SubjectScope> {
+        Some(&self.scope)
+    }
+
+    async fn resolve_subject_state(
+        &self,
+        events_stream: &jetstream::stream::Stream,
+        stream_id: &str,
+    ) -> Result<SubjectState, Self::Error> {
+        let subject = StreamSubject::new(format!("decider.commands.{stream_id}"))?;
+        let current_position = subject_current_position(events_stream, &subject).await?;
+
+        Ok(SubjectState {
+            subject,
+            current_position,
+        })
+    }
+}
+
+async fn escaping_harness() -> (JetStreamTestServer, JetStreamStore<EscapingSubjectResolver>) {
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
+    let events_stream = js
+        .create_stream(jetstream::stream::Config {
+            name: "SCOPE_ESCAPE".to_string(),
+            subjects: vec!["decider.commands.>".to_string()],
+            allow_atomic_publish: true,
+            ..Default::default()
+        })
+        .await
+        .expect("create command events stream");
+    let snapshot_bucket = js
+        .create_key_value(kv::Config {
+            bucket: "SCOPE_ESCAPE_SNAPSHOTS".to_string(),
+            ..Default::default()
+        })
+        .await
+        .expect("create command snapshot bucket");
+    let store =
+        JetStreamStore::builder(js, events_stream, snapshot_bucket).with_subject_resolver(EscapingSubjectResolver {
+            scope: SubjectScope::new("decider.other_tenant").expect("the scope is a valid prefix"),
+        });
+
+    (server, store)
+}
+
+#[tokio::test]
+async fn a_resolver_that_leaves_its_declared_scope_is_refused_before_the_append() {
+    let (_server, store) = escaping_harness().await;
+    let command = CreateCommand::new("escapee");
+
+    let error = CommandExecution::new(&store, &command)
+        .execute()
+        .await
+        .expect_err("a subject outside the declared scope must not be written");
+
+    assert!(
+        matches!(
+            &error,
+            CommandError::Append(JetStreamStoreError::SubjectOutsideScope { subject, scope })
+                if subject == "decider.commands.escapee" && scope == "decider.other_tenant.>"
+        ),
+        "expected a scope escape, got {error:?}"
+    );
+
+    // The refusal has to be worth something: the subject the resolver reached
+    // for must hold nothing afterwards. A check that fires after the publish
+    // would satisfy the assertion above and still have crossed the boundary.
+    let residue = StreamRead::<str>::read_stream(
+        &JetStreamStore::builder(
+            store.as_jetstream().clone(),
+            store.events_stream().clone(),
+            store.snapshot_bucket().clone(),
+        )
+        .with_subject_resolver(TestSubjectResolver),
+        ReadStreamRequest {
+            stream_id: "escapee",
+            from: ReadFrom::Beginning,
+        },
+    )
+    .await
+    .expect("reading through an unscoped resolver is allowed");
+    assert!(
+        residue.events.is_empty(),
+        "the escaping append must have written nothing"
+    );
+}
+
+#[tokio::test]
+async fn the_read_path_refuses_an_escaping_subject_too() {
+    let (_server, store) = escaping_harness().await;
+
+    let error = StreamRead::<str>::read_stream(
+        &store,
+        ReadStreamRequest {
+            stream_id: "escapee",
+            from: ReadFrom::Beginning,
+        },
+    )
+    .await
+    .expect_err("a subject outside the declared scope must not be read");
+
+    assert!(
+        matches!(
+            &error,
+            JetStreamStoreError::SubjectOutsideScope { subject, scope }
+                if subject == "decider.commands.escapee" && scope == "decider.other_tenant.>"
+        ),
+        "expected a scope escape, got {error:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_resolver_inside_its_declared_scope_is_left_alone() {
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
+    let events_stream = js
+        .create_stream(jetstream::stream::Config {
+            name: "SCOPE_HONORED".to_string(),
+            subjects: vec!["decider.commands.>".to_string()],
+            allow_atomic_publish: true,
+            ..Default::default()
+        })
+        .await
+        .expect("create command events stream");
+    let snapshot_bucket = js
+        .create_key_value(kv::Config {
+            bucket: "SCOPE_HONORED_SNAPSHOTS".to_string(),
+            ..Default::default()
+        })
+        .await
+        .expect("create command snapshot bucket");
+    let store =
+        JetStreamStore::builder(js, events_stream, snapshot_bucket).with_subject_resolver(EscapingSubjectResolver {
+            scope: SubjectScope::new("decider.commands").expect("the scope is a valid prefix"),
+        });
+
+    let command = CreateCommand::new("resident");
+    let result = CommandExecution::new(&store, &command)
+        .execute()
+        .await
+        .expect("a subject inside the declared scope is written normally");
+
+    assert_eq!(result.state, CreateState::Created);
 }

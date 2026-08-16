@@ -31,7 +31,7 @@ use trogon_decider_wasm_runtime::{
 use crate::command_subject::CommandSubjects;
 use crate::config::ServerConfig;
 use crate::constants::{CONTENT_TYPE_HEADER, PROTOBUF_CONTENT_TYPE, TROGON_DECIDER_OUTCOME_HEADER};
-use crate::event_subject::ModuleEventSubjects;
+use crate::event_subject::{EventSubjectError, ModuleEventSubjects};
 use crate::module_reference::ModuleReference;
 use crate::module_source::ModuleSource;
 use crate::outcome::CommandReply;
@@ -154,10 +154,10 @@ impl DeciderHost {
             .map(|name| {
                 let store = store_builder
                     .clone()
-                    .with_subject_resolver(ModuleEventSubjects::new(name));
-                (name.clone(), store)
+                    .with_subject_resolver(ModuleEventSubjects::new(name)?);
+                Ok((name.clone(), store))
             })
-            .collect();
+            .collect::<Result<_, EventSubjectError>>()?;
 
         let mut registry = DeciderRegistry::builder();
         for module in modules {
@@ -356,8 +356,8 @@ fn events_stream_config(
         name: config.events_stream.clone(),
         subjects: module_names
             .iter()
-            .map(|name| ModuleEventSubjects::new(name).subscription_pattern())
-            .collect(),
+            .map(|name| Ok(ModuleEventSubjects::new(name)?.subscription_pattern()))
+            .collect::<Result<_, EventSubjectError>>()?,
         // The append path publishes every command's events as one atomic
         // batch, so a stream without it cannot store a multi-event decision.
         allow_atomic_publish: true,
@@ -404,6 +404,9 @@ pub enum StartupError {
         reference: ModuleReference,
         declared: ModuleReference,
     },
+    /// A configured module's name does not form an event subject subtree.
+    #[error("{0}")]
+    EventSubjects(#[from] EventSubjectError),
     /// Two configured modules claim the same command type.
     #[error("{0}")]
     Register(#[from] RegisterModuleError),

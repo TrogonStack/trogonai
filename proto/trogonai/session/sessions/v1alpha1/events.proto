@@ -44,12 +44,14 @@ import "trogonai/session/sessions/v1alpha1/tool_call_requested.proto";
 import "trogonai/session/sessions/v1alpha1/tool_call_started.proto";
 import "trogonai/session/sessions/v1alpha1/user_message_recorded.proto";
 
-// This package is v1alpha1: the contract depends on draft ADR#0026/0027/0028/
-// 0029/0031 and promotes to v1 only by a later decision once ADR#0035 and its
-// dependencies are accepted and the substrate obligations they impose are met.
-// A session is scoped by its subject alone; shared multi-tenant deployment is
-// blocked on ADR#0027's resolver contract, and v1alpha1 is the room in which
-// that lands additively rather than as a speculative tenant_id today (D0).
+// This package is v1alpha1: the contract depends on ADR#0026/0027/0028/0029 and
+// draft ADR#0031, and promotes to v1 only by a later decision once ADR#0035 and
+// its dependencies are accepted and the substrate obligations they impose are
+// met. A session is scoped by its subject alone; ADR#0027 settled that shared
+// multi-tenant deployment scopes that subject through the resolver rather than
+// through a tenant_id field on the event, so no such field is owed here (D0).
+// What a shared deployment still owes is snapshot-key scoping, which ADR#0027
+// decision 3 leaves to the caller and which is not an event-contract concern.
 //
 // Within v1alpha1 a field may still be added as LEGACY_REQUIRED. That window is
 // open only while both conditions hold -- no deployed producer has written these

@@ -160,9 +160,10 @@ operational concerns injected by the caller.
   contract.
 - Per-[tenant](../glossary/tenant) fairness or quality-of-service scheduling. A global or
   per-command-type bound is in scope; weighting by tenant is fully open --
-  [ADR#0027](./0027-decider-multi-tenancy-primitive.md)'s tenant value
-  object is itself an unaccepted draft, so there is no settled primitive to
-  compose with, and no follow-on composition is implied here.
+  [ADR#0027](./0027-decider-multi-tenancy-primitive.md) deliberately leaves
+  the tenant vocabulary to consumers and keeps only a storage-resolution
+  scope, so there is no platform-level tenant identity for a limiter to
+  weight by, and no follow-on composition is implied here.
 - Bounding NATS-level publish/consume throughput. Only host-side execution
   concurrency for command dispatch is in scope.
 - Changing wasmtime fuel or memory defaults themselves. The admission
@@ -210,4 +211,4 @@ was unavoidable and is recorded in the Consequences.
 - [ADR#0017: AAuth Agent Authentication over a Trogon NATS PoP Binding](./0017-aauth-agent-authentication.md)
 - [ADR#0023: Secret Management and Key Custody on OpenBao behind a Platform Secrets Service](./0023-secret-management-and-key-custody-direction.md)
 - [ADR#0026: Command Authorization Principal and Authorizer Hook for Decider Execution](./0026-command-authorization-principal.md)
-- [ADR#0027: Tenant Value Object for Decider Stream and Snapshot Resolution](./0027-decider-multi-tenancy-primitive.md)
+- [ADR#0027: Declared Subject Scope for Decider Stream Resolution](./0027-decider-multi-tenancy-primitive.md)

@@ -77,7 +77,7 @@ mutable source of truth rather than a value that is always re-derivable from
 
 | ADK | Ours | Verdict |
 | --- | --- | --- |
-| `Session{id, app_name, user_id}` compound primary key (`src/google/adk/sessions/session.py:39-49`, `schemas/v1.py:75-85`) | Opaque `SessionId` addressing one subject `session.sessions.events.<session_id>` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 1) | Semantic mismatch: ADK bakes tenant/app/user scoping directly into the primary key; we keep identity opaque and defer multi-tenant scoping to draft [ADR#0027](../../../../adr/0027-decider-multi-tenancy-primitive.md) |
+| `Session{id, app_name, user_id}` compound primary key (`src/google/adk/sessions/session.py:39-49`, `schemas/v1.py:75-85`) | Opaque `SessionId` addressing one subject `session.sessions.events.<session_id>` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 1) | Semantic mismatch: ADK bakes tenant/app/user scoping directly into the primary key; we keep identity opaque and push multi-tenant scoping onto the subject prefix a resolver declares ([ADR#0027](../../../../adr/0027-decider-multi-tenancy-primitive.md)) |
 | `Session.state` (mutable folded document, directly overwritten or `json_patch`'d) | No equivalent as an authoritative record; the closest concept is the aggregate snapshot, always an "advisory cached fold," never independently written ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8) | Ours, decisively -- see structural difference above |
 | `Session.events: list[Event]` | Session event stream on `session.sessions.events.<session_id>` | Equivalent shape, different typing discipline: `Event` has `extra='ignore'` and no schema validation at the storage boundary; every one of our events is schema-validated protobuf at append ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 3) |
 | `EventActions.state_delta` (patched into `state` at every append) | No equivalent field; a change to session-scoped data is the fact itself (`TodoUpdated`, `FileChanged`, etc.), never a patch applied to a folded document | Ours, deliberately -- there is no document to patch, so there is nothing for a delta field to reconcile against |
@@ -254,10 +254,10 @@ apart that survives longer than institutional memory.
 **The change.** [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2's per-command precondition classification
 is a substrate-level guarantee today: "the runtime resolves the append guard
 to `At(current_position))`... unless an aggregate opts out." Nothing in the
-ADR states who is responsible for re-verifying that guarantee if draft
-[ADR#0027](../../../../adr/0027-decider-multi-tenancy-primitive.md)'s
-`TenantBinding::Dedicated` or a future storage tier is ever backed by
-something other than NATS JetStream.
+ADR states who is responsible for re-verifying that guarantee if a deployment
+giving one tenant its own stream and bucket
+([ADR#0027](../../../../adr/0027-decider-multi-tenancy-primitive.md)) or a
+future storage tier is ever backed by something other than NATS JetStream.
 
 **Evidence anchor.** Google ADK, store maturity 10/12: "optimistic concurrency
 with an expected-version precondition exists only in `DatabaseSessionService`,
@@ -405,9 +405,9 @@ change.
 - **A compound identity key that bakes in scoping.** `(app_name, user_id,
   session_id)` as a literal composite primary key is workable for ADK, but it
   is exactly the coupling we are deliberately avoiding by keeping `SessionId`
-  opaque and deferring tenant/scope binding to draft
-  [ADR#0027](../../../../adr/0027-decider-multi-tenancy-primitive.md) rather
-  than baking it into identity now.
+  opaque and leaving tenant/scope binding to the resolver's declared subject
+  scope ([ADR#0027](../../../../adr/0027-decider-multi-tenancy-primitive.md))
+  rather than baking it into identity.
 
 ## The two gaps the industry has not closed
 
@@ -538,8 +538,8 @@ away by the absence of the feature today.
    covered by an ordinary `ToolCallRequested`/`ToolCallCompleted` pair, or
    does decision 6 want to name this explicitly as the sanctioned answer to
    ADK's branch-scoped model?
-4. If a future storage backend or tenant binding (draft
-   [ADR#0027](../../../../adr/0027-decider-multi-tenancy-primitive.md)) is
+4. If a future storage backend or per-tenant stream
+   ([ADR#0027](../../../../adr/0027-decider-multi-tenancy-primitive.md)) is
    ever backed by something other than NATS JetStream, who is responsible for
    verifying it independently satisfies the same `NoStream`/`At`/`Any`
    guarantee facet 2 assumes today, given ADK shows a shared interface can

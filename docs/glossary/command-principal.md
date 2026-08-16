@@ -1,7 +1,7 @@
 ---
 term: "Command principal"
 section: "Event sourcing and the decider"
-order: 17
+order: 18
 ---
 
 # Command principal

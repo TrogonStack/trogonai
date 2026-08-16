@@ -1,7 +1,7 @@
 ---
 term: "Retention watermark"
 section: "Event sourcing and the decider"
-order: 16
+order: 17
 ---
 
 # Retention watermark

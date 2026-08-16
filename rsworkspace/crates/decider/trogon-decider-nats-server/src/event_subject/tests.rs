@@ -2,6 +2,7 @@ use super::*;
 
 fn subjects(module: &str) -> ModuleEventSubjects {
     ModuleEventSubjects::new(&ModuleName::new(module).expect("test module names are valid"))
+        .expect("test module names form a scope")
 }
 
 #[test]
@@ -68,4 +69,29 @@ fn a_stream_id_with_a_wildcard_is_refused() {
         .expect_err("a wildcard stream id would claim every stream in the module");
 
     assert!(matches!(error, EventSubjectError::NotPublishable { .. }), "{error}");
+}
+
+#[test]
+fn the_resolver_declares_the_subtree_it_writes_into() {
+    let subjects = subjects("scheduler.schedules");
+    let scope = subjects.subject_scope().expect("a module resolver is always scoped");
+
+    assert_eq!(scope.pattern(), subjects.subscription_pattern());
+    assert!(scope.contains(&subjects.subject_for("abc").expect("a hex id resolves")));
+    assert!(
+        !scope.contains(&StreamSubject::new("scheduler.other.events.abc").expect("a valid subject")),
+        "another module's subject is outside this module's declared scope"
+    );
+}
+
+#[test]
+fn a_module_name_that_cannot_form_a_subtree_is_refused_at_construction() {
+    let module = ModuleName::new(">").expect("the module name type does not police subjects");
+
+    let error = ModuleEventSubjects::new(&module).expect_err("a wildcard module name has no subtree");
+
+    assert!(
+        matches!(&error, EventSubjectError::Scope { module, .. } if module == ">"),
+        "expected a scope error, got {error:?}"
+    );
 }

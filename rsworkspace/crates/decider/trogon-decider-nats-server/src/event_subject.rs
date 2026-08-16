@@ -6,11 +6,10 @@
 //! events under exactly this shape, so the host inherits a topology that is in
 //! production rather than inventing a second one beside it.
 
-use std::sync::Arc;
-
 use async_nats::{SubjectError, jetstream};
 use trogon_decider_nats::{
-    StreamStoreError, StreamSubject, StreamSubjectResolver, SubjectState, subject_current_position,
+    StreamStoreError, StreamSubject, StreamSubjectResolver, SubjectScope, SubjectScopeError, SubjectState,
+    subject_current_position,
 };
 use trogon_decider_wasm_runtime::ModuleName;
 use trogon_nats::{SubjectViolationError, validate_published_subject};
@@ -20,15 +19,25 @@ use crate::constants::EVENT_SUBJECT_SEGMENT;
 /// Resolves one module's stream ids onto its event subjects.
 #[derive(Debug, Clone)]
 pub struct ModuleEventSubjects {
-    prefix: Arc<str>,
+    scope: SubjectScope,
 }
 
 impl ModuleEventSubjects {
     /// Binds the resolver to the module whose events it addresses.
-    pub fn new(module_name: &ModuleName) -> Self {
-        Self {
-            prefix: Arc::from(format!("{}.{EVENT_SUBJECT_SEGMENT}.", module_name.as_str())),
-        }
+    ///
+    /// Fallible because the module name is the whole of the scope: a name that
+    /// cannot form one leaves the resolver with no subtree to be held to, and
+    /// the host would rather learn that at startup than on a command.
+    pub fn new(module_name: &ModuleName) -> Result<Self, EventSubjectError> {
+        let scope =
+            SubjectScope::new(format!("{}.{EVENT_SUBJECT_SEGMENT}", module_name.as_str())).map_err(|source| {
+                EventSubjectError::Scope {
+                    module: module_name.as_str().to_owned(),
+                    source,
+                }
+            })?;
+
+        Ok(Self { scope })
     }
 
     /// The subject carrying one stream's events.
@@ -37,7 +46,7 @@ impl ModuleEventSubjects {
     /// id comes from the guest, and a guest that returns `>` would otherwise
     /// resolve onto the module's whole subtree.
     pub fn subject_for(&self, stream_id: &str) -> Result<StreamSubject, EventSubjectError> {
-        let subject = format!("{}{stream_id}", self.prefix);
+        let subject = format!("{}{stream_id}", self.scope.as_prefix());
         validate_published_subject(&subject).map_err(|source| EventSubjectError::NotPublishable {
             stream_id: stream_id.to_owned(),
             source,
@@ -51,12 +60,16 @@ impl ModuleEventSubjects {
 
     /// The pattern the events stream must capture for this module.
     pub fn subscription_pattern(&self) -> String {
-        format!("{}>", self.prefix)
+        self.scope.pattern()
     }
 }
 
 impl StreamSubjectResolver<str> for ModuleEventSubjects {
     type Error = EventSubjectError;
+
+    fn subject_scope(&self) -> Option<&SubjectScope> {
+        Some(&self.scope)
+    }
 
     async fn resolve_subject_state(
         &self,
@@ -76,6 +89,13 @@ impl StreamSubjectResolver<str> for ModuleEventSubjects {
 /// Why a stream id could not be resolved to a subject and its position.
 #[derive(Debug, thiserror::Error)]
 pub enum EventSubjectError {
+    /// The module name does not form a subtree its events can live under.
+    #[error("module '{module}' does not form a valid event subject scope: {source}")]
+    Scope {
+        module: String,
+        #[source]
+        source: SubjectScopeError,
+    },
     /// The stream id resolves onto a subject that cannot be published to.
     #[error("stream id '{stream_id}' does not form a publishable event subject: {source}")]
     NotPublishable {
