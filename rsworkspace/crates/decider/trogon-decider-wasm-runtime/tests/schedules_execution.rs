@@ -12,10 +12,10 @@ use buffa::MessageField;
 use buffa::MessageName as _;
 use support::{ContendedEventStore, InMemoryEventStore, InMemorySnapshotStore};
 use trogon_decider_runtime::{
-    AdmissionLimit, AuthorizationDenied, CommandAdmission, CommandAuthorizer, CommandPrincipal, ConcurrencyAdmission,
-    ConflictRetryLimit, DiscardAndReplaySnapshotFailure, ImmediateSnapshotTaskScheduler, PreconditionConflictError,
-    PrincipalClaim, PrincipalId, PrincipalKind, ReadFrom, ReplayChunkSize, ReplayLimit, SnapshotCadence,
-    StreamPosition, StreamWritePrecondition, UnauthorizedError,
+    AdmissionLimit, AuthorizationDeniedError, CommandAdmission, CommandAuthorizer, CommandPrincipal,
+    ConcurrencyAdmission, ConflictRetryLimit, DiscardAndReplaySnapshotFailure, ImmediateSnapshotTaskScheduler,
+    PreconditionConflictError, PrincipalClaim, PrincipalId, PrincipalKind, ReadFrom, ReplayChunkSize, ReplayLimit,
+    SnapshotCadence, StreamPosition, StreamWritePrecondition, UnauthorizedError,
 };
 use trogon_decider_wasm_runtime::{
     OpaqueSnapshotPayload, WasmCommandError, WasmCommandExecution, WasmDeciderEngine, WasmDeciderModule,
@@ -914,12 +914,16 @@ impl RequireClaim {
 }
 
 impl CommandAuthorizer<CommandEnvelope> for RequireClaim {
-    fn authorize(&self, principal: &CommandPrincipal, _command: &CommandEnvelope) -> Result<(), AuthorizationDenied> {
+    fn authorize(
+        &self,
+        principal: &CommandPrincipal,
+        _command: &CommandEnvelope,
+    ) -> Result<(), AuthorizationDeniedError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         if principal.has_claim(self.claim) {
             Ok(())
         } else {
-            Err(AuthorizationDenied::new(format!("{} is required", self.claim)))
+            Err(AuthorizationDeniedError::new(format!("{} is required", self.claim)))
         }
     }
 }

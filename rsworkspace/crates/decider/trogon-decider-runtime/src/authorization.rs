@@ -450,11 +450,11 @@ impl std::fmt::Display for CommandPrincipal {
 /// ADR#0026 declares a Non-Goal.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("command denied for this principal: {reason}")]
-pub struct AuthorizationDenied {
+pub struct AuthorizationDeniedError {
     reason: Cow<'static, str>,
 }
 
-impl AuthorizationDenied {
+impl AuthorizationDeniedError {
     /// Denies a command with the given explanation.
     pub fn new(reason: impl Into<Cow<'static, str>>) -> Self {
         Self { reason: reason.into() }
@@ -468,7 +468,7 @@ impl AuthorizationDenied {
 
 /// Why an execution was not authorized.
 ///
-/// Separate from [`AuthorizationDenied`] because the two failures have
+/// Separate from [`AuthorizationDeniedError`] because the two failures have
 /// different causes and different fixes. A denial is a policy answer about a
 /// known actor; a missing principal is a caller that configured an authorizer
 /// and then did not say who was acting, which is a wiring bug at the boundary.
@@ -483,7 +483,7 @@ pub enum UnauthorizedError {
     MissingPrincipal,
     /// The authorizer refused the command for this principal.
     #[error("{0}")]
-    Denied(#[source] AuthorizationDenied),
+    Denied(#[source] AuthorizationDeniedError),
 }
 
 /// Decides whether a principal may run a command, before anything is read,
@@ -506,7 +506,7 @@ pub trait CommandAuthorizer<C: ?Sized> {
     /// Neither path supplies the target stream or the replayed state, so a
     /// rule that needs to inspect stream state belongs in `decide`, where a
     /// rejection is already a first-class outcome.
-    fn authorize(&self, principal: &CommandPrincipal, command: &C) -> Result<(), AuthorizationDenied>;
+    fn authorize(&self, principal: &CommandPrincipal, command: &C) -> Result<(), AuthorizationDeniedError>;
 
     /// Applies this authorizer to an execution that may carry no principal.
     ///
@@ -528,7 +528,7 @@ where
     A: CommandAuthorizer<C> + ?Sized,
     C: ?Sized,
 {
-    fn authorize(&self, principal: &CommandPrincipal, command: &C) -> Result<(), AuthorizationDenied> {
+    fn authorize(&self, principal: &CommandPrincipal, command: &C) -> Result<(), AuthorizationDeniedError> {
         (*self).authorize(principal, command)
     }
 
@@ -542,7 +542,7 @@ where
     A: CommandAuthorizer<C> + ?Sized,
     C: ?Sized,
 {
-    fn authorize(&self, principal: &CommandPrincipal, command: &C) -> Result<(), AuthorizationDenied> {
+    fn authorize(&self, principal: &CommandPrincipal, command: &C) -> Result<(), AuthorizationDeniedError> {
         self.as_ref().authorize(principal, command)
     }
 
@@ -565,7 +565,7 @@ impl<C> CommandAuthorizer<C> for WithoutAuthorization
 where
     C: ?Sized,
 {
-    fn authorize(&self, _principal: &CommandPrincipal, _command: &C) -> Result<(), AuthorizationDenied> {
+    fn authorize(&self, _principal: &CommandPrincipal, _command: &C) -> Result<(), AuthorizationDeniedError> {
         Ok(())
     }
 

@@ -13,21 +13,11 @@
 //! of one `CommandOutcome`. A rejection is still a `Status`; it is just not a
 //! service error.
 
+use crate::constants::{CONCURRENCY_QUOTA_METRIC, DECIDER_ERROR_DOMAIN};
 use buffa_types::google::protobuf::Any;
 use std::error::Error as StdError;
 use trogon_decider_runtime::{OverloadedError, UnauthorizedError};
 use trogonai_proto::google::rpc::{Code, DebugInfo, ErrorInfo, QuotaFailure, Status, quota_failure};
-
-/// The reason space the host itself owns, as `ErrorInfo.domain`.
-///
-/// The proto package rather than a DNS name: it is the identifier this host's
-/// wire contract already publishes, so a caller reading `domain` can find the
-/// reasons it groups without being told where to look. A rejection uses the
-/// module's name instead, because the module, not the host, owns that code.
-pub const DECIDER_ERROR_DOMAIN: &str = "trogonai.decider.v1";
-
-/// The quota a shed command contended for, as `QuotaFailure.Violation.quota_metric`.
-pub const CONCURRENCY_QUOTA_METRIC: &str = "trogonai.decider.v1/concurrent_executions";
 
 /// The class of failure the host assigns when it could not execute a command.
 ///

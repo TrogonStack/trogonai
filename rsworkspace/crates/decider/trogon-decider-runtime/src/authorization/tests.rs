@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::{
-    AuthorizationDenied, CommandAuthorizer, CommandPrincipal, DirectedPrincipal, DirectedPrincipalError,
+    AuthorizationDeniedError, CommandAuthorizer, CommandPrincipal, DirectedPrincipal, DirectedPrincipalError,
     PrincipalClaim, PrincipalClaimError, PrincipalClaims, PrincipalId, PrincipalIdError, PrincipalKind,
     UnauthorizedError, WithoutAuthorization,
 };
@@ -12,11 +12,11 @@ struct Command;
 struct RequireClaim(&'static str);
 
 impl CommandAuthorizer<Command> for RequireClaim {
-    fn authorize(&self, principal: &CommandPrincipal, _command: &Command) -> Result<(), AuthorizationDenied> {
+    fn authorize(&self, principal: &CommandPrincipal, _command: &Command) -> Result<(), AuthorizationDeniedError> {
         if principal.has_claim(self.0) {
             return Ok(());
         }
-        Err(AuthorizationDenied::new(format!("missing claim {}", self.0)))
+        Err(AuthorizationDeniedError::new(format!("missing claim {}", self.0)))
     }
 }
 
@@ -24,7 +24,7 @@ impl CommandAuthorizer<Command> for RequireClaim {
 struct AllowAnonymous;
 
 impl CommandAuthorizer<Command> for AllowAnonymous {
-    fn authorize(&self, _principal: &CommandPrincipal, _command: &Command) -> Result<(), AuthorizationDenied> {
+    fn authorize(&self, _principal: &CommandPrincipal, _command: &Command) -> Result<(), AuthorizationDeniedError> {
         Ok(())
     }
 
@@ -156,7 +156,7 @@ fn a_denial_carries_the_authorizer_reason() {
 
     assert_eq!(
         error,
-        UnauthorizedError::Denied(AuthorizationDenied::new("missing claim orders.write"))
+        UnauthorizedError::Denied(AuthorizationDeniedError::new("missing claim orders.write"))
     );
     assert_eq!(
         error.to_string(),

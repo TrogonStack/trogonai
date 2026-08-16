@@ -1,6 +1,6 @@
 use trogon_decider_nats::JetStreamStoreError;
 use trogon_decider_runtime::{
-    AdmissionLimit, AuthorizationDenied, EventId, Headers, OverloadedError, SnapshotAheadOfStream, StreamPosition,
+    AdmissionLimit, AuthorizationDeniedError, EventId, Headers, OverloadedError, SnapshotAheadOfStream, StreamPosition,
     StreamWritePrecondition, UnauthorizedError,
 };
 use trogonai_proto::google::rpc::{Code, DebugInfo, ErrorInfo};
@@ -222,7 +222,7 @@ fn a_shed_command_lands_in_its_own_arm() {
 
 #[test]
 fn a_denied_command_lands_in_its_own_arm() {
-    let denied = UnauthorizedError::Denied(AuthorizationDenied::new("missing claim orders.write"));
+    let denied = UnauthorizedError::Denied(AuthorizationDeniedError::new("missing claim orders.write"));
     let reply = CommandReply::from_command_error(&module(), &TestCommandError::Unauthorized(denied));
 
     assert_eq!(reply.header_value(), "denied");

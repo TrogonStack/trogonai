@@ -95,7 +95,7 @@ pub use admission::{
     AdmissionLimit, AdmissionLimitError, CommandAdmission, ConcurrencyAdmission, OverloadedError, WithoutAdmission,
 };
 pub use authorization::{
-    AuthorizationDenied, CommandAuthorizer, CommandPrincipal, DirectedPrincipal, DirectedPrincipalError,
+    AuthorizationDeniedError, CommandAuthorizer, CommandPrincipal, DirectedPrincipal, DirectedPrincipalError,
     PrincipalClaim, PrincipalClaimError, PrincipalClaims, PrincipalId, PrincipalIdError, PrincipalKind,
     UnauthorizedError, WithoutAuthorization,
 };

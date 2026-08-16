@@ -29,4 +29,4 @@ pub use module_source::{
 pub use outcome::CommandReply;
 pub use request::{CommandRequest, CommandRequestError};
 pub use runtime::{CommandRouter, DeciderHost, RoutedCommand, ServeError, StartupError, serve, serve_until};
-pub use status::{CONCURRENCY_QUOTA_METRIC, DECIDER_ERROR_DOMAIN, FaultClass, find_detail};
+pub use status::{FaultClass, find_detail};

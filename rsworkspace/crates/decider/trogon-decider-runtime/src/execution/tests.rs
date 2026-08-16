@@ -11,9 +11,10 @@ use uuid::Uuid;
 
 use super::*;
 use crate::{
-    AdmissionLimit, AuthorizationDenied, ConcurrencyAdmission, Decision, EventData, EventDecode, EventDecodeOutcome,
-    EventEncode, EventIdentity, EventType, InvalidSnapshotTypeNameError, PrincipalClaim, PrincipalId, PrincipalKind,
-    ReadSnapshotResponse, ReadStreamResponse, SnapshotType, SnapshotTypeName, StreamEvent, WriteSnapshotResponse,
+    AdmissionLimit, AuthorizationDeniedError, ConcurrencyAdmission, Decision, EventData, EventDecode,
+    EventDecodeOutcome, EventEncode, EventIdentity, EventType, InvalidSnapshotTypeNameError, PrincipalClaim,
+    PrincipalId, PrincipalKind, ReadSnapshotResponse, ReadStreamResponse, SnapshotType, SnapshotTypeName, StreamEvent,
+    WriteSnapshotResponse,
 };
 
 fn position(value: u64) -> StreamPosition {
@@ -2569,12 +2570,12 @@ impl RequireClaim {
 }
 
 impl CommandAuthorizer<TestCommand> for RequireClaim {
-    fn authorize(&self, principal: &CommandPrincipal, _command: &TestCommand) -> Result<(), AuthorizationDenied> {
+    fn authorize(&self, principal: &CommandPrincipal, _command: &TestCommand) -> Result<(), AuthorizationDeniedError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         if principal.has_claim(self.claim) {
             Ok(())
         } else {
-            Err(AuthorizationDenied::new(format!("{} is required", self.claim)))
+            Err(AuthorizationDeniedError::new(format!("{} is required", self.claim)))
         }
     }
 }
@@ -2716,7 +2717,7 @@ fn a_denied_command_is_recorded_as_denied_rather_than_faulted() {
         std::convert::Infallible,
         std::convert::Infallible,
         std::convert::Infallible,
-    > = CommandError::Unauthorized(UnauthorizedError::Denied(AuthorizationDenied::new(
+    > = CommandError::Unauthorized(UnauthorizedError::Denied(AuthorizationDeniedError::new(
         "decider.write is required",
     )));
 

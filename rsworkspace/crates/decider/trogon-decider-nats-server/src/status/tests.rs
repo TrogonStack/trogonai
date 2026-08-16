@@ -1,4 +1,4 @@
-use trogon_decider_runtime::{AdmissionLimit, AuthorizationDenied};
+use trogon_decider_runtime::{AdmissionLimit, AuthorizationDeniedError};
 
 use super::*;
 
@@ -178,7 +178,7 @@ fn a_shed_command_names_no_subject() {
 #[test]
 fn a_missing_principal_is_unauthenticated_and_a_refusal_is_permission_denied() {
     let missing = denied(&UnauthorizedError::MissingPrincipal);
-    let refused = denied(&UnauthorizedError::Denied(AuthorizationDenied::new(
+    let refused = denied(&UnauthorizedError::Denied(AuthorizationDeniedError::new(
         "decider.write is required",
     )));
 
@@ -198,7 +198,7 @@ fn a_missing_principal_is_unauthenticated_and_a_refusal_is_permission_denied() {
 
 #[test]
 fn a_denial_says_only_what_the_authorizer_said() {
-    let status = denied(&UnauthorizedError::Denied(AuthorizationDenied::new(
+    let status = denied(&UnauthorizedError::Denied(AuthorizationDeniedError::new(
         "decider.write is required",
     )));
 
