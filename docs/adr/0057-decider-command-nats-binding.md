@@ -248,12 +248,12 @@ disagree with it. Two classes share `INTERNAL` on purpose: to a caller they are
 one thing, and the reason is what tells an operator which party is answerable.
 
 Every host-owned row below is also declared in
-[`faults.proto`](../../proto/trogonai/decider/v1/faults.proto) as a
-`trogon.error.v1alpha1` template, so the code and reason a caller should expect
-are readable off the schema rather than only out of this table. Those messages
-are schema-only and never encoded; the wire carries the `google.rpc.Status` it
-already did. The `Rejected` row has no template because its domain and reason
-belong to the module, not to the host.
+`proto/trogonai/decider/v1/faults.proto` as a `trogon.error.v1alpha1` template,
+so the code and reason a caller should expect are readable off the schema
+rather than only out of this table. Those messages are schema-only and never
+encoded; the wire carries the `google.rpc.Status` it already did. The
+`Rejected` row has no template because its domain and reason belong to the
+module, not to the host.
 
 The mapping from the runtime's error taxonomy is total:
 
