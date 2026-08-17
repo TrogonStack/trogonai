@@ -75,9 +75,10 @@ fn a_command_id_round_trips_through_its_serialized_form() {
 fn a_serialized_id_that_is_not_a_uuid_is_refused() {
     let error = serde_json::from_str::<CommandId>("\"not-a-uuid\"").expect_err("that is not an id");
 
-    assert!(
-        error.to_string().contains("invalid character"),
-        "a decoder that accepted it would hand the runtime an id no derivation can be trusted against: {error}"
+    assert_eq!(
+        error.classify(),
+        serde_json::error::Category::Data,
+        "a string is what the wire promised, so the id inside it is what failed, and a decoder that accepted it would hand the runtime an id no derivation can be trusted against"
     );
 }
 
