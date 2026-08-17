@@ -2,6 +2,7 @@
 
 include!("trogonai.decider.v1.command_accepted.rs");
 include!("trogonai.decider.v1.command_outcome.rs");
+include!("trogonai.decider.v1.faults.rs");
 #[allow(
     non_camel_case_types,
     dead_code,
@@ -21,6 +22,7 @@ pub mod __buffa {
         use super::*;
         include!("trogonai.decider.v1.command_accepted.__view.rs");
         include!("trogonai.decider.v1.command_outcome.__view.rs");
+        include!("trogonai.decider.v1.faults.__view.rs");
         pub mod oneof {
             #[allow(unused_imports)]
             use super::*;
@@ -37,6 +39,17 @@ pub mod __buffa {
         reg.register_json_any(super::__COMMAND_ACCEPTED_JSON_ANY);
         reg.register_json_any(super::__DECIDED_EVENT_JSON_ANY);
         reg.register_json_any(super::__COMMAND_OUTCOME_JSON_ANY);
+        reg.register_json_any(super::__COMMAND_TYPE_UNROUTABLE_ERROR_JSON_ANY);
+        reg.register_json_any(super::__COMMAND_REQUEST_MALFORMED_ERROR_JSON_ANY);
+        reg.register_json_any(super::__EXPECTED_REVISION_UNSATISFIABLE_ERROR_JSON_ANY);
+        reg.register_json_any(super::__STREAM_WRITE_CONFLICT_ERROR_JSON_ANY);
+        reg.register_json_any(super::__GUEST_FAULT_ERROR_JSON_ANY);
+        reg.register_json_any(super::__GUEST_DEADLINE_EXCEEDED_ERROR_JSON_ANY);
+        reg.register_json_any(super::__STORAGE_UNAVAILABLE_ERROR_JSON_ANY);
+        reg.register_json_any(super::__HOST_INTERNAL_ERROR_JSON_ANY);
+        reg.register_json_any(super::__ADMISSION_LIMIT_REACHED_ERROR_JSON_ANY);
+        reg.register_json_any(super::__PRINCIPAL_MISSING_ERROR_JSON_ANY);
+        reg.register_json_any(super::__PRINCIPAL_UNAUTHORIZED_ERROR_JSON_ANY);
     }
 }
 #[doc(inline)]
@@ -51,5 +64,49 @@ pub use self::__buffa::view::DecidedEventOwnedView;
 pub use self::__buffa::view::CommandOutcomeView;
 #[doc(inline)]
 pub use self::__buffa::view::CommandOutcomeOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::CommandTypeUnroutableErrorView;
+#[doc(inline)]
+pub use self::__buffa::view::CommandTypeUnroutableErrorOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::CommandRequestMalformedErrorView;
+#[doc(inline)]
+pub use self::__buffa::view::CommandRequestMalformedErrorOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::ExpectedRevisionUnsatisfiableErrorView;
+#[doc(inline)]
+pub use self::__buffa::view::ExpectedRevisionUnsatisfiableErrorOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::StreamWriteConflictErrorView;
+#[doc(inline)]
+pub use self::__buffa::view::StreamWriteConflictErrorOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::GuestFaultErrorView;
+#[doc(inline)]
+pub use self::__buffa::view::GuestFaultErrorOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::GuestDeadlineExceededErrorView;
+#[doc(inline)]
+pub use self::__buffa::view::GuestDeadlineExceededErrorOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::StorageUnavailableErrorView;
+#[doc(inline)]
+pub use self::__buffa::view::StorageUnavailableErrorOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::HostInternalErrorView;
+#[doc(inline)]
+pub use self::__buffa::view::HostInternalErrorOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::AdmissionLimitReachedErrorView;
+#[doc(inline)]
+pub use self::__buffa::view::AdmissionLimitReachedErrorOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::PrincipalMissingErrorView;
+#[doc(inline)]
+pub use self::__buffa::view::PrincipalMissingErrorOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::PrincipalUnauthorizedErrorView;
+#[doc(inline)]
+pub use self::__buffa::view::PrincipalUnauthorizedErrorOwnedView;
 #[doc(inline)]
 pub use self::__buffa::register_types;

@@ -471,11 +471,24 @@ Where the real correctness bugs live.
       updated across #0028, #0029, #0035, #0037, #0046, the decider architecture doc, the glossary
       (`tenant` rewritten, `subject-scope` added), the session events proto, and the ADK research
       comparison.
-- [ ] `P4` **Template-driven `trogon.error.v1alpha1` annotations** (deferred out of the #0026
-      authorization work). The error-options implementation was parked because `buffa` does not
-      support the annotation shape it wanted; codegen is an acceptable answer, so this is a matter of
-      emitting the templates rather than a blocked design. Do not start without agreeing the shape
-      first.
+- [x] `P4` **Template-driven `trogon.error.v1alpha1` annotations** (deferred out of the #0026
+      authorization work). The premise the deferral rested on was wrong twice over: the package
+      already ships in the `trogon-proto` commit `buf.lock` pins, and `buffa` does emit `extend`
+      blocks as `::buffa::Extension` constants, as `elixirpb.__ext.rs` had been showing all along.
+
+      Shipped as `proto/trogonai/decider/v1/faults.proto`: one annotated message per host-owned
+      reason, eleven in all, each declaring its domain, reason, code, and visibility. They are
+      schema-only. Nothing references them, nothing encodes them, and the wire still carries the
+      plain `google.rpc.Status` the arm always did, which is the whole point: the templates document
+      the contract the host already honors instead of becoming a second way to transport it. The
+      prose on `CommandOutcome`'s arms was cut back to what the templates cannot carry, and the
+      [ADR#0057](./docs/adr/0057-decider-command-nats-binding.md) mapping table now points at them.
+
+      `rejected` is deliberately untemplated: its domain is the module owning the code space and its
+      reason is that module's own code, so neither is the host's to declare. Two things the template
+      shape cannot express, left as prose: the typed details (`shed`'s `QuotaFailure`, `faulted`'s
+      `DebugInfo`), and the fact that `Template.message` is the invariant description while the host
+      substitutes live error text on emission.
 - [ ] `P4` **Revisit where `Projector` / `Processor` live** (`src/projector.rs`, `src/processor.rs`).
       Generic JetStream read-side primitives with no decider dependency; possibly `trogon-nats`
       instead, per the [ADR#0002](./docs/adr/0002-rust-crate-boundaries.md) boundary argument. Cosmetic against the rest of this file.

@@ -24,6 +24,10 @@
 /// off the micro error channel so `num_errors` stays a health signal. A
 /// rejection, a shed, and a denial are all defined outcomes with a canonical
 /// code and typed details, so they get 0016's shape without 0016's channel.
+///
+/// Which code and which `ErrorInfo.reason` each arm carries is declared in
+/// `faults.proto` as `trogon.error.v1alpha1` templates, so the contract is
+/// something a reader can resolve rather than something a comment asserts.
 #[derive(Clone, Debug, Default)]
 pub struct CommandOutcomeView<'a> {
     pub outcome: ::core::option::Option<

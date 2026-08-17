@@ -30,6 +30,10 @@ import "trogonai/decider/v1/command_accepted.proto";
 // off the micro error channel so `num_errors` stays a health signal. A
 // rejection, a shed, and a denial are all defined outcomes with a canonical
 // code and typed details, so they get 0016's shape without 0016's channel.
+//
+// Which code and which `ErrorInfo.reason` each arm carries is declared in
+// `faults.proto` as `trogon.error.v1alpha1` templates, so the contract is
+// something a reader can resolve rather than something a comment asserts.
 message CommandOutcome {
   oneof outcome {
     // The command was decided and its events appended.
@@ -39,33 +43,32 @@ message CommandOutcome {
     //
     // `FAILED_PRECONDITION`, with an `ErrorInfo` whose `domain` is the module
     // that owns the code space and whose `reason` is the code that module
-    // chose. Not a fault: the host executed correctly and the domain answered
-    // no, and a service that rejects invalid commands all day is healthy.
+    // chose. The only arm `faults.proto` does not declare, because neither of
+    // those is the host's to declare. Not a fault: the host executed
+    // correctly and the domain answered no, and a service that rejects
+    // invalid commands all day is healthy.
     google.rpc.Status rejected = 2;
 
     // The host could not execute the command.
     //
-    // The canonical code for the fault class, with an `ErrorInfo` whose
-    // `reason` names the class the host assigned and a `DebugInfo` carrying
-    // the source chain. These are the outcomes that count against a host's
-    // health rather than against the caller's input.
+    // The reason names the fault class the host assigned, and a `DebugInfo`
+    // carries the source chain. These are the outcomes that count against a
+    // host's health rather than against the caller's input.
     google.rpc.Status faulted = 3;
 
     // Admission control refused the command before any work began.
     //
-    // `RESOURCE_EXHAUSTED`, with a `QuotaFailure` naming the limit that was
-    // already fully committed so a backoff can be sized against it rather
-    // than guessed. The host is full, not broken.
+    // Carries a `QuotaFailure` naming the limit that was already fully
+    // committed, so a backoff can be sized against it rather than guessed.
+    // The host is full, not broken.
     google.rpc.Status shed = 4;
 
     // Authorization refused the command before any work began.
     //
-    // `UNAUTHENTICATED` when the execution carried no principal at all,
-    // `PERMISSION_DENIED` when the authorizer refused the one it carried. The
-    // two are separate codes because the caller's next move differs: present
-    // credentials, versus present different ones. Neither carries the rule
-    // that refused it, which would tell an unauthorized caller how to become
-    // an authorized one.
+    // Two reasons rather than one because the caller's next move differs:
+    // present credentials, versus present different ones. Neither carries the
+    // rule that refused it, which would tell an unauthorized caller how to
+    // become an authorized one.
     google.rpc.Status denied = 5;
   }
 }
