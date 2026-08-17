@@ -32,6 +32,13 @@ pub enum FaultClass {
     Unroutable,
     /// The subject or the headers could not be read as a command at all.
     InvalidRequest,
+    /// The caller asserted an expected revision no stream state can satisfy.
+    ///
+    /// Separate from [`Self::Conflict`] because the two look alike and differ
+    /// on the only question a caller asks of a write failure: a contended
+    /// append succeeds on a retry that replays the stream, and a fabricated
+    /// revision never does.
+    UnsatisfiablePrecondition,
     /// The stream moved under the command between the read and the append.
     Conflict,
     /// The guest faulted, trapped, or broke the WIT contract.
@@ -49,7 +56,7 @@ impl FaultClass {
     pub const fn code(self) -> Code {
         match self {
             Self::Unroutable => Code::UNIMPLEMENTED,
-            Self::InvalidRequest => Code::INVALID_ARGUMENT,
+            Self::InvalidRequest | Self::UnsatisfiablePrecondition => Code::INVALID_ARGUMENT,
             Self::Conflict => Code::ABORTED,
             Self::Guest | Self::Internal => Code::INTERNAL,
             Self::DeadlineExceeded => Code::DEADLINE_EXCEEDED,
@@ -63,6 +70,7 @@ impl FaultClass {
         match self {
             Self::Unroutable => "COMMAND_TYPE_UNROUTABLE",
             Self::InvalidRequest => "COMMAND_REQUEST_MALFORMED",
+            Self::UnsatisfiablePrecondition => "EXPECTED_REVISION_UNSATISFIABLE",
             Self::Conflict => "STREAM_WRITE_CONFLICT",
             Self::Guest => "GUEST_FAULT",
             Self::DeadlineExceeded => "GUEST_DEADLINE_EXCEEDED",

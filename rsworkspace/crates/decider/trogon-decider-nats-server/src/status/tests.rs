@@ -23,6 +23,7 @@ fn every_fault_class_reports_a_canonical_code() {
     let classes = [
         (FaultClass::Unroutable, Code::UNIMPLEMENTED),
         (FaultClass::InvalidRequest, Code::INVALID_ARGUMENT),
+        (FaultClass::UnsatisfiablePrecondition, Code::INVALID_ARGUMENT),
         (FaultClass::Conflict, Code::ABORTED),
         (FaultClass::Guest, Code::INTERNAL),
         (FaultClass::DeadlineExceeded, Code::DEADLINE_EXCEEDED),
@@ -57,6 +58,7 @@ fn every_fault_reason_matches_the_error_info_format() {
     let classes = [
         FaultClass::Unroutable,
         FaultClass::InvalidRequest,
+        FaultClass::UnsatisfiablePrecondition,
         FaultClass::Conflict,
         FaultClass::Guest,
         FaultClass::DeadlineExceeded,

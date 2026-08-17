@@ -257,7 +257,8 @@ The mapping from the runtime's error taxonomy is total:
 | `Unauthorized::Denied` | `denied` | `PERMISSION_DENIED` | `PRINCIPAL_UNAUTHORIZED` | No; not by this principal |
 | unrouted command type | `faulted` | `UNIMPLEMENTED` | `COMMAND_TYPE_UNROUTABLE` | Only after a module claiming it activates |
 | undecodable subject, unparseable header | `faulted` | `INVALID_ARGUMENT` | `COMMAND_REQUEST_MALFORMED` | No |
-| `PreconditionConflict`, optimistic concurrency conflict | `faulted` | `ABORTED` | `STREAM_WRITE_CONFLICT` | Yes; a retry replays the stream as it now stands |
+| `PreconditionConflict` | `faulted` | `INVALID_ARGUMENT` | `EXPECTED_REVISION_UNSATISFIABLE` | No; no stream state satisfies the revision the caller asserted |
+| optimistic concurrency conflict | `faulted` | `ABORTED` | `STREAM_WRITE_CONFLICT` | Yes; a retry replays the stream as it now stands |
 | `Faulted`, `Trap`, `EmptyDecision`, `Evolve`, `StreamId`, `Instantiate` | `faulted` | `INTERNAL` | `GUEST_FAULT` | No; a retry repeats the same guest call |
 | `DeadlineExceeded` | `faulted` | `DEADLINE_EXCEEDED` | `GUEST_DEADLINE_EXCEEDED` | Only once the load that slowed the guest has passed |
 | `ReadSnapshot`, `ReadStream`, `Append` | `faulted` | `UNAVAILABLE` | `STORAGE_UNAVAILABLE` | Yes, once storage recovers |

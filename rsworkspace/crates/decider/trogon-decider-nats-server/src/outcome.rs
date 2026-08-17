@@ -92,7 +92,7 @@ impl CommandReply {
                 DecisionOutcome::Denied,
                 status::denied(unauthorized),
             ),
-            WasmCommandError::PreconditionConflict(_) => Self::faulted(FaultClass::Conflict, error),
+            WasmCommandError::PreconditionConflict(_) => Self::faulted(FaultClass::UnsatisfiablePrecondition, error),
             // A concurrent writer won the race. Reaching for it through the
             // append error's chain rather than the variant, because the store
             // reports it as one storage failure among many and only the cause

@@ -1,7 +1,7 @@
 use trogon_decider_nats::JetStreamStoreError;
 use trogon_decider_runtime::{
-    AdmissionLimit, AuthorizationDeniedError, EventId, Headers, OverloadedError, SnapshotAheadOfStream, StreamPosition,
-    StreamWritePrecondition, UnauthorizedError,
+    AdmissionLimit, AuthorizationDeniedError, EventId, Headers, OverloadedError, PreconditionConflictError,
+    RevisionAheadOfStream, SnapshotAheadOfStream, StreamPosition, StreamWritePrecondition, UnauthorizedError,
 };
 use trogonai_proto::google::rpc::{Code, DebugInfo, ErrorInfo};
 use uuid::Uuid;
@@ -280,6 +280,38 @@ fn a_write_conflict_under_an_append_is_a_conflict_not_a_storage_fault() {
         "a retry replays the stream as it now stands, which is not the advice a storage fault gives"
     );
     assert_eq!(faulted(&reply).code, Code::ABORTED as i32);
+}
+
+#[test]
+fn a_fabricated_expected_revision_is_not_reported_as_a_retryable_conflict() {
+    let reply = CommandReply::from_command_error(
+        &module(),
+        &TestCommandError::PreconditionConflict(PreconditionConflictError::RevisionAheadOfStream(
+            RevisionAheadOfStream {
+                expected: position(9),
+                observed: Some(position(5)),
+            },
+        )),
+    );
+
+    assert_eq!(
+        fault_reason(&reply),
+        FaultClass::UnsatisfiablePrecondition.reason(),
+        "no stream state satisfies the revision, so the conflict advice would send a caller into a loop"
+    );
+    assert_eq!(faulted(&reply).code, Code::INVALID_ARGUMENT as i32);
+    assert_ne!(faulted(&reply).code, Code::ABORTED as i32);
+}
+
+#[test]
+fn a_create_command_carrying_a_revision_is_refused_as_the_caller_error_it_is() {
+    let reply = CommandReply::from_command_error(
+        &module(),
+        &TestCommandError::PreconditionConflict(PreconditionConflictError::CreateWithRevision),
+    );
+
+    assert_eq!(fault_reason(&reply), FaultClass::UnsatisfiablePrecondition.reason());
+    assert_eq!(faulted(&reply).code, Code::INVALID_ARGUMENT as i32);
 }
 
 #[test]
