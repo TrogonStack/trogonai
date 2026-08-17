@@ -974,16 +974,16 @@ where
         }
     }
 
-    /// How many retries this execution may spend, once the configured limit is checked against the
-    /// preconditions that make a retry meaningful.
-    ///
-    /// Resolved once rather than per attempt, because none of its inputs can change while the
-    /// command runs.
     /// The replay limit and chunk size this execution was configured with.
     fn replay_bounds(&self) -> ReplayBounds {
         ReplayBounds::new(self.replay_limit, self.replay_chunk_size)
     }
 
+    /// How many retries this execution may spend, once the configured limit is checked against the
+    /// preconditions that make a retry meaningful.
+    ///
+    /// Resolved once rather than per attempt, because none of its inputs can change while the
+    /// command runs.
     fn resolved_conflict_retry_budget(&self) -> u32 {
         let declared = command_spec(self.module, &self.command.type_)
             .map_or(WritePrecondition::StreamUnchanged, WasmCommandSpec::write_precondition);
