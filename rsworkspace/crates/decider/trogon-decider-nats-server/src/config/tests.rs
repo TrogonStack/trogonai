@@ -142,6 +142,44 @@ fn a_bucket_name_jetstream_would_reject_stops_startup() {
 }
 
 #[test]
+fn a_scheme_no_store_answers_to_stops_startup() {
+    let env = InMemoryEnv::new();
+
+    for value in ["s3:tenant-modules", "https://modules.example", "file:"] {
+        env.set(ENV_DECIDER_MODULE_STORE, value);
+
+        let error = config(with_module(args()), &env).expect_err("no store answers to that scheme");
+
+        assert!(
+            matches!(error, ConfigError::ModuleStoreScheme { .. }),
+            "'{value}' names no store this host can search, and falling back to one would search somewhere the operator never asked for: {error}"
+        );
+    }
+}
+
+#[test]
+fn a_module_store_reads_back_as_the_store_it_names() {
+    let env = InMemoryEnv::new();
+
+    for written in ["objectstore:TENANT_MODULES", "file:/srv/modules"] {
+        env.set(ENV_DECIDER_MODULE_STORE, written);
+        let store = config(with_module(args()), &env)
+            .expect("both schemes resolve")
+            .module_store;
+
+        assert_eq!(
+            store.to_string(),
+            written,
+            "a store an operator cannot read back out of a log is one they cannot confirm they configured"
+        );
+        assert_eq!(
+            store.to_string().parse::<ModuleStore>().expect("its own form parses"),
+            store
+        );
+    }
+}
+
+#[test]
 fn a_flag_wins_over_the_environment() {
     let env = InMemoryEnv::new();
     env.set(ENV_DECIDER_SUBJECT_PREFIX, "from-env");

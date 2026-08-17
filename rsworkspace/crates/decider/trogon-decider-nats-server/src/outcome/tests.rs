@@ -449,3 +449,27 @@ fn no_arm_but_decided_reports_ok() {
         );
     }
 }
+
+#[test]
+fn a_reply_body_reaches_the_caller_as_the_outcome_the_host_built() {
+    let replies = [
+        CommandReply::decided(&result(vec![event(
+            1,
+            "scheduler.schedules.v1.ScheduleCreated",
+            vec![1, 2, 3],
+        )])),
+        CommandReply::unroutable(&StorageDownError),
+        CommandReply::internal(&StorageDownError),
+    ];
+
+    for reply in &replies {
+        let decoded = v1::CommandOutcome::decode_from_slice(&reply.encode())
+            .expect("the host encodes what the caller is told to decode");
+
+        assert_eq!(
+            &decoded,
+            reply.outcome(),
+            "a body that did not survive the wire would report an outcome the host never reached"
+        );
+    }
+}

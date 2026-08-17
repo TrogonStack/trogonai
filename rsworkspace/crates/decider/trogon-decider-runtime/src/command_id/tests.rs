@@ -55,3 +55,44 @@ fn a_command_id_round_trips_through_its_string_form() {
     assert_eq!(parsed, command_id());
     assert_eq!(parsed.as_uuid(), command_id().as_uuid());
 }
+
+#[test]
+fn a_command_id_round_trips_through_its_serialized_form() {
+    let encoded = serde_json::to_string(&command_id()).expect("a command id serializes");
+
+    assert_eq!(
+        encoded, "\"0198be07-a384-79e1-a376-f250f9181be9\"",
+        "a stored id is written as the string an operator can match against a log line, not as bytes"
+    );
+    assert_eq!(
+        serde_json::from_str::<CommandId>(&encoded).expect("its own form deserializes"),
+        command_id(),
+        "an id that did not survive a round trip would break the idempotency the caller was promised"
+    );
+}
+
+#[test]
+fn a_serialized_id_that_is_not_a_uuid_is_refused() {
+    let error = serde_json::from_str::<CommandId>("\"not-a-uuid\"").expect_err("that is not an id");
+
+    assert!(
+        error.to_string().contains("invalid character"),
+        "a decoder that accepted it would hand the runtime an id no derivation can be trusted against: {error}"
+    );
+}
+
+#[test]
+fn a_command_id_converts_both_ways_with_the_uuid_it_wraps() {
+    let uuid = Uuid::parse_str("0198be07-a384-79e1-a376-f250f9181be9").expect("valid uuid");
+
+    assert_eq!(CommandId::from(uuid), command_id());
+    assert_eq!(Uuid::from(command_id()), uuid);
+}
+
+#[test]
+fn a_command_id_names_itself_in_a_diagnostic() {
+    assert_eq!(
+        format!("{:?}", command_id()),
+        "CommandId(0198be07-a384-79e1-a376-f250f9181be9)"
+    );
+}

@@ -46,6 +46,17 @@ async fn a_published_component_comes_back_verbatim() {
 }
 
 #[test]
+fn a_file_source_reads_only_the_directory_it_was_bound_to() {
+    let source = FileModuleSource::new("/srv/modules");
+
+    assert_eq!(source.root(), Path::new("/srv/modules"));
+    assert!(
+        source.path_for(&reference()).starts_with(source.root()),
+        "a reference that resolved outside the bound root would let a published name pick the file"
+    );
+}
+
+#[test]
 fn a_source_describes_the_store_it_searched() {
     assert_eq!(
         FileModuleSource::new("/srv/modules").describe(),
