@@ -43,14 +43,14 @@ fn event(id: u128, type_: &str, payload: Vec<u8>) -> Event {
     }
 }
 
-/// The arm of the response body, for the replies that have one.
-fn case(reply: &CommandReply) -> &DecideResponseCase {
+/// What an accepted command's response carries, for the one reply that has one.
+fn accepted(reply: &CommandReply) -> &v1::CommandAccepted {
     reply
         .response()
         .expect("this reply is a response, not a service error")
-        .result
-        .as_ref()
-        .expect("every response sets an arm")
+        .accepted
+        .as_option()
+        .expect("a response always carries its acceptance")
 }
 
 /// The `Status` of a reply that ADR#0016 makes a service error.
@@ -91,52 +91,43 @@ fn a_decided_command_reports_its_position_and_its_events_in_order() {
         event(2, "test.v1.Scheduled", vec![2]),
     ]));
 
-    match case(&reply) {
-        DecideResponseCase::Accepted(accepted) => {
-            assert_eq!(accepted.stream_position, 7);
-            let types: Vec<&str> = accepted
-                .events
-                .iter()
-                .map(|decided| {
-                    decided
-                        .event
-                        .as_option()
-                        .expect("an event is always carried")
-                        .type_url
-                        .as_str()
-                })
-                .collect();
-            assert_eq!(
-                types,
-                vec![
-                    "type.googleapis.com/test.v1.Created",
-                    "type.googleapis.com/test.v1.Scheduled",
-                ],
-                "append order is the only order a caller folding these can rely on"
-            );
-        }
-        other => panic!("expected an accepted reply, got {other:?}"),
-    }
+    let accepted = accepted(&reply);
+    assert_eq!(accepted.stream_position, 7);
+    let types: Vec<&str> = accepted
+        .events
+        .iter()
+        .map(|decided| {
+            decided
+                .event
+                .as_option()
+                .expect("an event is always carried")
+                .type_url
+                .as_str()
+        })
+        .collect();
+    assert_eq!(
+        types,
+        vec![
+            "type.googleapis.com/test.v1.Created",
+            "type.googleapis.com/test.v1.Scheduled",
+        ],
+        "append order is the only order a caller folding these can rely on"
+    );
 }
 
 #[test]
 fn a_decided_reply_carries_the_event_payloads() {
     let reply = CommandReply::decided(&result(vec![event(1, "test.v1.Created", vec![7; 4096])]));
 
-    match case(&reply) {
-        DecideResponseCase::Accepted(accepted) => {
-            let event = accepted.events[0]
-                .event
-                .as_option()
-                .expect("an event is always carried");
-            assert_eq!(
-                event.value.as_ref(),
-                vec![7u8; 4096],
-                "a caller warming a cache from its own write cannot do it from type names alone"
-            );
-        }
-        other => panic!("expected an accepted reply, got {other:?}"),
-    }
+    let event = accepted(&reply).events[0]
+        .event
+        .as_option()
+        .expect("an event is always carried");
+    assert_eq!(
+        event.value.as_ref(),
+        vec![7u8; 4096],
+        "a caller warming a cache from its own write cannot do it from type names alone"
+    );
 }
 
 #[test]
@@ -147,18 +138,17 @@ fn a_decided_reply_names_each_event_by_the_id_it_was_appended_under() {
     ];
     let reply = CommandReply::decided(&result(appended.clone()));
 
-    match case(&reply) {
-        DecideResponseCase::Accepted(accepted) => {
-            let ids: Vec<&str> = accepted.events.iter().map(|decided| decided.id.as_str()).collect();
-            let expected: Vec<String> = appended.iter().map(|event| event.id.to_string()).collect();
-            assert_eq!(
-                ids, expected,
-                "these ids are the stream's `Nats-Msg-Id`s; a caller that applies this reply and also \
-                 tails the stream deduplicates on them"
-            );
-        }
-        other => panic!("expected an accepted reply, got {other:?}"),
-    }
+    let ids: Vec<&str> = accepted(&reply)
+        .events
+        .iter()
+        .map(|decided| decided.id.as_str())
+        .collect();
+    let expected: Vec<String> = appended.iter().map(|event| event.id.to_string()).collect();
+    assert_eq!(
+        ids, expected,
+        "these ids are the stream's `Nats-Msg-Id`s; a caller that applies this reply and also \
+         tails the stream deduplicates on them"
+    );
 }
 
 #[test]
@@ -169,48 +159,49 @@ fn a_decided_reply_strips_nothing_but_adds_the_any_type_url_prefix() {
         vec![],
     )]));
 
-    match case(&reply) {
-        DecideResponseCase::Accepted(accepted) => {
-            assert_eq!(
-                accepted.events[0]
-                    .event
-                    .as_option()
-                    .expect("an event is always carried")
-                    .type_url,
-                "type.googleapis.com/trogonai.scheduler.schedules.v1.ScheduleCreated",
-                "the stream stores the bare full name and `Any` requires the prefix; the prefix is the \
-                 whole of the difference between the two"
-            );
-        }
-        other => panic!("expected an accepted reply, got {other:?}"),
-    }
+    assert_eq!(
+        accepted(&reply).events[0]
+            .event
+            .as_option()
+            .expect("an event is always carried")
+            .type_url,
+        "type.googleapis.com/trogonai.scheduler.schedules.v1.ScheduleCreated",
+        "the stream stores the bare full name and `Any` requires the prefix; the prefix is the \
+         whole of the difference between the two"
+    );
 }
 
 #[test]
 fn a_rejection_keeps_the_guest_code_message_and_details() {
     let reply = CommandReply::rejected(&module(), &guest_error());
+    let status = faulted(&reply);
 
-    match case(&reply) {
-        DecideResponseCase::Rejected(status) => {
-            let info = find_detail::<ErrorInfo>(status).expect("every decider status names its reason");
-            assert_eq!(info.reason, "schedule_already_exists");
-            assert_eq!(info.domain, "schedules");
-            assert_eq!(status.message, "schedule 'nightly' already exists");
-            let debug = find_detail::<DebugInfo>(status).expect("the guest attached a chain");
-            assert_eq!(debug.stack_entries, vec!["cause.0: duplicate key".to_owned()]);
-        }
-        other => panic!("expected a rejected reply, got {other:?}"),
-    }
+    let info = find_detail::<ErrorInfo>(status).expect("every decider status names its reason");
+    assert_eq!(info.reason, "schedule_already_exists");
+    assert_eq!(info.domain, "schedules");
+    assert_eq!(status.message, "schedule 'nightly' already exists");
+    let debug = find_detail::<DebugInfo>(status).expect("the guest attached a chain");
+    assert_eq!(debug.stack_entries, vec!["cause.0: duplicate key".to_owned()]);
 }
 
 #[test]
-fn a_rejection_is_not_a_fault() {
+fn a_rejection_reports_under_the_module_rather_than_under_the_host() {
     let reply = CommandReply::from_command_error(&module(), &TestCommandError::Rejected(guest_error()));
 
     assert_eq!(reply.decision(), DecisionOutcome::Rejected);
-    assert!(
-        reply.service_error_status().is_none(),
-        "a module refusing an invalid command is the decider pattern working, and counting it in micro's num_errors would make a health signal track business outcomes"
+    assert_eq!(
+        faulted(&reply).code,
+        Code::FAILED_PRECONDITION as i32,
+        "the command is well-formed and would succeed against a different stream state, which is the \
+         distinction `google.rpc.Code` draws between this and INVALID_ARGUMENT"
+    );
+    assert_eq!(
+        find_detail::<ErrorInfo>(faulted(&reply))
+            .expect("every decider status names its reason")
+            .domain,
+        module().as_str(),
+        "the host reporting a module's code under its own domain would make two modules choosing the \
+         same code indistinguishable"
     );
 }
 
@@ -417,14 +408,12 @@ fn a_reply_is_a_response_or_a_service_error_and_never_both() {
 }
 
 #[test]
-fn only_an_execution_that_completed_answers_in_the_response_body() {
+fn only_an_accepted_command_answers_in_the_response_body() {
     for reply in every_reply_shape() {
-        let executed = matches!(reply.decision(), DecisionOutcome::Decided | DecisionOutcome::Rejected);
-
         assert_eq!(
             reply.response().is_some(),
-            executed,
-            "num_errors is a health signal, so a command the host ran to completion must not raise it and a command it never ran must: {reply:?}"
+            reply.decision() == DecisionOutcome::Decided,
+            "the response type describes what was decided and appended, so an outcome that decided and appended nothing has nothing to say in it: {reply:?}"
         );
     }
 }
@@ -432,12 +421,8 @@ fn only_an_execution_that_completed_answers_in_the_response_body() {
 #[test]
 fn no_reply_but_an_accepted_one_reports_ok() {
     for reply in every_reply_shape() {
-        let status = match reply.service_error_status() {
-            Some(status) => status,
-            None => match case(&reply) {
-                DecideResponseCase::Rejected(status) => status,
-                DecideResponseCase::Accepted(_) => continue,
-            },
+        let Some(status) = reply.service_error_status() else {
+            continue;
         };
 
         assert_ne!(
@@ -462,9 +447,9 @@ fn a_reply_body_reaches_the_caller_as_the_body_the_host_built() {
             None => assert_eq!(
                 v1::DecideResponse::decode_from_slice(&encoded)
                     .expect("the host encodes what the descriptor tells the caller to decode")
-                    .result
-                    .as_ref(),
-                Some(case(&reply)),
+                    .accepted
+                    .as_option(),
+                Some(accepted(&reply)),
                 "a body that did not survive the wire would report an outcome the host never reached"
             ),
         }

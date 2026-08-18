@@ -25,7 +25,7 @@ use trogon_decider_nats_server::{
 };
 use trogon_decider_runtime::AdmissionLimit;
 use trogon_nats::test_support::JetStreamTestServer;
-use trogonai_proto::decider::{DecideResponseCase, v1 as decider_v1};
+use trogonai_proto::decider::v1 as decider_v1;
 use trogonai_proto::google::rpc::{ErrorInfo, Status};
 use trogonai_proto::scheduler::schedules::v1;
 
@@ -265,9 +265,10 @@ async fn a_command_is_decided_and_its_events_land_in_jetstream() {
     let reply = host.decide(&create_schedule(SCHEDULE_ID)).await;
 
     let response = response(&reply);
-    let Some(DecideResponseCase::Accepted(accepted)) = response.result else {
-        panic!("expected an accepted response, got {response:?}");
-    };
+    let accepted = response
+        .accepted
+        .as_option()
+        .unwrap_or_else(|| panic!("expected an accepted response, got {response:?}"));
     assert_eq!(accepted.stream_position, 1);
 
     // The whole event, not its name: a caller warming a cache off its own write
@@ -312,7 +313,7 @@ async fn recreating_a_schedule_conflicts_instead_of_forking_its_history() {
 
     let first = host.decide(&create_schedule(SCHEDULE_ID)).await;
     assert!(
-        matches!(response(&first).result, Some(DecideResponseCase::Accepted(_))),
+        response(&first).accepted.as_option().is_some(),
         "the conflict this test is about only means something if the first write landed"
     );
 

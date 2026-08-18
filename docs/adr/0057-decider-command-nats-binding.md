@@ -166,34 +166,41 @@ one a caller is holding: **a reply is an error if, and only if,
 `Nats-Service-Error-Code` is present.** This binding adds no discriminant of its
 own, because a second one would be free to disagree with the first.
 
-A command that **ran to completion** answers with the method's response type,
-`trogonai.decider.v1.DecideResponse`, whose `oneof` has two arms:
+An **accepted** command answers with the method's response type,
+`trogonai.decider.v1.DecideResponse`, which carries one field: `accepted`, the
+command was decided and its events appended.
 
-- `accepted`, the command was decided and its events appended;
-- `rejected`, the module understood the command and refused it on domain rules.
+**Every other outcome**, a module's own refusal included, answers on the error
+channel: one complete `google.rpc.Status` as the body, with `Status.code`
+mirrored to `Nats-Service-Error-Code` and `Status.message` to
+`Nats-Service-Error`. Per 0016 the headers are authoritative on any
+disagreement, so the host builds both from the one `Status` value rather than
+deriving them independently.
 
-A command the host **could not execute at all** answers on the error channel:
-one complete `google.rpc.Status` as the body, with `Status.code` mirrored to
-`Nats-Service-Error-Code` and `Status.message` to `Nats-Service-Error`. Per 0016
-the headers are authoritative on any disagreement, so the host builds both from
-the one `Status` value rather than deriving them independently.
+That is the ordinary contract of a protobuf RPC and the reason this binding
+adds nothing to it: the response type is the shape of a success, and a caller
+that did not get one reads a status. A response type carrying a second arm for
+a refusal would be an error union bolted onto a channel that already has one,
+and every caller would have to check both places to learn the one thing it
+asked.
 
-The split follows 0016 section 3 directly: a defined application-level negative
-outcome that still executed successfully belongs in the typed response body, so
-that `num_errors` stays a health signal rather than a business-outcome counter. A
-service that refuses invalid commands all day is healthy. A service that cannot
-reach storage is not.
+0016 section 3 leaves this to each specializing ADR, and the cost of deciding
+it this way is real and accepted: a module refusing commands all day raises
+micro's `num_errors`, so `num_errors` on a decider endpoint counts refused
+commands alongside broken ones. An operator separates the two off
+`ErrorInfo.domain`, which names the module for a refusal and
+`trogonai.decider.v1` for anything the host itself decided. Paying for that
+separation with a discriminant no other protobuf client would look for costs
+every caller more than it costs the one operator reading the counter.
 
 The host still records the finer `decision_outcome` telemetry attribute
 (`decided`, `rejected`, `faulted`, `shed`, `denied`) on its own spans. That is a
 trace vocabulary and not a wire one: a caller reads the error header and the
-response arm, never a discriminant the host also publishes.
+status, never a discriminant the host also publishes.
 
 **Every outcome but an acceptance is a `google.rpc.Status`**, per 0016 section 3:
 a canonical `google.rpc.Code`, a human-readable message, and standard `google.rpc`
-detail messages in `details`. What this binding decides is which channel the
-`Status` travels on, not what it looks like. A rejection is still a `Status`; it is
-just not a service error.
+detail messages in `details`.
 
 Every status carries a `google.rpc.ErrorInfo`. Its `reason` is the stable,
 machine-readable identifier a caller branches on, and its `domain` says who owns
@@ -218,7 +225,7 @@ The id is what makes the reply and the event stream safe to consume together. It
 is the same value the host publishes as the event's `Nats-Msg-Id`, so a caller
 that applies this reply and also tails the stream sees one event twice under one
 identity and applies it once. A stream position could not serve here: the
-`stream_position` that arm carries is the high watermark of the append as a
+`stream_position` it carries is the high watermark of the append as a
 whole, not a position per event, and per `AppendStreamResponse`'s own contract it
 is neither a next-expected-version nor safe to do arithmetic on. It is carried so
 a caller can read its own write, and nothing more.
@@ -229,20 +236,19 @@ is. The one difference from the form the events carry on the stream is the
 `Trogon-Event-Type` header does not; the host applies it at the reply boundary
 and nowhere else.
 
-`rejected` is a response arm, not an error channel. A module refusing an invalid
-command is the decider pattern working: the host executed correctly and the domain
-answered no. Counting that as a service error would turn a health signal into a
-business-outcome counter, which is the failure
-[ADR#0016](./0016-protobuf-rpc-over-nats-micro-binding.md) section 3 warns about.
-Its code is `FAILED_PRECONDITION` rather than `INVALID_ARGUMENT`, which is the
-distinction `google.rpc.Code` already draws: the command is well-formed and would
-succeed against a different stream state.
+A rejection is a service error whose code space is the module's. It is
+`FAILED_PRECONDITION` rather than `INVALID_ARGUMENT`, which is the distinction
+`google.rpc.Code` already draws: the command is well-formed and would succeed
+against a different stream state. What separates it from every other status
+here is its `ErrorInfo`, whose `domain` is the module and whose `reason` is the
+module's own code, so a caller branching on a domain rule branches on the
+module's vocabulary rather than on one the host invented for it.
 
-A shed command is a service error rather than a response arm, and for the reason
-that is the mirror image of a rejection's: per
+A shed command is a service error for a different reason, and the difference is
+worth keeping legible: per
 [ADR#0028](./0028-decider-admission-control-and-backpressure.md) a shed command
-was refused before anything was read, decided, or appended, so no execution ever
-happened for a response to describe. The host is full, not broken, and the
+was refused before anything was read, decided, or appended, so nothing about the
+command was ever wrong. The host is full, not broken, and the
 caller's correct response is backoff rather than escalation. It is
 `RESOURCE_EXHAUSTED` and carries a `google.rpc.QuotaFailure` naming the limit it
 contended for as a number, so the backoff can be sized rather than guessed. The
@@ -276,13 +282,14 @@ so the code and reason a caller should expect are readable off the schema
 rather than only out of this table. Those messages are schema-only and never
 encoded; the wire carries the `google.rpc.Status` it already did. The
 `Rejected` row has no template because its domain and reason belong to the
-module, not to the host.
+module, not to the host, which is the one thing a host-owned schema cannot
+declare on the module's behalf.
 
 The mapping from the runtime's error taxonomy is total:
 
 | `WasmCommandError` | Reply | `google.rpc.Code` | `ErrorInfo.reason` | Retry |
 | --- | --- | --- | --- | --- |
-| `Rejected` | `DecideResponse.rejected` | `FAILED_PRECONDITION` | the module's own code | No; the command is wrong, not the moment |
+| `Rejected` | service error | `FAILED_PRECONDITION` | the module's own code, under the module's domain | No; the command is wrong, not the moment |
 | `Overloaded` | service error | `RESOURCE_EXHAUSTED` | `ADMISSION_LIMIT_REACHED` | Yes, after backoff |
 | `Unauthorized::MissingPrincipal` | service error | `UNAUTHENTICATED` | `PRINCIPAL_MISSING` | No; not without credentials |
 | `Unauthorized::Denied` | service error | `PERMISSION_DENIED` | `PRINCIPAL_UNAUTHORIZED` | No; not by this principal |
@@ -348,8 +355,8 @@ alongside `command_type` would say nothing `command_type` does not.
   signalled by an absent or malformed reply.
 - On a service error, the headers and the body are built from one `Status` value,
   so they cannot disagree about what happened.
-- A domain rejection is a `DecideResponse` arm, never a service error. A shed and
-  a denial are service errors, never response arms.
+- A `DecideResponse` describes an acceptance and nothing else. Every other
+  outcome, a domain rejection included, is a service error.
 - Every outcome but an acceptance is a `google.rpc.Status` carrying a canonical
   `google.rpc.Code` and a `google.rpc.ErrorInfo`. The host defines no error
   message of its own and no such `Status` reports `OK`.
@@ -410,8 +417,25 @@ body, which is the thing 0016 settles by making the header authoritative. And th
 supposed benefit, an exhaustive match, is only exhaustive for callers that decode
 the body, which is exactly the set of callers that did not need the header.
 
-What survives from it is the part 0016 actually asks for: a rejection stays off
-the error channel, because that outcome executed successfully.
+### Keep a `rejected` arm in the response body
+
+Rejected, and this is what an earlier draft of this ADR adopted, on the reading
+of 0016 section 3 that a refusal executed successfully and therefore belongs in
+the typed response. The reading is defensible and the design is still worse.
+
+It makes `DecideResponse` an error union in front of a channel that already is
+one, so a caller cannot learn the outcome from the status it already has to
+handle: it decodes the body, matches an arm, and finds a `google.rpc.Status`
+inside a message it decoded to avoid one. A generated client gets none of that
+for free, because nothing in the descriptor says one arm of a response is an
+error. And it splits `google.rpc.Status` across two channels, which is the
+thing that makes a caller's error handling non-uniform: the same type, in two
+places, meaning the same thing.
+
+What it bought was `num_errors` not counting refusals. That is one counter on
+one endpoint, recoverable from `ErrorInfo.domain`, and it is not worth making
+every caller of this service read replies differently from every other
+protobuf service they call.
 
 ### Define per-outcome error messages instead of `google.rpc.Status`
 
@@ -439,8 +463,11 @@ of a caller being able to read a reply with types it already has.
   and its only additional dependency is `google.rpc`, which a caller that speaks
   any other Google-API-shaped service already has.
 - A generic protobuf error handler works on a decider reply without knowing what
-  a decider is. The response arm is the only decider-specific thing a caller has
-  to learn.
+  a decider is. Nothing about failure is decider-specific except which domain
+  owns the reason.
+- `num_errors` on a decider endpoint counts refused commands alongside broken
+  ones. An operator who needs the two apart splits them on `ErrorInfo.domain`
+  rather than on the counter.
 - Adding a fault class is now a new `ErrorInfo.reason` under an existing code,
   not a new message and not a `oneof` arm. Callers that branch on the code keep
   working; only the ones that branch on the reason see it.

@@ -16,9 +16,10 @@
 /// did not name the failing subject or revision would cost an operator the one
 /// detail worth reading.
 ///
-/// `DecideResponse.rejected` has no template here on purpose: its domain is the
-/// module that owns the code space and its reason is the code that module chose,
-/// so neither is the host's to declare.
+/// A module's own refusal has no template here on purpose. It reaches a caller
+/// as the same kind of `google.rpc.Status` these do, but its domain is the
+/// module that owns the code space and its reason is the code that module
+/// chose, so neither is the host's to declare.
 ///
 /// No activated module claims the command type the subject names.
 #[derive(Clone, Debug, Default)]

@@ -25,16 +25,6 @@ pub mod __buffa {
         include!("trogonai.decider.v1.decide_request.__view.rs");
         include!("trogonai.decider.v1.decide_response.__view.rs");
         include!("trogonai.decider.v1.faults.__view.rs");
-        pub mod oneof {
-            #[allow(unused_imports)]
-            use super::*;
-            include!("trogonai.decider.v1.decide_response.__view_oneof.rs");
-        }
-    }
-    pub mod oneof {
-        #[allow(unused_imports)]
-        use super::*;
-        include!("trogonai.decider.v1.decide_response.__oneof.rs");
     }
     /// Register this package's `Any` type entries and extension entries.
     pub fn register_types(reg: &mut ::buffa::type_registry::TypeRegistry) {

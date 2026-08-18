@@ -2,9 +2,20 @@ edition = "2024";
 
 package trogonai.decider.v1;
 
+import "google/rpc/code.proto";
+import "google/rpc/error_details.proto";
+import "google/rpc/status.proto";
 import "trogon/nats/micro/v1alpha1/options.proto";
 import "trogonai/decider/v1/decide_request.proto";
 import "trogonai/decider/v1/decide_response.proto";
+
+// The `google.rpc` imports are for what travels on this service's error
+// channel rather than for a field reference: anything but an acceptance comes
+// back as one complete `google.rpc.Status`, whose `code` is an `int32` drawn
+// from `google.rpc.Code` and whose `details` is a `repeated Any` holding the
+// standard detail types. Importing them here is what puts all three in this
+// schema's transitive closure, so a generated client has the types it needs to
+// read a failed call without being told out of band which ones to expect.
 
 // The decider's command surface, bound to NATS micro by
 // [ADR#0016](../../../../docs/adr/0016-protobuf-rpc-over-nats-micro-binding.md).

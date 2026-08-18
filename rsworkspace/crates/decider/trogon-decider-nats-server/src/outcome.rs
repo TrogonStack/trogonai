@@ -1,12 +1,11 @@
 //! Projecting one execution onto the ADR#0057 reply.
 //!
 //! Which of the two replies ADR#0016 defines a command earns is decided here,
-//! and only here. A command that ran to completion answers with the `Decide`
-//! method's response message; a command the host could not execute at all
-//! answers with one complete `google.rpc.Status` under
-//! `Nats-Service-Error-Code`. Deriving those two independently is what would
-//! let a reply carry an error header over a success body, so both come from
-//! one value.
+//! and only here. An accepted command answers with the `Decide` method's
+//! response message; every other outcome answers with one complete
+//! `google.rpc.Status` under `Nats-Service-Error-Code`. Deriving those two
+//! independently is what would let a reply carry an error header over a
+//! success body, so both come from one value.
 //!
 //! This module decides which of the two an error belongs in. What its
 //! `google.rpc.Status` looks like belongs to [`crate::status`].
@@ -18,7 +17,7 @@ use trogon_decider_nats::OptimisticConcurrencyConflictError;
 use trogon_decider_runtime::Event;
 use trogon_decider_wasm_runtime::{GuestDomainError, ModuleName, WasmCommandError, WasmExecutionResult};
 use trogon_semconv::attribute::DecisionOutcome;
-use trogonai_proto::decider::{DecideResponseCase, v1};
+use trogonai_proto::decider::v1;
 use trogonai_proto::google::rpc::Status;
 
 use crate::constants::TYPE_URL_PREFIX;
@@ -34,38 +33,37 @@ pub struct CommandReply {
 /// The two reply shapes ADR#0016 defines, and nothing between them.
 #[derive(Debug, Clone, PartialEq)]
 enum ReplyBody {
-    /// The execution ran to completion, so the body is the method's response.
+    /// The command was accepted, so the body is the method's response.
     Response(v1::DecideResponse),
-    /// The host could not execute the command, so the body is one `Status`.
+    /// The command was not accepted, so the body is one `Status`.
     ServiceError(Status),
 }
 
 impl CommandReply {
     /// The command was decided and its events appended.
     pub fn decided(result: &WasmExecutionResult) -> Self {
-        Self::from_case(
-            DecisionOutcome::Decided,
-            DecideResponseCase::Accepted(Box::new(v1::CommandAccepted {
-                stream_position: result.stream_position.as_u64(),
-                events: result.events.iter().map(decided_event).collect(),
-            })),
-        )
+        Self {
+            body: ReplyBody::Response(v1::DecideResponse {
+                accepted: MessageField::some(v1::CommandAccepted {
+                    stream_position: result.stream_position.as_u64(),
+                    events: result.events.iter().map(decided_event).collect(),
+                }),
+            }),
+            decision: DecisionOutcome::Decided,
+        }
     }
 
     /// The module answered no.
     ///
-    /// A response rather than a service error: the host executed correctly and
-    /// the domain refused, and counting that in micro's `num_errors` would turn
-    /// a health signal into a business-outcome counter.
+    /// A service error, like every outcome but an acceptance: the method's
+    /// response type describes what was decided and appended, and a refusal
+    /// decided nothing and appended nothing. The code space it reports under is
+    /// the module's rather than the host's, which is the whole of what makes it
+    /// different from a fault.
     pub fn rejected(module: &ModuleName, error: &GuestDomainError) -> Self {
-        Self::from_case(
+        Self::service_error(
             DecisionOutcome::Rejected,
-            DecideResponseCase::Rejected(Box::new(status::rejected(
-                module.as_str(),
-                &error.code,
-                error.message.clone(),
-                &error.details,
-            ))),
+            status::rejected(module.as_str(), &error.code, error.message.clone(), &error.details),
         )
     }
 
@@ -154,7 +152,7 @@ impl CommandReply {
         }
     }
 
-    /// The method's response, if the execution ran to completion.
+    /// The method's response, if the command was accepted.
     pub const fn response(&self) -> Option<&v1::DecideResponse> {
         match &self.body {
             ReplyBody::Response(response) => Some(response),
@@ -172,13 +170,6 @@ impl CommandReply {
 
     fn faulted(class: FaultClass, error: &dyn StdError) -> Self {
         Self::service_error(DecisionOutcome::Faulted, status::faulted(class, error))
-    }
-
-    fn from_case(decision: DecisionOutcome, case: DecideResponseCase) -> Self {
-        Self {
-            body: ReplyBody::Response(v1::DecideResponse { result: Some(case) }),
-            decision,
-        }
     }
 
     fn service_error(decision: DecisionOutcome, status: Status) -> Self {

@@ -4,5 +4,3 @@
 pub mod v1 {
     pub use crate::r#gen::trogonai::decider::v1::*;
 }
-
-pub use v1::__buffa::oneof::decide_response::Result as DecideResponseCase;

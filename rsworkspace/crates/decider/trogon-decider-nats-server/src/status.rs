@@ -7,11 +7,10 @@
 //! that shape, and it is deliberately the only place in the host that decides
 //! what code a failure reports as.
 //!
-//! What the decider adds on top is where the `Status` travels, not its shape.
-//! 0016 keeps defined business outcomes off the micro error channel so
-//! `num_errors` stays a health signal, so a rejection's `Status` rides in the
-//! `Decide` response body while a fault's rides on the error channel. Both are
-//! built here and both are a `Status`; only one of them is a service error.
+//! What the decider adds on top is who owns the code space a `Status` reports
+//! under, not where it travels: every one of these rides on the error channel,
+//! and a rejection differs only in naming the module as its `ErrorInfo.domain`
+//! because the code it carries is the module's and not the host's.
 
 use crate::constants::{CONCURRENCY_QUOTA_METRIC, DECIDER_ERROR_DOMAIN};
 use buffa_types::google::protobuf::Any;
@@ -105,7 +104,7 @@ pub fn guest_faulted(message: String, chain: &[(String, String)]) -> Status {
     )
 }
 
-/// Builds the `rejected` arm's status from what the module answered.
+/// Builds the `rejected` outcome's status from what the module answered.
 ///
 /// `FAILED_PRECONDITION` rather than `INVALID_ARGUMENT`: the command is
 /// well-formed and would succeed against a different stream state, which is
