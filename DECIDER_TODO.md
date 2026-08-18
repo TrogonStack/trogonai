@@ -489,9 +489,30 @@ Where the real correctness bugs live.
       shape cannot express, left as prose: the typed details (`shed`'s `QuotaFailure`, `faulted`'s
       `DebugInfo`), and the fact that `Template.message` is the invariant description while the host
       substitutes live error text on emission.
-- [ ] `P4` **Revisit where `Projector` / `Processor` live** (`src/projector.rs`, `src/processor.rs`).
-      Generic JetStream read-side primitives with no decider dependency; possibly `trogon-nats`
-      instead, per the [ADR#0002](./docs/adr/0002-rust-crate-boundaries.md) boundary argument. Cosmetic against the rest of this file.
+- [x] `P4` **Revisit where `Projector` / `Processor` live** (`src/projector.rs`, `src/processor.rs`).
+      *(decided: `Processor` moves, `Projector` stays; landed)* The premise that both are "generic
+      JetStream primitives with no decider dependency" held for only one of them.
+
+      `Processor` had none: its imports are `async_nats`, `futures`, and `tokio_util`, and its own
+      module doc already advertised itself as a base other workers build on. It now lives at
+      `trogon-nats/src/jetstream/processor.rs`, which
+      [ADR#0002](./docs/adr/0002-rust-crate-boundaries.md) names the shared NATS infrastructure
+      boundary. Leaving it in a `-decider-` crate meant the next non-decider caller (the scheduler's
+      own worker, `acp-nats`) would have had to depend on the decider adapter to reach a durable
+      pull-consumer driver, which is the dependency direction that ADR argues against. `trogon-nats`
+      gains the `server_2_10` `async-nats` feature `create_consumer_strict` needs, `tokio-util`, and
+      an `any(test, ...)` gate on `test_support` so the moved live-server tests keep running in
+      their new crate; `trogon-decider-nats` loses `tokio-util` and `server_2_10`.
+
+      `Projector` stays. It reads `trogon_decider_runtime::{StreamEvent, StreamPosition}` and
+      `crate::stream_store`'s replay helpers, so moving it would put `trogon-decider-runtime` into
+      the dependency set of every crate in the workspace that touches NATS. The boundary argument
+      that pulls `Processor` down is the same one that keeps `Projector` where it is.
+
+      Worth recording because it is the kind of thing this file exists to catch: neither type has a
+      single consumer anywhere in the workspace outside its own tests. They are speculative
+      primitives. That is an argument for not moving them at all, and it is the reason the change
+      stops at the one relocation the layering actually requires.
 
 ## L2 - `trogon-decider-wasm-runtime`
 

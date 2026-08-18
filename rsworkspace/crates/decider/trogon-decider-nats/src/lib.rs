@@ -12,8 +12,6 @@ mod store;
 
 /// Crate-wide constants.
 pub mod constants;
-/// Durable pull-consumer message processing.
-pub mod processor;
 /// Generic catch-up driver for subject-filtered JetStream projections.
 pub mod projector;
 /// Idempotent create-or-open provisioning for JetStream streams and buckets.
@@ -26,7 +24,6 @@ pub mod snapshot_store;
 pub mod stream_store;
 
 pub use constants::{TROGON_EVENT_HEADER_PREFIX, TROGON_EVENT_TYPE};
-pub use processor::{HandlerVerdict, MessageHandler, PoisonReason, Processor, ProcessorError, RedeliveryPolicy};
 pub use projector::{
     CatchUpError, CatchUpOutcome, CheckpointSequence, ProjectionApply, ProjectionCheckpointStore, Projector,
 };
