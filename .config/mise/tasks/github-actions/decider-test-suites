@@ -1,17 +1,28 @@
 #!/usr/bin/env python3
-#MISE description="Run wasm decider conformance: sim schedules suite, macro compile-fail tests, and every decider-test YAML fixture"
+#MISE description="Run wasm decider conformance: sim schedules suite, macro compile-fail tests, every decider-test YAML fixture, and every native/wasm parity test"
 #
 # The gate is on coverage, not just on results. Every wasm-components/* decider
-# must either have a decider-test suite that passes, or declare in its own
-# Cargo.toml why it has none:
+# must satisfy two independent requirements, and must either satisfy each one or
+# declare in its own Cargo.toml why it does not:
 #
 #     [package.metadata.decider-test]
-#     exempt = "why this component is not conformance-tested"
+#     exempt = "why this component has no cli/trogon-decider-test/{alias}.yaml suite"
 #
-# A component that has neither fails this task. The declaration lives in the
-# component's manifest rather than in a list here so that deleting a component
-# deletes its exemption, and so that adding one makes the question unavoidable
-# instead of answering it by silence.
+#     [package.metadata.decider-parity]
+#     exempt = "why this component has no trogon-decider-sim parity_{alias} test"
+#
+# The two answer different questions. A conformance suite asks whether the
+# component still does what it is specified to do. A parity test asks whether
+# the native decider and the compiled component do the *same* thing, which is
+# the guarantee that makes the native path a usable stand-in for the wasm one.
+# A component can honestly have one and not the other: parity needs the decider
+# logic to live in a shared crate both sides can call, and a component whose
+# logic lives only in its own cdylib has no native side to compare against.
+#
+# A component that has neither the artifact nor the exemption fails this task.
+# The declaration lives in the component's manifest rather than in a list here
+# so that deleting a component deletes its exemption, and so that adding one
+# makes the question unavoidable instead of answering it by silence.
 import os
 import subprocess
 import sys
@@ -26,6 +37,7 @@ workspace = root / "rsworkspace"
 suites_dir = workspace / "cli" / "trogon-decider-test"
 components_dir = workspace / "wasm-components"
 artifacts_dir = workspace / "dist" / "decider"
+parity_dir = workspace / "crates" / "decider" / "trogon-decider-sim" / "tests"
 
 
 def run(*command):
@@ -38,10 +50,10 @@ def alias_of(crate):
     return crate.removeprefix("trogon-").removesuffix("-decider")
 
 
-def exemption(manifest_path):
+def exemption(manifest_path, table):
     with open(manifest_path, "rb") as manifest_file:
         manifest = tomllib.load(manifest_file)
-    metadata = manifest.get("package", {}).get("metadata", {}).get("decider-test", {})
+    metadata = manifest.get("package", {}).get("metadata", {}).get(table, {})
     return metadata.get("exempt")
 
 
@@ -53,22 +65,25 @@ if not manifests:
 # a suite for is reported in seconds rather than after a full test build.
 violations = []
 runnable = []
-claimed = set()
+parity_targets = []
+claimed_suites = set()
+claimed_parity = set()
 
 for manifest in manifests:
     alias = alias_of(manifest.parent.name)
-    suite = suites_dir / f"{alias}.yaml"
-    exempt = exemption(manifest)
-    if suite.exists():
-        claimed.add(suite.name)
 
-    if exempt and suite.exists():
+    suite = suites_dir / f"{alias}.yaml"
+    suite_exempt = exemption(manifest, "decider-test")
+    if suite.exists():
+        claimed_suites.add(suite.name)
+
+    if suite_exempt and suite.exists():
         violations.append(
             f"{manifest}: declares a decider-test exemption but {suite.name} exists; "
             "drop the exemption so the suite is enforced"
         )
-    elif exempt:
-        print(f"exempt {alias}: {exempt}")
+    elif suite_exempt:
+        print(f"conformance-exempt {alias}: {suite_exempt}")
     elif not suite.exists():
         violations.append(
             f"{manifest.parent.name}: no conformance suite at {suite} and no "
@@ -81,9 +96,33 @@ for manifest in manifests:
         else:
             violations.append(f"{component} was not built; run 'mise run artifacts:wasm-components' first")
 
+    parity = parity_dir / f"parity_{alias}.rs"
+    parity_exempt = exemption(manifest, "decider-parity")
+    if parity.exists():
+        claimed_parity.add(parity.name)
+
+    if parity_exempt and parity.exists():
+        violations.append(
+            f"{manifest}: declares a decider-parity exemption but {parity.name} exists; "
+            "drop the exemption so the parity test is enforced"
+        )
+    elif parity_exempt:
+        print(f"parity-exempt {alias}: {parity_exempt}")
+    elif not parity.exists():
+        violations.append(
+            f"{manifest.parent.name}: no parity test at {parity} and no "
+            '[package.metadata.decider-parity] exempt = "..." explaining why'
+        )
+    else:
+        parity_targets.append(f"parity_{alias}")
+
 for suite in sorted(suites_dir.glob("*.yaml")):
-    if suite.name not in claimed:
+    if suite.name not in claimed_suites:
         violations.append(f"{suite} is not the suite of any wasm-components/* decider")
+
+for parity in sorted(parity_dir.glob("parity_*.rs")):
+    if parity.name not in claimed_parity:
+        violations.append(f"{parity} is not the parity test of any wasm-components/* decider")
 
 if violations:
     print("decider conformance gate failed:", file=sys.stderr)
@@ -91,6 +130,8 @@ if violations:
     sys.exit(1)
 
 run("cargo", "test", "-p", "trogon-decider-sim", "--test", "schedules", "--features", "test-support")
+for target in parity_targets:
+    run("cargo", "test", "-p", "trogon-decider-sim", "--test", target, "--features", "test-support")
 run("cargo", "test", "-p", "trogon-decider-guest-macros", "--test", "compile_fail")
 run("cargo", "build", "-p", "trogon-decider-test", "--release")
 

@@ -23,3 +23,6 @@ package = "trogon:decider"
 
 [package.metadata.decider-test]
 exempt = "a wasm-runtime fixture, not a shipped decider: its command and events are hand-rolled buffa messages with no generated proto descriptors, so decider-test has no type registry to encode a YAML suite against. Covered by trogon-decider-wasm-runtime/tests/act_chain_execution.rs."
+
+[package.metadata.decider-parity]
+exempt = "there is no native side to compare against: this crate is a cdylib whose decide/evolve live only in the component, unlike trogon-schedules-decider, which calls into trogon-scheduler-domain. A parity test would have to reimplement the guest logic natively and would then only prove the copy matches its original."

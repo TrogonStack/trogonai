@@ -537,10 +537,26 @@ the L1 skeleton lands.
 
 ## L3 - `trogon-decider-sim`
 
-- [ ] `P4` **Make parity a CI gate.** `assert_parity` covers the schedules decider and the act-chain
-      fixture, but nothing requires it for a new component. Rule to enforce: every component in
-      `wasm-components/` ships a YAML conformance suite *and* a parity test. Natural pairing with the
-      L4/L5 conformance-gate work.
+- [x] `P4` **Make parity a CI gate.** *(landed)* `assert_parity` ran only because someone had written
+      `tests/parity.rs`; nothing required it, so a new component could ship with none and keep CI
+      green. `github-actions:decider-test-suites` now enforces parity coverage the same way it
+      already enforces conformance coverage: for every `wasm-components/*` it resolves
+      `trogon-decider-sim/tests/parity_<alias>.rs`, runs it as its own `[[test]]` target, and fails
+      unless the component instead declares `[package.metadata.decider-parity] exempt = "..."` in its
+      own manifest. It also fails on an orphan `parity_*.rs` matching no component and on an
+      exemption that contradicts an existing parity test. `tests/parity.rs` was renamed
+      `tests/parity_schedules.rs` to make the component it covers resolvable by name.
+
+      The two requirements stay separate rather than collapsing into one flag because they answer
+      different questions. A conformance suite asks whether a component still does what it is
+      specified to do. A parity test asks whether the native decider and the compiled component do
+      the *same* thing, which is the only thing that makes the native path a usable stand-in.
+
+      `trogon-act-chain-decider` takes a parity exemption on top of its existing conformance one: it
+      is a `cdylib` whose `decide`/`evolve` live only in the component, unlike
+      `trogon-schedules-decider`, which calls into `trogon-scheduler-domain`. A parity test for it
+      would have to reimplement the guest logic natively and would then only prove the copy matches
+      its original. All three failure modes were verified to fire before the gate was declared done.
 
 ---
 
