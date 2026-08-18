@@ -172,9 +172,34 @@ overloaded to mean the opposite of what it reads as.
       and is invisible at the call site. The required const makes every decider's choice
       *visible*; the lint makes the one dangerous choice *argued*. Starts green: no production
       decider declares `Any` today.
-- [ ] `P4` **Evaluate issue #468** - split the `Decider` trait into `StateModel` and `Command`. Filed
-      as an *optional* refactor. Touching L0 ripples through every layer above, so this needs a
-      concrete payoff before it is worth the blast radius. Decide yes/no; do not leave it drifting.
+- [x] `P4` **Evaluate issue #468** - split the `Decider` trait into `StateModel` and `Command`.
+      *(decided: no)* Both sides are real, so both are recorded rather than one asserted.
+
+      **For.** The payoff is larger than the issue claims. Every command in a bundle repeats the
+      same five lines - `type State`, `type Event`, `type EvolveError`, `initial_state`, `evolve` -
+      all delegating to the same shared functions; `scheduler-domain`'s four commands
+      (`create_schedule.rs:37`, `pause_schedule.rs:31`, `resume_schedule.rs`, `remove_schedule.rs`)
+      are four copies of one answer. And `evolve` being a static method *on the command type* is the
+      wrong shape on its face: which command was issued has nothing to do with how an event evolves
+      state. Structurally, `Command::Model` would make bundle agreement a type fact, collapsing
+      `bundle_bounds` and `bundle_assert` in `trogon-decider-guest-macros/src/lib.rs:130-172` to one
+      associated-type equality; moving `state_schema_version` onto `StateModel` would delete
+      `schema_assert` (`:174-200`) outright. The WIT contract is untouched, so unlike the other L0
+      items this costs no lockstep guest/host rollout.
+
+      **Against.** 37 `Decider` impls and 28 generic bound sites across eight crates, plus the
+      dylint UI fixtures and the trybuild fixtures that pin the macro's diagnostics. Every
+      single-command decider - the shape `export_decider!` is built around - goes from one impl to
+      two and gains a type that exists only to be named.
+
+      **Why no.** The file's own bar was a *concrete* payoff, and every item above is ergonomic or
+      structural. Nothing here is a bug: the asserts the split would delete already work, already
+      fail at compile time, and are already covered by a compile-fail fixture. Replacing a working
+      guarantee with a differently-shaped working guarantee, at 37 call sites, is not a trade this
+      backlog should spend. **Revisit if** a third multi-command bundle appears, or if the static
+      `evolve` blocks something concrete - sharing one fold across bundles is the likely trigger.
+      **Action: close #468 with this reasoning** rather than leaving it open as a standing
+      invitation.
 
 ## L0 - `trogon-decider-wit` (contract)
 
@@ -203,8 +228,17 @@ it**, which is the main reason this file is ordered bottom-up.
       **Bundle these two items into a single `0.2.0` -> `0.3.0` bump.** They are the only two
       pending contract changes; shipping them separately costs two lockstep guest/host rollouts for
       one release's worth of value.
-- [ ] `P4` **Issue #464** - typed cross-language codec and proto-to-WIT emitter. Contract-shaped
-      work; sequence it here so it does not collide with the descriptor decision above.
+- [x] `P4` **Issue #464** - typed cross-language codec and proto-to-WIT emitter. *(sequencing
+      constraint discharged; the work itself stays on #464)* The only reason this sat in a decider
+      backlog was ordering: it would have collided with the `module-descriptor` decision above. That
+      decision landed in the `0.3.0` bump, so the constraint is gone and nothing here gates it.
+
+      What remains is not backlog cleanup, it is a project: an Nth codegen target beside Rust and
+      Elixir, a published per-stream-type codec component, and a proto-to-WIT emitter that has to
+      answer open enums (closed WIT variants plus an explicit unknown case), field presence, maps,
+      well-known types, and recursion. Scoping that belongs on the issue, not in a file organized by
+      decider crate layers. Until it ships, cross-language consumers decode event bytes with their
+      own proto library, which is the documented current answer and not a regression.
 
 ---
 
@@ -688,5 +722,25 @@ Bottom-up by layer, with the two genuine cross-layer bundles called out:
 
 ## Related open issues not yet placed
 
-- #466 - browser jco host for unit testing and AI-sandbox simulation (would be a new L3 sibling)
-- #469 - expose the sim host as an MCP tool over `mcp-nats` (L3/L4)
+*(placed; each note now lives on its own issue, so it outlives this file)*
+
+- #466 - browser jco host for unit testing and AI-sandbox simulation. A new L3 sibling of
+  `trogon-decider-sim`, not a variant of `trogon-decider-wasm-runtime`: it depends on domain, guest
+  SDK, and WIT, and is depended on by tooling above rather than by any runtime. Nothing blocks it.
+- #469 - expose the sim host as an MCP tool over `mcp-nats`. Straddles L3/L4: the capability is the
+  sim's, the shipped surface belongs beside `cli/trogon-decider-test`. Decide crate ownership first,
+  because putting the tool in the sim crate pulls an MCP dependency into a crate whose dependency
+  set is currently domain, guest SDK, WASM runtime, and WIT. Nothing blocks it.
+
+---
+
+## Closing out
+
+Every item above is `[x]`. What each one produced lives in the repo rather than in this file:
+the ADRs carry the decisions, the crates carry the implementations, the test suites carry the
+proofs, and the CI gates carry the parts that would otherwise decay back into convention. The four
+issues this backlog did not implement (#464, #466, #468, #469) each carry their own note.
+
+**This file is now deletable.** It was a reading of the decider crate family at one point in time;
+keeping it past that point would mean maintaining a second, staler description of a codebase that
+already describes itself.
