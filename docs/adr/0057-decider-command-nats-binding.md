@@ -167,8 +167,10 @@ one a caller is holding: **a reply is an error if, and only if,
 own, because a second one would be free to disagree with the first.
 
 An **accepted** command answers with the method's response type,
-`trogonai.decider.v1.DecideResponse`, which carries one field: `accepted`, the
-command was decided and its events appended.
+`trogonai.decider.v1.DecideResponse`, which is the acceptance itself: the
+`stream_position` the append reached and the events it appended. There is no
+wrapper message between the response and what it reports, because the response
+type already means "the command was decided and its events appended".
 
 **Every other outcome**, a module's own refusal included, answers on the error
 channel: one complete `google.rpc.Status` as the body, with `Status.code`
@@ -212,7 +214,7 @@ rejection code would be indistinguishable on the wire.
 `details` is a `repeated google.protobuf.Any` with no ordering guarantee. A
 reader locates a detail by unpacking on its type URL, never by indexing.
 
-`accepted` carries the appended events themselves, as `google.protobuf.Any`
+The response carries the appended events themselves, as `google.protobuf.Any`
 payloads in append order, each with the event id it was appended under. A caller
 that must act on what it just decided, such as one warming a cache from its own
 write, would otherwise have to wait for its own events to come back around off

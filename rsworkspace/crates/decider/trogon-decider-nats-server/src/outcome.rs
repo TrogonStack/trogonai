@@ -44,10 +44,8 @@ impl CommandReply {
     pub fn decided(result: &WasmExecutionResult) -> Self {
         Self {
             body: ReplyBody::Response(v1::DecideResponse {
-                accepted: MessageField::some(v1::CommandAccepted {
-                    stream_position: result.stream_position.as_u64(),
-                    events: result.events.iter().map(decided_event).collect(),
-                }),
+                stream_position: result.stream_position.as_u64(),
+                events: result.events.iter().map(decided_event).collect(),
             }),
             decision: DecisionOutcome::Decided,
         }

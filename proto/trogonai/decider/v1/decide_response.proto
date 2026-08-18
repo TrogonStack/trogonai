@@ -2,9 +2,9 @@ edition = "2024";
 
 package trogonai.decider.v1;
 
-import "trogonai/decider/v1/command_accepted.proto";
+import "trogonai/decider/v1/decided_event.proto";
 
-// What became of a command the decider executed.
+// A command the decider accepted: its events were decided and appended.
 //
 // The reply to an acceptance and to nothing else. Every other outcome, a
 // module's own refusal included, is a service error: one complete
@@ -13,6 +13,13 @@ import "trogonai/decider/v1/command_accepted.proto";
 // A caller learns which of the two it is holding from that header and never by
 // trying to decode this message first.
 message DecideResponse {
-  // The command was decided and its events appended.
-  CommandAccepted accepted = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Stream high-watermark after the append, so a caller can read its own write.
+  //
+  // The position of the append as a whole, not of any one event below. It is
+  // not a next-expected-version and no arithmetic on it is meaningful, so a
+  // caller that needs to identify individual events uses their ids.
+  uint64 stream_position = 1 [features.field_presence = LEGACY_REQUIRED];
+
+  // The events that were appended, in append order.
+  repeated DecidedEvent events = 2;
 }

@@ -44,13 +44,8 @@ fn event(id: u128, type_: &str, payload: Vec<u8>) -> Event {
 }
 
 /// What an accepted command's response carries, for the one reply that has one.
-fn accepted(reply: &CommandReply) -> &v1::CommandAccepted {
-    reply
-        .response()
-        .expect("this reply is a response, not a service error")
-        .accepted
-        .as_option()
-        .expect("a response always carries its acceptance")
+fn accepted(reply: &CommandReply) -> &v1::DecideResponse {
+    reply.response().expect("this reply is a response, not a service error")
 }
 
 /// The `Status` of a reply that ADR#0016 makes a service error.
@@ -445,11 +440,9 @@ fn a_reply_body_reaches_the_caller_as_the_body_the_host_built() {
                 "ADR#0016 promises a complete Status on the error channel, and a fragment is what a caller cannot tell from a truncated one"
             ),
             None => assert_eq!(
-                v1::DecideResponse::decode_from_slice(&encoded)
-                    .expect("the host encodes what the descriptor tells the caller to decode")
-                    .accepted
-                    .as_option(),
-                Some(accepted(&reply)),
+                &v1::DecideResponse::decode_from_slice(&encoded)
+                    .expect("the host encodes what the descriptor tells the caller to decode"),
+                accepted(&reply),
                 "a body that did not survive the wire would report an outcome the host never reached"
             ),
         }

@@ -264,11 +264,7 @@ async fn a_command_is_decided_and_its_events_land_in_jetstream() {
 
     let reply = host.decide(&create_schedule(SCHEDULE_ID)).await;
 
-    let response = response(&reply);
-    let accepted = response
-        .accepted
-        .as_option()
-        .unwrap_or_else(|| panic!("expected an accepted response, got {response:?}"));
+    let accepted = response(&reply);
     assert_eq!(accepted.stream_position, 1);
 
     // The whole event, not its name: a caller warming a cache off its own write
@@ -312,8 +308,9 @@ async fn recreating_a_schedule_conflicts_instead_of_forking_its_history() {
     let host = RunningHost::start().await;
 
     let first = host.decide(&create_schedule(SCHEDULE_ID)).await;
-    assert!(
-        response(&first).accepted.as_option().is_some(),
+    assert_eq!(
+        response(&first).stream_position,
+        1,
         "the conflict this test is about only means something if the first write landed"
     );
 
