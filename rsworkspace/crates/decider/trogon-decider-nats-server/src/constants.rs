@@ -47,14 +47,19 @@ pub const EVENT_SUBJECT_SEGMENT: &str = "events";
 /// Prefix every `CommandType` carries, per the canonical `Any` type URL form.
 pub const TYPE_URL_PREFIX: &str = "type.googleapis.com/";
 
-/// Caller-supplied identity for one command, reused across its retries.
-pub const TROGON_COMMAND_ID_HEADER: &str = "Trogon-Command-Id";
+/// The protobuf service this host answers for, per ADR#0016.
+pub const DECIDER_SERVICE_NAME: &str = "DeciderService";
 
-/// Stream revision the caller believes it is acting on.
-pub const TROGON_EXPECTED_REVISION_HEADER: &str = "Trogon-Expected-Revision";
+/// The one `rpc` that service declares, and so the one endpoint it exposes.
+pub const DECIDE_METHOD_NAME: &str = "Decide";
 
-/// Reply-side discriminant mirroring the `CommandOutcome` arm in the body.
-pub const TROGON_DECIDER_OUTCOME_HEADER: &str = "Trogon-Decider-Outcome";
+/// The developer-facing description on a service error, per ADR#0016.
+pub const NATS_SERVICE_ERROR_HEADER: &str = "Nats-Service-Error";
+
+/// The canonical `google.rpc.Code` on a service error, per ADR#0016.
+///
+/// Its presence, and nothing about the body, is what makes a reply an error.
+pub const NATS_SERVICE_ERROR_CODE_HEADER: &str = "Nats-Service-Error-Code";
 
 /// Payload encoding header. Protobuf is the only encoding this binding accepts.
 pub const CONTENT_TYPE_HEADER: &str = "Content-Type";

@@ -16,22 +16,22 @@ use buffa::Message as _;
 use tokio_util::sync::CancellationToken;
 use trogon_decider_nats::DuplicateWindow;
 use trogon_decider_nats_server::constants::{
-    CONTENT_TYPE_HEADER, DEFAULT_QUEUE_GROUP, DEFAULT_SUBJECT_PREFIX, PROTOBUF_CONTENT_TYPE,
-    TROGON_DECIDER_OUTCOME_HEADER, TROGON_EXPECTED_REVISION_HEADER,
+    CONTENT_TYPE_HEADER, DEFAULT_QUEUE_GROUP, DEFAULT_SUBJECT_PREFIX, NATS_SERVICE_ERROR_CODE_HEADER,
+    PROTOBUF_CONTENT_TYPE, TYPE_URL_PREFIX,
 };
 use trogon_decider_nats_server::{
-    CommandSubjects, DeciderHost, FaultClass, FileModuleSource, ModuleReference, ModuleStore, ServerConfig,
+    CommandEndpoint, DeciderHost, FaultClass, FileModuleSource, ModuleReference, ModuleStore, ServerConfig,
     SubjectPrefix, find_detail, serve_until,
 };
 use trogon_decider_runtime::AdmissionLimit;
 use trogon_nats::test_support::JetStreamTestServer;
-use trogonai_proto::decider::{CommandOutcomeCase, v1 as decider_v1};
-use trogonai_proto::google::rpc::ErrorInfo;
+use trogonai_proto::decider::{DecideResponseCase, v1 as decider_v1};
+use trogonai_proto::google::rpc::{ErrorInfo, Status};
 use trogonai_proto::scheduler::schedules::v1;
 
 const EVENTS_STREAM: &str = "SERVE_TEST_EVENTS";
 const SNAPSHOT_BUCKET: &str = "SERVE_TEST_SNAPSHOTS";
-const CREATE_SUBJECT: &str = "decider.trogonai.scheduler.schedules.v1.CreateSchedule";
+const CREATE_SCHEDULE: &str = "trogonai.scheduler.schedules.v1.CreateSchedule";
 const MODULE_REFERENCE: &str = "scheduler.schedules@0.1.0";
 const SCHEDULE_ID: &str = "0198be07a38479e1a376f250f9181bec";
 
@@ -60,9 +60,14 @@ fn module_store() -> tempfile::TempDir {
     root
 }
 
+fn endpoint() -> CommandEndpoint {
+    CommandEndpoint::new(SubjectPrefix::new(DEFAULT_SUBJECT_PREFIX).expect("the default is a token"))
+        .expect("the default prefix yields a conformant subject")
+}
+
 fn config(root: &Path) -> ServerConfig {
     ServerConfig {
-        subjects: CommandSubjects::new(SubjectPrefix::new(DEFAULT_SUBJECT_PREFIX).expect("the default is a token")),
+        endpoint: endpoint(),
         queue_group: DEFAULT_QUEUE_GROUP.to_owned(),
         events_stream: EVENTS_STREAM.to_owned(),
         snapshot_bucket: SNAPSHOT_BUCKET.to_owned(),
@@ -74,7 +79,19 @@ fn config(root: &Path) -> ServerConfig {
     }
 }
 
-fn create_schedule(id: &str) -> Vec<u8> {
+/// One `CreateSchedule` as the `Decide` endpoint's request message.
+fn create_schedule(id: &str) -> decider_v1::DecideRequest {
+    decider_v1::DecideRequest {
+        command: buffa::MessageField::some(buffa_types::google::protobuf::Any {
+            type_url: format!("{TYPE_URL_PREFIX}{CREATE_SCHEDULE}"),
+            value: create_schedule_command(id).into(),
+            ..buffa_types::google::protobuf::Any::default()
+        }),
+        ..decider_v1::DecideRequest::default()
+    }
+}
+
+fn create_schedule_command(id: &str) -> Vec<u8> {
     v1::CreateSchedule {
         schedule_id: id.to_owned(),
         status: buffa::MessageField::some(v1::ScheduleStatus {
@@ -162,11 +179,15 @@ impl RunningHost {
         }
     }
 
-    async fn request(&self, subject: &str, payload: Vec<u8>, headers: HeaderMap) -> async_nats::Message {
+    async fn decide(&self, request: &decider_v1::DecideRequest) -> async_nats::Message {
+        self.request(request.encode_to_vec(), protobuf_headers()).await
+    }
+
+    async fn request(&self, payload: Vec<u8>, headers: HeaderMap) -> async_nats::Message {
         tokio::time::timeout(
             Duration::from_secs(20),
             self.client
-                .request_with_headers(subject.to_owned(), headers, payload.into()),
+                .request_with_headers(endpoint().subject().to_owned(), headers, payload.into()),
         )
         .await
         .expect("the host replies before the test times out")
@@ -202,26 +223,36 @@ impl RunningHost {
     }
 }
 
-fn outcome(message: &async_nats::Message) -> decider_v1::CommandOutcome {
-    decider_v1::CommandOutcome::decode_from_slice(&message.payload).expect("the reply is a CommandOutcome")
-}
-
-fn outcome_header(message: &async_nats::Message) -> String {
+/// The code on the reply's `Nats-Service-Error-Code`, which per ADR#0016 is the
+/// only thing that makes a reply an error.
+fn error_code(message: &async_nats::Message) -> Option<String> {
     message
         .headers
         .as_ref()
-        .and_then(|headers| headers.get(TROGON_DECIDER_OUTCOME_HEADER))
+        .and_then(|headers| headers.get(NATS_SERVICE_ERROR_CODE_HEADER))
         .map(|value| value.as_str().to_owned())
-        .expect("every reply carries its outcome header")
 }
 
-/// The `ErrorInfo.reason` a faulted reply carries, which is what tells apart
+fn response(message: &async_nats::Message) -> decider_v1::DecideResponse {
+    assert_eq!(
+        error_code(message),
+        None,
+        "a reply carrying the error header is a service error, and decoding it as the method response would read one message as another"
+    );
+    decider_v1::DecideResponse::decode_from_slice(&message.payload).expect("the reply is a DecideResponse")
+}
+
+/// The `ErrorInfo.reason` a service error carries, which is what tells apart
 /// two fault classes reporting the same canonical code.
 fn fault_reason(message: &async_nats::Message) -> String {
-    let outcome = outcome(message);
-    let Some(CommandOutcomeCase::Faulted(status)) = outcome.outcome else {
-        panic!("expected a faulted outcome, got {outcome:?}");
-    };
+    let status = Status::decode_from_slice(&message.payload).expect("an error reply is one complete Status");
+
+    assert_eq!(
+        error_code(message).as_deref(),
+        Some(status.code.to_string().as_str()),
+        "0016 makes the header authoritative, so a body disagreeing with it would answer two callers differently"
+    );
+
     find_detail::<ErrorInfo>(&status)
         .expect("every decider status names its reason")
         .reason
@@ -231,15 +262,13 @@ fn fault_reason(message: &async_nats::Message) -> String {
 async fn a_command_is_decided_and_its_events_land_in_jetstream() {
     let host = RunningHost::start().await;
 
-    let reply = host
-        .request(CREATE_SUBJECT, create_schedule(SCHEDULE_ID), protobuf_headers())
-        .await;
+    let reply = host.decide(&create_schedule(SCHEDULE_ID)).await;
 
-    let Some(CommandOutcomeCase::Decided(accepted)) = outcome(&reply).outcome else {
-        panic!("expected a decided outcome, got {:?}", outcome(&reply));
+    let response = response(&reply);
+    let Some(DecideResponseCase::Accepted(accepted)) = response.result else {
+        panic!("expected an accepted response, got {response:?}");
     };
     assert_eq!(accepted.stream_position, 1);
-    assert_eq!(outcome_header(&reply), "decided");
 
     // The whole event, not its name: a caller warming a cache off its own write
     // decodes the reply rather than waiting for the event to come back around.
@@ -264,12 +293,15 @@ async fn a_command_is_decided_and_its_events_land_in_jetstream() {
 async fn a_command_no_module_claims_answers_unroutable_rather_than_timing_out() {
     let host = RunningHost::start().await;
 
-    let reply = host
-        .request("decider.trogonai.nowhere.v1.Nothing", Vec::new(), protobuf_headers())
-        .await;
+    let mut request = create_schedule(SCHEDULE_ID);
+    request.command = buffa::MessageField::some(buffa_types::google::protobuf::Any {
+        type_url: format!("{TYPE_URL_PREFIX}trogonai.nowhere.v1.Nothing"),
+        ..buffa_types::google::protobuf::Any::default()
+    });
+
+    let reply = host.decide(&request).await;
 
     assert_eq!(fault_reason(&reply), FaultClass::Unroutable.reason());
-    assert_eq!(outcome_header(&reply), "faulted");
 
     host.stop().await;
 }
@@ -278,14 +310,13 @@ async fn a_command_no_module_claims_answers_unroutable_rather_than_timing_out() 
 async fn recreating_a_schedule_conflicts_instead_of_forking_its_history() {
     let host = RunningHost::start().await;
 
-    let first = host
-        .request(CREATE_SUBJECT, create_schedule(SCHEDULE_ID), protobuf_headers())
-        .await;
-    assert_eq!(outcome_header(&first), "decided");
+    let first = host.decide(&create_schedule(SCHEDULE_ID)).await;
+    assert!(
+        matches!(response(&first).result, Some(DecideResponseCase::Accepted(_))),
+        "the conflict this test is about only means something if the first write landed"
+    );
 
-    let second = host
-        .request(CREATE_SUBJECT, create_schedule(SCHEDULE_ID), protobuf_headers())
-        .await;
+    let second = host.decide(&create_schedule(SCHEDULE_ID)).await;
 
     assert_eq!(
         fault_reason(&second),
@@ -297,17 +328,29 @@ async fn recreating_a_schedule_conflicts_instead_of_forking_its_history() {
 }
 
 #[tokio::test]
-async fn an_unreadable_expected_revision_is_refused_before_the_guest_runs() {
+async fn a_request_the_host_cannot_read_is_refused_before_the_guest_runs() {
     let host = RunningHost::start().await;
 
-    let mut headers = protobuf_headers();
-    headers.insert(TROGON_EXPECTED_REVISION_HEADER, "the-latest-one");
-
-    let reply = host
-        .request(CREATE_SUBJECT, create_schedule(SCHEDULE_ID), headers)
-        .await;
+    let reply = host.request(vec![0xff, 0xff, 0xff, 0xff], protobuf_headers()).await;
 
     assert_eq!(fault_reason(&reply), FaultClass::InvalidRequest.reason());
+
+    host.stop().await;
+}
+
+#[tokio::test]
+async fn a_zero_expected_revision_is_refused_rather_than_read_as_no_stream() {
+    let host = RunningHost::start().await;
+
+    let reply = host
+        .decide(&create_schedule(SCHEDULE_ID).with_expected_revision(0))
+        .await;
+
+    assert_eq!(
+        fault_reason(&reply),
+        FaultClass::InvalidRequest.reason(),
+        "an empty stream is the module's no_stream precondition, not a guard a caller gets to assert"
+    );
 
     host.stop().await;
 }

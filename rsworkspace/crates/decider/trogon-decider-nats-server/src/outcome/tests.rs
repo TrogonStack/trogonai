@@ -43,15 +43,21 @@ fn event(id: u128, type_: &str, payload: Vec<u8>) -> Event {
     }
 }
 
-fn case(reply: &CommandReply) -> &CommandOutcomeCase {
-    reply.outcome().outcome.as_ref().expect("every reply sets an arm")
+/// The arm of the response body, for the replies that have one.
+fn case(reply: &CommandReply) -> &DecideResponseCase {
+    reply
+        .response()
+        .expect("this reply is a response, not a service error")
+        .result
+        .as_ref()
+        .expect("every response sets an arm")
 }
 
+/// The `Status` of a reply that ADR#0016 makes a service error.
 fn faulted(reply: &CommandReply) -> &Status {
-    match case(reply) {
-        CommandOutcomeCase::Faulted(status) => status,
-        other => panic!("expected a faulted reply, got {other:?}"),
-    }
+    reply
+        .service_error_status()
+        .expect("this reply is a service error, not a response")
 }
 
 /// The reason a fault reports, which is what tells two classes sharing one code
@@ -86,7 +92,7 @@ fn a_decided_command_reports_its_position_and_its_events_in_order() {
     ]));
 
     match case(&reply) {
-        CommandOutcomeCase::Decided(accepted) => {
+        DecideResponseCase::Accepted(accepted) => {
             assert_eq!(accepted.stream_position, 7);
             let types: Vec<&str> = accepted
                 .events
@@ -109,7 +115,7 @@ fn a_decided_command_reports_its_position_and_its_events_in_order() {
                 "append order is the only order a caller folding these can rely on"
             );
         }
-        other => panic!("expected a decided reply, got {other:?}"),
+        other => panic!("expected an accepted reply, got {other:?}"),
     }
 }
 
@@ -118,7 +124,7 @@ fn a_decided_reply_carries_the_event_payloads() {
     let reply = CommandReply::decided(&result(vec![event(1, "test.v1.Created", vec![7; 4096])]));
 
     match case(&reply) {
-        CommandOutcomeCase::Decided(accepted) => {
+        DecideResponseCase::Accepted(accepted) => {
             let event = accepted.events[0]
                 .event
                 .as_option()
@@ -129,7 +135,7 @@ fn a_decided_reply_carries_the_event_payloads() {
                 "a caller warming a cache from its own write cannot do it from type names alone"
             );
         }
-        other => panic!("expected a decided reply, got {other:?}"),
+        other => panic!("expected an accepted reply, got {other:?}"),
     }
 }
 
@@ -142,7 +148,7 @@ fn a_decided_reply_names_each_event_by_the_id_it_was_appended_under() {
     let reply = CommandReply::decided(&result(appended.clone()));
 
     match case(&reply) {
-        CommandOutcomeCase::Decided(accepted) => {
+        DecideResponseCase::Accepted(accepted) => {
             let ids: Vec<&str> = accepted.events.iter().map(|decided| decided.id.as_str()).collect();
             let expected: Vec<String> = appended.iter().map(|event| event.id.to_string()).collect();
             assert_eq!(
@@ -151,7 +157,7 @@ fn a_decided_reply_names_each_event_by_the_id_it_was_appended_under() {
                  tails the stream deduplicates on them"
             );
         }
-        other => panic!("expected a decided reply, got {other:?}"),
+        other => panic!("expected an accepted reply, got {other:?}"),
     }
 }
 
@@ -164,7 +170,7 @@ fn a_decided_reply_strips_nothing_but_adds_the_any_type_url_prefix() {
     )]));
 
     match case(&reply) {
-        CommandOutcomeCase::Decided(accepted) => {
+        DecideResponseCase::Accepted(accepted) => {
             assert_eq!(
                 accepted.events[0]
                     .event
@@ -176,7 +182,7 @@ fn a_decided_reply_strips_nothing_but_adds_the_any_type_url_prefix() {
                  whole of the difference between the two"
             );
         }
-        other => panic!("expected a decided reply, got {other:?}"),
+        other => panic!("expected an accepted reply, got {other:?}"),
     }
 }
 
@@ -185,7 +191,7 @@ fn a_rejection_keeps_the_guest_code_message_and_details() {
     let reply = CommandReply::rejected(&module(), &guest_error());
 
     match case(&reply) {
-        CommandOutcomeCase::Rejected(status) => {
+        DecideResponseCase::Rejected(status) => {
             let info = find_detail::<ErrorInfo>(status).expect("every decider status names its reason");
             assert_eq!(info.reason, "schedule_already_exists");
             assert_eq!(info.domain, "schedules");
@@ -201,57 +207,52 @@ fn a_rejection_keeps_the_guest_code_message_and_details() {
 fn a_rejection_is_not_a_fault() {
     let reply = CommandReply::from_command_error(&module(), &TestCommandError::Rejected(guest_error()));
 
-    assert_eq!(
-        reply.header_value(),
-        "rejected",
-        "a module refusing an invalid command is the decider pattern working, not a service error"
+    assert_eq!(reply.decision(), DecisionOutcome::Rejected);
+    assert!(
+        reply.service_error_status().is_none(),
+        "a module refusing an invalid command is the decider pattern working, and counting it in micro's num_errors would make a health signal track business outcomes"
     );
 }
 
 #[test]
-fn a_shed_command_lands_in_its_own_arm() {
+fn a_shed_command_is_a_service_error_naming_the_quota() {
     let limit = AdmissionLimit::try_new(32).expect("a positive limit");
     let reply = CommandReply::from_command_error(&module(), &TestCommandError::Overloaded(OverloadedError::new(limit)));
 
-    assert_eq!(reply.header_value(), "shed");
-    match case(&reply) {
-        CommandOutcomeCase::Shed(status) => assert_eq!(status.code, Code::RESOURCE_EXHAUSTED as i32),
-        other => panic!("expected a shed reply, got {other:?}"),
-    }
+    assert_eq!(reply.decision(), DecisionOutcome::Shed);
+    assert_eq!(
+        faulted(&reply).code,
+        Code::RESOURCE_EXHAUSTED as i32,
+        "a command admission control never started is one the host did not execute, so it answers on the error channel"
+    );
 }
 
 #[test]
-fn a_denied_command_lands_in_its_own_arm() {
+fn a_denied_command_is_a_service_error() {
     let denied = UnauthorizedError::Denied(AuthorizationDeniedError::new("missing claim orders.write"));
     let reply = CommandReply::from_command_error(&module(), &TestCommandError::Unauthorized(denied));
 
-    assert_eq!(reply.header_value(), "denied");
-    match case(&reply) {
-        CommandOutcomeCase::Denied(status) => assert_eq!(
-            status.code,
-            Code::PERMISSION_DENIED as i32,
-            "the principal was identified and refused, which is not the same as not being identified"
-        ),
-        other => panic!("expected a denied reply, got {other:?}"),
-    }
+    assert_eq!(reply.decision(), DecisionOutcome::Denied);
+    assert_eq!(
+        faulted(&reply).code,
+        Code::PERMISSION_DENIED as i32,
+        "the principal was identified and refused, which is not the same as not being identified"
+    );
 }
 
 #[test]
-fn a_command_with_no_principal_is_denied_rather_than_faulted() {
+fn a_command_with_no_principal_is_unauthenticated_rather_than_permission_denied() {
     let reply = CommandReply::from_command_error(
         &module(),
         &TestCommandError::Unauthorized(UnauthorizedError::MissingPrincipal),
     );
 
     assert_eq!(
-        reply.header_value(),
-        "denied",
+        reply.decision(),
+        DecisionOutcome::Denied,
         "an authorizer configured without a principal is a caller problem, not a broken host"
     );
-    match case(&reply) {
-        CommandOutcomeCase::Denied(status) => assert_eq!(status.code, Code::UNAUTHENTICATED as i32),
-        other => panic!("expected a denied reply, got {other:?}"),
-    }
+    assert_eq!(faulted(&reply).code, Code::UNAUTHENTICATED as i32);
 }
 
 #[test]
@@ -382,9 +383,10 @@ fn a_host_fault_and_a_guest_fault_are_both_internal_but_not_the_same_reason() {
     );
 }
 
-#[test]
-fn every_reply_header_agrees_with_the_arm_it_summarizes() {
-    let replies = [
+/// Every shape a reply can take, so a rule asserted below is asserted over all
+/// of them rather than over the ones a reader happened to think of.
+fn every_reply_shape() -> Vec<CommandReply> {
+    vec![
         CommandReply::decided(&result(vec![event(1, "test.v1.Created", vec![1])])),
         CommandReply::rejected(&module(), &guest_error()),
         CommandReply::from_command_error(
@@ -398,78 +400,73 @@ fn every_reply_header_agrees_with_the_arm_it_summarizes() {
             &module(),
             &TestCommandError::Unauthorized(UnauthorizedError::MissingPrincipal),
         ),
-    ];
+        CommandReply::unroutable(&StorageDownError),
+        CommandReply::internal(&StorageDownError),
+    ]
+}
 
-    for reply in &replies {
-        let expected = match case(reply) {
-            CommandOutcomeCase::Decided(_) => "decided",
-            CommandOutcomeCase::Rejected(_) => "rejected",
-            CommandOutcomeCase::Faulted(_) => "faulted",
-            CommandOutcomeCase::Shed(_) => "shed",
-            CommandOutcomeCase::Denied(_) => "denied",
-        };
-
-        assert_eq!(
-            reply.header_value(),
-            expected,
-            "middleware meters on the header without decoding the body, so the two cannot disagree"
+#[test]
+fn a_reply_is_a_response_or_a_service_error_and_never_both() {
+    for reply in every_reply_shape() {
+        assert_ne!(
+            reply.response().is_some(),
+            reply.service_error_status().is_some(),
+            "ADR#0016 discriminates on the error header alone, so a reply holding both bodies would encode as one of them and be read as the other: {reply:?}"
         );
     }
 }
 
 #[test]
-fn no_arm_but_decided_reports_ok() {
-    let statuses = [
-        CommandReply::rejected(&module(), &guest_error()),
-        CommandReply::from_command_error(
-            &module(),
-            &TestCommandError::Overloaded(OverloadedError::new(
-                AdmissionLimit::try_new(1).expect("a positive limit"),
-            )),
-        ),
-        CommandReply::from_command_error(
-            &module(),
-            &TestCommandError::Unauthorized(UnauthorizedError::MissingPrincipal),
-        ),
-        CommandReply::internal(&StorageDownError),
-    ];
+fn only_an_execution_that_completed_answers_in_the_response_body() {
+    for reply in every_reply_shape() {
+        let executed = matches!(reply.decision(), DecisionOutcome::Decided | DecisionOutcome::Rejected);
 
-    for reply in &statuses {
-        let status = match case(reply) {
-            CommandOutcomeCase::Rejected(status)
-            | CommandOutcomeCase::Faulted(status)
-            | CommandOutcomeCase::Shed(status)
-            | CommandOutcomeCase::Denied(status) => status,
-            CommandOutcomeCase::Decided(_) => panic!("none of these arms is a success"),
+        assert_eq!(
+            reply.response().is_some(),
+            executed,
+            "num_errors is a health signal, so a command the host ran to completion must not raise it and a command it never ran must: {reply:?}"
+        );
+    }
+}
+
+#[test]
+fn no_reply_but_an_accepted_one_reports_ok() {
+    for reply in every_reply_shape() {
+        let status = match reply.service_error_status() {
+            Some(status) => status,
+            None => match case(&reply) {
+                DecideResponseCase::Rejected(status) => status,
+                DecideResponseCase::Accepted(_) => continue,
+            },
         };
+
         assert_ne!(
             status.code,
             Code::OK as i32,
-            "`OK` on a status a caller reached by matching a non-decided arm would contradict the arm"
+            "`OK` on the status a caller reads after a refusal or a fault would contradict how it got there"
         );
     }
 }
 
 #[test]
-fn a_reply_body_reaches_the_caller_as_the_outcome_the_host_built() {
-    let replies = [
-        CommandReply::decided(&result(vec![event(
-            1,
-            "scheduler.schedules.v1.ScheduleCreated",
-            vec![1, 2, 3],
-        )])),
-        CommandReply::unroutable(&StorageDownError),
-        CommandReply::internal(&StorageDownError),
-    ];
+fn a_reply_body_reaches_the_caller_as_the_body_the_host_built() {
+    for reply in every_reply_shape() {
+        let encoded = reply.encode();
 
-    for reply in &replies {
-        let decoded = v1::CommandOutcome::decode_from_slice(&reply.encode())
-            .expect("the host encodes what the caller is told to decode");
-
-        assert_eq!(
-            &decoded,
-            reply.outcome(),
-            "a body that did not survive the wire would report an outcome the host never reached"
-        );
+        match reply.service_error_status() {
+            Some(status) => assert_eq!(
+                &Status::decode_from_slice(&encoded).expect("an error body is one complete Status"),
+                status,
+                "ADR#0016 promises a complete Status on the error channel, and a fragment is what a caller cannot tell from a truncated one"
+            ),
+            None => assert_eq!(
+                v1::DecideResponse::decode_from_slice(&encoded)
+                    .expect("the host encodes what the descriptor tells the caller to decode")
+                    .result
+                    .as_ref(),
+                Some(case(&reply)),
+                "a body that did not survive the wire would report an outcome the host never reached"
+            ),
+        }
     }
 }

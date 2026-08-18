@@ -17,7 +17,6 @@ use trogon_nats::{NatsConfig, SubjectTokenViolationError};
 use trogon_std::ParseArgs;
 use trogon_std::env::ReadEnv;
 
-use crate::command_subject::{CommandSubjects, SubjectPrefix};
 use crate::constants::{
     DEFAULT_ADMISSION_LIMIT, DEFAULT_DUPLICATE_WINDOW_SECS, DEFAULT_EVENTS_STREAM, DEFAULT_MODULE_BUCKET,
     DEFAULT_QUEUE_GROUP, DEFAULT_SNAPSHOT_BUCKET, DEFAULT_SUBJECT_PREFIX, ENV_DECIDER_ADMISSION_LIMIT,
@@ -25,6 +24,7 @@ use crate::constants::{
     ENV_DECIDER_QUEUE_GROUP, ENV_DECIDER_REPLAY_LIMIT, ENV_DECIDER_SNAPSHOT_BUCKET, ENV_DECIDER_SUBJECT_PREFIX,
     MODULE_STORE_DIRECTORY_SCHEME, MODULE_STORE_OBJECT_SCHEME,
 };
+use crate::endpoint::{CommandEndpoint, CommandEndpointError, SubjectPrefix};
 use crate::module_reference::{ModuleReference, ModuleReferenceError};
 
 #[derive(Parser, Debug, Clone)]
@@ -55,7 +55,7 @@ pub struct Args {
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
     /// The command subject projection this host answers under.
-    pub subjects: CommandSubjects,
+    pub endpoint: CommandEndpoint,
     /// Queue group the host's replicas share.
     pub queue_group: String,
     /// JetStream stream holding decider events.
@@ -145,12 +145,12 @@ fn config_from_args<E: ReadEnv>(args: Args, env: &E) -> Result<(ServerConfig, Na
     })?;
 
     let config = ServerConfig {
-        subjects: CommandSubjects::new(SubjectPrefix::new(&subject_prefix).map_err(|source| {
+        endpoint: CommandEndpoint::new(SubjectPrefix::new(&subject_prefix).map_err(|source| {
             ConfigError::SubjectPrefix {
                 value: subject_prefix.clone(),
                 source,
             }
-        })?),
+        })?)?,
         queue_group,
         events_stream,
         snapshot_bucket,
@@ -245,6 +245,9 @@ pub enum ConfigError {
         #[source]
         source: SubjectTokenViolationError,
     },
+    /// The configured prefix does not yield a usable endpoint subject.
+    #[error(transparent)]
+    Endpoint(#[from] CommandEndpointError),
     /// No module was configured, so the host would answer nothing.
     #[error("no decider module configured; set --module or {ENV_DECIDER_MODULES}")]
     NoModules,

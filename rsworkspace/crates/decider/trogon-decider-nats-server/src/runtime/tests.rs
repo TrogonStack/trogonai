@@ -1,32 +1,33 @@
 use std::time::Duration;
 
+use buffa::{Message as _, MessageField};
+use buffa_types::google::protobuf::Any;
+
 use trogon_decider_nats::DuplicateWindow;
 use trogon_decider_runtime::AdmissionLimit;
 use trogon_semconv::attribute::DecisionOutcome;
-use trogonai_proto::decider::CommandOutcomeCase;
+use trogonai_proto::decider::v1::DecideRequest;
 use trogonai_proto::google::rpc::ErrorInfo;
 
-use crate::command_subject::SubjectPrefix;
 use crate::config::ModuleStore;
-use crate::constants::{
-    CONTENT_TYPE_HEADER, DEFAULT_EVENTS_STREAM, DEFAULT_SNAPSHOT_BUCKET, DEFAULT_SUBJECT_PREFIX,
-    TROGON_COMMAND_ID_HEADER,
-};
+use crate::constants::{CONTENT_TYPE_HEADER, DEFAULT_EVENTS_STREAM, DEFAULT_SNAPSHOT_BUCKET, DEFAULT_SUBJECT_PREFIX};
+use crate::endpoint::{CommandEndpoint, SubjectPrefix};
 use crate::status::{FaultClass, find_detail};
 
 use super::*;
 
-fn subjects() -> CommandSubjects {
-    CommandSubjects::new(SubjectPrefix::new(DEFAULT_SUBJECT_PREFIX).expect("the default prefix is a token"))
+fn endpoint() -> CommandEndpoint {
+    CommandEndpoint::new(SubjectPrefix::new(DEFAULT_SUBJECT_PREFIX).expect("the default prefix is a token"))
+        .expect("the default prefix yields a conformant subject")
 }
 
 fn router() -> CommandRouter {
-    CommandRouter::new(subjects(), Arc::new(DeciderRegistryHandle::default()))
+    CommandRouter::new(Arc::new(DeciderRegistryHandle::default()))
 }
 
 fn config() -> ServerConfig {
     ServerConfig {
-        subjects: subjects(),
+        endpoint: endpoint(),
         queue_group: "q".to_owned(),
         events_stream: DEFAULT_EVENTS_STREAM.to_owned(),
         snapshot_bucket: DEFAULT_SNAPSHOT_BUCKET.to_owned(),
@@ -81,10 +82,22 @@ fn reference(value: &str) -> ModuleReference {
     value.parse().expect("a well-formed reference")
 }
 
+const CREATE_SCHEDULE: &str = "type.googleapis.com/trogonai.scheduler.schedules.v1.CreateSchedule";
+
+fn request(type_url: &str) -> DecideRequest {
+    DecideRequest {
+        command: MessageField::some(Any {
+            type_url: type_url.to_owned(),
+            ..Any::default()
+        }),
+        ..DecideRequest::default()
+    }
+}
+
 fn fault_reason(reply: &CommandReply) -> String {
-    let Some(CommandOutcomeCase::Faulted(status)) = reply.outcome().outcome.as_ref() else {
-        panic!("expected a faulted reply, got {:?}", reply.outcome());
-    };
+    let status = reply
+        .service_error_status()
+        .unwrap_or_else(|| panic!("expected a service error reply, got {reply:?}"));
     find_detail::<ErrorInfo>(status)
         .expect("every decider status names its reason")
         .reason
@@ -93,11 +106,7 @@ fn fault_reason(reply: &CommandReply) -> String {
 #[test]
 fn a_command_no_module_claims_is_unroutable() {
     let reply = router()
-        .route(
-            "decider.trogonai.scheduler.schedules.v1.CreateSchedule",
-            Vec::new(),
-            None,
-        )
+        .route(&request(CREATE_SCHEDULE).encode_to_vec(), None)
         .expect_err("an empty registry claims nothing");
 
     assert_eq!(reply.decision(), DecisionOutcome::Faulted);
@@ -109,23 +118,19 @@ fn a_command_no_module_claims_is_unroutable() {
 }
 
 #[test]
-fn a_subject_outside_the_hosts_prefix_is_an_invalid_request() {
+fn a_payload_that_is_not_a_request_is_an_invalid_request() {
     let reply = router()
-        .route(
-            "elsewhere.trogonai.scheduler.schedules.v1.CreateSchedule",
-            Vec::new(),
-            None,
-        )
-        .expect_err("this host does not answer under that prefix");
+        .route(&[0xff, 0xff, 0xff, 0xff], None)
+        .expect_err("those bytes are not a DecideRequest");
 
     assert_eq!(fault_reason(&reply), FaultClass::InvalidRequest.reason());
 }
 
 #[test]
-fn the_bare_prefix_names_no_command() {
+fn a_request_naming_no_command_is_an_invalid_request() {
     let reply = router()
-        .route(DEFAULT_SUBJECT_PREFIX, Vec::new(), None)
-        .expect_err("the subtree root is not a command");
+        .route(&DecideRequest::default().encode_to_vec(), None)
+        .expect_err("a request with no command names nothing to route");
 
     assert_eq!(fault_reason(&reply), FaultClass::InvalidRequest.reason());
 }
@@ -136,11 +141,7 @@ fn an_encoding_the_host_does_not_speak_is_refused_before_routing() {
     headers.insert(CONTENT_TYPE_HEADER, "application/json");
 
     let reply = router()
-        .route(
-            "decider.trogonai.scheduler.schedules.v1.CreateSchedule",
-            Vec::new(),
-            Some(&headers),
-        )
+        .route(&request(CREATE_SCHEDULE).encode_to_vec(), Some(&headers))
         .expect_err("json is not a decider command encoding");
 
     assert_eq!(
@@ -151,15 +152,13 @@ fn an_encoding_the_host_does_not_speak_is_refused_before_routing() {
 }
 
 #[test]
-fn an_unparseable_header_outranks_an_unroutable_subject() {
-    let mut headers = HeaderMap::new();
-    headers.insert(TROGON_COMMAND_ID_HEADER, "not-a-uuid");
-
+fn an_unparseable_command_id_outranks_an_unroutable_command_type() {
     let reply = router()
         .route(
-            "decider.trogonai.scheduler.schedules.v1.CreateSchedule",
-            Vec::new(),
-            Some(&headers),
+            &request(CREATE_SCHEDULE)
+                .with_command_id("not-a-uuid".to_owned())
+                .encode_to_vec(),
+            None,
         )
         .expect_err("a malformed command id is not a command");
 
@@ -172,32 +171,30 @@ fn an_unparseable_header_outranks_an_unroutable_subject() {
 
 #[test]
 fn no_routing_failure_ever_reports_as_a_decision() {
-    let subjects = [
-        "decider.trogonai.scheduler.schedules.v1.CreateSchedule",
-        "elsewhere.some.Command",
-        DEFAULT_SUBJECT_PREFIX,
+    let payloads = [
+        request(CREATE_SCHEDULE).encode_to_vec(),
+        request("not-a-type-url").encode_to_vec(),
+        DecideRequest::default().encode_to_vec(),
+        vec![0xff, 0xff, 0xff, 0xff],
     ];
 
-    for subject in subjects {
+    for payload in &payloads {
         let reply = router()
-            .route(subject, Vec::new(), None)
+            .route(payload, None)
             .expect_err("nothing routes in an empty registry");
 
-        assert_eq!(
-            reply.header_value(),
-            DecisionOutcome::Faulted.as_str(),
-            "a header that disagreed with the body would meter '{subject}' as something the caller never saw"
+        assert!(
+            reply.service_error_status().is_some(),
+            "a command the host never ran has to answer on the error channel, or micro's num_errors stops tracking whether this host is working"
         );
+        assert_eq!(reply.decision(), DecisionOutcome::Faulted);
     }
 }
 
 #[test]
-fn the_router_exposes_the_projection_and_the_routable_set_it_reads() {
-    let router = router();
-
-    assert_eq!(router.subjects().prefix().as_str(), DEFAULT_SUBJECT_PREFIX);
+fn the_router_exposes_the_routable_set_it_reads() {
     assert!(
-        router.registry().routes().is_empty(),
+        router().registry().routes().is_empty(),
         "an empty registry claims nothing"
     );
 }

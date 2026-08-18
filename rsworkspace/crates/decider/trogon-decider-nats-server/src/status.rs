@@ -1,4 +1,4 @@
-//! The `google.rpc.Status` bodies every non-decided outcome carries.
+//! The `google.rpc.Status` bodies every outcome but an acceptance carries.
 //!
 //! [ADR#0016](../../../../../docs/adr/0016-protobuf-rpc-over-nats-micro-binding.md)
 //! fixes the shape of an error body for the whole platform: one complete
@@ -7,11 +7,11 @@
 //! that shape, and it is deliberately the only place in the host that decides
 //! what code a failure reports as.
 //!
-//! What the decider adds on top is the arm, not the shape. 0016 keeps defined
-//! business outcomes off the micro error channel so `num_errors` stays a health
-//! signal, and ADR#0057 keeps them off it by carrying every outcome as an arm
-//! of one `CommandOutcome`. A rejection is still a `Status`; it is just not a
-//! service error.
+//! What the decider adds on top is where the `Status` travels, not its shape.
+//! 0016 keeps defined business outcomes off the micro error channel so
+//! `num_errors` stays a health signal, so a rejection's `Status` rides in the
+//! `Decide` response body while a fault's rides on the error channel. Both are
+//! built here and both are a `Status`; only one of them is a service error.
 
 use crate::constants::{CONCURRENCY_QUOTA_METRIC, DECIDER_ERROR_DOMAIN};
 use buffa_types::google::protobuf::Any;

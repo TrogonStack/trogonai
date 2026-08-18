@@ -4,9 +4,9 @@
 /// The reasons the decider host itself can report, as annotations rather than
 /// as prose.
 ///
-/// Every message here is schema-only. None is referenced by `CommandOutcome`,
-/// none is ever encoded, and a caller will never decode one. What travels is
-/// the `google.rpc.Status` the arm already carries, per
+/// Every message here is schema-only. None is referenced by a field, none is
+/// ever encoded, and a caller will never decode one. What travels is the
+/// `google.rpc.Status` on the error channel, per
 /// [ADR#0016](../../../../docs/adr/0016-protobuf-rpc-over-nats-micro-binding.md);
 /// these declare what the host puts in it, in a form a reader does not have to
 /// take on trust from a comment.
@@ -16,9 +16,9 @@
 /// did not name the failing subject or revision would cost an operator the one
 /// detail worth reading.
 ///
-/// The `rejected` arm has no template here on purpose: its domain is the module
-/// that owns the code space and its reason is the code that module chose, so
-/// neither is the host's to declare.
+/// `DecideResponse.rejected` has no template here on purpose: its domain is the
+/// module that owns the code space and its reason is the code that module chose,
+/// so neither is the host's to declare.
 ///
 /// No activated module claims the command type the subject names.
 #[derive(Clone, Debug, Default)]

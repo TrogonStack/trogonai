@@ -35,35 +35,45 @@ out an otherwise obvious choice:
   subscription set on every rollout.
 - **The command type is already a protobuf type URL.** `CommandType` is exactly
   the `type.googleapis.com/...` URL the guest declares, and the registry is keyed
-  by it. A subject scheme that names commands some other way needs a mapping
-  table that can drift from the registry.
+  by it. Any scheme that names commands some other way needs a mapping table that
+  can drift from the registry.
 - **Durability already has an owner.** A decider command's durable effect is the
   events it appends to JetStream. Nothing about the request is the source of
   truth.
 
 ## Decision
 
-### 1. A decider command host is not a NATS micro service
+### 1. A decider command host serves an annotated protobuf service
 
-It is a core NATS request/reply responder with the contract below.
+The binding follows [ADR#0016](./0016-protobuf-rpc-over-nats-micro-binding.md)
+rather than departing from it. There is an annotated `service`, it is the
+canonical wire contract, and its method set is fixed.
 
-This is a deliberate departure from [ADR#0016](./0016-protobuf-rpc-over-nats-micro-binding.md)
-rather than an oversight, and the reason is 0016's own invariant: "The registered
-micro service exposes exactly the annotated `service`'s methods as endpoints." A
-decider host cannot satisfy it. There is no annotated `service` to enumerate, and
-the set it would enumerate instead is whatever modules are activated at this
-instant, which changes under `activate` and `retire`. Registering as a micro
-service would mean either freezing the routable set at startup (giving up runtime
-rollout, the feature the registry handle exists for) or mutating a micro service's
-endpoint set at runtime and reporting a discovery record that is a snapshot of a
-moving target.
+The apparent obstacle was 0016's endpoint invariant: "the registered micro
+service must expose exactly its methods as endpoints." A decider cannot enumerate
+its command types as methods, because which types are routable changes under
+`activate` and `retire` while the process runs, and freezing that set into a
+descriptor would cost the runtime rollout the registry handle exists for.
 
-What 0016 provides beyond the substrate is discovery, per-endpoint stats, and a
-standard error channel. Discovery of decider commands is answered by the registry
-(`DeciderRegistryHandle::routes` reports every routed command type with the
-module name and version serving it) and is exposed operationally rather than
-through `$SRV`. Stats and errors are covered by the observability rule in section 7
-and the outcome taxonomy in section 5.
+The resolution is that the open set does not have to live in the method set. One
+method, `Decide`, takes the command as a `google.protobuf.Any` in its request.
+The descriptor is static, the endpoint set is static, and what varies at run time
+varies inside a field. 0016's invariant holds exactly, and the caller gets what a
+generated client gives it: the subject, the request and response types, and the
+error convention all read off one descriptor.
+
+Discovery of *which commands* are routable is still the registry's answer, not
+the descriptor's. `DeciderRegistryHandle::routes` reports every routed command
+type with the module name and version serving it, exposed operationally. The
+descriptor answers what the endpoint is; the registry answers what it will accept
+today.
+
+The host takes the endpoint's subscription directly rather than through
+`async-nats`' micro service builder. That builder's error path publishes an empty
+body, and 0016 requires the error body to be one complete `google.rpc.Status`;
+the host cannot satisfy both. It therefore sets `Nats-Service-Error-Code` and
+`Nats-Service-Error` itself, per section 5, and does not currently answer `$SRV`
+discovery. That is a gap in the operational surface, not in the wire contract.
 
 ### 2. Commands are core request/reply, never a JetStream submission
 
@@ -77,102 +87,113 @@ original caller cannot observe. A caller that needs durable submission puts its
 own work queue in front of the host and drives this binding from its consumer;
 that keeps the retry policy with the party that knows the business deadline.
 
-### 3. The subject is the command's protobuf type
+### 3. The surface is a protobuf service with one method
+
+The wire contract is `trogonai.decider.v1.DeciderService`, declared in
+`proto/trogonai/decider/v1/decider_service.proto` and annotated with
+`trogon.nats.micro.v1alpha1.service`. Per
+[ADR#0016](./0016-protobuf-rpc-over-nats-micro-binding.md) the proto `service` is
+the canonical contract, so a client derives the subject, the request type, the
+response type, and the error convention from the descriptor rather than from this
+document.
+
+The service declares one `rpc`, and therefore exposes one endpoint:
 
 ```text
-{prefix}.{proto_full_name}
+{prefix}.DeciderService.Decide
 ```
 
 `prefix` is the configured subject namespace, a dotted NATS token defaulting to
-`decider`. `proto_full_name` is the command message's fully qualified protobuf
-name: the `CommandType` type URL with its `type.googleapis.com/` prefix stripped.
+`decider`, which yields `decider.DeciderService.Decide`.
 
-```text
-decider.trogonai.scheduler.schedules.v1.CreateSchedule
-```
+**One method rather than one per command type.** 0016 derives an endpoint from
+each `rpc`, which requires the method set to be known when the schema is written.
+A decider's command set is not: it is whatever the modules activated at run time
+declare. Naming the command inside the request is what lets a fixed descriptor
+carry an open set, and it is what makes runtime activation work without a
+subscription-management protocol. A host with one subscription per command type
+would have to add and drop subscriptions in lockstep with every `activate` and
+`retire`, and a rollout would have a window in which the routing table and the
+subscription set disagree.
 
-The projection is total and bidirectional by construction, because it is the
-identity on the type URL's message name. There is no mapping table to publish and
-nothing that can drift from the registry: the host recovers the exact
-`CommandType` it routes on from the subject alone, and rejects a subject whose
-recovered command type no activation claims.
+**The subject names the service, never the module and never the command.** A
+module version swap is invisible to callers by design (see
+`DeciderRegistryHandle`'s rollout semantics), and putting the module or the
+command in the subject would publish either a deployment detail or an open set as
+part of the caller's contract.
 
-Following [ADR#0016](./0016-protobuf-rpc-over-nats-micro-binding.md), the subject
-carries no `v{major}` binding token and its terminal is not lower_snake. The
-command's own proto package already carries its version (`...schedules.v1.`), and
-a binding-version token would version the routing contract a second time in the
-same subject. The terminal is the protobuf message name verbatim, PascalCase
-included, because any casing transformation would break bidirectionality for the
-message names that differ only by word boundary.
-
-**A responder subscribes to the whole subtree.** One `{prefix}.>` subscription on
-a queue group covers every command type, including types activated after the
-subscription was created. This is not an optimization: it is what makes runtime
-module activation work without a subscription-management protocol. A responder
-with one subscription per command type would have to add and drop subscriptions
-in lockstep with every `activate` and `retire`, and a rollout would have a window
-in which the routing table and the subscription set disagree.
-
-**The subject names the command, never the module.** Neither the module name nor
-the module version appears in it. A module version swap is invisible to callers
-by design (see `DeciderRegistryHandle`'s rollout semantics), and putting either in
-the subject would publish a deployment detail as part of the caller's contract and
-break every caller on rollout.
-
-Subjects are checked against
+The endpoint subject is checked at startup against
 [ADR#0055](./0055-nats-subject-design-jsonrpc-bindings.md)'s shape and limit rules
-with `trogon_nats::validate_published_subject`, which is where the token, byte,
-and layout budgets live. The casing rule does not apply, per the paragraph above,
-which is why the check is the published-subject pass rather than the pattern pass.
+with `trogon_nats::validate_published_subject`. A host whose configured prefix
+pushes the subject past those limits can never receive a command, so it refuses to
+start rather than serving a subject nobody can reach. The casing rule does not
+apply: per 0016 the terminal is the method name verbatim, PascalCase included.
 
-### 4. The request is the encoded command message
+### 4. The request is one `DecideRequest`
 
-The request payload is the command message's protobuf encoding with
-`Content-Type: application/protobuf`. The message **type** comes from the subject
-and is never parsed from the body, matching
-[ADR#0016](./0016-protobuf-rpc-over-nats-micro-binding.md)'s invariant. The host
-constructs the WIT `command-envelope` by pairing the subject-derived type with the
-request bytes; it does not decode the payload, because only the guest knows the
-schema.
+The request payload is a `trogonai.decider.v1.DecideRequest` with
+`Content-Type: application/protobuf`, which is the request type the endpoint's
+method declares, so 0016's invariant that the request type is a property of the
+endpoint holds.
 
-Two headers carry what the payload cannot:
-
-| Header | Meaning |
+| Field | Meaning |
 | --- | --- |
-| `Trogon-Command-Id` | UUID identifying **this command**, not this delivery attempt. Makes retries idempotent (see section 6). Optional. |
-| `Trogon-Expected-Revision` | The stream revision the caller believes it is acting on, as a decimal `u64`. Strengthens the module's declared write precondition; can never weaken it. Optional. |
+| `command` | The command itself as a `google.protobuf.Any`. Required. |
+| `command_id` | UUID identifying **this command**, not this delivery attempt. Makes retries idempotent (see section 6). Optional. |
+| `expected_revision` | The stream revision the caller believes it is acting on. Strengthens the module's declared write precondition; can never weaken it. Optional, and never zero. |
 
-Both are optional and both are rejected with `InvalidRequest` when present but
-unparseable, rather than silently ignored: a caller that sends an idempotency key
-the host drops would believe it has a guarantee it does not have.
+`Any` rather than a type-and-bytes pair, because that pair is what `Any` already
+is. Which module owns a command is resolved from `command.type_url`, and the host
+never decodes `command.value`: it pairs the type with the bytes to build the WIT
+`command-envelope`, because only the guest knows the schema behind them.
+
+A `command_id` that is present and not a UUID fails the command rather than being
+ignored: a caller whose idempotency key the host dropped would believe it has a
+guarantee it does not have. An `expected_revision` of zero is likewise refused.
+Zero would mean "I expect no events", which is the module's
+`WritePrecondition::NoStream` to declare rather than a revision for a caller to
+assert, and accepting it would let a caller express a guard the module never
+agreed to.
 
 Trace context propagation follows
 [ADR#0042](./0042-nats-trace-context-and-message-path-tracing.md).
 
-### 5. Every reply is one `CommandOutcome`
+### 5. A reply is a `DecideResponse` or a service error
 
-The reply payload is always a `trogonai.decider.v1.CommandOutcome`, whose `oneof`
-has exactly five arms: `decided`, `rejected`, `faulted`, `shed`, `denied`. There
-is no separate success body and error body, and there is no reply-is-an-error
-header convention. A caller decodes once and matches, and no outcome can be added
-later without every caller's match seeing it.
+There are exactly two reply shapes, and
+[ADR#0016](./0016-protobuf-rpc-over-nats-micro-binding.md) already decides which
+one a caller is holding: **a reply is an error if, and only if,
+`Nats-Service-Error-Code` is present.** This binding adds no discriminant of its
+own, because a second one would be free to disagree with the first.
 
-The `Trogon-Decider-Outcome` reply header carries the same discriminant so
-middleware can route and meter without decoding the body. **Its value space is
-the `decision_outcome` telemetry attribute's** (`decided`, `rejected`, `faulted`,
-`shed`, `denied`), so the wire vocabulary and the trace vocabulary are one
-vocabulary and cannot drift. On disagreement between header and body the body is authoritative,
-the inverse of 0016's rule, because here the body is the typed contract and the
-header is the derived summary.
+A command that **ran to completion** answers with the method's response type,
+`trogonai.decider.v1.DecideResponse`, whose `oneof` has two arms:
 
-**Every arm but `decided` is a `google.rpc.Status`**, per
-[ADR#0016](./0016-protobuf-rpc-over-nats-micro-binding.md) section 3: a canonical
-`google.rpc.Code`, a human-readable message, and standard `google.rpc` detail
-messages in `details`. What this binding adds is the arm, not the shape. 0016
-fixes what an error body looks like platform-wide and keeps defined business
-outcomes off the micro error channel so `num_errors` stays a health signal; the
-`oneof` is how they stay off it here. A rejection is still a `Status`, and it is
-still not a service error.
+- `accepted`, the command was decided and its events appended;
+- `rejected`, the module understood the command and refused it on domain rules.
+
+A command the host **could not execute at all** answers on the error channel:
+one complete `google.rpc.Status` as the body, with `Status.code` mirrored to
+`Nats-Service-Error-Code` and `Status.message` to `Nats-Service-Error`. Per 0016
+the headers are authoritative on any disagreement, so the host builds both from
+the one `Status` value rather than deriving them independently.
+
+The split follows 0016 section 3 directly: a defined application-level negative
+outcome that still executed successfully belongs in the typed response body, so
+that `num_errors` stays a health signal rather than a business-outcome counter. A
+service that refuses invalid commands all day is healthy. A service that cannot
+reach storage is not.
+
+The host still records the finer `decision_outcome` telemetry attribute
+(`decided`, `rejected`, `faulted`, `shed`, `denied`) on its own spans. That is a
+trace vocabulary and not a wire one: a caller reads the error header and the
+response arm, never a discriminant the host also publishes.
+
+**Every outcome but an acceptance is a `google.rpc.Status`**, per 0016 section 3:
+a canonical `google.rpc.Code`, a human-readable message, and standard `google.rpc`
+detail messages in `details`. What this binding decides is which channel the
+`Status` travels on, not what it looks like. A rejection is still a `Status`; it is
+just not a service error.
 
 Every status carries a `google.rpc.ErrorInfo`. Its `reason` is the stable,
 machine-readable identifier a caller branches on, and its `domain` says who owns
@@ -184,7 +205,7 @@ rejection code would be indistinguishable on the wire.
 `details` is a `repeated google.protobuf.Any` with no ordering guarantee. A
 reader locates a detail by unpacking on its type URL, never by indexing.
 
-`decided` carries the appended events themselves, as `google.protobuf.Any`
+`accepted` carries the appended events themselves, as `google.protobuf.Any`
 payloads in append order, each with the event id it was appended under. A caller
 that must act on what it just decided, such as one warming a cache from its own
 write, would otherwise have to wait for its own events to come back around off
@@ -197,7 +218,7 @@ The id is what makes the reply and the event stream safe to consume together. It
 is the same value the host publishes as the event's `Nats-Msg-Id`, so a caller
 that applies this reply and also tails the stream sees one event twice under one
 identity and applies it once. A stream position could not serve here: the
-`stream_position` this arm carries is the high watermark of the append as a
+`stream_position` that arm carries is the high watermark of the append as a
 whole, not a position per event, and per `AppendStreamResponse`'s own contract it
 is neither a next-expected-version nor safe to do arithmetic on. It is carried so
 a caller can read its own write, and nothing more.
@@ -208,7 +229,7 @@ is. The one difference from the form the events carry on the stream is the
 `Trogon-Event-Type` header does not; the host applies it at the reply boundary
 and nowhere else.
 
-`rejected` is a reply arm, not an error channel. A module refusing an invalid
+`rejected` is a response arm, not an error channel. A module refusing an invalid
 command is the decider pattern working: the host executed correctly and the domain
 answered no. Counting that as a service error would turn a health signal into a
 business-outcome counter, which is the failure
@@ -217,17 +238,18 @@ Its code is `FAILED_PRECONDITION` rather than `INVALID_ARGUMENT`, which is the
 distinction `google.rpc.Code` already draws: the command is well-formed and would
 succeed against a different stream state.
 
-`shed` is its own arm rather than a fault for the same reason in the opposite
-direction: per
+A shed command is a service error rather than a response arm, and for the reason
+that is the mirror image of a rejection's: per
 [ADR#0028](./0028-decider-admission-control-and-backpressure.md) a shed command
-was refused before anything was read, decided, or appended. The host is full, not
-broken, and the caller's correct response is backoff rather than escalation. It
-is `RESOURCE_EXHAUSTED` and carries a `google.rpc.QuotaFailure` naming the limit
-it contended for as a number, so the backoff can be sized rather than guessed.
-The violation's `subject` is empty: the limit is the host's, so nothing about who
+was refused before anything was read, decided, or appended, so no execution ever
+happened for a response to describe. The host is full, not broken, and the
+caller's correct response is backoff rather than escalation. It is
+`RESOURCE_EXHAUSTED` and carries a `google.rpc.QuotaFailure` naming the limit it
+contended for as a number, so the backoff can be sized rather than guessed. The
+violation's `subject` is empty: the limit is the host's, so nothing about who
 asked determined that the answer was no.
 
-`denied` is likewise its own arm rather than a fault. Per
+A denial is a service error for the same reason. Per
 [ADR#0026](./0026-command-authorization-principal.md) a denied command was
 refused before anything was read, decided, or appended, because the submitting
 principal was absent or the host's authorizer refused it. Nothing is broken and
@@ -240,7 +262,8 @@ different ones. The message is only what the authorizer gave, written for a call
 to read and not to branch on: a denial that named the rule that refused it would
 be telling an unauthorized caller how to become an authorized one.
 
-`faulted` is a single `Status` whose class is read off `ErrorInfo.reason`. A
+Every service error is a single `Status` whose class is read off
+`ErrorInfo.reason`. A
 reason rather than a nested `oneof`, because a code space is what a caller
 branches on and `google.rpc` already publishes the convention for one; a
 per-class message would also be a second discriminant alongside the code, free to
@@ -257,20 +280,20 @@ module, not to the host.
 
 The mapping from the runtime's error taxonomy is total:
 
-| `WasmCommandError` | Arm | `google.rpc.Code` | `ErrorInfo.reason` | Retry |
+| `WasmCommandError` | Reply | `google.rpc.Code` | `ErrorInfo.reason` | Retry |
 | --- | --- | --- | --- | --- |
-| `Rejected` | `rejected` | `FAILED_PRECONDITION` | the module's own code | No; the command is wrong, not the moment |
-| `Overloaded` | `shed` | `RESOURCE_EXHAUSTED` | `ADMISSION_LIMIT_REACHED` | Yes, after backoff |
-| `Unauthorized::MissingPrincipal` | `denied` | `UNAUTHENTICATED` | `PRINCIPAL_MISSING` | No; not without credentials |
-| `Unauthorized::Denied` | `denied` | `PERMISSION_DENIED` | `PRINCIPAL_UNAUTHORIZED` | No; not by this principal |
-| unrouted command type | `faulted` | `UNIMPLEMENTED` | `COMMAND_TYPE_UNROUTABLE` | Only after a module claiming it activates |
-| undecodable subject, unparseable header | `faulted` | `INVALID_ARGUMENT` | `COMMAND_REQUEST_MALFORMED` | No |
-| `PreconditionConflict` | `faulted` | `INVALID_ARGUMENT` | `EXPECTED_REVISION_UNSATISFIABLE` | No; no stream state satisfies the revision the caller asserted |
-| optimistic concurrency conflict | `faulted` | `ABORTED` | `STREAM_WRITE_CONFLICT` | Yes; a retry replays the stream as it now stands |
-| `Faulted`, `Trap`, `EmptyDecision`, `Evolve`, `StreamId`, `Instantiate` | `faulted` | `INTERNAL` | `GUEST_FAULT` | No; a retry repeats the same guest call |
-| `DeadlineExceeded` | `faulted` | `DEADLINE_EXCEEDED` | `GUEST_DEADLINE_EXCEEDED` | Only once the load that slowed the guest has passed |
-| `ReadSnapshot`, `ReadStream`, `Append` | `faulted` | `UNAVAILABLE` | `STORAGE_UNAVAILABLE` | Yes, once storage recovers |
-| `ReplayLimitExceeded`, `SnapshotAheadOfStream`, `ReadAfterOverflow`, `Blocking` | `faulted` | `INTERNAL` | `HOST_INTERNAL` | No |
+| `Rejected` | `DecideResponse.rejected` | `FAILED_PRECONDITION` | the module's own code | No; the command is wrong, not the moment |
+| `Overloaded` | service error | `RESOURCE_EXHAUSTED` | `ADMISSION_LIMIT_REACHED` | Yes, after backoff |
+| `Unauthorized::MissingPrincipal` | service error | `UNAUTHENTICATED` | `PRINCIPAL_MISSING` | No; not without credentials |
+| `Unauthorized::Denied` | service error | `PERMISSION_DENIED` | `PRINCIPAL_UNAUTHORIZED` | No; not by this principal |
+| unrouted command type | service error | `UNIMPLEMENTED` | `COMMAND_TYPE_UNROUTABLE` | Only after a module claiming it activates |
+| undecodable request, unparseable field | service error | `INVALID_ARGUMENT` | `COMMAND_REQUEST_MALFORMED` | No |
+| `PreconditionConflict` | service error | `INVALID_ARGUMENT` | `EXPECTED_REVISION_UNSATISFIABLE` | No; no stream state satisfies the revision the caller asserted |
+| optimistic concurrency conflict | service error | `ABORTED` | `STREAM_WRITE_CONFLICT` | Yes; a retry replays the stream as it now stands |
+| `Faulted`, `Trap`, `EmptyDecision`, `Evolve`, `StreamId`, `Instantiate` | service error | `INTERNAL` | `GUEST_FAULT` | No; a retry repeats the same guest call |
+| `DeadlineExceeded` | service error | `DEADLINE_EXCEEDED` | `GUEST_DEADLINE_EXCEEDED` | Only once the load that slowed the guest has passed |
+| `ReadSnapshot`, `ReadStream`, `Append` | service error | `UNAVAILABLE` | `STORAGE_UNAVAILABLE` | Yes, once storage recovers |
+| `ReplayLimitExceeded`, `SnapshotAheadOfStream`, `ReadAfterOverflow`, `Blocking` | service error | `INTERNAL` | `HOST_INTERNAL` | No |
 
 Where an error has a cause chain, it travels as `google.rpc.DebugInfo`, whose
 `stack_entries` is ordered outermost cause first. A guest's chain crossed the WIT
@@ -285,14 +308,15 @@ exists to make safe.
 
 ### 6. Idempotency is the caller's key, carried end to end
 
-`Trogon-Command-Id` identifies the command, so the same value must be reused
-across retries of one logical command and must differ between distinct commands.
+`DecideRequest.command_id` identifies the command, so the same value must be
+reused across retries of one logical command and must differ between distinct
+commands.
 The host turns it into a `CommandId`, from which the execution derives each
 event's id deterministically, which becomes the event's `Nats-Msg-Id` and is
 deduplicated by the events stream. A retry of a command that already appended its
 events therefore appends nothing the second time.
 
-Absent the header, event ids are freshly generated and a retry appends a second
+Absent the field, event ids are freshly generated and a retry appends a second
 copy of the events. That is the honest default: the host cannot invent an
 identity for a command whose caller did not give it one, and silently making
 retries "probably fine" would hide the one case where they are not.
@@ -307,66 +331,63 @@ does.
 A host records the spans and attributes the runtime already defines
 (`command_type`, `decision_outcome`, `guest_phase`, the replay and snapshot
 metrics), rather than introducing a transport-specific parallel vocabulary. The
-subject is derived from `command_type`, so recording both would be recording the
-same fact twice.
+subject is one value for every command this host serves, so recording it
+alongside `command_type` would say nothing `command_type` does not.
 
 ## Invariants
 
-- A responder covers its command surface with one `{prefix}.>` subscription;
-  per-command-type subscriptions are never used, because they cannot track
-  runtime activation.
-- The command type is recovered from the subject and never from the request body.
-  The host does not decode a command payload.
-- Neither the module name nor the module version appears in a command subject.
-- Every reply body is exactly one `CommandOutcome`; there is no alternative
-  success or error body, and an outcome is never signalled by an absent or
-  malformed reply.
-- `Trogon-Decider-Outcome` and the `decision_outcome` attribute draw from one
-  value space. Adding an outcome means adding it to both, in the semconv registry
-  and in `CommandOutcome`.
-- A domain rejection is `rejected`, never a fault. A shed is `shed`, never a
-  fault.
-- Every arm but `decided` is a `google.rpc.Status` carrying a canonical
+- A responder covers its command surface with one subscription, on the endpoint
+  subject the descriptor names; per-command-type subscriptions are never used,
+  because they cannot track runtime activation.
+- The command type is read from `DecideRequest.command.type_url`. The host never
+  decodes `command.value`.
+- Neither the module name, the module version, nor the command type appears in
+  the endpoint subject.
+- A reply is an error if, and only if, `Nats-Service-Error-Code` is present. A
+  reply is never both a `DecideResponse` and a `Status`, and an outcome is never
+  signalled by an absent or malformed reply.
+- On a service error, the headers and the body are built from one `Status` value,
+  so they cannot disagree about what happened.
+- A domain rejection is a `DecideResponse` arm, never a service error. A shed and
+  a denial are service errors, never response arms.
+- Every outcome but an acceptance is a `google.rpc.Status` carrying a canonical
   `google.rpc.Code` and a `google.rpc.ErrorInfo`. The host defines no error
-  message of its own and no `Status` in a non-`decided` arm reports `OK`.
+  message of its own and no such `Status` reports `OK`.
 - `ErrorInfo.domain` is `trogonai.decider.v1` for everything the host decided and
   the module's name for a rejection. A host never reports a module's rejection
   code under its own domain.
 - A caller reads `Status.details` by unpacking on a type URL. Nothing about the
   order or the count of that list is promised.
-- A present-but-unparseable `Trogon-Command-Id` or `Trogon-Expected-Revision`
+- A present-but-unparseable `command_id`, or an `expected_revision` of zero,
   fails the command; neither is ever ignored.
 - Commands are core NATS. A host never acknowledges, redelivers, or dead-letters
   a command.
 
 ## Alternatives Considered
 
-### Register as a NATS micro service per [ADR#0016](./0016-protobuf-rpc-over-nats-micro-binding.md)
+### One `rpc` per command type
 
-Rejected on 0016's own endpoint invariant, as argued in section 1: the routable
-command set is not derivable from a static service descriptor because runtime
-activation changes it. Adopting micro would have cost either runtime rollout or
-the truthfulness of the discovery record. The parts of 0016 that do fit (the
-subject is derived mechanically, the type is a property of the endpoint and not
-parsed from the body, application-level negative outcomes stay out of the error
-channel) are adopted directly in sections 3, 4, and 5.
+Rejected, and it is the design 0016 would suggest if the command set were known
+when the schema is written. It is not. A method per command type puts the
+routable set in the descriptor, which means regenerating and redeploying the
+schema to activate a module, and a rollout window in which the descriptor and the
+registry disagree. `Any` in the request is what keeps the descriptor static while
+the set behind it moves.
 
-### Put the command type in the request body instead of the subject
+### Put the command type in the subject instead of the request body
 
-Rejected. One subject for all commands makes subject-prefix authorization
-all-or-nothing: an account granted the right to issue any command is granted the
-right to issue every command. Deriving the subject from the proto package instead
-means `decider.trogonai.scheduler.schedules.v1.>` is a grantable capability that
-means exactly "the scheduler's commands". It also puts routing behind a decode,
-so a malformed body becomes unroutable rather than merely undecidable.
+Rejected, and this is the design an earlier draft of this ADR adopted. Its
+argument was subject-prefix authorization: `decider.trogonai.scheduler.schedules.v1.>`
+is a grantable capability meaning exactly "the scheduler's commands", which one
+subject per service cannot express.
 
-### Lower_snake the subject terminal to satisfy [ADR#0055](./0055-nats-subject-design-jsonrpc-bindings.md)'s casing rule
-
-Rejected. 0055 does not govern this binding, and the transformation is not
-injective: `CreateSchedule` and `Createschedule` both project to
-`create_schedule`, so the mapping stops being bidirectional exactly where 0055's
-own method-to-terminal rule requires bidirectionality. The subject stays the
-protobuf name verbatim.
+The cost is that it is not the 0016 binding. A generated client cannot reach it,
+because nothing in a descriptor says the subject encodes the request type; every
+caller needs a hand-written client and a copy of the subject rule. Paying that on
+every caller, forever, to move one authorization decision from the host to the
+broker is the wrong trade. Per-command authorization is the host's under
+[ADR#0026](./0026-command-authorization-principal.md), where the principal is
+already known and the module's own rules are already being applied.
 
 ### Carry commands on a JetStream work queue with durable consumers
 
@@ -375,21 +396,27 @@ provides and hides retries from the caller. A deployment that wants it composes
 it in front of this binding, which keeps the retry policy where the deadline is
 known.
 
-### Model the outcome as an error channel plus a success body
+### Model every outcome as one `oneof` and keep the error channel unused
 
-Rejected. It splits one total outcome across two encodings and two decode paths,
-and it forces every intermediate to agree on which signal wins. The `oneof` makes
-the outcome set exhaustive at the type level; the header keeps the
-decode-free metering that the split encoding was there to provide.
+Rejected, and this too is what an earlier draft adopted: a five-arm
+`CommandOutcome` with `decided`, `rejected`, `faulted`, `shed`, and `denied`,
+plus a `Trogon-Decider-Outcome` header carrying the same discriminant.
+
+It reads well and it is wrong on 0016. A reply that never sets
+`Nats-Service-Error-Code` is a reply every micro-aware intermediate reads as a
+success, so a host that faulted on every request would report `num_errors: 0` and
+look healthy. The header was a second discriminant free to disagree with the
+body, which is the thing 0016 settles by making the header authoritative. And the
+supposed benefit, an exhaustive match, is only exhaustive for callers that decode
+the body, which is exactly the set of callers that did not need the header.
+
+What survives from it is the part 0016 actually asks for: a rejection stays off
+the error channel, because that outcome executed successfully.
 
 ### Define per-outcome error messages instead of `google.rpc.Status`
 
-Rejected, and this is where the binding follows
-[ADR#0016](./0016-protobuf-rpc-over-nats-micro-binding.md) rather than departing
-from it. Section 1 departs from 0016 on the registration model because a decider
-host cannot satisfy 0016's endpoint invariant. Nothing about that argument
-reaches the error body, and the two questions are independent: 0016 fixes the
-shape of an error, and this binding fixes which arm it arrives in.
+Rejected. 0016 fixes the shape of an error platform-wide; what this binding adds
+is only which channel it arrives on.
 
 A hand-rolled `CommandFaulted` / `CommandRejected` / `CommandShed` /
 `CommandDenied` family is what a first pass produced, and it cost three things.
@@ -412,18 +439,20 @@ of a caller being able to read a reply with types it already has.
   and its only additional dependency is `google.rpc`, which a caller that speaks
   any other Google-API-shaped service already has.
 - A generic protobuf error handler works on a decider reply without knowing what
-  a decider is. The arm is the only decider-specific thing a caller has to learn.
+  a decider is. The response arm is the only decider-specific thing a caller has
+  to learn.
 - Adding a fault class is now a new `ErrorInfo.reason` under an existing code,
   not a new message and not a `oneof` arm. Callers that branch on the code keep
   working; only the ones that branch on the reason see it.
 - Callers that want at-least-once submission must build it. This binding gives
   them the idempotency key that makes it safe; it does not give them the queue.
-- `Trogon-Decider-Outcome` and the semconv `decision_outcome` member list are now
-  coupled. A change to the outcome set is a change to the semconv registry, the
-  generated attribute enum, and `command_outcome.proto` together.
-- Because subjects are derived from proto packages, an authorization policy
-  written against them stays correct as modules are added, and only changes when
-  a new proto package appears.
+- `decision_outcome` is now telemetry only. It no longer has to match anything on
+  the wire, so an outcome can be split for an operator's benefit without being a
+  breaking change for a caller.
+- An authorization policy written against the subject can no longer distinguish
+  one command type from another, because there is one subject. Per-command
+  authorization is the host's, via [ADR#0026](./0026-command-authorization-principal.md),
+  and not the broker's.
 
 ## Related ADRs
 

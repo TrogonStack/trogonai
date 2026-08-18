@@ -293,9 +293,9 @@ four implementations.
       before the first read, and both do it outside the conflict-retry loop, so a denied command
       costs one call and a command that conflicts three times still answers to one decision.
       `decision_outcome` gained a `denied` value, which per
-      [ADR#0057](./docs/adr/0057-decider-command-nats-binding.md)'s own rule that the wire and
-      trace vocabularies are one vocabulary forced a fifth `CommandOutcome` arm, `CommandDenied`,
-      rather than folding a denial into `faulted.internal` and reporting it as a fault.
+      [ADR#0057](./docs/adr/0057-decider-command-nats-binding.md) is reported as its own outcome,
+      with `UNAUTHENTICATED` and `PERMISSION_DENIED` kept apart, rather than folded into
+      `HOST_INTERNAL` and reported as a fault.
 
       The crate ships no rule and no claim vocabulary. `WithoutAuthorization` is named for the
       absence of a decision rather than for a permissive one, so an unconfigured execution
@@ -479,9 +479,9 @@ Where the real correctness bugs live.
       Shipped as `proto/trogonai/decider/v1/faults.proto`: one annotated message per host-owned
       reason, eleven in all, each declaring its domain, reason, code, and visibility. They are
       schema-only. Nothing references them, nothing encodes them, and the wire still carries the
-      plain `google.rpc.Status` the arm always did, which is the whole point: the templates document
-      the contract the host already honors instead of becoming a second way to transport it. The
-      prose on `CommandOutcome`'s arms was cut back to what the templates cannot carry, and the
+      plain `google.rpc.Status` the reply always did, which is the whole point: the templates
+      document the contract the host already honors instead of becoming a second way to transport
+      it. The prose on the outcomes was cut back to what the templates cannot carry, and the
       [ADR#0057](./docs/adr/0057-decider-command-nats-binding.md) mapping table now points at them.
 
       `rejected` is deliberately untemplated: its domain is the module owning the code space and its
@@ -578,17 +578,19 @@ This layer is last **by dependency**, not by importance - it is the single chang
 WASM path from a library into a product. Everything below it exists to make it correct on the first
 try.
 
-- [x] `P0` **Add a `trogon-decider-nats-server` host crate.** *(landed)* One `{prefix}.>` core
-      request/reply subscription, routed through `DeciderRegistryHandle`, executed against a
-      per-module `JetStreamStore`, answered with a single `trogonai.decider.v1.CommandOutcome`.
-      The binding is written down as [ADR#0057](./docs/adr/0057-decider-command-nats-binding.md),
-      which is **`draft` and authored by the implementer**: per [ADR#0000](./docs/adr/0000-adr-process.md) it needs signoff from
-      someone else, and its deliberate departure from
-      [ADR#0016](./docs/adr/0016-protobuf-rpc-over-nats-micro-binding.md) (not a NATS micro service,
-      because `activate`/`retire` break the static-endpoint invariant) is the decision most in need
-      of review. Two known limits: there is no control plane for runtime activation yet, so the
-      per-module store map is built once at startup from the configured modules; and startup refuses
-      if an existing events stream does not already cover a newly configured module's subtree.
+- [x] `P0` **Add a `trogon-decider-nats-server` host crate.** *(landed)* One core request/reply
+      subscription on the `Decide` endpoint of `trogonai.decider.v1.DeciderService`, routed through
+      `DeciderRegistryHandle`, executed against a per-module `JetStreamStore`, answered with a
+      `DecideResponse` or, per
+      [ADR#0016](./docs/adr/0016-protobuf-rpc-over-nats-micro-binding.md), a `google.rpc.Status`
+      under `Nats-Service-Error-Code`. The binding is written down as
+      [ADR#0057](./docs/adr/0057-decider-command-nats-binding.md), which is **`draft` and authored
+      by the implementer**: per [ADR#0000](./docs/adr/0000-adr-process.md) it needs signoff from
+      someone else. Three known limits: there is no control plane for runtime activation yet, so the
+      per-module store map is built once at startup from the configured modules; startup refuses if
+      an existing events stream does not already cover a newly configured module's subtree; and the
+      host does not answer `$SRV` discovery, because `async-nats`' micro builder publishes an empty
+      error body where 0016 requires a complete `Status`.
 - [x] `P0` **Issue #465 - give `WasmDeciderModule::load` a byte source.** *(landed)* Written down as
       [ADR#0058](./docs/adr/0058-decider-module-distribution.md), also **`draft` and authored by the
       implementer**. A module is now named by a `ModuleReference` (`{name}@{version}`), never by a

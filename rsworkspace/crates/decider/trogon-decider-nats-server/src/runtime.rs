@@ -5,8 +5,8 @@
 //! claiming one command type, an events stream that does not capture a
 //! module's subtree) is resolved in [`DeciderHost::start`] and refuses to
 //! produce a host. What remains at request time is only what a caller can get
-//! wrong, and every one of those answers with a `CommandOutcome` rather than
-//! with silence.
+//! wrong, and every one of those answers with a reply rather than with
+//! silence.
 
 // The `JetStreamStore` read and append impls are compiled out under coverage,
 // so the one method that executes against them is stubbed there and the
@@ -29,13 +29,14 @@ use trogon_decider_runtime::{
     ConcurrencyAdmission, DrainableSnapshotTaskScheduler, ReplayLimit, SnapshotTaskScheduler as _,
 };
 use trogon_decider_wasm_runtime::{
-    DeciderRegistry, DeciderRegistryHandle, LoadWasmDeciderError, ModuleName, RegisterModuleError,
+    CommandType, DeciderRegistry, DeciderRegistryHandle, LoadWasmDeciderError, ModuleName, RegisterModuleError,
     WasmCommandExecution, WasmDeciderEngine, WasmDeciderModule, WasmEngineConfig, WasmEngineError,
 };
 
-use crate::command_subject::CommandSubjects;
 use crate::config::ServerConfig;
-use crate::constants::{CONTENT_TYPE_HEADER, PROTOBUF_CONTENT_TYPE, TROGON_DECIDER_OUTCOME_HEADER};
+use crate::constants::{
+    CONTENT_TYPE_HEADER, NATS_SERVICE_ERROR_CODE_HEADER, NATS_SERVICE_ERROR_HEADER, PROTOBUF_CONTENT_TYPE,
+};
 use crate::event_subject::{EventSubjectError, ModuleEventSubjects};
 use crate::module_reference::ModuleReference;
 use crate::module_source::ModuleSource;
@@ -47,14 +48,13 @@ use crate::request::CommandRequest;
 /// Separate from the execution side so every way a request can fail to route
 /// is exercisable without a NATS server or a loaded module.
 pub struct CommandRouter {
-    subjects: CommandSubjects,
     registry: Arc<DeciderRegistryHandle>,
 }
 
 impl CommandRouter {
-    /// Binds a router to the subject projection and the routable set.
-    pub const fn new(subjects: CommandSubjects, registry: Arc<DeciderRegistryHandle>) -> Self {
-        Self { subjects, registry }
+    /// Binds a router to the routable set.
+    pub const fn new(registry: Arc<DeciderRegistryHandle>) -> Self {
+        Self { registry }
     }
 
     /// The routable set this router reads. Shared, so a later activation is visible here.
@@ -62,28 +62,15 @@ impl CommandRouter {
         &self.registry
     }
 
-    /// The subject projection this router is bound to.
-    pub const fn subjects(&self) -> &CommandSubjects {
-        &self.subjects
-    }
-
     /// Resolves a delivery into the module and inputs one execution needs.
     ///
-    /// The envelope is parsed before the route is resolved: a caller that sent
-    /// an unparseable header learns that, rather than learning "unroutable"
+    /// The request is decoded before the route is resolved: a caller that sent
+    /// an unreadable envelope learns that, rather than learning "unroutable"
     /// and going to look at a deployment that is fine.
-    pub fn route(
-        &self,
-        subject: &str,
-        payload: Vec<u8>,
-        headers: Option<&HeaderMap>,
-    ) -> Result<RoutedCommand, CommandReply> {
-        let command_type = self
-            .subjects
-            .command_type_for(subject)
-            .map_err(|error| CommandReply::invalid_request(&error))?;
-        let request = CommandRequest::parse(&command_type, payload, headers)
-            .map_err(|error| CommandReply::invalid_request(&error))?;
+    pub fn route(&self, payload: &[u8], headers: Option<&HeaderMap>) -> Result<RoutedCommand, CommandReply> {
+        let request = CommandRequest::parse(payload, headers).map_err(|error| CommandReply::invalid_request(&error))?;
+        let command_type =
+            CommandType::new(request.command().type_.clone()).map_err(|error| CommandReply::invalid_request(&error))?;
         let module = self
             .registry
             .route(&command_type)
@@ -170,7 +157,7 @@ impl DeciderHost {
         }
 
         Ok(Self {
-            router: CommandRouter::new(config.subjects.clone(), Arc::new(registry.build_handle())),
+            router: CommandRouter::new(Arc::new(registry.build_handle())),
             stores,
             snapshots: DrainableSnapshotTaskScheduler::new(),
             admission: ConcurrencyAdmission::new(config.admission_limit),
@@ -247,17 +234,17 @@ pub async fn serve_until(
     config: &ServerConfig,
     shutdown: CancellationToken,
 ) -> Result<(), ServeError> {
-    let pattern = config.subjects.subscription_pattern();
+    let subject = config.endpoint.subject().to_owned();
     let mut ingress = client
-        .queue_subscribe(pattern.clone(), config.queue_group.clone())
+        .queue_subscribe(subject.clone(), config.queue_group.clone())
         .await
         .map_err(|source| ServeError::Subscribe {
-            pattern: pattern.clone(),
+            pattern: subject.clone(),
             source,
         })?;
 
     info!(
-        subject = %pattern,
+        subject = %subject,
         queue_group = %config.queue_group,
         routes = host.router.registry().routes().len(),
         "decider host subscribed",
@@ -305,20 +292,26 @@ async fn handle(host: &DeciderHost, client: &Client, message: Message) {
         return;
     };
 
-    let reply = match host.router.route(subject.as_str(), payload.to_vec(), headers.as_ref()) {
+    let reply = match host.router.route(&payload, headers.as_ref()) {
         Ok(routed) => host.execute(routed).await,
         Err(reply) => reply,
     };
 
     let mut reply_headers = HeaderMap::new();
     reply_headers.insert(CONTENT_TYPE_HEADER, PROTOBUF_CONTENT_TYPE);
-    reply_headers.insert(TROGON_DECIDER_OUTCOME_HEADER, reply.header_value());
+    // ADR#0016: the error headers and the body are built from the one `Status`
+    // this reply already holds, so a caller reading the header and a caller
+    // decoding the body cannot reach different conclusions.
+    if let Some(status) = reply.service_error_status() {
+        reply_headers.insert(NATS_SERVICE_ERROR_CODE_HEADER, status.code.to_string());
+        reply_headers.insert(NATS_SERVICE_ERROR_HEADER, status.message.clone());
+    }
 
     if let Err(error) = client
         .publish_with_headers(reply_subject, reply_headers, reply.encode().into())
         .await
     {
-        error!(%subject, outcome = reply.header_value(), %error, "failed to publish a command outcome");
+        error!(%subject, outcome = reply.decision().as_str(), %error, "failed to publish a command reply");
     }
 }
 

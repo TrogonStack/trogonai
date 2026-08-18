@@ -14,7 +14,7 @@ use std::time::Duration;
 use trogon_decider_nats::DuplicateWindow;
 use trogon_decider_nats_server::constants::{DEFAULT_QUEUE_GROUP, DEFAULT_SUBJECT_PREFIX};
 use trogon_decider_nats_server::{
-    CommandSubjects, DeciderHost, FileModuleSource, ModuleReference, ModuleSource, ModuleStore,
+    CommandEndpoint, DeciderHost, FileModuleSource, ModuleReference, ModuleSource, ModuleStore,
     ObjectStoreModuleSource, ObjectStoreModuleSourceError, ServerConfig, StartupError, SubjectPrefix,
 };
 use trogon_decider_runtime::AdmissionLimit;
@@ -40,7 +40,8 @@ fn reference(value: &str) -> ModuleReference {
 
 fn config(root: &Path, modules: Vec<ModuleReference>) -> ServerConfig {
     ServerConfig {
-        subjects: CommandSubjects::new(SubjectPrefix::new(DEFAULT_SUBJECT_PREFIX).expect("the default is a token")),
+        endpoint: CommandEndpoint::new(SubjectPrefix::new(DEFAULT_SUBJECT_PREFIX).expect("the default is a token"))
+            .expect("the default prefix yields a conformant subject"),
         queue_group: DEFAULT_QUEUE_GROUP.to_owned(),
         events_stream: "MODULE_STORE_TEST_EVENTS".to_owned(),
         snapshot_bucket: "MODULE_STORE_TEST_SNAPSHOTS".to_owned(),

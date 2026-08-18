@@ -1,0 +1,44 @@
+edition = "2024";
+
+package trogonai.decider.v1;
+
+import "google/rpc/code.proto";
+import "google/rpc/error_details.proto";
+import "google/rpc/status.proto";
+import "trogonai/decider/v1/command_accepted.proto";
+
+// `code.proto` and `error_details.proto` are imported for what travels inside
+// a `Status` rather than for a field reference: `Status.code` is an `int32`
+// drawn from `google.rpc.Code`, and `Status.details` is a `repeated Any` whose
+// members are the standard detail types. Importing them is what puts both in
+// this schema's transitive closure, so a generated client has the types it
+// needs to read a reply without being told out of band which ones to expect.
+
+// What became of a command the decider executed.
+//
+// This body is only ever the reply to an execution that ran to completion. A
+// command the host could not execute at all is a service error, and per
+// [ADR#0016](../../../../docs/adr/0016-protobuf-rpc-over-nats-micro-binding.md)
+// it comes back as one complete `google.rpc.Status` under
+// `Nats-Service-Error-Code` rather than as an arm here. A caller learns which
+// of the two it is holding from that header and never by trying to decode this
+// message first.
+message DecideResponse {
+  oneof result {
+    // The command was decided and its events appended.
+    CommandAccepted accepted = 1;
+
+    // The module understood the command and refused it on domain rules.
+    //
+    // In the response body rather than on the error channel because the host
+    // executed correctly and the domain answered no: a service that refuses
+    // invalid commands all day is healthy, and counting those refusals in
+    // `num_errors` would make the micro error rate a business metric.
+    //
+    // `FAILED_PRECONDITION`, with an `ErrorInfo` whose `domain` is the module
+    // that owns the code space and whose `reason` is the code that module
+    // chose. `faults.proto` does not declare it, because neither of those is
+    // the host's to declare.
+    google.rpc.Status rejected = 2;
+  }
+}

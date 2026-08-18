@@ -1,3 +1,5 @@
+use buffa::MessageField;
+use buffa_types::google::protobuf::Any;
 use uuid::Uuid;
 
 use super::*;
@@ -5,8 +7,19 @@ use super::*;
 const CREATE_SCHEDULE: &str = "type.googleapis.com/trogonai.scheduler.schedules.v1.CreateSchedule";
 const COMMAND_UUID: &str = "0198be07-a384-79e1-a376-f250f9181bec";
 
-fn command_type() -> CommandType {
-    CommandType::new(CREATE_SCHEDULE).expect("test command type is valid")
+fn request(payload: Vec<u8>) -> DecideRequest {
+    DecideRequest {
+        command: MessageField::some(Any {
+            type_url: CREATE_SCHEDULE.to_owned(),
+            value: payload.into(),
+            ..Any::default()
+        }),
+        ..DecideRequest::default()
+    }
+}
+
+fn parse(request: &DecideRequest) -> Result<CommandRequest, CommandRequestError> {
+    CommandRequest::parse(&request.encode_to_vec(), None)
 }
 
 fn headers(pairs: &[(&str, &str)]) -> HeaderMap {
@@ -18,33 +31,35 @@ fn headers(pairs: &[(&str, &str)]) -> HeaderMap {
 }
 
 #[test]
-fn a_bare_request_carries_the_subject_type_and_the_payload() {
-    let request = CommandRequest::parse(&command_type(), vec![1, 2, 3], None).expect("a headerless request parses");
+fn a_bare_request_carries_the_command_type_and_the_payload() {
+    let parsed = parse(&request(vec![1, 2, 3])).expect("a minimal request parses");
 
-    assert_eq!(request.command().type_, CREATE_SCHEDULE);
-    assert_eq!(request.command().payload, vec![1, 2, 3]);
-    assert_eq!(request.command_id(), None);
-    assert_eq!(request.expected_revision(), None);
+    assert_eq!(
+        parsed.command().type_,
+        CREATE_SCHEDULE,
+        "the type url the caller sent is what the guest is handed, so a host that rewrote it would route one command and execute another"
+    );
+    assert_eq!(parsed.command().payload, vec![1, 2, 3]);
+    assert_eq!(parsed.command_id(), None);
+    assert_eq!(parsed.expected_revision(), None);
 }
 
 #[test]
 fn a_protobuf_content_type_is_accepted() {
     CommandRequest::parse(
-        &command_type(),
-        Vec::new(),
+        &request(Vec::new()).encode_to_vec(),
         Some(&headers(&[(CONTENT_TYPE_HEADER, PROTOBUF_CONTENT_TYPE)])),
     )
-    .expect("the declared encoding is the one this binding defines");
+    .expect("the declared encoding is the one this endpoint accepts");
 }
 
 #[test]
 fn another_content_type_is_refused_rather_than_reinterpreted() {
     let error = CommandRequest::parse(
-        &command_type(),
-        Vec::new(),
+        &request(Vec::new()).encode_to_vec(),
         Some(&headers(&[(CONTENT_TYPE_HEADER, "application/json")])),
     )
-    .expect_err("json is not an encoding this binding implements");
+    .expect_err("json is not an encoding DeciderService declares");
 
     assert!(
         matches!(error, CommandRequestError::UnsupportedContentType { .. }),
@@ -53,28 +68,50 @@ fn another_content_type_is_refused_rather_than_reinterpreted() {
 }
 
 #[test]
-fn a_command_id_header_becomes_the_command_identity() {
-    let request = CommandRequest::parse(
-        &command_type(),
-        Vec::new(),
-        Some(&headers(&[(TROGON_COMMAND_ID_HEADER, COMMAND_UUID)])),
-    )
-    .expect("a uuid header parses");
+fn a_payload_that_is_not_a_decide_request_fails_the_command() {
+    let error =
+        CommandRequest::parse(&[0xff, 0xff, 0xff, 0xff], None).expect_err("those bytes are not a DecideRequest");
+
+    assert!(
+        matches!(error, CommandRequestError::Undecodable { .. }),
+        "a caller that sent an unreadable envelope has to learn that, rather than learn its command was unroutable and go audit a deployment that is fine: {error}"
+    );
+}
+
+#[test]
+fn a_request_naming_no_command_fails_rather_than_executing_an_empty_one() {
+    let error = parse(&DecideRequest::default()).expect_err("there is no command to route");
+
+    assert!(matches!(error, CommandRequestError::NoCommand), "{error}");
+}
+
+#[test]
+fn a_type_url_that_is_not_a_command_type_fails_the_command() {
+    let mut malformed = request(Vec::new());
+    malformed.command = MessageField::some(Any {
+        type_url: String::new(),
+        ..Any::default()
+    });
+
+    let error = parse(&malformed).expect_err("an empty type url names nothing");
+
+    assert!(matches!(error, CommandRequestError::CommandType { .. }), "{error}");
+}
+
+#[test]
+fn a_command_id_becomes_the_command_identity() {
+    let parsed = parse(&request(Vec::new()).with_command_id(COMMAND_UUID.to_owned())).expect("a uuid parses");
 
     assert_eq!(
-        request.command_id().map(CommandId::as_uuid),
+        parsed.command_id().map(CommandId::as_uuid),
         Some(Uuid::parse_str(COMMAND_UUID).expect("the fixture is a uuid"))
     );
 }
 
 #[test]
 fn an_unparseable_command_id_fails_the_command_instead_of_being_dropped() {
-    let error = CommandRequest::parse(
-        &command_type(),
-        Vec::new(),
-        Some(&headers(&[(TROGON_COMMAND_ID_HEADER, "not-a-uuid")])),
-    )
-    .expect_err("a malformed idempotency key is not an absent one");
+    let error =
+        parse(&request(Vec::new()).with_command_id("not-a-uuid".to_owned())).expect_err("that is not an identity");
 
     assert!(
         matches!(error, CommandRequestError::CommandId { .. }),
@@ -83,58 +120,18 @@ fn an_unparseable_command_id_fails_the_command_instead_of_being_dropped() {
 }
 
 #[test]
-fn an_expected_revision_header_becomes_a_stream_position() {
-    let request = CommandRequest::parse(
-        &command_type(),
-        Vec::new(),
-        Some(&headers(&[(TROGON_EXPECTED_REVISION_HEADER, "7")])),
-    )
-    .expect("a decimal revision parses");
+fn an_expected_revision_becomes_a_stream_position() {
+    let parsed = parse(&request(Vec::new()).with_expected_revision(7)).expect("a revision parses");
 
-    assert_eq!(request.expected_revision().map(StreamPosition::as_u64), Some(7));
-}
-
-#[test]
-fn a_non_numeric_expected_revision_fails_the_command() {
-    let error = CommandRequest::parse(
-        &command_type(),
-        Vec::new(),
-        Some(&headers(&[(TROGON_EXPECTED_REVISION_HEADER, "seven")])),
-    )
-    .expect_err("a revision must be a number");
-
-    assert!(
-        matches!(error, CommandRequestError::ExpectedRevisionNotANumber { .. }),
-        "{error}"
-    );
+    assert_eq!(parsed.expected_revision().map(StreamPosition::as_u64), Some(7));
 }
 
 #[test]
 fn a_zero_expected_revision_fails_the_command() {
-    let error = CommandRequest::parse(
-        &command_type(),
-        Vec::new(),
-        Some(&headers(&[(TROGON_EXPECTED_REVISION_HEADER, "0")])),
-    )
-    .expect_err("zero is not a revision a caller gets to assert");
+    let error = parse(&request(Vec::new()).with_expected_revision(0)).expect_err("zero is not a revision to assert");
 
     assert!(
         matches!(error, CommandRequestError::ExpectedRevisionZero),
         "an empty stream is the module's no_stream precondition, not a caller-supplied guard: {error}"
-    );
-}
-
-#[test]
-fn a_negative_expected_revision_fails_the_command() {
-    let error = CommandRequest::parse(
-        &command_type(),
-        Vec::new(),
-        Some(&headers(&[(TROGON_EXPECTED_REVISION_HEADER, "-1")])),
-    )
-    .expect_err("a revision counts events, so it is never negative");
-
-    assert!(
-        matches!(error, CommandRequestError::ExpectedRevisionNotANumber { .. }),
-        "{error}"
     );
 }

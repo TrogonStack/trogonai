@@ -14,6 +14,15 @@ lint:
     - STANDARD
   except:
     - FIELD_NOT_REQUIRED
+  # `code.proto` and `error_details.proto` carry what travels inside a
+  # `google.rpc.Status` rather than anything this schema names by type, so no
+  # field references them and IMPORT_USED cannot see the dependency. Importing
+  # them is what puts them in the transitive closure, which is what gives a
+  # generated client the types it needs to read an error without being told out
+  # of band which ones to expect.
+  ignore_only:
+    IMPORT_USED:
+      - proto/trogonai/decider/v1/decide_response.proto
 
 breaking:
   use:

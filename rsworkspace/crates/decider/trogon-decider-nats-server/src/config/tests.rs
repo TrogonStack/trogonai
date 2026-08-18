@@ -34,7 +34,7 @@ fn config(args: Args, env: &InMemoryEnv) -> Result<ServerConfig, ConfigError> {
 fn the_defaults_are_a_complete_deployment_but_for_the_modules() {
     let config = config(with_module(args()), &InMemoryEnv::new()).expect("defaults resolve");
 
-    assert_eq!(config.subjects.prefix().as_str(), "decider");
+    assert_eq!(config.endpoint.prefix().as_str(), "decider");
     assert_eq!(config.queue_group, "q");
     assert_eq!(config.events_stream, "DECIDER_EVENTS");
     assert_eq!(config.snapshot_bucket, "DECIDER_SNAPSHOTS");
@@ -189,17 +189,17 @@ fn a_flag_wins_over_the_environment() {
 
     let config = config(args, &env).expect("a flag resolves");
 
-    assert_eq!(config.subjects.prefix().as_str(), "from-flag");
+    assert_eq!(config.endpoint.prefix().as_str(), "from-flag");
 }
 
 #[test]
-fn the_prefix_decides_the_subscription_the_host_will_take() {
+fn the_prefix_decides_the_subject_the_host_will_answer_on() {
     let env = InMemoryEnv::new();
     env.set(ENV_DECIDER_SUBJECT_PREFIX, "acme.decider");
 
     let config = config(with_module(args()), &env).expect("a dotted prefix resolves");
 
-    assert_eq!(config.subjects.subscription_pattern(), "acme.decider.>");
+    assert_eq!(config.endpoint.subject(), "acme.decider.DeciderService.Decide");
 }
 
 #[test]
