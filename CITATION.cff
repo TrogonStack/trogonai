@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "TrogonAi"
+abstract: "A distributed agentic platform for coordinating autonomous AI agents across services and runtimes, providing infrastructure for deploying, orchestrating, and scaling agents in systems where work crosses process and network boundaries."
+type: software
+authors:
+  - family-names: "Prieto"
+    given-names: "Yordis"
+    email: "yordis.prieto@gmail.com"
+repository-code: "https://github.com/TrogonStack/trogonai"
+url: "https://github.com/TrogonStack/trogonai"
+license: Apache-2.0
+keywords:
+  - "agents"
+  - "multi-agent-systems"
+  - "distributed-systems"
+  - "orchestration"
+  - "artificial-intelligence"
