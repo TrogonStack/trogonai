@@ -1,6 +1,6 @@
 use super::*;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use trogon_std::env::InMemoryEnv;
 use trogon_std::fs::{MemAppendWriter, MemFs};
 
@@ -53,11 +53,12 @@ fn try_open_log_file_succeeds_with_env_override() {
     env.set("TROGON_LOG_DIR", "/tmp/test-logs");
     let fs = MemFs::new();
 
-    let (writer, info) = try_open_log_file(ServiceName::AcpNatsStdio, &env, &fs);
+    let (writer, outcome) = try_open_log_file(ServiceName::AcpNatsStdio, &env, &fs);
     assert!(writer.is_some());
-    let msg = info.unwrap();
-    assert!(msg.contains("File logging enabled"));
-    assert!(msg.contains("acp-nats-stdio.log"));
+    let FileLoggingOutcome::Enabled { path } = outcome else {
+        panic!("expected file logging to be enabled");
+    };
+    assert_eq!(path, PathBuf::from("/tmp/test-logs/acp-nats-stdio.log"));
 }
 
 #[test]
@@ -65,10 +66,9 @@ fn try_open_log_file_falls_back_to_platform_dir() {
     let env = InMemoryEnv::new();
     let fs = MemFs::new();
 
-    let (writer, info) = try_open_log_file(ServiceName::AcpNatsServer, &env, &fs);
+    let (writer, outcome) = try_open_log_file(ServiceName::AcpNatsServer, &env, &fs);
     assert!(writer.is_some());
-    let msg = info.unwrap();
-    assert!(msg.contains("File logging enabled"));
+    assert!(matches!(outcome, FileLoggingOutcome::Enabled { .. }));
 }
 
 #[test]
@@ -78,10 +78,9 @@ fn try_open_log_file_reports_disabled_when_dir_fails() {
     fs.insert("/tmp/test-logs", "file-blocking-dir");
     env.set("TROGON_LOG_DIR", "/tmp/test-logs/sub");
 
-    let (writer, info) = try_open_log_file(ServiceName::AcpNatsStdio, &env, &fs);
+    let (writer, outcome) = try_open_log_file(ServiceName::AcpNatsStdio, &env, &fs);
     assert!(writer.is_none());
-    let msg = info.unwrap();
-    assert!(msg.contains("File logging disabled"));
+    assert!(matches!(outcome, FileLoggingOutcome::DirectoryUnavailable { .. }));
 }
 
 #[test]
@@ -90,12 +89,14 @@ fn try_open_log_file_reports_open_append_error() {
     env.set("TROGON_LOG_DIR", "/tmp/test-logs");
     let fs = OpenAppendErrorFs::new();
 
-    let (writer, info) = try_open_log_file(ServiceName::AcpNatsStdio, &env, &fs);
+    let (writer, outcome) = try_open_log_file(ServiceName::AcpNatsStdio, &env, &fs);
 
     assert!(writer.is_none());
-    let msg = info.unwrap();
-    assert!(msg.contains("Failed to create log file"));
-    assert!(msg.contains("open append failed"));
+    let FileLoggingOutcome::FileUnavailable { path, error } = outcome else {
+        panic!("expected the log file to be unopenable");
+    };
+    assert_eq!(path, PathBuf::from("/tmp/test-logs/acp-nats-stdio.log"));
+    assert_eq!(error.kind(), io::ErrorKind::Other);
 }
 
 #[test]

@@ -76,7 +76,7 @@ pub async fn run<
     C::Instant: Send,
 {
     let wildcard = crate::nats::subscriptions::AllClientSubject::new(bridge.config.acp_prefix_ref());
-    info!("Starting client proxy - subscribing to {}", wildcard);
+    info!(subject = %wildcard, "Starting client proxy");
 
     let mut subscriber = match nats.subscribe(wildcard).await {
         Ok(sub) => sub,

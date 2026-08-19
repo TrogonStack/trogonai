@@ -1,0 +1,35 @@
+error: log event interpolates its values into the message instead of recording them as fields
+  --> $DIR/unstructured_log_fields.rs:14:5
+   |
+LL |     tracing::info!("user {} hit {}", user_id, path);
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: pass the values as `tracing` fields, as in `tracing::info!(user_id, path, "request handled")`
+   = note: `#[deny(unstructured_log_fields)]` on by default
+
+error: log event interpolates its values into the message instead of recording them as fields
+  --> $DIR/unstructured_log_fields.rs:19:5
+   |
+LL |     tracing::warn!("processed {count} items");
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: pass the values as `tracing` fields, as in `tracing::info!(user_id, path, "request handled")`
+
+error: log event interpolates its values into the message instead of recording them as fields
+  --> $DIR/unstructured_log_fields.rs:24:5
+   |
+LL |     tracing::debug!("request: {request:?}");
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: pass the values as `tracing` fields, as in `tracing::info!(user_id, path, "request handled")`
+
+error: log event interpolates its values into the message instead of recording them as fields
+  --> $DIR/unstructured_log_fields.rs:29:5
+   |
+LL |     tracing::error!(target: "fixture", "publish to {} failed", subject);
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: pass the values as `tracing` fields, as in `tracing::info!(user_id, path, "request handled")`
+
+error: aborting due to 4 previous errors
+

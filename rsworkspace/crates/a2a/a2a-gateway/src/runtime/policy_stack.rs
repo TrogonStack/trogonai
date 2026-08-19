@@ -82,14 +82,22 @@ pub fn gateway_policy_stack_from_env<E: ReadEnv>(env: &E) -> GatewayPolicyStack 
 
     let Ok(raw) = env.var(ENV_POLICY_BUNDLE_DIR) else {
         if tier3_enabled {
-            warn!("{ENV_TIER3_REDACTION_ENABLED}=on but {ENV_POLICY_BUNDLE_DIR} unset; tier-3 noop");
+            warn!(
+                enabled_by = ENV_TIER3_REDACTION_ENABLED,
+                env_var = ENV_POLICY_BUNDLE_DIR,
+                "tier-3 redaction is enabled but the policy bundle directory is unset; tier-3 noop"
+            );
         }
         return GatewayPolicyStack::noop();
     };
     let dir = raw.trim();
     if dir.is_empty() {
         if tier3_enabled {
-            warn!("{ENV_TIER3_REDACTION_ENABLED}=on but {ENV_POLICY_BUNDLE_DIR} empty; tier-3 noop");
+            warn!(
+                enabled_by = ENV_TIER3_REDACTION_ENABLED,
+                env_var = ENV_POLICY_BUNDLE_DIR,
+                "tier-3 redaction is enabled but the policy bundle directory is empty; tier-3 noop"
+            );
         }
         return GatewayPolicyStack::noop();
     }
@@ -100,7 +108,10 @@ pub fn gateway_policy_stack_from_env<E: ReadEnv>(env: &E) -> GatewayPolicyStack 
         // Booting without the pubkey would run the very bundles this
         // operator asked to have verified, unverified. A typo in the
         // key must cost policy enforcement, not bundle authenticity.
-        warn!("{ENV_GATEWAY_TIER3_SIGNING_PUBKEY} is set but unusable; refusing to load unverified bundles");
+        warn!(
+            env_var = ENV_GATEWAY_TIER3_SIGNING_PUBKEY,
+            "signing public key is set but unusable; refusing to load unverified bundles"
+        );
         return GatewayPolicyStack::noop();
     }
     let tier3_signing_pubkey = signing_key.into_configured();
@@ -112,11 +123,15 @@ pub fn gateway_policy_stack_from_env<E: ReadEnv>(env: &E) -> GatewayPolicyStack 
         Err(err) => {
             warn!(
                 error = %err,
+                env_var = ENV_POLICY_BUNDLE_DIR,
                 bundle_dir = dir,
-                "{ENV_POLICY_BUNDLE_DIR} invalid -- Wasmtime substrate disabled",
+                "policy bundle directory is invalid -- Wasmtime substrate disabled",
             );
             if tier3_enabled {
-                warn!("{ENV_TIER3_REDACTION_ENABLED}=on but substrate failed to load; tier-3 noop");
+                warn!(
+                    enabled_by = ENV_TIER3_REDACTION_ENABLED,
+                    "tier-3 redaction is enabled but the substrate failed to load; tier-3 noop"
+                );
             }
             return GatewayPolicyStack::noop();
         }
