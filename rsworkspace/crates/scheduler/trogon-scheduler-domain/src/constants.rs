@@ -1,10 +1,8 @@
 //! Crate-wide constants.
 
-#[cfg(feature = "runtime-snapshot")]
 use std::num::NonZeroU64;
 
-#[cfg(feature = "runtime-snapshot")]
-use trogon_decider_runtime::FrequencySnapshot;
+use trogon_decider::SnapshotCadence;
 
 pub(crate) const RESERVED_SCHEDULE_HEADERS: [&str; 5] = [
     "Nats-Schedule",
@@ -14,8 +12,10 @@ pub(crate) const RESERVED_SCHEDULE_HEADERS: [&str; 5] = [
     "Nats-Schedule-TTL",
 ];
 
-#[cfg(feature = "runtime-snapshot")]
 const COMMAND_SNAPSHOT_EVERY: NonZeroU64 = NonZeroU64::new(32).unwrap();
 
-#[cfg(feature = "runtime-snapshot")]
-pub const COMMAND_SNAPSHOT_POLICY: FrequencySnapshot = FrequencySnapshot::new(COMMAND_SNAPSHOT_EVERY);
+/// Cadence every state-bearing scheduler command declares.
+///
+/// `CreateSchedule` is deliberately absent: it only ever writes the first event of a stream, so a
+/// snapshot taken right after it would save one event of replay and cost a KV write.
+pub const COMMAND_SNAPSHOT_CADENCE: SnapshotCadence = SnapshotCadence::EveryEvents(COMMAND_SNAPSHOT_EVERY);

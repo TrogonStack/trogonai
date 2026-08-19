@@ -17,6 +17,7 @@ impl Decider for TestCommand {
     type Event = &'static str;
     type DecideError = TestError;
     type EvolveError = TestError;
+    const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 
     fn stream_id(&self) -> &Self::StreamId {
         "alpha"

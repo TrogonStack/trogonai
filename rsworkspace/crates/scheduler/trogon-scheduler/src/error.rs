@@ -179,6 +179,10 @@ where
             JetStreamStoreError::AppendStream(source) => {
                 Self::event_source("failed to append schedule event batch", source)
             }
+            JetStreamStoreError::SubjectOutsideScope { subject, scope } => Self::schedule_source(
+                "schedule subject resolution escaped the resolver's declared scope",
+                std::io::Error::other(format!("subject '{subject}' is outside scope '{scope}'")),
+            ),
             JetStreamStoreError::Snapshot(source) => Self::from(source),
             JetStreamStoreError::Codec(source) => source,
             JetStreamStoreError::OptimisticConcurrencyConflict(source) => match source {

@@ -1,7 +1,7 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 #[allow(clippy::all)]
-#[cfg(any(feature = "schedules", feature = "agents", feature = "sessions"))]
+#[cfg(any(feature = "schedules", feature = "agents", feature = "sessions", feature = "decider"))]
 mod r#gen;
 
 #[cfg(any(feature = "schedules", feature = "agents", feature = "sessions"))]
@@ -18,6 +18,9 @@ pub mod scheduler;
 #[cfg(feature = "agents")]
 pub mod agents;
 
+#[cfg(feature = "decider")]
+pub mod decider;
+
 #[cfg(feature = "sessions")]
 pub mod session;
 
@@ -31,11 +34,17 @@ pub mod content {
     }
 }
 
-#[cfg(any(feature = "schedules", feature = "agents"))]
+#[cfg(any(feature = "schedules", feature = "agents", feature = "decider"))]
 #[cfg_attr(dylint_lib = "trogon_lints", allow(inline_module_block))]
 pub mod google {
+    #[cfg(any(feature = "schedules", feature = "agents"))]
     pub mod r#type {
         pub use crate::r#gen::google::r#type::*;
+    }
+
+    #[cfg(feature = "decider")]
+    pub mod rpc {
+        pub use crate::r#gen::google::rpc::*;
     }
 }
 

@@ -1,5 +1,5 @@
 use super::*;
-use trogon_decider::Decision;
+use trogon_decider::{Decision, WritePrecondition};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum FixtureEvent {
@@ -85,6 +85,7 @@ impl Decider for OpenAndFund {
     type Event = FixtureEvent;
     type DecideError = FixtureDecideError;
     type EvolveError = FixtureEvolveError;
+    const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 
     fn stream_id(&self) -> &str {
         &self.id

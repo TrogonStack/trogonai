@@ -1,4 +1,4 @@
-use trogon_decider::{Decider, Decision};
+use trogon_decider::{Decider, Decision, WritePrecondition};
 use trogon_decider_guest_sdk::export_decider;
 use trogon_scheduler_domain::CreateSchedule;
 use trogonai_proto::scheduler::schedules::{CREATE_SCHEDULE_TYPE_URL, SCHEDULES_STATE_SCHEMA_VERSION, state_v1, v1};
@@ -31,6 +31,7 @@ impl Decider for WrongEventCommand {
     type Event = WrongEvent;
     type DecideError = WrongEventDecideError;
     type EvolveError = WrongEventEvolveError;
+    const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 
     fn stream_id(&self) -> &Self::StreamId {
         "wrong"

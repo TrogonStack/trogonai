@@ -1,0 +1,30 @@
+error: `WRITE_PRECONDITION` is `WritePrecondition::Any`, so the append is unconditional
+  --> $DIR/weakened_write_precondition.rs:32:5
+   |
+LL |     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::Any;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: name the invariant the append depends on instead: `NoStream` for a creation, `StreamExists` for a transition, `StreamUnchanged` for a decision made from the state it read
+   = help: if appending unconditionally is deliberate, argue it in place: `#[cfg_attr(dylint_lib = "trogon_lints", allow(weakened_write_precondition, reason = "..."))]`
+   = note: `#[deny(weakened_write_precondition)]` on by default
+
+error: `WRITE_PRECONDITION` is `WritePrecondition::Any`, so the append is unconditional
+  --> $DIR/weakened_write_precondition.rs:40:5
+   |
+LL |     const WRITE_PRECONDITION: WritePrecondition = Any;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: name the invariant the append depends on instead: `NoStream` for a creation, `StreamExists` for a transition, `StreamUnchanged` for a decision made from the state it read
+   = help: if appending unconditionally is deliberate, argue it in place: `#[cfg_attr(dylint_lib = "trogon_lints", allow(weakened_write_precondition, reason = "..."))]`
+
+error: `WRITE_PRECONDITION` is `WritePrecondition::Any`, so the append is unconditional
+  --> $DIR/weakened_write_precondition.rs:57:5
+   |
+LL |     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::Any;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: the `allow` silencing this carries no `reason`, so the choice is turned off rather than argued
+   = help: if appending unconditionally is deliberate, argue it in place: `#[cfg_attr(dylint_lib = "trogon_lints", allow(weakened_write_precondition, reason = "..."))]`
+
+error: aborting due to 3 previous errors
+

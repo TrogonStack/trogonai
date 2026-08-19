@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
-members = ["crates/*/*", "wasm-components/*", "cli/trogon-decider-test"]
-default-members = ["crates/*/*", "cli/trogon-decider-test"]
+members = ["crates/*/*", "wasm-components/*", "cli/*"]
+default-members = ["crates/*/*", "cli/*"]
 
 [workspace.lints.rust]
 warnings = "deny"
@@ -35,10 +35,12 @@ trogon-aauth-sdk = { path = "crates/aauth/trogon-aauth-sdk" }
 trogon-aauth-verify = { path = "crates/aauth/trogon-aauth-verify" }
 trogon-decider = { path = "crates/decider/trogon-decider" }
 trogon-decider-nats = { path = "crates/decider/trogon-decider-nats" }
+trogon-decider-nats-server = { path = "crates/decider/trogon-decider-nats-server" }
 trogon-decider-wit = { path = "crates/decider/trogon-decider-wit" }
 trogon-decider-guest-macros = { path = "crates/decider/trogon-decider-guest-macros" }
 trogon-decider-guest-sdk = { path = "crates/decider/trogon-decider-guest-sdk" }
 trogon-decider-sim = { path = "crates/decider/trogon-decider-sim" }
+trogon-decider-test = { path = "cli/trogon-decider-test" }
 trogon-decider-runtime = { path = "crates/decider/trogon-decider-runtime" }
 trogon-decider-wasm-runtime = { path = "crates/decider/trogon-decider-wasm-runtime" }
 trogon-identity-types = { path = "crates/platform/trogon-identity-types" }

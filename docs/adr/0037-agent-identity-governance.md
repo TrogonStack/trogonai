@@ -41,9 +41,10 @@ defaulting to allow-all, so a caller that adopts it can refuse a command
 whose principal is merely nameable.
 [ADR#0028](./0028-decider-admission-control-and-backpressure.md) gates
 execution itself behind an admission limiter.
-[ADR#0027](./0027-decider-multi-tenancy-primitive.md) scopes every stream and
-snapshot to a validated `Tenant`, closing exactly the flat-global-namespace
-shape a permissionless key space assumes.
+[ADR#0027](./0027-decider-multi-tenancy-primitive.md) lets a stream resolver
+declare the subtree it writes into and has the store refuse anything outside
+it, closing exactly the flat-global-namespace shape a permissionless key space
+assumes.
 [ADR#0023](./0023-secret-management-and-key-custody-direction.md) and
 [ADR#0033](./0033-two-tier-key-custody-product-model.md) put private key
 custody behind a platform secrets service and a two-tier managed or
@@ -111,12 +112,13 @@ key currently authorized". Four concerns live on this plane:
   "The signature is valid" and "the agent is currently authorized" are
   distinct questions, and this decision requires that they never be
   conflated into one check.
-- **Tenancy.** Identity scoping follows the `Tenant` value object of
+- **Tenancy.** Identity scoping follows the
+  [subject scope](../glossary/subject-scope) of
   [ADR#0027](./0027-decider-multi-tenancy-primitive.md). A self-certifying
   key is globally unique by construction, but which tenant an agent belongs
-  to, and which streams and snapshots it may resolve against, remains a
-  tenancy fact enforced at the store boundary, not something the key
-  namespace itself expresses or limits.
+  to, and which streams it may resolve against, remains a deployment fact
+  projected onto a scope and enforced at the store boundary, not something the
+  key namespace itself expresses or limits.
 - **Entity attestation.** Binding a key to a real-world claim, "this key is
   Acme's reviewer agent", is asserted by credentials issued on this
   authority plane. [ADR#0036](./0036-agent-self-certifying-identity.md)
@@ -186,7 +188,7 @@ reachability is an optional bridge added later, not the root identity itself.
 - [ADR#0017: AAuth Agent Authentication over a Trogon NATS PoP Binding](./0017-aauth-agent-authentication.md)
 - [ADR#0023: Secret Management and Key Custody on OpenBao behind a Platform Secrets Service](./0023-secret-management-and-key-custody-direction.md)
 - [ADR#0026: Command Authorization Principal and Authorizer Hook for Decider Execution](./0026-command-authorization-principal.md)
-- [ADR#0027: Tenant Value Object for Decider Stream and Snapshot Resolution](./0027-decider-multi-tenancy-primitive.md)
+- [ADR#0027: Declared Subject Scope for Decider Stream Resolution](./0027-decider-multi-tenancy-primitive.md)
 - [ADR#0028: Admission Control for Decider Command Execution](./0028-decider-admission-control-and-backpressure.md)
 - [ADR#0033: Two-Tier Key Custody Product Model](./0033-two-tier-key-custody-product-model.md)
 - [ADR#0036: Agent Self-Certifying Cryptographic Identity](./0036-agent-self-certifying-identity.md)

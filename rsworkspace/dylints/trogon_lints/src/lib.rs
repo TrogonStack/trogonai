@@ -25,8 +25,9 @@ mod telemetry_metric_construction;
 mod telemetry_metric_name_literal;
 mod telemetry_span_name_literal;
 mod test_module_naming;
+mod weakened_write_precondition;
 
-use rustc_hir::{Expr, Item, LetStmt, Stmt};
+use rustc_hir::{Expr, ImplItem, Item, LetStmt, Stmt};
 use rustc_lint::{LateContext, LateLintPass, LintStore};
 
 dylint_linting::dylint_library!();
@@ -52,6 +53,7 @@ pub fn register_lints(sess: &rustc_session::Session, lint_store: &mut LintStore)
         TELEMETRY_METRIC_NAME_LITERAL,
         TELEMETRY_SPAN_NAME_LITERAL,
         TEST_MODULE_NAMING,
+        WEAKENED_WRITE_PRECONDITION,
     ]);
     lint_store.register_late_pass(|_| Box::<TrogonLints>::default());
     lint_store.register_early_pass(|| Box::new(redundant_module_path::RedundantModulePath));
@@ -722,6 +724,64 @@ rustc_session::declare_lint! {
     "name spans with a generated `trogon_semconv` constant, not an inline string literal",
 }
 
+rustc_session::declare_lint! {
+    /// ### What it does
+    ///
+    /// Detects a decider whose `WRITE_PRECONDITION` associated const is
+    /// `WritePrecondition::Any`, unless the declaration carries an `allow` that
+    /// states a reason.
+    ///
+    /// ### Why is this bad?
+    ///
+    /// `Any` is the one variant that appends without checking anything first,
+    /// so the decision a command made from the state it read is written even if
+    /// another writer changed that state in between. That is occasionally
+    /// correct, for a fact that commutes with every other fact on the stream,
+    /// and it is silently wrong for anything that guards an invariant. The
+    /// difference lives entirely in the *why*, which is invisible at a call
+    /// site that reads `WritePrecondition::Any` and nothing else.
+    ///
+    /// The const already makes every decider's choice visible. This makes the
+    /// one dangerous choice argued: an `allow` with a `reason` records the
+    /// commutativity claim next to the code that depends on it, where a
+    /// reviewer can disagree with it. A bare `allow` is reported, because
+    /// silencing the question is not answering it.
+    ///
+    /// ### Example
+    ///
+    /// ```rust,ignore
+    /// impl Decider for RenameSession {
+    ///     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::Any;
+    /// }
+    /// ```
+    ///
+    /// Use instead:
+    ///
+    /// ```rust,ignore
+    /// impl Decider for RenameSession {
+    ///     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamExists;
+    /// }
+    /// ```
+    ///
+    /// or, where the event genuinely commutes:
+    ///
+    /// ```rust,ignore
+    /// impl Decider for RenameSession {
+    ///     #[cfg_attr(
+    ///         dylint_lib = "trogon_lints",
+    ///         allow(
+    ///             weakened_write_precondition,
+    ///             reason = "a rename is a last-writer-wins fact that guards no invariant"
+    ///         )
+    ///     )]
+    ///     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::Any;
+    /// }
+    /// ```
+    pub WEAKENED_WRITE_PRECONDITION,
+    Deny,
+    "argue an unconditional `WritePrecondition::Any` append, or name the invariant it depends on",
+}
+
 #[derive(Default)]
 struct TrogonLints {
     error_string_comparison: error_string_comparison::ErrorStringComparison,
@@ -763,6 +823,10 @@ impl<'tcx> LateLintPass<'tcx> for TrogonLints {
         manual_error_impl::check_item(cx, item);
         test_module_naming::check_item(cx, item);
     }
+
+    fn check_impl_item(&mut self, cx: &LateContext<'tcx>, impl_item: &'tcx ImplItem<'tcx>) {
+        weakened_write_precondition::check_impl_item(cx, impl_item);
+    }
 }
 
 rustc_session::impl_lint_pass!(TrogonLints => [
@@ -781,6 +845,7 @@ rustc_session::impl_lint_pass!(TrogonLints => [
     TELEMETRY_METRIC_NAME_LITERAL,
     TELEMETRY_SPAN_NAME_LITERAL,
     TEST_MODULE_NAMING,
+    WEAKENED_WRITE_PRECONDITION,
 ]);
 
 rustc_session::impl_lint_pass!(redundant_module_path::RedundantModulePath => [REDUNDANT_MODULE_PATH]);

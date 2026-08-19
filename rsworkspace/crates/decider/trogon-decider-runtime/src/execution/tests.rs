@@ -11,9 +11,10 @@ use uuid::Uuid;
 
 use super::*;
 use crate::{
-    Decision, EventData, EventDecode, EventDecodeOutcome, EventEncode, EventIdentity, EventType,
-    InvalidSnapshotTypeNameError, ReadSnapshotResponse, ReadStreamResponse, SnapshotType, SnapshotTypeName,
-    StreamEvent, WriteSnapshotResponse,
+    AdmissionLimit, AuthorizationDeniedError, ConcurrencyAdmission, Decision, EventData, EventDecode,
+    EventDecodeOutcome, EventEncode, EventIdentity, EventType, InvalidSnapshotTypeNameError, PrincipalClaim,
+    PrincipalId, PrincipalKind, ReadSnapshotResponse, ReadStreamResponse, SnapshotType, SnapshotTypeName, StreamEvent,
+    WriteSnapshotResponse,
 };
 
 fn position(value: u64) -> StreamPosition {
@@ -49,6 +50,13 @@ struct TestCommand {
 struct RequiredRegisterCommand {
     id: String,
     stream_id_calls: Arc<AtomicUsize>,
+}
+
+/// Fixture for a decider whose `initial_state` is itself valid, so only the stream's
+/// emptiness can tell "never created" from "created, nothing happened yet".
+#[derive(Debug, Clone)]
+struct ExistingOnlyCommand {
+    id: String,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -223,6 +231,12 @@ impl RequiredRegisterCommand {
     }
 }
 
+impl ExistingOnlyCommand {
+    fn new(id: &str) -> Self {
+        Self { id: id.to_string() }
+    }
+}
+
 fn initial_test_state() -> TestState {
     TestState::Missing
 }
@@ -243,6 +257,8 @@ impl Decider for TestCommand {
     type Event = TestEvent;
     type DecideError = TestDecisionError;
     type EvolveError = TestCommandError;
+
+    const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 
     fn stream_id(&self) -> &Self::StreamId {
         self.stream_id_calls.fetch_add(1, Ordering::SeqCst);
@@ -322,7 +338,7 @@ impl Decider for RequiredRegisterCommand {
     type DecideError = TestDecisionError;
     type EvolveError = TestCommandError;
 
-    const WRITE_PRECONDITION: Option<WritePrecondition> = Some(WritePrecondition::NoStream);
+    const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::NoStream;
 
     fn stream_id(&self) -> &Self::StreamId {
         self.stream_id_calls.fetch_add(1, Ordering::SeqCst);
@@ -342,6 +358,41 @@ impl Decider for RequiredRegisterCommand {
             TestState::Missing => Ok(Decision::event(TestEvent::Registered { id: command.id.clone() })),
             TestState::Present { .. } => Err(TestDecisionError::AlreadyRegistered),
         }
+    }
+}
+
+impl CommandSnapshotPolicy for ExistingOnlyCommand {
+    type SnapshotPolicy = NoSnapshot;
+
+    const SNAPSHOT_POLICY: Self::SnapshotPolicy = NoSnapshot;
+}
+
+impl Decider for ExistingOnlyCommand {
+    type StreamId = str;
+    type State = TestState;
+    type Event = TestEvent;
+    type DecideError = TestDecisionError;
+    type EvolveError = TestCommandError;
+
+    const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamExists;
+
+    fn stream_id(&self) -> &Self::StreamId {
+        &self.id
+    }
+
+    fn initial_state() -> Self::State {
+        initial_test_state()
+    }
+
+    fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
+        evolve_test_state(state, event)
+    }
+
+    fn decide(_state: &TestState, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
+        Ok(Decision::event(TestEvent::StateChanged {
+            id: command.id.clone(),
+            enabled: false,
+        }))
     }
 }
 
@@ -786,18 +837,112 @@ fn test_error_helpers_cover_all_variants() {
 }
 
 #[test]
-fn write_preconditions_convert_from_decider_metadata() {
+fn declared_precondition_resolves_without_an_expected_revision() {
+    let observed = Some(position(7));
+
     assert_eq!(
-        StreamWritePrecondition::from(WritePrecondition::Any),
-        StreamWritePrecondition::Any
+        resolve_write_precondition(WritePrecondition::StreamUnchanged, None, observed),
+        Ok(StreamWritePrecondition::At(position(7)))
     );
     assert_eq!(
-        StreamWritePrecondition::from(WritePrecondition::StreamExists),
-        StreamWritePrecondition::StreamExists
+        resolve_write_precondition(WritePrecondition::StreamUnchanged, None, None),
+        Ok(StreamWritePrecondition::NoStream)
     );
     assert_eq!(
-        StreamWritePrecondition::from(WritePrecondition::NoStream),
-        StreamWritePrecondition::NoStream
+        resolve_write_precondition(WritePrecondition::NoStream, None, None),
+        Ok(StreamWritePrecondition::NoStream)
+    );
+    assert_eq!(
+        resolve_write_precondition(WritePrecondition::StreamExists, None, observed),
+        Ok(StreamWritePrecondition::StreamExists)
+    );
+    assert_eq!(
+        resolve_write_precondition(WritePrecondition::Any, None, observed),
+        Ok(StreamWritePrecondition::Any)
+    );
+}
+
+#[test]
+fn an_expected_revision_strengthens_every_declaration_it_can_satisfy() {
+    let observed = Some(position(7));
+    let expected = position(4);
+
+    for declared in [
+        WritePrecondition::StreamUnchanged,
+        WritePrecondition::StreamExists,
+        WritePrecondition::Any,
+    ] {
+        assert_eq!(
+            resolve_write_precondition(declared, Some(expected), observed),
+            Ok(StreamWritePrecondition::At(expected)),
+            "{declared:?} should defer to the caller's expected revision"
+        );
+    }
+}
+
+#[test]
+fn an_expected_revision_conflicts_with_a_creation_command() {
+    assert_eq!(
+        resolve_write_precondition(WritePrecondition::NoStream, Some(position(4)), None),
+        Err(PreconditionConflictError::CreateWithRevision)
+    );
+}
+
+#[test]
+fn an_expected_revision_the_stream_has_never_reached_is_rejected() {
+    let expected = position(9);
+
+    for declared in [
+        WritePrecondition::StreamUnchanged,
+        WritePrecondition::StreamExists,
+        WritePrecondition::Any,
+    ] {
+        assert_eq!(
+            resolve_write_precondition(declared, Some(expected), Some(position(7))),
+            Err(PreconditionConflictError::RevisionAheadOfStream(
+                RevisionAheadOfStream {
+                    expected,
+                    observed: Some(position(7)),
+                }
+            )),
+            "{declared:?} should reject a revision no event was assigned"
+        );
+        assert_eq!(
+            resolve_write_precondition(declared, Some(expected), None),
+            Err(PreconditionConflictError::RevisionAheadOfStream(
+                RevisionAheadOfStream {
+                    expected,
+                    observed: None,
+                }
+            )),
+            "{declared:?} should reject a revision on a stream that does not exist"
+        );
+    }
+
+    assert_eq!(
+        resolve_write_precondition(WritePrecondition::Any, Some(position(7)), Some(position(7))),
+        Ok(StreamWritePrecondition::At(position(7))),
+        "a revision equal to the observed position is the ordinary unchanged case"
+    );
+}
+
+#[test]
+fn rejecting_a_fabricated_revision_names_the_stream_state_it_was_measured_against() {
+    assert_eq!(
+        RevisionAheadOfStream {
+            expected: position(9),
+            observed: Some(position(7)),
+        }
+        .to_string(),
+        "caller expected revision 9 but the stream has only reached 7"
+    );
+    assert_eq!(
+        RevisionAheadOfStream {
+            expected: position(9),
+            observed: None,
+        }
+        .to_string(),
+        "caller expected revision 9 but the stream does not exist"
     );
 }
 
@@ -881,6 +1026,49 @@ fn executes_act_decisions_with_evolved_step_state() {
         &[StreamWritePrecondition::NoStream]
     );
     assert_eq!(runtime.appended_events.lock().unwrap().len(), 2);
+}
+
+#[test]
+fn a_redelivered_command_appends_the_same_event_ids_as_its_first_attempt() {
+    let command_id = CommandId::new(Uuid::now_v7());
+    let command = TestCommand::new("alpha", TestAction::RegisterThenDisable);
+    let execute_once = || {
+        let runtime = FakeRuntime {
+            stream_position: position(2),
+            ..Default::default()
+        };
+        block_on(
+            CommandExecution::new(&runtime, &command)
+                .with_command_id(command_id)
+                .execute(),
+        )
+        .unwrap();
+        let appended = runtime.appended_events.lock().unwrap();
+        appended.iter().map(|event| event.id).collect::<Vec<_>>()
+    };
+
+    let first_attempt = execute_once();
+    let redelivery = execute_once();
+
+    assert_eq!(first_attempt.len(), 2);
+    assert_ne!(first_attempt[0], first_attempt[1]);
+    assert_eq!(first_attempt, redelivery);
+}
+
+#[test]
+fn without_a_command_id_each_attempt_appends_freshly_generated_event_ids() {
+    let command = TestCommand::new("alpha", TestAction::Register);
+    let execute_once = || {
+        let runtime = FakeRuntime {
+            stream_position: position(1),
+            ..Default::default()
+        };
+        block_on(CommandExecution::new(&runtime, &command).execute()).unwrap();
+        let appended = runtime.appended_events.lock().unwrap();
+        appended.iter().map(|event| event.id).collect::<Vec<_>>()
+    };
+
+    assert_ne!(execute_once(), execute_once());
 }
 
 #[test]
@@ -1496,44 +1684,23 @@ fn replay_skips_events_outside_the_decider_event_set() {
 }
 
 #[test]
-fn explicit_write_precondition_overrides_exact_current_position_fallback() {
+fn a_stale_expected_revision_is_rejected_even_though_the_stream_is_unchanged() {
     let runtime = FakeRuntime {
-        stream_position: position(1),
-        ..Default::default()
-    };
-    let command = TestCommand::new("alpha", TestAction::Register);
-
-    let _ = block_on(
-        CommandExecution::new(&runtime, &command)
-            .with_write_precondition(StreamWritePrecondition::Any)
-            .execute(),
-    )
-    .unwrap();
-
-    assert_eq!(
-        runtime.stream_write_preconditions.lock().unwrap().as_slice(),
-        &[StreamWritePrecondition::Any]
-    );
-}
-
-#[test]
-fn explicit_no_stream_precondition_defers_existing_stream_conflict_to_append() {
-    let runtime = FakeRuntime {
-        current_position: Some(position(1)),
+        current_position: Some(position(7)),
         stream_events: vec![stream_event(
-            1,
+            7,
             TestEvent::Registered {
                 id: "alpha".to_string(),
             },
         )],
-        stream_position: position(2),
+        stream_position: position(8),
         ..Default::default()
     };
-    let command = TestCommand::new("alpha", TestAction::Register);
+    let command = TestCommand::new("alpha", TestAction::Remove);
 
     let error = block_on(
         CommandExecution::new(&runtime, &command)
-            .with_write_precondition(StreamWritePrecondition::NoStream)
+            .with_expected_revision(position(4))
             .execute(),
     )
     .unwrap_err();
@@ -1542,16 +1709,69 @@ fn explicit_no_stream_precondition_defers_existing_stream_conflict_to_append() {
         matches!(error, CommandError::Append(TestInfraError::WriteConflict)),
         "unexpected error: {error:?}"
     );
-    assert!(runtime.reads_from.lock().unwrap().is_empty());
     assert_eq!(
         runtime.stream_write_preconditions.lock().unwrap().as_slice(),
-        &[StreamWritePrecondition::NoStream]
+        &[StreamWritePrecondition::At(position(4))]
     );
+}
+
+#[test]
+fn a_current_expected_revision_reproduces_the_observed_position_guard() {
+    let runtime = FakeRuntime {
+        current_position: Some(position(7)),
+        stream_events: vec![stream_event(
+            7,
+            TestEvent::Registered {
+                id: "alpha".to_string(),
+            },
+        )],
+        stream_position: position(8),
+        ..Default::default()
+    };
+    let command = TestCommand::new("alpha", TestAction::Remove);
+
+    let _ = block_on(
+        CommandExecution::new(&runtime, &command)
+            .with_expected_revision(position(7))
+            .execute(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        runtime.stream_write_preconditions.lock().unwrap().as_slice(),
+        &[StreamWritePrecondition::At(position(7))]
+    );
+}
+
+#[test]
+fn expected_revision_on_a_creation_command_conflicts_before_any_append() {
+    let runtime = FakeRuntime {
+        stream_position: position(1),
+        ..Default::default()
+    };
+    let command = RequiredRegisterCommand::new("alpha");
+
+    let error = block_on(
+        CommandExecution::new(&runtime, &command)
+            .with_expected_revision(position(4))
+            .execute(),
+    )
+    .unwrap_err();
+
+    assert!(
+        matches!(
+            error,
+            CommandError::PreconditionConflict(PreconditionConflictError::CreateWithRevision)
+        ),
+        "unexpected error: {error:?}"
+    );
+    assert!(runtime.reads_from.lock().unwrap().is_empty());
+    assert!(runtime.stream_write_preconditions.lock().unwrap().is_empty());
     assert!(runtime.appended_events.lock().unwrap().is_empty());
 }
 
 #[test]
-fn explicit_stream_exists_precondition_allows_existing_stream() {
+fn declared_stream_exists_guards_the_append_without_pinning_a_position() {
     let runtime = FakeRuntime {
         current_position: Some(position(1)),
         stream_events: vec![stream_event(
@@ -1563,14 +1783,9 @@ fn explicit_stream_exists_precondition_allows_existing_stream() {
         stream_position: position(2),
         ..Default::default()
     };
-    let command = TestCommand::new("alpha", TestAction::Disable);
+    let command = ExistingOnlyCommand::new("alpha");
 
-    let _ = block_on(
-        CommandExecution::new(&runtime, &command)
-            .with_write_precondition(StreamWritePrecondition::StreamExists)
-            .execute(),
-    )
-    .unwrap();
+    let _ = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap();
 
     assert_eq!(
         runtime.stream_write_preconditions.lock().unwrap().as_slice(),
@@ -1579,39 +1794,61 @@ fn explicit_stream_exists_precondition_allows_existing_stream() {
 }
 
 #[test]
-fn explicit_no_stream_precondition_ignores_stale_snapshot_and_defers_conflict_to_append() {
+fn declared_stream_exists_defers_to_an_expected_revision() {
     let runtime = FakeRuntime {
-        snapshot: Some(Snapshot::new(position(1), TestState::Missing)),
-        current_position: Some(position(2)),
+        current_position: Some(position(1)),
         stream_events: vec![stream_event(
-            2,
+            1,
             TestEvent::Registered {
                 id: "alpha".to_string(),
             },
         )],
+        stream_position: position(2),
+        ..Default::default()
+    };
+    let command = ExistingOnlyCommand::new("alpha");
+
+    let _ = block_on(
+        CommandExecution::new(&runtime, &command)
+            .with_expected_revision(position(1))
+            .execute(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        runtime.stream_write_preconditions.lock().unwrap().as_slice(),
+        &[StreamWritePrecondition::At(position(1))]
+    );
+}
+
+#[test]
+fn expected_revision_on_a_creation_command_conflicts_before_any_snapshot_read() {
+    let runtime = FakeRuntime {
+        snapshot: Some(Snapshot::new(position(1), TestState::Missing)),
+        current_position: Some(position(2)),
         stream_position: position(3),
         ..Default::default()
     };
-    let command = TestCommand::new("alpha", TestAction::Register);
+    let command = RequiredRegisterCommand::new("alpha");
 
     let error = block_on(
         CommandExecution::new(&runtime, &command)
             .with_snapshot(test_snapshots(&runtime, NoSnapshot))
-            .with_write_precondition(StreamWritePrecondition::NoStream)
+            .with_expected_revision(position(1))
             .execute(),
     )
     .unwrap_err();
 
     assert!(
-        matches!(error, CommandError::Append(TestInfraError::WriteConflict)),
+        matches!(
+            error,
+            CommandError::PreconditionConflict(PreconditionConflictError::CreateWithRevision)
+        ),
         "unexpected error: {error:?}"
     );
     assert!(runtime.reads_from.lock().unwrap().is_empty());
     assert!(runtime.loaded_stream_ids.lock().unwrap().is_empty());
-    assert_eq!(
-        runtime.stream_write_preconditions.lock().unwrap().as_slice(),
-        &[StreamWritePrecondition::NoStream]
-    );
+    assert!(runtime.stream_write_preconditions.lock().unwrap().is_empty());
     assert!(runtime.appended_events.lock().unwrap().is_empty());
 }
 
@@ -1623,12 +1860,7 @@ fn required_command_rule_uses_required_stream_write_precondition() {
     };
     let command = RequiredRegisterCommand::new("alpha");
 
-    let _ = block_on(
-        CommandExecution::new(&runtime, &command)
-            .with_write_precondition(StreamWritePrecondition::Any)
-            .execute(),
-    )
-    .unwrap();
+    let _ = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap();
 
     assert_eq!(
         runtime.stream_write_preconditions.lock().unwrap().as_slice(),
@@ -1662,7 +1894,6 @@ fn no_stream_command_with_snapshots_skips_snapshot_and_stream_reads() {
     let result = block_on(
         CommandExecution::new(&runtime, &command)
             .with_snapshot(test_snapshots(&runtime, NoSnapshot))
-            .with_write_precondition(StreamWritePrecondition::Any)
             .execute(),
     )
     .unwrap();
@@ -2209,4 +2440,789 @@ fn replay_limit_defaults_to_unlimited() {
     let result = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap();
 
     assert_eq!(result.state, TestState::Present { enabled: false });
+}
+
+#[test]
+fn admission_defaults_to_unlimited() {
+    let runtime = FakeRuntime {
+        stream_position: position(1),
+        ..Default::default()
+    };
+    let command = TestCommand::new("alpha", TestAction::Register);
+
+    for _ in 0..8 {
+        block_on(CommandExecution::new(&runtime, &command).execute()).unwrap();
+    }
+}
+
+#[test]
+fn a_shed_command_reads_nothing_and_appends_nothing() {
+    let runtime = FakeRuntime {
+        stream_position: position(1),
+        ..Default::default()
+    };
+    let command = TestCommand::new("alpha", TestAction::Register);
+    let admission = ConcurrencyAdmission::new(AdmissionLimit::try_new(1).unwrap());
+    let held = admission.admit().unwrap();
+
+    let error = block_on(
+        CommandExecution::new(&runtime, &command)
+            .with_admission(&admission)
+            .execute(),
+    )
+    .unwrap_err();
+
+    assert!(
+        matches!(error, CommandError::Overloaded(overloaded) if overloaded.limit().as_usize() == 1),
+        "{error}"
+    );
+    assert!(
+        runtime.reads_from.lock().unwrap().is_empty(),
+        "a shed command must not reach the store"
+    );
+    assert!(runtime.appended_events.lock().unwrap().is_empty());
+    drop(held);
+}
+
+#[test]
+fn an_execution_releases_its_admission_slot_when_it_ends() {
+    let runtime = FakeRuntime {
+        stream_position: position(1),
+        ..Default::default()
+    };
+    let command = TestCommand::new("alpha", TestAction::Register);
+    let admission = ConcurrencyAdmission::new(AdmissionLimit::try_new(1).unwrap());
+
+    for _ in 0..3 {
+        block_on(
+            CommandExecution::new(&runtime, &command)
+                .with_admission(&admission)
+                .execute(),
+        )
+        .unwrap();
+        assert_eq!(admission.in_flight(), 0);
+    }
+}
+
+#[test]
+fn a_failed_execution_releases_its_admission_slot() {
+    let runtime = FakeRuntime {
+        fail_read_stream: true,
+        ..Default::default()
+    };
+    let command = TestCommand::new("alpha", TestAction::Register);
+    let admission = ConcurrencyAdmission::new(AdmissionLimit::try_new(1).unwrap());
+
+    let error = block_on(
+        CommandExecution::new(&runtime, &command)
+            .with_admission(&admission)
+            .execute(),
+    )
+    .unwrap_err();
+
+    assert!(matches!(error, CommandError::ReadStream(_)), "{error}");
+    assert_eq!(
+        admission.in_flight(),
+        0,
+        "a slot released only on success would leak on every failure"
+    );
+}
+
+#[test]
+fn a_shed_command_is_recorded_as_shed_rather_than_faulted() {
+    let overloaded = OverloadedError::new(AdmissionLimit::try_new(4).unwrap());
+    let error: CommandError<
+        std::convert::Infallible,
+        std::convert::Infallible,
+        std::convert::Infallible,
+        std::convert::Infallible,
+        std::convert::Infallible,
+        std::convert::Infallible,
+        std::convert::Infallible,
+        std::convert::Infallible,
+    > = CommandError::Overloaded(overloaded);
+
+    assert_eq!(decision_outcome_for_error(&error), attribute::DecisionOutcome::Shed);
+    assert_eq!(
+        error.to_string(),
+        "command shed by admission control: all 4 execution slots are in use"
+    );
+}
+
+/// An authorizer that grants on one claim and counts what it was asked.
+#[derive(Debug)]
+struct RequireClaim {
+    claim: &'static str,
+    calls: AtomicUsize,
+}
+
+impl RequireClaim {
+    fn new(claim: &'static str) -> Self {
+        Self {
+            claim,
+            calls: AtomicUsize::new(0),
+        }
+    }
+
+    fn calls(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
+    }
+}
+
+impl CommandAuthorizer<TestCommand> for RequireClaim {
+    fn authorize(&self, principal: &CommandPrincipal, _command: &TestCommand) -> Result<(), AuthorizationDeniedError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        if principal.has_claim(self.claim) {
+            Ok(())
+        } else {
+            Err(AuthorizationDeniedError::new(format!("{} is required", self.claim)))
+        }
+    }
+}
+
+fn principal(id: &str, claims: &[&str]) -> CommandPrincipal {
+    CommandPrincipal::new(PrincipalKind::Agent, PrincipalId::new(id).unwrap()).with_claims(
+        claims
+            .iter()
+            .map(|claim| PrincipalClaim::new(*claim).unwrap())
+            .collect(),
+    )
+}
+
+#[test]
+fn authorization_defaults_to_absent() {
+    let runtime = FakeRuntime {
+        stream_position: position(1),
+        ..Default::default()
+    };
+    let command = TestCommand::new("alpha", TestAction::Register);
+
+    block_on(CommandExecution::new(&runtime, &command).execute()).unwrap();
+}
+
+#[test]
+fn a_denied_command_reads_nothing_and_appends_nothing() {
+    let runtime = FakeRuntime {
+        stream_position: position(1),
+        ..Default::default()
+    };
+    let command = TestCommand::new("alpha", TestAction::Register);
+    let authorizer = RequireClaim::new("decider.write");
+
+    let error = block_on(
+        CommandExecution::new(&runtime, &command)
+            .with_principal(principal("agent-1", &["decider.read"]))
+            .with_authorizer(&authorizer)
+            .execute(),
+    )
+    .unwrap_err();
+
+    assert!(
+        matches!(
+            error,
+            CommandError::Unauthorized(UnauthorizedError::Denied(ref denied))
+                if denied.reason() == "decider.write is required"
+        ),
+        "{error}"
+    );
+    assert!(
+        runtime.reads_from.lock().unwrap().is_empty(),
+        "a denied command must not reach the store"
+    );
+    assert!(runtime.appended_events.lock().unwrap().is_empty());
+    assert_eq!(command.stream_id_calls.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn an_authorized_command_runs_as_it_would_unguarded() {
+    let runtime = FakeRuntime {
+        stream_position: position(1),
+        ..Default::default()
+    };
+    let command = TestCommand::new("alpha", TestAction::Register);
+    let authorizer = RequireClaim::new("decider.write");
+
+    let result = block_on(
+        CommandExecution::new(&runtime, &command)
+            .with_principal(principal("agent-1", &["decider.write"]))
+            .with_authorizer(&authorizer)
+            .execute(),
+    )
+    .unwrap();
+
+    assert_eq!(result.events.len(), 1);
+    assert_eq!(runtime.appended_events.lock().unwrap().len(), 1);
+    assert_eq!(authorizer.calls(), 1);
+}
+
+#[test]
+fn an_execution_with_an_authorizer_and_no_principal_is_denied() {
+    let runtime = FakeRuntime {
+        stream_position: position(1),
+        ..Default::default()
+    };
+    let command = TestCommand::new("alpha", TestAction::Register);
+    let authorizer = RequireClaim::new("decider.write");
+
+    let error = block_on(
+        CommandExecution::new(&runtime, &command)
+            .with_authorizer(&authorizer)
+            .execute(),
+    )
+    .unwrap_err();
+
+    assert!(
+        matches!(error, CommandError::Unauthorized(UnauthorizedError::MissingPrincipal)),
+        "{error}"
+    );
+    assert_eq!(
+        authorizer.calls(),
+        0,
+        "an absent principal is refused before any policy is consulted"
+    );
+    assert!(runtime.appended_events.lock().unwrap().is_empty());
+}
+
+#[test]
+fn one_command_is_authorized_once_however_many_conflicts_it_survives() {
+    let runtime = ContendedRuntime::losing(2);
+    let command = TestCommand::new("alpha", TestAction::Register);
+    let authorizer = RequireClaim::new("decider.write");
+
+    block_on(
+        CommandExecution::new(&runtime, &command)
+            .with_principal(principal("agent-1", &["decider.write"]))
+            .with_authorizer(&authorizer)
+            .with_conflict_retry(retry_limit(3))
+            .execute(),
+    )
+    .unwrap();
+
+    assert_eq!(runtime.attempts(), 3);
+    assert_eq!(
+        authorizer.calls(),
+        1,
+        "a retry re-reads and re-decides, but it is still the one command the principal submitted"
+    );
+}
+
+#[test]
+fn a_denied_command_is_recorded_as_denied_rather_than_faulted() {
+    let error: CommandError<
+        std::convert::Infallible,
+        std::convert::Infallible,
+        std::convert::Infallible,
+        std::convert::Infallible,
+        std::convert::Infallible,
+        std::convert::Infallible,
+        std::convert::Infallible,
+        std::convert::Infallible,
+    > = CommandError::Unauthorized(UnauthorizedError::Denied(AuthorizationDeniedError::new(
+        "decider.write is required",
+    )));
+
+    assert_eq!(decision_outcome_for_error(&error), attribute::DecisionOutcome::Denied);
+    assert_eq!(
+        error.to_string(),
+        "command denied for this principal: decider.write is required"
+    );
+}
+
+/// A store with another writer racing on the same stream.
+///
+/// Each append this store rejects also advances the stream, which is what makes
+/// the rejection worth another round: the next read observes a position the
+/// last decision could not have.
+#[derive(Debug)]
+struct ContendedRuntime {
+    conflicts_left: Mutex<u32>,
+    current_position: Mutex<Option<StreamPosition>>,
+    contender_event: Option<TestEvent>,
+    stream_events: Mutex<Vec<StreamEvent>>,
+    reads: Mutex<Vec<ReadFrom>>,
+    stream_write_preconditions: Mutex<Vec<StreamWritePrecondition>>,
+    appended_events: Mutex<Vec<Event>>,
+}
+
+impl ContendedRuntime {
+    /// A store that loses `conflicts` races before the append lands.
+    ///
+    /// The other writer leaves nothing this decider can decode, so every
+    /// attempt decides from the same state and only the guard moves.
+    fn losing(conflicts: u32) -> Self {
+        Self {
+            conflicts_left: Mutex::new(conflicts),
+            current_position: Mutex::new(None),
+            contender_event: None,
+            stream_events: Mutex::new(Vec::new()),
+            reads: Mutex::new(Vec::new()),
+            stream_write_preconditions: Mutex::new(Vec::new()),
+            appended_events: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// The same, except the other writer records an event this decider folds.
+    fn writing(mut self, event: TestEvent) -> Self {
+        self.contender_event = Some(event);
+        self
+    }
+
+    /// The same, over a stream that already has history.
+    fn starting_at(self, current_position: StreamPosition, events: Vec<StreamEvent>) -> Self {
+        *self.current_position.lock().unwrap() = Some(current_position);
+        *self.stream_events.lock().unwrap() = events;
+        self
+    }
+
+    fn attempts(&self) -> usize {
+        self.stream_write_preconditions.lock().unwrap().len()
+    }
+}
+
+impl StreamRead<str> for ContendedRuntime {
+    type Error = TestInfraError;
+
+    async fn read_stream(&self, request: ReadStreamRequest<'_, str>) -> Result<ReadStreamResponse, Self::Error> {
+        self.reads.lock().unwrap().push(request.from);
+        let from_sequence = match request.from {
+            ReadFrom::Beginning => 1,
+            ReadFrom::Position(position) => position.as_u64(),
+        };
+        Ok(ReadStreamResponse {
+            current_position: *self.current_position.lock().unwrap(),
+            events: self
+                .stream_events
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|event| event.stream_position.as_u64() >= from_sequence)
+                .cloned()
+                .collect(),
+        })
+    }
+}
+
+impl StreamAppend<str> for ContendedRuntime {
+    type Error = TestInfraError;
+
+    async fn append_stream(&self, request: AppendStreamRequest<'_, str>) -> Result<AppendStreamResponse, Self::Error> {
+        self.stream_write_preconditions
+            .lock()
+            .unwrap()
+            .push(request.stream_write_precondition);
+
+        let mut current_position = self.current_position.lock().unwrap();
+        let next = position(current_position.map_or(1, |position| position.as_u64() + 1));
+        let mut conflicts_left = self.conflicts_left.lock().unwrap();
+        if *conflicts_left > 0 {
+            *conflicts_left -= 1;
+            if let Some(event) = self.contender_event.clone() {
+                self.stream_events
+                    .lock()
+                    .unwrap()
+                    .push(stream_event(next.as_u64(), event));
+            }
+            *current_position = Some(next);
+            return Err(TestInfraError::WriteConflict);
+        }
+
+        *current_position = Some(next);
+        self.appended_events.lock().unwrap().extend(request.events);
+        Ok(AppendStreamResponse { stream_position: next })
+    }
+
+    fn classify_append_failure(&self, error: &Self::Error) -> AppendFailure {
+        match error {
+            TestInfraError::WriteConflict => AppendFailure::WriteConflict,
+            _ => AppendFailure::Fatal,
+        }
+    }
+}
+
+fn retry_limit(value: u32) -> ConflictRetryLimit {
+    ConflictRetryLimit::try_new(value).expect("test retry limit must be non-zero")
+}
+
+#[test]
+fn a_conflict_within_the_budget_is_retried_until_the_append_lands() {
+    let runtime = ContendedRuntime::losing(2);
+    let command = TestCommand::new("alpha", TestAction::Register);
+
+    let result = block_on(
+        CommandExecution::new(&runtime, &command)
+            .with_conflict_retry(retry_limit(3))
+            .execute(),
+    )
+    .unwrap();
+
+    assert_eq!(result.stream_position, position(3));
+    assert_eq!(
+        runtime.stream_write_preconditions.lock().unwrap().as_slice(),
+        &[
+            StreamWritePrecondition::NoStream,
+            StreamWritePrecondition::At(position(1)),
+            StreamWritePrecondition::At(position(2))
+        ],
+        "each attempt has to guard on the position its own read observed"
+    );
+    assert_eq!(
+        runtime.appended_events.lock().unwrap().len(),
+        1,
+        "only the attempt that won the race may leave events behind"
+    );
+    assert_eq!(
+        runtime.reads.lock().unwrap().len(),
+        3,
+        "a retry that skipped the read would decide from state it already knows is stale"
+    );
+}
+
+#[test]
+fn a_retry_decides_again_from_what_the_other_writer_left() {
+    let runtime = ContendedRuntime::losing(1).writing(TestEvent::Registered {
+        id: "alpha".to_string(),
+    });
+    let command = TestCommand::new("alpha", TestAction::Register);
+
+    let error = block_on(
+        CommandExecution::new(&runtime, &command)
+            .with_conflict_retry(retry_limit(3))
+            .execute(),
+    )
+    .unwrap_err();
+
+    assert!(
+        matches!(error, CommandError::Decide(TestDecisionError::AlreadyRegistered)),
+        "unexpected error: {error:?}"
+    );
+    assert!(
+        runtime.appended_events.lock().unwrap().is_empty(),
+        "the retry has to honour the decision it reached on the newer state"
+    );
+}
+
+#[test]
+fn a_conflict_that_outlives_the_budget_reaches_the_caller() {
+    let runtime = ContendedRuntime::losing(5);
+    let command = TestCommand::new("alpha", TestAction::Register);
+
+    let error = block_on(
+        CommandExecution::new(&runtime, &command)
+            .with_conflict_retry(retry_limit(2))
+            .execute(),
+    )
+    .unwrap_err();
+
+    assert!(
+        matches!(error, CommandError::Append(TestInfraError::WriteConflict)),
+        "unexpected error: {error:?}"
+    );
+    assert_eq!(
+        runtime.attempts(),
+        3,
+        "the limit counts retries, so two of them means three appends attempted"
+    );
+}
+
+#[test]
+fn without_a_configured_limit_the_first_conflict_is_the_answer() {
+    let runtime = ContendedRuntime::losing(1);
+    let command = TestCommand::new("alpha", TestAction::Register);
+
+    let error = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap_err();
+
+    assert!(
+        matches!(error, CommandError::Append(TestInfraError::WriteConflict)),
+        "unexpected error: {error:?}"
+    );
+    assert_eq!(runtime.attempts(), 1);
+}
+
+#[test]
+fn a_store_that_never_classified_its_errors_is_never_retried() {
+    let runtime = FakeRuntime {
+        current_position: Some(position(1)),
+        stream_events: vec![stream_event(
+            1,
+            TestEvent::Registered {
+                id: "alpha".to_string(),
+            },
+        )],
+        ..Default::default()
+    };
+    let command = RequiredRegisterCommand::new("alpha");
+
+    let error = block_on(
+        CommandExecution::new(&runtime, &command)
+            .with_conflict_retry(retry_limit(3))
+            .execute(),
+    )
+    .unwrap_err();
+
+    assert!(
+        matches!(error, CommandError::Append(TestInfraError::WriteConflict)),
+        "unexpected error: {error:?}"
+    );
+    assert_eq!(
+        runtime.stream_write_preconditions.lock().unwrap().len(),
+        1,
+        "a default classification means fatal, whatever the error happens to be named"
+    );
+}
+
+#[test]
+fn a_creation_command_is_not_retried_past_its_own_precondition() {
+    let runtime = ContendedRuntime::losing(1);
+    let command = RequiredRegisterCommand::new("alpha");
+
+    let error = block_on(
+        CommandExecution::new(&runtime, &command)
+            .with_conflict_retry(retry_limit(3))
+            .execute(),
+    )
+    .unwrap_err();
+
+    assert!(
+        matches!(error, CommandError::Append(TestInfraError::WriteConflict)),
+        "unexpected error: {error:?}"
+    );
+    assert_eq!(
+        runtime.attempts(),
+        1,
+        "re-reading cannot make a stream that now exists stop existing"
+    );
+}
+
+#[test]
+fn a_caller_supplied_revision_is_not_retried_past() {
+    let runtime = ContendedRuntime::losing(1).starting_at(
+        position(1),
+        vec![stream_event(
+            1,
+            TestEvent::Registered {
+                id: "alpha".to_string(),
+            },
+        )],
+    );
+    let command = TestCommand::new("alpha", TestAction::Remove);
+
+    let error = block_on(
+        CommandExecution::new(&runtime, &command)
+            .with_conflict_retry(retry_limit(3))
+            .with_expected_revision(position(1))
+            .execute(),
+    )
+    .unwrap_err();
+
+    assert!(
+        matches!(error, CommandError::Append(TestInfraError::WriteConflict)),
+        "unexpected error: {error:?}"
+    );
+    assert_eq!(
+        runtime.attempts(),
+        1,
+        "the conflict is the answer the caller asked for by naming a revision"
+    );
+}
+
+fn chunk_size(value: u64) -> ReplayChunkSize {
+    ReplayChunkSize::try_new(value).expect("test chunk size must be non-zero")
+}
+
+fn state_changed(sequence: u64, enabled: bool) -> StreamEvent {
+    stream_event(
+        sequence,
+        TestEvent::StateChanged {
+            id: "alpha".to_string(),
+            enabled,
+        },
+    )
+}
+
+fn registered(sequence: u64) -> StreamEvent {
+    stream_event(
+        sequence,
+        TestEvent::Registered {
+            id: "alpha".to_string(),
+        },
+    )
+}
+
+#[test]
+fn a_replay_chunk_size_walks_the_stream_in_bounded_reads() {
+    let runtime = FakeRuntime {
+        current_position: Some(position(5)),
+        stream_events: vec![
+            registered(1),
+            state_changed(2, false),
+            state_changed(3, true),
+            state_changed(4, false),
+            state_changed(5, true),
+        ],
+        stream_position: position(6),
+        ..Default::default()
+    };
+    let command = TestCommand::new("alpha", TestAction::Remove);
+
+    let result = block_on(
+        CommandExecution::new(&runtime, &command)
+            .with_replay_chunk_size(chunk_size(2))
+            .execute(),
+    )
+    .unwrap();
+
+    assert_eq!(result.state, TestState::Missing);
+    assert_eq!(
+        runtime.bounded_reads.lock().unwrap().as_slice(),
+        &[2, 2, 2],
+        "every read has to be capped at the chunk, or the chunk bounds nothing"
+    );
+    assert_eq!(
+        runtime.reads_from.lock().unwrap().as_slice(),
+        &[
+            ReadFrom::Beginning,
+            ReadFrom::Position(position(3)),
+            ReadFrom::Position(position(5))
+        ],
+        "each read resumes after the last event the previous chunk folded"
+    );
+}
+
+#[test]
+fn a_chunked_replay_is_pinned_to_the_tail_the_first_read_observed() {
+    let runtime = FakeRuntime {
+        current_position: Some(position(3)),
+        stream_events: vec![
+            registered(1),
+            state_changed(2, false),
+            state_changed(3, true),
+            state_changed(4, false),
+            state_changed(5, false),
+        ],
+        stream_position: position(6),
+        ..Default::default()
+    };
+    let command = TestCommand::new("alpha", TestAction::Disable);
+
+    let result = block_on(
+        CommandExecution::new(&runtime, &command)
+            .with_replay_chunk_size(chunk_size(2))
+            .execute(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        result.state,
+        TestState::Present { enabled: false },
+        "folding past the pin would have decided from a state the append is not guarded against"
+    );
+    assert_eq!(
+        runtime.stream_write_preconditions.lock().unwrap().as_slice(),
+        &[StreamWritePrecondition::At(position(3))],
+        "the guard and the fold have to agree on where the stream ended"
+    );
+    assert_eq!(
+        runtime.bounded_reads.lock().unwrap().len(),
+        2,
+        "reaching the pin ends the walk, however much further the stream has grown"
+    );
+}
+
+#[test]
+fn a_chunk_size_and_a_limit_read_by_whichever_is_tighter() {
+    let runtime = FakeRuntime {
+        current_position: Some(position(6)),
+        stream_events: vec![
+            registered(1),
+            state_changed(2, false),
+            state_changed(3, true),
+            state_changed(4, false),
+            state_changed(5, true),
+            state_changed(6, false),
+        ],
+        ..Default::default()
+    };
+    let command = TestCommand::new("alpha", TestAction::Remove);
+    let limit = ReplayLimit::try_new(4).unwrap();
+
+    let error = block_on(
+        CommandExecution::new(&runtime, &command)
+            .with_replay_limit(limit)
+            .with_replay_chunk_size(chunk_size(3))
+            .execute(),
+    )
+    .unwrap_err();
+
+    assert!(
+        matches!(
+            error,
+            CommandError::ReplayLimitExceeded(ReplayLimitExceeded {
+                limit: error_limit,
+                replayed_event_count: 5,
+            }) if error_limit == limit
+        ),
+        "unexpected error: {error:?}"
+    );
+    assert_eq!(
+        runtime.bounded_reads.lock().unwrap().as_slice(),
+        &[3, 2],
+        "the chunk bounds the first read and the remaining allowance plus its probe bounds the second"
+    );
+    assert!(
+        runtime.appended_events.lock().unwrap().is_empty(),
+        "a stream past its limit appends nothing, chunked or not"
+    );
+}
+
+#[test]
+fn replay_chunking_defaults_to_a_single_read() {
+    let runtime = FakeRuntime {
+        current_position: Some(position(3)),
+        stream_events: vec![registered(1), state_changed(2, false), state_changed(3, true)],
+        stream_position: position(4),
+        ..Default::default()
+    };
+    let command = TestCommand::new("alpha", TestAction::Remove);
+
+    block_on(CommandExecution::new(&runtime, &command).execute()).unwrap();
+
+    assert_eq!(runtime.reads_from.lock().unwrap().as_slice(), &[ReadFrom::Beginning]);
+    assert!(
+        runtime.bounded_reads.lock().unwrap().is_empty(),
+        "an unbounded replay must not start paying for a capped read it never asked for"
+    );
+}
+
+#[test]
+fn a_chunked_replay_resumes_from_a_snapshot_and_still_walks_the_rest() {
+    let runtime = FakeRuntime {
+        snapshot: Some(Snapshot::new(position(2), TestState::Present { enabled: false })),
+        current_position: Some(position(6)),
+        stream_events: vec![
+            registered(1),
+            state_changed(2, false),
+            state_changed(3, true),
+            state_changed(4, false),
+            state_changed(5, true),
+            state_changed(6, false),
+        ],
+        stream_position: position(7),
+        ..Default::default()
+    };
+    let command = TestCommand::new("alpha", TestAction::Remove);
+
+    let result = block_on(
+        CommandExecution::new(&runtime, &command)
+            .with_snapshot(test_snapshots(&runtime, NoSnapshot))
+            .with_replay_chunk_size(chunk_size(2))
+            .execute(),
+    )
+    .unwrap();
+
+    assert_eq!(result.state, TestState::Missing);
+    assert_eq!(
+        runtime.reads_from.lock().unwrap().as_slice(),
+        &[ReadFrom::Position(position(3)), ReadFrom::Position(position(5))],
+        "the walk starts after the snapshot and keeps chunking from there"
+    );
 }

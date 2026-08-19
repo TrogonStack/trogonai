@@ -12,7 +12,7 @@ test-support = ["trogon-decider/test-support"]
 [lints.rust]
 missing_docs = "warn"
 warnings = "deny"
-unexpected_cfgs = { level = "deny", check-cfg = ['cfg(coverage)'] }
+unexpected_cfgs = { level = "deny", check-cfg = ['cfg(coverage)', 'cfg(dylint_lib, values(any()))'] }
 
 [lints.clippy]
 all = "deny"
@@ -32,7 +32,7 @@ tracing = { workspace = true }
 trogon-decider = { version = "0.1.0", path = "../trogon-decider" }
 trogon-semconv = { workspace = true }
 trogon-std = { version = "0.1.0", path = "../../platform/trogon-std", features = ["uuid"] }
-uuid = { workspace = true }
+uuid = { workspace = true, features = ["v5"] }
 
 [dev-dependencies]
 opentelemetry_sdk = { workspace = true, features = ["testing"] }

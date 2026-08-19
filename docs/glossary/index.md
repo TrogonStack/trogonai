@@ -42,8 +42,10 @@ entries are the quick reference.
 - [Projection](./projection)
 - [Processor](./processor)
 - [Tenant](./tenant)
+- [Subject scope](./subject-scope)
 - [Admission control](./admission-control)
 - [Retention watermark](./retention-watermark)
+- [Command principal](./command-principal)
 
 ## Agent execution model
 

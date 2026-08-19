@@ -49,6 +49,22 @@ impl From<Option<StreamPosition>> for StreamWritePrecondition {
     }
 }
 
+/// What an append failure says about whether attempting it again could succeed.
+///
+/// Only the store knows which of its errors mean "the stream moved". Naming
+/// that here keeps the distinction typed rather than inferred from an error
+/// message, and it is the whole input the optimistic-concurrency retry loop
+/// needs: contention is worth another read-decide-append round, and nothing
+/// else is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppendFailure {
+    /// The stream did not satisfy the write precondition, because another
+    /// writer appended between this execution's read and its append.
+    WriteConflict,
+    /// Anything else. The same append attempted again fails the same way.
+    Fatal,
+}
+
 /// Appends event envelopes to a stream.
 ///
 /// Implementations should preserve the caller's precondition semantics while
@@ -62,4 +78,17 @@ pub trait StreamAppend<StreamId: ?Sized>: Send + Sync {
         &self,
         request: AppendStreamRequest<'_, StreamId>,
     ) -> impl std::future::Future<Output = Result<AppendStreamResponse, Self::Error>> + Send;
+
+    /// Says whether `error` was the stream moving under the append.
+    ///
+    /// Defaults to [`AppendFailure::Fatal`], so a store that has not
+    /// classified its errors never has a command retried behind its back.
+    /// Overriding this is what opts a store into
+    /// [`CommandExecution::with_conflict_retry`](crate::CommandExecution::with_conflict_retry);
+    /// a store that leaves it alone keeps returning conflicts to its caller
+    /// exactly as before.
+    fn classify_append_failure(&self, error: &Self::Error) -> AppendFailure {
+        let _ = error;
+        AppendFailure::Fatal
+    }
 }

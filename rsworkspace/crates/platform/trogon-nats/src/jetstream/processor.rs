@@ -23,10 +23,10 @@
 //! Consumer-stream-level failures (opening the message stream, reading the
 //! next message, and settling ack/nak/term) are treated as fatal for
 //! [`Processor::run`] and end the loop; only per-message handler outcomes go
-//! through the bounded redelivery path. This crate has no logging
-//! dependency, so callers that want visibility into a fatal stop should
-//! inspect the returned [`ProcessorError`]; [`MessageHandler::on_poison`] is
-//! the equivalent hook for per-message terminal outcomes.
+//! through the bounded redelivery path. The loop emits no telemetry of its
+//! own, so callers that want visibility into a fatal stop should inspect the
+//! returned [`ProcessorError`]; [`MessageHandler::on_poison`] is the
+//! equivalent hook for per-message terminal outcomes.
 
 use std::panic::AssertUnwindSafe;
 use std::time::Duration;

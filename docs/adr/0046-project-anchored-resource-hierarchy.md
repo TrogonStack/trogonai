@@ -107,9 +107,11 @@ rule in section 2 guarantees it can be added without touching stored names.
 - The shipped OpenBao path convention `trogonai/{owner_id}/credentials/{credential_id}`
   is ratified as-is, with owner id understood as project id, so no stored path
   migrates.
-- The tenant value that [ADR#0027](./0027-decider-multi-tenancy-primitive.md)
-  threads through decider stream and snapshot resolution carries the project
-  id for credential aggregates.
+- The project id is what a credential aggregate's resolver scopes its subjects
+  by, and therefore what it declares as its
+  [ADR#0027](./0027-decider-multi-tenancy-primitive.md) `SubjectScope`. #0027
+  owns no tenant value of its own; the project id is the consumer-side vocabulary
+  it expects.
 - Domain work names the owner value object as a project id rather than
   inventing a parallel workspace concept; workspace-shaped fields collapse
   into the project.
@@ -118,7 +120,7 @@ rule in section 2 guarantees it can be added without touching stored names.
 
 ## References
 
-- [ADR#0027: Tenant Value Object for Decider Stream and Snapshot Resolution](./0027-decider-multi-tenancy-primitive.md)
+- [ADR#0027: Declared Subject Scope for Decider Stream Resolution](./0027-decider-multi-tenancy-primitive.md)
 - [ADR#0040: Contract Field Vocabulary: Identifiers, Handles, and Display Labels](./0040-contract-field-vocabulary.md)
 - [ADR#0050: Signed Proof-of-Possession as the Strongly Recommended Caller Authentication](./0050-signed-first-caller-authentication.md)
 - [ADR#0051: Fully Bound Per-Request Signing Contract](./0051-fully-bound-request-signing.md)

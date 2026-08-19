@@ -7,6 +7,7 @@ pub mod create_conflicts;
 pub mod message;
 pub mod not_found;
 pub mod object_store;
+pub mod processor;
 pub mod publish;
 pub mod stream_max_age;
 pub mod traits;
@@ -31,6 +32,7 @@ pub use not_found::{is_get_key_value_not_found, is_get_stream_not_found};
 #[cfg(not(coverage))]
 pub use object_store::NatsObjectStore;
 pub use object_store::{ClaimBucketBinding, ObjectStoreGet, ObjectStorePut};
+pub use processor::{HandlerVerdict, MessageHandler, PoisonReason, Processor, ProcessorError, RedeliveryPolicy};
 pub use publish::{PublishOutcome, publish_event};
 pub use stream_max_age::StreamMaxAge;
 pub use traits::{

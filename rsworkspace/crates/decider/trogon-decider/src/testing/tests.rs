@@ -1,7 +1,7 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use super::*;
-use crate::Decision;
+use crate::{Decision, WritePrecondition};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum TestState {
@@ -108,6 +108,7 @@ impl Decider for TestCommand {
     type Event = TestEvent;
     type DecideError = TestCommandError;
     type EvolveError = TestDomainError;
+    const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 
     fn stream_id(&self) -> &Self::StreamId {
         self.id

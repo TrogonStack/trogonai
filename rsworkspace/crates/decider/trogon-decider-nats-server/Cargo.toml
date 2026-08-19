@@ -1,0 +1,49 @@
+[package]
+name = "trogon-decider-nats-server"
+version = "0.1.0"
+edition = "2024"
+description = "NATS host for WASM decider modules, per ADR#0057"
+license = "Apache-2.0"
+repository = "https://github.com/TrogonStack/trogonai"
+
+[lib]
+name = "trogon_decider_nats_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "trogon-decider-nats-server"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+async-nats = { workspace = true, features = ["jetstream", "kv", "server_2_10", "server_2_12"] }
+buffa = { workspace = true }
+buffa-types = { workspace = true }
+bytes = { workspace = true }
+clap = { workspace = true }
+futures = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-util", "rt-multi-thread", "macros", "signal", "sync"] }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+trogon-decider-nats = { workspace = true }
+trogon-decider-runtime = { workspace = true }
+trogon-decider-wasm-runtime = { workspace = true }
+trogon-decider-wit = { workspace = true }
+trogon-nats = { workspace = true }
+trogon-semconv = { workspace = true }
+trogon-std = { workspace = true, features = ["clap", "signal"] }
+trogon-telemetry = { workspace = true }
+trogonai-proto = { workspace = true, features = ["decider"] }
+uuid = { workspace = true }
+
+[dev-dependencies]
+buffa-types = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
+trogon-std = { workspace = true, features = ["test-support"] }
+trogonai-proto = { workspace = true, features = ["decider", "schedules"] }

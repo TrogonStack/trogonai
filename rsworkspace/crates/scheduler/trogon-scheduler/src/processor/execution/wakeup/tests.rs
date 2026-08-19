@@ -102,6 +102,10 @@ fn schedule_id() -> ScheduleId {
     crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c04").unwrap()
 }
 
+fn other_schedule_id() -> ScheduleId {
+    crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c05").unwrap()
+}
+
 fn stream_position_for_len(len: usize) -> Option<StreamPosition> {
     if len == 0 {
         None
@@ -159,6 +163,45 @@ async fn store_with_schedule(status: ScheduleEventStatus) -> (MemoryEventStore, 
             .unwrap();
     }
     (store, id)
+}
+
+async fn record_wakeup_event_ids() -> Vec<trogon_decider_runtime::EventId> {
+    let (store, id) = store_with_schedule(ScheduleEventStatus::Scheduled).await;
+    RRuleWakeupProcessor::with_clock(store.clone(), fixed_clock())
+        .process(&wakeup_subject(&id), &wakeup_payload(&id))
+        .await
+        .unwrap();
+    store
+        .events(&id.to_string())
+        .into_iter()
+        .skip(2)
+        .map(|stream_event| stream_event.event.id)
+        .collect()
+}
+
+#[tokio::test]
+async fn a_redelivered_wakeup_reuses_the_event_ids_of_the_first_delivery() {
+    let first_delivery = record_wakeup_event_ids().await;
+    let redelivery = record_wakeup_event_ids().await;
+
+    assert_eq!(first_delivery.len(), 2);
+    assert_ne!(first_delivery[0], first_delivery[1]);
+    assert_eq!(first_delivery, redelivery);
+}
+
+#[test]
+fn wakeups_for_different_occurrences_are_different_commands() {
+    let id = schedule_id();
+    let next_occurrence = occurrence_at() + chrono::Duration::days(1);
+
+    assert_ne!(
+        wakeup_command_id(&id, occurrence_at()),
+        wakeup_command_id(&id, next_occurrence)
+    );
+    assert_ne!(
+        wakeup_command_id(&id, occurrence_at()),
+        wakeup_command_id(&other_schedule_id(), occurrence_at())
+    );
 }
 
 #[tokio::test]

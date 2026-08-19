@@ -6973,13 +6973,56 @@ dependencies = [
  "thiserror 2.0.19",
  "time",
  "tokio",
- "tokio-util",
  "tracing",
  "trogon-decider-runtime",
  "trogon-nats",
  "trogon-semconv",
  "trogon-std",
  "uuid",
+]
+
+[[package]]
+name = "trogon-decider-nats-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-nats",
+ "buffa",
+ "buffa-types",
+ "bytes",
+ "clap",
+ "futures",
+ "tempfile",
+ "thiserror 2.0.19",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "trogon-decider-nats",
+ "trogon-decider-runtime",
+ "trogon-decider-wasm-runtime",
+ "trogon-decider-wit",
+ "trogon-nats",
+ "trogon-semconv",
+ "trogon-std",
+ "trogon-telemetry",
+ "trogonai-proto",
+ "uuid",
+]
+
+[[package]]
+name = "trogon-decider-publish"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-nats",
+ "clap",
+ "thiserror 2.0.19",
+ "tokio",
+ "trogon-decider-nats-server",
+ "trogon-decider-test",
+ "trogon-decider-wasm-runtime",
+ "trogon-nats",
+ "trogon-std",
 ]
 
 [[package]]
@@ -7157,6 +7200,7 @@ dependencies = [
  "thiserror 2.0.19",
  "time",
  "tokio",
+ "tokio-util",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
@@ -7555,6 +7599,7 @@ checksum = "bf3923a6f5c4c6382e0b653c4117f48d631ea17f38ed86e2a828e6f7412f5239"
 dependencies = [
  "getrandom 0.4.2",
  "js-sys",
+ "sha1_smol",
  "wasm-bindgen",
 ]
 

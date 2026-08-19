@@ -1,6 +1,6 @@
 use buffa::Message as _;
 use buffa::MessageField;
-use trogon_decider_runtime::{ImmediateSnapshotTaskScheduler, ReadFrom, StreamPosition};
+use trogon_decider_runtime::{ImmediateSnapshotTaskScheduler, ReadFrom, SnapshotCadence, StreamPosition};
 use trogon_decider_wit::host::CommandEnvelope;
 use trogonai_proto::content::v1alpha1 as content_v1alpha1;
 use trogonai_proto::scheduler::schedules::v1;
@@ -343,6 +343,7 @@ async fn activating_a_new_module_version_starts_cold_and_keeps_the_prior_snapsho
     let v1_create_module = handle.route(&create_type()).expect("v1 routes create");
     WasmCommandExecution::new(&v1_create_module, &event_store, &create_command(SCHEDULE_ID))
         .with_snapshot_store(&snapshot_store, &scheduler)
+        .with_snapshot_cadence(SnapshotCadence::every_events(1))
         .execute()
         .await
         .expect("create succeeds against v1");
@@ -364,6 +365,7 @@ async fn activating_a_new_module_version_starts_cold_and_keeps_the_prior_snapsho
 
     let result = WasmCommandExecution::new(&v2_pause_module, &event_store, &pause_command(SCHEDULE_ID))
         .with_snapshot_store(&snapshot_store, &scheduler)
+        .with_snapshot_cadence(SnapshotCadence::every_events(1))
         .execute()
         .await
         .expect("pause against v2 replays from the beginning instead of resuming a v1 snapshot");

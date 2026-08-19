@@ -69,7 +69,7 @@ where
     /// # Example
     ///
     /// ```
-    /// # use trogon_decider::{Decider, Decision};
+    /// # use trogon_decider::{Decider, Decision, WritePrecondition};
     /// # struct PlaceAndDiscount { order_id: String }
     /// # #[derive(Debug, PartialEq, Eq)]
     /// # enum OrderEvent {
@@ -92,6 +92,7 @@ where
     /// #     type Event = OrderEvent;
     /// #     type DecideError = PlaceAndDiscountError;
     /// #     type EvolveError = PlaceAndDiscountEvolveError;
+    /// #     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
     /// #     fn stream_id(&self) -> &str { &self.order_id }
     /// #     fn initial_state() -> OrderState { OrderState::New }
     /// #     fn evolve(_: OrderState, event: &OrderEvent) -> Result<OrderState, PlaceAndDiscountEvolveError> {

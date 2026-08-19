@@ -2,10 +2,25 @@
 
 use std::num::NonZeroU64;
 
+use trogon_decider_nats::DuplicateWindow;
 use trogon_decider_runtime::FrequencySnapshot;
 
 // kv: shared NATS plumbing (event stream and command snapshot bucket).
 pub const EVENTS_STREAM: &str = "SCHEDULER_EVENTS";
+
+/// How long the events stream remembers a `Nats-Msg-Id` it has already accepted.
+///
+/// Commands raised from an at-least-once delivery derive their event ids from a
+/// [`CommandId`](trogon_decider_runtime::CommandId), so a redelivery republishes ids the stream has
+/// seen and is deduplicated instead of appending the events twice. That only holds while the window
+/// still covers the entry, so it has to outlast the longest consumer `ack_wait` (120s) by enough
+/// margin to absorb a delivery that is slow rather than lost. The server's implicit default is
+/// exactly 120s, which would expire at the very moment the first redelivery arrives.
+pub const EVENTS_DUPLICATE_WINDOW: DuplicateWindow = match DuplicateWindow::try_new(std::time::Duration::from_secs(600))
+{
+    Ok(window) => window,
+    Err(_) => panic!("the events duplicate window must be a window the NATS server accepts"),
+};
 pub const EVENTS_SUBJECT_PREFIX: &str = "scheduler.schedules.events.";
 pub const EVENTS_SUBJECT_PATTERN: &str = "scheduler.schedules.events.>";
 pub const COMMAND_SNAPSHOT_BUCKET: &str = "scheduler_command_snapshots";
@@ -43,6 +58,13 @@ pub(crate) const PAST_AT_GRACE: chrono::Duration = chrono::Duration::minutes(5);
 // reconciliation::wakeup
 pub const RRULE_WAKEUP_FILTER: &str = "scheduler.schedules.execution.v1.rrule.>";
 pub const RRULE_WAKEUP_CONSUMER: &str = "scheduler_rrule_wakeup_v1";
+
+/// Namespace the RRULE wakeup consumer derives its command ids under.
+///
+/// A wakeup arrives with no identity of its own, so the command it raises is named by the
+/// occurrence it fires for. Owning a namespace of its own keeps that name from colliding with any
+/// other consumer that derives ids from a key rendered the same way.
+pub(crate) const RRULE_WAKEUP_COMMAND_NAMESPACE: uuid::Uuid = uuid::uuid!("8f3010b7-03cf-47cb-8952-9ceaaa2acf11");
 
 // reconciliation::schedule_subject
 pub(crate) const EXECUTION_SUBJECT_PREFIX: &str = "scheduler.schedules.execution.v1";

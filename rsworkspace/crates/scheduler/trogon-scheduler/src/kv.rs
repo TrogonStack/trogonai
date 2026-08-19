@@ -5,7 +5,7 @@ use trogon_nats::jetstream::{
     JetStreamGetKeyValue, JetStreamGetStream, is_create_key_value_already_exists, is_create_stream_already_exists,
 };
 
-use crate::constants::{COMMAND_SNAPSHOT_BUCKET, EVENTS_STREAM, EVENTS_SUBJECT_PATTERN};
+use crate::constants::{COMMAND_SNAPSHOT_BUCKET, EVENTS_DUPLICATE_WINDOW, EVENTS_STREAM, EVENTS_SUBJECT_PATTERN};
 use crate::error::SchedulerError;
 
 // The schedules read-model bucket, its key scheme, and the catch-up checkpoint
@@ -57,6 +57,7 @@ pub async fn get_or_create_events_stream(js: &jetstream::Context) -> Result<stre
         max_messages: -1,
         max_messages_per_subject: -1,
         max_bytes: -1,
+        duplicate_window: EVENTS_DUPLICATE_WINDOW.as_duration(),
         ..Default::default()
     };
 
@@ -88,12 +89,22 @@ async fn ensure_events_stream_config(
     desired: stream::Config,
 ) -> Result<stream::Stream, SchedulerError> {
     let mut current = stream.cached_info().config.clone();
-    if current.allow_atomic_publish == desired.allow_atomic_publish && current.subjects == desired.subjects {
+    // A floor rather than an exact value: an operator who widened the window past ours knows
+    // something about their redelivery tail that this declaration does not, and narrowing it back
+    // would break the deduplication the wider setting was chosen to buy.
+    let duplicate_window_is_wide_enough = current.duplicate_window >= EVENTS_DUPLICATE_WINDOW.as_duration();
+    if current.allow_atomic_publish == desired.allow_atomic_publish
+        && current.subjects == desired.subjects
+        && duplicate_window_is_wide_enough
+    {
         return Ok(stream);
     }
 
     current.allow_atomic_publish = desired.allow_atomic_publish;
     current.subjects = desired.subjects;
+    if !duplicate_window_is_wide_enough {
+        current.duplicate_window = desired.duplicate_window;
+    }
     js.update_stream(current)
         .await
         .map_err(|source| SchedulerError::event_source("failed to update events stream configuration", source))?;

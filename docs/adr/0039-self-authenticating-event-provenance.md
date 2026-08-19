@@ -11,8 +11,9 @@ date: 2026-07-27
 
 Authenticity is checked once, at the edge. AAuth proof-of-possession
 ([ADR#0017](./0017-aauth-agent-authentication.md)) authenticates the calling
-agent, and the authorizer hook hands `decide` a typed `CommandPrincipal`
-before it runs ([ADR#0026](./0026-command-authorization-principal.md)). Once
+agent, and the authorizer hook weighs a typed `CommandPrincipal` before
+`decide` runs ([ADR#0026](./0026-command-authorization-principal.md)); `decide`
+itself never sees that principal. Once
 `decide` returns, the resulting events are appended with no actor signature of
 their own. Event headers are freeform envelope metadata, and the runtime
 deliberately does not derive them: an application that wants a fixed header

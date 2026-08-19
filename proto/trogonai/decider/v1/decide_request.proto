@@ -1,0 +1,31 @@
+edition = "2024";
+
+package trogonai.decider.v1;
+
+import "google/protobuf/any.proto";
+
+// One command submitted to the decider for a decision.
+message DecideRequest {
+  // The command itself, as the module's own schema defines it.
+  //
+  // `Any` rather than a type/bytes pair because the endpoint is one method
+  // over an open command set: which module owns a command is resolved from
+  // this type URL, and the host never decodes the value, since only the guest
+  // knows the schema behind it.
+  google.protobuf.Any command = 1 [features.field_presence = LEGACY_REQUIRED];
+
+  // Caller-supplied identity for this command, reused across its retries.
+  //
+  // Absent means the caller wants no idempotency guarantee. Present, it is
+  // what the derived event ids are namespaced by, so a redelivery appends the
+  // same ids and the stream deduplicates them.
+  string command_id = 2;
+
+  // Stream revision the caller believes it is acting on.
+  //
+  // Absent means the caller asserts nothing and the module's own write
+  // precondition governs. Zero is not a valid assertion: an empty stream is
+  // the module's `no_stream` precondition to declare, not a revision for a
+  // caller to claim.
+  uint64 expected_revision = 3;
+}

@@ -11,7 +11,7 @@
 //! # Command emits events
 //!
 //! ```
-//! use trogon_decider::{Decider, Decision};
+//! use trogon_decider::{Decider, Decision, WritePrecondition};
 //! use trogon_decider::testing::TestCase;
 //!
 //! #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,6 +42,8 @@
 //!     type Event = AccountEvent;
 //!     type DecideError = AccountError;
 //!     type EvolveError = AccountError;
+//!
+//!     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 //!
 //!     fn stream_id(&self) -> &Self::StreamId {
 //!         self.account_id
@@ -74,7 +76,7 @@
 //! # Command rejects
 //!
 //! ```
-//! # use trogon_decider::{Decider, Decision};
+//! # use trogon_decider::{Decider, Decision, WritePrecondition};
 //! # use trogon_decider::testing::TestCase;
 //! #
 //! # #[derive(Debug, Clone, PartialEq, Eq)]
@@ -105,6 +107,7 @@
 //! #     type Event = AccountEvent;
 //! #     type DecideError = AccountError;
 //! #     type EvolveError = AccountError;
+//! #     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 //! #
 //! #     fn stream_id(&self) -> &Self::StreamId { self.account_id }
 //! #     fn initial_state() -> Self::State { AccountState::Missing }
@@ -291,7 +294,7 @@ where
     /// # Example
     ///
     /// ```
-    /// # use trogon_decider::{Decider, Decision};
+    /// # use trogon_decider::{Decider, Decision, WritePrecondition};
     /// # use trogon_decider::testing::TestCase;
     /// #
     /// # #[derive(Debug, Clone, PartialEq, Eq)]
@@ -322,6 +325,7 @@ where
     /// #     type Event = AccountEvent;
     /// #     type DecideError = AccountError;
     /// #     type EvolveError = AccountError;
+    /// #     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
     /// #
     /// #     fn stream_id(&self) -> &Self::StreamId { self.account_id }
     /// #     fn initial_state() -> Self::State { AccountState::Missing }

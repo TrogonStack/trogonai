@@ -67,6 +67,12 @@
     allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)
 )]
 
+/// Admission control gating how many command executions run concurrently.
+pub mod admission;
+/// Authorization gating which principal may run a command.
+pub mod authorization;
+mod command_id;
+mod conflict_retry_limit;
 mod constants;
 /// Event envelopes and codec traits used by stream storage adapters.
 pub mod event;
@@ -77,25 +83,41 @@ pub mod headers;
 /// In-memory test double for stream and snapshot storage contracts.
 #[cfg(feature = "test-support")]
 pub mod memory;
+mod replay_bounds;
+mod replay_chunk_size;
 mod replay_limit;
 /// Snapshot read/write contracts and payload codec traits.
 pub mod snapshot;
 /// Stream read/write contracts shared by event store backends.
 pub mod stream;
 
+pub use admission::{
+    AdmissionLimit, AdmissionLimitError, CommandAdmission, ConcurrencyAdmission, OverloadedError, WithoutAdmission,
+};
+pub use authorization::{
+    AuthorizationDeniedError, CommandAuthorizer, CommandPrincipal, DirectedPrincipal, DirectedPrincipalError,
+    PrincipalClaim, PrincipalClaimError, PrincipalClaims, PrincipalId, PrincipalIdError, PrincipalKind,
+    UnauthorizedError, WithoutAuthorization,
+};
+pub use command_id::CommandId;
+pub use conflict_retry_limit::{ConflictRetryLimit, ConflictRetryLimitError};
 pub use event::{Event, EventId, EventIdentity, StreamEvent};
 #[cfg(any(test, feature = "test-support"))]
 pub use execution::ImmediateSnapshotTaskScheduler;
 pub use execution::{
     CommandError, CommandExecution, CommandResult, CommandSnapshotPolicy, DecideSnapshot,
-    DiscardAndReplaySnapshotFailure, DrainableSnapshotTaskScheduler, ExecutionResult, FailOnSnapshotFailure,
-    FrequencySnapshot, NoSnapshot, ReplayLimitExceeded, SnapshotAheadOfStream, SnapshotDecision, SnapshotFailure,
-    SnapshotFailureContext, SnapshotFailureDecision, SnapshotFailurePolicy, SnapshotPolicy, SnapshotTaskScheduler,
-    Snapshots, TokioSnapshotTaskScheduler, WithoutSnapshotTaskScheduler, WithoutSnapshots,
+    DiscardAndReplaySnapshotFailure, DrainableSnapshotTaskScheduler, ExecutionResult, ExecutionSnapshots,
+    FailOnSnapshotFailure, FrequencySnapshot, LoadReplayError, LoadReplayResult, NoSnapshot, PreconditionConflictError,
+    ReplayContext, ReplayLimitExceeded, RevisionAheadOfStream, SnapshotAheadOfStream, SnapshotDecision,
+    SnapshotFailure, SnapshotFailureContext, SnapshotFailureDecision, SnapshotFailurePolicy, SnapshotPolicy,
+    SnapshotTaskScheduler, Snapshots, TokioSnapshotTaskScheduler, WithoutSnapshotTaskScheduler, WithoutSnapshots,
+    ensure_replay_within_limit, ensure_snapshot_not_ahead, read_stream_for_execution, resolve_write_precondition,
 };
 pub use headers::{FromEntriesError, HeaderName, HeaderNameError, HeaderValue, HeaderValueError, Headers};
 #[cfg(feature = "test-support")]
 pub use memory::{InMemoryStore, StreamAppendError};
+pub use replay_bounds::{ReplayBounds, ReplayCursor};
+pub use replay_chunk_size::{ReplayChunkSize, ReplayChunkSizeError};
 pub use replay_limit::{ReplayLimit, ReplayLimitError};
 pub use snapshot::{
     InvalidSnapshotTypeNameError, ReadSnapshotRequest, ReadSnapshotResponse, Snapshot, SnapshotPayloadData,
@@ -103,12 +125,12 @@ pub use snapshot::{
     WriteSnapshotRequest, WriteSnapshotResponse,
 };
 pub use stream::{
-    AppendStreamRequest, AppendStreamResponse, InvalidStreamPositionError, ReadAfterOverflowError, ReadFrom,
-    ReadStreamRequest, ReadStreamResponse, StreamAppend, StreamPosition, StreamRead, StreamWritePrecondition,
+    AppendFailure, AppendStreamRequest, AppendStreamResponse, InvalidStreamPositionError, ReadAfterOverflowError,
+    ReadFrom, ReadStreamRequest, ReadStreamResponse, StreamAppend, StreamPosition, StreamRead, StreamWritePrecondition,
 };
 #[cfg(feature = "test-support")]
 pub use trogon_decider::testing;
 #[cfg(feature = "test-support")]
 pub use trogon_decider::testing::{History, TestCase, ThenError, ThenEvents, ThenExpectation};
-pub use trogon_decider::{Act, ActBuilder, Decider, Decision, Events, WritePrecondition};
+pub use trogon_decider::{Act, ActBuilder, Decider, Decision, Events, SnapshotCadence, WritePrecondition};
 pub use trogon_decider::{EventData, EventDecode, EventDecodeOutcome, EventEncode, EventPayloadError, EventType};

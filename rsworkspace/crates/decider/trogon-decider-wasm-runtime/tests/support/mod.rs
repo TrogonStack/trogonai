@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use trogon_decider_runtime::{
-    AppendStreamRequest, AppendStreamResponse, ReadFrom, ReadSnapshotRequest, ReadSnapshotResponse, ReadStreamRequest,
-    ReadStreamResponse, Snapshot, SnapshotRead, SnapshotWrite, StreamAppend, StreamEvent, StreamPosition, StreamRead,
-    StreamWritePrecondition, WriteSnapshotRequest, WriteSnapshotResponse,
+    AppendFailure, AppendStreamRequest, AppendStreamResponse, ReadFrom, ReadSnapshotRequest, ReadSnapshotResponse,
+    ReadStreamRequest, ReadStreamResponse, Snapshot, SnapshotRead, SnapshotWrite, StreamAppend, StreamEvent,
+    StreamPosition, StreamRead, StreamWritePrecondition, WriteSnapshotRequest, WriteSnapshotResponse,
 };
 use trogon_decider_wasm_runtime::OpaqueSnapshotPayload;
 
@@ -24,6 +24,7 @@ pub enum InfraError {
 struct EventStoreState {
     events: Vec<StreamEvent>,
     reads_from: Vec<ReadFrom>,
+    read_bounds: Vec<Option<u64>>,
     write_preconditions: Vec<StreamWritePrecondition>,
 }
 
@@ -41,6 +42,12 @@ impl InMemoryEventStore {
 
     pub fn reads_from(&self) -> Vec<ReadFrom> {
         self.lock().reads_from.clone()
+    }
+
+    /// `max_events` requested by each read, in order, with `None` for reads
+    /// that asked for the whole stream.
+    pub fn read_bounds(&self) -> Vec<Option<u64>> {
+        self.lock().read_bounds.clone()
     }
 
     pub fn write_preconditions(&self) -> Vec<StreamWritePrecondition> {
@@ -69,6 +76,32 @@ impl InMemoryEventStore {
         self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
+    fn read(&self, request: ReadStreamRequest<'_, str>, max_events: Option<u64>) -> ReadStreamResponse {
+        let mut state = self.lock();
+        state.reads_from.push(request.from);
+        state.read_bounds.push(max_events);
+        let from_sequence = match request.from {
+            ReadFrom::Beginning => 1,
+            ReadFrom::Position(position) => position.as_u64(),
+        };
+        let current_position = Self::current_position(&state, request.stream_id);
+        let mut events: Vec<StreamEvent> = state
+            .events
+            .iter()
+            .filter(|event| event.stream_id == request.stream_id)
+            .filter(|event| event.stream_position.as_u64() >= from_sequence)
+            .cloned()
+            .collect();
+        if let Some(max_events) = max_events {
+            events.truncate(usize::try_from(max_events).unwrap_or(usize::MAX));
+        }
+
+        ReadStreamResponse {
+            current_position,
+            events,
+        }
+    }
+
     fn current_position(state: &EventStoreState, stream_id: &str) -> Option<StreamPosition> {
         state
             .events
@@ -83,22 +116,15 @@ impl StreamRead<str> for InMemoryEventStore {
     type Error = InfraError;
 
     async fn read_stream(&self, request: ReadStreamRequest<'_, str>) -> Result<ReadStreamResponse, Self::Error> {
-        let mut state = self.lock();
-        state.reads_from.push(request.from);
-        let from_sequence = match request.from {
-            ReadFrom::Beginning => 1,
-            ReadFrom::Position(position) => position.as_u64(),
-        };
-        Ok(ReadStreamResponse {
-            current_position: Self::current_position(&state, request.stream_id),
-            events: state
-                .events
-                .iter()
-                .filter(|event| event.stream_id == request.stream_id)
-                .filter(|event| event.stream_position.as_u64() >= from_sequence)
-                .cloned()
-                .collect(),
-        })
+        Ok(self.read(request, None))
+    }
+
+    async fn read_stream_bounded(
+        &self,
+        request: ReadStreamRequest<'_, str>,
+        max_events: u64,
+    ) -> Result<ReadStreamResponse, Self::Error> {
+        Ok(self.read(request, Some(max_events)))
     }
 }
 
@@ -199,5 +225,92 @@ impl SnapshotWrite<OpaqueSnapshotPayload, str> for InMemorySnapshotStore {
         }
         self.insert(request.snapshot_id, request.snapshot);
         Ok(WriteSnapshotResponse)
+    }
+}
+
+/// An event store with another writer racing on the same stream.
+///
+/// Rejects the first `conflicts` appends and classifies them as contention, so
+/// an execution configured to retry re-reads and decides again. Everything
+/// else delegates to the [`InMemoryEventStore`] underneath.
+#[derive(Default)]
+pub struct ContendedEventStore {
+    inner: InMemoryEventStore,
+    conflicts_left: Mutex<u32>,
+    append_attempts: Mutex<Vec<StreamWritePrecondition>>,
+}
+
+impl ContendedEventStore {
+    /// Makes the next `conflicts` appends lose the race.
+    pub fn contend(&self, conflicts: u32) {
+        *self.lock_conflicts() = conflicts;
+    }
+
+    pub fn read_stream_calls(&self) -> usize {
+        self.inner.read_stream_calls()
+    }
+
+    /// The precondition of every append attempted, rejected ones included.
+    pub fn append_attempts(&self) -> Vec<StreamWritePrecondition> {
+        self.append_attempts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    pub fn stored_event_types(&self, stream_id: &str) -> Vec<String> {
+        self.inner.stored_event_types(stream_id)
+    }
+
+    fn lock_conflicts(&self) -> std::sync::MutexGuard<'_, u32> {
+        self.conflicts_left
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+impl StreamRead<str> for ContendedEventStore {
+    type Error = InfraError;
+
+    async fn read_stream(&self, request: ReadStreamRequest<'_, str>) -> Result<ReadStreamResponse, Self::Error> {
+        self.inner.read_stream(request).await
+    }
+
+    async fn read_stream_bounded(
+        &self,
+        request: ReadStreamRequest<'_, str>,
+        max_events: u64,
+    ) -> Result<ReadStreamResponse, Self::Error> {
+        self.inner.read_stream_bounded(request, max_events).await
+    }
+}
+
+impl StreamAppend<str> for ContendedEventStore {
+    type Error = InfraError;
+
+    async fn append_stream(&self, request: AppendStreamRequest<'_, str>) -> Result<AppendStreamResponse, Self::Error> {
+        self.append_attempts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(request.stream_write_precondition);
+
+        let contended = {
+            let mut conflicts_left = self.lock_conflicts();
+            let contended = *conflicts_left > 0;
+            *conflicts_left = conflicts_left.saturating_sub(1);
+            contended
+        };
+        if contended {
+            return Err(InfraError::PreconditionRejected);
+        }
+
+        self.inner.append_stream(request).await
+    }
+
+    fn classify_append_failure(&self, error: &Self::Error) -> AppendFailure {
+        match error {
+            InfraError::PreconditionRejected => AppendFailure::WriteConflict,
+            InfraError::SnapshotWriteFailed | InfraError::SnapshotReadFailed => AppendFailure::Fatal,
+        }
     }
 }

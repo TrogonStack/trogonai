@@ -8,6 +8,7 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 pub mod codec;
+pub mod conformance;
 mod suite;
 
 pub use suite::{BudgetOverrides, ErrorExpectation, Scenario, Step, Suite, Then};
