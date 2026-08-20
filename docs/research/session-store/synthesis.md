@@ -718,3 +718,14 @@ nothing in the corpus enumerates what would go through it, so whether seven arms
 are the right seven is still open. The queued stage three in the
 [backlog](./backlog.md) takes a provider rather than a product as its unit of
 study for that reason.
+
+**DeepSeek Harness is an additional result beyond the 55 recommendations
+counted above.** Its 5/12 store reinforces the strongest stage-two conclusion:
+even two first-party implementations behind one persistence seam need an
+explicit conformance suite, because JSONL and SQLite provide different writer
+coordination. Its copied-prefix fork, generic mutable surface replacement, and
+out-of-band retention are weaker than decisions 5, 4, and 7 respectively, while
+its append-only crash closure is worth specifying as recovery behavior. Its two
+plausible additive catalog changes are to bind each assistant generation to the
+exact rendered request envelope and to distinguish process loss from user
+steering; at 5/12 both remain thin evidence, not industry norms.

@@ -118,6 +118,6 @@ Four component-level designs support the `acp-host` build:
   lifecycle TTLs, a `media://` resource-link scheme resolved to fresh
   presigned URLs, and an inline-base64 guardrail for small payloads.
 
-Full supporting evidence, including the callability matrix across all
-fifteen products studied, is in [synthesis.md](./synthesis.md) and the
-[product dossiers](./index.md#product-dossiers).
+Full supporting evidence, including the original callability matrix and later
+product additions, is in [synthesis.md](./synthesis.md) and the [product
+dossiers](./index.md#product-dossiers).
