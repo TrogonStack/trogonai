@@ -1,6 +1,24 @@
 use super::*;
+use std::io::Write;
 use std::sync::{Arc, Mutex};
+use tracing_subscriber::util::SubscriberInitExt;
 use trogon_nats::jetstream::JetStreamPublisher;
+
+/// Collects what a subscriber writes so a test can assert which values reached
+/// it as fields rather than as message text.
+#[derive(Clone, Default)]
+struct CapturedLogs(Arc<Mutex<Vec<u8>>>);
+
+impl Write for CapturedLogs {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
 
 /// Captures (subject, headers, payload) and resolves the ack future with a
 /// canned PublishAck. `duplicate` controls whether the ack reports the
@@ -135,6 +153,14 @@ async fn dispatch_succeeds_when_jetstream_reports_duplicate_ack() {
     // Duplicate ack just means JetStream already accepted the same
     // Msg-Id — the dispatcher must treat it as success (the desired
     // dedup behaviour, not an error).
+    let captured = CapturedLogs::default();
+    let writer = captured.clone();
+    let guard = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::TRACE)
+        .with_ansi(false)
+        .with_writer(move || writer.clone())
+        .set_default();
+
     let js = RecordingJetStream::new().with_duplicate();
     let dispatcher = JetStreamPublishPushDispatcher::new(js);
     dispatcher
@@ -149,6 +175,10 @@ async fn dispatch_succeeds_when_jetstream_reports_duplicate_ack() {
         )
         .await
         .unwrap();
+
+    drop(guard);
+    let logged = String::from_utf8(captured.0.lock().unwrap().clone()).expect("subscriber output is utf-8");
+    assert!(logged.contains(r#"subject="a2a.v1.push.bot.caller.t1""#), "{logged}");
 }
 
 #[tokio::test]
