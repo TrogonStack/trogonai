@@ -22,6 +22,11 @@ ADR is authoritative.
 > Divergences C, D, and E, and the conceptual and comparison tables. The
 > revisions are marked inline.
 
+> [DeepSeek Harness](./products/deepseek-harness.md) was researched on
+> 2026-08-20 at `dsh-v0.1.0-rc.8`. Its evidence qualifies Convergence #5,
+> Divergences A, C, D, and E, and the conceptual and comparison tables. The
+> revisions are marked inline.
+
 ## Convergence
 
 **1. The behavioral definition is settled.** Every product that states one
@@ -139,6 +144,13 @@ finishes after the parent has stopped caring is not dropped silently, it is
 recorded as a `SubagentResultTombstone` naming the disposition, so "the parent
 only sees the result" does not become "the result vanishes."
 
+*Qualified after DeepSeek Harness.* The final-result contract holds for its
+one-shot children, but not for its continuable children. A continuable child is
+a durable Session that accepts parent follow-ups and may report selected
+messages before an unconditional settlement notice. The narrower convergence
+is that bounded delegation returns a result without exposing hidden reasoning;
+long-lived child agents can require an explicit message channel.
+
 **6. The `description` field is the routing protocol.** LLM-driven
 delegation is steered by a natural-language description everywhere it
 exists: Claude Code ("Claude uses each subagent's description to decide
@@ -208,6 +220,13 @@ than a necessity. Its cost is also visible: with no record there is no place
 to enumerate agents, no natural home for a description, and no per-agent
 default anything, which is a real product gap and not just a purity choice.
 
+DeepSeek Harness adds a distinct live-handle point. Its Agent is a
+process-local registry entry and driver handle with exactly the same identity
+as one durable Session. The persisted Session can exist with no live Agent;
+resume creates a fresh Agent scope under that same ID. This is neither a
+definition record serving many executions nor a fused durable actor. It is a
+temporary behavior-bearing view over one durable conversation identity.
+
 **B. Who owns the loop.** Three positions: platform-managed loop
 (OpenComputer's runtimes, Managed Agents, Devin, and the AgentCore harness
 where "Who owns the loop: AWS"), customer loop behind an infrastructure
@@ -261,6 +280,13 @@ each run; thread state persists across those runs. Its useful warning is that
 "deployed definition" and "behavior observed by this session" are not the
 same fact when control-plane content remains live.
 
+DeepSeek Harness splits binding along another boundary. A preset generation is
+fixed before Agent publication and stays stable for that live instance, while
+prompt sections, tool schemas, and runtime context assemble on every step.
+Resume preserves the Session ID and log but accepts fresh Agent options and
+setup. Session continuity therefore does not imply behavior pinning; exact
+request headers provide an audit trail, not an Agent-definition version.
+
 **D. Subagents, the least settled axis.** Declared roster with depth-1
 cap (Managed Agents: 20 agents/25 threads; Hermes default; OpenClaw default,
 with hierarchy frameworks explicitly refused in VISION),
@@ -299,6 +325,14 @@ cancel operations. The topology label alone therefore cannot determine
 whether a child needs independent identity, state, authorization, and
 lifecycle.
 
+DeepSeek Harness makes the same lifecycle distinction through a provider seam
+and then separates durable identity from residency. A one-shot local child is
+an ordinary Agent and Session disposed after one result. A continuable child
+has one durable Session, zero or one live Activation, parent follow-ups, child
+reports, and cold resume. Remote providers may create no local Agent at all.
+The additional axis is therefore not just synchronous versus asynchronous, but
+whether child identity outlives a resident Agent process.
+
 **E. Session semantics.** Session-as-task-run (OpenComputer, Managed
 Agents, Devin, LangGraph runs) vs session-as-conversation-lane (OpenClaw's
 routing-scoped lanes, Hermes' session keys, Cloudflare instances that may
@@ -320,6 +354,12 @@ one invocation inside it. MDA documentation sometimes calls the thread a
 session, and thread-scoped sandboxes are reused across runs. Mapping the run
 to a session would discard the state and environment continuity that the
 product actually preserves.
+
+DeepSeek Harness adds a third mapping: Agent and Session share one exact ID and
+are 1:1 while live. The Session may remain persisted with no resident Agent,
+and resume reconstructs a fresh Agent under the same identity. Here `Session`
+is both the conversation continuity boundary and the durable identity behind
+the otherwise ephemeral Agent handle.
 
 **F. Identity scope.** Everyone has intra-org identity; only
 [A2A](./products/adk-a2a.md) defines cross-org
@@ -352,6 +392,7 @@ from the scope plus a run profile rather than published from a definition.
 | agent-as-compiled-harness-graph | LangChain Deep Agents |
 | agent-as-code-first-definition compiled into a managed assistant and deployment | LangSmith Managed Deep Agents |
 | agent-as-scope-coordinate (a validated axis in a scope tuple; no stored object, persona in files, runtime shape resolved onto each run) | IronClaw |
+| agent-as-live-session-bound-handle | DeepSeek Harness |
 
 These are not mutually exclusive; most products stack two or three.
 IronClaw stacks agent-as-scope-coordinate with agent-as-file, which is what
@@ -381,6 +422,7 @@ makes it legible: the scope answers "whose," the files answer "who."
 | [IronClaw](./products/ironclaw.md) (added post-synthesis) | scope coordinate with no stored object; persona in markdown, runtime shape in a `ResolvedRunProfile` on the run | child runs, lineage on the run, empty grant sets, atomic descendant reservation, deny-filtered off in shipped profiles | persona per turn (file read); mechanism resolved once at admission and frozen on the run | userland loop above a kernel boundary owning authority and recovery; loop is not the security perimeter | 1:N threads under the scope; thread (transcript) and turn run (lifecycle) are separate resources |
 | [LangChain Deep Agents](./products/deep-agents.md) (added post-synthesis) | compiled LangGraph harness graph; no durable Agent resource | sync child = stateless nested invocation; async child = independent thread and run | construction plus per-run context; thread state via checkpointer; no definition version contract | customer process or surrounding deployment | graph serves N threads; thread is the session boundary, run is one invocation |
 | [LangSmith Managed Deep Agents](./products/managed-deep-agents.md) (added post-synthesis) | code-first pre-runtime definition compiled into an assistant and deployment | underlying Deep Agents sync and async models; no MDA-specific child resource | code/model/tools at build; instructions/skills on every run; state on thread | LangSmith managed harness and runtime | one assistant serves N threads; session maps to thread, with N runs |
+| [DeepSeek Harness](./products/deepseek-harness.md) (added post-synthesis) | live Agent handle over one same-ID durable Session; no definition resource | provider-backed one-shot or continuable children; spawn, fork, and remote implementations; depth defaults to 3 | profile at boot; preset generation at create; prompt and tools per step; fresh setup on resume; no definition version | user-run process with a replaceable first-party loop plugin | 1:1 while live under one ID; persisted Session may later rehydrate a fresh Agent |
 
 ## Working definition
 

@@ -3,11 +3,12 @@
 The Agent Client Protocol (ACP) is Zed's open protocol for the client-to-agent
 seat: an editor, IDE, gateway, or any other host drives a coding agent through
 a standardized JSON-RPC surface, turning the N x M client/agent integration
-problem into N + M. This corpus is the frozen research input behind the
-platform's ACP-related decisions: an industry study of ACP's protocol
-contract, ecosystem adoption, and product integrations, plus the roadmap
-analysis that followed it. Where a conclusion here differs from an accepted
-record in the [ADR index](../../adr/index.md) or from the current spec
+problem into N + M. This corpus preserves the frozen research input behind the
+platform's ACP-related decisions and clearly marked later evidence: an
+industry study of ACP's protocol contract, ecosystem adoption, and product
+integrations, plus the roadmap analysis that followed it. Where a conclusion
+here differs from an accepted record in the [ADR index](../../adr/index.md) or
+from the current spec
 position in [ACP Conformance](../../architecture/acp-conformance.md), the ADR
 or the conformance document is authoritative.
 
@@ -19,15 +20,18 @@ dive remain reproducible.
 
 ## Product dossiers
 
-Fifteen products were studied for how they actually leverage ACP: native
-implementation vs. adapter, process lifecycle ownership, headless
-invocation and auth, and channel mapping where relevant.
+The original study covered fifteen products. Later product dossiers are
+marked as post-synthesis evidence rather than rewritten into the frozen
+decision-time input. Every dossier examines native implementation vs.
+adapter, process lifecycle ownership, headless invocation and auth, and
+channel mapping where relevant.
 
 - [Buzz](./products/buzz.md)
 - [Claude Code](./products/claude-code.md)
 - [Cline](./products/cline.md)
 - [Codex CLI](./products/codex-cli.md)
 - [Cursor](./products/cursor.md)
+- [DeepSeek Harness](./products/deepseek-harness.md)
 - [Devin](./products/devin.md)
 - [Gemini CLI](./products/gemini-cli.md)
 - [Goose](./products/goose.md)

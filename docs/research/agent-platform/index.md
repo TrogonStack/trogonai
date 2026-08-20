@@ -20,6 +20,7 @@ and evidence rules behind each product dossier remain reproducible.
 - [Claude Managed Agents](./products/claude-managed-agents.md)
 - [Cloudflare Agents](./products/cloudflare-agents.md)
 - [CrewAI](./products/crewai.md)
+- [DeepSeek Harness](./products/deepseek-harness.md)
 - [Devin](./products/devin.md)
 - [Hermes Agent](./products/hermes-agent.md)
 - [IronClaw (NEAR AI)](./products/ironclaw.md)

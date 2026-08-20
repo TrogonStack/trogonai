@@ -1,10 +1,13 @@
 # Harness survey: standing instruction inputs
 
 Part of the agent instructions research corpus.
-Evidence retrieved 2026-07-30 from official documentation and product
-source code. Documentation is mutable; anchors name the pages and source
-paths checked. The question asked of every product: what can an operator
-pass in as standing agent instructions, and what is its exact shape?
+Evidence for the original survey was retrieved 2026-07-30 from official
+documentation and product source code. The DeepSeek Harness addition was
+retrieved 2026-08-20 from release `dsh-v0.1.0-rc.8` at pinned commit
+`141eb6fef83422698aef7a981029e843e8161534`. Documentation is mutable;
+anchors name the pages and source paths checked. The question asked of every
+product: what can an operator pass in as standing agent instructions, and what
+is its exact shape?
 
 ## Summary table
 
@@ -14,6 +17,7 @@ pass in as standing agent instructions, and what is its exact shape?
 | Claude Code CLI | CLAUDE.md family, `.claude/rules/*.md`, flags | markdown |
 | Anthropic Messages API | `system` | string or text blocks |
 | Codex CLI / cloud | AGENTS.md, `config.toml` keys | markdown / string |
+| DeepSeek Harness | `$DSH_HOME/AGENTS.md`, project candidates and local overlays | markdown |
 | OpenAI Agents SDK | `instructions` | string or callable |
 | Cursor | `.cursor/rules/*.mdc`, User/Team Rules, AGENTS.md | markdown |
 | Grok Build (xAI) | AGENTS.md, CLAUDE.md, `.grok/rules/*.md` | markdown |
@@ -106,6 +110,45 @@ Source-verified against `openai/codex` (`codex-rs/core/src/agents_md.rs`,
   down 2026-08-26. Official guidance is to move prompt text into
   versioned application code. Anchor:
   [prompt object migration](https://developers.openai.com/api/docs/guides/prompting/migrate-from-prompt-object).
+
+## DeepSeek Harness
+
+Source-verified against DeepSeek Harness `dsh-v0.1.0-rc.8`, commit
+`141eb6fef83422698aef7a981029e843e8161534`.
+
+- First-party support is implemented by
+  `@deepseek-ai/dsh-agent-instructions`. The default baseline loads the fixed
+  user-global `$DSH_HOME/AGENTS.md`, then every existing project candidate from
+  the discovered project root through the session cwd. The defaults are
+  `AGENTS.md` and `CLAUDE.md`, followed in each directory by
+  `AGENTS.local.md` and `CLAUDE.local.md`; the project root marker defaults to
+  `.git`
+  ([packages/context/agent-instructions/src/config.ts:11-14](https://github.com/deepseek-ai/deepseek-harness/blob/141eb6fef83422698aef7a981029e843e8161534/packages/context/agent-instructions/src/config.ts#L11-L14),
+  [packages/context/agent-instructions/src/config.ts:39-46](https://github.com/deepseek-ai/deepseek-harness/blob/141eb6fef83422698aef7a981029e843e8161534/packages/context/agent-instructions/src/config.ts#L39-L46),
+  [packages/context/agent-instructions/src/files.ts:267-308](https://github.com/deepseek-ai/deepseek-harness/blob/141eb6fef83422698aef7a981029e843e8161534/packages/context/agent-instructions/src/files.ts#L267-L308)).
+- Scope and precedence are additive, broad to specific. User-global content is
+  first, then root-to-cwd directories; base candidates precede local overlays
+  in each directory. Distinct files all remain visible, while same-directory
+  files whose whitespace-trimmed content is identical collapse to the earliest
+  configured candidate. The rendered reminder tells the model that more
+  specific instructions take precedence and that workspace files do not
+  override system, developer, or direct user instructions
+  ([packages/context/agent-instructions/README.md:9-13](https://github.com/deepseek-ai/deepseek-harness/blob/141eb6fef83422698aef7a981029e843e8161534/packages/context/agent-instructions/README.md#L9-L13),
+  [packages/context/agent-instructions/src/render.ts:10-18](https://github.com/deepseek-ai/deepseek-harness/blob/141eb6fef83422698aef7a981029e843e8161534/packages/context/agent-instructions/src/render.ts#L10-L18),
+  [packages/context/agent-instructions/src/render.ts:85-98](https://github.com/deepseek-ai/deepseek-harness/blob/141eb6fef83422698aef7a981029e843e8161534/packages/context/agent-instructions/src/render.ts#L85-L98)).
+- Binding is per session and durable. The complete baseline joins the first
+  eligible request as a user-role message. Nested scopes below the session cwd
+  bind only after a successful first-party `read`, `write`, or `edit` reaches
+  them. Later edits and removals append replacement or removal messages; there
+  is no filesystem watcher, and shell `cd` does not trigger discovery
+  ([packages/context/agent-instructions/README.md:7-17](https://github.com/deepseek-ai/deepseek-harness/blob/141eb6fef83422698aef7a981029e843e8161534/packages/context/agent-instructions/README.md#L7-L17),
+  [packages/context/agent-instructions/README.md:49-55](https://github.com/deepseek-ai/deepseek-harness/blob/141eb6fef83422698aef7a981029e843e8161534/packages/context/agent-instructions/README.md#L49-L55)).
+- Resume retains a compatible visible baseline. A change to discovery,
+  precedence, project root, or budget identity appends one complete superseding
+  baseline. `maxBytes` is required, each source defaults to a 1 MiB cap, and
+  rendering preserves the most specific files first by dropping broader files
+  before truncating the most-specific file
+  ([packages/context/agent-instructions/README.md:49-78](https://github.com/deepseek-ai/deepseek-harness/blob/141eb6fef83422698aef7a981029e843e8161534/packages/context/agent-instructions/README.md#L49-L78)).
 
 ## Cursor
 

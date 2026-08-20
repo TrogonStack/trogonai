@@ -14,6 +14,7 @@ Repos we lean on most for research. One deduplicated list across all corpora.
 - [block/goose](https://github.com/block/goose)
 - [block/buzz](https://github.com/block/buzz)
 - [xai-org/grok-build](https://github.com/xai-org/grok-build)
+- [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)
 - [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent)
 - [nearai/ironclaw](https://github.com/nearai/ironclaw)
 - [anomalyco/opencode](https://github.com/anomalyco/opencode)
