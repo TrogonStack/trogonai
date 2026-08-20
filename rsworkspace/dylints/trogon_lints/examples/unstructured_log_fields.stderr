@@ -31,5 +31,13 @@ LL |     tracing::error!(target: "fixture", "publish to {} failed", subject);
    |
    = help: pass the values as `tracing` fields, as in `tracing::info!(user_id, path, "request handled")`
 
-error: aborting due to 4 previous errors
+error: log event interpolates its values into the message instead of recording them as fields
+  --> $DIR/unstructured_log_fields.rs:106:5
+   |
+LL |     tracing::info! { "user {} hit", user_id }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: pass the values as `tracing` fields, as in `tracing::info!(user_id, path, "request handled")`
+
+error: aborting due to 5 previous errors
 

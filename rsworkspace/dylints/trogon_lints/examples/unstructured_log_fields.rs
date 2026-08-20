@@ -88,6 +88,24 @@ fn trait_associated_new<T: Constructor>() -> T {
     T::new()
 }
 
+/// Braces in a `target:` belong to the target, not to the message, so a
+/// constant message beside one still captures nothing.
+fn target_containing_braces() {
+    tracing::error!(target: "audit{v2}", "server started");
+}
+
+/// The braces delimiting a macro invocation are not message placeholders
+/// either.
+fn brace_delimited_constant() {
+    tracing::info! { "server started" }
+}
+
+/// A brace-delimited invocation that does interpolate is still a finding.
+fn brace_delimited_interpolation() {
+    let user_id = 7;
+    tracing::info! { "user {} hit", user_id }
+}
+
 fn main() {
     positional_arguments();
     inline_capture();
@@ -102,4 +120,7 @@ fn main() {
     allowed();
     span_name();
     let _widget: Widget = trait_associated_new();
+    target_containing_braces();
+    brace_delimited_constant();
+    brace_delimited_interpolation();
 }

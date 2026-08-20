@@ -875,6 +875,10 @@ impl<'tcx> LateLintPass<'tcx> for TrogonLints {
     fn check_impl_item(&mut self, cx: &LateContext<'tcx>, impl_item: &'tcx ImplItem<'tcx>) {
         weakened_write_precondition::check_impl_item(cx, impl_item);
     }
+
+    fn check_crate_post(&mut self, cx: &LateContext<'tcx>) {
+        self.unstructured_log_fields.check_crate_post(cx);
+    }
 }
 
 rustc_session::impl_lint_pass!(TrogonLints => [

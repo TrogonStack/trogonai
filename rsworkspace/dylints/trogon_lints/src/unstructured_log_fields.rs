@@ -2,9 +2,12 @@
 //! <https://github.com/li-kai/rust-lints>. The rule, its name, and the shape of
 //! its exceptions are theirs; see this crate's README for the full credit.
 
-use clippy_utils::diagnostics::span_lint_and_then;
+use std::collections::HashSet;
+
+use clippy_utils::diagnostics::span_lint_hir_and_then;
 use rustc_ast::LitKind;
-use rustc_hir::{ConstItemRhs, Expr, ExprKind, ItemKind, StmtKind};
+use rustc_hir::def::{DefKind, Res};
+use rustc_hir::{ConstItemRhs, Expr, ExprKind, HirId, ItemKind, QPath, StmtKind, TyKind};
 use rustc_lint::LateContext;
 use rustc_span::{ExpnKind, Span, Symbol};
 
@@ -21,53 +24,106 @@ const FIELDS_ARGUMENT: usize = 6;
 /// message.
 const MESSAGE_FIELD: &str = "message";
 
+/// A `tracing` callsite is two separate pieces of HIR: the callsite metadata,
+/// which names the fields, and the message, which lowers to a `core::fmt`
+/// constructor in the enclosing function. Neither piece alone says whether the
+/// callsite interpolated a value that should have been a field, and they sit in
+/// different bodies, so both are collected as they are visited and matched up
+/// afterwards on the macro call site they share.
 #[derive(Default)]
-pub(crate) struct UnstructuredLogFields;
+pub(crate) struct UnstructuredLogFields {
+    message_only_events: HashSet<Span>,
+    interpolating_messages: Vec<(Span, HirId)>,
+}
 
 impl UnstructuredLogFields {
     pub(crate) fn check_expr<'tcx>(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'tcx>) {
         let ExprKind::Call(callee, args) = expr.kind else {
             return;
         };
-        let Some(kind) = metadata_new_kind(cx, callee, args) else {
-            return;
-        };
-        if kind.as_str() != "EVENT" {
-            return;
-        }
-        let Some(fields) = args.get(FIELDS_ARGUMENT) else {
-            return;
-        };
-        if !is_message_only(cx, fields) {
-            return;
-        }
-        let Some(call_site) = tracing_macro_call_site(cx, expr.span) else {
-            return;
-        };
-        if in_test_file(cx, call_site) {
-            return;
-        }
-        // With `message` as the only field, every value the callsite captures
-        // came from the format string, so a placeholder anywhere in the
-        // invocation is a value that could have been a field. A message with no
-        // placeholder captures nothing and has nothing to structure.
-        let Ok(snippet) = cx.tcx.sess.source_map().span_to_snippet(call_site) else {
-            return;
-        };
-        if !has_format_placeholder(&snippet) {
+
+        if is_message_only_event(cx, callee, args) {
+            if let Some(call_site) = tracing_macro_call_site(cx, expr.span)
+                && !in_test_file(cx, call_site)
+            {
+                self.message_only_events.insert(call_site);
+            }
             return;
         }
 
-        span_lint_and_then(
-            cx,
-            UNSTRUCTURED_LOG_FIELDS,
-            call_site,
-            "log event interpolates its values into the message instead of recording them as fields",
-            |diag| {
-                diag.help("pass the values as `tracing` fields, as in `tracing::info!(user_id, path, \"request handled\")`");
-            },
-        );
+        if interpolates_values(cx, callee)
+            && let Some(call_site) = tracing_macro_call_site(cx, expr.span)
+        {
+            // The `HirId` is the message's own, which lives in the enclosing
+            // function rather than in the static holding the metadata, so an
+            // `#[allow]` a reader would expect to apply still does.
+            self.interpolating_messages.push((call_site, expr.hir_id));
+        }
     }
+
+    pub(crate) fn check_crate_post(&mut self, cx: &LateContext<'_>) {
+        // Collection order follows the visitor, not the source, so the
+        // diagnostics are ordered here to keep the output stable.
+        self.interpolating_messages.sort_by_key(|(span, _)| span.lo());
+        self.interpolating_messages.dedup_by_key(|(span, _)| *span);
+
+        for (call_site, hir_id) in self.interpolating_messages.drain(..) {
+            if !self.message_only_events.contains(&call_site) {
+                continue;
+            }
+
+            span_lint_hir_and_then(
+                cx,
+                UNSTRUCTURED_LOG_FIELDS,
+                hir_id,
+                call_site,
+                "log event interpolates its values into the message instead of recording them as fields",
+                |diag| {
+                    diag.help("pass the values as `tracing` fields, as in `tracing::info!(user_id, path, \"request handled\")`");
+                },
+            );
+        }
+    }
+}
+
+/// Whether a `Metadata::new` call describes an event whose whole field set is
+/// the synthesized `message` field.
+fn is_message_only_event<'tcx>(
+    cx: &LateContext<'tcx>,
+    callee: &'tcx Expr<'tcx>,
+    args: &'tcx [Expr<'tcx>],
+) -> bool {
+    let Some(kind) = metadata_new_kind(cx, callee, args) else {
+        return false;
+    };
+    if kind.as_str() != "EVENT" {
+        return false;
+    }
+    args.get(FIELDS_ARGUMENT)
+        .is_some_and(|fields| is_message_only(cx, fields))
+}
+
+/// Whether `callee` is the `core::fmt::Arguments` constructor that a format
+/// string carrying at least one interpolated value lowers to. A format string
+/// that captures nothing lowers to `Arguments::from_str` instead, so the
+/// constructor answers on its own whether the message holds values, without
+/// reading the invocation's text. Reading the text cannot answer it: a brace in
+/// a `target:` or `parent:` argument, or the braces of a `tracing::info! { .. }`
+/// invocation, are not message placeholders.
+fn interpolates_values(cx: &LateContext<'_>, callee: &Expr<'_>) -> bool {
+    let ExprKind::Path(QPath::TypeRelative(self_ty, segment)) = &callee.kind else {
+        return false;
+    };
+    if segment.ident.name.as_str() != "new" {
+        return false;
+    }
+    let TyKind::Path(QPath::Resolved(_, path)) = self_ty.kind else {
+        return false;
+    };
+    let Res::Def(DefKind::Struct, did) = path.res else {
+        return false;
+    };
+    cx.tcx.crate_name(did.krate).as_str() == "core" && cx.tcx.item_name(did).as_str() == "Arguments"
 }
 
 /// Whether the `fields` argument of a `Metadata::new` call names `message` and
@@ -145,18 +201,4 @@ fn tracing_macro_call_site(cx: &LateContext<'_>, span: Span) -> Option<Span> {
         current = expansion.call_site;
     }
     call_site
-}
-
-/// Whether `snippet` contains a format placeholder. `{{` is an escaped brace
-/// rather than a placeholder and does not count.
-fn has_format_placeholder(snippet: &str) -> bool {
-    let mut rest = snippet;
-    while let Some(open) = rest.find('{') {
-        rest = &rest[open + 1..];
-        match rest.strip_prefix('{') {
-            Some(after_escape) => rest = after_escape,
-            None => return true,
-        }
-    }
-    false
 }
