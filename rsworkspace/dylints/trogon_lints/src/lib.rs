@@ -25,6 +25,8 @@ mod telemetry_metric_construction;
 mod telemetry_metric_name_literal;
 mod telemetry_span_name_literal;
 mod test_module_naming;
+mod tracing_metadata;
+mod unstructured_log_fields;
 mod weakened_write_precondition;
 
 use rustc_hir::{Expr, ImplItem, Item, LetStmt, Stmt};
@@ -53,6 +55,7 @@ pub fn register_lints(sess: &rustc_session::Session, lint_store: &mut LintStore)
         TELEMETRY_METRIC_NAME_LITERAL,
         TELEMETRY_SPAN_NAME_LITERAL,
         TEST_MODULE_NAMING,
+        UNSTRUCTURED_LOG_FIELDS,
         WEAKENED_WRITE_PRECONDITION,
     ]);
     lint_store.register_late_pass(|_| Box::<TrogonLints>::default());
@@ -727,6 +730,49 @@ rustc_session::declare_lint! {
 rustc_session::declare_lint! {
     /// ### What it does
     ///
+    /// Detects a `tracing` event macro (`info!`, `warn!`, `error!`, `debug!`,
+    /// `trace!`, `event!`) whose captured values are all interpolated into the
+    /// message through format placeholders, with no structured field among
+    /// them.
+    ///
+    /// ### Why is this bad?
+    ///
+    /// A field is queryable and a message is not. `tracing` records fields as
+    /// typed key-value pairs that a subscriber can filter, index, and forward
+    /// to a log backend as columns; a value baked into the message text is
+    /// reachable only by whoever writes the right regular expression against
+    /// the rendered string. Interpolating the value also drops its name, so
+    /// the same quantity is `session {}` at one site and `for session {}` at
+    /// the next, and nothing ties them together. Naming the value as a field
+    /// costs the same number of tokens and keeps the message the constant part
+    /// a reader scans for. A callsite that already carries at least one field
+    /// is left alone: mixing a field with a formatted message is a deliberate
+    /// middle ground, not an oversight. A message with no placeholders
+    /// captures nothing and has nothing to structure. Test sources
+    /// (`tests.rs`, `*_tests.rs`) are exempt.
+    ///
+    /// This rule is ported from the `unstructured_log_fields` lint in
+    /// <https://github.com/li-kai/rust-lints>; the credit for it is theirs.
+    ///
+    /// ### Example
+    ///
+    /// ```rust,ignore
+    /// tracing::info!("user {} hit {}", user_id, path);
+    /// ```
+    ///
+    /// Use instead:
+    ///
+    /// ```rust,ignore
+    /// tracing::info!(user_id, path, "user hit endpoint");
+    /// ```
+    pub UNSTRUCTURED_LOG_FIELDS,
+    Deny,
+    "record log values as `tracing` fields, not as format arguments in the message",
+}
+
+rustc_session::declare_lint! {
+    /// ### What it does
+    ///
     /// Detects a decider whose `WRITE_PRECONDITION` associated const is
     /// `WritePrecondition::Any`, unless the declaration carries an `allow` that
     /// states a reason.
@@ -793,6 +839,7 @@ struct TrogonLints {
     telemetry_metric_construction: telemetry_metric_construction::TelemetryMetricConstruction,
     telemetry_metric_name_literal: telemetry_metric_name_literal::TelemetryMetricNameLiteral,
     telemetry_span_name_literal: telemetry_span_name_literal::TelemetrySpanNameLiteral,
+    unstructured_log_fields: unstructured_log_fields::UnstructuredLogFields,
 }
 
 impl<'tcx> LateLintPass<'tcx> for TrogonLints {
@@ -809,6 +856,7 @@ impl<'tcx> LateLintPass<'tcx> for TrogonLints {
         self.telemetry_metric_construction.check_expr(cx, expr);
         self.telemetry_metric_name_literal.check_expr(cx, expr);
         self.telemetry_span_name_literal.check_expr(cx, expr);
+        self.unstructured_log_fields.check_expr(cx, expr);
     }
 
     fn check_stmt(&mut self, cx: &LateContext<'tcx>, stmt: &'tcx Stmt<'tcx>) {
@@ -826,6 +874,10 @@ impl<'tcx> LateLintPass<'tcx> for TrogonLints {
 
     fn check_impl_item(&mut self, cx: &LateContext<'tcx>, impl_item: &'tcx ImplItem<'tcx>) {
         weakened_write_precondition::check_impl_item(cx, impl_item);
+    }
+
+    fn check_crate_post(&mut self, cx: &LateContext<'tcx>) {
+        self.unstructured_log_fields.check_crate_post(cx);
     }
 }
 
@@ -845,6 +897,7 @@ rustc_session::impl_lint_pass!(TrogonLints => [
     TELEMETRY_METRIC_NAME_LITERAL,
     TELEMETRY_SPAN_NAME_LITERAL,
     TEST_MODULE_NAMING,
+    UNSTRUCTURED_LOG_FIELDS,
     WEAKENED_WRITE_PRECONDITION,
 ]);
 

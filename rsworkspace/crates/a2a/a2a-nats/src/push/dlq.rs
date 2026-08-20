@@ -102,11 +102,11 @@ pub async fn publish_push_delivery_failure<J>(
     {
         Ok(fut) => {
             if let Err(e) = fut.await {
-                tracing::warn!(%task_id, error = %e, "JetStream ack failed for push DLQ publish on {subject}");
+                tracing::warn!(%task_id, %subject, error = %e, "JetStream ack failed for push DLQ publish");
             }
         }
         Err(e) => {
-            tracing::warn!(%task_id, error = %e, "failed to publish push DLQ message on {subject}");
+            tracing::warn!(%task_id, %subject, error = %e, "failed to publish push DLQ message");
         }
     }
 }

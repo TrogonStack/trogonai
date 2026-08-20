@@ -1,8 +1,26 @@
 use super::*;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use trogon_std::env::InMemoryEnv;
 use trogon_std::fs::{MemAppendWriter, MemFs};
+use trogon_std::log_capture::{CapturedEvent, CapturedEvents, LevelFilter};
+
+fn record_events(outcome: &FileLoggingOutcome) -> Vec<CapturedEvent> {
+    let events = CapturedEvents::new();
+    let guard = events.install(LevelFilter::INFO);
+
+    outcome.record();
+    drop(guard);
+
+    events.events()
+}
+
+fn single_event(events: &[CapturedEvent]) -> &CapturedEvent {
+    let [event] = events else {
+        panic!("expected exactly one event, got {events:?}");
+    };
+    event
+}
 
 struct OpenAppendErrorFs {
     inner: MemFs,
@@ -53,11 +71,12 @@ fn try_open_log_file_succeeds_with_env_override() {
     env.set("TROGON_LOG_DIR", "/tmp/test-logs");
     let fs = MemFs::new();
 
-    let (writer, info) = try_open_log_file(ServiceName::AcpNatsStdio, &env, &fs);
+    let (writer, outcome) = try_open_log_file(ServiceName::AcpNatsStdio, &env, &fs);
     assert!(writer.is_some());
-    let msg = info.unwrap();
-    assert!(msg.contains("File logging enabled"));
-    assert!(msg.contains("acp-nats-stdio.log"));
+    let FileLoggingOutcome::Enabled { path } = outcome else {
+        panic!("expected file logging to be enabled");
+    };
+    assert_eq!(path, PathBuf::from("/tmp/test-logs/acp-nats-stdio.log"));
 }
 
 #[test]
@@ -65,10 +84,9 @@ fn try_open_log_file_falls_back_to_platform_dir() {
     let env = InMemoryEnv::new();
     let fs = MemFs::new();
 
-    let (writer, info) = try_open_log_file(ServiceName::AcpNatsServer, &env, &fs);
+    let (writer, outcome) = try_open_log_file(ServiceName::AcpNatsServer, &env, &fs);
     assert!(writer.is_some());
-    let msg = info.unwrap();
-    assert!(msg.contains("File logging enabled"));
+    assert!(matches!(outcome, FileLoggingOutcome::Enabled { .. }));
 }
 
 #[test]
@@ -78,10 +96,9 @@ fn try_open_log_file_reports_disabled_when_dir_fails() {
     fs.insert("/tmp/test-logs", "file-blocking-dir");
     env.set("TROGON_LOG_DIR", "/tmp/test-logs/sub");
 
-    let (writer, info) = try_open_log_file(ServiceName::AcpNatsStdio, &env, &fs);
+    let (writer, outcome) = try_open_log_file(ServiceName::AcpNatsStdio, &env, &fs);
     assert!(writer.is_none());
-    let msg = info.unwrap();
-    assert!(msg.contains("File logging disabled"));
+    assert!(matches!(outcome, FileLoggingOutcome::DirectoryUnavailable { .. }));
 }
 
 #[test]
@@ -90,12 +107,61 @@ fn try_open_log_file_reports_open_append_error() {
     env.set("TROGON_LOG_DIR", "/tmp/test-logs");
     let fs = OpenAppendErrorFs::new();
 
-    let (writer, info) = try_open_log_file(ServiceName::AcpNatsStdio, &env, &fs);
+    let (writer, outcome) = try_open_log_file(ServiceName::AcpNatsStdio, &env, &fs);
 
     assert!(writer.is_none());
-    let msg = info.unwrap();
-    assert!(msg.contains("Failed to create log file"));
-    assert!(msg.contains("open append failed"));
+    let FileLoggingOutcome::FileUnavailable { path, error } = outcome else {
+        panic!("expected the log file to be unopenable");
+    };
+    assert_eq!(path, PathBuf::from("/tmp/test-logs/acp-nats-stdio.log"));
+    assert_eq!(error.kind(), io::ErrorKind::Other);
+}
+
+#[test]
+fn record_reports_the_enabled_log_file_as_a_field() {
+    let outcome = FileLoggingOutcome::Enabled {
+        path: PathBuf::from("/tmp/test-logs/acp-nats-stdio.log"),
+    };
+
+    let events = record_events(&outcome);
+
+    let event = single_event(&events);
+    assert_eq!(event.message(), Some("file logging enabled"));
+    assert_eq!(event.field("log_file"), Some("/tmp/test-logs/acp-nats-stdio.log"));
+}
+
+#[test]
+fn record_reports_an_unavailable_directory_as_a_field() {
+    let outcome = FileLoggingOutcome::DirectoryUnavailable {
+        error: anyhow::anyhow!("permission denied"),
+    };
+
+    let events = record_events(&outcome);
+
+    let event = single_event(&events);
+    assert_eq!(
+        event.message(),
+        Some("file logging disabled: log directory unavailable")
+    );
+    assert_eq!(event.field("error"), Some("permission denied"));
+}
+
+#[test]
+fn record_reports_an_unopenable_log_file_as_fields() {
+    let outcome = FileLoggingOutcome::FileUnavailable {
+        path: PathBuf::from("/tmp/test-logs/acp-nats-stdio.log"),
+        error: io::Error::other("open append failed"),
+    };
+
+    let events = record_events(&outcome);
+
+    let event = single_event(&events);
+    assert_eq!(
+        event.message(),
+        Some("file logging disabled: log file could not be opened")
+    );
+    assert_eq!(event.field("log_file"), Some("/tmp/test-logs/acp-nats-stdio.log"));
+    assert_eq!(event.field("error"), Some("open append failed"));
 }
 
 #[test]

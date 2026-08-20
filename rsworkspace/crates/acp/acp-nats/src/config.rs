@@ -99,10 +99,19 @@ pub fn apply_timeout_overrides<E: ReadEnv>(config: Config, env_provider: &E) -> 
                 config = config.with_operation_timeout(Duration::from_secs(secs));
             }
             Ok(secs) => {
-                warn!("{ENV_OPERATION_TIMEOUT_SECS}={secs} is below minimum ({MIN_TIMEOUT_SECS}), using default");
+                warn!(
+                    env_var = ENV_OPERATION_TIMEOUT_SECS,
+                    value = secs,
+                    minimum = MIN_TIMEOUT_SECS,
+                    "environment variable is below the minimum timeout, using default"
+                );
             }
             Err(_) => {
-                warn!("{ENV_OPERATION_TIMEOUT_SECS}={raw:?} is not a valid integer, using default");
+                warn!(
+                    env_var = ENV_OPERATION_TIMEOUT_SECS,
+                    value = raw,
+                    "environment variable is not a valid integer, using default"
+                );
             }
         }
     }
@@ -113,10 +122,19 @@ pub fn apply_timeout_overrides<E: ReadEnv>(config: Config, env_provider: &E) -> 
                 config = config.with_prompt_timeout(Duration::from_secs(secs));
             }
             Ok(secs) => {
-                warn!("{ENV_PROMPT_TIMEOUT_SECS}={secs} is below minimum ({MIN_TIMEOUT_SECS}), using default");
+                warn!(
+                    env_var = ENV_PROMPT_TIMEOUT_SECS,
+                    value = secs,
+                    minimum = MIN_TIMEOUT_SECS,
+                    "environment variable is below the minimum timeout, using default"
+                );
             }
             Err(_) => {
-                warn!("{ENV_PROMPT_TIMEOUT_SECS}={raw:?} is not a valid integer, using default");
+                warn!(
+                    env_var = ENV_PROMPT_TIMEOUT_SECS,
+                    value = raw,
+                    "environment variable is not a valid integer, using default"
+                );
             }
         }
     }
@@ -131,11 +149,20 @@ pub fn nats_connect_timeout<E: ReadEnv>(env_provider: &E) -> Duration {
         Ok(raw) => match raw.parse::<u64>() {
             Ok(secs) if secs >= MIN_TIMEOUT_SECS => Duration::from_secs(secs),
             Ok(secs) => {
-                warn!("{ENV_CONNECT_TIMEOUT_SECS}={secs} is below minimum ({MIN_TIMEOUT_SECS}), using default");
+                warn!(
+                    env_var = ENV_CONNECT_TIMEOUT_SECS,
+                    value = secs,
+                    minimum = MIN_TIMEOUT_SECS,
+                    "environment variable is below the minimum timeout, using default"
+                );
                 default
             }
             Err(_) => {
-                warn!("{ENV_CONNECT_TIMEOUT_SECS}={raw:?} is not a valid integer, using default");
+                warn!(
+                    env_var = ENV_CONNECT_TIMEOUT_SECS,
+                    value = raw,
+                    "environment variable is not a valid integer, using default"
+                );
                 default
             }
         },
