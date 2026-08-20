@@ -19,9 +19,7 @@ use crate::tracing_metadata::metadata_new_kind;
 /// target, level, file, line, module_path, fields, kind)`.
 const FIELDS_ARGUMENT: usize = 6;
 
-/// The field `tracing` synthesizes for a macro's format-string message. A
-/// callsite whose whole field set is this one field captured nothing but the
-/// message.
+/// The field `tracing` synthesizes for a macro's format-string message.
 const MESSAGE_FIELD: &str = "message";
 
 /// A `tracing` callsite is two separate pieces of HIR: the callsite metadata,
@@ -32,7 +30,7 @@ const MESSAGE_FIELD: &str = "message";
 /// afterwards on the macro call site they share.
 #[derive(Default)]
 pub(crate) struct UnstructuredLogFields {
-    message_only_events: HashSet<Span>,
+    message_events: HashSet<Span>,
     interpolating_messages: Vec<(Span, HirId)>,
 }
 
@@ -42,11 +40,11 @@ impl UnstructuredLogFields {
             return;
         };
 
-        if is_message_only_event(cx, callee, args) {
+        if is_message_event(cx, callee, args) {
             if let Some(call_site) = tracing_macro_call_site(cx, expr.span)
                 && !in_test_file(cx, call_site)
             {
-                self.message_only_events.insert(call_site);
+                self.message_events.insert(call_site);
             }
             return;
         }
@@ -68,7 +66,7 @@ impl UnstructuredLogFields {
         self.interpolating_messages.dedup_by_key(|(span, _)| *span);
 
         for (call_site, hir_id) in self.interpolating_messages.drain(..) {
-            if !self.message_only_events.contains(&call_site) {
+            if !self.message_events.contains(&call_site) {
                 continue;
             }
 
@@ -86,9 +84,11 @@ impl UnstructuredLogFields {
     }
 }
 
-/// Whether a `Metadata::new` call describes an event whose whole field set is
-/// the synthesized `message` field.
-fn is_message_only_event<'tcx>(
+/// Whether a `Metadata::new` call describes an event that carries a message.
+/// The structured fields it may also declare do not excuse a value the message
+/// interpolates: a field beside the message covers whatever it names, not the
+/// separate value spliced into the text.
+fn is_message_event<'tcx>(
     cx: &LateContext<'tcx>,
     callee: &'tcx Expr<'tcx>,
     args: &'tcx [Expr<'tcx>],
@@ -100,7 +100,7 @@ fn is_message_only_event<'tcx>(
         return false;
     }
     args.get(FIELDS_ARGUMENT)
-        .is_some_and(|fields| is_message_only(cx, fields))
+        .is_some_and(|fields| records_message(cx, fields))
 }
 
 /// Whether `callee` is the `core::fmt::Arguments` constructor that a format
@@ -126,12 +126,11 @@ fn interpolates_values(cx: &LateContext<'_>, callee: &Expr<'_>) -> bool {
     cx.tcx.crate_name(did.krate).as_str() == "core" && cx.tcx.item_name(did).as_str() == "Arguments"
 }
 
-/// Whether the `fields` argument of a `Metadata::new` call names `message` and
-/// nothing else. `tracing` lowers the field set to a `FieldSet::new(&["a",
-/// "b"], _)` call whose first argument is an array of the field names, so the
-/// structured fields a callsite declares are readable straight off the
-/// expansion.
-fn is_message_only(cx: &LateContext<'_>, fields: &Expr<'_>) -> bool {
+/// Whether the `fields` argument of a `Metadata::new` call names `message`.
+/// `tracing` lowers the field set to a `FieldSet::new(&["a", "b"], _)` call
+/// whose first argument is an array of the field names, so the fields a
+/// callsite declares are readable straight off the expansion.
+fn records_message(cx: &LateContext<'_>, fields: &Expr<'_>) -> bool {
     let ExprKind::Call(_, args) = fields.kind else {
         return false;
     };
@@ -141,10 +140,12 @@ fn is_message_only(cx: &LateContext<'_>, fields: &Expr<'_>) -> bool {
     let ExprKind::AddrOf(_, _, array) = names.kind else {
         return false;
     };
-    let ExprKind::Array([only]) = array.kind else {
+    let ExprKind::Array(entries) = array.kind else {
         return false;
     };
-    field_name(cx, only).is_some_and(|name| name.as_str() == MESSAGE_FIELD)
+    entries
+        .iter()
+        .any(|entry| field_name(cx, entry).is_some_and(|name| name.as_str() == MESSAGE_FIELD))
 }
 
 /// The field name an entry of the `FieldSet` array spells. A plain invocation

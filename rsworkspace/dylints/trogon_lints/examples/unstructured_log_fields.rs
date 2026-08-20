@@ -45,6 +45,8 @@ fn display_shorthand() {
     tracing::info!(%address, "listening");
 }
 
+/// A field beside the message covers what it names, not the separate value the
+/// message interpolates, so `action` is still a finding despite `user_id`.
 fn mixed_field_and_message() {
     let user_id = 7;
     let action = "rename";

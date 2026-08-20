@@ -86,10 +86,11 @@ lint crate rather than in per-invocation flags.
   is a typed key-value pair a subscriber can filter, index, and forward as a
   column; a value baked into the message text is reachable only by regular
   expression, and loses the name that ties it to the same value logged
-  elsewhere. A callsite that already carries at least one field is left alone,
-  and a message with no placeholders captures nothing and has nothing to
-  structure. `target:` and `parent:` are directives rather than fields and do
-  not count as structuring. Test sources (`tests.rs`, `*_tests.rs`) are exempt;
+  elsewhere. A message with no placeholders captures nothing and has nothing to
+  structure. Fields the callsite already carries do not excuse it, because a
+  field covers whatever it names and not the separate value spliced into the
+  text. `target:` and `parent:` are directives rather than fields and do not
+  count as structuring. Test sources (`tests.rs`, `*_tests.rs`) are exempt;
   suppress a justified exception with
   `#[cfg_attr(dylint_lib = "trogon_lints", allow(unstructured_log_fields))]` at
   the site.
@@ -103,6 +104,14 @@ The rule, its name, and the shape of its exceptions are theirs; full credit for
 the idea goes to li-kai. The implementation here was written against this
 crate's own helpers rather than copied, because the upstream repository
 publishes no license.
+
+It departs from upstream in one respect. Upstream documents that it "does not
+fire when at least one structured field is present"; this port fires whenever
+the message interpolates a value, however many fields sit beside it. Upstream's
+rule reads a callsite as either structured or not, so `info!(user_id, "user
+performed {}", action)` counts as structured and `action` goes unreported even
+though only `user_id` is queryable. Treating the fields as a per-value question
+instead of a per-callsite one is what lets the rule reach that case.
 
 ## Run
 
