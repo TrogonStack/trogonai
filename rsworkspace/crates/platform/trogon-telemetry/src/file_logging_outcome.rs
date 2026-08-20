@@ -18,17 +18,11 @@ impl FileLoggingOutcome {
                 tracing::info!(log_file = %path.display(), "file logging enabled");
             }
             Self::DirectoryUnavailable { error } => {
-                tracing::info!(
-                    error = %error,
-                    "file logging disabled: log directory unavailable"
-                );
+                tracing::info!(error = %error, "file logging disabled: log directory unavailable");
             }
             Self::FileUnavailable { path, error } => {
-                tracing::info!(
-                    log_file = %path.display(),
-                    error = %error,
-                    "file logging disabled: log file could not be opened"
-                );
+                let log_file = path.display();
+                tracing::info!(%log_file, %error, "file logging disabled: log file could not be opened");
             }
         }
     }

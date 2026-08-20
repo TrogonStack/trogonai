@@ -110,10 +110,7 @@ where
         .map_err(|e| DispatchError::JetStreamPublish(JetStreamPublishDispatchError::new(subject.clone(), e)))?;
 
     if ack_result.duplicate {
-        tracing::trace!(
-            subject = subject.as_str(),
-            "JetStream accepted duplicate Msg-Id terminal push ack"
-        );
+        tracing::trace!(%subject, "JetStream accepted duplicate Msg-Id terminal push ack");
     }
     Ok(())
 }

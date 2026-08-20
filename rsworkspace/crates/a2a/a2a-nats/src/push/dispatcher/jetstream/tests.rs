@@ -178,7 +178,7 @@ async fn dispatch_succeeds_when_jetstream_reports_duplicate_ack() {
 
     drop(guard);
     let logged = String::from_utf8(captured.0.lock().unwrap().clone()).expect("subscriber output is utf-8");
-    assert!(logged.contains(r#"subject="a2a.v1.push.bot.caller.t1""#), "{logged}");
+    assert!(logged.contains("subject=a2a.v1.push.bot.caller.t1"), "{logged}");
 }
 
 #[tokio::test]
