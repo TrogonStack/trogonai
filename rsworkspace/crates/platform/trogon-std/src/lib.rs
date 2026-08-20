@@ -16,6 +16,7 @@
 //! | Filesystem | [`ReadFile`], [`WriteFile`], [`ExistsFile`], [`CreateDirAll`], [`OpenAppendFile`] | [`SystemFs`] | `MemFs`* |
 //! | Time (monotonic) | [`GetNow`], [`GetElapsed`] | [`SystemClock`] | `MockClock`* |
 //! | Time (wall clock) | [`EpochClock`] | [`SystemClock`] | `FixedEpochClock`* |
+//! | `tracing` events | n/a | n/a | `CapturedEvents`* |
 //!
 //! *Available with `#[cfg(test)]` or the `"test-support"` feature.
 //!
@@ -42,6 +43,8 @@ pub mod env;
 pub mod fs;
 pub mod http;
 pub mod json;
+#[cfg(any(test, feature = "test-support"))]
+pub mod log_capture;
 pub mod secret_string;
 #[cfg(feature = "signal")]
 pub mod signal;
@@ -64,6 +67,8 @@ pub use http::{ByteSize, HttpBodySizeMax};
 #[cfg(any(test, feature = "test-support"))]
 pub use json::FailNextSerialize;
 pub use json::{JsonSerialize, StdJsonSerialize};
+#[cfg(any(test, feature = "test-support"))]
+pub use log_capture::{CapturedEvent, CapturedEvents};
 pub use secret_string::{EmptySecretError, SecretString};
 pub use time::{EpochClock, GetElapsed, GetNow, SystemClock};
 #[cfg(feature = "uuid")]

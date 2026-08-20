@@ -1,42 +1,25 @@
 use super::*;
 use std::io;
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
-use tracing_subscriber::util::SubscriberInitExt;
 use trogon_std::env::InMemoryEnv;
 use trogon_std::fs::{MemAppendWriter, MemFs};
+use trogon_std::log_capture::{CapturedEvent, CapturedEvents, LevelFilter};
 
-/// Collects what a subscriber writes so a test can assert which values reached
-/// it as fields rather than as message text.
-#[derive(Clone, Default)]
-struct CapturedLogs(Arc<Mutex<Vec<u8>>>);
-
-impl Write for CapturedLogs {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.0.lock().unwrap().extend_from_slice(buf);
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
-
-fn record_to_string(outcome: &FileLoggingOutcome) -> String {
-    let captured = CapturedLogs::default();
-    let writer = captured.clone();
-    let guard = tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
-        .with_ansi(false)
-        .with_writer(move || writer.clone())
-        .set_default();
+fn record_events(outcome: &FileLoggingOutcome) -> Vec<CapturedEvent> {
+    let events = CapturedEvents::new();
+    let guard = events.install(LevelFilter::INFO);
 
     outcome.record();
     drop(guard);
 
-    let bytes = captured.0.lock().unwrap().clone();
-    String::from_utf8(bytes).expect("subscriber output is utf-8")
+    events.events()
+}
+
+fn single_event(events: &[CapturedEvent]) -> &CapturedEvent {
+    let [event] = events else {
+        panic!("expected exactly one event, got {events:?}");
+    };
+    event
 }
 
 struct OpenAppendErrorFs {
@@ -140,13 +123,11 @@ fn record_reports_the_enabled_log_file_as_a_field() {
         path: PathBuf::from("/tmp/test-logs/acp-nats-stdio.log"),
     };
 
-    let logged = record_to_string(&outcome);
+    let events = record_events(&outcome);
 
-    assert!(logged.contains("file logging enabled"), "{logged}");
-    assert!(
-        logged.contains("log_file=/tmp/test-logs/acp-nats-stdio.log"),
-        "{logged}"
-    );
+    let event = single_event(&events);
+    assert_eq!(event.message(), Some("file logging enabled"));
+    assert_eq!(event.field("log_file"), Some("/tmp/test-logs/acp-nats-stdio.log"));
 }
 
 #[test]
@@ -155,13 +136,14 @@ fn record_reports_an_unavailable_directory_as_a_field() {
         error: anyhow::anyhow!("permission denied"),
     };
 
-    let logged = record_to_string(&outcome);
+    let events = record_events(&outcome);
 
-    assert!(
-        logged.contains("file logging disabled: log directory unavailable"),
-        "{logged}"
+    let event = single_event(&events);
+    assert_eq!(
+        event.message(),
+        Some("file logging disabled: log directory unavailable")
     );
-    assert!(logged.contains("error=permission denied"), "{logged}");
+    assert_eq!(event.field("error"), Some("permission denied"));
 }
 
 #[test]
@@ -171,17 +153,15 @@ fn record_reports_an_unopenable_log_file_as_fields() {
         error: io::Error::other("open append failed"),
     };
 
-    let logged = record_to_string(&outcome);
+    let events = record_events(&outcome);
 
-    assert!(
-        logged.contains("file logging disabled: log file could not be opened"),
-        "{logged}"
+    let event = single_event(&events);
+    assert_eq!(
+        event.message(),
+        Some("file logging disabled: log file could not be opened")
     );
-    assert!(
-        logged.contains("log_file=/tmp/test-logs/acp-nats-stdio.log"),
-        "{logged}"
-    );
-    assert!(logged.contains("error=open append failed"), "{logged}");
+    assert_eq!(event.field("log_file"), Some("/tmp/test-logs/acp-nats-stdio.log"));
+    assert_eq!(event.field("error"), Some("open append failed"));
 }
 
 #[test]
