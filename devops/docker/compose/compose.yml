@@ -54,6 +54,9 @@ services:
       POSTGRES_USER: "${POSTGRES_USER:-trogon}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-trogon}"
       POSTGRES_DB: "${POSTGRES_DB:-trogon_scheduler}"
+      # Read by ./services/postgres/initdb/01-openbao-database.sh, which must
+      # create the same database the openbao service connects to.
+      OPENBAO_POSTGRES_DB: "${OPENBAO_POSTGRES_DB:-openbao}"
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:

@@ -23,8 +23,9 @@ until bootstrap runs against it, and because the dependency points from
 bootstrap to the server, starting `openbao` alone never triggers it. Bootstrap
 pulls in `openbao` and `postgres` as its own dependencies, then runs to
 completion: on a fresh database it initializes the server, installs the fixed
-dev root token, and mounts a transit key. Against an already-initialized server
-it exits without changing anything, so it is safe on every `up`. A plain
+dev root token, and mounts a transit key. Every step is skipped only when the
+thing it creates is already there, so re-running it reconciles rather than
+duplicates, and a run killed partway finishes on the next `up`. A plain
 `docker compose up` starts the whole stack and needs no special casing.
 
 The service publishes no host port. OrbStack routes to the container directly,
@@ -53,6 +54,13 @@ type whose transit `associated_data` carries the platform's authenticated
 binding ([ADR#0030](../../../../../docs/adr/0030-customer-controlled-key-backend-routing.md)
 Decision 2).
 
+The mount is created with `disable_upsert=true`, which OpenBao leaves off by
+default. Registration rejects a transit mount that leaves upsert enabled, so
+the local mount is shaped like one a customer deployment must present
+([ADR#0030](../../../../../docs/adr/0030-customer-controlled-key-backend-routing.md)
+Decision 5). A side effect worth knowing: encrypting under a key name that does
+not exist yet now fails instead of quietly creating the key.
+
 Verify the round trip:
 
 ```bash
@@ -62,10 +70,15 @@ bao write -field=ciphertext transit/encrypt/local-dev-kek \
 
 ## Storage
 
-OpenBao gets its own `openbao` database on the shared postgres instance, created
-by `services/postgres/initdb/01-openbao-database.sql`. Postgres only runs that
-script when its data volume is created from empty, so a workspace that already
-had postgres running before this service existed needs the database created once:
+OpenBao gets its own database on the shared postgres instance, created by
+`services/postgres/initdb/01-openbao-database.sh`. The name defaults to
+`openbao` and both the connection and the provisioning read the same
+`OPENBAO_POSTGRES_DB`, so overriding it stays consistent.
+
+Postgres only runs that script when its data volume is created from empty, so a
+workspace that already had postgres running before this service existed needs
+the database created once, substituting your own `POSTGRES_USER` and
+`OPENBAO_POSTGRES_DB` if you overrode them:
 
 ```bash
 docker compose exec postgres createdb -U trogon openbao
