@@ -54,10 +54,14 @@ services:
       POSTGRES_USER: "${POSTGRES_USER:-trogon}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-trogon}"
       POSTGRES_DB: "${POSTGRES_DB:-trogon_scheduler}"
+      # Read by ./services/postgres/initdb/01-openbao-database.sh, which must
+      # create the same database the openbao service connects to.
+      OPENBAO_POSTGRES_DB: "${OPENBAO_POSTGRES_DB:-openbao}"
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./services/postgres/initdb:/docker-entrypoint-initdb.d:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-trogon} -d ${POSTGRES_DB:-trogon_scheduler}"]
@@ -65,6 +69,64 @@ services:
       timeout: 3s
       start_period: 5s
       retries: 5
+
+  # Single-node OpenBao for local development, backed by the postgres service
+  # above. It auto-unseals from a static key and serves plaintext HTTP, so it is
+  # a stand-in for the platform-operated OpenBao, never a model for a real one.
+  openbao:
+    image: openbao/openbao:2.6.2
+    command:
+      - "server"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      BAO_PG_CONNECTION_URL: "postgres://${POSTGRES_USER:-trogon}:${POSTGRES_PASSWORD:-trogon}@postgres:5432/${OPENBAO_POSTGRES_DB:-openbao}?sslmode=disable"
+      BAO_STATIC_SEAL_KEY: "${OPENBAO_STATIC_SEAL_KEY:-bG9jYWwtZGV2LW9ubHktc2VhbC1rZXktMzJieXRlcyE=}"
+      BAO_LOG_LEVEL: "${OPENBAO_LOG_LEVEL:-info}"
+    # No published port: OrbStack routes to the container directly at
+    # http://openbao.trogonai.orb.local:8200.
+    volumes:
+      - ./services/openbao/openbao.hcl:/openbao/config/openbao.hcl:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      # 200 means unsealed and active; 501 means initialized but not yet set up,
+      # 503 means sealed. Only the first counts as healthy.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8200/v1/sys/health"]
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 12
+
+  # Runs to completion on every `up`: initializes a fresh OpenBao, installs the
+  # fixed dev root token, and mounts a transit key. A no-op once initialized.
+  #
+  # Nothing depends on this service, so `docker compose up openbao` on its own
+  # leaves the server uninitialized and sealed. Bring the pair up by naming this
+  # service instead: `docker compose up -d openbao-bootstrap` pulls in openbao
+  # and postgres as its dependencies.
+  openbao-bootstrap:
+    image: openbao/openbao:2.6.2
+    entrypoint:
+      - /bin/sh
+      - /bootstrap/bootstrap.sh
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      BAO_ADDR: "http://openbao:8200"
+      OPENBAO_DEV_ROOT_TOKEN: "${OPENBAO_DEV_ROOT_TOKEN:-local-dev-root-token}"
+      OPENBAO_DEV_TRANSIT_MOUNT: "${OPENBAO_DEV_TRANSIT_MOUNT:-transit}"
+      OPENBAO_DEV_TRANSIT_KEY: "${OPENBAO_DEV_TRANSIT_KEY:-local-dev-kek}"
+    volumes:
+      - ./services/openbao:/bootstrap:ro
+    depends_on:
+      openbao:
+        condition: service_started
+    restart: on-failure:3
 
   ngrok:
     image: ngrok/ngrok:3.39.6-alpine
