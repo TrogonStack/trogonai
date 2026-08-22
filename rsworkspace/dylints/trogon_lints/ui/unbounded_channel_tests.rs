@@ -8,7 +8,7 @@
 use std::sync::mpsc;
 
 fn pump() {
-    let (tx, rx) = mpsc::channel::<u8>();
+    let _ = mpsc::channel::<u8>();
 }
 
 fn main() {
