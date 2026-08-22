@@ -33,6 +33,17 @@ fn allowed() {
 
 // `main` is not exempt: a queue wired up during composition grows the same way
 // as one wired up anywhere else. Fires.
+// A queue built by the test-support module family is scaffolding: must NOT
+// fire.
+#[allow(inline_module_block)]
+mod mocks {
+    use std::sync::mpsc;
+
+    pub fn pump() {
+        let _ = mpsc::channel::<u8>();
+    }
+}
+
 fn main() {
     let _ = mpsc::channel::<u8>();
 }

@@ -159,4 +159,28 @@ impl Connection {
     }
 }
 
+// The test-support module family is scaffolding, so a constructor declared
+// directly in one is exempt whether it sits in an `impl` or at module scope:
+// must NOT fire.
+#[allow(inline_module_block)]
+mod mocks {
+    pub struct StubPort {
+        port: u16,
+    }
+
+    pub fn new(raw: &str) -> StubPort {
+        StubPort {
+            port: raw.parse::<u16>().unwrap(),
+        }
+    }
+
+    impl StubPort {
+        pub fn new_stub(raw: &str) -> Self {
+            Self {
+                port: raw.parse::<u16>().unwrap(),
+            }
+        }
+    }
+}
+
 fn main() {}

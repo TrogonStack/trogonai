@@ -18,7 +18,7 @@ LL |     let _ = mpsc::channel::<u8>();
    = note: if the queue is bounded by something other than its capacity, opt out at the site with `#[cfg_attr(dylint_lib = "trogon_lints", allow(unbounded_channel, reason = "..."))]`
 
 error: unbounded channel created; a slow consumer queues messages until the process runs out of memory
-  --> $DIR/unbounded_channel.rs:37:13
+  --> $DIR/unbounded_channel.rs:48:13
    |
 LL |     let _ = mpsc::channel::<u8>();
    |             ^^^^^^^^^^^^^^^^^^^

@@ -19,18 +19,21 @@ pub(crate) fn is_test_context(cx: &LateContext<'_>, hir_id: HirId, span: Span) -
         || is_test_or_bench_source(cx, span)
 }
 
+/// Walks `def_id` itself before its ancestors: `hir_get_parent_item` already
+/// returns the enclosing module for an item node, so skipping the starting
+/// node would miss a constructor declared directly in `mocks` or `tests`.
 fn is_inside_test_module(cx: &LateContext<'_>, def_id: LocalDefId) -> bool {
-    let mut current = def_id.to_def_id();
-    while let Some(parent) = cx.tcx.opt_parent(current) {
-        if cx.tcx.def_kind(parent) == DefKind::Mod
+    let mut current = Some(def_id.to_def_id());
+    while let Some(id) = current {
+        if cx.tcx.def_kind(id) == DefKind::Mod
             && cx
                 .tcx
-                .opt_item_name(parent)
+                .opt_item_name(id)
                 .is_some_and(|name| is_test_module_name(name.as_str()))
         {
             return true;
         }
-        current = parent;
+        current = cx.tcx.opt_parent(id);
     }
     false
 }
