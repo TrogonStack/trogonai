@@ -180,13 +180,14 @@ credit for the ideas goes to li-kai. The implementations here were written
 against this crate's own helpers rather than copied, because the upstream
 repository publishes no license.
 
-It departs from upstream in one respect. Upstream documents that it "does not
-fire when at least one structured field is present"; this port fires whenever
-the message interpolates a value, however many fields sit beside it. Upstream's
-rule reads a callsite as either structured or not, so `info!(user_id, "user
-performed {}", action)` counts as structured and `action` goes unreported even
-though only `user_id` is queryable. Treating the fields as a per-value question
-instead of a per-callsite one is what lets the rule reach that case.
+`unstructured_log_fields` departs from upstream in one respect. Upstream
+documents that it "does not fire when at least one structured field is
+present"; this port fires whenever the message interpolates a value, however
+many fields sit beside it. Upstream's rule reads a callsite as either
+structured or not, so `info!(user_id, "user performed {}", action)` counts as
+structured and `action` goes unreported even though only `user_id` is
+queryable. Treating the fields as a per-value question instead of a
+per-callsite one is what lets the rule reach that case.
 
 `acyclic_modules` departs from upstream in where the diagnostic is levelled.
 Upstream documents `#[expect(acyclic_modules, reason = "...")]` as the opt-out
@@ -238,3 +239,12 @@ test target is compiled:
 ```bash
 env -u RUSTUP_TOOLCHAIN cargo dylint --path dylints/trogon_lints --workspace --no-deps -- --all-features --all-targets
 ```
+
+## Prior art
+
+Several of these lints were prompted by [li-kai/rust-lints](https://github.com/li-kai/rust-lints),
+which arrived at the same policies independently and first: `acyclic_modules`,
+`debug_remnants`, `fallible_new`, `unbounded_channel`, and `unstructured_log_fields`
+all have counterparts there, and the names are taken from it. The implementations
+here are our own, written against a different matching strategy, but the choice of
+what to enforce owes that crate the credit.
