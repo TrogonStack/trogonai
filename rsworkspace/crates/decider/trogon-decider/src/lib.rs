@@ -2,6 +2,13 @@
     any(test, feature = "test-support"),
     allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)
 )]
+#![cfg_attr(
+    dylint_lib = "trogon_lints",
+    expect(
+        acyclic_modules,
+        reason = "`Decision::Act` holds an `Act` whose steps each produce a `Decision`, so the two types are mutually recursive"
+    )
+)]
 //! Typed decider primitives for event-sourced workflows.
 //!
 //! A *decider* turns a command into events against a prior state. This crate provides:

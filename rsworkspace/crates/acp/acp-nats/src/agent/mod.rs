@@ -1,3 +1,11 @@
+#![cfg_attr(
+    dylint_lib = "trogon_lints",
+    expect(
+        acyclic_modules,
+        reason = "`bridge` dispatches each ACP method to its handler module and every handler takes the `Bridge` it was dispatched from"
+    )
+)]
+
 mod authenticate;
 mod bridge;
 mod cancel;

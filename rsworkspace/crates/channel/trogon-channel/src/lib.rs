@@ -14,6 +14,13 @@
 //! does not: it is an agent protocol client already and needs none of this.
 
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
+#![cfg_attr(
+    dylint_lib = "trogon_lints",
+    expect(
+        acyclic_modules,
+        reason = "a conversation record is keyed by the agent session that owns it and the agent port reads that record back"
+    )
+)]
 
 pub mod agent_port;
 pub mod command;

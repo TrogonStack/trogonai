@@ -3,6 +3,13 @@
     any(test, feature = "test-support"),
     allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)
 )]
+#![cfg_attr(
+    dylint_lib = "trogon_lints",
+    expect(
+        acyclic_modules,
+        reason = "`error` names every module's failure and those modules return it, and the wire claims are typed with the same value objects they parse into, so both directions are load-bearing"
+    )
+)]
 
 pub mod account_resolver;
 pub mod bridge_mint;

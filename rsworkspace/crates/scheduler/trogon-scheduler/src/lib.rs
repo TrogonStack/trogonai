@@ -2,6 +2,13 @@
     any(test, feature = "test-support"),
     allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)
 )]
+#![cfg_attr(
+    dylint_lib = "trogon_lints",
+    expect(
+        acyclic_modules,
+        reason = "a query reads the rows its projection writes and the projector is defined against the query's row types"
+    )
+)]
 
 //! Generic scheduling control plane backed by native NATS scheduled messages.
 
