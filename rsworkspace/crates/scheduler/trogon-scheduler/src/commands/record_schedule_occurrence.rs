@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, Events, FrequencySnapshot};
+use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, Events, FrequencySnapshot, WritePrecondition};
 use trogonai_proto::convert::TimestampConversionError;
 use trogonai_proto::scheduler::schedules::{state_v1, v1};
 
@@ -78,6 +78,7 @@ impl Decider for RecordScheduleOccurrence {
     type Event = v1::ScheduleEvent;
     type DecideError = RecordScheduleOccurrenceError;
     type EvolveError = super::EvolveError;
+    const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 
     fn stream_id(&self) -> &Self::StreamId {
         &self.id

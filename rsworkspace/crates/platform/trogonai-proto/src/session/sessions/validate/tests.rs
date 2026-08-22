@@ -93,10 +93,10 @@ fn assistant_message_started() -> v1alpha1::AssistantMessageStarted {
 
 fn tool_call_completed() -> v1alpha1::ToolCallCompleted {
     v1alpha1::ToolCallCompleted {
-            detached: MessageField::none(),
-            accessed: Vec::new(),
-            failed_targets: Vec::new(),
-            targets_attempted: None,
+        detached: MessageField::none(),
+        accessed: Vec::new(),
+        failed_targets: Vec::new(),
+        targets_attempted: None,
         session_id: "session-1".to_string(),
         tool_call_id: "tool-call-1".to_string(),
         tool_execution_id: "tool-exec-1".to_string(),
@@ -119,7 +119,7 @@ fn tool_call_completed() -> v1alpha1::ToolCallCompleted {
 
 fn file_changed() -> v1alpha1::FileChanged {
     v1alpha1::FileChanged {
-            copied_from: MessageField::none(),
+        copied_from: MessageField::none(),
         session_id: "session-1".to_string(),
         path: "src/new.rs".to_string(),
         change_kind: buffa::EnumValue::from(v1alpha1::FileChangeKind::Modified),
@@ -352,10 +352,10 @@ fn validate_tool_call_completed_rejects_missing_result_kind() {
     let event = v1alpha1::SessionEvent {
         event: Some(
             v1alpha1::ToolCallCompleted {
-            detached: MessageField::none(),
-            accessed: Vec::new(),
-            failed_targets: Vec::new(),
-            targets_attempted: None,
+                detached: MessageField::none(),
+                accessed: Vec::new(),
+                failed_targets: Vec::new(),
+                targets_attempted: None,
                 session_id: "session-1".to_string(),
                 tool_call_id: "tool-call-1".to_string(),
                 tool_execution_id: "tool-exec-1".to_string(),
@@ -488,7 +488,7 @@ fn validate_file_changed_rejects_renamed_without_previous_path() {
     let event = v1alpha1::SessionEvent {
         event: Some(
             v1alpha1::FileChanged {
-            copied_from: MessageField::none(),
+                copied_from: MessageField::none(),
                 session_id: "session-1".to_string(),
                 path: "src/new.rs".to_string(),
                 change_kind: buffa::EnumValue::from(v1alpha1::FileChangeKind::Renamed),
@@ -514,7 +514,7 @@ fn validate_file_changed_rejects_non_renamed_with_previous_path() {
     let event = v1alpha1::SessionEvent {
         event: Some(
             v1alpha1::FileChanged {
-            copied_from: MessageField::none(),
+                copied_from: MessageField::none(),
                 session_id: "session-1".to_string(),
                 path: "src/new.rs".to_string(),
                 change_kind: buffa::EnumValue::from(v1alpha1::FileChangeKind::Modified),
@@ -540,7 +540,7 @@ fn validate_file_changed_accepts_renamed_with_previous_path() {
     let event = v1alpha1::SessionEvent {
         event: Some(
             v1alpha1::FileChanged {
-            copied_from: MessageField::none(),
+                copied_from: MessageField::none(),
                 session_id: "session-1".to_string(),
                 path: "src/new.rs".to_string(),
                 change_kind: buffa::EnumValue::from(v1alpha1::FileChangeKind::Renamed),
@@ -2170,9 +2170,7 @@ fn validate_provider_tool_intent_rejected_rejects_empty_rejection_id() {
 
     assert_eq!(
         validate_session_event(&event),
-        Err(SessionEventValidationError::EmptyIdentifier {
-            field: "rejection_id"
-        })
+        Err(SessionEventValidationError::EmptyIdentifier { field: "rejection_id" })
     );
 }
 
@@ -2181,9 +2179,7 @@ fn validate_provider_tool_intent_rejected_rejects_unspecified_reason() {
     let event = v1alpha1::SessionEvent {
         event: Some(
             v1alpha1::ProviderToolIntentRejected {
-                reason: buffa::EnumValue::from(
-                    v1alpha1::ProviderToolIntentRejectionReason::Unspecified,
-                ),
+                reason: buffa::EnumValue::from(v1alpha1::ProviderToolIntentRejectionReason::Unspecified),
                 ..provider_tool_intent_rejected()
             }
             .into(),
@@ -2202,9 +2198,7 @@ fn provider_tool_intent_rejected() -> v1alpha1::ProviderToolIntentRejected {
         rejection_id: "rejection-1".to_string(),
         message_id: "message-1".to_string(),
         turn_id: "turn-1".to_string(),
-        reason: buffa::EnumValue::from(
-            v1alpha1::ProviderToolIntentRejectionReason::DuplicateCallId,
-        ),
+        reason: buffa::EnumValue::from(v1alpha1::ProviderToolIntentRejectionReason::DuplicateCallId),
         claimed_tool_call_id: Some("dup-1".to_string()),
         claimed_tool_name: Some("Read".to_string()),
         raw_intent: MessageField::none(),
@@ -2303,10 +2297,10 @@ fn validate_tool_call_completed_accepts_valid_event() {
     let event = v1alpha1::SessionEvent {
         event: Some(
             v1alpha1::ToolCallCompleted {
-            detached: MessageField::none(),
-            accessed: Vec::new(),
-            failed_targets: Vec::new(),
-            targets_attempted: None,
+                detached: MessageField::none(),
+                accessed: Vec::new(),
+                failed_targets: Vec::new(),
+                targets_attempted: None,
                 session_id: "session-1".to_string(),
                 tool_call_id: "tool-call-1".to_string(),
                 tool_execution_id: "tool-exec-1".to_string(),
@@ -2759,10 +2753,10 @@ fn validate_tool_call_completed_accepts_artifact_ref_result() {
     let event = v1alpha1::SessionEvent {
         event: Some(
             v1alpha1::ToolCallCompleted {
-            detached: MessageField::none(),
-            accessed: Vec::new(),
-            failed_targets: Vec::new(),
-            targets_attempted: None,
+                detached: MessageField::none(),
+                accessed: Vec::new(),
+                failed_targets: Vec::new(),
+                targets_attempted: None,
                 session_id: "session-1".to_string(),
                 tool_call_id: "tool-call-1".to_string(),
                 tool_execution_id: "tool-exec-1".to_string(),
@@ -2791,10 +2785,10 @@ fn validate_tool_call_completed_rejects_invalid_artifact_ref_result() {
     let event = v1alpha1::SessionEvent {
         event: Some(
             v1alpha1::ToolCallCompleted {
-            detached: MessageField::none(),
-            accessed: Vec::new(),
-            failed_targets: Vec::new(),
-            targets_attempted: None,
+                detached: MessageField::none(),
+                accessed: Vec::new(),
+                failed_targets: Vec::new(),
+                targets_attempted: None,
                 session_id: "session-1".to_string(),
                 tool_call_id: "tool-call-1".to_string(),
                 tool_execution_id: "tool-exec-1".to_string(),
@@ -2827,7 +2821,7 @@ fn validate_file_changed_accepts_valid_before_and_after_ref() {
     let event = v1alpha1::SessionEvent {
         event: Some(
             v1alpha1::FileChanged {
-            copied_from: MessageField::none(),
+                copied_from: MessageField::none(),
                 session_id: "session-1".to_string(),
                 path: "src/new.rs".to_string(),
                 change_kind: buffa::EnumValue::from(v1alpha1::FileChangeKind::Modified),
@@ -2853,7 +2847,7 @@ fn validate_file_changed_rejects_invalid_before_ref() {
     let event = v1alpha1::SessionEvent {
         event: Some(
             v1alpha1::FileChanged {
-            copied_from: MessageField::none(),
+                copied_from: MessageField::none(),
                 session_id: "session-1".to_string(),
                 path: "src/new.rs".to_string(),
                 change_kind: buffa::EnumValue::from(v1alpha1::FileChangeKind::Modified),
@@ -2884,7 +2878,7 @@ fn validate_file_changed_rejects_invalid_after_ref() {
     let event = v1alpha1::SessionEvent {
         event: Some(
             v1alpha1::FileChanged {
-            copied_from: MessageField::none(),
+                copied_from: MessageField::none(),
                 session_id: "session-1".to_string(),
                 path: "src/new.rs".to_string(),
                 change_kind: buffa::EnumValue::from(v1alpha1::FileChangeKind::Modified),
@@ -3636,10 +3630,10 @@ fn validate_tool_call_completed_rejects_empty_text_result_content() {
     let event = v1alpha1::SessionEvent {
         event: Some(
             v1alpha1::ToolCallCompleted {
-            detached: MessageField::none(),
-            accessed: Vec::new(),
-            failed_targets: Vec::new(),
-            targets_attempted: None,
+                detached: MessageField::none(),
+                accessed: Vec::new(),
+                failed_targets: Vec::new(),
+                targets_attempted: None,
                 session_id: "session-1".to_string(),
                 tool_call_id: "tool-call-1".to_string(),
                 tool_execution_id: "tool-exec-1".to_string(),

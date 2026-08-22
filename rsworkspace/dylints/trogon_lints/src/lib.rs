@@ -7,9 +7,12 @@ extern crate rustc_middle;
 extern crate rustc_session;
 extern crate rustc_span;
 
+mod acyclic_modules;
 mod constant_outside_constants_module;
+mod debug_remnants;
 mod error_string_comparison;
 mod error_type_naming;
+mod fallible_new;
 mod function_local_macro_rules;
 mod function_local_use;
 mod inline_module_block;
@@ -24,10 +27,18 @@ mod telemetry_literal;
 mod telemetry_metric_construction;
 mod telemetry_metric_name_literal;
 mod telemetry_span_name_literal;
+mod test_context;
 mod test_module_naming;
+mod tracing_metadata;
+mod unbounded_channel;
+mod unstructured_log_fields;
+mod weakened_write_precondition;
 
-use rustc_hir::{Expr, Item, LetStmt, Stmt};
+use rustc_hir::def_id::LocalDefId;
+use rustc_hir::intravisit::FnKind;
+use rustc_hir::{AmbigArg, Body, Expr, FnDecl, ImplItem, Item, LetStmt, Stmt, Ty};
 use rustc_lint::{LateContext, LateLintPass, LintStore};
+use rustc_span::Span;
 
 dylint_linting::dylint_library!();
 
@@ -35,9 +46,12 @@ dylint_linting::dylint_library!();
 pub fn register_lints(sess: &rustc_session::Session, lint_store: &mut LintStore) {
     dylint_linting::init_config(sess);
     lint_store.register_lints(&[
+        ACYCLIC_MODULES,
         CONSTANT_OUTSIDE_CONSTANTS_MODULE,
+        DEBUG_REMNANTS,
         ERROR_STRING_COMPARISON,
         ERROR_TYPE_NAMING,
+        FALLIBLE_NEW,
         FUNCTION_LOCAL_MACRO_RULES,
         FUNCTION_LOCAL_USE,
         INLINE_MODULE_BLOCK,
@@ -52,12 +66,76 @@ pub fn register_lints(sess: &rustc_session::Session, lint_store: &mut LintStore)
         TELEMETRY_METRIC_NAME_LITERAL,
         TELEMETRY_SPAN_NAME_LITERAL,
         TEST_MODULE_NAMING,
+        UNBOUNDED_CHANNEL,
+        UNSTRUCTURED_LOG_FIELDS,
+        WEAKENED_WRITE_PRECONDITION,
     ]);
     lint_store.register_late_pass(|_| Box::<TrogonLints>::default());
     lint_store.register_early_pass(|| Box::new(redundant_module_path::RedundantModulePath));
     lint_store.register_early_pass(|| {
         Box::new(serde_json_macro_allow_without_reason::SerdeJsonMacroAllowWithoutReason)
     });
+}
+
+rustc_session::declare_lint! {
+    /// ### What it does
+    ///
+    /// Detects a cycle in the dependencies between sibling modules, at any
+    /// depth of the module tree.
+    ///
+    /// ### Why is this bad?
+    ///
+    /// A cycle means neither module can be read, moved, or tested without the
+    /// other, and it removes the one property that makes a module tree
+    /// navigable: that dependencies point in a single direction. Cycles are
+    /// never introduced deliberately. They accrue one reasonable edge at a
+    /// time, until `payments` and `server` are a single unit spelled as two,
+    /// and everything that depends on either depends on both.
+    ///
+    /// The rule is checked between siblings, so a cycle is reported against
+    /// the module that owns both ends of it. Parent-child references are not
+    /// dependencies in this sense and are never considered: a parent declares
+    /// its children and re-exports their API, and a child reaches back through
+    /// `super::`, which is how the module tree is built rather than how it is
+    /// layered. Because sibling graphs aggregate every reference made anywhere
+    /// in a child's subtree, a cycle distributed across grandchildren
+    /// (`payments::checkout` to `server::auth`, `server::routes` back to
+    /// `payments::billing`) is reported at the level where it closes.
+    ///
+    /// Only intra-crate references count, since Cargo already forbids cycles
+    /// between crates. Macro-generated references are the macro author's, not
+    /// the call site's, and are exempt. Test and benchmark code (`#[test]`
+    /// functions, `#[cfg(test)]` items, Cargo `tests/`/`benches/` targets,
+    /// `tests.rs`/`*_tests.rs` sources, and the test-support module family
+    /// `tests`/`benches`/`test_support`/`mocks`/`fixtures`/`testkit`/`*_harness`)
+    /// reaches across the tree by design and says nothing about how production
+    /// code is layered, so it is exempt too.
+    ///
+    /// ### Example
+    ///
+    /// ```rust,ignore
+    /// // in payments/checkout.rs
+    /// use crate::server::auth::verify;
+    ///
+    /// // in server/auth.rs
+    /// use crate::payments::billing::Invoice;
+    /// ```
+    ///
+    /// Use instead:
+    ///
+    /// ```rust,ignore
+    /// // in session.rs, which neither `payments` nor `server` owns
+    /// pub struct Session { ... }
+    ///
+    /// // in payments/checkout.rs
+    /// use crate::session::Session;
+    ///
+    /// // in server/auth.rs
+    /// use crate::session::Session;
+    /// ```
+    pub ACYCLIC_MODULES,
+    Deny,
+    "module dependencies must flow in one direction, not in a cycle",
 }
 
 rustc_session::declare_lint! {
@@ -105,6 +183,59 @@ rustc_session::declare_lint! {
     pub CONSTANT_OUTSIDE_CONSTANTS_MODULE,
     Deny,
     "declare module-level constants in a `constants` module, not elsewhere",
+}
+
+rustc_session::declare_lint! {
+    /// ### What it does
+    ///
+    /// Detects `println!`, `print!`, `eprintln!`, and `dbg!` in code that ships.
+    ///
+    /// ### Why is this bad?
+    ///
+    /// These macros write to the process's own stdout and stderr, a channel
+    /// nothing operates on. The line carries no level, so it cannot be
+    /// filtered; no fields, so it cannot be queried; no span context, so it
+    /// cannot be tied to the request that produced it; and it bypasses the
+    /// subscriber entirely, so it never reaches the backend the service
+    /// exports its logs to. A `dbg!` additionally prints the expression's
+    /// source text and keeps evaluating it in production, at a cost nobody
+    /// chose.
+    ///
+    /// The usual reason one of these is here at all is that it was typed to
+    /// answer a question during development and never removed. `tracing` is
+    /// how this repository records what a service is doing, and the same line
+    /// promoted to an event gains a level, named fields, and the span it
+    /// happened in.
+    ///
+    /// `eprint!` is not reported: a write to stderr with no newline is how a
+    /// terminal program draws a prompt or a progress line, which is output
+    /// rather than a leftover debugging statement.
+    ///
+    /// Test sources are exempt, where printing is how a failing case explains
+    /// itself to whoever reads the output. A write that is genuinely the
+    /// program's own output (a CLI printing its result, a process reporting a
+    /// fatal error before a subscriber exists) is not exempt by position,
+    /// because nothing distinguishes it from a leftover line except intent; it
+    /// says so at the site with
+    /// `#[cfg_attr(dylint_lib = "trogon_lints", allow(debug_remnants, reason = "..."))]`.
+    ///
+    /// This rule is ported from the `debug_remnants` lint in
+    /// <https://github.com/li-kai/rust-lints>; the credit for it is theirs.
+    ///
+    /// ### Example
+    ///
+    /// ```rust,ignore
+    /// println!("request: {:?}", request);
+    /// ```
+    ///
+    /// Use instead:
+    ///
+    /// ```rust,ignore
+    /// tracing::info!(?request, "request received");
+    /// ```
+    pub DEBUG_REMNANTS,
+    Deny,
+    "record diagnostics as `tracing` events, not as writes to the process's stdout or stderr",
 }
 
 rustc_session::declare_lint! {
@@ -175,6 +306,60 @@ rustc_session::declare_lint! {
     pub ERROR_TYPE_NAMING,
     Deny,
     "name types that implement `std::error::Error` with an `Error` suffix",
+}
+
+rustc_session::declare_lint! {
+    /// ### What it does
+    ///
+    /// Detects a constructor named `new` (or a `new_*` variant) whose body can
+    /// panic: `.unwrap()` or `.expect(...)` on a `Result` or an `Option`, a
+    /// `panic!`, or an `unreachable!`.
+    ///
+    /// ### Why is this bad?
+    ///
+    /// `new` is the name Rust reserves for construction that cannot fail, and a
+    /// caller reads it that way: there is no `Err` to match, nothing for `?` to
+    /// carry, and no way to recover short of `catch_unwind`. A panic reached
+    /// through that name takes the whole process down for a failure the caller
+    /// was never given the chance to handle, and a library consumer cannot wrap
+    /// the call in error handling of their own. Returning `Result<Self, _>`
+    /// (renaming to `try_new` when an infallible constructor stays beside it),
+    /// or moving the fallible work out to the caller, puts the failure back in
+    /// the signature where it can be seen.
+    ///
+    /// `todo!` and `unimplemented!` are left to rustc's own lints for
+    /// unfinished code. A constructor that already returns `Result` or `Option`
+    /// has said its construction can fail and is left alone, as is one in a
+    /// trait impl, where the implementor owns neither the name nor the return
+    /// type. Test and benchmark sources are exempt, since a panic there fails
+    /// the test that caused it rather than surprising a caller.
+    ///
+    /// ### Example
+    ///
+    /// ```rust,ignore
+    /// impl Client {
+    ///     pub fn new(endpoint: &str) -> Self {
+    ///         Self {
+    ///             endpoint: Url::parse(endpoint).expect("invalid endpoint"),
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// Use instead:
+    ///
+    /// ```rust,ignore
+    /// impl Client {
+    ///     pub fn new(endpoint: &str) -> Result<Self, ParseError> {
+    ///         Ok(Self {
+    ///             endpoint: Url::parse(endpoint)?,
+    ///         })
+    ///     }
+    /// }
+    /// ```
+    pub FALLIBLE_NEW,
+    Deny,
+    "a constructor named `new` must not panic; return `Result` or rename it `try_new`",
 }
 
 rustc_session::declare_lint! {
@@ -722,8 +907,158 @@ rustc_session::declare_lint! {
     "name spans with a generated `trogon_semconv` constant, not an inline string literal",
 }
 
+rustc_session::declare_lint! {
+    /// ### What it does
+    ///
+    /// Detects the creation of a channel whose queue has no capacity:
+    /// `std::sync::mpsc::channel`, `tokio::sync::mpsc::unbounded_channel`,
+    /// `futures::channel::mpsc::unbounded`, `flume::unbounded`,
+    /// `crossbeam::channel::unbounded`, and `async_channel::unbounded`.
+    ///
+    /// ### Why is this bad?
+    ///
+    /// An unbounded queue turns a throughput mismatch into a memory leak. A
+    /// producer that outruns its consumer never learns that it is ahead: the
+    /// send always succeeds, the queue grows for as long as the imbalance
+    /// lasts, and the first symptom is the process being killed for its
+    /// resident size. The imbalance does not have to be permanent to do this,
+    /// because a burst arriving faster than the consumer drains is enough.
+    ///
+    /// A capacity is what makes the mismatch observable and survivable. When
+    /// the queue is full the sender waits (or is told the queue is full), so
+    /// backpressure reaches the producer, and through it whatever the producer
+    /// is reading from: a socket stops being drained, a JetStream consumer
+    /// stops acking, an HTTP handler stops accepting. The bound also names the
+    /// worst-case memory the queue can hold, which an unbounded channel leaves
+    /// as a property of the workload.
+    ///
+    /// Test sources are exempt: a test drives both ends of its channel, so the
+    /// producer cannot outrun the consumer in a way that outlives the test.
+    ///
+    /// This rule is ported from the `unbounded_channel` lint in
+    /// <https://github.com/li-kai/rust-lints>; the credit for it is theirs.
+    ///
+    /// ### Example
+    ///
+    /// ```rust,ignore
+    /// let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    /// ```
+    ///
+    /// Use instead:
+    ///
+    /// ```rust,ignore
+    /// let (tx, rx) = tokio::sync::mpsc::channel(EVENT_QUEUE_CAPACITY);
+    /// ```
+    pub UNBOUNDED_CHANNEL,
+    Deny,
+    "give a channel an explicit capacity, so a slow consumer applies backpressure instead of consuming memory",
+}
+
+rustc_session::declare_lint! {
+    /// ### What it does
+    ///
+    /// Detects a `tracing` event macro (`info!`, `warn!`, `error!`, `debug!`,
+    /// `trace!`, `event!`) whose captured values are all interpolated into the
+    /// message through format placeholders, with no structured field among
+    /// them.
+    ///
+    /// ### Why is this bad?
+    ///
+    /// A field is queryable and a message is not. `tracing` records fields as
+    /// typed key-value pairs that a subscriber can filter, index, and forward
+    /// to a log backend as columns; a value baked into the message text is
+    /// reachable only by whoever writes the right regular expression against
+    /// the rendered string. Interpolating the value also drops its name, so
+    /// the same quantity is `session {}` at one site and `for session {}` at
+    /// the next, and nothing ties them together. Naming the value as a field
+    /// costs the same number of tokens and keeps the message the constant part
+    /// a reader scans for. A callsite that already carries at least one field
+    /// is left alone: mixing a field with a formatted message is a deliberate
+    /// middle ground, not an oversight. A message with no placeholders
+    /// captures nothing and has nothing to structure. Test sources
+    /// (`tests.rs`, `*_tests.rs`) are exempt.
+    ///
+    /// This rule is ported from the `unstructured_log_fields` lint in
+    /// <https://github.com/li-kai/rust-lints>; the credit for it is theirs.
+    ///
+    /// ### Example
+    ///
+    /// ```rust,ignore
+    /// tracing::info!("user {} hit {}", user_id, path);
+    /// ```
+    ///
+    /// Use instead:
+    ///
+    /// ```rust,ignore
+    /// tracing::info!(user_id, path, "user hit endpoint");
+    /// ```
+    pub UNSTRUCTURED_LOG_FIELDS,
+    Deny,
+    "record log values as `tracing` fields, not as format arguments in the message",
+}
+
+rustc_session::declare_lint! {
+    /// ### What it does
+    ///
+    /// Detects a decider whose `WRITE_PRECONDITION` associated const is
+    /// `WritePrecondition::Any`, unless the declaration carries an `allow` that
+    /// states a reason.
+    ///
+    /// ### Why is this bad?
+    ///
+    /// `Any` is the one variant that appends without checking anything first,
+    /// so the decision a command made from the state it read is written even if
+    /// another writer changed that state in between. That is occasionally
+    /// correct, for a fact that commutes with every other fact on the stream,
+    /// and it is silently wrong for anything that guards an invariant. The
+    /// difference lives entirely in the *why*, which is invisible at a call
+    /// site that reads `WritePrecondition::Any` and nothing else.
+    ///
+    /// The const already makes every decider's choice visible. This makes the
+    /// one dangerous choice argued: an `allow` with a `reason` records the
+    /// commutativity claim next to the code that depends on it, where a
+    /// reviewer can disagree with it. A bare `allow` is reported, because
+    /// silencing the question is not answering it.
+    ///
+    /// ### Example
+    ///
+    /// ```rust,ignore
+    /// impl Decider for RenameSession {
+    ///     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::Any;
+    /// }
+    /// ```
+    ///
+    /// Use instead:
+    ///
+    /// ```rust,ignore
+    /// impl Decider for RenameSession {
+    ///     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamExists;
+    /// }
+    /// ```
+    ///
+    /// or, where the event genuinely commutes:
+    ///
+    /// ```rust,ignore
+    /// impl Decider for RenameSession {
+    ///     #[cfg_attr(
+    ///         dylint_lib = "trogon_lints",
+    ///         allow(
+    ///             weakened_write_precondition,
+    ///             reason = "a rename is a last-writer-wins fact that guards no invariant"
+    ///         )
+    ///     )]
+    ///     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::Any;
+    /// }
+    /// ```
+    pub WEAKENED_WRITE_PRECONDITION,
+    Deny,
+    "argue an unconditional `WritePrecondition::Any` append, or name the invariant it depends on",
+}
+
 #[derive(Default)]
 struct TrogonLints {
+    acyclic_modules: acyclic_modules::AcyclicModules,
+    debug_remnants: debug_remnants::DebugRemnants,
     error_string_comparison: error_string_comparison::ErrorStringComparison,
     function_local_use: function_local_use::FunctionLocalUse,
     serde_json_macro: serde_json_macro::SerdeJsonMacro,
@@ -733,6 +1068,7 @@ struct TrogonLints {
     telemetry_metric_construction: telemetry_metric_construction::TelemetryMetricConstruction,
     telemetry_metric_name_literal: telemetry_metric_name_literal::TelemetryMetricNameLiteral,
     telemetry_span_name_literal: telemetry_span_name_literal::TelemetrySpanNameLiteral,
+    unstructured_log_fields: unstructured_log_fields::UnstructuredLogFields,
 }
 
 impl<'tcx> LateLintPass<'tcx> for TrogonLints {
@@ -741,6 +1077,9 @@ impl<'tcx> LateLintPass<'tcx> for TrogonLints {
     }
 
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'tcx>) {
+        unbounded_channel::check_expr(cx, expr);
+        self.acyclic_modules.check_expr(cx, expr);
+        self.debug_remnants.check_expr(cx, expr);
         self.error_string_comparison.check_expr(cx, expr);
         self.serde_json_macro.check_expr(cx, expr);
         self.std_env_access.check_expr(cx, expr);
@@ -749,6 +1088,19 @@ impl<'tcx> LateLintPass<'tcx> for TrogonLints {
         self.telemetry_metric_construction.check_expr(cx, expr);
         self.telemetry_metric_name_literal.check_expr(cx, expr);
         self.telemetry_span_name_literal.check_expr(cx, expr);
+        self.unstructured_log_fields.check_expr(cx, expr);
+    }
+
+    fn check_fn(
+        &mut self,
+        cx: &LateContext<'tcx>,
+        kind: FnKind<'tcx>,
+        _: &'tcx FnDecl<'tcx>,
+        body: &'tcx Body<'tcx>,
+        span: Span,
+        def_id: LocalDefId,
+    ) {
+        fallible_new::check_fn(cx, kind, body, span, def_id);
     }
 
     fn check_stmt(&mut self, cx: &LateContext<'tcx>, stmt: &'tcx Stmt<'tcx>) {
@@ -756,19 +1108,36 @@ impl<'tcx> LateLintPass<'tcx> for TrogonLints {
         self.function_local_use.check_stmt(cx, stmt);
     }
 
+    fn check_ty(&mut self, cx: &LateContext<'tcx>, ty: &'tcx Ty<'tcx, AmbigArg>) {
+        self.acyclic_modules.check_ty(cx, ty);
+    }
+
     fn check_item(&mut self, cx: &LateContext<'tcx>, item: &'tcx Item<'tcx>) {
+        self.acyclic_modules.check_item(cx, item);
         constant_outside_constants_module::check_item(cx, item);
         error_type_naming::check_item(cx, item);
         inline_module_block::check_item(cx, item);
         manual_error_impl::check_item(cx, item);
         test_module_naming::check_item(cx, item);
     }
+
+    fn check_impl_item(&mut self, cx: &LateContext<'tcx>, impl_item: &'tcx ImplItem<'tcx>) {
+        weakened_write_precondition::check_impl_item(cx, impl_item);
+    }
+
+    fn check_crate_post(&mut self, cx: &LateContext<'tcx>) {
+        self.acyclic_modules.check_crate_post(cx);
+        self.unstructured_log_fields.check_crate_post(cx);
+    }
 }
 
 rustc_session::impl_lint_pass!(TrogonLints => [
+    ACYCLIC_MODULES,
     CONSTANT_OUTSIDE_CONSTANTS_MODULE,
+    DEBUG_REMNANTS,
     ERROR_STRING_COMPARISON,
     ERROR_TYPE_NAMING,
+    FALLIBLE_NEW,
     FUNCTION_LOCAL_MACRO_RULES,
     FUNCTION_LOCAL_USE,
     INLINE_MODULE_BLOCK,
@@ -781,6 +1150,9 @@ rustc_session::impl_lint_pass!(TrogonLints => [
     TELEMETRY_METRIC_NAME_LITERAL,
     TELEMETRY_SPAN_NAME_LITERAL,
     TEST_MODULE_NAMING,
+    UNBOUNDED_CHANNEL,
+    UNSTRUCTURED_LOG_FIELDS,
+    WEAKENED_WRITE_PRECONDITION,
 ]);
 
 rustc_session::impl_lint_pass!(redundant_module_path::RedundantModulePath => [REDUNDANT_MODULE_PATH]);

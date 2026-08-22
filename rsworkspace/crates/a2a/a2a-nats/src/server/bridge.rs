@@ -74,7 +74,7 @@ where
             .map_err(|e| BridgeError::Subscribe(Box::new(e)))?;
 
         let subscribed_wildcard = format!("{}.v1.agents.{}.>", prefix.as_str(), agent_id.as_str());
-        info!("a2a-nats bridge subscribed to {subscribed_wildcard}");
+        info!(subject = subscribed_wildcard, "a2a-nats bridge subscribed");
 
         loop {
             tokio::select! {

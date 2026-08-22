@@ -144,11 +144,11 @@ async fn a_two_step_act_chain_crosses_the_wasm_boundary_and_threads_state_betwee
 
     assert_eq!(result.stream_position, position(2));
     assert_eq!(result.events.len(), 2);
-    assert_eq!(result.events[0].type_, STEP_ONE_EVENT_TYPE);
-    assert!(result.events[0].payload.is_empty());
-    assert_eq!(result.events[1].type_, STEP_TWO_EVENT_TYPE);
+    assert_eq!(result.events[0].r#type, STEP_ONE_EVENT_TYPE);
+    assert!(result.events[0].content.is_empty());
+    assert_eq!(result.events[1].r#type, STEP_TWO_EVENT_TYPE);
     assert_eq!(
-        result.events[1].payload,
+        result.events[1].content,
         1u32.to_le_bytes().to_vec(),
         "the second step must observe state already evolved by the first step's event"
     );

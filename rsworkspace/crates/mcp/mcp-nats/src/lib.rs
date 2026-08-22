@@ -1,4 +1,11 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
+#![cfg_attr(
+    dylint_lib = "trogon_lints",
+    expect(
+        acyclic_modules,
+        reason = "`wire` is typed with the transport error it produces and `transport` frames its payloads through `wire`"
+    )
+)]
 
 pub mod client;
 pub mod config;

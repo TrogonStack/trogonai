@@ -47,7 +47,10 @@ name = "schedules"
 path = "tests/schedules.rs"
 required-features = ["test-support"]
 
+# One parity target per wasm component, named `parity_{alias}`. The conformance
+# gate resolves a component's parity coverage by that name, so a component added
+# without one fails CI rather than passing unnoticed.
 [[test]]
-name = "parity"
-path = "tests/parity.rs"
+name = "parity_schedules"
+path = "tests/parity_schedules.rs"
 required-features = ["test-support"]

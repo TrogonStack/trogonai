@@ -132,6 +132,9 @@ artifact; this corpus nests because every product here has at least two.
   - [Continue compared to our session event catalog](./products/continue/vs-session-events.md)
 - [Crush (Charm)](./products/crush/index.md)
   - [Crush compared to our session event catalog](./products/crush/vs-session-events.md)
+- [DeepSeek Harness](./products/deepseek-harness/index.md)
+  - [DeepSeek Harness compared to our session event
+    catalog](./products/deepseek-harness/vs-session-events.md)
 - [fx (Vercel)](./products/fx/index.md)
   - [fx session detail JSON reference](./products/fx/session-detail-json-reference.md)
   - [fx compared to our session event catalog](./products/fx/vs-session-events.md)

@@ -2,11 +2,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use crate::test_support::JetStreamTestServer;
 use async_nats::jetstream;
 use async_nats::jetstream::consumer::{AckPolicy, pull};
 use bytes::Bytes;
 use tokio_util::sync::CancellationToken;
-use trogon_nats::test_support::JetStreamTestServer;
 
 use super::{HandlerVerdict, MessageHandler, PoisonReason, Processor, RedeliveryDecision, RedeliveryPolicy};
 

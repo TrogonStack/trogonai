@@ -163,3 +163,31 @@ products speak ACP; the one crossover to watch is ACP's proxy-chains RFD
 orchestration inside the client-agent seat but remains proposal-stage. Full
 analysis, including the seat-by-seat comparison table, in
 [ACP vs A2A](./acp-vs-a2a.md).
+
+## Post-synthesis evidence: DeepSeek Harness (2026-08-20)
+
+This section was added after the original fifteen-product synthesis and does
+not retroactively change its frozen decision-time claims. The
+[DeepSeek Harness dossier](./products/deepseek-harness.md) uses release
+`dsh-v0.1.0-rc.8` at pinned commit
+`141eb6fef83422698aef7a981029e843e8161534`.
+
+DeepSeek Harness adds a particularly clear two-sided ACP example. Its native
+automation server speaks wire v1 over JSON-RPC stdio, creates fresh sessions,
+streams only committed assistant messages, exposes one-shot permission
+decisions, and intentionally advertises no filesystem, terminal, MCP, session
+load, or interactive UI capability. Its separate `dsh-subagent-acp` provider
+plays the client-host role: one fresh child per run, explicit
+`initialize`/`session/new`/`session/prompt`, machine permission policy, and
+owned cancellation and process teardown.
+
+The product is not callable from TrogonAI at the checked commit. Protocol
+version is not the blocker: both sides use wire v1 and the required core method
+subset overlaps. The missing boundary is still the planned client-side
+`acp-host` that spawns and supervises the child and connects its stdio to the
+NATS session surface. The exact upstream source-checkout invocation is
+`DEEPSEEK_API_KEY=... pnpm --dir /path/to/deepseek-harness run demo:acp`;
+upstream documents a composed repository demo rather than a standalone
+`dsh acp` executable. This evidence strengthens the original host-role
+decision while adding an important requirement: the host must support agents
+that self-serve tools and advertise no client filesystem or terminal callbacks.

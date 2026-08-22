@@ -433,7 +433,7 @@ pub enum ConflictKind {
     /// data loss wearing the shape of idempotency.
     CONFLICT_KIND_IDENTITY_REUSED_WITH_DIFFERENT_CONTENT = 3i32,
     /// The subject the writer resolved belongs to a retired stream incarnation
-    /// and no longer accepts writes (ADR#0057). The writer must re-resolve rather
+    /// and no longer accepts writes (ADR#0059). The writer must re-resolve rather
     /// than retry, because a sealed incarnation refuses every retry forever.
     CONFLICT_KIND_INCARNATION_RETIRED = 4i32,
 }

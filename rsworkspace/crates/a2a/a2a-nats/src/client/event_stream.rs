@@ -4,17 +4,18 @@ use std::task::{Context, Poll};
 
 use a2a::event::StreamResponse;
 use futures::channel::mpsc;
-use futures::{Stream, StreamExt};
+use futures::{SinkExt, Stream, StreamExt};
 use tokio::task::AbortHandle;
 use trogon_nats::jetstream::{JetStreamConsumer, JsAck, JsMessageRef};
 
+use crate::constants::EVENT_STREAM_QUEUE_CAPACITY;
 use crate::req_id::ReqId;
 
 use super::error::ClientError;
 use super::wire::{decode_response, map_wire_error};
 
 pub struct TypedEventStream {
-    receiver: mpsc::UnboundedReceiver<Result<StreamResponse, ClientError>>,
+    receiver: mpsc::Receiver<Result<StreamResponse, ClientError>>,
     last_seq: Arc<Mutex<u64>>,
     abort: AbortHandle,
 }
@@ -60,7 +61,7 @@ where
     C::MessagesError: std::fmt::Display + Send + 'static,
     C::StreamError: std::fmt::Display + Send + 'static,
 {
-    let (tx, receiver) = mpsc::unbounded();
+    let (tx, receiver) = mpsc::channel(EVENT_STREAM_QUEUE_CAPACITY);
     let last_seq_for_task = last_seq_cell.clone();
 
     let join = tokio::spawn(pull_loop(consumer, tx, last_seq_for_task, demux_req_id));
@@ -78,7 +79,7 @@ where
 /// no task to scope a consumer to and no events will follow, so the caller gets a
 /// stream that ends immediately rather than a consumer on a subject nobody writes.
 pub fn empty_event_stream() -> TypedEventStream {
-    let (tx, receiver) = mpsc::unbounded::<Result<StreamResponse, ClientError>>();
+    let (tx, receiver) = mpsc::channel::<Result<StreamResponse, ClientError>>(EVENT_STREAM_QUEUE_CAPACITY);
     drop(tx);
     let join = tokio::spawn(std::future::ready(()));
 
@@ -91,7 +92,7 @@ pub fn empty_event_stream() -> TypedEventStream {
 
 async fn pull_loop<C>(
     consumer: C,
-    tx: mpsc::UnboundedSender<Result<StreamResponse, ClientError>>,
+    mut tx: mpsc::Sender<Result<StreamResponse, ClientError>>,
     last_seq: Arc<Mutex<u64>>,
     demux_req_id: Option<ReqId>,
 ) where
@@ -103,7 +104,7 @@ async fn pull_loop<C>(
     let mut msgs = match consumer.messages().await {
         Ok(m) => m,
         Err(e) => {
-            let _ = tx.unbounded_send(Err(ClientError::ConsumerSetup(e.to_string())));
+            let _ = tx.send(Err(ClientError::ConsumerSetup(e.to_string()))).await;
             return;
         }
     };
@@ -111,7 +112,7 @@ async fn pull_loop<C>(
     while let Some(item) = msgs.next().await {
         match item {
             Err(e) => {
-                let _ = tx.unbounded_send(Err(ClientError::JetStream(e.to_string())));
+                let _ = tx.send(Err(ClientError::JetStream(e.to_string()))).await;
                 return;
             }
             Ok(js_msg) => {
@@ -130,7 +131,7 @@ async fn pull_loop<C>(
                 let stream_seq = stream_sequence_from_reply(js_msg.message().reply.as_deref());
                 let message = js_msg.message();
                 let event_headers = message.headers.clone().unwrap_or_default();
-                let send_result = tx.unbounded_send(decode_event(&event_headers, message.payload.as_ref()));
+                let send_result = tx.send(decode_event(&event_headers, message.payload.as_ref())).await;
 
                 if send_result.is_err() {
                     return;

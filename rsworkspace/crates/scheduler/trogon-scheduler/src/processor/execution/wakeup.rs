@@ -4,12 +4,12 @@ use std::time::Duration;
 use async_nats::jetstream::consumer::pull;
 use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy, ReplayPolicy};
 use chrono::{DateTime, Utc};
-use trogon_decider_runtime::{CommandError, CommandExecution, StreamAppend, StreamPosition, StreamRead};
+use trogon_decider_runtime::{CommandError, CommandExecution, CommandId, StreamAppend, StreamPosition, StreamRead};
 use trogon_std::time::{EpochClock, SystemClock};
 
 use crate::commands::domain::ScheduleId;
 use crate::commands::{EvolveError, RecordScheduleOccurrence, RecordScheduleOccurrenceError};
-use crate::constants::{RRULE_WAKEUP_CONSUMER, RRULE_WAKEUP_FILTER};
+use crate::constants::{RRULE_WAKEUP_COMMAND_NAMESPACE, RRULE_WAKEUP_CONSUMER, RRULE_WAKEUP_FILTER};
 use crate::processor::execution::reconciliation::{RRuleWakeupPayload, RRuleWakeupPayloadDecodeError, ScheduleSubject};
 use trogonai_proto::scheduler::schedules::ScheduleEventPayloadError;
 
@@ -114,8 +114,13 @@ where
         ensure_subject_matches_payload(&subject, &schedule_id)?;
 
         let recorded_at = DateTime::<Utc>::from(self.clock.system_time());
+        let command_id = wakeup_command_id(&schedule_id, occurrence_at);
         let command = RecordScheduleOccurrence::new(schedule_id, occurrence_at, recorded_at);
-        match CommandExecution::new(&self.event_store, &command).execute().await {
+        match CommandExecution::new(&self.event_store, &command)
+            .with_command_id(command_id)
+            .execute()
+            .await
+        {
             Ok(result) => Ok(RRuleWakeupOutcome::Recorded {
                 stream_position: result.stream_position,
             }),
@@ -123,6 +128,18 @@ where
             Err(error) => Err(command_error(error)),
         }
     }
+}
+
+/// Names the command a wakeup raises after the occurrence it fires for.
+///
+/// The consumer acks explicitly with `max_deliver: -1`, so a wakeup whose append landed but whose
+/// ack did not comes back and decides again. Both attempts derive the same id here, so both derive
+/// the same event ids and the store's deduplication window drops the second append. The attempts
+/// do not agree on `recorded_at` (each reads the clock), and that is the point: deduplication keeps
+/// whichever attempt won rather than recording the occurrence twice at two different times.
+fn wakeup_command_id(schedule_id: &ScheduleId, occurrence_at: DateTime<Utc>) -> CommandId {
+    let key = format!("{schedule_id}/{}", occurrence_at.to_rfc3339());
+    CommandId::derive(&RRULE_WAKEUP_COMMAND_NAMESPACE, key.as_bytes())
 }
 
 pub fn rrule_wakeup_consumer_config() -> pull::Config {

@@ -73,16 +73,24 @@ lease, not JetStream's native expected-sequence guard -- a real lost-update
 hazard the substrate on the curated line already closes. This ADR **ratifies that
 domain model and deliberately supersedes its persistence mechanism**.
 
-Several primitives this decision leans on are themselves `draft`, not accepted,
-and some are not yet implemented in the substrate: [ADR#0026](./0026-command-authorization-principal.md)'s `CommandPrincipal`/
-`CommandAuthorizer`, [ADR#0027](./0027-decider-multi-tenancy-primitive.md)'s `Tenant`/`TenantBinding`, [ADR#0028](./0028-decider-admission-control-and-backpressure.md)'s admission
-limiter, [ADR#0029](./0029-decider-retention-and-truncation-watermark.md)'s snapshot-derived
-[retention watermark](../glossary/retention-watermark), and [ADR#0031](./0031-agent-implementation-and-session-plan.md)'s Session
-model. Where this ADR names those types it is naming proposed primitives it
-depends on, not shipped code, and decisions that build on them are provisional to
-that extent. The two facts marked "already ships, by default" above
-(expected-sequence OCC and physical-sequence order) are the exception -- those are
-implemented in `trogon-decider`/`trogon-decider-nats` today.
+One primitive this decision leans on is itself `draft`, not accepted:
+[ADR#0031](./0031-agent-implementation-and-session-plan.md)'s Session model.
+Where this ADR names those types it is naming proposed primitives it depends
+on, not shipped code, and decisions that build on them are provisional to that
+extent.
+
+Four of its dependencies are no longer in that category. The two facts marked
+"already ships, by default" above (expected-sequence OCC and physical-sequence
+order) were always implemented in `trogon-decider`/`trogon-decider-nats`.
+[ADR#0026](./0026-command-authorization-principal.md)'s `CommandPrincipal`/
+`CommandAuthorizer`, [ADR#0028](./0028-decider-admission-control-and-backpressure.md)'s
+admission limiter, and [ADR#0027](./0027-decider-multi-tenancy-primitive.md)'s
+[subject scope](../glossary/subject-scope) have all since been accepted and
+implemented, and
+[ADR#0029](./0029-decider-retention-and-truncation-watermark.md)'s snapshot-derived
+[retention watermark](../glossary/retention-watermark) has since been accepted and
+is computed by `trogon-decider-nats`, though the purge that would consume it is
+still unspecified.
 
 ## Decision
 
@@ -105,24 +113,26 @@ is mapped through a routing-key transform, as the scheduler does. This corrects
 the prior art's id-in-the-middle `sessions.{id}.events` to the trailing-token
 form the resolver and subject-filtered projector expect.
 
-Multi-[tenant](../glossary/tenant) scoping is expected to use draft
-[ADR#0027](./0027-decider-multi-tenancy-primitive.md)'s proposed `Tenant`: the
-resolver and snapshot-key surface would take a `Tenant`, the store would validate
-the resolved subject against it, and a tenant needing hard isolation would opt
-into `TenantBinding::Dedicated`. That type does not exist in the substrate yet;
-until it lands, a session is scoped by its subject alone, and **shared
-multi-tenant deployment of this store is explicitly blocked on [ADR#0027](./0027-decider-multi-tenancy-primitive.md)'s
-resolver contract landing** -- no `tenant_id` is added speculatively ahead of it.
+Multi-[tenant](../glossary/tenant) scoping composes with
+[ADR#0027](./0027-decider-multi-tenancy-primitive.md), which resolved that the
+crates own a [subject scope](../glossary/subject-scope) and not a `Tenant`: this
+store's resolver declares the subtree it writes into, and `JetStreamStore`
+refuses any subject that escapes it. The tenant vocabulary itself, and the
+projection of a tenant onto a scope, belong to the deployment. A tenant needing
+hard isolation gets its own store, stream, and bucket. Snapshot keys are outside
+that check by [ADR#0027](./0027-decider-multi-tenancy-primitive.md) Decision 3,
+so a shared multi-tenant deployment of this store
+must compose its scope into the `snapshot_id` as well as into the subject. No
+`tenant_id` is added to the wire contract.
 Proto lives under `proto/trogonai/session/sessions/v1alpha1/` (domain `session`,
 aggregate `sessions`), per [ADR#0009](./0009-protocol-buffers-wire-contracts.md).
 
 The `v1alpha1` suffix is the honest stability signal, not a placeholder to drop
-casually: the contract depends on five still-draft ADRs (0026, 0027, 0028, 0029,
-0031) and on the substrate obligations facet 2 lists as prerequisites, so it is
+casually: the contract depends on one still-draft ADR (0031),
+on four since accepted (0026, 0027, 0028, 0029), and on the substrate obligations facet 2
+lists as prerequisites, so it is
 promoted to `v1` only by a later decision, once this ADR and those dependencies
-are accepted and those obligations are met. `v1alpha1` is also the room in which
-[ADR#0027](./0027-decider-multi-tenancy-primitive.md)'s tenant scoping, once accepted, lands additively rather than as a
-breaking rename. `events.proto` carries a file-level comment naming this
+are accepted and those obligations are met. `events.proto` carries a file-level comment naming this
 promotion criteria.
 
 Within `v1alpha1`, a field may still be added as `LEGACY_REQUIRED`, and the
@@ -299,7 +309,7 @@ carries a caller-supplied idempotency key, stable across redelivery, and no
 domain payload gains a separate identity field of its own. Where that key
 structurally lives -- a field on the command struct, or an execution-layer
 input beside it -- is an open design question this ADR does not settle
-(draft [ADR#0026](./0026-command-authorization-principal.md) rejected the
+([ADR#0026](./0026-command-authorization-principal.md) rejected the
 analogous command-struct placement for its principal, which cuts against a
 struct field here too). Each appended event's envelope `Event.id` is derived
 deterministically: UUIDv5 over
@@ -1214,12 +1224,13 @@ artifact-byte erasure, not cryptographic shredding.
 **This explicitly supersedes [ADR#0029](./0029-decider-retention-and-truncation-watermark.md)
 for session streams.** Session streams never issue the
 [ADR#0029](./0029-decider-retention-and-truncation-watermark.md) purge; its
-`MinimumRequiredSequence` [retention watermark](../glossary/retention-watermark)
+`RetentionWatermark` [retention watermark](../glossary/retention-watermark)
 stays a read-only diagnostic for this store, and this ADR states that
-supersession explicitly rather than leaving the two decisions in tension.
-Both documents are drafts, so the supersession is provisional until both are
-accepted; [ADR#0029](./0029-decider-retention-and-truncation-watermark.md)
-carries the reciprocal note.
+supersession explicitly rather than leaving the two decisions in tension. What
+[ADR#0029](./0029-decider-retention-and-truncation-watermark.md) accepted is
+exactly that read-only computation, and it defers the purge job as a Non-Goal,
+so there is nothing to supersede until such a job is designed; this ADR remains
+free to settle session-stream retention on its own terms when it is accepted.
 
 Storage is otherwise managed without ever removing a fact:
 
@@ -1235,7 +1246,7 @@ Storage is otherwise managed without ever removing a fact:
   logically deletes an event, and whether to enable it is deferred to deployment, not
   decided here.
 
-  **Amended by [ADR#0057](./0057-session-stream-incarnation-fencing.md).** Eviction
+  **Amended by [ADR#0059](./0059-session-stream-incarnation-fencing.md).** Eviction
   from a live session subject is no longer admissible in any form. A partially
   evicted subject leaves this facet's `At(current_position)` guard comparing
   against a sequence that no longer names the event the writer read, and a fully
@@ -1259,7 +1270,7 @@ projection ([ADR#0014](./0014-command-and-query-naming.md)) -- `get_session`,
 `list_sessions` -- with no query protos, since the projection value is the read
 contract.
 
-**Amended by [ADR#0058](./0058-session-query-contract-separate-from-projection.md).**
+**Amended by [ADR#0060](./0060-session-query-contract-separate-from-projection.md).**
 The clause "with no query protos, since the projection value is the read
 contract" is withdrawn. A projection exists to be cheaply rebuilt and a public
 contract exists to hold still, and one type cannot carry both obligations: either
@@ -1455,8 +1466,8 @@ hot path without inheriting its weak lifecycle guarantees.
 - **How long cold-tiered copies live in the Object Store** -- a follow-up question
   only if tiering is enabled, analogous to [ADR#0029](./0029-decider-retention-and-truncation-watermark.md)'s deferred KV history-depth.
 - **Per-tenant retention or admission fairness.** [ADR#0028](./0028-decider-admission-control-and-backpressure.md) leaves QoS open and
-  [ADR#0027](./0027-decider-multi-tenancy-primitive.md) scopes `Tenant` to storage resolution only; a per-tenant policy
-  composes with both but is not decided here.
+  [ADR#0027](./0027-decider-multi-tenancy-primitive.md) keeps tenancy out of the
+  crates entirely; a per-tenant policy composes with both but is not decided here.
 - **Tenant-to-authorization-principal linkage** -- [ADR#0027](./0027-decider-multi-tenancy-primitive.md) Non-Goal; [ADR#0026](./0026-command-authorization-principal.md)
   owns the principal.
 - **Runtime and command implementation.** Concrete message fields, the event
@@ -1485,9 +1496,9 @@ list.
    command-struct field vs. execution-layer input, unresolved, with draft
    [ADR#0026](./0026-command-authorization-principal.md)'s rejection of the
    analogous struct placement as prior art against a struct field.
-3. **Five upstream drafts** (0026, 0027, 0028, 0029, 0031): every named
-   type from them is proposed, not shipped; any of them changing before
-   acceptance reopens the facet built on it, per the Context rule.
+3. **One upstream draft** (0031): every named type from it is proposed, not
+   shipped; it changing before acceptance reopens the facet built on it, per
+   the Context rule.
 
 ## Consequences
 
@@ -1562,13 +1573,14 @@ list.
   are accepted. Erasure-grade deletion
   (crypto-shredding) is still a named gap, deferred to a follow-up ADR, not
   silently unresolved.
-- This decision depends on five still-draft ADRs (0026, 0027, 0028, 0029,
-  0031); each that changes before acceptance can reopen the facet that builds
+- This decision depends on five ADRs (0026, 0027, 0028, 0029, 0031), one of
+  them still draft (0031); it changing before acceptance can reopen the facet that builds
   on it. The package is named `v1alpha1`, not `v1`, precisely because of that
   dependency and because the substrate obligations facet 2 lists are not yet
   met; promotion to `v1` is a later, separate decision. Shared multi-tenant
-  deployment additionally waits on [ADR#0027](./0027-decider-multi-tenancy-primitive.md)'s
-  resolver contract (facet 1).
+  deployment additionally owes the snapshot-key scoping that
+  [ADR#0027](./0027-decider-multi-tenancy-primitive.md) Decision 3 leaves to
+  the caller (facet 1).
 
 ## References
 
@@ -1578,7 +1590,7 @@ list.
 - [ADR#0021: Typed Decode over Passthrough Forwarding](./0021-typed-decode-over-passthrough-forwarding.md)
 - [ADR#0024: Agent Platform Stream Topology](./0024-agent-platform-stream-topology.md)
 - [ADR#0026: Command Authorization Principal and Authorizer Hook for Decider Execution](./0026-command-authorization-principal.md)
-- [ADR#0027: Tenant Value Object for Decider Stream and Snapshot Resolution](./0027-decider-multi-tenancy-primitive.md)
+- [ADR#0027: Declared Subject Scope for Decider Stream Resolution](./0027-decider-multi-tenancy-primitive.md)
 - [ADR#0028: Admission Control for Decider Command Execution](./0028-decider-admission-control-and-backpressure.md)
 - [ADR#0029: Snapshot-Derived Retention Watermark for Decider Streams](./0029-decider-retention-and-truncation-watermark.md)
 - [ADR#0031: Agent Implementation and Session Plan](./0031-agent-implementation-and-session-plan.md)

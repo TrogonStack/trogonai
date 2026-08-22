@@ -1,4 +1,4 @@
-use trogon_decider::{Decider, Decision};
+use trogon_decider::{Decider, Decision, SnapshotCadence, WritePrecondition};
 use trogonai_proto::scheduler::schedules::{state_v1, v1};
 
 use super::domain::ScheduleId;
@@ -34,6 +34,8 @@ impl Decider for PauseSchedule {
     type Event = v1::ScheduleEvent;
     type DecideError = PauseScheduleError;
     type EvolveError = super::EvolveError;
+    const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
+    const SNAPSHOT_CADENCE: SnapshotCadence = crate::constants::COMMAND_SNAPSHOT_CADENCE;
 
     fn stream_id(&self) -> &Self::StreamId {
         &self.id

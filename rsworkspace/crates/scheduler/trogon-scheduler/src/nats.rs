@@ -3,7 +3,7 @@
 use crate::{
     commands::domain::ScheduleId,
     config::ScheduleWriteState,
-    constants::{EVENTS_STREAM, EVENTS_SUBJECT_PATTERN, EVENTS_SUBJECT_PREFIX},
+    constants::{EVENTS_DUPLICATE_WINDOW, EVENTS_STREAM, EVENTS_SUBJECT_PATTERN, EVENTS_SUBJECT_PREFIX},
     error::SchedulerError,
 };
 use async_nats::jetstream::{self, stream::RetentionPolicy};
@@ -54,6 +54,16 @@ pub(crate) fn validate_events_stream(stream: &jetstream::stream::Stream) -> Resu
         return Err(SchedulerError::event_source(
             "events stream retention may drop events; it must retain full history \
              (retention=Limits, max_age=0, unlimited max_messages/max_messages_per_subject/max_bytes)",
+            std::io::Error::other(EVENTS_STREAM),
+        ));
+    }
+    // A stream provisioned before command ids existed carries the server's implicit window, which
+    // expires just as the first redelivery arrives. Refuse to start against it rather than append
+    // every retried command's events twice.
+    if config.duplicate_window < EVENTS_DUPLICATE_WINDOW.as_duration() {
+        return Err(SchedulerError::event_source(
+            "events stream duplicate_window is too short to deduplicate a redelivered command; \
+             it must be at least as long as EVENTS_DUPLICATE_WINDOW",
             std::io::Error::other(EVENTS_STREAM),
         ));
     }

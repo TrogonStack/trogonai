@@ -7,8 +7,8 @@ use trogon_decider_runtime::{HeaderName, Headers, StreamPosition};
 use trogonai_proto::scheduler::schedules::v1;
 
 use super::super::testkit::{
-    InMemoryExecution, InMemoryKv, MemoryEventStore, foreign_stream_event, malformed_stream_event, recorded_at,
-    schedule_id, stream_event, stream_event_with_headers,
+    InMemoryExecution, InMemoryKv, MemoryEventStore, command_id, foreign_stream_event, malformed_stream_event,
+    recorded_at, schedule_id, stream_event, stream_event_with_headers,
 };
 use super::*;
 use crate::commands::domain::{
@@ -561,6 +561,7 @@ async fn arm_reports_missing_or_deleted_schedules_for_retry() {
                 now: recorded_at(),
             },
             "event-missing",
+            command_id(),
             &trace_headers,
         )
         .await
@@ -596,6 +597,7 @@ async fn arm_reports_missing_or_deleted_schedules_for_retry() {
                 now: recorded_at(),
             },
             "event-deleted",
+            command_id(),
             &trace_headers,
         )
         .await
@@ -722,7 +724,12 @@ async fn direct_dispatch_action_uses_the_event_id_without_disambiguation() {
 
     harness
         .processor
-        .apply_action(&ReconcileAction::Dispatch(request), "event-2", &trace_headers)
+        .apply_action(
+            &ReconcileAction::Dispatch(request),
+            "event-2",
+            command_id(),
+            &trace_headers,
+        )
         .await
         .unwrap();
 

@@ -23,6 +23,5 @@ person, since the room is one endpoint. That imprecision is recorded, with its
 consequences, in
 [Multi-Channel Agent Routing](../architecture/multi-channel-agent-routing.md).
 
-Distinct from the decider's command-authorization principal
-([ADR#0026](../adr/0026-command-authorization-principal.md)), which authorizes
+Distinct from the [command principal](./command-principal), which authorizes
 command execution at a different layer.

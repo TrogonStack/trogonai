@@ -1,11 +1,11 @@
 ---
-number: "0058"
+number: "0060"
 slug: session-query-contract-separate-from-projection
 status: draft
 date: 2026-08-22
 ---
 
-# ADR#0058: The Session Read Contract Is a Query Proto, Not the Projection Value
+# ADR#0060: The Session Read Contract Is a Query Proto, Not the Projection Value
 
 ## Context
 
@@ -135,7 +135,7 @@ and a read contract is a boundary.
 Editing the sentence out of an accepted ADR would leave no record that the
 decision was reversed or why, which is the failure ADRs exist to prevent. The
 reciprocal amendment on facet 8 points here, the way facet 7's points to
-[ADR#0057](./0057-session-stream-incarnation-fencing.md).
+[ADR#0059](./0059-session-stream-incarnation-fencing.md).
 
 ## Consequences
 
@@ -161,7 +161,7 @@ reciprocal amendment on facet 8 points here, the way facet 7's points to
 - [ADR#0035: Session Store as a Decider Aggregate on NATS JetStream](./0035-session-store-decider-aggregate.md)
 - [ADR#0055: NATS Subject Design and JSON-RPC Bindings](./0055-nats-subject-design-jsonrpc-bindings.md)
 - [ADR#0056: Canonical JSON-RPC Bodies over NATS](./0056-canonical-jsonrpc-bodies-over-nats.md)
-- [ADR#0057: Stream Incarnation Fencing by Subject Isolation and Sealing](./0057-session-stream-incarnation-fencing.md)
+- [ADR#0059: Stream Incarnation Fencing by Subject Isolation and Sealing](./0059-session-stream-incarnation-fencing.md)
 - [Session Query Contract](../architecture/session-queries.md)
 - [Session Pagination](../architecture/session-pagination.md)
 - [Session Projection Freshness](../architecture/session-projection-freshness.md)

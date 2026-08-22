@@ -2,6 +2,13 @@
     any(test, feature = "test-support"),
     allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)
 )]
+#![cfg_attr(
+    dylint_lib = "trogon_lints",
+    expect(
+        acyclic_modules,
+        reason = "`Decision::Act` holds an `Act` whose steps each produce a `Decision`, so the two types are mutually recursive"
+    )
+)]
 //! Typed decider primitives for event-sourced workflows.
 //!
 //! A *decider* turns a command into events against a prior state. This crate provides:
@@ -12,8 +19,9 @@
 //! - [`Decision`], the outcome of `decide`: either a batch of events directly, or a
 //!   multi-step plan ([`Decision::act`]) whose later steps observe the state that would
 //!   result from earlier steps.
-//! - [`Events`], a non-empty ordered batch, and [`WritePrecondition`], an optional
-//!   concurrency guard applied when persisting.
+//! - [`Events`], a non-empty ordered batch, [`WritePrecondition`], the concurrency guard a
+//!   command declares for persisting its events, and [`SnapshotCadence`], how often it asks for
+//!   its state to be snapshotted.
 //!
 //! # Example
 //!
@@ -53,7 +61,7 @@
 //!     type DecideError = PlaceOrderError;
 //!     type EvolveError = PlaceOrderEvolveError;
 //!
-//!     const WRITE_PRECONDITION: Option<WritePrecondition> = Some(WritePrecondition::NoStream);
+//!     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::NoStream;
 //!
 //!     fn stream_id(&self) -> &Self::StreamId { &self.order_id }
 //!
@@ -91,6 +99,7 @@ mod act;
 mod decision;
 pub mod event;
 mod events;
+mod snapshot_cadence;
 #[cfg(feature = "test-support")]
 pub mod testing;
 mod write_precondition;
@@ -103,6 +112,7 @@ pub use decision::Decision;
 pub use decision::{DecisionError, DecisionResult, evaluate_decision};
 pub use event::{EventData, EventDecode, EventDecodeOutcome, EventEncode, EventPayloadError, EventType};
 pub use events::Events;
+pub use snapshot_cadence::SnapshotCadence;
 #[cfg(feature = "test-support")]
 pub use testing::{History, TestCase, ThenError, ThenEvents, ThenExpectation};
 pub use write_precondition::WritePrecondition;
@@ -133,11 +143,19 @@ pub trait Decider: Sized {
     /// Error returned when an event cannot be applied to state.
     type EvolveError: std::error::Error;
 
-    /// Optional concurrency guard applied when persisting the resulting events.
+    /// Concurrency guard applied when persisting the resulting events.
     ///
-    /// Defaults to `None` (no precondition). Override per command when you need to
-    /// enforce e.g. "stream must not exist" for a creation command.
-    const WRITE_PRECONDITION: Option<WritePrecondition> = None;
+    /// Required, with no default, so every command states what its meaning needs at the point it
+    /// is defined. [`WritePrecondition::StreamUnchanged`] is the optimistic-concurrency choice for
+    /// an ordinary state transition; [`WritePrecondition::NoStream`] for a creation command.
+    const WRITE_PRECONDITION: WritePrecondition;
+
+    /// Snapshot cadence applied after this command's events are appended.
+    ///
+    /// Defaults to [`SnapshotCadence::Never`]: unlike the write precondition, an omitted cadence
+    /// costs replay time rather than correctness. Declared here, at the command, so the native and
+    /// sandboxed execution paths cannot drift apart on it.
+    const SNAPSHOT_CADENCE: SnapshotCadence = SnapshotCadence::Never;
 
     /// Returns the stream identifier this command targets.
     fn stream_id(&self) -> &Self::StreamId;

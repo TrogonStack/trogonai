@@ -18,8 +18,8 @@ use trogon_decider_runtime::snapshot::{
 };
 #[cfg(not(coverage))]
 use trogon_decider_runtime::{
-    AppendStreamRequest, AppendStreamResponse, ReadStreamRequest, ReadStreamResponse, SnapshotRead, SnapshotWrite,
-    StreamAppend, StreamRead,
+    AppendFailure, AppendStreamRequest, AppendStreamResponse, ReadStreamRequest, ReadStreamResponse, SnapshotRead,
+    SnapshotWrite, StreamAppend, StreamRead,
 };
 use trogon_decider_runtime::{StreamPosition, StreamWritePrecondition};
 #[cfg(not(coverage))]
@@ -29,7 +29,8 @@ use crate::snapshot_store::{NatsSnapshotConfig, SnapshotStoreError};
 use crate::stream_store::StreamStoreError;
 #[cfg(not(coverage))]
 use crate::stream_store::{
-    StreamSubjectResolver, append_stream as append_subject_stream, read_subject_stream, read_subject_stream_bounded,
+    StreamSubjectResolver, SubjectState, append_stream as append_subject_stream, read_subject_stream,
+    read_subject_stream_bounded,
 };
 #[cfg(not(coverage))]
 use tracing::Instrument;
@@ -115,6 +116,14 @@ pub enum JetStreamStoreError<Error, SnapshotPayloadError = Infallible, SnapshotT
     /// Subject resolution failed before JetStream storage was accessed.
     #[error("failed to resolve stream subject state: {0}")]
     ResolveSubject(#[source] Error),
+    /// The resolver returned a subject outside the scope it declared.
+    #[error("resolved subject '{subject}' falls outside the resolver's declared scope '{scope}'")]
+    SubjectOutsideScope {
+        /// The subject the resolver computed.
+        subject: String,
+        /// The scope the resolver promised to stay inside.
+        scope: String,
+    },
     /// Reading stream events from JetStream failed.
     #[error("failed to read stream events: {0}")]
     ReadStream(#[source] StreamStoreError),
@@ -230,11 +239,8 @@ where
     async fn read_stream(&self, request: ReadStreamRequest<'_, StreamId>) -> Result<ReadStreamResponse, Self::Error> {
         let stream_id = request.stream_id;
         let stream_id_text = stream_id.to_string();
-        let subject_state = self
-            .subject_resolver
-            .resolve_subject_state(self.events_stream(), stream_id)
-            .await
-            .map_err(JetStreamStoreError::ResolveSubject)?;
+        let subject_state =
+            resolve_scoped_subject_state(&self.subject_resolver, self.events_stream(), stream_id).await?;
         let Some(current_position) = subject_state.current_position else {
             return Ok(ReadStreamResponse {
                 current_position: None,
@@ -266,11 +272,8 @@ where
     ) -> Result<ReadStreamResponse, Self::Error> {
         let stream_id = request.stream_id;
         let stream_id_text = stream_id.to_string();
-        let subject_state = self
-            .subject_resolver
-            .resolve_subject_state(self.events_stream(), stream_id)
-            .await
-            .map_err(JetStreamStoreError::ResolveSubject)?;
+        let subject_state =
+            resolve_scoped_subject_state(&self.subject_resolver, self.events_stream(), stream_id).await?;
         let Some(current_position) = subject_state.current_position else {
             return Ok(ReadStreamResponse {
                 current_position: None,
@@ -295,6 +298,40 @@ where
             events,
         })
     }
+}
+
+/// Resolves a stream id, then holds the resolver to the scope it declared.
+///
+/// The scope was fixed when the resolver was constructed and the subject was
+/// derived from a stream id supplied per call, so this compares two facts with
+/// different origins. A resolver that declares no scope is passed through
+/// unchecked, which is all the store can honestly do with a topology nobody
+/// described to it.
+#[cfg(not(coverage))]
+async fn resolve_scoped_subject_state<StreamId, Resolver>(
+    resolver: &Resolver,
+    events_stream: &jetstream::stream::Stream,
+    stream_id: &StreamId,
+) -> Result<SubjectState, JetStreamStoreError<Resolver::Error>>
+where
+    StreamId: Send + Sync + ?Sized,
+    Resolver: StreamSubjectResolver<StreamId>,
+{
+    let subject_state = resolver
+        .resolve_subject_state(events_stream, stream_id)
+        .await
+        .map_err(JetStreamStoreError::ResolveSubject)?;
+
+    if let Some(scope) = resolver.subject_scope()
+        && !scope.contains(&subject_state.subject)
+    {
+        return Err(JetStreamStoreError::SubjectOutsideScope {
+            subject: subject_state.subject.to_string(),
+            scope: scope.to_string(),
+        });
+    }
+
+    Ok(subject_state)
 }
 
 #[cfg(any(test, not(coverage)))]
@@ -328,11 +365,8 @@ where
         );
 
         async move {
-            let subject_state = self
-                .subject_resolver
-                .resolve_subject_state(self.events_stream(), stream_id)
-                .await
-                .map_err(JetStreamStoreError::ResolveSubject)?;
+            let subject_state =
+                resolve_scoped_subject_state(&self.subject_resolver, self.events_stream(), stream_id).await?;
             let current_position = subject_state.current_position;
             let expected_last_subject_sequence =
                 resolve_expected_last_subject_sequence(stream_id, expected_state, current_position)?;
@@ -365,6 +399,13 @@ where
         }
         .instrument(span)
         .await
+    }
+
+    fn classify_append_failure(&self, error: &Self::Error) -> AppendFailure {
+        match error {
+            JetStreamStoreError::OptimisticConcurrencyConflict(_) => AppendFailure::WriteConflict,
+            _ => AppendFailure::Fatal,
+        }
     }
 }
 

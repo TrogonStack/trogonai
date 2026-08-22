@@ -30,7 +30,7 @@ pub struct StreamBoundaryView<'a> {
     >,
     /// Which incarnation of the physical stream this cut was taken from: the
     /// subject token that isolates one incarnation's subject space from the next,
-    /// per ADR#0057. Required, because an unset incarnation is not "the same
+    /// per ADR#0059. Required, because an unset incarnation is not "the same
     /// incarnation" and a comparison against one can never fail.
     ///
     /// A migration's source names the retiring incarnation and its expected target
@@ -377,7 +377,7 @@ impl StreamBoundaryOwnedView {
     }
     /// Which incarnation of the physical stream this cut was taken from: the
     /// subject token that isolates one incarnation's subject space from the next,
-    /// per ADR#0057. Required, because an unset incarnation is not "the same
+    /// per ADR#0059. Required, because an unset incarnation is not "the same
     /// incarnation" and a comparison against one can never fail.
     ///
     /// A migration's source names the retiring incarnation and its expected target

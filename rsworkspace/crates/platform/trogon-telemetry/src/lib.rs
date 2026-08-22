@@ -1,6 +1,7 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 pub mod constants;
+mod file_logging_outcome;
 mod log;
 mod metric;
 mod resource_attribute;
@@ -10,6 +11,7 @@ mod trace;
 pub use resource_attribute::ResourceAttribute;
 pub use service_name::ServiceName;
 
+use file_logging_outcome::FileLoggingOutcome;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_sdk::Resource;
@@ -65,10 +67,10 @@ fn try_open_log_file<F: CreateDirAll + OpenAppendFile>(
     service_name: ServiceName,
     env: &impl ReadEnv,
     fs: &F,
-) -> (Option<std::sync::Mutex<F::Writer>>, Option<String>) {
+) -> (Option<std::sync::Mutex<F::Writer>>, FileLoggingOutcome) {
     let log_dir = match log::ensure_log_dir(service_name, env, fs) {
         Ok(dir) => dir,
-        Err(e) => return (None, Some(format!("File logging disabled: {}", e))),
+        Err(error) => return (None, FileLoggingOutcome::DirectoryUnavailable { error }),
     };
 
     let log_file_name = format!("{}.log", service_name.as_str());
@@ -76,15 +78,19 @@ fn try_open_log_file<F: CreateDirAll + OpenAppendFile>(
     match fs.open_append(&log_file) {
         Ok(writer) => (
             Some(std::sync::Mutex::new(writer)),
-            Some(format!("File logging enabled: {}", log_file.display())),
+            FileLoggingOutcome::Enabled { path: log_file },
         ),
-        Err(e) => (
-            None,
-            Some(format!("Failed to create log file {}: {}", log_file.display(), e)),
-        ),
+        Err(error) => (None, FileLoggingOutcome::FileUnavailable { path: log_file, error }),
     }
 }
 
+#[cfg_attr(
+    dylint_lib = "trogon_lints",
+    allow(
+        debug_remnants,
+        reason = "these warnings report that the subscriber itself could not be installed, so there is no `tracing` event to record them as"
+    )
+)]
 pub fn init_logger<E, F, A>(service_name: ServiceName, resource_attributes: A, env: &E, fs: &F)
 where
     E: ReadEnv,
@@ -99,7 +105,7 @@ where
         .with_span_events(FmtSpan::CLOSE)
         .json();
 
-    let (log_file, file_layer_info) = try_open_log_file(service_name, env, fs);
+    let (log_file, file_logging) = try_open_log_file(service_name, env, fs);
     let file_layer = log_file.map(|file| {
         tracing_subscriber::fmt::layer()
             .with_writer(file)
@@ -141,9 +147,7 @@ where
             }
 
             tracing::info!("Logger initialized with OpenTelemetry");
-            if let Some(msg) = file_layer_info {
-                tracing::info!("{}", msg);
-            }
+            file_logging.record();
         }
         Err(e) => {
             if let Err(init_error) = tracing_subscriber::registry()
@@ -159,9 +163,7 @@ where
                 error = %e,
                 "Logger initialized without OpenTelemetry (init failed)"
             );
-            if let Some(msg) = file_layer_info {
-                tracing::info!("{}", msg);
-            }
+            file_logging.record();
         }
     }
 }

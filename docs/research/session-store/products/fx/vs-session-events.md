@@ -430,4 +430,4 @@ records what it actually changed.
   we prohibit stream recreation outright?** Neither, as posed. The incarnation
   is a token in the subject, so the fence is the address rather than a checked
   value, and a retired incarnation is sealed. See
-  [ADR#0057](../../../../adr/0057-session-stream-incarnation-fencing.md).
+  [ADR#0059](../../../../adr/0059-session-stream-incarnation-fencing.md).

@@ -5,6 +5,13 @@
 //! the current slice ships value objects + JSON-RPC codec + protocol constants.
 
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
+#![cfg_attr(
+    dylint_lib = "trogon_lints",
+    expect(
+        acyclic_modules,
+        reason = "a subject carries the JetStream stream configuration it is published under and the consumer definitions are typed with those subjects"
+    )
+)]
 
 pub mod a2a_prefix;
 pub mod agent_id;

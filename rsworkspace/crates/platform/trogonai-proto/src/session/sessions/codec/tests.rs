@@ -267,10 +267,10 @@ fn tool_call_started() -> v1alpha1::ToolCallStarted {
 
 fn tool_call_completed() -> v1alpha1::ToolCallCompleted {
     v1alpha1::ToolCallCompleted {
-            detached: MessageField::none(),
-            accessed: Vec::new(),
-            failed_targets: Vec::new(),
-            targets_attempted: None,
+        detached: MessageField::none(),
+        accessed: Vec::new(),
+        failed_targets: Vec::new(),
+        targets_attempted: None,
         session_id: "session-1".to_string(),
         tool_call_id: "tool-call-1".to_string(),
         tool_execution_id: "tool-exec-1".to_string(),
@@ -325,7 +325,7 @@ fn artifact_recorded() -> v1alpha1::ArtifactRecorded {
 
 fn file_changed() -> v1alpha1::FileChanged {
     v1alpha1::FileChanged {
-            copied_from: MessageField::none(),
+        copied_from: MessageField::none(),
         session_id: "session-1".to_string(),
         path: "src/main.rs".to_string(),
         change_kind: buffa::EnumValue::from(v1alpha1::FileChangeKind::Modified),
@@ -539,9 +539,7 @@ fn provider_tool_intent_rejected() -> v1alpha1::ProviderToolIntentRejected {
         rejection_id: "rejection-1".to_string(),
         message_id: "message-1".to_string(),
         turn_id: "turn-1".to_string(),
-        reason: buffa::EnumValue::from(
-            v1alpha1::ProviderToolIntentRejectionReason::MalformedArguments,
-        ),
+        reason: buffa::EnumValue::from(v1alpha1::ProviderToolIntentRejectionReason::MalformedArguments),
         claimed_tool_call_id: None,
         claimed_tool_name: None,
         raw_intent: MessageField::none(),
@@ -1070,10 +1068,10 @@ fn tool_call_completed_round_trips_termination_duration_and_observations() {
     assert_round_trips(v1alpha1::SessionEvent {
         event: Some(
             v1alpha1::ToolCallCompleted {
-            detached: MessageField::none(),
-            accessed: Vec::new(),
-            failed_targets: Vec::new(),
-            targets_attempted: None,
+                detached: MessageField::none(),
+                accessed: Vec::new(),
+                failed_targets: Vec::new(),
+                targets_attempted: None,
                 termination: MessageField::some(v1alpha1::CommandTermination {
                     outcome: Some(v1alpha1::command_termination::Outcome::ExitCode(2)),
                 }),
@@ -1108,10 +1106,10 @@ fn tool_call_completed_round_trips_signal_termination() {
     assert_round_trips(v1alpha1::SessionEvent {
         event: Some(
             v1alpha1::ToolCallCompleted {
-            detached: MessageField::none(),
-            accessed: Vec::new(),
-            failed_targets: Vec::new(),
-            targets_attempted: None,
+                detached: MessageField::none(),
+                accessed: Vec::new(),
+                failed_targets: Vec::new(),
+                targets_attempted: None,
                 termination: MessageField::some(v1alpha1::CommandTermination {
                     outcome: Some(v1alpha1::command_termination::Outcome::Signal(9)),
                 }),
@@ -1127,7 +1125,7 @@ fn file_changed_round_trips_diff_summary() {
     assert_round_trips(v1alpha1::SessionEvent {
         event: Some(
             v1alpha1::FileChanged {
-            copied_from: MessageField::none(),
+                copied_from: MessageField::none(),
                 diff: MessageField::some(v1alpha1::DiffSummary {
                     added_lines: Some(12),
                     removed_lines: Some(3),

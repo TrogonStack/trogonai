@@ -84,10 +84,7 @@ pub fn gateway_tier3_signing_pubkey<E: ReadEnv>(env: &E) -> Tier3SigningKey {
     match Ed25519PublicKey::from_hex(trimmed) {
         Ok(pubkey) => Tier3SigningKey::Configured(pubkey),
         Err(err) => {
-            warn!(
-                error = %err,
-                "{ENV_GATEWAY_TIER3_SIGNING_PUBKEY} is not a valid ed25519 pubkey",
-            );
+            warn!(env_var = ENV_GATEWAY_TIER3_SIGNING_PUBKEY, error = %err, "value is not a valid ed25519 pubkey");
             Tier3SigningKey::Invalid
         }
     }

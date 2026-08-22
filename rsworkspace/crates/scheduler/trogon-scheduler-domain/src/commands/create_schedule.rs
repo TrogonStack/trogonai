@@ -41,7 +41,7 @@ impl Decider for CreateSchedule {
     type DecideError = CreateScheduleDecideError;
     type EvolveError = super::EvolveError;
 
-    const WRITE_PRECONDITION: Option<WritePrecondition> = Some(WritePrecondition::NoStream);
+    const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::NoStream;
 
     fn stream_id(&self) -> &Self::StreamId {
         &self.id

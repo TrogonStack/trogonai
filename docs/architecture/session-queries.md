@@ -29,7 +29,7 @@ is the same rule ADR#0035 facet 3 already applies to the `state`, `projections`,
 and `checkpoints` subtrees, extended one step further out.
 
 That departure is now on the record rather than on this page.
-[ADR#0058](../adr/0058-session-query-contract-separate-from-projection.md)
+[ADR#0060](../adr/0060-session-query-contract-separate-from-projection.md)
 withdraws facet 8's clause and states the reversal, and facet 8 carries the
 reciprocal amendment. Everything else in facet 8 stands: no read model is
 authoritative, projections are folded and checkpointed from the log, and these

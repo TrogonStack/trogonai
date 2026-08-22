@@ -53,7 +53,7 @@ pub mod server_info;
 pub mod subject_conformance;
 pub mod subject_token_violation;
 pub(crate) mod telemetry;
-#[cfg(feature = "test-support")]
+#[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 pub(crate) mod token;
 

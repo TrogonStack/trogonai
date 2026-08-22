@@ -28,6 +28,12 @@ pub const DEFAULT_TASK_TIMEOUT: Duration = Duration::from_secs(7200);
 /// Default per-client back-pressure cap on concurrent streaming tasks.
 pub const DEFAULT_MAX_CONCURRENT_CLIENT_TASKS: usize = 256;
 
+/// Queue depth between a task-events pull loop and the reader of its
+/// [`crate::client::TypedEventStream`]. The bound is what turns a slow reader
+/// into backpressure: the pull loop waits for room before acking, so the
+/// backlog stays in JetStream instead of accumulating in this process.
+pub const EVENT_STREAM_QUEUE_CAPACITY: usize = 128;
+
 /// NATS message header carrying the [`crate::ReqId`] across the request/reply boundary.
 ///
 /// Defined once in `trogon-nats` (ADR#0013 / RFC 6648 `Trogon-` prefix).

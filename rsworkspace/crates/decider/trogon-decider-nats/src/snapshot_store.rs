@@ -313,9 +313,9 @@ impl<PayloadError, SnapshotTypeError> From<SnapshotCodecError<PayloadError, Snap
 
 use crate::constants::{SNAPSHOT_CHECKPOINT_KEY_NAMESPACE, SNAPSHOT_DATA_KEY_NAMESPACE};
 
-type SnapshotTypeError<T> = <T as SnapshotType>::Error;
+pub(crate) type SnapshotTypeError<T> = <T as SnapshotType>::Error;
 type SnapshotEncodePayloadError<T> = <T as SnapshotPayloadEncode>::Error;
-type SnapshotDecodePayloadError<T> = <T as SnapshotPayloadDecode>::Error;
+pub(crate) type SnapshotDecodePayloadError<T> = <T as SnapshotPayloadDecode>::Error;
 
 fn resolve_snapshot_type<T, PayloadError>()
 -> Result<SnapshotTypeName, SnapshotStoreError<PayloadError, SnapshotTypeError<T>>>

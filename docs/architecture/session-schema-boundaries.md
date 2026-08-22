@@ -198,7 +198,7 @@ discarded and rebuilt without losing the edge.
 version at the top level, not only on a nested object, and it emits JSON that
 survives a strict parser. Reusing an older internal shape as the public one is
 the specific failure
-[ADR#0058](../adr/0058-session-query-contract-separate-from-projection.md)
+[ADR#0060](../adr/0060-session-query-contract-separate-from-projection.md)
 exists to prevent.
 
 ### Append time is the occurrence time unless the two can differ

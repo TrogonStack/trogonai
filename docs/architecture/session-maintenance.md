@@ -245,7 +245,7 @@ Not shipped: the transformations themselves, intent storage, the reconciler, the
 salvage reader, and the target-id derivation function.
 
 The dependency that was open when these protos landed is now settled.
-[ADR#0057](../adr/0057-session-stream-incarnation-fencing.md) defines a stream
+[ADR#0059](../adr/0059-session-stream-incarnation-fencing.md) defines a stream
 incarnation as a subject token isolating one rebuild of the physical stream from
 the next, so `StreamBoundary.incarnation` is required rather than optional: an
 unset incarnation proves nothing, and a comparison that can never fail is not a

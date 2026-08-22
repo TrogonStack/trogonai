@@ -1,7 +1,7 @@
 # Research Prompt: Agent Client Protocol (ACP)
 
 Reusable prompt for the ACP study. Output goes into `docs/research/acp/`,
-following the corpus structure in [index.md](./index.md): fifteen product
+following the corpus structure in [index.md](./index.md): the Tier 1 product
 dossiers under `products/`, a cross-cutting [synthesis](./synthesis.md), a
 [decision record](./decision-record.md), and a set of component-level deep
 dives (crate inventory, tier 2 client profiles, host role and invocation,
@@ -121,6 +121,10 @@ mapping, what this platform can copy or must avoid).
   client boundary.
 - **Devin**: remote/autonomous agent with ACP support; how a cloud-hosted
   agent maps onto a protocol designed around local subprocesses.
+- **DeepSeek Harness**: native automation-only ACP agent plus an in-repository
+  ACP subagent client. Study both sides of the boundary, including which side
+  owns the child process, how machine permission policy replaces interactive
+  UI, and whether the published surface is directly hostable.
 - **NetClaw**: full case study on how it handles channels and the agent
   boundary, ACP or not.
 - **Cline**: VS Code-native agent with ACP support; how an extension-first

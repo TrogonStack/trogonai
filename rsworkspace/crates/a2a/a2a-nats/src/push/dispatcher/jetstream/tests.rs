@@ -1,6 +1,7 @@
 use super::*;
 use std::sync::{Arc, Mutex};
 use trogon_nats::jetstream::JetStreamPublisher;
+use trogon_std::log_capture::{CapturedEvents, LevelFilter};
 
 /// Captures (subject, headers, payload) and resolves the ack future with a
 /// canned PublishAck. `duplicate` controls whether the ack reports the
@@ -135,6 +136,9 @@ async fn dispatch_succeeds_when_jetstream_reports_duplicate_ack() {
     // Duplicate ack just means JetStream already accepted the same
     // Msg-Id — the dispatcher must treat it as success (the desired
     // dedup behaviour, not an error).
+    let events = CapturedEvents::new();
+    let guard = events.install(LevelFilter::TRACE);
+
     let js = RecordingJetStream::new().with_duplicate();
     let dispatcher = JetStreamPublishPushDispatcher::new(js);
     dispatcher
@@ -149,6 +153,15 @@ async fn dispatch_succeeds_when_jetstream_reports_duplicate_ack() {
         )
         .await
         .unwrap();
+
+    drop(guard);
+    let captured = events.events();
+    let message = "JetStream accepted duplicate Msg-Id terminal push ack";
+    let event = captured
+        .iter()
+        .find(|event| event.message() == Some(message))
+        .unwrap_or_else(|| panic!("expected the duplicate-ack event, got {captured:?}"));
+    assert_eq!(event.field("subject"), Some("a2a.v1.push.bot.caller.t1"));
 }
 
 #[tokio::test]

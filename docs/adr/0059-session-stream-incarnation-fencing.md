@@ -1,11 +1,11 @@
 ---
-number: "0057"
+number: "0059"
 slug: session-stream-incarnation-fencing
 status: draft
 date: 2026-08-21
 ---
 
-# ADR#0057: Stream Incarnation Fencing by Subject Isolation and Sealing
+# ADR#0059: Stream Incarnation Fencing by Subject Isolation and Sealing
 
 ## Context
 

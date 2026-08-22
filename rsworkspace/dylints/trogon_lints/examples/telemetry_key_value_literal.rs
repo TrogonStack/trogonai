@@ -26,8 +26,26 @@ impl Wrapper {
     }
 }
 
+trait Keyed {
+    fn new(key: &str) -> Self;
+}
+
+impl Keyed for Wrapper {
+    fn new(_key: &str) -> Self {
+        Wrapper
+    }
+}
+
+/// A call that resolves to a trait's own associated fn named `new` has a trait,
+/// not an `impl`, as its parent. The lint has to recognise that before asking
+/// for a self type.
+fn trait_associated_new<T: Keyed>() -> T {
+    T::new("messaging.system")
+}
+
 fn main() {
     let _ = inline_key();
     let _ = constant_key();
     let _ = unrelated_new();
+    let _: Wrapper = trait_associated_new();
 }

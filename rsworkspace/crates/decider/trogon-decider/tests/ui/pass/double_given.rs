@@ -1,5 +1,5 @@
 use trogon_decider::{
-    Decider, Decision,
+    Decider, Decision, WritePrecondition,
     testing::TestCase,
 };
 
@@ -38,6 +38,7 @@ impl Decider for TestCommand {
     type Event = TestEvent;
     type DecideError = TestDecisionError;
     type EvolveError = TestHistoryError;
+    const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 
     fn stream_id(&self) -> &Self::StreamId {
         "alpha"
