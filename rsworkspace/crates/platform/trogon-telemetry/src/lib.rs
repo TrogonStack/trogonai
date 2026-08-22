@@ -84,6 +84,13 @@ fn try_open_log_file<F: CreateDirAll + OpenAppendFile>(
     }
 }
 
+#[cfg_attr(
+    dylint_lib = "trogon_lints",
+    allow(
+        debug_remnants,
+        reason = "these warnings report that the subscriber itself could not be installed, so there is no `tracing` event to record them as"
+    )
+)]
 pub fn init_logger<E, F, A>(service_name: ServiceName, resource_attributes: A, env: &E, fs: &F)
 where
     E: ReadEnv,

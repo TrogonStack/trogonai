@@ -254,7 +254,7 @@ async fn pull_loop_returns_early_when_receiver_dropped() {
     let (consumer, msg_tx) = MockJetStreamConsumer::new();
     let last_seq = Arc::new(Mutex::new(0u64));
 
-    let (tx, receiver) = mpsc::unbounded::<Result<StreamResponse, ClientError>>();
+    let (tx, receiver) = mpsc::channel::<Result<StreamResponse, ClientError>>(EVENT_STREAM_QUEUE_CAPACITY);
     drop(receiver); // Channel closed before pull_loop sees the message.
 
     let payload = event_body("req-1", &make_status_event("task-1"));

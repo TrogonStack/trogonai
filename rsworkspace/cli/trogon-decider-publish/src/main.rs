@@ -36,6 +36,13 @@ struct Args {
 }
 
 #[tokio::main]
+#[cfg_attr(
+    dylint_lib = "trogon_lints",
+    allow(
+        debug_remnants,
+        reason = "the CLI exits before a subscriber is installed, so stderr is the only channel left to report on"
+    )
+)]
 async fn main() {
     if let Err(error) = run(Args::parse()).await {
         eprintln!("error: {error:#}");
@@ -43,6 +50,13 @@ async fn main() {
     }
 }
 
+#[cfg_attr(
+    dylint_lib = "trogon_lints",
+    allow(
+        debug_remnants,
+        reason = "the published reference on stdout is this CLI's result, which a caller pipes onward"
+    )
+)]
 async fn run(args: Args) -> Result<()> {
     let component = fs::read(&args.wasm).with_context(|| format!("read {}", args.wasm.display()))?;
     let suite =
