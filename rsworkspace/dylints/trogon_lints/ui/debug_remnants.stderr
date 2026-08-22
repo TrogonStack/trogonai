@@ -1,0 +1,48 @@
+error: debug remnant: `println!` writes straight to the process's own stdio
+  --> $DIR/debug_remnants.rs:8:5
+   |
+LL |     println!("state: {:?}", 1);
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: record it as a structured event with `tracing::info!(...)`, so it carries named fields and a level and reaches the configured subscriber
+   = note: if the write is the program's own output rather than a diagnostic, opt out at the site with `#[cfg_attr(dylint_lib = "trogon_lints", allow(debug_remnants, reason = "..."))]`
+   = note: `#[deny(debug_remnants)]` on by default
+
+error: debug remnant: `print!` writes straight to the process's own stdio
+  --> $DIR/debug_remnants.rs:9:5
+   |
+LL |     print!("progress");
+   |     ^^^^^^^^^^^^^^^^^^
+   |
+   = help: record it as a structured event with `tracing::info!(...)`, so it carries named fields and a level and reaches the configured subscriber
+   = note: if the write is the program's own output rather than a diagnostic, opt out at the site with `#[cfg_attr(dylint_lib = "trogon_lints", allow(debug_remnants, reason = "..."))]`
+
+error: debug remnant: `eprintln!` writes straight to the process's own stdio
+  --> $DIR/debug_remnants.rs:13:5
+   |
+LL |     eprintln!("failed: {}", "boom");
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: record it as a structured event with `tracing::warn!(...)`, so it carries named fields and a level and reaches the configured subscriber
+   = note: if the write is the program's own output rather than a diagnostic, opt out at the site with `#[cfg_attr(dylint_lib = "trogon_lints", allow(debug_remnants, reason = "..."))]`
+
+error: debug remnant: `dbg!` writes straight to the process's own stdio
+  --> $DIR/debug_remnants.rs:17:13
+   |
+LL |     let _ = dbg!(1 + 1);
+   |             ^^^^^^^^^^^
+   |
+   = help: record it as a structured event with `tracing::debug!(...)`, so it carries named fields and a level and reaches the configured subscriber
+   = note: if the write is the program's own output rather than a diagnostic, opt out at the site with `#[cfg_attr(dylint_lib = "trogon_lints", allow(debug_remnants, reason = "..."))]`
+
+error: debug remnant: `println!` writes straight to the process's own stdio
+  --> $DIR/debug_remnants.rs:22:5
+   |
+LL |     println!("{} {} {}", 1, 2, 3);
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: record it as a structured event with `tracing::info!(...)`, so it carries named fields and a level and reaches the configured subscriber
+   = note: if the write is the program's own output rather than a diagnostic, opt out at the site with `#[cfg_attr(dylint_lib = "trogon_lints", allow(debug_remnants, reason = "..."))]`
+
+error: aborting due to 5 previous errors
+

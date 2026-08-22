@@ -4,6 +4,13 @@
 
 #[cfg(not(coverage))]
 #[tokio::main]
+#[cfg_attr(
+    dylint_lib = "trogon_lints",
+    allow(
+        debug_remnants,
+        reason = "the bridge exits before a subscriber is installed, so stderr is the only channel left to report on"
+    )
+)]
 async fn main() {
     if let Err(e) = a2a_nats_stdio::run().await {
         eprintln!("a2a-nats-stdio error: {e}");

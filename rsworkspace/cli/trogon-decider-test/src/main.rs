@@ -32,6 +32,13 @@ struct Args {
     suite: PathBuf,
 }
 
+#[cfg_attr(
+    dylint_lib = "trogon_lints",
+    allow(
+        debug_remnants,
+        reason = "the CLI exits before a subscriber is installed, so stderr is the only channel left to report on"
+    )
+)]
 fn main() {
     if let Err(error) = run(Args::parse()) {
         eprintln!("error: {error:#}");
