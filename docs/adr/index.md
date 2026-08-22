@@ -62,3 +62,5 @@ future implementation work.
 - [ADR#0054: NATS Protocol Binding Documentation (Draft)](./0054-nats-protocol-binding-documentation.md)
 - [ADR#0055: NATS Subject Design for JSON-RPC Protocol Bindings (Draft)](./0055-nats-subject-design-jsonrpc-bindings.md)
 - [ADR#0056: Canonical JSON-RPC Bodies over NATS (Draft)](./0056-canonical-jsonrpc-bodies-over-nats.md)
+- [ADR#0057: Stream Incarnation Fencing by Subject Isolation and Sealing (Draft)](./0057-session-stream-incarnation-fencing.md)
+- [ADR#0058: The Session Read Contract Is a Query Proto, Not the Projection Value (Draft)](./0058-session-query-contract-separate-from-projection.md)

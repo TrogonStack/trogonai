@@ -1,0 +1,19 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "trogonai/session/sessions/v1alpha1/session_ordinal.proto";
+import "trogonai/session/sessions/v1alpha1/session_rewound.proto";
+
+// RewindSession moves the effective-history boundary back, recording
+// [SessionRewound]. It masks what later turns and readers see; it never
+// un-applies a fact, because work that really ran still has to be reconcilable.
+//
+// Write precondition At: keep_through must lie within the log the decision was
+// taken against.
+message RewindSession {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // This session's own ordinal that stays effective; everything after it is masked.
+  SessionOrdinal keep_through = 2 [features.field_presence = LEGACY_REQUIRED];
+  RewindReason reason = 3 [features.field_presence = LEGACY_REQUIRED];
+}

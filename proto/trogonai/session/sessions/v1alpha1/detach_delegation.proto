@@ -1,0 +1,17 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+// DetachDelegation releases a child from its parent, run against the parent
+// side, recording [DelegationDetached]. After it, the parent's terminal state
+// no longer cascades to that child.
+//
+// Write precondition At: one detach per detach_operation_id. The child-side
+// half of the same intent is DetachParent.
+message DetachDelegation {
+  // The parent session.
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string child_session_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string detach_operation_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  string reason = 4;
+}

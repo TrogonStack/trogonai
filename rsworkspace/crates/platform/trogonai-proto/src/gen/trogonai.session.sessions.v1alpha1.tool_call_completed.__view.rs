@@ -48,6 +48,58 @@ pub struct ToolCallCompletedView<'a> {
         'a,
         super::super::__buffa::view::ResourceObservationView<'a>,
     >,
+    /// Claim-check to this command's captured stdout and stderr, for a tool that
+    /// executes a process and captured it; unset otherwise, including for a
+    /// command that ran with capture disabled.
+    ///
+    /// It sits here beside `termination` and not inside `result` for the reason
+    /// `termination` does (D11): captured output is the execution record, while
+    /// `result` is the transcript the model received. They routinely differ, since
+    /// what reaches the model is truncated or summarized, and folding raw output
+    /// into the replay shape would hand a later turn context the original turn
+    /// never had.
+    ///
+    /// Field 9: `output_replay`
+    pub output_replay: ::buffa::MessageFieldView<
+        super::super::__buffa::view::CommandOutputReplayRefView<'a>,
+    >,
+    /// Set when this call returned a handle to work that outlived the turn. Unset
+    /// is the ordinary case and means the call's result is its outcome; set means
+    /// the result is a handle and the outcome arrives later through the operation
+    /// ledger.
+    ///
+    /// Field 10: `detached`
+    pub detached: ::buffa::MessageFieldView<
+        super::super::__buffa::view::DetachedWorkView<'a>,
+    >,
+    /// Namespaces this call listed, searched, or otherwise touched, as distinct
+    /// from the content it read. Empty for a call that accessed no namespace.
+    ///
+    /// Field 11: `accessed`
+    pub accessed: ::buffa::RepeatedView<
+        'a,
+        super::super::__buffa::view::ResourceAccessRecordView<'a>,
+    >,
+    /// Targets of a multi-resource call that did not apply. Empty when every target
+    /// succeeded, and empty is also correct for a single-target call, which has
+    /// nothing partial to report.
+    ///
+    /// Successes are deliberately absent: they are already FileChanged facts, and a
+    /// second record of the same change is a second thing to keep consistent
+    /// through rewind and redaction.
+    ///
+    /// Field 12: `failed_targets`
+    pub failed_targets: ::buffa::RepeatedView<
+        'a,
+        super::super::__buffa::view::TargetOutcomeView<'a>,
+    >,
+    /// How many targets the call set out to apply, recorded so failed_targets can
+    /// be read as a fraction. Zero for a call with no target list, which is not the
+    /// same as a call that attempted zero targets and is why the count is here
+    /// rather than inferred from an empty list.
+    ///
+    /// Field 13: `targets_attempted`
+    pub targets_attempted: ::core::option::Option<u32>,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -216,6 +268,55 @@ impl<'a> ::buffa::MessageView<'a> for ToolCallCompletedView<'a> {
                     }
                 }
             }
+            9u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                match view.output_replay.as_mut() {
+                    Some(existing) => {
+                        ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
+                    }
+                    None => {
+                        view.output_replay = ::buffa::MessageFieldView::set(
+                            <super::super::__buffa::view::CommandOutputReplayRefView as ::buffa::MessageView>::decode_view_ctx(
+                                sub,
+                                __sub_ctx,
+                            )?,
+                        );
+                    }
+                }
+            }
+            10u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                match view.detached.as_mut() {
+                    Some(existing) => {
+                        ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
+                    }
+                    None => {
+                        view.detached = ::buffa::MessageFieldView::set(
+                            <super::super::__buffa::view::DetachedWorkView as ::buffa::MessageView>::decode_view_ctx(
+                                sub,
+                                __sub_ctx,
+                            )?,
+                        );
+                    }
+                }
+            }
+            13u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::Varint,
+                )?;
+                view.targets_attempted = Some(::buffa::types::decode_uint32(&mut cur)?);
+            }
             8u32 => {
                 ::buffa::encoding::check_wire_type(
                     tag,
@@ -231,6 +332,46 @@ impl<'a> ::buffa::MessageView<'a> for ToolCallCompletedView<'a> {
                 view.observed
                     .push(
                         <super::super::__buffa::view::ResourceObservationView as ::buffa::MessageView>::decode_view_ctx(
+                            sub,
+                            __sub_ctx,
+                        )?,
+                    );
+            }
+            11u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                ctx.register_element_memory(
+                    ::core::mem::size_of::<
+                        super::super::__buffa::view::ResourceAccessRecordView,
+                    >(),
+                )?;
+                view.accessed
+                    .push(
+                        <super::super::__buffa::view::ResourceAccessRecordView as ::buffa::MessageView>::decode_view_ctx(
+                            sub,
+                            __sub_ctx,
+                        )?,
+                    );
+            }
+            12u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                ctx.register_element_memory(
+                    ::core::mem::size_of::<
+                        super::super::__buffa::view::TargetOutcomeView,
+                    >(),
+                )?;
+                view.failed_targets
+                    .push(
+                        <super::super::__buffa::view::TargetOutcomeView as ::buffa::MessageView>::decode_view_ctx(
                             sub,
                             __sub_ctx,
                         )?,
@@ -292,6 +433,35 @@ impl<'a> ::buffa::MessageView<'a> for ToolCallCompletedView<'a> {
                 .iter()
                 .map(|v| v.to_owned_from_source(__buffa_src))
                 .collect::<::core::result::Result<_, ::buffa::DecodeError>>()?,
+            output_replay: match self.output_replay.as_option() {
+                Some(v) => {
+                    ::buffa::MessageField::<
+                        super::super::CommandOutputReplayRef,
+                        ::buffa::Inline<super::super::CommandOutputReplayRef>,
+                    >::some(v.to_owned_from_source(__buffa_src)?)
+                }
+                None => ::buffa::MessageField::none(),
+            },
+            detached: match self.detached.as_option() {
+                Some(v) => {
+                    ::buffa::MessageField::<
+                        super::super::DetachedWork,
+                        ::buffa::Inline<super::super::DetachedWork>,
+                    >::some(v.to_owned_from_source(__buffa_src)?)
+                }
+                None => ::buffa::MessageField::none(),
+            },
+            accessed: self
+                .accessed
+                .iter()
+                .map(|v| v.to_owned_from_source(__buffa_src))
+                .collect::<::core::result::Result<_, ::buffa::DecodeError>>()?,
+            failed_targets: self
+                .failed_targets
+                .iter()
+                .map(|v| v.to_owned_from_source(__buffa_src))
+                .collect::<::core::result::Result<_, ::buffa::DecodeError>>()?,
+            targets_attempted: self.targets_attempted,
             ..::core::default::Default::default()
         })
     }
@@ -339,6 +509,41 @@ impl<'a> ::buffa::ViewEncode<'a> for ToolCallCompletedView<'a> {
                 += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
                     + inner_size as u64;
         }
+        if self.output_replay.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.output_replay.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
+        if self.detached.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.detached.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
+        for v in &self.accessed {
+            let __slot = __cache.reserve();
+            let inner_size = v.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
+        for v in &self.failed_targets {
+            let __slot = __cache.reserve();
+            let inner_size = v.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
+        if let Some(v) = self.targets_attempted {
+            size += 1u64 + ::buffa::types::uint32_encoded_len(v) as u64;
+        }
         ::buffa::saturate_size(size)
     }
     #[allow(clippy::needless_borrow)]
@@ -384,6 +589,41 @@ impl<'a> ::buffa::ViewEncode<'a> for ToolCallCompletedView<'a> {
                 buf,
             );
             v.write_to(__cache, buf);
+        }
+        if self.output_replay.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                9u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.output_replay.write_to(__cache, buf);
+        }
+        if self.detached.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                10u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.detached.write_to(__cache, buf);
+        }
+        for v in &self.accessed {
+            ::buffa::types::put_len_delimited_header(
+                11u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            v.write_to(__cache, buf);
+        }
+        for v in &self.failed_targets {
+            ::buffa::types::put_len_delimited_header(
+                12u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            v.write_to(__cache, buf);
+        }
+        if let Some(v) = self.targets_attempted {
+            ::buffa::types::put_uint32_field(13u32, v, buf);
         }
     }
 }
@@ -434,6 +674,29 @@ impl<'__a> ::serde::Serialize for ToolCallCompletedView<'__a> {
         }
         if !self.observed.is_empty() {
             __map.serialize_entry("observed", &*self.observed)?;
+        }
+        {
+            if let ::core::option::Option::Some(__v) = self.output_replay.as_option() {
+                __map.serialize_entry("outputReplay", __v)?;
+            }
+        }
+        {
+            if let ::core::option::Option::Some(__v) = self.detached.as_option() {
+                __map.serialize_entry("detached", __v)?;
+            }
+        }
+        if !self.accessed.is_empty() {
+            __map.serialize_entry("accessed", &*self.accessed)?;
+        }
+        if !self.failed_targets.is_empty() {
+            __map.serialize_entry("failedTargets", &*self.failed_targets)?;
+        }
+        if let ::core::option::Option::Some(__v) = self.targets_attempted {
+            __map
+                .serialize_entry(
+                    "targetsAttempted",
+                    &::buffa::json_helpers::ProtoJson(&__v),
+                )?;
         }
         __map.end()
     }
@@ -600,6 +863,76 @@ impl ToolCallCompletedOwnedView {
         super::super::__buffa::view::ResourceObservationView<'_>,
     > {
         &self.0.reborrow().observed
+    }
+    /// Claim-check to this command's captured stdout and stderr, for a tool that
+    /// executes a process and captured it; unset otherwise, including for a
+    /// command that ran with capture disabled.
+    ///
+    /// It sits here beside `termination` and not inside `result` for the reason
+    /// `termination` does (D11): captured output is the execution record, while
+    /// `result` is the transcript the model received. They routinely differ, since
+    /// what reaches the model is truncated or summarized, and folding raw output
+    /// into the replay shape would hand a later turn context the original turn
+    /// never had.
+    ///
+    /// Field 9: `output_replay`
+    #[must_use]
+    pub fn output_replay(
+        &self,
+    ) -> &::buffa::MessageFieldView<
+        super::super::__buffa::view::CommandOutputReplayRefView<'_>,
+    > {
+        &self.0.reborrow().output_replay
+    }
+    /// Set when this call returned a handle to work that outlived the turn. Unset
+    /// is the ordinary case and means the call's result is its outcome; set means
+    /// the result is a handle and the outcome arrives later through the operation
+    /// ledger.
+    ///
+    /// Field 10: `detached`
+    #[must_use]
+    pub fn detached(
+        &self,
+    ) -> &::buffa::MessageFieldView<super::super::__buffa::view::DetachedWorkView<'_>> {
+        &self.0.reborrow().detached
+    }
+    /// Namespaces this call listed, searched, or otherwise touched, as distinct
+    /// from the content it read. Empty for a call that accessed no namespace.
+    ///
+    /// Field 11: `accessed`
+    #[must_use]
+    pub fn accessed(
+        &self,
+    ) -> &::buffa::RepeatedView<
+        '_,
+        super::super::__buffa::view::ResourceAccessRecordView<'_>,
+    > {
+        &self.0.reborrow().accessed
+    }
+    /// Targets of a multi-resource call that did not apply. Empty when every target
+    /// succeeded, and empty is also correct for a single-target call, which has
+    /// nothing partial to report.
+    ///
+    /// Successes are deliberately absent: they are already FileChanged facts, and a
+    /// second record of the same change is a second thing to keep consistent
+    /// through rewind and redaction.
+    ///
+    /// Field 12: `failed_targets`
+    #[must_use]
+    pub fn failed_targets(
+        &self,
+    ) -> &::buffa::RepeatedView<'_, super::super::__buffa::view::TargetOutcomeView<'_>> {
+        &self.0.reborrow().failed_targets
+    }
+    /// How many targets the call set out to apply, recorded so failed_targets can
+    /// be read as a fraction. Zero for a call with no target list, which is not the
+    /// same as a call that attempted zero targets and is why the count is here
+    /// rather than inferred from an empty list.
+    ///
+    /// Field 13: `targets_attempted`
+    #[must_use]
+    pub fn targets_attempted(&self) -> ::core::option::Option<u32> {
+        self.0.reborrow().targets_attempted
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<ToolCallCompletedView<'static>>>

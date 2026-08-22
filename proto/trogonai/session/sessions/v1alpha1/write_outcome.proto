@@ -1,0 +1,137 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "trogonai/session/sessions/v1alpha1/session_ordinal.proto";
+
+// WriteOutcome is what a caller learned about its own append.
+//
+// Every command response carries one. It exists because the interesting
+// failures of an append are not "it failed": they are the states between
+// success and failure that a boolean cannot express, and that a caller must
+// distinguish before it can decide whether retrying is safe.
+//
+// The reference case is the one this contract is named for. The store accepts
+// an event and the acknowledgment is lost. The caller knows only that it
+// published. It must not report failure, because the event may be committed.
+// It must not blindly retry into a second copy either. It has to be told the
+// outcome is unknown, and then be able to resolve it.
+//
+// There is deliberately no second field naming what the caller should do.
+// Disposition is derived from `state`, because two fields for one fact can
+// disagree, and the one that disagrees is the one a caller trusted.
+message WriteOutcome {
+  WriteState state = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Where the write landed. Present for COMMITTED and DEDUPLICATED, and absent
+  // for every other state, including UNKNOWN: a position reported for a write
+  // nobody confirmed is the exact fiction this message exists to prevent.
+  SessionOrdinal ordinal = 2;
+  // Present when and only when state is UNKNOWN.
+  IndeterminateWrite indeterminate = 3;
+  // Present when and only when state is CONFLICT.
+  WriteConflict conflict = 4;
+}
+
+// WriteState is what happened to the append, from the caller's vantage point.
+enum WriteState {
+  WRITE_STATE_UNSPECIFIED = 0;
+  // Definitely not appended. The store rejected the publish before it could
+  // reach the log, or refused it outright. Retrying is safe.
+  WRITE_STATE_NOT_APPENDED = 1;
+  // Appended and acknowledged. `ordinal` names where.
+  WRITE_STATE_COMMITTED = 2;
+  // The identical event was already committed and this append was recognized
+  // as a repeat of it. This is a success, not a failure: it is what a correct
+  // retry of a lost acknowledgment looks like, and `ordinal` names where the
+  // original landed.
+  //
+  // Distinguished from COMMITTED rather than folded into it because the two
+  // mean different things to anything counting side effects. A caller that
+  // notifies on every commit would notify twice.
+  WRITE_STATE_DEDUPLICATED = 3;
+  // The append was refused because something about the stream disagreed with
+  // what the writer believed. Retrying the same command unchanged will fail
+  // the same way; the writer must re-read and decide again.
+  WRITE_STATE_CONFLICT = 4;
+  // The append outcome is unknown. The event may or may not be committed, and
+  // nothing observed so far decides it. This is not a failure and must not be
+  // reported as one.
+  WRITE_STATE_UNKNOWN = 5;
+}
+
+// IndeterminateWrite is why an outcome could not be determined.
+//
+// The reasons are separated because they are resolved differently, and merging
+// them would make a condition that resolves itself on retry indistinguishable
+// from one that never will.
+message IndeterminateWrite {
+  UnknownWriteReason reason = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Human-readable, non-contractual. Never parse it.
+  string detail = 2;
+}
+
+// UnknownWriteReason is what prevented the outcome from being determined.
+enum UnknownWriteReason {
+  UNKNOWN_WRITE_REASON_UNSPECIFIED = 0;
+  // The event was published and no acknowledgment was observed within the
+  // caller's deadline. The canonical case, and the recoverable one: the
+  // deterministic event identity makes a retry either commit or deduplicate.
+  UNKNOWN_WRITE_REASON_ACK_TIMEOUT = 1;
+  // An acknowledgment arrived and could not be interpreted. Distinct from a
+  // timeout because the store demonstrably responded, so a transport-level
+  // retry is answering a different question than a store-level one.
+  UNKNOWN_WRITE_REASON_ACK_UNREADABLE = 2;
+  // A multi-event batch acknowledged some members and not others. The stream
+  // may now hold a partial batch, which no fold expects, so this resolves by
+  // reading the stream rather than by retrying the batch.
+  UNKNOWN_WRITE_REASON_BATCH_PARTIALLY_ACKNOWLEDGED = 3;
+  // The retry arrived after the store's duplicate-detection window elapsed, so
+  // the store can no longer tell a repeat from a first attempt. The window is a
+  // provisioning knob with a bounded lifetime, not a delivery guarantee.
+  //
+  // Past it, deduplication moves rather than disappearing: a guarded command
+  // re-replays and no-ops on its idempotency key at the aggregate, and an
+  // unguarded fact relies on readers collapsing identical ids. So this reason
+  // says the outcome is determinable and not determinable from here, which is
+  // why it is distinct from ACK_TIMEOUT: it points at a different resolver
+  // rather than at a retry the store can no longer make safe.
+  UNKNOWN_WRITE_REASON_DEDUPLICATION_WINDOW_EXPIRED = 4;
+}
+
+// WriteConflict is what the writer believed that the stream did not.
+message WriteConflict {
+  ConflictKind kind = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The head the writer guarded against. Absent when the writer guarded
+  // against an empty stream.
+  SessionOrdinal expected_head = 2;
+  // The head the stream actually had. Absent when it could not be read, which
+  // is itself informative: the conflict is real and its shape is not known.
+  SessionOrdinal observed_head = 3;
+  // Human-readable, non-contractual. Never parse it.
+  string detail = 4;
+}
+
+// ConflictKind is which disagreement refused the append.
+enum ConflictKind {
+  CONFLICT_KIND_UNSPECIFIED = 0;
+  // Optimistic concurrency: the head moved between the read and the append.
+  // The ordinary contended case, and the only one that is not a defect.
+  CONFLICT_KIND_WRONG_EXPECTED_HEAD = 1;
+  // A creation batch guarded against an empty stream and found one that is
+  // not. The identity is already in use.
+  CONFLICT_KIND_STREAM_ALREADY_EXISTS = 2;
+  // An event carrying an already-committed identity did not match the
+  // committed content.
+  //
+  // Event identity is derived in part from a caller-supplied idempotency key,
+  // so a caller that reuses one key across two different commands produces
+  // exactly this. It is reported rather than deduplicated because the store's
+  // duplicate detection keys on identity alone: left to itself it would
+  // discard the divergent content and acknowledge success, which is silent
+  // data loss wearing the shape of idempotency.
+  CONFLICT_KIND_IDENTITY_REUSED_WITH_DIFFERENT_CONTENT = 3;
+  // The subject the writer resolved belongs to a retired stream incarnation
+  // and no longer accepts writes (ADR#0057). The writer must re-resolve rather
+  // than retry, because a sealed incarnation refuses every retry forever.
+  CONFLICT_KIND_INCARNATION_RETIRED = 4;
+}

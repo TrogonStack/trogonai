@@ -81,6 +81,77 @@ pub struct ToolCallCompleted {
         deserialize_with = "::buffa::json_helpers::null_as_default"
     )]
     pub observed: ::buffa::alloc::vec::Vec<ResourceObservation>,
+    /// Claim-check to this command's captured stdout and stderr, for a tool that
+    /// executes a process and captured it; unset otherwise, including for a
+    /// command that ran with capture disabled.
+    ///
+    /// It sits here beside `termination` and not inside `result` for the reason
+    /// `termination` does (D11): captured output is the execution record, while
+    /// `result` is the transcript the model received. They routinely differ, since
+    /// what reaches the model is truncated or summarized, and folding raw output
+    /// into the replay shape would hand a later turn context the original turn
+    /// never had.
+    ///
+    /// Field 9: `output_replay`
+    #[serde(
+        rename = "outputReplay",
+        alias = "output_replay",
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
+    )]
+    pub output_replay: ::buffa::MessageField<
+        CommandOutputReplayRef,
+        ::buffa::Inline<CommandOutputReplayRef>,
+    >,
+    /// Set when this call returned a handle to work that outlived the turn. Unset
+    /// is the ordinary case and means the call's result is its outcome; set means
+    /// the result is a handle and the outcome arrives later through the operation
+    /// ledger.
+    ///
+    /// Field 10: `detached`
+    #[serde(
+        rename = "detached",
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
+    )]
+    pub detached: ::buffa::MessageField<DetachedWork, ::buffa::Inline<DetachedWork>>,
+    /// Namespaces this call listed, searched, or otherwise touched, as distinct
+    /// from the content it read. Empty for a call that accessed no namespace.
+    ///
+    /// Field 11: `accessed`
+    #[serde(
+        rename = "accessed",
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_empty_vec",
+        deserialize_with = "::buffa::json_helpers::null_as_default"
+    )]
+    pub accessed: ::buffa::alloc::vec::Vec<ResourceAccessRecord>,
+    /// Targets of a multi-resource call that did not apply. Empty when every target
+    /// succeeded, and empty is also correct for a single-target call, which has
+    /// nothing partial to report.
+    ///
+    /// Successes are deliberately absent: they are already FileChanged facts, and a
+    /// second record of the same change is a second thing to keep consistent
+    /// through rewind and redaction.
+    ///
+    /// Field 12: `failed_targets`
+    #[serde(
+        rename = "failedTargets",
+        alias = "failed_targets",
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_empty_vec",
+        deserialize_with = "::buffa::json_helpers::null_as_default"
+    )]
+    pub failed_targets: ::buffa::alloc::vec::Vec<TargetOutcome>,
+    /// How many targets the call set out to apply, recorded so failed_targets can
+    /// be read as a fraction. Zero for a call with no target list, which is not the
+    /// same as a call that attempted zero targets and is why the count is here
+    /// rather than inferred from an empty list.
+    ///
+    /// Field 13: `targets_attempted`
+    #[serde(
+        rename = "targetsAttempted",
+        alias = "targets_attempted",
+        with = "::buffa::json_helpers::opt_uint32",
+        skip_serializing_if = "::core::option::Option::is_none"
+    )]
+    pub targets_attempted: ::core::option::Option<u32>,
 }
 impl ::core::fmt::Debug for ToolCallCompleted {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -93,6 +164,11 @@ impl ::core::fmt::Debug for ToolCallCompleted {
             .field("termination", &self.termination)
             .field("duration", &self.duration)
             .field("observed", &self.observed)
+            .field("output_replay", &self.output_replay)
+            .field("detached", &self.detached)
+            .field("accessed", &self.accessed)
+            .field("failed_targets", &self.failed_targets)
+            .field("targets_attempted", &self.targets_attempted)
             .finish()
     }
 }
@@ -102,6 +178,15 @@ impl ToolCallCompleted {
     ///
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.session.sessions.v1alpha1.ToolCallCompleted";
+}
+impl ToolCallCompleted {
+    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
+    #[inline]
+    ///Sets [`Self::targets_attempted`] to `Some(value)`, consuming and returning `self`.
+    pub fn with_targets_attempted(mut self, value: u32) -> Self {
+        self.targets_attempted = Some(value);
+        self
+    }
 }
 ::buffa::impl_default_instance!(ToolCallCompleted);
 impl ::buffa::MessageName for ToolCallCompleted {
@@ -160,6 +245,41 @@ impl ::buffa::Message for ToolCallCompleted {
                 += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
                     + inner_size as u64;
         }
+        if self.output_replay.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.output_replay.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
+        if self.detached.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.detached.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
+        for v in &self.accessed {
+            let __slot = __cache.reserve();
+            let inner_size = v.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
+        for v in &self.failed_targets {
+            let __slot = __cache.reserve();
+            let inner_size = v.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
+        if let Some(v) = self.targets_attempted {
+            size += 1u64 + ::buffa::types::uint32_encoded_len(v) as u64;
+        }
         ::buffa::saturate_size(size)
     }
     fn write_to(
@@ -204,6 +324,41 @@ impl ::buffa::Message for ToolCallCompleted {
                 buf,
             );
             v.write_to(__cache, buf);
+        }
+        if self.output_replay.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                9u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.output_replay.write_to(__cache, buf);
+        }
+        if self.detached.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                10u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.detached.write_to(__cache, buf);
+        }
+        for v in &self.accessed {
+            ::buffa::types::put_len_delimited_header(
+                11u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            v.write_to(__cache, buf);
+        }
+        for v in &self.failed_targets {
+            ::buffa::types::put_len_delimited_header(
+                12u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            v.write_to(__cache, buf);
+        }
+        if let Some(v) = self.targets_attempted {
+            ::buffa::types::put_uint32_field(13u32, v, buf);
         }
     }
     fn merge_field(
@@ -290,6 +445,61 @@ impl ::buffa::Message for ToolCallCompleted {
                 ::buffa::Message::merge_length_delimited(&mut elem, buf, ctx)?;
                 self.observed.push(elem);
             }
+            9u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::Message::merge_length_delimited(
+                    self.output_replay.get_or_insert_default(),
+                    buf,
+                    ctx,
+                )?;
+            }
+            10u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::Message::merge_length_delimited(
+                    self.detached.get_or_insert_default(),
+                    buf,
+                    ctx,
+                )?;
+            }
+            11u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let mut elem = ::core::default::Default::default();
+                ctx.register_element_memory(
+                    ::buffa::__private::element_footprint(&elem),
+                )?;
+                ::buffa::Message::merge_length_delimited(&mut elem, buf, ctx)?;
+                self.accessed.push(elem);
+            }
+            12u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let mut elem = ::core::default::Default::default();
+                ctx.register_element_memory(
+                    ::buffa::__private::element_footprint(&elem),
+                )?;
+                ::buffa::Message::merge_length_delimited(&mut elem, buf, ctx)?;
+                self.failed_targets.push(elem);
+            }
+            13u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::Varint,
+                )?;
+                self.targets_attempted = ::core::option::Option::Some(
+                    ::buffa::types::decode_uint32(buf)?,
+                );
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -305,6 +515,11 @@ impl ::buffa::Message for ToolCallCompleted {
         self.termination = ::buffa::MessageField::none();
         self.duration = ::buffa::MessageField::none();
         self.observed.clear();
+        self.output_replay = ::buffa::MessageField::none();
+        self.detached = ::buffa::MessageField::none();
+        self.accessed.clear();
+        self.failed_targets.clear();
+        self.targets_attempted = ::core::option::Option::None;
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for ToolCallCompleted {

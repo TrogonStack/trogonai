@@ -1,0 +1,60 @@
+edition = "2024";
+
+package trogonai.session.sessions.maintenance.v1alpha1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/session/sessions/maintenance/v1alpha1/migration.proto";
+import "trogonai/session/sessions/maintenance/v1alpha1/stream_boundary.proto";
+
+// MigrateSession rewrites one session's stored events under a newer storage
+// schema, keeping the session's identity and its ordinals.
+//
+// Ordering of effects is fixed and not an implementation detail: record the
+// intent, stage the target, commit, validate. A process that dies at any point
+// leaves state that ReconcileMigration can classify, because the intent was
+// written before anything else was.
+message MigrateSessionRequest {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint32 target_schema_version = 2 [features.field_presence = LEGACY_REQUIRED];
+  string implementation_version = 3 [features.field_presence = LEGACY_REQUIRED];
+  string actor = 4 [features.field_presence = LEGACY_REQUIRED];
+  string reason = 5 [features.field_presence = LEGACY_REQUIRED];
+  // Unset is PLAN_ONLY. The zero value is the one that writes nothing, so a
+  // caller that forgets the field gets a plan instead of a rewrite.
+  MigrationMode mode = 6;
+  // The source boundary the caller already observed. A fleet orchestrator that
+  // read the source sets this, and the migration refuses if the source has
+  // moved since. Unset means the migration observes and pins the boundary
+  // itself, which is correct for a single session and racy for a fleet run that
+  // decided what to migrate minutes ago.
+  StreamBoundary expected_source = 7;
+  MigrationLimits limits = 8;
+}
+
+// MigrationMode is whether this call may write.
+enum MigrationMode {
+  MIGRATION_MODE_UNSPECIFIED = 0;
+  // Validate admissibility, compute the intent, write nothing.
+  MIGRATION_MODE_PLAN_ONLY = 1;
+  MIGRATION_MODE_COMMIT = 2;
+}
+
+// MigrationLimits bounds one call. A migration reads and rewrites an entire
+// stream, so an unbounded one on a large session is an outage.
+message MigrationLimits {
+  uint64 max_source_events = 1;
+  uint64 max_source_bytes = 2;
+  google.protobuf.Duration max_duration = 3;
+}
+
+message MigrateSessionResponse {
+  MigrationResult result = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Always present, including on refusal: the record is what a later
+  // reconciliation is run against, so a caller that cannot store it cannot
+  // reconcile.
+  MigrationRecord record = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Set only for MIGRATION_RESULT_NOT_ADMISSIBLE.
+  AdmissibilityDetail not_admissible = 3;
+  google.protobuf.Timestamp observed_at = 4 [features.field_presence = LEGACY_REQUIRED];
+}

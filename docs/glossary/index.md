@@ -44,6 +44,7 @@ entries are the quick reference.
 - [Tenant](./tenant)
 - [Admission control](./admission-control)
 - [Retention watermark](./retention-watermark)
+- [Stream incarnation](./stream-incarnation)
 
 ## Agent execution model
 

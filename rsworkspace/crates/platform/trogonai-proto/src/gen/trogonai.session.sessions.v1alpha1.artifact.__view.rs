@@ -1077,6 +1077,14 @@ pub struct StoredArtifactView<'a> {
     ///
     /// Field 4: `mime`
     pub mime: &'a str,
+    /// Chunk hashing that lets a caller check part of this artifact without
+    /// reading all of it. Unset when the artifact was stored without one, which
+    /// means no range of it can be checked.
+    ///
+    /// Field 5: `chunks`
+    pub chunks: ::buffa::MessageFieldView<
+        super::super::__buffa::view::ContentChunksView<'a>,
+    >,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -1187,6 +1195,27 @@ impl<'a> ::buffa::MessageView<'a> for StoredArtifactView<'a> {
                 view.mime = ::buffa::types::borrow_str(&mut cur)?;
                 view.__buffa_required_seen_0 |= 4u64;
             }
+            5u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                match view.chunks.as_mut() {
+                    Some(existing) => {
+                        ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
+                    }
+                    None => {
+                        view.chunks = ::buffa::MessageFieldView::set(
+                            <super::super::__buffa::view::ContentChunksView as ::buffa::MessageView>::decode_view_ctx(
+                                sub,
+                                __sub_ctx,
+                            )?,
+                        );
+                    }
+                }
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -1219,6 +1248,15 @@ impl<'a> ::buffa::MessageView<'a> for StoredArtifactView<'a> {
             size_bytes: self.size_bytes,
             storage_ref: self.storage_ref.to_string(),
             mime: self.mime.to_string(),
+            chunks: match self.chunks.as_option() {
+                Some(v) => {
+                    ::buffa::MessageField::<
+                        super::super::ContentChunks,
+                        ::buffa::Inline<super::super::ContentChunks>,
+                    >::some(v.to_owned_from_source(__buffa_src)?)
+                }
+                None => ::buffa::MessageField::none(),
+            },
             ..::core::default::Default::default()
         })
     }
@@ -1240,6 +1278,14 @@ impl<'a> ::buffa::ViewEncode<'a> for StoredArtifactView<'a> {
         size += 1u64 + ::buffa::types::uint64_encoded_len(self.size_bytes) as u64;
         size += 1u64 + ::buffa::types::string_encoded_len(&self.storage_ref) as u64;
         size += 1u64 + ::buffa::types::string_encoded_len(&self.mime) as u64;
+        if self.chunks.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.chunks.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
         ::buffa::saturate_size(size)
     }
     #[allow(clippy::needless_borrow)]
@@ -1261,6 +1307,14 @@ impl<'a> ::buffa::ViewEncode<'a> for StoredArtifactView<'a> {
         ::buffa::types::put_uint64_field(2u32, self.size_bytes, buf);
         ::buffa::types::put_string_field(3u32, &self.storage_ref, buf);
         ::buffa::types::put_string_field(4u32, &self.mime, buf);
+        if self.chunks.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                5u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.chunks.write_to(__cache, buf);
+        }
     }
 }
 /// Serializes this view as protobuf JSON.
@@ -1298,6 +1352,11 @@ impl<'__a> ::serde::Serialize for StoredArtifactView<'__a> {
         }
         {
             __map.serialize_entry("mime", self.mime)?;
+        }
+        {
+            if let ::core::option::Option::Some(__v) = self.chunks.as_option() {
+                __map.serialize_entry("chunks", __v)?;
+            }
         }
         __map.end()
     }
@@ -1421,6 +1480,17 @@ impl StoredArtifactOwnedView {
     #[must_use]
     pub fn mime(&self) -> &'_ str {
         self.0.reborrow().mime
+    }
+    /// Chunk hashing that lets a caller check part of this artifact without
+    /// reading all of it. Unset when the artifact was stored without one, which
+    /// means no range of it can be checked.
+    ///
+    /// Field 5: `chunks`
+    #[must_use]
+    pub fn chunks(
+        &self,
+    ) -> &::buffa::MessageFieldView<super::super::__buffa::view::ContentChunksView<'_>> {
+        &self.0.reborrow().chunks
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<StoredArtifactView<'static>>>

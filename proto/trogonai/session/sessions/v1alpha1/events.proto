@@ -23,6 +23,7 @@ import "trogonai/session/sessions/v1alpha1/parent_detached.proto";
 import "trogonai/session/sessions/v1alpha1/parent_history_invalidated.proto";
 import "trogonai/session/sessions/v1alpha1/parent_linked.proto";
 import "trogonai/session/sessions/v1alpha1/parent_terminated.proto";
+import "trogonai/session/sessions/v1alpha1/provider_tool_intent_rejected.proto";
 import "trogonai/session/sessions/v1alpha1/redaction_applied.proto";
 import "trogonai/session/sessions/v1alpha1/session_archived.proto";
 import "trogonai/session/sessions/v1alpha1/session_cancelled.proto";
@@ -30,6 +31,7 @@ import "trogonai/session/sessions/v1alpha1/session_closed.proto";
 import "trogonai/session/sessions/v1alpha1/session_failed.proto";
 import "trogonai/session/sessions/v1alpha1/session_forked.proto";
 import "trogonai/session/sessions/v1alpha1/session_hidden.proto";
+import "trogonai/session/sessions/v1alpha1/session_recovered.proto";
 import "trogonai/session/sessions/v1alpha1/session_renamed.proto";
 import "trogonai/session/sessions/v1alpha1/session_rewound.proto";
 import "trogonai/session/sessions/v1alpha1/session_started.proto";
@@ -77,6 +79,10 @@ message SessionEvent {
     // Fork and rewind.
     SessionForked session_forked = 6;
     SessionRewound session_rewound = 7;
+    // Salvage. A recovery is not a fork: it copies a damaged source rather than
+    // referencing an intact prefix of it, so the copied events are this
+    // session's own and the source's ordinals do not carry over.
+    SessionRecovered session_recovered = 42;
     // Compaction.
     Compacted compacted = 8;
     // Conversation.
@@ -85,6 +91,7 @@ message SessionEvent {
     AssistantMessageCompleted assistant_message_completed = 11;
     AssistantMessageFailed assistant_message_failed = 28;
     // Tool lifecycle.
+    ProviderToolIntentRejected provider_tool_intent_rejected = 43;
     ToolCallRequested tool_call_requested = 12;
     ToolCallApproved tool_call_approved = 13;
     ToolCallDenied tool_call_denied = 29;

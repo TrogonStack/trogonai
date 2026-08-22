@@ -1,0 +1,44 @@
+edition = "2024";
+
+package trogonai.session.sessions.artifacts.v1alpha1;
+
+// ArtifactError is the failure shape for the artifact read contract.
+//
+// Only failures to answer belong here. An artifact that is erased, missing,
+// corrupt, or hidden is an answer, carried as ArtifactAvailability on a
+// successful response, because it is a fact about the artifact the caller
+// asked about. Reporting it as an error would make "what happened to this
+// artifact" indistinguishable from "the read contract is broken" at exactly
+// the moment an operator needs to tell them apart.
+message ArtifactError {
+  ArtifactErrorCode code = 1 [features.field_presence = LEGACY_REQUIRED];
+  string message = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// ArtifactErrorCode is why the request could not be answered.
+enum ArtifactErrorCode {
+  ARTIFACT_ERROR_CODE_UNSPECIFIED = 0;
+  // No such session, or the caller may not see it. Deliberately one code, and
+  // deliberately not distinguished from permission denial, so that probing
+  // cannot use the difference to prove a session exists.
+  ARTIFACT_ERROR_CODE_SESSION_NOT_FOUND = 1;
+  // The session exists and holds no artifact under this id. This is not the
+  // same as ARTIFACT_AVAILABILITY_MISSING: here the claim-check itself is
+  // absent, so nothing was ever promised, whereas MISSING is a promise the log
+  // made and the store did not keep.
+  ARTIFACT_ERROR_CODE_ARTIFACT_NOT_FOUND = 2;
+  // The range is not addressable: an offset past the end of the artifact, or a
+  // zero length.
+  ARTIFACT_ERROR_CODE_RANGE_NOT_SATISFIABLE = 3;
+  // Verification was required and the artifact has no chunk manifest, so no
+  // checkable range of it exists. Refusing here is the whole value of the
+  // requirement: the alternative is a caller believing it verified a read
+  // because it asked to.
+  ARTIFACT_ERROR_CODE_VERIFICATION_UNAVAILABLE = 4;
+  // The requested length exceeds what a single response may carry. The bound is
+  // deployment-specific, so it is reported rather than encoded in the schema;
+  // the message carries the accepted maximum.
+  ARTIFACT_ERROR_CODE_RANGE_TOO_LARGE = 5;
+  // Malformed request that is none of the above.
+  ARTIFACT_ERROR_CODE_INVALID_ARGUMENT = 6;
+}

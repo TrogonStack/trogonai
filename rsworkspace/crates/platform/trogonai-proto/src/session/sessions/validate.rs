@@ -28,6 +28,7 @@ pub fn validate_session_event(event: &v1alpha1::SessionEvent) -> Result<(), Sess
         SessionEventCase::SessionFailed(inner) => validate_session_failed(inner),
         SessionEventCase::SessionHidden(inner) => validate_session_hidden(inner),
         SessionEventCase::SessionForked(inner) => validate_session_forked(inner),
+        SessionEventCase::SessionRecovered(inner) => validate_session_recovered(inner),
         SessionEventCase::SessionRewound(inner) => validate_session_rewound(inner),
         SessionEventCase::Compacted(inner) => validate_compacted(inner),
         SessionEventCase::UserMessageRecorded(inner) => validate_user_message_recorded(inner),
@@ -36,6 +37,7 @@ pub fn validate_session_event(event: &v1alpha1::SessionEvent) -> Result<(), Sess
         SessionEventCase::AssistantMessageFailed(inner) => validate_assistant_message_failed(inner),
         SessionEventCase::ToolCallRequested(inner) => validate_tool_call_requested(inner),
         SessionEventCase::ToolCallApproved(inner) => validate_tool_call_approved(inner),
+        SessionEventCase::ProviderToolIntentRejected(inner) => validate_provider_tool_intent_rejected(inner),
         SessionEventCase::ToolCallDenied(inner) => validate_tool_call_denied(inner),
         SessionEventCase::ToolCallStarted(inner) => validate_tool_call_started(inner),
         SessionEventCase::ToolCallCompleted(inner) => validate_tool_call_completed(inner),
@@ -140,6 +142,12 @@ pub enum SessionEventValidationError {
 
     #[error("restored_checkpoint.session_execution_plan_digest must match session_execution_plan_digest")]
     RestoredCheckpointPlanDigestMismatch,
+
+    #[error("omitted_count must be 0 when completeness is COMPLETE, got {actual}")]
+    CompleteRecoveryWithOmissions { actual: u32 },
+
+    #[error("omitted_count must be >= 1 when completeness is PARTIAL")]
+    PartialRecoveryWithoutOmissions,
 
     #[error("{field} must be well-formed JSON")]
     InvalidJson { field: &'static str },
@@ -557,6 +565,32 @@ fn validate_session_forked(event: &v1alpha1::SessionForked) -> Result<(), Sessio
     require_non_empty(&event.source_session_id, "source_session_id")?;
     require_positive_ordinal(&event.context_prefix_boundary, "context_prefix_boundary")?;
     require_known_nonzero(event.reason, "reason")
+}
+
+fn validate_session_recovered(event: &v1alpha1::SessionRecovered) -> Result<(), SessionEventValidationError> {
+    require_non_empty(&event.session_id, "session_id")?;
+    require_non_empty(&event.source_session_id, "source_session_id")?;
+    require_positive_ordinal(&event.source_boundary, "source_boundary")?;
+    let source_digest = event
+        .source_digest
+        .as_option()
+        .ok_or(SessionEventValidationError::MissingRequiredField { field: "source_digest" })?;
+    require_digest(source_digest, "source_digest")?;
+    require_non_empty(&event.salvage_key, "salvage_key")?;
+    require_known_nonzero(event.completeness, "completeness")?;
+    // A complete recovery that lost something, or a partial one that lost
+    // nothing, would let a reader draw the opposite conclusion from each field.
+    match event.completeness.as_known() {
+        Some(v1alpha1::RecoveryCompleteness::Complete) if event.omitted_count != 0 => {
+            Err(SessionEventValidationError::CompleteRecoveryWithOmissions {
+                actual: event.omitted_count,
+            })
+        }
+        Some(v1alpha1::RecoveryCompleteness::Partial) if event.omitted_count == 0 => {
+            Err(SessionEventValidationError::PartialRecoveryWithoutOmissions)
+        }
+        _ => Ok(()),
+    }
 }
 
 fn validate_session_rewound(event: &v1alpha1::SessionRewound) -> Result<(), SessionEventValidationError> {
@@ -987,6 +1021,16 @@ fn validate_todo_updated(event: &v1alpha1::TodoUpdated) -> Result<(), SessionEve
         require_known_nonzero(item.status, "items[].status")?;
     }
     Ok(())
+}
+
+fn validate_provider_tool_intent_rejected(
+    event: &v1alpha1::ProviderToolIntentRejected,
+) -> Result<(), SessionEventValidationError> {
+    require_non_empty(&event.session_id, "session_id")?;
+    require_non_empty(&event.rejection_id, "rejection_id")?;
+    require_non_empty(&event.message_id, "message_id")?;
+    require_non_empty(&event.turn_id, "turn_id")?;
+    require_known_nonzero(event.reason, "reason")
 }
 
 fn validate_session_renamed(event: &v1alpha1::SessionRenamed) -> Result<(), SessionEventValidationError> {

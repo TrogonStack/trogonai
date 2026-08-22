@@ -1,0 +1,21 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "trogonai/session/sessions/v1alpha1/session_ordinal.proto";
+
+// ReconcileParentRewind is issued by the child-session reconciler when a parent
+// rewinds past the dispatch that created a child, recording
+// [ParentHistoryInvalidated, SessionCancelled] as one batch: the context the
+// child inherited no longer exists.
+//
+// Write precondition At on the child: applies only when parent_dispatched_at is
+// past the parent's new boundary and the cascade policy allows it.
+message ReconcileParentRewind {
+  // The child session being reconciled.
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string parent_session_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  // The parent's new effective boundary.
+  SessionOrdinal parent_keep_through = 3 [features.field_presence = LEGACY_REQUIRED];
+  string triggering_event_id = 4 [features.field_presence = LEGACY_REQUIRED];
+}

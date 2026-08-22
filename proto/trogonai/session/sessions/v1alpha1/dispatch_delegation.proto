@@ -1,0 +1,21 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "trogonai/session/sessions/v1alpha1/cascade_policy.proto";
+
+// DispatchDelegation is the delegation saga's first step, run against the
+// parent: it records [DelegationDispatched], naming the child and what happens
+// to it when the parent reaches a terminal state.
+//
+// Write precondition At: one dispatch per operation_id, and the parent must not
+// already be terminal.
+message DispatchDelegation {
+  // The parent session.
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string operation_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string child_session_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Recorded at dispatch so an orphaned child is never a silent accident
+  // (ADR#0035 facet 6).
+  CascadePolicy cascade_policy = 4 [features.field_presence = LEGACY_REQUIRED];
+}

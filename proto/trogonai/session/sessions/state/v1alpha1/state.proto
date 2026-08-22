@@ -1,0 +1,227 @@
+edition = "2024";
+
+package trogonai.session.sessions.state.v1alpha1;
+
+import "trogonai/session/sessions/v1alpha1/cascade_policy.proto";
+import "trogonai/session/sessions/v1alpha1/checkpoint.proto";
+import "trogonai/session/sessions/v1alpha1/digest.proto";
+import "trogonai/session/sessions/v1alpha1/operation_reserved.proto";
+import "trogonai/session/sessions/v1alpha1/session_ordinal.proto";
+import "trogonai/session/sessions/v1alpha1/session_recovered.proto";
+
+// State is the Session aggregate's write-side fold: exactly the facts the
+// session commands read to enforce their invariants, and nothing a read model
+// owns (ADR#0035, ADR#0045). It is never a projection and never a transcript;
+// message bodies, todo items, artifacts, and display metadata are deliberately
+// absent because no command reads them.
+//
+// A crash between a started tool call and its outcome is the load-bearing case:
+// replaying a session leaves that call in TOOL_CALL_STATUS_STARTED with no
+// settled_at, and its reserved operation in OPERATION_STATUS_RESERVED, so
+// reconciliation can see the missing terminal outcome and finish or reject the
+// interrupted call rather than silently dropping it.
+message State {
+  StateValue state = 1 [features.field_presence = LEGACY_REQUIRED];
+  string session_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Count of events folded so far: this session's own fold-derived ordinal of
+  // the last applied event, never a JetStream sequence (ADR#0013).
+  trogonai.session.sessions.v1alpha1.SessionOrdinal position = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Digest of the immutable StoredSessionExecutionPlan recorded at start; every
+  // attempt, checkpoint, and compaction is bound to it.
+  trogonai.session.sessions.v1alpha1.Digest execution_plan_digest = 4;
+  // Which marker sealed the session. The first terminal marker wins; a later one
+  // is audit-only.
+  TerminalMarker terminal_marker = 5 [features.field_presence = LEGACY_REQUIRED];
+  // Context root when this session was forked from another one; unset for a
+  // session that started its own context.
+  ForkOrigin fork_origin = 6;
+  // Provenance of a salvaged session; unset for a session that was not
+  // recovered from a damaged source. Folded because it is a precondition the
+  // commands must be able to read: a session that is a partial copy cannot
+  // honor a rewind or a compaction against source positions it never received.
+  RecoveryOrigin recovery_origin = 19;
+  // Recorded parent lineage of a delegated child session.
+  ParentLink parent = 7;
+  // Newest rewind boundary. Rewind masks effective history for readers and
+  // future turns; it never un-applies folded facts, because a tool call that
+  // really ran still has to be reconcilable.
+  trogonai.session.sessions.v1alpha1.SessionOrdinal keep_through = 8;
+  // Newest compaction marker, the prior usable boundary a further compaction
+  // and an attempt restore both resolve against.
+  CompactionMarker compaction = 9;
+  // Attempt currently holding the session; unset when no attempt is running.
+  ExecutionAttempt active_attempt = 10;
+  // Most recently started attempt, still active or already ended, so a new
+  // attempt can be checked for monotonic numbering and exact predecessor.
+  string last_attempt_id = 11;
+  uint64 last_attempt_number = 12;
+  // Tool calls keyed by tool_call_id, in first-observed fold order.
+  repeated ToolCall tool_calls = 13;
+  // Operation ledger entries keyed by operation_id, in reservation fold order.
+  repeated Operation operations = 14;
+  // Dispatched delegations keyed by operation_id, parent side.
+  repeated Delegation delegations = 15;
+  // First admitted evidence per checkpoint_id; a later event reusing an id is
+  // retained on the log but never replaces the admitted evidence.
+  repeated CheckpointEvidence checkpoints = 16;
+  // Privacy dependencies an attempt restore and a compaction must respect.
+  repeated string redacted_event_ids = 17;
+  repeated string erased_artifact_ids = 18;
+}
+
+enum StateValue {
+  STATE_VALUE_UNSPECIFIED = 0;
+  // No SessionStarted folded: the stream does not exist yet.
+  STATE_VALUE_MISSING = 1;
+  STATE_VALUE_ACTIVE = 2;
+  // Sealed by a terminal marker: no further invariant-bearing transition is
+  // admitted, though guarded ledger and lineage facts still fold so an
+  // in-flight side effect stays reconcilable.
+  STATE_VALUE_TERMINAL = 3;
+}
+
+enum TerminalMarker {
+  TERMINAL_MARKER_UNSPECIFIED = 0;
+  TERMINAL_MARKER_CLOSED = 1;
+  TERMINAL_MARKER_CANCELLED = 2;
+  TERMINAL_MARKER_FAILED = 3;
+  TERMINAL_MARKER_HIDDEN = 4;
+}
+
+message ForkOrigin {
+  string source_session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.session.sessions.v1alpha1.SessionOrdinal context_prefix_boundary = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// RecoveryOrigin is the damaged source a salvaged session was copied from.
+//
+// source_boundary is a position on the source's stream, not on this one. This
+// session's ordinals count its own events and start at 1 regardless of where the
+// source's cut ended.
+message RecoveryOrigin {
+  string source_session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.session.sessions.v1alpha1.SessionOrdinal source_boundary = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.session.sessions.v1alpha1.Digest source_digest = 3 [features.field_presence = LEGACY_REQUIRED];
+  string salvage_key = 4 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.session.sessions.v1alpha1.RecoveryCompleteness completeness = 5 [features.field_presence = LEGACY_REQUIRED];
+  uint32 omitted_count = 6 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ParentLink {
+  string parent_session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The parent's own ordinal of the dispatch that created this session.
+  trogonai.session.sessions.v1alpha1.SessionOrdinal parent_dispatched_at = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.session.sessions.v1alpha1.CascadePolicy cascade_policy = 3 [features.field_presence = LEGACY_REQUIRED];
+  // The parent-side operation this session was dispatched under.
+  string operation_id = 4 [features.field_presence = LEGACY_REQUIRED];
+  // The parent reached a terminal state and this session observed it.
+  bool parent_terminated = 5 [features.field_presence = LEGACY_REQUIRED];
+  // The parent rewound past the dispatch: the inherited prefix no longer holds.
+  bool history_invalidated = 6 [features.field_presence = LEGACY_REQUIRED];
+  // Set once the lineage is detached, making the detach idempotent per id.
+  string detach_operation_id = 7;
+}
+
+message Delegation {
+  string operation_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  DelegationKind kind = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Set for DELEGATION_KIND_CHILD_SESSION.
+  string child_session_id = 3;
+  trogonai.session.sessions.v1alpha1.CascadePolicy cascade_policy = 4;
+  // Set for DELEGATION_KIND_EXTERNAL.
+  string delegate_reference = 5;
+  trogonai.session.sessions.v1alpha1.SessionOrdinal dispatched_at = 6 [features.field_presence = LEGACY_REQUIRED];
+  // Set once the child is detached, making the detach idempotent per id.
+  string detach_operation_id = 7;
+}
+
+enum DelegationKind {
+  DELEGATION_KIND_UNSPECIFIED = 0;
+  DELEGATION_KIND_CHILD_SESSION = 1;
+  DELEGATION_KIND_EXTERNAL = 2;
+}
+
+message ExecutionAttempt {
+  string execution_attempt_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint64 attempt_number = 2 [features.field_presence = LEGACY_REQUIRED];
+  // The attempt published its ready attestation; until then it holds the
+  // session but must not be treated as serving.
+  bool ready = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Checkpoint the attempt restored from, empty when it started from scratch.
+  string restored_checkpoint_id = 4;
+  // Ordinal of the ExecutionAttemptStarted event itself: the head the attempt
+  // selected, and the point its tail replay resumes from.
+  trogonai.session.sessions.v1alpha1.SessionOrdinal started_at = 5 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message CompactionMarker {
+  string summary_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Ordinal of the Compacted event itself.
+  trogonai.session.sessions.v1alpha1.SessionOrdinal marker_ordinal = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.session.sessions.v1alpha1.SessionOrdinal covers_from = 3 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.session.sessions.v1alpha1.SessionOrdinal covers_through = 4 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.session.sessions.v1alpha1.Digest covered_input_digest = 5 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ToolCall {
+  string tool_call_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Retry identity of the call, and the key its terminal outcome joins on.
+  string tool_execution_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string tool_name = 3 [features.field_presence = LEGACY_REQUIRED];
+  string turn_id = 4 [features.field_presence = LEGACY_REQUIRED];
+  // The operation ledger entry guarding this call's side effect, when it
+  // reserves one.
+  string operation_id = 5;
+  ToolCallStatus status = 6 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.session.sessions.v1alpha1.SessionOrdinal requested_at = 7 [features.field_presence = LEGACY_REQUIRED];
+  // Set when the call started executing. A call with started_at set and
+  // settled_at unset is exactly an interrupted call awaiting reconciliation.
+  trogonai.session.sessions.v1alpha1.SessionOrdinal started_at = 8;
+  // Set by the first terminal outcome; a later conflicting one is audit-only.
+  trogonai.session.sessions.v1alpha1.SessionOrdinal settled_at = 9;
+}
+
+enum ToolCallStatus {
+  TOOL_CALL_STATUS_UNSPECIFIED = 0;
+  TOOL_CALL_STATUS_REQUESTED = 1;
+  TOOL_CALL_STATUS_APPROVED = 2;
+  // Terminal: the call was refused and never ran.
+  TOOL_CALL_STATUS_DENIED = 3;
+  TOOL_CALL_STATUS_STARTED = 4;
+  TOOL_CALL_STATUS_COMPLETED = 5;
+  TOOL_CALL_STATUS_FAILED = 6;
+}
+
+message Operation {
+  string operation_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.session.sessions.v1alpha1.OperationKind operation_kind = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Digest of the reserved request, so a retry carrying different bytes under
+  // the same id is refused instead of executed twice.
+  trogonai.session.sessions.v1alpha1.Digest request_digest = 3 [features.field_presence = LEGACY_REQUIRED];
+  OperationStatus status = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Cancellation was asked for; it does not settle the operation, which still
+  // needs a recorded outcome.
+  bool cancellation_requested = 5 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.session.sessions.v1alpha1.SessionOrdinal reserved_at = 6 [features.field_presence = LEGACY_REQUIRED];
+  // Set by the determinate outcome that settled the operation.
+  trogonai.session.sessions.v1alpha1.SessionOrdinal settled_at = 7;
+}
+
+enum OperationStatus {
+  OPERATION_STATUS_UNSPECIFIED = 0;
+  // Reserved, no outcome recorded: the side effect may or may not have run.
+  OPERATION_STATUS_RESERVED = 1;
+  // Recorded as indeterminate. Non-terminal, and supersedable exactly once by
+  // a determinate outcome.
+  OPERATION_STATUS_UNKNOWN = 2;
+  OPERATION_STATUS_SUCCEEDED = 3;
+  OPERATION_STATUS_FAILED = 4;
+  OPERATION_STATUS_CANCELLED = 5;
+}
+
+message CheckpointEvidence {
+  string checkpoint_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.session.sessions.v1alpha1.Checkpoint checkpoint = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Ordinal of the CheckpointProduced event that admitted this evidence.
+  trogonai.session.sessions.v1alpha1.SessionOrdinal produced_at = 3 [features.field_presence = LEGACY_REQUIRED];
+}

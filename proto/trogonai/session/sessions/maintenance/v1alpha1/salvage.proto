@@ -1,0 +1,160 @@
+edition = "2024";
+
+package trogonai.session.sessions.maintenance.v1alpha1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/session/sessions/maintenance/v1alpha1/outcome.proto";
+import "trogonai/session/sessions/maintenance/v1alpha1/stream_boundary.proto";
+
+// The durable record of a Session salvage.
+//
+// A salvage copies what can be read from a damaged session into a new session
+// identity. It is the opposite of a migration on every axis that matters:
+//
+// | | migration | salvage |
+// | identity | preserved | new |
+// | ordinals | preserved exactly | not preserved |
+// | source | must be intact | is damaged |
+// | source after | replaced | untouched |
+// | loss | inadmissible | expected and enumerated |
+//
+// It is also not ForkSession. A fork inherits a prefix it assumes is valid and
+// references it in place, so the source must stay readable forever. A salvage
+// exists because the source's validity is incomplete, so it copies, and the
+// copy is a different session that must never be presented as the original.
+
+// SalvageIdentity is the retry identity of a salvage.
+message SalvageIdentity {
+  string source_session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Chosen by the operator or orchestrator. Two salvages of one damaged source
+  // are legitimately different operations, so identity cannot be derived from
+  // the source alone.
+  string salvage_key = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// SalvageIntent is written durably before the target session is created.
+message SalvageIntent {
+  SalvageIdentity identity = 1 [features.field_presence = LEGACY_REQUIRED];
+  StreamBoundary source = 2 [features.field_presence = LEGACY_REQUIRED];
+  // The id the salvaged session will have, derived from the identity before any
+  // write is attempted.
+  //
+  // Deriving it is what makes a retry safe. The salvaged session is created by
+  // an atomic batch under a NoStream precondition, so a retry that lands on the
+  // same id sees a visible conflict instead of producing a second copy. A
+  // randomly minted id would leave a retry unable to find its own prior work,
+  // which is the same trap the migration reconciler exists to escape, closed
+  // here by the write precondition rather than by a later comparison.
+  string target_session_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  OrderProof order_proof = 4 [features.field_presence = LEGACY_REQUIRED];
+  string actor = 5 [features.field_presence = LEGACY_REQUIRED];
+  string reason = 6 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp planned_at = 7 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// SalvageRecord is the intent plus everything learned since.
+message SalvageRecord {
+  SalvageIntent intent = 1 [features.field_presence = LEGACY_REQUIRED];
+  MaintenanceState state = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Set only for MAINTENANCE_STATE_INDETERMINATE.
+  IndeterminateDetail indeterminate = 3;
+  // Everything the source held that the salvaged session does not.
+  repeated OmittedItem omitted = 4;
+  uint32 attempt_count = 5 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp updated_at = 6 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// OmittedItem is one thing the salvage could not carry.
+//
+// Enumerated rather than counted. An operator told that three things were lost
+// cannot tell whether they were three tool results or three user messages, and
+// that difference decides whether the salvaged session is worth keeping.
+message OmittedItem {
+  OmittedKind kind = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The source position, for an omission that had one.
+  uint64 source_ordinal = 2;
+  // The artifact, checkpoint, or child session id, for an omission that had one.
+  string entity_id = 3;
+  OmissionReason reason = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// OmittedKind is what sort of thing was lost.
+enum OmittedKind {
+  OMITTED_KIND_UNSPECIFIED = 0;
+  OMITTED_KIND_EVENT = 1;
+  OMITTED_KIND_ARTIFACT = 2;
+  OMITTED_KIND_CHECKPOINT = 3;
+  OMITTED_KIND_CHILD_SESSION = 4;
+}
+
+// OmissionReason is why it was lost.
+enum OmissionReason {
+  OMISSION_REASON_UNSPECIFIED = 0;
+  // Present in the source and did not decode.
+  OMISSION_REASON_UNDECODABLE = 1;
+  // Referenced by the source and not there.
+  OMISSION_REASON_MISSING = 2;
+  // Present, and its content did not match its recorded digest. Deliberately
+  // never carried: a salvage that copied content failing its own integrity
+  // check would launder corruption into a session that looks healthy.
+  OMISSION_REASON_DIGEST_MISMATCH = 3;
+  // Present and could not be read well enough to verify. Not the same as
+  // absent, and not evidence of corruption, matching the doctor's three-way
+  // artifact observation.
+  OMISSION_REASON_UNVERIFIABLE = 4;
+  // Erased under a privacy obligation. It was not lost, and a salvage must not
+  // resurrect it. Recorded so the gap in the salvaged history is explained
+  // rather than read as further damage.
+  OMISSION_REASON_ERASED = 5;
+}
+
+// SalvageResult is the disposition of one SalvageSession call.
+//
+// There is no separate "recovered with unverified artifacts" value, which is a
+// deliberate departure from the shape Fx uses. History completeness and
+// artifact verification are independent axes, and one flat enum forces the
+// server to choose which of the two facts to report. The omissions carry both,
+// and a second signal that could disagree with them would only invite a caller
+// to pick.
+enum SalvageResult {
+  SALVAGE_RESULT_UNSPECIFIED = 0;
+  // Every source event decoded and every referenced artifact verified.
+  SALVAGE_RESULT_COMPLETE = 1;
+  // A session was produced and items are missing. They are enumerated.
+  SALVAGE_RESULT_PARTIAL = 2;
+  // A prior attempt under this identity already produced the target session.
+  SALVAGE_RESULT_ALREADY_SALVAGED = 3;
+  // Refused before writing. Carries a RefusalDetail.
+  SALVAGE_RESULT_REFUSED = 4;
+  // The outcome could not be classified.
+  SALVAGE_RESULT_INDETERMINATE = 5;
+  // PLAN_ONLY: a salvage would run and nothing was written. The planned
+  // omissions are on the record, so an operator can see what would be lost
+  // before deciding.
+  SALVAGE_RESULT_WOULD_SALVAGE = 6;
+}
+
+// RefusalDetail is why a salvage wrote nothing.
+message RefusalDetail {
+  RefusalReason reason = 1 [features.field_presence = LEGACY_REQUIRED];
+  string detail = 2;
+}
+
+// RefusalReason is the specific refusal.
+enum RefusalReason {
+  REFUSAL_REASON_UNSPECIFIED = 0;
+  REFUSAL_REASON_SOURCE_NOT_FOUND = 1;
+  // Event order could not be established, so any session produced would be a
+  // plausible-looking transcript in an order that never happened.
+  REFUSAL_REASON_ORDER_UNPROVEN = 2;
+  // Nothing in the source could be read. An empty salvaged session would be a
+  // new artifact claiming provenance it cannot support.
+  REFUSAL_REASON_NOTHING_RECOVERABLE = 3;
+  // The source exceeds the limits allowed for one operation.
+  REFUSAL_REASON_SIZE_LIMIT = 4;
+  // A stream already exists at the derived target id and is not the target this
+  // identity would have produced.
+  REFUSAL_REASON_TARGET_DIVERGED = 5;
+  // Another maintenance operation holds this session.
+  REFUSAL_REASON_OPERATION_IN_PROGRESS = 6;
+}

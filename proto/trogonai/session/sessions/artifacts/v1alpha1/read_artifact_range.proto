@@ -1,0 +1,96 @@
+edition = "2024";
+
+package trogonai.session.sessions.artifacts.v1alpha1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/session/sessions/artifacts/v1alpha1/availability.proto";
+
+// ReadArtifactRangeRequest asks for a bounded window of an artifact's bytes.
+//
+// There is no request for the whole artifact and no way to express one. A
+// caller that wants all 40 MB issues successive ranges; the transport carries
+// JSON-RPC bodies over NATS (ADR#0055, ADR#0056) and has no streaming call, so
+// successive bounded reads are the streaming primitive rather than a
+// workaround for the absence of one. The practical difference is that the
+// bound is always the caller's and always visible, instead of a limit
+// discovered when a response fails to fit.
+message ReadArtifactRangeRequest {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string artifact_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  // First byte requested, counted from the start of the artifact.
+  uint64 offset = 3 [features.field_presence = LEGACY_REQUIRED];
+  // How many bytes are wanted. The server may serve fewer at the end of the
+  // artifact or under its own cap, and may serve more only to reach a chunk
+  // boundary when verification was required. What was served is on the
+  // response; a caller must read it rather than assume it got what it asked
+  // for.
+  uint64 length = 4 [features.field_presence = LEGACY_REQUIRED];
+  VerificationRequirement verification = 5;
+}
+
+// VerificationRequirement is whether the caller is willing to receive bytes it
+// cannot check.
+//
+// Unspecified means required. The default has to be the strict one: a caller
+// that never thought about verification is precisely the caller that will not
+// notice unchecked bytes arriving, and a field whose omission silently weakens
+// a guarantee is a guarantee only for people who read the schema.
+enum VerificationRequirement {
+  VERIFICATION_REQUIREMENT_UNSPECIFIED = 0;
+  // Refuse the read rather than serve a range the caller cannot check. A
+  // requirement that degrades into a warning when it cannot be met is not a
+  // requirement, so this fails with
+  // ARTIFACT_ERROR_CODE_VERIFICATION_UNAVAILABLE instead of returning bytes
+  // labelled unverifiable.
+  VERIFICATION_REQUIREMENT_REQUIRED = 1;
+  // Serve the range even when it cannot be checked. Appropriate for a preview
+  // pane and not for anything that will be executed, replayed, or stored
+  // elsewhere as the artifact.
+  VERIFICATION_REQUIREMENT_NOT_REQUIRED = 2;
+}
+
+// ReadArtifactRangeResponse carries the served bytes and says what they are
+// worth.
+message ReadArtifactRangeResponse {
+  string artifact_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ArtifactAvailability availability = 2 [features.field_presence = LEGACY_REQUIRED];
+  // First byte actually served. Equal to the requested offset unless
+  // verification required aligning down to a chunk boundary.
+  uint64 offset = 3 [features.field_presence = LEGACY_REQUIRED];
+  // The served bytes. Empty for every availability except
+  // ARTIFACT_AVAILABILITY_AVAILABLE. Its length is the served length; a
+  // separate length field would be a second copy of a fact the bytes already
+  // carry, and the copy is what a caller would trust when they disagree.
+  bytes content = 4;
+  // Total size of the artifact. This is what makes the response
+  // self-describing: with the served offset and length, a caller derives
+  // reaching the end of the artifact from being cut short by the server
+  // without a flag that could contradict the numbers next to it, and knows
+  // where to resume without a second call.
+  uint64 size_bytes = 5 [features.field_presence = LEGACY_REQUIRED];
+  RangeVerifiability verifiability = 6 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp observed_at = 7 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// RangeVerifiability is whether the caller can check what it just received.
+//
+// It reports what the caller can do, not what the server did, and the
+// distinction is the point. A server field reading "verified" would be the
+// party under suspicion certifying itself: the only check worth anything here
+// is one the caller performs, against a manifest digest that came from the
+// event log rather than from the artifact store. So this contract's obligation
+// is to serve ranges in a shape that can be checked, and to say plainly when it
+// has not.
+enum RangeVerifiability {
+  RANGE_VERIFIABILITY_UNSPECIFIED = 0;
+  // The served range covers whole chunks, so every byte in it is covered by a
+  // chunk digest the caller can obtain and check.
+  RANGE_VERIFIABILITY_VERIFIABLE = 1;
+  // The artifact was stored without chunk hashing. Nothing about this range can
+  // be checked short of reading the entire artifact and hashing it.
+  RANGE_VERIFIABILITY_NO_MANIFEST = 2;
+  // A manifest exists and the served range does not align to it, because the
+  // caller allowed an unverifiable read. The partial chunks at its edges are
+  // not covered by any digest the caller can check.
+  RANGE_VERIFIABILITY_RANGE_NOT_ALIGNED = 3;
+}

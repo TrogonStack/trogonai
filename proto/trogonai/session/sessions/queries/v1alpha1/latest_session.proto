@@ -1,0 +1,126 @@
+edition = "2024";
+
+package trogonai.session.sessions.queries.v1alpha1;
+
+import "trogonai/session/sessions/queries/v1alpha1/contract_version.proto";
+import "trogonai/session/sessions/queries/v1alpha1/projection_freshness.proto";
+import "trogonai/session/sessions/queries/v1alpha1/read_consistency.proto";
+import "trogonai/session/sessions/queries/v1alpha1/session_view.proto";
+
+// GetLatestSessionRequest asks for the one newest session matching a selector.
+//
+// A resume command wants a single session, and getting it by listing a page and
+// taking the first row is wrong in a way that only shows up under load: the
+// list is ordered by recency but filtered afterwards, so a workspace whose most
+// recent forty sessions are all ineligible returns a page with no answer in it
+// and no indication that a longer page would have found one. Selection has to
+// happen in the index, not in the caller.
+//
+// This is also the query where staleness costs the most. A stale list is a list
+// with an old row in it, which a human reading a picker can notice. A stale
+// latest-pointer is the one answer the caller acts on, so the whole error lands
+// on the session that gets opened.
+message GetLatestSessionRequest {
+  string workspace_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ContractVersion accepted_contract = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Which session counts as the answer.
+  SessionSelector selector = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Which timestamp "latest" is measured by.
+  RecencyBasis recency = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Freshness the caller requires. Unset is an eventual read.
+  ReadConsistency consistency = 5;
+}
+
+// GetLatestSessionResponse is the single newest matching session, or nothing.
+message GetLatestSessionResponse {
+  ContractNegotiation contract = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Unset when nothing in the workspace matched. Absence is the answer, not an
+  // error: a workspace with no resumable session is a normal state, and
+  // reporting it as a failure would make a first-run workspace look broken.
+  SessionSummary session = 2;
+  // What the selector rejected on the way to that answer. Always present,
+  // including when a session was found.
+  //
+  // This is what makes an empty answer diagnosable. "No resumable session" and
+  // "eleven sessions, all still running" are the same absence to a caller that
+  // only sees the empty field, and they call for opposite next moves: create a
+  // new session, or attach to a running one.
+  ExclusionCounts excluded = 3 [features.field_presence = LEGACY_REQUIRED];
+  ProjectionFreshness freshness = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// SessionSelector is which session in a workspace counts as the answer.
+//
+// An enum rather than a set of filter booleans. Booleans let a caller ask for a
+// session that is both currently active and not currently active, and the
+// server then has to decide what an impossible request means. Every value here
+// is a question someone actually asks.
+enum SessionSelector {
+  // No selector given. Refused with QUERY_ERROR_CODE_INVALID_ARGUMENT.
+  //
+  // The zero value does not default to a selector, because the two callers of
+  // this query want different ones and both are plausible defaults: a picker
+  // wants the most recent session of any kind, and a resume wants a resumable
+  // one. Guessing wrong hands a resume command a session that is already
+  // running somewhere else.
+  SESSION_SELECTOR_UNSPECIFIED = 0;
+  // The newest non-archived session, whatever state it is in.
+  SESSION_SELECTOR_MOST_RECENT = 1;
+  // The newest session a resume can attach to: not archived, not currently
+  // active, not empty, and not hidden.
+  //
+  // Terminal is not an exclusion. A closed session is the ordinary thing to
+  // resume; that is what resuming means. What is excluded is a session already
+  // being driven from somewhere else, which resuming would turn into two
+  // writers on one stream.
+  SESSION_SELECTOR_RESUMABLE = 2;
+  // The newest session currently being driven. Answers "reattach me to what I
+  // was doing" without a resume's exclusions.
+  SESSION_SELECTOR_ACTIVE = 3;
+}
+
+// RecencyBasis is which timestamp "latest" is measured by.
+//
+// The two orderings disagree often enough to matter: a long session started
+// yesterday and worked on this morning is the newest by activity and among the
+// oldest by creation. Every timestamp behind this is a recorded external
+// occurrence and not the moment an envelope was appended (D10), so a projection
+// that catches up late does not reorder the answer.
+enum RecencyBasis {
+  // Unset. Treated as LAST_ACTIVITY, which is what a resume means by "latest".
+  RECENCY_BASIS_UNSPECIFIED = 0;
+  // Most recent effective history activity.
+  RECENCY_BASIS_LAST_ACTIVITY = 1;
+  // Session creation.
+  RECENCY_BASIS_CREATED = 2;
+}
+
+// ExclusionCounts is how many candidate sessions each rule removed.
+//
+// A session removed by more than one rule is counted once, under the first rule
+// that removed it, in the order the fields are declared. Counting it under
+// every matching rule would produce totals that exceed the workspace, and the
+// number a caller wants is how many sessions there were, not how many
+// judgements were made.
+message ExclusionCounts {
+  // Sessions in the workspace the caller may see. The denominator; zero here
+  // means an empty workspace rather than an over-strict selector.
+  uint32 considered = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint32 archived = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Excluded because something is currently driving them.
+  uint32 active = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Excluded because their effective history contains no user-authored turn.
+  //
+  // Emptiness is defined on authored content, not on `effective_length`. A
+  // session can carry configuration and lifecycle records and still be one
+  // nobody ever said anything in, and a rewind back to the start empties a
+  // session that was not empty an hour ago. Resuming one of those puts a person
+  // back into a blank window they have no memory of leaving.
+  uint32 empty = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Excluded by TERMINAL_REASON_HIDDEN.
+  uint32 hidden = 5 [features.field_presence = LEGACY_REQUIRED];
+  // Excluded because the projection could not render the row. Non-zero means
+  // the answer may be wrong rather than merely empty: the session that should
+  // have won might be one of these.
+  uint32 unrenderable = 6 [features.field_presence = LEGACY_REQUIRED];
+}

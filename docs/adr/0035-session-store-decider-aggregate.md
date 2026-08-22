@@ -1235,6 +1235,15 @@ Storage is otherwise managed without ever removing a fact:
   logically deletes an event, and whether to enable it is deferred to deployment, not
   decided here.
 
+  **Amended by [ADR#0057](./0057-session-stream-incarnation-fencing.md).** Eviction
+  from a live session subject is no longer admissible in any form. A partially
+  evicted subject leaves this facet's `At(current_position)` guard comparing
+  against a sequence that no longer names the event the writer read, and a fully
+  evicted one resolves to `NoStream`, so a redelivered creation command starts a
+  second history under an identity that already has one. A deployment that must
+  bound the hot stream rebuilds into a new stream incarnation and seals the old
+  one; it does not edit the stream it is running on.
+
 Because nothing is ever logically removed, the machinery an archive-then-purge
 design would need -- a verified-archive KV ledger, a fork-lineage watermark term so a
 live fork's source prefix is not purged, and the purge-versus-new-fork race -- simply
@@ -1248,7 +1257,19 @@ needs, checkpointing `last_applied_stream_position` after each event exactly as
 the scheduler does. Queries are `verb + noun` Rust functions over the KV
 projection ([ADR#0014](./0014-command-and-query-naming.md)) -- `get_session`,
 `list_sessions` -- with no query protos, since the projection value is the read
-contract. The model-visible context is compiled deterministically by applying
+contract.
+
+**Amended by [ADR#0058](./0058-session-query-contract-separate-from-projection.md).**
+The clause "with no query protos, since the projection value is the read
+contract" is withdrawn. A projection exists to be cheaply rebuilt and a public
+contract exists to hold still, and one type cannot carry both obligations: either
+the projection stops changing freely, which removes the property that made it
+worth rebuilding, or the contract changes at the projection's cadence, which
+means it is not a contract. The read contract is a versioned query proto under
+`sessions/queries/v1alpha1` whose value types are redefined locally rather than
+imported. Everything else in this facet stands: no read model is authoritative,
+projections are folded and checkpointed from the log, and the handlers are still
+`verb + noun` Rust functions reading the KV projection. The model-visible context is compiled deterministically by applying
 rewind invalidation through the selected head before choosing the newest
 usable `Compacted` marker (facet 4). For a fork with no usable child
 marker, the projection recursively resolves the source context named by its

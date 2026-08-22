@@ -1,0 +1,12 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+// ArchiveSession moves a session out of the default listing view, recording
+// [SessionArchived]. Reversible organization state, unlike the terminal
+// HideSession.
+//
+// Write precondition Any.
+message ArchiveSession {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+}

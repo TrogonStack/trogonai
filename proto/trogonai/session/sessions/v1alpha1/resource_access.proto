@@ -1,0 +1,93 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "trogonai/session/sessions/v1alpha1/artifact.proto";
+
+// ResourceAccessRecord records what a tool call did to a namespace of
+// resources, as distinct from what content it read.
+//
+// It exists because ResourceObservation deliberately answers only one question.
+// An observation means content entered the model's context, and its digest is
+// what makes a later write checkable. A search that walks a directory of
+// sensitive filenames and returns none of their contents produces no
+// observation, correctly, and yet something happened that a compliance reviewer
+// has to be able to see: the agent learned that those files exist and what they
+// are called.
+//
+// The two must stay separate rather than merging into one weakened observation.
+// "Did the agent read this file" and "did the agent see this file's name" are
+// different questions with different answers and different consequences, and a
+// single record that means either makes both unanswerable.
+//
+// Records are per-scope, never per-path. That is the same volume argument that
+// keeps reads off their own event: a search can walk forty thousand paths, and
+// forty thousand facts appended to a log that is never truncated
+// (ADR#0035 facet 7) would make the dominant content of a session stream the
+// output of one grep. The scope plus the counts is what a reviewer needs to know
+// what was exposed; the path list itself, when it is worth keeping, goes out of
+// line as an artifact and is erasable like any other artifact while the counts
+// survive it.
+message ResourceAccessRecord {
+  ResourceAction action = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The namespace this access covered, as a URI prefix or a glob in the same URI
+  // form as WorkspaceRef.uri. This is the extent of exposure, not a single
+  // resource: a directory listing's scope is the directory, and a recursive
+  // search's scope is its root.
+  string scope = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Resources within scope the tool actually enumerated back to the caller. For
+  // a search this is the hit count, which is the number that matters, since
+  // knowing that four files in a secrets directory matched "password" is a
+  // different disclosure from knowing the directory has four hundred files.
+  uint64 matched = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Resources within scope the tool traversed to produce that answer. Recorded
+  // apart from `matched` because traversal is itself access to a namespace: a
+  // filter that rejected a path still required reading the path's name.
+  uint64 traversed = 4 [features.field_presence = LEGACY_REQUIRED];
+  // True when the tool covered its scope entirely. False when it stopped at a
+  // result limit, a depth limit, or a timeout, so a reviewer never reads a
+  // truncated enumeration as a complete inventory of what was exposed.
+  bool complete = 5 [features.field_presence = LEGACY_REQUIRED];
+  // Claim-check to the enumerated resource identifiers, when they were kept.
+  //
+  // Unset is ordinary and does not weaken the record: the counts and the scope
+  // stand on their own. It is a claim-check rather than a repeated string for
+  // the volume reason above, and being an artifact is also what makes the list
+  // erasable under a deletion request while leaving the audit fact that an
+  // enumeration happened permanently intact.
+  ArtifactRef enumerated = 6;
+}
+
+// ResourceAction is what was done to a namespace, in the terms an access policy
+// is written in.
+//
+// The distinction the taxonomy exists for is between the actions that expose
+// names and the actions that expose or alter content. LIST and SEARCH disclose
+// a namespace. READ discloses content. The mutating actions change it. A policy
+// that cannot separate those cannot express "this agent may find files here but
+// may not open them", which is a rule real deployments have.
+enum ResourceAction {
+  RESOURCE_ACTION_UNSPECIFIED = 0;
+  // Enumerated the names within a scope, without reading contents.
+  RESOURCE_ACTION_LIST = 1;
+  // Matched contents within a scope and returned locations or excerpts. Content
+  // that actually entered the model's context is separately a
+  // ResourceObservation; a search that returned only paths is not.
+  RESOURCE_ACTION_SEARCH = 2;
+  // Read content. Paired with a ResourceObservation carrying the digest.
+  RESOURCE_ACTION_READ = 3;
+  // Created or overwrote content.
+  RESOURCE_ACTION_WRITE = 4;
+  // Modified existing content in place.
+  RESOURCE_ACTION_EDIT = 5;
+  // Removed resources.
+  RESOURCE_ACTION_DELETE = 6;
+  // Moved or renamed resources.
+  RESOURCE_ACTION_RENAME = 7;
+  // Duplicated resources to a new location.
+  RESOURCE_ACTION_COPY = 8;
+  // Changed permissions, ownership, or other metadata without changing content.
+  RESOURCE_ACTION_CHANGE_METADATA = 9;
+  // Executed a resource as a program.
+  RESOURCE_ACTION_EXECUTE = 10;
+}

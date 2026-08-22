@@ -1,0 +1,52 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "trogonai/session/sessions/v1alpha1/digest.proto";
+import "trogonai/session/sessions/v1alpha1/session_ordinal.proto";
+
+// SessionRecovered is the second event in the atomic
+// [SessionStarted, SessionRecovered] creation batch appended to a salvaged
+// session's subject under the NoStream precondition, making salvage creation
+// atomic and exactly-once (ADR#0035 facet 2).
+//
+// It exists as an event rather than only as a maintenance record because a
+// reader folding this stream alone must be able to tell that this session is a
+// copy of a damaged one. A projection is rebuilt from the stream, so provenance
+// that lived only in an operator-side journal would be lost on the next rebuild
+// and the session would then read as an ordinary session with a short history.
+//
+// This is not SessionForked. A fork inherits its source by reference within
+// context_prefix_boundary and depends on the source staying readable; a
+// recovery copies, because the source's readability is the thing that failed.
+// The copied events are this session's own events at this session's own
+// ordinals: source ordinals do not carry over, and source_boundary is
+// provenance, not an index into this stream.
+message SessionRecovered {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string source_session_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  // The last source-stream ordinal the salvage drew from.
+  SessionOrdinal source_boundary = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Digest of the source cut, over the source's stored bytes. Binds this
+  // session to exactly what was read, so a later salvage of the same source can
+  // be told apart from a retry of this one.
+  Digest source_digest = 4 [features.field_presence = LEGACY_REQUIRED];
+  // The salvage operation that produced this session, so the record holding the
+  // enumerated omissions can be found from the session alone.
+  string salvage_key = 5 [features.field_presence = LEGACY_REQUIRED];
+  RecoveryCompleteness completeness = 6 [features.field_presence = LEGACY_REQUIRED];
+  // How many source items could not be carried. The enumeration lives in the
+  // salvage record; the count lives here because a fold of this stream must be
+  // able to conclude the session is incomplete without an operator-side lookup
+  // that may not be available.
+  uint32 omitted_count = 7 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// RecoveryCompleteness is how much of the source this session carries.
+enum RecoveryCompleteness {
+  RECOVERY_COMPLETENESS_UNSPECIFIED = 0;
+  // Every source event decoded and every referenced artifact verified.
+  RECOVERY_COMPLETENESS_COMPLETE = 1;
+  // Items are missing. A reader must not present this session as the original.
+  RECOVERY_COMPLETENESS_PARTIAL = 2;
+}
