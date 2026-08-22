@@ -15,7 +15,8 @@ Session records what was consumed. A billing consumer reads that and settles it.
 The retry state of the second job is the consumer's problem.
 
 Publishing settlement progress back into a session stream would put a downstream
-system's bookkeeping into a log that is never truncated (ADR#0035 facet 7), so a
+system's bookkeeping into a log that is never truncated
+([ADR#0035](../adr/0035-session-store-decider-aggregate.md) facet 7), so a
 transient provider outage would leave permanent noise in the history of every
 session it touched. The ledger is the consumer's own durable state, in its own
 domain, at `proto/trogonai/usage/settlement/v1alpha1/`.

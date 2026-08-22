@@ -31,13 +31,15 @@ that assumption:
    the guard resolves to `NoStream`, and a redelivered creation command starts a
    second history under an identity that already has one.
 
-Neither is hypothetical in the current design. ADR#0035 facet 7 keeps the log
+Neither is hypothetical in the current design.
+[ADR#0035](./0035-session-store-decider-aggregate.md) facet 7 keeps the log
 forever, which rules out purging a session subject as an ordinary operation, but
 the same facet admits cold-storage tiering that evicts already-immutable events
 from the hot stream and restores them on demand. Eviction is the second case
-exactly. Disaster recovery is the first. And [ADR#0013](./0013-origin-stream-sequence-header.md)
-already contemplates a restore path that re-appends archived events into a
-replacement stream, where every sequence is new by construction.
+exactly. Disaster recovery is the first. And
+[ADR#0013](./0013-origin-stream-sequence-header.md) already contemplates a
+restore path that re-appends archived events into a replacement stream, where
+every sequence is new by construction.
 
 The maintenance contract added for schema migration and salvage
 ([Session Maintenance](../architecture/session-maintenance.md)) made the gap
@@ -65,11 +67,12 @@ The [session doctor](../architecture/session-doctor.md) already respects this.
 Every `RepairAction` operates on derived state, and none of them reach the event
 stream.
 
-**This amends ADR#0035's cold-storage tiering bullet.** Eviction from a live
-subject is no longer admissible in any form, because a partially evicted subject
-and a fully evicted one produce the stale-guard and false-`NoStream` failures
-respectively. A deployment that must bound the hot stream rebuilds into a new
-incarnation under rule 2; it does not edit the one it is running on.
+**This amends [ADR#0035](./0035-session-store-decider-aggregate.md)'s
+cold-storage tiering bullet.** Eviction from a live subject is no longer
+admissible in any form, because a partially evicted subject and a fully evicted
+one produce the stale-guard and false-`NoStream` failures respectively. A
+deployment that must bound the hot stream rebuilds into a new incarnation under
+rule 2; it does not edit the one it is running on.
 
 ### 2. An incarnation belongs to the physical stream, never to one session
 
@@ -130,8 +133,9 @@ Everything that names a position from outside the stream already uses ordinals:
 a fork's `context_prefix_boundary`, checkpoint evidence, `ConsistencyToken`,
 `PageCursor`. Those references keep their meaning across a rebuild. Nothing else
 does, which is why sequences stay confined to optimistic concurrency and
-read-side checkpoints, and why ADR#0013 keeps `Trogon-Origin-Stream-Sequence` to
-provenance.
+read-side checkpoints, and why
+[ADR#0013](./0013-origin-stream-sequence-header.md) keeps
+`Trogon-Origin-Stream-Sequence` to provenance.
 
 ### 6. Derived state does not cross an incarnation boundary
 
@@ -252,8 +256,8 @@ stream around it stays put.
 - Anything that caches a resolved subject across a rebuild fails loudly. Writers
   must re-resolve the subject rather than retry the append, because a sealed
   stream rejects retries forever.
-- ADR#0035's cold-storage tiering bullet is amended by rule 1 and is now
-  reachable only as a rebuild.
+- [ADR#0035](./0035-session-store-decider-aggregate.md)'s cold-storage tiering
+  bullet is amended by rule 1 and is now reachable only as a rebuild.
 - `StreamBoundary.incarnation` moves from optional to required, which is a
   presence change inside `v1alpha1` and wire-compatible.
 

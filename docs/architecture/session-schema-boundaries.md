@@ -203,12 +203,13 @@ exists to prevent.
 
 ### Append time is the occurrence time unless the two can differ
 
-**A creation timestamp on `SessionStarted`.** ADR#0035's event-time policy treats
-append time as transport metadata and adds a payload occurrence time only when
-the external occurrence can differ from the append. Platform session creation
-*is* the creation append, so a payload timestamp would be a second field for one
-fact. This reverses if imported or externally created sessions acquire a domain
-occurrence time distinct from when they were appended.
+**A creation timestamp on `SessionStarted`.**
+[ADR#0035](../adr/0035-session-store-decider-aggregate.md)'s event-time policy
+treats append time as transport metadata and adds a payload occurrence time only
+when the external occurrence can differ from the append. Platform session
+creation *is* the creation append, so a payload timestamp would be a second
+field for one fact. This reverses if imported or externally created sessions
+acquire a domain occurrence time distinct from when they were appended.
 
 **A timestamp on every tool result.** The same rule. A locally completed tool
 result occurs at its append. An occurrence time is warranted only for a delayed

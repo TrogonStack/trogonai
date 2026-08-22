@@ -25,8 +25,9 @@ client-visible change, and the read model stops being cheap to rebuild.
 
 So the query types here are defined in their own package and redefine their
 value types locally rather than importing write-side or projection types. That
-is the same rule ADR#0035 facet 3 already applies to the `state`, `projections`,
-and `checkpoints` subtrees, extended one step further out.
+is the same rule [ADR#0035](../adr/0035-session-store-decider-aggregate.md)
+facet 3 already applies to the `state`, `projections`, and `checkpoints`
+subtrees, extended one step further out.
 
 That departure is now on the record rather than on this page.
 [ADR#0060](../adr/0060-session-query-contract-separate-from-projection.md)

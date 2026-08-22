@@ -212,8 +212,9 @@ rather than letting an operator infer loss from a failed read.
 A sibling subtree rather than part of `queries`, and its own error type rather
 than `QueryError`. The doctor is an operator surface with its own audience and
 release cadence; pinning it to the client contract would make every new operator
-diagnostic a client-visible change. That is the reasoning ADR#0035 facet 3
-applies to projection value types, one subtree further out.
+diagnostic a client-visible change. That is the reasoning
+[ADR#0035](../adr/0035-session-store-decider-aggregate.md) facet 3 applies to
+projection value types, one subtree further out.
 
 `FindingKind` is treated as open. A reader meeting an unrecognized kind must
 surface it as an unknown finding rather than drop it, and `kind` sits outside

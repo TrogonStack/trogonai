@@ -66,7 +66,8 @@ rewind, so its ledger entry stays.
 ## Preconditions
 
 Each command declares which concurrency guard its append runs under. All 42 rows
-of ADR#0035's matrix fall into three classes:
+of [ADR#0035](../adr/0035-session-store-decider-aggregate.md)'s matrix fall into
+three classes:
 
 | Class | Count | Meaning |
 | --- | --- | --- |
@@ -86,9 +87,10 @@ instead of a second copy. See [Session Maintenance](./session-maintenance.md).
 `CommandExecution` already falls back to `At(current_position)` whenever the
 stream is non-empty and neither the decider nor the caller declared a
 precondition, so a command gets real optimistic concurrency by leaving
-`WRITE_PRECONDITION` unset. ADR#0035 rejects a trait-level `At(N)` variant
-precisely because a compile-time `const` could only weaken that default, never
-strengthen it.
+`WRITE_PRECONDITION` unset.
+[ADR#0035](../adr/0035-session-store-decider-aggregate.md) rejects a trait-level
+`At(N)` variant precisely because a compile-time `const` could only weaken that
+default, never strengthen it.
 
 `Any` is a claim about commutativity, and it is only honest because the fold
 rules below make ordering irrelevant for those events.
@@ -202,8 +204,9 @@ index within the batch. `Nats-Msg-Id` carries the event id, so a redelivery
 publishes byte-identical ids and collapses in the duplicate window.
 
 The command protos carry no idempotency-key field. Where that key structurally
-lives is an explicitly open question in ADR#0035, and inventing a field here
-would prejudge a decision that has not been made.
+lives is an explicitly open question in
+[ADR#0035](../adr/0035-session-store-decider-aggregate.md), and inventing a
+field here would prejudge a decision that has not been made.
 
 What a caller is told when an append is interrupted, and what a retry is then
 allowed to do, is the other half of this and lives in
@@ -235,8 +238,9 @@ formatted, building, and generating Rust bindings.
 Not shipped: `initial_state`, `evolve`, `decide`, the command handlers,
 projections, snapshots, the query service, and the recovery operator.
 
-The Rust runtime is blocked on three shared-crate obligations that ADR#0035
-raises as requests to the decider platform, not decisions it can make alone:
+The Rust runtime is blocked on three shared-crate obligations that
+[ADR#0035](../adr/0035-session-store-decider-aggregate.md) raises as requests to
+the decider platform, not decisions it can make alone:
 
 1. **Evolve-visible event identity**, on both the native and WASM replay paths.
    `ApplyRedaction` guards that its targeted event ids exist in-session, and that

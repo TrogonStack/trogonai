@@ -59,9 +59,10 @@ price of that choice.
 Two things this depends on do not exist yet. `EventIdentity for SessionEvent` is
 the empty default, so the runtime assigns a fresh UUIDv7 per publish: a retry
 today produces a different id and duplicate detection does nothing at all. And
-the command protos carry no idempotency-key field, because ADR#0035 leaves the
-key's structural home explicitly open. The derivation is documented and
-unimplemented on both ends.
+the command protos carry no idempotency-key field, because
+[ADR#0035](../adr/0035-session-store-decider-aggregate.md) leaves the key's
+structural home explicitly open. The derivation is documented and unimplemented
+on both ends.
 
 ## Resolving a duplicate acknowledgment
 
@@ -80,7 +81,8 @@ happy path, because a duplicate acknowledgment only happens on a retry.
 It is worth being explicit that the store is not the place divergence is caught.
 Reuse of one idempotency key across two different commands derives the same id,
 and duplicate detection keys on identity alone, so the store would discard the
-second command's events and acknowledge success. ADR#0035 catches this earlier:
+second command's events and acknowledge success.
+[ADR#0035](../adr/0035-session-store-decider-aggregate.md) catches this earlier:
 a guarded command re-replays and no-ops on a key the aggregate has already seen,
 so the reuse is refused at decide time and nothing is published.
 `CONFLICT_KIND_IDENTITY_REUSED_WITH_DIFFERENT_CONTENT` reports that refusal, and
@@ -217,10 +219,12 @@ A duplicate acknowledgment is surfaced as an error and its sequence is
 discarded, so the one signal that resolves a lost acknowledgment is thrown away
 at the point it arrives.
 
-The command idempotency key has no structural home, which ADR#0035 leaves open
+The command idempotency key has no structural home, which
+[ADR#0035](../adr/0035-session-store-decider-aggregate.md) leaves open
 deliberately. Until it does, the derivation has no input and the aggregate's
 seen-key horizon has nothing to key on, so both halves of the dedup story are
 waiting on the same decision.
 
-ADR#0035 already says this machinery is a substrate obligation rather than a
-shipped guarantee. This page is what it has to satisfy.
+[ADR#0035](../adr/0035-session-store-decider-aggregate.md) already says this
+machinery is a substrate obligation rather than a shipped guarantee. This page
+is what it has to satisfy.
