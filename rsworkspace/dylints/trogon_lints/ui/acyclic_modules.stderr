@@ -1,0 +1,54 @@
+error: cyclic dependency between sibling modules under `crate`: `payments` -> `server` -> `payments`
+  --> $DIR/acyclic_modules.rs:14:21
+   |
+LL |             let _ = crate::server::auth::verify();
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^ `payments` -> `server`
+...
+LL |             let _ = crate::payments::billing::create_invoice();
+   |                     ---------------------------------------- `server` -> `payments`
+   |
+   = help: move the items `payments` and `server` share into a module they can both depend on, or turn one of the two references around so the dependency flows in one direction
+   = note: if the coupling is deliberate, opt out on `crate` with `#[cfg_attr(dylint_lib = "trogon_lints", expect(acyclic_modules, reason = "..."))]`
+   = note: `#[deny(acyclic_modules)]` on by default
+
+error: cyclic dependency between sibling modules under `imports`: `reader` -> `writer` -> `reader`
+  --> $DIR/acyclic_modules.rs:91:9
+   |
+LL |         use crate::imports::writer::Record;
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `reader` -> `writer`
+...
+LL |         pub fn write(reader: crate::imports::reader::Reader) -> u64 {
+   |                              ------------------------------ `writer` -> `reader`
+   |
+   = help: move the items `reader` and `writer` share into a module they can both depend on, or turn one of the two references around so the dependency flows in one direction
+   = note: if the coupling is deliberate, opt out on `imports` with `#[cfg_attr(dylint_lib = "trogon_lints", expect(acyclic_modules, reason = "..."))]`
+
+error: cyclic dependency between sibling modules under `pipeline`: `ingest` -> `transform` -> `load` -> `ingest`
+  --> $DIR/acyclic_modules.rs:70:21
+   |
+LL |             let _ = crate::pipeline::transform::run();
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `ingest` -> `transform`
+...
+LL |             let _ = crate::pipeline::load::run();
+   |                     -------------------------- `transform` -> `load`
+...
+LL |             crate::pipeline::ingest::run();
+   |             ---------------------------- `load` -> `ingest`
+   |
+   = help: extract the items `ingest`, `transform`, `load` share into a module they can all depend on, so the dependency flows in one direction
+   = note: if the coupling is deliberate, opt out on `pipeline` with `#[cfg_attr(dylint_lib = "trogon_lints", expect(acyclic_modules, reason = "..."))]`
+
+error: cyclic dependency between sibling modules under `shop`: `billing` -> `checkout` -> `billing`
+  --> $DIR/acyclic_modules.rs:59:25
+   |
+LL |             let _ = crate::shop::billing::total();
+   |                     --------------------------- `checkout` -> `billing`
+...
+LL |             let _item = crate::shop::checkout::CartItem { name: "" };
+   |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `billing` -> `checkout`
+   |
+   = help: move the items `billing` and `checkout` share into a module they can both depend on, or turn one of the two references around so the dependency flows in one direction
+   = note: if the coupling is deliberate, opt out on `shop` with `#[cfg_attr(dylint_lib = "trogon_lints", expect(acyclic_modules, reason = "..."))]`
+
+error: aborting due to 4 previous errors
+

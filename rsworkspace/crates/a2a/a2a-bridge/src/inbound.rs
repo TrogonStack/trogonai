@@ -32,7 +32,7 @@ use a2a_nats::{A2aPrefix, A2aTaskId, ReqId};
 use a2a_auth_callout::{CALLER_JWT_HEADER_NAME, CallerJwtHeaderValue, MintedUserJwt};
 
 use crate::auth::AuthCalloutClient;
-use crate::constants::{AGENT_ID_HEADER, INTERNAL_ERROR, JSONRPC_VERSION};
+use crate::constants::{AGENT_ID_HEADER, INTERNAL_ERROR, JSONRPC_VERSION, SSE_EVENT_QUEUE_CAPACITY};
 use crate::error::BridgeError;
 use crate::identity::{BridgeAgentId, BridgeUserJwt, CallerHttpsAuth};
 
@@ -387,31 +387,33 @@ impl TaskJetStreamPort for AsyncNatsTokenTaskJetstream {
             .await
             .map_err(|e| BridgeError::JetStreamConsume(format!("consumer.messages: {e}")))?;
 
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, rx) = tokio::sync::mpsc::channel(SSE_EVENT_QUEUE_CAPACITY);
 
         let handle = tokio::spawn(async move {
             while let Some(item) = messages_stream.next().await {
                 match item {
                     Ok(js_message) => {
-                        // Enqueue BEFORE acking — if the SSE client
-                        // already disconnected the receiver is closed
+                        // Enqueue BEFORE acking — the send waits for the
+                        // reader to make room, so a slow SSE client holds the
+                        // ack back and JetStream keeps the backlog. If the
+                        // client already disconnected the receiver is closed
                         // and we want JetStream to redeliver this event
                         // to the next consumer rather than dropping it.
                         // An event belonging to another subscription to the same task
                         // is acked without being enqueued, so it leaves the stream
                         // without reaching this caller.
                         if event_forwards_to_caller(demux_req_id.as_ref(), js_message.message.headers.as_ref())
-                            && tx.send(Ok(Bytes::clone(&js_message.message.payload))).is_err()
+                            && tx.send(Ok(Bytes::clone(&js_message.message.payload))).await.is_err()
                         {
                             break;
                         }
                         if let Err(ack_err) = js_message.ack().await {
-                            let _ = tx.send(Err(BridgeError::JetStreamConsume(ack_err.to_string())));
+                            let _ = tx.send(Err(BridgeError::JetStreamConsume(ack_err.to_string()))).await;
                             break;
                         }
                     }
                     Err(err) => {
-                        let _ = tx.send(Err(BridgeError::JetStreamConsume(err.to_string())));
+                        let _ = tx.send(Err(BridgeError::JetStreamConsume(err.to_string()))).await;
                         break;
                     }
                 }
@@ -426,7 +428,7 @@ impl TaskJetStreamPort for AsyncNatsTokenTaskJetstream {
 }
 
 struct RxPollStream {
-    rx: tokio::sync::mpsc::UnboundedReceiver<Result<Bytes, BridgeError>>,
+    rx: tokio::sync::mpsc::Receiver<Result<Bytes, BridgeError>>,
     handle: Option<tokio::task::JoinHandle<()>>,
 }
 

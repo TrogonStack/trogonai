@@ -2,6 +2,14 @@
 
 //! ARD-compatible HTTP registry runtime.
 
+#![cfg_attr(
+    dylint_lib = "trogon_lints",
+    expect(
+        acyclic_modules,
+        reason = "`registry_error` names the search request's own failure and the search modules return the registry error, so the pair references each other by construction"
+    )
+)]
+
 pub mod constants;
 pub mod explore_request;
 pub mod extract;

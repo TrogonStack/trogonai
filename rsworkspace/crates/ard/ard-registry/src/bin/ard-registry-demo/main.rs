@@ -10,6 +10,13 @@ use ard_registry::{Registry, RegistryConfig, SourceUrl, router};
 use tokio::net::TcpListener;
 
 #[tokio::main]
+#[cfg_attr(
+    dylint_lib = "trogon_lints",
+    allow(
+        debug_remnants,
+        reason = "the bound address on stdout is this demo's contract with whatever started it and reads the port back"
+    )
+)]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
     let first = args.next();

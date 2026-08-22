@@ -1,3 +1,11 @@
+#![cfg_attr(
+    dylint_lib = "trogon_lints",
+    expect(
+        acyclic_modules,
+        reason = "a compiled bundle holds the programs the compiler produced and the compiler is typed with the handles the bundle hands back"
+    )
+)]
+
 pub mod bundle;
 pub mod compiler;
 pub mod evaluator;

@@ -1,6 +1,20 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
+#![cfg_attr(
+    dylint_lib = "trogon_lints",
+    expect(
+        acyclic_modules,
+        reason = "the type URLs are the generated message types' own constants, so `constants` reads the scheduler module that re-exports those constants back"
+    )
+)]
 
 #[allow(clippy::all)]
+#[cfg_attr(
+    dylint_lib = "trogon_lints",
+    allow(
+        acyclic_modules,
+        reason = "buffa-codegen emits each message's view module beside the message it views, so the generated tree is cyclic by construction and is not edited here"
+    )
+)]
 #[cfg(any(feature = "schedules", feature = "agents", feature = "sessions", feature = "decider"))]
 mod r#gen;
 
