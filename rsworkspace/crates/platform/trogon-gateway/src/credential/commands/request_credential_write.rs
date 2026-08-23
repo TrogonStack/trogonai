@@ -52,7 +52,7 @@ impl Decider for RequestCredentialWrite {
     type DecideError = CredentialDecideError;
     type EvolveError = CredentialEvolveError;
 
-    const WRITE_PRECONDITION: Option<WritePrecondition> = Some(WritePrecondition::NoStream);
+    const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::NoStream;
 
     fn stream_id(&self) -> &Self::StreamId {
         self.credential_id.as_str()
