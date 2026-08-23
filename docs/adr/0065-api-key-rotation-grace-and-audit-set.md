@@ -1,11 +1,11 @@
 ---
-number: "0061"
+number: "0065"
 slug: api-key-rotation-grace-and-audit-set
 status: accepted
 date: 2026-08-15
 ---
 
-# ADR#0061: API Key Rotation Grace and the First-Release Audit Set
+# ADR#0065: API Key Rotation Grace and the First-Release Audit Set
 
 ## Context
 
@@ -129,7 +129,7 @@ persistence work that names them separately.
 
 The one legitimate exception to actor attribution is the bootstrap
 `api_key.created` in
-[ADR#0059](./0059-api-keyspaces-and-root-key-bootstrap.md) section 4, which
+[ADR#0063](./0063-api-keyspaces-and-root-key-bootstrap.md) section 4, which
 has a null actor because no authenticated actor exists at that moment.
 
 ## Consequences
@@ -154,5 +154,5 @@ has a null actor because no authenticated actor exists at that moment.
 - [ADR#0048: One-Time Plaintext Exposure Contract](./0048-one-time-plaintext-exposure.md)
 - [ADR#0050: Signed Proof-of-Possession as the Strongly Recommended Caller Authentication](./0050-signed-first-caller-authentication.md)
 - [ADR#0051: Fully Bound Per-Request Signing Contract](./0051-fully-bound-request-signing.md)
-- [ADR#0059: API Keyspaces and Root Key Bootstrap](./0059-api-keyspaces-and-root-key-bootstrap.md)
-- [ADR#0060: API Key Authorization Model and Rate Limits](./0060-api-key-authorization-model-and-rate-limits.md)
+- [ADR#0063: API Keyspaces and Root Key Bootstrap](./0063-api-keyspaces-and-root-key-bootstrap.md)
+- [ADR#0064: API Key Authorization Model and Rate Limits](./0064-api-key-authorization-model-and-rate-limits.md)

@@ -77,12 +77,12 @@ This distinction is the core rule.
   grant raw secret access.
 - API-key verification returns a domain principal with permissions, roles,
   project, identity, and allowed resource boundaries. There is no separate
-  `scopes` vocabulary; permissions are the only one (ADR#0060).
+  `scopes` vocabulary; permissions are the only one (ADR#0064).
 - Rate limits, permissions, identities, lifecycle state, and audit events are
   part of the API-key domain model, not optional add-ons.
 - OpenBao stores the verifier pepper, but not individual raw Trogonai API
   keys. The pepper is resolved once at process start and never touched on
-  the request path (ADR#0058).
+  the request path (ADR#0062).
 - Signed request keys are the strongly recommended mode for every caller,
   not a high-risk exception; bearer keys are the labeled compatibility tier
   for tooling that cannot sign (ADR#0050).
@@ -191,7 +191,7 @@ for the platform management model and Coinbase for the high-security
 authentication model.
 
 The split is by keyspace policy, not by how important the key feels
-(ADR#0050 section 5, ADR#0059 section 3):
+(ADR#0050 section 5, ADR#0063 section 3):
 
 ```text
 management keyspace
@@ -252,8 +252,8 @@ What not to focus on first:
 - a general-purpose OAuth authorization server;
 - FAPI certification;
 - mandatory mutual TLS for every customer;
-- customer-authored roles (built-in roles only, ADR#0060 section 2);
-- identity-level shared rate limits (ADR#0060 section 6);
+- customer-authored roles (built-in roles only, ADR#0064 section 2);
+- identity-level shared rate limits (ADR#0064 section 6);
 - certificate-based client authentication (JWT request tokens first);
 - exposing OpenBao paths or policies as the product API.
 
@@ -327,7 +327,7 @@ verifier digest + verifier_key_version
 
 verifier pepper
   -> OpenBao KV; resolved once at process start, held in memory,
-     never touched on the request path (ADR#0058 section 3)
+     never touched on the request path (ADR#0062 section 3)
 
 signed key private material
   -> nowhere. The caller holds it; the platform never sees it.
@@ -374,11 +374,11 @@ not have, because each absence answers a question that would otherwise be
 reopened by habit:
 
 - **No `scopes`.** Permissions are the only authorization vocabulary
-  (ADR#0060 section 1). Two grant vocabularies mean every future check has
+  (ADR#0064 section 1). Two grant vocabularies mean every future check has
   to decide which wins when they disagree.
 - **No stored `public_prefix`.** It is the derived display form
   `tg_<env>_<key_id>`, and lookup uses the key id directly, so there is no
-  second minted value that can disagree with the first (ADR#0058 section 1).
+  second minted value that can disagree with the first (ADR#0062 section 1).
 - **No standalone `fingerprint`.** Signed keys fingerprint their public key;
   a bearer key has nothing to fingerprint that is not either the id or the
   digest.
@@ -389,7 +389,7 @@ reopened by habit:
   coarse granularity.
 
 Resource boundaries are a `ResourceScope` rather than a bare list, so the
-empty-list question never has to be answered at runtime (ADR#0060 section 4):
+empty-list question never has to be answered at runtime (ADR#0064 section 4):
 the scope is either the whole project or an explicit non-empty set, and an
 empty set is a validation error rather than a value with two possible
 readings.
@@ -405,7 +405,7 @@ the request ADR#0050 section 2 exists to refuse.
 ## Key Format
 
 The format, its components, and the scanner-facing pattern are fixed in
-ADR#0058 section 1.
+ADR#0062 section 1.
 
 ```text
 tg_<env>_<key_id>_<secret><checksum>
@@ -413,7 +413,7 @@ tg_<env>_<key_id>_<secret><checksum>
 
 Two properties of it matter to the rest of this document. The `<env>`
 segment stays truthful because keyspace environment is immutable
-(ADR#0059 section 2), so a key minted in a test keyspace cannot come to
+(ADR#0063 section 2), so a key minted in a test keyspace cannot come to
 display as live. And the checksum lets SDKs and secret scanners reject
 typos and truncations offline, before anything reaches verification.
 
@@ -622,7 +622,7 @@ gateway.sessions.create
 ```
 
 Roles group permissions. The first milestone ships built-in roles only;
-customers assign them and do not author them (ADR#0060 section 2). The set
+customers assign them and do not author them (ADR#0064 section 2). The set
 and what each one covers is `api_keys/v1/role.proto`.
 
 API keys may have roles and direct permissions:
@@ -655,7 +655,7 @@ passes.
 ## Root And Management Keys
 
 Root and management keys live in the project's `management` keyspace, which
-is signed-only and demands server nonces by policy (ADR#0059 section 3).
+is signed-only and demands server nonces by policy (ADR#0063 section 3).
 The separation is enforced by keyspace policy rather than by convention.
 
 ```text
@@ -675,7 +675,7 @@ Root keys are:
 - rare;
 - environment-specific;
 - permissioned;
-- rotated periodically, on the shorter management grace (ADR#0061 section 2);
+- rotated periodically, on the shorter management grace (ADR#0065 section 2);
 - forbidden from browser/client-side use;
 - audited aggressively;
 - signed-request keys always, not by default.
@@ -684,7 +684,7 @@ Root keys are:
 
 Self-hosted deployments start with no key at all, and creating a key
 requires a key. The bootstrap is a public key supplied as deployment
-configuration (ADR#0059 section 4):
+configuration (ADR#0063 section 4):
 
 ```text
 1. The operator generates a key pair locally with the CLI.
@@ -717,7 +717,7 @@ central promise is that it never holds a caller's private key.
 The policy shape and the enforced subject kinds are
 `api_keys/v1/rate_limit_policy.proto`. The first milestone enforces `key`
 and `project` only; `identity` and `route` are declared and not enforced
-(ADR#0060 section 6).
+(ADR#0064 section 6).
 
 Identity-level shared limits are deferred because they need a counter
 shared across keys, which is the one shape that turns a per-key local
@@ -762,7 +762,7 @@ Apply rate limits to:
 Reroll is planned rotation. Revoke is compromise. Keeping them separate is
 what makes a non-zero grace period safe: nobody has to choose between a
 rotation that will not break their fleet and a containment action that
-takes effect now (ADR#0061).
+takes effect now (ADR#0065).
 
 Rerolling creates a new raw key while preserving the old key's policy. It
 is bearer-only.
@@ -785,7 +785,7 @@ Showing the old key as `rotating` rather than `active` is what makes a
 rotation somebody started and forgot to finish visible in the product
 instead of only in the data.
 
-Grace defaults and the configurable range are ADR#0061 section 2, carried
+Grace defaults and the configurable range are ADR#0065 section 2, carried
 on keyspace policy. Ordinary keyspaces get a default long enough to cover a
 deploy cycle for consumers the platform has no visibility into; management
 keyspaces have few consumers and privileged reach, so they get a much
@@ -902,7 +902,7 @@ Emit metrics and logs for operations, not values:
 - create count;
 - usage by key id or fingerprint if cardinality has been reviewed.
 
-The required first-release audit facts are fixed at seven in ADR#0061
+The required first-release audit facts are fixed at seven in ADR#0065
 section 5 and modelled in `api_keys/audit/v1/audit_fact.proto`. Each is
 either a change of authority or an attack signal. Two of them,
 `api_key.denied` and `api_key.signed_request_replayed`, are the signals the
@@ -1020,7 +1020,7 @@ Use pending-operation limits to prevent accidental or malicious row growth:
 max pending api_key.create operations per project
 max pending api_key.reroll operations per key
 max active root keys per project
-max active public keys per signed key    fixed at 2 (ADR#0061 section 4)
+max active public keys per signed key    fixed at 2 (ADR#0065 section 4)
 ```
 
 ## Open Questions

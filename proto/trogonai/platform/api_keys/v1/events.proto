@@ -13,7 +13,7 @@ import "trogonai/platform/api_keys/v1/api_key_revoked.proto";
 // ApiKeyEvent is the API key aggregate's event stream, keyed by api_key_id.
 //
 // Successful verification is absent on purpose. It is a metric counted by
-// keyspace and result, not an event (ADR#0061 section 6): its volume equals the
+// keyspace and result, not an event (ADR#0065 section 6): its volume equals the
 // platform's authenticated request rate, so recording it here would make this
 // the highest-volume stream on the platform and put the event store's write
 // path in front of every authenticated request. Attribution survives anyway,

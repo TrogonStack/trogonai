@@ -33,7 +33,7 @@ enum AuthenticationMethod {
 // request, not an error.
 //
 // `scopes` is deliberately absent. Permissions are the one authorization
-// vocabulary (ADR#0060 section 1), so nothing downstream has to reconcile two
+// vocabulary (ADR#0064 section 1), so nothing downstream has to reconcile two
 // grants that can disagree.
 message ApiPrincipal {
   string api_key_id = 1 [features.field_presence = LEGACY_REQUIRED];
@@ -51,7 +51,7 @@ message ApiPrincipal {
   repeated string effective_permissions = 8;
   // Retained separately from effective_permissions so an audit can still tell
   // which authority came from a role and which was granted directly
-  // (ADR#0060 section 3).
+  // (ADR#0064 section 3).
   repeated string direct_permissions = 9;
 
   trogonai.platform.api_keys.v1.ResourceScope allowed_vaults = 10;
@@ -68,7 +68,7 @@ message ApiPrincipal {
 // tier-1 checks. In the first milestone the check is evaluated in process
 // against ApiPrincipal.effective_permissions and the resource scopes, because
 // roles are a closed platform-defined set and an in-process check over a closed
-// set needs no relationship database (ADR#0060 section 2).
+// set needs no relationship database (ADR#0064 section 2).
 //
 // Matching the tuple shape now means the evaluator can move behind SpiceDB
 // later without changing this contract or any call site. The thing that would

@@ -1,11 +1,11 @@
 ---
-number: "0059"
+number: "0063"
 slug: api-keyspaces-and-root-key-bootstrap
 status: accepted
 date: 2026-08-15
 ---
 
-# ADR#0059: API Keyspaces and Root Key Bootstrap
+# ADR#0063: API Keyspaces and Root Key Bootstrap
 
 ## Context
 
@@ -62,12 +62,12 @@ server_nonce         optional | required
 max_token_lifetime   <= 2 minutes (the ADR#0051 ceiling)
 default_key_expiry
 max_active_keys
-reroll_grace         (ADR#0061)
+reroll_grace         (ADR#0065)
 ```
 
 Environment immutability is load-bearing rather than incidental: it is
 what lets the wire-format environment marker in
-[ADR#0058](./0058-api-key-format-and-verifier-construction.md) be a
+[ADR#0062](./0062-api-key-format-and-verifier-construction.md) be a
 rendering of the keyspace attribute instead of a denormalized copy that
 can drift. Moving a keyspace between environments is not an operation;
 creating a new keyspace is.
@@ -105,7 +105,7 @@ somewhere to put its first key at the moment it exists.
 ```
 
 - Registration is idempotent by public-key fingerprint (the `sha256:` SPKI
-  fingerprint from ADR#0058 section 4), so re-applying the same
+  fingerprint from ADR#0062 section 4), so re-applying the same
   configuration is a no-op and the flow is safe under a declarative apply.
 - If a root key already exists under a different fingerprint, first boot
   does not replace it. Adding a second root key is an explicit operation,
@@ -168,5 +168,5 @@ central promise is that it never holds a caller's private key.
 - [ADR#0050: Signed Proof-of-Possession as the Strongly Recommended Caller Authentication](./0050-signed-first-caller-authentication.md)
 - [ADR#0051: Fully Bound Per-Request Signing Contract](./0051-fully-bound-request-signing.md)
 - [ADR#0053: External OIDC Federation Surface for Agent Identity](./0053-external-oidc-federation-surface.md)
-- [ADR#0058: API Key Format and Bearer Verifier Construction](./0058-api-key-format-and-verifier-construction.md)
-- [ADR#0061: API Key Rotation Grace and the First-Release Audit Set](./0061-api-key-rotation-grace-and-audit-set.md)
+- [ADR#0062: API Key Format and Bearer Verifier Construction](./0062-api-key-format-and-verifier-construction.md)
+- [ADR#0065: API Key Rotation Grace and the First-Release Audit Set](./0065-api-key-rotation-grace-and-audit-set.md)

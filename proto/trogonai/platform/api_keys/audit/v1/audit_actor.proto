@@ -7,7 +7,7 @@ package trogonai.platform.api_keys.audit.v1;
 // The oneof exists so the unattributed case is a named state rather than an
 // empty string. Exactly one create on the platform has no actor: the self-hosted
 // bootstrap registration, which happens before any authenticated actor exists
-// (ADR#0059 section 4). Recording that as Unattributed is honest; inventing a
+// (ADR#0063 section 4). Recording that as Unattributed is honest; inventing a
 // synthetic "system" actor would make the audit log claim an authentication
 // that never happened, and would make the one genuinely unattributed action
 // indistinguishable from a service account.
@@ -35,7 +35,7 @@ message AuditActor {
   }
 
   // The operator CLI with direct store access, runnable only on a platform
-  // host (ADR#0059 section 6). Separated from HumanSessionActor because a
+  // host (ADR#0063 section 6). Separated from HumanSessionActor because a
   // break-glass action bypassed the normal authorization path and an auditor
   // must be able to find every such action without inferring it.
   message BreakGlassActor {

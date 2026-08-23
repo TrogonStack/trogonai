@@ -10,7 +10,7 @@ import "google/protobuf/timestamp.proto";
 // revoked: a rotation somebody started and forgot to finish shows in the
 // product as `rotating` with an expiry rather than as `active`, so the second
 // live key is visible where operators look instead of only in the data
-// (ADR#0061 section 3).
+// (ADR#0065 section 3).
 message ApiKeyRerolled {
   string successor_api_key_id = 1 [features.field_presence = LEGACY_REQUIRED];
   // Absolute rather than a duration, so the deadline does not shift if the

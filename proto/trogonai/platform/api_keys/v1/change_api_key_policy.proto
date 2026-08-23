@@ -10,12 +10,12 @@ import "trogonai/platform/api_keys/v1/rate_limit_policy.proto";
 //
 // Permissions and rate limits move together because there is one endpoint that
 // changes them; splitting them into separate commands would fragment one
-// operator action across events that always co-occur (ADR#0061 section 7).
+// operator action across events that always co-occur (ADR#0065 section 7).
 //
 // The delegation ceiling is checked here, not documented here: the resulting
 // effective permissions must be a subset of the acting principal's, and the
 // resulting resource scope must be contained in the acting principal's
-// (ADR#0060 section 5). Root keys are not exempt; a root key's ceiling is the
+// (ADR#0064 section 5). Root keys are not exempt; a root key's ceiling is the
 // whole project, so the same check runs and passes.
 message ChangeApiKeyPolicy {
   string api_key_id = 1 [features.field_presence = LEGACY_REQUIRED];

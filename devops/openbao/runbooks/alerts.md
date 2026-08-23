@@ -8,7 +8,7 @@ defines them, and wiring them into a monitoring backend is separate work.
 Two of those three, suspicious API-key verification failures and
 signed-request replay attempts, now have a specified source rather than an
 open question: `api_key.denied` and `api_key.signed_request_replayed` in
-[ADR#0061](../../../docs/adr/0061-api-key-rotation-grace-and-audit-set.md)
+[ADR#0065](../../../docs/adr/0065-api-key-rotation-grace-and-audit-set.md)
 section 5. They remain unfirable because the API key platform is unbuilt,
 which is a different problem from not knowing what to fire on. The third,
 orphan cleanup backlog, still has neither.
@@ -206,7 +206,7 @@ apart without carrying the key itself.
 
 **Signal source, now specified:** `api_key.denied`, one of the seven required
 first-release audit facts in
-[ADR#0061](../../../docs/adr/0061-api-key-rotation-grace-and-audit-set.md)
+[ADR#0065](../../../docs/adr/0065-api-key-rotation-grace-and-audit-set.md)
 section 5. It lands with build item 6i in CREDENTIAL_PLATFORM_SPEC.md.
 
 The label restriction and the clustering question resolve across two
@@ -233,7 +233,7 @@ bug, and collapsing them makes the alert unactionable.
 
 **Signal source, now specified:** `api_key.signed_request_replayed`, a
 distinct audit fact from `api_key.denied` in
-[ADR#0061](../../../docs/adr/0061-api-key-rotation-grace-and-audit-set.md)
+[ADR#0065](../../../docs/adr/0065-api-key-rotation-grace-and-audit-set.md)
 section 5, which is exactly the separation this alert asks for: a spent
 `jti` produces the replay fact, every other rejection produces the denial
 fact. It lands with build item 6i, and the replay store it reads from is

@@ -6,7 +6,7 @@ package trogonai.platform.api_keyspaces.v1;
 // hierarchy (ADR#0046 section 4).
 //
 // It is immutable after creation, which is what lets the wire-format
-// environment marker in an issued key (ADR#0058 section 1) be a rendering of
+// environment marker in an issued key (ADR#0062 section 1) be a rendering of
 // this attribute rather than a denormalized copy that can drift. Moving a
 // keyspace between environments is not an operation; creating a new keyspace
 // is. That immutability is enforced structurally: this field appears on

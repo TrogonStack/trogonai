@@ -57,7 +57,7 @@ message SignedRequestTarget {
 // (ADR#0051 section 1).
 message SignedRequest {
   // The same ApiKeyId the bearer tier uses, carried as the token's kid
-  // (ADR#0058 section 4), so key lookup is one code path across both tiers.
+  // (ADR#0062 section 4), so key lookup is one code path across both tiers.
   string api_key_id = 1 [features.field_presence = LEGACY_REQUIRED];
   // Which of the at-most-two active public keys signed this. Sent rather than
   // inferred by trying each: during a rotation window both keys verify, and

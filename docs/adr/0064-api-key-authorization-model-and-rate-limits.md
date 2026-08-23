@@ -1,11 +1,11 @@
 ---
-number: "0060"
+number: "0064"
 slug: api-key-authorization-model-and-rate-limits
 status: accepted
 date: 2026-08-15
 ---
 
-# ADR#0060: API Key Authorization Model and Rate Limits
+# ADR#0064: API Key Authorization Model and Rate Limits
 
 ## Context
 
@@ -180,4 +180,4 @@ the management keyspace.
 - [ADR#0047: Event Stream as the Credential Metadata Source of Truth](./0047-event-sourced-credential-metadata.md)
 - [ADR#0050: Signed Proof-of-Possession as the Strongly Recommended Caller Authentication](./0050-signed-first-caller-authentication.md)
 - [ADR#0051: Fully Bound Per-Request Signing Contract](./0051-fully-bound-request-signing.md)
-- [ADR#0059: API Keyspaces and Root Key Bootstrap](./0059-api-keyspaces-and-root-key-bootstrap.md)
+- [ADR#0063: API Keyspaces and Root Key Bootstrap](./0063-api-keyspaces-and-root-key-bootstrap.md)

@@ -1,11 +1,11 @@
 ---
-number: "0057"
+number: "0061"
 slug: credential-platform-extraction-boundary
 status: proposed
 date: 2026-08-15
 ---
 
-# ADR#0057: Credential Platform Extraction Boundary
+# ADR#0061: Credential Platform Extraction Boundary
 
 ## Context
 

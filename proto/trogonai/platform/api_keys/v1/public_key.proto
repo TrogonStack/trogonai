@@ -15,7 +15,7 @@ import "trogonai/platform/api_keyspaces/v1/signing_algorithm.proto";
 // logged, dumped, or subpoenaed.
 message PublicKey {
   // SHA-256 over the SPKI DER encoding, base64url, displayed with a "sha256:"
-  // prefix (ADR#0058 section 4). This is the value the self-hosted bootstrap
+  // prefix (ADR#0062 section 4). This is the value the self-hosted bootstrap
   // and the rotation flow match on, which is what makes re-applying the same
   // deployment configuration a no-op rather than a second registration.
   string fingerprint = 1 [features.field_presence = LEGACY_REQUIRED];

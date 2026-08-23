@@ -3,7 +3,7 @@ edition = "2024";
 package trogonai.platform.api_keys.v1;
 
 // Role is a platform-defined bundle of permissions. Customers assign roles;
-// they do not author them (ADR#0060 section 2).
+// they do not author them (ADR#0064 section 2).
 //
 // Customer-defined roles are deferred, not rejected. They need a
 // role-management surface, a delegation story for role authorship itself, and

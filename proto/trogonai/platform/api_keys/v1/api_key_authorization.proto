@@ -7,7 +7,7 @@ import "trogonai/platform/api_keys/v1/role.proto";
 
 // ApiKeyAuthorization is the whole authority of a key.
 //
-// One vocabulary: permissions (ADR#0060 section 1). The `scopes` field an
+// One vocabulary: permissions (ADR#0064 section 1). The `scopes` field an
 // earlier draft carried alongside `roles` is gone, because two grant vocabularies
 // mean every future check has to decide which one wins and what happens when
 // they disagree.
@@ -23,7 +23,7 @@ import "trogonai/platform/api_keys/v1/role.proto";
 message ApiKeyAuthorization {
   repeated Role roles = 1;
   // The escape hatch for the case a built-in role does not fit. Bounded by the
-  // delegation ceiling (ADR#0060 section 5) and surfaced in the UI as a
+  // delegation ceiling (ADR#0064 section 5) and surfaced in the UI as a
   // distinct badge, never folded into the role display, so a key carrying one
   // is visible to whoever audits it later.
   repeated string direct_permissions = 2;

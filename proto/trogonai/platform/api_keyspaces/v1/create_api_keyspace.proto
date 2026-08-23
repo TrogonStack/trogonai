@@ -7,7 +7,7 @@ import "trogonai/platform/api_keyspaces/v1/api_keyspace_tier.proto";
 import "trogonai/platform/api_keyspaces/v1/environment.proto";
 
 // CreateApiKeyspace opens a project-anchored policy boundary
-// (ADR#0059 section 1).
+// (ADR#0063 section 1).
 //
 // Every project gets a management and a standard keyspace at project creation,
 // neither authored by the user; this command also serves the additional

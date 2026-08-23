@@ -22,7 +22,7 @@ message ApiKeyManagementIdempotencyRecord {
 // ApiKeyCommandResponse is the replayable half of a management response.
 //
 // A bearer create returns the plaintext key exactly once and it is stored
-// nowhere, including here (ADR#0048, ADR#0058 section 3). So a replayed create
+// nowhere, including here (ADR#0048, ADR#0062 section 3). So a replayed create
 // returns this record without the secret, and that asymmetry is the design
 // rather than a gap: the alternative is an idempotency ledger that reissues
 // plaintext to anyone who can replay a request id, which would turn a retry

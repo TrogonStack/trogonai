@@ -20,14 +20,14 @@ enum AuditResult {
 
 // ApiKeyAuditFact is one entry in the audit trail.
 //
-// Audit facts are a distinct concept from domain events (ADR#0061 section 8).
+// Audit facts are a distinct concept from domain events (ADR#0065 section 8).
 // The aggregate's events describe how the key changed; these describe what
 // somebody did and whether it worked, including the attempts that changed
 // nothing. api_key.denied and api_key.signed_request_replayed exist only here,
 // because a rejected request is not a state transition.
 //
 // Successful verification is absent. It is a metric counted by keyspace and
-// result (ADR#0061 section 6): as an audit fact its volume would equal the
+// result (ADR#0065 section 6): as an audit fact its volume would equal the
 // platform's authenticated request rate, making audit retention a request-path
 // cost. Attribution survives through event provenance (ADR#0039).
 //
@@ -66,7 +66,7 @@ message ApiKeyAuditFact {
 message ApiKeyCreated {
   string display_name = 1 [features.field_presence = LEGACY_REQUIRED];
   // The public display form tg_{env}_{key_id}, which is derived rather than
-  // separately minted (ADR#0058 section 1). Safe to record: it is the half of
+  // separately minted (ADR#0062 section 1). Safe to record: it is the half of
   // the key format that carries no secret.
   string public_prefix = 2 [features.field_presence = LEGACY_REQUIRED];
   trogonai.platform.api_keys.v1.ApiKeyAuthorization authorization = 3 [features.field_presence = LEGACY_REQUIRED];
@@ -99,7 +99,7 @@ message ApiKeyPublicKeyRevoked {
 }
 
 // A distinct fact from ApiKeyDenied, not a denial reason folded into it
-// (ADR#0061 section 5). A spent jti is an attack signal and everything else is
+// (ADR#0065 section 5). A spent jti is an attack signal and everything else is
 // usually a client bug; the replay alert reads this type and nothing else, so
 // it cannot be diluted by malformed-signature noise.
 message ApiKeySignedRequestReplayed {

@@ -21,11 +21,11 @@ message CreateApiKey {
   string api_keyspace_id = 2 [features.field_presence = LEGACY_REQUIRED];
   // Denormalized from the keyspace. Safe because a keyspace never moves between
   // projects, and required because every audit fact carries a project id
-  // (ADR#0061 section 8) and audit must not depend on a second lookup that can
+  // (ADR#0065 section 8) and audit must not depend on a second lookup that can
   // fail.
   string project_id = 3 [features.field_presence = LEGACY_REQUIRED];
   // Keys are not registry handles, so they carry id and display_name rather
-  // than a bare name (ADR#0040, ADR#0059 section 1).
+  // than a bare name (ADR#0040, ADR#0063 section 1).
   string display_name = 4 [features.field_presence = LEGACY_REQUIRED];
 
   oneof credential {

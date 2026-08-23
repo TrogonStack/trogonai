@@ -10,7 +10,7 @@ package trogonai.platform.api_keys.v1;
 // Retiring the identity is what RevokeApiKey is for.
 message RevokeApiKeyPublicKey {
   string api_key_id = 1 [features.field_presence = LEGACY_REQUIRED];
-  // The "sha256:"-prefixed fingerprint from ADR#0058 section 4, not the key
+  // The "sha256:"-prefixed fingerprint from ADR#0062 section 4, not the key
   // bytes. Callers identify a key to retire by the value the UI and the CLI
   // both display.
   string fingerprint = 2 [features.field_presence = LEGACY_REQUIRED];

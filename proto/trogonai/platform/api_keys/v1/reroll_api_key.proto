@@ -5,7 +5,7 @@ package trogonai.platform.api_keys.v1;
 import "google/protobuf/duration.proto";
 
 // RerollApiKey is planned rotation. Revocation is the compromise path and has
-// no window at all (ADR#0061 section 1).
+// no window at all (ADR#0065 section 1).
 //
 // Keeping the two apart is what makes a non-zero default grace defensible.
 // Nobody has to choose between a rotation that will not break their fleet and
@@ -19,7 +19,7 @@ import "google/protobuf/duration.proto";
 // must be created first, so a crash between the two leaves an orphaned new key
 // rather than a predecessor pointing at a key that does not exist.
 //
-// Bearer-only. Signed keys rotate by public-key swap (ADR#0061 section 4), and
+// Bearer-only. Signed keys rotate by public-key swap (ADR#0065 section 4), and
 // routing a signed key here is a decide-time error rather than a second
 // rotation mechanism nobody maintains.
 message RerollApiKey {

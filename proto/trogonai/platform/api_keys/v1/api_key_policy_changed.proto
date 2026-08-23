@@ -9,7 +9,7 @@ import "trogonai/platform/api_keys/v1/rate_limit_policy.proto";
 // ApiKeyPolicyChanged carries the before and after of one policy patch.
 //
 // This is the merge of what an earlier draft split into permission_added,
-// permission_removed, and rate_limit_changed (ADR#0061 section 7). Three event
+// permission_removed, and rate_limit_changed (ADR#0065 section 7). Three event
 // types for one endpoint would mean a reader has to collect all three and
 // assume they co-occurred to reconstruct a single operator action.
 //

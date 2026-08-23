@@ -19,7 +19,7 @@ enum DenialReason {
   DENIAL_REASON_UNSPECIFIED = 0;
 
   // Rejected before any lookup: bad shape, or the CRC32C checksum in the key
-  // format did not match (ADR#0058 section 1).
+  // format did not match (ADR#0062 section 1).
   DENIAL_REASON_MALFORMED_CREDENTIAL = 1;
   DENIAL_REASON_UNKNOWN_KEY = 2;
   DENIAL_REASON_KEY_REVOKED = 3;
@@ -60,7 +60,7 @@ enum DenialReason {
   DENIAL_REASON_PERMISSION_DENIED = 19;
   // Authenticated and permitted, but the resource is outside the key's scope.
   DENIAL_REASON_RESOURCE_SCOPE_DENIED = 20;
-  // Would have exceeded the delegation ceiling (ADR#0060 section 5).
+  // Would have exceeded the delegation ceiling (ADR#0064 section 5).
   DENIAL_REASON_DELEGATION_CEILING_EXCEEDED = 21;
 
   DENIAL_REASON_RATE_LIMITED = 22;

@@ -8,7 +8,7 @@ import "trogonai/platform/api_keys/v1/role.proto";
 // ApiKeyListStatus is what the console shows for a key.
 //
 // ROTATING is a first-class status rather than a decoration on ACTIVE
-// (ADR#0061 section 3). A rotation somebody started and forgot to finish is
+// (ADR#0065 section 3). A rotation somebody started and forgot to finish is
 // then a visible product state instead of a second live key that looks normal
 // in the list, which is the failure this status exists to prevent.
 enum ApiKeyListStatus {
@@ -27,7 +27,7 @@ enum ApiKeyListStatus {
 //
 // last_used_at is deliberately absent. It is the field every key list
 // eventually grows, and it would put a write on the authenticated request path
-// for exactly the reason ADR#0061 section 6 keeps api_key.verified out of the
+// for exactly the reason ADR#0065 section 6 keeps api_key.verified out of the
 // audit trail. If it is wanted later it should be derived from the verification
 // metric at a coarse granularity, not written per request.
 message ApiKeySummary {
@@ -41,7 +41,7 @@ message ApiKeySummary {
   ApiKeyListStatus status = 6;
   repeated trogonai.platform.api_keys.v1.Role roles = 7;
   // Rendered as a distinct badge, never folded into the role display
-  // (ADR#0060 section 3). A boolean rather than the permission list because the
+  // (ADR#0064 section 3). A boolean rather than the permission list because the
   // list view's job is to make a key worth a second look identifiable at a
   // glance; the detail view carries the permissions themselves.
   bool has_direct_permissions = 8;

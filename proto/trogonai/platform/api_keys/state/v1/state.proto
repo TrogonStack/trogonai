@@ -51,7 +51,7 @@ message ApiKeyCredential {
 
 message SignedCredential {
   // One or two entries. Two is the rotation window; the cap is what keeps it a
-  // window rather than a growing set (ADR#0061 section 4). Never zero on a live
+  // window rather than a growing set (ADR#0065 section 4). Never zero on a live
   // key, which is why revoking the last public key is refused.
   repeated trogonai.platform.api_keys.v1.PublicKey active_public_keys = 1;
 }

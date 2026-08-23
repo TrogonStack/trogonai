@@ -1,11 +1,11 @@
 ---
-number: "0058"
+number: "0062"
 slug: api-key-format-and-verifier-construction
 status: accepted
 date: 2026-08-15
 ---
 
-# ADR#0058: API Key Format and Bearer Verifier Construction
+# ADR#0062: API Key Format and Bearer Verifier Construction
 
 ## Context
 
@@ -53,7 +53,7 @@ tg_<env>_<key_id>_<secret><checksum>
   section 4, so this marker is a rendering of the keyspace attribute and
   not a second source of truth. It stays consistent because keyspace
   environment is immutable after creation
-  ([ADR#0059](./0059-api-keyspaces-and-root-key-bootstrap.md)).
+  ([ADR#0063](./0063-api-keyspaces-and-root-key-bootstrap.md)).
 - `<key_id>` is the `ApiKeyId` itself: ULID-shaped, Crockford base32,
   26 characters, lowercased. Lookup is therefore a primary-key read rather
   than a scan on a secondary token. `public_prefix` in the API_KEY.md data
@@ -109,7 +109,7 @@ rotate a pepper the platform cannot re-derive digests without.
 
 The pepper is stored in OpenBao KV and resolved once at process start by
 the verifying service, through the secrets service as an opaque ref per
-[ADR#0057](./0057-credential-platform-extraction-boundary.md), not by the
+[ADR#0061](./0061-credential-platform-extraction-boundary.md), not by the
 verifier holding an OpenBao client of its own. It is held in memory for the
 process lifetime.
 
@@ -142,7 +142,7 @@ A signed key has no wire-format secret, so it has no `<secret>` or
 `public_key_fingerprint` is SHA-256 over the SPKI DER encoding, base64url,
 displayed with a `sha256:` prefix. It is the value the bootstrap and
 rotation flows in
-[ADR#0059](./0059-api-keyspaces-and-root-key-bootstrap.md) match on.
+[ADR#0063](./0063-api-keyspaces-and-root-key-bootstrap.md) match on.
 
 ## Consequences
 
@@ -170,7 +170,7 @@ rotation flows in
 - [ADR#0048: One-Time Plaintext Exposure Contract](./0048-one-time-plaintext-exposure.md)
 - [ADR#0050: Signed Proof-of-Possession as the Strongly Recommended Caller Authentication](./0050-signed-first-caller-authentication.md)
 - [ADR#0051: Fully Bound Per-Request Signing Contract](./0051-fully-bound-request-signing.md)
-- [ADR#0057: Credential Platform Extraction Boundary](./0057-credential-platform-extraction-boundary.md)
-- [ADR#0059: API Keyspaces and Root Key Bootstrap](./0059-api-keyspaces-and-root-key-bootstrap.md)
+- [ADR#0061: Credential Platform Extraction Boundary](./0061-credential-platform-extraction-boundary.md)
+- [ADR#0063: API Keyspaces and Root Key Bootstrap](./0063-api-keyspaces-and-root-key-bootstrap.md)
 - RFC 2104 (HMAC-SHA-256); RFC 9106 (Argon2, the password-hashing family
   this rejects for full-width random secrets)

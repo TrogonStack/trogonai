@@ -11,7 +11,7 @@ import "trogonai/platform/api_keys/admission/v1/denial_reason.proto";
 // There is no request message here on purpose. A presented bearer key is a raw
 // secret, and a proto field would hand it a generated Debug implementation that
 // prints it, defeating the structural redaction the platform relies on
-// (ADR#0058 section 3). The presented credential is an in-process value wrapped
+// (ADR#0062 section 3). The presented credential is an in-process value wrapped
 // in SecretString, verified at the edge by the first service that accepts the
 // request, and it never crosses a service boundary in any encoding. What
 // crosses is this outcome.

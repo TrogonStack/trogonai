@@ -7,7 +7,7 @@ import "google/protobuf/duration.proto";
 // RateLimitSubjectKind names what a limit counts against.
 //
 // IDENTITY and ROUTE are declared and not enforced in the first milestone
-// (ADR#0060 section 6). They are declared anyway so adding them later is a
+// (ADR#0064 section 6). They are declared anyway so adding them later is a
 // policy row rather than a schema migration, and stating the gap here keeps the
 // enum from implying coverage the limiter does not have.
 enum RateLimitSubjectKind {
@@ -24,7 +24,7 @@ enum RateLimitSubjectKind {
 }
 
 // RateLimitPolicy is a fixed window counted in NATS KV with revision-checked
-// updates (ADR#0060 section 7), alongside the replay store.
+// updates (ADR#0064 section 7), alongside the replay store.
 //
 // The ceiling is known rather than discovered later: compare-and-set on a
 // per-key record bounds write throughput per key, so this limiter is coarse.

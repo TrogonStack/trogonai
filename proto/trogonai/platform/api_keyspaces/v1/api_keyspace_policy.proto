@@ -22,7 +22,7 @@ enum ServerNonce {
   SERVER_NONCE_REQUIRED = 2;
 }
 
-// ApiKeyspacePolicy is the mutable half of a keyspace (ADR#0059 section 2).
+// ApiKeyspacePolicy is the mutable half of a keyspace (ADR#0063 section 2).
 //
 // Everything immutable after creation (environment, tier) is deliberately
 // absent, so the update command cannot express a change the design forbids.
@@ -44,11 +44,11 @@ message ApiKeyspacePolicy {
   // it does not revoke keys that are already live.
   uint32 max_active_keys = 6;
   // Window during which a rerolled key's predecessor still verifies
-  // (ADR#0061 section 2). Defaults to 24 hours, 1 hour on management
+  // (ADR#0065 section 2). Defaults to 24 hours, 1 hour on management
   // keyspaces, configurable from 0 to 7 days. A zero duration is legal and
   // means the old key stops verifying the moment the new one is issued.
   //
   // Bearer-only. Signed keys rotate by public-key swap and never consult this
-  // (ADR#0061 section 4).
+  // (ADR#0065 section 4).
   google.protobuf.Duration reroll_grace = 7;
 }

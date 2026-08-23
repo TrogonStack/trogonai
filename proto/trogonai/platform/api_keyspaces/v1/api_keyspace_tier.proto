@@ -8,8 +8,8 @@ package trogonai.platform.api_keyspaces.v1;
 // Three decisions branch on this and none of them can safely branch on the
 // keyspace name: users may create their own keyspaces, so matching the literal
 // string "management" would let a user mint a keyspace that inherits
-// privileged defaults. The branches are the shorter reroll grace (ADR#0061
-// section 2), fail-closed rate limiting (ADR#0060 section 8), and required
+// privileged defaults. The branches are the shorter reroll grace (ADR#0065
+// section 2), fail-closed rate limiting (ADR#0064 section 8), and required
 // server nonces (ADR#0051 section 3).
 //
 // Immutable after creation, for the same reason as Environment.

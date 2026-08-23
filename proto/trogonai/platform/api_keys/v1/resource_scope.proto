@@ -3,7 +3,7 @@ edition = "2024";
 package trogonai.platform.api_keys.v1;
 
 // ResourceScope narrows where a permission applies. It never grants
-// (ADR#0060 section 4).
+// (ADR#0064 section 4).
 //
 // A request must pass both the permission check and every applicable scope
 // check. Scope is ANDed with permissions, so widening a scope can never add an
