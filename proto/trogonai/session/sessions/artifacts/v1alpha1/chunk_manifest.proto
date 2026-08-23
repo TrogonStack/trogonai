@@ -1,0 +1,34 @@
+edition = "2024";
+
+package trogonai.session.sessions.artifacts.v1alpha1;
+
+// GetChunkManifestRequest asks for the per-chunk digests that make ranges of an
+// artifact checkable.
+message GetChunkManifestRequest {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string artifact_id = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// GetChunkManifestResponse carries the ordered chunk digests.
+//
+// The manifest comes from the artifact store, so on its own it proves nothing:
+// a store serving wrong bytes can serve a manifest that agrees with them. It
+// becomes evidence only when the caller hashes it and compares the result
+// against the manifest digest recorded on the event log, which the store did
+// not supply. A caller that skips that comparison has verified nothing and
+// should say so rather than report a verified read.
+message GetChunkManifestResponse {
+  string artifact_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Hash used for each chunk digest and for the digest over their
+  // concatenation, for example "sha256".
+  string algorithm = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Size of every chunk but the last, which holds the remainder.
+  uint64 chunk_size_bytes = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Total size of the artifact, so a caller can tell a complete manifest from a
+  // truncated one before trusting any chunk in it.
+  uint64 size_bytes = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Raw chunk digests in artifact order, one per chunk. The algorithm is on the
+  // envelope because every entry uses the same one, and a per-entry algorithm
+  // would be a per-entry opportunity for them to disagree.
+  repeated bytes chunk_digests = 5;
+}

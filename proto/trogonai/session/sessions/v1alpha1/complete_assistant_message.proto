@@ -1,0 +1,21 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "trogonai/session/sessions/v1alpha1/assistant_message_completed.proto";
+import "trogonai/session/sessions/v1alpha1/message.proto";
+
+// CompleteAssistantMessage settles an assistant turn normally, recording
+// [AssistantMessageCompleted].
+//
+// Write precondition Any: per message_id this competes with
+// FailAssistantMessage under first-terminal-outcome-wins, so ordering between
+// them is decided by the fold rather than by a write guard.
+message CompleteAssistantMessage {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  CanonicalMessage message = 2 [features.field_presence = LEGACY_REQUIRED];
+  FinishReason finish_reason = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Set only when finish_reason is FINISH_REASON_STOP_SEQUENCE.
+  string matched_stop_sequence = 4;
+  string turn_id = 5 [features.field_presence = LEGACY_REQUIRED];
+}

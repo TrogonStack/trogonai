@@ -1,0 +1,142 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "trogonai/session/sessions/v1alpha1/artifact.proto";
+
+// CommandOutputReplayRef is a claim-check to the captured output of a
+// process-executing tool call, plus the small set of facts a reader needs
+// before it is allowed to render any of it.
+//
+// The output itself is an artifact: one immutable, content-addressed blob of
+// framed stdout and stderr, referenced from the terminal event rather than
+// appended to the log as an event per chunk. A long command emits millions of
+// writes, and a log that records them is a log whose size is set by the noisiest
+// thing that ever ran on it, permanently, because nothing ever leaves the log
+// (ADR#0035 facet 7).
+//
+// It lives on ToolCallCompleted, next to CommandTermination and for the same
+// reason (D11): it is the execution and audit record, not the transcript the
+// model received. The model saw ToolCallResult, which is usually a truncation
+// or a summary. Putting raw captured output into the replay shape would feed a
+// later turn context the original turn never had.
+//
+// Every field here is on the log rather than only inside the artifact, because
+// the artifact's bytes may be erased (ArtifactErased) while the log keeps its
+// provenance. After erasure a reader can still say the command produced 2.1
+// million frames and 40 MB and was captured through a terminal, which is the
+// point of separating byte lifecycle from log retention.
+message CommandOutputReplayRef {
+  // Claim-check to the framed capture. Its `preview` conventionally holds the
+  // tail of the output, which is the part someone reading a command log wants
+  // first.
+  ArtifactRef artifact = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Version of the byte layout inside the artifact, as defined by
+  // trogonai.session.sessions.replay.v1alpha1.
+  //
+  // Carried as a number and not read out of the artifact's media type, because
+  // a reader deciding whether it can parse these frames should not be doing
+  // string surgery on a MIME parameter to find out.
+  uint32 format_version = 2 [features.field_presence = LEGACY_REQUIRED];
+  CaptureMode capture_mode = 3 [features.field_presence = LEGACY_REQUIRED];
+  TimingFidelity timing = 4 [features.field_presence = LEGACY_REQUIRED];
+  ReplayCompleteness completeness = 5 [features.field_presence = LEGACY_REQUIRED];
+  // Frames in the capture.
+  uint64 frame_count = 6 [features.field_presence = LEGACY_REQUIRED];
+  // Payload bytes across all frames, which is the size of the output as a user
+  // understands it. Always smaller than ArtifactRef.size_bytes, which includes
+  // framing overhead and the index.
+  uint64 output_byte_count = 7 [features.field_presence = LEGACY_REQUIRED];
+  // Where the seek index sits inside the artifact.
+  //
+  // The index is a trailer, because a capturer streaming a running process does
+  // not know it until the process exits and so cannot write it as a header. Its
+  // location is recorded here so a reader can range-read the index directly,
+  // rather than seeking relative to an end-of-object the artifact store might
+  // report differently than the log does.
+  uint64 index_offset = 8 [features.field_presence = LEGACY_REQUIRED];
+  uint64 index_length = 9 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// CaptureMode is how the output was collected, which decides what the frame
+// order and the per-frame stream tag are actually worth.
+//
+// A renderer that ignores this will misrepresent output in one of two
+// directions, and which one depends on a decision made at spawn time that it
+// cannot see.
+enum CaptureMode {
+  CAPTURE_MODE_UNSPECIFIED = 0;
+  // stdout and stderr were read from separate pipes.
+  //
+  // Stream attribution is exact and the interleaving is not: the child's own
+  // buffering decides when each pipe becomes readable, so a line written to
+  // stderr before a line written to stdout can be captured after it. A renderer
+  // may color the two streams and must not present their relative order as the
+  // order the process produced them in.
+  CAPTURE_MODE_SEPARATE_PIPES = 1;
+  // Both streams were written to one terminal or one pipe.
+  //
+  // The interleaving is the process's own and is exact. Stream attribution is
+  // gone: the frames say MERGED because at capture time there was nothing left
+  // to distinguish. A renderer must not guess stderr from content, which is
+  // what makes this the honest opposite of SEPARATE_PIPES rather than a
+  // strictly worse version of it.
+  CAPTURE_MODE_MERGED_TERMINAL = 2;
+}
+
+// TimingFidelity is whether the capture can be played back at speed, or only in
+// order.
+//
+// Order-only is the common case and the safe default, and it is stated rather
+// than left to inference because a replay UI that animates untimed frames is
+// inventing pacing and presenting it as a recording.
+enum TimingFidelity {
+  TIMING_FIDELITY_UNSPECIFIED = 0;
+  // Frames carry no timing. Only their sequence is meaningful.
+  TIMING_FIDELITY_ORDER_ONLY = 1;
+  // Frames carry the elapsed time at which the capturer observed them, which is
+  // not when the process wrote them: pipe buffering, scheduler delay, and the
+  // capturer's own read loop all sit in between. Close enough to replay at
+  // speed, not evidence of when anything happened.
+  TIMING_FIDELITY_CAPTURE_ELAPSED = 2;
+}
+
+// ReplayCompleteness is how much of the output survived capture.
+//
+// This is not ArtifactRef.truncated, which says a preview is shorter than its
+// content. This says the content is shorter than what the process emitted, and
+// names which end went missing, because for a command log that is the whole
+// question: losing the tail loses the failure, losing the head loses what was
+// run.
+message ReplayCompleteness {
+  // Unspecified is not complete. A reader that cannot recognize the shape must
+  // treat the capture as of unknown completeness rather than whole.
+  TruncationShape shape = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Payload bytes the capturer saw and did not retain.
+  //
+  // Unset means dropping occurred and was not counted, which a fixed-size ring
+  // buffer that overwrites without accounting cannot avoid. Left absent rather
+  // than reported as zero, because zero here would say nothing was lost.
+  uint64 dropped_byte_count = 2;
+  // Frames the capturer saw and did not retain, under the same rule.
+  uint64 dropped_frame_count = 3;
+}
+
+// TruncationShape is which part of the output is missing.
+enum TruncationShape {
+  TRUNCATION_SHAPE_UNSPECIFIED = 0;
+  // Everything the process emitted was captured.
+  TRUNCATION_SHAPE_COMPLETE = 1;
+  // The beginning was dropped, typically by a ring buffer that kept the most
+  // recent output. The command's own startup and its invocation echo are gone.
+  TRUNCATION_SHAPE_HEAD_DROPPED = 2;
+  // Capture stopped at a cap and the rest was discarded. Whatever the command
+  // said on its way out, including why it failed, is not here.
+  TRUNCATION_SHAPE_TAIL_DROPPED = 3;
+  // The head and the tail were kept and a span in the middle was not. Frame
+  // sequence numbers are the capturer's original count and are never compacted
+  // when frames are dropped, so the gap is visible in the frames themselves;
+  // this value is what lets a reader know to expect one without scanning for
+  // it.
+  TRUNCATION_SHAPE_MIDDLE_DROPPED = 4;
+}

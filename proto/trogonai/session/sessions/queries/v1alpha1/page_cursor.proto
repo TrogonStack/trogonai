@@ -1,0 +1,164 @@
+edition = "2024";
+
+package trogonai.session.sessions.queries.v1alpha1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/session/sessions/queries/v1alpha1/contract_version.proto";
+import "trogonai/session/sessions/queries/v1alpha1/get_session_history.proto";
+import "trogonai/session/sessions/queries/v1alpha1/list_sessions.proto";
+
+// CursorEnvelope is what a `page_token` actually contains.
+//
+// These types are server-minted internals. They are published so the format is
+// reviewable and versioned, not so callers can read it: a client must treat a
+// token as opaque bytes and never construct, parse, or edit one. The server
+// owes nothing to a hand-built token beyond QUERY_ERROR_CODE_MALFORMED_CURSOR.
+//
+// The envelope keeps `payload` as bytes rather than an inline message on
+// purpose. `mac` authenticates the exact bytes the server emitted, and protobuf
+// serialization is not canonical, so a server that re-encoded a decoded message
+// to check the MAC could compute a different byte string than it signed.
+message CursorEnvelope {
+  // Version of this envelope and payload format, independent of the query
+  // ContractVersion. A token minted under an unknown format_version is
+  // MALFORMED_CURSOR, not STALE_CURSOR: there is nothing to interpret.
+  uint32 format_version = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Serialized PageCursor.
+  bytes payload = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Authenticates format_version and payload under a server-held key.
+  //
+  // A cursor names a scan position, so an unauthenticated one is a request
+  // parameter the caller controls. The MAC is what stops a caller from moving
+  // the anchor, widening the selector, or pointing a scan at another session's
+  // stream. It is tamper evidence and nothing more: a cursor is never
+  // authorization, and every continuation is re-authorized from the caller's
+  // own identity as if it were a fresh request.
+  bytes mac = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// PageCursor is the decoded scan position.
+message PageCursor {
+  // When the scan variant does not match the query it was presented to, the
+  // token is MALFORMED_CURSOR. A history cursor is not a list cursor with
+  // different fields set.
+  oneof scan {
+    HistoryScanCursor history = 1;
+    SessionListScanCursor session_list = 2;
+  }
+  // When the token stops being honored regardless of validity.
+  //
+  // A pinned scan holds read-model retention (see CursorValidity), so scans
+  // cannot be allowed to live forever. Expiry is STALE_CURSOR with
+  // STALE_CURSOR_REASON_EXPIRED, because restarting the scan is the fix.
+  google.protobuf.Timestamp expires_at = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// HistoryScanCursor is a position within one session's history.
+//
+// This is the message that makes the paging guarantee true. History is
+// append-only and every item carries a SessionOrdinal that is assigned once and
+// never renumbered, so a position expressed as an ordinal keeps its meaning as
+// the session grows. A position expressed as an offset from either end does
+// not, which is why the count of items is deliberately absent here.
+message HistoryScanCursor {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Contract the scan was opened at. The server keeps rendering at this version
+  // for the life of the scan so a page is not shaped differently from its
+  // predecessors. A continuation presenting a different major is
+  // STALE_CURSOR_REASON_CONTRACT_CHANGED.
+  ContractVersion minted_contract = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Fixed for the life of the scan. A continuation cannot reverse it; that is a
+  // new scan.
+  HistoryDirection direction = 3 [features.field_presence = LEGACY_REQUIRED];
+  // The effective-history head the scan was pinned to when it opened, as a
+  // SessionOrdinal.
+  //
+  // The scan never looks past this, and that is what makes concurrent appends
+  // harmless: a turn recorded after the scan opened is outside the window
+  // rather than shifting rows inside it. A reverse scan walking toward older
+  // history is unaffected by definition; a forward scan ends here even if newer
+  // items exist by the time it arrives.
+  uint64 anchor_ordinal = 4 [features.field_presence = LEGACY_REQUIRED];
+  // The last SessionOrdinal delivered. The next page resumes strictly past it
+  // in `direction`, which is why an item can be neither repeated nor skipped:
+  // the boundary is the identity of a delivered row, not a count of them.
+  uint64 last_delivered_ordinal = 5 [features.field_presence = LEGACY_REQUIRED];
+  CursorValidity validity = 6 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// SessionListScanCursor is a position within a list scan.
+message SessionListScanCursor {
+  ContractVersion minted_contract = 1 [features.field_presence = LEGACY_REQUIRED];
+  ListScanSelector selector = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Last row delivered. The next page resumes strictly after it in the scan's
+  // ordering.
+  SessionOrderingKey last_delivered = 3 [features.field_presence = LEGACY_REQUIRED];
+  CursorValidity validity = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// ListScanSelector is the request shape the scan was opened with.
+//
+// A continuation whose request disagrees with this is MALFORMED_CURSOR rather
+// than a silently re-scoped scan. Changing the scope, workspace, or archived
+// filter mid-scan produces a page sequence that is neither the old selection
+// nor the new one, and the caller has no way to notice.
+message ListScanSelector {
+  ListSessionsScope scope = 1 [features.field_presence = LEGACY_REQUIRED];
+  string workspace_id = 2;
+  ArchivedFilter archived = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// SessionOrderingKey is one row's position in the list ordering.
+//
+// Ordering is by `ordering_value` descending, then `session_id` ascending. The
+// tie-breaker is not decoration: ordering values collide, and a boundary that
+// cannot distinguish two rows sharing one must either re-emit both or drop
+// both.
+message SessionOrderingKey {
+  // The row's ordering value as of the scan's pinned watermark, not as of now.
+  //
+  // Recency ordering is the thing a session picker wants and is also mutable, a
+  // combination that breaks naive pagination: a row that gains activity after
+  // the cursor has passed its old position jumps ahead of the cursor and is
+  // never delivered. Reading the ordering as of a fixed watermark is what
+  // removes that skip, and it is an obligation on the list projection rather
+  // than something this contract can assert by itself.
+  uint64 ordering_value = 1 [features.field_presence = LEGACY_REQUIRED];
+  string session_id = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// CursorValidity is everything a cursor binds to besides its position.
+//
+// Each field answers one question: is the sequence this cursor was cut from
+// still the same sequence? A change in any of them means resuming would produce
+// a page sequence that never existed as a whole, so the server refuses with
+// QUERY_ERROR_CODE_STALE_CURSOR and the matching StaleCursorReason instead of
+// serving a plausible page.
+message CursorValidity {
+  // Identifies the projection instance. A rebuild under a new generation makes
+  // ordering values from the old one meaningless.
+  // Mismatch: STALE_CURSOR_REASON_PROJECTION_REPLACED.
+  string projection_generation = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The projection position the scan is pinned to. Constant across every page
+  // of one scan.
+  //
+  // A pinned scan requires the projection to still be able to answer as of this
+  // point, which is what cursor expiry bounds.
+  uint64 pinned_watermark = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Bumped whenever the set of effective events changes shape: rewind, which
+  // retracts history the scan may already have passed, and compaction, which
+  // replaces a span with a summary. Either leaves a cursor describing a prefix
+  // that no longer exists.
+  //
+  // Mismatch is STALE_CURSOR_REASON_REWOUND or STALE_CURSOR_REASON_COMPACTED
+  // depending on which change advanced it, so the server must know the cause of
+  // an advance and not only that one happened. The distinction matters to a
+  // caller: a compaction lost nothing, a rewind did.
+  uint64 effective_history_revision = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Bumped by redaction and artifact erasure. Tracked separately from
+  // effective_history_revision because it is the field that must be checked
+  // even when nothing else moved: continuing to serve a scan cut before an
+  // erasure would keep handing out content that was ordered destroyed.
+  // Mismatch: STALE_CURSOR_REASON_PRIVACY_CHANGED.
+  uint64 privacy_revision = 4 [features.field_presence = LEGACY_REQUIRED];
+}

@@ -55,12 +55,14 @@ fn encode_session_event_case(event: &SessionEventCase) -> Vec<u8> {
         SessionEventCase::SessionFailed(inner) => inner.encode_to_vec(),
         SessionEventCase::SessionHidden(inner) => inner.encode_to_vec(),
         SessionEventCase::SessionForked(inner) => inner.encode_to_vec(),
+        SessionEventCase::SessionRecovered(inner) => inner.encode_to_vec(),
         SessionEventCase::SessionRewound(inner) => inner.encode_to_vec(),
         SessionEventCase::Compacted(inner) => inner.encode_to_vec(),
         SessionEventCase::UserMessageRecorded(inner) => inner.encode_to_vec(),
         SessionEventCase::AssistantMessageStarted(inner) => inner.encode_to_vec(),
         SessionEventCase::AssistantMessageCompleted(inner) => inner.encode_to_vec(),
         SessionEventCase::AssistantMessageFailed(inner) => inner.encode_to_vec(),
+        SessionEventCase::ProviderToolIntentRejected(inner) => inner.encode_to_vec(),
         SessionEventCase::ToolCallRequested(inner) => inner.encode_to_vec(),
         SessionEventCase::ToolCallApproved(inner) => inner.encode_to_vec(),
         SessionEventCase::ToolCallDenied(inner) => inner.encode_to_vec(),
@@ -100,6 +102,7 @@ fn decode_session_event_case(event: EventData<'_>) -> Result<Option<SessionEvent
         .or_else(|| decode_event_case::<v1alpha1::SessionFailed, SessionEventCase>(&event))
         .or_else(|| decode_event_case::<v1alpha1::SessionHidden, SessionEventCase>(&event))
         .or_else(|| decode_event_case::<v1alpha1::SessionForked, SessionEventCase>(&event))
+        .or_else(|| decode_event_case::<v1alpha1::SessionRecovered, SessionEventCase>(&event))
         .or_else(|| decode_event_case::<v1alpha1::SessionRewound, SessionEventCase>(&event))
         .or_else(|| decode_event_case::<v1alpha1::Compacted, SessionEventCase>(&event))
         .or_else(|| decode_event_case::<v1alpha1::UserMessageRecorded, SessionEventCase>(&event))
@@ -135,6 +138,7 @@ fn decode_session_event_case(event: EventData<'_>) -> Result<Option<SessionEvent
         .or_else(|| decode_event_case::<v1alpha1::SessionRenamed, SessionEventCase>(&event))
         .or_else(|| decode_event_case::<v1alpha1::SessionArchived, SessionEventCase>(&event))
         .or_else(|| decode_event_case::<v1alpha1::SessionUnarchived, SessionEventCase>(&event))
+        .or_else(|| decode_event_case::<v1alpha1::ProviderToolIntentRejected, SessionEventCase>(&event))
     else {
         return Ok(None);
     };
@@ -150,6 +154,7 @@ fn session_event_case_type(event: &SessionEventCase) -> &'static str {
         SessionEventCase::SessionFailed(_) => event_type::<v1alpha1::SessionFailed>(),
         SessionEventCase::SessionHidden(_) => event_type::<v1alpha1::SessionHidden>(),
         SessionEventCase::SessionForked(_) => event_type::<v1alpha1::SessionForked>(),
+        SessionEventCase::SessionRecovered(_) => event_type::<v1alpha1::SessionRecovered>(),
         SessionEventCase::SessionRewound(_) => event_type::<v1alpha1::SessionRewound>(),
         SessionEventCase::Compacted(_) => event_type::<v1alpha1::Compacted>(),
         SessionEventCase::UserMessageRecorded(_) => event_type::<v1alpha1::UserMessageRecorded>(),
@@ -185,6 +190,7 @@ fn session_event_case_type(event: &SessionEventCase) -> &'static str {
         SessionEventCase::SessionRenamed(_) => event_type::<v1alpha1::SessionRenamed>(),
         SessionEventCase::SessionArchived(_) => event_type::<v1alpha1::SessionArchived>(),
         SessionEventCase::SessionUnarchived(_) => event_type::<v1alpha1::SessionUnarchived>(),
+        SessionEventCase::ProviderToolIntentRejected(_) => event_type::<v1alpha1::ProviderToolIntentRejected>(),
     }
 }
 

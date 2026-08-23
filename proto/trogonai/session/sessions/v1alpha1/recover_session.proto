@@ -1,0 +1,36 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "trogonai/session/sessions/v1alpha1/digest.proto";
+import "trogonai/session/sessions/v1alpha1/execution_plan.proto";
+import "trogonai/session/sessions/v1alpha1/session_ordinal.proto";
+import "trogonai/session/sessions/v1alpha1/session_recovered.proto";
+import "trogonai/session/sessions/v1alpha1/workspace.proto";
+
+// RecoverSession opens a session carrying what a salvage could read from a
+// damaged source, recording [SessionStarted, SessionRecovered] as one batch.
+//
+// Write precondition NoStream on the new stream. The source is a different
+// aggregate and this decider never reads it, so what the salvage found is
+// carried on the command rather than derived here; the same rule ForkSession
+// follows. The NoStream precondition is what makes a retried salvage safe: a
+// second attempt derives the same session_id and is rejected instead of
+// producing a second copy.
+//
+// The salvaged events themselves are appended after this batch, as this
+// session's own events. This command records only that the session is a
+// recovery and how complete it is.
+message RecoverSession {
+  // Derived from the salvage identity, never randomly minted.
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  StoredSessionExecutionPlan execution_plan = 2 [features.field_presence = LEGACY_REQUIRED];
+  WorkspaceRef workspace = 3 [features.field_presence = LEGACY_REQUIRED];
+  string source_session_id = 4 [features.field_presence = LEGACY_REQUIRED];
+  // The last source ordinal the salvage drew from.
+  SessionOrdinal source_boundary = 5 [features.field_presence = LEGACY_REQUIRED];
+  Digest source_digest = 6 [features.field_presence = LEGACY_REQUIRED];
+  string salvage_key = 7 [features.field_presence = LEGACY_REQUIRED];
+  RecoveryCompleteness completeness = 8 [features.field_presence = LEGACY_REQUIRED];
+  uint32 omitted_count = 9 [features.field_presence = LEGACY_REQUIRED];
+}

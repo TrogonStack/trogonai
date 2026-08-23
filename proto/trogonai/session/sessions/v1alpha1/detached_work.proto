@@ -1,0 +1,93 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+// DetachedWork records that a tool call returned a handle while its work
+// continued outside the turn.
+//
+// A development server is the ordinary case: the tool starts it, returns a URL,
+// and the turn ends while the process keeps running and keeps producing output.
+// Without this the completion is a lie of omission. `ToolCallCompleted` means
+// the call finished, a reader folds it as done, and a process nobody is
+// tracking outlives the session that started it.
+//
+// It is deliberately not a compound background-turn record. Everything durable
+// about the work already has a home: `operation_id` joins the operation ledger,
+// the eventual result arrives as `OperationOutcomeRecorded`, cancellation is
+// `OperationCancellationRequested`, and captured output is a
+// `CommandOutputReplayRef` sealed when the process ends. What was missing is
+// only the fact that the turn was released first, plus the two policies nobody
+// could otherwise infer.
+message DetachedWork {
+  // The reserved operation this work continues under, joining to
+  // OperationReserved and the eventual OperationOutcomeRecorded.
+  //
+  // Required here, unlike ToolCallRequested.operation_id, which is empty for a
+  // call that reserves nothing. Work that outlives its turn has to be
+  // addressable to be cancellable, and an unaddressable detached process is the
+  // thing this message exists to prevent.
+  string operation_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Wall-clock instant the turn was released, a real external occurrence
+  // distinct from envelope append time (D10).
+  google.protobuf.Timestamp detached_at = 2 [features.field_presence = LEGACY_REQUIRED];
+  // What happens to this work when the session reaches a terminal state.
+  TerminalOwnership terminal_ownership = 3 [features.field_presence = LEGACY_REQUIRED];
+  // How long the work may go unsupervised before a runner is presumed lost.
+  SupervisionPolicy supervision = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Where the caller can reach what was started: a URL, a socket path, a
+  // container id. Empty when the work exposes nothing addressable.
+  //
+  // Must be credential-free, the same prohibition ExternalArtifact.source_url
+  // carries (D7). A detached development server's URL is the field most likely
+  // to arrive with a session token stapled to it.
+  string endpoint = 5;
+}
+
+// TerminalOwnership is what becomes of detached work when its session ends.
+//
+// The zero value cancels, because the two failure modes are not symmetric.
+// Cancelling work that should have survived is visible: something the user
+// wanted stopped, and they find out. Leaving work running that should have
+// stopped is invisible, and it is the orphan problem in
+// `doctor/v1alpha1/orphan.proto` with a process attached instead of a byte
+// range.
+enum TerminalOwnership {
+  // Unknown policy. Treat as CANCEL_ON_TERMINAL.
+  TERMINAL_OWNERSHIP_UNSPECIFIED = 0;
+  // Cancel the operation when the session reaches a terminal state.
+  TERMINAL_OWNERSHIP_CANCEL_ON_TERMINAL = 1;
+  // Let the work continue past the session's terminal state.
+  //
+  // The session still owns the record of it. A terminal session with surviving
+  // detached work is exactly the case `SessionView.has_unreconciled_work`
+  // exists for: terminal is not the same as complete, and a reader that treats
+  // them as the same will report a session as finished while its work is still
+  // running.
+  TERMINAL_OWNERSHIP_SURVIVE_TERMINAL = 2;
+}
+
+// SupervisionPolicy is how a lost runner becomes detectable.
+//
+// It records the policy and never the heartbeat. A renewal per interval would
+// be an append per interval, into a log that is never truncated
+// (ADR#0035 facet 7), and long-lived detached work is precisely the case that
+// generates the most of them. That is the same reason FX-23 keeps a downstream
+// consumer's checkpoint flood out of Session streams: liveness is live state,
+// and live state belongs in the runner registry that a projection reads, not in
+// the history that outlives it.
+//
+// What the log holds is the number a reconciler needs afterwards. Given
+// `max_unsupervised` and the last observed supervision, whether a runner is
+// lost is a question anyone can answer later without having watched.
+message SupervisionPolicy {
+  // How long the work may run without an observed supervisor before it is
+  // presumed abandoned and becomes a reconciliation candidate.
+  google.protobuf.Duration max_unsupervised = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Identity of the runner that held the work at detach time. Opaque, and
+  // recorded so a reconciler can tell work whose runner is gone from work whose
+  // runner is merely quiet.
+  string runner_id = 2 [features.field_presence = LEGACY_REQUIRED];
+}

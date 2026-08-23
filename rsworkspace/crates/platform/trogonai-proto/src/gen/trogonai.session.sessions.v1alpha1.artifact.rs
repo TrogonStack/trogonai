@@ -789,6 +789,16 @@ pub struct StoredArtifact {
     /// Field 4: `mime`
     #[serde(rename = "mime", with = "::buffa::json_helpers::proto_string")]
     pub mime: ::buffa::alloc::string::String,
+    /// Chunk hashing that lets a caller check part of this artifact without
+    /// reading all of it. Unset when the artifact was stored without one, which
+    /// means no range of it can be checked.
+    ///
+    /// Field 5: `chunks`
+    #[serde(
+        rename = "chunks",
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
+    )]
+    pub chunks: ::buffa::MessageField<ContentChunks, ::buffa::Inline<ContentChunks>>,
 }
 impl ::core::fmt::Debug for StoredArtifact {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -797,6 +807,7 @@ impl ::core::fmt::Debug for StoredArtifact {
             .field("size_bytes", &self.size_bytes)
             .field("storage_ref", &self.storage_ref)
             .field("mime", &self.mime)
+            .field("chunks", &self.chunks)
             .finish()
     }
 }
@@ -838,6 +849,14 @@ impl ::buffa::Message for StoredArtifact {
         size += 1u64 + ::buffa::types::uint64_encoded_len(self.size_bytes) as u64;
         size += 1u64 + ::buffa::types::string_encoded_len(&self.storage_ref) as u64;
         size += 1u64 + ::buffa::types::string_encoded_len(&self.mime) as u64;
+        if self.chunks.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.chunks.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
         ::buffa::saturate_size(size)
     }
     fn write_to(
@@ -858,6 +877,14 @@ impl ::buffa::Message for StoredArtifact {
         ::buffa::types::put_uint64_field(2u32, self.size_bytes, buf);
         ::buffa::types::put_string_field(3u32, &self.storage_ref, buf);
         ::buffa::types::put_string_field(4u32, &self.mime, buf);
+        if self.chunks.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                5u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.chunks.write_to(__cache, buf);
+        }
     }
     fn merge_field(
         &mut self,
@@ -902,6 +929,17 @@ impl ::buffa::Message for StoredArtifact {
                 )?;
                 ::buffa::types::merge_string(&mut self.mime, buf)?;
             }
+            5u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::Message::merge_length_delimited(
+                    self.chunks.get_or_insert_default(),
+                    buf,
+                    ctx,
+                )?;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -913,6 +951,7 @@ impl ::buffa::Message for StoredArtifact {
         self.size_bytes = 0u64;
         self.storage_ref.clear();
         self.mime.clear();
+        self.chunks = ::buffa::MessageField::none();
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for StoredArtifact {

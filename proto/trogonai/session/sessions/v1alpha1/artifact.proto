@@ -3,6 +3,7 @@ edition = "2024";
 package trogonai.session.sessions.v1alpha1;
 
 import "google/protobuf/timestamp.proto";
+import "trogonai/session/sessions/v1alpha1/content_chunks.proto";
 import "trogonai/session/sessions/v1alpha1/digest.proto";
 
 // ArtifactRef is an inline claim-check to an artifact stored out of line: the
@@ -69,6 +70,10 @@ message StoredArtifact {
   string storage_ref = 3 [features.field_presence = LEGACY_REQUIRED];
   // Decoded/validated media type of the stored bytes.
   string mime = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Chunk hashing that lets a caller check part of this artifact without
+  // reading all of it. Unset when the artifact was stored without one, which
+  // means no range of it can be checked.
+  ContentChunks chunks = 5;
 }
 
 // ExternalArtifact is the degraded source arm for an artifact whose bytes were

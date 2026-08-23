@@ -1,0 +1,26 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "trogonai/session/sessions/v1alpha1/operation_outcome_recorded.proto";
+
+// RecordOperationOutcome settles a reserved operation, recording
+// [OperationOutcomeRecorded]. It is how an interrupted side effect stops being
+// in flight, and it stays admissible after the session is terminal so work
+// stranded by a cancellation can still be reconciled.
+//
+// Write precondition At: one determinate outcome per operation_id. An `unknown`
+// outcome is not determinate; it may be superseded exactly once by a
+// determinate one.
+message RecordOperationOutcome {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string operation_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  oneof outcome {
+    OperationSucceeded succeeded = 3;
+    OperationFailed failed = 4;
+    OperationCancelled cancelled = 5;
+    // Indeterminate: the side effect may or may not have run. Non-terminal, and
+    // supersedable exactly once.
+    OperationUnknown unknown = 6;
+  }
+}

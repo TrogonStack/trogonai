@@ -38,7 +38,9 @@ pub struct FileChanged {
         with = "::buffa::json_helpers::proto_enum"
     )]
     pub change_kind: ::buffa::EnumValue<FileChangeKind>,
-    /// Same workspace-relative form as path.
+    /// Where a renamed file used to be, in the same workspace-relative form as
+    /// path. Rename only: a copy sets copied_from instead, because a previous path
+    /// asserts the file is no longer there.
     ///
     /// Field 4: `previous_path`
     #[serde(
@@ -97,6 +99,15 @@ pub struct FileChanged {
         skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
     )]
     pub diff: ::buffa::MessageField<DiffSummary, ::buffa::Inline<DiffSummary>>,
+    /// Where the content came from, set only for FILE_CHANGE_KIND_COPIED.
+    ///
+    /// Field 10: `copied_from`
+    #[serde(
+        rename = "copiedFrom",
+        alias = "copied_from",
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
+    )]
+    pub copied_from: ::buffa::MessageField<CopySource, ::buffa::Inline<CopySource>>,
 }
 impl ::core::fmt::Debug for FileChanged {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -110,6 +121,7 @@ impl ::core::fmt::Debug for FileChanged {
             .field("tool_call_id", &self.tool_call_id)
             .field("turn_id", &self.turn_id)
             .field("diff", &self.diff)
+            .field("copied_from", &self.copied_from)
             .finish()
     }
 }
@@ -187,6 +199,14 @@ impl ::buffa::Message for FileChanged {
                 += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
                     + inner_size as u64;
         }
+        if self.copied_from.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.copied_from.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
         ::buffa::saturate_size(size)
     }
     fn write_to(
@@ -227,6 +247,14 @@ impl ::buffa::Message for FileChanged {
                 buf,
             );
             self.diff.write_to(__cache, buf);
+        }
+        if self.copied_from.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                10u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.copied_from.write_to(__cache, buf);
         }
     }
     fn merge_field(
@@ -322,6 +350,17 @@ impl ::buffa::Message for FileChanged {
                     ctx,
                 )?;
             }
+            10u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::Message::merge_length_delimited(
+                    self.copied_from.get_or_insert_default(),
+                    buf,
+                    ctx,
+                )?;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -338,6 +377,7 @@ impl ::buffa::Message for FileChanged {
         self.tool_call_id.clear();
         self.turn_id.clear();
         self.diff = ::buffa::MessageField::none();
+        self.copied_from = ::buffa::MessageField::none();
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for FileChanged {

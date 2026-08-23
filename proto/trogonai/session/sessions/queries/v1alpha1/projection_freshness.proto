@@ -1,0 +1,125 @@
+edition = "2024";
+
+package trogonai.session.sessions.queries.v1alpha1;
+
+import "google/protobuf/timestamp.proto";
+
+// ProjectionFreshness is how current the read model was when it answered.
+//
+// Every successful Session query carries one. A response that parses is not
+// evidence that it reflects a write the caller just made, and a caller with no
+// way to tell will present a stale view as the truth. Reporting freshness on
+// every answer, rather than only when something is wrong, is what makes "this
+// is current" a statement the server made instead of one the caller assumed.
+//
+// This is query metadata. None of it is derived from Session events, and none
+// of it belongs in one: it describes the read path's progress, which is not a
+// fact about the session.
+message ProjectionFreshness {
+  ProjectionCondition condition = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Identifies the projection instance. A rebuild under a new generation
+  // invalidates positions and orderings minted against the old one, which is
+  // what page cursors bind to (see CursorValidity).
+  string projection_generation = 2 [features.field_presence = LEGACY_REQUIRED];
+  // How far the projection has applied. For a session-scoped read this is a
+  // SessionOrdinal on that session's stream, which is what a ConsistencyToken
+  // is compared against.
+  uint64 processed_watermark = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Event time of the last applied event. Useful for a human-facing "as of",
+  // and useless as a consistency boundary: event time is not monotonic across
+  // writers, so a caller must compare watermarks, not timestamps.
+  google.protobuf.Timestamp processed_at = 4;
+  // The source stream head as most recently observed.
+  //
+  // Unset means the head was not observed for this read, which is not the same
+  // as a head of zero. Observing it costs a round trip the read path does not
+  // always pay, so the contract lets a server decline rather than report a
+  // fabricated value. When it is unset the condition is INDETERMINATE.
+  uint64 source_high_watermark = 5;
+  // When source_high_watermark was observed. A cached observation is still
+  // useful and still needs its age disclosed, because lag computed against a
+  // stale head understates the real lag.
+  google.protobuf.Timestamp source_observed_at = 6;
+  ConsistencyOutcome consistency = 7 [features.field_presence = LEGACY_REQUIRED];
+  AnswerSource source = 8 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// AnswerSource is what actually produced this answer.
+//
+// A projection that cannot serve does not have to mean the read fails. For a
+// read scoped to one session the server can fold that session's stream directly
+// and answer from the log, which is the authoritative source the projection is
+// only a cache of. The caller needs to be told, because the answer is better
+// than a projection answer and more expensive than one, and because a few
+// things it would normally be allowed to do with the response no longer hold.
+//
+// Falling back is admissible only for a session-scoped read. A read across
+// sessions has no bounded stream to fold, so a list query has exactly two
+// honest outcomes: a projection answer, or
+// QUERY_ERROR_CODE_PROJECTION_UNAVAILABLE. Stating that here is cheaper than
+// discovering it the first time a degraded list query tries to replay a
+// tenant.
+enum AnswerSource {
+  ANSWER_SOURCE_UNSPECIFIED = 0;
+  // Served from the materialized read model.
+  ANSWER_SOURCE_PROJECTION = 1;
+  // Served by folding the session's own stream, because the projection could
+  // not answer.
+  //
+  // The condition is CURRENT, since the fold ran to the head it read at. The
+  // `projection_generation` is empty, because no projection instance produced
+  // this and a synthetic id would be a generation a page cursor could bind to
+  // that nothing is able to honor later. Which is the constraint that follows:
+  // a replay answer must not mint a page cursor, so a caller needing to
+  // paginate through a projection outage has to wait for the projection rather
+  // than scan against a fallback.
+  ANSWER_SOURCE_AUTHORITATIVE_REPLAY = 2;
+}
+
+// ProjectionCondition is the projection's state on the success path.
+//
+// It is deliberately smaller than the set of states a projection can be in.
+// Rebuilding, invalid, and missing are failure-path conditions: a projection in
+// one of those either serves nothing, in which case the caller gets
+// QUERY_ERROR_CODE_PROJECTION_UNAVAILABLE with the matching reason, or serves a
+// readable prior generation, in which case it is simply LAGGING. Duplicating
+// them here would create two places to express one state and invite them to
+// disagree.
+enum ProjectionCondition {
+  PROJECTION_CONDITION_UNSPECIFIED = 0;
+  // Applied through the observed source head. Nothing known is missing.
+  PROJECTION_CONDITION_CURRENT = 1;
+  // Known to be behind the observed source head.
+  PROJECTION_CONDITION_LAGGING = 2;
+  // The source head was not observed, so currency could not be determined.
+  //
+  // This is not a degraded CURRENT. A caller that needs to know it is reading a
+  // write it just made must state that with ReadConsistency rather than infer
+  // it from a condition that says the server did not check.
+  PROJECTION_CONDITION_INDETERMINATE = 3;
+}
+
+// ConsistencyOutcome reports what the server did about the caller's
+// ReadConsistency, so a satisfied requirement is affirmed rather than implied
+// by the absence of an error.
+message ConsistencyOutcome {
+  ConsistencyResult result = 1 [features.field_presence = LEGACY_REQUIRED];
+  // How long the read waited before answering. Zero for both NOT_REQUESTED and
+  // SATISFIED_IMMEDIATELY.
+  uint32 waited_millis = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// ConsistencyResult is how a read's consistency requirement was resolved.
+//
+// There is no unsatisfied value. A requirement the server could not meet is a
+// failure, not a success carrying a flag, because a success shape with an
+// ignored flag is exactly what a caller in a hurry will read as an answer.
+enum ConsistencyResult {
+  CONSISTENCY_RESULT_UNSPECIFIED = 0;
+  // The caller asked for an eventual read. Freshness is still reported.
+  CONSISTENCY_RESULT_NOT_REQUESTED = 1;
+  // The projection had already applied the required position.
+  CONSISTENCY_RESULT_SATISFIED_IMMEDIATELY = 2;
+  // The read waited for the projection to catch up, then answered.
+  CONSISTENCY_RESULT_SATISFIED_AFTER_WAIT = 3;
+}

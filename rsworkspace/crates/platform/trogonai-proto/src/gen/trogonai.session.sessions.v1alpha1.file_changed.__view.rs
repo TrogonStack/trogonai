@@ -25,7 +25,9 @@ pub struct FileChangedView<'a> {
     pub path: &'a str,
     /// Field 3: `change_kind`
     pub change_kind: ::buffa::EnumValue<super::super::FileChangeKind>,
-    /// Same workspace-relative form as path.
+    /// Where a renamed file used to be, in the same workspace-relative form as
+    /// path. Rename only: a copy sets copied_from instead, because a previous path
+    /// asserts the file is no longer there.
     ///
     /// Field 4: `previous_path`
     pub previous_path: ::core::option::Option<&'a str>,
@@ -60,6 +62,12 @@ pub struct FileChangedView<'a> {
     /// Field 9: `diff`
     pub diff: ::buffa::MessageFieldView<
         super::super::__buffa::view::DiffSummaryView<'a>,
+    >,
+    /// Where the content came from, set only for FILE_CHANGE_KIND_COPIED.
+    ///
+    /// Field 10: `copied_from`
+    pub copied_from: ::buffa::MessageFieldView<
+        super::super::__buffa::view::CopySourceView<'a>,
     >,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
@@ -246,6 +254,27 @@ impl<'a> ::buffa::MessageView<'a> for FileChangedView<'a> {
                     }
                 }
             }
+            10u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                match view.copied_from.as_mut() {
+                    Some(existing) => {
+                        ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
+                    }
+                    None => {
+                        view.copied_from = ::buffa::MessageFieldView::set(
+                            <super::super::__buffa::view::CopySourceView as ::buffa::MessageView>::decode_view_ctx(
+                                sub,
+                                __sub_ctx,
+                            )?,
+                        );
+                    }
+                }
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -299,6 +328,15 @@ impl<'a> ::buffa::MessageView<'a> for FileChangedView<'a> {
                 }
                 None => ::buffa::MessageField::none(),
             },
+            copied_from: match self.copied_from.as_option() {
+                Some(v) => {
+                    ::buffa::MessageField::<
+                        super::super::CopySource,
+                        ::buffa::Inline<super::super::CopySource>,
+                    >::some(v.to_owned_from_source(__buffa_src)?)
+                }
+                None => ::buffa::MessageField::none(),
+            },
             ..::core::default::Default::default()
         })
     }
@@ -339,6 +377,14 @@ impl<'a> ::buffa::ViewEncode<'a> for FileChangedView<'a> {
         if self.diff.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.diff.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
+        if self.copied_from.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.copied_from.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
                 += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
@@ -385,6 +431,14 @@ impl<'a> ::buffa::ViewEncode<'a> for FileChangedView<'a> {
                 buf,
             );
             self.diff.write_to(__cache, buf);
+        }
+        if self.copied_from.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                10u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.copied_from.write_to(__cache, buf);
         }
     }
 }
@@ -437,6 +491,11 @@ impl<'__a> ::serde::Serialize for FileChangedView<'__a> {
         {
             if let ::core::option::Option::Some(__v) = self.diff.as_option() {
                 __map.serialize_entry("diff", __v)?;
+            }
+        }
+        {
+            if let ::core::option::Option::Some(__v) = self.copied_from.as_option() {
+                __map.serialize_entry("copiedFrom", __v)?;
             }
         }
         __map.end()
@@ -553,7 +612,9 @@ impl FileChangedOwnedView {
     pub fn change_kind(&self) -> ::buffa::EnumValue<super::super::FileChangeKind> {
         self.0.reborrow().change_kind
     }
-    /// Same workspace-relative form as path.
+    /// Where a renamed file used to be, in the same workspace-relative form as
+    /// path. Rename only: a copy sets copied_from instead, because a previous path
+    /// asserts the file is no longer there.
     ///
     /// Field 4: `previous_path`
     #[must_use]
@@ -606,6 +667,15 @@ impl FileChangedOwnedView {
         &self,
     ) -> &::buffa::MessageFieldView<super::super::__buffa::view::DiffSummaryView<'_>> {
         &self.0.reborrow().diff
+    }
+    /// Where the content came from, set only for FILE_CHANGE_KIND_COPIED.
+    ///
+    /// Field 10: `copied_from`
+    #[must_use]
+    pub fn copied_from(
+        &self,
+    ) -> &::buffa::MessageFieldView<super::super::__buffa::view::CopySourceView<'_>> {
+        &self.0.reborrow().copied_from
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<FileChangedView<'static>>>

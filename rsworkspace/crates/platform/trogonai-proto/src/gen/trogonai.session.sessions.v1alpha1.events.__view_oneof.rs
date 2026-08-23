@@ -41,6 +41,11 @@ pub mod session_event {
                 super::super::super::super::__buffa::view::SessionRewoundView<'a>,
             >,
         ),
+        SessionRecovered(
+            ::buffa::alloc::boxed::Box<
+                super::super::super::super::__buffa::view::SessionRecoveredView<'a>,
+            >,
+        ),
         Compacted(
             ::buffa::alloc::boxed::Box<
                 super::super::super::super::__buffa::view::CompactedView<'a>,
@@ -68,6 +73,13 @@ pub mod session_event {
         AssistantMessageFailed(
             ::buffa::alloc::boxed::Box<
                 super::super::super::super::__buffa::view::AssistantMessageFailedView<'a>,
+            >,
+        ),
+        ProviderToolIntentRejected(
+            ::buffa::alloc::boxed::Box<
+                super::super::super::super::__buffa::view::ProviderToolIntentRejectedView<
+                    'a,
+                >,
             >,
         ),
         ToolCallRequested(

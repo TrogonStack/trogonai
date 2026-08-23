@@ -1,0 +1,38 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "trogonai/session/sessions/v1alpha1/digest.proto";
+
+// ContentChunks is what makes part of an artifact checkable without reading all
+// of it.
+//
+// An artifact's Digest covers the whole artifact, so it can only be checked by
+// hashing every byte. That is exactly what a range read exists to avoid: a
+// caller fetching 64 KB of a 40 MB artifact cannot afford a 40 MB verification,
+// and a caller who skips it is reading unverified bytes while holding a digest
+// that looks like it proved something.
+//
+// So the artifact is also hashed in fixed-size chunks, and the digest of that
+// ordered chunk-digest list is recorded here, on the log. A caller holding this
+// value can fetch the chunk manifest from the artifact store, check the
+// manifest against a value the store did not supply, and then check any chunk
+// it reads against the manifest. Trust flows from the event log outward, which
+// is the only direction in which it means anything: a manifest checked only
+// against the store that served it proves the store is self-consistent.
+//
+// Optional on StoredArtifact. Absent means no range of that artifact can be
+// checked, and the read contract says so rather than serving unchecked bytes
+// that look checked.
+message ContentChunks {
+  // Hash used for each chunk and for the manifest digest, for example "sha256".
+  string algorithm = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Size of every chunk but the last, which holds the remainder.
+  uint64 chunk_size_bytes = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Digest over the ordered chunk digests concatenated.
+  //
+  // The chunk count is deliberately not recorded: it follows from
+  // StoredArtifact.size_bytes and chunk_size_bytes, and a second field carrying
+  // a derivable fact is a second field that can disagree with the first.
+  Digest manifest_digest = 3 [features.field_presence = LEGACY_REQUIRED];
+}

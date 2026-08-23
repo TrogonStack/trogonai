@@ -1,0 +1,85 @@
+edition = "2024";
+
+package trogonai.session.sessions.diff.v1alpha1;
+
+// Structured diff artifact content for a recorded file change.
+//
+// This is artifact payload, not an event. It sits behind
+// `DiffSummary.rendered`, which is a claim-check like any other, and a reader
+// finds it there by the media type on `ArtifactRef.mime`. The alternative was
+// putting hunks on FileChanged, which would put a presentation shape into a log
+// that is never truncated (ADR#0035 facet 7): every review UI decision about how
+// much context to show would become permanent history.
+//
+// It is defined in its own subtree and does not import the write-side types
+// (ADR#0035 facet 3). A diff format changes for rendering reasons, on a review
+// tool's schedule, and nothing about the session domain should have to move when
+// it does.
+//
+// The counts on DiffSummary stay authoritative and are never recomputed from
+// this. `DiffSummary.truncated` exists precisely because the artifact may omit
+// hunks while the inline counts remain exact, so a reader that recounts from the
+// hunks here will get a smaller number and will be wrong.
+
+// StructuredDiff is a parsed diff for one file change.
+message StructuredDiff {
+  // Version of this structure's semantics, incremented when the meaning of an
+  // existing field changes rather than when fields are added.
+  //
+  // It is here and not only in the media type because an artifact outlives the
+  // reference that found it. A stored diff read years later through a generic
+  // artifact path has to be able to say what it is without the mime string that
+  // was attached to the claim-check.
+  uint32 format_version = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated DiffHunk hunks = 2;
+  // True when hunks were omitted. Mirrors DiffSummary.truncated so the artifact
+  // is self-describing: a consumer holding only these bytes must be able to tell
+  // a complete diff from a partial one without the summary that pointed at it.
+  bool truncated = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// DiffHunk is one contiguous region of change with its surrounding context.
+message DiffHunk {
+  // First line of this hunk in the before-content, 1-based. Zero when the
+  // before-content does not exist, which is the create case.
+  uint32 old_start = 1 [features.field_presence = LEGACY_REQUIRED];
+  // First line of this hunk in the after-content, 1-based. Zero when the
+  // after-content does not exist, which is the delete case.
+  uint32 new_start = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Section heading a renderer can show above the hunk, such as the enclosing
+  // function. Empty when none was determined.
+  string heading = 3;
+  repeated DiffLine lines = 4;
+}
+
+// DiffLine is one line of a hunk.
+message DiffLine {
+  LineKind kind = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Line content without its trailing newline and without a leading diff marker.
+  // The marker is `kind`, so a renderer never has to strip one character off the
+  // front of the text and hope it was punctuation rather than content.
+  //
+  // Empty for LINE_KIND_ELIDED, which stands for lines that are not here.
+  string text = 2;
+  // Line number in the before-content, 1-based. Unset for an added line, which
+  // has no position there. Absent rather than zero, so "this line did not exist
+  // before" cannot be read as "line zero".
+  uint32 old_line = 3;
+  // Line number in the after-content, 1-based. Unset for a removed line.
+  uint32 new_line = 4;
+  // How many lines LINE_KIND_ELIDED stands in for. Zero for every other kind.
+  uint32 elided_count = 5;
+}
+
+// LineKind is what a line represents in the change.
+enum LineKind {
+  LINE_KIND_UNSPECIFIED = 0;
+  // Unchanged, present for context.
+  LINE_KIND_CONTEXT = 1;
+  LINE_KIND_ADDED = 2;
+  LINE_KIND_REMOVED = 3;
+  // A run of lines omitted from this artifact. It carries a count instead of
+  // text, so a renderer can show that content is missing rather than joining two
+  // distant regions into what looks like adjacent code.
+  LINE_KIND_ELIDED = 4;
+}

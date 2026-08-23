@@ -437,9 +437,255 @@ pub mod trogonai {
                 clippy::doc_lazy_continuation,
                 clippy::module_inception
             )]
+            pub mod artifacts {
+                use super::*;
+                #[allow(
+                    non_camel_case_types,
+                    dead_code,
+                    unused_imports,
+                    unused_qualifications,
+                    clippy::derivable_impls,
+                    clippy::match_single_binding,
+                    clippy::uninlined_format_args,
+                    clippy::doc_lazy_continuation,
+                    clippy::module_inception
+                )]
+                pub mod v1alpha1 {
+                    use super::*;
+                    include!("trogonai.session.sessions.artifacts.v1alpha1.mod.rs");
+                }
+            }
+            #[allow(
+                non_camel_case_types,
+                dead_code,
+                unused_imports,
+                unused_qualifications,
+                clippy::derivable_impls,
+                clippy::match_single_binding,
+                clippy::uninlined_format_args,
+                clippy::doc_lazy_continuation,
+                clippy::module_inception
+            )]
+            pub mod diff {
+                use super::*;
+                #[allow(
+                    non_camel_case_types,
+                    dead_code,
+                    unused_imports,
+                    unused_qualifications,
+                    clippy::derivable_impls,
+                    clippy::match_single_binding,
+                    clippy::uninlined_format_args,
+                    clippy::doc_lazy_continuation,
+                    clippy::module_inception
+                )]
+                pub mod v1alpha1 {
+                    use super::*;
+                    include!("trogonai.session.sessions.diff.v1alpha1.mod.rs");
+                }
+            }
+            #[allow(
+                non_camel_case_types,
+                dead_code,
+                unused_imports,
+                unused_qualifications,
+                clippy::derivable_impls,
+                clippy::match_single_binding,
+                clippy::uninlined_format_args,
+                clippy::doc_lazy_continuation,
+                clippy::module_inception
+            )]
+            pub mod doctor {
+                use super::*;
+                #[allow(
+                    non_camel_case_types,
+                    dead_code,
+                    unused_imports,
+                    unused_qualifications,
+                    clippy::derivable_impls,
+                    clippy::match_single_binding,
+                    clippy::uninlined_format_args,
+                    clippy::doc_lazy_continuation,
+                    clippy::module_inception
+                )]
+                pub mod v1alpha1 {
+                    use super::*;
+                    include!("trogonai.session.sessions.doctor.v1alpha1.mod.rs");
+                }
+            }
+            #[allow(
+                non_camel_case_types,
+                dead_code,
+                unused_imports,
+                unused_qualifications,
+                clippy::derivable_impls,
+                clippy::match_single_binding,
+                clippy::uninlined_format_args,
+                clippy::doc_lazy_continuation,
+                clippy::module_inception
+            )]
+            pub mod maintenance {
+                use super::*;
+                #[allow(
+                    non_camel_case_types,
+                    dead_code,
+                    unused_imports,
+                    unused_qualifications,
+                    clippy::derivable_impls,
+                    clippy::match_single_binding,
+                    clippy::uninlined_format_args,
+                    clippy::doc_lazy_continuation,
+                    clippy::module_inception
+                )]
+                pub mod v1alpha1 {
+                    use super::*;
+                    include!("trogonai.session.sessions.maintenance.v1alpha1.mod.rs");
+                }
+            }
+            #[allow(
+                non_camel_case_types,
+                dead_code,
+                unused_imports,
+                unused_qualifications,
+                clippy::derivable_impls,
+                clippy::match_single_binding,
+                clippy::uninlined_format_args,
+                clippy::doc_lazy_continuation,
+                clippy::module_inception
+            )]
+            pub mod queries {
+                use super::*;
+                #[allow(
+                    non_camel_case_types,
+                    dead_code,
+                    unused_imports,
+                    unused_qualifications,
+                    clippy::derivable_impls,
+                    clippy::match_single_binding,
+                    clippy::uninlined_format_args,
+                    clippy::doc_lazy_continuation,
+                    clippy::module_inception
+                )]
+                pub mod v1alpha1 {
+                    use super::*;
+                    include!("trogonai.session.sessions.queries.v1alpha1.mod.rs");
+                }
+            }
+            #[allow(
+                non_camel_case_types,
+                dead_code,
+                unused_imports,
+                unused_qualifications,
+                clippy::derivable_impls,
+                clippy::match_single_binding,
+                clippy::uninlined_format_args,
+                clippy::doc_lazy_continuation,
+                clippy::module_inception
+            )]
+            pub mod replay {
+                use super::*;
+                #[allow(
+                    non_camel_case_types,
+                    dead_code,
+                    unused_imports,
+                    unused_qualifications,
+                    clippy::derivable_impls,
+                    clippy::match_single_binding,
+                    clippy::uninlined_format_args,
+                    clippy::doc_lazy_continuation,
+                    clippy::module_inception
+                )]
+                pub mod v1alpha1 {
+                    use super::*;
+                    include!("trogonai.session.sessions.replay.v1alpha1.mod.rs");
+                }
+            }
+            #[allow(
+                non_camel_case_types,
+                dead_code,
+                unused_imports,
+                unused_qualifications,
+                clippy::derivable_impls,
+                clippy::match_single_binding,
+                clippy::uninlined_format_args,
+                clippy::doc_lazy_continuation,
+                clippy::module_inception
+            )]
+            pub mod state {
+                use super::*;
+                #[allow(
+                    non_camel_case_types,
+                    dead_code,
+                    unused_imports,
+                    unused_qualifications,
+                    clippy::derivable_impls,
+                    clippy::match_single_binding,
+                    clippy::uninlined_format_args,
+                    clippy::doc_lazy_continuation,
+                    clippy::module_inception
+                )]
+                pub mod v1alpha1 {
+                    use super::*;
+                    include!("trogonai.session.sessions.state.v1alpha1.mod.rs");
+                }
+            }
+            #[allow(
+                non_camel_case_types,
+                dead_code,
+                unused_imports,
+                unused_qualifications,
+                clippy::derivable_impls,
+                clippy::match_single_binding,
+                clippy::uninlined_format_args,
+                clippy::doc_lazy_continuation,
+                clippy::module_inception
+            )]
             pub mod v1alpha1 {
                 use super::*;
                 include!("trogonai.session.sessions.v1alpha1.mod.rs");
+            }
+        }
+    }
+    #[allow(
+        non_camel_case_types,
+        dead_code,
+        unused_imports,
+        unused_qualifications,
+        clippy::derivable_impls,
+        clippy::match_single_binding,
+        clippy::uninlined_format_args,
+        clippy::doc_lazy_continuation,
+        clippy::module_inception
+    )]
+    pub mod usage {
+        use super::*;
+        #[allow(
+            non_camel_case_types,
+            dead_code,
+            unused_imports,
+            unused_qualifications,
+            clippy::derivable_impls,
+            clippy::match_single_binding,
+            clippy::uninlined_format_args,
+            clippy::doc_lazy_continuation,
+            clippy::module_inception
+        )]
+        pub mod settlement {
+            use super::*;
+            #[allow(
+                non_camel_case_types,
+                dead_code,
+                unused_imports,
+                unused_qualifications,
+                clippy::derivable_impls,
+                clippy::match_single_binding,
+                clippy::uninlined_format_args,
+                clippy::doc_lazy_continuation,
+                clippy::module_inception
+            )]
+            pub mod v1alpha1 {
+                use super::*;
+                include!("trogonai.usage.settlement.v1alpha1.mod.rs");
             }
         }
     }

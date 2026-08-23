@@ -15,6 +15,9 @@ pub mod session_event {
         SessionHidden(::buffa::alloc::boxed::Box<super::super::super::SessionHidden>),
         SessionForked(::buffa::alloc::boxed::Box<super::super::super::SessionForked>),
         SessionRewound(::buffa::alloc::boxed::Box<super::super::super::SessionRewound>),
+        SessionRecovered(
+            ::buffa::alloc::boxed::Box<super::super::super::SessionRecovered>,
+        ),
         Compacted(::buffa::alloc::boxed::Box<super::super::super::Compacted>),
         UserMessageRecorded(
             ::buffa::alloc::boxed::Box<super::super::super::UserMessageRecorded>,
@@ -27,6 +30,9 @@ pub mod session_event {
         ),
         AssistantMessageFailed(
             ::buffa::alloc::boxed::Box<super::super::super::AssistantMessageFailed>,
+        ),
+        ProviderToolIntentRejected(
+            ::buffa::alloc::boxed::Box<super::super::super::ProviderToolIntentRejected>,
         ),
         ToolCallRequested(
             ::buffa::alloc::boxed::Box<super::super::super::ToolCallRequested>,
@@ -173,6 +179,16 @@ pub mod session_event {
             Self::Some(Event::from(v))
         }
     }
+    impl From<super::super::super::SessionRecovered> for Event {
+        fn from(v: super::super::super::SessionRecovered) -> Self {
+            Self::SessionRecovered(::buffa::alloc::boxed::Box::new(v))
+        }
+    }
+    impl From<super::super::super::SessionRecovered> for ::core::option::Option<Event> {
+        fn from(v: super::super::super::SessionRecovered) -> Self {
+            Self::Some(Event::from(v))
+        }
+    }
     impl From<super::super::super::Compacted> for Event {
         fn from(v: super::super::super::Compacted) -> Self {
             Self::Compacted(::buffa::alloc::boxed::Box::new(v))
@@ -224,6 +240,17 @@ pub mod session_event {
     impl From<super::super::super::AssistantMessageFailed>
     for ::core::option::Option<Event> {
         fn from(v: super::super::super::AssistantMessageFailed) -> Self {
+            Self::Some(Event::from(v))
+        }
+    }
+    impl From<super::super::super::ProviderToolIntentRejected> for Event {
+        fn from(v: super::super::super::ProviderToolIntentRejected) -> Self {
+            Self::ProviderToolIntentRejected(::buffa::alloc::boxed::Box::new(v))
+        }
+    }
+    impl From<super::super::super::ProviderToolIntentRejected>
+    for ::core::option::Option<Event> {
+        fn from(v: super::super::super::ProviderToolIntentRejected) -> Self {
             Self::Some(Event::from(v))
         }
     }
@@ -557,6 +584,9 @@ pub mod session_event {
                 Self::SessionRewound(v) => {
                     map.serialize_entry("sessionRewound", v)?;
                 }
+                Self::SessionRecovered(v) => {
+                    map.serialize_entry("sessionRecovered", v)?;
+                }
                 Self::Compacted(v) => {
                     map.serialize_entry("compacted", v)?;
                 }
@@ -571,6 +601,9 @@ pub mod session_event {
                 }
                 Self::AssistantMessageFailed(v) => {
                     map.serialize_entry("assistantMessageFailed", v)?;
+                }
+                Self::ProviderToolIntentRejected(v) => {
+                    map.serialize_entry("providerToolIntentRejected", v)?;
                 }
                 Self::ToolCallRequested(v) => {
                     map.serialize_entry("toolCallRequested", v)?;

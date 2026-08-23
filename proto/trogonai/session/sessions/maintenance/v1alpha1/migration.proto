@@ -1,0 +1,143 @@
+edition = "2024";
+
+package trogonai.session.sessions.maintenance.v1alpha1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/session/sessions/maintenance/v1alpha1/outcome.proto";
+import "trogonai/session/sessions/maintenance/v1alpha1/stream_boundary.proto";
+
+// The durable record of a Session migration.
+//
+// A migration rewrites one session's stored events under a newer storage schema
+// and keeps the session's identity. Two rules make that safe, and both are
+// admissibility requirements rather than best effort:
+//
+// 1. Ordinals are preserved exactly. The target has the same event count as the
+//    source, one transformed payload per source position. Inserting or removing
+//    an event would renumber every following SessionOrdinal, and ordinals are
+//    referenced from outside this stream: fork context boundaries on child
+//    sessions, checkpoint evidence, consistency tokens, and page cursors would
+//    all silently come to mean something else.
+// 2. The transformation is byte-deterministic. Given the same source bytes and
+//    the same implementation_version, it produces the same target bytes.
+//
+// The second rule is what makes a lost commit acknowledgment recoverable: the
+// expected target digest can be written down before the commit, so a later look
+// at the target answers "did my write land" instead of "did some write land."
+// A transformation that cannot reproduce its own output is not a migration. It
+// is a salvage, and it must mint a new identity.
+
+// MigrationIdentity is the retry identity of a migration.
+//
+// Two attempts sharing this tuple are the same migration and the second is
+// idempotent. Two attempts differing anywhere in it are different migrations,
+// and treating the second as a retry of the first is how a session gets
+// migrated twice.
+message MigrationIdentity {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Digest of the source cut. Part of identity because a migration of different
+  // source content is a different migration even under the same version pair.
+  ContentDigest source_digest = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Pins the transformation, including its encoder. Byte-determinism is scoped
+  // to this value: a new encoder is a new implementation_version, because the
+  // output bytes are part of what it promises.
+  string implementation_version = 3 [features.field_presence = LEGACY_REQUIRED];
+  uint32 source_schema_version = 4 [features.field_presence = LEGACY_REQUIRED];
+  uint32 target_schema_version = 5 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// MigrationIntent is written durably before any target byte is written.
+//
+// This is the load-bearing record of the whole workflow. Reconciliation is a
+// comparison, and a comparison needs something recorded on the near side of the
+// crash. Without an intent, a process that dies mid-commit leaves a target that
+// nobody can attribute and nobody can safely replace.
+message MigrationIntent {
+  MigrationIdentity identity = 1 [features.field_presence = LEGACY_REQUIRED];
+  StreamBoundary source = 2 [features.field_presence = LEGACY_REQUIRED];
+  // The boundary the target will have if the commit lands, computed before the
+  // commit is attempted. `expected_target.ordinal` always equals
+  // `source.ordinal`; a plan where they differ is not admissible.
+  StreamBoundary expected_target = 3 [features.field_presence = LEGACY_REQUIRED];
+  string actor = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Why this migration was run. A migration is a rewrite of durable history,
+  // and an unattributed rewrite is not auditable.
+  string reason = 5 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp planned_at = 6 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// MigrationRecord is the intent plus everything learned since.
+message MigrationRecord {
+  MigrationIntent intent = 1 [features.field_presence = LEGACY_REQUIRED];
+  MaintenanceState state = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Set only for MAINTENANCE_STATE_INDETERMINATE.
+  IndeterminateDetail indeterminate = 3;
+  // The target as actually observed. Unset before any commit was attempted, and
+  // unset after a reconciliation that found no target.
+  StreamBoundary observed_target = 4;
+  // Attempts made under this identity. A rising count against an unchanged
+  // state is the signal that a retry loop is not converging.
+  uint32 attempt_count = 5 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp updated_at = 6 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// MigrationResult is the disposition of one MigrateSession call.
+enum MigrationResult {
+  MIGRATION_RESULT_UNSPECIFIED = 0;
+  // This call performed the migration.
+  MIGRATION_RESULT_MIGRATED = 1;
+  // The session was already at the target schema version and no work was
+  // needed. Distinct from MIGRATED so a fleet run can report how much it
+  // actually rewrote.
+  MIGRATION_RESULT_ALREADY_CURRENT = 2;
+  // A prior attempt under this identity already committed. Reported instead of
+  // MIGRATED so a retry never claims work it did not do, which is exactly the
+  // claim the user's lost acknowledgment would otherwise produce.
+  MIGRATION_RESULT_ALREADY_MIGRATED = 3;
+  // The plan was rejected before any write. Carries an AdmissibilityDetail.
+  MIGRATION_RESULT_NOT_ADMISSIBLE = 4;
+  // The migration did not commit, and that is known.
+  MIGRATION_RESULT_FAILED = 5;
+  // The outcome could not be classified. Carries an IndeterminateDetail on the
+  // record.
+  MIGRATION_RESULT_INDETERMINATE = 6;
+  // PLAN_ONLY: the plan is admissible and nothing was written.
+  MIGRATION_RESULT_WOULD_MIGRATE = 7;
+}
+
+// AdmissibilityDetail is why a migration was refused before writing anything.
+//
+// Every reason here is a reason to reach for salvage instead. A migration that
+// bends any of these rules keeps the session's identity while changing what its
+// ordinals mean, and nothing downstream would notice.
+message AdmissibilityDetail {
+  AdmissibilityReason reason = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The source position that triggered the refusal, where one did.
+  uint64 ordinal = 2;
+  // The source event type that triggered it, where one did.
+  string type_url = 3;
+  string detail = 4;
+}
+
+// AdmissibilityReason is the specific rule a plan violated.
+enum AdmissibilityReason {
+  ADMISSIBILITY_REASON_UNSPECIFIED = 0;
+  // An event type in the source has no representation in the target schema.
+  // Dropping it would renumber ordinals, so the migration refuses.
+  ADMISSIBILITY_REASON_TYPE_REMOVED = 1;
+  // An event decoded and carries a value the target schema cannot express.
+  ADMISSIBILITY_REASON_FIELD_UNREPRESENTABLE = 2;
+  // Source bytes did not decode. A migration transforms events it understands;
+  // recovering ones it does not is salvage.
+  ADMISSIBILITY_REASON_SOURCE_UNDECODABLE = 3;
+  // The transformation could not commit to a reproducible output, so a retry
+  // could not be distinguished from a divergence.
+  ADMISSIBILITY_REASON_NOT_BYTE_DETERMINISTIC = 4;
+  // The source is larger than the limits allowed for a single operation.
+  ADMISSIBILITY_REASON_SIZE_LIMIT = 5;
+  // The source is still being written to. A migration of a moving stream is a
+  // migration of an arbitrary prefix.
+  ADMISSIBILITY_REASON_SOURCE_NOT_QUIESCED = 6;
+  // Another maintenance operation holds this session.
+  ADMISSIBILITY_REASON_OPERATION_IN_PROGRESS = 7;
+}

@@ -122,6 +122,14 @@ impl ::buffa::Message for SessionEvent {
                         += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
                             + inner as u64;
                 }
+                __buffa::oneof::session_event::Event::SessionRecovered(x) => {
+                    let __slot = __cache.reserve();
+                    let inner = x.compute_size(__cache);
+                    __cache.set(__slot, inner);
+                    size
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
+                }
                 __buffa::oneof::session_event::Event::Compacted(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
@@ -155,6 +163,14 @@ impl ::buffa::Message for SessionEvent {
                             + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::AssistantMessageFailed(x) => {
+                    let __slot = __cache.reserve();
+                    let inner = x.compute_size(__cache);
+                    __cache.set(__slot, inner);
+                    size
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
+                }
+                __buffa::oneof::session_event::Event::ProviderToolIntentRejected(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
@@ -467,6 +483,14 @@ impl ::buffa::Message for SessionEvent {
                     );
                     x.write_to(__cache, buf);
                 }
+                __buffa::oneof::session_event::Event::SessionRecovered(x) => {
+                    ::buffa::types::put_len_delimited_header(
+                        42u32,
+                        u64::from(__cache.consume_next()),
+                        buf,
+                    );
+                    x.write_to(__cache, buf);
+                }
                 __buffa::oneof::session_event::Event::Compacted(x) => {
                     ::buffa::types::put_len_delimited_header(
                         8u32,
@@ -502,6 +526,14 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::AssistantMessageFailed(x) => {
                     ::buffa::types::put_len_delimited_header(
                         28u32,
+                        u64::from(__cache.consume_next()),
+                        buf,
+                    );
+                    x.write_to(__cache, buf);
+                }
+                __buffa::oneof::session_event::Event::ProviderToolIntentRejected(x) => {
+                    ::buffa::types::put_len_delimited_header(
+                        43u32,
                         u64::from(__cache.consume_next()),
                         buf,
                     );
@@ -903,6 +935,28 @@ impl ::buffa::Message for SessionEvent {
                     );
                 }
             }
+            42u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                if let ::core::option::Option::Some(
+                    __buffa::oneof::session_event::Event::SessionRecovered(
+                        ref mut existing,
+                    ),
+                ) = self.event
+                {
+                    ::buffa::Message::merge_length_delimited(&mut **existing, buf, ctx)?;
+                } else {
+                    let mut val = ::core::default::Default::default();
+                    ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
+                    self.event = ::core::option::Option::Some(
+                        __buffa::oneof::session_event::Event::SessionRecovered(
+                            ::buffa::alloc::boxed::Box::new(val),
+                        ),
+                    );
+                }
+            }
             8u32 => {
                 ::buffa::encoding::check_wire_type(
                     tag,
@@ -1006,6 +1060,28 @@ impl ::buffa::Message for SessionEvent {
                     ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
                     self.event = ::core::option::Option::Some(
                         __buffa::oneof::session_event::Event::AssistantMessageFailed(
+                            ::buffa::alloc::boxed::Box::new(val),
+                        ),
+                    );
+                }
+            }
+            43u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                if let ::core::option::Option::Some(
+                    __buffa::oneof::session_event::Event::ProviderToolIntentRejected(
+                        ref mut existing,
+                    ),
+                ) = self.event
+                {
+                    ::buffa::Message::merge_length_delimited(&mut **existing, buf, ctx)?;
+                } else {
+                    let mut val = ::core::default::Default::default();
+                    ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
+                    self.event = ::core::option::Option::Some(
+                        __buffa::oneof::session_event::Event::ProviderToolIntentRejected(
                             ::buffa::alloc::boxed::Box::new(val),
                         ),
                     );
@@ -1841,6 +1917,30 @@ impl<'de> serde::Deserialize<'de> for SessionEvent {
                                 );
                             }
                         }
+                        "sessionRecovered" | "session_recovered" => {
+                            let v: ::core::option::Option<SessionRecovered> = map
+                                .next_value_seed(
+                                    ::buffa::json_helpers::NullableDeserializeSeed(
+                                        ::buffa::json_helpers::DefaultDeserializeSeed::<
+                                            SessionRecovered,
+                                        >::new(),
+                                    ),
+                                )?;
+                            if let Some(v) = v {
+                                if __oneof_event.is_some() {
+                                    return Err(
+                                        serde::de::Error::custom(
+                                            "multiple oneof fields set for 'event'",
+                                        ),
+                                    );
+                                }
+                                __oneof_event = Some(
+                                    __buffa::oneof::session_event::Event::SessionRecovered(
+                                        ::buffa::alloc::boxed::Box::new(v),
+                                    ),
+                                );
+                            }
+                        }
                         "compacted" => {
                             let v: ::core::option::Option<Compacted> = map
                                 .next_value_seed(
@@ -1956,6 +2056,31 @@ impl<'de> serde::Deserialize<'de> for SessionEvent {
                                 }
                                 __oneof_event = Some(
                                     __buffa::oneof::session_event::Event::AssistantMessageFailed(
+                                        ::buffa::alloc::boxed::Box::new(v),
+                                    ),
+                                );
+                            }
+                        }
+                        "providerToolIntentRejected"
+                        | "provider_tool_intent_rejected" => {
+                            let v: ::core::option::Option<ProviderToolIntentRejected> = map
+                                .next_value_seed(
+                                    ::buffa::json_helpers::NullableDeserializeSeed(
+                                        ::buffa::json_helpers::DefaultDeserializeSeed::<
+                                            ProviderToolIntentRejected,
+                                        >::new(),
+                                    ),
+                                )?;
+                            if let Some(v) = v {
+                                if __oneof_event.is_some() {
+                                    return Err(
+                                        serde::de::Error::custom(
+                                            "multiple oneof fields set for 'event'",
+                                        ),
+                                    );
+                                }
+                                __oneof_event = Some(
+                                    __buffa::oneof::session_event::Event::ProviderToolIntentRejected(
                                         ::buffa::alloc::boxed::Box::new(v),
                                     ),
                                 );

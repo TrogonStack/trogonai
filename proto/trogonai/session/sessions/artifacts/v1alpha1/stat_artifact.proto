@@ -1,0 +1,59 @@
+edition = "2024";
+
+package trogonai.session.sessions.artifacts.v1alpha1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/session/sessions/artifacts/v1alpha1/availability.proto";
+
+// StatArtifactRequest asks what an artifact is, without asking for it.
+//
+// There is deliberately no field on this request that could cause bytes to be
+// returned: no range, no "include content", no size threshold under which the
+// content comes along. A caller reaching for metadata about a 40 MB artifact
+// must not be able to fetch 40 MB by setting a field wrong, and a reviewer must
+// not have to read a value to know a call was cheap. This is the same
+// structural argument that gives DiagnoseSession no repair mode.
+message StatArtifactRequest {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string artifact_id = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// StatArtifactResponse describes the artifact and what can be done with it.
+message StatArtifactResponse {
+  string artifact_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ArtifactAvailability availability = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Short human-readable preview recorded with the artifact; empty when none
+  // was produced. Present regardless of availability, because a preview is
+  // recorded on the log rather than stored with the bytes and so survives their
+  // erasure or loss. For many callers this is the whole answer, and the reason
+  // a preview is not a range read is that it costs nothing to serve.
+  string preview = 3;
+  // True when preview is a truncation of the full content.
+  bool preview_truncated = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Set only for ARTIFACT_AVAILABILITY_AVAILABLE. Every other availability has
+  // no readable bytes to describe, and a size or digest reported next to one of
+  // them would describe something the caller cannot obtain.
+  ReadableContent content = 5;
+  // When availability was determined. Availability is an observation of an
+  // external store at a moment, not a durable property of the artifact, and a
+  // caller acting on it later is acting on a claim that has since expired.
+  google.protobuf.Timestamp observed_at = 6 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// ReadableContent describes bytes a caller can actually get.
+message ReadableContent {
+  uint64 size_bytes = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Decoded media type of the stored bytes.
+  string mime = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Hash algorithm of `digest`, for example "sha256".
+  string digest_algorithm = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Content digest over the whole artifact, as recorded on the log. Checking a
+  // range against this one requires reading every byte, which is what
+  // `chunk_size_bytes` exists to avoid.
+  bytes digest = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Chunk size of this artifact's manifest, when it has one. Unset means the
+  // artifact was stored without chunk hashing, so no range of it can be
+  // checked, and a caller that needs a checkable read should learn that here
+  // rather than by having a range read refused.
+  uint64 chunk_size_bytes = 5;
+}

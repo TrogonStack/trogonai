@@ -10,6 +10,11 @@ pub enum FileChangeKind {
     FILE_CHANGE_KIND_MODIFIED = 2i32,
     FILE_CHANGE_KIND_DELETED = 3i32,
     FILE_CHANGE_KIND_RENAMED = 4i32,
+    /// Content duplicated from another path, which still exists. Recorded instead
+    /// of FILE_CHANGE_KIND_CREATED rather than alongside it, so the destination has
+    /// exactly one kind and two facts about the same change cannot disagree. The
+    /// source file did not change and produces no FileChanged of its own.
+    FILE_CHANGE_KIND_COPIED = 5i32,
 }
 impl FileChangeKind {
     ///Idiomatic alias for [`Self::FILE_CHANGE_KIND_UNSPECIFIED`]; `Debug` prints the variant name.
@@ -27,6 +32,9 @@ impl FileChangeKind {
     ///Idiomatic alias for [`Self::FILE_CHANGE_KIND_RENAMED`]; `Debug` prints the variant name.
     #[allow(non_upper_case_globals)]
     pub const Renamed: Self = Self::FILE_CHANGE_KIND_RENAMED;
+    ///Idiomatic alias for [`Self::FILE_CHANGE_KIND_COPIED`]; `Debug` prints the variant name.
+    #[allow(non_upper_case_globals)]
+    pub const Copied: Self = Self::FILE_CHANGE_KIND_COPIED;
 }
 impl ::core::default::Default for FileChangeKind {
     fn default() -> Self {
@@ -129,6 +137,7 @@ impl ::buffa::Enumeration for FileChangeKind {
             2i32 => ::core::option::Option::Some(Self::FILE_CHANGE_KIND_MODIFIED),
             3i32 => ::core::option::Option::Some(Self::FILE_CHANGE_KIND_DELETED),
             4i32 => ::core::option::Option::Some(Self::FILE_CHANGE_KIND_RENAMED),
+            5i32 => ::core::option::Option::Some(Self::FILE_CHANGE_KIND_COPIED),
             _ => ::core::option::Option::None,
         }
     }
@@ -142,6 +151,7 @@ impl ::buffa::Enumeration for FileChangeKind {
             Self::FILE_CHANGE_KIND_MODIFIED => "FILE_CHANGE_KIND_MODIFIED",
             Self::FILE_CHANGE_KIND_DELETED => "FILE_CHANGE_KIND_DELETED",
             Self::FILE_CHANGE_KIND_RENAMED => "FILE_CHANGE_KIND_RENAMED",
+            Self::FILE_CHANGE_KIND_COPIED => "FILE_CHANGE_KIND_COPIED",
         }
     }
     fn from_proto_name(name: &str) -> ::core::option::Option<Self> {
@@ -161,6 +171,9 @@ impl ::buffa::Enumeration for FileChangeKind {
             "FILE_CHANGE_KIND_RENAMED" => {
                 ::core::option::Option::Some(Self::FILE_CHANGE_KIND_RENAMED)
             }
+            "FILE_CHANGE_KIND_COPIED" => {
+                ::core::option::Option::Some(Self::FILE_CHANGE_KIND_COPIED)
+            }
             _ => ::core::option::Option::None,
         }
     }
@@ -171,6 +184,7 @@ impl ::buffa::Enumeration for FileChangeKind {
             Self::FILE_CHANGE_KIND_MODIFIED,
             Self::FILE_CHANGE_KIND_DELETED,
             Self::FILE_CHANGE_KIND_RENAMED,
+            Self::FILE_CHANGE_KIND_COPIED,
         ]
     }
 }

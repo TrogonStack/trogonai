@@ -400,19 +400,34 @@ model is fine, a rollup in the event is a second source of truth.
   `last_event_seq` are all recomputable and all capable of drifting from the
   log they summarise.
 
-## Open questions for the ADR
+## Questions this study opened, and how they were answered
 
-- Turn identity: correlator field or explicit `TurnStarted` / `TurnEnded`
-  events? The second is more faithful; the first is compatible with every
-  existing event without touching their shapes.
-- Are file reads session facts or tool details? The answer decides whether
-  audit ("what did the agent look at") is a first-class capability or a
-  log-parsing exercise.
-- Is workspace binding part of the session aggregate or part of the opaque
-  execution plan? If the former, is rebinding supported, and does it produce
-  an event?
-- Does a provider-native escape hatch belong in a canonical event catalog at
-  all, or should each provider-specific need be modelled explicitly as it
-  arises? `ThinkingBlock.signature` is the precedent either way.
-- Do we need an epoch or authority token distinct from stream sequence, or do
-  we prohibit stream recreation outright?
+All five are closed. They are kept here rather than deleted so the comparison
+records what it actually changed.
+
+- **Turn identity: a correlator field, or explicit `TurnStarted` / `TurnEnded`
+  events?** The correlator. A required `turn_id` correlates conversation, tool,
+  and file facts without adding events whose only content is a boundary.
+- **Are file reads session facts or tool details?** Session facts.
+  `ToolCallCompleted.observed` records URI, digest or confirmed absence, range,
+  and completeness, so audit is a fold rather than a log-parsing exercise. A
+  later pass separated *seeing a name* from *reading contents*, because they are
+  different compliance questions: see
+  [Session Tool Effects](../../../../architecture/session-tool-effects.md).
+- **Is workspace binding part of the aggregate or part of the opaque execution
+  plan, and is rebinding supported?** Part of the aggregate, and rebinding is
+  not supported. The binding is immutable for the life of the session; a change
+  is a new session or a fork. Recorded in
+  [Session Schema Boundaries](../../../../architecture/session-schema-boundaries.md).
+- **Does a provider-native escape hatch belong in a canonical catalog?** Yes,
+  under a strict rule. `ProviderBlock` retains unmodelled provider blocks as
+  write-verbatim, read-never data, inline or via `ArtifactRef`. Read-never is
+  what keeps it an escape hatch rather than a second schema: a projection may
+  not mine it. That constraint is precisely why a malformed tool intent needed
+  its own typed event, in
+  [Session Provider Faults](../../../../architecture/session-provider-faults.md).
+- **Do we need an epoch or authority token distinct from stream sequence, or do
+  we prohibit stream recreation outright?** Neither, as posed. The incarnation
+  is a token in the subject, so the fence is the address rather than a checked
+  value, and a retired incarnation is sealed. See
+  [ADR#0059](../../../../adr/0059-session-stream-incarnation-fencing.md).

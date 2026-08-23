@@ -276,6 +276,37 @@ impl<'a> ::buffa::MessageView<'a> for SessionEventView<'a> {
                     );
                 }
             }
+            42u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                if let Some(
+                    super::super::__buffa::view::oneof::session_event::Event::SessionRecovered(
+                        ref mut existing,
+                    ),
+                ) = view.event
+                {
+                    ::buffa::MessageView::merge_into_view(
+                        &mut **existing,
+                        sub,
+                        __sub_ctx,
+                    )?;
+                } else {
+                    view.event = Some(
+                        super::super::__buffa::view::oneof::session_event::Event::SessionRecovered(
+                            ::buffa::alloc::boxed::Box::new(
+                                <super::super::__buffa::view::SessionRecoveredView as ::buffa::MessageView>::decode_view_ctx(
+                                    sub,
+                                    __sub_ctx,
+                                )?,
+                            ),
+                        ),
+                    );
+                }
+            }
             8u32 => {
                 ::buffa::encoding::check_wire_type(
                     tag,
@@ -423,6 +454,37 @@ impl<'a> ::buffa::MessageView<'a> for SessionEventView<'a> {
                         super::super::__buffa::view::oneof::session_event::Event::AssistantMessageFailed(
                             ::buffa::alloc::boxed::Box::new(
                                 <super::super::__buffa::view::AssistantMessageFailedView as ::buffa::MessageView>::decode_view_ctx(
+                                    sub,
+                                    __sub_ctx,
+                                )?,
+                            ),
+                        ),
+                    );
+                }
+            }
+            43u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                if let Some(
+                    super::super::__buffa::view::oneof::session_event::Event::ProviderToolIntentRejected(
+                        ref mut existing,
+                    ),
+                ) = view.event
+                {
+                    ::buffa::MessageView::merge_into_view(
+                        &mut **existing,
+                        sub,
+                        __sub_ctx,
+                    )?;
+                } else {
+                    view.event = Some(
+                        super::super::__buffa::view::oneof::session_event::Event::ProviderToolIntentRejected(
+                            ::buffa::alloc::boxed::Box::new(
+                                <super::super::__buffa::view::ProviderToolIntentRejectedView as ::buffa::MessageView>::decode_view_ctx(
                                     sub,
                                     __sub_ctx,
                                 )?,
@@ -1417,6 +1479,15 @@ impl<'a> ::buffa::MessageView<'a> for SessionEventView<'a> {
                                     ),
                                 )
                             }
+                            super::super::__buffa::view::oneof::session_event::Event::SessionRecovered(
+                                v,
+                            ) => {
+                                super::super::__buffa::oneof::session_event::Event::SessionRecovered(
+                                    ::buffa::alloc::boxed::Box::new(
+                                        v.to_owned_from_source(__buffa_src)?,
+                                    ),
+                                )
+                            }
                             super::super::__buffa::view::oneof::session_event::Event::Compacted(
                                 v,
                             ) => {
@@ -1457,6 +1528,15 @@ impl<'a> ::buffa::MessageView<'a> for SessionEventView<'a> {
                                 v,
                             ) => {
                                 super::super::__buffa::oneof::session_event::Event::AssistantMessageFailed(
+                                    ::buffa::alloc::boxed::Box::new(
+                                        v.to_owned_from_source(__buffa_src)?,
+                                    ),
+                                )
+                            }
+                            super::super::__buffa::view::oneof::session_event::Event::ProviderToolIntentRejected(
+                                v,
+                            ) => {
+                                super::super::__buffa::oneof::session_event::Event::ProviderToolIntentRejected(
                                     ::buffa::alloc::boxed::Box::new(
                                         v.to_owned_from_source(__buffa_src)?,
                                     ),
@@ -1810,6 +1890,16 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                         += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
                             + inner as u64;
                 }
+                super::super::__buffa::view::oneof::session_event::Event::SessionRecovered(
+                    x,
+                ) => {
+                    let __slot = __cache.reserve();
+                    let inner = x.compute_size(__cache);
+                    __cache.set(__slot, inner);
+                    size
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
+                }
                 super::super::__buffa::view::oneof::session_event::Event::Compacted(
                     x,
                 ) => {
@@ -1851,6 +1941,16 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                             + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::AssistantMessageFailed(
+                    x,
+                ) => {
+                    let __slot = __cache.reserve();
+                    let inner = x.compute_size(__cache);
+                    __cache.set(__slot, inner);
+                    size
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
+                }
+                super::super::__buffa::view::oneof::session_event::Event::ProviderToolIntentRejected(
                     x,
                 ) => {
                     let __slot = __cache.reserve();
@@ -2234,6 +2334,16 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     );
                     x.write_to(__cache, buf);
                 }
+                super::super::__buffa::view::oneof::session_event::Event::SessionRecovered(
+                    x,
+                ) => {
+                    ::buffa::types::put_len_delimited_header(
+                        42u32,
+                        u64::from(__cache.consume_next()),
+                        buf,
+                    );
+                    x.write_to(__cache, buf);
+                }
                 super::super::__buffa::view::oneof::session_event::Event::Compacted(
                     x,
                 ) => {
@@ -2279,6 +2389,16 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         28u32,
+                        u64::from(__cache.consume_next()),
+                        buf,
+                    );
+                    x.write_to(__cache, buf);
+                }
+                super::super::__buffa::view::oneof::session_event::Event::ProviderToolIntentRejected(
+                    x,
+                ) => {
+                    ::buffa::types::put_len_delimited_header(
+                        43u32,
                         u64::from(__cache.consume_next()),
                         buf,
                     );
@@ -2633,6 +2753,11 @@ impl<'__a> ::serde::Serialize for SessionEventView<'__a> {
                 ) => {
                     __map.serialize_entry("sessionRewound", v)?;
                 }
+                super::super::__buffa::view::oneof::session_event::Event::SessionRecovered(
+                    v,
+                ) => {
+                    __map.serialize_entry("sessionRecovered", v)?;
+                }
                 super::super::__buffa::view::oneof::session_event::Event::Compacted(
                     v,
                 ) => {
@@ -2657,6 +2782,11 @@ impl<'__a> ::serde::Serialize for SessionEventView<'__a> {
                     v,
                 ) => {
                     __map.serialize_entry("assistantMessageFailed", v)?;
+                }
+                super::super::__buffa::view::oneof::session_event::Event::ProviderToolIntentRejected(
+                    v,
+                ) => {
+                    __map.serialize_entry("providerToolIntentRejected", v)?;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::ToolCallRequested(
                     v,

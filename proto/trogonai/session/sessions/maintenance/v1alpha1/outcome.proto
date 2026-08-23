@@ -1,0 +1,80 @@
+edition = "2024";
+
+package trogonai.session.sessions.maintenance.v1alpha1;
+
+import "trogonai/session/sessions/maintenance/v1alpha1/stream_boundary.proto";
+
+// MaintenanceState is the lifecycle shared by migration and salvage.
+//
+// The two workflows differ in almost everything else and share this because
+// they share the same crash-exposed middle: durable work that is staged but not
+// yet authoritative, and a commit whose acknowledgment can be lost after the
+// commit itself succeeded.
+enum MaintenanceState {
+  MAINTENANCE_STATE_UNSPECIFIED = 0;
+  // The intent is durable and no target write has been attempted. Recovering
+  // from a crash here is free: nothing was written.
+  MAINTENANCE_STATE_PLANNED = 1;
+  // Target content exists and is not yet the authoritative answer.
+  MAINTENANCE_STATE_STAGED = 2;
+  // A commit was attempted and its outcome is not known. This is where a lost
+  // acknowledgment lands. It is neither success nor failure, and the whole
+  // reason the intent is written first is so this state can be left.
+  MAINTENANCE_STATE_COMMIT_UNKNOWN = 3;
+  MAINTENANCE_STATE_COMMITTED = 4;
+  // The committed target was read back and matched the intent.
+  MAINTENANCE_STATE_VALIDATED = 5;
+  // The workflow ended without committing, and that is known.
+  MAINTENANCE_STATE_FAILED = 6;
+  // Reconciliation ran and could not classify the outcome. Terminal until an
+  // operator acts.
+  MAINTENANCE_STATE_INDETERMINATE = 7;
+}
+
+// IndeterminateDetail is why an outcome could not be classified.
+//
+// COMMIT_UNKNOWN and INDETERMINATE are deliberately different states.
+// COMMIT_UNKNOWN says nobody has looked yet, and looking is a mechanical step
+// the workflow performs on its own. INDETERMINATE says the workflow looked and
+// the evidence does not decide. Indeterminate is a conclusion, not the absence
+// of one, and collapsing the two would make an unattended retry loop
+// indistinguishable from a problem that needs a human.
+message IndeterminateDetail {
+  IndeterminateReason reason = 1 [features.field_presence = LEGACY_REQUIRED];
+  // What the intent said should be there.
+  StreamBoundary expected = 2;
+  // What was found. Unset means nothing was found, which is a different fact
+  // from finding an empty stream, and the two lead to opposite actions.
+  StreamBoundary observed = 3;
+  // For an operator. Never parsed.
+  string detail = 4;
+}
+
+// IndeterminateReason is the specific evidence gap.
+enum IndeterminateReason {
+  INDETERMINATE_REASON_UNSPECIFIED = 0;
+  // A target exists where the intent said one would, and its content is not the
+  // content this operation would have produced. Either something else wrote it
+  // or a prior attempt wrote a truncated copy. Never overwrite: this is the one
+  // reason that most invites a "just run it again" reflex and most punishes it.
+  INDETERMINATE_REASON_TARGET_CONTENT_MISMATCH = 1;
+  // The target exists and could not be read well enough to compare. Unreadable
+  // is not absent, so nothing may be written on the strength of it.
+  INDETERMINATE_REASON_TARGET_UNREADABLE = 2;
+  // The source advanced between the intent and the commit, so the staged target
+  // is a transformation of a prefix. Committing it would silently discard every
+  // event appended in between.
+  INDETERMINATE_REASON_SOURCE_ADVANCED = 3;
+  // The source is no longer the stream incarnation the intent was cut from.
+  INDETERMINATE_REASON_SOURCE_INCARNATION_CHANGED = 4;
+  // The authoritative order of source events could not be established.
+  INDETERMINATE_REASON_ORDER_UNPROVEN = 5;
+  // Exclusive ownership of the target could not be proven, so a commit might
+  // overwrite a concurrent writer.
+  INDETERMINATE_REASON_OWNERSHIP_UNPROVEN = 6;
+  // No intent record was found for an operation that durable state shows was
+  // started. There is nothing to compare against, which is what skipping the
+  // intent-first rule costs. Named so its absence is a reportable condition
+  // rather than a mystery.
+  INDETERMINATE_REASON_INTENT_MISSING = 7;
+}

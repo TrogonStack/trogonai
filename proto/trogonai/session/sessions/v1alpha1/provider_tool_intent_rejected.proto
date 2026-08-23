@@ -1,0 +1,95 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "trogonai/session/sessions/v1alpha1/artifact.proto";
+
+// ProviderToolIntentRejected records that a provider emitted something shaped
+// like a tool call which the runtime refused to turn into one.
+//
+// It exists because the malformed intent structurally cannot be stored anywhere
+// else. The canonical transcript form is `ToolUseBlock`, whose `input_json` is
+// LEGACY_REQUIRED and must be valid JSON; an intent whose arguments are truncated
+// JSON has nothing to put there. `ProviderBlock` retains the raw payload but is
+// documented write-verbatim, read-never, so mining it for diagnosis would make a
+// projection depend on a shape the domain promised never to interpret. The
+// choice is therefore a typed event or nothing, and nothing means the most
+// common provider fault in production leaves a session that simply did less than
+// it appeared to.
+//
+// This is not ToolCallDenied. Denial is a well-formed request a human, policy,
+// or hook refused, and the request exists. Here no request was ever admissible,
+// so no ToolCallRequested is written, no execution id is minted, and no
+// operation is reserved. Refusing to synthesize a request out of unparseable
+// input is the whole point: a synthetic ToolCallRequested would put a call on the
+// log that the provider never validly asked for.
+//
+// It is per-intent and not per-message. A message carrying nine sound tool calls
+// and one malformed one must keep the nine, so the sound calls proceed to
+// ToolCallRequested normally while only the tenth lands here. Marking the whole
+// assistant message failed would discard nine calls to describe one.
+//
+// It is a commuting happened-fact (WRITE_PRECONDITION = Any, ADR#0035 facet 2).
+// It records something the provider already did; nothing about the session's
+// current lifecycle can make it untrue.
+message ProviderToolIntentRejected {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Identifies this rejection. Minted by the runtime, because the whole class of
+  // fault is that the provider's own identifier is missing, empty, or duplicated
+  // and cannot be used as a key.
+  string rejection_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  // The assistant message this intent arrived in (CanonicalMessage.message_id).
+  string message_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Turn this generation belongs to (see UserMessageRecorded.turn_id).
+  string turn_id = 4 [features.field_presence = LEGACY_REQUIRED];
+  ProviderToolIntentRejectionReason reason = 5 [features.field_presence = LEGACY_REQUIRED];
+  // What the provider claimed the call's id was, verbatim, including empty when
+  // that was the fault. Recorded as a claim rather than as an identity: it may
+  // be empty, may collide with a real call, and must never be joined against
+  // tool_call_id anywhere.
+  string claimed_tool_call_id = 6;
+  // What the provider claimed the tool's name was, verbatim. Empty when absent.
+  string claimed_tool_name = 7;
+  // Claim-check to the provider's raw emission for this intent.
+  //
+  // Out of line rather than inline for the reason every other unbounded payload
+  // is: malformed input has no length bound, and this particular payload is the
+  // one shaped by whatever produced the fault. A megabyte of truncated JSON
+  // inlined into a never-truncated log is a way to make one bad generation
+  // permanent for every reader of the stream.
+  //
+  // Unset when the raw emission could not be captured, which is itself worth
+  // distinguishing from a capture of nothing.
+  ArtifactRef raw_intent = 8;
+  // Free-text detail from the parser or validator, for humans. Never parsed.
+  string detail = 9;
+}
+
+// ProviderToolIntentRejectionReason is why the intent was not admissible.
+//
+// The reasons are typed because the operational responses differ: a malformed
+// argument payload is a prompt or model problem, an unknown tool name is a
+// catalog drift problem, and a duplicate id is a provider bug that will corrupt
+// joins if it is ever admitted. A single free-text reason makes those one alert.
+enum ProviderToolIntentRejectionReason {
+  PROVIDER_TOOL_INTENT_REJECTION_REASON_UNSPECIFIED = 0;
+  // Arguments were not parseable as JSON, or parsed to something that is not an
+  // object.
+  PROVIDER_TOOL_INTENT_REJECTION_REASON_MALFORMED_ARGUMENTS = 1;
+  // Arguments parsed but did not satisfy the tool's declared input schema.
+  PROVIDER_TOOL_INTENT_REJECTION_REASON_SCHEMA_VIOLATION = 2;
+  // The provider supplied no call id, or an empty one.
+  PROVIDER_TOOL_INTENT_REJECTION_REASON_MISSING_CALL_ID = 3;
+  // The call id collides with one already used in this session. Refused rather
+  // than deduplicated: admitting it would make the result of one call
+  // attributable to another, and every downstream join silently wrong.
+  PROVIDER_TOOL_INTENT_REJECTION_REASON_DUPLICATE_CALL_ID = 4;
+  // No tool name, or a name no registered tool answers to.
+  PROVIDER_TOOL_INTENT_REJECTION_REASON_UNKNOWN_TOOL = 5;
+  // The intent named a parent tool use that does not exist in this session, so
+  // its position in the call tree is unresolvable.
+  PROVIDER_TOOL_INTENT_REJECTION_REASON_UNRESOLVABLE_PARENT = 6;
+  // The emission exceeded the runtime's accepted size for a single intent and
+  // was refused before parsing.
+  PROVIDER_TOOL_INTENT_REJECTION_REASON_OVERSIZED = 7;
+}

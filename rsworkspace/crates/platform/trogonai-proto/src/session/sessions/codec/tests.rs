@@ -117,6 +117,18 @@ fn session_forked() -> v1alpha1::SessionForked {
     }
 }
 
+fn session_recovered() -> v1alpha1::SessionRecovered {
+    v1alpha1::SessionRecovered {
+        session_id: "session-1".to_string(),
+        source_session_id: "session-0".to_string(),
+        source_boundary: MessageField::some(session_ordinal(7)),
+        source_digest: MessageField::some(digest()),
+        salvage_key: "salvage-1".to_string(),
+        completeness: buffa::EnumValue::from(v1alpha1::RecoveryCompleteness::Partial),
+        omitted_count: 2,
+    }
+}
+
 fn session_rewound() -> v1alpha1::SessionRewound {
     v1alpha1::SessionRewound {
         session_id: "session-1".to_string(),
@@ -255,6 +267,10 @@ fn tool_call_started() -> v1alpha1::ToolCallStarted {
 
 fn tool_call_completed() -> v1alpha1::ToolCallCompleted {
     v1alpha1::ToolCallCompleted {
+        detached: MessageField::none(),
+        accessed: Vec::new(),
+        failed_targets: Vec::new(),
+        targets_attempted: None,
         session_id: "session-1".to_string(),
         tool_call_id: "tool-call-1".to_string(),
         tool_execution_id: "tool-exec-1".to_string(),
@@ -270,6 +286,7 @@ fn tool_call_completed() -> v1alpha1::ToolCallCompleted {
         duration: MessageField::none(),
         observed: Vec::new(),
         termination: MessageField::none(),
+        output_replay: MessageField::none(),
         turn_id: "turn-1".to_string(),
     }
 }
@@ -299,6 +316,7 @@ fn artifact_recorded() -> v1alpha1::ArtifactRecorded {
                     size_bytes: 128,
                     storage_ref: "blob://artifact-1".to_string(),
                     mime: "text/plain".to_string(),
+                    chunks: MessageField::none(),
                 },
             ))),
         }),
@@ -307,6 +325,7 @@ fn artifact_recorded() -> v1alpha1::ArtifactRecorded {
 
 fn file_changed() -> v1alpha1::FileChanged {
     v1alpha1::FileChanged {
+        copied_from: MessageField::none(),
         session_id: "session-1".to_string(),
         path: "src/main.rs".to_string(),
         change_kind: buffa::EnumValue::from(v1alpha1::FileChangeKind::Modified),
@@ -514,6 +533,20 @@ fn session_unarchived() -> v1alpha1::SessionUnarchived {
     }
 }
 
+fn provider_tool_intent_rejected() -> v1alpha1::ProviderToolIntentRejected {
+    v1alpha1::ProviderToolIntentRejected {
+        session_id: "session-1".to_string(),
+        rejection_id: "rejection-1".to_string(),
+        message_id: "message-1".to_string(),
+        turn_id: "turn-1".to_string(),
+        reason: buffa::EnumValue::from(v1alpha1::ProviderToolIntentRejectionReason::MalformedArguments),
+        claimed_tool_call_id: None,
+        claimed_tool_name: None,
+        raw_intent: MessageField::none(),
+        detail: None,
+    }
+}
+
 fn all_session_events() -> Vec<v1alpha1::SessionEvent> {
     vec![
         v1alpha1::SessionEvent {
@@ -639,6 +672,12 @@ fn all_session_events() -> Vec<v1alpha1::SessionEvent> {
         v1alpha1::SessionEvent {
             event: Some(session_unarchived().into()),
         },
+        v1alpha1::SessionEvent {
+            event: Some(session_recovered().into()),
+        },
+        v1alpha1::SessionEvent {
+            event: Some(provider_tool_intent_rejected().into()),
+        },
     ]
 }
 
@@ -669,6 +708,10 @@ fn assert_variant_round_trips(event: &v1alpha1::SessionEvent, encoded: &[u8]) ->
         SessionEventCase::SessionForked(inner) => {
             assert_eq!(v1alpha1::SessionForked::decode_from_slice(encoded).unwrap(), **inner);
             <v1alpha1::SessionForked as buffa::MessageName>::FULL_NAME
+        }
+        SessionEventCase::SessionRecovered(inner) => {
+            assert_eq!(v1alpha1::SessionRecovered::decode_from_slice(encoded).unwrap(), **inner);
+            <v1alpha1::SessionRecovered as buffa::MessageName>::FULL_NAME
         }
         SessionEventCase::SessionRewound(inner) => {
             assert_eq!(v1alpha1::SessionRewound::decode_from_slice(encoded).unwrap(), **inner);
@@ -867,6 +910,13 @@ fn assert_variant_round_trips(event: &v1alpha1::SessionEvent, encoded: &[u8]) ->
             );
             <v1alpha1::SessionUnarchived as buffa::MessageName>::FULL_NAME
         }
+        SessionEventCase::ProviderToolIntentRejected(inner) => {
+            assert_eq!(
+                v1alpha1::ProviderToolIntentRejected::decode_from_slice(encoded).unwrap(),
+                **inner
+            );
+            <v1alpha1::ProviderToolIntentRejected as buffa::MessageName>::FULL_NAME
+        }
     }
 }
 
@@ -1018,6 +1068,10 @@ fn tool_call_completed_round_trips_termination_duration_and_observations() {
     assert_round_trips(v1alpha1::SessionEvent {
         event: Some(
             v1alpha1::ToolCallCompleted {
+                detached: MessageField::none(),
+                accessed: Vec::new(),
+                failed_targets: Vec::new(),
+                targets_attempted: None,
                 termination: MessageField::some(v1alpha1::CommandTermination {
                     outcome: Some(v1alpha1::command_termination::Outcome::ExitCode(2)),
                 }),
@@ -1052,6 +1106,10 @@ fn tool_call_completed_round_trips_signal_termination() {
     assert_round_trips(v1alpha1::SessionEvent {
         event: Some(
             v1alpha1::ToolCallCompleted {
+                detached: MessageField::none(),
+                accessed: Vec::new(),
+                failed_targets: Vec::new(),
+                targets_attempted: None,
                 termination: MessageField::some(v1alpha1::CommandTermination {
                     outcome: Some(v1alpha1::command_termination::Outcome::Signal(9)),
                 }),
@@ -1067,6 +1125,7 @@ fn file_changed_round_trips_diff_summary() {
     assert_round_trips(v1alpha1::SessionEvent {
         event: Some(
             v1alpha1::FileChanged {
+                copied_from: MessageField::none(),
                 diff: MessageField::some(v1alpha1::DiffSummary {
                     added_lines: Some(12),
                     removed_lines: Some(3),

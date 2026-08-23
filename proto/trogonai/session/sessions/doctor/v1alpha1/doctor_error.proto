@@ -1,0 +1,44 @@
+edition = "2024";
+
+package trogonai.session.sessions.doctor.v1alpha1;
+
+// DoctorError is the typed failure payload for the doctor surface.
+//
+// Defined here rather than shared with the query contract's QueryError. The
+// doctor is an operator surface with its own audience and its own release
+// cadence, and pinning its failure vocabulary to a client-facing contract would
+// mean every new operator diagnostic is a client-visible change. That is the
+// same reasoning the query contract applies to projection value types, one
+// subtree further out.
+message DoctorError {
+  DoctorErrorCode code = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Human-readable, non-contractual. Never parse it.
+  string message = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Dotted path into the request for INVALID_ARGUMENT.
+  string field_path = 3;
+}
+
+// DoctorErrorCode is why a diagnosis or repair could not be served.
+enum DoctorErrorCode {
+  DOCTOR_ERROR_CODE_UNSPECIFIED = 0;
+  DOCTOR_ERROR_CODE_SESSION_NOT_FOUND = 1;
+  DOCTOR_ERROR_CODE_INVALID_ARGUMENT = 2;
+  // The repair names a diagnosis this server does not have. Repairs are bound
+  // to a report, so an unknown one is refused rather than treated as an
+  // unprovenanced repair.
+  DOCTOR_ERROR_CODE_DIAGNOSIS_NOT_FOUND = 3;
+  // The diagnosis is known and too old to authorize a mutation. A report ages
+  // into a description of a session that no longer exists, and re-verification
+  // catches most of that but should not be the only thing standing between a
+  // stale report and a destructive action.
+  DOCTOR_ERROR_CODE_DIAGNOSIS_EXPIRED = 4;
+  // The repair names findings from a different session than it targets.
+  DOCTOR_ERROR_CODE_DIAGNOSIS_SESSION_MISMATCH = 5;
+  // The caller may not inspect or repair this session. Diagnosis and repair are
+  // authorized separately: read access to a report does not carry the right to
+  // act on it.
+  DOCTOR_ERROR_CODE_PERMISSION_DENIED = 6;
+  // The requested inspection is too expensive to admit even with a budget.
+  DOCTOR_ERROR_CODE_RESOURCE_EXHAUSTED = 7;
+  DOCTOR_ERROR_CODE_INTERNAL = 8;
+}

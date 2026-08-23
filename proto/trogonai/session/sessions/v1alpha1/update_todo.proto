@@ -1,0 +1,21 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "trogonai/session/sessions/v1alpha1/todo_updated.proto";
+
+// UpdateTodo replaces the agent's task list wholesale, recording
+// [TodoUpdated], so the plan is a domain fact rather than something a
+// projection parses out of a tool call's input.
+//
+// Write precondition Any: the fold keeps the highest revision, which is
+// order-independent and so genuinely commuting; ties resolve to the first in
+// fold order.
+message UpdateTodo {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The complete list as of this update; readers replace, not merge.
+  repeated TodoItem items = 2;
+  // Monotonic per session from the single logical writer, the active
+  // attempt's loop.
+  uint64 revision = 3 [features.field_presence = LEGACY_REQUIRED];
+}

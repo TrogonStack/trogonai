@@ -1,0 +1,53 @@
+edition = "2024";
+
+package trogonai.session.sessions.maintenance.v1alpha1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/session/sessions/maintenance/v1alpha1/migration.proto";
+import "trogonai/session/sessions/maintenance/v1alpha1/outcome.proto";
+import "trogonai/session/sessions/maintenance/v1alpha1/stream_boundary.proto";
+
+// ReconcileMigration resolves a migration whose commit outcome is unknown.
+//
+// It reads. There is no mode, no force, and no field that could make it write,
+// for the same reason DiagnoseSession has none: a reconciler that can also
+// commit is a reconciler that can blindly commit, and blindly copying a session
+// again is precisely the failure this workflow exists to prevent. Acting on a
+// verdict is a separate MigrateSession call, made by whoever read the verdict.
+message ReconcileMigrationRequest {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The identity from the recorded intent. Reconciliation compares against what
+  // was planned, so a caller with no intent has nothing to reconcile and gets
+  // INDETERMINATE_REASON_INTENT_MISSING rather than a guess.
+  MigrationIdentity identity = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ReconcileMigrationResponse {
+  ReconciliationVerdict verdict = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The state the record should be moved to. Reported rather than applied,
+  // because applying it is a write.
+  MaintenanceState resolved_state = 2 [features.field_presence = LEGACY_REQUIRED];
+  // What was found at the target location. Unset when nothing was found.
+  StreamBoundary observed_target = 3;
+  // Set only for RECONCILIATION_VERDICT_UNRESOLVED.
+  IndeterminateDetail indeterminate = 4;
+  google.protobuf.Timestamp observed_at = 5 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// ReconciliationVerdict is what the durable evidence says happened.
+enum ReconciliationVerdict {
+  RECONCILIATION_VERDICT_UNSPECIFIED = 0;
+  // No target exists. The commit did not land, and a retry under the same
+  // identity is safe.
+  RECONCILIATION_VERDICT_NOT_COMMITTED = 1;
+  // A target exists and its boundary matches the intent exactly. The commit
+  // landed and the acknowledgment was the only thing lost. The correct action
+  // is to record success, not to migrate again.
+  RECONCILIATION_VERDICT_COMMITTED = 2;
+  // A target exists and does not match the intent. Fail closed: no automated
+  // action may resolve this, because both readings, a truncated copy of ours
+  // and an intact copy of somebody else's, look identical from here.
+  RECONCILIATION_VERDICT_DIVERGED = 3;
+  // The comparison itself could not be made.
+  RECONCILIATION_VERDICT_UNRESOLVED = 4;
+}

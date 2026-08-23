@@ -1,0 +1,173 @@
+edition = "2024";
+
+package trogonai.session.sessions.doctor.v1alpha1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+// Orphan reporting for the doctor.
+//
+// An orphan is a resource that was staged for a write that never landed. The
+// canonical shape is an artifact upload that succeeded followed by an append
+// that failed: the bytes are durable, nothing references them, and nothing ever
+// will. Left alone they accumulate; deleted carelessly they take live content
+// with them.
+//
+// Every message here exists to make the second failure hard. The point is not
+// to find candidates, which is easy, but to state what was actually traced and
+// what is still holding a release back, so that deleting something is a
+// decision an operator makes against evidence rather than against a count.
+
+// OrphanClass is what kind of resource was left behind.
+//
+// They are enumerated separately rather than collapsed into "unreferenced
+// thing" because they have different owners, different ways of being
+// referenced, and different consequences for getting it wrong. Releasing an
+// abandoned projection generation costs a rebuild. Releasing a claim check that
+// was about to be referenced destroys the only copy of a command's output.
+enum OrphanClass {
+  ORPHAN_CLASS_UNSPECIFIED = 0;
+  // A multipart upload with parts written and no completion. It holds storage,
+  // it has no digest yet, and no event can reference it because the object it
+  // would name does not exist.
+  ORPHAN_CLASS_UNCOMMITTED_MULTIPART_UPLOAD = 1;
+  // A completed object with a digest that no event in any stream references.
+  //
+  // The dangerous one. Content-addressed storage means the same bytes can be
+  // reachable through a stream nobody thought to scan, so this class is the
+  // reason ownership has to be traced rather than searched for.
+  ORPHAN_CLASS_UNREFERENCED_CLAIM_CHECK = 2;
+  // Materialized state belonging to a projection generation that is neither
+  // current nor being rebuilt. Disposable by construction: the stream can
+  // produce it again.
+  ORPHAN_CLASS_ABANDONED_PROJECTION_GENERATION = 3;
+  // Staging state from a migration that has since finished. It was never the
+  // source of truth, and it stops being a fallback once the migration is done.
+  ORPHAN_CLASS_COMPLETED_MIGRATION_STAGING = 4;
+  // A reconciliation lease past its expiry whose holder never returned.
+  //
+  // Releasing this one is not a deletion, it is a handoff: the work the lease
+  // covered still needs settling, and reclaiming the lease is what lets someone
+  // else settle it.
+  ORPHAN_CLASS_EXPIRED_RECONCILIATION_LEASE = 5;
+}
+
+// OrphanDetail is the evidence behind an orphan finding.
+message OrphanDetail {
+  OrphanClass orphan_class = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Upload id, artifact id, projection generation, migration id, or lease id,
+  // per `orphan_class`.
+  string resource_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  // When the resource was created in its store, as the store recorded it. A
+  // wall-clock occurrence, not a position derived from append order (D10),
+  // because an orphan by definition never reached the log.
+  google.protobuf.Timestamp staged_at = 3 [features.field_presence = LEGACY_REQUIRED];
+  // How long it has been sitting there, as of the finding's `observed_at`.
+  google.protobuf.Duration age = 4 [features.field_presence = LEGACY_REQUIRED];
+  // What was actually checked before calling this unreferenced.
+  OwnershipTrace trace = 5 [features.field_presence = LEGACY_REQUIRED];
+  // What still has to be true before it can be released.
+  ReleaseGate gate = 6 [features.field_presence = LEGACY_REQUIRED];
+  // Storage this would return. Unset when the store cannot say, which is
+  // ordinary for an incomplete multipart upload and is not zero bytes.
+  uint64 reclaimable_bytes = 7;
+}
+
+// OwnershipTrace is what the orphan check looked at, and how far it got.
+//
+// This message is the difference between a finding and a guess. "No reference
+// found" is only meaningful alongside where the search ran and where it
+// stopped, and a check that scanned four of a tenant's streams produces the
+// same empty result as one that scanned all of them.
+message OwnershipTrace {
+  TraceCompleteness completeness = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Streams the trace read to completion.
+  uint32 streams_scanned = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Streams in scope the trace could not read. Any non-zero value makes the
+  // result non-exhaustive no matter how many streams were scanned, because the
+  // reference could be in exactly one of them.
+  uint32 streams_unreadable = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Position the trace scanned through.
+  uint64 scanned_through_watermark = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Head at the time the trace ran. Above `scanned_through_watermark` means
+  // events were appended during the scan, and a reference could be in the gap.
+  uint64 source_high_watermark = 5 [features.field_presence = LEGACY_REQUIRED];
+  // Position the slowest projector needed for this trace had applied through.
+  //
+  // A trace that consults derived state is only as complete as that state. A
+  // projector behind the scan makes the trace's answer a statement about
+  // history the projector has already seen, which is not the same as the
+  // history that exists.
+  uint64 projector_applied_through = 6 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// TraceCompleteness is how much of the search space the trace actually covered.
+enum TraceCompleteness {
+  // Unknown coverage. Treat as INCOMPLETE.
+  TRACE_COMPLETENESS_UNSPECIFIED = 0;
+  // Every stream in scope was read to the head observed at scan time, and
+  // every projector consulted was current with it.
+  TRACE_COMPLETENESS_EXHAUSTIVE = 1;
+  // Coverage was cut short by a budget: a time limit, a stream limit, a byte
+  // limit. Whatever was scanned is accurate, and the unscanned part is unknown.
+  TRACE_COMPLETENESS_BOUNDED = 2;
+  // Something in scope could not be read at all. Distinct from BOUNDED because
+  // a bounded trace can be finished by granting more budget, and this one
+  // cannot be finished until the fault is fixed.
+  TRACE_COMPLETENESS_INCOMPLETE = 3;
+}
+
+// ReleaseGate is what stands between an orphan finding and deleting something.
+//
+// Nothing is released on age alone and nothing is released on absence of
+// references alone. Both are necessary and neither is sufficient, which is why
+// the outcome is a single value rather than a set of flags a caller could read
+// selectively.
+message ReleaseGate {
+  GateOutcome outcome = 1 [features.field_presence = LEGACY_REQUIRED];
+  // How old a resource of this class must be before release is considered.
+  google.protobuf.Duration minimum_age = 2 [features.field_presence = LEGACY_REQUIRED];
+  // How long an append can remain indeterminate before its outcome is settled
+  // one way or the other.
+  //
+  // This is the number that makes the whole gate correct. An append whose write
+  // state is unknown may still land, and if it lands it carries a reference to
+  // a resource that a cleanup pass has already decided nothing points at. So
+  // `minimum_age` has to exceed this window, and a resource inside it is held
+  // regardless of how thoroughly it was traced: the trace was accurate and the
+  // history was not finished happening.
+  google.protobuf.Duration indeterminacy_window = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Earliest time this could become releasable, if nothing changes. Unset when
+  // waiting will not help, which is the case for every outcome that depends on
+  // a fault being fixed rather than on time passing.
+  google.protobuf.Timestamp releasable_after = 4;
+}
+
+// GateOutcome is whether this orphan may be released now, and if not, why not.
+//
+// The zero value holds and RELEASABLE is last, so a reader that does not
+// recognize a variant keeps the resource. Getting this backwards would make an
+// unknown enum value a deletion.
+enum GateOutcome {
+  // Unknown outcome. Hold.
+  GATE_OUTCOME_UNSPECIFIED = 0;
+  // Younger than `minimum_age`.
+  GATE_OUTCOME_HELD_TOO_YOUNG = 1;
+  // Inside the indeterminacy window of an append that has not settled. The
+  // reference may still arrive.
+  GATE_OUTCOME_HELD_INDETERMINATE_APPEND = 2;
+  // The ownership trace did not cover the search space, so "unreferenced" has
+  // not actually been established.
+  GATE_OUTCOME_HELD_TRACE_INCOMPLETE = 3;
+  // A projector the trace depends on is behind the stream head. Held rather
+  // than reported as incomplete, because this one resolves on its own once the
+  // projector catches up.
+  GATE_OUTCOME_HELD_PROJECTOR_BEHIND = 4;
+  // Old enough, exhaustively traced, no unsettled append in range. A repair may
+  // release it.
+  //
+  // Still not an instruction. The doctor observes and never mutates; releasing
+  // is a RepairSession call naming this finding, and the gate is re-evaluated
+  // then, because everything it asserts can stop being true in the interval.
+  GATE_OUTCOME_RELEASABLE = 5;
+}

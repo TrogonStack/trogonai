@@ -3,6 +3,7 @@ edition = "2024";
 package trogonai.session.sessions.v1alpha1;
 
 import "trogonai/session/sessions/v1alpha1/artifact.proto";
+import "trogonai/session/sessions/v1alpha1/copy_source.proto";
 import "trogonai/session/sessions/v1alpha1/diff_summary.proto";
 import "trogonai/session/sessions/v1alpha1/file_change.proto";
 
@@ -25,7 +26,9 @@ message FileChanged {
   // with no FileChanged to join against.
   string path = 2 [features.field_presence = LEGACY_REQUIRED];
   FileChangeKind change_kind = 3 [features.field_presence = LEGACY_REQUIRED];
-  // Same workspace-relative form as path.
+  // Where a renamed file used to be, in the same workspace-relative form as
+  // path. Rename only: a copy sets copied_from instead, because a previous path
+  // asserts the file is no longer there.
   string previous_path = 4;
   // Claim-check to the file's content before the change; unset for a create or
   // when content was not captured. Recorded because our checkpoints are opaque,
@@ -43,4 +46,6 @@ message FileChanged {
   string turn_id = 8 [features.field_presence = LEGACY_REQUIRED];
   // Precomputed line counts and rendered diff; unset when no diff was computed.
   DiffSummary diff = 9;
+  // Where the content came from, set only for FILE_CHANGE_KIND_COPIED.
+  CopySource copied_from = 10;
 }

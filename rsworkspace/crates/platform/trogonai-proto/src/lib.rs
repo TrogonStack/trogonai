@@ -48,6 +48,14 @@ pub mod content {
     }
 }
 
+#[cfg(feature = "sessions")]
+#[cfg_attr(dylint_lib = "trogon_lints", allow(inline_module_block))]
+pub mod usage {
+    pub mod settlement_v1alpha1 {
+        pub use crate::r#gen::trogonai::usage::settlement::v1alpha1::*;
+    }
+}
+
 #[cfg(any(feature = "schedules", feature = "agents", feature = "decider"))]
 #[cfg_attr(dylint_lib = "trogon_lints", allow(inline_module_block))]
 pub mod google {

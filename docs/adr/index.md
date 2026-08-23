@@ -64,3 +64,5 @@ future implementation work.
 - [ADR#0056: Canonical JSON-RPC Bodies over NATS (Draft)](./0056-canonical-jsonrpc-bodies-over-nats.md)
 - [ADR#0057: Decider Command NATS Binding (Draft)](./0057-decider-command-nats-binding.md)
 - [ADR#0058: Decider Module Distribution (Draft)](./0058-decider-module-distribution.md)
+- [ADR#0059: Stream Incarnation Fencing by Subject Isolation and Sealing (Draft)](./0059-session-stream-incarnation-fencing.md)
+- [ADR#0060: The Session Read Contract Is a Query Proto, Not the Projection Value (Draft)](./0060-session-query-contract-separate-from-projection.md)

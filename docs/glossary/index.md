@@ -46,6 +46,7 @@ entries are the quick reference.
 - [Admission control](./admission-control)
 - [Retention watermark](./retention-watermark)
 - [Command principal](./command-principal)
+- [Stream incarnation](./stream-incarnation)
 
 ## Agent execution model
 
