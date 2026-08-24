@@ -7340,7 +7340,6 @@ dependencies = [
  "buffa-types",
  "chrono",
  "serde",
- "serde_json",
  "thiserror 2.0.19",
  "trogon-decider",
  "trogon-decider-runtime",
