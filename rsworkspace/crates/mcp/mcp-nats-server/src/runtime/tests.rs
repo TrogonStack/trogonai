@@ -545,3 +545,98 @@ fn custom_request_extensions_restore_meta_and_allowlisted_http_headers() {
     let request = serde_json::to_value(request).unwrap();
     assert_eq!(request["params"]["_meta"]["test.marker"], "preserved");
 }
+
+#[derive(Clone)]
+struct NoopServerHandler;
+
+impl ServerHandler for NoopServerHandler {}
+
+#[tokio::test]
+async fn proxy_worker_times_out_pending_requests_that_never_get_a_response() {
+    let nats = trogon_nats::AdvancedMockNatsClient::new();
+    let _inbound = nats.inject_messages();
+    let mismatched = ServerJsonRpcMessage::response(
+        ServerResult::InitializeResult(
+            InitializeResult::new(ServerCapabilities::default())
+                .with_server_info(Implementation::new("remote-server", "1.0.0")),
+        ),
+        NumberOrString::Number(99),
+    );
+    let encoded = wire::encode_tx::<RoleServer>(&mismatched).unwrap();
+    nats.set_response_wire("mcp.v1.server.default.initialize", encoded.headers, encoded.body);
+
+    let (_http_side, handler_side) = tokio::io::duplex(1024);
+    let running = rmcp::service::serve_directly(NoopServerHandler, handler_side, None);
+    let peer = running.peer().clone();
+
+    let (command_tx, command_rx) = mpsc::channel(1);
+    let worker = tokio::spawn(run_proxy_worker(
+        nats,
+        mcp_config().with_operation_timeout(Duration::from_millis(150)),
+        McpPeerId::new("http-test").unwrap(),
+        McpPeerId::new("default").unwrap(),
+        command_rx,
+    ));
+
+    let JsonRpcMessage::Request(request) = initialize_request() else {
+        panic!("expected initialize request");
+    };
+    let (response_tx, response_rx) = oneshot::channel();
+    command_tx
+        .send(ProxyCommand::Request {
+            request: Box::new(request.request),
+            request_id: RequestId::Number(1),
+            peer,
+            response_tx,
+        })
+        .await
+        .unwrap();
+
+    let delivered = response_rx.await.unwrap();
+    assert_eq!(
+        delivered.unwrap_err().message.as_ref(),
+        "MCP NATS proxy timed out waiting for a response"
+    );
+
+    drop(command_tx);
+    worker.await.unwrap();
+}
+
+#[tokio::test]
+async fn evict_expired_pending_keeps_requests_that_are_still_within_their_deadline() {
+    let (expired_tx, expired_rx) = oneshot::channel();
+    let (live_tx, _live_rx) = oneshot::channel();
+    let mut pending: HashMap<RequestId, PendingEntry> = HashMap::new();
+    pending.insert(
+        RequestId::Number(1),
+        PendingEntry {
+            response_tx: expired_tx,
+            deadline: Instant::now(),
+        },
+    );
+    pending.insert(
+        RequestId::Number(2),
+        PendingEntry {
+            response_tx: live_tx,
+            deadline: Instant::now() + Duration::from_secs(60),
+        },
+    );
+
+    evict_expired_pending(&mut pending);
+
+    assert_eq!(pending.len(), 1);
+    assert!(pending.contains_key(&RequestId::Number(2)));
+    assert_eq!(
+        expired_rx.await.unwrap().unwrap_err().message.as_ref(),
+        "MCP NATS proxy timed out waiting for a response"
+    );
+}
+
+#[tokio::test]
+async fn wait_for_deadline_never_resolves_without_a_pending_deadline() {
+    assert!(
+        tokio::time::timeout(Duration::from_millis(20), wait_for_deadline(None))
+            .await
+            .is_err()
+    );
+}
