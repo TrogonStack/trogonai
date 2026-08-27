@@ -4,10 +4,6 @@ pub mod checkpoints_v1 {
     pub use crate::r#gen::trogonai::gateway::credentials::checkpoints::v1::*;
 }
 
-pub mod commands_v1 {
-    pub use crate::r#gen::trogonai::gateway::credentials::commands::v1::*;
-}
-
 pub mod idempotency_v1 {
     pub use crate::r#gen::trogonai::gateway::credentials::idempotency::v1::*;
 }

@@ -9,6 +9,8 @@ inputs:
     exclude_paths:
       - proto/trogonai/session
       - proto/trogonai/usage
+      - proto/trogonai/platform
+      - proto/trogonai/gateway/credentials/commands
 plugins:
   - local: protoc-gen-buffa
     out: rsworkspace/crates/platform/trogonai-proto/src/gen
