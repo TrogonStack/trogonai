@@ -2,6 +2,18 @@
 
 Repos we lean on most for research. One deduplicated list across all corpora.
 
+## Protocol research
+
+- [ACP v2 and MCP 2026-07-28](./acp-v2-and-mcp-2026-07-28.md)
+
+## Official protocol source repositories
+
+- [agentclientprotocol/agent-client-protocol](https://github.com/agentclientprotocol/agent-client-protocol)
+- [agentclientprotocol/rust-sdk](https://github.com/agentclientprotocol/rust-sdk)
+- [modelcontextprotocol/modelcontextprotocol](https://github.com/modelcontextprotocol/modelcontextprotocol)
+- [modelcontextprotocol/typescript-sdk](https://github.com/modelcontextprotocol/typescript-sdk)
+- [modelcontextprotocol/rust-sdk](https://github.com/modelcontextprotocol/rust-sdk)
+
 - [anthropics/claude-agent-sdk-python](https://github.com/anthropics/claude-agent-sdk-python) / [claude-agent-sdk-typescript](https://github.com/anthropics/claude-agent-sdk-typescript)
 - [openai/codex](https://github.com/openai/codex)
 - [openai/openai-agents-python](https://github.com/openai/openai-agents-python)
@@ -31,5 +43,4 @@ Repos we lean on most for research. One deduplicated list across all corpora.
 - [Mesh-LLM/mesh-llm](https://github.com/Mesh-LLM/mesh-llm)
 - [earendil-works/pi](https://github.com/earendil-works/pi)
 - [zed-industries/zed](https://github.com/zed-industries/zed)
-- [agentclientprotocol/agent-client-protocol](https://github.com/agentclientprotocol/agent-client-protocol)
 - [cline/cline](https://github.com/cline/cline)
