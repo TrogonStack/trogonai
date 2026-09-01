@@ -168,6 +168,7 @@ hmac = "=0.13.0"
 jsonwebtoken = { version = "=11.0.0", features = ["rust_crypto"] }
 nats-jwt-rs = "=0.1.1"
 nkeys = { version = "=0.4.5", features = ["xkeys"] }
+rustls = { version = "=0.23.37", default-features = false, features = ["aws-lc-rs", "std"] }
 rustls-pemfile = "=2.2.0"
 rustls-pki-types = { version = "=1.15.1", default-features = false, features = ["std"] }
 rustls-webpki = { version = "=0.103.13", default-features = false, features = ["std", "alloc", "ring"] }
