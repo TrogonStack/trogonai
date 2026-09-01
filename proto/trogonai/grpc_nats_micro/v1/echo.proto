@@ -10,31 +10,32 @@ import "google/rpc/code.proto";
 import "google/rpc/status.proto";
 import "trogon/nats/micro/v1alpha1/options.proto";
 
-// Echo is the reference NATS micro service. The binding derives one endpoint
-// per rpc; success replies carry the response message, faults carry a
-// google.rpc.Status on the micro error channel (ADR 0016 section 3).
-service Echo {
-  option (trogon.nats.micro.v1alpha1.service) = {
-    version: "1"
-  };
+// EchoService is the reference NATS micro service. The binding derives one
+// endpoint per rpc; success replies carry the response message, faults carry
+// a google.rpc.Status on the micro error channel (ADR 0016 section 3).
+service EchoService {
+  option (trogon.nats.micro.v1alpha1.service) = {version: "1"};
 
   // Say returns the request message unchanged.
-  rpc Say(EchoRequest) returns (EchoReply);
+  rpc Say(SayRequest) returns (SayResponse);
 
   // Fail always faults, so tests can exercise the google.rpc.Status error
   // channel. The requested code is echoed back as the fault's status code.
-  rpc Fail(FailRequest) returns (EchoReply) {
+  rpc Fail(FailRequest) returns (FailResponse) {
     option (trogon.nats.micro.v1alpha1.method) = {
-      metadata: { key: "always-faults" value: "true" }
+      metadata: {
+        key: "always-faults"
+        value: "true"
+      }
     };
   }
 }
 
-message EchoRequest {
+message SayRequest {
   string message = 1;
 }
 
-message EchoReply {
+message SayResponse {
   string message = 1;
 }
 
@@ -42,4 +43,8 @@ message FailRequest {
   // Canonical status code the handler should fault with.
   google.rpc.Code code = 1;
   string message = 2;
+}
+
+message FailResponse {
+  string message = 1;
 }

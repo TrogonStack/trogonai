@@ -1,6 +1,6 @@
 use buffa::Message;
 use thiserror::Error;
-use trogonai_proto::nats::micro::v1alpha1::ServiceOptions;
+use trogonai_proto::nats::micro::v1alpha1::{ContentType as ProtoContentType, ServiceOptions};
 
 use crate::constants::{CONTENT_TYPE_JSON, CONTENT_TYPE_PROTOBUF};
 
@@ -15,8 +15,6 @@ impl ContentType {
     /// The set of `Content-Type` values a [`ServiceOptions::content_type`]
     /// restriction allows on the wire.
     fn allowed(policy: &ServiceOptions) -> Allowed {
-        use trogonai_proto::nats::micro::v1alpha1::ContentType as ProtoContentType;
-
         match policy.content_type.as_known() {
             Some(ProtoContentType::CONTENT_TYPE_PROTOBUF) => Allowed::Only(Self::Protobuf),
             Some(ProtoContentType::CONTENT_TYPE_JSON) => Allowed::Only(Self::Json),

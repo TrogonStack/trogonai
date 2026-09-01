@@ -54,19 +54,12 @@ pub fn encode_reply(outcome: Outcome, content_type: ContentType) -> Result<Encod
 
 /// A decoded micro service error: the headers are authoritative for `code`
 /// on any disagreement with the body per ADR 0016 §3.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Error)]
+#[error("nats micro service error (code {code}): {message}")]
 pub struct ServiceError {
     pub code: i32,
     pub message: String,
 }
-
-impl std::fmt::Display for ServiceError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "nats micro service error (code {}): {}", self.code, self.message)
-    }
-}
-
-impl std::error::Error for ServiceError {}
 
 impl ServiceError {
     fn from_status(header_code: i32, status: Status) -> Self {

@@ -22,22 +22,27 @@ pub mod __buffa {
     }
     /// Register this package's `Any` type entries and extension entries.
     pub fn register_types(reg: &mut ::buffa::type_registry::TypeRegistry) {
-        reg.register_json_any(super::__ECHO_REQUEST_JSON_ANY);
-        reg.register_json_any(super::__ECHO_REPLY_JSON_ANY);
+        reg.register_json_any(super::__SAY_REQUEST_JSON_ANY);
+        reg.register_json_any(super::__SAY_RESPONSE_JSON_ANY);
         reg.register_json_any(super::__FAIL_REQUEST_JSON_ANY);
+        reg.register_json_any(super::__FAIL_RESPONSE_JSON_ANY);
     }
 }
 #[doc(inline)]
-pub use self::__buffa::view::EchoRequestView;
+pub use self::__buffa::view::SayRequestView;
 #[doc(inline)]
-pub use self::__buffa::view::EchoRequestOwnedView;
+pub use self::__buffa::view::SayRequestOwnedView;
 #[doc(inline)]
-pub use self::__buffa::view::EchoReplyView;
+pub use self::__buffa::view::SayResponseView;
 #[doc(inline)]
-pub use self::__buffa::view::EchoReplyOwnedView;
+pub use self::__buffa::view::SayResponseOwnedView;
 #[doc(inline)]
 pub use self::__buffa::view::FailRequestView;
 #[doc(inline)]
 pub use self::__buffa::view::FailRequestOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::FailResponseView;
+#[doc(inline)]
+pub use self::__buffa::view::FailResponseOwnedView;
 #[doc(inline)]
 pub use self::__buffa::register_types;

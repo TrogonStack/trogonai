@@ -4,24 +4,24 @@
 #[derive(Clone, PartialEq, Default)]
 #[derive(::serde::Serialize, ::serde::Deserialize)]
 #[serde(default)]
-pub struct EchoRequest {
+pub struct SayRequest {
     /// Field 1: `message`
     #[serde(rename = "message", skip_serializing_if = "::core::option::Option::is_none")]
     pub message: ::core::option::Option<::buffa::alloc::string::String>,
 }
-impl ::core::fmt::Debug for EchoRequest {
+impl ::core::fmt::Debug for SayRequest {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-        f.debug_struct("EchoRequest").field("message", &self.message).finish()
+        f.debug_struct("SayRequest").field("message", &self.message).finish()
     }
 }
-impl EchoRequest {
+impl SayRequest {
     /// Protobuf type URL for this message, for use with `Any::pack` and
     /// `Any::unpack_if`.
     ///
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
-    pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.grpc_nats_micro.v1.EchoRequest";
+    pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.grpc_nats_micro.v1.SayRequest";
 }
-impl EchoRequest {
+impl SayRequest {
     #[must_use = "with_* setters return `self` by value; assign or chain the result"]
     #[inline]
     ///Sets [`Self::message`] to `Some(value)`, consuming and returning `self`.
@@ -33,14 +33,14 @@ impl EchoRequest {
         self
     }
 }
-::buffa::impl_default_instance!(EchoRequest);
-impl ::buffa::MessageName for EchoRequest {
+::buffa::impl_default_instance!(SayRequest);
+impl ::buffa::MessageName for SayRequest {
     const PACKAGE: &'static str = "trogonai.grpc_nats_micro.v1";
-    const NAME: &'static str = "EchoRequest";
-    const FULL_NAME: &'static str = "trogonai.grpc_nats_micro.v1.EchoRequest";
-    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.grpc_nats_micro.v1.EchoRequest";
+    const NAME: &'static str = "SayRequest";
+    const FULL_NAME: &'static str = "trogonai.grpc_nats_micro.v1.SayRequest";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.grpc_nats_micro.v1.SayRequest";
 }
-impl ::buffa::Message for EchoRequest {
+impl ::buffa::Message for SayRequest {
     /// Returns the total encoded size in bytes.
     ///
     /// Accumulates in `u64` (which cannot overflow for in-memory
@@ -100,7 +100,7 @@ impl ::buffa::Message for EchoRequest {
         self.message = ::core::option::Option::None;
     }
 }
-impl ::buffa::json_helpers::ProtoElemJson for EchoRequest {
+impl ::buffa::json_helpers::ProtoElemJson for SayRequest {
     fn serialize_proto_json<S: ::serde::Serializer>(
         v: &Self,
         s: S,
@@ -114,33 +114,33 @@ impl ::buffa::json_helpers::ProtoElemJson for EchoRequest {
     }
 }
 #[doc(hidden)]
-pub const __ECHO_REQUEST_JSON_ANY: ::buffa::type_registry::JsonAnyEntry = ::buffa::type_registry::JsonAnyEntry {
-    type_url: "type.googleapis.com/trogonai.grpc_nats_micro.v1.EchoRequest",
-    to_json: ::buffa::type_registry::any_to_json::<EchoRequest>,
-    from_json: ::buffa::type_registry::any_from_json::<EchoRequest>,
+pub const __SAY_REQUEST_JSON_ANY: ::buffa::type_registry::JsonAnyEntry = ::buffa::type_registry::JsonAnyEntry {
+    type_url: "type.googleapis.com/trogonai.grpc_nats_micro.v1.SayRequest",
+    to_json: ::buffa::type_registry::any_to_json::<SayRequest>,
+    from_json: ::buffa::type_registry::any_from_json::<SayRequest>,
     is_wkt: false,
 };
 #[derive(Clone, PartialEq, Default)]
 #[derive(::serde::Serialize, ::serde::Deserialize)]
 #[serde(default)]
-pub struct EchoReply {
+pub struct SayResponse {
     /// Field 1: `message`
     #[serde(rename = "message", skip_serializing_if = "::core::option::Option::is_none")]
     pub message: ::core::option::Option<::buffa::alloc::string::String>,
 }
-impl ::core::fmt::Debug for EchoReply {
+impl ::core::fmt::Debug for SayResponse {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-        f.debug_struct("EchoReply").field("message", &self.message).finish()
+        f.debug_struct("SayResponse").field("message", &self.message).finish()
     }
 }
-impl EchoReply {
+impl SayResponse {
     /// Protobuf type URL for this message, for use with `Any::pack` and
     /// `Any::unpack_if`.
     ///
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
-    pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.grpc_nats_micro.v1.EchoReply";
+    pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.grpc_nats_micro.v1.SayResponse";
 }
-impl EchoReply {
+impl SayResponse {
     #[must_use = "with_* setters return `self` by value; assign or chain the result"]
     #[inline]
     ///Sets [`Self::message`] to `Some(value)`, consuming and returning `self`.
@@ -152,14 +152,14 @@ impl EchoReply {
         self
     }
 }
-::buffa::impl_default_instance!(EchoReply);
-impl ::buffa::MessageName for EchoReply {
+::buffa::impl_default_instance!(SayResponse);
+impl ::buffa::MessageName for SayResponse {
     const PACKAGE: &'static str = "trogonai.grpc_nats_micro.v1";
-    const NAME: &'static str = "EchoReply";
-    const FULL_NAME: &'static str = "trogonai.grpc_nats_micro.v1.EchoReply";
-    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.grpc_nats_micro.v1.EchoReply";
+    const NAME: &'static str = "SayResponse";
+    const FULL_NAME: &'static str = "trogonai.grpc_nats_micro.v1.SayResponse";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.grpc_nats_micro.v1.SayResponse";
 }
-impl ::buffa::Message for EchoReply {
+impl ::buffa::Message for SayResponse {
     /// Returns the total encoded size in bytes.
     ///
     /// Accumulates in `u64` (which cannot overflow for in-memory
@@ -219,7 +219,7 @@ impl ::buffa::Message for EchoReply {
         self.message = ::core::option::Option::None;
     }
 }
-impl ::buffa::json_helpers::ProtoElemJson for EchoReply {
+impl ::buffa::json_helpers::ProtoElemJson for SayResponse {
     fn serialize_proto_json<S: ::serde::Serializer>(
         v: &Self,
         s: S,
@@ -233,10 +233,10 @@ impl ::buffa::json_helpers::ProtoElemJson for EchoReply {
     }
 }
 #[doc(hidden)]
-pub const __ECHO_REPLY_JSON_ANY: ::buffa::type_registry::JsonAnyEntry = ::buffa::type_registry::JsonAnyEntry {
-    type_url: "type.googleapis.com/trogonai.grpc_nats_micro.v1.EchoReply",
-    to_json: ::buffa::type_registry::any_to_json::<EchoReply>,
-    from_json: ::buffa::type_registry::any_from_json::<EchoReply>,
+pub const __SAY_RESPONSE_JSON_ANY: ::buffa::type_registry::JsonAnyEntry = ::buffa::type_registry::JsonAnyEntry {
+    type_url: "type.googleapis.com/trogonai.grpc_nats_micro.v1.SayResponse",
+    to_json: ::buffa::type_registry::any_to_json::<SayResponse>,
+    from_json: ::buffa::type_registry::any_from_json::<SayResponse>,
     is_wkt: false,
 };
 #[derive(Clone, PartialEq, Default)]
@@ -396,5 +396,124 @@ pub const __FAIL_REQUEST_JSON_ANY: ::buffa::type_registry::JsonAnyEntry = ::buff
     type_url: "type.googleapis.com/trogonai.grpc_nats_micro.v1.FailRequest",
     to_json: ::buffa::type_registry::any_to_json::<FailRequest>,
     from_json: ::buffa::type_registry::any_from_json::<FailRequest>,
+    is_wkt: false,
+};
+#[derive(Clone, PartialEq, Default)]
+#[derive(::serde::Serialize, ::serde::Deserialize)]
+#[serde(default)]
+pub struct FailResponse {
+    /// Field 1: `message`
+    #[serde(rename = "message", skip_serializing_if = "::core::option::Option::is_none")]
+    pub message: ::core::option::Option<::buffa::alloc::string::String>,
+}
+impl ::core::fmt::Debug for FailResponse {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.debug_struct("FailResponse").field("message", &self.message).finish()
+    }
+}
+impl FailResponse {
+    /// Protobuf type URL for this message, for use with `Any::pack` and
+    /// `Any::unpack_if`.
+    ///
+    /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
+    pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.grpc_nats_micro.v1.FailResponse";
+}
+impl FailResponse {
+    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
+    #[inline]
+    ///Sets [`Self::message`] to `Some(value)`, consuming and returning `self`.
+    pub fn with_message(
+        mut self,
+        value: impl Into<::buffa::alloc::string::String>,
+    ) -> Self {
+        self.message = Some(value.into());
+        self
+    }
+}
+::buffa::impl_default_instance!(FailResponse);
+impl ::buffa::MessageName for FailResponse {
+    const PACKAGE: &'static str = "trogonai.grpc_nats_micro.v1";
+    const NAME: &'static str = "FailResponse";
+    const FULL_NAME: &'static str = "trogonai.grpc_nats_micro.v1.FailResponse";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.grpc_nats_micro.v1.FailResponse";
+}
+impl ::buffa::Message for FailResponse {
+    /// Returns the total encoded size in bytes.
+    ///
+    /// Accumulates in `u64` (which cannot overflow for in-memory
+    /// data) and saturates to `u32` at return, so a message whose
+    /// encoded size exceeds the 2 GiB protobuf limit yields a value
+    /// above [`::buffa::MAX_MESSAGE_BYTES`] that the encode entry
+    /// points reject, never a silently wrapped size.
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        let mut size = 0u64;
+        if let Some(ref v) = self.message {
+            size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
+        }
+        ::buffa::saturate_size(size)
+    }
+    fn write_to(
+        &self,
+        _cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::EncodeSink,
+    ) {
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        if let Some(ref v) = self.message {
+            ::buffa::types::put_string_field(1u32, v, buf);
+        }
+    }
+    fn merge_field(
+        &mut self,
+        tag: ::buffa::encoding::Tag,
+        buf: &mut impl ::buffa::bytes::Buf,
+        ctx: ::buffa::DecodeContext<'_>,
+    ) -> ::core::result::Result<(), ::buffa::DecodeError> {
+        #[allow(unused_imports)]
+        use ::buffa::bytes::Buf as _;
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        match tag.field_number() {
+            1u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::types::merge_string(
+                    self.message.get_or_insert_with(::buffa::alloc::string::String::new),
+                    buf,
+                )?;
+            }
+            _ => {
+                ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
+            }
+        }
+        ::core::result::Result::Ok(())
+    }
+    fn clear(&mut self) {
+        self.message = ::core::option::Option::None;
+    }
+}
+impl ::buffa::json_helpers::ProtoElemJson for FailResponse {
+    fn serialize_proto_json<S: ::serde::Serializer>(
+        v: &Self,
+        s: S,
+    ) -> ::core::result::Result<S::Ok, S::Error> {
+        ::serde::Serialize::serialize(v, s)
+    }
+    fn deserialize_proto_json<'de, D: ::serde::Deserializer<'de>>(
+        d: D,
+    ) -> ::core::result::Result<Self, D::Error> {
+        <Self as ::serde::Deserialize>::deserialize(d)
+    }
+}
+#[doc(hidden)]
+pub const __FAIL_RESPONSE_JSON_ANY: ::buffa::type_registry::JsonAnyEntry = ::buffa::type_registry::JsonAnyEntry {
+    type_url: "type.googleapis.com/trogonai.grpc_nats_micro.v1.FailResponse",
+    to_json: ::buffa::type_registry::any_to_json::<FailResponse>,
+    from_json: ::buffa::type_registry::any_from_json::<FailResponse>,
     is_wkt: false,
 };

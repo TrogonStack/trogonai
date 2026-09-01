@@ -13,14 +13,24 @@ use crate::constants::HEADER_CONTENT_TYPE;
 use crate::content_type::{ContentType, EncodeError};
 use crate::status_codec::{ReplyError, decode_reply};
 
+/// `Transport` keeps the client's own error type rather than a rendered
+/// string, so a caller can match on the concrete failure (`no responders`,
+/// connection lost) instead of parsing a message.
 #[derive(Debug, Error)]
-pub enum RequestError {
+pub enum RequestError<E>
+where
+    E: std::error::Error + 'static,
+{
     #[error("failed to encode request payload")]
     Encode(#[source] EncodeError),
     #[error("NATS request to {subject} timed out")]
     Timeout { subject: String },
-    #[error("NATS request to {subject} failed: {error}")]
-    Transport { subject: String, error: String },
+    #[error("NATS request to {subject} failed")]
+    Transport {
+        subject: String,
+        #[source]
+        error: E,
+    },
     #[error(transparent)]
     Reply(#[from] ReplyError),
 }
@@ -36,9 +46,10 @@ pub async fn request<N, Req, Resp>(
     content_type: ContentType,
     request: &Req,
     timeout: Duration,
-) -> Result<Resp, RequestError>
+) -> Result<Resp, RequestError<N::RequestError>>
 where
     N: RequestClient,
+    N::RequestError: 'static,
     Req: buffa::Message + serde::Serialize,
     Resp: buffa::Message + serde::de::DeserializeOwned,
 {
@@ -58,7 +69,7 @@ where
     })?
     .map_err(|error| RequestError::Transport {
         subject: subject.clone(),
-        error: error.to_string(),
+        error,
     })?;
 
     decode_reply(response.headers.as_ref(), &response.payload, content_type).map_err(RequestError::from)

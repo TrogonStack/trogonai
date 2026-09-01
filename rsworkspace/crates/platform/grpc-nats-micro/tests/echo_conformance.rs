@@ -14,7 +14,7 @@ use grpc_nats_micro::constants::HEADER_ERROR_CODE;
 use grpc_nats_micro::{ContentType, EndpointHandler, ServiceBinding};
 use tokio::process::{Child, Command};
 use trogonai_proto::google::rpc::{Code, Status};
-use trogonai_proto::grpc_nats_micro::v1::{EchoReply, EchoRequest, FailRequest};
+use trogonai_proto::grpc_nats_micro::v1::{FailRequest, SayRequest, SayResponse};
 
 const SUBJECT_PREFIX: &str = "echo.v1";
 const SERVICE_NAME: &str = "EchoService";
@@ -82,12 +82,12 @@ impl EndpointHandler for SayHandler {
         content_type: ContentType,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, Status>> + Send + 'a>> {
         Box::pin(async move {
-            let request: EchoRequest = content_type.decode(request_bytes).map_err(|error| Status {
+            let request: SayRequest = content_type.decode(request_bytes).map_err(|error| Status {
                 code: Code::INVALID_ARGUMENT.to_i32(),
                 message: error.to_string(),
                 details: Vec::new(),
             })?;
-            let reply = EchoReply {
+            let reply = SayResponse {
                 message: request.message,
             };
             content_type.encode(&reply).map_err(|error| Status {
@@ -172,10 +172,10 @@ async fn say(fixture: &EchoFixture, content_type: ContentType, message: &str) ->
         .find(|endpoint| endpoint.method_name() == SAY_METHOD)
         .expect("Say endpoint registered");
 
-    let request = EchoRequest {
+    let request = SayRequest {
         message: Some(message.to_string()),
     };
-    let body = content_type.encode(&request).expect("encode EchoRequest");
+    let body = content_type.encode(&request).expect("encode SayRequest");
     let mut headers = HeaderMap::new();
     headers.insert(
         grpc_nats_micro::constants::HEADER_CONTENT_TYPE,
@@ -234,7 +234,7 @@ async fn assert_say_round_trips(content_type: ContentType) {
             .is_none(),
         "successful Say reply must not carry {HEADER_ERROR_CODE}"
     );
-    let reply: EchoReply = content_type.decode(&response.payload).expect("decode EchoReply");
+    let reply: SayResponse = content_type.decode(&response.payload).expect("decode SayResponse");
     assert_eq!(reply.message, Some("hello".to_string()));
 }
 

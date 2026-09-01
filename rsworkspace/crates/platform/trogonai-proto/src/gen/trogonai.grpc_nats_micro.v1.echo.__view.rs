@@ -2,12 +2,12 @@
 // source: trogonai/grpc_nats_micro/v1/echo.proto
 
 #[derive(Clone, Debug, Default)]
-pub struct EchoRequestView<'a> {
+pub struct SayRequestView<'a> {
     /// Field 1: `message`
     pub message: ::core::option::Option<&'a str>,
 }
-impl<'a> ::buffa::MessageView<'a> for EchoRequestView<'a> {
-    type Owned = super::super::EchoRequest;
+impl<'a> ::buffa::MessageView<'a> for SayRequestView<'a> {
+    type Owned = super::super::SayRequest;
     fn decode_view(buf: &'a [u8]) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         let __limit = ::core::cell::Cell::new(::buffa::DEFAULT_UNKNOWN_FIELD_LIMIT);
         <Self as ::buffa::MessageView>::decode_view_ctx(
@@ -49,24 +49,24 @@ impl<'a> ::buffa::MessageView<'a> for EchoRequestView<'a> {
     }
     fn to_owned_message(
         &self,
-    ) -> ::core::result::Result<super::super::EchoRequest, ::buffa::DecodeError> {
+    ) -> ::core::result::Result<super::super::SayRequest, ::buffa::DecodeError> {
         self.to_owned_from_source(None)
     }
     #[allow(clippy::useless_conversion, clippy::needless_update)]
     fn to_owned_from_source(
         &self,
         __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
-    ) -> ::core::result::Result<super::super::EchoRequest, ::buffa::DecodeError> {
+    ) -> ::core::result::Result<super::super::SayRequest, ::buffa::DecodeError> {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
         let _ = __buffa_src;
-        ::core::result::Result::Ok(super::super::EchoRequest {
+        ::core::result::Result::Ok(super::super::SayRequest {
             message: self.message.map(|s| s.to_string()),
             ..::core::default::Default::default()
         })
     }
 }
-impl<'a> ::buffa::ViewEncode<'a> for EchoRequestView<'a> {
+impl<'a> ::buffa::ViewEncode<'a> for SayRequestView<'a> {
     #[allow(clippy::needless_borrow, clippy::let_and_return)]
     fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
@@ -101,7 +101,7 @@ impl<'a> ::buffa::ViewEncode<'a> for EchoRequestView<'a> {
 /// fields depends on default-omission rules; serializers that require
 /// known map lengths (e.g. `bincode`) will return a runtime error.
 /// Use the owned message type for those formats.
-impl<'__a> ::serde::Serialize for EchoRequestView<'__a> {
+impl<'__a> ::serde::Serialize for SayRequestView<'__a> {
     fn serialize<__S: ::serde::Serializer>(
         &self,
         __s: __S,
@@ -114,22 +114,22 @@ impl<'__a> ::serde::Serialize for EchoRequestView<'__a> {
         __map.end()
     }
 }
-impl<'a> ::buffa::MessageName for EchoRequestView<'a> {
+impl<'a> ::buffa::MessageName for SayRequestView<'a> {
     const PACKAGE: &'static str = "trogonai.grpc_nats_micro.v1";
-    const NAME: &'static str = "EchoRequest";
-    const FULL_NAME: &'static str = "trogonai.grpc_nats_micro.v1.EchoRequest";
-    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.grpc_nats_micro.v1.EchoRequest";
+    const NAME: &'static str = "SayRequest";
+    const FULL_NAME: &'static str = "trogonai.grpc_nats_micro.v1.SayRequest";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.grpc_nats_micro.v1.SayRequest";
 }
-::buffa::impl_default_view_instance!(EchoRequestView);
-::buffa::impl_view_reborrow!(EchoRequestView);
-/** Self-contained, `'static` owned view of a `EchoRequest` message.
+::buffa::impl_default_view_instance!(SayRequestView);
+::buffa::impl_view_reborrow!(SayRequestView);
+/** Self-contained, `'static` owned view of a `SayRequest` message.
 
- Wraps [`::buffa::OwnedView`]`<`[`EchoRequestView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
+ Wraps [`::buffa::OwnedView`]`<`[`SayRequestView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
 
- Field accessors return borrows tied to `&self`. Use [`Self::view`] to get the full [`EchoRequestView`] when you need struct patterns, iteration helpers, or to pass the view to lifetime-parameterised code.*/
+ Field accessors return borrows tied to `&self`. Use [`Self::view`] to get the full [`SayRequestView`] when you need struct patterns, iteration helpers, or to pass the view to lifetime-parameterised code.*/
 #[derive(Clone, Debug)]
-pub struct EchoRequestOwnedView(::buffa::OwnedView<EchoRequestView<'static>>);
-impl EchoRequestOwnedView {
+pub struct SayRequestOwnedView(::buffa::OwnedView<SayRequestView<'static>>);
+impl SayRequestOwnedView {
     /// Decode an owned view from a [`::buffa::bytes::Bytes`] buffer.
     ///
     /// The view borrows directly from the buffer's data; the buffer is
@@ -143,7 +143,7 @@ impl EchoRequestOwnedView {
         bytes: ::buffa::bytes::Bytes,
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         ::core::result::Result::Ok(
-            EchoRequestOwnedView(::buffa::OwnedView::decode(bytes)?),
+            SayRequestOwnedView(::buffa::OwnedView::decode(bytes)?),
         )
     }
     /// Decode with custom [`::buffa::DecodeOptions`] (recursion limit,
@@ -158,7 +158,7 @@ impl EchoRequestOwnedView {
         opts: &::buffa::DecodeOptions,
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         ::core::result::Result::Ok(
-            EchoRequestOwnedView(::buffa::OwnedView::decode_with_options(bytes, opts)?),
+            SayRequestOwnedView(::buffa::OwnedView::decode_with_options(bytes, opts)?),
         )
     }
     /// Build from an owned message via an encode → decode round-trip.
@@ -170,15 +170,15 @@ impl EchoRequestOwnedView {
     /// another [`::buffa::DecodeError`] if the re-encoded bytes are
     /// somehow invalid (should not happen for well-formed messages).
     pub fn from_owned(
-        msg: &super::super::EchoRequest,
+        msg: &super::super::SayRequest,
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         ::core::result::Result::Ok(
-            EchoRequestOwnedView(::buffa::OwnedView::from_owned(msg)?),
+            SayRequestOwnedView(::buffa::OwnedView::from_owned(msg)?),
         )
     }
-    /// Borrow the full [`EchoRequestView`] with its lifetime tied to `&self`.
+    /// Borrow the full [`SayRequestView`] with its lifetime tied to `&self`.
     #[must_use]
-    pub fn view(&self) -> &EchoRequestView<'_> {
+    pub fn view(&self) -> &SayRequestView<'_> {
         self.0.reborrow()
     }
     /// Convert to the owned message type.
@@ -189,7 +189,7 @@ impl EchoRequestOwnedView {
     /// whose contract also governs handles converted from a raw
     /// [`::buffa::OwnedView`].
     #[must_use]
-    pub fn to_owned_message(&self) -> super::super::EchoRequest {
+    pub fn to_owned_message(&self) -> super::super::SayRequest {
         self.0.to_owned_message()
     }
     /// The underlying bytes buffer.
@@ -208,29 +208,29 @@ impl EchoRequestOwnedView {
         self.0.reborrow().message
     }
 }
-impl ::core::convert::From<::buffa::OwnedView<EchoRequestView<'static>>>
-for EchoRequestOwnedView {
-    fn from(inner: ::buffa::OwnedView<EchoRequestView<'static>>) -> Self {
-        EchoRequestOwnedView(inner)
+impl ::core::convert::From<::buffa::OwnedView<SayRequestView<'static>>>
+for SayRequestOwnedView {
+    fn from(inner: ::buffa::OwnedView<SayRequestView<'static>>) -> Self {
+        SayRequestOwnedView(inner)
     }
 }
-impl ::core::convert::From<EchoRequestOwnedView>
-for ::buffa::OwnedView<EchoRequestView<'static>> {
-    fn from(wrapper: EchoRequestOwnedView) -> Self {
+impl ::core::convert::From<SayRequestOwnedView>
+for ::buffa::OwnedView<SayRequestView<'static>> {
+    fn from(wrapper: SayRequestOwnedView) -> Self {
         wrapper.0
     }
 }
-impl ::core::convert::AsRef<::buffa::OwnedView<EchoRequestView<'static>>>
-for EchoRequestOwnedView {
-    fn as_ref(&self) -> &::buffa::OwnedView<EchoRequestView<'static>> {
+impl ::core::convert::AsRef<::buffa::OwnedView<SayRequestView<'static>>>
+for SayRequestOwnedView {
+    fn as_ref(&self) -> &::buffa::OwnedView<SayRequestView<'static>> {
         &self.0
     }
 }
-impl ::buffa::HasMessageView for super::super::EchoRequest {
-    type View<'a> = EchoRequestView<'a>;
-    type ViewHandle = EchoRequestOwnedView;
+impl ::buffa::HasMessageView for super::super::SayRequest {
+    type View<'a> = SayRequestView<'a>;
+    type ViewHandle = SayRequestOwnedView;
 }
-impl ::serde::Serialize for EchoRequestOwnedView {
+impl ::serde::Serialize for SayRequestOwnedView {
     fn serialize<__S: ::serde::Serializer>(
         &self,
         __s: __S,
@@ -239,12 +239,12 @@ impl ::serde::Serialize for EchoRequestOwnedView {
     }
 }
 #[derive(Clone, Debug, Default)]
-pub struct EchoReplyView<'a> {
+pub struct SayResponseView<'a> {
     /// Field 1: `message`
     pub message: ::core::option::Option<&'a str>,
 }
-impl<'a> ::buffa::MessageView<'a> for EchoReplyView<'a> {
-    type Owned = super::super::EchoReply;
+impl<'a> ::buffa::MessageView<'a> for SayResponseView<'a> {
+    type Owned = super::super::SayResponse;
     fn decode_view(buf: &'a [u8]) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         let __limit = ::core::cell::Cell::new(::buffa::DEFAULT_UNKNOWN_FIELD_LIMIT);
         <Self as ::buffa::MessageView>::decode_view_ctx(
@@ -286,24 +286,24 @@ impl<'a> ::buffa::MessageView<'a> for EchoReplyView<'a> {
     }
     fn to_owned_message(
         &self,
-    ) -> ::core::result::Result<super::super::EchoReply, ::buffa::DecodeError> {
+    ) -> ::core::result::Result<super::super::SayResponse, ::buffa::DecodeError> {
         self.to_owned_from_source(None)
     }
     #[allow(clippy::useless_conversion, clippy::needless_update)]
     fn to_owned_from_source(
         &self,
         __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
-    ) -> ::core::result::Result<super::super::EchoReply, ::buffa::DecodeError> {
+    ) -> ::core::result::Result<super::super::SayResponse, ::buffa::DecodeError> {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
         let _ = __buffa_src;
-        ::core::result::Result::Ok(super::super::EchoReply {
+        ::core::result::Result::Ok(super::super::SayResponse {
             message: self.message.map(|s| s.to_string()),
             ..::core::default::Default::default()
         })
     }
 }
-impl<'a> ::buffa::ViewEncode<'a> for EchoReplyView<'a> {
+impl<'a> ::buffa::ViewEncode<'a> for SayResponseView<'a> {
     #[allow(clippy::needless_borrow, clippy::let_and_return)]
     fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
@@ -338,7 +338,7 @@ impl<'a> ::buffa::ViewEncode<'a> for EchoReplyView<'a> {
 /// fields depends on default-omission rules; serializers that require
 /// known map lengths (e.g. `bincode`) will return a runtime error.
 /// Use the owned message type for those formats.
-impl<'__a> ::serde::Serialize for EchoReplyView<'__a> {
+impl<'__a> ::serde::Serialize for SayResponseView<'__a> {
     fn serialize<__S: ::serde::Serializer>(
         &self,
         __s: __S,
@@ -351,22 +351,22 @@ impl<'__a> ::serde::Serialize for EchoReplyView<'__a> {
         __map.end()
     }
 }
-impl<'a> ::buffa::MessageName for EchoReplyView<'a> {
+impl<'a> ::buffa::MessageName for SayResponseView<'a> {
     const PACKAGE: &'static str = "trogonai.grpc_nats_micro.v1";
-    const NAME: &'static str = "EchoReply";
-    const FULL_NAME: &'static str = "trogonai.grpc_nats_micro.v1.EchoReply";
-    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.grpc_nats_micro.v1.EchoReply";
+    const NAME: &'static str = "SayResponse";
+    const FULL_NAME: &'static str = "trogonai.grpc_nats_micro.v1.SayResponse";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.grpc_nats_micro.v1.SayResponse";
 }
-::buffa::impl_default_view_instance!(EchoReplyView);
-::buffa::impl_view_reborrow!(EchoReplyView);
-/** Self-contained, `'static` owned view of a `EchoReply` message.
+::buffa::impl_default_view_instance!(SayResponseView);
+::buffa::impl_view_reborrow!(SayResponseView);
+/** Self-contained, `'static` owned view of a `SayResponse` message.
 
- Wraps [`::buffa::OwnedView`]`<`[`EchoReplyView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
+ Wraps [`::buffa::OwnedView`]`<`[`SayResponseView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
 
- Field accessors return borrows tied to `&self`. Use [`Self::view`] to get the full [`EchoReplyView`] when you need struct patterns, iteration helpers, or to pass the view to lifetime-parameterised code.*/
+ Field accessors return borrows tied to `&self`. Use [`Self::view`] to get the full [`SayResponseView`] when you need struct patterns, iteration helpers, or to pass the view to lifetime-parameterised code.*/
 #[derive(Clone, Debug)]
-pub struct EchoReplyOwnedView(::buffa::OwnedView<EchoReplyView<'static>>);
-impl EchoReplyOwnedView {
+pub struct SayResponseOwnedView(::buffa::OwnedView<SayResponseView<'static>>);
+impl SayResponseOwnedView {
     /// Decode an owned view from a [`::buffa::bytes::Bytes`] buffer.
     ///
     /// The view borrows directly from the buffer's data; the buffer is
@@ -380,7 +380,7 @@ impl EchoReplyOwnedView {
         bytes: ::buffa::bytes::Bytes,
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         ::core::result::Result::Ok(
-            EchoReplyOwnedView(::buffa::OwnedView::decode(bytes)?),
+            SayResponseOwnedView(::buffa::OwnedView::decode(bytes)?),
         )
     }
     /// Decode with custom [`::buffa::DecodeOptions`] (recursion limit,
@@ -395,7 +395,7 @@ impl EchoReplyOwnedView {
         opts: &::buffa::DecodeOptions,
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         ::core::result::Result::Ok(
-            EchoReplyOwnedView(::buffa::OwnedView::decode_with_options(bytes, opts)?),
+            SayResponseOwnedView(::buffa::OwnedView::decode_with_options(bytes, opts)?),
         )
     }
     /// Build from an owned message via an encode → decode round-trip.
@@ -407,15 +407,15 @@ impl EchoReplyOwnedView {
     /// another [`::buffa::DecodeError`] if the re-encoded bytes are
     /// somehow invalid (should not happen for well-formed messages).
     pub fn from_owned(
-        msg: &super::super::EchoReply,
+        msg: &super::super::SayResponse,
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         ::core::result::Result::Ok(
-            EchoReplyOwnedView(::buffa::OwnedView::from_owned(msg)?),
+            SayResponseOwnedView(::buffa::OwnedView::from_owned(msg)?),
         )
     }
-    /// Borrow the full [`EchoReplyView`] with its lifetime tied to `&self`.
+    /// Borrow the full [`SayResponseView`] with its lifetime tied to `&self`.
     #[must_use]
-    pub fn view(&self) -> &EchoReplyView<'_> {
+    pub fn view(&self) -> &SayResponseView<'_> {
         self.0.reborrow()
     }
     /// Convert to the owned message type.
@@ -426,7 +426,7 @@ impl EchoReplyOwnedView {
     /// whose contract also governs handles converted from a raw
     /// [`::buffa::OwnedView`].
     #[must_use]
-    pub fn to_owned_message(&self) -> super::super::EchoReply {
+    pub fn to_owned_message(&self) -> super::super::SayResponse {
         self.0.to_owned_message()
     }
     /// The underlying bytes buffer.
@@ -445,29 +445,29 @@ impl EchoReplyOwnedView {
         self.0.reborrow().message
     }
 }
-impl ::core::convert::From<::buffa::OwnedView<EchoReplyView<'static>>>
-for EchoReplyOwnedView {
-    fn from(inner: ::buffa::OwnedView<EchoReplyView<'static>>) -> Self {
-        EchoReplyOwnedView(inner)
+impl ::core::convert::From<::buffa::OwnedView<SayResponseView<'static>>>
+for SayResponseOwnedView {
+    fn from(inner: ::buffa::OwnedView<SayResponseView<'static>>) -> Self {
+        SayResponseOwnedView(inner)
     }
 }
-impl ::core::convert::From<EchoReplyOwnedView>
-for ::buffa::OwnedView<EchoReplyView<'static>> {
-    fn from(wrapper: EchoReplyOwnedView) -> Self {
+impl ::core::convert::From<SayResponseOwnedView>
+for ::buffa::OwnedView<SayResponseView<'static>> {
+    fn from(wrapper: SayResponseOwnedView) -> Self {
         wrapper.0
     }
 }
-impl ::core::convert::AsRef<::buffa::OwnedView<EchoReplyView<'static>>>
-for EchoReplyOwnedView {
-    fn as_ref(&self) -> &::buffa::OwnedView<EchoReplyView<'static>> {
+impl ::core::convert::AsRef<::buffa::OwnedView<SayResponseView<'static>>>
+for SayResponseOwnedView {
+    fn as_ref(&self) -> &::buffa::OwnedView<SayResponseView<'static>> {
         &self.0
     }
 }
-impl ::buffa::HasMessageView for super::super::EchoReply {
-    type View<'a> = EchoReplyView<'a>;
-    type ViewHandle = EchoReplyOwnedView;
+impl ::buffa::HasMessageView for super::super::SayResponse {
+    type View<'a> = SayResponseView<'a>;
+    type ViewHandle = SayResponseOwnedView;
 }
-impl ::serde::Serialize for EchoReplyOwnedView {
+impl ::serde::Serialize for SayResponseOwnedView {
     fn serialize<__S: ::serde::Serializer>(
         &self,
         __s: __S,
@@ -741,6 +741,243 @@ impl ::buffa::HasMessageView for super::super::FailRequest {
     type ViewHandle = FailRequestOwnedView;
 }
 impl ::serde::Serialize for FailRequestOwnedView {
+    fn serialize<__S: ::serde::Serializer>(
+        &self,
+        __s: __S,
+    ) -> ::core::result::Result<__S::Ok, __S::Error> {
+        ::serde::Serialize::serialize(&self.0, __s)
+    }
+}
+#[derive(Clone, Debug, Default)]
+pub struct FailResponseView<'a> {
+    /// Field 1: `message`
+    pub message: ::core::option::Option<&'a str>,
+}
+impl<'a> ::buffa::MessageView<'a> for FailResponseView<'a> {
+    type Owned = super::super::FailResponse;
+    fn decode_view(buf: &'a [u8]) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        let __limit = ::core::cell::Cell::new(::buffa::DEFAULT_UNKNOWN_FIELD_LIMIT);
+        <Self as ::buffa::MessageView>::decode_view_ctx(
+            buf,
+            ::buffa::DecodeContext::new(::buffa::RECURSION_LIMIT, &__limit),
+        )
+    }
+    fn decode_view_with_ctx(
+        buf: &'a [u8],
+        ctx: ::buffa::DecodeContext<'_>,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        <Self as ::buffa::MessageView>::decode_view_ctx(buf, ctx)
+    }
+    #[inline]
+    fn merge_view_field(
+        &mut self,
+        tag: ::buffa::encoding::Tag,
+        cur: &'a [u8],
+        _before_tag: &'a [u8],
+        ctx: ::buffa::DecodeContext<'_>,
+    ) -> ::core::result::Result<&'a [u8], ::buffa::DecodeError> {
+        let _ = ctx;
+        #[allow(unused_variables)]
+        let view = self;
+        let mut cur = cur;
+        match tag.field_number() {
+            1u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.message = Some(::buffa::types::borrow_str(&mut cur)?);
+            }
+            _ => {
+                ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
+            }
+        }
+        ::core::result::Result::Ok(cur)
+    }
+    fn to_owned_message(
+        &self,
+    ) -> ::core::result::Result<super::super::FailResponse, ::buffa::DecodeError> {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> ::core::result::Result<super::super::FailResponse, ::buffa::DecodeError> {
+        #[allow(unused_imports)]
+        use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
+        ::core::result::Result::Ok(super::super::FailResponse {
+            message: self.message.map(|s| s.to_string()),
+            ..::core::default::Default::default()
+        })
+    }
+}
+impl<'a> ::buffa::ViewEncode<'a> for FailResponseView<'a> {
+    #[allow(clippy::needless_borrow, clippy::let_and_return)]
+    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        let mut size = 0u64;
+        if let Some(ref v) = self.message {
+            size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
+        }
+        ::buffa::saturate_size(size)
+    }
+    #[allow(clippy::needless_borrow)]
+    fn write_to(
+        &self,
+        _cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::EncodeSink,
+    ) {
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        if let Some(ref v) = self.message {
+            ::buffa::types::put_string_field(1u32, v, buf);
+        }
+    }
+}
+/// Serializes this view as protobuf JSON.
+///
+/// Implicit-presence fields with default values are omitted, `required`
+/// fields are always emitted, explicit-presence (`optional`) fields are
+/// emitted only when set, bytes fields are base64-encoded, and enum
+/// values are their proto name strings.
+///
+/// This impl uses `serialize_map(None)` because the number of emitted
+/// fields depends on default-omission rules; serializers that require
+/// known map lengths (e.g. `bincode`) will return a runtime error.
+/// Use the owned message type for those formats.
+impl<'__a> ::serde::Serialize for FailResponseView<'__a> {
+    fn serialize<__S: ::serde::Serializer>(
+        &self,
+        __s: __S,
+    ) -> ::core::result::Result<__S::Ok, __S::Error> {
+        use ::serde::ser::SerializeMap as _;
+        let mut __map = __s.serialize_map(::core::option::Option::None)?;
+        if let ::core::option::Option::Some(__v) = self.message {
+            __map.serialize_entry("message", __v)?;
+        }
+        __map.end()
+    }
+}
+impl<'a> ::buffa::MessageName for FailResponseView<'a> {
+    const PACKAGE: &'static str = "trogonai.grpc_nats_micro.v1";
+    const NAME: &'static str = "FailResponse";
+    const FULL_NAME: &'static str = "trogonai.grpc_nats_micro.v1.FailResponse";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.grpc_nats_micro.v1.FailResponse";
+}
+::buffa::impl_default_view_instance!(FailResponseView);
+::buffa::impl_view_reborrow!(FailResponseView);
+/** Self-contained, `'static` owned view of a `FailResponse` message.
+
+ Wraps [`::buffa::OwnedView`]`<`[`FailResponseView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
+
+ Field accessors return borrows tied to `&self`. Use [`Self::view`] to get the full [`FailResponseView`] when you need struct patterns, iteration helpers, or to pass the view to lifetime-parameterised code.*/
+#[derive(Clone, Debug)]
+pub struct FailResponseOwnedView(::buffa::OwnedView<FailResponseView<'static>>);
+impl FailResponseOwnedView {
+    /// Decode an owned view from a [`::buffa::bytes::Bytes`] buffer.
+    ///
+    /// The view borrows directly from the buffer's data; the buffer is
+    /// retained inside the returned handle.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the buffer contains invalid
+    /// protobuf data.
+    pub fn decode(
+        bytes: ::buffa::bytes::Bytes,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            FailResponseOwnedView(::buffa::OwnedView::decode(bytes)?),
+        )
+    }
+    /// Decode with custom [`::buffa::DecodeOptions`] (recursion limit,
+    /// max message size).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the buffer is invalid or
+    /// exceeds the configured limits.
+    pub fn decode_with_options(
+        bytes: ::buffa::bytes::Bytes,
+        opts: &::buffa::DecodeOptions,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            FailResponseOwnedView(::buffa::OwnedView::decode_with_options(bytes, opts)?),
+        )
+    }
+    /// Build from an owned message via an encode → decode round-trip.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError::MessageTooLarge`] if the
+    /// message's encoded size exceeds the 2 GiB protobuf limit, or
+    /// another [`::buffa::DecodeError`] if the re-encoded bytes are
+    /// somehow invalid (should not happen for well-formed messages).
+    pub fn from_owned(
+        msg: &super::super::FailResponse,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            FailResponseOwnedView(::buffa::OwnedView::from_owned(msg)?),
+        )
+    }
+    /// Borrow the full [`FailResponseView`] with its lifetime tied to `&self`.
+    #[must_use]
+    pub fn view(&self) -> &FailResponseView<'_> {
+        self.0.reborrow()
+    }
+    /// Convert to the owned message type.
+    ///
+    /// Infallible: this type's constructors wire-decode their
+    /// buffer, and a view produced by wire decoding always
+    /// converts. Delegates to [`::buffa::OwnedView::to_owned_message`],
+    /// whose contract also governs handles converted from a raw
+    /// [`::buffa::OwnedView`].
+    #[must_use]
+    pub fn to_owned_message(&self) -> super::super::FailResponse {
+        self.0.to_owned_message()
+    }
+    /// The underlying bytes buffer.
+    #[must_use]
+    pub fn bytes(&self) -> &::buffa::bytes::Bytes {
+        self.0.bytes()
+    }
+    /// Consume the handle, returning the underlying bytes buffer.
+    #[must_use]
+    pub fn into_bytes(self) -> ::buffa::bytes::Bytes {
+        self.0.into_bytes()
+    }
+    /// Field 1: `message`
+    #[must_use]
+    pub fn message(&self) -> ::core::option::Option<&'_ str> {
+        self.0.reborrow().message
+    }
+}
+impl ::core::convert::From<::buffa::OwnedView<FailResponseView<'static>>>
+for FailResponseOwnedView {
+    fn from(inner: ::buffa::OwnedView<FailResponseView<'static>>) -> Self {
+        FailResponseOwnedView(inner)
+    }
+}
+impl ::core::convert::From<FailResponseOwnedView>
+for ::buffa::OwnedView<FailResponseView<'static>> {
+    fn from(wrapper: FailResponseOwnedView) -> Self {
+        wrapper.0
+    }
+}
+impl ::core::convert::AsRef<::buffa::OwnedView<FailResponseView<'static>>>
+for FailResponseOwnedView {
+    fn as_ref(&self) -> &::buffa::OwnedView<FailResponseView<'static>> {
+        &self.0
+    }
+}
+impl ::buffa::HasMessageView for super::super::FailResponse {
+    type View<'a> = FailResponseView<'a>;
+    type ViewHandle = FailResponseOwnedView;
+}
+impl ::serde::Serialize for FailResponseOwnedView {
     fn serialize<__S: ::serde::Serializer>(
         &self,
         __s: __S,
