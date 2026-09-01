@@ -24,3 +24,17 @@ fn rejects_subject_separators_and_wildcards() {
     );
     assert_eq!(MethodName::new("Say>"), Err(MethodNameError::InvalidCharacter('>')));
 }
+
+#[test]
+fn rejects_characters_outside_the_protobuf_identifier_grammar() {
+    assert_eq!(
+        MethodName::new("Say-Again"),
+        Err(MethodNameError::InvalidCharacter('-'))
+    );
+}
+
+#[test]
+fn rejects_a_name_over_the_subject_token_budget() {
+    let long = "S".repeat(129);
+    assert_eq!(MethodName::new(&long), Err(MethodNameError::TooLong(129)));
+}

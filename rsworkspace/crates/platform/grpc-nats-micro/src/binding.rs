@@ -89,3 +89,6 @@ impl ServiceBinding {
         &self.endpoints
     }
 }
+
+#[cfg(test)]
+mod tests;

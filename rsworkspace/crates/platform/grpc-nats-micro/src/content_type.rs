@@ -117,3 +117,6 @@ pub enum DecodeError {
     #[error("failed to decode payload as JSON")]
     Json(#[source] serde_json::Error),
 }
+
+#[cfg(test)]
+mod tests;

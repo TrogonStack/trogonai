@@ -46,3 +46,9 @@ fn rejects_whitespace() {
         Err(SubjectPrefixError::InvalidCharacter(' '))
     );
 }
+
+#[test]
+fn rejects_a_prefix_over_the_subject_token_budget() {
+    let long = "e".repeat(129);
+    assert_eq!(SubjectPrefix::new(&long), Err(SubjectPrefixError::TooLong(129)));
+}

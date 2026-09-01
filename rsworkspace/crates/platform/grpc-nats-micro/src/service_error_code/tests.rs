@@ -30,7 +30,11 @@ fn rejects_a_header_that_is_not_an_integer() {
     let header = ServiceErrorCodeInput::new("RESOURCE_EXHAUSTED");
     assert_eq!(
         ServiceErrorCode::from_input(&header),
-        Err(ServiceErrorCodeError::NotAnInteger { header })
+        Err(ServiceErrorCodeError::NotAnInteger { header: header.clone() })
+    );
+    assert_eq!(
+        ServiceErrorCodeError::NotAnInteger { header }.to_string(),
+        "service error code RESOURCE_EXHAUSTED is not an integer"
     );
 }
 

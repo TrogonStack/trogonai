@@ -32,3 +32,9 @@ fn rejects_characters_outside_the_protobuf_identifier_grammar() {
         Err(ServiceNameError::InvalidCharacter('-'))
     );
 }
+
+#[test]
+fn rejects_a_name_over_the_subject_token_budget() {
+    let long = "E".repeat(129);
+    assert_eq!(ServiceName::new(&long), Err(ServiceNameError::TooLong(129)));
+}

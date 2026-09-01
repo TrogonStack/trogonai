@@ -74,3 +74,6 @@ where
 
     decode_reply(response.headers.as_ref(), &response.payload, content_type).map_err(RequestError::from)
 }
+
+#[cfg(test)]
+mod tests;

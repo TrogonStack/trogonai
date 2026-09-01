@@ -11,6 +11,7 @@ use async_nats::HeaderMap;
 use async_nats::service::Service;
 use buffa::Enumeration as _;
 use buffa_types::google::protobuf::Any;
+use grpc_nats_micro::client::RequestError;
 use grpc_nats_micro::constants::HEADER_ERROR_CODE;
 use grpc_nats_micro::status_codec::ReplyError;
 use grpc_nats_micro::{
@@ -25,10 +26,13 @@ use trogonai_proto::nats::micro::v1alpha1::{ContentType as ProtoContentType, Ser
 const SUBJECT_PREFIX: &str = "echo.v1";
 const SERVICE_NAME: &str = "EchoService";
 const SERVICE_VERSION: &str = "0.1.0";
+const SERVICE_DESCRIPTION: &str = "Echoes what it is told";
 const SAY_METHOD: &str = "Say";
 const FAIL_METHOD: &str = "Fail";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+const STOPPED_SERVICE_TIMEOUT: Duration = Duration::from_millis(500);
+const STOPPED_SERVICE_SETTLE: Duration = Duration::from_millis(100);
 const FAIL_DETAIL_REASON: &str = "ECHO_FAIL";
 const FAIL_DETAIL_DOMAIN: &str = "grpc-nats-micro.conformance";
 
@@ -142,6 +146,7 @@ fn echo_service_binding() -> ServiceBinding {
         SERVICE_VERSION,
         SubjectPrefix::new(SUBJECT_PREFIX).expect("valid subject prefix"),
     )
+    .with_description(SERVICE_DESCRIPTION)
     .with_method(method(SAY_METHOD))
     .expect("derive Say subject")
     .with_method(method(FAIL_METHOD))
@@ -364,6 +369,7 @@ async fn discovery_names_endpoints_after_rpc_methods() {
     .expect("$SRV.INFO responded");
 
     let info: serde_json::Value = serde_json::from_slice(&response.payload).expect("decode $SRV.INFO record");
+    assert_eq!(info["description"].as_str(), Some(SERVICE_DESCRIPTION));
     let mut names: Vec<&str> = info["endpoints"]
         .as_array()
         .expect("$SRV.INFO carries endpoints")
@@ -447,4 +453,44 @@ async fn a_handler_count_mismatch_is_rejected_before_startup() {
             handlers: 1
         }
     ));
+}
+
+/// Stopping the service unsubscribes its endpoints, which ends the dispatch
+/// task each one runs on and leaves the subject without a responder.
+#[tokio::test]
+async fn stopping_the_service_leaves_its_subjects_without_a_responder() {
+    let server = NatsServerProcess::spawn().await;
+    let client = connect(&server.url()).await.expect("connect to nats-server");
+    let binding = echo_service_binding();
+    let handlers: Vec<Box<dyn EndpointHandler>> = vec![Box::new(SayHandler), Box::new(FailHandler)];
+    let service = grpc_nats_micro::serve(&client, &binding, ServiceOptions::default(), handlers)
+        .await
+        .expect("start EchoService");
+
+    service.stop().await.expect("stop EchoService");
+    tokio::time::sleep(STOPPED_SERVICE_SETTLE).await;
+    client.flush().await.expect("flush the unsubscribes");
+
+    let endpoint = binding
+        .endpoints()
+        .iter()
+        .find(|endpoint| endpoint.method_name().as_str() == SAY_METHOD)
+        .expect("Say endpoint registered");
+    let request = SayRequest {
+        message: Some("hello".to_string()),
+    };
+    let error = grpc_nats_micro::client::request::<_, SayRequest, SayResponse>(
+        &client,
+        endpoint,
+        ContentType::Protobuf,
+        &request,
+        STOPPED_SERVICE_TIMEOUT,
+    )
+    .await
+    .expect_err("a stopped service must not respond");
+
+    assert!(
+        matches!(error, RequestError::Transport { .. }),
+        "expected no responder, got {error:?}"
+    );
 }

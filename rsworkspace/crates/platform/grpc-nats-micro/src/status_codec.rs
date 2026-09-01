@@ -117,3 +117,6 @@ pub enum ReplyError {
     #[error(transparent)]
     Service(#[from] ServiceError),
 }
+
+#[cfg(test)]
+mod tests;

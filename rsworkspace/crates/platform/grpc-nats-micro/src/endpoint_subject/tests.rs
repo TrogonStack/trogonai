@@ -29,3 +29,9 @@ fn rejects_a_subject_over_the_token_budget() {
         trogon_nats::subject_conformance::SubjectViolationError::TooManyTokens { .. }
     ));
 }
+
+#[test]
+fn renders_as_the_subject_it_derived() {
+    let derived = subject("echo.v1").expect("derives a conformant subject");
+    assert_eq!(derived.to_string(), "echo.v1.EchoService.Say");
+}

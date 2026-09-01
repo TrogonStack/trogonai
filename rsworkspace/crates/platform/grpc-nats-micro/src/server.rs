@@ -17,7 +17,7 @@ use trogonai_proto::nats::micro::v1alpha1::ServiceOptions;
 
 use crate::binding::ServiceBinding;
 use crate::constants::HEADER_CONTENT_TYPE;
-use crate::content_type::ContentType;
+use crate::content_type::{ContentType, EncodeError};
 use crate::content_type_input::ContentTypeInput;
 use crate::service_fault::ServiceFault;
 use crate::status_codec::{self, Outcome};
@@ -93,36 +93,23 @@ pub async fn serve(
         // otherwise derives the name from the full subject, so `$SRV.INFO`
         // and `$SRV.STATS` would report the dotted subject instead of the
         // method the binding declared.
-        let micro_endpoint = service
+        let registration = service
             .endpoint_builder()
             .name(endpoint.method_name().as_str())
             .add(subject.clone())
-            .await
-            .map_err(|source| ServeError::Endpoint {
-                subject: subject.clone(),
-                source,
-            })?;
+            .await;
+        let mut micro_endpoint = registration.map_err(|source| ServeError::Endpoint { subject, source })?;
 
-        tokio::spawn(run_endpoint(
-            client.clone(),
-            micro_endpoint,
-            content_type_policy.clone(),
-            handler,
-        ));
+        let client = client.clone();
+        let content_type_policy = content_type_policy.clone();
+        tokio::spawn(async move {
+            while let Some(request) = micro_endpoint.next().await {
+                dispatch(&client, &request, &content_type_policy, handler.as_ref()).await;
+            }
+        });
     }
 
     Ok(service)
-}
-
-async fn run_endpoint<P: PublishClient>(
-    client: P,
-    mut micro_endpoint: async_nats::service::endpoint::Endpoint,
-    content_type_policy: Arc<ServiceOptions>,
-    handler: Box<dyn EndpointHandler>,
-) {
-    while let Some(request) = micro_endpoint.next().await {
-        dispatch(&client, &request, &content_type_policy, handler.as_ref()).await;
-    }
 }
 
 async fn dispatch<P: PublishClient>(
@@ -131,49 +118,65 @@ async fn dispatch<P: PublishClient>(
     content_type_policy: &ServiceOptions,
     handler: &dyn EndpointHandler,
 ) {
-    let requested = request
-        .message
-        .headers
-        .as_ref()
+    let (content_type, outcome) = resolve(
+        request.message.headers.as_ref(),
+        &request.message.payload,
+        content_type_policy,
+        handler,
+    )
+    .await;
+
+    match outcome {
+        Ok(body) => reply_success(request, body, content_type).await,
+        Err(fault) => {
+            let reply = request.message.reply.clone();
+            let published = reply_error(client, reply, fault, content_type).await;
+            let _ = published.inspect_err(warn_unencodable);
+        }
+    }
+}
+
+/// Negotiate the request's encoding (ADR 0016 §4), run the handler, and report
+/// the encoding the reply must use either way.
+///
+/// A caller the policy turns away still has to be able to read why, so the
+/// rejection is reported in the encoding the caller asked for; an encoding this
+/// binding does not speak leaves protobuf as the only choice.
+async fn resolve(
+    headers: Option<&HeaderMap>,
+    payload: &[u8],
+    content_type_policy: &ServiceOptions,
+    handler: &dyn EndpointHandler,
+) -> (ContentType, Result<Vec<u8>, ServiceFault>) {
+    let requested = headers
         .and_then(|headers| headers.get(HEADER_CONTENT_TYPE))
         .map(|value| ContentTypeInput::new(value.as_str()));
 
-    let content_type = match ContentType::negotiate(content_type_policy, requested.as_ref()) {
-        Ok(content_type) => content_type,
+    match ContentType::negotiate(content_type_policy, requested.as_ref()) {
+        Ok(content_type) => {
+            let outcome = handler.handle(payload, content_type).await;
+            (content_type, outcome)
+        }
         Err(error) => {
-            // Report the rejection in the encoding the caller asked for, so a
-            // caller the policy turns away can still read why. An encoding
-            // this binding does not speak leaves protobuf as the only choice.
             let rejection_content_type = requested
                 .as_ref()
                 .and_then(ContentType::from_input)
                 .unwrap_or(ContentType::Protobuf);
-            reply_error(
-                client,
-                request,
-                ServiceFault::invalid_argument(error.to_string()),
+            (
                 rejection_content_type,
+                Err(ServiceFault::invalid_argument(error.to_string())),
             )
-            .await;
-            return;
         }
-    };
-
-    match handler.handle(&request.message.payload, content_type).await {
-        Ok(body) => reply_success(request, body, content_type).await,
-        Err(fault) => reply_error(client, request, fault, content_type).await,
     }
 }
 
 async fn reply_success(request: &async_nats::service::Request, body: Vec<u8>, content_type: ContentType) {
     let mut headers = HeaderMap::new();
     headers.insert(HEADER_CONTENT_TYPE, content_type.header_value());
-    if let Err(source) = request
+    let published = request
         .respond_with_headers(Ok(bytes::Bytes::from(body)), headers)
-        .await
-    {
-        tracing::warn!(error = %source, "grpc-nats-micro: failed to publish success reply");
-    }
+        .await;
+    warn_if_undelivered(published, ReplyKind::Success);
 }
 
 /// Publish an error reply directly on the client, bypassing
@@ -189,24 +192,55 @@ async fn reply_success(request: &async_nats::service::Request, body: Vec<u8>, co
 /// convenience micro provides, not an invariant, so body-completeness wins.
 async fn reply_error<P: PublishClient>(
     client: &P,
-    request: &async_nats::service::Request,
+    reply: Option<async_nats::Subject>,
     fault: ServiceFault,
     content_type: ContentType,
-) {
-    let Some(reply) = request.message.reply.clone() else {
+) -> Result<(), EncodeError> {
+    let Some(reply) = reply else {
         tracing::warn!("grpc-nats-micro: request had no reply subject; dropping error reply");
-        return;
+        return Ok(());
     };
-    let encoded = match status_codec::encode_reply(Outcome::Error(fault), content_type) {
-        Ok(encoded) => encoded,
-        Err(error) => {
-            tracing::warn!(error = %error, "grpc-nats-micro: failed to encode error reply");
-            return;
-        }
-    };
+    let encoded = status_codec::encode_reply(Outcome::Error(fault), content_type)?;
     let mut headers = encoded.headers;
     headers.insert(HEADER_CONTENT_TYPE, content_type.header_value());
-    if let Err(source) = client.publish_with_headers(reply, headers, encoded.body).await {
-        tracing::warn!(error = %source, "grpc-nats-micro: failed to publish error reply");
+    let published = client.publish_with_headers(reply, headers, encoded.body).await;
+    warn_if_undelivered(published, ReplyKind::Error);
+    Ok(())
+}
+
+/// A `Status` that will not encode leaves nothing to report: ADR 0016 §3 makes
+/// the error body one complete `Status`, and half of one is not that.
+fn warn_unencodable(error: &EncodeError) {
+    tracing::warn!(error = %error, "grpc-nats-micro: failed to encode error reply");
+}
+
+/// Which half of the reply contract a failed publish belongs to, so the log
+/// line says what was lost without a second message per call site.
+enum ReplyKind {
+    Success,
+    Error,
+}
+
+impl ReplyKind {
+    const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Success => "success",
+            Self::Error => "error",
+        }
     }
 }
+
+/// A reply that cannot be delivered has nowhere left to go: micro offers no
+/// redelivery channel, and the caller learns of it by timing out.
+fn warn_if_undelivered<E>(published: Result<(), E>, reply_kind: ReplyKind)
+where
+    E: std::fmt::Display,
+{
+    if let Err(error) = published {
+        let reply_kind = reply_kind.as_str();
+        tracing::warn!(error = %error, reply_kind, "grpc-nats-micro: failed to publish reply");
+    }
+}
+
+#[cfg(test)]
+mod tests;

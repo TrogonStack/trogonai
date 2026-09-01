@@ -36,3 +36,13 @@ fn named_constructors_carry_their_code() {
     );
     assert_eq!(ServiceFault::internal("boom").code().code(), Code::INTERNAL);
 }
+
+#[test]
+fn hands_over_the_whole_status_it_carries() {
+    let fault = ServiceFault::internal("boom");
+
+    let status = fault.into_status();
+
+    assert_eq!(status.code, Code::INTERNAL.to_i32());
+    assert_eq!(status.message, "boom");
+}
