@@ -11,10 +11,16 @@ use crate::subject_prefix::SubjectPrefix;
 
 /// Why the subject derived from otherwise valid components is not a subject
 /// this binding may publish to.
+///
+/// The components are kept as they were validated, so a caller can act on the
+/// one that pushed the derivation over budget instead of re-parsing a rendered
+/// subject.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
-#[error("derived endpoint subject {subject:?} is not a conformant published subject")]
+#[error("derived endpoint subject {subject_prefix}.{service_name}.{method_name} is not a conformant published subject")]
 pub struct EndpointSubjectError {
-    pub subject: String,
+    pub subject_prefix: SubjectPrefix,
+    pub service_name: ServiceName,
+    pub method_name: MethodName,
     #[source]
     pub source: SubjectViolationError,
 }
@@ -36,7 +42,9 @@ impl EndpointSubject {
     ) -> Result<Self, EndpointSubjectError> {
         let subject = format!("{subject_prefix}.{service_name}.{method_name}");
         validate_published_subject(&subject).map_err(|source| EndpointSubjectError {
-            subject: subject.clone(),
+            subject_prefix: subject_prefix.clone(),
+            service_name: service_name.clone(),
+            method_name: method_name.clone(),
             source,
         })?;
         Ok(Self(subject.into()))

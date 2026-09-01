@@ -14,7 +14,7 @@ import "trogon/nats/micro/v1alpha1/options.proto";
 // endpoint per rpc; success replies carry the response message, faults carry
 // a google.rpc.Status on the micro error channel (ADR 0016 section 3).
 service EchoService {
-  option (trogon.nats.micro.v1alpha1.service) = {version: "1"};
+  option (trogon.nats.micro.v1alpha1.service) = {version: "1.0.0"};
 
   // Say returns the request message unchanged.
   rpc Say(SayRequest) returns (SayResponse);

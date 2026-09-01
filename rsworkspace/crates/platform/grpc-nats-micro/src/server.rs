@@ -82,7 +82,7 @@ pub async fn serve(
         builder = builder.description(description);
     }
     let service = builder
-        .start(binding.name().as_str(), binding.version())
+        .start(binding.name().as_str(), binding.version().as_str())
         .await
         .map_err(ServeError::Start)?;
 

@@ -22,6 +22,7 @@ pub mod service_error_code;
 pub mod service_error_code_input;
 pub mod service_fault;
 pub mod service_name;
+pub mod service_version;
 pub mod status_codec;
 pub mod subject_prefix;
 
@@ -35,5 +36,6 @@ pub use service_error_code::{ServiceErrorCode, ServiceErrorCodeError};
 pub use service_error_code_input::ServiceErrorCodeInput;
 pub use service_fault::ServiceFault;
 pub use service_name::{ServiceName, ServiceNameError};
+pub use service_version::{ServiceVersion, ServiceVersionError};
 pub use status_codec::{EncodedReply, Outcome, ReplyError, ServiceError};
 pub use subject_prefix::{SubjectPrefix, SubjectPrefixError};

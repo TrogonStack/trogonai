@@ -15,7 +15,7 @@ use grpc_nats_micro::client::RequestError;
 use grpc_nats_micro::constants::HEADER_ERROR_CODE;
 use grpc_nats_micro::status_codec::ReplyError;
 use grpc_nats_micro::{
-    ContentType, EndpointHandler, MethodName, ServiceBinding, ServiceFault, ServiceName, SubjectPrefix,
+    ContentType, EndpointHandler, MethodName, ServiceBinding, ServiceFault, ServiceName, ServiceVersion, SubjectPrefix,
 };
 use tokio::process::{Child, Command};
 use trogon_nats::{NatsConfig, RequestClient};
@@ -25,7 +25,7 @@ use trogonai_proto::nats::micro::v1alpha1::{ContentType as ProtoContentType, Ser
 
 const SUBJECT_PREFIX: &str = "echo.v1";
 const SERVICE_NAME: &str = "EchoService";
-const SERVICE_VERSION: &str = "0.1.0";
+const SERVICE_VERSION: &str = "1.0.0";
 const SERVICE_DESCRIPTION: &str = "Echoes what it is told";
 const SAY_METHOD: &str = "Say";
 const FAIL_METHOD: &str = "Fail";
@@ -143,7 +143,7 @@ impl EndpointHandler for FailHandler {
 fn echo_service_binding() -> ServiceBinding {
     ServiceBinding::new(
         ServiceName::new(SERVICE_NAME).expect("valid service name"),
-        SERVICE_VERSION,
+        ServiceVersion::new(SERVICE_VERSION).expect("valid service version"),
         SubjectPrefix::new(SUBJECT_PREFIX).expect("valid subject prefix"),
     )
     .with_description(SERVICE_DESCRIPTION)

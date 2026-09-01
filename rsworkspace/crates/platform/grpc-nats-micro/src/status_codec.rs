@@ -82,17 +82,23 @@ impl ServiceError {
 /// disagreement, and the body is decoded as the complete [`Status`]. Absent
 /// the header, the body is decoded as `Resp`.
 ///
-/// `requested` is only a fallback: ADR 0016 §4 makes the reply's own
-/// `Content-Type` authoritative for how its body is encoded, which is what
-/// lets a rejection of the requested encoding still be readable.
+/// `requested` is only a fallback for a reply that declares no `Content-Type`:
+/// ADR 0016 §4 makes the reply's own `Content-Type` authoritative for how its
+/// body is encoded, which is what lets a rejection of the requested encoding
+/// still be readable. A reply that declares an encoding this binding does not
+/// speak is reported rather than decoded, since falling back to `requested`
+/// there would decode the body as something the sender never wrote.
 pub fn decode_reply<Resp>(headers: Option<&HeaderMap>, body: &[u8], requested: ContentType) -> Result<Resp, ReplyError>
 where
     Resp: buffa::Message + serde::de::DeserializeOwned,
 {
-    let content_type = headers
+    let declared = headers
         .and_then(|headers| headers.get(HEADER_CONTENT_TYPE))
-        .and_then(|value| ContentType::from_input(&ContentTypeInput::new(value.as_str())))
-        .unwrap_or(requested);
+        .map(|value| ContentTypeInput::new(value.as_str()));
+    let content_type = match declared {
+        Some(declared) => ContentType::from_input(&declared).ok_or(ReplyError::ContentType { declared })?,
+        None => requested,
+    };
     let error_code = headers.and_then(|headers| headers.get(HEADER_ERROR_CODE));
 
     match error_code {
@@ -112,6 +118,8 @@ where
 pub enum ReplyError {
     #[error("invalid {HEADER_ERROR_CODE} header")]
     ErrorCode(#[source] ServiceErrorCodeError),
+    #[error("reply declares an unsupported Content-Type: {declared}")]
+    ContentType { declared: ContentTypeInput },
     #[error("failed to decode reply payload")]
     Decode(#[source] DecodeError),
     #[error(transparent)]

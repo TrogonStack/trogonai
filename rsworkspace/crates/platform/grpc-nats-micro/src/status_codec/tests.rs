@@ -129,3 +129,20 @@ fn an_undecodable_error_body_is_reported() {
 
     assert!(matches!(error, ReplyError::Decode(_)));
 }
+
+/// ADR 0016 §4 makes the reply's own `Content-Type` authoritative, so an
+/// encoding this binding does not speak is reported rather than decoded as
+/// whatever the caller happened to request.
+#[test]
+fn a_reply_declaring_an_unsupported_content_type_is_reported() {
+    let mut headers = HeaderMap::new();
+    headers.insert(HEADER_CONTENT_TYPE, "application/xml");
+
+    let error = decode_reply::<SayResponse>(Some(&headers), b"", ContentType::Protobuf)
+        .expect_err("the reply names an encoding this binding does not speak");
+
+    let ReplyError::ContentType { declared } = error else {
+        panic!("expected an unsupported content type failure");
+    };
+    assert_eq!(declared.as_str(), "application/xml");
+}

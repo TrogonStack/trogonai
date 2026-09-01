@@ -1,6 +1,7 @@
 use super::ServiceBinding;
 use crate::method_name::MethodName;
 use crate::service_name::ServiceName;
+use crate::service_version::ServiceVersion;
 use crate::subject_prefix::SubjectPrefix;
 
 const SUBJECT_PREFIX: &str = "echo.v1";
@@ -8,7 +9,7 @@ const SUBJECT_PREFIX: &str = "echo.v1";
 fn binding() -> ServiceBinding {
     ServiceBinding::new(
         ServiceName::new("EchoService").expect("valid service name"),
-        "0.1.0",
+        ServiceVersion::new("1.0.0").expect("valid service version"),
         SubjectPrefix::new(SUBJECT_PREFIX).expect("valid subject prefix"),
     )
     .with_method(MethodName::new("Say").expect("valid method name"))

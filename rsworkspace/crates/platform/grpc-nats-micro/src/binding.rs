@@ -4,6 +4,7 @@
 use crate::endpoint_subject::{EndpointSubject, EndpointSubjectError};
 use crate::method_name::MethodName;
 use crate::service_name::ServiceName;
+use crate::service_version::ServiceVersion;
 use crate::subject_prefix::SubjectPrefix;
 
 /// One `rpc` method of the annotated protobuf service, registered as a micro
@@ -38,17 +39,17 @@ impl EndpointBinding {
 #[derive(Debug, Clone)]
 pub struct ServiceBinding {
     name: ServiceName,
-    version: String,
+    version: ServiceVersion,
     description: Option<String>,
     subject_prefix: SubjectPrefix,
     endpoints: Vec<EndpointBinding>,
 }
 
 impl ServiceBinding {
-    pub fn new(name: ServiceName, version: impl Into<String>, subject_prefix: SubjectPrefix) -> Self {
+    pub fn new(name: ServiceName, version: ServiceVersion, subject_prefix: SubjectPrefix) -> Self {
         Self {
             name,
-            version: version.into(),
+            version,
             description: None,
             subject_prefix,
             endpoints: Vec::new(),
@@ -73,7 +74,7 @@ impl ServiceBinding {
         &self.name
     }
 
-    pub fn version(&self) -> &str {
+    pub const fn version(&self) -> &ServiceVersion {
         &self.version
     }
 
