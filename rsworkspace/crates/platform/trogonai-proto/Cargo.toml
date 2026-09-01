@@ -12,6 +12,10 @@ workspace = true
 default = []
 chrono = ["dep:buffa-types", "dep:chrono"]
 schedules = ["dep:buffa", "dep:buffa-types", "dep:serde", "dep:trogon-decider", "chrono"]
+# Generated types for the grpc-nats-micro binding (ADR 0016): google.rpc.Status/Code,
+# the trogon.nats.micro.v1alpha1 options, and the echo conformance fixture. Deliberately
+# excludes the decider/scheduler domain deps so the binding does not couple to them.
+grpc-nats-micro = ["dep:buffa", "dep:buffa-types", "dep:serde"]
 runtime-snapshot = ["schedules", "dep:trogon-decider-runtime"]
 runtime-host = ["schedules", "dep:trogon-decider-runtime"]
 agents = ["dep:buffa", "dep:buffa-types", "dep:serde", "dep:trogon-decider"]

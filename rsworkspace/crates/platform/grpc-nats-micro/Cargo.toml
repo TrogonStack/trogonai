@@ -1,0 +1,25 @@
+[package]
+name = "grpc-nats-micro"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Protocol Buffers request/reply over NATS micro (ADR 0016)"
+
+[lints]
+workspace = true
+
+[dependencies]
+async-nats = { workspace = true, features = ["service"] }
+buffa = { workspace = true }
+bytes = { workspace = true }
+futures-util = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["time", "rt"] }
+tracing = { workspace = true }
+trogon-nats = { workspace = true }
+trogonai-proto = { workspace = true, features = ["grpc-nats-micro"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "process", "time"] }

@@ -1,0 +1,22 @@
+//! Protocol Buffers request/reply over NATS micro (ADR 0016).
+//!
+//! This is not gRPC: there is no HTTP/2, no gRPC wire framing, and no gRPC
+//! library on the request/reply path. "gRPC" in the crate name is a naming
+//! idiom only — transport is a NATS micro service (NATS Services / ADR-32),
+//! and the wire payload is either protobuf binary or canonical proto3 JSON,
+//! negotiated per `Content-Type` (see [`content_type`]).
+//!
+//! See `docs/adr/0016-protobuf-rpc-over-nats-micro-binding.md` for the full
+//! binding specification this crate implements.
+
+pub mod binding;
+pub mod client;
+pub mod constants;
+pub mod content_type;
+pub mod server;
+pub mod status_codec;
+
+pub use binding::{EndpointBinding, EndpointSubject, ServiceBinding};
+pub use content_type::ContentType;
+pub use server::{EndpointHandler, ServeError, serve};
+pub use status_codec::{EncodedReply, Outcome, ReplyError, ServiceError};

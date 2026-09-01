@@ -15,7 +15,12 @@
         reason = "buffa-codegen emits each message's view module beside the message it views, so the generated tree is cyclic by construction and is not edited here"
     )
 )]
-#[cfg(any(feature = "schedules", feature = "agents", feature = "decider"))]
+#[cfg(any(
+    feature = "schedules",
+    feature = "agents",
+    feature = "decider",
+    feature = "grpc-nats-micro"
+))]
 mod r#gen;
 
 #[cfg(any(feature = "schedules", feature = "agents"))]
@@ -45,7 +50,22 @@ pub mod content {
     }
 }
 
-#[cfg(any(feature = "schedules", feature = "agents", feature = "decider"))]
+#[cfg(feature = "grpc-nats-micro")]
+#[cfg_attr(dylint_lib = "trogon_lints", allow(inline_module_block))]
+pub mod nats {
+    pub mod micro {
+        pub mod v1alpha1 {
+            pub use crate::r#gen::trogon::nats::micro::v1alpha1::*;
+        }
+    }
+}
+
+#[cfg(any(
+    feature = "schedules",
+    feature = "agents",
+    feature = "decider",
+    feature = "grpc-nats-micro"
+))]
 #[cfg_attr(dylint_lib = "trogon_lints", allow(inline_module_block))]
 pub mod google {
     #[cfg(any(feature = "schedules", feature = "agents"))]
@@ -53,9 +73,17 @@ pub mod google {
         pub use crate::r#gen::google::r#type::*;
     }
 
-    #[cfg(feature = "decider")]
+    #[cfg(any(feature = "decider", feature = "grpc-nats-micro"))]
     pub mod rpc {
         pub use crate::r#gen::google::rpc::*;
+    }
+}
+
+#[cfg(feature = "grpc-nats-micro")]
+#[cfg_attr(dylint_lib = "trogon_lints", allow(inline_module_block))]
+pub mod grpc_nats_micro {
+    pub mod v1 {
+        pub use crate::r#gen::trogonai::grpc_nats_micro::v1::*;
     }
 }
 

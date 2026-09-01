@@ -25,6 +25,7 @@ ard-nats = { path = "crates/ard/ard-nats" }
 ard-registry = { path = "crates/ard/ard-registry" }
 a2a-redaction = { path = "crates/a2a/a2a-redaction" }
 acp-nats = { path = "crates/acp/acp-nats" }
+grpc-nats-micro = { path = "crates/platform/grpc-nats-micro" }
 trogon-telemetry = { path = "crates/platform/trogon-telemetry" }
 mcp-nats = { path = "crates/mcp/mcp-nats" }
 mcp-nats-server = { path = "crates/mcp/mcp-nats-server" }
