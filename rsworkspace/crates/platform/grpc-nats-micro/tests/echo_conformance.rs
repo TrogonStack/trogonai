@@ -13,7 +13,9 @@ use buffa::Enumeration as _;
 use buffa_types::google::protobuf::Any;
 use grpc_nats_micro::constants::HEADER_ERROR_CODE;
 use grpc_nats_micro::status_codec::ReplyError;
-use grpc_nats_micro::{ContentType, EndpointHandler, MethodName, ServiceBinding, ServiceName, SubjectPrefix};
+use grpc_nats_micro::{
+    ContentType, EndpointHandler, MethodName, ServiceBinding, ServiceFault, ServiceName, SubjectPrefix,
+};
 use tokio::process::{Child, Command};
 use trogon_nats::{NatsConfig, RequestClient};
 use trogonai_proto::google::rpc::{Code, ErrorInfo, Status};
@@ -91,21 +93,17 @@ impl EndpointHandler for SayHandler {
         &'a self,
         request_bytes: &'a [u8],
         content_type: ContentType,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, Status>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, ServiceFault>> + Send + 'a>> {
         Box::pin(async move {
-            let request: SayRequest = content_type.decode(request_bytes).map_err(|error| Status {
-                code: Code::INVALID_ARGUMENT.to_i32(),
-                message: error.to_string(),
-                details: Vec::new(),
-            })?;
+            let request: SayRequest = content_type
+                .decode(request_bytes)
+                .map_err(|error| ServiceFault::invalid_argument(error.to_string()))?;
             let reply = SayResponse {
                 message: request.message,
             };
-            content_type.encode(&reply).map_err(|error| Status {
-                code: Code::INTERNAL.to_i32(),
-                message: error.to_string(),
-                details: Vec::new(),
-            })
+            content_type
+                .encode(&reply)
+                .map_err(|error| ServiceFault::internal(error.to_string()))
         })
     }
 }
@@ -117,24 +115,23 @@ impl EndpointHandler for FailHandler {
         &'a self,
         request_bytes: &'a [u8],
         content_type: ContentType,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, Status>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, ServiceFault>> + Send + 'a>> {
         Box::pin(async move {
-            let request: FailRequest = content_type.decode(request_bytes).map_err(|error| Status {
-                code: Code::INVALID_ARGUMENT.to_i32(),
-                message: error.to_string(),
-                details: Vec::new(),
-            })?;
+            let request: FailRequest = content_type
+                .decode(request_bytes)
+                .map_err(|error| ServiceFault::invalid_argument(error.to_string()))?;
             let code = request.code.and_then(|value| value.as_known()).unwrap_or(Code::UNKNOWN);
             let detail = ErrorInfo {
                 reason: FAIL_DETAIL_REASON.to_string(),
                 domain: FAIL_DETAIL_DOMAIN.to_string(),
                 ..Default::default()
             };
-            Err(Status {
+            Err(ServiceFault::new(Status {
                 code: code.to_i32(),
                 message: request.message.unwrap_or_default(),
                 details: vec![Any::pack(&detail, ErrorInfo::TYPE_URL)],
             })
+            .expect("FailRequest carries a service error code"))
         })
     }
 }
@@ -305,7 +302,7 @@ async fn assert_fail_details_reach_the_client(content_type: ContentType) {
     .expect_err("Fail must surface a service error");
 
     let service_error = service_error(error);
-    assert_eq!(service_error.code(), Code::RESOURCE_EXHAUSTED.to_i32());
+    assert_eq!(service_error.code().code(), Code::RESOURCE_EXHAUSTED);
     assert_eq!(service_error.message(), "out of quota");
     let detail = error_info(service_error.status());
     assert_eq!(detail.reason, FAIL_DETAIL_REASON);
@@ -403,7 +400,7 @@ async fn rejected_content_type_reports_the_policy_status() {
     .expect_err("a JSON caller must be rejected by a protobuf-only service");
 
     let service_error = service_error(error);
-    assert_eq!(service_error.code(), Code::INVALID_ARGUMENT.to_i32());
+    assert_eq!(service_error.code().code(), Code::INVALID_ARGUMENT);
 }
 
 #[tokio::test]
@@ -424,4 +421,30 @@ async fn fail_reports_status_over_protobuf() {
 #[tokio::test]
 async fn fail_reports_status_over_json() {
     assert_fail_reports_status(ContentType::Json).await;
+}
+
+/// A handler list that does not line up with the binding's endpoints would be
+/// silently truncated by `zip`, leaving declared methods unserved.
+#[tokio::test]
+async fn a_handler_count_mismatch_is_rejected_before_startup() {
+    let server = NatsServerProcess::spawn().await;
+    let client = connect(&server.url()).await.expect("connect to nats-server");
+    let binding = echo_service_binding();
+
+    let error = grpc_nats_micro::serve(
+        &client,
+        &binding,
+        ServiceOptions::default(),
+        vec![Box::new(SayHandler) as Box<dyn EndpointHandler>],
+    )
+    .await
+    .expect_err("a short handler list must be rejected");
+
+    assert!(matches!(
+        error,
+        grpc_nats_micro::ServeError::HandlerCount {
+            endpoints: 2,
+            handlers: 1
+        }
+    ));
 }

@@ -10,23 +10,24 @@ use std::sync::Arc;
 
 use async_nats::service::ServiceExt as _;
 use async_nats::{Client, HeaderMap};
-use buffa::Enumeration as _;
 use futures_util::StreamExt as _;
 use thiserror::Error;
 use trogon_nats::PublishClient;
-use trogonai_proto::google::rpc::{Code, Status};
 use trogonai_proto::nats::micro::v1alpha1::ServiceOptions;
 
 use crate::binding::ServiceBinding;
 use crate::constants::HEADER_CONTENT_TYPE;
 use crate::content_type::ContentType;
+use crate::content_type_input::ContentTypeInput;
+use crate::service_fault::ServiceFault;
 use crate::status_codec::{self, Outcome};
 
 /// Decodes a request payload and produces a reply payload for one endpoint.
 ///
 /// The handler receives the request bytes already isolated from NATS
 /// transport concerns and returns the success reply body pre-encoded in
-/// `content_type`, or a [`Status`] to report on the micro error channel.
+/// `content_type`, or a [`ServiceFault`] to report on the micro error
+/// channel.
 /// Pre-encoding the success body here (rather than a typed message) keeps
 /// this trait's signature independent of any one request/response message
 /// pair, so one registration loop can dispatch to endpoints with unrelated
@@ -38,11 +39,13 @@ pub trait EndpointHandler: Send + Sync {
         &'a self,
         request_bytes: &'a [u8],
         content_type: ContentType,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, Status>> + Send + 'a>>;
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, ServiceFault>> + Send + 'a>>;
 }
 
 #[derive(Debug, Error)]
 pub enum ServeError {
+    #[error("binding declares {endpoints} endpoints but {handlers} handlers were supplied")]
+    HandlerCount { endpoints: usize, handlers: usize },
     #[error("failed to start NATS micro service: {0}")]
     Start(#[source] async_nats::Error),
     #[error("failed to register endpoint {subject}: {source}")]
@@ -67,6 +70,13 @@ pub async fn serve(
     content_type_policy: ServiceOptions,
     handlers: Vec<Box<dyn EndpointHandler>>,
 ) -> Result<async_nats::service::Service, ServeError> {
+    if binding.endpoints().len() != handlers.len() {
+        return Err(ServeError::HandlerCount {
+            endpoints: binding.endpoints().len(),
+            handlers: handlers.len(),
+        });
+    }
+
     let mut builder = client.service_builder();
     if let Some(description) = binding.description() {
         builder = builder.description(description);
@@ -121,35 +131,37 @@ async fn dispatch<P: PublishClient>(
     content_type_policy: &ServiceOptions,
     handler: &dyn EndpointHandler,
 ) {
-    let header_value = request
+    let requested = request
         .message
         .headers
         .as_ref()
         .and_then(|headers| headers.get(HEADER_CONTENT_TYPE))
-        .map(|value| value.as_str());
+        .map(|value| ContentTypeInput::new(value.as_str()));
 
-    let content_type = match ContentType::negotiate(content_type_policy, header_value) {
+    let content_type = match ContentType::negotiate(content_type_policy, requested.as_ref()) {
         Ok(content_type) => content_type,
         Err(error) => {
-            let status = Status {
-                code: Code::INVALID_ARGUMENT.to_i32(),
-                message: error.to_string(),
-                details: Vec::new(),
-            };
             // Report the rejection in the encoding the caller asked for, so a
             // caller the policy turns away can still read why. An encoding
             // this binding does not speak leaves protobuf as the only choice.
-            let rejection_content_type = header_value
-                .and_then(ContentType::from_header_value)
+            let rejection_content_type = requested
+                .as_ref()
+                .and_then(ContentType::from_input)
                 .unwrap_or(ContentType::Protobuf);
-            reply_error(client, request, status, rejection_content_type).await;
+            reply_error(
+                client,
+                request,
+                ServiceFault::invalid_argument(error.to_string()),
+                rejection_content_type,
+            )
+            .await;
             return;
         }
     };
 
     match handler.handle(&request.message.payload, content_type).await {
         Ok(body) => reply_success(request, body, content_type).await,
-        Err(status) => reply_error(client, request, status, content_type).await,
+        Err(fault) => reply_error(client, request, fault, content_type).await,
     }
 }
 
@@ -178,14 +190,14 @@ async fn reply_success(request: &async_nats::service::Request, body: Vec<u8>, co
 async fn reply_error<P: PublishClient>(
     client: &P,
     request: &async_nats::service::Request,
-    status: Status,
+    fault: ServiceFault,
     content_type: ContentType,
 ) {
     let Some(reply) = request.message.reply.clone() else {
         tracing::warn!("grpc-nats-micro: request had no reply subject; dropping error reply");
         return;
     };
-    let encoded = match status_codec::encode_reply(Outcome::Error(status), content_type) {
+    let encoded = match status_codec::encode_reply(Outcome::Error(fault), content_type) {
         Ok(encoded) => encoded,
         Err(error) => {
             tracing::warn!(error = %error, "grpc-nats-micro: failed to encode error reply");
