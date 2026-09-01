@@ -78,8 +78,14 @@ pub async fn serve(
     let content_type_policy = Arc::new(content_type_policy);
     for (endpoint, handler) in binding.endpoints().iter().zip(handlers) {
         let subject = endpoint.subject().as_str().to_string();
+        // Name the endpoint after the rpc method (ADR 0016 §2). Micro
+        // otherwise derives the name from the full subject, so `$SRV.INFO`
+        // and `$SRV.STATS` would report the dotted subject instead of the
+        // method the binding declared.
         let micro_endpoint = service
-            .endpoint(subject.clone())
+            .endpoint_builder()
+            .name(endpoint.method_name())
+            .add(subject.clone())
             .await
             .map_err(|source| ServeError::Endpoint {
                 subject: subject.clone(),
@@ -129,7 +135,13 @@ async fn dispatch(
                 message: error.to_string(),
                 details: Vec::new(),
             };
-            reply_error(client, request, status, ContentType::Protobuf).await;
+            // Report the rejection in the encoding the caller asked for, so a
+            // caller the policy turns away can still read why. An encoding
+            // this binding does not speak leaves protobuf as the only choice.
+            let rejection_content_type = header_value
+                .and_then(ContentType::from_header_value)
+                .unwrap_or(ContentType::Protobuf);
+            reply_error(client, request, status, rejection_content_type).await;
             return;
         }
     };

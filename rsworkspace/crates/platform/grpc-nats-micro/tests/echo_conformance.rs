@@ -10,11 +10,14 @@ use std::time::Duration;
 use async_nats::HeaderMap;
 use async_nats::service::Service;
 use buffa::Enumeration as _;
+use buffa_types::google::protobuf::Any;
 use grpc_nats_micro::constants::HEADER_ERROR_CODE;
+use grpc_nats_micro::status_codec::ReplyError;
 use grpc_nats_micro::{ContentType, EndpointHandler, ServiceBinding};
 use tokio::process::{Child, Command};
-use trogonai_proto::google::rpc::{Code, Status};
-use trogonai_proto::grpc_nats_micro::v1::{FailRequest, SayRequest, SayResponse};
+use trogonai_proto::google::rpc::{Code, ErrorInfo, Status};
+use trogonai_proto::grpc_nats_micro::v1::{FailRequest, FailResponse, SayRequest, SayResponse};
+use trogonai_proto::nats::micro::v1alpha1::{ContentType as ProtoContentType, ServiceOptions};
 
 const SUBJECT_PREFIX: &str = "echo.v1";
 const SERVICE_NAME: &str = "EchoService";
@@ -22,6 +25,8 @@ const SERVICE_VERSION: &str = "0.1.0";
 const SAY_METHOD: &str = "Say";
 const FAIL_METHOD: &str = "Fail";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+const FAIL_DETAIL_REASON: &str = "ECHO_FAIL";
+const FAIL_DETAIL_DOMAIN: &str = "grpc-nats-micro.conformance";
 
 struct NatsServerProcess {
     child: Child,
@@ -114,10 +119,15 @@ impl EndpointHandler for FailHandler {
                 details: Vec::new(),
             })?;
             let code = request.code.and_then(|value| value.as_known()).unwrap_or(Code::UNKNOWN);
+            let detail = ErrorInfo {
+                reason: FAIL_DETAIL_REASON.to_string(),
+                domain: FAIL_DETAIL_DOMAIN.to_string(),
+                ..Default::default()
+            };
             Err(Status {
                 code: code.to_i32(),
                 message: request.message.unwrap_or_default(),
-                details: Vec::new(),
+                details: vec![Any::pack(&detail, ErrorInfo::TYPE_URL)],
             })
         })
     }
@@ -141,20 +151,19 @@ struct EchoFixture {
 }
 
 async fn start_fixture() -> EchoFixture {
+    start_fixture_with_policy(ServiceOptions::default()).await
+}
+
+async fn start_fixture_with_policy(content_type_policy: ServiceOptions) -> EchoFixture {
     let server = NatsServerProcess::spawn().await;
     let client = async_nats::connect(server.url()).await.expect("connect to nats-server");
 
     let binding = echo_service_binding();
     let handlers: Vec<Box<dyn EndpointHandler>> = vec![Box::new(SayHandler), Box::new(FailHandler)];
 
-    let service = grpc_nats_micro::serve(
-        &client,
-        &binding,
-        trogonai_proto::nats::micro::v1alpha1::ServiceOptions::default(),
-        handlers,
-    )
-    .await
-    .expect("start EchoService");
+    let service = grpc_nats_micro::serve(&client, &binding, content_type_policy, handlers)
+        .await
+        .expect("start EchoService");
 
     EchoFixture {
         _server: server,
@@ -255,6 +264,130 @@ async fn assert_fail_reports_status(content_type: ContentType) {
         .expect("decode complete Status body");
     assert_eq!(status.code, Code::ALREADY_EXISTS.to_i32());
     assert_eq!(status.message, "already exists");
+    assert_eq!(error_info(&status).reason, FAIL_DETAIL_REASON);
+}
+
+/// ADR 0016 §3 makes the body the only place `Status.details` is readable, so
+/// the client decode path must surface them rather than reduce the fault to
+/// code and message.
+async fn assert_fail_details_reach_the_client(content_type: ContentType) {
+    let fixture = start_fixture_with_policy(ServiceOptions::default()).await;
+    let endpoint = endpoint(&fixture, FAIL_METHOD);
+
+    let request = FailRequest {
+        code: Some(Code::RESOURCE_EXHAUSTED.into()),
+        message: Some("out of quota".to_string()),
+    };
+    let error = grpc_nats_micro::client::request::<_, FailRequest, FailResponse>(
+        &fixture.client,
+        endpoint,
+        content_type,
+        &request,
+        REQUEST_TIMEOUT,
+    )
+    .await
+    .expect_err("Fail must surface a service error");
+
+    let service_error = service_error(error);
+    assert_eq!(service_error.code(), Code::RESOURCE_EXHAUSTED.to_i32());
+    assert_eq!(service_error.message(), "out of quota");
+    let detail = error_info(service_error.status());
+    assert_eq!(detail.reason, FAIL_DETAIL_REASON);
+    assert_eq!(detail.domain, FAIL_DETAIL_DOMAIN);
+}
+
+fn error_info(status: &Status) -> ErrorInfo {
+    status
+        .details
+        .first()
+        .expect("Status carries an error detail")
+        .unpack_if::<ErrorInfo>(ErrorInfo::TYPE_URL)
+        .expect("decode ErrorInfo detail")
+        .expect("detail is an ErrorInfo")
+}
+
+fn service_error(
+    error: grpc_nats_micro::client::RequestError<async_nats::client::RequestError>,
+) -> grpc_nats_micro::ServiceError {
+    match error {
+        grpc_nats_micro::client::RequestError::Reply(ReplyError::Service(service_error)) => service_error,
+        other => panic!("expected a micro service error, got {other:?}"),
+    }
+}
+
+fn endpoint<'a>(fixture: &'a EchoFixture, method_name: &str) -> &'a grpc_nats_micro::EndpointBinding {
+    fixture
+        .binding
+        .endpoints()
+        .iter()
+        .find(|endpoint| endpoint.method_name() == method_name)
+        .expect("endpoint registered")
+}
+
+#[tokio::test]
+async fn fail_details_reach_the_client_over_protobuf() {
+    assert_fail_details_reach_the_client(ContentType::Protobuf).await;
+}
+
+#[tokio::test]
+async fn fail_details_reach_the_client_over_json() {
+    assert_fail_details_reach_the_client(ContentType::Json).await;
+}
+
+/// ADR 0016 §2: the endpoint name is the rpc method name, so discovery reports
+/// the method rather than the subject micro would otherwise name it after.
+#[tokio::test]
+async fn discovery_names_endpoints_after_rpc_methods() {
+    let fixture = start_fixture().await;
+
+    let response = tokio::time::timeout(
+        REQUEST_TIMEOUT,
+        fixture
+            .client
+            .request(format!("$SRV.INFO.{SERVICE_NAME}"), bytes::Bytes::new()),
+    )
+    .await
+    .expect("$SRV.INFO did not time out")
+    .expect("$SRV.INFO responded");
+
+    let info: serde_json::Value = serde_json::from_slice(&response.payload).expect("decode $SRV.INFO record");
+    let mut names: Vec<&str> = info["endpoints"]
+        .as_array()
+        .expect("$SRV.INFO carries endpoints")
+        .iter()
+        .map(|endpoint| endpoint["name"].as_str().expect("endpoint name is a string"))
+        .collect();
+    names.sort_unstable();
+    assert_eq!(names, vec![FAIL_METHOD, SAY_METHOD]);
+}
+
+/// A caller the content-type policy turns away must be able to read the
+/// rejection: encoding it in a type the caller does not speak would surface as
+/// a decode failure instead of the policy's `Status`.
+#[tokio::test]
+async fn rejected_content_type_reports_the_policy_status() {
+    let fixture = start_fixture_with_policy(ServiceOptions {
+        content_type: ProtoContentType::CONTENT_TYPE_PROTOBUF.into(),
+        ..Default::default()
+    })
+    .await;
+    let endpoint = endpoint(&fixture, SAY_METHOD);
+
+    let request = SayRequest {
+        message: Some("hello".to_string()),
+    };
+    let error = grpc_nats_micro::client::request::<_, SayRequest, SayResponse>(
+        &fixture.client,
+        endpoint,
+        ContentType::Json,
+        &request,
+        REQUEST_TIMEOUT,
+    )
+    .await
+    .expect_err("a JSON caller must be rejected by a protobuf-only service");
+
+    let service_error = service_error(error);
+    assert_eq!(service_error.code(), Code::INVALID_ARGUMENT.to_i32());
 }
 
 #[tokio::test]

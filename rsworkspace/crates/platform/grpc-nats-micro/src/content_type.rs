@@ -22,6 +22,16 @@ impl ContentType {
         }
     }
 
+    /// The encoding a `Content-Type` header value names, or `None` if the
+    /// value is not one this binding speaks (ADR 0016 §4).
+    pub fn from_header_value(value: &str) -> Option<Self> {
+        match value {
+            CONTENT_TYPE_PROTOBUF => Some(Self::Protobuf),
+            CONTENT_TYPE_JSON => Some(Self::Json),
+            _ => None,
+        }
+    }
+
     /// Negotiate the [`ContentType`] for a request given the service's
     /// [`ServiceOptions`] restriction and the request's `Content-Type` header
     /// value, if any.
@@ -31,19 +41,16 @@ impl ContentType {
     pub fn negotiate(policy: &ServiceOptions, header: Option<&str>) -> Result<Self, NegotiationError> {
         let allowed = Self::allowed(policy);
         match header {
-            Some(CONTENT_TYPE_PROTOBUF) => match allowed {
-                Allowed::Either | Allowed::Only(Self::Protobuf) => Ok(Self::Protobuf),
-                Allowed::Only(Self::Json) => Err(NegotiationError::NotAllowed {
-                    requested: Self::Protobuf,
-                }),
-            },
-            Some(CONTENT_TYPE_JSON) => match allowed {
-                Allowed::Either | Allowed::Only(Self::Json) => Ok(Self::Json),
-                Allowed::Only(Self::Protobuf) => Err(NegotiationError::NotAllowed { requested: Self::Json }),
-            },
-            Some(other) => Err(NegotiationError::UnknownContentType {
-                value: other.to_string(),
-            }),
+            Some(value) => {
+                let requested = Self::from_header_value(value).ok_or_else(|| NegotiationError::UnknownContentType {
+                    value: value.to_string(),
+                })?;
+                match allowed {
+                    Allowed::Either => Ok(requested),
+                    Allowed::Only(only) if only == requested => Ok(requested),
+                    Allowed::Only(_) => Err(NegotiationError::NotAllowed { requested }),
+                }
+            }
             None => match allowed {
                 Allowed::Either => Ok(Self::Protobuf),
                 Allowed::Only(content_type) => Ok(content_type),
