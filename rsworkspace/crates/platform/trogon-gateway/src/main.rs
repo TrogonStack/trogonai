@@ -219,12 +219,14 @@ async fn serve(resolved: config::ResolvedConfig) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[cfg_attr(coverage, allow(dead_code))]
 #[derive(Debug, thiserror::Error)]
 enum NotionVerificationTokenCommandError {
     #[error("notion integration '{0}' is not configured")]
     IntegrationNotConfigured(source_integration_id::SourceIntegrationId),
 }
 
+#[cfg_attr(coverage, allow(dead_code))]
 async fn notion_verification_token<N, J, W>(
     resolved: &config::ResolvedConfig,
     integration: &source_integration_id::SourceIntegrationId,
