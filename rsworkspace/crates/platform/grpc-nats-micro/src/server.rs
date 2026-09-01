@@ -13,6 +13,7 @@ use async_nats::{Client, HeaderMap};
 use buffa::Enumeration as _;
 use futures_util::StreamExt as _;
 use thiserror::Error;
+use trogon_nats::PublishClient;
 use trogonai_proto::google::rpc::{Code, Status};
 use trogonai_proto::nats::micro::v1alpha1::ServiceOptions;
 
@@ -71,7 +72,7 @@ pub async fn serve(
         builder = builder.description(description);
     }
     let service = builder
-        .start(binding.name(), binding.version())
+        .start(binding.name().as_str(), binding.version())
         .await
         .map_err(ServeError::Start)?;
 
@@ -84,7 +85,7 @@ pub async fn serve(
         // method the binding declared.
         let micro_endpoint = service
             .endpoint_builder()
-            .name(endpoint.method_name())
+            .name(endpoint.method_name().as_str())
             .add(subject.clone())
             .await
             .map_err(|source| ServeError::Endpoint {
@@ -103,8 +104,8 @@ pub async fn serve(
     Ok(service)
 }
 
-async fn run_endpoint(
-    client: Client,
+async fn run_endpoint<P: PublishClient>(
+    client: P,
     mut micro_endpoint: async_nats::service::endpoint::Endpoint,
     content_type_policy: Arc<ServiceOptions>,
     handler: Box<dyn EndpointHandler>,
@@ -114,8 +115,8 @@ async fn run_endpoint(
     }
 }
 
-async fn dispatch(
-    client: &Client,
+async fn dispatch<P: PublishClient>(
+    client: &P,
     request: &async_nats::service::Request,
     content_type_policy: &ServiceOptions,
     handler: &dyn EndpointHandler,
@@ -174,8 +175,8 @@ async fn reply_success(request: &async_nats::service::Request, body: Vec<u8>, co
 /// `last_error` endpoint statistics bookkeeping, which only `respond`/
 /// `respond_with_headers` update; ADR 0016 treats stats-counting as a
 /// convenience micro provides, not an invariant, so body-completeness wins.
-async fn reply_error(
-    client: &Client,
+async fn reply_error<P: PublishClient>(
+    client: &P,
     request: &async_nats::service::Request,
     status: Status,
     content_type: ContentType,

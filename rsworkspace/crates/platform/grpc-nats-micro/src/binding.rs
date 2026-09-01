@@ -1,44 +1,30 @@
-//! Binding descriptors: subject derivation per ADR 0016 §2
-//! (`<subject_prefix>.<service-name>.<MethodName>`).
+//! Binding descriptors: the annotated protobuf service and its `rpc` methods,
+//! bound to NATS micro per ADR 0016 §1 and §2.
 
-/// A NATS subject derived from a subject prefix, service name, and method
-/// name, per ADR 0016 §2. Always constructed through [`EndpointSubject::new`]
-/// so the derivation rule cannot drift out of sync at a call site.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EndpointSubject(String);
-
-impl EndpointSubject {
-    pub fn new(subject_prefix: &str, service_name: &str, method_name: &str) -> Self {
-        Self(format!("{subject_prefix}.{service_name}.{method_name}"))
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl std::fmt::Display for EndpointSubject {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
+use crate::endpoint_subject::{EndpointSubject, EndpointSubjectError};
+use crate::method_name::MethodName;
+use crate::service_name::ServiceName;
+use crate::subject_prefix::SubjectPrefix;
 
 /// One `rpc` method of the annotated protobuf service, registered as a micro
 /// endpoint on its derived subject.
 #[derive(Debug, Clone)]
 pub struct EndpointBinding {
-    method_name: String,
+    method_name: MethodName,
     subject: EndpointSubject,
 }
 
 impl EndpointBinding {
-    pub fn new(subject_prefix: &str, service_name: &str, method_name: impl Into<String>) -> Self {
-        let method_name = method_name.into();
-        let subject = EndpointSubject::new(subject_prefix, service_name, &method_name);
-        Self { method_name, subject }
+    pub fn new(
+        subject_prefix: &SubjectPrefix,
+        service_name: &ServiceName,
+        method_name: MethodName,
+    ) -> Result<Self, EndpointSubjectError> {
+        let subject = EndpointSubject::new(subject_prefix, service_name, &method_name)?;
+        Ok(Self { method_name, subject })
     }
 
-    pub fn method_name(&self) -> &str {
+    pub fn method_name(&self) -> &MethodName {
         &self.method_name
     }
 
@@ -51,20 +37,20 @@ impl EndpointBinding {
 /// (ADR 0016 §1), and the subject prefix its endpoints are derived under.
 #[derive(Debug, Clone)]
 pub struct ServiceBinding {
-    name: String,
+    name: ServiceName,
     version: String,
     description: Option<String>,
-    subject_prefix: String,
+    subject_prefix: SubjectPrefix,
     endpoints: Vec<EndpointBinding>,
 }
 
 impl ServiceBinding {
-    pub fn new(name: impl Into<String>, version: impl Into<String>, subject_prefix: impl Into<String>) -> Self {
+    pub fn new(name: ServiceName, version: impl Into<String>, subject_prefix: SubjectPrefix) -> Self {
         Self {
-            name: name.into(),
+            name,
             version: version.into(),
             description: None,
-            subject_prefix: subject_prefix.into(),
+            subject_prefix,
             endpoints: Vec::new(),
         }
     }
@@ -77,14 +63,13 @@ impl ServiceBinding {
 
     /// Register an `rpc` method as a micro endpoint, deriving its subject
     /// from this binding's subject prefix and service name.
-    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
-    pub fn with_method(mut self, method_name: impl Into<String>) -> Self {
+    pub fn with_method(mut self, method_name: MethodName) -> Result<Self, EndpointSubjectError> {
         self.endpoints
-            .push(EndpointBinding::new(&self.subject_prefix, &self.name, method_name));
-        self
+            .push(EndpointBinding::new(&self.subject_prefix, &self.name, method_name)?);
+        Ok(self)
     }
 
-    pub fn name(&self) -> &str {
+    pub fn name(&self) -> &ServiceName {
         &self.name
     }
 
@@ -94,6 +79,10 @@ impl ServiceBinding {
 
     pub fn description(&self) -> Option<&str> {
         self.description.as_deref()
+    }
+
+    pub fn subject_prefix(&self) -> &SubjectPrefix {
+        &self.subject_prefix
     }
 
     pub fn endpoints(&self) -> &[EndpointBinding] {

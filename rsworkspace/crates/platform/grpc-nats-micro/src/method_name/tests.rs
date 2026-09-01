@@ -1,0 +1,26 @@
+use super::{MethodName, MethodNameError};
+
+#[test]
+fn accepts_a_protobuf_method_name() {
+    let method = MethodName::new("Say").expect("protobuf method name is valid");
+    assert_eq!(method.as_str(), "Say");
+}
+
+#[test]
+fn rejects_empty() {
+    assert_eq!(MethodName::new(""), Err(MethodNameError::Empty));
+}
+
+#[test]
+fn rejects_a_leading_digit() {
+    assert_eq!(MethodName::new("2Say"), Err(MethodNameError::LeadingCharacter('2')));
+}
+
+#[test]
+fn rejects_subject_separators_and_wildcards() {
+    assert_eq!(
+        MethodName::new("Say.Again"),
+        Err(MethodNameError::InvalidCharacter('.'))
+    );
+    assert_eq!(MethodName::new("Say>"), Err(MethodNameError::InvalidCharacter('>')));
+}

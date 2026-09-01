@@ -13,8 +13,9 @@ use buffa::Enumeration as _;
 use buffa_types::google::protobuf::Any;
 use grpc_nats_micro::constants::HEADER_ERROR_CODE;
 use grpc_nats_micro::status_codec::ReplyError;
-use grpc_nats_micro::{ContentType, EndpointHandler, ServiceBinding};
+use grpc_nats_micro::{ContentType, EndpointHandler, MethodName, ServiceBinding, ServiceName, SubjectPrefix};
 use tokio::process::{Child, Command};
+use trogon_nats::{NatsConfig, RequestClient};
 use trogonai_proto::google::rpc::{Code, ErrorInfo, Status};
 use trogonai_proto::grpc_nats_micro::v1::{FailRequest, FailResponse, SayRequest, SayResponse};
 use trogonai_proto::nats::micro::v1alpha1::{ContentType as ProtoContentType, ServiceOptions};
@@ -25,6 +26,7 @@ const SERVICE_VERSION: &str = "0.1.0";
 const SAY_METHOD: &str = "Say";
 const FAIL_METHOD: &str = "Fail";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const FAIL_DETAIL_REASON: &str = "ECHO_FAIL";
 const FAIL_DETAIL_DOMAIN: &str = "grpc-nats-micro.conformance";
 
@@ -49,7 +51,7 @@ impl NatsServerProcess {
     async fn wait_until_ready(&self) {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
         loop {
-            if async_nats::connect(self.url()).await.is_ok() {
+            if connect(&self.url()).await.is_ok() {
                 return;
             }
             if tokio::time::Instant::now() >= deadline {
@@ -68,6 +70,10 @@ impl Drop for NatsServerProcess {
     fn drop(&mut self) {
         let _ = self.child.start_kill();
     }
+}
+
+async fn connect(url: &str) -> Result<async_nats::Client, trogon_nats::ConnectError> {
+    trogon_nats::connect(&NatsConfig::from_url(url), CONNECT_TIMEOUT).await
 }
 
 fn free_port() -> u16 {
@@ -134,9 +140,19 @@ impl EndpointHandler for FailHandler {
 }
 
 fn echo_service_binding() -> ServiceBinding {
-    ServiceBinding::new(SERVICE_NAME, SERVICE_VERSION, SUBJECT_PREFIX)
-        .with_method(SAY_METHOD)
-        .with_method(FAIL_METHOD)
+    ServiceBinding::new(
+        ServiceName::new(SERVICE_NAME).expect("valid service name"),
+        SERVICE_VERSION,
+        SubjectPrefix::new(SUBJECT_PREFIX).expect("valid subject prefix"),
+    )
+    .with_method(method(SAY_METHOD))
+    .expect("derive Say subject")
+    .with_method(method(FAIL_METHOD))
+    .expect("derive Fail subject")
+}
+
+fn method(name: &str) -> MethodName {
+    MethodName::new(name).expect("valid method name")
 }
 
 /// Keeps the spawned `nats-server` process, the client, the service
@@ -156,7 +172,7 @@ async fn start_fixture() -> EchoFixture {
 
 async fn start_fixture_with_policy(content_type_policy: ServiceOptions) -> EchoFixture {
     let server = NatsServerProcess::spawn().await;
-    let client = async_nats::connect(server.url()).await.expect("connect to nats-server");
+    let client = connect(&server.url()).await.expect("connect to nats-server");
 
     let binding = echo_service_binding();
     let handlers: Vec<Box<dyn EndpointHandler>> = vec![Box::new(SayHandler), Box::new(FailHandler)];
@@ -178,7 +194,7 @@ async fn say(fixture: &EchoFixture, content_type: ContentType, message: &str) ->
         .binding
         .endpoints()
         .iter()
-        .find(|endpoint| endpoint.method_name() == SAY_METHOD)
+        .find(|endpoint| endpoint.method_name().as_str() == SAY_METHOD)
         .expect("Say endpoint registered");
 
     let request = SayRequest {
@@ -194,7 +210,7 @@ async fn say(fixture: &EchoFixture, content_type: ContentType, message: &str) ->
     let subject = endpoint.subject().as_str().to_string();
     tokio::time::timeout(
         REQUEST_TIMEOUT,
-        fixture.client.request_with_headers(subject, headers, body.into()),
+        RequestClient::request_with_headers(&fixture.client, subject, headers, body.into()),
     )
     .await
     .expect("Say request did not time out")
@@ -206,7 +222,7 @@ async fn fail(fixture: &EchoFixture, content_type: ContentType, code: Code, mess
         .binding
         .endpoints()
         .iter()
-        .find(|endpoint| endpoint.method_name() == FAIL_METHOD)
+        .find(|endpoint| endpoint.method_name().as_str() == FAIL_METHOD)
         .expect("Fail endpoint registered");
 
     let request = FailRequest {
@@ -223,7 +239,7 @@ async fn fail(fixture: &EchoFixture, content_type: ContentType, code: Code, mess
     let subject = endpoint.subject().as_str().to_string();
     tokio::time::timeout(
         REQUEST_TIMEOUT,
-        fixture.client.request_with_headers(subject, headers, body.into()),
+        RequestClient::request_with_headers(&fixture.client, subject, headers, body.into()),
     )
     .await
     .expect("Fail request did not time out")
@@ -320,7 +336,7 @@ fn endpoint<'a>(fixture: &'a EchoFixture, method_name: &str) -> &'a grpc_nats_mi
         .binding
         .endpoints()
         .iter()
-        .find(|endpoint| endpoint.method_name() == method_name)
+        .find(|endpoint| endpoint.method_name().as_str() == method_name)
         .expect("endpoint registered")
 }
 

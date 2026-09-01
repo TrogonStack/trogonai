@@ -1,3 +1,4 @@
+#![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 //! Protocol Buffers request/reply over NATS micro (ADR 0016).
 //!
 //! This is not gRPC: there is no HTTP/2, no gRPC wire framing, and no gRPC
@@ -13,10 +14,18 @@ pub mod binding;
 pub mod client;
 pub mod constants;
 pub mod content_type;
+pub mod endpoint_subject;
+pub mod method_name;
 pub mod server;
+pub mod service_name;
 pub mod status_codec;
+pub mod subject_prefix;
 
-pub use binding::{EndpointBinding, EndpointSubject, ServiceBinding};
+pub use binding::{EndpointBinding, ServiceBinding};
 pub use content_type::ContentType;
+pub use endpoint_subject::{EndpointSubject, EndpointSubjectError};
+pub use method_name::{MethodName, MethodNameError};
 pub use server::{EndpointHandler, ServeError, serve};
+pub use service_name::{ServiceName, ServiceNameError};
 pub use status_codec::{EncodedReply, Outcome, ReplyError, ServiceError};
+pub use subject_prefix::{SubjectPrefix, SubjectPrefixError};
