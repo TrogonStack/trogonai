@@ -1,13 +1,16 @@
 use super::EndpointSubject;
 use crate::method_name::MethodName;
+use crate::method_name_input::MethodNameInput;
 use crate::service_name::ServiceName;
+use crate::service_name_input::ServiceNameInput;
 use crate::subject_prefix::SubjectPrefix;
+use crate::subject_prefix_input::SubjectPrefixInput;
 
 fn subject(prefix: &str) -> Result<EndpointSubject, super::EndpointSubjectError> {
     EndpointSubject::new(
-        &SubjectPrefix::new(prefix).expect("valid prefix"),
-        &ServiceName::new("EchoService").expect("valid service name"),
-        &MethodName::new("Say").expect("valid method name"),
+        &SubjectPrefix::from_input(&SubjectPrefixInput::new(prefix)).expect("valid prefix"),
+        &ServiceName::from_input(&ServiceNameInput::new("EchoService")).expect("valid service name"),
+        &MethodName::from_input(&MethodNameInput::new("Say")).expect("valid method name"),
     )
 }
 

@@ -1,18 +1,22 @@
 use super::ServiceBinding;
 use crate::method_name::MethodName;
+use crate::method_name_input::MethodNameInput;
 use crate::service_name::ServiceName;
+use crate::service_name_input::ServiceNameInput;
 use crate::service_version::ServiceVersion;
+use crate::service_version_input::ServiceVersionInput;
 use crate::subject_prefix::SubjectPrefix;
+use crate::subject_prefix_input::SubjectPrefixInput;
 
 const SUBJECT_PREFIX: &str = "echo.v1";
 
 fn binding() -> ServiceBinding {
     ServiceBinding::new(
-        ServiceName::new("EchoService").expect("valid service name"),
-        ServiceVersion::new("1.0.0").expect("valid service version"),
-        SubjectPrefix::new(SUBJECT_PREFIX).expect("valid subject prefix"),
+        ServiceName::from_input(&ServiceNameInput::new("EchoService")).expect("valid service name"),
+        ServiceVersion::from_input(&ServiceVersionInput::new("1.0.0")).expect("valid service version"),
+        SubjectPrefix::from_input(&SubjectPrefixInput::new(SUBJECT_PREFIX)).expect("valid subject prefix"),
     )
-    .with_method(MethodName::new("Say").expect("valid method name"))
+    .with_method(MethodName::from_input(&MethodNameInput::new("Say")).expect("valid method name"))
     .expect("derive the Say subject")
 }
 

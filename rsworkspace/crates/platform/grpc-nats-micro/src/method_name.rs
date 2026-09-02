@@ -3,6 +3,8 @@
 
 use trogon_nats::{NatsToken, SubjectTokenViolationError};
 
+use crate::method_name_input::MethodNameInput;
+
 /// Why a [`MethodName`] could not be constructed.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum MethodNameError {
@@ -36,8 +38,8 @@ impl From<SubjectTokenViolationError> for MethodNameError {
 pub struct MethodName(NatsToken);
 
 impl MethodName {
-    pub fn new(value: impl AsRef<str>) -> Result<Self, MethodNameError> {
-        let value = value.as_ref();
+    pub fn from_input(input: &MethodNameInput) -> Result<Self, MethodNameError> {
+        let value = input.as_str();
         let token = NatsToken::new(value)?;
 
         let mut characters = value.chars();

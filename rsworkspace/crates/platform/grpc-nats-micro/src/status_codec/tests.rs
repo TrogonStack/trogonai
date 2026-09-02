@@ -50,6 +50,33 @@ fn an_error_reply_carries_the_code_and_message_headers() {
     );
 }
 
+/// A multi-line fault message cannot be a NATS header value. The reply still
+/// has to carry the fault, so the code header and the complete `Status` body
+/// stay and only the descriptive header is dropped (ADR 0016 §3).
+#[test]
+fn a_multi_line_fault_message_still_replies_with_the_status_body() {
+    let message = "boom\r\nsecond line";
+
+    let encoded =
+        encode_reply(Outcome::Error(ServiceFault::internal(message)), ContentType::Json).expect("an error reply");
+
+    assert!(encoded.headers.get(HEADER_ERROR).is_none());
+    assert_eq!(
+        encoded
+            .headers
+            .get(HEADER_ERROR_CODE)
+            .expect("error code header")
+            .as_str(),
+        Code::INTERNAL.to_i32().to_string()
+    );
+    let decoded = decode_reply::<SayResponse>(Some(&encoded.headers), &encoded.body, ContentType::Json)
+        .expect_err("an error reply decodes as an error");
+    let ReplyError::Service(error) = decoded else {
+        panic!("expected a service error, got {decoded:?}");
+    };
+    assert_eq!(error.message(), message);
+}
+
 #[test]
 fn a_reply_without_the_error_header_decodes_as_the_response() {
     let response = SayResponse {

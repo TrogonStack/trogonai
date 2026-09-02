@@ -14,7 +14,8 @@ use grpc_nats_micro::client::RequestError;
 use grpc_nats_micro::constants::HEADER_ERROR_CODE;
 use grpc_nats_micro::status_codec::ReplyError;
 use grpc_nats_micro::{
-    ContentType, EndpointHandler, MethodName, ServiceBinding, ServiceFault, ServiceName, ServiceVersion, SubjectPrefix,
+    ContentType, EndpointBinding, EndpointHandler, MethodName, MethodNameInput, ServiceBinding, ServiceFault,
+    ServiceName, ServiceNameInput, ServiceVersion, ServiceVersionInput, SubjectPrefix, SubjectPrefixInput,
 };
 use trogon_nats::test_support::CoreTestServer;
 use trogon_nats::{NatsConfig, RequestClient};
@@ -31,7 +32,8 @@ const FAIL_METHOD: &str = "Fail";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const STOPPED_SERVICE_TIMEOUT: Duration = Duration::from_millis(500);
-const STOPPED_SERVICE_SETTLE: Duration = Duration::from_millis(100);
+const STOPPED_SERVICE_DEADLINE: Duration = Duration::from_secs(10);
+const STOPPED_SERVICE_POLL: Duration = Duration::from_millis(25);
 const FAIL_DETAIL_REASON: &str = "ECHO_FAIL";
 const FAIL_DETAIL_DOMAIN: &str = "grpc-nats-micro.conformance";
 
@@ -94,9 +96,9 @@ impl EndpointHandler for FailHandler {
 
 fn echo_service_binding() -> ServiceBinding {
     ServiceBinding::new(
-        ServiceName::new(SERVICE_NAME).expect("valid service name"),
-        ServiceVersion::new(SERVICE_VERSION).expect("valid service version"),
-        SubjectPrefix::new(SUBJECT_PREFIX).expect("valid subject prefix"),
+        ServiceName::from_input(&ServiceNameInput::new(SERVICE_NAME)).expect("valid service name"),
+        ServiceVersion::from_input(&ServiceVersionInput::new(SERVICE_VERSION)).expect("valid service version"),
+        SubjectPrefix::from_input(&SubjectPrefixInput::new(SUBJECT_PREFIX)).expect("valid subject prefix"),
     )
     .with_description(SERVICE_DESCRIPTION)
     .with_method(method(SAY_METHOD))
@@ -106,7 +108,7 @@ fn echo_service_binding() -> ServiceBinding {
 }
 
 fn method(name: &str) -> MethodName {
-    MethodName::new(name).expect("valid method name")
+    MethodName::from_input(&MethodNameInput::new(name)).expect("valid method name")
 }
 
 /// Keeps the NATS container, the client, the service registration, and the
@@ -420,29 +422,59 @@ async fn stopping_the_service_leaves_its_subjects_without_a_responder() {
         .expect("start EchoService");
 
     service.stop().await.expect("stop EchoService");
-    tokio::time::sleep(STOPPED_SERVICE_SETTLE).await;
-    client.flush().await.expect("flush the unsubscribes");
 
     let endpoint = binding
         .endpoints()
         .iter()
         .find(|endpoint| endpoint.method_name().as_str() == SAY_METHOD)
         .expect("Say endpoint registered");
-    let request = SayRequest {
-        message: Some("hello".to_string()),
-    };
-    let error = grpc_nats_micro::client::request::<_, SayRequest, SayResponse>(
-        &client,
-        endpoint,
-        ContentType::Protobuf,
-        &request,
-        STOPPED_SERVICE_TIMEOUT,
-    )
-    .await
-    .expect_err("a stopped service must not respond");
+    let error = wait_for_no_responder(&client, endpoint).await;
 
     assert!(
         matches!(error, RequestError::Transport { .. }),
         "expected no responder, got {error:?}"
     );
+}
+
+/// Request `endpoint` until nobody answers, and report the failure that ended
+/// the wait.
+///
+/// `Service::stop` only broadcasts the shutdown, and a stopped endpoint reaches
+/// "no responder" in two steps: its dispatch task stops consuming, then its
+/// unsubscribe reaches the server. Between the two the subject still has a
+/// subscription nobody reads, so a request there times out instead of finding
+/// no responder. Retrying until the subscription is actually gone waits for the
+/// state under test rather than guessing how long those steps take.
+async fn wait_for_no_responder<N>(client: &N, endpoint: &EndpointBinding) -> RequestError<N::RequestError>
+where
+    N: RequestClient,
+    N::RequestError: 'static,
+{
+    let deadline = tokio::time::Instant::now() + STOPPED_SERVICE_DEADLINE;
+    let request = SayRequest {
+        message: Some("hello".to_string()),
+    };
+
+    loop {
+        let outcome = grpc_nats_micro::client::request::<_, SayRequest, SayResponse>(
+            client,
+            endpoint,
+            ContentType::Protobuf,
+            &request,
+            STOPPED_SERVICE_TIMEOUT,
+        )
+        .await;
+
+        match outcome {
+            Err(error @ RequestError::Transport { .. }) => return error,
+            settling => assert!(
+                tokio::time::Instant::now() < deadline,
+                "the stopped service still had a subscription after {STOPPED_SERVICE_DEADLINE:?}, \
+                 last attempt: {:?}",
+                settling.map(|_: SayResponse| "answered")
+            ),
+        }
+
+        tokio::time::sleep(STOPPED_SERVICE_POLL).await;
+    }
 }

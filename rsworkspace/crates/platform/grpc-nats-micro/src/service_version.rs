@@ -1,5 +1,7 @@
 //! The registered NATS micro service's version (ADR 0016 §1).
 
+use crate::service_version_input::ServiceVersionInput;
+
 /// Why a [`ServiceVersion`] could not be constructed.
 #[derive(Debug, thiserror::Error)]
 #[error("service version is not a semantic version")]
@@ -15,8 +17,8 @@ pub struct ServiceVersionError(#[from] semver::Error);
 pub struct ServiceVersion(Box<str>);
 
 impl ServiceVersion {
-    pub fn new(value: impl AsRef<str>) -> Result<Self, ServiceVersionError> {
-        let value = value.as_ref();
+    pub fn from_input(input: &ServiceVersionInput) -> Result<Self, ServiceVersionError> {
+        let value = input.as_str();
         semver::Version::parse(value)?;
         Ok(Self(value.into()))
     }

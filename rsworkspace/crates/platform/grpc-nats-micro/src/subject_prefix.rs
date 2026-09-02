@@ -3,6 +3,8 @@
 
 use trogon_nats::{DottedNatsToken, SubjectTokenViolationError};
 
+use crate::subject_prefix_input::SubjectPrefixInput;
+
 /// Why a [`SubjectPrefix`] could not be constructed.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum SubjectPrefixError {
@@ -33,8 +35,8 @@ impl From<SubjectTokenViolationError> for SubjectPrefixError {
 pub struct SubjectPrefix(DottedNatsToken);
 
 impl SubjectPrefix {
-    pub fn new(value: impl AsRef<str>) -> Result<Self, SubjectPrefixError> {
-        DottedNatsToken::new(value).map(Self).map_err(Into::into)
+    pub fn from_input(input: &SubjectPrefixInput) -> Result<Self, SubjectPrefixError> {
+        DottedNatsToken::new(input.as_str()).map(Self).map_err(Into::into)
     }
 
     pub fn as_str(&self) -> &str {

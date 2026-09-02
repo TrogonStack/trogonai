@@ -2,7 +2,9 @@
 //! `Nats-Service-Error-Code` is present, and on error the body is one
 //! complete `google.rpc.Status` encoded per the negotiated [`ContentType`].
 
-use async_nats::HeaderMap;
+use std::str::FromStr as _;
+
+use async_nats::{HeaderMap, HeaderValue};
 use bytes::Bytes;
 use thiserror::Error;
 use trogonai_proto::google::rpc::Status;
@@ -37,7 +39,9 @@ pub fn encode_reply(outcome: Outcome, content_type: ContentType) -> Result<Encod
         Outcome::Error(fault) => {
             let body = content_type.encode(fault.status())?;
             let mut headers = HeaderMap::new();
-            headers.insert(HEADER_ERROR, fault.message());
+            if let Some(message) = describe(fault.message()) {
+                headers.insert(HEADER_ERROR, message);
+            }
             headers.insert(HEADER_ERROR_CODE, fault.code().to_i32().to_string().as_str());
             Ok(EncodedReply {
                 headers,
@@ -45,6 +49,30 @@ pub fn encode_reply(outcome: Outcome, content_type: ContentType) -> Result<Encod
             })
         }
     }
+}
+
+/// The fault message as a [`HEADER_ERROR`] value, or `None` when it cannot be
+/// one.
+///
+/// NATS header values may not contain CR or LF, and `HeaderValue`'s `From<&str>`
+/// asserts that rather than reporting it, so a fault whose message spans lines
+/// would abort the dispatch task mid-reply.
+///
+/// Omitting the header is safe because ADR 0016 §3 puts the authoritative
+/// message in the body's complete `google.rpc.Status`, and makes
+/// [`HEADER_ERROR_CODE`], not this header, the thing that marks a reply as an
+/// error. Failing the reply instead would trade a panic for a caller timeout
+/// and lose a `Status` that encoded perfectly well.
+fn describe(message: &str) -> Option<HeaderValue> {
+    HeaderValue::from_str(message)
+        .inspect_err(|error| {
+            tracing::warn!(
+                error = %error,
+                "grpc-nats-micro: fault message is not a valid {HEADER_ERROR} value; \
+                 replying with the status body alone"
+            );
+        })
+        .ok()
 }
 
 /// A decoded micro service error: the whole `google.rpc.Status` from the reply

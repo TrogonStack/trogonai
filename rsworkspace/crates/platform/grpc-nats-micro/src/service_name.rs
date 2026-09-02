@@ -3,6 +3,8 @@
 
 use trogon_nats::{NatsToken, SubjectTokenViolationError};
 
+use crate::service_name_input::ServiceNameInput;
+
 /// Why a [`ServiceName`] could not be constructed.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum ServiceNameError {
@@ -36,8 +38,8 @@ impl From<SubjectTokenViolationError> for ServiceNameError {
 pub struct ServiceName(NatsToken);
 
 impl ServiceName {
-    pub fn new(value: impl AsRef<str>) -> Result<Self, ServiceNameError> {
-        let value = value.as_ref();
+    pub fn from_input(input: &ServiceNameInput) -> Result<Self, ServiceNameError> {
+        let value = input.as_str();
         let token = NatsToken::new(value)?;
 
         let mut characters = value.chars();
