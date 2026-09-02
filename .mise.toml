@@ -1,7 +1,6 @@
 [tools]
 buf = "1.70.0"
 go = "1.26.5"
-"ubi:nats-io/nats-server" = { version = "2.14.5", exe = "nats-server" }
 "ubi:open-telemetry/weaver" = { version = "0.24.2", exe = "weaver" }
 "cargo:cargo-dylint" = "6.0.1"
 "cargo:dylint-link" = "6.0.1"

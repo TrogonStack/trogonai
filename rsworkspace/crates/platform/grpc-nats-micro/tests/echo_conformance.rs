@@ -1,9 +1,8 @@
 //! ADR 0016 conformance: an Echo/Fail service registered through
-//! [`grpc_nats_micro::serve`] against a real `nats-server` process.
+//! [`grpc_nats_micro::serve`] against a real NATS server in a container.
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
 use std::future::Future;
-use std::net::TcpListener;
 use std::pin::Pin;
 use std::time::Duration;
 
@@ -17,7 +16,7 @@ use grpc_nats_micro::status_codec::ReplyError;
 use grpc_nats_micro::{
     ContentType, EndpointHandler, MethodName, ServiceBinding, ServiceFault, ServiceName, ServiceVersion, SubjectPrefix,
 };
-use tokio::process::{Child, Command};
+use trogon_nats::test_support::CoreTestServer;
 use trogon_nats::{NatsConfig, RequestClient};
 use trogonai_proto::google::rpc::{Code, ErrorInfo, Status};
 use trogonai_proto::grpc_nats_micro::v1::{FailRequest, FailResponse, SayRequest, SayResponse};
@@ -36,58 +35,11 @@ const STOPPED_SERVICE_SETTLE: Duration = Duration::from_millis(100);
 const FAIL_DETAIL_REASON: &str = "ECHO_FAIL";
 const FAIL_DETAIL_DOMAIN: &str = "grpc-nats-micro.conformance";
 
-struct NatsServerProcess {
-    child: Child,
-    port: u16,
-}
-
-impl NatsServerProcess {
-    async fn spawn() -> Self {
-        let port = free_port();
-        let child = Command::new("nats-server")
-            .args(["-p", &port.to_string(), "-a", "127.0.0.1"])
-            .kill_on_drop(true)
-            .spawn()
-            .expect("spawn nats-server; is it on PATH?");
-        let process = Self { child, port };
-        process.wait_until_ready().await;
-        process
-    }
-
-    async fn wait_until_ready(&self) {
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-        loop {
-            if connect(&self.url()).await.is_ok() {
-                return;
-            }
-            if tokio::time::Instant::now() >= deadline {
-                panic!("nats-server did not become ready on port {}", self.port);
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-    }
-
-    fn url(&self) -> String {
-        format!("127.0.0.1:{}", self.port)
-    }
-}
-
-impl Drop for NatsServerProcess {
-    fn drop(&mut self) {
-        let _ = self.child.start_kill();
-    }
-}
-
-async fn connect(url: &str) -> Result<async_nats::Client, trogon_nats::ConnectError> {
-    trogon_nats::connect(&NatsConfig::from_url(url), CONNECT_TIMEOUT).await
-}
-
-fn free_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0")
-        .expect("bind ephemeral port")
-        .local_addr()
-        .expect("local addr")
-        .port()
+/// Connect the way a service would: through this workspace's own
+/// [`trogon_nats::connect`], so the conformance run exercises the configured
+/// connect path rather than a raw `async_nats` client.
+async fn connect(server: &CoreTestServer) -> Result<async_nats::Client, trogon_nats::ConnectError> {
+    trogon_nats::connect(&NatsConfig::from_url(server.address()), CONNECT_TIMEOUT).await
 }
 
 struct SayHandler;
@@ -157,12 +109,12 @@ fn method(name: &str) -> MethodName {
     MethodName::new(name).expect("valid method name")
 }
 
-/// Keeps the spawned `nats-server` process, the client, the service
-/// registration, and the derived subject binding alive together: dropping
-/// the [`Service`] handle closes its internal shutdown broadcast, which
-/// stops every endpoint task started by [`grpc_nats_micro::serve`].
+/// Keeps the NATS container, the client, the service registration, and the
+/// derived subject binding alive together: dropping the [`Service`] handle
+/// closes its internal shutdown broadcast, which stops every endpoint task
+/// started by [`grpc_nats_micro::serve`].
 struct EchoFixture {
-    _server: NatsServerProcess,
+    _server: CoreTestServer,
     client: async_nats::Client,
     binding: ServiceBinding,
     _service: Service,
@@ -173,8 +125,8 @@ async fn start_fixture() -> EchoFixture {
 }
 
 async fn start_fixture_with_policy(content_type_policy: ServiceOptions) -> EchoFixture {
-    let server = NatsServerProcess::spawn().await;
-    let client = connect(&server.url()).await.expect("connect to nats-server");
+    let server = CoreTestServer::start().await;
+    let client = connect(&server).await.expect("connect to the NATS testcontainer");
 
     let binding = echo_service_binding();
     let handlers: Vec<Box<dyn EndpointHandler>> = vec![Box::new(SayHandler), Box::new(FailHandler)];
@@ -433,8 +385,8 @@ async fn fail_reports_status_over_json() {
 /// silently truncated by `zip`, leaving declared methods unserved.
 #[tokio::test]
 async fn a_handler_count_mismatch_is_rejected_before_startup() {
-    let server = NatsServerProcess::spawn().await;
-    let client = connect(&server.url()).await.expect("connect to nats-server");
+    let server = CoreTestServer::start().await;
+    let client = connect(&server).await.expect("connect to the NATS testcontainer");
     let binding = echo_service_binding();
 
     let error = grpc_nats_micro::serve(
@@ -459,8 +411,8 @@ async fn a_handler_count_mismatch_is_rejected_before_startup() {
 /// task each one runs on and leaves the subject without a responder.
 #[tokio::test]
 async fn stopping_the_service_leaves_its_subjects_without_a_responder() {
-    let server = NatsServerProcess::spawn().await;
-    let client = connect(&server.url()).await.expect("connect to nats-server");
+    let server = CoreTestServer::start().await;
+    let client = connect(&server).await.expect("connect to the NATS testcontainer");
     let binding = echo_service_binding();
     let handlers: Vec<Box<dyn EndpointHandler>> = vec![Box::new(SayHandler), Box::new(FailHandler)];
     let service = grpc_nats_micro::serve(&client, &binding, ServiceOptions::default(), handlers)

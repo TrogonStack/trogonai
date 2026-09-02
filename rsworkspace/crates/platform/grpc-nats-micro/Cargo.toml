@@ -24,5 +24,5 @@ trogonai-proto = { workspace = true, features = ["grpc-nats-micro"] }
 
 [dev-dependencies]
 buffa-types = { workspace = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "process", "time"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
