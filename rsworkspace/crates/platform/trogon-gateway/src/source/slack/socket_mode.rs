@@ -5,8 +5,10 @@ use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use serde::Deserialize;
 use tokio_tungstenite::tungstenite::{Error as WebSocketError, Message};
 use tracing::{info, warn};
+#[cfg_attr(coverage, allow(unused_imports))]
 use trogon_nats::jetstream::{ClaimCheckPublisher, JetStreamPublisher, ObjectStorePut};
 
+#[cfg_attr(coverage, allow(unused_imports))]
 use super::config::{SlackConfig, SlackSocketModeConfig};
 use super::constants::RECONNECT_MAX_DELAY;
 #[cfg(not(coverage))]
