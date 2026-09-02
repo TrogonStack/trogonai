@@ -68,7 +68,8 @@ fn describe(message: &str) -> Option<HeaderValue> {
         .inspect_err(|error| {
             tracing::warn!(
                 error = %error,
-                "grpc-nats-micro: fault message is not a valid {HEADER_ERROR} value; \
+                header = HEADER_ERROR,
+                "grpc-nats-micro: fault message is not a valid header value; \
                  replying with the status body alone"
             );
         })
