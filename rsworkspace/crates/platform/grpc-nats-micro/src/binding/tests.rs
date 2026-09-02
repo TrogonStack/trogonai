@@ -42,3 +42,25 @@ fn carries_the_description_micro_discovery_reports() {
         Some("Echoes what it is told")
     );
 }
+
+/// The derivation is what can fail, so registering a method has to surface
+/// that failure rather than register an endpoint nobody can reach.
+#[test]
+fn rejects_a_method_whose_subject_is_not_derivable() {
+    let deep = (0..trogon_nats::MAX_SUBJECT_TOKENS)
+        .map(|_| "a")
+        .collect::<Vec<_>>()
+        .join(".");
+    let error = ServiceBinding::new(
+        ServiceName::from_input(&ServiceNameInput::new("EchoService")).expect("valid service name"),
+        ServiceVersion::from_input(&ServiceVersionInput::new("1.0.0")).expect("valid service version"),
+        SubjectPrefix::from_input(&SubjectPrefixInput::new(deep.as_str())).expect("valid subject prefix"),
+    )
+    .with_method(
+        MethodName::from_input(&MethodNameInput::new("Say")).expect("valid method name"),
+        DiscoveryMetadata::default(),
+    )
+    .expect_err("a subject over the token budget is rejected");
+
+    assert_eq!(error.method_name.as_str(), "Say");
+}
