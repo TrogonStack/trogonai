@@ -81,6 +81,12 @@ pub async fn serve(
     if let Some(description) = binding.description() {
         builder = builder.description(description);
     }
+    // Only when there is something to report: micro omits the field entirely
+    // when it is unset, so setting an empty map would publish `metadata: {}`
+    // into every discovery record that declares none.
+    if !binding.metadata().is_empty() {
+        builder = builder.metadata(binding.metadata().entries().clone());
+    }
     let service = builder
         .start(binding.name().as_str(), binding.version().as_str())
         .await
@@ -93,11 +99,11 @@ pub async fn serve(
         // otherwise derives the name from the full subject, so `$SRV.INFO`
         // and `$SRV.STATS` would report the dotted subject instead of the
         // method the binding declared.
-        let registration = service
-            .endpoint_builder()
-            .name(endpoint.method_name().as_str())
-            .add(subject.clone())
-            .await;
+        let mut endpoint_builder = service.endpoint_builder().name(endpoint.method_name().as_str());
+        if !endpoint.metadata().is_empty() {
+            endpoint_builder = endpoint_builder.metadata(endpoint.metadata().entries().clone());
+        }
+        let registration = endpoint_builder.add(subject.clone()).await;
         let mut micro_endpoint = registration.map_err(|source| ServeError::Endpoint { subject, source })?;
 
         let client = client.clone();

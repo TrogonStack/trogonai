@@ -1,4 +1,5 @@
 use super::ServiceBinding;
+use crate::discovery_metadata::DiscoveryMetadata;
 use crate::method_name::MethodName;
 use crate::method_name_input::MethodNameInput;
 use crate::service_name::ServiceName;
@@ -16,7 +17,10 @@ fn binding() -> ServiceBinding {
         ServiceVersion::from_input(&ServiceVersionInput::new("1.0.0")).expect("valid service version"),
         SubjectPrefix::from_input(&SubjectPrefixInput::new(SUBJECT_PREFIX)).expect("valid subject prefix"),
     )
-    .with_method(MethodName::from_input(&MethodNameInput::new("Say")).expect("valid method name"))
+    .with_method(
+        MethodName::from_input(&MethodNameInput::new("Say")).expect("valid method name"),
+        DiscoveryMetadata::default(),
+    )
     .expect("derive the Say subject")
 }
 

@@ -14,8 +14,9 @@ use grpc_nats_micro::client::RequestError;
 use grpc_nats_micro::constants::HEADER_ERROR_CODE;
 use grpc_nats_micro::status_codec::ReplyError;
 use grpc_nats_micro::{
-    ContentType, EndpointBinding, EndpointHandler, MethodName, MethodNameInput, ServiceBinding, ServiceFault,
-    ServiceName, ServiceNameInput, ServiceVersion, ServiceVersionInput, SubjectPrefix, SubjectPrefixInput,
+    ContentType, DiscoveryMetadata, DiscoveryMetadataInput, EndpointBinding, EndpointHandler, MethodName,
+    MethodNameInput, ServiceBinding, ServiceFault, ServiceName, ServiceNameInput, ServiceVersion, ServiceVersionInput,
+    SubjectPrefix, SubjectPrefixInput,
 };
 use trogon_nats::test_support::CoreTestServer;
 use trogon_nats::{NatsConfig, RequestClient};
@@ -29,6 +30,10 @@ const SERVICE_VERSION: &str = "1.0.0";
 const SERVICE_DESCRIPTION: &str = "Echoes what it is told";
 const SAY_METHOD: &str = "Say";
 const FAIL_METHOD: &str = "Fail";
+const SERVICE_METADATA_KEY: &str = "adr";
+const SERVICE_METADATA_VALUE: &str = "0016";
+const FAIL_METADATA_KEY: &str = "always-faults";
+const FAIL_METADATA_VALUE: &str = "true";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const STOPPED_SERVICE_TIMEOUT: Duration = Duration::from_millis(500);
@@ -101,14 +106,23 @@ fn echo_service_binding() -> ServiceBinding {
         SubjectPrefix::from_input(&SubjectPrefixInput::new(SUBJECT_PREFIX)).expect("valid subject prefix"),
     )
     .with_description(SERVICE_DESCRIPTION)
-    .with_method(method(SAY_METHOD))
+    .with_metadata(metadata([(SERVICE_METADATA_KEY, SERVICE_METADATA_VALUE)]))
+    .with_method(method(SAY_METHOD), DiscoveryMetadata::default())
     .expect("derive Say subject")
-    .with_method(method(FAIL_METHOD))
+    // Mirrors the `always-faults` annotation `Fail` carries in echo.proto.
+    .with_method(
+        method(FAIL_METHOD),
+        metadata([(FAIL_METADATA_KEY, FAIL_METADATA_VALUE)]),
+    )
     .expect("derive Fail subject")
 }
 
 fn method(name: &str) -> MethodName {
     MethodName::from_input(&MethodNameInput::new(name)).expect("valid method name")
+}
+
+fn metadata<const N: usize>(entries: [(&str, &str); N]) -> DiscoveryMetadata {
+    DiscoveryMetadata::from_input(&DiscoveryMetadataInput::new(entries)).expect("valid discovery metadata")
 }
 
 /// Keeps the NATS container, the client, the service registration, and the
@@ -306,23 +320,26 @@ async fn fail_details_reach_the_client_over_json() {
     assert_fail_details_reach_the_client(ContentType::Json).await;
 }
 
+/// The service's own `$SRV.INFO` record, decoded.
+async fn service_info(client: &async_nats::Client) -> serde_json::Value {
+    let response = tokio::time::timeout(
+        REQUEST_TIMEOUT,
+        client.request(format!("$SRV.INFO.{SERVICE_NAME}"), bytes::Bytes::new()),
+    )
+    .await
+    .expect("$SRV.INFO did not time out")
+    .expect("$SRV.INFO responded");
+
+    serde_json::from_slice(&response.payload).expect("decode $SRV.INFO record")
+}
+
 /// ADR 0016 §2: the endpoint name is the rpc method name, so discovery reports
 /// the method rather than the subject micro would otherwise name it after.
 #[tokio::test]
 async fn discovery_names_endpoints_after_rpc_methods() {
     let fixture = start_fixture().await;
 
-    let response = tokio::time::timeout(
-        REQUEST_TIMEOUT,
-        fixture
-            .client
-            .request(format!("$SRV.INFO.{SERVICE_NAME}"), bytes::Bytes::new()),
-    )
-    .await
-    .expect("$SRV.INFO did not time out")
-    .expect("$SRV.INFO responded");
-
-    let info: serde_json::Value = serde_json::from_slice(&response.payload).expect("decode $SRV.INFO record");
+    let info = service_info(&fixture.client).await;
     assert_eq!(info["description"].as_str(), Some(SERVICE_DESCRIPTION));
     let mut names: Vec<&str> = info["endpoints"]
         .as_array()
@@ -332,6 +349,40 @@ async fn discovery_names_endpoints_after_rpc_methods() {
         .collect();
     names.sort_unstable();
     assert_eq!(names, vec![FAIL_METHOD, SAY_METHOD]);
+}
+
+/// ADR 0016 §1: `ServiceOptions.metadata` populates the service's discovery
+/// record and `MethodOptions.metadata` populates its endpoint's, so an
+/// annotation such as `Fail`'s `always-faults` has to survive the binding and
+/// reach `$SRV.INFO`.
+#[tokio::test]
+async fn discovery_carries_the_annotated_metadata() {
+    let fixture = start_fixture().await;
+
+    let info = service_info(&fixture.client).await;
+
+    assert_eq!(
+        info["metadata"][SERVICE_METADATA_KEY].as_str(),
+        Some(SERVICE_METADATA_VALUE)
+    );
+    let fail = info["endpoints"]
+        .as_array()
+        .expect("$SRV.INFO carries endpoints")
+        .iter()
+        .find(|endpoint| endpoint["name"].as_str() == Some(FAIL_METHOD))
+        .expect("Fail endpoint in $SRV.INFO");
+    assert_eq!(fail["metadata"][FAIL_METADATA_KEY].as_str(), Some(FAIL_METADATA_VALUE));
+
+    let say = info["endpoints"]
+        .as_array()
+        .expect("$SRV.INFO carries endpoints")
+        .iter()
+        .find(|endpoint| endpoint["name"].as_str() == Some(SAY_METHOD))
+        .expect("Say endpoint in $SRV.INFO");
+    assert!(
+        say["metadata"][FAIL_METADATA_KEY].is_null(),
+        "a method that declares no metadata must not inherit another's, got {say}"
+    );
 }
 
 /// A caller the content-type policy turns away must be able to read the

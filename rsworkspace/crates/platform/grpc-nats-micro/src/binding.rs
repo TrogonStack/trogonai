@@ -1,6 +1,7 @@
 //! Binding descriptors: the annotated protobuf service and its `rpc` methods,
 //! bound to NATS micro per ADR 0016 §1 and §2.
 
+use crate::discovery_metadata::DiscoveryMetadata;
 use crate::endpoint_subject::{EndpointSubject, EndpointSubjectError};
 use crate::method_name::MethodName;
 use crate::service_name::ServiceName;
@@ -13,6 +14,7 @@ use crate::subject_prefix::SubjectPrefix;
 pub struct EndpointBinding {
     method_name: MethodName,
     subject: EndpointSubject,
+    metadata: DiscoveryMetadata,
 }
 
 impl EndpointBinding {
@@ -20,9 +22,14 @@ impl EndpointBinding {
         subject_prefix: &SubjectPrefix,
         service_name: &ServiceName,
         method_name: MethodName,
+        metadata: DiscoveryMetadata,
     ) -> Result<Self, EndpointSubjectError> {
         let subject = EndpointSubject::new(subject_prefix, service_name, &method_name)?;
-        Ok(Self { method_name, subject })
+        Ok(Self {
+            method_name,
+            subject,
+            metadata,
+        })
     }
 
     pub fn method_name(&self) -> &MethodName {
@@ -31,6 +38,12 @@ impl EndpointBinding {
 
     pub fn subject(&self) -> &EndpointSubject {
         &self.subject
+    }
+
+    /// `MethodOptions.metadata`, which populates this endpoint's discovery
+    /// record (ADR 0016 §1).
+    pub const fn metadata(&self) -> &DiscoveryMetadata {
+        &self.metadata
     }
 }
 
@@ -41,6 +54,7 @@ pub struct ServiceBinding {
     name: ServiceName,
     version: ServiceVersion,
     description: Option<String>,
+    metadata: DiscoveryMetadata,
     subject_prefix: SubjectPrefix,
     endpoints: Vec<EndpointBinding>,
 }
@@ -51,6 +65,7 @@ impl ServiceBinding {
             name,
             version,
             description: None,
+            metadata: DiscoveryMetadata::default(),
             subject_prefix,
             endpoints: Vec::new(),
         }
@@ -62,11 +77,29 @@ impl ServiceBinding {
         self
     }
 
+    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
+    pub fn with_metadata(mut self, metadata: DiscoveryMetadata) -> Self {
+        self.metadata = metadata;
+        self
+    }
+
     /// Register an `rpc` method as a micro endpoint, deriving its subject
     /// from this binding's subject prefix and service name.
-    pub fn with_method(mut self, method_name: MethodName) -> Result<Self, EndpointSubjectError> {
-        self.endpoints
-            .push(EndpointBinding::new(&self.subject_prefix, &self.name, method_name)?);
+    ///
+    /// `metadata` is the method's own `MethodOptions.metadata`. Every endpoint
+    /// has a discovery record, so a method that declares none passes an empty
+    /// map rather than leaving the argument out.
+    pub fn with_method(
+        mut self,
+        method_name: MethodName,
+        metadata: DiscoveryMetadata,
+    ) -> Result<Self, EndpointSubjectError> {
+        self.endpoints.push(EndpointBinding::new(
+            &self.subject_prefix,
+            &self.name,
+            method_name,
+            metadata,
+        )?);
         Ok(self)
     }
 
@@ -80,6 +113,12 @@ impl ServiceBinding {
 
     pub fn description(&self) -> Option<&str> {
         self.description.as_deref()
+    }
+
+    /// `ServiceOptions.metadata`, which populates this service's discovery
+    /// record (ADR 0016 §1).
+    pub const fn metadata(&self) -> &DiscoveryMetadata {
+        &self.metadata
     }
 
     pub fn subject_prefix(&self) -> &SubjectPrefix {
