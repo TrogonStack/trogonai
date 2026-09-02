@@ -4,7 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
     # ADR#NNNN references live in markdown across the whole repo (crate READMEs,
     # skills, architecture and research docs), not only under docs/adr, so this
     # guard is intentionally repo-wide rather than scoped to one workspace dir.
