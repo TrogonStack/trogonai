@@ -51,6 +51,8 @@ pub mod signal;
 #[cfg(feature = "telemetry-http")]
 pub mod telemetry;
 pub mod time;
+#[cfg(feature = "tls")]
+pub mod tls;
 #[cfg(feature = "uuid")]
 pub mod uuid;
 
@@ -71,5 +73,7 @@ pub use json::{JsonSerialize, StdJsonSerialize};
 pub use log_capture::{CapturedEvent, CapturedEvents};
 pub use secret_string::{EmptySecretError, SecretString};
 pub use time::{EpochClock, GetElapsed, GetNow, SystemClock};
+#[cfg(feature = "tls")]
+pub use tls::{CryptoProviderAlreadyInstalledError, install_default_crypto_provider};
 #[cfg(feature = "uuid")]
 pub use uuid::{NowV7, UuidV7Generator};

@@ -12,6 +12,7 @@ test-support = ["dep:tracing", "dep:tracing-subscriber"]
 clap = ["dep:clap"]
 uuid = ["dep:uuid"]
 signal = ["dep:tokio", "dep:tracing"]
+tls = ["dep:rustls"]
 telemetry-http = [
     "dep:axum",
     "dep:opentelemetry",
@@ -27,6 +28,7 @@ axum = { workspace = true, optional = true }
 bytesize = "2.3.1"
 clap = { workspace = true, optional = true }
 opentelemetry = { workspace = true, optional = true }
+rustls = { workspace = true, optional = true }
 trogon-semconv = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -50,6 +50,8 @@ type SourceResult = (&'static str, anyhow::Result<()>);
 #[cfg(not(coverage))]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    trogon_std::tls::install_default_crypto_provider()?;
+
     let cli = CliArgs::<cli::Cli>::new().parse_args();
     let resolved = config::load_with_overrides(cli.runtime.config.as_deref(), &cli.runtime.nats)?;
 
@@ -219,12 +221,14 @@ async fn serve(resolved: config::ResolvedConfig) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[cfg_attr(coverage, allow(dead_code))]
 #[derive(Debug, thiserror::Error)]
 enum NotionVerificationTokenCommandError {
     #[error("notion integration '{0}' is not configured")]
     IntegrationNotConfigured(source_integration_id::SourceIntegrationId),
 }
 
+#[cfg_attr(coverage, allow(dead_code))]
 async fn notion_verification_token<N, J, W>(
     resolved: &config::ResolvedConfig,
     integration: &source_integration_id::SourceIntegrationId,
