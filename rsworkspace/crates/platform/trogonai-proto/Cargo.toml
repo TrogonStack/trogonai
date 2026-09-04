@@ -18,7 +18,6 @@ schedules = ["dep:buffa", "dep:buffa-types", "dep:serde", "dep:trogon-decider", 
 grpc-nats-micro = ["dep:buffa", "dep:buffa-types", "dep:serde"]
 runtime-snapshot = ["schedules", "dep:trogon-decider-runtime"]
 runtime-host = ["schedules", "dep:trogon-decider-runtime"]
-agents = ["dep:buffa", "dep:buffa-types", "dep:serde", "dep:trogon-decider"]
 decider = ["dep:buffa", "dep:buffa-types", "dep:serde", "chrono"]
 
 [dependencies]

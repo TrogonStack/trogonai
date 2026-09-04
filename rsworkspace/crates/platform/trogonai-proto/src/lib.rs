@@ -15,15 +15,10 @@
         reason = "buffa-codegen emits each message's view module beside the message it views, so the generated tree is cyclic by construction and is not edited here"
     )
 )]
-#[cfg(any(
-    feature = "schedules",
-    feature = "agents",
-    feature = "decider",
-    feature = "grpc-nats-micro"
-))]
+#[cfg(any(feature = "schedules", feature = "decider", feature = "grpc-nats-micro"))]
 mod r#gen;
 
-#[cfg(any(feature = "schedules", feature = "agents"))]
+#[cfg(feature = "schedules")]
 mod codec;
 
 pub mod constants;
@@ -34,15 +29,12 @@ pub mod convert;
 #[cfg(feature = "schedules")]
 pub mod scheduler;
 
-#[cfg(feature = "agents")]
-pub mod agents;
-
 #[cfg(feature = "decider")]
 pub mod decider;
 
 // Thin wrappers that re-export the generated proto packages, emitted as inline
 // module trees that mirror the codegen layout.
-#[cfg(any(feature = "schedules", feature = "agents"))]
+#[cfg(feature = "schedules")]
 #[cfg_attr(dylint_lib = "trogon_lints", allow(inline_module_block))]
 pub mod content {
     pub mod v1alpha1 {
@@ -60,15 +52,10 @@ pub mod nats {
     }
 }
 
-#[cfg(any(
-    feature = "schedules",
-    feature = "agents",
-    feature = "decider",
-    feature = "grpc-nats-micro"
-))]
+#[cfg(any(feature = "schedules", feature = "decider", feature = "grpc-nats-micro"))]
 #[cfg_attr(dylint_lib = "trogon_lints", allow(inline_module_block))]
 pub mod google {
-    #[cfg(any(feature = "schedules", feature = "agents"))]
+    #[cfg(feature = "schedules")]
     pub mod r#type {
         pub use crate::r#gen::google::r#type::*;
     }
@@ -88,7 +75,7 @@ pub mod grpc_nats_micro {
 }
 
 /// Failure decoding a registered event payload to canonical JSON.
-#[cfg(any(feature = "schedules", feature = "agents"))]
+#[cfg(feature = "schedules")]
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EventDecodeError {
     #[error("failed to decode '{type_url}' payload as json: {message}")]
@@ -106,7 +93,7 @@ pub enum EventDecodeError {
 /// Returns `Ok(None)` only for unregistered types; a registered type whose payload
 /// fails to decode returns `Err`, so malformed output of a known event is never
 /// mistaken for an unknown type.
-#[cfg(any(feature = "schedules", feature = "agents"))]
+#[cfg(feature = "schedules")]
 pub fn decode_event_to_json(type_url: &str, payload: &[u8]) -> Result<Option<String>, EventDecodeError> {
     static REGISTRY: std::sync::OnceLock<buffa::type_registry::TypeRegistry> = std::sync::OnceLock::new();
 
@@ -114,8 +101,6 @@ pub fn decode_event_to_json(type_url: &str, payload: &[u8]) -> Result<Option<Str
         let mut registry = buffa::type_registry::TypeRegistry::new();
         #[cfg(feature = "schedules")]
         r#gen::trogonai::scheduler::schedules::v1::register_types(&mut registry);
-        #[cfg(feature = "agents")]
-        r#gen::trogonai::agents::agents::v1::register_types(&mut registry);
         registry
     });
 
@@ -136,5 +121,5 @@ pub fn decode_event_to_json(type_url: &str, payload: &[u8]) -> Result<Option<Str
         })
 }
 
-#[cfg(all(test, any(feature = "schedules", feature = "agents")))]
+#[cfg(all(test, feature = "schedules"))]
 mod tests;

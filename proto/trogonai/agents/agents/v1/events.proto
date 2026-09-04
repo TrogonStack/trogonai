@@ -2,11 +2,15 @@ edition = "2024";
 
 package trogonai.agents.agents.v1;
 
+import "trogonai/agents/agents/v1/agent_annotated.proto";
+import "trogonai/agents/agents/v1/agent_archived.proto";
 import "trogonai/agents/agents/v1/agent_provisioned.proto";
 
 // AgentEvent is the Agent registry stream's event union.
 message AgentEvent {
   oneof event {
     AgentProvisioned agent_provisioned = 1;
+    AgentArchived agent_archived = 2;
+    AgentAnnotated agent_annotated = 3;
   }
 }
