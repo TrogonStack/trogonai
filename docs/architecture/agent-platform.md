@@ -35,13 +35,18 @@ The current `v1` wire contract is only the first slice of that lifecycle:
 - `proto/trogonai/agents/agents/v1/agent.proto` defines
   `AgentConfiguration` as a runtime identifier plus runtime-owned settings.
 - `proto/trogonai/agents/agents/v1/agent_provisioned.proto` records identity,
-  display name, placement, configuration, revision 1, and its digest.
-- `proto/trogonai/agents/agents/v1/events.proto` currently exposes only
-  `AgentProvisioned`.
+  display name, placement, configuration, revision 1, its digest, and the
+  genesis annotations.
+- `proto/trogonai/agents/agents/v1/agent_annotated.proto` replaces the
+  agent's annotations wholesale. Annotations are opaque record metadata
+  outside the digest, so the event mints no revision.
+- `proto/trogonai/agents/agents/v1/agent_archived.proto` is the stream's
+  terminal event. Archive is permanent: there is no unarchive, and reviving
+  the behavior means provisioning a new agent.
+- `proto/trogonai/agents/agents/v1/events.proto` exposes those three events.
 
 This is not yet the complete Agent Registry. Revision activation, proposal
-streams, archive behavior, onboarding APIs, and onboarding UI remain future
-work. The console home screen is currently an operator-console placeholder.
+streams, onboarding APIs, and onboarding UI remain future work. The console home screen is currently an operator-console placeholder.
 
 ### Session event contracts
 
