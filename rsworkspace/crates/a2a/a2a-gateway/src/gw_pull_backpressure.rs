@@ -13,25 +13,18 @@ use async_nats::jetstream::consumer::AckPolicy;
 use tokio_util::sync::CancellationToken;
 use trogon_std::env::ReadEnv;
 
-// Pump-only imports — gated so `cfg(coverage)` doesn't warn on unused
-// imports when the pull-consumer loop stubs out.
-#[cfg(not(coverage))]
 use a2a_nats::jetstream::consumers::gateway_events_consumer;
-#[cfg(not(coverage))]
 use a2a_nats::jetstream::streams::events_stream_name;
-#[cfg(not(coverage))]
 use async_nats::jetstream::{self, AckKind};
-#[cfg(not(coverage))]
-use futures::StreamExt;
-#[cfg(not(coverage))]
+use futures::{Stream, StreamExt};
 use tracing::{debug, warn};
+use trogon_nats::jetstream::message::{JsAckWith, JsDoubleAck, JsMessageRef};
 
 pub use crate::constants::{
     DEFAULT_FETCH_BATCH, DEFAULT_FETCH_HEARTBEAT_SECS, DEFAULT_INACTIVE_THRESHOLD_SECS, DEFAULT_MAX_ACK_PENDING,
     DEFAULT_MAX_INFLIGHT_PER_CALLER, ENV_GATEWAY_EVENTS_FETCH_BATCH, ENV_GATEWAY_EVENTS_FETCH_HEARTBEAT_SECS,
     ENV_GATEWAY_EVENTS_MAX_ACK_PENDING, ENV_GATEWAY_EVENTS_MAX_INFLIGHT_PER_CALLER, ENV_GATEWAY_EVENTS_PULL,
 };
-#[cfg(not(coverage))]
 use crate::constants::{FETCH_EXPIRES, GATE_NAK_DELAY, INITIAL_BACKOFF, MAX_BACKOFF};
 
 /// JetStream durable name for the gateway task-event egress consumer.
@@ -351,13 +344,11 @@ pub fn parse_task_events_subject(prefix: &str, subject: &str) -> Option<A2aTaskI
     A2aTaskId::new(task_id).ok()
 }
 
-#[cfg_attr(coverage, allow(dead_code))]
 struct CallerInflightGate {
     limit: usize,
     inflight: Mutex<HashMap<String, usize>>,
 }
 
-#[cfg_attr(coverage, allow(dead_code))]
 impl CallerInflightGate {
     fn new(limit: usize) -> Self {
         Self {
@@ -392,7 +383,6 @@ impl CallerInflightGate {
     }
 }
 
-#[cfg_attr(coverage, allow(dead_code))]
 struct CallerInflightPermit {
     gate: Arc<CallerInflightGate>,
     caller_key: String,
@@ -421,7 +411,6 @@ impl Drop for CallerInflightPermit {
 /// consumer provisioning, fetch, ack) survive across the loop instead of
 /// being flattened into a Display string.
 #[derive(Debug, thiserror::Error)]
-#[cfg_attr(coverage, allow(dead_code))]
 pub enum PullCycleError {
     #[error("bind events stream {stream}")]
     BindStream {
@@ -455,10 +444,7 @@ pub enum PullCycleError {
     },
 }
 
-/// Run the gateway egress pull-consumer loop. The body that binds a real
-/// JetStream context is gated behind `cfg(not(coverage))`; the pure
-/// planning + parsing helpers are exercised by unit tests under all builds.
-#[cfg(not(coverage))]
+/// Run the gateway egress pull-consumer loop.
 pub async fn run_gateway_events_pull(
     client: async_nats::Client,
     prefix: A2aPrefix,
@@ -512,11 +498,6 @@ pub async fn run_gateway_events_pull(
     debug!(prefix = %prefix, "gateway events pull loop stopped");
 }
 
-#[cfg(coverage)]
-#[rustfmt::skip]
-pub async fn run_gateway_events_pull(_client: async_nats::Client, _prefix: A2aPrefix, _config: GatewayEventsPullConfig, _shutdown: CancellationToken) {}
-
-#[cfg(not(coverage))]
 fn info_span_start(prefix: &A2aPrefix, durable: &EventsConsumerDurable, config: &GatewayEventsPullConfig) {
     tracing::info!(
         prefix = %prefix,
@@ -529,7 +510,6 @@ fn info_span_start(prefix: &A2aPrefix, durable: &EventsConsumerDurable, config: 
     );
 }
 
-#[cfg(not(coverage))]
 #[allow(clippy::too_many_arguments)]
 async fn run_fetch_cycle(
     client: &async_nats::Client,
@@ -560,7 +540,7 @@ async fn run_fetch_cycle(
             source,
         })?;
 
-    let mut batch = consumer
+    let batch = consumer
         .fetch()
         .max_messages(config.fetch_batch().as_usize())
         .expires(FETCH_EXPIRES)
@@ -572,6 +552,44 @@ async fn run_fetch_cycle(
             source,
         })?;
 
+    let deliveries = batch.map(|item| {
+        item.map(|message| EgressDelivery {
+            sequence: message.info().map(|info| info.stream_sequence).unwrap_or(0),
+            message,
+        })
+    });
+    forward_egress_deliveries(
+        client,
+        prefix,
+        planner,
+        inflight_gate,
+        forward_attempts,
+        shutdown,
+        deliveries,
+    )
+    .await
+}
+
+struct EgressDelivery<M> {
+    message: M,
+    sequence: u64,
+}
+
+async fn forward_egress_deliveries<C, M, E>(
+    client: &C,
+    prefix: &A2aPrefix,
+    planner: &BaselineTaskEventsEgressPlanner,
+    inflight_gate: Arc<CallerInflightGate>,
+    forward_attempts: Arc<ForwardAttempts>,
+    shutdown: CancellationToken,
+    mut batch: impl Stream<Item = Result<EgressDelivery<M>, E>> + Unpin,
+) -> Result<(), PullCycleError>
+where
+    C: trogon_nats::PublishClient,
+    M: JsMessageRef + JsAckWith + JsDoubleAck,
+    <M as JsAckWith>::Error: Into<async_nats::Error>,
+    E: Into<async_nats::Error>,
+{
     loop {
         // Race the fetch poll against shutdown so a draining batch can't
         // keep us blocked for up to FETCH_EXPIRES (30s) after cancel, and
@@ -582,23 +600,23 @@ async fn run_fetch_cycle(
             next = batch.next() => next,
         };
         let Some(item) = item else { break };
-        let message = item.map_err(|source| PullCycleError::FetchItem {
+        let EgressDelivery { message, sequence } = item.map_err(|source| PullCycleError::FetchItem {
             subject: String::new(),
-            source,
+            source: source.into(),
         })?;
-        let subject = message.subject.as_str();
+        let subject = message.message().subject.as_str();
         // Term what cannot be routed. The event subject no longer names the
         // request or the caller (ADR#0055), so both now come from the headers,
         // and an event carrying neither has no egress address at all.
         let routing = parse_task_events_subject(prefix.as_str(), subject)
-            .and_then(|_task_id| egress_routing_from_headers(message.message.headers.as_ref()));
+            .and_then(|_task_id| egress_routing_from_headers(message.message().headers.as_ref()));
         let Some((caller_id, req_id)) = routing else {
             message
                 .ack_with(AckKind::Term)
                 .await
                 .map_err(|source| PullCycleError::Ack {
                     subject: subject.to_owned(),
-                    source,
+                    source: source.into(),
                 })?;
             continue;
         };
@@ -621,7 +639,7 @@ async fn run_fetch_cycle(
                 .await
                 .map_err(|source| PullCycleError::Ack {
                     subject: subject.to_owned(),
-                    source,
+                    source: source.into(),
                 })?;
             continue;
         };
@@ -637,11 +655,14 @@ async fn run_fetch_cycle(
         // would ever exist).
         tokio::spawn(async move {
             let _permit = permit;
-            // Identify this logical message across redeliveries so gate-NAK
-            // redeliveries don't tick the forward attempt counter.
-            let sequence = message.info().map(|i| i.stream_sequence).unwrap_or(0);
-            let forward_result =
-                forward_task_event(&client_handle, &prefix_handle, &caller_id, &req_id, &message.payload).await;
+            let forward_result = forward_task_event(
+                &client_handle,
+                &prefix_handle,
+                &caller_id,
+                &req_id,
+                &message.message().payload,
+            )
+            .await;
             let attempt = if forward_result.is_err() {
                 attempts_handle.record_attempt(sequence)
             } else {
@@ -702,13 +723,11 @@ async fn run_fetch_cycle(
 /// "Gate NAKs consume forward retries" review thread. This in-process map
 /// tracks attempts only when the actual publish to `gateway.egress` fails,
 /// so the budget reflects real forward failures.
-#[cfg_attr(coverage, allow(dead_code))]
 #[derive(Default)]
 struct ForwardAttempts {
     by_sequence: Mutex<HashMap<u64, u32>>,
 }
 
-#[cfg_attr(coverage, allow(dead_code))]
 impl ForwardAttempts {
     fn new() -> Self {
         Self::default()
@@ -743,7 +762,6 @@ impl ForwardAttempts {
 /// this through `MockNatsClient` without standing up a NATS server. The
 /// production pump passes the concrete `async_nats::Client` which already
 /// implements the trait.
-#[cfg_attr(coverage, allow(dead_code))]
 async fn forward_task_event<C: trogon_nats::PublishClient>(
     client: &C,
     prefix: &A2aPrefix,
@@ -767,9 +785,6 @@ async fn forward_task_event<C: trogon_nats::PublishClient>(
 /// so the per-caller inflight cap can't be circumvented just by stripping one
 /// header. Returns `None` when either half is missing or is not a single NATS
 /// token, because the event then has no address to egress on.
-// The only caller is the fetch cycle, which is `cfg(not(coverage))`, so under
-// coverage this is reachable from tests but not from the crate itself.
-#[cfg_attr(coverage, allow(dead_code))]
 fn egress_routing_from_headers(headers: Option<&async_nats::HeaderMap>) -> Option<(EgressCallerId, ReqId)> {
     let headers = headers?;
     let read = |name| {

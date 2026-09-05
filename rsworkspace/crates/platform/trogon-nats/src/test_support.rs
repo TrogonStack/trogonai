@@ -51,6 +51,11 @@ impl TestServer {
 pub struct JetStreamTestServer(TestServer);
 
 impl JetStreamTestServer {
+    /// The mapped host and port for clients that manage their own connections.
+    pub fn address(&self) -> &str {
+        &self.0.address
+    }
+
     /// Starts the pinned NATS image and waits until it accepts client connections.
     pub async fn start() -> Self {
         Self(TestServer::start(&NatsServerCmd::default().with_jetstream()).await)

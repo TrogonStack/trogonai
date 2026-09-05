@@ -9,7 +9,6 @@ fn default_prefix_is_a2a() {
 fn default_timeouts_are_positive() {
     assert!(DEFAULT_OPERATION_TIMEOUT > Duration::ZERO);
     assert!(DEFAULT_TASK_TIMEOUT > Duration::ZERO);
-    const _: () = assert!(DEFAULT_CONNECT_TIMEOUT_SECS > 0);
 }
 
 #[test]

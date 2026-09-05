@@ -1,0 +1,131 @@
+error: this assertion only confirms a fixed literal
+  --> $DIR/assertions_on_fixed_literals.rs:12:15
+   |
+LL | const _: () = assert!(!VERSION_CURRENT.is_empty());
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: remove the assertion; validate supplied values or relationships between independent constants instead
+   = note: `#[deny(assertions_on_fixed_literals)]` on by default
+
+error: this assertion only confirms a fixed literal
+  --> $DIR/assertions_on_fixed_literals.rs:13:15
+   |
+LL | const _: () = assert!(!VERSION_PREVIOUS.is_empty());
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: remove the assertion; validate supplied values or relationships between independent constants instead
+
+error: this assertion only confirms a fixed literal
+  --> $DIR/assertions_on_fixed_literals.rs:21:15
+   |
+LL | const _: () = assert!(!ALIAS.is_empty());
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: remove the assertion; validate supplied values or relationships between independent constants instead
+
+error: this assertion only confirms a fixed literal
+  --> $DIR/assertions_on_fixed_literals.rs:22:15
+   |
+LL | const _: () = assert!(TIMEOUT > 0);
+   |               ^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: remove the assertion; validate supplied values or relationships between independent constants instead
+
+error: this assertion only confirms a fixed literal
+  --> $DIR/assertions_on_fixed_literals.rs:23:15
+   |
+LL | const _: () = assert!(ENABLED);
+   |               ^^^^^^^^^^^^^^^^
+   |
+   = help: remove the assertion; validate supplied values or relationships between independent constants instead
+
+error: this assertion only confirms a fixed literal
+  --> $DIR/assertions_on_fixed_literals.rs:24:15
+   |
+LL | const _: () = assert!("fixed".len() == 5);
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: remove the assertion; validate supplied values or relationships between independent constants instead
+
+error: this assertion only confirms a fixed literal
+  --> $DIR/assertions_on_fixed_literals.rs:25:15
+   |
+LL | const _: () = assert!("".is_empty());
+   |               ^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: remove the assertion; validate supplied values or relationships between independent constants instead
+
+error: this assertion only confirms a fixed literal
+  --> $DIR/assertions_on_fixed_literals.rs:26:15
+   |
+LL | const _: () = assert!(!b"wire".is_empty());
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: remove the assertion; validate supplied values or relationships between independent constants instead
+
+error: this assertion only confirms a fixed literal
+  --> $DIR/assertions_on_fixed_literals.rs:27:15
+   |
+LL | const _: () = assert!(BYTES.len() == 4);
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: remove the assertion; validate supplied values or relationships between independent constants instead
+
+error: this assertion only confirms a fixed literal
+  --> $DIR/assertions_on_fixed_literals.rs:28:15
+   |
+LL | const _: () = assert!(b"wire".len() == 4);
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: remove the assertion; validate supplied values or relationships between independent constants instead
+
+error: this assertion only confirms a fixed literal
+  --> $DIR/assertions_on_fixed_literals.rs:29:15
+   |
+LL | const _: () = assert!(true);
+   |               ^^^^^^^^^^^^^
+   |
+   = help: remove the assertion; validate supplied values or relationships between independent constants instead
+
+error: this assertion only confirms a fixed literal
+  --> $DIR/assertions_on_fixed_literals.rs:30:15
+   |
+LL | const _: () = assert!(-5_i16 < 0);
+   |               ^^^^^^^^^^^^^^^^^^^
+   |
+   = help: remove the assertion; validate supplied values or relationships between independent constants instead
+
+error: this assertion only confirms a fixed literal
+  --> $DIR/assertions_on_fixed_literals.rs:31:15
+   |
+LL | const _: () = assert!(SIGNED < 0);
+   |               ^^^^^^^^^^^^^^^^^^^
+   |
+   = help: remove the assertion; validate supplied values or relationships between independent constants instead
+
+error: this assertion only confirms a fixed literal
+  --> $DIR/assertions_on_fixed_literals.rs:32:15
+   |
+LL | const _: () = debug_assert!(!VERSION_CURRENT.is_empty());
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: remove the assertion; validate supplied values or relationships between independent constants instead
+
+error: this assertion only confirms a fixed literal
+  --> $DIR/assertions_on_fixed_literals.rs:33:20
+   |
+LL | static FIXED: () = assert!(10 > 0);
+   |                    ^^^^^^^^^^^^^^^
+   |
+   = help: remove the assertion; validate supplied values or relationships between independent constants instead
+
+error: this assertion only confirms a fixed literal
+  --> $DIR/assertions_on_fixed_literals.rs:95:13
+   |
+LL |     const { assert!(!VERSION_CURRENT.is_empty()) };
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: remove the assertion; validate supplied values or relationships between independent constants instead
+
+error: aborting due to 16 previous errors
+

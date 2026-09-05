@@ -56,19 +56,13 @@ pub fn encode_success<Res: Serialize>(id: ResponseId, result: &Res) -> Result<En
 }
 
 /// Encode an error response (complete body; code projected to `Jsonrpc-Error-Code`).
-pub fn encode_error(
-    id: ResponseId,
-    code: i32,
-    message: impl Into<String>,
-    data: Option<serde_json::Value>,
-) -> Result<Encoded, WireError> {
-    encode(&Message::Error {
+pub fn encode_error(id: ResponseId, code: i32, message: impl Into<String>, data: Option<serde_json::Value>) -> Encoded {
+    Encoded::from(&Message::Error {
         id,
         code,
         message: message.into(),
         data,
     })
-    .map_err(WireError::from)
 }
 
 /// Decode a JSON-RPC response into a typed result or structured error `(code, message)`.

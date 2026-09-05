@@ -1,5 +1,3 @@
-#![cfg_attr(coverage, allow(dead_code))]
-
 use reqwest::StatusCode;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};

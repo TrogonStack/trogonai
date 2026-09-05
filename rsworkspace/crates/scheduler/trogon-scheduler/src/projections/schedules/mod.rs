@@ -1,5 +1,3 @@
-#![cfg_attr(coverage, allow(dead_code, unused_imports))]
-
 use std::collections::{BTreeMap, HashSet};
 
 use async_nats::jetstream::{
@@ -11,9 +9,11 @@ use buffa::MessageField;
 use futures::StreamExt;
 use trogon_decider_nats::record_stream_message;
 use trogon_decider_runtime::{Event, EventData, EventDecode, StreamEvent, StreamPosition};
-use trogon_nats::jetstream::{JetStreamCreateKeyValue, JetStreamGetKeyValue, JetStreamGetStream};
+use trogon_nats::jetstream::{
+    JetStreamCreateKeyValue, JetStreamGetKeyValue, JetStreamGetStream, JetStreamKeyValueDeleteExpectRevision,
+    JetStreamKvKeys,
+};
 
-#[cfg(not(coverage))]
 use crate::kv::open_events_stream;
 use crate::{
     ScheduleEventCase,
@@ -23,8 +23,11 @@ use crate::{
     projections_v1, v1,
 };
 
-#[cfg(not(coverage))]
+use super::ordered_event_consumer::OrderedEventConsumer;
+use applied_schedule::AppliedSchedule;
 use storage::get_or_create_schedules_bucket;
+
+mod applied_schedule;
 
 /// The read model's KV storage contract (bucket, key scheme, checkpoint key),
 /// owned by the projection that defines that layout.
@@ -94,14 +97,14 @@ const fn initial_state() -> ScheduleStreamState {
 
 pub(crate) fn apply(
     stream_id: &str,
-    state: ScheduleStreamState,
+    state: impl Into<ScheduleStreamState>,
     event: &v1::ScheduleEvent,
-) -> Result<ScheduleStreamState, ScheduleTransitionError> {
+) -> Result<AppliedSchedule, ScheduleTransitionError> {
     validate_event_payload_schedule_id(stream_id, event)?;
 
-    match (state, &event.event) {
+    match (state.into(), &event.event) {
         (ScheduleStreamState::Initial, Some(ScheduleEventCase::ScheduleCreated(inner))) => {
-            Ok(ScheduleStreamState::Present(Box::new(apply_schedule_created(inner)?)))
+            Ok(AppliedSchedule::Present(Box::new(apply_schedule_created(inner)?)))
         }
         (
             ScheduleStreamState::Initial,
@@ -116,7 +119,7 @@ pub(crate) fn apply(
             id: stream_id.to_string(),
         }),
         (ScheduleStreamState::Initial, Some(ScheduleEventCase::ScheduleRemoved(_))) => {
-            Ok(ScheduleStreamState::Deleted(stream_id.to_string()))
+            Ok(AppliedSchedule::Deleted(stream_id.to_string()))
         }
         (ScheduleStreamState::Present(view), Some(ScheduleEventCase::ScheduleCreated(_))) => {
             Err(ScheduleTransitionError::CannotAddExistingSchedule { id: view.schedule_id })
@@ -126,33 +129,33 @@ pub(crate) fn apply(
             // Pause retains any pending occurrence: it is durable progress the
             // command-side state keeps while disabled. Resume is the boundary that
             // discards an unrecorded paused wakeup (see the `ScheduleResumed` arm).
-            Ok(ScheduleStreamState::Present(view))
+            Ok(AppliedSchedule::Present(view))
         }
         (ScheduleStreamState::Present(mut view), Some(ScheduleEventCase::ScheduleResumed(_))) => {
             view.status = MessageField::some(status_proto(true));
             // Resume discards the unrecorded paused wakeup so scheduling can re-arm
             // from durable occurrence progress, mirroring the command-side state.
             view.next_occurrence_at = MessageField::none();
-            Ok(ScheduleStreamState::Present(view))
+            Ok(AppliedSchedule::Present(view))
         }
         (ScheduleStreamState::Present(view), Some(ScheduleEventCase::ScheduleRemoved(_))) => {
-            Ok(ScheduleStreamState::Deleted(view.schedule_id))
+            Ok(AppliedSchedule::Deleted(view.schedule_id))
         }
         (ScheduleStreamState::Present(mut view), Some(ScheduleEventCase::ScheduleCompleted(_))) => {
             view.completed = Some(true);
             // Nothing more will fire, so there is no pending occurrence.
             view.next_occurrence_at = MessageField::none();
-            Ok(ScheduleStreamState::Present(view))
+            Ok(AppliedSchedule::Present(view))
         }
         (ScheduleStreamState::Present(mut view), Some(ScheduleEventCase::ScheduleOccurrenceScheduled(inner))) => {
             view.next_occurrence_at = inner.occurrence_at.clone();
-            Ok(ScheduleStreamState::Present(view))
+            Ok(AppliedSchedule::Present(view))
         }
         (ScheduleStreamState::Present(mut view), Some(ScheduleEventCase::ScheduleOccurrenceRecorded(inner))) => {
             view.last_occurrence_at = inner.occurrence_at.clone();
             // The pending occurrence has now fired; clear it until the next is armed.
             view.next_occurrence_at = MessageField::none();
-            Ok(ScheduleStreamState::Present(view))
+            Ok(AppliedSchedule::Present(view))
         }
         (ScheduleStreamState::Deleted(id), Some(ScheduleEventCase::ScheduleCreated(_))) => {
             Err(ScheduleTransitionError::CannotAddDeletedSchedule { id })
@@ -265,29 +268,12 @@ pub(crate) fn event_schedule_id(event: &v1::ScheduleEvent) -> Option<&str> {
     }
 }
 
-pub(crate) fn projection_change(before: &ScheduleStreamState, after: &ScheduleStreamState) -> Option<ProjectionChange> {
-    match (before, after) {
-        (_, ScheduleStreamState::Present(view)) => Some(ProjectionChange::Upsert(view.clone())),
-        // Emit a delete for any transition into Deleted, including from Initial.
-        // If a ScheduleCreated was purged from the stream but a stale KV entry
-        // survives, the ScheduleRemoved replayed from Initial must still clear it.
-        // A KV delete on an absent key is idempotent, so this is always safe.
-        (_, ScheduleStreamState::Deleted(id)) => Some(ProjectionChange::Delete(id.clone())),
-        (ScheduleStreamState::Present(view), ScheduleStreamState::Initial) => {
-            Some(ProjectionChange::Delete(view.schedule_id.clone()))
-        }
-        (ScheduleStreamState::Initial, ScheduleStreamState::Initial)
-        | (ScheduleStreamState::Deleted(_), ScheduleStreamState::Initial) => None,
-    }
-}
-
 impl From<projections_v1::ScheduleProjection> for ScheduleStreamState {
     fn from(view: projections_v1::ScheduleProjection) -> Self {
         Self::Present(Box::new(view))
     }
 }
 
-#[cfg(not(coverage))]
 pub(crate) async fn catch_up_schedules_read_model<J>(js: &J) -> Result<(), SchedulerError>
 where
     J: JetStreamCreateKeyValue<Store = kv::Store>
@@ -295,6 +281,14 @@ where
         + JetStreamGetStream<Stream = jetstream::stream::Stream>,
 {
     let stream: jetstream::stream::Stream = open_events_stream(js).await?;
+    catch_up_stream(js, &stream).await
+}
+
+pub(super) async fn catch_up_stream<J, S>(js: &J, stream: &S) -> Result<(), SchedulerError>
+where
+    J: JetStreamCreateKeyValue<Store = kv::Store> + JetStreamGetKeyValue<Store = kv::Store>,
+    S: super::ordered_event_stream::OrderedEventStream,
+{
     let info = stream.get_info().await.map_err(|source| {
         SchedulerError::event_source(
             "failed to query events stream info for schedules read-model catch-up",
@@ -324,7 +318,7 @@ where
     let mut states = BTreeMap::new();
 
     let consumer = stream
-        .create_consumer(event_replay_consumer_config(info.state.first_sequence))
+        .create_ordered_consumer(event_replay_consumer_config(info.state.first_sequence))
         .await
         .map_err(|source| {
             SchedulerError::event_source("failed to create schedules read-model catch-up consumer", source)
@@ -417,8 +411,10 @@ where
 /// on the single-active-writer invariant (see the module docs): with a concurrent
 /// writer — a misconfigured rolling restart — it could delete a row a peer just
 /// created, which that peer's next event or restart re-creates.
-#[cfg(not(coverage))]
-async fn reconcile_projection_keys(bucket: &kv::Store, live_keys: &HashSet<String>) -> Result<(), SchedulerError> {
+async fn reconcile_projection_keys<K>(bucket: &K, live_keys: &HashSet<String>) -> Result<(), SchedulerError>
+where
+    K: JetStreamKvKeys + JetStreamKeyValueDeleteExpectRevision,
+{
     let mut keys = bucket.keys().await.map_err(|source| {
         SchedulerError::kv_source("failed to list schedules read-model keys for reconcile", source)
     })?;
@@ -430,7 +426,7 @@ async fn reconcile_projection_keys(bucket: &kv::Store, live_keys: &HashSet<Strin
             continue;
         }
         bucket
-            .delete(key.clone())
+            .delete_expect_revision(&key, None)
             .await
             .map_err(|source| SchedulerError::kv_source("failed to delete stale read-model key", source))?;
         tracing::warn!(%key, "deleted stale schedules read-model entry during catch-up reconcile");
@@ -445,7 +441,6 @@ async fn reconcile_projection_keys(bucket: &kv::Store, live_keys: &HashSet<Strin
 /// invalid transition) are logged and skipped — they must not abort the rebuild.
 /// Only a KV write failure is propagated, because it is transient infrastructure
 /// and re-folding on the next start repairs it.
-#[cfg(not(coverage))]
 async fn fold_catch_up_message(
     bucket: &kv::Store,
     states: &mut BTreeMap<String, ScheduleStreamState>,
@@ -477,32 +472,27 @@ async fn fold_catch_up_message(
             return Ok(());
         }
     };
-    let Some(schedule_id) = event_schedule_id(&decoded) else {
-        tracing::warn!(%subject_schedule_id, "skipping schedule event without a payload schedule id during read-model catch-up");
-        return Ok(());
-    };
-    if schedule_id != subject_schedule_id.to_string() {
+    let schedule_id = subject_schedule_id.to_string();
+    let payload_schedule_id = event_schedule_id(&decoded);
+    if payload_schedule_id != Some(schedule_id.as_str()) {
         tracing::warn!(
             %subject_schedule_id,
-            %schedule_id,
+            schedule_id = ?payload_schedule_id,
             "skipping schedule event whose payload id does not route to its subject during read-model catch-up"
         );
         return Ok(());
     }
-    let change = match apply_event_to_read_model_state(states, schedule_id, &decoded) {
+    let change = match apply_event_to_read_model_state(states, &schedule_id, &decoded) {
         Ok(change) => change,
         Err(source) => {
             tracing::warn!(%schedule_id, %source, "skipping invalid schedule transition during read-model catch-up");
             return Ok(());
         }
     };
-    if let Some(change) = change {
-        apply_projection_change(bucket, &change).await?;
-    }
+    apply_projection_change(bucket, &change).await?;
     Ok(())
 }
 
-#[cfg(not(coverage))]
 pub(crate) async fn project_appended_events(
     bucket: &kv::Store,
     job_id: &str,
@@ -525,14 +515,12 @@ pub(crate) async fn project_appended_events(
         let Some(decoded) = decoded.into_decoded() else {
             continue;
         };
-        if let Some(change) = apply_event_to_read_model_state(&mut states, job_id, &decoded)? {
-            apply_projection_change(bucket, &change).await?;
-        }
+        let change = apply_event_to_read_model_state(&mut states, job_id, &decoded)?;
+        apply_projection_change(bucket, &change).await?;
     }
     maybe_advance_read_model_checkpoint(bucket, final_position.as_u64(), events.len() as u64).await
 }
 
-#[cfg(not(coverage))]
 fn decode_recorded_job_event(
     message: async_nats::jetstream::message::StreamMessage,
 ) -> Result<StreamEvent, SchedulerError> {
@@ -541,7 +529,6 @@ fn decode_recorded_job_event(
         .map_err(|source| SchedulerError::event_source("failed to decode stored schedule event", source))
 }
 
-#[cfg(not(coverage))]
 pub(crate) fn decode_recorded_delivery_message(
     message: &async_nats::jetstream::Message,
 ) -> Result<StreamEvent, SchedulerError> {
@@ -577,7 +564,6 @@ pub(crate) fn event_replay_consumer_config(start_sequence: u64) -> pull::Ordered
     }
 }
 
-#[cfg(not(coverage))]
 pub(crate) fn event_message_sequence(
     message: &jetstream::Message,
     context: &'static str,
@@ -590,7 +576,6 @@ pub(crate) fn event_message_sequence(
 
 /// Reads the prior stored view for a schedule so the live path can fold new
 /// events onto it. Works purely in proto; `get` returns `None` for a tombstone.
-#[cfg(not(coverage))]
 async fn read_projected_view(
     bucket: &kv::Store,
     id: &str,
@@ -608,7 +593,6 @@ async fn read_projected_view(
         .map_err(|source| SchedulerError::kv_source("failed to decode projected schedule view", source))
 }
 
-#[cfg(not(coverage))]
 async fn read_read_model_checkpoint(bucket: &kv::Store) -> Result<u64, SchedulerError> {
     let Some(value) = bucket
         .get(SCHEDULES_CHECKPOINT_KEY.to_string())
@@ -636,7 +620,6 @@ async fn read_read_model_checkpoint(bucket: &kv::Store) -> Result<u64, Scheduler
     }
 }
 
-#[cfg(not(coverage))]
 async fn write_read_model_checkpoint(bucket: &kv::Store, sequence: u64) -> Result<(), SchedulerError> {
     bucket
         .put(SCHEDULES_CHECKPOINT_KEY.to_string(), sequence.to_string().into())
@@ -645,7 +628,6 @@ async fn write_read_model_checkpoint(bucket: &kv::Store, sequence: u64) -> Resul
         .map_err(|source| SchedulerError::kv_source("failed to write schedules read-model checkpoint", source))
 }
 
-#[cfg(not(coverage))]
 async fn maybe_advance_read_model_checkpoint(
     bucket: &kv::Store,
     final_position: u64,
@@ -665,7 +647,6 @@ async fn maybe_advance_read_model_checkpoint(
     write_read_model_checkpoint(bucket, final_position).await
 }
 
-#[cfg(not(coverage))]
 async fn apply_projection_change(kv: &kv::Store, change: &ProjectionChange) -> Result<(), SchedulerError> {
     match change {
         ProjectionChange::Upsert(view) => {
@@ -688,21 +669,14 @@ fn apply_event_to_read_model_state(
     states: &mut BTreeMap<String, ScheduleStreamState>,
     stream_id: &str,
     event: &v1::ScheduleEvent,
-) -> Result<Option<ProjectionChange>, SchedulerError> {
+) -> Result<ProjectionChange, SchedulerError> {
     let current_state = states.get(stream_id).cloned().unwrap_or_else(initial_state);
-    let next_state = apply(stream_id, current_state.clone(), event).map_err(|source| {
+    let next_state = apply(stream_id, current_state, event).map_err(|source| {
         SchedulerError::event_source("failed to apply schedule event to schedules read model", source)
     })?;
-    let change = projection_change(&current_state, &next_state);
+    let change = ProjectionChange::from(&next_state);
 
-    match next_state {
-        ScheduleStreamState::Present(_) | ScheduleStreamState::Deleted(_) => {
-            states.insert(stream_id.to_string(), next_state);
-        }
-        ScheduleStreamState::Initial => {
-            states.remove(stream_id);
-        }
-    }
+    states.insert(stream_id.to_string(), next_state.into());
 
     Ok(change)
 }

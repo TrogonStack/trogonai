@@ -13,8 +13,6 @@
 //! read. The catch-up checkpoint lives in the shared `jetstream_projection_checkpoint`
 //! table, keyed by [`SCHEDULES_CHECKPOINT_ID`].
 
-#![cfg_attr(coverage, allow(dead_code, unused_imports))]
-
 use std::collections::HashSet;
 
 use buffa::{MessageField, ProtoBox};

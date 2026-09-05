@@ -172,3 +172,6 @@ async fn publish_denial(
         .await
         .map_err(AuthCalloutError::Reply)
 }
+
+#[cfg(test)]
+mod tests;

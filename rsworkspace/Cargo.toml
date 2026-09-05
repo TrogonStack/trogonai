@@ -5,7 +5,7 @@ default-members = ["crates/*/*", "cli/*"]
 
 [workspace.lints.rust]
 warnings = "deny"
-unexpected_cfgs = { level = "deny", check-cfg = ['cfg(coverage)', 'cfg(dylint_lib, values(any()))'] }
+unexpected_cfgs = { level = "deny", check-cfg = ['cfg(coverage)', 'cfg(coverage_nightly)', 'cfg(dylint_lib, values(any()))'] }
 
 [workspace.lints.clippy]
 all = "deny"

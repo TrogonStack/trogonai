@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use trogon_std::NonZeroDuration;
 
-use super::NatsObjectStore;
+use super::{NatsObjectStore, ProvisionObjectStoreError};
 use crate::jetstream::claim_bucket::ClaimBucket;
 use crate::jetstream::claim_check::ClaimResolver;
 use crate::jetstream::claim_retention::ClaimRetention;
@@ -59,6 +59,25 @@ async fn provisioning_an_existing_bucket_reconciles_its_retention() {
         .await
         .expect("re-provision narrower");
     assert_eq!(backing_stream_max_age(&js).await, long.bucket_max_age());
+}
+
+#[tokio::test]
+async fn invalid_bucket_name_preserves_the_creation_error() {
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
+    let result = NatsObjectStore::provision(
+        &js,
+        async_nats::jetstream::object_store::Config {
+            bucket: "invalid.bucket".to_owned(),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert!(matches!(
+        result,
+        Err(ProvisionObjectStoreError::Create(source))
+            if source.kind() == async_nats::jetstream::context::CreateKeyValueErrorKind::InvalidStoreName
+    ));
 }
 
 /// What the binding is for: the bucket a resolver checks incoming claims

@@ -58,3 +58,6 @@ pub use runtime::RuntimeError;
 pub async fn run(args: Args) -> Result<(), RuntimeError> {
     runtime::run_with_args(args, &trogon_std::env::SystemEnv).await
 }
+
+#[cfg(test)]
+mod gateway_test_support;

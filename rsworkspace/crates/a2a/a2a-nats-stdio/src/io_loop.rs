@@ -1,14 +1,9 @@
-// run_io_loop is gated to cfg(not(coverage)); under cfg(coverage) the loop
-// becomes a stub and these imports/helpers go unused. See preamble on
-// `run_io_loop` for the follow-up TODO.
-#![cfg_attr(coverage, allow(dead_code, unused_imports))]
-
 use std::sync::Arc;
 
 use a2a_nats::client::A2aClient;
 use jsonrpc_nats::{CodecError, Message, RequestId, ResponseId, from_json_value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::sync::{Semaphore, mpsc};
+use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tracing::{debug, error, warn};
 use trogon_nats::RequestClient;
@@ -21,17 +16,10 @@ use crate::wire::OutboundFrame;
 /// Returns `Err` when the stdout writer task failed (broken pipe, write/flush
 /// error). Callers should propagate so the process exits non-zero — a stdio
 /// bridge whose downstream parent stopped reading should not pretend success.
-///
-/// Gated behind `cfg(not(coverage))` because the loop's branches include
-/// timing-dependent `tokio::select!` arms (writer-died races, shutdown
-/// preemption) plus truly-unreachable defenses (closed semaphore, infallible
-/// derive serialize) that the cobertura gate cannot reach deterministically.
-/// See `.trogonai/todos/a2a-nats-stdio-io-loop-coverage.internal.trogonai.md`.
-#[cfg(not(coverage))]
 pub async fn run_io_loop<N, J, R, W>(
     client: A2aClient<N, J>,
     stdin: R,
-    mut stdout: W,
+    stdout: W,
     shutdown: impl std::future::Future<Output = ()>,
 ) -> std::io::Result<()>
 where
@@ -46,63 +34,23 @@ where
     R: tokio::io::AsyncRead + Unpin + Send + 'static,
     W: tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
-    let (frame_tx, mut frame_rx) = mpsc::channel::<OutboundFrame>(CHANNEL_CAP);
-
-    let mut writer_task = tokio::spawn(async move {
-        while let Some(frame) = frame_rx.recv().await {
-            // serde_json::to_string failing means the dispatch task already
-            // enqueued a frame the caller will never see. Surface it as an
-            // io::Error so the main loop tears down instead of letting the
-            // stdin caller hang waiting for a reply that was silently dropped.
-            let json = serde_json::to_string(&frame).map_err(|e| {
-                error!(error = %e, "frame serialization failed");
-                std::io::Error::other(e)
-            })?;
-            if let Err(e) = stdout.write_all(json.as_bytes()).await {
-                error!(error = %e, "stdout write failed");
-                return Err(e);
-            }
-            if let Err(e) = stdout.write_all(b"\n").await {
-                error!(error = %e, "stdout write failed");
-                return Err(e);
-            }
-            // Flush per frame so a piped parent doesn't deadlock waiting on a
-            // libc full-buffer that never drains until the next line on stdin
-            // closes the loop.
-            if let Err(e) = stdout.flush().await {
-                error!(error = %e, "stdout flush failed");
-                return Err(e);
-            }
-        }
-        Ok::<(), std::io::Error>(())
-    });
+    let (frame_tx, frame_rx) = mpsc::channel::<OutboundFrame>(CHANNEL_CAP);
+    let mut writer_task = tokio::spawn(write_frames(stdout, frame_rx));
 
     let client = Arc::new(client);
     let mut lines = BufReader::new(stdin).lines();
-    let semaphore = Arc::new(Semaphore::new(MAX_INFLIGHT_DISPATCH));
     let mut dispatch_tasks: JoinSet<()> = JoinSet::new();
+    let mut dispatch_err = None;
 
     tokio::pin!(shutdown);
 
-    // True iff we exited the read loop via the shutdown signal (signal-driven
-    // teardown — abort in-flight stream dispatchers). False iff stdin closed
-    // cleanly (drain in-flight RPCs).
     let mut shutdown_requested = false;
-
-    // Set when the writer task exits — the loop must stop spawning dispatches
-    // whose responses would land in a closed channel. None until detected.
-    let mut writer_err: Option<std::io::Error> = None;
-    // Surface stdin read failures / JoinSet failures alongside the writer
-    // result so callers see the first real error rather than a silent Ok.
+    let mut completed_writer = None;
     let mut loop_err: Option<std::io::Error> = None;
 
     'outer: loop {
         tokio::select! {
-            // `biased;` keeps shutdown priority once the signal fires — without
-            // it, tokio's random branch selection can keep picking buffered
-            // stdin lines (or EOF) and `shutdown_requested` would never flip,
-            // so signal teardown would silently drain streaming tasks instead
-            // of aborting them.
+            // Shutdown must win over buffered stdin and EOF so streams are aborted.
             biased;
             _ = &mut shutdown => {
                 debug!("io_loop received shutdown signal");
@@ -110,10 +58,7 @@ where
                 break 'outer;
             }
             res = &mut writer_task => {
-                // Writer died — no point reading more stdin or dispatching;
-                // responses would be silently dropped. Record the error and
-                // tear down with abort semantics.
-                writer_err = Some(writer_task_err(res));
+                completed_writer = Some(writer_task_result(res));
                 shutdown_requested = true;
                 break 'outer;
             }
@@ -139,10 +84,6 @@ where
                         let (id, method, params) = match parse_inbound(&raw) {
                             Ok(t) => t,
                             Err(err) => {
-                                // Outbound channel may be full while writer is
-                                // back-pressured. Poll the writer handle so
-                                // its death also unsticks us, and stay
-                                // responsive to shutdown.
                                 tokio::select! {
                                     biased;
                                     _ = &mut shutdown => {
@@ -150,7 +91,7 @@ where
                                         break 'outer;
                                     }
                                     res = &mut writer_task => {
-                                        writer_err = Some(writer_task_err(res));
+                                        completed_writer = Some(writer_task_result(res));
                                         shutdown_requested = true;
                                         break 'outer;
                                     }
@@ -160,36 +101,23 @@ where
                             }
                         };
 
-                        // Acquire a dispatch slot before spawning so a fast
-                        // producer can't create unbounded in-flight RPC work.
-                        // Poll shutdown and writer-death alongside acquire so
-                        // a saturated semaphore (e.g. permits held by
-                        // long-lived streams) doesn't strand either signal
-                        // when stdout breaks or shutdown fires.
-                        let permit = tokio::select! {
+                        tokio::select! {
                             biased;
                             _ = &mut shutdown => {
                                 shutdown_requested = true;
                                 break 'outer;
                             }
                             res = &mut writer_task => {
-                                writer_err = Some(writer_task_err(res));
+                                completed_writer = Some(writer_task_result(res));
                                 shutdown_requested = true;
                                 break 'outer;
                             }
-                            p = semaphore.clone().acquire_owned() => match p {
-                                Ok(p) => p,
-                                Err(e) => {
-                                    error!(error = %e, "dispatch semaphore closed");
-                                    break 'outer;
-                                }
-                            }
-                        };
+                            () = wait_for_dispatch_capacity(&mut dispatch_tasks, &mut dispatch_err) => {}
+                        }
                         let client = client.clone();
                         let tx = frame_tx.clone();
                         dispatch_tasks.spawn(async move {
                             dispatch_request(&client, id, &method, params, &tx).await;
-                            drop(permit);
                         });
                     }
                 }
@@ -197,40 +125,26 @@ where
         }
     }
 
-    // On signal-driven shutdown, abort in-flight dispatchers — long-lived
-    // `message/stream` / `tasks/resubscribe` tasks otherwise keep a `tx`
-    // clone alive and the writer never sees frame_rx close. On clean EOF
-    // we let in-flight RPCs drain so their responses reach stdout.
+    // Signal teardown must release streaming senders; EOF must drain replies.
     if shutdown_requested {
         dispatch_tasks.abort_all();
     }
     while let Some(res) = dispatch_tasks.join_next().await {
-        // Aborted joins surface as JoinError on signal-driven teardown; only
-        // record join errors when shutdown wasn't requested so we don't
-        // mistake our own abort for a real failure.
-        if !shutdown_requested && let Err(join_err) = res {
-            loop_err.get_or_insert_with(|| std::io::Error::other(join_err));
+        if let Err(error) = res {
+            dispatch_err.get_or_insert(error);
         }
+    }
+    if !shutdown_requested && let Some(error) = dispatch_err {
+        loop_err.get_or_insert_with(|| std::io::Error::other(error));
     }
     drop(frame_tx);
 
-    // If the writer-died branch fired, writer_err already holds its exit
-    // status — the writer_task handle is consumed. Otherwise await it so any
-    // frames still queued (e.g. dispatch responses produced just before a
-    // stdin read error) finish flushing before we return.
-    let writer_result = if writer_err.is_some() {
-        writer_err.map_or(Ok(()), Err)
-    } else {
-        match writer_task.await {
-            Ok(Ok(())) => Ok(()),
-            Ok(Err(e)) => Err(e),
-            Err(join_err) => Err(std::io::Error::other(join_err)),
-        }
+    let writer_result = match completed_writer {
+        Some(result) => result,
+        None => writer_task_result(writer_task.await),
     };
 
-    // Surface the first real failure: writer error wins (it means stdout was
-    // broken or queued frames were lost), then loop errors (stdin read /
-    // dispatch join), then success.
+    // A failed writer means queued replies were lost, so it takes precedence.
     match (writer_result, loop_err) {
         (Err(e), _) => Err(e),
         (Ok(()), Some(e)) => Err(e),
@@ -238,41 +152,49 @@ where
     }
 }
 
-/// Coverage-build stub mirroring the real `run_io_loop` signature. The body is
-/// empty because the production loop relies on `tokio::select!` races and
-/// truly-unreachable defenses that `cargo cov` cannot reach deterministically.
-/// Tests targeting loop behavior run only under `cfg(not(coverage))`; the
-/// TODO file referenced on the real impl tracks the follow-up.
-#[cfg(coverage)]
-pub async fn run_io_loop<N, J, R, W>(
-    _client: A2aClient<N, J>,
-    _stdin: R,
-    _stdout: W,
-    _shutdown: impl std::future::Future<Output = ()>,
-) -> std::io::Result<()>
-where
-    N: RequestClient + Clone + Send + Sync + 'static,
-    J: JetStreamGetStream + Clone + Send + Sync + 'static,
-    JsMessageOf<J>: JsMessageRef + JsAck<Error: std::fmt::Display + Send + 'static> + Send + 'static,
-    <J as JetStreamGetStream>::Stream: Send + 'static,
-    <<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer: Send + 'static,
-    <<<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Messages: Send + 'static,
-    <<<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::MessagesError: std::fmt::Display + Send + 'static,
-    <<<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::StreamError: std::fmt::Display + Send + 'static,
-    R: tokio::io::AsyncRead + Unpin + Send + 'static,
-    W: tokio::io::AsyncWrite + Unpin + Send + 'static,
-{
+async fn wait_for_dispatch_capacity(tasks: &mut JoinSet<()>, dispatch_err: &mut Option<tokio::task::JoinError>) {
+    // Reaping completed tasks bounds retained join records as well as active work.
+    while tasks.len() >= MAX_INFLIGHT_DISPATCH {
+        if let Some(Err(error)) = tasks.join_next().await {
+            dispatch_err.get_or_insert(error);
+        }
+    }
+}
+
+async fn write_frames<W: tokio::io::AsyncWrite + Unpin>(
+    mut stdout: W,
+    mut frame_rx: mpsc::Receiver<OutboundFrame>,
+) -> std::io::Result<()> {
+    while let Some(frame) = frame_rx.recv().await {
+        // serde_json::to_string failing means the dispatch task already
+        // enqueued a frame the caller will never see. Surface it as an
+        // io::Error so the main loop tears down instead of letting the
+        // stdin caller hang waiting for a reply that was silently dropped.
+        let json = serde_json::to_string(&frame).map_err(|e| {
+            error!(error = %e, "frame serialization failed");
+            std::io::Error::other(e)
+        })?;
+        if let Err(e) = stdout.write_all(json.as_bytes()).await {
+            error!(error = %e, "stdout write failed");
+            return Err(e);
+        }
+        if let Err(e) = stdout.write_all(b"\n").await {
+            error!(error = %e, "stdout write failed");
+            return Err(e);
+        }
+        // Flush per frame so a piped parent doesn't deadlock waiting on a
+        // libc full-buffer that never drains until the next line on stdin
+        // closes the loop.
+        if let Err(e) = stdout.flush().await {
+            error!(error = %e, "stdout flush failed");
+            return Err(e);
+        }
+    }
     Ok(())
 }
 
-/// Collapse the writer task's `Result<Result<(), io::Error>, JoinError>` into a
-/// single `io::Error`. Used by every select arm that polls `&mut writer_task`.
-fn writer_task_err(res: Result<std::io::Result<()>, tokio::task::JoinError>) -> std::io::Error {
-    match res {
-        Ok(Ok(())) => std::io::Error::other("writer task exited unexpectedly"),
-        Ok(Err(e)) => e,
-        Err(join_err) => std::io::Error::other(join_err),
-    }
+fn writer_task_result(res: Result<std::io::Result<()>, tokio::task::JoinError>) -> std::io::Result<()> {
+    res.map_err(std::io::Error::other)?
 }
 
 /// Split JSON-syntax failures (`-32700` Parse error) from envelope-shape
@@ -312,19 +234,9 @@ fn parse_inbound(raw: &str) -> Result<(RequestId, String, serde_json::Value), Bo
     }
 }
 
-// Loop-exercising tests are gated to `cfg(not(coverage))` — see the io_loop
-// preamble. They live in their own module so the helpers/mocks they depend on
-// are also gated out under coverage builds and don't show as uncovered.
-#[cfg(all(test, not(coverage)))]
-mod tests;
-
-// Stub-call test that runs only under `cfg(coverage)` so the empty-body cov
-// stub of `run_io_loop` gets exercised. Mirrors the runtime::run pattern.
-#[cfg(all(test, coverage))]
-mod cov_stub_tests;
-// parse_inbound and writer_task_err tests are cheap and deterministic — they
-// run under every build mode including coverage.
 #[cfg(test)]
 mod parse_tests;
+#[cfg(test)]
+mod tests;
 #[cfg(test)]
 mod writer_err_tests;

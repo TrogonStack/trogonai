@@ -95,14 +95,41 @@ fn ingress_from_agent_wrong_leader_returns_none() {
 #[test]
 fn ingress_agent_method_matches_resolve_subject() {
     let p = pfx();
-    let subject = "a2a.v1.gateway.planner.message.send";
-    let (agent, method_dots) = gateway_ingress_agent_and_method_dots(subject, &p).unwrap();
-    assert_eq!(agent.as_str(), "planner");
-    assert_eq!(method_dots, "message.send");
-    assert_eq!(
-        resolve_gateway_ingress_subject(subject, &p).unwrap(),
-        "a2a.v1.agents.planner.message.send"
-    );
+    for suffix in GATEWAY_INGRESS_METHOD_SUFFIXES {
+        let expected_method = suffix.join(".");
+        let subject = format!("a2a.v1.gateway.planner.{expected_method}");
+        let (agent, method) = gateway_ingress_agent_and_method(&subject, &p).unwrap();
+        let (legacy_agent, method_dots) = gateway_ingress_agent_and_method_dots(&subject, &p).unwrap();
+        assert_eq!(agent.as_str(), "planner");
+        assert_eq!(legacy_agent, agent);
+        assert_eq!(method.as_dotted_suffix(), expected_method);
+        assert_eq!(method_dots, expected_method);
+        assert_eq!(
+            resolve_gateway_ingress_subject(&subject, &p).unwrap(),
+            format!("a2a.v1.agents.planner.{expected_method}")
+        );
+    }
+}
+
+#[test]
+fn typed_ingress_preserves_subject_validation_and_error_precedence() {
+    for subject in [
+        "other.v1.gateway.planner.message.send",
+        "a2a.v1.gateway.",
+        "a2a.v1.gateway...",
+        "a2a.v1.gateway.planner",
+        "a2a.v1.gateway.planner.unknown",
+        "a2a.v1.gateway.acme.planner.message.send",
+        "a2a.v1.gateway.bad*agent.message.send",
+        "a2a.v1.gateway.bad*agent.unknown",
+    ] {
+        let expected = resolve_gateway_ingress_subject(subject, &pfx()).unwrap_err();
+        assert_eq!(gateway_ingress_agent_and_method(subject, &pfx()).unwrap_err(), expected);
+        assert_eq!(
+            gateway_ingress_agent_and_method_dots(subject, &pfx()).unwrap_err(),
+            expected
+        );
+    }
 }
 
 #[test]
@@ -123,7 +150,7 @@ fn compose_rejects_blank_method_suffix() {
 fn invalid_request_payload_produces_stable_jsonrpc_wrapper() {
     let headers = HeaderMap::new();
     let hint = br#"{"jsonrpc":"2.0","id":"x","method":"m"}"#;
-    let encoded = ingress_error_response_wire(&headers, hint, -32600, "bad ingress", None).unwrap();
+    let encoded = ingress_error_response_wire(&headers, hint, -32600, "bad ingress", None);
     let value = to_json_value(&decode(Direction::Response, None, &encoded.headers, &encoded.body).unwrap());
     assert_eq!(value["jsonrpc"], "2.0");
     assert_eq!(value["id"], "x");
@@ -201,21 +228,21 @@ fn parse_error_code(encoded: &jsonrpc_nats::Encoded) -> i64 {
 #[test]
 fn policy_denied_emits_code_minus_32801() {
     let headers = HeaderMap::new();
-    let encoded = ingress_error_response_wire(&headers, b"{}", -32_801, "denied", None).unwrap();
+    let encoded = ingress_error_response_wire(&headers, b"{}", -32_801, "denied", None);
     assert_eq!(parse_error_code(&encoded), -32_801);
 }
 
 #[test]
 fn declarative_denied_emits_code_minus_32803() {
     let headers = HeaderMap::new();
-    let encoded = ingress_error_response_wire(&headers, b"{}", -32_803, "tier1", None).unwrap();
+    let encoded = ingress_error_response_wire(&headers, b"{}", -32_803, "tier1", None);
     assert_eq!(parse_error_code(&encoded), -32_803);
 }
 
 #[test]
 fn aauth_denied_emits_code_minus_32118() {
     let headers = HeaderMap::new();
-    let encoded = ingress_error_response_wire(&headers, b"{}", -32_118, "aauth", None).unwrap();
+    let encoded = ingress_error_response_wire(&headers, b"{}", -32_118, "aauth", None);
     assert_eq!(parse_error_code(&encoded), -32_118);
     // The JSON-RPC-over-NATS binding discriminates errors via this header;
     // a deny reply that drops it is unparseable as an error.
@@ -235,11 +262,11 @@ fn aauth_denied_response_bytes_emits_code_minus_32118() {
     // message round-trips and cross-checks the code against the
     // header-carrying twin built from the same underlying encoder.
     let headers = HeaderMap::new();
-    let bytes = ingress_gateway_aauth_denied_response_bytes(&headers, b"{}", "aauth required").unwrap();
+    let bytes = ingress_gateway_aauth_denied_response_bytes(&headers, b"{}", "aauth required");
     let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(value["error"]["message"], "aauth required");
 
-    let wire = ingress_error_response_wire(&headers, b"{}", -32_118, "aauth required", None).unwrap();
+    let wire = ingress_error_response_wire(&headers, b"{}", -32_118, "aauth required", None);
     assert_eq!(wire.body.as_ref(), bytes.as_ref());
     assert_eq!(
         wire.headers
@@ -258,16 +285,19 @@ fn tier3_refused_emits_code_minus_32802_with_rule() {
         -32_802,
         "refused",
         Some(serde_json::json!({ "rule": "no-pii" })),
-    )
-    .unwrap();
+    );
     let value = to_json_value(&decode(Direction::Response, None, &encoded.headers, &encoded.body).unwrap());
     assert_eq!(value["error"]["code"], -32_802);
     assert_eq!(value["error"]["data"]["rule"], "no-pii");
+    assert_eq!(
+        ingress_gateway_tier3_refused_response_bytes(&headers, b"{}", "refused", "no-pii"),
+        encoded.body
+    );
 }
 
 #[test]
 fn deadline_exceeded_emits_code_minus_32800() {
     let headers = HeaderMap::new();
-    let encoded = ingress_error_response_wire(&headers, b"{}", -32_800, "timeout", None).unwrap();
+    let encoded = ingress_error_response_wire(&headers, b"{}", -32_800, "timeout", None);
     assert_eq!(parse_error_code(&encoded), -32_800);
 }

@@ -171,3 +171,6 @@ impl JetStreamGetStream for NatsJetStreamClient {
     }
 }
 pub type MessagesError = async_nats::jetstream::consumer::pull::MessagesError;
+
+#[cfg(test)]
+mod tests;

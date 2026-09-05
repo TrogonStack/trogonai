@@ -45,16 +45,19 @@
 //! The residual is a transient stale (or briefly missing) schedule that resolves
 //! on the schedule's next event or the next restart.
 
+mod ordered_event_consumer;
+mod ordered_event_stream;
 /// The NATS JetStream KV schedules projector.
 mod schedules;
 
+#[cfg(test)]
+mod replay_tests;
+
 /// The Postgres schedules projector (additive; the NATS KV projector is unchanged).
-#[cfg(all(feature = "postgres", not(coverage)))]
+#[cfg(feature = "postgres")]
 pub mod postgres;
 
-#[cfg(all(feature = "postgres", not(coverage)))]
+#[cfg(feature = "postgres")]
 pub use postgres::{PostgresSchedulesProjection, SchedulesProjector};
-#[cfg(not(coverage))]
 pub(crate) use schedules::storage;
-#[cfg(not(coverage))]
 pub(crate) use schedules::{catch_up_schedules_read_model, project_appended_events};

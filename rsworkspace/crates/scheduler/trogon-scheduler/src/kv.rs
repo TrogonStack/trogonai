@@ -1,8 +1,7 @@
-#![cfg_attr(coverage, allow(dead_code, unused_imports))]
-
 use async_nats::jetstream::{self, kv, stream};
 use trogon_nats::jetstream::{
-    JetStreamGetKeyValue, JetStreamGetStream, is_create_key_value_already_exists, is_create_stream_already_exists,
+    JetStreamCreateKeyValue, JetStreamGetKeyValue, JetStreamGetStream, is_create_key_value_already_exists,
+    is_create_stream_already_exists,
 };
 
 use crate::constants::{COMMAND_SNAPSHOT_BUCKET, EVENTS_DUPLICATE_WINDOW, EVENTS_STREAM, EVENTS_SUBJECT_PATTERN};
@@ -14,7 +13,6 @@ use crate::error::SchedulerError;
 // NATS plumbing: the event stream (also used by the event store), the command
 // snapshot bucket, and the generic create-or-open helper.
 
-#[cfg(not(coverage))]
 pub async fn get_or_create_command_snapshot_bucket(js: &jetstream::Context) -> Result<kv::Store, SchedulerError> {
     get_or_create(
         js,
@@ -27,8 +25,10 @@ pub async fn get_or_create_command_snapshot_bucket(js: &jetstream::Context) -> R
     .await
 }
 
-#[cfg(not(coverage))]
-pub async fn get_or_create(js: &jetstream::Context, config: kv::Config) -> Result<kv::Store, SchedulerError> {
+pub async fn get_or_create<J>(js: &J, config: kv::Config) -> Result<kv::Store, SchedulerError>
+where
+    J: JetStreamCreateKeyValue<Store = kv::Store> + JetStreamGetKeyValue<Store = kv::Store>,
+{
     let name = config.bucket.clone();
     match js.create_key_value(config).await {
         Ok(store) => Ok(store),
@@ -42,7 +42,6 @@ pub async fn get_or_create(js: &jetstream::Context, config: kv::Config) -> Resul
     }
 }
 
-#[cfg(not(coverage))]
 pub async fn get_or_create_events_stream(js: &jetstream::Context) -> Result<stream::Stream, SchedulerError> {
     let config = stream::Config {
         name: EVENTS_STREAM.to_string(),
@@ -61,28 +60,35 @@ pub async fn get_or_create_events_stream(js: &jetstream::Context) -> Result<stre
         ..Default::default()
     };
 
-    let stream = match js.create_stream(config.clone()).await {
-        Ok(stream) => stream,
+    let stream = created_events_stream(js, js.create_stream(config.clone()).await).await?;
+
+    ensure_events_stream_config(js, stream, config).await
+}
+
+async fn created_events_stream<J>(
+    js: &J,
+    created: Result<stream::Stream, jetstream::context::CreateStreamError>,
+) -> Result<stream::Stream, SchedulerError>
+where
+    J: JetStreamGetStream<Stream = stream::Stream>,
+{
+    match created {
+        Ok(stream) => Ok(stream),
         Err(source) if is_create_stream_already_exists(&source) => {
             js.get_stream(EVENTS_STREAM).await.map_err(|source| {
                 SchedulerError::event_source(
                     "failed to get existing events stream after create reported already exists",
                     source,
                 )
-            })?
+            })
         }
-        Err(source) => {
-            return Err(SchedulerError::event_source(
-                "failed to get or create events stream",
-                source,
-            ));
-        }
-    };
-
-    ensure_events_stream_config(js, stream, config).await
+        Err(source) => Err(SchedulerError::event_source(
+            "failed to get or create events stream",
+            source,
+        )),
+    }
 }
 
-#[cfg(not(coverage))]
 async fn ensure_events_stream_config(
     js: &jetstream::Context,
     stream: stream::Stream,
@@ -113,7 +119,6 @@ async fn ensure_events_stream_config(
         .map_err(|source| SchedulerError::event_source("failed to reopen updated events stream", source))
 }
 
-#[cfg(not(coverage))]
 pub async fn open_command_snapshot_bucket<J>(js: &J) -> Result<kv::Store, SchedulerError>
 where
     J: JetStreamGetKeyValue<Store = kv::Store>,
@@ -123,7 +128,6 @@ where
         .map_err(|source| SchedulerError::kv_source("failed to open command snapshot bucket", source))
 }
 
-#[cfg(not(coverage))]
 pub(crate) async fn open_events_stream<J>(js: &J) -> Result<stream::Stream, SchedulerError>
 where
     J: JetStreamGetStream<Stream = stream::Stream>,

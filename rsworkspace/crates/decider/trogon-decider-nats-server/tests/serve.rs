@@ -3,7 +3,6 @@
 //! The unit tests prove each seam in isolation; this one proves they are wired
 //! to each other. A crate whose parts are all individually correct and whose
 //! serve loop never actually replies would pass every one of those tests.
-#![cfg(not(coverage))]
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
 use std::path::{Path, PathBuf};

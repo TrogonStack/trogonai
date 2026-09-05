@@ -1,7 +1,6 @@
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
-#![cfg_attr(coverage, allow(dead_code, unused_imports))]
 
-#[cfg(not(coverage))]
 use {
     anyhow::Result,
     async_nats::jetstream,
@@ -16,8 +15,8 @@ use {
     trogon_telemetry::ServiceName,
 };
 
-#[cfg(not(coverage))]
 #[tokio::main]
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn main() -> Result<()> {
     let (config, nats_config) = base_config(&trogon_std::CliArgs::<Args>::new(), &SystemEnv)?;
     trogon_telemetry::init_logger(ServiceName::TrogonDeciderNatsServer, [], &SystemEnv, &SystemFs);
@@ -44,6 +43,3 @@ async fn main() -> Result<()> {
     result?;
     Ok(())
 }
-
-#[cfg(coverage)]
-fn main() {}
