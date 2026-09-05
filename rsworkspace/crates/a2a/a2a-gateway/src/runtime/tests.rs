@@ -5,6 +5,42 @@ use trogon_std::env::InMemoryEnv;
 
 use super::*;
 
+#[cfg(feature = "spicedb")]
+#[tokio::test]
+async fn startup_preserves_enabled_policy_configuration_failures() {
+    let server = trogon_nats::test_support::CoreTestServer::start().await;
+    for setting in [
+        ("A2A_GATEWAY_TIER1_SPICEDB_ENABLED", "true"),
+        ("A2A_GATEWAY_TIER1_DECLARATIVE_ENABLED", "true"),
+        ("A2A_GATEWAY_AAUTH_MODE", "invalid"),
+    ] {
+        let env = InMemoryEnv::new();
+        env.set(
+            "AUTH_CALLOUT_SIGNING_SECRET",
+            nkeys::KeyPair::new_account().seed().unwrap(),
+        );
+        env.set(setting.0, setting.1);
+        let error = run_with_args(
+            Args {
+                nats_url: server.address().to_owned(),
+                prefix: "a2a".to_owned(),
+                queue_group: None,
+            },
+            &env,
+        )
+        .await
+        .unwrap_err();
+        match setting.0 {
+            "A2A_GATEWAY_TIER1_SPICEDB_ENABLED" => assert!(matches!(error, RuntimeError::Tier1Config(_))),
+            "A2A_GATEWAY_TIER1_DECLARATIVE_ENABLED" => {
+                assert!(matches!(error, RuntimeError::Tier1DeclarativeConfig(_)))
+            }
+            _ => assert!(matches!(error, RuntimeError::AAuthConfig(_))),
+        }
+        assert!(error.source().is_some());
+    }
+}
+
 #[cfg(not(feature = "spicedb"))]
 #[tokio::test(flavor = "current_thread")]
 async fn run_with_args_resolves_config_and_returns_ok() {

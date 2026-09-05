@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 
 use super::*;
 
-fn proxy_endpoint() -> (
+pub(super) fn proxy_endpoint() -> (
     McpNatsProxyService<trogon_nats::AdvancedMockNatsClient>,
     mpsc::Receiver<ProxyCommand>,
 ) {
@@ -239,4 +239,113 @@ async fn proxy_request_wait_is_bounded_by_the_operation_timeout() {
         result.unwrap_err().message,
         "MCP NATS proxy timed out waiting for a response"
     );
+}
+
+#[tokio::test]
+async fn discovery_preserves_supported_versions_and_capabilities() {
+    let (_client, server) = tokio::io::duplex(1024);
+    let running = rmcp::service::serve_directly(NoopServerHandler, server, None);
+    let expected =
+        DiscoverResult::from_server_info(vec![rmcp::model::ProtocolVersion::V_2026_07_28], ServerInfo::default());
+    for reply in [
+        Ok(ServerResult::DiscoverResult(expected.clone())),
+        Ok(ServerResult::empty(())),
+        Err(ErrorData::invalid_params("remote rejection", None)),
+    ] {
+        let (proxy, mut commands) = proxy_endpoint();
+        let mut context = RequestContext::new(RequestId::Number(17), running.peer().clone());
+        context.meta.insert("test.marker".to_owned(), json!("preserved"));
+        let expected_reply = reply.clone();
+        let (result, ()) = tokio::join!(
+            proxy.discover(context),
+            answer_request(&mut commands, "server/discover", json!({}), reply),
+        );
+        match expected_reply {
+            Ok(ServerResult::DiscoverResult(expected)) => assert_eq!(result.unwrap(), expected),
+            Ok(_) => assert!(result.unwrap_err().message.contains("discover")),
+            Err(expected) => assert_eq!(result.unwrap_err(), expected),
+        }
+    }
+}
+
+forwarding_contract!(
+    task_reads_preserve_identity_and_working_status,
+    get_task,
+    "tasks/get",
+    json!({"taskId": "task-1"}),
+    ServerResult::GetTaskResult(GetTaskResult::new(rmcp::model::DetailedTask::new(
+        task(),
+        rmcp::model::TaskPayload::Working,
+    ))),
+    ServerResult::GetTaskResult,
+    GetTaskParams::new("task-1")
+);
+
+forwarding_contract!(
+    task_updates_preserve_input_responses,
+    update_task,
+    "tasks/update",
+    json!({"taskId": "task-1", "inputResponses": {}}),
+    ServerResult::task_ack(()),
+    ServerResult::task_ack,
+    UpdateTaskParams::new("task-1", Default::default())
+);
+
+forwarding_contract!(
+    task_cancellation_preserves_task_identity,
+    cancel_task,
+    "tasks/cancel",
+    json!({"taskId": "task-1"}),
+    ServerResult::task_ack(()),
+    ServerResult::task_ack,
+    CancelTaskParams::new("task-1")
+);
+
+forwarding_contract!(
+    tool_calls_preserve_deferred_task_handles,
+    call_tool,
+    "tools/call",
+    json!({"name": "background"}),
+    ServerResult::CreateTaskResult(rmcp::model::CreateTaskResult::new(task())),
+    ServerResult::from,
+    serde_json::from_value(json!({"name": "background"})).unwrap()
+);
+
+forwarding_contract!(
+    tool_calls_preserve_input_required_request_state,
+    call_tool,
+    "tools/call",
+    json!({"name": "interactive"}),
+    ServerResult::InputRequiredResult(rmcp::model::InputRequiredResult::from_request_state("resume-tool")),
+    ServerResult::from,
+    serde_json::from_value(json!({"name": "interactive"})).unwrap()
+);
+
+forwarding_contract!(
+    prompt_requests_preserve_input_required_request_state,
+    get_prompt,
+    "prompts/get",
+    json!({"name": "interactive"}),
+    ServerResult::InputRequiredResult(rmcp::model::InputRequiredResult::from_request_state("resume-prompt")),
+    ServerResult::from,
+    serde_json::from_value(json!({"name": "interactive"})).unwrap()
+);
+
+forwarding_contract!(
+    resource_reads_preserve_input_required_request_state,
+    read_resource,
+    "resources/read",
+    json!({"uri": "test://interactive"}),
+    ServerResult::InputRequiredResult(rmcp::model::InputRequiredResult::from_request_state("resume-resource")),
+    ServerResult::from,
+    serde_json::from_value(json!({"uri": "test://interactive"})).unwrap()
+);
+
+fn task() -> rmcp::model::Task {
+    rmcp::model::Task::new(
+        "task-1",
+        rmcp::model::TaskStatus::Working,
+        "2026-01-01T00:00:00Z",
+        "2026-01-01T00:00:00Z",
+    )
 }

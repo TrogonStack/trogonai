@@ -12,6 +12,7 @@ use super::*;
 struct RecordingPublisher {
     publishes: Arc<Mutex<Vec<(String, HeaderMap, Bytes)>>>,
     fail_until: Arc<Mutex<u32>>,
+    fail_ack_until: Arc<Mutex<u32>>,
 }
 
 impl RecordingPublisher {
@@ -39,6 +40,11 @@ impl JetStreamPublisher for RecordingPublisher {
             .lock()
             .unwrap()
             .push((subject.to_subject().to_string(), headers, payload));
+        let mut remaining_acks = self.fail_ack_until.lock().unwrap();
+        if *remaining_acks > 0 {
+            *remaining_acks -= 1;
+            return Ok(std::future::ready(Err(std::io::Error::other("simulated ack failure"))));
+        }
         Ok(std::future::ready(Ok(async_nats::jetstream::publish::PublishAck {
             duplicate: false,
             stream: "A2A_PUSH_DLQ".into(),
@@ -295,3 +301,66 @@ async fn mirror_carries_content_type_header_through() {
     let published = js.publishes.lock().unwrap();
     assert_eq!(published[0].1.get("Content-Type").unwrap().as_str(), "application/cbor");
 }
+
+#[tokio::test]
+async fn mirror_retries_failed_ack_without_changing_message_identity() {
+    let js = RecordingPublisher::default();
+    *js.fail_ack_until.lock().unwrap() = 1;
+    let dedup = PushDlqDedupGate::with_capacity(32);
+    let payload = br#"{"idempotency_key":"task-ack:failed"}"#;
+    assert_eq!(
+        mirror_push_dlq_envelope(&js, &prefix(), "a2a.v1.push.dlq.alice.task-ack", None, payload, &dedup).await,
+        MirrorDispatchOutcome::Mirrored
+    );
+    let publishes = js.publishes.lock().unwrap();
+    assert_eq!(publishes.len(), 2);
+    assert_eq!(publishes[0], publishes[1]);
+    assert_eq!(publishes[1].1.get("Content-Type").unwrap().as_str(), "application/json");
+}
+
+#[tokio::test]
+async fn mirror_releases_key_after_ack_failures_so_redelivery_can_recover() {
+    let js = RecordingPublisher::default();
+    *js.fail_ack_until.lock().unwrap() = MAX_PUBLISH_RETRIES;
+    let dedup = PushDlqDedupGate::with_capacity(32);
+    let payload = br#"{"idempotency_key":"task-ack:failed"}"#;
+    assert_eq!(
+        mirror_push_dlq_envelope(&js, &prefix(), "a2a.v1.push.dlq.alice.task-ack", None, payload, &dedup).await,
+        MirrorDispatchOutcome::PublishFailed
+    );
+    assert_eq!(
+        mirror_push_dlq_envelope(&js, &prefix(), "a2a.v1.push.dlq.alice.task-ack", None, payload, &dedup).await,
+        MirrorDispatchOutcome::Mirrored
+    );
+}
+
+#[tokio::test]
+async fn mirror_skips_invalid_envelopes_and_unrelated_subjects_without_publishing() {
+    let js = RecordingPublisher::default();
+    let dedup = PushDlqDedupGate::with_capacity(32);
+    for payload in [
+        b"not-json".as_slice(),
+        br#"{"idempotency_key":""}"#,
+        br#"{"idempotency_key":42}"#,
+    ] {
+        assert_eq!(
+            mirror_push_dlq_envelope(&js, &prefix(), "a2a.v1.push.dlq.alice.task-1", None, payload, &dedup).await,
+            MirrorDispatchOutcome::Skipped
+        );
+    }
+    assert_eq!(
+        mirror_push_dlq_envelope(
+            &js,
+            &prefix(),
+            "unrelated.subject",
+            None,
+            br#"{"idempotency_key":"key"}"#,
+            &dedup
+        )
+        .await,
+        MirrorDispatchOutcome::Skipped
+    );
+    assert!(js.publishes.lock().unwrap().is_empty());
+}
+
+mod consumer_tests;

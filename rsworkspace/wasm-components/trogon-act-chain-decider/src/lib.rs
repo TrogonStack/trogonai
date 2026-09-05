@@ -14,6 +14,9 @@ use trogon_decider_guest_sdk::export_decider;
 
 pub mod constants;
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct RunTwoStepPlan {
     pub stream_id: String,

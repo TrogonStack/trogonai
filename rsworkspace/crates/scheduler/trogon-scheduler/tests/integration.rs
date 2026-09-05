@@ -6,13 +6,14 @@ use async_nats::Request;
 use async_nats::jetstream;
 use chrono::{DateTime, Utc};
 use trogon_decider_runtime::{CommandExecution, ReadFrom, ReadStreamRequest, StreamRead, TokioSnapshotTaskScheduler};
-use trogon_nats::{NatsConfig, connect as nats_connect};
 use trogon_scheduler::{
     CreateSchedule, GetScheduleCommand, ListSchedulesCommand, PauseSchedule, RecordScheduleOccurrence, RemoveSchedule,
     ResumeSchedule, ScheduleEventCase, ScheduleEventSchedule, ScheduleEventStatus, ScheduleId, ScheduleNextOccurrence,
     commands::domain as command_domain, connect_store, get_schedule, list_schedules, state_v1, v1,
 };
-use trogon_std::env::{ReadEnv, SystemEnv};
+
+#[path = "support/nats.rs"]
+mod nats_support;
 
 fn fixture_schedule_id(label: &str) -> String {
     match label {
@@ -33,52 +34,12 @@ fn fixture_schedule_id(label: &str) -> String {
     .to_string()
 }
 
-fn test_url() -> String {
-    SystemEnv
-        .var("NATS_TEST_URL")
-        .unwrap_or_else(|_| "nats://localhost:4222".to_string())
-}
-
 fn command_schedule_id(id: &str) -> command_domain::ScheduleId {
     command_domain::ScheduleId::parse(&fixture_schedule_id(id)).unwrap()
 }
 
 fn query_schedule_id(id: &str) -> ScheduleId {
     ScheduleId::parse(&fixture_schedule_id(id)).unwrap()
-}
-
-async fn connect() -> async_nats::Client {
-    let config = NatsConfig::from_url(test_url());
-    nats_connect(&config, Duration::from_secs(10))
-        .await
-        .expect("failed to connect to NATS")
-}
-
-async fn connect_js() -> (async_nats::Client, jetstream::Context) {
-    let nats = connect().await;
-    let js = jetstream::new(nats.clone());
-    (nats, js)
-}
-
-async fn reset_state(js: &jetstream::Context) {
-    let _ = js.delete_stream(trogon_scheduler::constants::EVENTS_STREAM).await;
-    if let Ok(kv) = js.get_key_value(trogon_scheduler::SCHEDULES_BUCKET).await {
-        let mut keys = kv.keys().await.unwrap();
-        while let Some(result) = futures::StreamExt::next(&mut keys).await {
-            let key = result.unwrap();
-            let _ = kv.purge(key).await;
-        }
-    }
-    if let Ok(kv) = js
-        .get_key_value(trogon_scheduler::constants::COMMAND_SNAPSHOT_BUCKET)
-        .await
-    {
-        let mut keys = kv.keys().await.unwrap();
-        while let Some(result) = futures::StreamExt::next(&mut keys).await {
-            let key = result.unwrap();
-            let _ = kv.purge(key).await;
-        }
-    }
 }
 
 fn base_schedule(id: &str) -> CreateSchedule {
@@ -99,9 +60,8 @@ fn base_schedule(id: &str) -> CreateSchedule {
 }
 
 #[tokio::test]
-#[ignore = "requires nightly NATS scheduler"]
 async fn raw_js_info_request_with_explicit_inbox_works() {
-    let nats = connect().await;
+    let (_server, nats) = nats_support::start().await;
     let inbox = nats.new_inbox();
     let response = nats
         .send_request(
@@ -119,10 +79,8 @@ async fn raw_js_info_request_with_explicit_inbox_works() {
 }
 
 #[tokio::test]
-#[ignore = "requires NATS test broker"]
 async fn event_store_rebuilds_current_state_for_new_client() {
-    let (nats, js) = connect_js().await;
-    reset_state(&js).await;
+    let (_server, nats) = nats_support::start().await;
 
     let store = connect_store(nats.clone()).await.unwrap();
     let mut job = base_schedule("eventful");
@@ -154,10 +112,8 @@ async fn event_store_rebuilds_current_state_for_new_client() {
 }
 
 #[tokio::test]
-#[ignore = "requires NATS test broker"]
 async fn removed_schedule_reads_back_as_absent() {
-    let (nats, js) = connect_js().await;
-    reset_state(&js).await;
+    let (_server, nats) = nats_support::start().await;
     let store = connect_store(nats.clone()).await.unwrap();
 
     let id = command_schedule_id("retired");
@@ -201,10 +157,8 @@ async fn removed_schedule_reads_back_as_absent() {
 }
 
 #[tokio::test]
-#[ignore = "requires NATS test broker"]
 async fn catch_up_rebuilds_read_model_after_a_multi_event_append() {
-    let (nats, js) = connect_js().await;
-    reset_state(&js).await;
+    let (_server, nats) = nats_support::start().await;
     let store = connect_store(nats.clone()).await.unwrap();
 
     // A recurring schedule recording an occurrence appends two events at once
@@ -292,10 +246,9 @@ async fn purge_schedules_bucket(js: &jetstream::Context) {
 }
 
 #[tokio::test]
-#[ignore = "requires NATS test broker"]
 async fn projection_preserves_canonical_schedule_ids_through_live_and_catch_up() {
-    let (nats, js) = connect_js().await;
-    reset_state(&js).await;
+    let (_server, nats) = nats_support::start().await;
+    let js = jetstream::new(nats.clone());
     let store = connect_store(nats.clone()).await.unwrap();
 
     let labels = ["report-v2", "orders-created", "namespace-thing", "nightly"];
@@ -352,10 +305,9 @@ async fn projection_preserves_canonical_schedule_ids_through_live_and_catch_up()
 }
 
 #[tokio::test]
-#[ignore = "requires NATS test broker"]
 async fn completed_recurring_schedule_is_marked_completed_in_read_model() {
-    let (nats, js) = connect_js().await;
-    reset_state(&js).await;
+    let (_server, nats) = nats_support::start().await;
+    let js = jetstream::new(nats.clone());
     let store = connect_store(nats.clone()).await.unwrap();
 
     // A single-occurrence recurrence whose only occurrence is already in the past
@@ -417,10 +369,9 @@ async fn completed_recurring_schedule_is_marked_completed_in_read_model() {
 }
 
 #[tokio::test]
-#[ignore = "requires NATS test broker"]
 async fn catch_up_reconcile_removes_rows_absent_from_the_folded_state() {
-    let (nats, js) = connect_js().await;
-    reset_state(&js).await;
+    let (_server, nats) = nats_support::start().await;
+    let js = jetstream::new(nats.clone());
     let store = connect_store(nats.clone()).await.unwrap();
     CommandExecution::new(&store.event_store, &base_schedule("alpha"))
         .execute()
@@ -476,16 +427,16 @@ async fn catch_up_reconcile_removes_rows_absent_from_the_folded_state() {
 }
 
 #[tokio::test]
-#[ignore = "requires NATS test broker"]
 async fn catch_up_self_heals_from_a_corrupt_checkpoint() {
-    let (nats, js) = connect_js().await;
-    reset_state(&js).await;
+    let (_server, nats) = nats_support::start().await;
+    let js = jetstream::new(nats.clone());
     let store = connect_store(nats.clone()).await.unwrap();
     CommandExecution::new(&store.event_store, &base_schedule("durable"))
         .execute()
         .await
         .unwrap();
 
+    purge_schedules_bucket(&js).await;
     // Corrupt the checkpoint value: a non-numeric checkpoint must not wedge startup.
     let kv = js.get_key_value(trogon_scheduler::SCHEDULES_BUCKET).await.unwrap();
     kv.put(
@@ -494,7 +445,6 @@ async fn catch_up_self_heals_from_a_corrupt_checkpoint() {
     )
     .await
     .unwrap();
-    purge_schedules_bucket(&js).await;
 
     // A fresh client treats the corrupt checkpoint as 0 and rebuilds.
     let fresh = connect_store(nats).await.unwrap();
@@ -510,10 +460,8 @@ async fn catch_up_self_heals_from_a_corrupt_checkpoint() {
 }
 
 #[tokio::test]
-#[ignore = "requires NATS test broker"]
 async fn commands_execute_full_lifecycle_against_event_store() {
-    let (nats, js) = connect_js().await;
-    reset_state(&js).await;
+    let (_server, nats) = nats_support::start().await;
     let store = connect_store(nats.clone()).await.unwrap();
 
     let job = base_schedule("lifecycle");

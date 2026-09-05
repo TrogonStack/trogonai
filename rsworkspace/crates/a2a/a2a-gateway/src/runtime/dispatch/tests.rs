@@ -1,5 +1,7 @@
 mod aauth_tests;
 mod fixture;
+mod pressure_tests;
+mod signed_auth_tests;
 mod streaming_tests;
 
 use std::sync::Arc;

@@ -252,5 +252,6 @@ fn snapshot_id_from_snapshot_key_rejects_empty_suffix() {
     );
 }
 
+mod kv_failure_tests;
 mod kv_live_tests;
 mod kv_operations_tests;

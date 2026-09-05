@@ -16,6 +16,9 @@ mod parse;
 mod pipeline;
 mod render;
 
+#[cfg(test)]
+mod main_tests;
+
 use {
     acp_nats::AgentHandler,
     acp_port::{AcpBridge, AcpPort, SessionMethods},

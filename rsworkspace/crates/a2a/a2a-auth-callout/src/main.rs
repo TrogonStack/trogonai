@@ -14,6 +14,9 @@ use {
     trogon_std::env::{ReadEnv, SystemEnv},
 };
 
+#[cfg(test)]
+mod main_tests;
+
 fn split_env_list(env: &impl ReadEnv, name: &str) -> Vec<String> {
     env.var(name)
         .ok()

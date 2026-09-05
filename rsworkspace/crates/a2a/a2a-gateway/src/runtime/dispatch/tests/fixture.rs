@@ -105,6 +105,10 @@ pub struct DispatchFixture<S = CoreTestServer> {
 }
 
 impl DispatchFixture {
+    pub fn broker_address(&self) -> &str {
+        self._server.address()
+    }
+
     pub async fn new() -> TestResult<Self> {
         let server = CoreTestServer::start().await;
         let client = async_nats::connect(server.address()).await?;

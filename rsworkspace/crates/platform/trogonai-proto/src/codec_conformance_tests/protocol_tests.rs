@@ -1,9 +1,10 @@
-use buffa::{DecodeError, Message};
+use buffa::{DecodeError, Enumeration, Message};
 use serde_json::json;
 
-use super::{assert_json_codec, assert_malformed, assert_wire_codec};
+use super::{assert_json_codec, assert_malformed, assert_proto_sequence, assert_wire_codec};
+use crate::google::rpc::Code;
 use crate::grpc_nats_micro::v1::{FailRequest, FailResponse, SayRequest, SayResponse};
-use crate::nats::micro::v1alpha1::{MethodOptions, ServiceOptions};
+use crate::nats::micro::v1alpha1::{ContentType, MethodOptions, ServiceOptions};
 
 #[test]
 fn echo_wire_distinguishes_absent_from_explicit_empty() {
@@ -73,4 +74,68 @@ fn invalid_wire_tags_and_scalar_encodings_have_typed_failures() {
         &[0x08, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80],
         DecodeError::VarintTooLong,
     );
+}
+
+#[test]
+fn explicit_rpc_defaults_are_present_even_when_built_without_json() {
+    let request = SayRequest::default().with_message("");
+    assert_wire_codec(b"\x0a\x00", &request);
+    assert_wire_codec(b"\x0a\x00", &SayResponse::default().with_message(""));
+    assert_wire_codec(b"\x0a\x00", &FailResponse::default().with_message(""));
+    let failure = FailRequest::default().with_code(Code::OK).with_message("");
+    assert_wire_codec(b"\x08\x00\x12\x00", &failure);
+    assert_eq!(
+        serde_json::to_value(failure).expect("explicit defaults"),
+        json!({"code": "OK", "message": ""})
+    );
+
+    let options = ServiceOptions::default().with_version("").with_description("");
+    assert_wire_codec(b"\x1a\x00\x22\x00", &options);
+    assert_eq!(
+        serde_json::to_value(options).expect("explicit discovery defaults"),
+        json!({"version": "", "description": ""})
+    );
+}
+
+#[test]
+fn content_type_configuration_accepts_defined_names_and_numbers_only() {
+    let expected = [
+        (ContentType::Unspecified, 0, "CONTENT_TYPE_UNSPECIFIED"),
+        (ContentType::Protobuf, 1, "CONTENT_TYPE_PROTOBUF"),
+        (ContentType::Json, 2, "CONTENT_TYPE_JSON"),
+    ];
+    assert_eq!(ContentType::values(), expected.map(|(kind, _, _)| kind));
+    assert_proto_sequence(
+        expected.map(|(kind, _, _)| kind).to_vec(),
+        json!(expected.map(|(_, _, name)| name)),
+    );
+    for (kind, number, name) in expected {
+        assert_eq!(ContentType::from_i32(number), Some(kind));
+        assert_eq!(kind.to_i32(), number);
+        assert_eq!(kind.proto_name(), name);
+        assert_eq!(
+            serde_json::from_value::<ContentType>(json!(number)).expect("numeric content type"),
+            kind
+        );
+        assert_eq!(
+            serde_json::from_value::<ContentType>(json!(name)).expect("named content type"),
+            kind
+        );
+        assert_eq!(serde_json::to_value(kind).expect("canonical content type"), json!(name));
+    }
+    assert_eq!(
+        serde_json::from_value::<ContentType>(json!(null)).expect("unspecified content type"),
+        ContentType::Unspecified
+    );
+    for invalid in [
+        json!(-1),
+        json!(3),
+        json!(i64::MIN),
+        json!(u64::MAX),
+        json!("FUTURE"),
+        json!({}),
+        json!(true),
+    ] {
+        assert!(serde_json::from_value::<ContentType>(invalid).is_err());
+    }
 }
