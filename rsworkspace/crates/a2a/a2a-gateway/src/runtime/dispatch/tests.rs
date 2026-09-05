@@ -11,6 +11,7 @@ use a2a_redaction::{SkillId, WasmBundlePath};
 use serde_json::{Value, json};
 
 use crate::constants::{ENV_GATEWAY_JWT_AUDIENCE, ENV_GATEWAY_TRUST_CALLER_HEADERS, ENV_TIER3_REDACTION_ENABLED};
+use crate::gateway_test_support::Diagnostics;
 use crate::policy::spicedb_tier1::Tier1AuthorizeOutcome;
 use crate::policy::tier1_declarative::RealTier1DeclarativeGate;
 use crate::policy::tier1_declarative::bundle::{
@@ -95,10 +96,13 @@ async fn untrusted_caller_headers_cannot_change_audit_attribution() -> TestResul
 
 #[tokio::test]
 async fn requests_without_reply_inbox_are_not_dispatched_or_audited() -> TestResult {
+    let diagnostics = Diagnostics::both_outputs();
     let mut fixture = DispatchFixture::new().await?;
     let mut message = request("message.send", json!({}));
     message.reply = None;
+    let payload_len = message.payload.len().to_string();
     fixture.dispatch(message).await;
+    diagnostics.assert_event("gateway ingress envelope received", &[("payload_len", &payload_len)]);
     assert_empty(&fixture.client, &mut fixture.agents, "a2a.v1.agents.barrier").await?;
     assert_empty(&fixture.client, &mut fixture.replies, "_INBOX.dispatch").await?;
     assert_empty(&fixture.client, &mut fixture.audits, "a2a.v1.audit.barrier").await
@@ -106,6 +110,7 @@ async fn requests_without_reply_inbox_are_not_dispatched_or_audited() -> TestRes
 
 #[tokio::test]
 async fn invalid_route_replies_with_correlated_invalid_request() -> TestResult {
+    let diagnostics = Diagnostics::both_outputs();
     let mut fixture = DispatchFixture::new().await?;
     for subject in ["other.v1.gateway.bot.message.send", "a2a.v1.gateway.bot.unknown"] {
         let mut message = request("message.send", json!({}));
@@ -113,6 +118,10 @@ async fn invalid_route_replies_with_correlated_invalid_request() -> TestResult {
         fixture.dispatch(message).await;
         fixture.denied(-32600, json!("request-7")).await?;
     }
+    diagnostics.assert_event(
+        "gateway ingress subject routing failed",
+        &[("ingress.subject", "a2a.v1.gateway.bot.unknown")],
+    );
     Ok(())
 }
 
@@ -359,6 +368,7 @@ impl Tier3RedactionGate for RejectingGate {
 
 #[tokio::test]
 async fn tier3_rewrites_forwarded_payload_and_records_redaction_with_route() -> TestResult {
+    let diagnostics = Diagnostics::both_outputs();
     let mut fixture = DispatchFixture::new().await?;
     fixture.env.set(ENV_TIER3_REDACTION_ENABLED, "true");
     fixture.policy.tier3_gate = Arc::new(RedactingGate {
@@ -377,11 +387,16 @@ async fn tier3_rewrites_forwarded_payload_and_records_redaction_with_route() -> 
     assert_eq!(audit["rules_fired"][2], "gateway.tier3.redacted");
     assert_eq!(audit["rewrites"][1], "pii:Masked@$.params.secret");
     assert!(!serde_json::to_string(&audit)?.contains("confidential"));
+    diagnostics.assert_event(
+        "gateway tier-3 redaction applied before forward",
+        &[("caller_id", "alice"), ("method", "message/send"), ("count", "1")],
+    );
     Ok(())
 }
 
 #[tokio::test]
 async fn tier3_refusal_and_engine_failure_fail_closed_with_distinct_protocol_errors() -> TestResult {
+    let diagnostics = Diagnostics::both_outputs();
     let mut fixture = DispatchFixture::new().await?;
     for (decision, code, tier3, rule) in [
         (
@@ -414,6 +429,14 @@ async fn tier3_refusal_and_engine_failure_fail_closed_with_distinct_protocol_err
         assert_eq!(audit["tier3_decision"], tier3);
         assert_eq!(audit["rules_fired"], json!([rule]));
     }
+    diagnostics.assert_event(
+        "gateway tier-3 skill refused part redaction",
+        &[("caller_id", "alice"), ("method", "message/send"), ("skill_id", "pii")],
+    );
+    diagnostics.assert_event(
+        "gateway tier-3 redaction engine failed closed",
+        &[("caller_id", "alice"), ("method", "message/send"), ("skill_id", "pii")],
+    );
     Ok(())
 }
 

@@ -1,3 +1,5 @@
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 use {
     a2a_auth_callout::credentials::mtls::MTlsVerifier,
     a2a_auth_callout::credentials::mtls::{TrustAnchorPem, X509MtlsVerifier},
@@ -78,6 +80,7 @@ fn build_mtls_verifier(env: &impl ReadEnv) -> Option<Arc<dyn MTlsVerifier>> {
 }
 
 #[tokio::main]
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(

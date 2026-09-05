@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 
 use super::assert_json_codec;
 use super::retained_fixture::retained_detail;
+use crate::r#gen::elixirpb::{FileOptions, FileOptionsOwnedView, FileOptionsView};
 use crate::r#gen::trogon::error::v1alpha1::field_options::ValuePolicyView;
 use crate::r#gen::trogon::error::v1alpha1::message_options::{
     HelpLink, HelpLinkOwnedView, HelpLinkView, MetadataEntry, MetadataEntryOwnedView, MetadataEntryView, Template,
@@ -121,6 +122,19 @@ fn field_policy_ownership_distinguishes_empty_fallback_from_fixed_value() {
         |handle| {
             assert_eq!(handle.visibility(), Visibility::Unspecified);
             assert!(handle.value_policy().is_none());
+        }
+    );
+}
+
+#[test]
+fn package_override_survives_retained_buffer_transfer_and_source_reuse() {
+    retained_detail!(
+        FileOptions,
+        FileOptionsOwnedView,
+        FileOptionsView<'static>,
+        json!({"modulePrefix": "Example"}),
+        |handle| {
+            assert_eq!(handle.module_prefix(), Some("Example"));
         }
     );
 }

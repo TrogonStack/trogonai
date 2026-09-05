@@ -4,6 +4,7 @@ use bytes::Bytes;
 use trogon_nats::test_support::JetStreamTestServer;
 
 use super::*;
+use crate::gateway_test_support::Diagnostics;
 
 const WAIT: Duration = Duration::from_secs(10);
 
@@ -135,6 +136,7 @@ async fn pull_routes_by_caller_and_principal_and_terminates_unroutable_records()
 
 #[tokio::test]
 async fn pull_recovers_when_the_events_stream_is_provisioned_after_startup() {
+    let diagnostics = Diagnostics::both_outputs();
     let server = JetStreamTestServer::start().await;
     let client = server.client().await;
     let js = jetstream::new(client.clone());
@@ -171,6 +173,20 @@ async fn pull_recovers_when_the_events_stream_is_provisioned_after_startup() {
         .await
         .unwrap()
         .unwrap();
+    diagnostics.assert_event(
+        "gateway events pull consumer started",
+        &[
+            ("durable", "A2A_GATEWAY_EVENTS"),
+            ("max_ack_pending", "8"),
+            ("fetch_batch", "8"),
+            ("fetch_heartbeat_secs", "1"),
+            ("max_inflight_per_caller", "1"),
+        ],
+    );
+    diagnostics.assert_event(
+        "gateway events pull cycle failed; backing off",
+        &[("durable", "A2A_GATEWAY_EVENTS"), ("backoff_ms", "250")],
+    );
 }
 
 #[tokio::test]

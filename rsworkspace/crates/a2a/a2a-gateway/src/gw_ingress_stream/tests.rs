@@ -334,3 +334,5 @@ fn caller_inflight_gate_drop_removes_empty_bucket() {
     assert!(!gate.inflight.lock().unwrap().contains_key("bot"));
 }
 mod startup_tests;
+
+mod delivery_tests;

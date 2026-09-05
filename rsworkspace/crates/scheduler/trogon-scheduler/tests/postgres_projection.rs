@@ -6,7 +6,10 @@ use std::collections::HashSet;
 use buffa::MessageField;
 use buffa_types::google::protobuf::{Duration, Timestamp};
 use sqlx::Row;
-use trogon_scheduler::{GetScheduleCommand, ListSchedulesCommand, ScheduleId, projection_queries, projections_v1};
+use trogon_scheduler::{
+    GetScheduleCommand, ListSchedulesCommand, PostgresSchedulesProjection, ScheduleId, projection_queries,
+    projections_v1,
+};
 
 fn fixture_schedule_id(label: &str) -> String {
     match label {
@@ -428,5 +431,55 @@ async fn incomplete_columns_and_malformed_headers_do_not_hide_valid_rows() {
         let listed = store.list_projections().await.unwrap();
         assert_eq!(listed.len(), 1, "{corruption}");
         assert_eq!(listed[0].schedule_id, fixture_schedule_id("ok"));
+    }
+}
+
+#[tokio::test]
+async fn query_listing_skips_a_binary_payload_the_storage_layer_can_read() {
+    let (_container, store) = start().await;
+    store.upsert_projection(&schedule_projection("ok")).await.unwrap();
+    let mut binary = schedule_projection("binary");
+    binary.message = MessageField::some(projections_v1::Message {
+        content: MessageField::some(trogonai_proto::content::v1alpha1::Content {
+            content_type: "application/octet-stream".to_string(),
+            data: vec![0xff],
+        }),
+        headers: Vec::new(),
+    });
+    store.upsert_projection(&binary).await.unwrap();
+    assert_eq!(store.list_projections().await.unwrap().len(), 2);
+
+    let schedules = projection_queries::list_schedules(&store, ListSchedulesCommand)
+        .await
+        .unwrap();
+
+    assert_eq!(schedules.len(), 1);
+    assert_eq!(schedules[0].id, fixture_schedule_id("ok"));
+}
+
+#[tokio::test]
+async fn future_schema_discriminators_do_not_hide_supported_rows() {
+    let (_container, store) = start().await;
+    store.upsert_projection(&schedule_projection("ok")).await.unwrap();
+    sqlx::query("ALTER TABLE schedules_projection DROP CONSTRAINT schedules_projection_schedule_kind_check, ADD CONSTRAINT schedules_projection_schedule_kind_check CHECK (schedule_kind IN ('at', 'every', 'cron', 'rrule', 'future'))")
+        .execute(store.pool()).await.unwrap();
+    sqlx::query("ALTER TABLE schedules_projection DROP CONSTRAINT schedules_projection_delivery_kind_check, ADD CONSTRAINT schedules_projection_delivery_kind_check CHECK (delivery_kind IN ('nats_message', 'future'))")
+        .execute(store.pool()).await.unwrap();
+    for update in [
+        "UPDATE schedules_projection SET schedule_kind = 'future' WHERE schedule_id = $1",
+        "UPDATE schedules_projection SET delivery_kind = 'future' WHERE schedule_id = $1",
+    ] {
+        store.upsert_projection(&schedule_projection("broken")).await.unwrap();
+        sqlx::query(update)
+            .bind(fixture_schedule_id("broken"))
+            .execute(store.pool())
+            .await
+            .unwrap();
+        assert!(store.get_projection(&id("broken")).await.is_err());
+        let listed = projection_queries::list_schedules(&store, ListSchedulesCommand)
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, fixture_schedule_id("ok"));
     }
 }

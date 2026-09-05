@@ -1,7 +1,7 @@
 use buffa::{DecodeError, Enumeration, Message};
 use serde_json::json;
 
-use super::{assert_json_codec, assert_malformed, assert_proto_sequence, assert_wire_codec};
+use super::{assert_collection_limit, assert_json_codec, assert_malformed, assert_proto_sequence, assert_wire_codec};
 use crate::google::rpc::Code;
 use crate::grpc_nats_micro::v1::{FailRequest, FailResponse, SayRequest, SayResponse};
 use crate::nats::micro::v1alpha1::{ContentType, MethodOptions, ServiceOptions};
@@ -53,6 +53,12 @@ fn discovery_options_preserve_metadata_and_content_type_policy() {
     let merged: MethodOptions = serde_json::from_value(json!({"metadata": {"region": "east", "owner": "scheduler"}}))
         .expect("merged endpoint metadata");
     assert_wire_codec(&[first.encode_to_vec(), second.encode_to_vec()].concat(), &merged);
+}
+
+#[test]
+fn discovery_metadata_cannot_bypass_collection_memory_limits_with_empty_entries() {
+    assert_collection_limit::<ServiceOptions>(b"\x2a\x00");
+    assert_collection_limit::<MethodOptions>(b"\x1a\x00");
 }
 
 #[test]

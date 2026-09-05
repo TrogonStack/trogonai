@@ -1,6 +1,6 @@
 use std::error::Error;
 use std::io::ErrorKind;
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 use std::{ffi::OsString, os::unix::ffi::OsStringExt};
 
 use a2a_redaction::signed_bundle::{Ed25519PublicKey, verify_signed_bundle};
@@ -81,13 +81,58 @@ fn discovery_sorts_skills_and_skips_other_extensions() -> Result<(), Box<dyn Err
     Ok(())
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 #[test]
-fn discovery_skips_non_utf8_skill_names() -> Result<(), Box<dyn Error>> {
-    let dir = tempfile::tempdir()?;
-    fs::write(dir.path().join(OsString::from_vec(b"\xff.wasm".to_vec())), [])?;
+fn discovery_skips_non_utf8_skill_paths() -> Result<(), Box<dyn Error>> {
+    let dir = Path::new("skills");
+    let entries = [
+        Ok(dir.join(OsString::from_vec(b"\xff.wasm".to_vec()))),
+        Ok(dir.join("valid.wasm")),
+    ];
 
-    assert!(discover_skills(dir.path())?.is_empty());
+    assert_eq!(discover_skill_paths(dir, entries)?, [SkillId::new("valid")?]);
+    Ok(())
+}
+
+#[test]
+fn discovery_preserves_iterator_failure_without_returning_partial_skills() {
+    let dir = Path::new("skills");
+    let entries = [
+        Ok(dir.join("alpha.wasm")),
+        Err(std::io::Error::from(ErrorKind::PermissionDenied)),
+    ];
+    assert!(matches!(
+        discover_skill_paths(dir, entries),
+        Err(CliError::ReadDirEntry { path, source }) if path == dir && source.kind() == ErrorKind::PermissionDenied
+    ));
+}
+
+struct BrokenSignatureWriter;
+
+impl std::io::Write for BrokenSignatureWriter {
+    fn write(&mut self, _bytes: &[u8]) -> std::io::Result<usize> {
+        Err(std::io::Error::from(ErrorKind::BrokenPipe))
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn signature_write_reports_output_path_and_underlying_io_failure() -> Result<(), Box<dyn Error>> {
+    let skill = SkillId::new("demo")?;
+    let envelope = SignedBundleManifest::new(
+        &skill,
+        Sha256Digest::hash(b"manifest"),
+        Sha256Digest::hash(b"wasm"),
+        Ed25519Signature::from_bytes([0; 64]),
+    );
+    let path = Path::new("skills/demo.sig");
+    assert!(matches!(
+        write_signature(BrokenSignatureWriter, path, &envelope),
+        Err(CliError::WriteSignature { path: actual, source }) if actual == path && source.io_error_kind() == Some(ErrorKind::BrokenPipe)
+    ));
     Ok(())
 }
 

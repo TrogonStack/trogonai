@@ -9,6 +9,34 @@ use crate::constants::{ENV_GATEWAY_UNARY_DEADLINE_SECS, ENV_TIER3_REDACTION_ENAB
 use super::fixture::{DispatchFixture, TestResult, receive, request};
 
 #[tokio::test]
+async fn a_closed_reply_connection_reports_the_failed_ingress_response() -> TestResult {
+    let mut fixture = DispatchFixture::new().await?;
+    let drained = async_nats::connect(fixture.broker_address()).await?;
+    drained.drain().await.expect("start connection drain");
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while drained.publish("drain.probe", Bytes::new()).await.is_ok() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await?;
+    fixture.client = drained;
+    let events = trogon_std::log_capture::CapturedEvents::new();
+    let _capture = events.install(trogon_std::log_capture::LevelFilter::DEBUG);
+    let mut message = request("unknown.method", json!({}));
+    message.subject = "a2a.v1.gateway.bot.unknown.method".into();
+    fixture.dispatch(message).await;
+    assert!(
+        events
+            .events()
+            .iter()
+            .any(|event| event.message() == Some("gateway failed to publish ingress error reply"))
+    );
+    let observer = async_nats::connect(fixture.broker_address()).await?;
+    super::fixture::assert_empty(&observer, &mut fixture.agents, "a2a.v1.agents.barrier").await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn a_saturated_connection_queue_expires_without_forwarding_the_request() -> TestResult {
     let mut fixture = DispatchFixture::new().await?;
     fixture.env.set(ENV_GATEWAY_UNARY_DEADLINE_SECS, "1");

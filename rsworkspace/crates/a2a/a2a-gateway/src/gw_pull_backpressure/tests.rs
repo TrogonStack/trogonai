@@ -444,3 +444,5 @@ fn egress_caller_id_rejects_wildcards() {
 }
 
 mod consumer_tests;
+
+mod delivery_tests;

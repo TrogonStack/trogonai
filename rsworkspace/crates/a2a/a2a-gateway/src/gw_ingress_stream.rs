@@ -14,8 +14,9 @@ use trogon_std::env::ReadEnv;
 use a2a_nats::jetstream::consumers::{gateway_stream_events_consumer, resubscribe_consumer_with_flow};
 use a2a_nats::jetstream::streams::events_stream_name;
 use async_nats::jetstream::{self, AckKind};
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use tracing::{debug, warn};
+use trogon_nats::jetstream::message::{JsAck, JsAckWith, JsDoubleAck, JsMessageRef};
 
 use crate::constants::STREAMING_INGRESS_MAX_FORWARD_ATTEMPTS;
 pub use crate::constants::{
@@ -335,17 +336,7 @@ async fn publish_to_caller_reply<C: trogon_nats::PublishClient>(
 pub async fn events_stream_last_seq(client: &async_nats::Client, prefix: &A2aPrefix) -> Option<u64> {
     let stream_name = events_stream_name(prefix);
     match jetstream::new(client.clone()).get_stream(&stream_name).await {
-        Ok(mut stream) => match stream.info().await {
-            Ok(info) => Some(info.state.last_sequence),
-            Err(error) => {
-                warn!(
-                    stream = %stream_name,
-                    error = %error,
-                    "gateway streaming ingress could not read events stream head",
-                );
-                None
-            }
-        },
+        Ok(stream) => Some(stream.cached_info().state.last_sequence),
         Err(error) => {
             warn!(
                 stream = %stream_name,
@@ -379,15 +370,13 @@ async fn run_streaming_ingress_pump(
         }
     };
 
-    let (consumer_config, demux_req_id) = match &spawn.kind {
-        StreamingIngressKind::MessageStream { req_id, last_seq } => (
-            gateway_stream_events_consumer(&prefix, *last_seq, config.max_ack_pending.as_i64()),
-            Some(req_id),
-        ),
-        StreamingIngressKind::TasksResubscribe { task_id, last_seq, .. } => (
-            resubscribe_consumer_with_flow(&prefix, task_id, *last_seq, config.max_ack_pending.as_i64()),
-            None,
-        ),
+    let consumer_config = match &spawn.kind {
+        StreamingIngressKind::MessageStream { last_seq, .. } => {
+            gateway_stream_events_consumer(&prefix, *last_seq, config.max_ack_pending.as_i64())
+        }
+        StreamingIngressKind::TasksResubscribe { task_id, last_seq, .. } => {
+            resubscribe_consumer_with_flow(&prefix, task_id, *last_seq, config.max_ack_pending.as_i64())
+        }
     };
 
     let consumer = match stream.create_consumer(consumer_config).await {
@@ -402,7 +391,7 @@ async fn run_streaming_ingress_pump(
     // and then close — the pump exited after a single event. Use the
     // continuous `messages()` stream so the pump keeps pulling until the
     // shutdown token fires or the consumer ends.
-    let mut messages = match consumer.messages().await {
+    let messages = match consumer.messages().await {
         Ok(messages) => messages,
         Err(error) => {
             warn!(error = %error, "gateway streaming ingress messages stream unavailable");
@@ -410,6 +399,34 @@ async fn run_streaming_ingress_pump(
         }
     };
 
+    let deliveries = messages.map(|item| {
+        item.map(|message| StreamingDelivery {
+            attempt: message.info().map(|info| info.delivered).unwrap_or(1),
+            message,
+        })
+    });
+    forward_stream_deliveries(&client, &spawn, shutdown, deliveries).await;
+}
+
+struct StreamingDelivery<M> {
+    message: M,
+    attempt: i64,
+}
+
+async fn forward_stream_deliveries<C, M, E>(
+    client: &C,
+    spawn: &StreamingIngressSpawn,
+    shutdown: CancellationToken,
+    mut messages: impl Stream<Item = Result<StreamingDelivery<M>, E>> + Unpin,
+) where
+    C: trogon_nats::PublishClient,
+    M: JsMessageRef + JsAck + JsAckWith + JsDoubleAck,
+    E: std::fmt::Display,
+{
+    let demux_req_id = match &spawn.kind {
+        StreamingIngressKind::MessageStream { req_id, .. } => Some(req_id),
+        StreamingIngressKind::TasksResubscribe { .. } => None,
+    };
     debug!(
         reply = %spawn.reply,
         req_id = %spawn.req_id(),
@@ -427,8 +444,8 @@ async fn run_streaming_ingress_pump(
             break;
         };
 
-        let message = match item {
-            Ok(message) => message,
+        let StreamingDelivery { message, attempt } = match item {
+            Ok(delivery) => delivery,
             Err(error) => {
                 warn!(error = %error, "gateway streaming ingress fetch item error");
                 break;
@@ -443,7 +460,7 @@ async fn run_streaming_ingress_pump(
         // the events carry the `req_id` of the original subscription, not of the
         // resubscribe request.
         if let Some(req_id) = demux_req_id
-            && !req_id.matches_event_headers(message.message.headers.as_ref())
+            && !req_id.matches_event_headers(message.message().headers.as_ref())
         {
             let _ = message.ack().await;
             continue;
@@ -453,8 +470,7 @@ async fn run_streaming_ingress_pump(
         // so a permanently failing publish (bad reply subject, ACL, etc.)
         // doesn't NAK-loop forever — match the egress path's 3-attempt
         // budget before Term'ing.
-        let attempt = message.info().map(|i| i.delivered).unwrap_or(1);
-        if let Err(error) = publish_to_caller_reply(&client, &spawn.reply, message.payload.clone()).await {
+        if let Err(error) = publish_to_caller_reply(client, &spawn.reply, message.message().payload.clone()).await {
             let disposition = if attempt >= STREAMING_INGRESS_MAX_FORWARD_ATTEMPTS {
                 AckKind::Term
             } else {

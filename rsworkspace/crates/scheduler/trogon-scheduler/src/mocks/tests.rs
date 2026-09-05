@@ -1,4 +1,4 @@
-use trogon_decider_runtime::{CommandError, CommandExecution, ImmediateSnapshotTaskScheduler};
+use trogon_decider_runtime::{CommandError, CommandExecution, ImmediateSnapshotTaskScheduler, SnapshotTypeName};
 
 use super::*;
 use crate::commands::domain as command_domain;
@@ -525,4 +525,161 @@ async fn append_pause_without_prior_create_is_an_error() {
     )
     .await;
     assert!(result.is_err());
+}
+
+#[derive(Debug, thiserror::Error)]
+enum SnapshotFixtureError {
+    #[error("snapshot encoding failed")]
+    Encode,
+    #[error("snapshot type unavailable")]
+    Type,
+}
+
+struct UnencodableSnapshot;
+
+impl SnapshotType for UnencodableSnapshot {
+    type Error = trogon_decider_runtime::InvalidSnapshotTypeNameError;
+
+    fn snapshot_type() -> Result<SnapshotTypeName, Self::Error> {
+        SnapshotTypeName::new("tests.scheduler.snapshot")
+    }
+}
+
+impl SnapshotPayloadEncode for UnencodableSnapshot {
+    type Error = SnapshotFixtureError;
+
+    fn encode(&self) -> Result<Vec<u8>, Self::Error> {
+        Err(SnapshotFixtureError::Encode)
+    }
+}
+
+#[derive(Debug)]
+struct UnresolvableSnapshot;
+
+impl SnapshotType for UnresolvableSnapshot {
+    type Error = SnapshotFixtureError;
+
+    fn snapshot_type() -> Result<SnapshotTypeName, Self::Error> {
+        Err(SnapshotFixtureError::Type)
+    }
+}
+
+impl SnapshotPayloadEncode for UnresolvableSnapshot {
+    type Error = std::convert::Infallible;
+
+    fn encode(&self) -> Result<Vec<u8>, Self::Error> {
+        Ok(Vec::new())
+    }
+}
+
+impl SnapshotPayloadDecode for UnresolvableSnapshot {
+    type Error = std::convert::Infallible;
+
+    fn decode(_payload: SnapshotPayloadData<'_>) -> Result<Self, Self::Error> {
+        Ok(Self)
+    }
+}
+
+#[tokio::test]
+async fn snapshot_failures_preserve_their_sources_without_persisting_partial_state() {
+    let store = MockSchedulerStore::new();
+    let id = command_schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c35");
+    let encoding = store
+        .write_snapshot(WriteSnapshotRequest {
+            snapshot_id: &id,
+            snapshot: Snapshot::new(position(7), UnencodableSnapshot),
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        std::error::Error::source(&encoding)
+            .unwrap()
+            .downcast_ref::<SnapshotFixtureError>(),
+        Some(SnapshotFixtureError::Encode)
+    ));
+
+    let type_error = store
+        .write_snapshot(WriteSnapshotRequest {
+            snapshot_id: &id,
+            snapshot: Snapshot::new(position(7), UnresolvableSnapshot),
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        std::error::Error::source(&type_error)
+            .unwrap()
+            .downcast_ref::<SnapshotFixtureError>(),
+        Some(SnapshotFixtureError::Type)
+    ));
+    let result: Result<ReadSnapshotResponse<UnresolvableSnapshot>, _> =
+        store.read_snapshot(ReadSnapshotRequest { snapshot_id: &id }).await;
+    assert!(matches!(
+        std::error::Error::source(&result.unwrap_err())
+            .unwrap()
+            .downcast_ref::<SnapshotFixtureError>(),
+        Some(SnapshotFixtureError::Type)
+    ));
+    assert!(store.command_snapshots.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn snapshot_round_trip_preserves_position_and_rejects_corrupt_payload() {
+    let store = MockSchedulerStore::new();
+    let id = command_schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c35");
+    let state = crate::state_v1::State::default();
+    store
+        .write_snapshot(WriteSnapshotRequest {
+            snapshot_id: &id,
+            snapshot: Snapshot::new(position(7), state.clone()),
+        })
+        .await
+        .unwrap();
+    let loaded: ReadSnapshotResponse<crate::state_v1::State> = store
+        .read_snapshot(ReadSnapshotRequest { snapshot_id: &id })
+        .await
+        .unwrap();
+    let snapshot = loaded.snapshot.unwrap();
+    assert_eq!(snapshot.position, position(7));
+    assert_eq!(snapshot.payload, state);
+
+    let snapshot_type = crate::state_v1::State::snapshot_type().unwrap();
+    store
+        .command_snapshots
+        .lock()
+        .unwrap()
+        .get_mut(snapshot_type.as_ref())
+        .unwrap()
+        .get_mut(&id.to_string())
+        .unwrap()
+        .payload = vec![0xff];
+    let corrupt: Result<ReadSnapshotResponse<crate::state_v1::State>, _> =
+        store.read_snapshot(ReadSnapshotRequest { snapshot_id: &id }).await;
+    assert!(matches!(corrupt.unwrap_err(), SchedulerError::Event { .. }));
+}
+
+#[tokio::test]
+async fn resume_without_a_created_schedule_is_rejected() {
+    let store = MockSchedulerStore::new();
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c35";
+    let error = append_events(
+        &store,
+        id,
+        &[lifecycle_event(
+            v1::ScheduleResumed {
+                schedule_id: id.to_string(),
+            }
+            .into(),
+        )],
+        StreamWritePrecondition::Any,
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(error, SchedulerError::Event { .. }));
+    assert!(
+        store
+            .get_schedule(GetSchedule::new(crate::queries::ScheduleId::parse(id).unwrap()))
+            .await
+            .unwrap()
+            .is_none()
+    );
 }

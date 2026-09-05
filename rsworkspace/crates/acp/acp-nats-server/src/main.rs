@@ -1,3 +1,4 @@
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 mod compat;
@@ -18,6 +19,7 @@ use {
 };
 
 #[tokio::main]
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn main() -> anyhow::Result<()> {
     let args = config::Args::parse();
     let server_config = config::config_from_args(args, &SystemEnv)?;

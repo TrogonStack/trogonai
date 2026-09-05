@@ -53,6 +53,7 @@ macro_rules! fault_codec {
             assert_eq!(retained.into_bytes().as_ref(), FUTURE_WIRE);
             let future: decider::$owned = serde_json::from_value(json!({"futureField": "data"}))
                 .expect("unknown JSON field");
+            assert_eq!(format!("{future:?}"), stringify!($owned));
             assert_eq!(serde_json::to_value(future).expect("canonical JSON"), json!({}));
         }
     };

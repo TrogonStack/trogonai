@@ -381,3 +381,46 @@ async fn list_skips_checkpoint_keys_without_values() {
 
     assert!(records.is_empty());
 }
+
+#[tokio::test]
+async fn invalid_key_on_checkpoint_create_or_update_is_permanent() {
+    let record = record("0198fa2f6d0a7b1a8cf9f762e73a1c05");
+    let kv = MockJetStreamKvStore::new();
+    kv.enqueue_create_result(Err(kv::CreateErrorKind::InvalidKey));
+    kv.enqueue_update_result(Err(kv::UpdateErrorKind::InvalidKey));
+    let store = ScheduleCheckpointStore::new(kv);
+    for revision in [None, Some(3)] {
+        let error = store.save(&record, revision).await.unwrap_err();
+        assert!(matches!(error, CheckpointStoreError::PermanentBackend { .. }));
+        assert!(!error.is_transient());
+        assert!(error.corrupt_last_applied_event_id().is_none());
+        assert!(std::error::Error::source(&error).is_some());
+    }
+}
+
+#[tokio::test]
+async fn transient_write_errors_do_not_become_concurrency_conflicts() {
+    let record = record("0198fa2f6d0a7b1a8cf9f762e73a1c05");
+    let kv = MockJetStreamKvStore::new();
+    kv.enqueue_create_result(Err(kv::CreateErrorKind::Other));
+    kv.enqueue_update_result(Err(kv::UpdateErrorKind::Other));
+    let store = ScheduleCheckpointStore::new(kv);
+    for revision in [None, Some(3)] {
+        let error = store.save(&record, revision).await.unwrap_err();
+        assert!(matches!(error, CheckpointStoreError::Backend { .. }));
+        assert!(error.is_transient());
+    }
+}
+
+#[tokio::test]
+async fn checkpoint_enumeration_propagates_backend_failures() {
+    let kv = MockJetStreamKvStore::new();
+    kv.set_keys_result(Err(kv::WatchErrorKind::Other));
+    let store = ScheduleCheckpointStore::new(kv.clone());
+    assert!(store.list().await.unwrap_err().is_transient());
+
+    kv.set_keys_result(Ok(vec!["v1.0198fa2f6d0a7b1a8cf9f762e73a1c05".to_string()]));
+    kv.enqueue_get_error(kv::EntryErrorKind::Other);
+    assert!(store.list().await.unwrap_err().is_transient());
+    assert_eq!(kv.get_calls().len(), 1);
+}

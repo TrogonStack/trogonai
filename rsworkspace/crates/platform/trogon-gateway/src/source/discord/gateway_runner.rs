@@ -1,26 +1,29 @@
-use std::future::poll_fn;
-use std::pin::Pin;
+use std::fmt::Debug;
 
-use futures_core::Stream;
+use futures_util::{Stream, StreamExt};
 use tracing::{info, warn};
-use twilight_gateway::{Message, Shard, ShardId};
+use twilight_gateway::Message;
 
 use super::gateway::GatewayBridge;
 
-pub async fn run<P: trogon_nats::jetstream::JetStreamPublisher, S: trogon_nats::jetstream::ObjectStorePut>(
+pub async fn run<P, S, Incoming, E>(
     publisher: trogon_nats::jetstream::ClaimCheckPublisher<P, S>,
-    config: &super::config::DiscordConfig,
-) {
+    config: super::config::DiscordConfig,
+    mut incoming: Incoming,
+) where
+    P: trogon_nats::jetstream::JetStreamPublisher,
+    S: trogon_nats::jetstream::ObjectStorePut,
+    Incoming: Stream<Item = Result<Message, E>> + Unpin,
+    E: Debug,
+{
     info!("mode: gateway");
 
     let bridge = GatewayBridge::new(publisher, config.subject_prefix.clone(), config.nats_ack_timeout.into());
 
-    let mut shard = Shard::new(ShardId::ONE, config.bot_token.as_str().to_owned(), config.intents);
-
     info!("starting Discord gateway connection");
 
     loop {
-        let msg = poll_fn(|cx| Stream::poll_next(Pin::new(&mut shard), cx)).await;
+        let msg = incoming.next().await;
         match msg {
             Some(Ok(Message::Text(text))) => bridge.dispatch(&text).await,
             Some(Ok(Message::Close(_))) => {
@@ -35,3 +38,6 @@ pub async fn run<P: trogon_nats::jetstream::JetStreamPublisher, S: trogon_nats::
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

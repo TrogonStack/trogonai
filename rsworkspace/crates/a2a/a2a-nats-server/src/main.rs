@@ -1,3 +1,5 @@
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 //! Default `a2a-nats-server` agent binary.
 //!
 //! Boots a [`NoopHandler`] that returns `UnsupportedOperation` (or
@@ -16,6 +18,7 @@ use trogon_nats::jetstream::NatsJetStreamClient;
 use trogon_std::env::SystemEnv;
 
 #[tokio::main]
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn main() {
     tracing_subscriber::fmt::init();
 

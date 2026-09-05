@@ -4,6 +4,7 @@ use serde_json::json;
 
 use super::assert_json_codec;
 use super::retained_fixture::retained_detail;
+use crate::content::v1alpha1::{Content, ContentOwnedView, ContentView};
 use crate::google::rpc::Code;
 use crate::grpc_nats_micro::v1::{
     FailRequest, FailRequestOwnedView, FailRequestView, FailResponse, FailResponseOwnedView, FailResponseView,
@@ -46,6 +47,20 @@ fn retained_rpc_messages_preserve_optional_empty_and_absent_fields() {
             }
         );
     }
+}
+
+#[test]
+fn retained_content_keeps_binary_payload_and_media_type_after_owner_transfer() {
+    retained_detail!(
+        Content,
+        ContentOwnedView,
+        ContentView<'static>,
+        json!({"contentType": "application/octet-stream", "data": "AP8B"}),
+        |handle| {
+            assert_eq!(handle.content_type(), "application/octet-stream");
+            assert_eq!(handle.data(), b"\x00\xff\x01");
+        }
+    );
 }
 
 #[test]

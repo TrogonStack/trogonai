@@ -1,3 +1,5 @@
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 use {
     a2a_redaction::signed_bundle::{
         Ed25519Signature, SIGNED_BUNDLE_VERSION, Sha256Digest, SignedBundleManifest, sign_bundle_digest,
@@ -55,9 +57,9 @@ enum CliError {
         #[source]
         source: std::io::Error,
     },
-    #[error("serialize signature envelope for skill {skill}: {source}")]
-    SerializeSignature {
-        skill: String,
+    #[error("write signature {path}: {source}", path = path.display())]
+    WriteSignature {
+        path: PathBuf,
         #[source]
         source: serde_json::Error,
     },
@@ -76,6 +78,7 @@ enum CliError {
         reason = "the per-bundle progress is this CLI's own output to the operator running it"
     )
 )]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn main() -> Result<(), CliError> {
     run(SignBundlesInput::parse(), |skill| {
         eprintln!("signed {}", skill.as_str())
@@ -121,16 +124,23 @@ fn parse_signing_key(raw: &str) -> Result<SigningKey, CliError> {
 }
 
 fn discover_skills(dir: &Path) -> Result<Vec<SkillId>, CliError> {
-    let mut skills = Vec::new();
-    for entry in fs::read_dir(dir).map_err(|source| CliError::ReadDir {
+    let entries = fs::read_dir(dir).map_err(|source| CliError::ReadDir {
         path: dir.to_path_buf(),
         source,
-    })? {
-        let entry = entry.map_err(|source| CliError::ReadDirEntry {
+    })?;
+    discover_skill_paths(dir, entries.map(|entry| entry.map(|entry| entry.path())))
+}
+
+fn discover_skill_paths(
+    dir: &Path,
+    entries: impl IntoIterator<Item = std::io::Result<PathBuf>>,
+) -> Result<Vec<SkillId>, CliError> {
+    let mut skills = Vec::new();
+    for entry in entries {
+        let path = entry.map_err(|source| CliError::ReadDirEntry {
             path: dir.to_path_buf(),
             source,
         })?;
-        let path = entry.path();
         if path.extension().and_then(|ext| ext.to_str()) != Some("wasm") {
             continue;
         }
@@ -166,11 +176,18 @@ fn sign_skill_bundle(dir: &Path, skill: &SkillId, signing_key: &SigningKey) -> R
     let signature = Ed25519Signature::from_bytes(signing_key.sign(&message).to_bytes());
     let envelope = SignedBundleManifest::new(skill, manifest_digest, wasm_digest, signature);
     let sig_path = dir.join(format!("{}.sig", skill.as_str()));
-    let sig_json = serde_json::to_vec_pretty(&envelope).map_err(|source| CliError::SerializeSignature {
-        skill: skill.to_string(),
+    let file = fs::File::create(&sig_path).map_err(|source| CliError::WriteFile {
+        path: sig_path.clone(),
         source,
     })?;
-    fs::write(&sig_path, sig_json).map_err(|source| CliError::WriteFile { path: sig_path, source })
+    write_signature(file, &sig_path, &envelope)
+}
+
+fn write_signature(writer: impl std::io::Write, path: &Path, envelope: &SignedBundleManifest) -> Result<(), CliError> {
+    serde_json::to_writer_pretty(writer, envelope).map_err(|source| CliError::WriteSignature {
+        path: path.to_path_buf(),
+        source,
+    })
 }
 
 #[cfg(test)]

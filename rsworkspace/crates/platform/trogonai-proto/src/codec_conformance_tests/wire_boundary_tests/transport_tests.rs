@@ -10,4 +10,5 @@ fn transport_fields_reject_wrong_types_and_truncation_before_exposing_a_view() {
     assert_field_wire_types::<FailResponse>(&[1], &[]);
     assert_field_wire_types::<ServiceOptions>(&[3, 4, 5], &[6]);
     assert_field_wire_types::<MethodOptions>(&[3], &[]);
+    assert_field_wire_types::<crate::content::v1alpha1::Content>(&[1, 2], &[]);
 }

@@ -100,11 +100,18 @@ jobs:
         with:
           tool: cargo-llvm-cov,nextest
 
+      - name: Install Rust coverage toolchain
+        run: rustup toolchain install nightly-2026-04-16 --profile minimal --component llvm-tools-preview --target wasm32-unknown-unknown
+
       - name: Build decider components for sim fixtures
         run: mise run artifacts:wasm-components
 
       - name: Run documentation tests
         run: cargo test --doc
+        working-directory: rsworkspace
+
+      - name: Check stable compiler diagnostics
+        run: cargo nextest run -p trogon-decider-guest-macros --all-features --test compile_fail
         working-directory: rsworkspace
 
       - name: Run tests with coverage
@@ -122,9 +129,9 @@ jobs:
           diff: true
           diff-branch: main
           diff-storage: _xml_coverage_reports
-          uncovered-statements-increase-failure: ${{ !contains(github.event.pull_request.labels.*.name, 'rust:coverage-baseline-reset') }}
-          new-uncovered-statements-failure: ${{ !contains(github.event.pull_request.labels.*.name, 'rust:coverage-baseline-reset') }}
-          coverage-rate-reduction-failure: ${{ !contains(github.event.pull_request.labels.*.name, 'rust:coverage-baseline-reset') }}
+          uncovered-statements-increase-failure: true
+          new-uncovered-statements-failure: true
+          coverage-rate-reduction-failure: true
           togglable-report: true
 
       - name: Prepare nested test targets for cache cleanup

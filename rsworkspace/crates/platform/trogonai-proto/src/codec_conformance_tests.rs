@@ -9,8 +9,12 @@ use serde_json::{Value, json};
 
 #[cfg(feature = "schedules")]
 mod datetime_tests;
+mod diagnostic_tests;
 mod error_options_tests;
 mod error_retained_tests;
+#[cfg(any(feature = "decider", feature = "grpc-nats-micro", feature = "schedules"))]
+mod json_write_tests;
+mod registry_codec_tests;
 mod retained_fixture;
 #[cfg(feature = "grpc-nats-micro")]
 mod transport_retained_tests;
@@ -33,7 +37,11 @@ mod retained_view_tests;
 #[cfg(any(feature = "decider", feature = "grpc-nats-micro"))]
 mod rpc_retained_tests;
 #[cfg(feature = "schedules")]
+mod scheduler_constructor_tests;
+#[cfg(feature = "schedules")]
 mod scheduler_json_tests;
+#[cfg(feature = "schedules")]
+mod scheduler_merge_tests;
 #[cfg(feature = "schedules")]
 mod scheduler_presence_tests;
 #[cfg(feature = "schedules")]
@@ -91,6 +99,17 @@ where
 
     let empty: M = serde_json::from_value(json!({})).expect("absent JSON fields");
     assert_wire_codec(&[], &empty);
+    let empty_view = M::decode_view(&[]).expect("absent borrowed fields");
+    let empty_json = serde_json::to_value(&empty_view).expect("default view JSON");
+    assert_eq!(
+        serde_json::from_value::<M>(empty_json.clone()).expect("default view JSON decode"),
+        empty
+    );
+    let empty_handle = M::decode_view_handle(Bytes::new()).expect("absent retained fields");
+    assert_eq!(
+        serde_json::to_value(&empty_handle).expect("default retained JSON"),
+        empty_json
+    );
     let mut reused = message.clone();
     reused.clear();
     assert_eq!(reused, empty);
@@ -126,5 +145,32 @@ fn assert_malformed<M: Message + HasMessageView>(wire: &[u8], expected: DecodeEr
     assert_eq!(
         M::decode_view_handle(Bytes::copy_from_slice(wire)).err(),
         Some(expected)
+    );
+}
+
+fn assert_collection_limit<M: Message + HasMessageView + Debug + PartialEq>(wire: &[u8]) {
+    let bounded = DecodeOptions::new().with_element_memory_limit(0);
+    assert_eq!(
+        bounded.decode_from_slice::<M>(wire).err(),
+        Some(DecodeError::ElementMemoryLimitExceeded)
+    );
+    assert_eq!(
+        M::decode_view_with_options(wire, &bounded).err(),
+        Some(DecodeError::ElementMemoryLimitExceeded)
+    );
+    assert_eq!(
+        M::decode_view_handle_with_options(Bytes::copy_from_slice(wire), &bounded).err(),
+        Some(DecodeError::ElementMemoryLimitExceeded)
+    );
+    let expected = M::decode_from_slice(wire).expect("valid collection wire");
+    let allowed = DecodeOptions::new().with_element_memory_limit(4096);
+    assert_eq!(
+        allowed.decode_from_slice::<M>(wire).expect("bounded collection"),
+        expected
+    );
+    let view = M::decode_view_with_options(wire, &allowed).expect("bounded collection view");
+    assert_eq!(
+        view.to_owned_message().expect("bounded collection conversion"),
+        expected
     );
 }

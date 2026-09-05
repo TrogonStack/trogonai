@@ -18,5 +18,9 @@ trogon-scheduler-domain = { path = "../../crates/scheduler/trogon-scheduler-doma
 trogonai-proto = { path = "../../crates/platform/trogonai-proto", default-features = false, features = ["schedules"] }
 wit-bindgen = { workspace = true }
 
+[dev-dependencies]
+buffa = { workspace = true }
+buffa-types = { workspace = true }
+
 [package.metadata.component]
 package = "trogon:decider"

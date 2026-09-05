@@ -1,3 +1,4 @@
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 mod config;
@@ -16,6 +17,7 @@ use trogon_std::{env::SystemEnv, fs::SystemFs, signal::shutdown_signal};
 use trogon_telemetry::{ResourceAttribute, ServiceName};
 
 #[tokio::main]
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn main() -> Result<()> {
     let config = config::base_config(&trogon_std::CliArgs::<config::Args>::new(), &SystemEnv)?;
     let config::BridgeConfig {

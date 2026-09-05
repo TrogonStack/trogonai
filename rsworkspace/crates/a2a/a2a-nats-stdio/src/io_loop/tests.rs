@@ -8,13 +8,34 @@ use tokio::io::AsyncWriteExt;
 use trogon_nats::AdvancedMockNatsClient;
 use trogon_nats::jetstream::mocks::MockJetStreamConsumerFactory;
 
-fn make_client(
-    nats: AdvancedMockNatsClient,
+mod failure_tests;
+
+fn make_client<N: RequestClient>(
+    nats: N,
     js: MockJetStreamConsumerFactory,
-) -> A2aClient<AdvancedMockNatsClient, MockJetStreamConsumerFactory> {
+) -> A2aClient<N, MockJetStreamConsumerFactory> {
     let prefix = A2aPrefix::new("a2a").unwrap();
     let agent_id = A2aAgentId::new("bot").unwrap();
     A2aClient::new(prefix, agent_id, nats, js)
+}
+
+#[derive(Clone)]
+struct PendingRequests {
+    started: tokio::sync::mpsc::UnboundedSender<()>,
+}
+
+impl RequestClient for PendingRequests {
+    type RequestError = std::convert::Infallible;
+
+    async fn request_with_headers<S: async_nats::subject::ToSubject + Send>(
+        &self,
+        _subject: S,
+        _headers: async_nats::HeaderMap,
+        _payload: Bytes,
+    ) -> Result<async_nats::Message, Self::RequestError> {
+        self.started.send(()).expect("request observer remains alive");
+        std::future::pending().await
+    }
 }
 
 fn task_response(task_id: &str) -> (async_nats::HeaderMap, Bytes) {
@@ -154,13 +175,10 @@ async fn io_loop_handles_invalid_request_envelope() {
 
 #[tokio::test]
 async fn io_loop_shutdown_preempts_blocking_dispatch_acquire() {
-    let nats = AdvancedMockNatsClient::new();
+    let (started_tx, mut started_rx) = tokio::sync::mpsc::unbounded_channel();
+    let nats = PendingRequests { started: started_tx };
     let client = make_client(nats, MockJetStreamConsumerFactory::new());
 
-    // Fill the loop with more requests than the semaphore allows, each one
-    // landing on an unstubbed subject so the dispatcher never resolves.
-    // The next `acquire_owned()` then sits indefinitely — shutdown must
-    // preempt it, not hang behind it.
     let (stdin_reader, mut stdin_writer) = tokio::io::duplex(64 * 1024);
     let (_stdout_reader, stdout_writer) = tokio::io::duplex(64 * 1024);
 
@@ -177,11 +195,23 @@ async fn io_loop_shutdown_preempts_blocking_dispatch_acquire() {
 
     let handle = tokio::spawn(run_io_loop(client, stdin_reader, stdout_writer, shutdown));
 
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    let _ = shutdown_tx.send(());
-
-    let res = tokio::time::timeout(std::time::Duration::from_secs(2), handle).await;
-    assert!(res.is_ok(), "io_loop did not exit on shutdown");
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        for _ in 0..MAX_INFLIGHT_DISPATCH {
+            assert_eq!(started_rx.recv().await, Some(()));
+        }
+    })
+    .await
+    .expect("dispatch capacity must be occupied before shutdown");
+    assert!(matches!(
+        started_rx.try_recv(),
+        Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+    ));
+    shutdown_tx.send(()).expect("loop is waiting for shutdown");
+    tokio::time::timeout(std::time::Duration::from_secs(2), handle)
+        .await
+        .expect("saturated loop must respond to shutdown")
+        .expect("loop must not panic")
+        .expect("controlled shutdown succeeds");
     drop(stdin_writer);
 }
 

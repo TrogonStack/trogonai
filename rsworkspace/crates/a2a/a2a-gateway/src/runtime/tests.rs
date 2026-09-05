@@ -7,6 +7,33 @@ use super::*;
 
 #[cfg(feature = "spicedb")]
 #[tokio::test]
+async fn a_closed_ingress_finishes_after_dispatching_its_final_envelope() {
+    let prefix = a2a_nats::A2aPrefix::new("a2a").unwrap();
+    let message = crate::gateway_test_support::event(async_nats::HeaderMap::new());
+    let mut payloads = Vec::new();
+    let events = trogon_std::log_capture::CapturedEvents::new();
+    let _capture = events.install(trogon_std::log_capture::LevelFilter::DEBUG);
+    receive_ingress(
+        futures::stream::iter([message]),
+        &prefix,
+        CancellationToken::new(),
+        |message| {
+            payloads.push(message.payload);
+            std::future::ready(())
+        },
+    )
+    .await;
+    assert_eq!(payloads, [bytes::Bytes::from_static(b"event payload")]);
+    assert!(
+        events
+            .events()
+            .iter()
+            .any(|event| event.message() == Some("gateway ingress NATS subscription closed"))
+    );
+}
+
+#[cfg(feature = "spicedb")]
+#[tokio::test]
 async fn startup_preserves_enabled_policy_configuration_failures() {
     let server = trogon_nats::test_support::CoreTestServer::start().await;
     for setting in [

@@ -3,7 +3,7 @@ use buffa::type_registry::TypeRegistry;
 use buffa::{DecodeError, DecodeOptions, Enumeration, Message, MessageField, UnknownFields};
 use serde_json::{Value, json};
 
-use super::{assert_json_codec, assert_malformed, assert_proto_sequence, assert_wire_codec};
+use super::{assert_collection_limit, assert_json_codec, assert_malformed, assert_proto_sequence, assert_wire_codec};
 use crate::r#gen::elixirpb::{self, FileOptions, FileOptionsOwnedView};
 use crate::r#gen::trogon::error::v1alpha1::field_options::{ValuePolicy, ValuePolicyView};
 use crate::r#gen::trogon::error::v1alpha1::message_options::{
@@ -114,6 +114,36 @@ fn field_policy_retains_explicit_empty_values_and_last_wire_alternative() {
 }
 
 #[test]
+fn field_policy_json_rejects_collisions_in_either_order_and_ignores_future_fields() {
+    for input in [
+        r#"{"value":"fixed","defaultValue":"fallback"}"#,
+        r#"{"default_value":"first","defaultValue":"second"}"#,
+    ] {
+        let error = serde_json::from_str::<FieldOptions>(input).expect_err("conflicting oneof alternatives");
+        assert!(error.is_data());
+    }
+    let options: FieldOptions = serde_json::from_value(json!({
+        "defaultValue": "fallback", "futurePolicy": {"rules": [null, {"value": 1}]}
+    }))
+    .expect("unknown annotation ignored");
+    assert_eq!(
+        options.value_policy,
+        Some(ValuePolicy::DefaultValue("fallback".to_owned()))
+    );
+    assert_eq!(
+        serde_json::to_value(options).expect("canonical field policy"),
+        json!({"defaultValue": "fallback"})
+    );
+}
+
+#[test]
+fn empty_template_annotations_still_consume_the_collection_memory_budget() {
+    assert_collection_limit::<Template>(b"\x32\x00");
+    assert_collection_limit::<Template>(b"\x3a\x00");
+    assert_collection_limit::<MessageOptions>(b"\x0a\x02\x32\x00");
+}
+
+#[test]
 fn unknown_error_codes_and_visibility_survive_while_closed_enum_names_are_validated() {
     assert_json_codec::<Template>(json!({"code": 123, "visibility": 124}));
     assert_json_codec::<MetadataEntry>(json!({"visibility": -1}));
@@ -185,6 +215,8 @@ fn template_error_codes_match_the_canonical_rpc_numeric_space_without_ok() {
         json!(17),
         json!(4294967296_u64),
         json!(-4294967296_i64),
+        json!(true),
+        json!([]),
     ] {
         assert!(serde_json::from_value::<Code>(invalid).is_err());
     }
@@ -229,6 +261,8 @@ fn visibility_names_and_numbers_preserve_the_descriptor_exposure_contract() {
         json!(3),
         json!(4294967296_u64),
         json!(-4294967296_i64),
+        json!(true),
+        json!([]),
     ] {
         assert!(serde_json::from_value::<Visibility>(invalid).is_err());
     }

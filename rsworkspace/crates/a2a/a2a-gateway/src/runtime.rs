@@ -105,7 +105,7 @@ pub async fn run_with_config<E: ReadEnv>(config: Config, nats_config: NatsConfig
     let gateway_subject_string = config.gateway_subscribe_subject();
     let gateway_subject = async_nats::Subject::from(gateway_subject_string.as_str());
 
-    let mut ingress = match &config.queue_group {
+    let ingress = match &config.queue_group {
         Some(q) => client.queue_subscribe(gateway_subject, q.as_str().to_owned()).await?,
         None => client.subscribe(gateway_subject).await?,
     };
@@ -129,34 +129,51 @@ pub async fn run_with_config<E: ReadEnv>(config: Config, nats_config: NatsConfig
     let streaming_ingress_enabled = gateway_streaming_ingress_enabled(env);
     let streaming_ingress_gate = StreamingIngressGate::new(streaming_ingress_config);
 
+    receive_ingress(ingress, &config.a2a_prefix, shutdown.clone(), |msg| {
+        crate::runtime::dispatch::dispatch_gateway_ingress(
+            &client,
+            &config,
+            tier1_layer.gate.as_ref(),
+            tier1_layer.owner_emitter.as_ref(),
+            tier1_declarative_layer.gate.as_ref(),
+            aauth.as_ref(),
+            &policy_stack,
+            &message_caller_identity,
+            caller_identity_policy,
+            streaming_ingress_enabled,
+            streaming_ingress_config,
+            &streaming_ingress_gate,
+            shutdown.clone(),
+            env,
+            msg,
+        )
+    })
+    .await;
+
+    info!(prefix = %config.a2a_prefix, "A2A gateway shutdown complete");
+    Ok(())
+}
+
+#[cfg(feature = "spicedb")]
+async fn receive_ingress<S, F, D>(
+    mut ingress: S,
+    prefix: &a2a_nats::A2aPrefix,
+    shutdown: CancellationToken,
+    mut dispatch: F,
+) where
+    S: futures::Stream<Item = async_nats::Message> + Unpin,
+    F: FnMut(async_nats::Message) -> D,
+    D: std::future::Future<Output = ()>,
+{
     loop {
         tokio::select! {
             _ = shutdown.cancelled() => {
-                info!(prefix = %config.a2a_prefix, "gateway shutdown signal received");
+                info!(%prefix, "gateway shutdown signal received");
                 break;
             }
             incoming = ingress.next() => {
                 match incoming {
-                    Some(msg) => {
-                        crate::runtime::dispatch::dispatch_gateway_ingress(
-                            &client,
-                            &config,
-                            tier1_layer.gate.as_ref(),
-                            tier1_layer.owner_emitter.as_ref(),
-                            tier1_declarative_layer.gate.as_ref(),
-                            aauth.as_ref(),
-                            &policy_stack,
-                            &message_caller_identity,
-                            caller_identity_policy,
-                            streaming_ingress_enabled,
-                            streaming_ingress_config,
-                            &streaming_ingress_gate,
-                            shutdown.clone(),
-                            env,
-                            msg,
-                        )
-                        .await;
-                    }
+                    Some(msg) => dispatch(msg).await,
                     None => {
                         warn!("gateway ingress NATS subscription closed");
                         break;
@@ -165,10 +182,6 @@ pub async fn run_with_config<E: ReadEnv>(config: Config, nats_config: NatsConfig
             }
         }
     }
-
-    drop(ingress);
-    info!(prefix = %config.a2a_prefix, "A2A gateway shutdown complete");
-    Ok(())
 }
 
 #[cfg(test)]

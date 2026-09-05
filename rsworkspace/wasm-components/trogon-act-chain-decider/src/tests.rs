@@ -2,6 +2,84 @@ use buffa::{DecodeError, Message};
 use trogon_decider::testing::TestCase;
 
 use super::*;
+use __trogon_decider_bindings::WritePrecondition as GuestWritePrecondition;
+use __trogon_decider_bindings::{CommandEnvelope, DecideError, Guest, GuestSession, SnapshotPolicy};
+
+#[test]
+fn descriptor_keeps_the_act_commands_native_policies() {
+    let descriptor = Component::descriptor();
+    assert_eq!(descriptor.commands.len(), 1);
+    let command = &descriptor.commands[0];
+    assert_eq!(command.command_type, constants::RUN_TWO_STEP_PLAN_TYPE_URL);
+    assert!(matches!(
+        command.write_precondition,
+        GuestWritePrecondition::StreamUnchanged
+    ));
+    assert!(matches!(command.snapshot_policy, SnapshotPolicy::NoSnapshot));
+}
+
+fn plan_envelope() -> CommandEnvelope {
+    CommandEnvelope {
+        type_: constants::RUN_TWO_STEP_PLAN_TYPE_URL.to_string(),
+        payload: RunTwoStepPlan {
+            stream_id: "plan-7".to_string(),
+        }
+        .encode_to_vec(),
+    }
+}
+
+#[test]
+fn exported_session_keeps_decisions_uncommitted_until_replay_and_restores_snapshots() -> Result<(), DecideError> {
+    assert_eq!(
+        Component::stream_id(plan_envelope()).map_err(DecideError::Faulted)?,
+        "plan-7"
+    );
+    let session = Session::new(None);
+    let initial = session.snapshot();
+    let events = session.decide(plan_envelope())?;
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0].type_, constants::STEP_ONE_EVENT_TYPE);
+    assert_eq!(events[1].type_, constants::STEP_TWO_EVENT_TYPE);
+    assert_eq!(events[1].payload, 1_u32.to_le_bytes());
+    assert_eq!(session.snapshot(), initial);
+
+    session.evolve(events).map_err(DecideError::Faulted)?;
+    let persisted = session.snapshot();
+    assert!(persisted.is_some());
+    let restored = Session::new(persisted);
+    assert!(matches!(
+        restored.decide(plan_envelope()),
+        Err(DecideError::Rejected(_))
+    ));
+    assert_eq!(restored.snapshot(), session.snapshot());
+    Ok(())
+}
+
+#[test]
+fn exported_command_admission_rejects_unknown_types_and_malformed_payloads() {
+    let session = Session::new(None);
+    let initial = session.snapshot();
+    for (type_url, payload) in [
+        ("future.plan.Command", Vec::new()),
+        (constants::RUN_TWO_STEP_PLAN_TYPE_URL, vec![0x08, 0x01]),
+    ] {
+        assert!(
+            Component::stream_id(CommandEnvelope {
+                type_: type_url.to_string(),
+                payload: payload.clone(),
+            })
+            .is_err()
+        );
+        assert!(matches!(
+            session.decide(CommandEnvelope {
+                type_: type_url.to_string(),
+                payload,
+            }),
+            Err(DecideError::Faulted(_))
+        ));
+    }
+    assert_eq!(session.snapshot(), initial);
+}
 
 #[test]
 fn the_second_step_observes_state_evolved_by_the_first() {

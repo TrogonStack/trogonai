@@ -304,6 +304,7 @@ async fn mirror_carries_content_type_header_through() {
 
 #[tokio::test]
 async fn mirror_retries_failed_ack_without_changing_message_identity() {
+    let diagnostics = crate::gateway_test_support::Diagnostics::both_outputs();
     let js = RecordingPublisher::default();
     *js.fail_ack_until.lock().unwrap() = 1;
     let dedup = PushDlqDedupGate::with_capacity(32);
@@ -316,6 +317,13 @@ async fn mirror_retries_failed_ack_without_changing_message_identity() {
     assert_eq!(publishes.len(), 2);
     assert_eq!(publishes[0], publishes[1]);
     assert_eq!(publishes[1].1.get("Content-Type").unwrap().as_str(), "application/json");
+    diagnostics.assert_event(
+        "push DLQ mirror JetStream ack failed",
+        &[
+            ("mirror_subject", "a2a.v1.push.dlq.mirror.alice.task-ack"),
+            ("attempt", "1"),
+        ],
+    );
 }
 
 #[tokio::test]

@@ -2,7 +2,7 @@ use buffa::{DecodeError, Message};
 use buffa_types::google::protobuf::Any;
 use serde_json::json;
 
-use super::{assert_json_codec, assert_malformed, assert_wire_codec};
+use super::{assert_collection_limit, assert_json_codec, assert_malformed, assert_wire_codec};
 use crate::google::rpc::{
     BadRequest, DebugInfo, ErrorInfo, Help, LocalizedMessage, PreconditionFailure, QuotaFailure, RequestInfo,
     ResourceInfo, RetryInfo, Status,
@@ -105,4 +105,31 @@ fn malformed_map_entry_and_nested_error_detail_are_rejected_eagerly() {
     assert_malformed::<ErrorInfo>(b"\x1a\x04\x0a\x01x", DecodeError::UnexpectedEof);
     assert_malformed::<BadRequest>(b"\x0a\x03\x0a\x01\xff", DecodeError::InvalidUtf8);
     assert_malformed::<Status>(b"\x1a\x03\x0a\x01\xff", DecodeError::InvalidUtf8);
+}
+
+#[test]
+fn collections_consume_decode_memory_even_when_elements_are_empty() {
+    assert_collection_limit::<ErrorInfo>(b"\x1a\x00");
+    assert_collection_limit::<DebugInfo>(b"\x0a\x00");
+    assert_collection_limit::<QuotaFailure>(b"\x0a\x00");
+    assert_collection_limit::<crate::google::rpc::quota_failure::Violation>(b"\x32\x00");
+    assert_collection_limit::<PreconditionFailure>(b"\x0a\x00");
+    assert_collection_limit::<BadRequest>(b"\x0a\x00");
+    assert_collection_limit::<Help>(b"\x0a\x00");
+    assert_collection_limit::<Status>(b"\x1a\x00");
+}
+
+#[test]
+fn duplicate_nested_details_merge_without_discarding_earlier_fields() {
+    let retry = assert_json_codec::<RetryInfo>(json!({"retryDelay": "1.000000002s"}));
+    assert_wire_codec(b"\x0a\x02\x08\x01\x0a\x02\x10\x02", &retry);
+    let localized = assert_json_codec::<crate::google::rpc::bad_request::FieldViolation>(json!({
+        "localizedMessage": {"locale": "es", "message": "Error"}
+    }));
+    assert_wire_codec(b"\x22\x04\x0a\x02es\x22\x07\x12\x05Error", &localized);
+    assert_malformed::<RetryInfo>(b"\x0a\x02\x08\x01\x0a\x01\x10", DecodeError::UnexpectedEof);
+    assert_malformed::<crate::google::rpc::bad_request::FieldViolation>(
+        b"\x22\x04\x0a\x02es\x22\x03\x12\x01\xff",
+        DecodeError::InvalidUtf8,
+    );
 }

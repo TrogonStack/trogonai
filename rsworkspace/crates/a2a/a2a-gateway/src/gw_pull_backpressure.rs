@@ -16,8 +16,9 @@ use trogon_std::env::ReadEnv;
 use a2a_nats::jetstream::consumers::gateway_events_consumer;
 use a2a_nats::jetstream::streams::events_stream_name;
 use async_nats::jetstream::{self, AckKind};
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use tracing::{debug, warn};
+use trogon_nats::jetstream::message::{JsAckWith, JsDoubleAck, JsMessageRef};
 
 pub use crate::constants::{
     DEFAULT_FETCH_BATCH, DEFAULT_FETCH_HEARTBEAT_SECS, DEFAULT_INACTIVE_THRESHOLD_SECS, DEFAULT_MAX_ACK_PENDING,
@@ -539,7 +540,7 @@ async fn run_fetch_cycle(
             source,
         })?;
 
-    let mut batch = consumer
+    let batch = consumer
         .fetch()
         .max_messages(config.fetch_batch().as_usize())
         .expires(FETCH_EXPIRES)
@@ -551,6 +552,44 @@ async fn run_fetch_cycle(
             source,
         })?;
 
+    let deliveries = batch.map(|item| {
+        item.map(|message| EgressDelivery {
+            sequence: message.info().map(|info| info.stream_sequence).unwrap_or(0),
+            message,
+        })
+    });
+    forward_egress_deliveries(
+        client,
+        prefix,
+        planner,
+        inflight_gate,
+        forward_attempts,
+        shutdown,
+        deliveries,
+    )
+    .await
+}
+
+struct EgressDelivery<M> {
+    message: M,
+    sequence: u64,
+}
+
+async fn forward_egress_deliveries<C, M, E>(
+    client: &C,
+    prefix: &A2aPrefix,
+    planner: &BaselineTaskEventsEgressPlanner,
+    inflight_gate: Arc<CallerInflightGate>,
+    forward_attempts: Arc<ForwardAttempts>,
+    shutdown: CancellationToken,
+    mut batch: impl Stream<Item = Result<EgressDelivery<M>, E>> + Unpin,
+) -> Result<(), PullCycleError>
+where
+    C: trogon_nats::PublishClient,
+    M: JsMessageRef + JsAckWith + JsDoubleAck,
+    <M as JsAckWith>::Error: Into<async_nats::Error>,
+    E: Into<async_nats::Error>,
+{
     loop {
         // Race the fetch poll against shutdown so a draining batch can't
         // keep us blocked for up to FETCH_EXPIRES (30s) after cancel, and
@@ -561,23 +600,23 @@ async fn run_fetch_cycle(
             next = batch.next() => next,
         };
         let Some(item) = item else { break };
-        let message = item.map_err(|source| PullCycleError::FetchItem {
+        let EgressDelivery { message, sequence } = item.map_err(|source| PullCycleError::FetchItem {
             subject: String::new(),
-            source,
+            source: source.into(),
         })?;
-        let subject = message.subject.as_str();
+        let subject = message.message().subject.as_str();
         // Term what cannot be routed. The event subject no longer names the
         // request or the caller (ADR#0055), so both now come from the headers,
         // and an event carrying neither has no egress address at all.
         let routing = parse_task_events_subject(prefix.as_str(), subject)
-            .and_then(|_task_id| egress_routing_from_headers(message.message.headers.as_ref()));
+            .and_then(|_task_id| egress_routing_from_headers(message.message().headers.as_ref()));
         let Some((caller_id, req_id)) = routing else {
             message
                 .ack_with(AckKind::Term)
                 .await
                 .map_err(|source| PullCycleError::Ack {
                     subject: subject.to_owned(),
-                    source,
+                    source: source.into(),
                 })?;
             continue;
         };
@@ -600,7 +639,7 @@ async fn run_fetch_cycle(
                 .await
                 .map_err(|source| PullCycleError::Ack {
                     subject: subject.to_owned(),
-                    source,
+                    source: source.into(),
                 })?;
             continue;
         };
@@ -616,11 +655,14 @@ async fn run_fetch_cycle(
         // would ever exist).
         tokio::spawn(async move {
             let _permit = permit;
-            // Identify this logical message across redeliveries so gate-NAK
-            // redeliveries don't tick the forward attempt counter.
-            let sequence = message.info().map(|i| i.stream_sequence).unwrap_or(0);
-            let forward_result =
-                forward_task_event(&client_handle, &prefix_handle, &caller_id, &req_id, &message.payload).await;
+            let forward_result = forward_task_event(
+                &client_handle,
+                &prefix_handle,
+                &caller_id,
+                &req_id,
+                &message.message().payload,
+            )
+            .await;
             let attempt = if forward_result.is_err() {
                 attempts_handle.record_attempt(sequence)
             } else {

@@ -1,3 +1,4 @@
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 mod cli;
@@ -15,10 +16,12 @@ use std::net::SocketAddr;
 
 use crate::constants::{CLAIM_CHECK_TTL_GRACE, NATS_CONNECT_TIMEOUT, NATS_SERVER_INFO_POLL_INTERVAL};
 use anyhow::Context;
+use futures_util::FutureExt;
 use tokio::task::JoinSet;
 use tracing::{error, info};
 use trogon_nats::jetstream::{
-    ClaimBucket, ClaimCheckPublisher, ClaimRetention, MaxPayload, NatsJetStreamClient, NatsObjectStore,
+    ClaimBucket, ClaimCheckPublisher, ClaimRetention, JetStreamPublisher, MaxPayload, NatsJetStreamClient,
+    NatsObjectStore, ObjectStorePut,
 };
 use trogon_nats::{connect, wait_for_server_info};
 use trogon_std::args::{CliArgs, ParseArgs};
@@ -28,6 +31,7 @@ use trogon_std::fs::SystemFs;
 type SourceResult = (&'static str, anyhow::Result<()>);
 
 #[tokio::main]
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn main() -> anyhow::Result<()> {
     trogon_std::tls::install_default_crypto_provider()?;
 
@@ -35,7 +39,7 @@ async fn main() -> anyhow::Result<()> {
     let resolved = config::load_with_overrides(cli.runtime.config.as_deref(), &cli.runtime.nats)?;
 
     match cli.command {
-        cli::Command::Serve => serve(resolved).await,
+        cli::Command::Serve => serve(resolved, trogon_std::signal::shutdown_signal()).await,
         cli::Command::Source { source } => match source {
             cli::SourceCommand::Notion { command } => match command {
                 cli::NotionCommand::VerificationToken { integration, watch } => {
@@ -50,7 +54,10 @@ async fn main() -> anyhow::Result<()> {
     }
 }
 
-async fn serve(resolved: config::ResolvedConfig) -> anyhow::Result<()> {
+async fn serve(
+    resolved: config::ResolvedConfig,
+    shutdown: impl std::future::Future<Output = ()> + Send + 'static,
+) -> anyhow::Result<()> {
     if !resolved.has_any_source() {
         anyhow::bail!("no sources configured — provide a config file with at least one source");
     }
@@ -64,11 +71,7 @@ async fn serve(resolved: config::ResolvedConfig) -> anyhow::Result<()> {
         .await?
         .max_payload;
     let max_payload = MaxPayload::from_server_limit(server_max_payload);
-    info!(
-        server_max_payload_bytes = server_max_payload,
-        claim_check_threshold_bytes = max_payload.threshold(),
-        "NATS connected"
-    );
+    log_nats_connection(server_max_payload, max_payload);
     let js_context = async_nats::jetstream::new(nats.clone());
     // Size the claim bucket TTL from the longest stream it serves so a message
     // still on the stream can always resolve its claim. `has_any_source` is
@@ -83,22 +86,83 @@ async fn serve(resolved: config::ResolvedConfig) -> anyhow::Result<()> {
     let client = NatsJetStreamClient::new(js_context);
 
     streams::provision(&client, &resolved).await?;
-    let telegram_registration_configs: Vec<_> = resolved
-        .telegram
+    register_telegram_webhooks(
+        &resolved.telegram,
+        crate::source::telegram::registration::registration_http_client,
+        crate::source::telegram::registration::register_webhook,
+    )
+    .await;
+
+    let port = resolved.http_server.port;
+    let mut join_set: JoinSet<SourceResult> = JoinSet::new();
+    let shutdown = shutdown.shared();
+
+    let publisher = ClaimCheckPublisher::new(client.clone(), claim_binding, nats.clone());
+
+    spawn_discord_gateway(
+        &mut join_set,
+        resolved.discord.as_ref(),
+        publisher.clone(),
+        crate::source::discord::gateway_runner::run,
+    );
+
+    spawn_slack_socket_modes(
+        &mut join_set,
+        &resolved.slack,
+        publisher.clone(),
+        shutdown.clone(),
+        crate::source::slack::socket_mode::run,
+    );
+
+    let app = trogon_std::telemetry::http::instrument_router(http::mount_sources(resolved, publisher));
+
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    info!(addr = %addr, "listening");
+
+    join_set.spawn(async move {
+        let result = axum::serve(listener, app).with_graceful_shutdown(shutdown).await;
+        ("http", result.context("http server"))
+    });
+
+    wait_for_sources(join_set).await
+}
+
+async fn wait_for_sources(join_set: JoinSet<SourceResult>) -> anyhow::Result<()> {
+    wait_for_sources_with_shutdown(join_set, trogon_telemetry::shutdown_otel).await
+}
+
+fn log_nats_connection(server_max_payload: usize, max_payload: MaxPayload) {
+    info!(
+        server_max_payload_bytes = server_max_payload,
+        claim_check_threshold_bytes = max_payload.threshold(),
+        "NATS connected"
+    );
+}
+
+async fn register_telegram_webhooks<C, E, Register>(
+    integrations: &[config::SourceIntegration<source::telegram::TelegramSourceConfig>],
+    client: impl FnOnce() -> Result<C, E>,
+    register: Register,
+) where
+    E: std::error::Error,
+    Register: for<'a> std::ops::AsyncFn(
+            &'a source::telegram::TelegramSourceConfig,
+            &'a C,
+        ) -> Result<(), source::telegram::registration::RegistrationError>,
+{
+    let registrations: Vec<_> = integrations
         .iter()
         .filter(|integration| integration.config.registration.is_some())
-        .map(|integration| (&integration.id, &integration.config))
         .collect();
-    if !telegram_registration_configs.is_empty() {
-        match crate::source::telegram::registration::registration_http_client() {
-            Ok(telegram_http_client) => {
-                for (integration_id, config) in telegram_registration_configs {
-                    if let Err(error) =
-                        crate::source::telegram::registration::register_webhook(config, &telegram_http_client).await
-                    {
+    if !registrations.is_empty() {
+        match client() {
+            Ok(client) => {
+                for integration in registrations {
+                    if let Err(error) = register(&integration.config, &client).await {
                         error!(
                             source = "telegram",
-                            integration = %integration_id,
+                            integration = %integration.id,
                             error = %error,
                             "Telegram webhook registration failed"
                         );
@@ -114,61 +178,82 @@ async fn serve(resolved: config::ResolvedConfig) -> anyhow::Result<()> {
             }
         }
     }
+}
 
-    let port = resolved.http_server.port;
-    let mut join_set: JoinSet<SourceResult> = JoinSet::new();
-
-    let publisher = ClaimCheckPublisher::new(client.clone(), claim_binding, nats.clone());
-
-    {
-        if let Some(ref cfg) = resolved.discord {
-            let p = publisher.clone();
-            let discord_cfg = cfg.clone();
-            join_set.spawn(async move {
-                crate::source::discord::gateway_runner::run(p, &discord_cfg).await;
-                ("discord-gateway", Ok(()))
-            });
-            info!(source = "discord", "gateway runner spawned");
-        }
+fn spawn_discord_gateway<P, S, Run, Running>(
+    tasks: &mut JoinSet<SourceResult>,
+    config: Option<&source::discord::config::DiscordConfig>,
+    publisher: ClaimCheckPublisher<P, S>,
+    run: Run,
+) where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    Run: FnOnce(ClaimCheckPublisher<P, S>, source::discord::config::DiscordConfig, twilight_gateway::Shard) -> Running
+        + Send
+        + 'static,
+    Running: std::future::Future<Output = ()> + Send + 'static,
+{
+    if let Some(config) = config {
+        let config = config.clone();
+        tasks.spawn(async move {
+            let shard = twilight_gateway::Shard::new(
+                twilight_gateway::ShardId::ONE,
+                config.bot_token.as_str().to_owned(),
+                config.intents,
+            );
+            run(publisher, config, shard).await;
+            ("discord-gateway", Ok(()))
+        });
+        info!(source = "discord", "gateway runner spawned");
     }
+}
 
-    for integration in resolved
-        .slack
+fn spawn_slack_socket_modes<P, S, Shutdown, Run, Running>(
+    tasks: &mut JoinSet<SourceResult>,
+    integrations: &[config::SourceIntegration<source::slack::SlackConfig>],
+    publisher: ClaimCheckPublisher<P, S>,
+    shutdown: Shutdown,
+    run: Run,
+) where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    Shutdown: std::future::Future<Output = ()> + Clone + Send + 'static,
+    Run: FnOnce(
+            ClaimCheckPublisher<P, S>,
+            source::slack::SlackConfig,
+            source::slack::socket_mode::HttpSocketConnector,
+        ) -> Running
+        + Clone
+        + Send
+        + 'static,
+    Running: std::future::Future<Output = Result<(), source::slack::socket_mode::SocketModeError>> + Send + 'static,
+{
+    for integration in integrations
         .iter()
         .filter(|integration| integration.config.socket_mode().is_some())
     {
-        let p = publisher.clone();
-        let integration_id = integration.id.clone();
-        let slack_cfg = integration.config.clone();
-        join_set.spawn(async move {
+        let publisher = publisher.clone();
+        let config = integration.config.clone();
+        let shutdown = shutdown.clone();
+        let run = run.clone();
+        tasks.spawn(async move {
             let result = tokio::select! {
-                _ = trogon_std::signal::shutdown_signal() => Ok(()),
-                result = crate::source::slack::socket_mode::run(p, &slack_cfg) => {
-                    result.context("slack socket mode")
-                }
+                () = shutdown => Ok(()),
+                result = async {
+                    let connector = source::slack::socket_mode::HttpSocketConnector::slack();
+                    run(publisher, config, connector).await
+                } => result.context("slack socket mode"),
             };
             ("slack-socket-mode", result)
         });
-        info!(
-            source = "slack",
-            integration = %integration_id,
-            "socket mode runner spawned"
-        );
+        info!(source = "slack", integration = %integration.id, "socket mode runner spawned");
     }
+}
 
-    let app = trogon_std::telemetry::http::instrument_router(http::mount_sources(resolved, publisher));
-
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    info!(addr = %addr, "listening");
-
-    join_set.spawn(async move {
-        let result = axum::serve(listener, app)
-            .with_graceful_shutdown(trogon_std::signal::shutdown_signal())
-            .await;
-        ("http", result.context("http server"))
-    });
-
+async fn wait_for_sources_with_shutdown<E: std::error::Error>(
+    mut join_set: JoinSet<SourceResult>,
+    shutdown_telemetry: impl FnOnce() -> Result<(), E>,
+) -> anyhow::Result<()> {
     let task_count = join_set.len();
     info!(count = task_count, "tasks spawned");
 
@@ -188,7 +273,7 @@ async fn serve(resolved: config::ResolvedConfig) -> anyhow::Result<()> {
     }
 
     info!("all tasks stopped, shutting down");
-    if let Err(e) = trogon_telemetry::shutdown_otel() {
+    if let Err(e) = shutdown_telemetry() {
         error!(error = %e, "OpenTelemetry shutdown failed");
     }
 
@@ -237,3 +322,5 @@ where
 
 #[cfg(test)]
 mod command_tests;
+#[cfg(test)]
+mod lifecycle_tests;

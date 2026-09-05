@@ -1,4 +1,6 @@
 use super::{assert_embedded_validation, assert_field_wire_types};
+#[cfg(feature = "decider")]
+use crate::decider::v1::{DecideRequest, DecideResponse, DecidedEvent};
 use crate::google::rpc::{
     BadRequest, DebugInfo, ErrorInfo, Help, LocalizedMessage, PreconditionFailure, QuotaFailure, RequestInfo,
     ResourceInfo, RetryInfo, Status, bad_request, help, precondition_failure, quota_failure,
@@ -32,4 +34,15 @@ fn rpc_details_validate_embedded_messages_before_exposing_a_view() {
     assert_embedded_validation::<bad_request::FieldViolation>(&[4]);
     assert_embedded_validation::<Help>(&[1]);
     assert_embedded_validation::<Status>(&[3]);
+}
+
+#[cfg(feature = "decider")]
+#[test]
+fn decider_envelopes_validate_wire_types_and_repeated_any_fragments() {
+    assert_field_wire_types::<DecideRequest>(&[1, 2], &[3]);
+    assert_embedded_validation::<DecideRequest>(&[1]);
+    assert_field_wire_types::<DecideResponse>(&[2], &[1]);
+    assert_embedded_validation::<DecideResponse>(&[2]);
+    assert_field_wire_types::<DecidedEvent>(&[1, 2], &[]);
+    assert_embedded_validation::<DecidedEvent>(&[2]);
 }

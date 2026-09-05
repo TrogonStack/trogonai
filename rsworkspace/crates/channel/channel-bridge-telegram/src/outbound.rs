@@ -2,6 +2,9 @@ use teloxide::Bot;
 use teloxide::requests::Requester;
 use teloxide::types::{ChatAction, ChatId, Message, True};
 
+#[cfg(test)]
+mod tests;
+
 /// Show the typing indicator in a chat. One trait per outbound operation;
 /// never carries agent concepts.
 #[allow(async_fn_in_trait)]

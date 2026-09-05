@@ -1,3 +1,5 @@
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 //! `a2a-gateway` binary.
 
 use clap::Parser;
@@ -6,6 +8,7 @@ use tracing::error;
 use a2a_gateway::{Args, run};
 
 #[tokio::main]
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(

@@ -1,3 +1,4 @@
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 use {
@@ -15,6 +16,7 @@ use {
 };
 
 #[tokio::main]
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn main() -> Result<()> {
     let (config, nats_config) = base_config(&trogon_std::CliArgs::<Args>::new(), &SystemEnv)?;
     trogon_telemetry::init_logger(ServiceName::TrogonDeciderNatsServer, [], &SystemEnv, &SystemFs);

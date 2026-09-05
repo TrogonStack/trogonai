@@ -6,11 +6,13 @@ use std::time::Duration;
 use buffa::MessageField;
 use trogon_decider_runtime::CommandExecution;
 use trogon_scheduler::{
-    CreateSchedule, GetScheduleCommand, ListSchedulesCommand, PauseSchedule, RemoveSchedule, ResumeSchedule,
-    ScheduleEventStatus, ScheduleId, SchedulesProjector, commands::domain as command_domain, connect_store,
-    projection_queries, projections_v1,
+    CreateSchedule, GetScheduleCommand, ListSchedulesCommand, PauseSchedule, PostgresSchedulesProjection,
+    RemoveSchedule, ResumeSchedule, ScheduleEventStatus, ScheduleId, SchedulesProjector,
+    commands::domain as command_domain, connect_store, projection_queries, projections_v1,
 };
 
+#[path = "support/events.rs"]
+mod events;
 #[path = "support/nats.rs"]
 mod nats;
 #[path = "support/postgres.rs"]
@@ -229,6 +231,7 @@ async fn malformed_delivery_does_not_block_later_valid_events_or_checkpointing()
     let projector = SchedulesProjector::new(pg.clone());
 
     for label in ["orders", "reports"] {
+        events::publish_anomalies(&js, &fixture_schedule_id("ghost"), &fixture_schedule_id(label)).await;
         js.publish(
             format!(
                 "{}{}",
@@ -284,6 +287,20 @@ async fn database_failure_leaves_the_event_available_for_retry() {
     let projector = SchedulesProjector::new(pg.clone());
     CommandExecution::new(&store.event_store, &base_schedule("orders"))
         .execute()
+        .await
+        .unwrap();
+    sqlx::query("ALTER TABLE schedules_projection RENAME TO unavailable_projection")
+        .execute(pg.pool())
+        .await
+        .unwrap();
+    let error = projector
+        .catch_up(&js)
+        .await
+        .expect_err("rebuild requires writable projection storage");
+    assert!(std::error::Error::source(&error).is_some());
+    assert_eq!(pg.read_checkpoint().await.unwrap(), 0);
+    sqlx::query("ALTER TABLE unavailable_projection RENAME TO schedules_projection")
+        .execute(pg.pool())
         .await
         .unwrap();
     projector.catch_up(&js).await.unwrap();

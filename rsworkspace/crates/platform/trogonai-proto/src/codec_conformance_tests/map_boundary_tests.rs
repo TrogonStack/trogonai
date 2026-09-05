@@ -23,6 +23,7 @@ macro_rules! map_entry_contract {
         for entry_tag in [0x0a, 0x12] {
             assert_malformed::<$message>(&[$tag, 3, entry_tag, 1, 0xff], DecodeError::InvalidUtf8);
         }
+        assert_malformed::<$message>(&[$tag, 2, 0x18, 0x80], DecodeError::UnexpectedEof);
     }};
 }
 

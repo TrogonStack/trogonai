@@ -1,4 +1,7 @@
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 #[tokio::main]
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(

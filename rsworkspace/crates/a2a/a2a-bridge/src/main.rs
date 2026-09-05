@@ -1,3 +1,5 @@
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 use {
     a2a_bridge::{
         AppState, AsyncNatsAuthMintWire, AsyncNatsTokenGatewayUnary, AsyncNatsTokenTaskJetstream,
@@ -5,22 +7,21 @@ use {
         StubInboundGatewayPublish, StubTaskJetStreamPort, gateway_router,
     },
     a2a_nats::{A2aPrefix, DEFAULT_A2A_PREFIX, ENV_A2A_PREFIX},
-    std::{net::SocketAddr, sync::Arc, time::Duration},
+    std::{future::Future, net::SocketAddr, sync::Arc, time::Duration},
     trogon_std::env::{ReadEnv, SystemEnv},
 };
 
 #[tokio::main]
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn main() {
     tracing_subscriber::fmt::try_init().ok();
-    if let Err(err) = run().await {
+    if let Err(err) = run(&SystemEnv, std::future::pending()).await {
         tracing::error!(%err, "a2a-bridge exited with error");
         std::process::exit(1);
     }
 }
 
-async fn run() -> Result<(), BootstrapError> {
-    let env = SystemEnv;
-
+async fn run(env: &impl ReadEnv, shutdown: impl Future<Output = ()> + Send + 'static) -> Result<(), BootstrapError> {
     let transport = env.var("A2A_BRIDGE_TRANSPORT").unwrap_or_else(|_| "stub".into());
 
     let nats_url = env.var("NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".into());
@@ -36,11 +37,11 @@ async fn run() -> Result<(), BootstrapError> {
     // -server — defaulting to "a2a" silently in production would make
     // any non-default deployment publish to a different gateway
     // subject and JetStream stream name than the rest of the stack.
-    let prefix = resolve_a2a_prefix(&env)?;
+    let prefix = resolve_a2a_prefix(env)?;
 
     let state = match transport.as_str() {
-        "stub" => bootstrap_stub_transport(&env, &nats_url, prefix),
-        "nats" => bootstrap_nats_transport(&env, &nats_url, prefix).await?,
+        "stub" => bootstrap_stub_transport(env, &nats_url, prefix),
+        "nats" => bootstrap_nats_transport(env, &nats_url, prefix).await?,
         other => return Err(BootstrapError::UnknownTransport(other.into())),
     };
 
@@ -50,7 +51,10 @@ async fn run() -> Result<(), BootstrapError> {
     let listener = tokio::net::TcpListener::bind(listen)
         .await
         .map_err(BootstrapError::Listen)?;
-    axum::serve(listener, router).await.map_err(BootstrapError::Serve)?;
+    axum::serve(listener, router)
+        .with_graceful_shutdown(shutdown)
+        .await
+        .map_err(BootstrapError::Serve)?;
     Ok(())
 }
 
@@ -185,3 +189,7 @@ fn parse_nats_servers(raw: &str) -> Vec<String> {
 fn parse_u64_env(env: &impl ReadEnv, key: &str) -> Option<u64> {
     env.var(key).ok()?.trim().parse().ok()
 }
+
+#[cfg(test)]
+#[path = "bootstrap_tests.rs"]
+mod tests;

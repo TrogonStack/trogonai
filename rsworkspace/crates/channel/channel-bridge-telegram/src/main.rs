@@ -1,3 +1,5 @@
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 //! Telegram channel bridge: the path from the gateway's raw Telegram stream to
 //! an ACP agent. See `docs/architecture/multi-channel-agent-routing.md`.
 //!
@@ -45,6 +47,7 @@ use {
 };
 
 #[tokio::main]
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn main() -> anyhow::Result<()> {
     let config = BridgeConfig::from_env(&SystemEnv)?;
     trogon_telemetry::init_logger(ServiceName::ChannelBridgeTelegram, [], &SystemEnv, &SystemFs);
@@ -105,7 +108,15 @@ async fn main() -> anyhow::Result<()> {
 
     let local = tokio::task::LocalSet::new();
     let result = local
-        .run_until(run(nats_client, store, claims, messages, bot, config))
+        .run_until(run(
+            nats_client,
+            store,
+            claims,
+            messages,
+            bot,
+            config,
+            shutdown_signal(),
+        ))
         .await;
 
     if let Err(e) = trogon_telemetry::shutdown_otel() {
@@ -126,14 +137,21 @@ async fn seed_principals(store: &ChannelStore, config: &BridgeConfig) -> anyhow:
     Ok(())
 }
 
-async fn run(
+async fn run<M, S>(
     nats_client: async_nats::Client,
     store: ChannelStore,
     claims: ClaimResolver<NatsObjectStore>,
-    mut messages: async_nats::jetstream::consumer::pull::Stream,
+    mut messages: M,
     bot: Bot,
     config: BridgeConfig,
-) -> anyhow::Result<()> {
+    shutdown: S,
+) -> anyhow::Result<()>
+where
+    M: futures::Stream<
+            Item = Result<async_nats::jetstream::Message, async_nats::jetstream::consumer::pull::MessagesError>,
+        > + Unpin,
+    S: std::future::Future<Output = ()>,
+{
     let meter = trogon_telemetry::meter("channel-bridge-telegram");
     let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(async_nats::jetstream::new(nats_client.clone()));
     let bridge: Arc<AcpBridge> = Arc::new(acp_nats::Bridge::new(
@@ -175,7 +193,6 @@ async fn run(
         ids: &UuidV7Generator,
     };
 
-    let shutdown = shutdown_signal();
     tokio::pin!(shutdown);
     loop {
         tokio::select! {

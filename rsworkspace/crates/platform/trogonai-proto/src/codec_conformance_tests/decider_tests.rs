@@ -1,7 +1,7 @@
 use buffa::{DecodeError, Message, MessageField};
 use buffa_types::google::protobuf::Any;
 
-use super::{assert_malformed, assert_wire_codec};
+use super::{assert_collection_limit, assert_malformed, assert_wire_codec};
 use crate::decider::v1::{DecideRequest, DecideResponse, DecidedEvent};
 use crate::scheduler::schedules::v1::{PauseSchedule, SchedulePaused, ScheduleResumed};
 
@@ -27,6 +27,11 @@ fn decide_request_preserves_command_type_and_optional_concurrency_precondition()
     let wire = request.encode_to_vec();
     assert_wire_codec(&wire, &request);
     let decoded = DecideRequest::decode_from_slice(&wire).expect("request decode");
+    let diagnostic = format!("{decoded:?}");
+    assert!(diagnostic.contains("DecideRequest"));
+    assert!(diagnostic.contains("command_id: Some(\"command-7\")"));
+    assert!(diagnostic.contains("expected_revision: Some(18446744073709551615)"));
+    assert!(diagnostic.contains(PauseSchedule::TYPE_URL));
     assert_eq!(
         decoded
             .command
@@ -69,6 +74,13 @@ fn decide_response_preserves_event_order_and_stream_position_when_merged() {
     let wire = [first.encode_to_vec(), second.encode_to_vec()].concat();
     assert_wire_codec(&wire, &expected);
     let decoded = DecideResponse::decode_from_slice(&wire).expect("response decode");
+    let diagnostic = format!("{decoded:?}");
+    assert!(diagnostic.contains("DecideResponse"));
+    assert!(diagnostic.contains("stream_position: 18446744073709551615"));
+    assert!(diagnostic.contains("DecidedEvent { id: \"event-7\""));
+    assert!(diagnostic.contains("DecidedEvent { id: \"event-8\""));
+    assert!(diagnostic.contains(SchedulePaused::TYPE_URL));
+    assert!(diagnostic.contains(ScheduleResumed::TYPE_URL));
     assert_eq!(
         decoded.events[0]
             .event
@@ -90,4 +102,9 @@ fn malformed_decider_any_type_url_and_nested_event_are_rejected() {
     assert_malformed::<DecideRequest>(b"\x0a\x03\x0a\x01\xff", DecodeError::InvalidUtf8);
     assert_malformed::<DecidedEvent>(b"\x12\x03\x0a\x01\xff", DecodeError::InvalidUtf8);
     assert_malformed::<DecideResponse>(b"\x12\x04\x0a\x01x", DecodeError::UnexpectedEof);
+}
+
+#[test]
+fn empty_decided_events_still_consume_collection_memory() {
+    assert_collection_limit::<DecideResponse>(b"\x12\x00");
 }

@@ -1,7 +1,8 @@
 use testcontainers_modules::postgres::Postgres;
 use testcontainers_modules::testcontainers::ContainerAsync;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
-use trogon_scheduler::PostgresSchedulesProjection;
+
+use super::PostgresSchedulesProjection;
 
 pub async fn start() -> (ContainerAsync<Postgres>, PostgresSchedulesProjection) {
     let container = Postgres::default().start().await.expect("start postgres container");

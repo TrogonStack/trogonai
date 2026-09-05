@@ -1352,6 +1352,7 @@ dependencies = [
  "anyhow",
  "async-nats",
  "async-trait",
+ "axum",
  "futures",
  "serde",
  "serde_json",
@@ -7305,6 +7306,8 @@ dependencies = [
 name = "trogon-schedules-decider"
 version = "0.1.0"
 dependencies = [
+ "buffa",
+ "buffa-types",
  "trogon-decider",
  "trogon-decider-guest-sdk",
  "trogon-scheduler-domain",
@@ -7336,6 +7339,7 @@ dependencies = [
  "axum",
  "bytesize",
  "clap",
+ "log",
  "opentelemetry",
  "rustls",
  "serde",

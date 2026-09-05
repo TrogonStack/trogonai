@@ -63,20 +63,56 @@ struct SocketEnvelope {
     reason: Option<String>,
 }
 
+pub trait SocketConnector<P: JetStreamPublisher, S: ObjectStorePut> {
+    fn connect<'a>(
+        &'a mut self,
+        bridge: &'a SlackBridge<P, S>,
+        config: &'a SlackSocketModeConfig,
+    ) -> impl std::future::Future<Output = Result<(), SocketModeError>> + Send + 'a;
+}
+
+pub struct HttpSocketConnector {
+    client: reqwest::Client,
+    open_url: String,
+}
+
+impl HttpSocketConnector {
+    pub fn new(open_url: impl Into<String>) -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            open_url: open_url.into(),
+        }
+    }
+
+    pub fn slack() -> Self {
+        Self::new(APPS_CONNECTIONS_OPEN_URL)
+    }
+}
+
+impl<P: JetStreamPublisher, S: ObjectStorePut> SocketConnector<P, S> for HttpSocketConnector {
+    async fn connect<'a>(
+        &'a mut self,
+        bridge: &'a SlackBridge<P, S>,
+        config: &'a SlackSocketModeConfig,
+    ) -> Result<(), SocketModeError> {
+        connect_once(&self.client, &self.open_url, bridge, config).await
+    }
+}
+
 pub async fn run<P: JetStreamPublisher, S: ObjectStorePut>(
     publisher: ClaimCheckPublisher<P, S>,
-    config: &SlackConfig,
+    config: SlackConfig,
+    mut connector: impl SocketConnector<P, S>,
 ) -> Result<(), SocketModeError> {
     let socket_mode = config
         .socket_mode()
         .ok_or(SocketModeError::MissingSocketModeConfig)?
         .clone();
-    let bridge = SlackBridge::new(publisher, config);
-    let client = reqwest::Client::new();
+    let bridge = SlackBridge::new(publisher, &config);
     let mut reconnect_delay = RECONNECT_INITIAL_DELAY;
 
     loop {
-        match connect_once(&client, APPS_CONNECTIONS_OPEN_URL, &bridge, &socket_mode).await {
+        match connector.connect(&bridge, &socket_mode).await {
             Ok(()) => reconnect_delay = RECONNECT_INITIAL_DELAY,
             Err(error) => warn!(error = %error, "Slack Socket Mode connection failed"),
         }

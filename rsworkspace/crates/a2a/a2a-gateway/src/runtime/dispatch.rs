@@ -18,10 +18,9 @@ use a2a_auth_callout::SpiceDbSubject;
 use a2a_nats::A2aMethod;
 use a2a_nats::audit::envelope::{AuditEnvelope, AuditEnvelopeFields, AuditOutcome, Tier1Decision, Tier3Decision};
 use a2a_nats::{
-    gateway_ingress_agent_and_method_dots, ingress_error_response_wire,
-    ingress_gateway_deadline_exceeded_response_bytes, ingress_gateway_declarative_denied_response_bytes,
-    ingress_gateway_policy_denied_response_bytes, ingress_gateway_tier3_refused_response_bytes,
-    ingress_invalid_request_response_bytes,
+    gateway_ingress_agent_and_method, ingress_error_response_wire, ingress_gateway_deadline_exceeded_response_bytes,
+    ingress_gateway_declarative_denied_response_bytes, ingress_gateway_policy_denied_response_bytes,
+    ingress_gateway_tier3_refused_response_bytes, ingress_invalid_request_response_bytes,
 };
 use async_nats::HeaderMap;
 use bytes::Bytes;
@@ -66,13 +65,13 @@ use crate::runtime::streaming::maybe_spawn_streaming_ingress_pump;
 use crate::runtime::tier1::{enrich_audit_caller, tier1_declarative_context_from_ingress};
 use crate::runtime::tier1_denial::{Tier1DenialCtx, deny_tier1};
 
+use crate::constants::MESSAGE_STREAM_METHOD_DOTS;
 use crate::constants::{
     ANONYMOUS_CALLER_SLUG, ATTR_AAUTH_AGENT_ID, ATTR_AGENT_SUBJECT, ATTR_CALLER_ID, ATTR_ROUTING_OUTCOME,
     ENV_GATEWAY_JWT_AUDIENCE, ROUTING_AAUTH_DENIED, ROUTING_DEADLINE_EXCEEDED, ROUTING_FORWARD_FAILED,
     ROUTING_FORWARDED, ROUTING_IGNORED_NO_REPLY, ROUTING_INGRESS_ERROR, ROUTING_POLICY_DENIED, ROUTING_TIER1_DENIED,
     ROUTING_TIER3_ENGINE_ERROR, ROUTING_TIER3_REFUSED, SPAN_GATEWAY_INGRESS_DISPATCH,
 };
-use crate::constants::{MESSAGE_SEND_METHOD_DOTS, MESSAGE_STREAM_METHOD_DOTS};
 
 /// Run a single ingress envelope through the full gateway dispatch
 /// chain. Returns once the reply (or detached audit publish) has
@@ -141,8 +140,8 @@ pub async fn dispatch_gateway_ingress<E: ReadEnv>(
             return;
         };
 
-        match gateway_ingress_agent_and_method_dots(ingress_subject.as_str(), &config.a2a_prefix) {
-            Ok((agent_id, method_dots)) => {
+        match gateway_ingress_agent_and_method(ingress_subject.as_str(), &config.a2a_prefix) {
+            Ok((agent_id, method)) => {
                 dispatch_routed(
                     client,
                     config,
@@ -160,7 +159,7 @@ pub async fn dispatch_gateway_ingress<E: ReadEnv>(
                     reply,
                     ingress_subject.as_str(),
                     agent_id,
-                    method_dots,
+                    method,
                     audit_caller_id,
                     audit_caller_source,
                 )
@@ -193,10 +192,11 @@ async fn dispatch_routed<E: ReadEnv>(
     reply: async_nats::Subject,
     ingress_subject: &str,
     agent_id: a2a_nats::A2aAgentId,
-    method_dots: String,
+    method: A2aMethod,
     mut audit_caller_id: String,
     mut audit_caller_source: Option<String>,
 ) {
+    let method_dots = method.as_dotted_suffix().to_owned();
     let agent_subject = format!(
         "{}.v1.agents.{}.{}",
         config.a2a_prefix.as_str(),
@@ -279,25 +279,13 @@ async fn dispatch_routed<E: ReadEnv>(
                 // derived Jsonrpc-Id / Jsonrpc-Error-Code projections stay for
                 // routing and metrics so clients that only inspect headers still
                 // see -32118.
-                let encoded = match ingress_error_response_wire(
+                let encoded = ingress_error_response_wire(
                     &headers_owned,
                     payload.as_ref(),
                     deny.code,
                     "aauth verification rejected envelope",
                     None,
-                ) {
-                    Ok(encoded) => encoded,
-                    Err(err) => {
-                        // The caller is left to time out on its inbox, so at
-                        // minimum the drop must be visible to operators.
-                        error!(
-                            ingress.subject = %ingress_subject,
-                            error = %err,
-                            "failed to encode aauth deny reply; dropping error response",
-                        );
-                        return;
-                    }
-                };
+                );
                 let mut reply_headers = encoded.headers;
                 if let Some((name, value)) = deny.to_requirement_header() {
                     reply_headers.insert(name.as_str(), value.as_str());
@@ -356,7 +344,7 @@ async fn dispatch_routed<E: ReadEnv>(
             tier1,
             tier1_owner,
             &agent_id,
-            method_dots.as_str(),
+            &method,
             method_slashes.as_str(),
             &headers_owned,
             payload.as_ref(),
@@ -402,13 +390,11 @@ async fn dispatch_routed<E: ReadEnv>(
                 routing_outcome = "policy_denied",
                 "gateway tier-1 declarative policy rejected ingress envelope",
             );
-            let Ok(body) = ingress_gateway_declarative_denied_response_bytes(
+            let body = ingress_gateway_declarative_denied_response_bytes(
                 &headers_owned,
                 payload.as_ref(),
                 "tier-1 declarative policy rejected envelope",
-            ) else {
-                return;
-            };
+            );
             reply_error(client, reply, HeaderMap::new(), body).await;
             spawn_gateway_audit_publish(
                 audit_enabled,
@@ -445,7 +431,6 @@ async fn dispatch_routed<E: ReadEnv>(
 
     if let Some(substrate) = policy.substrate.as_ref()
         && let Some(evaluator) = substrate.tier2.evaluator()
-        && let Some(method) = A2aMethod::from_dotted_suffix(method_dots.as_str())
     {
         let caller_subject = SpiceDbSubject::new(audit_caller_id.as_str());
         let eval_ctx = tier2_evaluation_context_from_ingress(
@@ -466,13 +451,11 @@ async fn dispatch_routed<E: ReadEnv>(
                     routing_outcome = "policy_denied",
                     "gateway tier-2 predicate rejected ingress envelope",
                 );
-                let Ok(body) = ingress_gateway_policy_denied_response_bytes(
+                let body = ingress_gateway_policy_denied_response_bytes(
                     &headers_owned,
                     payload.as_ref(),
                     "tier-2 predicate rejected envelope",
-                ) else {
-                    return;
-                };
+                );
                 reply_error(client, reply, HeaderMap::new(), body).await;
                 spawn_gateway_audit_publish(
                     audit_enabled,
@@ -518,13 +501,11 @@ async fn dispatch_routed<E: ReadEnv>(
             // Unparseable payload -- fail closed rather than fall
             // through to a Null-payload manifest miss. Audit + reply
             // share the same -32801 shape as a policy denial.
-            let Ok(body) = ingress_gateway_policy_denied_response_bytes(
+            let body = ingress_gateway_policy_denied_response_bytes(
                 &headers_owned,
                 payload.as_ref(),
                 "tier-3 ingress payload not valid JSON",
-            ) else {
-                return;
-            };
+            );
             reply_error(client, reply, HeaderMap::new(), body).await;
             return;
         }
@@ -540,26 +521,7 @@ async fn dispatch_routed<E: ReadEnv>(
                     "gateway tier-3 redaction applied before forward",
                 );
             }
-            match tier3_ctx.into_payload_bytes() {
-                Ok(bytes) => payload = bytes,
-                Err(err) => {
-                    error!(
-                        caller_id = caller_slug.as_deref().unwrap_or(""),
-                        method = %method_slashes,
-                        error = %err,
-                        "tier-3 rewritten payload serialization failed; denying ingress",
-                    );
-                    let Ok(body) = ingress_gateway_policy_denied_response_bytes(
-                        &headers_owned,
-                        payload.as_ref(),
-                        "tier-3 redaction engine error",
-                    ) else {
-                        return;
-                    };
-                    reply_error(client, reply, HeaderMap::new(), body).await;
-                    return;
-                }
-            }
+            payload = tier3_ctx.into_payload_bytes();
         }
         Tier3RedactionDecision::Refuse { reason, rule } => {
             tracing::Span::current().record(ATTR_ROUTING_OUTCOME, ROUTING_TIER3_REFUSED);
@@ -571,14 +533,12 @@ async fn dispatch_routed<E: ReadEnv>(
                 routing_outcome = "tier3_refused",
                 "gateway tier-3 skill refused part redaction",
             );
-            let Ok(body) = ingress_gateway_tier3_refused_response_bytes(
+            let body = ingress_gateway_tier3_refused_response_bytes(
                 &headers_owned,
                 payload.as_ref(),
                 "tier-3 skill refused part redaction",
                 rule.as_str(),
-            ) else {
-                return;
-            };
+            );
             reply_error(client, reply, HeaderMap::new(), body).await;
             spawn_gateway_audit_publish(
                 audit_enabled,
@@ -617,13 +577,11 @@ async fn dispatch_routed<E: ReadEnv>(
                 routing_outcome = "tier3_engine_error",
                 "gateway tier-3 redaction engine failed closed",
             );
-            let Ok(body) = ingress_gateway_policy_denied_response_bytes(
+            let body = ingress_gateway_policy_denied_response_bytes(
                 &headers_owned,
                 payload.as_ref(),
                 "tier-3 redaction engine error",
-            ) else {
-                return;
-            };
+            );
             reply_error(client, reply, HeaderMap::new(), body).await;
             spawn_gateway_audit_publish(
                 audit_enabled,
@@ -789,13 +747,11 @@ async fn dispatch_routed<E: ReadEnv>(
                 routing_outcome = "deadline_exceeded",
                 "gateway unary publish exceeded deadline before agent reply routing",
             );
-            let Ok(body) = ingress_gateway_deadline_exceeded_response_bytes(
+            let body = ingress_gateway_deadline_exceeded_response_bytes(
                 &headers_owned,
                 payload.as_ref(),
                 "gateway publish deadline exceeded for message/send",
-            ) else {
-                return;
-            };
+            );
             reply_error(client, reply, HeaderMap::new(), body).await;
             spawn_gateway_audit_publish(
                 audit_enabled,
@@ -847,13 +803,7 @@ async fn handle_ingress_routing_failure(
         "gateway ingress subject routing failed",
     );
     let headers = msg.headers.clone().unwrap_or_default();
-    let body = match ingress_invalid_request_response_bytes(&headers, &msg.payload, reason) {
-        Ok(b) => b,
-        Err(error) => {
-            warn!(error = %error, "failed to serialize JSON-RPC ingress error response");
-            return;
-        }
-    };
+    let body = ingress_invalid_request_response_bytes(&headers, &msg.payload, reason);
     if let Err(error) = client.publish_with_headers(reply, HeaderMap::new(), body).await {
         warn!(error = %error, "gateway failed to publish ingress error reply");
     }
@@ -872,7 +822,7 @@ async fn run_tier1_spicedb<'a, E: ReadEnv>(
     tier1: &dyn SpiceDbTier1Gate,
     tier1_owner: Option<&Arc<dyn OwnerTupleEmitter>>,
     agent_id: &'a a2a_nats::A2aAgentId,
-    method_dots: &str,
+    method: &A2aMethod,
     method_slashes: &'a str,
     _headers_owned: &HeaderMap,
     payload: &'a [u8],
@@ -911,26 +861,7 @@ async fn run_tier1_spicedb<'a, E: ReadEnv>(
         return Tier1SpiceDbStepOutcome::Denied;
     };
     let params = json_rpc_params(payload);
-    let Some(method) = A2aMethod::from_dotted_suffix(method_dots) else {
-        run_tier1_deny(
-            client,
-            reply,
-            config,
-            agent_id,
-            method_slashes,
-            &payload_bytes,
-            trace_id,
-            audit_enabled,
-            started_wall_ms,
-            started_mono,
-            audit_caller_id,
-            audit_caller_source,
-            "tier-1 unknown method suffix",
-        )
-        .await;
-        return Tier1SpiceDbStepOutcome::Denied;
-    };
-    let tuple = match derive_tuple(&method, agent_id, session.account(), &params) {
+    let tuple = match derive_tuple(method, agent_id, session.account(), &params) {
         Ok(tuple) => tuple,
         Err(_) => {
             run_tier1_deny(
@@ -954,7 +885,7 @@ async fn run_tier1_spicedb<'a, E: ReadEnv>(
     };
     match tier1.authorize(&session, &principal, &tuple).await {
         Tier1AuthorizeOutcome::Allowed { zed_token } => {
-            if method_dots == MESSAGE_SEND_METHOD_DOTS
+            if matches!(method, A2aMethod::MessageSend)
                 && let Some(emitter) = tier1_owner
                 && let Some(owner) = owner_tuple_for_message_send(agent_id, &params, &principal)
                 && let Err(error) = emitter.emit_owner(&owner).await
@@ -1023,9 +954,7 @@ async fn run_tier1_deny<'a>(
     audit_caller_source: &'a Option<String>,
     message: &'a str,
 ) {
-    let Ok(body) = ingress_gateway_policy_denied_response_bytes(&HeaderMap::new(), payload.as_ref(), message) else {
-        return;
-    };
+    let body = ingress_gateway_policy_denied_response_bytes(&HeaderMap::new(), payload.as_ref(), message);
     let ctx = Tier1DenialCtx {
         a2a_prefix: &config.a2a_prefix,
         agent_id,

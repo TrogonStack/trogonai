@@ -4,6 +4,7 @@ use async_nats::jetstream::stream::{DiscardPolicy, Stream};
 use trogon_nats::test_support::JetStreamTestServer;
 
 use super::*;
+use crate::gateway_test_support::Diagnostics;
 
 const WAIT: Duration = Duration::from_secs(10);
 
@@ -26,6 +27,7 @@ async fn wait_for_acknowledged(stream: &Stream, durable: &PushDlqMirrorDurable, 
 
 #[tokio::test]
 async fn consumer_mirrors_once_and_acknowledges_duplicate_invalid_and_loop_marked_records() {
+    let diagnostics = Diagnostics::both_outputs();
     let server = JetStreamTestServer::start().await;
     let client = server.client().await;
     let js = async_nats::jetstream::new(client.clone());
@@ -88,6 +90,15 @@ async fn consumer_mirrors_once_and_acknowledges_duplicate_invalid_and_loop_marke
     shutdown.cancel();
     tokio::time::timeout(WAIT, worker).await.unwrap().unwrap();
     assert_eq!(stream.info().await.unwrap().state.messages, 5);
+    diagnostics.assert_event(
+        "push DLQ mirror consumer started",
+        &[("stream", "A2A_PUSH_DLQ"), ("durable", durable.as_str())],
+    );
+    diagnostics.assert_event("push DLQ mirror shutting down", &[("durable", durable.as_str())]);
+    diagnostics.assert_event(
+        "push DLQ mirror publish acknowledged",
+        &[("mirror_subject", "a2a.v1.push.dlq.mirror.alice.task-1")],
+    );
 }
 
 #[tokio::test]

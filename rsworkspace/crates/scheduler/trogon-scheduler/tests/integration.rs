@@ -5,15 +5,25 @@ use std::time::Duration;
 use async_nats::Request;
 use async_nats::jetstream;
 use chrono::{DateTime, Utc};
-use trogon_decider_runtime::{CommandExecution, ReadFrom, ReadStreamRequest, StreamRead, TokioSnapshotTaskScheduler};
+use tracing::instrument::WithSubscriber;
+use trogon_decider_runtime::{
+    CommandExecution, ReadFrom, ReadSnapshotRequest, ReadSnapshotResponse, ReadStreamRequest, Snapshot, SnapshotRead,
+    SnapshotWrite, StreamRead, TokioSnapshotTaskScheduler, WriteSnapshotRequest,
+};
 use trogon_scheduler::{
     CreateSchedule, GetScheduleCommand, ListSchedulesCommand, PauseSchedule, RecordScheduleOccurrence, RemoveSchedule,
     ResumeSchedule, ScheduleEventCase, ScheduleEventSchedule, ScheduleEventStatus, ScheduleId, ScheduleNextOccurrence,
     commands::domain as command_domain, connect_store, get_schedule, list_schedules, state_v1, v1,
 };
+use trogon_std::log_capture::{CapturedLogs, LogLevel};
 
+#[path = "support/events.rs"]
+mod events;
 #[path = "support/nats.rs"]
 mod nats_support;
+
+#[path = "support/projection_observer.rs"]
+mod projection_observer;
 
 fn fixture_schedule_id(label: &str) -> String {
     match label {
@@ -57,6 +67,302 @@ fn base_schedule(id: &str) -> CreateSchedule {
             headers: command_domain::ScheduleHeaders::default(),
         },
     }
+}
+
+#[tokio::test]
+async fn catch_up_skips_invalid_events_without_losing_valid_state_or_checkpoint_progress() {
+    let (_server, client) = nats_support::start().await;
+    let store = connect_store(client.clone()).await.unwrap();
+    let js = jetstream::new(client.clone());
+    CommandExecution::new(&store.event_store, &base_schedule("eventful"))
+        .execute()
+        .await
+        .unwrap();
+    events::publish_anomalies(&js, &fixture_schedule_id("retired"), &fixture_schedule_id("eventful")).await;
+    js.publish(
+        format!(
+            "{}{}",
+            trogon_scheduler::constants::EVENTS_SUBJECT_PREFIX,
+            fixture_schedule_id("retired")
+        ),
+        bytes::Bytes::from_static(b"missing event headers"),
+    )
+    .await
+    .unwrap()
+    .await
+    .unwrap();
+    CommandExecution::new(&store.event_store, &PauseSchedule::new(command_schedule_id("eventful")))
+        .execute()
+        .await
+        .unwrap();
+
+    let fresh = tokio::time::timeout(Duration::from_secs(10), connect_store(client))
+        .await
+        .expect("invalid events must not wedge catch-up")
+        .unwrap();
+    let schedules = list_schedules(&fresh.schedules_bucket, ListSchedulesCommand)
+        .await
+        .unwrap();
+    assert_eq!(schedules.len(), 1);
+    assert_eq!(schedules[0].id, fixture_schedule_id("eventful"));
+    assert_eq!(schedules[0].status, ScheduleEventStatus::Paused);
+    let target = js
+        .get_stream(trogon_scheduler::constants::EVENTS_STREAM)
+        .await
+        .unwrap()
+        .get_info()
+        .await
+        .unwrap()
+        .state
+        .last_sequence;
+    let checkpoint = fresh
+        .schedules_bucket
+        .get(trogon_scheduler::SCHEDULES_CHECKPOINT_KEY)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(checkpoint.as_ref(), target.to_string().as_bytes());
+}
+
+#[tokio::test]
+async fn provisioning_repairs_legacy_stream_settings_and_preserves_wider_deduplication() {
+    let (_server, client) = nats_support::start().await;
+    let js = jetstream::new(client);
+    let stream = trogon_scheduler::kv::get_or_create_events_stream(&js).await.unwrap();
+    let mut legacy = stream.cached_info().config.clone();
+    legacy.allow_atomic_publish = false;
+    legacy.subjects = vec!["legacy.schedule.events.>".to_string()];
+    legacy.duplicate_window = Duration::from_secs(1);
+    js.update_stream(legacy).await.unwrap();
+
+    let repaired = trogon_scheduler::kv::get_or_create_events_stream(&js).await.unwrap();
+    let config = &repaired.cached_info().config;
+    assert!(config.allow_atomic_publish);
+    assert_eq!(
+        config.subjects,
+        vec![trogon_scheduler::constants::EVENTS_SUBJECT_PATTERN]
+    );
+    assert_eq!(
+        config.duplicate_window,
+        trogon_scheduler::constants::EVENTS_DUPLICATE_WINDOW.as_duration()
+    );
+
+    let mut wider = config.clone();
+    wider.duplicate_window *= 2;
+    let expected_window = wider.duplicate_window;
+    js.update_stream(wider).await.unwrap();
+    let reopened = trogon_scheduler::kv::get_or_create_events_stream(&js).await.unwrap();
+    assert_eq!(reopened.cached_info().config.duplicate_window, expected_window);
+}
+
+#[tokio::test]
+async fn startup_rejects_event_retention_that_can_erase_schedule_history() {
+    let (_server, client) = nats_support::start().await;
+    let js = jetstream::new(client.clone());
+    let stream = trogon_scheduler::kv::get_or_create_events_stream(&js).await.unwrap();
+    let mut limited = stream.cached_info().config.clone();
+    limited.max_messages = 10;
+    js.update_stream(limited).await.unwrap();
+    let error = connect_store(client)
+        .await
+        .err()
+        .expect("lossy retention must prevent startup");
+    assert!(matches!(error, trogon_scheduler::SchedulerError::Event { .. }));
+    assert!(std::error::Error::source(&error).is_some());
+    assert_eq!(
+        js.get_stream(trogon_scheduler::constants::EVENTS_STREAM)
+            .await
+            .unwrap()
+            .cached_info()
+            .config
+            .max_messages,
+        10
+    );
+}
+
+#[tokio::test]
+async fn key_value_provisioning_reopens_an_existing_bucket_and_reports_invalid_names() {
+    let (_server, client) = nats_support::start().await;
+    let js = jetstream::new(client);
+    let original = js
+        .create_key_value(jetstream::kv::Config {
+            bucket: "PROVISIONING".to_string(),
+            history: 5,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    original
+        .put("retained", bytes::Bytes::from_static(b"existing value"))
+        .await
+        .unwrap();
+    let reopened = trogon_scheduler::kv::get_or_create(
+        &js,
+        jetstream::kv::Config {
+            bucket: "PROVISIONING".to_string(),
+            history: 1,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        reopened.get("retained").await.unwrap().unwrap().as_ref(),
+        b"existing value"
+    );
+    let error = trogon_scheduler::kv::get_or_create(
+        &js,
+        jetstream::kv::Config {
+            bucket: "invalid.bucket".to_string(),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect_err("invalid bucket names must fail");
+    assert!(matches!(error, trogon_scheduler::SchedulerError::Kv { .. }));
+    assert!(std::error::Error::source(&error).is_some());
+}
+
+#[tokio::test]
+async fn listing_skips_a_corrupt_row_and_restart_repairs_it_from_history() {
+    let (_server, client) = nats_support::start().await;
+    let store = connect_store(client.clone()).await.unwrap();
+    for id in ["eventful", "second"] {
+        CommandExecution::new(&store.event_store, &base_schedule(id))
+            .execute()
+            .await
+            .unwrap();
+    }
+    store
+        .schedules_bucket
+        .put(
+            fixture_schedule_id("eventful"),
+            bytes::Bytes::from_static(b"invalid projection"),
+        )
+        .await
+        .unwrap();
+    let listed = list_schedules(&store.schedules_bucket, ListSchedulesCommand)
+        .await
+        .unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].id, fixture_schedule_id("second"));
+    CommandExecution::new(&store.event_store, &PauseSchedule::new(command_schedule_id("eventful")))
+        .execute()
+        .await
+        .unwrap();
+    let fresh = connect_store(client).await.unwrap();
+    let repaired = get_schedule(
+        &fresh.schedules_bucket,
+        GetScheduleCommand::new(query_schedule_id("eventful")),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(repaired.status, ScheduleEventStatus::Paused);
+    assert_eq!(
+        list_schedules(&fresh.schedules_bucket, ListSchedulesCommand)
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
+}
+
+#[tokio::test]
+async fn failed_projection_writes_leave_checkpoint_behind_until_replay_can_repair_them() {
+    let logs = CapturedLogs::isolated();
+    let (_server, client) = nats_support::start().await;
+    let store = connect_store(client.clone()).await.unwrap();
+    let js = jetstream::new(client.clone());
+    js.update_key_value(jetstream::kv::Config {
+        bucket: trogon_scheduler::SCHEDULES_BUCKET.to_string(),
+        history: 5,
+        max_value_size: 32,
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    let observer = projection_observer::ProjectionFailureObserver::default();
+    let command = base_schedule("eventful");
+    let execution = CommandExecution::new(&store.event_store, &command);
+    let appended = if logs.is_some() {
+        execution.execute().await
+    } else {
+        execution.execute().with_subscriber(observer.clone()).await
+    }
+    .expect("projection failure must not turn a durable append into a failed command");
+    if let Some(logs) = logs {
+        let records = logs.records();
+        let position = format!("stream_position={}", appended.stream_position.as_u64());
+        let schedule_id = format!("schedule_id={}", fixture_schedule_id("eventful"));
+        assert!(records.iter().any(|record| {
+            record.level == LogLevel::Error
+                && record.target == "trogon_scheduler::store::event_store"
+                && record
+                    .message
+                    .contains("failed to project appended schedule events into the read model")
+                && record.message.split_whitespace().any(|field| field == position)
+                && record.message.contains(&schedule_id)
+        }));
+    } else {
+        assert_eq!(observer.position(), Some(appended.stream_position.as_u64()));
+    }
+
+    let incomplete = connect_store(client.clone()).await.unwrap();
+    assert!(
+        get_schedule(
+            &incomplete.schedules_bucket,
+            GetScheduleCommand::new(query_schedule_id("eventful"))
+        )
+        .await
+        .unwrap()
+        .is_none()
+    );
+    assert!(
+        incomplete
+            .schedules_bucket
+            .get(trogon_scheduler::SCHEDULES_CHECKPOINT_KEY)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let recorded = incomplete
+        .event_store
+        .read_stream(ReadStreamRequest {
+            stream_id: &command_schedule_id("eventful"),
+            from: ReadFrom::Beginning,
+        })
+        .await
+        .unwrap();
+    assert_eq!(recorded.events.len(), 1);
+
+    js.update_key_value(jetstream::kv::Config {
+        bucket: trogon_scheduler::SCHEDULES_BUCKET.to_string(),
+        history: 5,
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    let repaired = connect_store(client).await.unwrap();
+    assert!(
+        get_schedule(
+            &repaired.schedules_bucket,
+            GetScheduleCommand::new(query_schedule_id("eventful"))
+        )
+        .await
+        .unwrap()
+        .is_some()
+    );
+    assert_eq!(
+        repaired
+            .schedules_bucket
+            .get(trogon_scheduler::SCHEDULES_CHECKPOINT_KEY)
+            .await
+            .unwrap()
+            .unwrap()
+            .as_ref(),
+        b"1"
+    );
 }
 
 #[tokio::test]
@@ -531,4 +837,49 @@ async fn commands_execute_full_lifecycle_against_event_store() {
     assert!(matches!(&events[1].event, Some(ScheduleEventCase::SchedulePaused(_))));
     assert!(matches!(&events[2].event, Some(ScheduleEventCase::ScheduleResumed(_))));
     assert!(matches!(&events[3].event, Some(ScheduleEventCase::ScheduleRemoved(_))));
+}
+
+#[tokio::test]
+async fn persisted_command_snapshot_round_trips_and_survives_reopening() {
+    let (_server, client) = nats_support::start().await;
+    let store = connect_store(client.clone()).await.unwrap();
+    let id = command_schedule_id("lifecycle");
+    let result = CommandExecution::new(&store.event_store, &base_schedule("lifecycle"))
+        .execute()
+        .await
+        .unwrap();
+    let info = store.event_store.events_stream().get_info().await.unwrap();
+    assert_eq!(info.state.last_sequence, result.stream_position.as_u64());
+    store
+        .event_store
+        .write_snapshot(WriteSnapshotRequest {
+            snapshot_id: &id,
+            snapshot: Snapshot::new(result.stream_position, result.state.clone()),
+        })
+        .await
+        .unwrap();
+
+    let js = jetstream::new(client.clone());
+    let bucket = trogon_scheduler::open_command_snapshot_bucket(&js).await.unwrap();
+    assert_eq!(
+        bucket.status().await.unwrap().info.config.name,
+        format!("KV_{}", trogon_scheduler::constants::COMMAND_SNAPSHOT_BUCKET)
+    );
+    let reopened = connect_store(client).await.unwrap();
+    let snapshot: ReadSnapshotResponse<state_v1::State> = reopened
+        .event_store
+        .read_snapshot(ReadSnapshotRequest { snapshot_id: &id })
+        .await
+        .unwrap();
+    let snapshot = snapshot.snapshot.unwrap();
+    assert_eq!(snapshot.position, result.stream_position);
+    assert_eq!(snapshot.payload, result.state);
+
+    js.delete_key_value(trogon_scheduler::constants::COMMAND_SNAPSHOT_BUCKET)
+        .await
+        .unwrap();
+    assert!(matches!(
+        trogon_scheduler::open_command_snapshot_bucket(&js).await.err().unwrap(),
+        trogon_scheduler::SchedulerError::Kv { .. }
+    ));
 }

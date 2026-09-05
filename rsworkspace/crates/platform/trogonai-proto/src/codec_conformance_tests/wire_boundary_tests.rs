@@ -24,6 +24,10 @@ fn assert_field_wire_types<M: Message + HasMessageView>(length_delimited: &[u8],
 fn assert_embedded_validation<M: Message + HasMessageView>(fields: &[u8]) {
     for &field in fields {
         assert_malformed::<M>(&[field << 3 | 2, 1, 0], DecodeError::InvalidFieldNumber);
+        assert_malformed::<M>(
+            &[field << 3 | 2, 0, field << 3 | 2, 1, 0],
+            DecodeError::InvalidFieldNumber,
+        );
     }
 }
 
@@ -36,6 +40,7 @@ fn error_template_fields_enforce_their_wire_types_and_validate_nested_options() 
     assert_field_wire_types::<message_options::HelpLink>(&[1, 2], &[]);
     assert_field_wire_types::<message_options::MetadataEntry>(&[1, 2], &[3]);
     assert_field_wire_types::<FieldOptions>(&[2, 3], &[1]);
+    assert_field_wire_types::<crate::r#gen::elixirpb::FileOptions>(&[1], &[]);
 }
 
 #[cfg(any(feature = "decider", feature = "grpc-nats-micro"))]
