@@ -1138,3 +1138,6 @@ fn caller_slug_from_audit_id(audit_caller_id: &str) -> Option<String> {
 fn elapsed_ms(started_mono: Instant) -> u64 {
     started_mono.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
 }
+
+#[cfg(test)]
+mod tests;

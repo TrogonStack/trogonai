@@ -86,3 +86,6 @@ pub fn decode_event_to_json(type_url: &str, payload: &[u8]) -> Result<Option<Str
 
 #[cfg(all(test, feature = "schedules"))]
 mod tests;
+
+#[cfg(all(test, any(feature = "schedules", feature = "decider", feature = "grpc-nats-micro")))]
+mod codec_conformance_tests;

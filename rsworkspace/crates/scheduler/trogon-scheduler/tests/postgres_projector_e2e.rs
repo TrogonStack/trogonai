@@ -1,22 +1,20 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
-// End-to-end: append schedules through the real NATS event store, then fold the
-// event stream into Postgres with `SchedulesProjector`. Both backends run in
-// throwaway containers, so this needs Docker; run with
-// `cargo test -p trogon-scheduler --features postgres -- --ignored`.
 #![cfg(feature = "postgres")]
 
 use std::time::Duration;
 
 use buffa::MessageField;
-use testcontainers_modules::nats::{Nats, NatsServerCmd};
-use testcontainers_modules::postgres::Postgres;
-use testcontainers_modules::testcontainers::ImageExt;
-use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use trogon_decider_runtime::CommandExecution;
 use trogon_scheduler::{
-    CreateSchedule, GetScheduleCommand, ListSchedulesCommand, PostgresSchedulesProjection, ScheduleId,
-    SchedulesProjector, commands::domain as command_domain, connect_store, projection_queries, projections_v1,
+    CreateSchedule, GetScheduleCommand, ListSchedulesCommand, PauseSchedule, RemoveSchedule, ResumeSchedule,
+    ScheduleEventStatus, ScheduleId, SchedulesProjector, commands::domain as command_domain, connect_store,
+    projection_queries, projections_v1,
 };
+
+#[path = "support/nats.rs"]
+mod nats;
+#[path = "support/postgres.rs"]
+mod postgres;
 
 fn fixture_schedule_id(label: &str) -> String {
     match label {
@@ -73,37 +71,17 @@ fn base_schedule(id: &str) -> CreateSchedule {
 }
 
 #[tokio::test]
-#[ignore = "requires Docker for testcontainers NATS + Postgres"]
 async fn projector_folds_event_stream_into_postgres() {
-    // Postgres backend.
-    let pg_container = Postgres::default().start().await.expect("start postgres");
-    let pg_host = pg_container.get_host().await.expect("postgres host");
-    let pg_port = pg_container.get_host_port_ipv4(5432).await.expect("postgres port");
-    let pg_url = format!("postgres://postgres:postgres@{pg_host}:{pg_port}/postgres");
-    let pg_pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&pg_url)
-        .await
-        .expect("connect postgres pool");
-    let pg = PostgresSchedulesProjection::new(pg_pool).await.expect("run migrations");
-
-    // NATS with JetStream for the event store.
-    let nats_cmd = NatsServerCmd::default().with_jetstream();
-    // The event store requires NATS 2.12+ (atomic batch publish), so pin a tag that
-    // supports it rather than the module's older default.
-    let nats_container = Nats::default()
-        .with_cmd(&nats_cmd)
-        .with_tag("2.14.2-alpine")
-        .start()
-        .await
-        .expect("start nats");
-    let nats_host = nats_container.get_host().await.expect("nats host");
-    let nats_port = nats_container.get_host_port_ipv4(4222).await.expect("nats port");
-    let nats_url = format!("nats://{nats_host}:{nats_port}");
-    let client = async_nats::connect(&nats_url).await.expect("connect nats");
+    let (_pg_container, pg) = postgres::start().await;
+    let (_nats_container, client) = nats::start().await;
 
     // Append two schedules through the real (NATS-backed) event store.
     let store = connect_store(client.clone()).await.expect("connect store");
+    let js = async_nats::jetstream::new(client);
+    let projector = SchedulesProjector::new(pg.clone());
+    projector.catch_up(&js).await.expect("catch up empty stream");
+    assert_eq!(pg.read_checkpoint().await.unwrap(), 0);
+
     CommandExecution::new(&store.event_store, &base_schedule("orders"))
         .execute()
         .await
@@ -114,8 +92,6 @@ async fn projector_folds_event_stream_into_postgres() {
         .expect("create reports");
 
     // Fold the event stream into Postgres.
-    let js = async_nats::jetstream::new(client);
-    let projector = SchedulesProjector::new(pg.clone());
     projector.catch_up(&js).await.expect("projector catch up");
 
     // The Postgres-backed read model now serves both schedules.
@@ -147,6 +123,78 @@ async fn projector_folds_event_stream_into_postgres() {
         2
     );
 
+    let checkpoint = pg.read_checkpoint().await.unwrap();
+    let orders_id = command_domain::ScheduleId::parse(&fixture_schedule_id("orders")).unwrap();
+    CommandExecution::new(&store.event_store, &PauseSchedule::new(orders_id.clone()))
+        .execute()
+        .await
+        .expect("pause orders");
+    projector
+        .catch_up(&js)
+        .await
+        .expect("resume projection from checkpoint");
+    let orders = projection_queries::get_schedule(
+        &pg,
+        GetScheduleCommand::new(ScheduleId::parse(&fixture_schedule_id("orders")).unwrap()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(orders.status, ScheduleEventStatus::Paused);
+    assert!(pg.read_checkpoint().await.unwrap() > checkpoint);
+
+    CommandExecution::new(
+        &store.event_store,
+        &RemoveSchedule::new(command_domain::ScheduleId::parse(&fixture_schedule_id("reports")).unwrap()),
+    )
+    .execute()
+    .await
+    .expect("remove reports");
+    projector.catch_up(&js).await.expect("project removal");
+    assert!(
+        pg.get_projection(&ScheduleId::parse(&fixture_schedule_id("reports")).unwrap())
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    let mut tail = tokio::task::JoinSet::new();
+    let live_projector = projector.clone();
+    let live_js = js.clone();
+    tail.spawn(async move { live_projector.run(&live_js).await });
+    CommandExecution::new(&store.event_store, &ResumeSchedule::new(orders_id))
+        .execute()
+        .await
+        .expect("resume orders");
+    let target = js
+        .get_stream(trogon_scheduler::constants::EVENTS_STREAM)
+        .await
+        .unwrap()
+        .get_info()
+        .await
+        .unwrap()
+        .state
+        .last_sequence;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while pg.read_checkpoint().await.unwrap() < target {
+            tokio::select! {
+                result = tail.join_next() => panic!("live projector exited before checkpointing the event: {result:?}"),
+                () = tokio::time::sleep(Duration::from_millis(10)) => {}
+            }
+        }
+    })
+    .await
+    .expect("live projector reaches the event tail");
+    let orders = projection_queries::get_schedule(
+        &pg,
+        GetScheduleCommand::new(ScheduleId::parse(&fixture_schedule_id("orders")).unwrap()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(orders.status, ScheduleEventStatus::Scheduled);
+    tail.shutdown().await;
+
     // A stale row with no backing events plus a reset checkpoint: a from-zero
     // catch-up must reconcile it away.
     pg.upsert_projection(&orphan_projection("ghost"))
@@ -165,5 +213,112 @@ async fn projector_folds_event_stream_into_postgres() {
         !ids.contains(&fixture_schedule_id("ghost")),
         "orphan must be reconciled away: {ids:?}"
     );
-    assert_eq!(ids.len(), 2, "the two event-backed schedules survive: {ids:?}");
+    assert_eq!(
+        ids,
+        vec![fixture_schedule_id("orders")],
+        "removed schedules stay absent after replay"
+    );
+}
+
+#[tokio::test]
+async fn malformed_delivery_does_not_block_later_valid_events_or_checkpointing() {
+    let (_pg_container, pg) = postgres::start().await;
+    let (_nats_container, client) = nats::start().await;
+    let store = connect_store(client.clone()).await.unwrap();
+    let js = async_nats::jetstream::new(client);
+    let projector = SchedulesProjector::new(pg.clone());
+
+    for label in ["orders", "reports"] {
+        js.publish(
+            format!(
+                "{}{}",
+                trogon_scheduler::constants::EVENTS_SUBJECT_PREFIX,
+                fixture_schedule_id("ghost")
+            ),
+            bytes::Bytes::from_static(b"invalid recorded event"),
+        )
+        .await
+        .unwrap()
+        .await
+        .unwrap();
+        CommandExecution::new(&store.event_store, &base_schedule(label))
+            .execute()
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(10), projector.catch_up(&js))
+            .await
+            .expect("malformed event must not wedge catch-up")
+            .unwrap();
+        let target = js
+            .get_stream(trogon_scheduler::constants::EVENTS_STREAM)
+            .await
+            .unwrap()
+            .get_info()
+            .await
+            .unwrap()
+            .state
+            .last_sequence;
+        assert_eq!(pg.read_checkpoint().await.unwrap(), target);
+        assert!(
+            pg.get_projection(&ScheduleId::parse(&fixture_schedule_id(label)).unwrap())
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            pg.get_projection(&ScheduleId::parse(&fixture_schedule_id("ghost")).unwrap())
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+    assert_eq!(pg.list_projections().await.unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn database_failure_leaves_the_event_available_for_retry() {
+    let (_pg_container, pg) = postgres::start().await;
+    let (_nats_container, client) = nats::start().await;
+    let store = connect_store(client.clone()).await.unwrap();
+    let js = async_nats::jetstream::new(client);
+    let projector = SchedulesProjector::new(pg.clone());
+    CommandExecution::new(&store.event_store, &base_schedule("orders"))
+        .execute()
+        .await
+        .unwrap();
+    projector.catch_up(&js).await.unwrap();
+    let checkpoint = pg.read_checkpoint().await.unwrap();
+    CommandExecution::new(
+        &store.event_store,
+        &PauseSchedule::new(command_domain::ScheduleId::parse(&fixture_schedule_id("orders")).unwrap()),
+    )
+    .execute()
+    .await
+    .unwrap();
+
+    sqlx::query("ALTER TABLE schedules_projection RENAME TO unavailable_projection")
+        .execute(pg.pool())
+        .await
+        .unwrap();
+    let error = tokio::time::timeout(Duration::from_secs(10), projector.run(&js))
+        .await
+        .expect("database failure stops the live projector")
+        .expect_err("missing projection table");
+    assert!(std::error::Error::source(&error).is_some());
+    assert_eq!(pg.read_checkpoint().await.unwrap(), checkpoint);
+
+    sqlx::query("ALTER TABLE unavailable_projection RENAME TO schedules_projection")
+        .execute(pg.pool())
+        .await
+        .unwrap();
+    projector.catch_up(&js).await.expect("retry the uncheckpointed event");
+    let orders = projection_queries::get_schedule(
+        &pg,
+        GetScheduleCommand::new(ScheduleId::parse(&fixture_schedule_id("orders")).unwrap()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(orders.status, ScheduleEventStatus::Paused);
+    assert!(pg.read_checkpoint().await.unwrap() > checkpoint);
 }

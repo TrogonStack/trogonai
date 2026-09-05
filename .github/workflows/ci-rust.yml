@@ -127,6 +127,11 @@ jobs:
           coverage-rate-reduction-failure: ${{ !contains(github.event.pull_request.labels.*.name, 'rust:coverage-baseline-reset') }}
           togglable-report: true
 
+      - name: Prepare nested test targets for cache cleanup
+        if: always()
+        # rust-cache v2.9.2 traverses both paths, but trybuild creates only one.
+        run: mkdir -p rsworkspace/target/tests/{target,trybuild}
+
   build:
     runs-on: ubuntu-latest
     permissions:
