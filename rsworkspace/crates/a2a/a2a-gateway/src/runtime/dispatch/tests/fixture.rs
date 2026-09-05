@@ -28,10 +28,58 @@ use crate::policy::tier1_declarative::{NoopTier1DeclarativeGate, Tier1Declarativ
 use crate::runtime::dispatch::dispatch_gateway_ingress;
 use crate::runtime::policy_stack::GatewayPolicyStack;
 
-pub type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
+pub type TestResult<T = ()> = Result<T, FixtureError>;
 
 #[derive(Debug, thiserror::Error)]
-enum FixtureError {
+pub enum FixtureError {
+    #[error("NATS connection failed: {0}")]
+    NatsConnect(#[from] async_nats::ConnectError),
+    #[error("gateway configuration failed: {0}")]
+    Config(#[from] crate::config::ConfigError),
+    #[error("NATS signing seed failed: {0}")]
+    Nkey(#[from] nkeys::error::Error),
+    #[error("signing key version is invalid: {0}")]
+    KeyVersion(#[from] a2a_auth_callout::KeyVersionError),
+    #[error("signing key source failed: {0}")]
+    AuthCallout(#[from] a2a_auth_callout::AuthCalloutError),
+    #[error("NATS subscription failed: {0}")]
+    NatsSubscribe(#[from] async_nats::SubscribeError),
+    #[error("NATS flush failed: {0}")]
+    NatsFlush(#[from] async_nats::client::FlushError),
+    #[error("JSON processing failed: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("dispatch test timed out: {0}")]
+    Timeout(#[from] tokio::time::error::Elapsed),
+    #[error("NATS publish failed: {0}")]
+    NatsPublish(#[from] async_nats::PublishError),
+    #[error("temporary directory creation failed: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("declarative policy schema is invalid: {0}")]
+    DeclarativeSchema(#[from] crate::policy::tier1_declarative::bundle::Tier1DeclarativeSchemaError),
+    #[error("policy substrate initialization failed: {0}")]
+    Policy(#[from] crate::policy::error::PolicyError),
+    #[error("redaction skill identifier is invalid: {0}")]
+    SkillId(#[from] a2a_redaction::SkillIdError),
+    #[error("redaction rewrite is invalid: {0}")]
+    RedactionRewrite(#[from] crate::policy::tier3_redaction::RedactionRewriteError),
+    #[error("PKCS#8 key encoding failed: {0}")]
+    Pkcs8(#[from] p256::pkcs8::Error),
+    #[error("JWT key decoding failed: {0}")]
+    Jwt(#[from] jsonwebtoken::errors::Error),
+    #[error("resource issuer is invalid: {0}")]
+    ResourceIssuer(#[from] crate::aauth::ResourceIssuerError),
+    #[error("person-server audience is invalid: {0}")]
+    PersonServerAudience(#[from] crate::aauth::PersonServerAudienceError),
+    #[error("challenge key identifier is invalid: {0}")]
+    ChallengeKid(#[from] crate::aauth::ChallengeKidError),
+    #[error("authentication time configuration is invalid: {0}")]
+    NonNegativeSecs(#[from] crate::aauth::NonNegativeSecsError),
+    #[error("JetStream stream creation failed: {0}")]
+    CreateStream(#[from] async_nats::jetstream::context::CreateStreamError),
+    #[error("task identifier is invalid: {0}")]
+    TaskId(#[from] a2a_nats::TaskIdError),
+    #[error("JetStream publish failed: {0}")]
+    JetStreamPublish(#[from] async_nats::jetstream::context::PublishError),
     #[error("NATS subscription ended before the expected message")]
     SubscriptionEnded,
 }
@@ -178,9 +226,9 @@ pub fn request(method: &str, params: Value) -> Message {
 }
 
 pub async fn receive(subscription: &mut Subscriber) -> TestResult<Message> {
-    Ok(tokio::time::timeout(Duration::from_secs(5), subscription.next())
+    tokio::time::timeout(Duration::from_secs(5), subscription.next())
         .await?
-        .ok_or(FixtureError::SubscriptionEnded)?)
+        .ok_or(FixtureError::SubscriptionEnded)
 }
 
 pub async fn assert_empty(client: &async_nats::Client, subscription: &mut Subscriber, subject: &str) -> TestResult {
