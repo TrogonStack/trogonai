@@ -54,7 +54,7 @@ pub enum RuntimeError {
 
     #[cfg(feature = "spicedb")]
     #[error("gateway subscribe: {0}")]
-    Subscribe(String),
+    Subscribe(#[from] async_nats::client::SubscribeError),
 
     #[cfg(feature = "spicedb")]
     #[error("tier-1 SpiceDB config: {0}")]
@@ -106,14 +106,8 @@ pub async fn run_with_config<E: ReadEnv>(config: Config, nats_config: NatsConfig
     let gateway_subject = async_nats::Subject::from(gateway_subject_string.as_str());
 
     let mut ingress = match &config.queue_group {
-        Some(q) => client
-            .queue_subscribe(gateway_subject, q.as_str().to_owned())
-            .await
-            .map_err(|e| RuntimeError::Subscribe(e.to_string()))?,
-        None => client
-            .subscribe(gateway_subject)
-            .await
-            .map_err(|e| RuntimeError::Subscribe(e.to_string()))?,
+        Some(q) => client.queue_subscribe(gateway_subject, q.as_str().to_owned()).await?,
+        None => client.subscribe(gateway_subject).await?,
     };
 
     info!(

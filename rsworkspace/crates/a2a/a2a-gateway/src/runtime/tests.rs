@@ -1,3 +1,6 @@
+#[cfg(feature = "spicedb")]
+use std::error::Error as _;
+
 use trogon_std::env::InMemoryEnv;
 
 use super::*;
@@ -24,4 +27,36 @@ async fn run_with_args_surfaces_config_error() {
     };
     let err = run_with_args(args, &env).await.unwrap_err();
     assert!(matches!(err, RuntimeError::Config(ConfigError::InvalidPrefix(_))));
+}
+
+#[cfg(feature = "spicedb")]
+#[tokio::test]
+async fn run_with_args_preserves_subscription_error_source() {
+    let server = trogon_nats::test_support::CoreTestServer::start().await;
+    let env = InMemoryEnv::new();
+    env.set(
+        "AUTH_CALLOUT_SIGNING_SECRET",
+        nkeys::KeyPair::new_account().seed().expect("account signing seed"),
+    );
+    let args = Args {
+        nats_url: server.address().to_owned(),
+        prefix: "a2a".to_owned(),
+        queue_group: Some("invalid queue".to_owned()),
+    };
+
+    let error = tokio::time::timeout(std::time::Duration::from_secs(10), run_with_args(args, &env))
+        .await
+        .expect("invalid subscription must terminate startup")
+        .expect_err("invalid queue name must fail subscription");
+
+    assert!(matches!(error, RuntimeError::Subscribe(_)));
+    assert_eq!(error.to_string(), "gateway subscribe: invalid queue name");
+    let source = error.source().expect("subscription failure must retain its source");
+    let subscription = source
+        .downcast_ref::<async_nats::client::SubscribeError>()
+        .expect("source must preserve the SDK subscription error type");
+    assert_eq!(
+        subscription.kind(),
+        async_nats::client::SubscribeErrorKind::InvalidQueueName
+    );
 }

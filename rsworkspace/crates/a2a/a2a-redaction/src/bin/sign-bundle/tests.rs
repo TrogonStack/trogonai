@@ -8,13 +8,13 @@ use a2a_redaction::signed_bundle::{Ed25519PublicKey, verify_signed_bundle};
 use super::*;
 
 #[test]
-fn args_require_key_and_skill_directory() {
+fn input_requires_key_and_skill_directory() {
     assert!(matches!(
-        Args::try_parse_from(["a2a-sign-bundle", "--key", "00"]),
+        SignBundlesInput::try_parse_from(["a2a-sign-bundle", "--key", "00"]),
         Err(error) if error.kind() == clap::error::ErrorKind::MissingRequiredArgument
     ));
     assert!(matches!(
-        Args::try_parse_from(["a2a-sign-bundle", "--skill-dir", "skills"]),
+        SignBundlesInput::try_parse_from(["a2a-sign-bundle", "--skill-dir", "skills"]),
         Err(error) if error.kind() == clap::error::ErrorKind::MissingRequiredArgument
     ));
 }
@@ -107,12 +107,34 @@ fn discovery_preserves_invalid_skill_path_and_cause() -> Result<(), Box<dyn Erro
 #[test]
 fn run_rejects_invalid_key_before_discovery() -> Result<(), Box<dyn Error>> {
     let dir = tempfile::tempdir()?;
-    let args = Args {
+    let input = SignBundlesInput {
         key: "0x00".to_owned(),
         skill_dir: dir.path().join("missing"),
     };
 
-    assert!(matches!(run(args, |_| {}), Err(CliError::KeyHasHexPrefix)));
+    assert!(matches!(run(input, |_| {}), Err(CliError::KeyHasHexPrefix)));
+    Ok(())
+}
+
+#[test]
+fn run_rejects_invalid_discovered_skill_before_signing() -> Result<(), Box<dyn Error>> {
+    let dir = tempfile::tempdir()?;
+    fs::write(dir.path().join("alpha.wasm"), b"\0asm")?;
+    fs::write(dir.path().join("alpha.manifest.json"), b"{}")?;
+    let invalid_path = dir.path().join("invalid..skill.wasm");
+    fs::write(&invalid_path, b"\0asm")?;
+    let input = SignBundlesInput {
+        key: "07".repeat(32),
+        skill_dir: dir.path().to_path_buf(),
+    };
+    let mut reported = Vec::new();
+
+    assert!(matches!(
+        run(input, |skill| reported.push(skill.clone())),
+        Err(CliError::InvalidSkillId { path, source: SkillIdError::PathTraversal }) if path == invalid_path
+    ));
+    assert!(reported.is_empty());
+    assert!(!dir.path().join("alpha.sig").exists());
     Ok(())
 }
 
@@ -120,13 +142,13 @@ fn run_rejects_invalid_key_before_discovery() -> Result<(), Box<dyn Error>> {
 fn run_reports_missing_directory_with_path_and_cause() -> Result<(), Box<dyn Error>> {
     let dir = tempfile::tempdir()?;
     let missing = dir.path().join("missing");
-    let args = Args {
+    let input = SignBundlesInput {
         key: "07".repeat(32),
         skill_dir: missing.clone(),
     };
 
     assert!(matches!(
-        run(args, |_| {}),
+        run(input, |_| {}),
         Err(CliError::ReadDir { path, source }) if path == missing && source.kind() == ErrorKind::NotFound
     ));
     Ok(())
@@ -136,12 +158,12 @@ fn run_reports_missing_directory_with_path_and_cause() -> Result<(), Box<dyn Err
 fn run_rejects_directories_without_wasm_bundles() -> Result<(), Box<dyn Error>> {
     let dir = tempfile::tempdir()?;
     fs::write(dir.path().join("demo.manifest.json"), b"{}")?;
-    let args = Args {
+    let input = SignBundlesInput {
         key: "07".repeat(32),
         skill_dir: dir.path().to_path_buf(),
     };
 
-    assert!(matches!(run(args, |_| {}), Err(CliError::NoSkillBundles(path)) if path == dir.path()));
+    assert!(matches!(run(input, |_| {}), Err(CliError::NoSkillBundles(path)) if path == dir.path()));
     Ok(())
 }
 
@@ -164,7 +186,7 @@ fn run_signs_every_bundle_with_verifiable_digests() -> Result<(), Box<dyn Error>
         fs::write(dir.path().join(format!("{skill}.manifest.json")), manifest)?;
         fs::write(dir.path().join(format!("{skill}.wasm")), wasm)?;
     }
-    let args = Args::try_parse_from([
+    let input = SignBundlesInput::try_parse_from([
         "a2a-sign-bundle".as_ref(),
         "--key".as_ref(),
         "07".repeat(32).as_ref(),
@@ -173,7 +195,7 @@ fn run_signs_every_bundle_with_verifiable_digests() -> Result<(), Box<dyn Error>
     ])?;
 
     let mut reported = Vec::new();
-    run(args, |skill| {
+    run(input, |skill| {
         assert!(dir.path().join(format!("{skill}.sig")).is_file());
         reported.push(skill.clone());
     })?;
@@ -214,13 +236,13 @@ fn run_stops_at_missing_manifest_after_signing_earlier_bundles() -> Result<(), B
     }
     fs::write(dir.path().join("alpha.manifest.json"), b"{}")?;
     fs::write(dir.path().join("zebra.manifest.json"), b"{}")?;
-    let args = Args {
+    let input = SignBundlesInput {
         key: "07".repeat(32),
         skill_dir: dir.path().to_path_buf(),
     };
 
     let mut reported = Vec::new();
-    let result = run(args, |skill| {
+    let result = run(input, |skill| {
         assert!(dir.path().join(format!("{skill}.sig")).is_file());
         reported.push(skill.clone());
     });

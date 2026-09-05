@@ -11,7 +11,7 @@ use {
 
 #[derive(Debug, Parser)]
 #[command(name = "a2a-sign-bundle", about = "Sign Tier-3 WASM policy bundles")]
-struct Args {
+struct SignBundlesInput {
     /// Hex-encoded 32-byte ed25519 signing key seed (64 hex chars, no 0x prefix)
     #[arg(long)]
     key: String,
@@ -77,19 +77,30 @@ enum CliError {
     )
 )]
 fn main() -> Result<(), CliError> {
-    run(Args::parse(), |skill| eprintln!("signed {}", skill.as_str()))
+    run(SignBundlesInput::parse(), |skill| {
+        eprintln!("signed {}", skill.as_str())
+    })
 }
 
-fn run(args: Args, mut report_signed: impl FnMut(&SkillId)) -> Result<(), CliError> {
-    let signing_key = parse_signing_key(&args.key)?;
-    let skills = discover_skills(&args.skill_dir)?;
+fn run(input: SignBundlesInput, report_signed: impl FnMut(&SkillId)) -> Result<(), CliError> {
+    let signing_key = parse_signing_key(&input.key)?;
+    let skills = discover_skills(&input.skill_dir)?;
     if skills.is_empty() {
-        return Err(CliError::NoSkillBundles(args.skill_dir));
+        return Err(CliError::NoSkillBundles(input.skill_dir));
     }
 
+    sign_bundles(&input.skill_dir, &skills, &signing_key, report_signed)
+}
+
+fn sign_bundles(
+    dir: &Path,
+    skills: &[SkillId],
+    signing_key: &SigningKey,
+    mut report_signed: impl FnMut(&SkillId),
+) -> Result<(), CliError> {
     for skill in skills {
-        sign_skill_bundle(&args.skill_dir, &skill, &signing_key)?;
-        report_signed(&skill);
+        sign_skill_bundle(dir, skill, signing_key)?;
+        report_signed(skill);
     }
 
     Ok(())
