@@ -80,6 +80,7 @@ fn file_reads_current_and_optional_previous() {
         .expect("write current");
     let source = FileSigningKeySource::new(current.path(), None::<&str>).expect("file source");
     assert_eq!(source.accepted().len(), 1);
+    assert_eq!(source.current().version().as_str(), "current");
 
     let previous_kp = KeyPair::new_account();
     let mut previous = NamedTempFile::new().expect("previous temp");
@@ -87,7 +88,10 @@ fn file_reads_current_and_optional_previous() {
         .write_all(previous_kp.seed().expect("previous seed").as_bytes())
         .expect("write previous");
     let source = FileSigningKeySource::new(current.path(), Some(previous.path())).expect("file overlap");
-    assert_eq!(source.accepted().len(), 2);
+    let accepted = source.accepted();
+    assert_eq!(accepted.len(), 2);
+    assert_eq!(accepted[0].version().as_str(), "current");
+    assert_eq!(accepted[1].version().as_str(), "previous");
 }
 
 #[test]

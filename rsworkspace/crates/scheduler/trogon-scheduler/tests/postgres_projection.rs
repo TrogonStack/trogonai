@@ -2,7 +2,7 @@
 // Exercises the Postgres schedules read-model backend against a real Postgres in a
 // throwaway container. `#[ignore]`d because it needs Docker; run with
 // `cargo test -p trogon-scheduler --features postgres -- --ignored`.
-#![cfg(all(feature = "postgres", not(coverage)))]
+#![cfg(feature = "postgres")]
 
 use std::collections::HashSet;
 

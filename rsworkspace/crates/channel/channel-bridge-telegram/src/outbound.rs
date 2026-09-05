@@ -1,11 +1,5 @@
-// Only the implementation talks to Telegram, and it is nothing but those calls,
-// so the coverage build leaves it out and keeps the seam the pipeline is written
-// against.
-#[cfg(not(coverage))]
 use teloxide::Bot;
-#[cfg(not(coverage))]
 use teloxide::requests::Requester;
-#[cfg(not(coverage))]
 use teloxide::types::{ChatAction, ChatId, Message, True};
 
 /// Show the typing indicator in a chat. One trait per outbound operation;
@@ -28,19 +22,16 @@ pub trait SendText {
     async fn send_text(&self, chat_id: i64, text: String) -> Result<Self::Message, Self::Error>;
 }
 
-#[cfg(not(coverage))]
 pub struct TelegramOutbound {
     bot: Bot,
 }
 
-#[cfg(not(coverage))]
 impl TelegramOutbound {
     pub fn new(bot: Bot) -> Self {
         Self { bot }
     }
 }
 
-#[cfg(not(coverage))]
 impl SendTyping for TelegramOutbound {
     type Error = teloxide::RequestError;
     type Output = True;
@@ -50,7 +41,6 @@ impl SendTyping for TelegramOutbound {
     }
 }
 
-#[cfg(not(coverage))]
 impl SendText for TelegramOutbound {
     type Error = teloxide::RequestError;
     type Message = Message;

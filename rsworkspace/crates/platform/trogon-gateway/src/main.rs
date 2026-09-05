@@ -1,53 +1,32 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
-#[cfg(not(coverage))]
 mod cli;
-#[cfg_attr(coverage, allow(dead_code))]
 mod config;
-#[cfg_attr(coverage, allow(dead_code))]
 mod constants;
-#[cfg_attr(coverage, allow(dead_code))]
 mod http;
-#[cfg_attr(coverage, allow(dead_code))]
 mod source;
-#[cfg_attr(coverage, allow(dead_code))]
 mod source_integration_id;
-#[cfg_attr(coverage, allow(dead_code))]
 mod source_plugin;
-#[cfg_attr(coverage, allow(dead_code))]
 mod source_status;
-#[cfg_attr(coverage, allow(dead_code))]
 mod streams;
 
 use std::io::Write;
-#[cfg(not(coverage))]
 use std::net::SocketAddr;
 
-#[cfg(not(coverage))]
 use crate::constants::{CLAIM_CHECK_TTL_GRACE, NATS_CONNECT_TIMEOUT, NATS_SERVER_INFO_POLL_INTERVAL};
-#[cfg(not(coverage))]
 use anyhow::Context;
-#[cfg(not(coverage))]
 use tokio::task::JoinSet;
-#[cfg(not(coverage))]
 use tracing::{error, info};
-#[cfg(not(coverage))]
 use trogon_nats::jetstream::{
     ClaimBucket, ClaimCheckPublisher, ClaimRetention, MaxPayload, NatsJetStreamClient, NatsObjectStore,
 };
-#[cfg(not(coverage))]
 use trogon_nats::{connect, wait_for_server_info};
-#[cfg(not(coverage))]
 use trogon_std::args::{CliArgs, ParseArgs};
-#[cfg(not(coverage))]
 use trogon_std::env::SystemEnv;
-#[cfg(not(coverage))]
 use trogon_std::fs::SystemFs;
 
-#[cfg(not(coverage))]
 type SourceResult = (&'static str, anyhow::Result<()>);
 
-#[cfg(not(coverage))]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     trogon_std::tls::install_default_crypto_provider()?;
@@ -71,7 +50,6 @@ async fn main() -> anyhow::Result<()> {
     }
 }
 
-#[cfg(not(coverage))]
 async fn serve(resolved: config::ResolvedConfig) -> anyhow::Result<()> {
     if !resolved.has_any_source() {
         anyhow::bail!("no sources configured — provide a config file with at least one source");
@@ -221,14 +199,12 @@ async fn serve(resolved: config::ResolvedConfig) -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg_attr(coverage, allow(dead_code))]
 #[derive(Debug, thiserror::Error)]
 enum NotionVerificationTokenCommandError {
     #[error("notion integration '{0}' is not configured")]
     IntegrationNotConfigured(source_integration_id::SourceIntegrationId),
 }
 
-#[cfg_attr(coverage, allow(dead_code))]
 async fn notion_verification_token<N, J, W>(
     resolved: &config::ResolvedConfig,
     integration: &source_integration_id::SourceIntegrationId,
@@ -259,11 +235,5 @@ where
     Ok(())
 }
 
-#[cfg(coverage)]
-fn main() {}
-
 #[cfg(test)]
 mod command_tests;
-
-#[cfg(all(coverage, test))]
-mod tests;

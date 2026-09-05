@@ -12,8 +12,6 @@
 //! foreign subject, misrouted, an invalid transition) is logged and skipped, never
 //! wedging the projector.
 
-#![cfg_attr(coverage, allow(dead_code, unused_imports))]
-
 use std::collections::{BTreeMap, HashSet};
 
 use async_nats::jetstream;

@@ -8,14 +8,12 @@ use std::sync::Arc;
 use tracing::{error, info};
 use trogon_std::time::SystemClock;
 
-#[cfg(not(coverage))]
 use {
     acp_nats::nats,
     trogon_std::{env::SystemEnv, fs::SystemFs, signal::shutdown_signal},
     trogon_telemetry::{ResourceAttribute, ServiceName},
 };
 
-#[cfg(not(coverage))]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let config = config::base_config(&trogon_std::CliArgs::<config::Args>::new(), &SystemEnv)?;
@@ -52,9 +50,6 @@ async fn main() -> anyhow::Result<()> {
 
     result
 }
-
-#[cfg(coverage)]
-fn main() {}
 
 async fn run_bridge<N, J, W, R>(
     nats_client: N,

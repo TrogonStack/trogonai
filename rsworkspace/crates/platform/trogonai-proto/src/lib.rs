@@ -1,11 +1,4 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
-#![cfg_attr(
-    dylint_lib = "trogon_lints",
-    expect(
-        acyclic_modules,
-        reason = "the type URLs are the generated message types' own constants, so `constants` reads the scheduler module that re-exports those constants back"
-    )
-)]
 
 #[allow(clippy::all)]
 #[cfg_attr(
@@ -32,47 +25,17 @@ pub mod scheduler;
 #[cfg(feature = "decider")]
 pub mod decider;
 
-// Thin wrappers that re-export the generated proto packages, emitted as inline
-// module trees that mirror the codegen layout.
 #[cfg(feature = "schedules")]
-#[cfg_attr(dylint_lib = "trogon_lints", allow(inline_module_block))]
-pub mod content {
-    pub mod v1alpha1 {
-        pub use crate::r#gen::trogon::content::v1alpha1::*;
-    }
-}
+pub use crate::r#gen::trogon::content;
 
 #[cfg(feature = "grpc-nats-micro")]
-#[cfg_attr(dylint_lib = "trogon_lints", allow(inline_module_block))]
-pub mod nats {
-    pub mod micro {
-        pub mod v1alpha1 {
-            pub use crate::r#gen::trogon::nats::micro::v1alpha1::*;
-        }
-    }
-}
+pub use crate::r#gen::trogon::nats;
 
 #[cfg(any(feature = "schedules", feature = "decider", feature = "grpc-nats-micro"))]
-#[cfg_attr(dylint_lib = "trogon_lints", allow(inline_module_block))]
-pub mod google {
-    #[cfg(feature = "schedules")]
-    pub mod r#type {
-        pub use crate::r#gen::google::r#type::*;
-    }
-
-    #[cfg(any(feature = "decider", feature = "grpc-nats-micro"))]
-    pub mod rpc {
-        pub use crate::r#gen::google::rpc::*;
-    }
-}
+pub mod google;
 
 #[cfg(feature = "grpc-nats-micro")]
-#[cfg_attr(dylint_lib = "trogon_lints", allow(inline_module_block))]
-pub mod grpc_nats_micro {
-    pub mod v1 {
-        pub use crate::r#gen::trogonai::grpc_nats_micro::v1::*;
-    }
-}
+pub use crate::r#gen::trogonai::grpc_nats_micro;
 
 /// Failure decoding a registered event payload to canonical JSON.
 #[cfg(feature = "schedules")]

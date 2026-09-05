@@ -1,4 +1,3 @@
-#[cfg(not(coverage))]
 use {
     a2a_redaction::signed_bundle::{
         Ed25519Signature, SIGNED_BUNDLE_VERSION, Sha256Digest, SignedBundleManifest, sign_bundle_digest,
@@ -10,7 +9,6 @@ use {
     std::path::{Path, PathBuf},
 };
 
-#[cfg(not(coverage))]
 #[derive(Debug, Parser)]
 #[command(name = "a2a-sign-bundle", about = "Sign Tier-3 WASM policy bundles")]
 struct Args {
@@ -23,7 +21,6 @@ struct Args {
     skill_dir: PathBuf,
 }
 
-#[cfg(not(coverage))]
 #[derive(Debug, thiserror::Error)]
 enum CliError {
     #[error("signing key must not use 0x prefix")]
@@ -72,7 +69,6 @@ enum CliError {
     },
 }
 
-#[cfg(not(coverage))]
 #[cfg_attr(
     dylint_lib = "trogon_lints",
     allow(
@@ -81,7 +77,10 @@ enum CliError {
     )
 )]
 fn main() -> Result<(), CliError> {
-    let args = Args::parse();
+    run(Args::parse(), |skill| eprintln!("signed {}", skill.as_str()))
+}
+
+fn run(args: Args, mut report_signed: impl FnMut(&SkillId)) -> Result<(), CliError> {
     let signing_key = parse_signing_key(&args.key)?;
     let skills = discover_skills(&args.skill_dir)?;
     if skills.is_empty() {
@@ -90,13 +89,12 @@ fn main() -> Result<(), CliError> {
 
     for skill in skills {
         sign_skill_bundle(&args.skill_dir, &skill, &signing_key)?;
-        eprintln!("signed {}", skill.as_str());
+        report_signed(&skill);
     }
 
     Ok(())
 }
 
-#[cfg(not(coverage))]
 fn parse_signing_key(raw: &str) -> Result<SigningKey, CliError> {
     let trimmed = raw.trim();
     if trimmed.starts_with("0x") || trimmed.starts_with("0X") {
@@ -111,7 +109,6 @@ fn parse_signing_key(raw: &str) -> Result<SigningKey, CliError> {
     Ok(SigningKey::from_bytes(&seed))
 }
 
-#[cfg(not(coverage))]
 fn discover_skills(dir: &Path) -> Result<Vec<SkillId>, CliError> {
     let mut skills = Vec::new();
     for entry in fs::read_dir(dir).map_err(|source| CliError::ReadDir {
@@ -140,7 +137,6 @@ fn discover_skills(dir: &Path) -> Result<Vec<SkillId>, CliError> {
     Ok(skills)
 }
 
-#[cfg(not(coverage))]
 fn sign_skill_bundle(dir: &Path, skill: &SkillId, signing_key: &SigningKey) -> Result<(), CliError> {
     let wasm_path = dir.join(format!("{}.wasm", skill.as_str()));
     let manifest_path = dir.join(format!("{}.manifest.json", skill.as_str()));
@@ -166,5 +162,6 @@ fn sign_skill_bundle(dir: &Path, skill: &SkillId, signing_key: &SigningKey) -> R
     fs::write(&sig_path, sig_json).map_err(|source| CliError::WriteFile { path: sig_path, source })
 }
 
-#[cfg(coverage)]
-fn main() {}
+#[cfg(test)]
+#[path = "sign-bundle/tests.rs"]
+mod tests;

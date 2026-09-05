@@ -8,25 +8,14 @@
 //! nothing else.
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
-#[cfg_attr(coverage, allow(dead_code))]
 mod acp_port;
-#[cfg_attr(coverage, allow(dead_code))]
 mod config;
-#[cfg_attr(coverage, allow(dead_code))]
 mod constants;
-#[cfg_attr(coverage, allow(dead_code))]
 mod outbound;
-#[cfg_attr(coverage, allow(dead_code))]
 mod parse;
-#[cfg_attr(coverage, allow(dead_code))]
 mod pipeline;
-#[cfg_attr(coverage, allow(dead_code))]
 mod render;
 
-// The wiring below is nothing but transport: it builds the real NATS clients,
-// which the coverage build leaves out. The logic it wires together stays in the
-// coverage build and is exercised by the module tests.
-#[cfg(not(coverage))]
 use {
     acp_nats::AgentHandler,
     acp_port::{AcpBridge, AcpPort, SessionMethods},
@@ -52,10 +41,6 @@ use {
     trogon_telemetry::ServiceName,
 };
 
-#[cfg(coverage)]
-fn main() {}
-
-#[cfg(not(coverage))]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let config = BridgeConfig::from_env(&SystemEnv)?;
@@ -126,7 +111,6 @@ async fn main() -> anyhow::Result<()> {
     result
 }
 
-#[cfg(not(coverage))]
 async fn seed_principals(store: &ChannelStore, config: &BridgeConfig) -> anyhow::Result<()> {
     for user in &config.seed_users {
         let principal = PrincipalId::new(format!("{}-{user}", constants::CHANNEL))?;
@@ -139,7 +123,6 @@ async fn seed_principals(store: &ChannelStore, config: &BridgeConfig) -> anyhow:
     Ok(())
 }
 
-#[cfg(not(coverage))]
 async fn run(
     nats_client: async_nats::Client,
     store: ChannelStore,
@@ -223,6 +206,3 @@ async fn run(
     client_task.abort();
     Ok(())
 }
-
-#[cfg(test)]
-mod tests;

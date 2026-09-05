@@ -3,7 +3,7 @@
 // event stream into Postgres with `SchedulesProjector`. Both backends run in
 // throwaway containers, so this needs Docker; run with
 // `cargo test -p trogon-scheduler --features postgres -- --ignored`.
-#![cfg(all(feature = "postgres", not(coverage)))]
+#![cfg(feature = "postgres")]
 
 use std::time::Duration;
 

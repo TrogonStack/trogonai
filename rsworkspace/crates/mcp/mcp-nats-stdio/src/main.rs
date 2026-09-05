@@ -8,18 +8,13 @@ use std::future::Future;
 use anyhow::Result;
 use rmcp::service::{RoleClient, RoleServer};
 use rmcp::transport::Transport;
-#[cfg(not(coverage))]
 use rmcp::transport::async_rw::AsyncRwTransport;
-#[cfg(not(coverage))]
 use rmcp::transport::stdio;
 use tracing::{error, info};
 
-#[cfg(not(coverage))]
 use trogon_std::{env::SystemEnv, fs::SystemFs, signal::shutdown_signal};
-#[cfg(not(coverage))]
 use trogon_telemetry::{ResourceAttribute, ServiceName};
 
-#[cfg(not(coverage))]
 #[tokio::main]
 async fn main() -> Result<()> {
     let config = config::base_config(&trogon_std::CliArgs::<config::Args>::new(), &SystemEnv)?;
@@ -62,9 +57,6 @@ async fn main() -> Result<()> {
 
     result
 }
-
-#[cfg(coverage)]
-fn main() {}
 
 async fn run_bridge<L, R, S>(mut local: L, mut remote: R, shutdown_signal: S) -> Result<()>
 where

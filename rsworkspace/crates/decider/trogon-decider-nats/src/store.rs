@@ -1,50 +1,37 @@
 use std::convert::Infallible;
-#[cfg(not(coverage))]
 use std::sync::OnceLock;
-#[cfg(not(coverage))]
 use std::time::Instant;
 
 use async_nats::jetstream::{self, kv};
-#[cfg(not(coverage))]
 use opentelemetry::metrics::Histogram;
-#[cfg(not(coverage))]
 use opentelemetry::{global, metrics::Counter};
-#[cfg(any(test, not(coverage)))]
 use trogon_decider_runtime::ReadFrom;
-#[cfg(not(coverage))]
 use trogon_decider_runtime::snapshot::{
     ReadSnapshotRequest, ReadSnapshotResponse, SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotType,
     WriteSnapshotRequest, WriteSnapshotResponse,
 };
-#[cfg(not(coverage))]
 use trogon_decider_runtime::{
     AppendFailure, AppendStreamRequest, AppendStreamResponse, ReadStreamRequest, ReadStreamResponse, SnapshotRead,
     SnapshotWrite, StreamAppend, StreamRead,
 };
 use trogon_decider_runtime::{StreamPosition, StreamWritePrecondition};
-#[cfg(not(coverage))]
 use trogon_semconv::{attribute, metric, span};
 
 use crate::snapshot_store::{NatsSnapshotConfig, SnapshotStoreError};
 use crate::stream_store::StreamStoreError;
-#[cfg(not(coverage))]
 use crate::stream_store::{
     StreamSubjectResolver, SubjectState, append_stream as append_subject_stream, read_subject_stream,
     read_subject_stream_bounded,
 };
-#[cfg(not(coverage))]
 use tracing::Instrument;
 
-#[cfg(not(coverage))]
 use crate::constants::METER_NAME;
 
-#[cfg(not(coverage))]
 struct StoreMetrics {
     append_duration: Histogram<f64>,
     append_conflicts: Counter<u64>,
 }
 
-#[cfg(not(coverage))]
 impl StoreMetrics {
     fn new() -> Self {
         let meter = global::meter(METER_NAME);
@@ -55,15 +42,12 @@ impl StoreMetrics {
     }
 }
 
-#[cfg(not(coverage))]
 static METRICS: OnceLock<StoreMetrics> = OnceLock::new();
 
-#[cfg(not(coverage))]
 fn metrics() -> &'static StoreMetrics {
     METRICS.get_or_init(StoreMetrics::new)
 }
 
-#[cfg(not(coverage))]
 fn write_precondition_attribute(precondition: StreamWritePrecondition) -> attribute::WritePrecondition {
     match precondition {
         StreamWritePrecondition::Any => attribute::WritePrecondition::Any,
@@ -97,7 +81,6 @@ pub enum OptimisticConcurrencyConflictError {
 }
 
 impl OptimisticConcurrencyConflictError {
-    #[cfg(any(test, not(coverage)))]
     fn new(stream_id: String, expected: StreamWritePrecondition, current_position: Option<StreamPosition>) -> Self {
         match current_position {
             Some(current_position) => Self::WithPosition {
@@ -228,7 +211,6 @@ impl<Resolver> JetStreamStore<Resolver> {
     }
 }
 
-#[cfg(not(coverage))]
 impl<StreamId, Resolver> StreamRead<StreamId> for JetStreamStore<Resolver>
 where
     StreamId: std::fmt::Display + Send + Sync + ?Sized,
@@ -307,7 +289,6 @@ where
 /// different origins. A resolver that declares no scope is passed through
 /// unchecked, which is all the store can honestly do with a topology nobody
 /// described to it.
-#[cfg(not(coverage))]
 async fn resolve_scoped_subject_state<StreamId, Resolver>(
     resolver: &Resolver,
     events_stream: &jetstream::stream::Stream,
@@ -334,7 +315,6 @@ where
     Ok(subject_state)
 }
 
-#[cfg(any(test, not(coverage)))]
 fn stream_read_from_to_sequence(from: ReadFrom) -> u64 {
     match from {
         ReadFrom::Beginning => 1,
@@ -342,7 +322,6 @@ fn stream_read_from_to_sequence(from: ReadFrom) -> u64 {
     }
 }
 
-#[cfg(not(coverage))]
 impl<StreamId, Resolver> StreamAppend<StreamId> for JetStreamStore<Resolver>
 where
     StreamId: std::fmt::Display + Send + Sync + ?Sized,
@@ -409,7 +388,6 @@ where
     }
 }
 
-#[cfg(not(coverage))]
 impl<StreamId, Payload, Resolver> SnapshotRead<Payload, StreamId> for JetStreamStore<Resolver>
 where
     StreamId: std::fmt::Display + Send + Sync + ?Sized,
@@ -435,7 +413,6 @@ where
     }
 }
 
-#[cfg(not(coverage))]
 impl<StreamId, Payload, Resolver> SnapshotWrite<Payload, StreamId> for JetStreamStore<Resolver>
 where
     StreamId: std::fmt::Display + Send + Sync + ?Sized,
@@ -465,7 +442,6 @@ where
     }
 }
 
-#[cfg(any(test, not(coverage)))]
 fn resolve_expected_last_subject_sequence<StreamId, Error>(
     stream_id: &StreamId,
     expected_state: StreamWritePrecondition,

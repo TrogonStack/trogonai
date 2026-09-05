@@ -138,8 +138,7 @@ pub fn gateway_aauth_from_env<E: ReadEnv>(env: &E) -> Result<Option<GatewayAAuth
 }
 
 /// Maps a denial reason to the audit `rules_fired` entry dispatch.rs
-/// records for an AAuth denial. Kept outside the `not(coverage)`-gated
-/// dispatch module so this branch stays covered under coverage builds.
+/// records for an AAuth denial.
 pub fn aauth_deny_rule_fired(reason: &AAuthDenyReasonError) -> &'static str {
     match reason {
         AAuthDenyReasonError::Pop(_) => "gateway.aauth.denied.pop",
@@ -172,10 +171,6 @@ pub struct GatewayCallerIdentity {
 /// over caller attribution for authorization (Tier-1) and audit; when it is
 /// absent, the existing JWT-header-derived identity is left untouched
 /// because there is nothing more authoritative to switch to.
-///
-/// A pure function (no I/O, no dispatch types) so the supersede decision is
-/// unit-testable without constructing the `not(coverage)`-gated dispatch
-/// plumbing.
 #[must_use]
 pub fn gateway_caller_identity_after_aauth(
     existing: GatewayCallerIdentity,

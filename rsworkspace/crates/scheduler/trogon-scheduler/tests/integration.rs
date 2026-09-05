@@ -1,7 +1,4 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
-// These tests require a live NATS broker (all `#[ignore]`d). The coverage build
-// stubs out the NATS-backed store, so exclude the whole suite there.
-#![cfg(not(coverage))]
 
 use std::time::Duration;
 

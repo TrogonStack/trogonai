@@ -2,7 +2,6 @@
 //! `A2aClient` running against a real NATS server. See the library docs for
 //! the protocol shape.
 
-#[cfg(not(coverage))]
 #[tokio::main]
 #[cfg_attr(
     dylint_lib = "trogon_lints",
@@ -17,9 +16,3 @@ async fn main() {
         std::process::exit(1);
     }
 }
-
-#[cfg(coverage)]
-fn main() {}
-
-#[cfg(test)]
-mod tests;

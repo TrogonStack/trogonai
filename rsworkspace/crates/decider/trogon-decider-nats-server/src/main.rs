@@ -1,7 +1,5 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
-#![cfg_attr(coverage, allow(dead_code, unused_imports))]
 
-#[cfg(not(coverage))]
 use {
     anyhow::Result,
     async_nats::jetstream,
@@ -16,7 +14,6 @@ use {
     trogon_telemetry::ServiceName,
 };
 
-#[cfg(not(coverage))]
 #[tokio::main]
 async fn main() -> Result<()> {
     let (config, nats_config) = base_config(&trogon_std::CliArgs::<Args>::new(), &SystemEnv)?;
@@ -44,6 +41,3 @@ async fn main() -> Result<()> {
     result?;
     Ok(())
 }
-
-#[cfg(coverage)]
-fn main() {}

@@ -1,5 +1,3 @@
-#![cfg_attr(coverage, allow(unused_imports))]
-
 use futures::StreamExt;
 
 use async_nats::jetstream::kv;
@@ -12,7 +10,6 @@ use super::read_model::Schedule;
 #[derive(Debug, Clone, Default)]
 pub struct ListSchedules;
 
-#[cfg(not(coverage))]
 pub async fn run(store: &kv::Store, _command: ListSchedules) -> Result<Vec<Schedule>, SchedulerError> {
     let mut keys = store
         .keys()

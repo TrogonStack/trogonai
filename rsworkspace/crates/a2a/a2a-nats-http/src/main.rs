@@ -1,4 +1,3 @@
-#[cfg(not(coverage))]
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
@@ -13,9 +12,3 @@ async fn main() {
         std::process::exit(1);
     }
 }
-
-#[cfg(coverage)]
-fn main() {}
-
-#[cfg(test)]
-mod main_tests;

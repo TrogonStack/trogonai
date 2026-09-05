@@ -35,7 +35,6 @@ fn socket_config() -> SlackConfig {
     }
 }
 
-#[cfg(not(coverage))]
 fn webhook_config() -> SlackConfig {
     SlackConfig {
         subject_prefix: NatsToken::new("slack").unwrap(),
@@ -60,7 +59,6 @@ fn reconnect_delay_doubles_until_cap() {
     assert_eq!(next_reconnect_delay(RECONNECT_MAX_DELAY), RECONNECT_MAX_DELAY);
 }
 
-#[cfg(not(coverage))]
 #[tokio::test]
 async fn run_requires_socket_mode_config() {
     let error = run(wrap_publisher(MockJetStreamPublisher::new()), &webhook_config())

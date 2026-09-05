@@ -8,7 +8,6 @@ mod constants;
 use component::NatsAgentComponent;
 use tokio::sync::watch;
 
-#[cfg(not(coverage))]
 use {
     acp_nats::nats,
     clap::Parser,
@@ -18,7 +17,6 @@ use {
     trogon_telemetry::{ResourceAttribute, ServiceName},
 };
 
-#[cfg(not(coverage))]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = config::Args::parse();
@@ -76,9 +74,6 @@ async fn main() -> anyhow::Result<()> {
 
     result.map_err(Into::into)
 }
-
-#[cfg(coverage)]
-fn main() {}
 
 /// Builds the served router: the SDK's transport, plus the behaviors it omits.
 ///

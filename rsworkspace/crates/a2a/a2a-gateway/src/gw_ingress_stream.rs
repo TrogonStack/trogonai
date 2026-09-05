@@ -11,20 +11,12 @@ use a2a_nats::{A2aPrefix, A2aTaskId, ReqId};
 use tokio_util::sync::CancellationToken;
 use trogon_std::env::ReadEnv;
 
-// Pump-only imports — gated so `cfg(coverage)` doesn't warn on unused
-// imports when the pump stubs out.
-#[cfg(not(coverage))]
 use a2a_nats::jetstream::consumers::{gateway_stream_events_consumer, resubscribe_consumer_with_flow};
-#[cfg(not(coverage))]
 use a2a_nats::jetstream::streams::events_stream_name;
-#[cfg(not(coverage))]
 use async_nats::jetstream::{self, AckKind};
-#[cfg(not(coverage))]
 use futures::StreamExt;
-#[cfg(not(coverage))]
 use tracing::{debug, warn};
 
-#[cfg(not(coverage))]
 use crate::constants::STREAMING_INGRESS_MAX_FORWARD_ATTEMPTS;
 pub use crate::constants::{
     DEFAULT_STREAMING_MAX_ACK_PENDING, DEFAULT_STREAMING_MAX_INFLIGHT, ENV_GATEWAY_STREAMING_INGRESS,
@@ -166,7 +158,6 @@ pub struct StreamingIngressSpawn {
     pub caller_key: CallerKey,
 }
 
-#[cfg(not(coverage))]
 impl StreamingIngressSpawn {
     fn req_id(&self) -> &ReqId {
         match &self.kind {
@@ -289,7 +280,6 @@ pub enum StreamingIngressSpawnError {
 /// path can observe backpressure synchronously — otherwise the caller
 /// couldn't tell a successful spawn from one that the gate refused inside
 /// the spawned task. The permit moves into the task and releases on drop.
-#[cfg(not(coverage))]
 pub fn spawn_streaming_ingress_pump(
     client: async_nats::Client,
     prefix: A2aPrefix,
@@ -303,14 +293,6 @@ pub fn spawn_streaming_ingress_pump(
         run_streaming_ingress_pump(client, prefix, config, permit, spawn, shutdown).await;
     });
     Ok(())
-}
-
-/// Coverage build skips the JetStream-bound pump entirely; the permit
-/// gate's behavior is what unit tests assert via `try_acquire_streaming_permit`.
-#[cfg(coverage)]
-#[rustfmt::skip]
-pub fn spawn_streaming_ingress_pump(_client: async_nats::Client, _prefix: A2aPrefix, _config: GatewayStreamingIngressConfig, gate: StreamingIngressGate, spawn: StreamingIngressSpawn, _shutdown: CancellationToken) -> Result<(), StreamingIngressSpawnError> {
-    try_acquire_streaming_permit(&gate, &spawn).map(drop)
 }
 
 /// Permit-acquire that surfaces a typed error so the request path can map
@@ -333,7 +315,6 @@ fn try_acquire_streaming_permit(
 /// this through `MockNatsClient` without standing up NATS. The pump itself
 /// keeps its concrete `async_nats::Client` because JetStream binding still
 /// uses the concrete type — only the forward step is mockable.
-#[cfg_attr(coverage, allow(dead_code))]
 async fn publish_to_caller_reply<C: trogon_nats::PublishClient>(
     client: &C,
     reply: &async_nats::Subject,
@@ -351,7 +332,6 @@ async fn publish_to_caller_reply<C: trogon_nats::PublishClient>(
 /// anchor taken any later could sit behind events the agent has already
 /// published. `None` means the stream could not be reached, in which case there
 /// is no safe start position and the caller declines to spawn.
-#[cfg(not(coverage))]
 pub async fn events_stream_last_seq(client: &async_nats::Client, prefix: &A2aPrefix) -> Option<u64> {
     let stream_name = events_stream_name(prefix);
     match jetstream::new(client.clone()).get_stream(&stream_name).await {
@@ -377,7 +357,6 @@ pub async fn events_stream_last_seq(client: &async_nats::Client, prefix: &A2aPre
     }
 }
 
-#[cfg(not(coverage))]
 async fn run_streaming_ingress_pump(
     client: async_nats::Client,
     prefix: A2aPrefix,

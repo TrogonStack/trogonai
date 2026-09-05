@@ -1,8 +1,3 @@
-// run_io_loop is gated to cfg(not(coverage)); under cfg(coverage) the loop
-// becomes a stub and these imports/helpers go unused. See preamble on
-// `run_io_loop` for the follow-up TODO.
-#![cfg_attr(coverage, allow(dead_code, unused_imports))]
-
 use std::sync::Arc;
 
 use a2a_nats::client::A2aClient;
@@ -21,13 +16,6 @@ use crate::wire::OutboundFrame;
 /// Returns `Err` when the stdout writer task failed (broken pipe, write/flush
 /// error). Callers should propagate so the process exits non-zero — a stdio
 /// bridge whose downstream parent stopped reading should not pretend success.
-///
-/// Gated behind `cfg(not(coverage))` because the loop's branches include
-/// timing-dependent `tokio::select!` arms (writer-died races, shutdown
-/// preemption) plus truly-unreachable defenses (closed semaphore, infallible
-/// derive serialize) that the cobertura gate cannot reach deterministically.
-/// See `.trogonai/todos/a2a-nats-stdio-io-loop-coverage.internal.trogonai.md`.
-#[cfg(not(coverage))]
 pub async fn run_io_loop<N, J, R, W>(
     client: A2aClient<N, J>,
     stdin: R,
@@ -238,33 +226,6 @@ where
     }
 }
 
-/// Coverage-build stub mirroring the real `run_io_loop` signature. The body is
-/// empty because the production loop relies on `tokio::select!` races and
-/// truly-unreachable defenses that `cargo cov` cannot reach deterministically.
-/// Tests targeting loop behavior run only under `cfg(not(coverage))`; the
-/// TODO file referenced on the real impl tracks the follow-up.
-#[cfg(coverage)]
-pub async fn run_io_loop<N, J, R, W>(
-    _client: A2aClient<N, J>,
-    _stdin: R,
-    _stdout: W,
-    _shutdown: impl std::future::Future<Output = ()>,
-) -> std::io::Result<()>
-where
-    N: RequestClient + Clone + Send + Sync + 'static,
-    J: JetStreamGetStream + Clone + Send + Sync + 'static,
-    JsMessageOf<J>: JsMessageRef + JsAck<Error: std::fmt::Display + Send + 'static> + Send + 'static,
-    <J as JetStreamGetStream>::Stream: Send + 'static,
-    <<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer: Send + 'static,
-    <<<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Messages: Send + 'static,
-    <<<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::MessagesError: std::fmt::Display + Send + 'static,
-    <<<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::StreamError: std::fmt::Display + Send + 'static,
-    R: tokio::io::AsyncRead + Unpin + Send + 'static,
-    W: tokio::io::AsyncWrite + Unpin + Send + 'static,
-{
-    Ok(())
-}
-
 /// Collapse the writer task's `Result<Result<(), io::Error>, JoinError>` into a
 /// single `io::Error`. Used by every select arm that polls `&mut writer_task`.
 fn writer_task_err(res: Result<std::io::Result<()>, tokio::task::JoinError>) -> std::io::Error {
@@ -312,19 +273,9 @@ fn parse_inbound(raw: &str) -> Result<(RequestId, String, serde_json::Value), Bo
     }
 }
 
-// Loop-exercising tests are gated to `cfg(not(coverage))` — see the io_loop
-// preamble. They live in their own module so the helpers/mocks they depend on
-// are also gated out under coverage builds and don't show as uncovered.
-#[cfg(all(test, not(coverage)))]
-mod tests;
-
-// Stub-call test that runs only under `cfg(coverage)` so the empty-body cov
-// stub of `run_io_loop` gets exercised. Mirrors the runtime::run pattern.
-#[cfg(all(test, coverage))]
-mod cov_stub_tests;
-// parse_inbound and writer_task_err tests are cheap and deterministic — they
-// run under every build mode including coverage.
 #[cfg(test)]
 mod parse_tests;
+#[cfg(test)]
+mod tests;
 #[cfg(test)]
 mod writer_err_tests;

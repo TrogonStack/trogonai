@@ -1,4 +1,3 @@
-#[cfg(not(coverage))]
 use {
     a2a_bridge::{
         AppState, AsyncNatsAuthMintWire, AsyncNatsTokenGatewayUnary, AsyncNatsTokenTaskJetstream,
@@ -10,7 +9,6 @@ use {
     trogon_std::env::{ReadEnv, SystemEnv},
 };
 
-#[cfg(not(coverage))]
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::try_init().ok();
@@ -20,7 +18,6 @@ async fn main() {
     }
 }
 
-#[cfg(not(coverage))]
 async fn run() -> Result<(), BootstrapError> {
     let env = SystemEnv;
 
@@ -57,7 +54,6 @@ async fn run() -> Result<(), BootstrapError> {
     Ok(())
 }
 
-#[cfg(not(coverage))]
 #[derive(Debug, thiserror::Error)]
 enum BootstrapError {
     #[error("BRIDGE_LISTEN_ADDR must be a SocketAddr")]
@@ -72,7 +68,6 @@ enum BootstrapError {
     Serve(#[source] std::io::Error),
 }
 
-#[cfg(not(coverage))]
 fn resolve_a2a_prefix(env: &impl ReadEnv) -> Result<A2aPrefix, BridgeError> {
     let raw = env
         .var(ENV_A2A_PREFIX)
@@ -80,7 +75,6 @@ fn resolve_a2a_prefix(env: &impl ReadEnv) -> Result<A2aPrefix, BridgeError> {
     A2aPrefix::new(raw).map_err(|e| BridgeError::NatsPublish(format!("{ENV_A2A_PREFIX} is invalid: {e}")))
 }
 
-#[cfg(not(coverage))]
 fn bootstrap_stub_transport(env: &impl ReadEnv, nats_url: &str, prefix: A2aPrefix) -> AppState {
     let auth_callout_url = env
         .var("AUTH_CALLOUT_NATS_URL")
@@ -100,7 +94,6 @@ fn bootstrap_stub_transport(env: &impl ReadEnv, nats_url: &str, prefix: A2aPrefi
     )
 }
 
-#[cfg(not(coverage))]
 async fn bootstrap_nats_transport(
     env: &impl ReadEnv,
     nats_raw: &str,
@@ -175,7 +168,6 @@ async fn bootstrap_nats_transport(
     ))
 }
 
-#[cfg(not(coverage))]
 fn parse_nats_servers(raw: &str) -> Vec<String> {
     raw.split(',')
         .map(str::trim)
@@ -190,10 +182,6 @@ fn parse_nats_servers(raw: &str) -> Vec<String> {
         .collect()
 }
 
-#[cfg(not(coverage))]
 fn parse_u64_env(env: &impl ReadEnv, key: &str) -> Option<u64> {
     env.var(key).ok()?.trim().parse().ok()
 }
-
-#[cfg(coverage)]
-fn main() {}

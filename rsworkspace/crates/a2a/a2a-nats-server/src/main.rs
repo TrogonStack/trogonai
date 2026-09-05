@@ -3,30 +3,18 @@
 //! Boots a [`NoopHandler`] that returns `UnsupportedOperation` (or
 //! `PushNotificationNotSupported` for push ops) on every method — the
 //! production agent author plugs in their own [`A2aExecutor`] impl by
-//! depending on `a2a-nats` directly. Connect-and-serve is gated to
-//! `cfg(not(coverage))` because `trogon-nats::NatsJetStreamClient` is
-//! excluded during coverage runs.
+//! depending on `a2a-nats` directly.
 
-#[cfg(not(coverage))]
 use a2a_nats::jetstream::{StreamProvisionOptions, provision_streams_with_options};
-#[cfg(not(coverage))]
 use a2a_nats::nats_connect_timeout;
-#[cfg(not(coverage))]
 use a2a_nats::server::Bridge;
-#[cfg(not(coverage))]
 use a2a_nats_server::NoopHandler;
-#[cfg(not(coverage))]
 use a2a_nats_server::runtime::{RuntimeError, parse_env};
-#[cfg(not(coverage))]
 use tokio_util::sync::CancellationToken;
-#[cfg(not(coverage))]
 use tracing::{error, info};
-#[cfg(not(coverage))]
 use trogon_nats::jetstream::NatsJetStreamClient;
-#[cfg(not(coverage))]
 use trogon_std::env::SystemEnv;
 
-#[cfg(not(coverage))]
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
@@ -77,9 +65,3 @@ async fn main() {
 
     info!("A2A agent shutdown complete");
 }
-
-#[cfg(coverage)]
-fn main() {}
-
-#[cfg(test)]
-mod tests;

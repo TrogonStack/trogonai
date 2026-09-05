@@ -8,13 +8,8 @@
 //! allow path forwards to `{prefix}.v1.global.agent.{agent}.{method}` and
 //! (when configured) spawns a streaming pump for stream-shaped
 //! methods.
-//!
-//! Gated behind `cfg(not(coverage))` because it binds the concrete
-//! `async_nats::Client` + JetStream pump; the per-tier classifier
-//! and denial-shaping helpers live in sibling modules and have
-//! their own unit tests.
 
-#![cfg(all(feature = "spicedb", not(coverage)))]
+#![cfg(feature = "spicedb")]
 
 use std::sync::Arc;
 use std::time::Instant;

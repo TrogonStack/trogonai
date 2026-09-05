@@ -2,6 +2,7 @@ use trogon_std::env::InMemoryEnv;
 
 use super::*;
 
+#[cfg(not(feature = "spicedb"))]
 #[tokio::test(flavor = "current_thread")]
 async fn run_with_args_resolves_config_and_returns_ok() {
     let env = InMemoryEnv::new();

@@ -38,9 +38,6 @@ fn task_response(task_id: &str) -> (async_nats::HeaderMap, Bytes) {
     (encoded.headers, encoded.body)
 }
 
-// run_io_loop-exercising tests are skipped under cfg(coverage) because
-// the real impl is replaced by a stub there. See io_loop.rs preamble.
-#[cfg(not(coverage))]
 #[tokio::test]
 async fn io_loop_exits_on_eof() {
     let nats = AdvancedMockNatsClient::new();
@@ -53,7 +50,6 @@ async fn io_loop_exits_on_eof() {
     let _ = run_io_loop(client, stdin_reader, stdout_writer, std::future::pending::<()>()).await;
 }
 
-#[cfg(not(coverage))]
 #[tokio::test]
 async fn io_loop_exits_on_shutdown_signal() {
     let nats = AdvancedMockNatsClient::new();
@@ -65,7 +61,6 @@ async fn io_loop_exits_on_shutdown_signal() {
     let _ = run_io_loop(client, stdin_reader, stdout_writer, std::future::ready(())).await;
 }
 
-#[cfg(not(coverage))]
 #[tokio::test]
 async fn io_loop_skips_blank_lines() {
     let nats = AdvancedMockNatsClient::new();
@@ -94,7 +89,6 @@ async fn io_loop_skips_blank_lines() {
     assert_eq!(output.matches('\n').count(), 1, "blank lines should not emit frames");
 }
 
-#[cfg(not(coverage))]
 #[tokio::test]
 async fn io_loop_handles_valid_request() {
     let nats = AdvancedMockNatsClient::new();
@@ -118,7 +112,6 @@ async fn io_loop_handles_valid_request() {
     assert!(output.contains("t1"));
 }
 
-#[cfg(not(coverage))]
 #[tokio::test]
 async fn io_loop_handles_parse_error() {
     let nats = AdvancedMockNatsClient::new();
@@ -139,7 +132,6 @@ async fn io_loop_handles_parse_error() {
     assert!(output.contains("-32700"));
 }
 
-#[cfg(not(coverage))]
 #[tokio::test]
 async fn io_loop_handles_invalid_request_envelope() {
     let nats = AdvancedMockNatsClient::new();
@@ -160,7 +152,6 @@ async fn io_loop_handles_invalid_request_envelope() {
     assert!(output.contains("-32600"), "expected invalid request in: {output}");
 }
 
-#[cfg(not(coverage))]
 #[tokio::test]
 async fn io_loop_shutdown_preempts_blocking_dispatch_acquire() {
     let nats = AdvancedMockNatsClient::new();
@@ -251,21 +242,18 @@ async fn run_with_failing_writer(writes_until_fail: usize, fail_on_flush: bool) 
     run_io_loop(client, stdin_reader, writer, std::future::pending::<()>()).await
 }
 
-#[cfg(not(coverage))]
 #[tokio::test]
 async fn writer_task_handles_payload_write_failure() {
     let res = run_with_failing_writer(0, false).await;
     assert!(res.is_err(), "writer failure must propagate as Err");
 }
 
-#[cfg(not(coverage))]
 #[tokio::test]
 async fn writer_task_handles_newline_write_failure() {
     let res = run_with_failing_writer(1, false).await;
     assert!(res.is_err(), "writer failure must propagate as Err");
 }
 
-#[cfg(not(coverage))]
 #[tokio::test]
 async fn writer_task_handles_flush_failure() {
     let res = run_with_failing_writer(usize::MAX, true).await;
@@ -285,7 +273,6 @@ impl tokio::io::AsyncRead for FailingReader {
     }
 }
 
-#[cfg(not(coverage))]
 #[tokio::test]
 async fn io_loop_exits_on_stdin_read_error() {
     let nats = AdvancedMockNatsClient::new();

@@ -5,13 +5,10 @@ use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use serde::Deserialize;
 use tokio_tungstenite::tungstenite::{Error as WebSocketError, Message};
 use tracing::{info, warn};
-#[cfg_attr(coverage, allow(unused_imports))]
 use trogon_nats::jetstream::{ClaimCheckPublisher, JetStreamPublisher, ObjectStorePut};
 
-#[cfg_attr(coverage, allow(unused_imports))]
 use super::config::{SlackConfig, SlackSocketModeConfig};
 use super::constants::RECONNECT_MAX_DELAY;
-#[cfg(not(coverage))]
 use super::constants::{APPS_CONNECTIONS_OPEN_URL, RECONNECT_INITIAL_DELAY};
 use super::server::SlackBridge;
 
@@ -66,7 +63,6 @@ struct SocketEnvelope {
     reason: Option<String>,
 }
 
-#[cfg(not(coverage))]
 pub async fn run<P: JetStreamPublisher, S: ObjectStorePut>(
     publisher: ClaimCheckPublisher<P, S>,
     config: &SlackConfig,

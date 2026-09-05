@@ -10,29 +10,29 @@ use trogon_std::env::ReadEnv;
 
 use crate::config::{Args, Config, ConfigError, config_from_args};
 
-#[cfg(all(feature = "spicedb", not(coverage)))]
+#[cfg(feature = "spicedb")]
 use a2a_auth_callout::signing_key_source_from_env;
-#[cfg(all(feature = "spicedb", not(coverage)))]
+#[cfg(feature = "spicedb")]
 use futures::StreamExt;
-#[cfg(all(feature = "spicedb", not(coverage)))]
+#[cfg(feature = "spicedb")]
 use tokio_util::sync::CancellationToken;
-#[cfg(all(feature = "spicedb", not(coverage)))]
+#[cfg(feature = "spicedb")]
 use tracing::{info, warn};
 
-#[cfg(all(feature = "spicedb", not(coverage)))]
+#[cfg(feature = "spicedb")]
 use crate::gw_ingress_stream::{
     GatewayStreamingIngressConfig, StreamingIngressGate, gateway_streaming_ingress_enabled,
 };
-#[cfg(all(feature = "spicedb", not(coverage)))]
+#[cfg(feature = "spicedb")]
 use crate::jwt_caller_identity::{JwtHeaderCallerIdentitySource, gateway_caller_identity_policy, gateway_jwt_audience};
-#[cfg(all(feature = "spicedb", not(coverage)))]
+#[cfg(feature = "spicedb")]
 use crate::policy::spicedb_tier1::Tier1SpiceDbConfig;
-#[cfg(all(feature = "spicedb", not(coverage)))]
+#[cfg(feature = "spicedb")]
 use crate::policy::tier1_declarative::Tier1DeclarativeConfig;
 
 pub mod aauth_env;
 pub mod audit_publish;
-#[cfg(all(feature = "spicedb", not(coverage)))]
+#[cfg(feature = "spicedb")]
 pub mod dispatch;
 pub mod env;
 pub mod policy_stack;
@@ -48,51 +48,47 @@ pub enum RuntimeError {
     #[error("gateway config: {0}")]
     Config(#[from] ConfigError),
 
-    #[cfg(all(feature = "spicedb", not(coverage)))]
+    #[cfg(feature = "spicedb")]
     #[error("NATS connect: {0}")]
     NatsConnect(#[from] trogon_nats::ConnectError),
 
-    #[cfg(all(feature = "spicedb", not(coverage)))]
+    #[cfg(feature = "spicedb")]
     #[error("gateway subscribe: {0}")]
     Subscribe(String),
 
-    #[cfg(all(feature = "spicedb", not(coverage)))]
+    #[cfg(feature = "spicedb")]
     #[error("tier-1 SpiceDB config: {0}")]
     Tier1Config(#[from] crate::policy::spicedb_tier1::Tier1SpiceDbBuildError),
 
-    #[cfg(all(feature = "spicedb", not(coverage)))]
+    #[cfg(feature = "spicedb")]
     #[error("tier-1 declarative config: {0}")]
     Tier1DeclarativeConfig(#[from] crate::policy::tier1_declarative::Tier1DeclarativeBuildError),
 
-    #[cfg(all(feature = "spicedb", not(coverage)))]
+    #[cfg(feature = "spicedb")]
     #[error("gateway signing key source: {0}")]
     SigningKeySource(#[from] a2a_auth_callout::AuthCalloutError),
 
-    #[cfg(all(feature = "spicedb", not(coverage)))]
+    #[cfg(feature = "spicedb")]
     #[error("AAuth config: {0}")]
     AAuthConfig(#[from] crate::runtime::aauth_env::AAuthEnvError),
 }
 
-/// Resolve config from `args` + `env` and run the gateway. Coverage and
-/// non-spicedb builds short-circuit after walking the config seam so the
-/// crate still compiles and lints without the live policy stack.
+/// Resolve config from `args` + `env` and run the gateway.
 pub async fn run_with_args<E: ReadEnv>(args: Args, env: &E) -> Result<(), RuntimeError> {
     let (config, nats_config) = config_from_args(args, env)?;
     run_with_config(config, nats_config, env).await
 }
 
-#[cfg(any(not(feature = "spicedb"), coverage))]
+#[cfg(not(feature = "spicedb"))]
 pub async fn run_with_config<E: ReadEnv>(
     _config: Config,
     _nats_config: NatsConfig,
     _env: &E,
 ) -> Result<(), RuntimeError> {
-    // The live dispatch path is only built into the `spicedb` non-coverage
-    // profile; coverage / no-spicedb builds keep the crate buildable.
     Ok(())
 }
 
-#[cfg(all(feature = "spicedb", not(coverage)))]
+#[cfg(feature = "spicedb")]
 pub async fn run_with_config<E: ReadEnv>(config: Config, nats_config: NatsConfig, env: &E) -> Result<(), RuntimeError> {
     let connect_timeout = a2a_nats::nats_connect_timeout(env);
     let client = trogon_nats::connect(&nats_config, connect_timeout).await?;
