@@ -14,9 +14,6 @@ pub(crate) const HEADER_ALGORITHM: &str = "ed25519-nkey";
 pub(crate) const VERSION_CURRENT: &str = "current";
 pub(crate) const VERSION_PREVIOUS: &str = "previous";
 
-const _: () = assert!(!VERSION_CURRENT.is_empty());
-const _: () = assert!(!VERSION_PREVIOUS.is_empty());
-
 /// NATS subject the server uses for auth callout requests.
 pub(crate) const AUTH_CALLOUT_SUBJECT: &str = "$SYS.REQ.USER.AUTH";
 

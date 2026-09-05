@@ -8,6 +8,7 @@ extern crate rustc_session;
 extern crate rustc_span;
 
 mod acyclic_modules;
+mod assertions_on_fixed_literals;
 mod constant_outside_constants_module;
 mod debug_remnants;
 mod error_string_comparison;
@@ -47,6 +48,7 @@ pub fn register_lints(sess: &rustc_session::Session, lint_store: &mut LintStore)
     dylint_linting::init_config(sess);
     lint_store.register_lints(&[
         ACYCLIC_MODULES,
+        ASSERTIONS_ON_FIXED_LITERALS,
         CONSTANT_OUTSIDE_CONSTANTS_MODULE,
         DEBUG_REMNANTS,
         ERROR_STRING_COMPARISON,
@@ -72,9 +74,32 @@ pub fn register_lints(sess: &rustc_session::Session, lint_store: &mut LintStore)
     ]);
     lint_store.register_late_pass(|_| Box::<TrogonLints>::default());
     lint_store.register_early_pass(|| Box::new(redundant_module_path::RedundantModulePath));
-    lint_store.register_early_pass(|| {
-        Box::new(serde_json_macro_allow_without_reason::SerdeJsonMacroAllowWithoutReason)
-    });
+    lint_store
+        .register_early_pass(|| Box::new(serde_json_macro_allow_without_reason::SerdeJsonMacroAllowWithoutReason));
+}
+
+rustc_session::declare_lint! {
+    /// ### What it does
+    ///
+    /// Detects always-true assertions in compile-time contexts whose condition
+    /// merely checks a literal or a local constant initialized with a literal.
+    ///
+    /// ### Why is this bad?
+    ///
+    /// Restating an obvious property of a fixed value adds no independent
+    /// invariant. Runtime validation, computed values, generated inputs, type
+    /// properties, and relationships between distinct named constants remain
+    /// meaningful and are outside this rule's scope.
+    ///
+    /// ### Example
+    ///
+    /// ```rust,ignore
+    /// const VERSION_CURRENT: &str = "current";
+    /// const _: () = assert!(!VERSION_CURRENT.is_empty());
+    /// ```
+    pub ASSERTIONS_ON_FIXED_LITERALS,
+    Deny,
+    "compile-time assertions must express more than an obvious property of a fixed literal",
 }
 
 rustc_session::declare_lint! {
@@ -1077,6 +1102,7 @@ impl<'tcx> LateLintPass<'tcx> for TrogonLints {
     }
 
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'tcx>) {
+        assertions_on_fixed_literals::check_expr(cx, expr);
         unbounded_channel::check_expr(cx, expr);
         self.acyclic_modules.check_expr(cx, expr);
         self.debug_remnants.check_expr(cx, expr);
@@ -1133,6 +1159,7 @@ impl<'tcx> LateLintPass<'tcx> for TrogonLints {
 
 rustc_session::impl_lint_pass!(TrogonLints => [
     ACYCLIC_MODULES,
+    ASSERTIONS_ON_FIXED_LITERALS,
     CONSTANT_OUTSIDE_CONSTANTS_MODULE,
     DEBUG_REMNANTS,
     ERROR_STRING_COMPARISON,

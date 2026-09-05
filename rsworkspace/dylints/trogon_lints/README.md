@@ -33,6 +33,17 @@ lint crate rather than in per-invocation flags.
   `#[cfg_attr(dylint_lib = "trogon_lints", expect(acyclic_modules, reason = "..."))]`,
   where `expect` reports itself once the cycle is gone so the exemption cannot
   outlive its reason.
+- `assertions_on_fixed_literals` (`deny`): rejects always-true `assert!` and
+  `debug_assert!` calls in compile-time contexts when they only restate an
+  obvious property of a fixed literal, such as
+  `const _: () = assert!(!VERSION_CURRENT.is_empty());` for
+  `const VERSION_CURRENT: &str = "current";`. It covers boolean literals,
+  scalar comparisons, and string or byte-string `len()`/`is_empty()` checks,
+  including local constants and their literal aliases. Runtime assertions,
+  relationships between distinct named constants, computed or generated
+  values, values from associated constants, and type or generic invariants are
+  left alone.
+  Assertions that evaluate to false remain the compiler's responsibility.
 - `constant_outside_constants_module` (`deny`): requires module-level (and
   crate-root) `const` items to live in a `constants` module (`constants.rs`), so
   a module's tunable values are discoverable in one place instead of scattered
