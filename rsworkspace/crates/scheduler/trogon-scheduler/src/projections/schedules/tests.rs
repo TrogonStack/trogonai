@@ -1,6 +1,8 @@
 use buffa::MessageField;
 use buffa_types::google::protobuf::{Duration, Timestamp};
 use chrono::DateTime;
+use trogon_decider_runtime::{EventId, Headers};
+use trogon_nats::test_support::JetStreamTestServer;
 
 use super::*;
 use crate::constants::{EVENTS_SUBJECT_PATTERN, EVENTS_SUBJECT_PREFIX};
@@ -125,8 +127,8 @@ fn occurrence_recorded_event(id: &str, sequence: u64, at: &str) -> v1::ScheduleE
     }
 }
 
-fn present(state: ScheduleStreamState) -> Box<projections_v1::ScheduleProjection> {
-    match state {
+fn present(state: impl Into<ScheduleStreamState>) -> Box<projections_v1::ScheduleProjection> {
+    match state.into() {
         ScheduleStreamState::Present(view) => view,
         other => panic!("expected present schedule, got {other:?}"),
     }
@@ -242,7 +244,7 @@ fn pause_retains_and_resume_clears_the_pending_next_occurrence() {
 fn event_projection_replays_latest_state() {
     let mut state = initial_state();
     for event in [added_event("backup"), paused_event("backup"), removed_event("backup")] {
-        state = apply("backup", state, &event).unwrap();
+        state = apply("backup", state, &event).unwrap().into();
     }
     assert_eq!(state, ScheduleStreamState::Deleted("backup".to_string()));
 }
@@ -322,7 +324,10 @@ fn rejects_recreating_an_existing_schedule() {
 #[test]
 fn initial_removal_creates_a_deleted_tombstone() {
     let state = apply("backup", initial_state(), &removed_event("backup")).unwrap();
-    assert_eq!(state, ScheduleStreamState::Deleted("backup".to_string()));
+    assert_eq!(
+        ScheduleStreamState::from(state),
+        ScheduleStreamState::Deleted("backup".to_string())
+    );
 }
 
 #[test]
@@ -337,15 +342,12 @@ fn mismatched_payload_id_is_rejected() {
 #[test]
 fn projection_change_upserts_then_deletes() {
     let before = initial_state();
-    let after = apply("backup", before.clone(), &added_event("backup")).unwrap();
-    assert!(matches!(
-        projection_change(&before, &after),
-        Some(ProjectionChange::Upsert(_))
-    ));
+    let after = apply("backup", before, &added_event("backup")).unwrap();
+    assert!(matches!(ProjectionChange::from(&after), ProjectionChange::Upsert(_)));
 
-    let removed = apply("backup", after.clone(), &removed_event("backup")).unwrap();
-    match projection_change(&after, &removed) {
-        Some(ProjectionChange::Delete(id)) => assert_eq!(id, "backup"),
+    let removed = apply("backup", after, &removed_event("backup")).unwrap();
+    match ProjectionChange::from(&removed) {
+        ProjectionChange::Delete(id) => assert_eq!(id, "backup"),
         other => panic!("expected delete, got {other:?}"),
     }
 }
@@ -580,14 +582,123 @@ fn apply_schedule_created_rejects_missing_definition_fields() {
 }
 
 #[test]
-fn projection_change_covers_delete_and_noop_transitions() {
-    let present = apply("backup", initial_state(), &added_event("backup")).unwrap();
-    // Present -> Initial emits a delete (stale-row cleanup).
+fn removing_without_prior_creation_still_deletes_a_stale_projection() {
+    let applied = apply("backup", initial_state(), &removed_event("backup")).unwrap();
+    assert!(matches!(ProjectionChange::from(&applied), ProjectionChange::Delete(id) if id == "backup"));
+}
+
+#[tokio::test]
+async fn projection_skips_foreign_events_but_preserves_checkpoint_on_malformed_known_events() {
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
+    let bucket = get_or_create_schedules_bucket(&js).await.unwrap();
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c35";
+    let position = StreamPosition::try_new(1).unwrap();
+    let unknown = Event {
+        id: EventId::from(uuid::Uuid::from_u128(1)),
+        r#type: "example.future.Event".to_string(),
+        content: Vec::new(),
+        headers: Headers::empty(),
+    };
+    project_appended_events(&bucket, id, &[unknown], position)
+        .await
+        .unwrap();
+    assert!(read_projected_view(&bucket, id).await.unwrap().is_none());
+    assert_eq!(read_read_model_checkpoint(&bucket).await.unwrap(), 1);
+
+    let malformed = Event {
+        id: EventId::from(uuid::Uuid::from_u128(2)),
+        r#type: <v1::ScheduleCreated as buffa::MessageName>::FULL_NAME.to_string(),
+        content: vec![0xff],
+        headers: Headers::empty(),
+    };
+    let error = project_appended_events(&bucket, id, &[malformed], StreamPosition::try_new(2).unwrap())
+        .await
+        .unwrap_err();
+    assert!(matches!(error, SchedulerError::Event { .. }));
+    assert_eq!(read_read_model_checkpoint(&bucket).await.unwrap(), 1);
+    assert!(read_projected_view(&bucket, id).await.unwrap().is_none());
+
+    js.delete_key_value(crate::constants::SCHEDULES_BUCKET).await.unwrap();
+    project_appended_events(&bucket, id, &[], position).await.unwrap();
+}
+
+#[tokio::test]
+async fn consumer_metadata_is_required_before_folding_a_delivery() {
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
+    let bucket = get_or_create_schedules_bucket(&js).await.unwrap();
+    let message = jetstream::Message {
+        message: async_nats::Message {
+            subject: "scheduler.schedules.events.invalid".into(),
+            reply: None,
+            payload: bytes::Bytes::new(),
+            headers: None,
+            status: None,
+            description: None,
+            length: 0,
+        },
+        context: js,
+    };
     assert!(matches!(
-        projection_change(&present, &initial_state()),
-        Some(ProjectionChange::Delete(_))
+        decode_recorded_delivery_message(&message).unwrap_err(),
+        SchedulerError::Event { .. }
     ));
-    // Initial -> Initial and Deleted -> Initial are no-ops.
-    assert!(projection_change(&initial_state(), &initial_state()).is_none());
-    assert!(projection_change(&ScheduleStreamState::Deleted("x".to_string()), &initial_state()).is_none());
+    assert!(event_message_sequence(&message, "read delivery sequence").is_err());
+    let mut states = BTreeMap::new();
+    states.insert(
+        "existing".to_string(),
+        apply("existing", initial_state(), &added_event("existing"))
+            .unwrap()
+            .into(),
+    );
+    let before = states.clone();
+    fold_catch_up_message(&bucket, &mut states, &message).await.unwrap();
+    assert_eq!(states, before);
+    assert_eq!(read_read_model_checkpoint(&bucket).await.unwrap(), 0);
+}
+
+#[derive(Clone, Copy)]
+enum FailedKeyListing {
+    Open,
+    Read,
+}
+
+impl JetStreamKvKeys for FailedKeyListing {
+    type Keys = futures::stream::Iter<std::vec::IntoIter<Result<String, kv::WatcherError>>>;
+
+    async fn keys(&self) -> Result<Self::Keys, kv::HistoryError> {
+        match self {
+            Self::Open => Err(kv::HistoryError::new(kv::HistoryErrorKind::InvalidKey)),
+            Self::Read => Ok(futures::stream::iter(vec![Err(kv::WatcherError::new(
+                kv::WatcherErrorKind::Consumer,
+            ))])),
+        }
+    }
+}
+
+impl JetStreamKeyValueDeleteExpectRevision for FailedKeyListing {
+    async fn delete_expect_revision(&self, _key: &str, _revision: Option<u64>) -> Result<(), kv::DeleteError> {
+        panic!("a failed key listing must not remove any projection");
+    }
+}
+
+#[tokio::test]
+async fn failed_reconcile_key_listing_does_not_delete_rows_and_retains_the_source() {
+    for failure in [FailedKeyListing::Open, FailedKeyListing::Read] {
+        let error = reconcile_projection_keys(&failure, &HashSet::new()).await.unwrap_err();
+        let SchedulerError::Kv { source, .. } = error else {
+            panic!("key enumeration must report a key-value failure");
+        };
+        match failure {
+            FailedKeyListing::Open => assert_eq!(
+                source.downcast_ref::<kv::HistoryError>().unwrap().kind(),
+                kv::HistoryErrorKind::InvalidKey
+            ),
+            FailedKeyListing::Read => assert_eq!(
+                source.downcast_ref::<kv::WatcherError>().unwrap().kind(),
+                kv::WatcherErrorKind::Consumer
+            ),
+        }
+    }
 }

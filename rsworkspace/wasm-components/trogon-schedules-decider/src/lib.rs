@@ -37,3 +37,6 @@ export_decider!(
         state_schema_version = SCHEDULES_STATE_SCHEMA_VERSION,
     },
 );
+
+#[cfg(test)]
+mod tests;

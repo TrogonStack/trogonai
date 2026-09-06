@@ -16,6 +16,10 @@ use mcp_nats::wire;
 
 use super::*;
 
+mod forwarding_tests;
+mod protocol_surface_tests;
+mod worker_lifecycle_tests;
+
 #[derive(Clone, Debug)]
 struct CapturedNatsRequest {
     subject: String,

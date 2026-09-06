@@ -1,3 +1,4 @@
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 mod config;
@@ -8,15 +9,14 @@ use std::sync::Arc;
 use tracing::{error, info};
 use trogon_std::time::SystemClock;
 
-#[cfg(not(coverage))]
 use {
     acp_nats::nats,
     trogon_std::{env::SystemEnv, fs::SystemFs, signal::shutdown_signal},
     trogon_telemetry::{ResourceAttribute, ServiceName},
 };
 
-#[cfg(not(coverage))]
 #[tokio::main]
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn main() -> anyhow::Result<()> {
     let config = config::base_config(&trogon_std::CliArgs::<config::Args>::new(), &SystemEnv)?;
     trogon_telemetry::init_logger(
@@ -52,9 +52,6 @@ async fn main() -> anyhow::Result<()> {
 
     result
 }
-
-#[cfg(coverage)]
-fn main() {}
 
 async fn run_bridge<N, J, W, R>(
     nats_client: N,

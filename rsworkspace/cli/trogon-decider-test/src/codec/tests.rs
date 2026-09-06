@@ -74,6 +74,30 @@ fn utf8_wrapper_encodes_identically_to_base64() {
 }
 
 #[test]
+fn utf8_payload_expansion_preserves_repeated_message_headers() {
+    let mut value = create_schedule_value();
+    value["message"]["content"]["data"] = serde_json::json!({ "utf8": "scheduled café" });
+    value["message"]["headers"] = serde_json::json!([
+        { "name": "X-Workflow", "value": "nightly" },
+        { "name": "X-Region", "value": "west" },
+    ]);
+
+    let encoded = json_any_to_command(schedules_registry(), &value).unwrap();
+    let decoded = schedules_v1::CreateSchedule::decode_from_slice(&encoded.payload).unwrap();
+    let message = decoded.message.unwrap();
+
+    assert_eq!(message.content.unwrap().data, "scheduled café".as_bytes());
+    assert_eq!(
+        message
+            .headers
+            .iter()
+            .map(|header| (header.name.as_str(), header.value.as_str()))
+            .collect::<Vec<_>>(),
+        vec![("X-Workflow", "nightly"), ("X-Region", "west")]
+    );
+}
+
+#[test]
 fn missing_type_is_an_error() {
     let value = serde_json::json!({ "schedule_id": "backup" });
     let error = json_any_to_command(schedules_registry(), &value)

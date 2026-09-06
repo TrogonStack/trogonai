@@ -71,12 +71,6 @@ fn parse_env_valid_uses_default_prefix() {
     assert_eq!(cfg.agent_id.as_str(), "bot");
 }
 
-#[tokio::test]
-#[cfg(coverage)]
-async fn coverage_run_stub_is_callable() {
-    super::run().await.unwrap();
-}
-
 #[test]
 fn runtime_error_display_and_source_for_io_loop() {
     let e = RuntimeError::IoLoop(std::io::Error::other("nope"));

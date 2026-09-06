@@ -1,12 +1,11 @@
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
-#![cfg_attr(coverage, allow(dead_code, unused_imports))]
 
 mod allowed_host;
 mod config;
 mod constants;
 mod runtime;
 
-#[cfg(not(coverage))]
 use {
     crate::constants::MCP_ENDPOINT,
     anyhow::Result,
@@ -17,8 +16,8 @@ use {
     trogon_telemetry::{ResourceAttribute, ServiceName},
 };
 
-#[cfg(not(coverage))]
 #[tokio::main]
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn main() -> Result<()> {
     let config = config::base_config(&trogon_std::CliArgs::<config::Args>::new(), &SystemEnv)?;
     let config::HttpBridgeConfig {
@@ -62,6 +61,3 @@ async fn main() -> Result<()> {
     result?;
     Ok(())
 }
-
-#[cfg(coverage)]
-fn main() {}

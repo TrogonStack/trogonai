@@ -6,11 +6,6 @@
 //! events under exactly this shape, so the host inherits a topology that is in
 //! production rather than inventing a second one beside it.
 
-// `JetStreamLastRawMessageBySubject` is not implemented for the real
-// `jetstream::stream::Stream` under coverage, so the one method that reaches
-// NATS is stubbed there and its imports go unused.
-#![cfg_attr(coverage, allow(unused_imports))]
-
 use async_nats::{SubjectError, jetstream};
 use trogon_decider_nats::{
     StreamStoreError, StreamSubject, StreamSubjectResolver, SubjectScope, SubjectScopeError, SubjectState,
@@ -81,21 +76,13 @@ impl StreamSubjectResolver<str> for ModuleEventSubjects {
         events_stream: &jetstream::stream::Stream,
         stream_id: &str,
     ) -> Result<SubjectState, Self::Error> {
-        #[cfg(not(coverage))]
-        {
-            let subject = self.subject_for(stream_id)?;
-            let current_position = subject_current_position(events_stream, &subject).await?;
+        let subject = self.subject_for(stream_id)?;
+        let current_position = subject_current_position(events_stream, &subject).await?;
 
-            Ok(SubjectState {
-                subject,
-                current_position,
-            })
-        }
-        #[cfg(coverage)]
-        {
-            let _ = (events_stream, stream_id);
-            Err(EventSubjectError::CoverageUnavailable)
-        }
+        Ok(SubjectState {
+            subject,
+            current_position,
+        })
     }
 }
 
@@ -126,11 +113,6 @@ pub enum EventSubjectError {
     /// Reading the subject's current position failed.
     #[error("failed to read the current position of a module event subject: {0}")]
     CurrentPosition(#[from] StreamStoreError),
-    /// Never reached outside a coverage build, where the JetStream read this
-    /// resolver depends on is compiled out.
-    #[cfg(coverage)]
-    #[error("coverage stub does not resolve module event subject state")]
-    CoverageUnavailable,
 }
 
 #[cfg(test)]

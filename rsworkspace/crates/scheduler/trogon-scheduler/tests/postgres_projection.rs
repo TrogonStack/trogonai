@@ -1,16 +1,11 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
-// Exercises the Postgres schedules read-model backend against a real Postgres in a
-// throwaway container. `#[ignore]`d because it needs Docker; run with
-// `cargo test -p trogon-scheduler --features postgres -- --ignored`.
-#![cfg(all(feature = "postgres", not(coverage)))]
+#![cfg(feature = "postgres")]
 
 use std::collections::HashSet;
 
 use buffa::MessageField;
+use buffa_types::google::protobuf::{Duration, Timestamp};
 use sqlx::Row;
-use testcontainers_modules::postgres::Postgres;
-use testcontainers_modules::testcontainers::ContainerAsync;
-use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use trogon_scheduler::{
     GetScheduleCommand, ListSchedulesCommand, PostgresSchedulesProjection, ScheduleId, projection_queries,
     projections_v1,
@@ -65,22 +60,12 @@ fn schedule_projection(id: &str) -> projections_v1::ScheduleProjection {
     }
 }
 
-async fn start() -> (ContainerAsync<Postgres>, PostgresSchedulesProjection) {
-    let container = Postgres::default().start().await.expect("start postgres container");
-    let host = container.get_host().await.expect("container host");
-    let port = container.get_host_port_ipv4(5432).await.expect("container port");
-    let url = format!("postgres://postgres:postgres@{host}:{port}/postgres");
-    let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&url)
-        .await
-        .expect("connect pool");
-    let store = PostgresSchedulesProjection::new(pool).await.expect("run migrations");
-    (container, store)
-}
+#[path = "support/postgres.rs"]
+mod postgres;
+
+use postgres::start;
 
 #[tokio::test]
-#[ignore = "requires Docker for testcontainers Postgres"]
 async fn upsert_get_list_delete_round_trip() {
     let (_container, store) = start().await;
 
@@ -119,7 +104,6 @@ async fn upsert_get_list_delete_round_trip() {
 }
 
 #[tokio::test]
-#[ignore = "requires Docker for testcontainers Postgres"]
 async fn reconcile_removes_rows_absent_from_the_live_set() {
     let (_container, store) = start().await;
     store.upsert_projection(&schedule_projection("keep")).await.unwrap();
@@ -135,7 +119,6 @@ async fn reconcile_removes_rows_absent_from_the_live_set() {
 }
 
 #[tokio::test]
-#[ignore = "requires Docker for testcontainers Postgres"]
 async fn checkpoint_round_trips() {
     let (_container, store) = start().await;
 
@@ -147,7 +130,6 @@ async fn checkpoint_round_trips() {
 }
 
 #[tokio::test]
-#[ignore = "requires Docker for testcontainers Postgres"]
 async fn schedule_fields_are_stored_as_typed_columns() {
     let (_container, store) = start().await;
     store.upsert_projection(&schedule_projection("orders")).await.unwrap();
@@ -171,7 +153,6 @@ async fn schedule_fields_are_stored_as_typed_columns() {
 }
 
 #[tokio::test]
-#[ignore = "requires Docker for testcontainers Postgres"]
 async fn non_utf8_message_body_round_trips() {
     let (_container, store) = start().await;
 
@@ -201,12 +182,11 @@ async fn non_utf8_message_body_round_trips() {
 }
 
 #[tokio::test]
-#[ignore = "requires Docker for testcontainers Postgres"]
 async fn corrupt_row_is_unreadable_not_silently_repaired() {
     let (_container, store) = start().await;
 
     // A fully schema-valid row (every constraint satisfied) whose JSONB headers are
-    // malformed — a non-string header name — so the corruption is purely at the
+    // malformed because a header name is not a string, so the corruption is purely at the
     // application-decode layer and does not depend on any column's nullability. It
     // must surface as an error, not be returned as a defaulted (wrong) schedule.
     sqlx::query(
@@ -241,7 +221,6 @@ async fn corrupt_row_is_unreadable_not_silently_repaired() {
 }
 
 #[tokio::test]
-#[ignore = "requires Docker for testcontainers Postgres"]
 async fn projection_queries_read_through_the_backend() {
     let (_container, store) = start().await;
     store.upsert_projection(&schedule_projection("orders")).await.unwrap();
@@ -264,4 +243,243 @@ async fn projection_queries_read_through_the_backend() {
             .unwrap()
             .is_none()
     );
+}
+
+fn timestamp(seconds: i64) -> Timestamp {
+    Timestamp {
+        seconds,
+        nanos: 123_456_000,
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn replacing_schedule_variants_preserves_the_complete_projection() {
+    let (_container, store) = start().await;
+    let timezone = MessageField::some(trogonai_proto::google::r#type::TimeZone {
+        id: "America/New_York".to_string(),
+        ..Default::default()
+    });
+    let definitions = [
+        projections_v1::Schedule {
+            kind: Some(
+                projections_v1::schedule::At {
+                    at: MessageField::some(timestamp(1_800_000_000)),
+                }
+                .into(),
+            ),
+        },
+        projections_v1::Schedule {
+            kind: Some(
+                projections_v1::schedule::Cron {
+                    expr: "0 9 * * *".to_string(),
+                    timezone: timezone.clone(),
+                }
+                .into(),
+            ),
+        },
+        projections_v1::Schedule {
+            kind: Some(
+                projections_v1::schedule::RRule {
+                    dtstart: MessageField::some(timestamp(1_800_000_000)),
+                    rrule: "FREQ=DAILY;COUNT=5".to_string(),
+                    timezone,
+                    rdate: vec![timestamp(1_800_086_400), timestamp(1_800_172_800)],
+                    exdate: vec![timestamp(1_800_259_200)],
+                }
+                .into(),
+            ),
+        },
+        projections_v1::Schedule {
+            kind: Some(
+                projections_v1::schedule::Every {
+                    every: MessageField::some(Duration {
+                        seconds: 30,
+                        ..Default::default()
+                    }),
+                }
+                .into(),
+            ),
+        },
+    ];
+    let mut projection = schedule_projection("orders");
+    projection.status = MessageField::some(projections_v1::ScheduleStatus {
+        kind: Some(projections_v1::schedule_status::Paused {}.into()),
+    });
+    projection.completed = Some(true);
+    projection.next_occurrence_at = MessageField::some(timestamp(1_800_086_400));
+    projection.last_occurrence_at = MessageField::some(timestamp(1_800_000_000));
+    projection.delivery = MessageField::some(projections_v1::Delivery {
+        kind: Some(
+            projections_v1::delivery::NatsMessage {
+                subject: "agent.run".to_string(),
+                ttl: MessageField::some(Duration {
+                    seconds: 60,
+                    ..Default::default()
+                }),
+                source: MessageField::some(projections_v1::delivery::nats_message::Source {
+                    kind: Some(
+                        projections_v1::delivery::nats_message::LatestFromSubject {
+                            subject: "agent.input".to_string(),
+                        }
+                        .into(),
+                    ),
+                }),
+            }
+            .into(),
+        ),
+    });
+    projection.message = MessageField::some(projections_v1::Message {
+        content: MessageField::some(trogonai_proto::content::v1alpha1::Content {
+            content_type: "application/json".to_string(),
+            data: br#"{"kind":"heartbeat"}"#.to_vec(),
+        }),
+        headers: vec![
+            projections_v1::Header {
+                name: "X-Category".to_string(),
+                value: "orders".to_string(),
+            },
+            projections_v1::Header {
+                name: "X-Category".to_string(),
+                value: "reports".to_string(),
+            },
+        ],
+    });
+
+    for definition in definitions {
+        projection.schedule = MessageField::some(definition);
+        store.upsert_projection(&projection).await.unwrap();
+        assert_eq!(
+            store.get_projection(&id("orders")).await.unwrap(),
+            Some(projection.clone())
+        );
+        assert_eq!(store.list_projections().await.unwrap(), vec![projection.clone()]);
+    }
+
+    let row = sqlx::query(
+        "SELECT at_at, cron_expr, rrule, rrule_dtstart, timezone, cardinality(rrule_rdate) AS rdates, \
+         cardinality(rrule_exdate) AS exdates FROM schedules_projection WHERE schedule_id = $1",
+    )
+    .bind(fixture_schedule_id("orders"))
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert!(row.get::<Option<chrono::DateTime<chrono::Utc>>, _>("at_at").is_none());
+    assert!(row.get::<Option<String>, _>("cron_expr").is_none());
+    assert!(row.get::<Option<String>, _>("rrule").is_none());
+    assert!(
+        row.get::<Option<chrono::DateTime<chrono::Utc>>, _>("rrule_dtstart")
+            .is_none()
+    );
+    assert!(row.get::<Option<String>, _>("timezone").is_none());
+    assert_eq!(row.get::<i32, _>("rdates"), 0);
+    assert_eq!(row.get::<i32, _>("exdates"), 0);
+}
+
+#[tokio::test]
+async fn invalid_projection_input_does_not_overwrite_a_valid_row() {
+    let (_container, store) = start().await;
+    let projection = schedule_projection("orders");
+    store.upsert_projection(&projection).await.unwrap();
+    let original = store.get_projection(&id("orders")).await.unwrap();
+
+    let mut missing_schedule = projection.clone();
+    missing_schedule.schedule = MessageField::none();
+    let mut missing_schedule_kind = projection.clone();
+    missing_schedule_kind.schedule = MessageField::some(projections_v1::Schedule::default());
+    let mut missing_delivery = projection.clone();
+    missing_delivery.delivery = MessageField::none();
+    let mut missing_delivery_kind = projection.clone();
+    missing_delivery_kind.delivery = MessageField::some(projections_v1::Delivery::default());
+    let mut missing_message = projection.clone();
+    missing_message.message = MessageField::none();
+    let mut invalid_timestamp = projection.clone();
+    invalid_timestamp.next_occurrence_at = MessageField::some(timestamp(i64::MAX));
+
+    for invalid in [
+        missing_schedule,
+        missing_schedule_kind,
+        missing_delivery,
+        missing_delivery_kind,
+        missing_message,
+        invalid_timestamp,
+    ] {
+        assert!(store.upsert_projection(&invalid).await.is_err());
+        assert_eq!(store.get_projection(&id("orders")).await.unwrap(), original);
+    }
+}
+
+#[tokio::test]
+async fn incomplete_columns_and_malformed_headers_do_not_hide_valid_rows() {
+    let (_container, store) = start().await;
+    store.upsert_projection(&schedule_projection("ok")).await.unwrap();
+    for corruption in [
+        "UPDATE schedules_projection SET schedule_kind = 'cron', cron_expr = NULL WHERE schedule_id = $1",
+        "UPDATE schedules_projection SET schedule_kind = 'rrule', rrule = NULL WHERE schedule_id = $1",
+        "UPDATE schedules_projection SET delivery_subject = NULL WHERE schedule_id = $1",
+        "UPDATE schedules_projection SET message_content_type = 'application/json', message_body = NULL WHERE schedule_id = $1",
+        "UPDATE schedules_projection SET message_headers = '{}'::jsonb WHERE schedule_id = $1",
+        "UPDATE schedules_projection SET message_headers = '[{\"name\":\"X-Category\",\"value\":5}]'::jsonb WHERE schedule_id = $1",
+    ] {
+        store.upsert_projection(&schedule_projection("broken")).await.unwrap();
+        sqlx::query(corruption)
+            .bind(fixture_schedule_id("broken"))
+            .execute(store.pool())
+            .await
+            .unwrap();
+        assert!(store.get_projection(&id("broken")).await.is_err(), "{corruption}");
+        let listed = store.list_projections().await.unwrap();
+        assert_eq!(listed.len(), 1, "{corruption}");
+        assert_eq!(listed[0].schedule_id, fixture_schedule_id("ok"));
+    }
+}
+
+#[tokio::test]
+async fn query_listing_skips_a_binary_payload_the_storage_layer_can_read() {
+    let (_container, store) = start().await;
+    store.upsert_projection(&schedule_projection("ok")).await.unwrap();
+    let mut binary = schedule_projection("binary");
+    binary.message = MessageField::some(projections_v1::Message {
+        content: MessageField::some(trogonai_proto::content::v1alpha1::Content {
+            content_type: "application/octet-stream".to_string(),
+            data: vec![0xff],
+        }),
+        headers: Vec::new(),
+    });
+    store.upsert_projection(&binary).await.unwrap();
+    assert_eq!(store.list_projections().await.unwrap().len(), 2);
+
+    let schedules = projection_queries::list_schedules(&store, ListSchedulesCommand)
+        .await
+        .unwrap();
+
+    assert_eq!(schedules.len(), 1);
+    assert_eq!(schedules[0].id, fixture_schedule_id("ok"));
+}
+
+#[tokio::test]
+async fn future_schema_discriminators_do_not_hide_supported_rows() {
+    let (_container, store) = start().await;
+    store.upsert_projection(&schedule_projection("ok")).await.unwrap();
+    sqlx::query("ALTER TABLE schedules_projection DROP CONSTRAINT schedules_projection_schedule_kind_check, ADD CONSTRAINT schedules_projection_schedule_kind_check CHECK (schedule_kind IN ('at', 'every', 'cron', 'rrule', 'future'))")
+        .execute(store.pool()).await.unwrap();
+    sqlx::query("ALTER TABLE schedules_projection DROP CONSTRAINT schedules_projection_delivery_kind_check, ADD CONSTRAINT schedules_projection_delivery_kind_check CHECK (delivery_kind IN ('nats_message', 'future'))")
+        .execute(store.pool()).await.unwrap();
+    for update in [
+        "UPDATE schedules_projection SET schedule_kind = 'future' WHERE schedule_id = $1",
+        "UPDATE schedules_projection SET delivery_kind = 'future' WHERE schedule_id = $1",
+    ] {
+        store.upsert_projection(&schedule_projection("broken")).await.unwrap();
+        sqlx::query(update)
+            .bind(fixture_schedule_id("broken"))
+            .execute(store.pool())
+            .await
+            .unwrap();
+        assert!(store.get_projection(&id("broken")).await.is_err());
+        let listed = projection_queries::list_schedules(&store, ListSchedulesCommand)
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, fixture_schedule_id("ok"));
+    }
 }

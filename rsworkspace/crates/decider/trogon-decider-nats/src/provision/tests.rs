@@ -289,7 +289,6 @@ fn apply_duplicate_window_rejects_a_window_wider_than_max_age() {
     );
 }
 
-#[cfg(not(coverage))]
 #[tokio::test]
 async fn ensure_stream_provisions_a_stream_carrying_the_configured_duplicate_window() {
     let server = JetStreamTestServer::start().await;

@@ -137,6 +137,7 @@ fn from_dotted_suffix_resolves_each_variant() {
     ];
     for (suffix, expected) in pairs {
         assert_eq!(A2aMethod::from_dotted_suffix(suffix), Some(expected.clone()));
+        assert_eq!(expected.as_dotted_suffix(), suffix);
     }
 }
 

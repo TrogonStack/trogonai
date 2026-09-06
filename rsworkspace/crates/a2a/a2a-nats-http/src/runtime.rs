@@ -1,33 +1,18 @@
-// Same coverage split as `a2a-nats-server` / `a2a-nats-stdio`: env validation
-// and error types are pure; the connect-and-serve half lives behind
-// `cfg(not(coverage))` because `trogon-nats::NatsJetStreamClient` is excluded
-// during coverage builds.
-
 use a2a_identity_types::JwtError;
 use a2a_nats::{A2aPrefixError, AgentIdError};
 
-#[cfg(not(coverage))]
 use std::net::SocketAddr;
 
-#[cfg(not(coverage))]
 use a2a_identity_types::MintedUserJwt;
-#[cfg(not(coverage))]
 use a2a_nats::client::A2aClient;
-#[cfg(not(coverage))]
 use a2a_nats::{A2aAgentId, A2aPrefix, Config, NatsConfig};
-#[cfg(not(coverage))]
 use tracing::info;
-#[cfg(not(coverage))]
 use trogon_nats::jetstream::NatsJetStreamClient;
-#[cfg(not(coverage))]
 use trogon_std::env::SystemEnv;
-#[cfg(not(coverage))]
 use trogon_std::signal::shutdown_signal;
 
-#[cfg(not(coverage))]
 use crate::constants::{DEFAULT_BIND, ENV_HTTP_BIND};
 use crate::constants::{ENV_AGENT_ID, ENV_GATEWAY_CALLER_JWT, ENV_USE_GATEWAY};
-#[cfg(not(coverage))]
 use crate::router;
 
 #[derive(Debug, thiserror::Error)]
@@ -50,7 +35,6 @@ pub enum RuntimeError {
     Io(#[source] std::io::Error),
 }
 
-#[cfg_attr(coverage, allow(dead_code))]
 fn env_flag<E: trogon_std::env::ReadEnv>(env: &E, key: &str) -> bool {
     matches!(
         trogon_std::env::ReadEnv::var(env, key).as_deref().map(str::trim),
@@ -58,7 +42,6 @@ fn env_flag<E: trogon_std::env::ReadEnv>(env: &E, key: &str) -> bool {
     )
 }
 
-#[cfg(not(coverage))]
 pub async fn run() -> Result<(), RuntimeError> {
     let env = SystemEnv;
 
@@ -116,9 +99,4 @@ pub async fn run() -> Result<(), RuntimeError> {
         })
         .await
         .map_err(RuntimeError::Io)
-}
-
-#[cfg(coverage)]
-pub async fn run() -> Result<(), RuntimeError> {
-    Ok(())
 }

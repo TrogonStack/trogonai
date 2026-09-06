@@ -11,7 +11,6 @@ use crate::jetstream::{JetStreamCreateKeyValue, JetStreamGetKeyValue, JetStreamK
 use super::{IncompatibleLeaseBucketConfigError, LeaseError, LeaseProvisionError, NatsKvLease, NatsKvLeaseConfig};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(coverage, allow(dead_code))]
 pub(super) struct KeyValueSettings {
     pub history: i64,
     pub max_age: Duration,
@@ -19,7 +18,6 @@ pub(super) struct KeyValueSettings {
     pub subject_delete_marker_ttl: Option<Duration>,
 }
 
-#[cfg_attr(coverage, allow(dead_code))]
 pub(super) fn create_bucket_error(source: CreateKeyValueError) -> LeaseError {
     LeaseError::provision_source(
         "failed to create lease bucket",
@@ -27,7 +25,6 @@ pub(super) fn create_bucket_error(source: CreateKeyValueError) -> LeaseError {
     )
 }
 
-#[cfg_attr(coverage, allow(dead_code))]
 pub(super) fn open_existing_bucket_error(source: KeyValueError) -> LeaseError {
     LeaseError::provision_source(
         "failed to open existing lease bucket after create reported already exists",
@@ -35,7 +32,6 @@ pub(super) fn open_existing_bucket_error(source: KeyValueError) -> LeaseError {
     )
 }
 
-#[cfg_attr(coverage, allow(dead_code))]
 pub(super) fn inspect_bucket_error(source: kv::StatusError) -> LeaseError {
     LeaseError::provision_source(
         "failed to inspect lease bucket configuration",
@@ -43,7 +39,6 @@ pub(super) fn inspect_bucket_error(source: kv::StatusError) -> LeaseError {
     )
 }
 
-#[cfg_attr(coverage, allow(dead_code))]
 pub(super) fn key_value_config(config: &NatsKvLeaseConfig) -> kv::Config {
     kv::Config {
         bucket: config.bucket().as_str().to_owned(),
@@ -54,7 +49,6 @@ pub(super) fn key_value_config(config: &NatsKvLeaseConfig) -> kv::Config {
     }
 }
 
-#[cfg_attr(coverage, allow(dead_code))]
 pub(super) async fn provision_store<J, S>(js: &J, config: &NatsKvLeaseConfig) -> Result<S, LeaseError>
 where
     J: JetStreamCreateKeyValue<Store = S> + JetStreamGetKeyValue<Store = S>,
@@ -92,7 +86,6 @@ impl NatsKvLease {
     }
 }
 
-#[cfg_attr(coverage, allow(dead_code))]
 pub(super) fn validate_bucket_settings(
     settings: KeyValueSettings,
     config: &NatsKvLeaseConfig,
@@ -122,7 +115,6 @@ pub(super) fn validate_bucket_settings(
     Ok(())
 }
 
-#[cfg_attr(coverage, allow(dead_code))]
 pub(super) fn settings_from_status(status: &async_nats::jetstream::kv::bucket::Status) -> KeyValueSettings {
     KeyValueSettings {
         history: status.history(),

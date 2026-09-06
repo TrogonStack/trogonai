@@ -9,7 +9,6 @@ mod vault;
 
 pub use env::EnvSigningKeySource;
 pub use file::FileSigningKeySource;
-#[allow(unused_imports)]
 pub(crate) use key_version::unminted_placeholder;
 pub use key_version::{KeyVersion, KeyVersionError};
 pub use loader::signing_key_source_from_env;

@@ -46,7 +46,7 @@ fn encode_success_reply_sets_result_body_only() {
 fn encode_error_reply_sets_error_code_header() {
     let mut headers = HeaderMap::new();
     headers.insert(jsonrpc_nats::HEADER_ID, "7");
-    let encoded = encode_error(response_id_from_request_headers(&headers), -32001, "missing", None).unwrap();
+    let encoded = encode_error(response_id_from_request_headers(&headers), -32001, "missing", None);
     assert_eq!(
         encoded.headers.get(jsonrpc_nats::HEADER_ERROR_CODE).unwrap().as_str(),
         "-32001"

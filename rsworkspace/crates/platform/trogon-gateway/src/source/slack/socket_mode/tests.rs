@@ -35,7 +35,6 @@ fn socket_config() -> SlackConfig {
     }
 }
 
-#[cfg(not(coverage))]
 fn webhook_config() -> SlackConfig {
     SlackConfig {
         subject_prefix: NatsToken::new("slack").unwrap(),
@@ -60,12 +59,64 @@ fn reconnect_delay_doubles_until_cap() {
     assert_eq!(next_reconnect_delay(RECONNECT_MAX_DELAY), RECONNECT_MAX_DELAY);
 }
 
-#[cfg(not(coverage))]
+struct ScriptedConnector {
+    results: std::collections::VecDeque<Result<(), SocketModeError>>,
+    attempts: mpsc::Sender<tokio::time::Instant>,
+}
+
+impl SocketConnector<MockJetStreamPublisher, MockObjectStore> for ScriptedConnector {
+    async fn connect<'a>(
+        &'a mut self,
+        _bridge: &'a SlackBridge<MockJetStreamPublisher, MockObjectStore>,
+        config: &'a SlackSocketModeConfig,
+    ) -> Result<(), SocketModeError> {
+        assert_eq!(config.app_token.as_str(), "xapp-test-token");
+        self.attempts.send(tokio::time::Instant::now()).await.unwrap();
+        match self.results.pop_front() {
+            Some(result) => result,
+            None => std::future::pending().await,
+        }
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn reconnect_failures_back_off_and_success_resets_the_delay() {
+    let (attempts, mut observed) = mpsc::channel(1);
+    let connector = ScriptedConnector {
+        results: [
+            Err(SocketModeError::WebSocket(WebSocketError::ConnectionClosed)),
+            Err(SocketModeError::WebSocket(WebSocketError::ConnectionClosed)),
+            Ok(()),
+        ]
+        .into(),
+        attempts,
+    };
+    let task = tokio::spawn(run(
+        wrap_publisher(MockJetStreamPublisher::new()),
+        socket_config(),
+        connector,
+    ));
+    let first = observed.recv().await.unwrap();
+    let second = observed.recv().await.unwrap();
+    let third = observed.recv().await.unwrap();
+    let fourth = observed.recv().await.unwrap();
+    assert_eq!(second - first, RECONNECT_INITIAL_DELAY);
+    assert_eq!(third - second, RECONNECT_INITIAL_DELAY * 2);
+    assert_eq!(fourth - third, RECONNECT_INITIAL_DELAY);
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+    assert!(observed.recv().await.is_none());
+}
+
 #[tokio::test]
 async fn run_requires_socket_mode_config() {
-    let error = run(wrap_publisher(MockJetStreamPublisher::new()), &webhook_config())
-        .await
-        .unwrap_err();
+    let error = run(
+        wrap_publisher(MockJetStreamPublisher::new()),
+        webhook_config(),
+        HttpSocketConnector::slack(),
+    )
+    .await
+    .unwrap_err();
 
     assert!(matches!(error, SocketModeError::MissingSocketModeConfig));
     assert_eq!(error.to_string(), "slack socket_mode config is missing");
@@ -517,12 +568,8 @@ async fn apps_connections_open_response_url_is_used() {
     let bridge = bridge(MockJetStreamPublisher::new());
     let result = tokio::time::timeout(
         Duration::from_secs(2),
-        connect_once(
-            &client,
-            &format!("http://{open_addr}/apps.connections.open"),
-            &bridge,
-            config.socket_mode().unwrap(),
-        ),
+        HttpSocketConnector::new(format!("http://{open_addr}/apps.connections.open"))
+            .connect(&bridge, config.socket_mode().unwrap()),
     )
     .await;
 

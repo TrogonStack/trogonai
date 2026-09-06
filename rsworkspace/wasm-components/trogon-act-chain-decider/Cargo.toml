@@ -18,6 +18,9 @@ trogon-decider = { workspace = true }
 trogon-decider-guest-sdk = { workspace = true }
 wit-bindgen = { workspace = true }
 
+[dev-dependencies]
+trogon-decider = { workspace = true, features = ["test-support"] }
+
 [package.metadata.component]
 package = "trogon:decider"
 

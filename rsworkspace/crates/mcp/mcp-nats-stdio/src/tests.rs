@@ -267,9 +267,3 @@ async fn failing_close_transport_send_is_noop() {
 fn close_error_display_is_specific() {
     assert_eq!(CloseError.to_string(), "close failed");
 }
-
-#[test]
-#[cfg(coverage)]
-fn coverage_main_stub_is_callable() {
-    main();
-}

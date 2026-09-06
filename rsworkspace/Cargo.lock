@@ -33,6 +33,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "trogon-nats",
  "trogon-std",
  "uuid",
  "wiremock",
@@ -57,6 +58,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.20",
  "tokio",
+ "tower",
  "tracing",
  "tracing-subscriber",
  "trogon-nats",
@@ -1350,6 +1352,7 @@ dependencies = [
  "anyhow",
  "async-nats",
  "async-trait",
+ "axum",
  "futures",
  "serde",
  "serde_json",
@@ -7303,6 +7306,8 @@ dependencies = [
 name = "trogon-schedules-decider"
 version = "0.1.0"
 dependencies = [
+ "buffa",
+ "buffa-types",
  "trogon-decider",
  "trogon-decider-guest-sdk",
  "trogon-scheduler-domain",
@@ -7334,6 +7339,7 @@ dependencies = [
  "axum",
  "bytesize",
  "clap",
+ "log",
  "opentelemetry",
  "rustls",
  "serde",
@@ -7374,6 +7380,7 @@ dependencies = [
  "buffa-types",
  "chrono",
  "serde",
+ "serde_json",
  "thiserror 2.0.20",
  "trogon-decider",
  "trogon-decider-runtime",
