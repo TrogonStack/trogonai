@@ -490,11 +490,11 @@ pub mod mock {
         }
 
         pub fn set_response(&self, response: impl Into<String>) {
-            *self.result.lock().unwrap() = Ok(response.into());
+            *self.result.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Ok(response.into());
         }
 
         pub fn set_error(&self, error: impl Into<String>) {
-            *self.result.lock().unwrap() = Err(error.into());
+            *self.result.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Err(error.into());
         }
     }
 
@@ -510,7 +510,7 @@ pub mod mock {
             _name: &'a str,
             _arguments: &'a Value,
         ) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send + 'a>> {
-            let result = self.result.lock().unwrap().clone();
+            let result = self.result.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
             Box::pin(async move { result })
         }
     }

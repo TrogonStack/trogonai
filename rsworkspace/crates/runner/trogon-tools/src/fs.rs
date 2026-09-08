@@ -584,7 +584,9 @@ pub async fn notebook_edit(ctx: &ToolContext, input: &Value) -> String {
                 );
             }
 
-            let content = content.expect("content checked above");
+            let Some(content) = content else {
+                return "Error: missing required parameter 'content'".to_string();
+            };
             let cell = &mut cells[cell_index];
             cell["source"] = serde_json::json!(content_to_source_lines(content));
 
@@ -600,7 +602,9 @@ pub async fn notebook_edit(ctx: &ToolContext, input: &Value) -> String {
                 );
             }
 
-            let content = content.expect("content checked above");
+            let Some(content) = content else {
+                return "Error: missing required parameter 'content'".to_string();
+            };
             let ct = cell_type.unwrap_or("code");
             let new_cell = match new_notebook_cell(ct, content) {
                 Ok(cell) => cell,
