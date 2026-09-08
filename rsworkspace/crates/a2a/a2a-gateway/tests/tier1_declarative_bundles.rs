@@ -107,8 +107,7 @@ fn per_method_allowlist_deny_emits_policy_denied_response_shape() {
         &headers,
         payload,
         "tier-1 declarative policy rejected envelope",
-    )
-    .expect("deny response");
+    );
     let denied_json: serde_json::Value = serde_json::from_slice(&denied_body).expect("deny json");
     assert_eq!(denied_json["jsonrpc"], "2.0");
     assert_eq!(denied_json["id"], "1");
@@ -124,8 +123,7 @@ fn per_method_allowlist_deny_emits_policy_denied_response_shape() {
         -32_803,
         "tier-1 declarative policy rejected envelope",
         None,
-    )
-    .expect("wire");
+    );
     assert_eq!(
         wire.headers.get("Jsonrpc-Error-Code").map(|v| v.as_str().to_owned()),
         Some("-32803".to_owned()),

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-#MISE description="Run rsworkspace tests with coverage and write rsworkspace/coverage.xml"
+#MISE description="Run rsworkspace coverage on pinned nightly and write rsworkspace/coverage.xml"
 set -euo pipefail
 
 ROOT="${GITHUB_WORKSPACE:-$(git rev-parse --show-toplevel)}"
 cd "$ROOT/rsworkspace"
 
-cargo cov nextest --cobertura --output-path coverage.xml
+rustup run nightly-2026-04-16 cargo cov nextest --cobertura --output-path coverage.xml

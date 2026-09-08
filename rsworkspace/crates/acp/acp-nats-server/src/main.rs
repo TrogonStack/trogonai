@@ -1,5 +1,5 @@
 #![cfg_attr(coverage, allow(dead_code, unused_imports))] // coverage build cfg-excludes the entrypoint, orphaning its private helpers
-#![cfg_attr(coverage, feature(coverage_attribute))]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 mod compat;
@@ -10,7 +10,6 @@ mod constants;
 use component::NatsAgentComponent;
 use tokio::sync::watch;
 
-#[cfg(not(coverage))]
 use {
     acp_nats::nats,
     clap::Parser,
@@ -20,8 +19,8 @@ use {
     trogon_telemetry::{ResourceAttribute, ServiceName},
 };
 
-#[cfg(not(coverage))]
 #[tokio::main]
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn main() -> anyhow::Result<()> {
     let args = config::Args::parse();
     let server_config = config::config_from_args(args, &SystemEnv)?;
@@ -78,9 +77,6 @@ async fn main() -> anyhow::Result<()> {
 
     result.map_err(Into::into)
 }
-
-#[cfg(coverage)]
-fn main() {}
 
 /// Builds the served router: the SDK's transport, plus the behaviors it omits.
 ///

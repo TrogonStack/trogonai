@@ -19,5 +19,5 @@ pub(crate) mod reconciliation;
 pub mod wakeup;
 pub mod worker;
 
-#[cfg(all(test, not(coverage)))]
+#[cfg(test)]
 mod nats_execution_tests;

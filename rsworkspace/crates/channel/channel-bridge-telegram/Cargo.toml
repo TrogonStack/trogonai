@@ -27,5 +27,6 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "ti
 tracing = { workspace = true }
 
 [dev-dependencies]
+axum = { workspace = true }
 trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-std = { workspace = true, features = ["test-support"] }

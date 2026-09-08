@@ -5,7 +5,6 @@
 //! and stores the module anyway is not a gate, and every host downstream would
 //! be fetching something no suite ever passed.
 
-#![cfg(not(coverage))]
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
 use std::path::PathBuf;

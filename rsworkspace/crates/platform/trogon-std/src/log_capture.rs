@@ -19,6 +19,9 @@ use tracing_subscriber::util::SubscriberInitExt;
 
 pub use tracing_subscriber::filter::LevelFilter;
 
+mod facade;
+pub use facade::{CapturedLog, CapturedLogs, LogLevel};
+
 /// A single `tracing` event, recorded as its fields rather than as rendered
 /// text.
 #[derive(Clone, Debug, PartialEq, Eq)]

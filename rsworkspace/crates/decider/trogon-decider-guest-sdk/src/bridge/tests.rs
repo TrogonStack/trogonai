@@ -152,6 +152,8 @@ enum WireErrorKind {
 struct WireError {
     kind: WireErrorKind,
     code: String,
+    message: String,
+    details: Vec<(String, String)>,
 }
 
 impl DecideErrorView for WireError {
@@ -159,6 +161,8 @@ impl DecideErrorView for WireError {
         Self {
             kind: WireErrorKind::Rejected,
             code: parts.code,
+            message: parts.message,
+            details: parts.details,
         }
     }
 
@@ -166,6 +170,8 @@ impl DecideErrorView for WireError {
         Self {
             kind: WireErrorKind::Faulted,
             code: parts.code,
+            message: parts.message,
+            details: parts.details,
         }
     }
 }
@@ -175,6 +181,8 @@ impl From<DomainErrorParts> for WireError {
         Self {
             kind: WireErrorKind::Faulted,
             code: parts.code,
+            message: parts.message,
+            details: parts.details,
         }
     }
 }
@@ -238,6 +246,11 @@ fn act_rejection_matches_native_evaluation() {
         decide_command::<OpenAndFund, WireError, WireEvent>(&command, &state).expect_err("first step should reject");
     assert_eq!(bridge_error.kind, WireErrorKind::Rejected);
     assert_eq!(bridge_error.code, "rejected");
+    assert_eq!(bridge_error.message, "account is already open");
+    assert_eq!(
+        bridge_error.details,
+        vec![("cause.0".to_string(), FixtureDecideError::AlreadyOpen.to_string())]
+    );
 
     let native_failure =
         evaluate_decision::<OpenAndFund>(state, &command).expect_err("first step should reject natively");
@@ -248,3 +261,6 @@ fn act_rejection_matches_native_evaluation() {
         trogon_decider::DecisionError::Evolve(_) => panic!("expected a decide rejection, not an evolve failure"),
     }
 }
+
+mod admission_tests;
+mod failure_tests;

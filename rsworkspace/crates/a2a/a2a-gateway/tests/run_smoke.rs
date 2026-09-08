@@ -1,19 +1,57 @@
-//! End-to-end smoke test for the `run` shim.
-//!
-//! Drives the public `a2a_gateway::run` entrypoint with valid defaults so
-//! the production thin shim is exercised through the same call path the
-//! binary uses.
+//! Feature-specific smoke tests for the gateway's public startup entrypoints.
 
-#![allow(clippy::expect_used)]
+#[cfg(feature = "spicedb")]
+use a2a_auth_callout::AuthCalloutError;
+use a2a_gateway::config::ConfigError;
+#[cfg(feature = "spicedb")]
+use a2a_gateway::runtime::run_with_args;
+use a2a_gateway::{Args, RuntimeError, run};
+#[cfg(feature = "spicedb")]
+use trogon_nats::test_support::CoreTestServer;
+#[cfg(feature = "spicedb")]
+use trogon_std::env::InMemoryEnv;
 
-use a2a_gateway::{Args, run};
-
+#[cfg(not(feature = "spicedb"))]
 #[tokio::test(flavor = "current_thread")]
-async fn run_completes_with_valid_defaults() {
+async fn run_completes_without_spicedb() -> Result<(), RuntimeError> {
     let args = Args {
         nats_url: "localhost:4222".to_string(),
         prefix: "a2a".to_string(),
         queue_group: None,
     };
-    run(args).await.expect("bootstrap-only run succeeds");
+    run(args).await
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn run_rejects_invalid_prefix() {
+    let args = Args {
+        nats_url: "localhost:4222".to_string(),
+        prefix: "bad prefix!".to_string(),
+        queue_group: None,
+    };
+
+    assert!(matches!(
+        run(args).await,
+        Err(RuntimeError::Config(ConfigError::InvalidPrefix(_)))
+    ));
+}
+
+#[cfg(feature = "spicedb")]
+#[tokio::test(flavor = "current_thread")]
+async fn run_rejects_missing_signing_credentials() {
+    // Startup connects to NATS before loading the signing credentials.
+    let server = CoreTestServer::start().await;
+    let env = InMemoryEnv::new();
+    let args = Args {
+        nats_url: server.address().to_string(),
+        prefix: "a2a".to_string(),
+        queue_group: None,
+    };
+
+    assert!(matches!(
+        run_with_args(args, &env).await,
+        Err(RuntimeError::SigningKeySource(AuthCalloutError::MissingEnvVar(
+            "AUTH_CALLOUT_SIGNING_SECRET"
+        )))
+    ));
 }

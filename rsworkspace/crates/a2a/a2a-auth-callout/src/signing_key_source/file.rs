@@ -1,6 +1,5 @@
 use std::path::Path;
 
-use crate::constants::{VERSION_CURRENT, VERSION_PREVIOUS};
 use crate::error::AuthCalloutError;
 use crate::jwt::SigningKey;
 
@@ -23,13 +22,7 @@ impl FileSigningKeySource {
             path: current_path.as_ref().to_path_buf(),
             source: e,
         })?;
-        // VERSION_CURRENT / VERSION_PREVIOUS are validated string constants;
-        // their KeyVersion::new can't fail at runtime.
-        #[allow(clippy::expect_used)]
-        let current = SigningKeyHandle::new(
-            KeyVersion::new(VERSION_CURRENT).expect("static version"),
-            signing_key_from_file_bytes(&current_bytes)?,
-        );
+        let current = SigningKeyHandle::new(KeyVersion::current(), signing_key_from_file_bytes(&current_bytes)?);
 
         let previous = match previous_path {
             None => None,
@@ -38,9 +31,10 @@ impl FileSigningKeySource {
                     path: p.as_ref().to_path_buf(),
                     source: e,
                 })?;
-                #[allow(clippy::expect_used)]
-                let version = KeyVersion::new(VERSION_PREVIOUS).expect("static version");
-                Some(SigningKeyHandle::new(version, signing_key_from_file_bytes(&bytes)?))
+                Some(SigningKeyHandle::new(
+                    KeyVersion::previous(),
+                    signing_key_from_file_bytes(&bytes)?,
+                ))
             }
         };
 

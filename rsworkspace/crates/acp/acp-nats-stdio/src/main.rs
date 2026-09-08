@@ -1,5 +1,7 @@
 #![cfg_attr(coverage, feature(coverage_attribute))]
 #![cfg_attr(coverage, allow(dead_code, unused_imports))]
+#![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
+
 mod config;
 
 use acp_nats::boundary::{AbortOnDrop, BoundaryExit, ConnectionClient, connect_agent_boundary};
@@ -8,7 +10,6 @@ use std::sync::Arc;
 use tracing::{error, info};
 use trogon_std::time::SystemClock;
 
-#[cfg(not(coverage))]
 use {
     acp_nats::nats,
     trogon_std::{env::SystemEnv, fs::SystemFs, signal::shutdown_signal},
@@ -54,7 +55,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[cfg(coverage)]
-#[cfg_attr(coverage, coverage(off))]
 fn main() {}
 
 async fn run_bridge<N, J, W, R>(

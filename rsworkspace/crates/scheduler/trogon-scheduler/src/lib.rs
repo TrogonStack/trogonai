@@ -21,7 +21,6 @@ pub mod nats;
 pub mod processor;
 mod projections;
 pub mod queries;
-#[cfg(not(coverage))]
 pub mod store;
 pub(crate) mod telemetry;
 
@@ -36,20 +35,18 @@ pub use commands::{
 pub use config::ScheduleWriteCondition;
 pub use constants::{SCHEDULES_BUCKET, SCHEDULES_CHECKPOINT_KEY};
 pub use error::{ScheduleSpecError, SchedulerError};
-#[cfg(all(feature = "postgres", not(coverage)))]
+#[cfg(feature = "postgres")]
 pub use projections::{PostgresSchedulesProjection, SchedulesProjector};
 
 /// Query entry points for the Postgres projection.
-#[cfg(all(feature = "postgres", not(coverage)))]
+#[cfg(feature = "postgres")]
 pub mod projection_queries;
 pub use queries::read_model::{
     MessageContent, MessageEnvelope, MessageHeaders, MessageHeadersError, Schedule, ScheduleDetails,
     ScheduleEventDelivery, ScheduleEventSamplingSource, ScheduleEventSchedule, ScheduleEventStatus,
 };
 pub use queries::{GetSchedule, GetScheduleCommand, ListSchedules, ListSchedulesCommand, ScheduleId, ScheduleIdError};
-#[cfg(not(coverage))]
 pub use queries::{get_schedule, list_schedules};
-#[cfg(not(coverage))]
 pub use store::{Store, connect_store, open_command_snapshot_bucket};
 pub use trogon_decider_runtime::{CommandError, CommandResult, ExecutionResult, StreamWritePrecondition};
 pub use trogonai_proto::scheduler::schedules::{

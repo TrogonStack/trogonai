@@ -1,0 +1,12 @@
+edition = "2024";
+
+package trogonai.agents.agents.v1;
+
+// AgentArchived is the Agent registry stream's terminal event. An archived
+// agent accepts no further revisions, proposals, or annotation changes, and
+// there is no unarchive: reviving the behaviour means provisioning a new
+// agent. Sessions already running against the archived agent are not
+// interrupted; the registry only stops resolving it for new work.
+message AgentArchived {
+  string agent_id = 1 [features.field_presence = LEGACY_REQUIRED];
+}

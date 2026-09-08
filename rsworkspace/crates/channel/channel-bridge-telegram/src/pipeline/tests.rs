@@ -14,9 +14,6 @@ use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding, MockObjectStore};
 use trogon_nats::test_support::JetStreamTestServer;
 use trogon_std::UuidV7Generator;
 
-// The claim-check scenarios below need the real object store and publisher, which
-// the coverage build leaves out; the scenarios that carry no claim do not.
-#[cfg(not(coverage))]
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, ClaimRetention, DEFAULT_CLAIM_BUCKET, MaxPayload, NatsJetStreamClient, NatsObjectStore,
 };
@@ -321,7 +318,6 @@ fn unclaimed_resolver() -> ClaimResolver<MockObjectStore> {
 /// The bucket the gateway offloads oversized bodies into, opened the way the
 /// bridge opens it. Provisioned here because in a deployment the gateway has
 /// already done so.
-#[cfg(not(coverage))]
 async fn claim_resolver(js: &async_nats::jetstream::Context) -> ClaimResolver<NatsObjectStore> {
     NatsObjectStore::provision_claim_bucket(js, ClaimBucket::default(), ClaimRetention::EventSourced)
         .await
@@ -476,7 +472,6 @@ async fn pipeline_routes_gateway_updates_to_the_agent_and_back() {
 /// that deserializes the payload sees zero bytes. Published here through the
 /// same publisher the gateway uses, with the threshold driven to zero so every
 /// body takes that path.
-#[cfg(not(coverage))]
 #[tokio::test]
 async fn pipeline_redeems_a_claim_checked_update() {
     let server = JetStreamTestServer::start().await;
@@ -566,7 +561,6 @@ async fn pipeline_redeems_a_claim_checked_update() {
 /// A claim that cannot be redeemed is left for redelivery instead of acked.
 /// Dropping it would be permanent, and the payload alone carries no sign that
 /// anything was lost.
-#[cfg(not(coverage))]
 #[tokio::test]
 async fn pipeline_leaves_an_unredeemable_claim_unacked() {
     let server = JetStreamTestServer::start().await;

@@ -5,11 +5,8 @@ use super::*;
 use reqwest::header::CONTENT_TYPE;
 use serde_json::{Value, json};
 use std::error::Error;
-#[cfg(coverage)]
 use std::time::Duration;
-#[cfg(coverage)]
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-#[cfg(coverage)]
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
@@ -144,7 +141,6 @@ fn test_config() -> TelegramSourceConfig {
     }
 }
 
-#[cfg(coverage)]
 async fn reqwest_test_api(body: &'static str) -> String {
     let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -329,7 +325,6 @@ async fn http_response_json_error_propagates() {
     );
 }
 
-#[cfg(coverage)]
 #[tokio::test]
 async fn reqwest_http_traits_delegate_to_reqwest() {
     let config = test_config();

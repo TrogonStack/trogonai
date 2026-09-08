@@ -8,11 +8,6 @@
 //! wrong, and every one of those answers with a reply rather than with
 //! silence.
 
-// The `JetStreamStore` read and append impls are compiled out under coverage,
-// so the one method that executes against them is stubbed there and the
-// imports and fields only that method reaches go unused.
-#![cfg_attr(coverage, allow(dead_code, unused_imports))]
-
 use std::collections::HashMap;
 use std::error::Error as StdError;
 use std::sync::Arc;
@@ -184,24 +179,16 @@ impl DeciderHost {
             return CommandReply::internal(&error);
         };
 
-        #[cfg(not(coverage))]
-        {
-            let execution = WasmCommandExecution::new(&routed.module, store, routed.request.command())
-                .with_snapshot_store(store, &self.snapshots)
-                .with_expected_revision(routed.request.expected_revision())
-                .with_replay_limit(self.replay_limit)
-                .with_command_id(routed.request.command_id())
-                .with_admission(&self.admission);
+        let execution = WasmCommandExecution::new(&routed.module, store, routed.request.command())
+            .with_snapshot_store(store, &self.snapshots)
+            .with_expected_revision(routed.request.expected_revision())
+            .with_replay_limit(self.replay_limit)
+            .with_command_id(routed.request.command_id())
+            .with_admission(&self.admission);
 
-            match execution.execute().await {
-                Ok(result) => CommandReply::decided(&result),
-                Err(error) => CommandReply::from_command_error(routed.module.name(), &error),
-            }
-        }
-        #[cfg(coverage)]
-        {
-            let _ = store;
-            CommandReply::internal(&CoverageUnavailableError)
+        match execution.execute().await {
+            Ok(result) => CommandReply::decided(&result),
+            Err(error) => CommandReply::from_command_error(routed.module.name(), &error),
         }
     }
 
@@ -438,13 +425,6 @@ pub enum ServeError {
         source: SubscribeError,
     },
 }
-
-/// Stands in for an execution a coverage build cannot perform, because the
-/// store operations it would reach are compiled out there.
-#[cfg(coverage)]
-#[derive(Debug, thiserror::Error)]
-#[error("coverage stub does not execute commands")]
-struct CoverageUnavailableError;
 
 /// A command routed to a module the host never provisioned storage for.
 #[derive(Debug, thiserror::Error)]

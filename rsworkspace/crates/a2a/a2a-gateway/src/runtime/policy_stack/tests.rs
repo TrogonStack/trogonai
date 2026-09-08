@@ -2,6 +2,8 @@ use trogon_std::env::InMemoryEnv;
 
 use super::*;
 
+mod boot_tests;
+
 #[test]
 fn noop_stack_has_no_substrate() {
     let stack = GatewayPolicyStack::noop();

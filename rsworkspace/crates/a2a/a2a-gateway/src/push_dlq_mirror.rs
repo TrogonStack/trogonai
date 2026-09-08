@@ -22,11 +22,7 @@ use tracing::{info, warn};
 use trogon_nats::jetstream::JetStreamPublisher;
 use trogon_std::env::ReadEnv;
 
-// Only the real `run_push_dlq_mirror` uses these — the cfg(coverage) stub
-// returns immediately and would otherwise carry unused-import warnings.
-#[cfg(not(coverage))]
 use a2a_nats::nats::subjects::A2aStream;
-#[cfg(not(coverage))]
 use futures::StreamExt;
 
 pub use crate::constants::{
@@ -262,12 +258,6 @@ fn idempotency_key_from_dlq_payload(payload: &[u8]) -> Option<PushIdempotencyKey
 }
 
 /// Background pull-consumer that mirrors DLQ envelopes until shutdown.
-///
-/// Gated behind `cfg(not(coverage))` because it binds a real JetStream
-/// context and would block coverage measurement; the pure helpers
-/// (`mirror_push_dlq_envelope`, `push_dlq_mirror_subject`, etc.) are
-/// exercised by unit tests under all build modes.
-#[cfg(not(coverage))]
 pub async fn run_push_dlq_mirror(
     js: async_nats::jetstream::Context,
     prefix: A2aPrefix,
@@ -374,16 +364,6 @@ pub async fn run_push_dlq_mirror(
             }
         }
     }
-}
-
-#[cfg(coverage)]
-pub async fn run_push_dlq_mirror(
-    _js: async_nats::jetstream::Context,
-    _prefix: A2aPrefix,
-    _durable: PushDlqMirrorDurable,
-    _shutdown: CancellationToken,
-    _dedup: Arc<PushDlqDedupGate>,
-) {
 }
 
 #[cfg(test)]

@@ -2,11 +2,6 @@
 //! read-model value objects that queries return. This is the read side of the
 //! projection: the projection writes the proto, the queries read and shape it for
 //! callers.
-//!
-//! Under the coverage build the query entry points that call this are stubbed out,
-//! so the decode path is reached only by its own tests; allow it to look unused
-//! there.
-#![cfg_attr(coverage, allow(dead_code))]
 
 use chrono::{TimeZone, Utc};
 

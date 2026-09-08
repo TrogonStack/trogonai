@@ -63,7 +63,7 @@ impl Tier3EvaluationContext {
         &self.skill_manifests
     }
 
-    pub fn into_payload_bytes(self) -> Result<bytes::Bytes, serde_json::Error> {
-        serde_json::to_vec(&self.payload).map(bytes::Bytes::from)
+    pub fn into_payload_bytes(self) -> bytes::Bytes {
+        bytes::Bytes::from(self.payload.to_string())
     }
 }

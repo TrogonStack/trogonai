@@ -8,13 +8,12 @@
 
 use async_nats::header::HeaderMap;
 use jsonrpc_nats::Encoded;
-use serde::Serialize;
 
 use crate::a2a_prefix::A2aPrefix;
 use crate::agent_id::A2aAgentId;
 pub use crate::constants::GATEWAY_INGRESS_METHOD_SUFFIXES;
 use crate::jsonrpc::{extract_request_id, extract_request_id_from_body};
-use crate::wire::{WireError, encode_error, response_id_from_request_headers};
+use crate::wire::{encode_error, response_id_from_request_headers};
 
 /// Failure resolving a `{prefix}.v1.gateway.` subject to an agent RPC subject.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -90,6 +89,14 @@ pub fn gateway_ingress_agent_and_method_dots(
     subject: &str,
     prefix: &A2aPrefix,
 ) -> Result<(A2aAgentId, String), GatewayIngressError> {
+    let (agent_id, method) = gateway_ingress_agent_and_method(subject, prefix)?;
+    Ok((agent_id, method.as_dotted_suffix().to_owned()))
+}
+
+pub fn gateway_ingress_agent_and_method(
+    subject: &str,
+    prefix: &A2aPrefix,
+) -> Result<(A2aAgentId, crate::A2aMethod), GatewayIngressError> {
     let leader = format!("{}.v1.gateway.", prefix.as_str());
     let rest = subject
         .strip_prefix(&leader)
@@ -98,10 +105,11 @@ pub fn gateway_ingress_agent_and_method_dots(
         return Err(GatewayIngressError::BadSubjectShape);
     }
     let tokens: Vec<&str> = rest.split('.').filter(|t| !t.is_empty()).collect();
-    let (agent_id_str, suffix_tokens) =
-        peel_agent_and_suffix(&tokens).ok_or(GatewayIngressError::UnknownMethodSuffix)?;
+    let (agent_id_str, suffix_tokens) = tokens.split_first().ok_or(GatewayIngressError::UnknownMethodSuffix)?;
+    let method = crate::A2aMethod::from_dotted_suffix(&suffix_tokens.join("."))
+        .ok_or(GatewayIngressError::UnknownMethodSuffix)?;
     let agent_id = A2aAgentId::new(agent_id_str).map_err(|_| GatewayIngressError::InvalidAgentId)?;
-    Ok((agent_id, suffix_tokens.join(".")))
+    Ok((agent_id, method))
 }
 
 /// Resolve ingress subject → core agent RPC subject `{prefix}.v1.agents.{agent_id}.{method…}`.
@@ -161,7 +169,7 @@ fn ingress_error_wire(
     code: i32,
     message: impl Into<String>,
     data: Option<serde_json::Value>,
-) -> Result<Encoded, WireError> {
+) -> Encoded {
     let id = if request_headers.get(jsonrpc_nats::HEADER_ID).is_some() {
         response_id_from_request_headers(request_headers)
     } else {
@@ -175,8 +183,8 @@ pub fn ingress_invalid_request_response_bytes(
     request_headers: &HeaderMap,
     request_payload_hint: &[u8],
     message: impl Into<String>,
-) -> Result<bytes::Bytes, WireError> {
-    Ok(ingress_error_wire(request_headers, request_payload_hint, -32600, message, None)?.body)
+) -> bytes::Bytes {
+    ingress_error_wire(request_headers, request_payload_hint, -32600, message, None).body
 }
 
 /// Serialize a gateway policy denial reply for the correlating inbox.
@@ -184,8 +192,8 @@ pub fn ingress_gateway_policy_denied_response_bytes(
     request_headers: &HeaderMap,
     request_payload_hint: &[u8],
     message: impl Into<String>,
-) -> Result<bytes::Bytes, WireError> {
-    Ok(ingress_error_wire(request_headers, request_payload_hint, -32_801, message, None)?.body)
+) -> bytes::Bytes {
+    ingress_error_wire(request_headers, request_payload_hint, -32_801, message, None).body
 }
 
 /// Serialize a Tier-1 declarative policy denial (`-32803`) for the correlating inbox.
@@ -193,14 +201,20 @@ pub fn ingress_gateway_declarative_denied_response_bytes(
     request_headers: &HeaderMap,
     request_payload_hint: &[u8],
     message: impl Into<String>,
-) -> Result<bytes::Bytes, WireError> {
-    Ok(ingress_error_wire(request_headers, request_payload_hint, -32_803, message, None)?.body)
+) -> bytes::Bytes {
+    ingress_error_wire(request_headers, request_payload_hint, -32_803, message, None).body
 }
 
-/// `data` member of a Tier-3 skill refusal, naming the rule that refused.
-#[derive(Debug, Serialize)]
 struct Tier3RefusalData<'a> {
     rule: &'a str,
+}
+
+impl From<Tier3RefusalData<'_>> for serde_json::Value {
+    fn from(data: Tier3RefusalData<'_>) -> Self {
+        let mut fields = serde_json::Map::new();
+        fields.insert("rule".to_owned(), Self::String(data.rule.to_owned()));
+        Self::Object(fields)
+    }
 }
 
 /// Serialize a Tier-3 skill refusal reply (`-32802`) for the correlating inbox.
@@ -209,15 +223,15 @@ pub fn ingress_gateway_tier3_refused_response_bytes(
     request_payload_hint: &[u8],
     message: impl Into<String>,
     rule: &str,
-) -> Result<bytes::Bytes, WireError> {
-    Ok(ingress_error_wire(
+) -> bytes::Bytes {
+    ingress_error_wire(
         request_headers,
         request_payload_hint,
         -32_802,
         message,
-        serde_json::to_value(Tier3RefusalData { rule }).ok(),
-    )?
-    .body)
+        Some(Tier3RefusalData { rule }.into()),
+    )
+    .body
 }
 
 /// Serialize an AAuth verification denial (`-32118`, mirrors
@@ -226,8 +240,8 @@ pub fn ingress_gateway_aauth_denied_response_bytes(
     request_headers: &HeaderMap,
     request_payload_hint: &[u8],
     message: impl Into<String>,
-) -> Result<bytes::Bytes, WireError> {
-    Ok(ingress_error_wire(request_headers, request_payload_hint, -32_118, message, None)?.body)
+) -> bytes::Bytes {
+    ingress_error_wire(request_headers, request_payload_hint, -32_118, message, None).body
 }
 
 /// Serialize an upstream-gateway deadline overrun (-32800, reserved for
@@ -236,8 +250,8 @@ pub fn ingress_gateway_deadline_exceeded_response_bytes(
     request_headers: &HeaderMap,
     request_payload_hint: &[u8],
     message: impl Into<String>,
-) -> Result<bytes::Bytes, WireError> {
-    Ok(ingress_error_wire(request_headers, request_payload_hint, -32_800, message, None)?.body)
+) -> bytes::Bytes {
+    ingress_error_wire(request_headers, request_payload_hint, -32_800, message, None).body
 }
 
 /// Canonical wire encoding for ingress error replies (complete JSON-RPC body).
@@ -247,7 +261,7 @@ pub fn ingress_error_response_wire(
     code: i32,
     message: impl Into<String>,
     data: Option<serde_json::Value>,
-) -> Result<Encoded, WireError> {
+) -> Encoded {
     ingress_error_wire(request_headers, request_payload_hint, code, message, data)
 }
 

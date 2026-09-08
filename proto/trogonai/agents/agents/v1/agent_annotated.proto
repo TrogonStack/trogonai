@@ -1,0 +1,12 @@
+edition = "2024";
+
+package trogonai.agents.agents.v1;
+
+// AgentAnnotated replaces the agent's annotations with the set carried here.
+// Annotations are opaque record metadata: they never reach model input,
+// never affect selection, and never enter the configuration digest, so this
+// event mints no revision. A key absent from `annotations` is gone.
+message AgentAnnotated {
+  string agent_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  map<string, string> annotations = 2;
+}

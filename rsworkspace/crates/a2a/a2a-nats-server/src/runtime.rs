@@ -1,9 +1,4 @@
 //! Env-parsing entry point shared by main.rs.
-//!
-//! Splits the validation half (pure, testable, runs under coverage) from the
-//! NATS-connect-and-serve half (gated to `cfg(not(coverage))` because the
-//! upstream `trogon-nats` crate also gates `NatsJetStreamClient` out during
-//! coverage builds).
 
 use a2a_nats::{
     A2aAgentId, A2aPrefix, AgentIdError, Config, DEFAULT_A2A_PREFIX, ENV_A2A_PREFIX, NatsConfig,

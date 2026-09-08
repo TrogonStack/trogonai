@@ -6,7 +6,6 @@ use tokio::io::AsyncRead;
 
 use super::claim_bucket::ClaimBucket;
 
-#[cfg(not(coverage))]
 use async_nats::jetstream::context::CreateKeyValueErrorKind;
 
 /// Decide the `max_age` a claim bucket should reconcile to, growing only.
@@ -18,9 +17,6 @@ use async_nats::jetstream::context::CreateKeyValueErrorKind;
 /// is equal or shorter. `Duration::ZERO` is NATS's "no expiry", i.e. the
 /// longest possible retention, so it dominates any finite value in both
 /// directions.
-// Only `reconcile_bucket_max_age` (cfg `not(coverage)`) and the unit tests call
-// this; a coverage build without tests would otherwise see it as dead.
-#[cfg_attr(coverage, allow(dead_code))]
 fn widened_max_age(current: Duration, desired: Duration) -> Option<Duration> {
     let current_never_expires = current.is_zero();
     let desired_never_expires = desired.is_zero();
@@ -185,7 +181,6 @@ impl NatsObjectStore {
 /// A NATS object-store bucket is a stream named `OBJ_<bucket>`; only `max_age`
 /// is touched, leaving every other stream setting untouched. The retention only
 /// widens (see [`widened_max_age`]), so a lowered config is a no-op.
-#[cfg(not(coverage))]
 async fn reconcile_bucket_max_age(
     js: &async_nats::jetstream::Context,
     bucket: &str,
@@ -238,5 +233,5 @@ impl ObjectStoreDelete for NatsObjectStore {
 #[cfg(test)]
 mod tests;
 
-#[cfg(all(test, not(coverage), feature = "test-support"))]
+#[cfg(all(test, feature = "test-support"))]
 mod integration_tests;

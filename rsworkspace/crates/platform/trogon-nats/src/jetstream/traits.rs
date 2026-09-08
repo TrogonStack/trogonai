@@ -367,7 +367,6 @@ impl JetStreamLastRawMessageBySubject for jetstream::stream::Stream {
     }
 }
 
-#[cfg(not(coverage))]
 impl JetStreamSubjectPurger for jetstream::stream::Stream {
     type PurgeResponse = stream::PurgeResponse;
     type Error = stream::PurgeError;
@@ -377,7 +376,6 @@ impl JetStreamSubjectPurger for jetstream::stream::Stream {
     }
 }
 
-#[cfg(not(coverage))]
 impl JetStreamGetStreamInfo for jetstream::stream::Stream {
     async fn get_info(&self) -> Result<stream::Info, stream::InfoError> {
         jetstream::stream::Stream::get_info(self).await

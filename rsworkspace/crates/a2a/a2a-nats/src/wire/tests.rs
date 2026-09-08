@@ -60,7 +60,7 @@ fn encode_success_produces_valid_response() {
 
 #[test]
 fn encode_error_sets_error_code_header() {
-    let encoded = encode_error(ResponseId::Number(1), -32001, "bad request", None).unwrap();
+    let encoded = encode_error(ResponseId::Number(1), -32001, "bad request", None);
     assert_eq!(
         encoded.headers.get(jsonrpc_nats::HEADER_ERROR_CODE).unwrap().as_str(),
         "-32001"

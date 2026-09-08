@@ -16,21 +16,27 @@ use super::{Encoded, from_json_value, to_json_value};
 /// as non-authoritative projections of the body for cheap routing and metrics
 /// (ADR#0056). Decoders reject a present header that disagrees with the body.
 pub fn encode(message: &Message) -> Result<Encoded, CodecError> {
-    let mut value = to_json_value(message);
-    // `Message` cannot distinguish an absent `params` from an explicit null, so
-    // `to_json_value` renders an omitted `params` as `"params": null`. Canonical
-    // JSON-RPC omits absent params and `validate_params` rejects a null, so drop
-    // it here to keep paramless requests and notifications round-trippable.
-    if let Value::Object(object) = &mut value
-        && object.get("params").is_some_and(Value::is_null)
-    {
-        object.remove("params");
+    Ok(Encoded::from(message))
+}
+
+impl From<&Message> for Encoded {
+    fn from(message: &Message) -> Self {
+        let mut value = to_json_value(message);
+        // `Message` cannot distinguish an absent `params` from an explicit null, so
+        // `to_json_value` renders an omitted `params` as `"params": null`. Canonical
+        // JSON-RPC omits absent params and `validate_params` rejects a null, so drop
+        // it here to keep paramless requests and notifications round-trippable.
+        if let Value::Object(object) = &mut value
+            && object.get("params").is_some_and(Value::is_null)
+        {
+            object.remove("params");
+        }
+        let body = value.to_string().into_bytes();
+        Encoded {
+            headers: derived_projection_headers(message),
+            body: Bytes::from(body),
+        }
     }
-    let body = serde_json::to_vec(&value).map_err(CodecError::Serialize)?;
-    Ok(Encoded {
-        headers: derived_projection_headers(message),
-        body: Bytes::from(body),
-    })
 }
 
 /// Encode a complete canonical JSON-RPC 2.0 value without normalizing its shape.

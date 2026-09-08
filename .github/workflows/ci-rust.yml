@@ -5,7 +5,6 @@ on:
     branches: [main, platform]
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
-    branches: [main, platform]
     paths:
       - 'rsworkspace/**'
       - 'LICENSE'
@@ -50,7 +49,7 @@ jobs:
         run: mise run --skip-tools rust:tls-policy
 
       - name: Cache dependencies
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: rsworkspace -> target
           save-if: true
@@ -89,7 +88,7 @@ jobs:
         uses: ./.github/actions/setup-rust
 
       - name: Cache dependencies
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: rsworkspace -> target
           save-if: true
@@ -97,15 +96,22 @@ jobs:
           cache-workspace-crates: true
 
       - name: Install coverage tools
-        uses: taiki-e/install-action@065d6a08a14e61e89fb0a4c10eecdbdef39c7d8e # v2.85.4
+        uses: taiki-e/install-action@742a3317eac7bd62f91cd888b4eead5e784ba833 # v2.87.1
         with:
           tool: cargo-llvm-cov,nextest
+
+      - name: Install Rust coverage toolchain
+        run: rustup toolchain install nightly-2026-04-16 --profile minimal --component llvm-tools-preview --target wasm32-unknown-unknown
 
       - name: Build decider components for sim fixtures
         run: mise run artifacts:wasm-components
 
       - name: Run documentation tests
         run: cargo test --doc
+        working-directory: rsworkspace
+
+      - name: Check stable compiler diagnostics
+        run: cargo nextest run -p trogon-decider-guest-macros --all-features --test compile_fail
         working-directory: rsworkspace
 
       - name: Run tests with coverage
@@ -130,6 +136,11 @@ jobs:
           coverage-rate-reduction-failure: ${{ !contains(github.event.pull_request.labels.*.name, 'rust:coverage-baseline-reset') }}
           togglable-report: true
 
+      - name: Prepare nested test targets for cache cleanup
+        if: always()
+        # rust-cache v2.9.2 traverses both paths, but trybuild creates only one.
+        run: mkdir -p rsworkspace/target/tests/{target,trybuild}
+
   build:
     runs-on: ubuntu-latest
     permissions:
@@ -144,7 +155,7 @@ jobs:
         uses: ./.github/actions/setup-rust
 
       - name: Cache dependencies
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: rsworkspace -> target
           save-if: true
@@ -169,7 +180,7 @@ jobs:
         uses: ./.github/actions/setup-rust
 
       - name: Cache dependencies
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: rsworkspace -> target
           save-if: always

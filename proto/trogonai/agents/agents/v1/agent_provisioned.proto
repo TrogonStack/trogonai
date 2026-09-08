@@ -26,4 +26,8 @@ message AgentProvisioned {
   // Content digest over the provisioned revision bundle, carrying its own
   // algorithm identifier rather than assuming one by convention.
   Digest content_digest = 6 [features.field_presence = LEGACY_REQUIRED];
+  // Opaque record metadata present from genesis. Excluded from
+  // `content_digest` and from model input; later changes arrive as
+  // AgentAnnotated and mint no revision.
+  map<string, string> annotations = 7;
 }

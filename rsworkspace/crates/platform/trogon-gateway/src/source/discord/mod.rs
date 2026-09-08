@@ -12,7 +12,6 @@
 pub mod config;
 pub mod constants;
 pub mod gateway;
-#[cfg(not(coverage))]
 pub mod gateway_runner;
 
 pub use config::DiscordConfig;
