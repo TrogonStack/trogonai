@@ -2,6 +2,10 @@
 
 > Research date: 2026-07-04. All product claims were fetched live from official docs/changelogs and adversarially verified by independent fact-checking agents. Source URLs inline.
 >
+> **Addendum 2026-07-08:** Part 2B adds notes on **NetBird Agent Network** (a third, network-layer approach), taken from its in-repo design docs and Go source.
+>
+> **Addendum 2026-08-27:** A fourth comparison point, **LLM Gateway** (`theopenco/llmgateway`, AGPL + commercial `ee/`), is documented in the companion file `LLMGATEWAY_RESEARCH.md`. It is the closest open-source analog to Vercel AI Gateway: a self-hostable TypeScript LLM-egress gateway with the deepest routing-config surface of the OSS options (weighted multi-factor scoring + epsilon-greedy exploration + sticky sessions + versioned dynamic-route graphs), the broadest modality surface (chat/embed/image/video/speech/STT/OCR/rerank/moderation/realtime/web-search), compliance-gated routing with per-provider data-policy metadata, and an embeddable-payments resale primitive. Like Vercel and NetBird, it has **no agent-coordination protocol surface** (no MCP-as-data-plane, A2A, ACP, discovery, or durable execution) — it is a model-egress gateway, not an agent gateway, so it does not close helsinki's coordination lead. See that file's positioning table and "what to steal" section, which reinforce Part 5's P0/P1 items (routing math, cost `cost_details` schema, compliance/data-policy routing, multi-scope limits, retention stripping).
+>
 > **Naming note:** "Vercel agentgateway" conflates two distinct products:
 > 1. **Vercel AI Gateway** (`vercel.com/docs/ai-gateway`): Vercel's hosted LLM gateway (unified model API, routing, spend).
 > 2. **agentgateway** (`agentgateway.dev`): an open-source Rust data plane for agent traffic (MCP, A2A, LLM APIs). Created by Solo.io (March 2025), donated to the **Linux Foundation** (Aug 2025), now hosted by the **Agentic AI Foundation (AAIF)**. It is NOT a Vercel product and, contrary to common belief, not a CNCF sandbox project (the CNCF-affiliated project is **kgateway**, which integrates agentgateway as of kgateway v2.1).
@@ -149,6 +153,85 @@ Rust data plane for agent traffic; Apache 2.0; ~3.7k stars; contributors incl. M
 - Standalone binary / Docker; Kubernetes with **own control plane** implementing **Gateway API v1.5** (standard+extended+experimental conformance), `AgentgatewayPolicy` CRD, Helm OCI charts, documented ArgoCD/FluxCD flows.
 - kgateway v2.1 integration (CNCF); Istio 1.30 experimental `istio-agentgateway` GatewayClass; ambient waypoint direction.
 - **Gateway API Inference Extension**: routes to `InferencePool`/`InferenceModel`; first GIE v1.4.0-conformant gateway; llm-d Endpoint Picker for KV-cache/GPU-utilization/LoRA/queue-depth-aware routing, prefill/decode disaggregation.
+
+---
+
+## Part 2B: NetBird Agent Network (notes, 2026-07-08)
+
+> Source: `github.com/netbirdio/netbird`, dirs `agent-network/`, `docs/agent-networks/`, `proxy/internal/{middleware,llm}`, `management/internals/modules/{reverseproxy,agentnetwork}`. Notes taken from the in-repo design docs + Go source (paths cited). NetBird is open-source (AGPL core), self-hostable, Go. Feature is "beta but running in production" per the README.
+
+### 2B.0 The one-line differentiator
+
+NetBird is the only one of the three that governs LLM traffic at the **network layer**. It is not a standalone gateway product; it is a feature bolted onto NetBird's existing **WireGuard overlay mesh + reverse proxy**. Every agent is a NetBird peer with an IdP-tied identity; the governed LLM endpoint (e.g. `https://mirror.netbird.ai`) is reachable **only over the encrypted tunnel** after IdP auth, never from the public internet. This is a fundamentally different trust model from Vercel (hosted egress), agentgateway (data-plane you deploy), and helsinki (NATS identity/subject-scoped). Identity comes from the WireGuard peer + IdP, not from a bearer token the caller presents to the gateway.
+
+### 2B.1 Architecture: synthesized middleware chain
+
+- **Two reused components, no new service**: the `proxy/` reverse proxy (data plane, terminates LLM requests over WireGuard) and `management/internals/modules/reverseproxy` + `.../agentnetwork` (control plane). Agent Network is a *synthesizer* that emits per-peer proxy config.
+- **Config → runtime flow**: operator edits Provider/Policy/Guardrail/BudgetRule/Settings via REST → management persists (gorm/SQL) → `network_map.Controller` calls `SynthesizeServices(ctx, store, accountID)` **on every network-map push** (not on a timer; cost is O(peers × policies × providers) per push) → services + `MiddlewareConfig` list stream to the proxy over gRPC → proxy's `middleware_translate` turns proto configs into a runtime `middleware.Chain`. **Chain replacement is live, no restart, in-flight requests unaffected.**
+- **`SynthesizeServices` is the single source of truth** for the wire format the proxy runs. "Anything the proxy does that the synthesizer didn't request is a bug." The translate step must reject unknown middleware IDs — silently dropping e.g. `llm_limit_check` would mean unbounded spend.
+- **Middleware framework**: generic plugin system with three slots (`on_request`, `on_response`, `terminal`), per-instance `fail_open`/`fail_closed`, `timeout_ms`, `can_mutate`. Each middleware declares `MetadataKeys()`; the accumulator drops any KV outside that allowlist. Header/body rewrites go through a gated `Mutations` path (`Authorization` is blocked on the generic header path — auth injection uses a separate trusted `UpstreamRewrite.AuthHeader` field). Body-tap has hard memory bounds: 1 MiB per direction, 256 MiB shared budget, deep-copies body up to 16× per chain (perf hot-spot).
+
+### 2B.2 The 8-middleware LLM chain (canonical order)
+
+Executed per LLM request, in synth-defined order (order encodes invariants):
+
+1. **`llm_request_parser`** (OnRequest) — detect provider (URL sniff via `DetectParser`, or by name when synth stamps `provider_id`), decode body → `{model, stream}`, extract prompt. Path-routed providers (Vertex/Bedrock) short-circuit: model pulled from the URL path.
+2. **`llm_router`** (OnRequest) — three-pass route select: filter by `Models` claim → vendor-pin → filter by `AllowedGroupIDs` intersection → model precedence over path → longest-`UpstreamPath`-prefix tie-break. Does upstream rewrite + auth strip/inject. Deny codes `model_not_routable` / `no_authorised_provider`. GCP path can mint short-lived OAuth2 tokens from a `keyfile::` key.
+3. **`llm_limit_check`** (OnRequest) — pre-flight gRPC `CheckLLMPolicyLimits(provider, model, est_tokens, groups, user)`, 2s timeout, **fail-open** (nil mgmt client / RPC error → allow, so a management outage doesn't kill all LLM traffic). Stamps attribution metadata on allow.
+4. **`llm_identity_inject`** (OnRequest) — inject NetBird identity (peer email or UserID) + authorising-group tags into upstream headers/body. Two shapes: LiteLLM-style `HeaderPair`, Portkey-style `JSONMetadata`, plus catalog `ExtraHeaders`. **Anti-spoof**: every `HeadersAdd` is preceded by `HeadersRemove` of the same name so client-supplied identity never reaches upstream.
+5. **`llm_guardrail`** (OnRequest) — model-allowlist deny (case-insensitive; empty allowlist = disabled) + optional prompt capture. Deny code `model_blocked`.
+6. **`llm_response_parser`** (OnResponse) — parse usage tokens + completion from JSON, SSE (`text/event-stream`), or AWS binary event-stream (Bedrock). Partial-chunk tolerant.
+7. **`cost_meter`** (OnResponse) — token buckets → USD via `pricing.Loader` (embedded `defaults_pricing.yaml`, hot-reloadable override, atomic swap). Closed-set skip reasons (`unknown_model`, `zero_tokens`, etc.). Provider-agnostic.
+8. **`llm_limit_record`** (OnResponse) — post-flight gRPC `RecordLLMUsage(provider, model, prompt_t, completion_t, cost, groups, user)`, 5s, errors swallowed (response already served).
+
+**Record-once invariant**: `llm_limit_check` must precede `llm_router` (denied request never hits upstream) and must pair with `llm_limit_record` (a checked request is always recorded, or rate-limit semantics break). Recorder has an independent skip-on-missing-attribution guard so no phantom counters materialise.
+
+### 2B.3 Budget rules: "min-wins, all-must-pass"
+
+The core (and most surprising) semantic. A budget rule binds `(group set, user set)` to `(window, ceiling)`. At check time **every** matching rule is evaluated; if **any** rule has zero remaining quota, the whole request is denied. Hard caps that stop requests once the budget is hit. The proxy never decides locally — it always asks management (`CheckLLMPolicyLimits`) and reports back (`RecordLLMUsage`), keeping account-wide accounting in one place and avoiding per-proxy drift. Dashboard "Budget Dashboard" tab polls `/api/agent-network/consumption` (REST poll, not gRPC/WS).
+
+### 2B.4 Provider model, pricing, PII
+
+- **Provider record** (`agent_network_providers` table, per account): `UpstreamURL`, encrypted `APIKey`, `ExtraValues` (operator-typed catalog headers), `Models []{ID, InputPer1k, OutputPer1k}` (operator pins prices; empty = all catalog models at catalog prices), `SkipTLSVerification` (for self-hosted upstreams), per-provider ed25519 session keypair for OIDC session JWTs, customizable identity header names. **BYOK is server-side**: the operator's provider key lives in management, injected by the proxy — agents never hold provider API keys.
+- **Pricing**: per-provider cost formulas matter (OpenAI cached tokens are a **subset** of input; Anthropic cache_read/cache_creation are **additive**). Loader is symlink-safe (`O_NOFOLLOW`, 1 MiB cap), embedded defaults + mtime hot-reload.
+- **PII redaction**: parser-side (`llm_guardrail.RedactPII`, single exported contract) before metadata is stamped. Regex set: email, SSN, phone (E.164 + NA), bearer tokens, IPv4, credit cards, names. Account-level `RedactPii` toggle. Prompt/completion capture is a `*bool` with three-state semantics: `nil` = legacy emit, `false` = suppress, `true` = emit (driven by account `EnablePromptCollection`).
+- **Access logs**: `AccessLogEntry` with geo, user, auth method, bytes, status, latency; gated on account `EnableLogCollection` (off = chain still enforces budgets, but no audit trail). Deny paths stamp `llm_policy.decision=deny` + a reason for pivoting.
+
+### 2B.5 Providers supported / API surfaces
+
+- **Client-facing API shapes parsed**: OpenAI Chat Completions (`/v1/chat/completions`, also bare `/chat/completions` for Cloudflare AI Gateway), OpenAI Responses (`/v1/responses`), legacy Completions, Anthropic Messages (`/v1/messages`) + legacy `/v1/complete`, AWS Bedrock (InvokeModel + Converse, model in URL path), Vertex AI (path-routed; Anthropic publisher metered, Gemini/`google` publisher **denied as unmeterable**).
+- **Explicitly designed to sit in front of existing gateways**: LiteLLM, Portkey, Bifrost, Cloudflare AI Gateway (the `provider_id` synth-stamp bypasses URL sniffing so non-canonical gateway URLs still parse). NetBird positions itself as an **identity/governance layer on top of** an AI gateway, not a replacement for one.
+
+### 2B.6 What NetBird has that helsinki does not (net-new vs the Vercel/agentgateway gap list)
+
+Most of NetBird's LLM features overlap the Category A/B gaps already in Part 4. NetBird-specific angles worth stealing:
+
+- **Network-layer identity binding**: agents authenticated as WireGuard peers via IdP; the governed endpoint is unreachable off-tunnel. helsinki's analogue is NATS-account identity + auth-callout — conceptually similar, but NetBird's "endpoint not on the public internet" posture is a strong story.
+- **Server-side BYOK with zero agent-held keys** injected by a reverse proxy — directly maps to Part 5 P0 item 1.
+- **"min-wins all-must-pass" multi-rule budget model** — a concrete, implementable budget semantic for Part 5 P0 item 3. Simpler than agentgateway's token-bucket CEL but very legible.
+- **Live chain replacement on config push** with a synthesizer as single source of truth — a clean control-plane pattern; helsinki could mirror this with NATS config streams driving a per-caller policy chain.
+- **Fail-open limit check + record-once pairing** — good operational defaults worth copying if we build the LLM gateway.
+- **Three-state capture pointer for prompt/PII** (`nil`/`false`/`true`) — a careful default-preserving pattern for privacy toggles.
+
+### 2B.7 Where NetBird is thinner than agentgateway / helsinki
+
+- **No MCP or A2A awareness at all** — purely an LLM egress governor. No tool-level RBAC, no MCP federation, no agent-card handling. helsinki and agentgateway both far exceed it here.
+- **No advanced routing** — failover chains / weighted split / cost-latency `sort` are absent; routing is allowlist + first-match by model/group/path.
+- **No streaming guardrails, no external moderation connectors** — guardrail = static model allowlist + regex PII only. agentgateway (Bedrock Guardrails, Model Armor, webhook, streaming) is much deeper.
+- **Coupled to NetBird** — you must run the WireGuard mesh + NetBird management/proxy to get any of it; not a drop-in library.
+- **String-typed `decision`/`deny_code` on the gRPC contract** (self-flagged as needing enum pinning), no OTel export of gateway telemetry noted, reaper/GC of stale synth services cut from scope.
+
+### 2B.8 Three-way positioning summary
+
+| Axis | Vercel AI Gateway | agentgateway | NetBird Agent Network |
+|---|---|---|---|
+| Shape | Hosted SaaS egress | Self-host Rust data plane | Feature on WireGuard mesh + reverse proxy |
+| Identity model | API key / OIDC token | JWT/OAuth, virtual keys | WireGuard peer + IdP (network-layer) |
+| LLM governance | Deep (routing, spend, ZDR) | Deep (routing, budgets, guardrails) | Focused (budget rules, model allowlist, cost) |
+| MCP / A2A | MCP via AI SDK | Deepest MCP + A2A proxy | None |
+| Guardrails | None built-in | Broadest (moderation, PII, webhook, streaming) | Regex PII + model allowlist only |
+| BYOK | Yes | Yes | Yes, server-side, agents hold no keys |
+| Network posture | Public egress endpoint | Wherever you deploy | Governed endpoint off public internet |
 
 ---
 
