@@ -12,12 +12,13 @@ date: 2026-07-18
 An Agent needs a precise answer to two questions:
 
 1. Which implementation interprets this Agent definition?
-2. Which models does that implementation use?
+2. Which behavior can the platform inspect and enforce for this Session?
 
 Terms such as runtime and harness have different meanings across products.
-Using either term as the main platform abstraction made the answer harder to
-see. It also allowed a supposedly immutable Agent revision to acquire a newer
-implementation or a different model when a Session started.
+The configuration's `runtime` binding must identify the exact implementation
+that interprets its settings, rather than conflating behavior with hosting.
+Otherwise a supposedly immutable Agent revision can acquire a newer
+implementation when a Session starts.
 
 This decision uses a smaller model:
 
@@ -25,22 +26,23 @@ This decision uses a smaller model:
       stable identity
 
     AgentConfiguration
-      exact implementation version and typed configuration
-      exact primary and auxiliary model selections
-      the rest of the Agent's behavior
+      exact runtime version
+      one runtime-owned typed settings message
+      supported platform-owned declarations
 
     AgentRevision
       immutable numbered binding to one AgentConfiguration
 
     SessionExecutionPlan
-      immutable record of the exact revision, implementation, models,
-      provider routes, and dependencies admitted for one Session
+      immutable record of the exact revision, implementation, settings,
+      dependencies, and supported capabilities admitted for one Session
 
 The platform-managed harness loop is the normative v1 implementation in this
 model. Codex and Claude Code are possible future edge integrations, not the
 source of the core Session schema. An OpenAI or Claude model is a separate model
-selection. A process, container, microVM, or remote service may host an
-implementation, but hosting is not itself an Agent implementation.
+selection when the selected runtime exposes that control. A process, container,
+microVM, or remote service may host an implementation, but hosting is not itself
+an Agent implementation.
 
 OpenClaw uses its own precise product vocabulary: an agent runtime owns a
 prepared model loop, and a harness implements that runtime. The platform does
@@ -58,8 +60,8 @@ It also refines the frozen
 [agent-platform decision record](../research/agent-platform/decision-record.md),
 which used `runtime` as an immutable Agent field and allowed a Session to
 override the model. That record remains historical research input. If this ADR
-is accepted, its exact implementation and model pins become the normative
-decision.
+is accepted, its exact implementation binding and capability-scoped model pins
+become the normative decision.
 
 The repository already establishes adjacent constraints:
 
@@ -81,9 +83,16 @@ and protobuf modeling. It does not select a container orchestrator, define a
 general hosting resource, or move provider credentials into Agent
 configuration.
 
+Draft [ADR#0062](./0062-runtime-owned-settings-and-platform-declarations.md)
+defines the general Agent boundary: one exact runtime binding and one typed
+settings payload, with common declarations for supported platform integrations.
+The platform harness and managed-model path below are a specific execution
+contract. A valid configuration for another runtime does not automatically
+qualify for that contract or require the same native controls.
+
 ## Decision
 
-### 1. Pin implementation and models in AgentConfiguration
+### 1. Pin the runtime and its settings in AgentConfiguration
 
 Use these normative logical records:
 
@@ -95,23 +104,24 @@ Use these normative logical records:
         harness contract version
       registered_extension:
         immutable extension version reference and definition digest
-      configuration contract version
-      supported model protocols and capabilities
+      settings type URL and descriptor-set digest
+      settings contract version and validator
+      supported platform integrations and inspection capabilities
       definition_digest
 
     AgentImplementation
       exact AgentImplementationVersion reference and definition digest
-      typed per-Agent implementation configuration and digest
 
     ModelSelection
       exact ModelVersion reference and definition digest
       deterministic model parameters
 
     AgentConfiguration
-      agent_implementation -> AgentImplementation
-      primary_model_selection -> ModelSelection
-      auxiliary_model_selections -> typed role + ModelSelection
-      instructions, wrappers, variables, skills, dependencies, and labels
+      runtime -> AgentImplementation
+      settings -> one google.protobuf.Any accepted by that exact version
+      description and selectable labels
+      platform-owned variables, skills, and dependencies
+        (declared integrations require support from the pinned adapter)
       configuration_digest
 
     AgentRevision
@@ -121,14 +131,13 @@ Use these normative logical records:
       configuration_digest
       source
 
-The two model-selection fields above are contested. The shipped agent contract
-carries model selection inside the runtime-owned settings on AgentConfiguration
-rather than as platform-owned sibling fields, so every step below that reads a
-ModelSelection from AgentConfiguration describes intended design whose
-precondition is unmet. The consequence recorded in
-[ADR#0025](./0025-agent-definition-data-ownership.md) tracks that conflict; the
-rest of this ADR, including implementation pinning, plan immutability, and
-attestation, is unaffected by it.
+`ModelSelection` is a typed projection for platform-managed model access, not
+a mandatory field on the general AgentConfiguration. A pinned adapter derives
+it from the runtime-owned settings when it can prove exact models, roles, and
+parameters and enforce them during execution. The author does not maintain a
+second platform model selection beside the native settings. A runtime with no
+caller-controlled model selection is not thereby model-free; it may manage
+models internally and be ineligible for the managed-model capability.
 
 AgentImplementationVersion describes a reusable immutable release. For the
 built-in arm, its definition digest commits to the platform harness artifacts,
@@ -142,32 +151,38 @@ bundled CLI or SDK, plugins, nested components, composition rules, and generated
 assets when they can affect implementation behavior. Recording only a wrapper
 or launcher version is insufficient.
 
-AgentImplementation inside AgentConfiguration selects one exact version and
-contains its typed per-Agent options. The AgentConfiguration digest commits to
-that selection, those options, every model selection, and the rest of the
-Agent behavior. AgentRevision binds the same configuration and digest after
-activation.
+The runtime binding inside AgentConfiguration selects one exact version. Its
+single settings envelope contains the complete message accepted by that
+version, including native models, parameters, instructions, and context
+controls when supported. The AgentConfiguration digest commits to the binding,
+settings type and admitted bytes, and platform-owned declarations. AgentRevision
+binds the same configuration and digest after activation.
 
 ModelSelection identifies an exact versioned model catalog record, not a
 display name, mutable provider alias, auto value, or provider credential. Its
-parameters are part of AgentConfiguration. The implementation cannot replace
-that model with a harness default or fallback. Enforcing that last sentence
-requires the platform to read the pinned model, which runtime-owned model
-selection does not currently grant.
+parameters derive from the admitted runtime settings, including defaults whose
+meaning is fixed by the pinned runtime contract. The managed-model capability
+requires the implementation to honor that exact projection without a harness
+default or fallback replacing it. If the adapter cannot prove the projection or
+prevent substitution, admission rejects that capability.
 
-An implementation-required auxiliary model is also explicit in
-AgentConfiguration under a typed role. An implementation release cannot add a
-hidden model call. Adding a role or changing any model produces a new
-AgentConfiguration and AgentRevision.
+For the managed-model capability, every auxiliary model is derived under a
+typed role from the same settings and pinned implementation contract. An
+implementation release cannot add a hidden platform-authorized model call.
+Changing the runtime settings or version requires a new AgentConfiguration and
+AgentRevision. A settings contract may permit native choices that this
+capability cannot admit; configuration validity and Session eligibility are
+separate judgments.
 
 The stable Agent record contains no implementation family. Changing from
 Codex to Claude Code is a Proposal and a new AgentRevision. Governance may
 require a sibling Agent for a particular change, but the storage model does
 not silently create that rule.
 
-For example, AgentRevision 7 can pin `codex-release-42` plus
-`model-release-17`. A Session may resolve that exact model through an admitted
-Bedrock connection and [credential binding](../glossary/credentialbinding), but it cannot replace either pin.
+For example, AgentRevision 7 can pin an exact runtime release whose settings
+select an exact model. If its adapter supports platform-managed model access,
+a Session may resolve that derived selection through an admitted provider
+connection and [credential binding](../glossary/credentialbinding), but it cannot replace either pin.
 Moving the same plan to another conforming host does not create a revision.
 Selecting Claude Code, a newer Codex release, or another model requires a new
 AgentConfiguration and AgentRevision.
@@ -202,25 +217,27 @@ Before a Session becomes runnable, create one SessionExecutionPlan:
       agent_revision_ref
       agent_configuration_ref + configuration_digest
       agent_implementation_version_ref + definition_digest
-      implementation_configuration_digest
+      runtime_settings_type + runtime_settings_digest
       effective_harness_configuration_digest
-      primary_model_selection
-      primary_resolved_model_route
-      auxiliary_model_selections + resolved routes
+      admitted platform-model capability, when required:
+        derived primary_model_selection + resolved route
+        derived auxiliary_model_selections + resolved routes
       resolved variable bindings
       resolved tool, delegate, memory, and skill versions
       work contract and input references
-      resolved compaction trigger thresholds, input, summary, guidance,
-        retained-tail, bounded-pass, and non-summary encoding budgets,
+      platform-harness compaction policy, when that execution contract applies:
+        resolved trigger thresholds, input, summary, guidance, retained-tail,
+        bounded-pass, and non-summary encoding budgets,
         covered-input contract version, and producer role
       harness contract version
       session-plan contract version
       resolved-model-route contract version
 
-The implementation and model selections are copied from the pinned
-AgentConfiguration. Session admission verifies them but never chooses a
-different implementation, implementation version, model, or deterministic
-parameter. V1 has no Session override for those values.
+The implementation and settings are bound to the pinned AgentConfiguration.
+When platform-managed model access is required, admission runs the pinned
+adapter against those settings and records its verified ModelSelection
+projection. It never chooses a different implementation, model, or parameter.
+V1 has no Session override for those admitted values.
 
 The resolved model routes add the [provider connection](../glossary/modelproviderconnection), non-secret credential
 binding reference, exact provider driver, and protocol required to serve each
@@ -228,8 +245,8 @@ ModelSelection. They cannot substitute another model. Attempt-scoped
 [model-access grants](../glossary/modelaccessgrant), secret values, and short-lived provider credentials never
 enter the plan.
 
-AgentConfiguration pins the exact compaction trigger thresholds, input,
-summary, guidance, and retained-tail budgets, bounded-pass limits,
+The platform harness's own settings pin the exact compaction trigger thresholds,
+input, summary, guidance, and retained-tail budgets, bounded-pass limits,
 covered-input contract version, and producer role. The resolved policy also
 sets encoded-length bounds for every variable non-summary `Compacted` field and
 every decider envelope or header value the append carries. Admission rejects an
@@ -240,26 +257,13 @@ either the pinned primary ModelSelection or the exact pinned auxiliary
 ModelSelection under the typed role `compaction`. It cannot name an arbitrary
 model.
 
-The plan's model fields inherit the contested ownership recorded in section 1.
-The shipped AgentConfiguration contract exposes no typed ModelSelection for
-admission to read, so `primary_model_selection`, `auxiliary_model_selections`,
-and their resolved model routes are provisional, together with admission
-steps 4 and 5, the model-protocol check in step 7, the model-access grants in
-step 10, and the ExactModelUnavailable and ExactModelMismatch failure
-categories below; none of them has anything to read until typed selections
-land, the same block
-[ADR#0032](./0032-model-route-and-credential-binding.md) records for route
-admission. Until the reconciliation tracked in
-[ADR#0025](./0025-agent-definition-data-ownership.md) lands, the authoritative
-interim source of model selection is the runtime-owned settings inside the
-pinned AgentConfiguration, when they record one: that selection cannot change
-within a revision, because `configuration_digest` commits to those settings,
-but the platform cannot read it as a typed value, resolve a provider route
-for it, or enforce the no-substitution rule above. When those settings are
-absent, the shipped contract lets the implementation's own defaults choose
-the model, which is exactly the invisibility this decision exists to remove;
-the reconciliation must close that gap. The plan fields and admission steps
-that do not depend on model selection are normative now.
+The managed-model projection is a required capability of the platform harness
+path described here. Another runtime's AgentConfiguration can be valid without
+it, but cannot enter a Session requiring managed-model guarantees. Compaction
+controls likewise belong to the platform harness settings and execution
+contract, rather than becoming universal Agent fields. A different runtime's
+checkpoint or compaction mechanism does not gain platform semantics merely by
+sharing the general configuration envelope.
 
 Admission proceeds in this order:
 
@@ -268,27 +272,33 @@ Admission proceeds in this order:
 2. Load the exact AgentImplementationVersion and verify its definition and
    harness artifact digests. A registered edge extension verifies its own
    pinned product and adapter artifacts under the extension contract.
-3. Validate the typed implementation configuration against the exact
-   configuration contract version.
-4. Read the exact primary and auxiliary ModelSelection values from
-   AgentConfiguration.
-5. Resolve an authorized provider route and CredentialBinding for each exact
-   model under [ADR#0032](./0032-model-route-and-credential-binding.md).
+3. Validate the settings type and complete payload against the exact runtime
+   settings contract. Validate each present platform declaration and require
+   the pinned adapter's integration support; optional resource resolution does
+   not permit unsupported declarations to be ignored.
+4. If the Session requires platform-managed model access, require its pinned
+   adapter capability and derive verifiable primary and auxiliary
+   ModelSelection values from those settings. Reject unsupported or hidden
+   model control for that capability.
+5. For that capability, resolve an authorized provider route and
+   CredentialBinding for each exact model under
+   [ADR#0032](./0032-model-route-and-credential-binding.md).
 6. Resolve tools, delegates, memories, variables, work input, and other
    Session dependencies.
-7. Verify that the implementation supports every model protocol and required
-   Session capability.
+7. Verify every required Session capability and, for managed-model access,
+   every admitted model protocol.
 8. Build the exact harness configuration projection and its expected digest.
 9. Store the canonical SessionExecutionPlan bytes and digest atomically with
    SessionStarted.
 10. Authorize the first launch only after observing that durable start fact.
-    Create model-access grants only after Ready binds them to a specific
-    ExecutionAttempt.
+    Where managed-model access is admitted, create its grants only after Ready
+    binds them to a specific ExecutionAttempt.
 
-A missing, ambiguous, unavailable, unauthorized, revoked, incompatible, or
-digest-mismatched value rejects Session start with a typed failure. Admission
-never falls back to another implementation release, model, provider account,
-credential, or extension.
+A missing required dependency, or an ambiguous, unavailable, unauthorized,
+revoked, incompatible, or digest-mismatched admitted value, rejects Session
+start with a typed failure. Optional dependencies may remain absent under their
+declared resolution rules. Admission never falls back to another implementation
+release, model, provider account, credential, or extension.
 
 Across admission, Ready, recovery, dependency revalidation, and compaction, the
 minimum failure categories are:
@@ -297,6 +307,8 @@ minimum failure categories are:
 - ImplementationArtifactMismatch;
 - ImplementationConfigurationSchemaMismatch;
 - ImplementationConfigurationContractUnsupported;
+- PlatformIntegrationUnsupported;
+- ModelAdmissionCapabilityUnsupported;
 - ExactModelUnavailable;
 - ExactModelMismatch;
 - HostAttestationMismatch;
@@ -307,9 +319,11 @@ minimum failure categories are:
 - CompactionInputTooLarge; and
 - CompactionPayloadTooLarge.
 
-These failures never trigger harness or platform fallback. A caller may correct
-the configuration, activate another reviewed AgentRevision, or start a new
-Session after the unavailable dependency is restored.
+Model and compaction failures apply to their admitted capabilities. A runtime
+without an exposed model selection does not satisfy them by claiming an empty
+model set. These failures never trigger harness or platform fallback. A caller
+may correct the configuration, activate another reviewed AgentRevision, or start
+a new Session after the unavailable dependency is restored.
 
 The plan becomes immutable at SessionStarted. A different implementation,
 model, provider route, input, or dependency requires another Session. A
@@ -322,11 +336,12 @@ those bytes. Store the digest beside the bytes, never inside the value it
 hashes. Readers verify the bytes before decoding and never re-encode a decoded
 plan to recreate the digest.
 
-### 3. Keep every implementation attached to its platform Session
+### 3. Keep verified implementations attached to their platform Session
 
-The Session coordinator and platform-owned harness form the bidirectional
-execution boundary. A future AgentImplementationAdapter translates an external
-product into that boundary without changing the core Session contract. Its
+For the verified execution contract, the Session coordinator and
+platform-owned harness form the bidirectional execution boundary. A future
+AgentImplementationAdapter translates an external product into that boundary
+without changing the core Session contract. Its
 version and artifact digest are pinned by the immutable registered extension
 version.
 
@@ -678,105 +693,79 @@ checkpoint continuity or grant rebinding cannot be proven, that continuation is
 rejected and the platform starts a fresh attempt from authoritative history
 instead of rewriting the plan.
 
-### 5. Use typed protobuf unions and registered extensions
+### 5. Bind one typed settings payload to the exact runtime
 
-The platform-managed harness is the only built-in v1 implementation arm. A
-future product integration uses the registered edge-extension arm unless a
-later ADR changes the core contract. The oneof case is the implementation kind;
-an enum discriminator beside it could disagree with the selected value.
+The general AgentConfiguration has one `runtime` binding and one
+`google.protobuf.Any` settings envelope. Each runtime owns the complete message
+inside that envelope, including the platform harness. The platform harness is
+the only built-in v1 execution implementation; this does not give its native
+settings fields universal meaning for other runtimes.
 
-The following shapes are illustrative. Concrete packages, field names, and
-supporting value objects require their own Buf-validated contract design.
+The immutable AgentImplementationVersion pins the accepted settings [type URL](../glossary/type-url),
+descriptor-set digest, settings contract version, validation rules, defaults,
+and adapter artifacts. Admission checks the runtime/settings pairing and
+validates the complete payload. The type URL identifies a registered contract;
+it never authorizes fetching code or schemas from the network. Mismatched,
+unavailable, undecodable, or unsupported settings fail closed.
 
-    message AgentImplementation {
-      oneof implementation {
-        PlatformHarnessImplementation platform_harness = 1;
-        RegisteredImplementation registered_extension = 100;
-      }
-      Digest definition_digest = 101;
-      Digest configuration_digest = 102;
-    }
+One envelope is sufficient because the runtime's complete settings message may
+contain its own nested lists or unions. A general `repeated Any` would add
+ordering, multiplicity, overlap, and merge rules without an owner. A runtime
+that needs composition defines those rules in its own settings contract.
 
-    message PlatformHarnessImplementation {
-      AgentImplementationVersionRef version = 1;
-      ConfigurationContractVersion configuration_contract = 2;
-      PlatformHarnessConfiguration configuration = 3;
-    }
+Platform-owned skill pins, memory/tool/delegate declarations, and caller
+variables remain typed common declarations under
+[ADR#0025](./0025-agent-definition-data-ownership.md) and
+[ADR#0062](./0062-runtime-owned-settings-and-platform-declarations.md). Every
+declared resource integration requires support in the pinned adapter. An absent
+declaration requires no such integration capability. These fields never carry
+skill or memory contents, policy, live grants, or credentials. Common description
+and selectable labels remain platform-owned metadata; they do not require
+native runtime consumption.
 
-    message RegisteredImplementation {
-      AgentImplementationExtensionVersionRef extension_version = 1;
-      google.protobuf.Any configuration = 2;
-    }
+A registered product integration pins its native product and adapter artifacts
+inside its immutable implementation definition. Its settings cannot contain
+provider credentials, secret values, or live grants. Runtime ownership does not
+move another platform resource's authority into the settings envelope.
 
-    message SessionExecutionPlan {
-      SessionId session_id = 1;
-      AgentRevisionRef agent_revision = 2;
-      AgentConfigurationRef agent_configuration = 3;
-      AgentImplementationVersionRef implementation_version = 4;
-      Digest implementation_definition_digest = 5;
-      Digest implementation_configuration_digest = 6;
-      Digest effective_harness_configuration_digest = 7;
-      ModelSelection primary_model_selection = 8;
-      ResolvedModelRoute primary_model_route = 9;
-      repeated AuxiliaryModelRoute auxiliary_models = 10;
-      SessionDependencies dependencies = 11;
-      HarnessContractVersion harness_contract = 12;
-      SessionPlanContractVersion plan_contract = 13;
-      ModelRouteContractVersion model_route_contract = 14;
-      ResolvedCompactionPolicy compaction_policy = 15;
-    }
-
-    message StoredSessionExecutionPlan {
-      bytes plan_bytes = 1;
-      Digest plan_digest = 2;
-    }
-
-The kind recorded by the selected AgentImplementationVersion must agree with
-the AgentImplementation oneof arm. A platform-harness version in the registered
-extension arm, an extension version in the platform-harness arm, or any other
-mismatch is ImplementationKindMismatch.
-
-The registered_extension arm is the only place this decision permits
-google.protobuf.Any. Its immutable extension version pins one allowed [type URL](../glossary/type-url),
-descriptor-set digest, adapter artifact digest, configuration contract version,
-and capabilities. The platform never fetches code or schemas from the type
-URL. Mismatched, unavailable, undecodable, or unregistered values fail closed.
-Extension configuration cannot contain provider credentials, Secret values,
-live grants, or behavior that belongs in another AgentConfiguration field.
+The managed-model Session plan retains typed ModelSelection and
+ResolvedModelRoute values for the capability it admitted. They are derived
+values with verified provenance to the pinned settings, not authored sibling
+settings on AgentConfiguration. StoredSessionExecutionPlan retains exact plan
+bytes and a separate digest as required by section 2.
 
 ### 6. Fail closed across protobuf version skew
 
-Unknown oneof arms are not the only risk. A reader may know the arm but not
-newer additive fields inside that implementation message. With
-unknown_fields=false, it can silently drop those fields when rewriting and
-could ignore behavior required by the newer configuration.
+Knowing a settings type is insufficient when a reader cannot interpret a newer
+contract version of its payload. With unknown_fields=false, it can silently
+drop additive fields when rewriting and could ignore behavior required by the
+newer configuration.
 
 Apply these rules:
 
-1. Every boundary validates that exactly one known implementation arm exists.
-   A missing arm is unsupported, never a default.
-2. The built-in harness arm carries an explicit configuration contract version.
-   Writers, admission services, harnesses, supervisors, and registered extension
-   handlers advertise the exact contract versions they can interpret.
-3. Admission requires support for the selected arm and configuration contract
-   version. A newer behavior-affecting field requires a newer contract version,
-   even when protobuf considers the field additive.
+1. Every boundary validates the exact runtime reference and its accepted
+   settings type. A missing or mismatched binding is unsupported, never a
+   default implementation.
+2. Every runtime version pins an explicit settings contract version. Writers,
+   admission services, harnesses, supervisors, and adapter handlers advertise
+   the exact versions they can interpret.
+3. Admission requires support for the type, contract version, and every declared
+   platform integration. A newer behavior-affecting settings field requires a
+   newer contract version even when protobuf considers it additive.
 4. SessionExecutionPlan and ResolvedModelRoute carry independent contract
-   versions. Coordinators, harnesses, supervisors, registered extension
-   handlers, and the [model access service](../glossary/model-access-service)
-   advertise the exact versions they interpret. Admission requires every plan
-   consumer to support both versions. A missing or unsupported version is a
-   typed admission failure, never a default. Any behavior-affecting or
-   security-affecting field, including a provider driver pin, requires a newer
-   contract version even when its protobuf field is additive.
+   versions. Every consumer must support the plan and capability values it
+   interprets. Consumers of admitted model routes must support their route
+   contract. A missing or unsupported version is a typed failure, never a
+   default. Behavior-affecting or security-affecting fields require a newer
+   contract version even when protobuf considers them additive.
 5. A component may relay exact immutable bytes it does not interpret, but it
-   may not decode, modify, and rewrite a record whose arm or configuration
-   contract, plan contract, or route contract it does not fully support.
-6. New built-in arms and contract versions require coordinated rollout and
-   compatibility tests before records using them are admitted.
-7. Registered extensions use the already-known registered_extension arm. A
-   breaking schema uses a new type URL and immutable extension version.
-8. Digests cover the exact admitted bytes. Verification never depends on
+   may not decode, modify, and rewrite a record whose settings, plan, or
+   admitted capability contract it does not fully support.
+6. New runtime settings contracts and platform capabilities require coordinated
+   rollout and compatibility tests before configurations using them are
+   admitted. A breaking settings schema uses a new type URL and immutable
+   runtime version.
+7. Digests cover the exact admitted bytes. Verification never depends on
    decoding and re-encoding with a possibly older schema.
 
 ProtoJSON is diagnostic or interoperable output, not the canonical persistence
@@ -791,24 +780,22 @@ type, and digest.
 
 ### 7. Apply the model to concrete products
 
-The Model ownership column below assumes platform-owned model selection, which
-the shipped contract does not provide; read it as intended design pending the
-reconciliation recorded in
-[ADR#0025](./0025-agent-definition-data-ownership.md).
-The platform-managed loop is the only normative v1 row. Product rows summarize
-research and possible edge integrations; they do not reserve core oneof arms or
-field numbers.
+The platform-managed loop is the only normative v1 execution implementation.
+Product rows describe configuration boundaries for possible future integrations,
+not a promise that an SDK supports the required inspection or execution
+capabilities.
 
-| Arrangement | AgentConfiguration implementation | Model ownership | Classification |
+| Arrangement | Runtime-owned settings | Platform-managed model capability | Execution status |
 | --- | --- | --- | --- |
-| Platform managed loop | `platform_harness` with its exact version and typed options | Exact model selections remain in AgentConfiguration | Normative built-in v1 implementation |
-| Codex or Claude Code | No built-in arm; a later accepted integration uses `registered_extension` and edge-owned product state | Exact compatible model selections remain separate AgentConfiguration fields | Future edge integration research |
-| OpenClaw or another composite product | No built-in or composite arm; use external delegation unless a later accepted edge extension can prove the required behavior | Every platform-authorized model role remains explicit in AgentConfiguration | Future edge integration or external delegation |
+| Platform managed loop | Its own typed settings, including native model and compaction controls | Derives and enforces exact model selections | Normative built-in v1 implementation |
+| Codex or Claude Code adapter | A distinct complete settings contract for each pinned adapter; no assumed common native fields | Requires adapter-specific proof of verifiable selection and route enforcement | Future edge integration research |
+| Composite or externally managed product | Its own settings and immutable implementation binding | Hidden or dynamic model control cannot claim exact managed-model admission | Verified integration only if all required capabilities are proven; otherwise external delegation |
 
 Product composition, hidden spawning, native fallback, and product-specific
-resume behavior cannot become core Session semantics through the extension
-arm. An integration either translates them into existing platform commands or
-keeps them outside the verified Session boundary.
+resume behavior cannot become core Session semantics through the settings
+envelope. An integration either translates them into supported platform
+commands or keeps them outside the verified Session boundary. A valid Agent
+configuration does not establish support for every execution mode.
 
 ### 8. Bound mutability explicitly
 
@@ -818,7 +805,7 @@ keeps them outside the verified Session boundary.
 | AgentConfiguration | No | Create a new configuration |
 | AgentRevision | No | Activate a new revision |
 | Implementation kind, version, or options | No within a revision | Proposal and new revision |
-| Model selections or deterministic parameters | No within a revision | Proposal and new revision |
+| Runtime model settings and derived managed-model selections | No within a revision | Proposal and new revision |
 | AgentImplementationVersion definition | No | Publish another version |
 | SessionExecutionPlan | No | Start another Session |
 | Implementation availability or revocation | Yes | Live policy with no fallback |
@@ -848,10 +835,13 @@ An immutable version record does not make an AgentRevision immutable when a
 later Session can select a newer version. The exact version belongs in
 AgentConfiguration.
 
-### Let Codex, Claude Code, or OpenClaw choose the model
+### Admit hidden model choice to the managed-model path
 
-Native defaults and fallback make the model invisible to revision review.
-Every primary and auxiliary model is explicit AgentConfiguration content.
+A runtime may own model selection without exposing it to the platform. That
+settings contract can be valid, but it cannot prove the exact selections needed
+for managed route admission. Native defaults are admissible for that path only
+when the pinned contract fixes them and the adapter derives and enforces the
+resulting selection. Hidden control is not evidence of a model-free runtime.
 
 ### Model hosting as a first-class resource now
 
@@ -859,11 +849,13 @@ The current decision only requires exact implementation artifacts and
 auditable launch facts. A reusable hosting resource would add policy and
 versioning before a proven domain invariant requires it.
 
-### Generic configuration for the built-in harness
+### Give the platform harness's settings a universal schema
 
-An enum plus map, Struct, bytes, or unrestricted Any loses type safety and
-allows the discriminator to disagree with the value. The built-in harness uses
-a typed oneof arm. Any is reserved for registered extensions.
+A mandatory common model, prompt, or compaction shape would require unrelated
+runtimes to accept controls they may not expose. One `Any` preserves each
+runtime's typed message while the exact version binding prevents mismatched
+payloads. This differs from an unrestricted map or an unvalidated envelope:
+registration, full validation, and capability checks remain mandatory.
 
 ### Treat dynamic OpenClaw as an ordinary verified implementation
 
@@ -873,12 +865,14 @@ attested. Otherwise it is treated as an external delegated agent.
 
 ## Consequences
 
-- Every AgentRevision answers exactly which implementation version and models
-  it declares.
-- Upgrades and model changes are reviewed, versioned Agent changes rather than
-  hidden Session resolution.
+- Every AgentRevision answers exactly which runtime version, settings type,
+  admitted settings bytes, and platform declarations it binds. Exact managed
+  model selections are available only through an admitted adapter capability.
+- Runtime upgrades and settings changes are reviewed, versioned Agent changes.
+  Managed-model admission cannot replace their derived model selections.
 - Every Session records the exact implementation, configuration projection,
-  model routes, dependencies, and canonical plan bytes it admitted.
+  dependencies, admitted capabilities, and canonical plan bytes. Model routes
+  appear only for the managed-model capability.
 - Session events, aggregate snapshots, harness recovery checkpoints,
   and read-side checkpoints have separate authority and failure behavior.
 - Provider credentials remain outside Agent and implementation configuration.
@@ -900,6 +894,7 @@ attested. Otherwise it is treated as an external delegated agent.
 - [ADR#0024: Agent Platform Stream Topology](./0024-agent-platform-stream-topology.md)
 - [ADR#0025: Agent Definition Data Ownership](./0025-agent-definition-data-ownership.md)
 - [ADR#0032: Model Route and Credential Binding](./0032-model-route-and-credential-binding.md)
+- [ADR#0062: Runtime-Owned Settings and Platform Declarations](./0062-runtime-owned-settings-and-platform-declarations.md)
 - [Agent platform decision record](../research/agent-platform/decision-record.md)
 - [Codex App Server](https://developers.openai.com/codex/app-server)
 - [Codex custom model providers](https://learn.chatgpt.com/docs/config-file/config-advanced#custom-model-providers)

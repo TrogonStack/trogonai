@@ -1,0 +1,43 @@
+edition = "2024";
+
+package trogonai.agents.proposals.v1;
+
+import "trogonai/agents/agents/v1/agent_revision.proto";
+import "trogonai/agents/agents/v1/digest.proto";
+import "trogonai/agents/proposals/v1/configuration_difference.proto";
+
+message ProposalEvidenceRef {
+  string evidence_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.agents.v1.Digest content_digest = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message EvaluationResultRef {
+  string evaluation_result_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.agents.v1.Digest content_digest = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// The difference's base configuration must equal the pinned base revision's
+// configuration. Its candidate remains the same artifact through activation.
+message ProposalDefinition {
+  trogonai.agents.agents.v1.AgentRevisionRef base_revision = 1 [features.field_presence = LEGACY_REQUIRED];
+  VerifiedConfigurationDifference difference = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Authenticated opaque identity; principal kind remains outside this domain.
+  string author_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  repeated ProposalEvidenceRef evidence = 4;
+  // Supersession does not close another stream; its author withdraws it separately.
+  string supersedes_proposal_id = 5;
+}
+
+message ProposalJudgment {
+  string verifier_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string rationale = 2 [features.field_presence = LEGACY_REQUIRED];
+  repeated EvaluationResultRef evaluation_results = 3;
+}
+
+message ProposalVerdict {
+  // Exactly one known decision is required; an unset or unknown arm is invalid.
+  oneof decision {
+    ProposalJudgment approved = 1;
+    ProposalJudgment rejected = 2;
+  }
+}

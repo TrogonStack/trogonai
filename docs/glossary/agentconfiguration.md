@@ -6,10 +6,11 @@ order: 1
 
 # AgentConfiguration
 
-The versioned record holding an agent's runtime selection and the runtime-owned
-settings that runtime defines and validates, including its model selection.
-Digest-committed, so any behavior-significant change produces a new revision.
-Whether model selection instead belongs to the platform as a typed field is
-unresolved; see the consequence recorded in
-[ADR#0025](../adr/0025-agent-definition-data-ownership.md) and
-[ADR#0031](../adr/0031-agent-implementation-and-session-plan.md).
+The immutable configuration bound to an AgentRevision: one exact runtime
+binding, one runtime-owned typed settings message carried in
+`google.protobuf.Any`, and revision-owned platform declarations. The runtime
+defines its native fields and validation. The platform defines common resource
+declarations, such as skill pins and memory dependencies, whose use requires
+support from the selected runtime or adapter. The configuration digest commits
+to both. See draft
+[ADR#0062](../adr/0062-runtime-owned-settings-and-platform-declarations.md).

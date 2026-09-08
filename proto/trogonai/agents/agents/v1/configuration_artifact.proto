@@ -1,0 +1,43 @@
+edition = "2024";
+
+package trogonai.agents.agents.v1;
+
+import "trogonai/agents/agents/v1/digest.proto";
+
+// The exact contract artifact commits to its protobuf descriptor closure and
+// validation and interpretation semantics. Admission requires this registered
+// tuple; a matching message name with different bytes or semantics is invalid.
+message ConfigurationContractRef {
+  string message_type = 1 [features.field_presence = LEGACY_REQUIRED];
+  string version = 2 [features.field_presence = LEGACY_REQUIRED];
+  Digest definition_digest = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// The contract identifies the fully qualified protobuf message in these exact
+// admitted binary bytes. Verify the digest before decoding, reject unknown
+// behavior, and preserve the bytes instead of recovering them by re-encoding.
+// An empty payload is valid only when the exact contract admits it, including
+// defaults whose meaning is fixed by that contract.
+message NativeConfiguration {
+  ConfigurationContractRef contract = 1 [features.field_presence = LEGACY_REQUIRED];
+  bytes configuration_bytes = 2 [features.field_presence = LEGACY_REQUIRED];
+  Digest configuration_digest = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Content addressing resolves to exactly one StoredAgentConfiguration. Admit a
+// reference only after its bytes are durably retrievable. Retain those bytes
+// while any durable genesis, revision, or proposal reference exists, including
+// archived agents and rejected or withdrawn proposals.
+message AgentConfigurationRef {
+  Digest configuration_digest = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// The authoritative admitted binary encoding of AgentConfiguration. Its
+// contract_version is inside the digest boundary. Protobuf encoding is not
+// canonical: alternate encodings are distinct artifacts even when they decode
+// to equivalent values. Hash these bytes once, preserve them, and verify before
+// decoding. Never re-encode a decoded message to recreate its artifact identity.
+message StoredAgentConfiguration {
+  bytes configuration_bytes = 1 [features.field_presence = LEGACY_REQUIRED];
+  Digest configuration_digest = 2 [features.field_presence = LEGACY_REQUIRED];
+}

@@ -1,0 +1,120 @@
+edition = "2024";
+
+package trogonai.agents.proposals.v1;
+
+import "google/protobuf/any.proto";
+import "google/protobuf/empty.proto";
+import "trogonai/agents/agents/v1/configuration_artifact.proto";
+import "trogonai/agents/agents/v1/dependencies.proto";
+import "trogonai/agents/agents/v1/digest.proto";
+import "trogonai/agents/agents/v1/implementation.proto";
+import "trogonai/agents/agents/v1/variables.proto";
+
+enum AgentChangeClass {
+  AGENT_CHANGE_CLASS_UNSPECIFIED = 0;
+  AGENT_CHANGE_CLASS_LEARNED_LAYER = 1;
+  AGENT_CHANGE_CLASS_CHARTER = 2;
+}
+
+// Dispatch computes a complete difference from verified base and candidate bytes
+// under this exact differencer contract. Caller-declared changed fields are never
+// authoritative. Unsupported decoders or incomplete differences reject.
+// Trusted registration maps exact implementation and settings versions to the
+// differencer and governance contracts; callers cannot select their classifier.
+// Every snapshot and digest must equal its corresponding base or candidate value.
+// Encoding-only changes are not differences. Fully validated native changes with
+// no registered semantic classifier use the conservative charter case below.
+message VerifiedConfigurationDifference {
+  trogonai.agents.agents.v1.AgentConfigurationRef base_configuration = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.agents.v1.AgentConfigurationRef candidate_configuration = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.agents.v1.ConfigurationContractRef differencer_contract = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Nonempty, complete, and one entry per changed category; duplicates reject.
+  repeated ConfigurationChange changes = 4;
+  // Charter dominates learned-layer. Unknown enum values and UNSPECIFIED reject;
+  // understood content without a known governance class is assigned CHARTER.
+  AgentChangeClass derived_change_class = 5 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ConfigurationChange {
+  reserved 3, 8;
+  reserved models, platform_harness_settings, implementation;
+
+  // Exactly one known arm is required; unknown or unset changes reject.
+  oneof change {
+    RuntimeDifference runtime = 1;
+    RuntimeSettingsDifference runtime_settings = 2;
+    VariableSchemaDifference variables_schema = 4;
+    DependenciesDifference dependencies = 5;
+    SelectableLabelsDifference selectable_labels = 6;
+    DescriptionDifference description = 7;
+  }
+}
+
+// Runtime identity, artifact, or settings-contract changes are charter. Settings
+// payload changes have their own entry, including when the runtime also changes.
+message RuntimeDifference {
+  trogonai.agents.agents.v1.AgentImplementation before = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.agents.v1.AgentImplementation after = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Both snapshots equal the settings envelopes in the verified configurations.
+// Exactly one known classification is required. Dispatch selects conservative
+// charter only when both payloads are fully validated and no registered semantic
+// classifier supports this exact transition; it is not a fallback for a failed
+// classifier or unsupported decoder. A runtime change remains charter regardless
+// of how this settings difference is classified.
+message RuntimeSettingsDifference {
+  google.protobuf.Any before = 1 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Any after = 2 [features.field_presence = LEGACY_REQUIRED];
+  oneof classification {
+    RuntimeSettingsGovernanceResponse classified = 3;
+    google.protobuf.Empty conservative_charter = 4;
+  }
+}
+
+// The trusted runtime governance contract classifies native changes for any
+// supported runtime, including the platform harness. The contract references
+// must match the runtime definitions and Any type URLs; settings digests cover
+// the exact corresponding Any.value bytes. The registered classifier determines
+// the native difference type and class, never caller claims or SDK field names.
+// Unknown classes and UNSPECIFIED reject; understood content without a narrower
+// class is charter.
+// Native model, role, and parameter changes are charter; instruction-only learned
+// changes require proof under unchanged runtime and settings contracts.
+message RuntimeSettingsGovernanceResponse {
+  trogonai.agents.agents.v1.ConfigurationContractRef base_settings_contract = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.agents.v1.Digest base_settings_digest = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.agents.v1.ConfigurationContractRef candidate_settings_contract = 3 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.agents.v1.Digest candidate_settings_digest = 4 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.agents.v1.ConfigurationContractRef governance_contract = 5 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.agents.v1.NativeConfiguration difference = 6 [features.field_presence = LEGACY_REQUIRED];
+  AgentChangeClass derived_change_class = 7 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Caller-contract changes are charter, including presence, type, and requiredness
+// changes. Snapshot absence must match the corresponding configuration exactly.
+message VariableSchemaDifference {
+  trogonai.agents.agents.v1.VariableSchema before = 1;
+  trogonai.agents.agents.v1.VariableSchema after = 2;
+}
+
+// Required declaration changes are charter; optional declaration and skill-pin
+// changes are learned-layer. Requirement transitions therefore remain charter.
+// Snapshot absence must match the corresponding configuration exactly.
+message DependenciesDifference {
+  trogonai.agents.agents.v1.AgentDependencies before = 1;
+  trogonai.agents.agents.v1.AgentDependencies after = 2;
+}
+
+// Grouping-label changes, including family, are charter. The pinned differencer
+// defines the remaining well-known grouping labels; other labels are learned-layer.
+message SelectableLabelsDifference {
+  map<string, string> before = 1;
+  map<string, string> after = 2;
+}
+
+// Description changes are learned-layer and do not alter registry metadata.
+message DescriptionDifference {
+  string before = 1 [features.field_presence = LEGACY_REQUIRED];
+  string after = 2 [features.field_presence = LEGACY_REQUIRED];
+}

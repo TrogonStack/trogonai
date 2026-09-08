@@ -1,0 +1,94 @@
+edition = "2024";
+
+package trogonai.agents.agents.v1;
+
+import "google/protobuf/struct.proto";
+
+// This schema governs caller bindings at Session start, not work inputs, tool
+// arguments, or runtime state. Names are case-sensitive, nonempty, and unique
+// in each scope.
+// Unknown names and absent required values are rejected. Optional values may
+// be omitted; omission never supplies a default. No type in this schema admits
+// null, so explicit null is rejected even for optional variables.
+message VariableSchema {
+  repeated VariableDefinition variables = 1;
+}
+
+message VariableDefinition {
+  string name = 1 [features.field_presence = LEGACY_REQUIRED];
+  VariableType value_type = 2 [features.field_presence = LEGACY_REQUIRED];
+  VariableRequirement requirement = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Unspecified and unknown values are invalid, so omission cannot silently make
+// a caller binding optional.
+enum VariableRequirement {
+  VARIABLE_REQUIREMENT_UNSPECIFIED = 0;
+  VARIABLE_REQUIREMENT_REQUIRED = 1;
+  VARIABLE_REQUIREMENT_OPTIONAL = 2;
+}
+
+// Exactly one known arm is required. Matching is structural and recursive,
+// without coercion: strings and booleans cannot satisfy numeric types. Integers
+// are a constrained subset of JSON numbers, not a separate binding encoding.
+// Unknown arms and unsupported behavior-affecting fields fail admission.
+message VariableType {
+  oneof kind {
+    StringVariableType string_type = 1;
+    BooleanVariableType boolean_type = 2;
+    IntegerVariableType integer_type = 3;
+    NumberVariableType number_type = 4;
+    ListVariableType list_type = 5;
+    ObjectVariableType object_type = 6;
+  }
+}
+
+// Bounds are inclusive; absent bounds add no restriction. Length counts Unicode
+// scalar values, without normalization. Allowed values use exact string equality;
+// an empty list adds no enumeration constraint. Duplicates and values outside
+// the length bounds are invalid schema definitions. Minimum must not exceed
+// maximum.
+message StringVariableType {
+  uint32 min_length = 1;
+  uint32 max_length = 2;
+  repeated string allowed_values = 3;
+}
+
+message BooleanVariableType {}
+
+// Bindings must be finite JSON numbers with integral values in the inclusive
+// safe integer range [-9007199254740991, 9007199254740991]. Bounds must use that
+// same range; absent bounds use its endpoints. Minimum must not exceed maximum.
+message IntegerVariableType {
+  sint64 minimum = 1;
+  sint64 maximum = 2;
+}
+
+// Bounds and bindings must be finite IEEE 754 binary64 values. Bounds are
+// inclusive; absent bounds add no restriction. Minimum must not exceed maximum.
+message NumberVariableType {
+  double minimum = 1;
+  double maximum = 2;
+}
+
+// Every element must match element_type. Bounds are inclusive; absent bounds
+// add no restriction. Minimum must not exceed maximum.
+message ListVariableType {
+  VariableType element_type = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint32 min_items = 2;
+  uint32 max_items = 3;
+}
+
+// Objects are closed: undeclared fields fail validation, including in nested
+// objects. Field names and requiredness follow VariableSchema's rules.
+message ObjectVariableType {
+  repeated VariableDefinition fields = 1;
+}
+
+// Bindings are Session-owned values. The Agent configuration stores only their
+// schema, so supplying a different valid binding does not mint a revision.
+// Struct keys are variable names. Values must match the declared types at every
+// nested scope; null and an unset google.protobuf.Value kind are invalid.
+message VariableBindings {
+  google.protobuf.Struct values = 1 [features.field_presence = LEGACY_REQUIRED];
+}

@@ -3,29 +3,31 @@ edition = "2024";
 package trogonai.agents.agents.v1;
 
 import "google/protobuf/any.proto";
+import "trogonai/agents/agents/v1/dependencies.proto";
+import "trogonai/agents/agents/v1/implementation.proto";
+import "trogonai/agents/agents/v1/variables.proto";
 
-// AgentConfiguration is the minimal, versioned declaration of an agent
-// (design Q16): identity, engine, and the engine-owned settings. Nothing
-// economic, temporal, evaluative, or reputational lives here; those are stances
-// on their own planes (policy, evaluation, scheduling), selector-bound and
-// human-owned.
+// AgentConfiguration owns immutable behavior and dependency declarations.
+// Changes, including implementation changes, require a new AgentRevision.
+// Grants, credentials, provider routes, live memory, and session inputs belong
+// to their own planes and cannot be embedded in this declaration.
 message AgentConfiguration {
-  // Execution engine. Immutable for the agent's v1 lifetime; switching
-  // engines mints a new sibling agent rather than a revision (design Q24).
-  string runtime = 1 [features.field_presence = LEGACY_REQUIRED];
-  // Runtime-owned settings: model selection, model parameters, instruction
-  // and prompt content, and dependency declarations. Model selection and
-  // instructions are deliberately runtime-owned rather than sibling fields on
-  // this message (ADR#0043). Which models exist, how they are named, which
-  // sampling or reasoning knobs apply, and what shape a prompt takes (one
-  // string, a document list, a named preset with an append seam) are facts
-  // the runtime owns, and a runtime that exposes none of these simply carries
-  // none, with no platform-level field left empty to interpret. The runtime
-  // named above defines the message type carried here and validates its
-  // contents. A populated settings payload carrying any type other than the
-  // one the named runtime defines is invalid: provisioning and the write-side
-  // decider reject it rather than persist bytes no runtime can interpret.
-  // Absent means the runtime runs with its defaults, including its default
-  // prompt.
-  google.protobuf.Any settings = 2;
+  AgentImplementation runtime = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The exact runtime definition admits one concrete settings contract. The
+  // envelope and its registered type URL remain required for a zero-field
+  // payload. Absent native fields may use defaults fixed by that contract.
+  google.protobuf.Any settings = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Must be 1 for this contract. Unsupported versions and unknown fields are
+  // rejected before admission so older readers cannot erase behavior.
+  uint32 contract_version = 3 [features.field_presence = LEGACY_REQUIRED];
+  string description = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Absent or empty declarations impose no integration requirement. Every
+  // declared integration requires support from the pinned runtime or adapter.
+  AgentDependencies dependencies = 7;
+  // This is the platform-supplied caller interface when declared. Native-only
+  // variables remain in settings; concrete platform bindings belong to Session.
+  VariableSchema variables_schema = 8;
+  // Selection consumes the labels of the pinned revision. Annotation changes
+  // cannot change this set or which declarations a session starts with.
+  map<string, string> selectable_labels = 9;
 }
