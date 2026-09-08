@@ -1,0 +1,16 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+// DenyToolCall records a human decision to refuse a call, recording
+// [ToolCallDenied]. Denial is terminal for the call: it never starts.
+//
+// Write precondition At: mutually exclusive with approve.
+message DenyToolCall {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string tool_call_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string tool_execution_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  string denied_by = 4 [features.field_presence = LEGACY_REQUIRED];
+  string reason = 5;
+  string turn_id = 6;
+}

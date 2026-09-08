@@ -23,10 +23,10 @@ pub async fn publish_wire_reply<N: PublishClient + FlushClient>(
         .publish_with_headers(reply_to.to_string(), headers, encoded.body)
         .await
     {
-        warn!(error = %e, "Failed to publish {}", context);
+        warn!(error = %e, context, "Failed to publish reply");
     }
     if let Err(e) = nats.flush().await {
-        warn!(error = %e, "Failed to flush {}", context);
+        warn!(error = %e, context, "Failed to flush reply");
     }
 }
 
@@ -43,7 +43,7 @@ pub async fn publish_success_reply<N, Res>(
     match encode_success(response_id.clone(), result) {
         Ok(encoded) => publish_wire_reply(nats, reply_to, encoded, context).await,
         Err(e) => {
-            warn!(error = %e, "Failed to encode success reply for {}", context);
+            warn!(error = %e, context, "Failed to encode success reply");
             publish_internal_error_reply(nats, reply_to, response_id, context).await;
         }
     }
@@ -59,7 +59,7 @@ pub async fn publish_agent_error_reply<N: PublishClient + FlushClient>(
     match encode_agent_error(response_id, error) {
         Ok(encoded) => publish_wire_reply(nats, reply_to, encoded, context).await,
         Err(e) => {
-            warn!(error = %e, "Failed to encode error reply for {}", context);
+            warn!(error = %e, context, "Failed to encode error reply");
             publish_fallback_error_reply(nats, reply_to, context).await;
         }
     }
@@ -101,17 +101,17 @@ async fn publish_fallback_error_reply<N: PublishClient + FlushClient>(nats: &N, 
     ) {
         Ok(encoded) => encoded,
         Err(e) => {
-            warn!(error = %e, "Fallback wire encoding failed for {}", context);
+            warn!(error = %e, context, "Fallback wire encoding failed");
             let mut headers = headers_with_trace_context();
             headers.insert("Content-Type", CONTENT_TYPE_PLAIN);
             if let Err(e) = nats
                 .publish_with_headers(reply_to.to_string(), headers, "Internal error".into())
                 .await
             {
-                warn!(error = %e, "Failed to publish fallback {}", context);
+                warn!(error = %e, context, "Failed to publish fallback reply");
             }
             if let Err(e) = nats.flush().await {
-                warn!(error = %e, "Failed to flush fallback {}", context);
+                warn!(error = %e, context, "Failed to flush fallback reply");
             }
             return;
         }

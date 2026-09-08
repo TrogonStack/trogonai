@@ -6,6 +6,7 @@ use serde::Serialize;
 
 use crate::a2a_prefix::A2aPrefix;
 use crate::constants::NATS_MSG_ID_HEADER;
+pub use crate::constants::PUSH_DLQ_SCHEMA_V1;
 use crate::push::caller_id::{CallerId, sanitize_subject_token};
 use crate::push::dispatch_error::DispatchError;
 use crate::push::dlq_dedup::PushDlqDedupGate;
@@ -13,19 +14,17 @@ use crate::push::push_idempotency_key::PushIdempotencyKey;
 use crate::push::status_transition_id::StatusTransitionId;
 use crate::task_id::A2aTaskId;
 
-pub const PUSH_DLQ_SCHEMA_V1: &str = "a2a.push.dlq/v1";
-
-/// `{prefix}.push.dlq.{caller_id}.{task_id}` — trailing tokens match the `A2A_PUSH_DLQ` stream filter `{prefix}.push.dlq.*.*`.
+/// `{prefix}.v1.push.dlq.{caller_id}.{task_id}` — trailing tokens match the `A2A_PUSH_DLQ` stream filter `{prefix}.v1.push.dlq.*.*`.
 pub fn push_dlq_publish_subject(prefix: &A2aPrefix, caller_id: &CallerId, task_id: &A2aTaskId) -> String {
     format!(
-        "{}.push.dlq.{}.{}",
+        "{}.v1.push.dlq.{}.{}",
         prefix.as_str(),
         sanitize_subject_token(caller_id.as_str()),
         task_id.as_str()
     )
 }
 
-/// JSON envelope for terminal push delivery failures (`schema`: **`a2a.push.dlq/v1`**).
+/// JSON envelope for terminal push delivery failures (`schema`: **`a2a.v1.push.dlq/v1`**).
 ///
 /// `idempotency_key` is deterministic: `{task_id}:{status_transition_id}:{target_url}`.
 #[derive(Serialize)]
@@ -103,11 +102,11 @@ pub async fn publish_push_delivery_failure<J>(
     {
         Ok(fut) => {
             if let Err(e) = fut.await {
-                tracing::warn!(%task_id, error = %e, "JetStream ack failed for push DLQ publish on {subject}");
+                tracing::warn!(%task_id, %subject, error = %e, "JetStream ack failed for push DLQ publish");
             }
         }
         Err(e) => {
-            tracing::warn!(%task_id, error = %e, "failed to publish push DLQ message on {subject}");
+            tracing::warn!(%task_id, %subject, error = %e, "failed to publish push DLQ message");
         }
     }
 }

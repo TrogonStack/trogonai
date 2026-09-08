@@ -4,6 +4,7 @@ use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 use tower::ServiceExt;
 use trogon_nats::NatsToken;
+use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{ClaimCheckPublisher, MaxPayload, MockJetStreamPublisher, MockObjectStore, StreamMaxAge};
 use trogon_std::NonZeroDuration;
 
@@ -28,8 +29,7 @@ fn make_app() -> (MockJetStreamPublisher, axum::Router) {
     let publisher = MockJetStreamPublisher::new();
     let cc = ClaimCheckPublisher::new(
         publisher.clone(),
-        MockObjectStore::new(),
-        "test-bucket".to_string(),
+        ClaimBucketBinding::for_test(MockObjectStore::new(), ClaimBucket::default()),
         MaxPayload::from_server_limit(usize::MAX),
     );
     let config = super::config::LinearConfig {

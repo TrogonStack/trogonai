@@ -66,11 +66,16 @@ where
 }
 
 /// Encode the current guest state into a versioned snapshot frame.
-pub fn encode_current<S>(state: &S, schema_version: &str) -> Option<Vec<u8>>
+///
+/// Returns the frame rather than an `option<list<u8>>`, even though that is what the WIT
+/// `session.snapshot` export returns. A guest asked for a snapshot always has one to give; whether
+/// one is worth taking is a cost question the host answers from the cadence in the module
+/// descriptor, before it makes the call.
+pub fn encode_current<S>(state: &S, schema_version: &str) -> Vec<u8>
 where
     S: buffa::Message,
 {
-    Some(encode_snapshot(state, schema_version))
+    encode_snapshot(state, schema_version)
 }
 
 /// Encodes decider state plus a schema version tag into this crate's versioned snapshot frame

@@ -1,4 +1,4 @@
-use crate::error::{
+use crate::constants::{
     AGENT_UNAVAILABLE, CONTENT_TYPE_NOT_SUPPORTED, EXTENDED_AGENT_CARD_NOT_CONFIGURED, EXTENSION_SUPPORT_REQUIRED,
     INVALID_AGENT_RESPONSE, PUSH_NOTIFICATION_NOT_SUPPORTED, TASK_NOT_CANCELABLE, TASK_NOT_FOUND,
     UNSUPPORTED_OPERATION, VERSION_NOT_SUPPORTED,
@@ -10,6 +10,15 @@ pub enum ClientError {
     Serialize(#[source] serde_json::Error),
     #[error("failed to deserialize response: {0}")]
     Deserialize(#[source] serde_json::Error),
+    /// The body violated the JSON-RPC envelope grammar itself. Distinct from
+    /// [`Self::Deserialize`], which is a well-formed envelope whose payload did
+    /// not match the caller's type: only this one indicts the peer's framing.
+    #[error("JSON-RPC codec error: {0}")]
+    Codec(#[source] jsonrpc_nats::CodecError),
+    /// A valid envelope of the wrong kind for this position, e.g. a request
+    /// where a response was expected.
+    #[error("unexpected JSON-RPC message variant")]
+    UnexpectedMessage,
     #[error("transport error: {0}")]
     Transport(String),
     #[error("request to '{subject}' timed out")]

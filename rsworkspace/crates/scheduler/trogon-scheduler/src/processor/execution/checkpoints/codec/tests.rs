@@ -8,7 +8,7 @@ use super::*;
 use crate::commands::domain::{Delivery, MessageContent, Schedule, ScheduleHeaders, ScheduleMessage};
 
 fn record(schedule: Schedule, status: ScheduleStatus, outcome: ReconcileOutcome) -> ScheduleCheckpointRecord {
-    let schedule_id = crate::commands::domain::ScheduleId::parse("orders/created").unwrap();
+    let schedule_id = crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c01").unwrap();
     ScheduleCheckpointRecord {
         schedule_id,
         status,
@@ -20,7 +20,7 @@ fn record(schedule: Schedule, status: ScheduleStatus, outcome: ReconcileOutcome)
         },
         message: ScheduleMessage {
             content: MessageContent::json(r#"{"ok":true}"#),
-            headers: ScheduleHeaders::new([("x-kind", "heartbeat")]).unwrap(),
+            headers: ScheduleHeaders::new([("x-kind", "0198fa2f6d0a7b1a8cf9f762e73a1c19")]).unwrap(),
         },
         last_applied_stream_position: StreamPosition::try_new(7).unwrap(),
         last_applied_event_id: Some("event-7".to_string()),
@@ -116,7 +116,7 @@ fn corrupt_bytes_are_rejected() {
 #[test]
 fn default_enums_decode_to_stable_domain_values() {
     let stored = checkpoints_v1::ScheduleCheckpoint {
-        schedule_id: Some("orders/created".to_string()),
+        schedule_id: Some("0198fa2f6d0a7b1a8cf9f762e73a1c01".to_string()),
         status: None,
         last_applied_stream_position: Some(1),
         last_applied_event_id: None,
@@ -194,7 +194,7 @@ fn codec_errors_display_and_expose_sources() {
 
     let domain = decode_checkpoint_record(
         &checkpoints_v1::ScheduleCheckpoint {
-            schedule_id: Some("orders/created".to_string()),
+            schedule_id: Some("0198fa2f6d0a7b1a8cf9f762e73a1c01".to_string()),
             status: Some(checkpoints_v1::ScheduleCheckpointStatus::Scheduled.into()),
             last_applied_stream_position: Some(1),
             last_applied_event_id: None,

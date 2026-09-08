@@ -1,16 +1,11 @@
-use ed25519_dalek::Verifier;
 use sha2::{Digest, Sha256};
 
 use super::digest::Sha256Digest;
 use super::error::SignatureVerificationError;
-use super::manifest::{SIGNED_BUNDLE_VERSION, SignedBundleManifest};
+use super::manifest::SignedBundleManifest;
 use super::public_key::Ed25519PublicKey;
+use crate::constants::{SIGNED_BUNDLE_SIGNATURE_DOMAIN, SIGNED_BUNDLE_VERSION};
 use crate::skill_id::SkillId;
-
-/// Domain-separation tag the verifier and signer agree on. Including the tag
-/// in the signed message prevents a confused-deputy attack where a signature
-/// produced for some other Ed25519 message could be replayed here.
-const SIGNED_BUNDLE_SIGNATURE_DOMAIN: &[u8] = b"a2a-redaction/signed-bundle/v1";
 
 /// Construct the canonical signed message for a bundle.
 ///
@@ -92,8 +87,13 @@ pub fn verify_signed_bundle(
     let signature = envelope.signature_bytes(&skill_id)?;
     let message = sign_bundle_digest(envelope.version, &skill_id, expected_manifest, expected_wasm);
 
+    // `verify_strict` rather than `verify`: this is a code-signing
+    // decision, so the permissive checks are the wrong default. Strict
+    // rejects small-order and non-canonically-encoded key/nonce points,
+    // which is what closes the gap where one signature validates under
+    // more than one public key.
     verifying_key
-        .verify(&message, &signature.dalek_signature()?)
+        .verify_strict(&message, &signature.dalek_signature()?)
         .map_err(|_| SignatureVerificationError::SignatureVerificationFailed {
             skill_id: skill_id.to_string(),
         })

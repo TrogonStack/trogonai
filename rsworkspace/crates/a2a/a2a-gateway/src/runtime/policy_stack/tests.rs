@@ -57,3 +57,28 @@ fn from_env_returns_substrate_when_bundle_dir_set_to_any_path() {
     assert!(stack.substrate.is_some());
     assert!(stack.tier3_manifests.is_empty());
 }
+
+#[test]
+fn from_env_returns_noop_when_signing_pubkey_is_unusable() {
+    // A bundle dir plus a mistyped signing pubkey must not boot a
+    // substrate that would execute those bundles unverified. Losing
+    // policy enforcement is the correct cost of the typo.
+    let env = InMemoryEnv::new();
+    env.set(ENV_POLICY_BUNDLE_DIR, "/tmp/policy-bundle-for-boot-test");
+    env.set(ENV_GATEWAY_TIER3_SIGNING_PUBKEY, "not-hex");
+    let stack = gateway_policy_stack_from_env(&env);
+    assert!(stack.substrate.is_none());
+    assert!(stack.tier3_manifests.is_empty());
+}
+
+#[test]
+fn from_env_returns_substrate_when_signing_pubkey_is_valid() {
+    let env = InMemoryEnv::new();
+    env.set(ENV_POLICY_BUNDLE_DIR, "/tmp/policy-bundle-for-boot-test");
+    env.set(
+        ENV_GATEWAY_TIER3_SIGNING_PUBKEY,
+        "abababababababababababababababababababababababababababababababab",
+    );
+    let stack = gateway_policy_stack_from_env(&env);
+    assert!(stack.substrate.is_some());
+}

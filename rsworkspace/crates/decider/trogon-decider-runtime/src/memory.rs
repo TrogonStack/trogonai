@@ -24,8 +24,8 @@ use crate::snapshot::{
     WriteSnapshotResponse, decode_snapshot, encode_snapshot,
 };
 use crate::stream::{
-    AppendStreamRequest, AppendStreamResponse, ReadFrom, ReadStreamRequest, ReadStreamResponse, StreamAppend,
-    StreamPosition, StreamRead, StreamWritePrecondition,
+    AppendFailure, AppendStreamRequest, AppendStreamResponse, ReadFrom, ReadStreamRequest, ReadStreamResponse,
+    StreamAppend, StreamPosition, StreamRead, StreamWritePrecondition,
 };
 use crate::{Event, StreamEvent};
 
@@ -176,6 +176,13 @@ where
             .expect("stream already had events or new events were appended");
 
         Ok(AppendStreamResponse { stream_position })
+    }
+
+    fn classify_append_failure(&self, error: &Self::Error) -> AppendFailure {
+        match error {
+            StreamAppendError::WriteConflict { .. } => AppendFailure::WriteConflict,
+            StreamAppendError::EmptyAppendWithoutPosition { .. } => AppendFailure::Fatal,
+        }
     }
 }
 

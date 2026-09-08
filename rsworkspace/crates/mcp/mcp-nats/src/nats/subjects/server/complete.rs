@@ -17,7 +17,7 @@ impl std::fmt::Display for CompleteSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.server.{}.completion.complete",
+            "{}.v1.server.{}.completion.complete",
             self.prefix.as_str(),
             self.server_id.as_str()
         )

@@ -16,7 +16,6 @@
 //!   cargo test -p acp-nats --test remapping_client_integration
 
 use std::collections::HashMap;
-use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -78,14 +77,12 @@ fn make_bridge(
     )
     .with_operation_timeout(Duration::from_millis(500));
     let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
-    let (tx, _rx) = tokio::sync::mpsc::channel(1);
     Bridge::new(
         nats,
         js_client,
         SystemClock,
         &opentelemetry::global::meter("remapping-client-test"),
         config,
-        tx,
     )
 }
 
@@ -116,7 +113,7 @@ async fn permission_request_is_relayed_with_remapped_session_id() {
                 .lock()
                 .unwrap()
                 .insert(runner_sid.to_string(), acp_sid.to_string());
-            let relay_client = Rc::new(RemappingClient::new(inner, id_remap));
+            let relay_client = Arc::new(RemappingClient::new(inner, id_remap));
             let bridge_rc = Arc::new(bridge);
 
             tokio::task::spawn_local(async move {

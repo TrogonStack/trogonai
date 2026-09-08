@@ -1,7 +1,7 @@
 use trogon_decider_runtime::StreamPosition;
 
 use crate::commands::domain::{Delivery, Schedule, ScheduleId, ScheduleMessage};
-use crate::processor::execution::reconciliation::{ScheduleKey, ScheduleSubject};
+use crate::processor::execution::reconciliation::ScheduleSubject;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScheduleStatus {
@@ -42,15 +42,13 @@ pub struct ScheduleCheckpointRecord {
 }
 
 impl ScheduleCheckpointRecord {
-    /// KV key for this schedule, derived deterministically from the id so it
-    /// can never drift from what was stored.
-    pub fn key(&self) -> ScheduleKey {
-        ScheduleKey::derive(&self.schedule_id)
+    pub fn key(&self) -> &ScheduleId {
+        &self.schedule_id
     }
 
     /// Execution stream subject for this schedule, derived deterministically
     /// from the id so it can never drift from what was stored.
     pub fn subject(&self) -> ScheduleSubject {
-        ScheduleSubject::execution(&self.key())
+        ScheduleSubject::execution(&self.schedule_id)
     }
 }

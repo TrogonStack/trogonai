@@ -42,8 +42,11 @@ entries are the quick reference.
 - [Projection](./projection)
 - [Processor](./processor)
 - [Tenant](./tenant)
+- [Subject scope](./subject-scope)
 - [Admission control](./admission-control)
 - [Retention watermark](./retention-watermark)
+- [Command principal](./command-principal)
+- [Stream incarnation](./stream-incarnation)
 
 ## Agent execution model
 
@@ -53,7 +56,9 @@ How an agent is defined, versioned, and run. The full narrative is split across
 and session plan), and
 [ADR#0032](../adr/0032-model-route-and-credential-binding.md) (model routing and
 credentials). These are draft decisions; treat the entries as the intended model,
-not current behavior.
+not current behavior. Model-selection ownership is not merely unbuilt but
+unresolved: those ADRs place it on the platform, while the shipped contract gives
+it to the runtime, and reconciling them is its own decision.
 
 - [Agent](./agent)
 - [AgentConfiguration](./agentconfiguration)
@@ -63,12 +68,30 @@ not current behavior.
 - [Session](./session)
 - [SessionExecutionPlan](./sessionexecutionplan)
 - [ExecutionAttempt](./executionattempt)
+- [Child session](./child-session)
+- [Subagent](./subagent)
+- [Delegation](./delegation)
+- [Cascade policy](./cascade-policy)
+- [Fork](./fork)
 - [External delegated agent](./external-delegated-agent)
 - [ResolvedModelRoute](./resolvedmodelroute)
 - [ModelProviderConnection](./modelproviderconnection)
 - [CredentialBinding](./credentialbinding)
 - [ModelAccessGrant](./modelaccessgrant)
 - [Model access service](./model-access-service)
+
+## Channels and conversations
+
+How a human on a messaging platform reaches an agent. The full narrative lives in
+[Multi-Channel Agent Routing](../architecture/multi-channel-agent-routing.md);
+these entries are the quick reference. Telegram is the only channel implemented
+today, and the vocabulary is deliberately channel-neutral ahead of the second.
+
+- [Channel](./channel)
+- [Endpoint](./endpoint)
+- [Principal](./principal)
+- [Conversation](./conversation)
+- [Binding](./binding)
 
 ## Messaging and storage infrastructure
 

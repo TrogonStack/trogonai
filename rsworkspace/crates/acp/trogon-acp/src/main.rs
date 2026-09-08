@@ -190,7 +190,6 @@ async fn main() -> anyhow::Result<()> {
         trogon_std::time::SystemClock,
         &meter,
         config,
-        notification_tx.clone(),
     );
 
     // ── TrogonAcpAgent (embedded Claude; lifecycle local, prompt/cancel via Bridge) ──
@@ -261,7 +260,6 @@ async fn main() -> anyhow::Result<()> {
         trogon_std::time::SystemClock,
         base_config,
         registry,
-        notification_tx.clone(),
         embedded_prefix,
     );
     if let Some(switcher) = canonical_switcher {
@@ -291,7 +289,7 @@ async fn main() -> anyhow::Result<()> {
                 // session id is rewritten to the acp session id the IDE knows. The embedded
                 // Claude keeps its own local `perm_tx` path (handled in the select loop below).
                 // Limitation: only runners registered when trogon-acp starts are covered.
-                let relay_client = std::rc::Rc::new(acp_nats::RemappingClient::new(
+                let relay_client = std::sync::Arc::new(acp_nats::RemappingClient::new(
                     Arc::new(client.clone()),
                     id_remap.clone(),
                 ));
@@ -319,7 +317,6 @@ async fn main() -> anyhow::Result<()> {
                         trogon_std::time::SystemClock,
                         &opentelemetry::global::meter("trogon-acp-perm-relay"),
                         cfg,
-                        notification_tx.clone(),
                     ));
                     let nats_run = nats.clone();
                     let client_run = relay_client.clone();

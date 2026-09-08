@@ -73,6 +73,13 @@ enum CliError {
 }
 
 #[cfg(not(coverage))]
+#[cfg_attr(
+    dylint_lib = "trogon_lints",
+    allow(
+        debug_remnants,
+        reason = "the per-bundle progress is this CLI's own output to the operator running it"
+    )
+)]
 fn main() -> Result<(), CliError> {
     let args = Args::parse();
     let signing_key = parse_signing_key(&args.key)?;

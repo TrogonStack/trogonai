@@ -1,6 +1,6 @@
 use std::{fmt, marker::PhantomData};
 
-use super::{Decider, Decision, DecisionFailure, DecisionResult};
+use super::{Decider, Decision, DecisionError, DecisionResult};
 
 /// Builder for a multi-step [`Decision::Act`].
 ///
@@ -11,6 +11,7 @@ use super::{Decider, Decision, DecisionFailure, DecisionResult};
 /// The chain is monomorphized at compile time (each `execute` returns a new typestate
 /// type), and the whole chain is boxed exactly once when it is converted into a
 /// [`Decision::Act`].
+#[must_use = "act chains must be completed with .execute(...) and then .into()"]
 pub struct ActBuilder<C>
 where
     C: Decider,
@@ -59,6 +60,7 @@ where
 }
 
 #[doc(hidden)]
+#[must_use = "act chains must be completed with .into() to produce a Decision"]
 pub struct ActChain<C, S>
 where
     C: Decider,
@@ -191,7 +193,7 @@ where
 {
     fn run(self, state: C::State, command: &C) -> DecisionResult<C> {
         let result: Result<Decision<C>, C::DecideError> = (self.step)(&state, command).into();
-        let decision = result.map_err(DecisionFailure::Decide)?;
+        let decision = result.map_err(DecisionError::Decide)?;
         decision.handle(state, command)
     }
 }
@@ -212,7 +214,7 @@ where
     fn run(self, state: C::State, command: &C) -> DecisionResult<C> {
         let (state, mut events) = self.prev.run(state, command)?;
         let result: Result<Decision<C>, C::DecideError> = (self.step)(&state, command).into();
-        let decision = result.map_err(DecisionFailure::Decide)?;
+        let decision = result.map_err(DecisionError::Decide)?;
         let (state, new_events) = decision.handle(state, command)?;
         events.extend(new_events);
         Ok((state, events))

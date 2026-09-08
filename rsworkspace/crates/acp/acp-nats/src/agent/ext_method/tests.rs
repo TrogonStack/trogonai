@@ -11,7 +11,7 @@ async fn ext_method_forwards_request_and_returns_response() {
     let (mock, _js, bridge) = mock_bridge();
     let raw = RawValue::from_string(r#"{"result":"ok"}"#.to_string()).unwrap();
     let expected = ExtResponse::new(raw.into());
-    set_json_response(&mock, "acp.agent.ext.my_method", &expected);
+    set_json_response(&mock, "acp.v1.global.agent.ext.my_method", &expected);
 
     let params = RawValue::from_string(r#"{"key":"value"}"#.to_string()).unwrap();
     let request = ExtRequest::new("my_method", params.into());
@@ -35,7 +35,7 @@ async fn ext_method_returns_error_when_nats_fails() {
 #[tokio::test]
 async fn ext_method_returns_error_when_response_is_invalid_json() {
     let (mock, _js, bridge) = mock_bridge();
-    mock.set_response("acp.agent.ext.my_method", "not json".into());
+    mock.set_response("acp.v1.global.agent.ext.my_method", "not json".into());
 
     let params = RawValue::from_string("{}".to_string()).unwrap();
     let request = ExtRequest::new("my_method", params.into());
@@ -80,7 +80,11 @@ async fn ext_method_records_error_metric_on_invalid_method_name() {
 async fn ext_method_records_metrics_on_success() {
     let (mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
     let raw = RawValue::from_string("{}".to_string()).unwrap();
-    set_json_response(&mock, "acp.agent.ext.my_method", &ExtResponse::new(raw.into()));
+    set_json_response(
+        &mock,
+        "acp.v1.global.agent.ext.my_method",
+        &ExtResponse::new(raw.into()),
+    );
 
     let params = RawValue::from_string("{}".to_string()).unwrap();
     let _ = bridge.ext_method(ExtRequest::new("my_method", params.into())).await;

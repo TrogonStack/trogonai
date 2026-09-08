@@ -59,6 +59,14 @@ groups:
               value: "faulted"
               brief: Command execution faulted on an infrastructure or guest execution failure.
               stability: development
+            - id: shed
+              value: "shed"
+              brief: The command was shed by admission control before any work began.
+              stability: development
+            - id: denied
+              value: "denied"
+              brief: The command was denied by authorization before any work began.
+              stability: development
         stability: development
         brief: Outcome of a command execution attempt.
         examples: ["decided", "rejected"]
@@ -232,6 +240,20 @@ groups:
     brief: Optimistic concurrency conflicts (wrong expected stream version) surfaced by an append.
     instrument: counter
     unit: "{conflict}"
+    stability: development
+    attributes:
+      - ref: stream_id
+        requirement_level: recommended
+
+  - id: metric.decider.command.conflict_retries
+    type: metric
+    metric_name: decider.command.conflict_retries
+    annotations:
+      code_generation:
+        metric_value_type: int
+    brief: Command execution attempts retried in place after an optimistic concurrency conflict.
+    instrument: counter
+    unit: "{attempt}"
     stability: development
     attributes:
       - ref: stream_id

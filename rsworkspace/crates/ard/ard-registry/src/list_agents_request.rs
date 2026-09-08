@@ -2,12 +2,10 @@
 
 use ard_catalog::ListAgentsQueryWire;
 
+use crate::constants::{DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE};
 use crate::page_token::decode_page_token;
 use crate::registry_error::RegistryError;
 use crate::search_filters::SearchFilters;
-
-pub const DEFAULT_PAGE_SIZE: u32 = 50;
-pub const MAX_PAGE_SIZE: u32 = 100;
 
 /// Validated query parameters for the list-agents operation.
 #[derive(Debug, Clone, PartialEq, Eq)]

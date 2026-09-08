@@ -12,7 +12,7 @@ impl AllClientSubject {
 
 impl std::fmt::Display for AllClientSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.session.*.client.>", self.prefix.as_str())
+        write!(f, "{}.v1.session.*.client.>", self.prefix.as_str())
     }
 }
 
@@ -40,7 +40,7 @@ mod tests {
     #[test]
     fn display_formats_subject_correctly() {
         let s = AllClientSubject::new(&prefix());
-        assert_eq!(s.to_string(), "acp.session.*.client.>");
+        assert_eq!(s.to_string(), "acp.v1.session.*.client.>");
     }
 
     #[test]

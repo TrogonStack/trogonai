@@ -1,45 +1,29 @@
-//! Map `{prefix}.gateway…` ingress NATS subjects to `{prefix}.agents.{agent_id}.{method}` shapes.
+//! Map `{prefix}.gateway…` ingress NATS subjects to `{prefix}.v1.agents.{agent_id}.{method}` shapes.
 //!
 //! Tenant isolation uses **one NATS Account per tenant** (see [`docs/a2a/explanation/architecture.md`](../../../../../docs/a2a/explanation/architecture.md) §Decisions); there is no `{tenant}`
-//! token on gateway subjects inside an Account — only **`{prefix}.gateway.{agent_id}.{method…}`**.
+//! token on gateway subjects inside an Account — only **`{prefix}.v1.gateway.{agent_id}.{method…}`**.
 //!
-//! To target a gateway from code that builds agent-shaped subjects (`{prefix}.agents…`), use
+//! To target a gateway from code that builds agent-shaped subjects (`{prefix}.v1.agents…`), use
 //! [`gateway_ingress_subject_from_agent_subject`] (swap **`agents` → `gateway`** on the segment after the prefix).
 
 use async_nats::header::HeaderMap;
 use jsonrpc_nats::Encoded;
+use serde::Serialize;
 
 use crate::a2a_prefix::A2aPrefix;
 use crate::agent_id::A2aAgentId;
-use crate::jsonrpc::{JsonRpcId, extract_request_id, extract_request_id_from_body};
+pub use crate::constants::GATEWAY_INGRESS_METHOD_SUFFIXES;
+use crate::jsonrpc::{extract_request_id, extract_request_id_from_body};
 use crate::wire::{WireError, encode_error, response_id_from_request_headers};
 
-/// Recognized dotted method suffix tokens after `{prefix}.agents.{agent_id}.` /
-/// ingress remainder (same spelling as [`crate::server::dispatch::A2aMethod`] mapping).
-///
-/// Listed longest-first to ensure deterministic matching.
-pub const GATEWAY_INGRESS_METHOD_SUFFIXES: &[&[&str]] = &[
-    &["message", "stream"],
-    &["message", "send"],
-    &["tasks", "resubscribe"],
-    &["tasks", "cancel"],
-    &["tasks", "list"],
-    &["tasks", "get"],
-    &["push", "set"],
-    &["push", "get"],
-    &["push", "list"],
-    &["push", "delete"],
-    &["card"],
-];
-
-/// Failure resolving a `{prefix}.gateway.` subject to an agent RPC subject.
+/// Failure resolving a `{prefix}.v1.gateway.` subject to an agent RPC subject.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum GatewayIngressError {
-    /// Subject does not start with `{prefix}.gateway.`.
-    #[error("subject does not start with '{{prefix}}.gateway.' for the configured prefix")]
+    /// Subject does not start with `{prefix}.v1.gateway.`.
+    #[error("subject does not start with '{{prefix}}.v1.gateway.' for the configured prefix")]
     NotGatewayIngress,
     /// No agent id / trailing tokens missing after stripping the gateway prefix.
-    #[error("expected '{{prefix}}.gateway.{{agent_id}}.{{method…}}'")]
+    #[error("expected '{{prefix}}.v1.gateway.{{agent_id}}.{{method…}}'")]
     BadSubjectShape,
     /// Trailing tokens do not match a known A2A method suffix.
     #[error("unknown method suffix after gateway segment")]
@@ -49,7 +33,7 @@ pub enum GatewayIngressError {
     InvalidAgentId,
 }
 
-/// Invalid arguments when assembling `{prefix}.gateway.{agent}.{method…}`.
+/// Invalid arguments when assembling `{prefix}.v1.gateway.{agent}.{method…}`.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum GatewayComposeError {
     #[error("gateway ingress method suffix is empty")]
@@ -58,7 +42,7 @@ pub enum GatewayComposeError {
     UnknownMethodSuffix,
 }
 
-/// Builds `{prefix}.gateway.{agent_id}.{method…}`.
+/// Builds `{prefix}.v1.gateway.{agent_id}.{method…}`.
 ///
 /// `method_suffix_dots` uses the same dotted tail as agent subjects (`"message.send"`,
 /// `"push.set"`, …) and is rejected with [`GatewayComposeError::UnknownMethodSuffix`]
@@ -79,19 +63,24 @@ pub fn compose_gateway_ingress_subject(
         return Err(GatewayComposeError::UnknownMethodSuffix);
     }
 
-    Ok(format!("{}.gateway.{}.{}", prefix.as_str(), agent_id.as_str(), trimmed))
+    Ok(format!(
+        "{}.v1.gateway.{}.{}",
+        prefix.as_str(),
+        agent_id.as_str(),
+        trimmed
+    ))
 }
 
-/// Maps `{prefix}.agents.{remainder}` → `{prefix}.gateway.{remainder}`.
+/// Maps `{prefix}.v1.agents.{remainder}` → `{prefix}.v1.gateway.{remainder}`.
 ///
-/// Returns `None` when `agent_subject` is not prefixed with `{prefix}.agents.`.
+/// Returns `None` when `agent_subject` is not prefixed with `{prefix}.v1.agents.`.
 ///
 /// Passing the result through [`resolve_gateway_ingress_subject`] yields the original `agent_subject`
 /// exactly when the trailing tokens match [`GATEWAY_INGRESS_METHOD_SUFFIXES`].
 pub fn gateway_ingress_subject_from_agent_subject(agent_subject: &str, prefix: &A2aPrefix) -> Option<String> {
-    let leader = format!("{}.agents.", prefix.as_str());
+    let leader = format!("{}.v1.agents.", prefix.as_str());
     let remainder = agent_subject.strip_prefix(&leader)?;
-    (!remainder.is_empty()).then(|| format!("{}.gateway.{remainder}", prefix.as_str()))
+    (!remainder.is_empty()).then(|| format!("{}.v1.gateway.{remainder}", prefix.as_str()))
 }
 
 /// Parses ingress subject → validated [`A2aAgentId`] plus dotted RPC method tail (`message.send`, …).
@@ -101,7 +90,7 @@ pub fn gateway_ingress_agent_and_method_dots(
     subject: &str,
     prefix: &A2aPrefix,
 ) -> Result<(A2aAgentId, String), GatewayIngressError> {
-    let leader = format!("{}.gateway.", prefix.as_str());
+    let leader = format!("{}.v1.gateway.", prefix.as_str());
     let rest = subject
         .strip_prefix(&leader)
         .ok_or(GatewayIngressError::NotGatewayIngress)?;
@@ -115,9 +104,9 @@ pub fn gateway_ingress_agent_and_method_dots(
     Ok((agent_id, suffix_tokens.join(".")))
 }
 
-/// Resolve ingress subject → core agent RPC subject `{prefix}.agents.{agent_id}.{method…}`.
+/// Resolve ingress subject → core agent RPC subject `{prefix}.v1.agents.{agent_id}.{method…}`.
 pub fn resolve_gateway_ingress_subject(subject: &str, prefix: &A2aPrefix) -> Result<String, GatewayIngressError> {
-    let leader = format!("{}.gateway.", prefix.as_str());
+    let leader = format!("{}.v1.gateway.", prefix.as_str());
     let rest = subject
         .strip_prefix(&leader)
         .ok_or(GatewayIngressError::NotGatewayIngress)?;
@@ -131,7 +120,7 @@ pub fn resolve_gateway_ingress_subject(subject: &str, prefix: &A2aPrefix) -> Res
 
     validate_agent_id(agent_id_str)?;
     let suffix = suffix_tokens.join(".");
-    Ok(format!("{}.agents.{}.{}", prefix.as_str(), agent_id_str, suffix))
+    Ok(format!("{}.v1.agents.{}.{}", prefix.as_str(), agent_id_str, suffix))
 }
 
 fn ends_with_suffix(tokens: &[&str], suffix: &[&str]) -> bool {
@@ -161,18 +150,9 @@ fn validate_agent_id(segment: &str) -> Result<(), GatewayIngressError> {
 }
 
 fn response_id_for_ingress(request_headers: &HeaderMap, request_payload_hint: &[u8]) -> jsonrpc_nats::ResponseId {
-    if let Some(id) = extract_request_id(request_headers) {
-        return match id {
-            JsonRpcId::Number(n) => jsonrpc_nats::ResponseId::Number(n),
-            JsonRpcId::String(s) => jsonrpc_nats::ResponseId::String(s),
-            JsonRpcId::Null => jsonrpc_nats::ResponseId::Null,
-        };
-    }
-    match extract_request_id_from_body(request_payload_hint) {
-        Some(JsonRpcId::Number(n)) => jsonrpc_nats::ResponseId::Number(n),
-        Some(JsonRpcId::String(s)) => jsonrpc_nats::ResponseId::String(s),
-        Some(JsonRpcId::Null) | None => jsonrpc_nats::ResponseId::Null,
-    }
+    extract_request_id(request_headers)
+        .or_else(|| extract_request_id_from_body(request_payload_hint))
+        .unwrap_or(jsonrpc_nats::ResponseId::Null)
 }
 
 fn ingress_error_wire(
@@ -217,6 +197,12 @@ pub fn ingress_gateway_declarative_denied_response_bytes(
     Ok(ingress_error_wire(request_headers, request_payload_hint, -32_803, message, None)?.body)
 }
 
+/// `data` member of a Tier-3 skill refusal, naming the rule that refused.
+#[derive(Debug, Serialize)]
+struct Tier3RefusalData<'a> {
+    rule: &'a str,
+}
+
 /// Serialize a Tier-3 skill refusal reply (`-32802`) for the correlating inbox.
 pub fn ingress_gateway_tier3_refused_response_bytes(
     request_headers: &HeaderMap,
@@ -229,7 +215,7 @@ pub fn ingress_gateway_tier3_refused_response_bytes(
         request_payload_hint,
         -32_802,
         message,
-        Some(serde_json::json!({ "rule": rule })),
+        serde_json::to_value(Tier3RefusalData { rule }).ok(),
     )?
     .body)
 }
@@ -244,7 +230,8 @@ pub fn ingress_gateway_aauth_denied_response_bytes(
     Ok(ingress_error_wire(request_headers, request_payload_hint, -32_118, message, None)?.body)
 }
 
-/// Serialize an upstream-gateway deadline overrun (-32800 — reserved for `{prefix}.gateway>` deadlines).
+/// Serialize an upstream-gateway deadline overrun (-32800, reserved for
+/// `{prefix}.v1.gateway.>` deadlines).
 pub fn ingress_gateway_deadline_exceeded_response_bytes(
     request_headers: &HeaderMap,
     request_payload_hint: &[u8],
@@ -253,7 +240,7 @@ pub fn ingress_gateway_deadline_exceeded_response_bytes(
     Ok(ingress_error_wire(request_headers, request_payload_hint, -32_800, message, None)?.body)
 }
 
-/// Content-mode wire encoding for ingress error replies (headers + bare error body).
+/// Canonical wire encoding for ingress error replies (complete JSON-RPC body).
 pub fn ingress_error_response_wire(
     request_headers: &HeaderMap,
     request_payload_hint: &[u8],

@@ -74,9 +74,8 @@ fn make_mock_bridge(
     let js = MockJs::new();
 
     let meter = opentelemetry::global::meter("spawn-session-tests");
-    let (tx, _rx) = tokio::sync::mpsc::channel(1);
 
-    let bridge = Bridge::new(mock.clone(), js.clone(), MockClock::new(), &meter, config, tx);
+    let bridge = Bridge::new(mock.clone(), js.clone(), MockClock::new(), &meter, config);
 
     (mock, js, bridge)
 }

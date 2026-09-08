@@ -11,35 +11,8 @@
 use async_nats::jetstream::kv;
 use trogon_nats::jetstream::{JetStreamCreateKeyValue, JetStreamGetKeyValue};
 
+use crate::constants::SCHEDULES_BUCKET;
 use crate::error::SchedulerError;
-use crate::processor::execution::reconciliation::{ScheduleKey, StreamRoutingId};
-
-/// KV bucket holding the schedules read model.
-pub const SCHEDULES_BUCKET: &str = "scheduler_schedules";
-
-/// Key of the catch-up checkpoint entry within [`SCHEDULES_BUCKET`].
-///
-/// Versioned: the read model keys entries by a derived token (see
-/// [`read_model_key`]) rather than the raw schedule id. The version forces a
-/// one-time full rebuild on upgrade so the bucket is re-keyed under the new
-/// scheme; the catch-up reconcile then removes any entry written under the old
-/// (raw-id) scheme.
-pub const SCHEDULES_CHECKPOINT_KEY: &str = "_query.schedules.read_model.v2.last_event_sequence";
-
-/// Derives the KV key for a schedule's read-model entry.
-///
-/// A schedule id may be any string the command domain allows — dots, slashes,
-/// `:`, `@`, non-ASCII, up to 256 chars — which is not always a valid NATS KV
-/// key. Keying by a derived 32-hex token (the same scheme the execution worker
-/// uses for its checkpoint) makes every schedule both storable and addressable,
-/// regardless of the characters in its id.
-pub(crate) fn read_model_key(schedule_id: &str) -> String {
-    ScheduleKey::for_stream(&StreamRoutingId::from(schedule_id)).simple()
-}
-
-#[cfg(test)]
-mod tests;
-
 #[cfg(not(coverage))]
 pub(crate) async fn get_or_create_schedules_bucket<J>(js: &J) -> Result<kv::Store, SchedulerError>
 where

@@ -24,12 +24,13 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use futures::{Stream, StreamExt};
+use jsonrpc_nats::{INTERNAL_ERROR, INVALID_PARAMS, ResponseId};
 use serde::Deserialize;
-use serde_json::Value;
 use trogon_nats::RequestClient;
 use trogon_nats::jetstream::{JetStreamCreateConsumer, JetStreamGetStream, JsAck, JsMessageOf, JsMessageRef};
 
 use crate::sse::{client_error_to_jsonrpc_code, typed_event_stream_to_sse};
+use crate::wire::{self, RestError};
 
 /// Build a `Router` of REST routes that can be merged into the top-level router.
 pub fn router<N, J>() -> axum::Router<Arc<A2aClient<N, J>>>
@@ -114,17 +115,11 @@ where
             // Mirror the JSON-RPC handler: emit the unary SendMessageResponse
             // as the first SSE frame so REST callers get the task handle that
             // anchors the subsequent JetStream notifications.
-            let bootstrap_event = serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": Value::Null,
-                "result": bootstrap,
-            });
+            let bootstrap_event = sse_envelope(&bootstrap);
             let bootstrap_sse = futures::stream::once(async move {
-                Ok::<Event, std::convert::Infallible>(
-                    Event::default().data(serde_json::to_string(&bootstrap_event).unwrap_or_default()),
-                )
+                Ok::<Event, std::convert::Infallible>(Event::default().data(bootstrap_event))
             });
-            sse_response(bootstrap_sse.chain(typed_event_stream_to_sse(stream, Value::Null, "message/stream")))
+            sse_response(bootstrap_sse.chain(typed_event_stream_to_sse(stream, ResponseId::Null)))
         }
         Err(e) => rest_error_response(&e),
     }
@@ -263,9 +258,7 @@ where
             // Match the other REST routes — return JSON {"error":{code, message}}
             // so clients can parse the failure uniformly instead of getting a
             // bare text body for this one path.
-            let body = serde_json::json!({
-                "error": { "code": -32602, "message": e.to_string() }
-            });
+            let body = RestError::new(INVALID_PARAMS, e.to_string());
             return (StatusCode::BAD_REQUEST, Json(body)).into_response();
         }
     };
@@ -273,17 +266,10 @@ where
         Ok((snapshot, stream)) => {
             // Match the JSON-RPC handler envelope so subscribe doesn't mix
             // bare {result} frames with full JSON-RPC frames downstream.
-            let snapshot_event = serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": Value::Null,
-                "result": snapshot,
-            });
-            let snapshot_sse = futures::stream::once(async move {
-                Ok::<Event, Infallible>(
-                    Event::default().data(serde_json::to_string(&snapshot_event).unwrap_or_default()),
-                )
-            });
-            sse_response(snapshot_sse.chain(typed_event_stream_to_sse(stream, Value::Null, "tasks/resubscribe")))
+            let snapshot_event = sse_envelope(&snapshot);
+            let snapshot_sse =
+                futures::stream::once(async move { Ok::<Event, Infallible>(Event::default().data(snapshot_event)) });
+            sse_response(snapshot_sse.chain(typed_event_stream_to_sse(stream, ResponseId::Null)))
         }
         Err(e) => rest_error_response(&e),
     }
@@ -308,12 +294,7 @@ where
     // task instead of letting untrusted JSON pick the write target. Untyped
     // JSON crosses the boundary here; this is the one conversion site.
     if !req.task_id.is_empty() && req.task_id != id {
-        let body = serde_json::json!({
-            "error": {
-                "code": -32602,
-                "message": "task id in body does not match path"
-            }
-        });
+        let body = RestError::new(INVALID_PARAMS, "task id in body does not match path");
         return (StatusCode::BAD_REQUEST, Json(body)).into_response();
     }
     req.task_id = id;
@@ -406,13 +387,21 @@ where
     }
 }
 
+/// Serialized opening SSE frame for a REST subscribe route.
+///
+/// REST callers get the same JSON-RPC envelope the JSON-RPC routes emit so a
+/// stream never mixes bare `{result}` frames with enveloped ones. There is no
+/// caller-supplied id on a REST route, hence [`ResponseId::Null`].
+fn sse_envelope<T: serde::Serialize>(result: &T) -> String {
+    wire::success(&ResponseId::Null, result)
+        .unwrap_or_else(|e| wire::error(&ResponseId::Null, INTERNAL_ERROR, format!("serialize error: {e}")))
+        .to_string()
+}
+
 pub(crate) fn rest_error_response(err: &ClientError) -> Response {
     let (code, message) = client_error_to_jsonrpc_code(err);
     let status = http_status_for_jsonrpc_code(code);
-    let body = serde_json::json!({
-        "error": { "code": code, "message": message },
-    });
-    (status, Json(body)).into_response()
+    (status, Json(RestError::new(code, message))).into_response()
 }
 
 pub(crate) fn http_status_for_jsonrpc_code(code: i32) -> StatusCode {

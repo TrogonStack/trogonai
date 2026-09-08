@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use trogon_std::{NonZeroDuration, ZeroDuration};
+use trogon_std::{NonZeroDuration, ZeroDurationError};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct LeaseRenewInterval(NonZeroDuration);
@@ -19,13 +19,13 @@ impl LeaseRenewInterval {
     pub fn from_secs(secs: u64) -> Result<Self, LeaseRenewIntervalError> {
         NonZeroDuration::from_secs(secs)
             .map(Self)
-            .map_err(|_: ZeroDuration| LeaseRenewIntervalError::ZeroDuration)
+            .map_err(|_: ZeroDurationError| LeaseRenewIntervalError::ZeroDuration)
     }
 
     pub fn from_millis(millis: u64) -> Result<Self, LeaseRenewIntervalError> {
         NonZeroDuration::from_millis(millis)
             .map(Self)
-            .map_err(|_: ZeroDuration| LeaseRenewIntervalError::ZeroDuration)
+            .map_err(|_: ZeroDurationError| LeaseRenewIntervalError::ZeroDuration)
     }
 
     pub fn as_duration(self) -> Duration {

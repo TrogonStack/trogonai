@@ -38,7 +38,7 @@ fn dispatch_header_value<'a>(request: &'a DispatchRequest, name: &str) -> Option
 
 #[test]
 fn build_at_uses_one_shot_schedule_headers() {
-    let id = schedule_id("orders/created");
+    let id = schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c01");
     let request = ScheduleRequest::build_at(
         &id,
         at("2026-01-01T00:00:00Z"),
@@ -52,15 +52,12 @@ fn build_at_uses_one_shot_schedule_headers() {
         Some("@at 2026-01-01T00:00:00Z")
     );
     assert_eq!(header_value(&request, "Nats-Schedule-Target"), Some("agent.run"));
-    assert_eq!(
-        request.subject().as_str(),
-        ScheduleSubject::execution(&ScheduleKey::derive(&id)).as_str()
-    );
+    assert_eq!(request.subject().as_str(), ScheduleSubject::execution(&id).as_str());
 }
 
 #[test]
 fn at_schedule_maps_to_an_at_header_and_correlation_headers() {
-    let id = schedule_id("orders/created");
+    let id = schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c01");
     let request = ScheduleRequest::build(
         &id,
         &Schedule::At {
@@ -78,24 +75,17 @@ fn at_schedule_maps_to_an_at_header_and_correlation_headers() {
     assert_eq!(header_value(&request, "Nats-Schedule-Target"), Some("agent.run"));
     assert_eq!(header_value(&request, "Content-Type"), Some("application/json"));
     assert_eq!(
-        header_value(&request, "Trogon-Schedule-Key"),
-        Some(ScheduleKey::derive(&id).simple().as_str())
-    );
-    assert_eq!(
-        header_value(&request, "Trogon-Schedule-Id-B64"),
-        Some("b3JkZXJzL2NyZWF0ZWQ")
+        header_value(&request, "Trogon-Schedule-Id").map(str::to_owned),
+        Some(id.to_string())
     );
     assert_eq!(request.payload(), br#"{"ok":true}"#);
-    assert_eq!(
-        request.subject().as_str(),
-        ScheduleSubject::execution(&ScheduleKey::derive(&id)).as_str()
-    );
+    assert_eq!(request.subject().as_str(), ScheduleSubject::execution(&id).as_str());
 }
 
 #[test]
 fn at_schedule_preserves_subsecond_precision() {
     let request = ScheduleRequest::build(
-        &schedule_id("orders/created"),
+        &schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c01"),
         &Schedule::At {
             at: at("2026-01-01T00:00:00.123456789Z"),
         },
@@ -113,7 +103,7 @@ fn at_schedule_preserves_subsecond_precision() {
 #[test]
 fn every_schedule_formats_a_go_duration() {
     let request = ScheduleRequest::build(
-        &schedule_id("heartbeat"),
+        &schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c19"),
         &Schedule::every(Duration::from_secs(90)).unwrap(),
         &Delivery::nats_event("agent.run").unwrap(),
         &message(),
@@ -126,7 +116,7 @@ fn every_schedule_formats_a_go_duration() {
 #[test]
 fn cron_schedule_emits_expression_and_optional_timezone() {
     let request = ScheduleRequest::build(
-        &schedule_id("nightly"),
+        &schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c16"),
         &Schedule::cron("0 0 * * * *", Some("America/New_York".to_string())).unwrap(),
         &Delivery::nats_event("agent.run").unwrap(),
         &message(),
@@ -148,7 +138,7 @@ fn delivery_ttl_and_source_become_headers() {
         source: Some(SamplingSource::latest_from_subject("agent.events").unwrap()),
     };
     let request = ScheduleRequest::build(
-        &schedule_id("sampled"),
+        &schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c1a"),
         &Schedule::every(Duration::from_secs(30)).unwrap(),
         &delivery,
         &message(),
@@ -162,7 +152,7 @@ fn delivery_ttl_and_source_become_headers() {
 #[test]
 fn rrule_schedule_is_unsupported() {
     let error = ScheduleRequest::build(
-        &schedule_id("recurring"),
+        &schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c15"),
         &Schedule::rrule("2026-01-01T00:00:00Z", "FREQ=DAILY;COUNT=2", None).unwrap(),
         &Delivery::nats_event("agent.run").unwrap(),
         &message(),
@@ -174,14 +164,14 @@ fn rrule_schedule_is_unsupported() {
 
 #[test]
 fn rrule_wakeup_targets_scheduler_owned_subject_and_carries_ttl() {
-    let id = schedule_id("orders/recurring");
+    let id = schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c1b");
     let delivery = Delivery::NatsEvent {
         route: DeliveryRoute::new("agent.run").unwrap(),
         ttl: Some(TtlDuration::from_secs(45).unwrap()),
         source: None,
     };
     let request = ScheduleRequest::build_rrule_wakeup(&id, at("2026-06-15T18:00:00Z"), &delivery).unwrap();
-    let key = ScheduleKey::derive(&id);
+    let key = id.clone();
 
     assert_eq!(request.subject().as_str(), ScheduleSubject::execution(&key).as_str());
     assert_eq!(
@@ -196,7 +186,7 @@ fn rrule_wakeup_targets_scheduler_owned_subject_and_carries_ttl() {
     assert_eq!(header_value(&request, "Content-Type"), Some("application/json"));
     assert_eq!(
         request.payload(),
-        br#"{"schedule_id":"orders/recurring","occurrence_at":"2026-06-15T18:00:00Z"}"#
+        format!(r#"{{"schedule_id":"{id}","occurrence_at":"2026-06-15T18:00:00Z"}}"#).as_bytes()
     );
 }
 
@@ -204,10 +194,10 @@ fn rrule_wakeup_targets_scheduler_owned_subject_and_carries_ttl() {
 fn dispatch_request_targets_user_subject_without_schedule_headers() {
     let message = ScheduleMessage {
         content: MessageContent::json(r#"{"ok":true}"#),
-        headers: ScheduleHeaders::new([("x-kind", "heartbeat")]).unwrap(),
+        headers: ScheduleHeaders::new([("x-kind", "0198fa2f6d0a7b1a8cf9f762e73a1c19")]).unwrap(),
     };
     let request = DispatchRequest::build(
-        &schedule_id("orders/created"),
+        &schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c01"),
         &Delivery::nats_event("agent.run").unwrap(),
         &message,
     )
@@ -219,25 +209,24 @@ fn dispatch_request_targets_user_subject_without_schedule_headers() {
         Some("application/json")
     );
     assert_eq!(
-        dispatch_header_value(&request, "Trogon-Schedule-Key"),
-        Some(ScheduleKey::derive(&schedule_id("orders/created")).simple().as_str())
-    );
-    assert_eq!(
-        dispatch_header_value(&request, "Trogon-Schedule-Id-B64"),
-        Some("b3JkZXJzL2NyZWF0ZWQ")
+        dispatch_header_value(&request, "Trogon-Schedule-Id").map(str::to_owned),
+        Some(schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c01").to_string())
     );
     assert_eq!(
         dispatch_header_value(&request, "Trogon-Schedule-Occurrence-Sequence"),
         None
     );
-    assert_eq!(dispatch_header_value(&request, "x-kind"), Some("heartbeat"));
+    assert_eq!(
+        dispatch_header_value(&request, "x-kind"),
+        Some("0198fa2f6d0a7b1a8cf9f762e73a1c19")
+    );
     assert_eq!(request.payload(), br#"{"ok":true}"#);
 }
 
 #[test]
 fn occurrence_dispatch_request_carries_read_model_identity_headers() {
     let request = DispatchRequest::build_occurrence(
-        &schedule_id("orders/created"),
+        &schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c01"),
         ScheduleOccurrenceSequence::try_new(12).unwrap(),
         at("2026-06-15T18:00:00Z"),
         &Delivery::nats_event("agent.run").unwrap(),
@@ -262,7 +251,8 @@ fn dispatch_request_rejects_sampling_and_scheduler_owned_headers() {
         ttl: None,
         source: Some(SamplingSource::latest_from_subject("agent.events").unwrap()),
     };
-    let sampling = DispatchRequest::build(&schedule_id("orders/created"), &delivery, &message()).unwrap_err();
+    let sampling =
+        DispatchRequest::build(&schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c01"), &delivery, &message()).unwrap_err();
     assert!(matches!(sampling, ScheduleRequestError::UnsupportedDispatchSource));
 
     let message = ScheduleMessage {
@@ -270,7 +260,7 @@ fn dispatch_request_rejects_sampling_and_scheduler_owned_headers() {
         headers: ScheduleHeaders::new([("Nats-Msg-Id", "value")]).unwrap(),
     };
     let reserved = DispatchRequest::build(
-        &schedule_id("orders/created"),
+        &schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c01"),
         &Delivery::nats_event("agent.run").unwrap(),
         &message,
     )
@@ -299,7 +289,7 @@ fn reserved_user_headers_are_rejected() {
         "Content-Type",
         "content-type",
         "Nats-Msg-Id",
-        "Trogon-Schedule-Key",
+        "Trogon-Schedule-Id",
         "trogon-schedule-extra",
     ] {
         let with_reserved = ScheduleMessage {
@@ -307,7 +297,7 @@ fn reserved_user_headers_are_rejected() {
             headers: ScheduleHeaders::new([(reserved, "value")]).unwrap(),
         };
         let error = ScheduleRequest::build(
-            &schedule_id("orders"),
+            &schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c05"),
             &Schedule::At {
                 at: at("2026-01-01T00:00:00Z"),
             },
@@ -327,10 +317,10 @@ fn reserved_user_headers_are_rejected() {
 fn user_headers_are_copied_through_after_the_scheduler_headers() {
     let with_user = ScheduleMessage {
         content: MessageContent::json("{}"),
-        headers: ScheduleHeaders::new([("x-kind", "heartbeat")]).unwrap(),
+        headers: ScheduleHeaders::new([("x-kind", "0198fa2f6d0a7b1a8cf9f762e73a1c19")]).unwrap(),
     };
     let request = ScheduleRequest::build(
-        &schedule_id("orders"),
+        &schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c05"),
         &Schedule::At {
             at: at("2026-01-01T00:00:00Z"),
         },
@@ -339,15 +329,18 @@ fn user_headers_are_copied_through_after_the_scheduler_headers() {
     )
     .unwrap();
 
-    assert_eq!(header_value(&request, "x-kind"), Some("heartbeat"));
+    assert_eq!(
+        header_value(&request, "x-kind"),
+        Some("0198fa2f6d0a7b1a8cf9f762e73a1c19")
+    );
 }
 
 #[test]
 fn delivery_target_inside_a_scheduler_namespace_is_rejected() {
-    let id = schedule_id("orders");
-    let own_subject = ScheduleSubject::execution(&ScheduleKey::derive(&id));
-    let other_subject = ScheduleSubject::execution(&ScheduleKey::derive(&schedule_id("other")));
-    let event_subject = ScheduleSubject::event(&ScheduleKey::derive(&id));
+    let id = schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c05");
+    let own_subject = ScheduleSubject::execution(&id);
+    let other_subject = ScheduleSubject::execution(&schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c1c"));
+    let event_subject = ScheduleSubject::event(&id);
 
     for target in [
         own_subject.as_str(),
@@ -421,13 +414,4 @@ fn request_errors_display_and_expose_sources() {
         "delivery target 'scheduler.schedules.execution.v1.key' is inside a scheduler-owned namespace"
     );
     assert!(std::error::Error::source(&target).is_none());
-}
-
-#[test]
-fn base64url_encodes_without_padding() {
-    assert_eq!(URL_SAFE_NO_PAD.encode(""), "");
-    assert_eq!(URL_SAFE_NO_PAD.encode("f"), "Zg");
-    assert_eq!(URL_SAFE_NO_PAD.encode("fo"), "Zm8");
-    assert_eq!(URL_SAFE_NO_PAD.encode("foo"), "Zm9v");
-    assert_eq!(URL_SAFE_NO_PAD.encode("orders/created"), "b3JkZXJzL2NyZWF0ZWQ");
 }

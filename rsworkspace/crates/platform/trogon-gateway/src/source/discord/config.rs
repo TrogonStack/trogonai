@@ -2,13 +2,13 @@ use std::fmt;
 
 use trogon_nats::NatsToken;
 use trogon_nats::jetstream::StreamMaxAge;
-use trogon_std::{EmptySecret, NonZeroDuration, SecretString};
+use trogon_std::{EmptySecretError, NonZeroDuration, SecretString};
 
 #[derive(Clone)]
 pub struct DiscordBotToken(SecretString);
 
 impl DiscordBotToken {
-    pub fn new(s: impl AsRef<str>) -> Result<Self, EmptySecret> {
+    pub fn new(s: impl AsRef<str>) -> Result<Self, EmptySecretError> {
         SecretString::new(s).map(Self)
     }
 
@@ -24,6 +24,8 @@ impl fmt::Debug for DiscordBotToken {
 }
 use twilight_model::gateway::Intents;
 
+use super::constants::PRIVILEGED_INTENTS;
+
 #[derive(Clone)]
 pub struct DiscordConfig {
     pub bot_token: DiscordBotToken,
@@ -33,10 +35,6 @@ pub struct DiscordConfig {
     pub stream_max_age: StreamMaxAge,
     pub nats_ack_timeout: NonZeroDuration,
 }
-
-const PRIVILEGED_INTENTS: Intents = Intents::from_bits_truncate(
-    Intents::GUILD_MEMBERS.bits() | Intents::GUILD_PRESENCES.bits() | Intents::MESSAGE_CONTENT.bits(),
-);
 
 pub fn default_intents() -> Intents {
     Intents::all().difference(PRIVILEGED_INTENTS)

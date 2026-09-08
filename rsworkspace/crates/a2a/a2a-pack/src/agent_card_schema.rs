@@ -7,8 +7,7 @@ use std::sync::OnceLock;
 use jsonschema::Validator;
 use serde_json::Value;
 
-/// Bundled draft-07 JSON Schema for minimal AgentCard registration checks.
-pub const AGENT_CARD_JSON_SCHEMA: &str = include_str!("../schemas/agent-card.min.json");
+use crate::constants::AGENT_CARD_JSON_SCHEMA;
 
 static BUNDLED: OnceLock<AgentCardJsonSchema> = OnceLock::new();
 

@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+#MISE description="Install the rustfmt, clippy, llvm-tools-preview components and the wasm32-unknown-unknown target for the active toolchain"
+set -euo pipefail
+
+rustup component add rustfmt clippy llvm-tools-preview \
+    --toolchain "${RUSTUP_TOOLCHAIN:-$(rustup show active-toolchain | awk '{print $1}')}"
+
+# Added serially here rather than through rust-toolchain.toml `targets`: that field makes
+# every concurrent `cargo install` during `mise install` trigger its own rustup target
+# download, and the parallel downloads corrupt each other (rename fails with os error 2).
+rustup target add wasm32-unknown-unknown \
+    --toolchain "${RUSTUP_TOOLCHAIN:-$(rustup show active-toolchain | awk '{print $1}')}"

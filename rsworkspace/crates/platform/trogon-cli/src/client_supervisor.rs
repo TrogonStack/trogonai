@@ -3,11 +3,9 @@
 //! See `docs/permission-ui-design.md` §9.
 
 use acp_nats::{AcpPrefix, Config, NatsAuth, NatsConfig, agent::Bridge, client};
-use agent_client_protocol::schema::v1::SessionNotification;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::tui_client::{ActiveClientState, TuiClient};
@@ -20,22 +18,20 @@ pub struct AcpClientSupervisor {
 }
 
 struct SupervisorInner {
-    tui_client: Rc<TuiClient>,
+    tui_client: Arc<TuiClient>,
     nats: async_nats::Client,
     js_client: NatsJetStreamClient,
     nats_url: String,
-    notification_tx: mpsc::Sender<SessionNotification>,
     client_task: Option<JoinHandle<()>>,
 }
 
 impl AcpClientSupervisor {
     pub fn new(
         state: Arc<Mutex<ActiveClientState>>,
-        tui_client: Rc<TuiClient>,
+        tui_client: Arc<TuiClient>,
         nats: async_nats::Client,
         js_client: NatsJetStreamClient,
         nats_url: String,
-        notification_tx: mpsc::Sender<SessionNotification>,
         initial_prefix: &str,
     ) -> anyhow::Result<Self> {
         let sup = Self {
@@ -44,7 +40,6 @@ impl AcpClientSupervisor {
                 nats,
                 js_client,
                 nats_url,
-                notification_tx,
                 client_task: None,
             })),
             state,
@@ -69,7 +64,6 @@ impl AcpClientSupervisor {
             SystemClock,
             &meter,
             config,
-            inner.notification_tx.clone(),
         ));
 
         let nats = inner.nats.clone();

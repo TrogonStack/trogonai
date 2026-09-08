@@ -3,7 +3,7 @@ use std::fmt;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 
-const GITLAB_SIGNING_TOKEN_BYTES: usize = 32;
+use super::constants::GITLAB_SIGNING_TOKEN_BYTES;
 
 #[derive(Debug, thiserror::Error)]
 pub enum GitLabSigningTokenError {

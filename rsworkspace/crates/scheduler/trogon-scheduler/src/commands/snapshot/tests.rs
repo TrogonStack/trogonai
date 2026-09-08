@@ -1,4 +1,5 @@
 use super::*;
+use crate::constants::COMMAND_SNAPSHOT_EVERY;
 
 #[test]
 fn command_snapshot_policy_uses_expected_frequency() {

@@ -8,14 +8,16 @@ use serde_json::Value;
 
 use crate::error::JwtError;
 
-/// Header name carrying a serialized [`CallerJwtHeaderValue`] on every A2A
-/// request, including gateway-mediated traffic.
-pub const CALLER_JWT_HEADER_NAME: &str = "A2a-Caller-Jwt";
-
 /// Compact JWT string suitable for header transport. Validates shape on
 /// construction (3 dotted segments) without verifying signature.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct CallerJwtHeaderValue(String);
+
+impl fmt::Debug for CallerJwtHeaderValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("CallerJwtHeaderValue").field(&"<redacted>").finish()
+    }
+}
 
 impl CallerJwtHeaderValue {
     /// Builds a header value from a [`MintedUserJwt`]. The minted JWT is already
@@ -58,8 +60,14 @@ impl fmt::Display for CallerJwtHeaderValue {
 /// User JWT minted for bridge/gateway consumption; carried as the inner
 /// `nats.jwt` on wire responses. Validates shape on construction but does not
 /// verify the signature — that lives gateway-side.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct MintedUserJwt(String);
+
+impl fmt::Debug for MintedUserJwt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("MintedUserJwt").field(&"<redacted>").finish()
+    }
+}
 
 impl MintedUserJwt {
     /// Constructs a minted JWT from an already-shape-valid compact JWT string.

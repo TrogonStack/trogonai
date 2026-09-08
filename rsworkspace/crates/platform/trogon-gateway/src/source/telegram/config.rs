@@ -3,7 +3,7 @@ use std::fmt;
 use reqwest::Url;
 use trogon_nats::NatsToken;
 use trogon_nats::jetstream::StreamMaxAge;
-use trogon_std::{EmptySecret, NonZeroDuration, SecretString};
+use trogon_std::{EmptySecretError, NonZeroDuration, SecretString};
 
 #[derive(Clone)]
 pub struct TelegramBotToken(SecretString);
@@ -11,7 +11,7 @@ pub struct TelegramBotToken(SecretString);
 #[derive(Debug, thiserror::Error)]
 pub enum TelegramBotTokenError {
     #[error("{0}")]
-    Empty(#[source] EmptySecret),
+    Empty(#[source] EmptySecretError),
     #[error("must match Telegram bot token format")]
     InvalidFormat,
 }
@@ -53,7 +53,7 @@ impl fmt::Debug for TelegramBotToken {
 pub struct TelegramWebhookSecret(SecretString);
 
 impl TelegramWebhookSecret {
-    pub fn new(s: impl AsRef<str>) -> Result<Self, EmptySecret> {
+    pub fn new(s: impl AsRef<str>) -> Result<Self, EmptySecretError> {
         SecretString::new(s).map(Self)
     }
 

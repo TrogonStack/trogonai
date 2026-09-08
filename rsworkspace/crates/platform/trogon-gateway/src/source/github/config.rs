@@ -2,13 +2,13 @@ use std::fmt;
 
 use trogon_nats::NatsToken;
 use trogon_nats::jetstream::StreamMaxAge;
-use trogon_std::{EmptySecret, NonZeroDuration, SecretString};
+use trogon_std::{EmptySecretError, NonZeroDuration, SecretString};
 
 #[derive(Clone)]
 pub struct GitHubWebhookSecret(SecretString);
 
 impl GitHubWebhookSecret {
-    pub fn new(s: impl AsRef<str>) -> Result<Self, EmptySecret> {
+    pub fn new(s: impl AsRef<str>) -> Result<Self, EmptySecretError> {
         SecretString::new(s).map(Self)
     }
 

@@ -33,7 +33,7 @@ fn created(status: v1::ScheduleStatus) -> v1::ScheduleEvent {
     v1::ScheduleEvent {
         event: Some(
             v1::ScheduleCreated {
-                schedule_id: "backup".to_string(),
+                schedule_id: "0198fa2f6d0a7b1a8cf9f762e73a1c45".to_string(),
                 status: MessageField::some(status),
                 schedule: MessageField::some(schedule()),
                 delivery: MessageField::default(),
@@ -48,7 +48,7 @@ fn paused() -> v1::ScheduleEvent {
     v1::ScheduleEvent {
         event: Some(
             v1::SchedulePaused {
-                schedule_id: "backup".to_string(),
+                schedule_id: "0198fa2f6d0a7b1a8cf9f762e73a1c45".to_string(),
             }
             .into(),
         ),
@@ -59,7 +59,7 @@ fn resumed() -> v1::ScheduleEvent {
     v1::ScheduleEvent {
         event: Some(
             v1::ScheduleResumed {
-                schedule_id: "backup".to_string(),
+                schedule_id: "0198fa2f6d0a7b1a8cf9f762e73a1c45".to_string(),
             }
             .into(),
         ),
@@ -70,7 +70,7 @@ fn occurrence_recorded() -> v1::ScheduleEvent {
     v1::ScheduleEvent {
         event: Some(
             v1::ScheduleOccurrenceRecorded {
-                schedule_id: "backup".to_string(),
+                schedule_id: "0198fa2f6d0a7b1a8cf9f762e73a1c45".to_string(),
                 occurrence_sequence: Some(1),
                 occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&occurrence_at())),
                 recorded_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&occurrence_at())),
@@ -84,7 +84,7 @@ fn occurrence_scheduled() -> v1::ScheduleEvent {
     v1::ScheduleEvent {
         event: Some(
             v1::ScheduleOccurrenceScheduled {
-                schedule_id: "backup".to_string(),
+                schedule_id: "0198fa2f6d0a7b1a8cf9f762e73a1c45".to_string(),
                 occurrence_sequence: Some(2),
                 occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&occurrence_at())),
                 scheduled_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&occurrence_at())),
@@ -98,7 +98,7 @@ fn completed() -> v1::ScheduleEvent {
     v1::ScheduleEvent {
         event: Some(
             v1::ScheduleCompleted {
-                schedule_id: "backup".to_string(),
+                schedule_id: "0198fa2f6d0a7b1a8cf9f762e73a1c45".to_string(),
                 last_occurrence_sequence: Some(1),
             }
             .into(),
@@ -188,7 +188,7 @@ fn evolve_removed_and_deleted_state_are_terminal() {
     let removed = v1::ScheduleEvent {
         event: Some(
             v1::ScheduleRemoved {
-                schedule_id: "backup".to_string(),
+                schedule_id: "0198fa2f6d0a7b1a8cf9f762e73a1c45".to_string(),
             }
             .into(),
         ),
@@ -298,7 +298,7 @@ fn evolve_created_rejects_missing_schedule_and_status() {
     let no_schedule = v1::ScheduleEvent {
         event: Some(
             v1::ScheduleCreated {
-                schedule_id: "backup".to_string(),
+                schedule_id: "0198fa2f6d0a7b1a8cf9f762e73a1c45".to_string(),
                 status: MessageField::some(v1::ScheduleStatus {
                     kind: Some(v1::schedule_status::Scheduled {}.into()),
                 }),
@@ -317,7 +317,7 @@ fn evolve_created_rejects_missing_schedule_and_status() {
     let no_status = v1::ScheduleEvent {
         event: Some(
             v1::ScheduleCreated {
-                schedule_id: "backup".to_string(),
+                schedule_id: "0198fa2f6d0a7b1a8cf9f762e73a1c45".to_string(),
                 status: MessageField::default(),
                 schedule: MessageField::some(schedule()),
                 delivery: MessageField::default(),
@@ -357,7 +357,7 @@ fn evolve_created_resets_progress_and_stashes_schedule() {
     let created = v1::ScheduleEvent {
         event: Some(
             v1::ScheduleCreated {
-                schedule_id: "backup".to_string(),
+                schedule_id: "0198fa2f6d0a7b1a8cf9f762e73a1c45".to_string(),
                 status: MessageField::some(v1::ScheduleStatus {
                     kind: Some(v1::schedule_status::Scheduled {}.into()),
                 }),
@@ -486,7 +486,7 @@ fn evolve_occurrence_recorded_requires_occurrence_at() {
     let event = v1::ScheduleEvent {
         event: Some(
             v1::ScheduleOccurrenceRecorded {
-                schedule_id: "backup".to_string(),
+                schedule_id: "0198fa2f6d0a7b1a8cf9f762e73a1c45".to_string(),
                 occurrence_sequence: Some(1),
                 occurrence_at: MessageField::default(),
                 recorded_at: MessageField::default(),
@@ -506,7 +506,7 @@ fn evolve_occurrence_recorded_requires_occurrence_sequence() {
     let event = v1::ScheduleEvent {
         event: Some(
             v1::ScheduleOccurrenceRecorded {
-                schedule_id: "backup".to_string(),
+                schedule_id: "0198fa2f6d0a7b1a8cf9f762e73a1c45".to_string(),
                 occurrence_sequence: None,
                 occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&occurrence_at())),
                 recorded_at: MessageField::default(),
@@ -526,7 +526,7 @@ fn evolve_occurrence_scheduled_requires_occurrence_at() {
     let event = v1::ScheduleEvent {
         event: Some(
             v1::ScheduleOccurrenceScheduled {
-                schedule_id: "backup".to_string(),
+                schedule_id: "0198fa2f6d0a7b1a8cf9f762e73a1c45".to_string(),
                 occurrence_sequence: Some(2),
                 occurrence_at: MessageField::default(),
                 scheduled_at: MessageField::default(),

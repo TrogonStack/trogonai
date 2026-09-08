@@ -280,11 +280,6 @@ async fn dispatch<N, R>(
             reply_error(&nats, reply, -32601, "Method not supported by this runtime").await;
         }
 
-        ClientMethod::ExtSessionPromptResponse => {
-            debug!("ExtSessionPromptResponse — not handled");
-            reply_error(&nats, reply, -32601, "Method not supported by this runtime").await;
-        }
-
         ClientMethod::Ext(ref name) if name == "terminal.write_stdin" => {
             // Payload: { "terminal_id": "...", "data": [1, 2, 3, ...] }
             #[derive(serde::Deserialize)]
@@ -1072,7 +1067,7 @@ mod tests {
         dispatch(
             broker.clone(),
             "s1".into(),
-            ClientMethod::ExtSessionPromptResponse,
+            ClientMethod::Ext("session.prompt_response".into()),
             Bytes::new(),
             reply("r"),
             rt,

@@ -1,0 +1,115 @@
+name: CI Proto
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+    branches: [main]
+    paths:
+      - 'proto/**'
+      - 'buf.yaml'
+      - 'buf.gen.yaml'
+      - 'buf.lock'
+      - '.mise.toml'
+      - '.config/mise/tasks/**'
+      - 'rsworkspace/crates/platform/trogonai-proto/src/gen/**'
+      - '.github/workflows/ci-proto.yml'
+
+concurrency:
+  group: ci-proto-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install buf via mise
+        uses: jdx/mise-action@9e7f7633ff6f6d6048a9418a68d48f288f50eb14 # v4.2.3
+        with:
+          install_args: buf
+
+      - name: Check buf format
+        run: buf format --diff --exit-code proto
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install buf via mise
+        uses: jdx/mise-action@9e7f7633ff6f6d6048a9418a68d48f288f50eb14 # v4.2.3
+        with:
+          install_args: buf
+
+      - name: Lint proto sources
+        run: buf lint
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install buf via mise
+        uses: jdx/mise-action@9e7f7633ff6f6d6048a9418a68d48f288f50eb14 # v4.2.3
+        with:
+          install_args: buf
+
+      - name: Build proto module
+        run: buf build
+
+  breaking:
+    runs-on: ubuntu-latest
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'buf:skip:breaking') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install buf via mise
+        uses: jdx/mise-action@9e7f7633ff6f6d6048a9418a68d48f288f50eb14 # v4.2.3
+        with:
+          install_args: buf
+
+      - name: Check for breaking changes against main
+        run: buf breaking . --against ".git#branch=origin/main"
+
+  generate:
+    runs-on: ubuntu-latest
+    env:
+      # protoc-gen-buffa and protoc-gen-buffa-packaging are source-built mise
+      # tools (cargo backend) and fetch crates from crates.io during install;
+      # raise retry tolerance for spurious network errors (see ci-rust.yml).
+      CARGO_NET_RETRY: '10'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install proto codegen toolchain via mise
+        uses: jdx/mise-action@9e7f7633ff6f6d6048a9418a68d48f288f50eb14 # v4.2.3
+        with:
+          install_args: buf rust cargo:protoc-gen-buffa cargo:protoc-gen-buffa-packaging
+
+      - name: Regenerate protobuf bindings
+        run: mise run --skip-tools proto:generate
+
+      - name: Assert generated output matches proto sources
+        run: mise run --skip-tools github-actions:assert-proto-generated

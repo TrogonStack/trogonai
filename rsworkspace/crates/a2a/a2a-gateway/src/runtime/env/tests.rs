@@ -30,37 +30,51 @@ fn audit_publish_enables_on_truthy_value() {
 }
 
 #[test]
-fn tier3_signing_pubkey_returns_none_when_unset() {
+fn tier3_signing_pubkey_is_not_configured_when_unset() {
     let env = InMemoryEnv::new();
-    assert!(gateway_tier3_signing_pubkey(&env).is_none());
+    assert!(matches!(
+        gateway_tier3_signing_pubkey(&env),
+        Tier3SigningKey::NotConfigured
+    ));
 }
 
 #[test]
-fn tier3_signing_pubkey_returns_none_for_empty_string() {
+fn tier3_signing_pubkey_is_not_configured_for_empty_string() {
     // An empty value must surface as "no pubkey configured" rather
     // than a half-trusted invalid pubkey. Operators clearing the
     // env var to disable signing rely on this.
     let env = InMemoryEnv::new();
     env.set(ENV_GATEWAY_TIER3_SIGNING_PUBKEY, "   ");
-    assert!(gateway_tier3_signing_pubkey(&env).is_none());
+    assert!(matches!(
+        gateway_tier3_signing_pubkey(&env),
+        Tier3SigningKey::NotConfigured
+    ));
 }
 
 #[test]
-fn tier3_signing_pubkey_returns_none_for_invalid_hex() {
+fn tier3_signing_pubkey_is_invalid_not_unconfigured_for_bad_hex() {
+    // The distinction that matters: an operator who typo'd the key
+    // asked for verification and must not silently get none.
     let env = InMemoryEnv::new();
     env.set(ENV_GATEWAY_TIER3_SIGNING_PUBKEY, "not-hex");
-    assert!(gateway_tier3_signing_pubkey(&env).is_none());
+    assert!(matches!(gateway_tier3_signing_pubkey(&env), Tier3SigningKey::Invalid));
+}
+
+#[test]
+fn tier3_signing_pubkey_invalid_has_no_configured_projection() {
+    assert!(Tier3SigningKey::Invalid.into_configured().is_none());
+    assert!(Tier3SigningKey::NotConfigured.into_configured().is_none());
 }
 
 #[test]
 fn tier3_signing_pubkey_parses_valid_hex() {
     // Test ed25519 pubkey from the a2a-redaction fixtures (32-byte
-    // hex). Asserts the success path produces a `Some(_)` without
+    // hex). Asserts the success path produces a usable key without
     // hard-coding the inner type's debug shape.
     let env = InMemoryEnv::new();
     let hex = "abababababababababababababababababababababababababababababababab";
     env.set(ENV_GATEWAY_TIER3_SIGNING_PUBKEY, hex);
-    assert!(gateway_tier3_signing_pubkey(&env).is_some());
+    assert!(gateway_tier3_signing_pubkey(&env).into_configured().is_some());
 }
 
 #[test]
@@ -179,4 +193,19 @@ fn json_rpc_audit_req_id_returns_none_for_notification() {
 fn json_rpc_audit_req_id_returns_request_id_when_present() {
     let payload = br#"{"jsonrpc":"2.0","id":"req-42","method":"tasks/get","params":{}}"#;
     assert_eq!(json_rpc_audit_req_id(payload).as_deref(), Some("req-42"));
+}
+
+#[test]
+fn json_rpc_audit_req_id_renders_a_numeric_id_as_its_decimal_text() {
+    let payload = br#"{"jsonrpc":"2.0","id":42,"method":"tasks/get","params":{}}"#;
+    assert_eq!(json_rpc_audit_req_id(payload).as_deref(), Some("42"));
+}
+
+#[test]
+fn json_rpc_audit_req_id_matches_the_req_id_header_the_bridge_would_mint() {
+    // The audit row joins the request through `Trogon-Req-Id`, and the bridge
+    // mints that from a string id as its bare text. Quoting it here would
+    // produce a row that joins nothing.
+    let payload = br#"{"jsonrpc":"2.0","id":"corr-1","method":"tasks/get","params":{}}"#;
+    assert_eq!(json_rpc_audit_req_id(payload).as_deref(), Some("corr-1"));
 }

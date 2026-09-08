@@ -1,10 +1,8 @@
 use std::fmt;
 
+use crate::constants::{JETSTREAM_SCHEME_PREFIX, SUBJECT_SCHEME_PREFIX};
 use crate::push::nats_push_subject::{NatsPushSubject, NatsPushSubjectError};
 use crate::push::target::{WebhookUrl, WebhookUrlError};
-
-const SUBJECT_SCHEME_PREFIX: &str = "subject:";
-const JETSTREAM_SCHEME_PREFIX: &str = "jetstream:";
 
 /// Case-insensitive scheme prefix check — `WebhookUrl::new` (via `url::Url`)
 /// normalises the scheme anyway, so `HTTPS://…` should reach the webhook arm

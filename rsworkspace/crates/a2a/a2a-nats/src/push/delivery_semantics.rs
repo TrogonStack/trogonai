@@ -38,6 +38,13 @@ struct ExactlyOnceWire {
     idempotency_key_header: Option<String>,
 }
 
+/// The `deliverySemantics` member written back onto a push-config object.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DeliverySemanticsWire {
+    exactly_once: ExactlyOnceWire,
+}
+
 pub fn merged_request_delivery_semantics(
     delivery_semantics_json: Option<&Value>,
     exactly_once_delivery_json: Option<bool>,
@@ -115,17 +122,17 @@ pub fn upsert_delivery_semantics_on_push_config_json_object(
         DeliverySemantics::ExactlyOnce {
             idempotency_key_header: header,
         } => {
-            let inner = ExactlyOnceWire {
-                idempotency_key_header: header.as_ref().map(ToString::to_string),
+            let wire = DeliverySemanticsWire {
+                exactly_once: ExactlyOnceWire {
+                    idempotency_key_header: header.as_ref().map(ToString::to_string),
+                },
             };
-            // ExactlyOnceWire only holds an Option<String>; serde_json::to_value
-            // can't fail at runtime, so fall back to the empty body if the
-            // (impossible) error fires — never panic on push-config writes.
-            let body = serde_json::to_value(inner).unwrap_or(Value::Object(Default::default()));
-            map.insert(
-                "deliverySemantics".to_owned(),
-                serde_json::json!({ "exactlyOnce": body }),
-            );
+            // DeliverySemanticsWire only holds an Option<String>;
+            // serde_json::to_value can't fail at runtime, so fall back to the
+            // empty body if the (impossible) error fires - never panic on
+            // push-config writes.
+            let body = serde_json::to_value(wire).unwrap_or(Value::Object(Default::default()));
+            map.insert("deliverySemantics".to_owned(), body);
         }
     }
 }

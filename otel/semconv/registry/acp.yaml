@@ -42,10 +42,6 @@ groups:
               value: "client"
               brief: Client-directed operation.
               stability: development
-            - id: client_ext_session_prompt_response
-              value: "client.ext.session.prompt_response"
-              brief: Client extension prompt-response operation.
-              stability: development
         stability: development
         brief: ACP operation where an error occurred.
       - id: reason
@@ -98,14 +94,6 @@ groups:
             - id: client_backpressure_rejected
               value: "client_backpressure_rejected"
               brief: Rejected due to client backpressure.
-              stability: development
-            - id: missing_prompt_id
-              value: "missing_prompt_id"
-              brief: Prompt id was missing.
-              stability: development
-            - id: prompt_response_parse_failed
-              value: "prompt_response_parse_failed"
-              brief: Parsing the prompt response failed.
               stability: development
         stability: development
         brief: Reason code for the ACP error.
@@ -389,13 +377,6 @@ groups:
     brief: ACP client extension call.
     attributes:
       - ref: ext_method
-  - id: span.acp.client.ext.session.prompt_response
-    type: span
-    span_kind: internal
-    stability: development
-    brief: ACP client extension session prompt-response handling.
-    attributes:
-      - ref: session_id
   - id: span.dispatch_client_method
     type: span
     span_kind: internal

@@ -1,0 +1,30 @@
+error: unbounded channel created; a slow consumer queues messages until the process runs out of memory
+  --> $DIR/unbounded_channel.rs:8:13
+   |
+LL |     let _ = std::sync::mpsc::channel::<u8>();
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: give the queue an explicit capacity with `std::sync::mpsc::sync_channel(capacity)`, so a producer that outruns its consumer waits instead of allocating
+   = note: if the queue is bounded by something other than its capacity, opt out at the site with `#[cfg_attr(dylint_lib = "trogon_lints", allow(unbounded_channel, reason = "..."))]`
+   = note: `#[deny(unbounded_channel)]` on by default
+
+error: unbounded channel created; a slow consumer queues messages until the process runs out of memory
+  --> $DIR/unbounded_channel.rs:13:13
+   |
+LL |     let _ = mpsc::channel::<u8>();
+   |             ^^^^^^^^^^^^^^^^^^^
+   |
+   = help: give the queue an explicit capacity with `std::sync::mpsc::sync_channel(capacity)`, so a producer that outruns its consumer waits instead of allocating
+   = note: if the queue is bounded by something other than its capacity, opt out at the site with `#[cfg_attr(dylint_lib = "trogon_lints", allow(unbounded_channel, reason = "..."))]`
+
+error: unbounded channel created; a slow consumer queues messages until the process runs out of memory
+  --> $DIR/unbounded_channel.rs:48:13
+   |
+LL |     let _ = mpsc::channel::<u8>();
+   |             ^^^^^^^^^^^^^^^^^^^
+   |
+   = help: give the queue an explicit capacity with `std::sync::mpsc::sync_channel(capacity)`, so a producer that outruns its consumer waits instead of allocating
+   = note: if the queue is bounded by something other than its capacity, opt out at the site with `#[cfg_attr(dylint_lib = "trogon_lints", allow(unbounded_channel, reason = "..."))]`
+
+error: aborting due to 3 previous errors
+

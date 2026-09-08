@@ -1,4 +1,5 @@
 use super::*;
+use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore, StreamMaxAge,
 };
@@ -7,8 +8,7 @@ use trogon_std::NonZeroDuration;
 fn wrap_publisher(publisher: MockJetStreamPublisher) -> ClaimCheckPublisher<MockJetStreamPublisher, MockObjectStore> {
     ClaimCheckPublisher::new(
         publisher,
-        MockObjectStore::new(),
-        "test-bucket".to_string(),
+        ClaimBucketBinding::for_test(MockObjectStore::new(), ClaimBucket::default()),
         MaxPayload::from_server_limit(usize::MAX),
     )
 }

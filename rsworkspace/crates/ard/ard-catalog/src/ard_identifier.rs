@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-const URN_AIR_PREFIX: &str = "urn:air:";
+use crate::constants::URN_AIR_PREFIX;
 
 /// Error returned when [`ArdIdentifier`] validation fails.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

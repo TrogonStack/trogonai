@@ -1,7 +1,6 @@
 pub(crate) mod elicitation_complete;
 pub(crate) mod elicitation_create;
 pub(crate) mod ext;
-pub(crate) mod ext_session_prompt_response;
 pub(crate) mod fs_read_text_file;
 pub(crate) mod fs_write_text_file;
 pub(crate) mod request_permission;
@@ -27,9 +26,8 @@ use async_nats::Message;
 use async_nats::header::HeaderMap;
 use bytes::Bytes;
 use futures::StreamExt;
-use std::cell::Cell;
-use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tracing::{Span, error, info, instrument, warn};
 use trogon_semconv::attribute::SESSION_ID;
 use trogon_semconv::span::DISPATCH_CLIENT_METHOD;
@@ -64,23 +62,23 @@ async fn publish_backpressure_error_reply<N: PublishClient + FlushClient>(
 
 /// Runs the client proxy, subscribing to client subjects and dispatching to handlers.
 ///
-/// # Panics / Runtime requirement
-/// This function uses [`tokio::task::spawn_local`] internally and **must** be called from within
-/// a [`tokio::task::LocalSet`] (or any executor that supports `!Send` tasks). Calling it outside
-/// a `LocalSet` will panic at runtime when the first message is dispatched.
+/// Dispatch tasks are spawned with [`tokio::spawn`], so this runs on any multi-threaded
+/// runtime and does not require a [`tokio::task::LocalSet`].
 #[cfg_attr(coverage, coverage(off))]
 pub async fn run<
     N: SubscribeClient + RequestClient + PublishClient + FlushClient,
-    Cl: ClientHandler + Sync + 'static,
-    C: trogon_std::time::GetElapsed + 'static,
-    J: 'static,
+    Cl: ClientHandler + Send + Sync + 'static,
+    C: trogon_std::time::GetElapsed + Send + Sync + 'static,
+    J: Send + Sync + 'static,
 >(
     nats: N,
-    client: Rc<Cl>,
+    client: Arc<Cl>,
     bridge: Arc<Bridge<N, C, J>>,
-) {
+) where
+    C::Instant: Send,
+{
     let wildcard = crate::nats::subscriptions::AllClientSubject::new(bridge.config.acp_prefix_ref());
-    info!("Starting client proxy - subscribing to {}", wildcard);
+    info!(subject = %wildcard, "Starting client proxy");
 
     let mut subscriber = match nats.subscribe(wildcard).await {
         Ok(sub) => sub,
@@ -90,7 +88,7 @@ pub async fn run<
         }
     };
 
-    let in_flight = Rc::new(Cell::new(0usize));
+    let in_flight = Arc::new(AtomicUsize::new(0));
     let max_concurrent = bridge.config.max_concurrent_client_tasks();
 
     while let Some(msg) = subscriber.next().await {
@@ -103,17 +101,19 @@ pub async fn run<
 #[cfg_attr(coverage, coverage(off))]
 async fn process_message<
     N: SubscribeClient + RequestClient + PublishClient + FlushClient,
-    Cl: ClientHandler + Sync + 'static,
-    C: trogon_std::time::GetElapsed + 'static,
-    J: 'static,
+    Cl: ClientHandler + Send + Sync + 'static,
+    C: trogon_std::time::GetElapsed + Send + Sync + 'static,
+    J: Send + Sync + 'static,
 >(
     msg: Message,
     nats: &N,
-    client: Rc<Cl>,
+    client: Arc<Cl>,
     bridge: Arc<Bridge<N, C, J>>,
-    in_flight: &Rc<Cell<usize>>,
+    in_flight: &Arc<AtomicUsize>,
     max_concurrent: usize,
-) {
+) where
+    C::Instant: Send,
+{
     let subject = msg.subject.to_string();
 
     // Validate subject before backpressure so unrecognised methods always
@@ -130,7 +130,7 @@ async fn process_message<
     let reply = msg.reply.as_ref().map(|r| r.to_string());
     let headers = msg.headers.clone().unwrap_or_default();
 
-    let current_in_flight = in_flight.get();
+    let current_in_flight = in_flight.load(Ordering::Acquire);
     if current_in_flight >= max_concurrent {
         warn!(
             in_flight = current_in_flight,
@@ -147,7 +147,7 @@ async fn process_message<
     }
     let nats = nats.clone();
     let in_flight_guard = InFlightSlotGuard::new(in_flight.clone());
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         let _in_flight_guard = in_flight_guard;
         let ctx = DispatchContext {
             nats: &nats,
@@ -235,16 +235,6 @@ async fn dispatch_client_method<
         }
         ClientMethod::ElicitationComplete => {
             elicitation_complete::handle(headers, &payload, ctx.client, reply.is_some(), &ctx.bridge.metrics).await;
-        }
-        ClientMethod::ExtSessionPromptResponse => {
-            ext_session_prompt_response::handle(
-                parsed.session_id.as_str(),
-                headers,
-                &payload,
-                reply.as_deref(),
-                ctx.bridge,
-            )
-            .await;
         }
         ClientMethod::TerminalCreate => {
             terminal_create::handle(

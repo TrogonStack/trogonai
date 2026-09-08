@@ -32,10 +32,11 @@ use trogon_decider_runtime::{CommandExecution, ReadFrom, ReadStreamRequest, Stre
 use trogon_nats::NatsConfig;
 use trogon_nats::jetstream::JetStreamSubjectPurger;
 use trogon_std::env::{ReadEnv, SystemEnv};
+use trogon_std::{NowV7, UuidV7Generator};
 
 use super::checkpoints::{ReconcileOutcome, ScheduleCheckpointRecord, ScheduleCheckpointStore, ScheduleStatus};
 use super::execution_schedules::ExecutionScheduleWriter;
-use super::reconciliation::{ScheduleKey, ScheduleRequest, ScheduleSubject, StreamRoutingId};
+use super::reconciliation::{ScheduleRequest, ScheduleSubject};
 use super::wakeup::{RRuleWakeupOutcome, RRuleWakeupProcessor, rrule_wakeup_consumer_config};
 use super::worker::{ProcessedOutcome, ScheduleProcessor};
 use crate::CreateSchedule;
@@ -54,16 +55,15 @@ const EXECUTION_TARGET_SUBJECT: &str = "agent.run";
 #[derive(Clone)]
 struct ScheduleEventSubjectResolver;
 
-impl StreamSubjectResolver<str> for ScheduleEventSubjectResolver {
+impl StreamSubjectResolver<ScheduleId> for ScheduleEventSubjectResolver {
     type Error = StreamStoreError;
 
     async fn resolve_subject_state(
         &self,
         events_stream: &Stream,
-        stream_id: &str,
+        stream_id: &ScheduleId,
     ) -> Result<SubjectState, Self::Error> {
-        let key = ScheduleKey::for_stream(&StreamRoutingId::from(stream_id));
-        let subject = StreamSubject::new(ScheduleSubject::event(&key).as_str()).expect("event subject is valid");
+        let subject = StreamSubject::new(ScheduleSubject::event(stream_id).as_str()).expect("event subject is valid");
         let current_position = subject_current_position(events_stream, &subject).await?;
 
         Ok(SubjectState {
@@ -126,6 +126,10 @@ fn test_nonce() -> u128 {
         .duration_since(UNIX_EPOCH)
         .expect("system time is after the Unix epoch")
         .as_nanos()
+}
+
+fn test_schedule_id() -> ScheduleId {
+    UuidV7Generator.now_v7().into()
 }
 
 fn utc_seconds(datetime: chrono::DateTime<Utc>) -> String {
@@ -208,9 +212,8 @@ async fn purge_then_publish_converges_and_state_persists_against_live_nats() {
     let checkpoints = ScheduleCheckpointStore::new(checkpoint_kv);
 
     let nonce = test_nonce();
-    let id = ScheduleId::parse(&format!("orders/it-{nonce}")).unwrap();
-    let key = ScheduleKey::derive(&id);
-    let subject = ScheduleSubject::execution(&key);
+    let id = test_schedule_id();
+    let subject = ScheduleSubject::execution(&id);
     let request = request(&id);
 
     // Start from a clean subject.
@@ -255,7 +258,7 @@ async fn purge_then_publish_converges_and_state_persists_against_live_nats() {
     };
     checkpoints.save(&record, None).await.expect("checkpoint create");
     let loaded = checkpoints
-        .load(&record.key())
+        .load(record.key())
         .await
         .expect("checkpoint load")
         .expect("present");
@@ -277,9 +280,8 @@ async fn create_command_event_is_processed_into_a_live_execution_schedule() {
     let store = JetStreamStore::builder(context.clone(), events_stream.clone(), snapshot_kv)
         .with_subject_resolver(ScheduleEventSubjectResolver);
 
-    let id = ScheduleId::parse(&format!("orders/full-e2e-{}", test_nonce())).unwrap();
-    let key = ScheduleKey::derive(&id);
-    let subject = ScheduleSubject::execution(&key);
+    let id = test_schedule_id();
+    let subject = ScheduleSubject::execution(&id);
     execution_stream
         .purge_subject_messages(subject.as_str())
         .await
@@ -294,7 +296,7 @@ async fn create_command_event_is_processed_into_a_live_execution_schedule() {
 
     let read = store
         .read_stream(ReadStreamRequest {
-            stream_id: command.id.as_str(),
+            stream_id: &command.id,
             from: ReadFrom::Beginning,
         })
         .await
@@ -322,7 +324,7 @@ async fn create_command_event_is_processed_into_a_live_execution_schedule() {
     assert_eq!(last.subject.as_str(), subject.as_str());
 
     let checkpoint = ScheduleCheckpointStore::new(checkpoint_kv)
-        .load(&key)
+        .load(&id)
         .await
         .expect("checkpoint read")
         .expect("checkpoint persisted");
@@ -352,10 +354,9 @@ async fn rrule_command_event_is_processed_and_continued_against_live_nats() {
     let first_occurrence_text = utc_seconds(first_occurrence);
     let second_occurrence_text = utc_seconds(second_occurrence);
 
-    let id = ScheduleId::parse(&format!("orders/rrule-e2e-{}", test_nonce())).unwrap();
-    let key = ScheduleKey::derive(&id);
-    let subject = ScheduleSubject::execution(&key);
-    let wakeup_subject = ScheduleSubject::rrule_wakeup(&key);
+    let id = test_schedule_id();
+    let subject = ScheduleSubject::execution(&id);
+    let wakeup_subject = ScheduleSubject::rrule_wakeup(&id);
     execution_stream
         .purge_subject_messages(subject.as_str())
         .await
@@ -375,7 +376,7 @@ async fn rrule_command_event_is_processed_and_continued_against_live_nats() {
 
     let read = store
         .read_stream(ReadStreamRequest {
-            stream_id: command.id.as_str(),
+            stream_id: &command.id,
             from: ReadFrom::Beginning,
         })
         .await
@@ -401,7 +402,7 @@ async fn rrule_command_event_is_processed_and_continued_against_live_nats() {
 
     let read = store
         .read_stream(ReadStreamRequest {
-            stream_id: command.id.as_str(),
+            stream_id: &command.id,
             from: ReadFrom::Beginning,
         })
         .await
@@ -433,7 +434,7 @@ async fn rrule_command_event_is_processed_and_continued_against_live_nats() {
         first.payload.as_ref(),
         format!(
             r#"{{"schedule_id":"{}","occurrence_at":"{first_occurrence_text}"}}"#,
-            id.as_str()
+            id
         )
         .as_bytes()
     );
@@ -455,7 +456,7 @@ async fn rrule_command_event_is_processed_and_continued_against_live_nats() {
     // schedule aggregate stream: ScheduleOccurrenceRecorded + ScheduleOccurrenceScheduled.
     let read = store
         .read_stream(ReadStreamRequest {
-            stream_id: command.id.as_str(),
+            stream_id: &command.id,
             from: ReadFrom::Beginning,
         })
         .await
@@ -519,7 +520,7 @@ async fn rrule_command_event_is_processed_and_continued_against_live_nats() {
     // The final occurrence records and completes: ScheduleOccurrenceRecorded + ScheduleCompleted.
     let read = store
         .read_stream(ReadStreamRequest {
-            stream_id: command.id.as_str(),
+            stream_id: &command.id,
             from: ReadFrom::Beginning,
         })
         .await
@@ -540,7 +541,7 @@ async fn rrule_command_event_is_processed_and_continued_against_live_nats() {
     assert_eq!(expired.outcome, ProcessedOutcome::Expired);
 
     let checkpoint = checkpoints
-        .load(&key)
+        .load(&id)
         .await
         .expect("checkpoint read")
         .expect("checkpoint persisted");

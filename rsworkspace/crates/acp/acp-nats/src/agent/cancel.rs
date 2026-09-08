@@ -37,7 +37,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: GetElapsed, J>(
     let prefix = bridge.config.acp_prefix_ref();
     let subject = commands::CancelSubject::new(prefix, &session_id);
 
-    let publish_result = match encode_notification(SessionAgentMethod::Cancel.wire_method(), &args) {
+    let publish_result = match encode_notification(SessionAgentMethod::Cancel.protocol_method(), &args) {
         Ok(encoded) => {
             nats::publish_wire(
                 bridge.nats(),

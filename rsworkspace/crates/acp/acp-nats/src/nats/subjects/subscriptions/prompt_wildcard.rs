@@ -12,7 +12,7 @@ impl PromptWildcardSubject {
 
 impl std::fmt::Display for PromptWildcardSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.session.*.agent.prompt", self.prefix.as_str())
+        write!(f, "{}.v1.session.*.agent.prompt", self.prefix.as_str())
     }
 }
 
@@ -40,7 +40,7 @@ mod tests {
     #[test]
     fn display_formats_subject_correctly() {
         let s = PromptWildcardSubject::new(&prefix());
-        assert_eq!(s.to_string(), "acp.session.*.agent.prompt");
+        assert_eq!(s.to_string(), "acp.v1.session.*.agent.prompt");
     }
 
     #[test]

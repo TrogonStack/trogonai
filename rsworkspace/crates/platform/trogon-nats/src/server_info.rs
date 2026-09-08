@@ -24,13 +24,13 @@ impl ServerInfoSource for Client {
 /// The server `INFO` did not arrive within the allotted time.
 #[derive(Debug, thiserror::Error)]
 #[error("timed out after {0:?} waiting for NATS server INFO")]
-pub struct ServerInfoTimeout(pub Duration);
+pub struct ServerInfoTimeoutError(pub Duration);
 
 /// Waits until the server `INFO` is available, polling every `poll_interval`.
 ///
 /// `async_nats` does not expose the `INFO` watch channel, so readiness is
 /// observed by polling [`ServerInfoSource::try_server_info`]. Returns
-/// [`ServerInfoTimeout`] if no `INFO` arrives within `timeout`.
+/// [`ServerInfoTimeoutError`] if no `INFO` arrives within `timeout`.
 ///
 /// `poll_interval` must be non-zero; a zero interval would busy-loop and is
 /// clamped to 1ms.
@@ -38,7 +38,7 @@ pub async fn wait_for_server_info<S>(
     source: &S,
     timeout: Duration,
     poll_interval: Duration,
-) -> Result<ServerInfo, ServerInfoTimeout>
+) -> Result<ServerInfo, ServerInfoTimeoutError>
 where
     S: ServerInfoSource + ?Sized,
 {
@@ -53,7 +53,7 @@ where
         }
     })
     .await
-    .map_err(|_| ServerInfoTimeout(timeout))
+    .map_err(|_| ServerInfoTimeoutError(timeout))
 }
 
 #[cfg(test)]

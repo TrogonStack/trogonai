@@ -44,9 +44,8 @@ fn agent_claims_serde() {
         iat: 100,
         exp: 200,
         dwk: DWK_AGENT.into(),
-        cnf: Cnf {
-            jwk: serde_json::json!({"kty": "EC", "crv": "P-256", "x": "X", "y": "Y"}),
-        },
+        cnf: Cnf::public(serde_json::json!({"kty": "EC", "crv": "P-256", "x": "X", "y": "Y"}))
+            .expect("test fixture is a public jwk"),
         ps: Some("https://ps.example".into()),
     };
     let j = serde_json::to_value(&c).unwrap();
@@ -237,4 +236,168 @@ fn requirement_header_round_trips_agent_token() {
 fn split_header_skips_empty_segments_from_stray_semicolons() {
     let raw = "requirement=clarification;;  ;";
     assert_eq!(Requirement::parse(raw), Requirement::Clarification);
+}
+
+#[test]
+fn cnf_public_accepts_an_ec_public_jwk() {
+    let jwk = serde_json::json!({"kty": "EC", "crv": "P-256", "x": "AAA", "y": "BBB"});
+    let cnf = Cnf::public(jwk.clone()).expect("public jwk accepted");
+    assert_eq!(cnf.jwk(), &jwk);
+}
+
+#[test]
+fn cnf_public_rejects_ec_private_scalar() {
+    // The mistake this guards: serializing a keypair instead of its public
+    // half puts `d` in a token that is handed to every resource server.
+    let jwk = serde_json::json!({"kty": "EC", "crv": "P-256", "x": "AAA", "y": "BBB", "d": "SECRET"});
+    assert_eq!(
+        Cnf::public(jwk).unwrap_err(),
+        CnfError::PrivateKeyMaterial { member: "d" }
+    );
+}
+
+#[test]
+fn cnf_public_rejects_rsa_crt_parameters() {
+    for member in ["p", "q", "dp", "dq", "qi", "oth"] {
+        let mut jwk = serde_json::json!({"kty": "RSA", "n": "AAA", "e": "AQAB"});
+        jwk[member] = serde_json::json!("SECRET");
+        assert_eq!(
+            Cnf::public(jwk).unwrap_err(),
+            CnfError::PrivateKeyMaterial { member },
+            "{member} must be refused"
+        );
+    }
+}
+
+#[test]
+fn cnf_public_rejects_okp_private_scalar() {
+    let jwk = serde_json::json!({"kty": "OKP", "crv": "Ed25519", "x": "AAA", "d": "SECRET"});
+    assert_eq!(
+        Cnf::public(jwk).unwrap_err(),
+        CnfError::PrivateKeyMaterial { member: "d" }
+    );
+}
+
+#[test]
+fn cnf_public_rejects_symmetric_keys_by_kty() {
+    // Checked before the member scan so an `oct` key is refused even when
+    // `k` is absent: there is no public half of a symmetric key to carry.
+    let jwk = serde_json::json!({"kty": "oct"});
+    assert_eq!(Cnf::public(jwk).unwrap_err(), CnfError::SymmetricKey);
+    let upper = serde_json::json!({"kty": "OCT", "k": "SECRET"});
+    assert_eq!(Cnf::public(upper).unwrap_err(), CnfError::SymmetricKey);
+}
+
+#[test]
+fn cnf_public_rejects_non_object_jwk() {
+    for value in [
+        serde_json::json!("not-a-jwk"),
+        serde_json::json!(null),
+        serde_json::json!([{"kty": "EC"}]),
+    ] {
+        assert_eq!(Cnf::public(value).unwrap_err(), CnfError::NotAnObject);
+    }
+}
+
+#[test]
+fn cnf_public_accepts_the_other_supported_key_types() {
+    for jwk in [
+        serde_json::json!({"kty": "RSA", "n": "AAA", "e": "AQAB"}),
+        serde_json::json!({"kty": "OKP", "crv": "Ed25519", "x": "AAA"}),
+    ] {
+        Cnf::public(jwk.clone()).unwrap_or_else(|e| panic!("{jwk} must be accepted, got {e}"));
+    }
+}
+
+#[test]
+fn cnf_public_rejects_a_jwk_with_no_kty() {
+    let jwk = serde_json::json!({"crv": "P-256", "x": "AAA", "y": "BBB"});
+    assert_eq!(Cnf::public(jwk).unwrap_err(), CnfError::MissingKeyType);
+    let non_string = serde_json::json!({"kty": 256, "x": "AAA"});
+    assert_eq!(Cnf::public(non_string).unwrap_err(), CnfError::MissingKeyType);
+}
+
+#[test]
+fn cnf_public_rejects_a_key_type_it_cannot_check() {
+    // Anything outside the three known types would sail past the member scan
+    // with nothing verified, so it is refused rather than waved through.
+    let jwk = serde_json::json!({"kty": "ec", "crv": "P-256", "x": "AAA", "y": "BBB"});
+    assert_eq!(
+        Cnf::public(jwk).unwrap_err(),
+        CnfError::UnsupportedKeyType { kty: "ec".to_owned() }
+    );
+}
+
+#[test]
+fn cnf_public_rejects_a_jwk_missing_a_member_its_key_type_needs() {
+    // The failure this guards is silent at issuance: the token verifies, and
+    // every proof of possession against it fails at the resource instead.
+    let cases = [
+        (serde_json::json!({"kty": "EC", "x": "AAA", "y": "BBB"}), "EC", "crv"),
+        (serde_json::json!({"kty": "EC", "crv": "P-256", "y": "BBB"}), "EC", "x"),
+        (serde_json::json!({"kty": "EC", "crv": "P-256", "x": "AAA"}), "EC", "y"),
+        (serde_json::json!({"kty": "RSA", "e": "AQAB"}), "RSA", "n"),
+        (serde_json::json!({"kty": "RSA", "n": "AAA"}), "RSA", "e"),
+        (serde_json::json!({"kty": "OKP", "x": "AAA"}), "OKP", "crv"),
+        (serde_json::json!({"kty": "OKP", "crv": "Ed25519"}), "OKP", "x"),
+    ];
+    for (jwk, kty, member) in cases {
+        assert_eq!(
+            Cnf::public(jwk).unwrap_err(),
+            CnfError::UnusablePublicMember { kty, member },
+            "{kty} without {member} must be refused"
+        );
+    }
+}
+
+#[test]
+fn cnf_public_rejects_a_required_member_that_is_present_but_unusable() {
+    // Present-but-empty and present-but-not-a-string are the same defect as
+    // absent: nothing a verifier can build a key from.
+    for x in [serde_json::json!(""), serde_json::json!(0), serde_json::json!(null)] {
+        let jwk = serde_json::json!({"kty": "EC", "crv": "P-256", "x": x, "y": "BBB"});
+        assert_eq!(
+            Cnf::public(jwk).unwrap_err(),
+            CnfError::UnusablePublicMember { kty: "EC", member: "x" }
+        );
+    }
+}
+
+#[test]
+fn cnf_still_deserializes_a_peer_supplied_confirmation_claim() {
+    // The verifier read path must stay lenient: rejecting a peer's own `cnf`
+    // at parse time is not this type's call, and the guard is issuer-side.
+    let raw = r#"{"jwk":{"kty":"EC","crv":"P-256","x":"AAA","y":"BBB","d":"THEIRS"}}"#;
+    let cnf: Cnf = serde_json::from_str(raw).expect("inbound cnf parses");
+    assert!(cnf.jwk().get("d").is_some());
+}
+
+#[test]
+fn cnf_debug_does_not_print_the_key_it_holds() {
+    // Reached through the lenient inbound path, so `d` is present: this is
+    // exactly the shape whose Debug output must stay clean.
+    let raw = r#"{"jwk":{"kty":"EC","crv":"P-256","kid":"peer-1","x":"PUBX","y":"PUBY","d":"THEIRS"}}"#;
+    let cnf: Cnf = serde_json::from_str(raw).expect("inbound cnf parses");
+
+    let printed = format!("{cnf:?}");
+    for secret in ["THEIRS", "PUBX", "PUBY"] {
+        assert!(!printed.contains(secret), "{printed}");
+    }
+    // Still says which key it is, or the redaction costs every log line its
+    // diagnostic value.
+    assert!(printed.contains("peer-1"), "{printed}");
+    assert!(printed.contains("P-256"), "{printed}");
+}
+
+#[test]
+fn cnf_debug_omits_members_it_does_not_recognise() {
+    // The allow-list is the point: a member added to a future key type must be
+    // withheld until someone decides it is safe to print.
+    let raw = r#"{"jwk":{"kty":"OKP","crv":"Ed25519","x":"AAA","some_future_member":"UNVETTED"}}"#;
+    let cnf: Cnf = serde_json::from_str(raw).expect("inbound cnf parses");
+
+    let printed = format!("{cnf:?}");
+    assert!(!printed.contains("UNVETTED"), "{printed}");
+    assert!(!printed.contains("some_future_member"), "{printed}");
+    assert!(printed.contains(".."), "{printed}");
 }

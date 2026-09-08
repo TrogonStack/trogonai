@@ -18,7 +18,7 @@ impl std::fmt::Display for SetModelSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.session.{}.agent.set_model",
+            "{}.v1.session.{}.agent.set_model",
             self.prefix.as_str(),
             self.session_id.as_str()
         )
@@ -52,7 +52,7 @@ mod tests {
     #[test]
     fn display_formats_subject_correctly() {
         let s = SetModelSubject::new(&prefix(), &session_id());
-        assert_eq!(s.to_string(), "acp.session.ses1.agent.set_model");
+        assert_eq!(s.to_string(), "acp.v1.session.ses1.agent.set_model");
     }
 
     #[test]

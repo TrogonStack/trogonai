@@ -3,7 +3,6 @@ use jsonrpc_nats::{Direction, Message, RequestId, ResponseId, decode, encode, to
 use serde::{Deserialize, Serialize};
 
 use super::*;
-use crate::jsonrpc::JsonRpcId;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 struct DummyParams {
@@ -17,9 +16,10 @@ struct DummyResult {
 
 #[test]
 fn encode_client_request_puts_id_in_header_and_params_in_body() {
-    let encoded = encode_client_request("tasks/get", JsonRpcId::Number(1), &DummyParams { value: "x".into() }).unwrap();
+    let encoded = encode_client_request("tasks/get", RequestId::Number(1), &DummyParams { value: "x".into() }).unwrap();
     assert!(encoded.headers.get(jsonrpc_nats::HEADER_ID).is_some());
-    let params: DummyParams = serde_json::from_slice(&encoded.body).unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&encoded.body).unwrap();
+    let params: DummyParams = serde_json::from_value(body["params"].clone()).unwrap();
     assert_eq!(params.value, "x");
 }
 
@@ -55,7 +55,7 @@ fn decode_client_error_response() {
 fn roundtrip_reconstructs_canonical_json_at_edge() {
     let encoded = encode_client_request(
         "tasks/get",
-        JsonRpcId::String("abc".into()),
+        RequestId::String("abc".into()),
         &DummyParams { value: "x".into() },
     )
     .unwrap();
@@ -66,9 +66,34 @@ fn roundtrip_reconstructs_canonical_json_at_edge() {
 }
 
 #[test]
+fn map_wire_error_carries_every_variant_across_without_flattening() {
+    let source = serde_json::from_str::<DummyResult>("{}").unwrap_err();
+    assert!(matches!(
+        map_wire_error(WireError::Deserialize(source)),
+        ClientError::Deserialize(_)
+    ));
+
+    let source = serde_json::from_str::<DummyResult>("{}").unwrap_err();
+    assert!(matches!(
+        map_wire_error(WireError::Serialize(source)),
+        ClientError::Serialize(_)
+    ));
+
+    assert!(matches!(
+        map_wire_error(WireError::Codec(jsonrpc_nats::CodecError::RequestWithoutId)),
+        ClientError::Codec(_)
+    ));
+
+    assert!(matches!(
+        map_wire_error(WireError::UnexpectedMessage),
+        ClientError::UnexpectedMessage
+    ));
+}
+
+#[test]
 fn merge_headers_overlays_jsonrpc_fields() {
     let mut base = HeaderMap::new();
-    base.insert("X-Req-Id", "transport");
+    base.insert("Trogon-Req-Id", "transport");
     let encoded = encode(&Message::Request {
         id: RequestId::String("abc".into()),
         method: "tasks/get".into(),
@@ -76,12 +101,6 @@ fn merge_headers_overlays_jsonrpc_fields() {
     })
     .unwrap();
     let merged = merge_jsonrpc_headers(base, encoded.headers);
-    assert_eq!(merged.get("X-Req-Id").unwrap().as_str(), "transport");
+    assert_eq!(merged.get("Trogon-Req-Id").unwrap().as_str(), "transport");
     assert!(merged.get(jsonrpc_nats::HEADER_ID).is_some());
-}
-
-#[test]
-fn encode_client_request_rejects_null_id() {
-    let err = encode_client_request("tasks/get", JsonRpcId::Null, &DummyParams { value: "x".into() }).unwrap_err();
-    assert!(matches!(err, WireError::Codec(_)));
 }

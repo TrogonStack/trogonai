@@ -16,7 +16,7 @@ impl ExtNotifySubject {
 
 impl std::fmt::Display for ExtNotifySubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.agent.ext.{}", self.prefix.as_str(), self.method)
+        write!(f, "{}.v1.global.agent.ext.{}", self.prefix.as_str(), self.method)
     }
 }
 
@@ -40,6 +40,6 @@ mod tests {
     #[test]
     fn display_formats_subject_correctly() {
         let s = ExtNotifySubject::new(&prefix(), &method());
-        assert_eq!(s.to_string(), "acp.agent.ext.notify_op");
+        assert_eq!(s.to_string(), "acp.v1.global.agent.ext.notify_op");
     }
 }

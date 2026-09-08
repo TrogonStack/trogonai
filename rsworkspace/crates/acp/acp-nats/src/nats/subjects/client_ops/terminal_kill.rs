@@ -18,7 +18,7 @@ impl std::fmt::Display for TerminalKillSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.session.{}.client.terminal.kill",
+            "{}.v1.session.{}.client.terminal.kill",
             self.prefix.as_str(),
             self.session_id.as_str()
         )
@@ -45,6 +45,6 @@ mod tests {
     #[test]
     fn display_formats_subject_correctly() {
         let s = TerminalKillSubject::new(&prefix(), &session_id());
-        assert_eq!(s.to_string(), "acp.session.ses1.client.terminal.kill");
+        assert_eq!(s.to_string(), "acp.v1.session.ses1.client.terminal.kill");
     }
 }

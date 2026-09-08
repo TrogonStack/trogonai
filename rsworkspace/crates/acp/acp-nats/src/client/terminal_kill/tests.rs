@@ -99,7 +99,7 @@ async fn handle_client_error_publishes_error_reply() {
     assert!(published_headers.get(jsonrpc_nats::HEADER_ERROR_CODE).is_some());
     let payloads = nats.published_payloads();
     let body: serde_json::Value = serde_json::from_slice(payloads[0].as_ref()).unwrap();
-    assert_eq!(body["message"], "mock kill_terminal failure");
+    assert_eq!(body["error"]["message"], "mock kill_terminal failure");
 }
 
 #[tokio::test]

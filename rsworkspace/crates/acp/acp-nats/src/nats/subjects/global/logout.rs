@@ -12,7 +12,7 @@ impl LogoutSubject {
 
 impl std::fmt::Display for LogoutSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.agent.logout", self.prefix.as_str())
+        write!(f, "{}.v1.global.agent.logout", self.prefix.as_str())
     }
 }
 
@@ -33,6 +33,6 @@ mod tests {
     #[test]
     fn display_formats_subject_correctly() {
         let s = LogoutSubject::new(&prefix());
-        assert_eq!(s.to_string(), "acp.agent.logout");
+        assert_eq!(s.to_string(), "acp.v1.global.agent.logout");
     }
 }

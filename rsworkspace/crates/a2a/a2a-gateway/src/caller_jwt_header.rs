@@ -4,4 +4,5 @@
 //! this crate don't need a direct dependency on `a2a-auth-callout` just to
 //! reference the header name or parse the header value.
 
-pub use a2a_auth_callout::caller_jwt_header::{CALLER_JWT_HEADER_NAME, CallerJwtHeaderValue};
+pub use a2a_auth_callout::caller_jwt_header::CallerJwtHeaderValue;
+pub use a2a_auth_callout::constants::CALLER_JWT_HEADER_NAME;

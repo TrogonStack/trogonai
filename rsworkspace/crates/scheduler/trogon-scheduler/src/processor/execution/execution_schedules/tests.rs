@@ -7,11 +7,11 @@ use async_nats::subject::ToSubject;
 use trogon_nats::jetstream::{MockJetStreamPublisher, MockJetStreamPurger};
 
 use super::*;
-use crate::commands::domain::{Delivery, MessageContent, Schedule, ScheduleHeaders, ScheduleId, ScheduleMessage};
+use crate::commands::domain::{Delivery, MessageContent, Schedule, ScheduleHeaders, ScheduleMessage};
 
 fn request() -> ScheduleRequest {
     ScheduleRequest::build(
-        &ScheduleId::parse("orders/created").unwrap(),
+        &crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c01").unwrap(),
         &Schedule::every(std::time::Duration::from_secs(30)).unwrap(),
         &Delivery::nats_event("agent.run").unwrap(),
         &ScheduleMessage {
@@ -24,7 +24,7 @@ fn request() -> ScheduleRequest {
 
 fn dispatch_request() -> DispatchRequest {
     DispatchRequest::build(
-        &ScheduleId::parse("orders/created").unwrap(),
+        &crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c01").unwrap(),
         &Delivery::nats_event("agent.run").unwrap(),
         &ScheduleMessage {
             content: MessageContent::json(r#"{"ok":true}"#),

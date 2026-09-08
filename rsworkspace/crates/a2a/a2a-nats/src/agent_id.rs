@@ -1,11 +1,11 @@
 //! NATS-safe agent identifier value object.
 //!
 //! Agent IDs identify a deployed A2A agent and are embedded as a single NATS subject token:
-//! `{prefix}.agents.{agent_id}.message.send`. Multiple replicas of an agent share the same
-//! agent_id and participate in a NATS queue group on `{prefix}.agents.{agent_id}.>`.
+//! `{prefix}.v1.agents.{agent_id}.message.send`. Multiple replicas of an agent share the same
+//! agent_id and participate in a NATS queue group on `{prefix}.v1.agents.{agent_id}.>`.
 
 use trogon_nats::NatsToken;
-use trogon_nats::SubjectTokenViolation;
+use trogon_nats::SubjectTokenViolationError;
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum AgentIdError {
@@ -17,12 +17,12 @@ pub enum AgentIdError {
     TooLong(usize),
 }
 
-impl From<SubjectTokenViolation> for AgentIdError {
-    fn from(violation: SubjectTokenViolation) -> Self {
+impl From<SubjectTokenViolationError> for AgentIdError {
+    fn from(violation: SubjectTokenViolationError) -> Self {
         match violation {
-            SubjectTokenViolation::Empty => Self::Empty,
-            SubjectTokenViolation::InvalidCharacter(ch) => Self::InvalidCharacter(ch),
-            SubjectTokenViolation::TooLong(len) => Self::TooLong(len),
+            SubjectTokenViolationError::Empty => Self::Empty,
+            SubjectTokenViolationError::InvalidCharacter(ch) => Self::InvalidCharacter(ch),
+            SubjectTokenViolationError::TooLong(len) => Self::TooLong(len),
         }
     }
 }

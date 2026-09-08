@@ -1,0 +1,63 @@
+edition = "2024";
+
+package trogonai.session.sessions.maintenance.v1alpha1;
+
+// Value types shared by the Session maintenance workflows: migration and
+// salvage.
+//
+// Redefined here rather than imported from the write side, following the rule
+// ADR#0035 facet 3 applies to the state, projections, and checkpoints subtrees.
+// A maintenance record outlives the schema it was written under -- that is the
+// entire point of migration provenance -- so it must not be pinned to a
+// write-side type that a migration is free to change.
+
+// StreamBoundary names an exact cut of one session's own logical stream: how
+// far it extends and what the content at that extent is.
+//
+// Both workflows pin against one, and every indeterminate outcome is ultimately
+// the statement that an observed boundary did not match an expected one.
+message StreamBoundary {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The 1-indexed SessionOrdinal of the last event in the cut. Fold-derived,
+  // never a JetStream sequence, so it survives restore and relocation.
+  uint64 ordinal = 2 [features.field_presence = LEGACY_REQUIRED];
+  ContentDigest content_digest = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Which incarnation of the physical stream this cut was taken from: the
+  // subject token that isolates one incarnation's subject space from the next,
+  // per ADR#0059. Required, because an unset incarnation is not "the same
+  // incarnation" and a comparison against one can never fail.
+  //
+  // A migration's source names the retiring incarnation and its expected target
+  // names the new one. Two boundaries carrying different incarnations are not
+  // comparable by ordinal, and treating them as comparable is the failure
+  // INDETERMINATE_REASON_SOURCE_INCARNATION_CHANGED exists to report.
+  string incarnation = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// ContentDigest commits to the event bytes exactly as the log stores them.
+//
+// Never to a re-serialization. Protobuf encoding is not canonical, so a digest
+// taken over a decode-then-re-encode round trip would not reproduce, and a
+// workflow whose central check is "is this the same content" cannot be built on
+// a comparison that fails against bytes the system itself wrote.
+message ContentDigest {
+  string algorithm = 1 [features.field_presence = LEGACY_REQUIRED];
+  bytes value = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// OrderProof is how well the authoritative order of a source cut is known.
+//
+// A salvage that cannot establish order cannot produce a session, because a
+// transcript in the wrong order is worse than no transcript: it reads as
+// authoritative and is wrong.
+enum OrderProof {
+  ORDER_PROOF_UNSPECIFIED = 0;
+  // Every position from 1 to the boundary is present and decoded.
+  ORDER_PROOF_CONTIGUOUS = 1;
+  // Positions are missing, and every surviving event decoded and carries its
+  // own position, so the relative order of what survives is known. The missing
+  // positions are enumerated as omissions.
+  ORDER_PROOF_GAPPED = 2;
+  // Order could not be established. Fail closed.
+  ORDER_PROOF_UNPROVEN = 3;
+}

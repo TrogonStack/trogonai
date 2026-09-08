@@ -1,8 +1,5 @@
 use ard_catalog::ArdStorageKey;
-use trogon_nats::{NatsToken, SubjectTokenViolation};
-
-pub const CATALOG_KV_BUCKET: &str = "ARD_CATALOG";
-pub const CATALOG_EVENT_STREAM: &str = "ARD_CATALOG_EVENTS";
+use trogon_nats::{NatsToken, SubjectTokenViolationError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CatalogSubjectKind {
@@ -30,7 +27,7 @@ pub struct CatalogEventSubject {
 }
 
 impl CatalogEventSubject {
-    pub fn new(kind: CatalogSubjectKind, storage_key: &ArdStorageKey) -> Result<Self, SubjectTokenViolation> {
+    pub fn new(kind: CatalogSubjectKind, storage_key: &ArdStorageKey) -> Result<Self, SubjectTokenViolationError> {
         Ok(Self {
             storage_key: NatsToken::new(storage_key.as_str())?,
             kind,

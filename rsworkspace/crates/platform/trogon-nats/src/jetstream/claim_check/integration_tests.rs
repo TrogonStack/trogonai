@@ -29,14 +29,20 @@ impl MaxPayloadLimit for DynamicMaxPayload {
     }
 }
 
+/// A fake store has no bucket to open, so these tests assert the pair by hand.
+/// Production code has no such constructor: it gets a binding from opening the
+/// bucket, which is the whole point of the type.
+fn test_binding<S>(store: S) -> ClaimBucketBinding<S> {
+    ClaimBucketBinding::for_test(store, ClaimBucket::new("test-bucket").expect("valid bucket name"))
+}
+
 #[tokio::test]
 async fn small_payload_publishes_directly() {
     let publisher = MockJetStreamPublisher::new();
     let store = MockObjectStore::new();
     let cc = ClaimCheckPublisher::new(
         publisher.clone(),
-        store.clone(),
-        "test-bucket".to_string(),
+        test_binding(store.clone()),
         MaxPayload::from_server_limit(1024 + PROTOCOL_OVERHEAD),
     );
 
@@ -62,8 +68,7 @@ async fn large_payload_stores_in_object_store_and_publishes_claim() {
     let store = MockObjectStore::new();
     let cc = ClaimCheckPublisher::new(
         publisher.clone(),
-        store.clone(),
-        "test-bucket".to_string(),
+        test_binding(store.clone()),
         MaxPayload::from_server_limit(1024 + PROTOCOL_OVERHEAD),
     );
 
@@ -104,8 +109,7 @@ async fn payload_at_exact_threshold_publishes_directly() {
     let store = MockObjectStore::new();
     let cc = ClaimCheckPublisher::new(
         publisher.clone(),
-        store.clone(),
-        "test-bucket".to_string(),
+        test_binding(store.clone()),
         MaxPayload::from_server_limit(1024 + PROTOCOL_OVERHEAD),
     );
 
@@ -128,12 +132,7 @@ async fn publish_uses_current_max_payload_limit() {
     let publisher = MockJetStreamPublisher::new();
     let store = MockObjectStore::new();
     let max_payload = DynamicMaxPayload::new(1024 + PROTOCOL_OVERHEAD);
-    let cc = ClaimCheckPublisher::new(
-        publisher.clone(),
-        store.clone(),
-        "test-bucket".to_string(),
-        max_payload.clone(),
-    );
+    let cc = ClaimCheckPublisher::new(publisher.clone(), test_binding(store.clone()), max_payload.clone());
 
     let direct = cc
         .publish_event(
@@ -170,8 +169,7 @@ async fn object_store_failure_returns_store_failed() {
     store.fail_next_put();
     let cc = ClaimCheckPublisher::new(
         publisher.clone(),
-        store,
-        "test-bucket".to_string(),
+        test_binding(store),
         MaxPayload::from_server_limit(1024 + PROTOCOL_OVERHEAD),
     );
 
@@ -194,8 +192,7 @@ async fn large_payload_preserves_original_headers() {
     let store = MockObjectStore::new();
     let cc = ClaimCheckPublisher::new(
         publisher.clone(),
-        store,
-        "test-bucket".to_string(),
+        test_binding(store),
         MaxPayload::from_server_limit(1024 + PROTOCOL_OVERHEAD),
     );
 
@@ -258,8 +255,7 @@ async fn small_payload_strips_claim_headers() {
     let store = MockObjectStore::new();
     let cc = ClaimCheckPublisher::new(
         publisher.clone(),
-        store.clone(),
-        "test-bucket".to_string(),
+        test_binding(store.clone()),
         MaxPayload::from_server_limit(1024 + PROTOCOL_OVERHEAD),
     );
 
@@ -285,4 +281,154 @@ async fn small_payload_strips_claim_headers() {
     assert!(msg.headers.get(HEADER_CLAIM_BUCKET).is_none());
     assert!(msg.headers.get(HEADER_CLAIM_KEY).is_none());
     assert!(store.stored_objects().is_empty());
+}
+
+#[tokio::test]
+async fn resolver_returns_payload_when_message_has_no_headers() {
+    let resolver = ClaimResolver::new(test_binding(MockObjectStore::new()));
+    let payload = Bytes::from("raw data");
+
+    let result = resolver.resolve(None, payload.clone()).await;
+    assert_eq!(result.unwrap(), payload);
+}
+
+#[tokio::test]
+async fn resolver_returns_payload_when_headers_carry_no_claim() {
+    let resolver = ClaimResolver::new(test_binding(MockObjectStore::new()));
+    let headers = HeaderMap::new();
+    let payload = Bytes::from("raw data");
+
+    let result = resolver.resolve(Some(&headers), payload.clone()).await;
+    assert_eq!(result.unwrap(), payload);
+}
+
+#[tokio::test]
+async fn resolver_redeems_a_claim_from_its_bucket() {
+    let store = MockObjectStore::new();
+    let expected = Bytes::from("offloaded body");
+    store.seed("test.subject/some-id", expected.clone());
+    let resolver = ClaimResolver::new(test_binding(store));
+
+    let mut headers = HeaderMap::new();
+    headers.insert(HEADER_CLAIM_CHECK, CLAIM_CHECK_VERSION);
+    headers.insert(HEADER_CLAIM_BUCKET, "test-bucket");
+    headers.insert(HEADER_CLAIM_KEY, "test.subject/some-id");
+
+    let result = resolver.resolve(Some(&headers), Bytes::new()).await;
+    assert_eq!(result.unwrap(), expected);
+}
+
+#[tokio::test]
+async fn resolver_redeems_a_claim_that_names_no_bucket() {
+    let store = MockObjectStore::new();
+    let expected = Bytes::from("offloaded body");
+    store.seed("test.subject/some-id", expected.clone());
+    let resolver = ClaimResolver::new(test_binding(store));
+
+    let mut headers = HeaderMap::new();
+    headers.insert(HEADER_CLAIM_CHECK, CLAIM_CHECK_VERSION);
+    headers.insert(HEADER_CLAIM_KEY, "test.subject/some-id");
+
+    let result = resolver.resolve(Some(&headers), Bytes::new()).await;
+    assert_eq!(result.unwrap(), expected);
+}
+
+/// A consumer bound to the wrong bucket would otherwise read a bucket that
+/// happens to hold nothing under that key and report a missing object, which
+/// reads as a lost payload instead of as a misconfiguration.
+#[tokio::test]
+async fn resolver_rejects_a_claim_from_another_bucket() {
+    let store = MockObjectStore::new();
+    store.seed("test.subject/some-id", Bytes::from("offloaded body"));
+    let resolver = ClaimResolver::new(test_binding(store));
+    assert_eq!(resolver.bucket(), "test-bucket");
+
+    let mut headers = HeaderMap::new();
+    headers.insert(HEADER_CLAIM_CHECK, CLAIM_CHECK_VERSION);
+    headers.insert(HEADER_CLAIM_BUCKET, "someone-elses-bucket");
+    headers.insert(HEADER_CLAIM_KEY, "test.subject/some-id");
+
+    let error = resolver.resolve(Some(&headers), Bytes::new()).await.unwrap_err();
+    assert!(matches!(
+        error,
+        ClaimResolveError::BucketMismatch { ref expected, ref named }
+            if expected == "test-bucket" && named == "someone-elses-bucket"
+    ));
+}
+
+/// A header nobody could have written by configuring a bucket says something a
+/// mismatch does not, so it is reported as what it is rather than folded into
+/// "some other bucket". The object is left alone either way: a consumer that
+/// cannot trust the header has no business spending the key next to it.
+#[tokio::test]
+async fn resolver_rejects_a_claim_naming_something_that_is_not_a_bucket() {
+    let store = MockObjectStore::new();
+    store.seed("test.subject/some-id", Bytes::from("offloaded body"));
+    let resolver = ClaimResolver::new(test_binding(store));
+
+    let mut headers = HeaderMap::new();
+    headers.insert(HEADER_CLAIM_CHECK, CLAIM_CHECK_VERSION);
+    headers.insert(HEADER_CLAIM_BUCKET, "not a bucket");
+    headers.insert(HEADER_CLAIM_KEY, "test.subject/some-id");
+
+    let error = resolver.resolve(Some(&headers), Bytes::new()).await.unwrap_err();
+    assert!(
+        matches!(
+            error,
+            ClaimResolveError::UnnamableBucket { ref named, source: ClaimBucketError::InvalidCharacter(' ') }
+                if named.as_str() == "not a bucket"
+        ),
+        "{error}"
+    );
+}
+
+/// The publisher writes the object and only then publishes the claim, so a
+/// consumer that cannot read the object is looking at a transient failure and
+/// must not treat the message as consumed.
+#[tokio::test]
+async fn resolver_surfaces_a_store_failure_rather_than_an_empty_body() {
+    let store = MockObjectStore::new();
+    store.seed("test.subject/some-id", Bytes::from("offloaded body"));
+    store.fail_next_get();
+    let resolver = ClaimResolver::new(test_binding(store));
+
+    let mut headers = HeaderMap::new();
+    headers.insert(HEADER_CLAIM_CHECK, CLAIM_CHECK_VERSION);
+    headers.insert(HEADER_CLAIM_BUCKET, "test-bucket");
+    headers.insert(HEADER_CLAIM_KEY, "test.subject/some-id");
+
+    let result = resolver.resolve(Some(&headers), Bytes::new()).await;
+    assert!(matches!(result, Err(ClaimResolveError::StoreFailed(_))));
+}
+
+#[tokio::test]
+async fn published_claim_round_trips_through_a_resolver() {
+    let publisher = MockJetStreamPublisher::new();
+    let store = MockObjectStore::new();
+    let cc = ClaimCheckPublisher::new(
+        publisher.clone(),
+        test_binding(store.clone()),
+        MaxPayload::from_server_limit(1024 + PROTOCOL_OVERHEAD),
+    );
+    let body = Bytes::from(vec![7u8; 4096]);
+
+    let outcome = cc
+        .publish_event(
+            "test.subject".to_string(),
+            HeaderMap::new(),
+            body.clone(),
+            Duration::from_secs(5),
+        )
+        .await;
+    assert!(outcome.is_ok());
+
+    let msg = &publisher.published_messages()[0];
+    assert!(msg.payload.is_empty());
+
+    let resolver = ClaimResolver::new(test_binding(store));
+    let resolved = resolver
+        .resolve(Some(&msg.headers), msg.payload.clone())
+        .await
+        .expect("resolve");
+    assert_eq!(resolved, body);
 }

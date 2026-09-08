@@ -15,6 +15,7 @@ impl fmt::Display for ManualError {
 impl std::error::Error for ManualError {}
 
 #[derive(Debug)]
+#[allow(error_type_naming)]
 struct ManualWithSource(std::io::Error);
 
 impl fmt::Display for ManualWithSource {

@@ -16,6 +16,7 @@ use trogon_nats::{FlushClient, PublishClient, RequestClient, SubscribeClient, he
 use trogon_semconv::span::RECEIVE;
 use trogon_semconv::span::SEND;
 
+use crate::nats::subjects::{McpRole, PeerSubject, method_from_suffix};
 use crate::{Config, McpPeerId, McpPrefix, nats, wire};
 
 type PendingReplies = Arc<Mutex<HashMap<RequestId, String>>>;
@@ -118,6 +119,7 @@ where
 impl<R, N> Transport<R> for NatsTransport<R, N>
 where
     R: ServiceRole,
+    R::Not: rmcp::model::GetExtensions,
     N: SubscribeClient + RequestClient + PublishClient + FlushClient,
     N::RequestError: 'static,
     N::PublishError: 'static,
@@ -290,9 +292,8 @@ fn subject_for_message<R: ServiceRole>(
     item: &TxJsonRpcMessage<R>,
 ) -> Result<String, NatsTransportError> {
     let method = method_for_message::<R>(item)?;
-    let suffix = method_suffix(&method)?;
-    let role = if R::IS_CLIENT { "server" } else { "client" };
-    Ok(format!("{prefix}.{role}.{peer_id}.{suffix}"))
+    let role = if R::IS_CLIENT { McpRole::Server } else { McpRole::Client };
+    Ok(PeerSubject::for_method(prefix, role, peer_id, &method)?.to_string())
 }
 
 fn method_for_message<R: ServiceRole>(item: &TxJsonRpcMessage<R>) -> Result<String, NatsTransportError> {
@@ -302,82 +303,6 @@ fn method_for_message<R: ServiceRole>(item: &TxJsonRpcMessage<R>) -> Result<Stri
         .and_then(serde_json::Value::as_str)
         .map(str::to_string)
         .ok_or(NatsTransportError::MissingMethod)
-}
-
-fn method_suffix(method: &str) -> Result<&'static str, NatsTransportError> {
-    match method {
-        "initialize" => Ok("initialize"),
-        "ping" => Ok("ping"),
-        "completion/complete" => Ok("completion.complete"),
-        "logging/setLevel" => Ok("logging.set_level"),
-        "prompts/list" => Ok("prompts.list"),
-        "prompts/get" => Ok("prompts.get"),
-        "resources/list" => Ok("resources.list"),
-        "resources/templates/list" => Ok("resources.templates.list"),
-        "resources/read" => Ok("resources.read"),
-        "resources/subscribe" => Ok("resources.subscribe"),
-        "resources/unsubscribe" => Ok("resources.unsubscribe"),
-        "tools/list" => Ok("tools.list"),
-        "tools/call" => Ok("tools.call"),
-        "tasks/get" => Ok("tasks.get"),
-        "tasks/list" => Ok("tasks.list"),
-        "tasks/result" => Ok("tasks.result"),
-        "tasks/cancel" => Ok("tasks.cancel"),
-        "notifications/cancelled" => Ok("notifications.cancelled"),
-        "notifications/progress" => Ok("notifications.progress"),
-        "notifications/message" => Ok("notifications.message"),
-        "notifications/resources/updated" => Ok("notifications.resources.updated"),
-        "notifications/resources/list_changed" => Ok("notifications.resources.list_changed"),
-        "notifications/tools/list_changed" => Ok("notifications.tools.list_changed"),
-        "notifications/prompts/list_changed" => Ok("notifications.prompts.list_changed"),
-        "notifications/elicitation/complete" => Ok("notifications.elicitation.complete"),
-        "sampling/createMessage" => Ok("sampling.create_message"),
-        "roots/list" => Ok("roots.list"),
-        "elicitation/create" => Ok("elicitation.create"),
-        "notifications/initialized" => Ok("notifications.initialized"),
-        "notifications/roots/list_changed" => Ok("notifications.roots.list_changed"),
-        _ => Err(NatsTransportError::UnsupportedMethod {
-            method: method.to_string(),
-        }),
-    }
-}
-
-fn method_from_suffix(suffix: &str) -> Result<&'static str, NatsTransportError> {
-    match suffix {
-        "initialize" => Ok("initialize"),
-        "ping" => Ok("ping"),
-        "completion.complete" => Ok("completion/complete"),
-        "logging.set_level" => Ok("logging/setLevel"),
-        "prompts.list" => Ok("prompts/list"),
-        "prompts.get" => Ok("prompts/get"),
-        "resources.list" => Ok("resources/list"),
-        "resources.templates.list" => Ok("resources/templates/list"),
-        "resources.read" => Ok("resources/read"),
-        "resources.subscribe" => Ok("resources/subscribe"),
-        "resources.unsubscribe" => Ok("resources/unsubscribe"),
-        "tools.list" => Ok("tools/list"),
-        "tools.call" => Ok("tools/call"),
-        "tasks.get" => Ok("tasks/get"),
-        "tasks.list" => Ok("tasks/list"),
-        "tasks.result" => Ok("tasks/result"),
-        "tasks.cancel" => Ok("tasks/cancel"),
-        "notifications.cancelled" => Ok("notifications/cancelled"),
-        "notifications.progress" => Ok("notifications/progress"),
-        "notifications.message" => Ok("notifications/message"),
-        "notifications.resources.updated" => Ok("notifications/resources/updated"),
-        "notifications.resources.list_changed" => Ok("notifications/resources/list_changed"),
-        "notifications.tools.list_changed" => Ok("notifications/tools/list_changed"),
-        "notifications.prompts.list_changed" => Ok("notifications/prompts/list_changed"),
-        "notifications.elicitation.complete" => Ok("notifications/elicitation/complete"),
-        "sampling.create_message" => Ok("sampling/createMessage"),
-        "roots.list" => Ok("roots/list"),
-        "elicitation.create" => Ok("elicitation/create"),
-        "notifications.initialized" => Ok("notifications/initialized"),
-        "notifications.roots.list_changed" => Ok("notifications/roots/list_changed"),
-        _ => Err(NatsTransportError::UnsupportedMethod {
-            method: suffix.to_string(),
-        }),
-    }
 }
 
 fn method_from_subject<R: ServiceRole>(subject: &str) -> Result<String, NatsTransportError> {
@@ -392,7 +317,7 @@ fn method_from_subject<R: ServiceRole>(subject: &str) -> Result<String, NatsTran
         .split_once('.')
         .map(|(_, method_suffix)| method_suffix)
         .unwrap_or(suffix);
-    Ok(method_from_suffix(suffix)?.to_string())
+    Ok(method_from_suffix(suffix)?)
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -423,8 +348,12 @@ pub enum NatsTransportError {
     Deserialize(#[source] serde_json::Error),
     #[error("MCP JSON-RPC message is missing a method")]
     MissingMethod,
+    #[error(transparent)]
+    MethodMap(#[from] crate::nats::subjects::methods::MethodMapError),
     #[error("unsupported MCP method for NATS routing: {method}")]
     UnsupportedMethod { method: String },
+    #[error("invalid encoded custom MCP method suffix: {suffix}")]
+    InvalidCustomMethodSuffix { suffix: String },
     #[error("missing reply subject for MCP response")]
     MissingReplySubject,
     #[error("MCP NATS inbound queue is closed")]

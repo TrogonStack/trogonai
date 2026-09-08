@@ -1,3 +1,5 @@
+use serde_json::json;
+
 use super::*;
 use crate::wire::test_encode::signed_auth_request;
 
@@ -59,6 +61,27 @@ fn verify_jwt_issuer_rejects_invalid_segment_count() {
     let server_pub = NkeyPublic::parse(server.public_key()).unwrap();
     let err = server_pub.verify_jwt_issuer("only-one-segment").unwrap_err();
     assert!(matches!(err, AuthCalloutError::WireFormat(_)));
+}
+
+#[test]
+fn normalize_fills_the_sections_a_server_may_omit() {
+    let mut payload = json!({ "nats": { "client_info": {}, "client_tls": {} } });
+
+    normalize_auth_request_payload(&mut payload);
+
+    assert_eq!(payload["nats"]["client_info"]["name_tag"], json!(""));
+    assert_eq!(payload["nats"]["client_info"]["nonce"], json!(""));
+    assert_eq!(payload["nats"]["client_tls"]["certs"], json!([]));
+    assert_eq!(payload["nats"]["client_tls"]["verified_chains"], json!([]));
+}
+
+#[test]
+fn normalize_leaves_a_payload_without_the_sections_alone() {
+    let mut payload = json!({ "nats": {} });
+
+    normalize_auth_request_payload(&mut payload);
+
+    assert_eq!(payload, json!({ "nats": {} }));
 }
 
 #[test]

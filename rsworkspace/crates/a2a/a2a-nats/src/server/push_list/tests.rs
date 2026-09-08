@@ -68,7 +68,11 @@ async fn no_reply_drops_request() {
 async fn missing_params_returns_invalid_params_error() {
     let nats = AdvancedMockNatsClient::new();
     let handler = stub();
-    let (headers, payload) = wire_request("METHOD", RequestId::Number(5), serde_json::Value::Null);
+    let (headers, payload) = wire_request(
+        "tasks/pushNotificationConfig/list",
+        RequestId::Number(5),
+        serde_json::Value::Null,
+    );
     handle(&handler, &headers, &payload, Some("r".into()), &nats).await;
     let body = parse_published_response(&nats, 0);
     assert_eq!(body["error"]["code"], -32602);

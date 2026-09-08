@@ -22,3 +22,5 @@ For NATS infrastructure and testing, use the `trogon-nats` crate which provides:
 ## Module conventions
 
 Place observability concerns (metrics, tracing spans, logging helpers) under a `telemetry` module within each crate. Example: `acp-nats/src/telemetry/metrics.rs`. This keeps observability code separated from domain logic and provides a consistent location across crates.
+
+For event-sourced services, organize by stream and follow [ADR#0045](../../docs/adr/0045-event-sourced-service-module-layout.md). Each stream is a module named for the workflow it represents, expressed as a noun (never a mechanism word like `Lifecycle`/`Manager`/`Service`), containing `commands` (one decider per file, with the write-side `state`, `snapshot`, and `domain` submodules nested inside it), the read-side `processor`, and the stream's own persistence and handler. `domain` holds value objects only; events and state are the generated proto types. Value objects for a stream live under that stream's `commands/domain`, not at the crate root. `trogon-scheduler` is the reference implementation.

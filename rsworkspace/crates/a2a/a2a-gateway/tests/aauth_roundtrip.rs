@@ -25,7 +25,7 @@ use trogon_aauth_verify::nats_pop::content_digest_sha256;
 use trogon_identity_types::aauth::{Cnf, DWK_AGENT, DWK_RESOURCE, NatsSignatureEnvelope, TYP_AGENT, TYP_AUTH, headers};
 
 use a2a_gateway::aauth::{
-    AAUTH_REQUIRED_CODE, AAuthConfig, AAuthDenyReason, AAuthIngress, AAuthMode, ChallengeKid, LeewaySecs,
+    AAUTH_REQUIRED_CODE, AAuthConfig, AAuthDenyReasonError, AAuthIngress, AAuthMode, ChallengeKid, LeewaySecs,
     NonNegativeSecs, PersonServerAudience, ResourceIssuer, StaticJwks,
 };
 
@@ -80,7 +80,7 @@ fn mint_agent_jwt(ap_signing: &SigningKey, ap_kid: &str, ap_iss: &str, agent: &A
         "iat": now - 5,
         "exp": now + 600,
         "dwk": DWK_AGENT,
-        "cnf": Cnf { jwk: agent.jwk_val.clone() },
+        "cnf": Cnf::public(agent.jwk_val.clone()).expect("test fixture is a public jwk"),
     });
     encode(&header, &claims, &enc).expect("encode agent jwt")
 }
@@ -261,7 +261,7 @@ async fn resolve_nats_happy_path_with_matching_auth_token() {
     let _ = ap_jwk;
     let ingress = Arc::new(build_ingress(ap_public_jwk, ap_iss, resource_iss, AAuthMode::Enforce));
 
-    let subject = "a2a.gateway.bot.message.send";
+    let subject = "a2a.v1.gateway.bot.message.send";
     let reply = "_INBOX.x.1";
     let payload = b"{}".to_vec();
     let pop = pop_headers(&agent, &agent_jwt, subject, reply, &payload, now);
@@ -324,7 +324,7 @@ async fn resolve_nats_rejects_auth_token_bound_to_different_agent() {
     };
     let ingress = build_ingress(ap_public_jwk, ap_iss, resource_iss, AAuthMode::Enforce);
 
-    let subject = "a2a.gateway.bot.message.send";
+    let subject = "a2a.v1.gateway.bot.message.send";
     let reply = "_INBOX.x.1";
     let payload = b"{}".to_vec();
     let pop = pop_headers(&agent, &agent_jwt, subject, reply, &payload, now);
@@ -341,7 +341,7 @@ async fn resolve_nats_rejects_auth_token_bound_to_different_agent() {
         .await
         .expect_err("agent mismatch denies");
     assert_eq!(err.code, AAUTH_REQUIRED_CODE);
-    assert!(matches!(err.reason, AAuthDenyReason::AuthAgentMismatch { .. }));
+    assert!(matches!(err.reason, AAuthDenyReasonError::AuthAgentMismatch { .. }));
     // Challenge IS issued because the PoP-verified agent had a jkt to bind to.
     assert!(err.challenge.is_some(), "expected challenge bound to verified agent");
 }
@@ -395,7 +395,7 @@ async fn resolve_nats_enforce_mode_denies_scope_not_covering_method() {
     };
     let ingress = build_ingress(ap_public_jwk, ap_iss, resource_iss, AAuthMode::Enforce);
 
-    let subject = "a2a.gateway.bot.message.send";
+    let subject = "a2a.v1.gateway.bot.message.send";
     let reply = "_INBOX.x.1";
     let payload = b"{}".to_vec();
     let pop = pop_headers(&agent, &agent_jwt, subject, reply, &payload, now);
@@ -405,7 +405,7 @@ async fn resolve_nats_enforce_mode_denies_scope_not_covering_method() {
         .await
         .expect_err("uncovered scope denies in enforce mode");
     assert_eq!(err.code, AAUTH_REQUIRED_CODE);
-    assert!(matches!(err.reason, AAuthDenyReason::ScopeNotCovered { .. }));
+    assert!(matches!(err.reason, AAuthDenyReasonError::ScopeNotCovered { .. }));
     assert!(err.challenge.is_some(), "expected fresh auth-token challenge");
 }
 
@@ -459,7 +459,7 @@ async fn resolve_nats_mission_header_matches_auth_claim() {
     };
     let ingress = build_ingress(ap_public_jwk, ap_iss, resource_iss, AAuthMode::Enforce);
 
-    let subject = "a2a.gateway.bot.message.send";
+    let subject = "a2a.v1.gateway.bot.message.send";
     let reply = "_INBOX.x.1";
     let payload = b"{}".to_vec();
     let mut pop = pop_headers(&agent, &agent_jwt, subject, reply, &payload, now);
@@ -525,7 +525,7 @@ async fn resolve_nats_denies_mission_claim_without_header() {
     };
     let ingress = build_ingress(ap_public_jwk, ap_iss, resource_iss, AAuthMode::Enforce);
 
-    let subject = "a2a.gateway.bot.message.send";
+    let subject = "a2a.v1.gateway.bot.message.send";
     let reply = "_INBOX.x.1";
     let payload = b"{}".to_vec();
     // No AAuth-Mission header on the request: a mission-scoped token must
@@ -539,7 +539,7 @@ async fn resolve_nats_denies_mission_claim_without_header() {
     assert_eq!(err.code, AAUTH_REQUIRED_CODE);
     assert!(matches!(
         err.reason,
-        AAuthDenyReason::MissionHeaderMissing { ref approver } if approver == "approver-1"
+        AAuthDenyReasonError::MissionHeaderMissing { ref approver } if approver == "approver-1"
     ));
 }
 
@@ -600,7 +600,7 @@ async fn resolve_nats_denies_malformed_mission_claim() {
     };
     let ingress = build_ingress(ap_public_jwk, ap_iss, resource_iss, AAuthMode::Enforce);
 
-    let subject = "a2a.gateway.bot.message.send";
+    let subject = "a2a.v1.gateway.bot.message.send";
     let reply = "_INBOX.x.1";
     let payload = b"{}".to_vec();
     let pop = pop_headers(&agent, &agent_jwt, subject, reply, &payload, now);
@@ -610,7 +610,7 @@ async fn resolve_nats_denies_malformed_mission_claim() {
         .await
         .expect_err("malformed mission claim denies");
     assert_eq!(err.code, AAUTH_REQUIRED_CODE);
-    assert!(matches!(err.reason, AAuthDenyReason::MissionMismatch(_)));
+    assert!(matches!(err.reason, AAuthDenyReasonError::MissionMismatch(_)));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -672,7 +672,7 @@ async fn resolve_nats_denies_expired_auth_token_with_valid_pop() {
     };
     let ingress = build_ingress(ap_public_jwk, ap_iss, resource_iss, AAuthMode::Enforce);
 
-    let subject = "a2a.gateway.bot.message.send";
+    let subject = "a2a.v1.gateway.bot.message.send";
     let reply = "_INBOX.x.1";
     let payload = b"{}".to_vec();
     let pop = pop_headers(&agent, &agent_jwt, subject, reply, &payload, now);
@@ -689,7 +689,7 @@ async fn resolve_nats_denies_expired_auth_token_with_valid_pop() {
         .await
         .expect_err("expired auth token denies");
     assert_eq!(err.code, AAUTH_REQUIRED_CODE);
-    assert!(matches!(err.reason, AAuthDenyReason::Auth(_)));
+    assert!(matches!(err.reason, AAuthDenyReasonError::Auth(_)));
     // Challenge IS issued because PoP already verified the presenting agent.
     assert!(err.challenge.is_some(), "expected challenge bound to verified agent");
 }
@@ -746,7 +746,7 @@ async fn resolve_nats_denies_mission_header_mismatching_claim() {
     };
     let ingress = build_ingress(ap_public_jwk, ap_iss, resource_iss, AAuthMode::Enforce);
 
-    let subject = "a2a.gateway.bot.message.send";
+    let subject = "a2a.v1.gateway.bot.message.send";
     let reply = "_INBOX.x.1";
     let payload = b"{}".to_vec();
     let mut pop = pop_headers(&agent, &agent_jwt, subject, reply, &payload, now);
@@ -763,7 +763,7 @@ async fn resolve_nats_denies_mission_header_mismatching_claim() {
         .await
         .expect_err("mismatched mission header denies");
     assert_eq!(err.code, AAUTH_REQUIRED_CODE);
-    assert!(matches!(err.reason, AAuthDenyReason::MissionMismatch(_)));
+    assert!(matches!(err.reason, AAuthDenyReasonError::MissionMismatch(_)));
 }
 
 const _: () = {

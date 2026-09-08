@@ -18,7 +18,7 @@ impl std::fmt::Display for FsWriteTextFileSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.session.{}.client.fs.write_text_file",
+            "{}.v1.session.{}.client.fs.write_text_file",
             self.prefix.as_str(),
             self.session_id.as_str()
         )
@@ -45,6 +45,6 @@ mod tests {
     #[test]
     fn display_formats_subject_correctly() {
         let s = FsWriteTextFileSubject::new(&prefix(), &session_id());
-        assert_eq!(s.to_string(), "acp.session.ses1.client.fs.write_text_file");
+        assert_eq!(s.to_string(), "acp.v1.session.ses1.client.fs.write_text_file");
     }
 }

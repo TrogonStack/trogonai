@@ -21,6 +21,8 @@ use trogon_identity_types::aauth::Requirement;
 use trogon_identity_types::aauth::error::{ErrorResponse, PollingError};
 use trogon_identity_types::aauth::person_server::{PendingResponse, TokenGrantResponse};
 
+use crate::constants::SLOW_DOWN_STEP_SECS;
+
 /// Headers carried on a `202` response that the JSON body does not include,
 /// per "Deferred Responses" / "Pending Response" -- `Location` and
 /// `Retry-After` are REQUIRED HTTP headers, not body fields.
@@ -119,13 +121,6 @@ pub enum ExchangeAction {
     /// state; nothing more to send automatically.
     Stop,
 }
-
-/// Default poll interval per "Polling with GET": used when a `202` response
-/// omits `Retry-After` (the spec calls this a MUST-have header on `202`s, but
-/// core stays defensive for malformed servers).
-pub const DEFAULT_POLL_INTERVAL_SECS: u64 = 5;
-/// Linear backoff step applied on `429 Too Many Requests`, per "Polling with GET".
-pub const SLOW_DOWN_STEP_SECS: u64 = 5;
 
 /// Pure transition function implementing the "Deferred Response State
 /// Machine" diagram. Returns the new state and the action the driver should

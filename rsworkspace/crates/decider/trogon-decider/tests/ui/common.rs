@@ -1,4 +1,4 @@
-use trogon_decider::{Decider, Decision};
+use trogon_decider::{Decider, Decision, WritePrecondition};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TestState {
@@ -32,6 +32,7 @@ impl Decider for TestCommand {
     type Event = TestEvent;
     type DecideError = TestDecisionError;
     type EvolveError = TestDomainError;
+    const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 
     fn stream_id(&self) -> &Self::StreamId {
         "alpha"

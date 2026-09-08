@@ -21,7 +21,7 @@
 //!
 //! [[rule.matches]]
 //! kind = "nats_subject_pattern"
-//! pattern = "a2a.gateway.*.message.send"
+//! pattern = "a2a.v1.gateway.*.message.send"
 //!
 //! [[rule.matches]]
 //! kind = "time_of_day"

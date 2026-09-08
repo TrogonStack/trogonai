@@ -39,37 +39,40 @@ fn card(name: &str) -> a2a::agent_card::AgentCard {
 #[test]
 fn registrar_subject_wildcard() {
     let sub = RegistrarSubject::new(&prefix("a2a"));
-    assert_eq!(sub.wildcard(), "a2a.catalog.register.*");
+    assert_eq!(sub.wildcard(), "a2a.v1.catalog.register.*");
 }
 
 #[test]
 fn registrar_subject_for_agent() {
     let sub = RegistrarSubject::new(&prefix("a2a"));
-    assert_eq!(sub.for_agent(&agent_id("planner")), "a2a.catalog.register.planner");
+    assert_eq!(sub.for_agent(&agent_id("planner")), "a2a.v1.catalog.register.planner");
 }
 
 #[test]
 fn registrar_subject_dotted_prefix() {
     let sub = RegistrarSubject::new(&prefix("my.multi.part"));
-    assert_eq!(sub.wildcard(), "my.multi.part.catalog.register.*");
-    assert_eq!(sub.for_agent(&agent_id("bot")), "my.multi.part.catalog.register.bot");
+    assert_eq!(sub.wildcard(), "my.multi.part.v1.catalog.register.*");
+    assert_eq!(sub.for_agent(&agent_id("bot")), "my.multi.part.v1.catalog.register.bot");
 }
 
 #[test]
 fn registrar_subject_display() {
     let sub = RegistrarSubject::new(&prefix("myapp"));
-    assert_eq!(sub.to_string(), "myapp.catalog.register.*");
+    assert_eq!(sub.to_string(), "myapp.v1.catalog.register.*");
 }
 
 #[test]
 fn register_subject_prefix_takes_typed_prefix() {
-    assert_eq!(register_subject_prefix(&prefix("a2a")), "a2a.catalog.register.");
-    assert_eq!(register_subject_prefix(&prefix("my.app")), "my.app.catalog.register.");
+    assert_eq!(register_subject_prefix(&prefix("a2a")), "a2a.v1.catalog.register.");
+    assert_eq!(
+        register_subject_prefix(&prefix("my.app")),
+        "my.app.v1.catalog.register."
+    );
 }
 
 #[test]
 fn agent_id_from_subject_returns_typed_agent_id() {
-    let id = agent_id_from_subject("a2a.catalog.register.planner", &prefix("a2a")).unwrap();
+    let id = agent_id_from_subject("a2a.v1.catalog.register.planner", &prefix("a2a")).unwrap();
     assert_eq!(id.as_str(), "planner");
 }
 
@@ -81,13 +84,13 @@ fn agent_id_from_subject_rejects_subject_missing_register_leader() {
 
 #[test]
 fn agent_id_from_subject_rejects_missing_agent_id_segment() {
-    let err = agent_id_from_subject("a2a.catalog.register.", &prefix("a2a")).unwrap_err();
+    let err = agent_id_from_subject("a2a.v1.catalog.register.", &prefix("a2a")).unwrap_err();
     assert!(matches!(err, AgentSuffixError::MissingAgentId));
 }
 
 #[test]
 fn agent_id_from_subject_rejects_invalid_agent_id_segment() {
-    let err = agent_id_from_subject("a2a.catalog.register.bad*agent", &prefix("a2a")).unwrap_err();
+    let err = agent_id_from_subject("a2a.v1.catalog.register.bad*agent", &prefix("a2a")).unwrap_err();
     assert!(matches!(err, AgentSuffixError::InvalidAgentId(_)));
 }
 
@@ -95,7 +98,7 @@ fn agent_id_from_subject_rejects_invalid_agent_id_segment() {
 fn agent_suffix_error_display_and_source() {
     assert_eq!(
         AgentSuffixError::NotARegisterSubject.to_string(),
-        "subject is not a `{prefix}.catalog.register.` register subject"
+        "subject is not a `{prefix}.v1.catalog.register.` register subject"
     );
     assert_eq!(
         AgentSuffixError::MissingAgentId.to_string(),

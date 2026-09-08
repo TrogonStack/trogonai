@@ -31,7 +31,7 @@ fn added(id: &str) -> v1::ScheduleEvent {
     v1::ScheduleEvent {
         event: Some(
             v1::ScheduleCreated {
-                schedule_id: command.id.as_str().to_string(),
+                schedule_id: command.id.to_string(),
                 status: MessageField::some(v1::ScheduleStatus::from(command.status)),
                 schedule: MessageField::some(
                     v1::Schedule::try_from(&ScheduleEventSchedule::from(&command.schedule)).unwrap(),
@@ -50,7 +50,7 @@ fn removed() -> v1::ScheduleEvent {
     v1::ScheduleEvent {
         event: Some(
             v1::ScheduleRemoved {
-                schedule_id: "backup".to_string(),
+                schedule_id: "0198fa2f6d0a7b1a8cf9f762e73a1c45".to_string(),
             }
             .into(),
         ),
@@ -83,54 +83,54 @@ fn resumed(id: &str) -> v1::ScheduleEvent {
 fn given_when_then_supports_create_schedule_decider() {
     TestCase::<CreateSchedule>::new()
         .given_no_history()
-        .when(create_schedule("backup"))
-        .then([added("backup")]);
+        .when(create_schedule("0198fa2f6d0a7b1a8cf9f762e73a1c45"))
+        .then([added("0198fa2f6d0a7b1a8cf9f762e73a1c45")]);
 }
 
 #[test]
 fn given_when_then_supports_create_schedule_failures() {
     TestCase::<CreateSchedule>::new()
-        .given([added("backup")])
-        .when(create_schedule("backup"))
+        .given([added("0198fa2f6d0a7b1a8cf9f762e73a1c45")])
+        .when(create_schedule("0198fa2f6d0a7b1a8cf9f762e73a1c45"))
         .then_error(CreateScheduleDecideError::AlreadyExists {
-            id: ScheduleId::parse("backup").unwrap(),
+            id: ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c45").unwrap(),
         });
 }
 
 #[test]
 fn replaying_lifecycle_events_rejects_existing_schedule_ids() {
     TestCase::<CreateSchedule>::new()
-        .given([added("backup")])
-        .given([paused("backup")])
-        .when(create_schedule("backup"))
+        .given([added("0198fa2f6d0a7b1a8cf9f762e73a1c45")])
+        .given([paused("0198fa2f6d0a7b1a8cf9f762e73a1c45")])
+        .when(create_schedule("0198fa2f6d0a7b1a8cf9f762e73a1c45"))
         .then_error(CreateScheduleDecideError::AlreadyExists {
-            id: ScheduleId::parse("backup").unwrap(),
+            id: ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c45").unwrap(),
         });
 
     TestCase::<CreateSchedule>::new()
-        .given([added("backup")])
-        .given([paused("backup")])
-        .given([resumed("backup")])
-        .when(create_schedule("backup"))
+        .given([added("0198fa2f6d0a7b1a8cf9f762e73a1c45")])
+        .given([paused("0198fa2f6d0a7b1a8cf9f762e73a1c45")])
+        .given([resumed("0198fa2f6d0a7b1a8cf9f762e73a1c45")])
+        .when(create_schedule("0198fa2f6d0a7b1a8cf9f762e73a1c45"))
         .then_error(CreateScheduleDecideError::AlreadyExists {
-            id: ScheduleId::parse("backup").unwrap(),
+            id: ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c45").unwrap(),
         });
 }
 
 #[test]
 fn rejects_adding_deleted_schedule_ids() {
     TestCase::<CreateSchedule>::new()
-        .given([added("backup")])
+        .given([added("0198fa2f6d0a7b1a8cf9f762e73a1c45")])
         .given([removed()])
-        .when(create_schedule("backup"))
+        .when(create_schedule("0198fa2f6d0a7b1a8cf9f762e73a1c45"))
         .then_error(CreateScheduleDecideError::ScheduleDeleted {
-            id: ScheduleId::parse("backup").unwrap(),
+            id: ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c45").unwrap(),
         });
 }
 
 #[test]
 fn decide_errors_display_user_facing_messages() {
-    let id = ScheduleId::parse("backup").unwrap();
+    let id = ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c45").unwrap();
     let duration_error = trogonai_proto::convert::duration_from_std(
         trogonai_proto::convert::PROTOBUF_DURATION_MAX + std::time::Duration::from_nanos(1),
     )
@@ -138,11 +138,11 @@ fn decide_errors_display_user_facing_messages() {
 
     assert_eq!(
         CreateScheduleDecideError::AlreadyExists { id: id.clone() }.to_string(),
-        "schedule 'backup' already exists"
+        "schedule '0198fa2f6d0a7b1a8cf9f762e73a1c45' already exists"
     );
     assert_eq!(
         CreateScheduleDecideError::ScheduleDeleted { id: id.clone() }.to_string(),
-        "schedule 'backup' was deleted"
+        "schedule '0198fa2f6d0a7b1a8cf9f762e73a1c45' was deleted"
     );
     assert_eq!(
         CreateScheduleDecideError::MissingStateValue.to_string(),
@@ -183,7 +183,7 @@ fn decide_rejects_invalid_state_values() {
             schedule: MessageField::default(),
             pending_occurrence_at: MessageField::default(),
         })
-        .when(create_schedule("backup"))
+        .when(create_schedule("0198fa2f6d0a7b1a8cf9f762e73a1c45"))
         .then_error(CreateScheduleDecideError::MissingStateValue);
 
     TestCase::<CreateSchedule>::new()
@@ -195,7 +195,7 @@ fn decide_rejects_invalid_state_values() {
             schedule: MessageField::default(),
             pending_occurrence_at: MessageField::default(),
         })
-        .when(create_schedule("backup"))
+        .when(create_schedule("0198fa2f6d0a7b1a8cf9f762e73a1c45"))
         .then_error(CreateScheduleDecideError::UnknownStateValue { value: 123 });
 
     TestCase::<CreateSchedule>::new()
@@ -207,6 +207,6 @@ fn decide_rejects_invalid_state_values() {
             schedule: MessageField::default(),
             pending_occurrence_at: MessageField::default(),
         })
-        .when(create_schedule("backup"))
+        .when(create_schedule("0198fa2f6d0a7b1a8cf9f762e73a1c45"))
         .then_error(CreateScheduleDecideError::UnknownStateValue { value: 0 });
 }

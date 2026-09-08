@@ -1,4 +1,11 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
+#![cfg_attr(
+    dylint_lib = "trogon_lints",
+    expect(
+        acyclic_modules,
+        reason = "`wire` is typed with the transport error it produces and `transport` frames its payloads through `wire`"
+    )
+)]
 
 pub mod client;
 pub mod config;
@@ -6,6 +13,7 @@ pub mod constants;
 pub mod jsonrpc;
 pub mod mcp_peer_id;
 pub mod mcp_prefix;
+pub mod mcp_transport_headers;
 pub mod nats;
 pub mod server;
 pub(crate) mod telemetry;
@@ -21,6 +29,7 @@ pub use jsonrpc::{
 };
 pub use mcp_peer_id::{McpPeerId, McpPeerIdError};
 pub use mcp_prefix::{McpPrefix, McpPrefixError};
+pub use mcp_transport_headers::McpTransportHeaders;
 pub use nats::{
     ClientNotificationMethod, ClientRequestMethod, FlushClient, ParsedClientSubject, ParsedServerSubject,
     PublishClient, RequestClient, ServerNotificationMethod, ServerRequestMethod, SubscribeClient, markers,

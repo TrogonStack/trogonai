@@ -1,0 +1,42 @@
+#!/usr/bin/env python3
+#MISE description="Validate every Cargo workspace package declares the expected SPDX license"
+import json
+import os
+import subprocess
+import sys
+import tomllib
+
+workspace_dir = os.environ.get("CARGO_WORKSPACE_DIR", "rsworkspace")
+expected_license = os.environ.get("EXPECTED_LICENSE", "Apache-2.0")
+
+root = os.environ.get("GITHUB_WORKSPACE") or subprocess.check_output(
+    ["git", "rev-parse", "--show-toplevel"], text=True
+).strip()
+cargo_dir = os.path.join(root, workspace_dir)
+
+metadata = json.loads(
+    subprocess.check_output(
+        ["cargo", "metadata", "--no-deps", "--format-version", "1"],
+        cwd=cargo_dir,
+        encoding="utf-8",
+    )
+)
+
+violations = []
+
+for package in metadata["packages"]:
+    with open(package["manifest_path"], "rb") as manifest_file:
+        manifest = tomllib.load(manifest_file)
+    declared_license = manifest.get("package", {}).get("license")
+    if package.get("license") != expected_license or declared_license != expected_license:
+        violations.append(
+            f'{package["manifest_path"]}: license is {package.get("license") or "missing"}'
+        )
+
+if violations:
+    print(
+        f'Every Rust crate must declare license = "{expected_license}" in Cargo.toml.',
+        file=sys.stderr,
+    )
+    print("\n".join(violations), file=sys.stderr)
+    sys.exit(1)

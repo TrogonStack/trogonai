@@ -1,7 +1,7 @@
 use std::error::Error as _;
 
 use trogon_decider::{
-    Decider, DecisionFailure, EventData, EventDecode, EventDecodeOutcome, EventEncode, EventType, evaluate_decision,
+    Decider, DecisionError, EventData, EventDecode, EventDecodeOutcome, EventEncode, EventType, evaluate_decision,
 };
 
 /// Abstraction over whatever concrete WIT-generated command-envelope type a guest's generated
@@ -209,18 +209,18 @@ where
     C::evolve(state, &event).map_err(|source| into_view(BridgeError::Evolve(Box::new(source))))
 }
 
-/// Project a [`DecisionFailure`] into a [`BridgeError`], mirroring the native runtime's
+/// Project a [`DecisionError`] into a [`BridgeError`], mirroring the native runtime's
 /// handling of the same failure type (see `trogon-decider-runtime`'s `append_decision` and
 /// `trogon_decider::testing`'s `decide_events`).
-fn map_decision_failure<C>(failure: DecisionFailure<C::DecideError, C::EvolveError>) -> BridgeError
+fn map_decision_failure<C>(failure: DecisionError<C::DecideError, C::EvolveError>) -> BridgeError
 where
     C: Decider<DecideError: std::error::Error + 'static, EvolveError: std::error::Error + 'static>,
 {
     match failure {
-        DecisionFailure::Decide(source) => BridgeError::Rejected {
+        DecisionError::Decide(source) => BridgeError::Rejected {
             source: Box::new(source),
         },
-        DecisionFailure::Evolve(source) => BridgeError::Evolve(Box::new(source)),
+        DecisionError::Evolve(source) => BridgeError::Evolve(Box::new(source)),
     }
 }
 
@@ -266,13 +266,14 @@ where
 }
 
 /// Projects the native [`trogon_decider::WritePrecondition`] into the guest-side
-/// [`WritePreconditionTag`], preserving `None` (no precondition) as `None`.
-pub fn map_write_precondition(value: Option<trogon_decider::WritePrecondition>) -> Option<WritePreconditionTag> {
-    value.map(|precondition| match precondition {
-        trogon_decider::WritePrecondition::Any => WritePreconditionTag::Any,
-        trogon_decider::WritePrecondition::StreamExists => WritePreconditionTag::StreamExists,
+/// [`WritePreconditionTag`].
+pub fn map_write_precondition(value: trogon_decider::WritePrecondition) -> WritePreconditionTag {
+    match value {
+        trogon_decider::WritePrecondition::StreamUnchanged => WritePreconditionTag::StreamUnchanged,
         trogon_decider::WritePrecondition::NoStream => WritePreconditionTag::NoStream,
-    })
+        trogon_decider::WritePrecondition::StreamExists => WritePreconditionTag::StreamExists,
+        trogon_decider::WritePrecondition::Any => WritePreconditionTag::Any,
+    }
 }
 
 /// Guest-side mirror of [`trogon_decider::WritePrecondition`].
@@ -283,12 +284,38 @@ pub fn map_write_precondition(value: Option<trogon_decider::WritePrecondition>) 
 /// own generated `WritePrecondition` type (see `map_write_precondition_tag` in
 /// `trogon-decider-guest-macros`).
 pub enum WritePreconditionTag {
-    /// No constraint on the stream's current state.
-    Any,
-    /// The stream must already exist.
-    StreamExists,
+    /// The stream must still be exactly as replay observed it.
+    StreamUnchanged,
     /// The stream must not yet exist.
     NoStream,
+    /// The stream must already exist.
+    StreamExists,
+    /// No constraint on the stream's current state.
+    Any,
+}
+
+/// Projects the native [`trogon_decider::SnapshotCadence`] into the guest-side
+/// [`SnapshotPolicyTag`].
+///
+/// The WIT `frequency` case carries a plain `u64`, so a cadence that never snapshots crosses as
+/// [`SnapshotPolicyTag::NoSnapshot`] rather than as a zero frequency.
+pub fn map_snapshot_cadence(value: trogon_decider::SnapshotCadence) -> SnapshotPolicyTag {
+    match value.frequency() {
+        None => SnapshotPolicyTag::NoSnapshot,
+        Some(frequency) => SnapshotPolicyTag::Frequency(frequency.get()),
+    }
+}
+
+/// Guest-side mirror of the WIT `snapshot-policy` variant.
+///
+/// Carries the same per-crate binding constraint as [`WritePreconditionTag`]: callers convert it
+/// into their generated `SnapshotPolicy` type (see `map_snapshot_policy_tag` in
+/// `trogon-decider-guest-macros`).
+pub enum SnapshotPolicyTag {
+    /// The host never snapshots this command's state.
+    NoSnapshot,
+    /// The host snapshots once this many events accumulate since the last snapshot.
+    Frequency(u64),
 }
 
 #[cfg(test)]

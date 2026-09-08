@@ -33,11 +33,12 @@ use crate::task_id::A2aTaskId;
 use super::error::ClientError;
 use super::event_stream::TypedEventStream;
 use super::resubscribe::open_resubscribe_stream;
-use super::streaming::{StreamingRequest, send_streaming};
-use super::unary::send_unary;
+use super::streaming::{StreamingRequest, send_streaming_validated};
+use super::unary::send_unary_validated;
+use super::validated::ValidatedRpc;
 
-/// Whether `A2aClient` publishes to `{prefix}.agents.{agent_id}.…` (talking to the
-/// agent directly on a trusted NATS connection) or to `{prefix}.gateway.…` with a
+/// Whether `A2aClient` publishes to `{prefix}.v1.agents.{agent_id}.…` (talking to the
+/// agent directly on a trusted NATS connection) or to `{prefix}.v1.gateway.…` with a
 /// minted caller JWT (going through the policy edge).
 #[derive(Clone, Debug)]
 #[allow(dead_code)] // GatewayIngress JWT is unwrapped by per-operation methods that land afterward
@@ -76,7 +77,7 @@ impl<N, J> A2aClient<N, J> {
     }
 
     /// Routes unary / bootstrap RPCs through `a2a-gateway`: subjects become
-    /// `{prefix}.gateway.{agent_id}.{method…}` (see
+    /// `{prefix}.v1.gateway.{agent_id}.{method…}` (see
     /// [`gateway_ingress_subject_from_agent_subject`]), with `caller_jwt`
     /// attached as the caller-JWT header on every gateway publish.
     ///
@@ -88,7 +89,7 @@ impl<N, J> A2aClient<N, J> {
         self
     }
 
-    /// Default (direct) routing to `{prefix}.agents.{agent_id}.{method…}`.
+    /// Default (direct) routing to `{prefix}.v1.agents.{agent_id}.{method…}`.
     #[must_use]
     pub fn routing_to_agent(mut self) -> Self {
         self.ingress = ClientIngressTarget::AgentSubjects;
@@ -129,10 +130,10 @@ impl<N, J> A2aClient<N, J>
 where
     N: RequestClient,
 {
-    pub async fn tasks_cancel(&self, req: &CancelTaskRequest) -> Result<Task, ClientError> {
+    pub async fn tasks_cancel_validated(&self, req: &CancelTaskRequest) -> Result<ValidatedRpc<Task>, ClientError> {
         let subject = self.outbound_rpc_subject(TasksCancelSubject::new(self.prefix(), &self.agent_id).to_string())?;
         let req_id = ReqId::new();
-        send_unary(
+        send_unary_validated(
             &self.nats,
             &subject,
             "tasks/cancel",
@@ -144,10 +145,17 @@ where
         .await
     }
 
-    pub async fn tasks_list(&self, req: &ListTasksRequest) -> Result<ListTasksResponse, ClientError> {
+    pub async fn tasks_cancel(&self, req: &CancelTaskRequest) -> Result<Task, ClientError> {
+        Ok(self.tasks_cancel_validated(req).await?.value)
+    }
+
+    pub async fn tasks_list_validated(
+        &self,
+        req: &ListTasksRequest,
+    ) -> Result<ValidatedRpc<ListTasksResponse>, ClientError> {
         let subject = self.outbound_rpc_subject(TasksListSubject::new(self.prefix(), &self.agent_id).to_string())?;
         let req_id = ReqId::new();
-        send_unary(
+        send_unary_validated(
             &self.nats,
             &subject,
             "tasks/list",
@@ -159,10 +167,14 @@ where
         .await
     }
 
-    pub async fn tasks_get(&self, req: &GetTaskRequest) -> Result<Task, ClientError> {
+    pub async fn tasks_list(&self, req: &ListTasksRequest) -> Result<ListTasksResponse, ClientError> {
+        Ok(self.tasks_list_validated(req).await?.value)
+    }
+
+    pub async fn tasks_get_validated(&self, req: &GetTaskRequest) -> Result<ValidatedRpc<Task>, ClientError> {
         let subject = self.outbound_rpc_subject(TasksGetSubject::new(self.prefix(), &self.agent_id).to_string())?;
         let req_id = ReqId::new();
-        send_unary(
+        send_unary_validated(
             &self.nats,
             &subject,
             "tasks/get",
@@ -174,10 +186,17 @@ where
         .await
     }
 
-    pub async fn message_send(&self, req: &SendMessageRequest) -> Result<SendMessageResponse, ClientError> {
+    pub async fn tasks_get(&self, req: &GetTaskRequest) -> Result<Task, ClientError> {
+        Ok(self.tasks_get_validated(req).await?.value)
+    }
+
+    pub async fn message_send_validated(
+        &self,
+        req: &SendMessageRequest,
+    ) -> Result<ValidatedRpc<SendMessageResponse>, ClientError> {
         let subject = self.outbound_rpc_subject(MessageSendSubject::new(self.prefix(), &self.agent_id).to_string())?;
         let req_id = ReqId::new();
-        send_unary(
+        send_unary_validated(
             &self.nats,
             &subject,
             "message/send",
@@ -189,13 +208,43 @@ where
         .await
     }
 
-    pub async fn push_delete(&self, req: &DeleteTaskPushNotificationConfigRequest) -> Result<(), ClientError> {
+    pub async fn message_send(&self, req: &SendMessageRequest) -> Result<SendMessageResponse, ClientError> {
+        Ok(self.message_send_validated(req).await?.value)
+    }
+
+    pub async fn push_delete_validated(
+        &self,
+        req: &DeleteTaskPushNotificationConfigRequest,
+    ) -> Result<ValidatedRpc<()>, ClientError> {
         let subject = self.outbound_rpc_subject(PushDeleteSubject::new(self.prefix(), &self.agent_id).to_string())?;
         let req_id = ReqId::new();
-        send_unary::<N, _, ()>(
+        send_unary_validated(
             &self.nats,
             &subject,
             "tasks/pushNotificationConfig/delete",
+            req,
+            &req_id,
+            self.operation_timeout(),
+            self.gateway_caller_jwt(),
+        )
+        .await
+    }
+
+    pub async fn push_delete(&self, req: &DeleteTaskPushNotificationConfigRequest) -> Result<(), ClientError> {
+        self.push_delete_validated(req).await?;
+        Ok(())
+    }
+
+    pub async fn push_list_validated(
+        &self,
+        req: &ListTaskPushNotificationConfigsRequest,
+    ) -> Result<ValidatedRpc<ListTaskPushNotificationConfigsResponse>, ClientError> {
+        let subject = self.outbound_rpc_subject(PushListSubject::new(self.prefix(), &self.agent_id).to_string())?;
+        let req_id = ReqId::new();
+        send_unary_validated(
+            &self.nats,
+            &subject,
+            "tasks/pushNotificationConfig/list",
             req,
             &req_id,
             self.operation_timeout(),
@@ -208,12 +257,19 @@ where
         &self,
         req: &ListTaskPushNotificationConfigsRequest,
     ) -> Result<ListTaskPushNotificationConfigsResponse, ClientError> {
-        let subject = self.outbound_rpc_subject(PushListSubject::new(self.prefix(), &self.agent_id).to_string())?;
+        Ok(self.push_list_validated(req).await?.value)
+    }
+
+    pub async fn push_get_validated(
+        &self,
+        req: &GetTaskPushNotificationConfigRequest,
+    ) -> Result<ValidatedRpc<TaskPushNotificationConfig>, ClientError> {
+        let subject = self.outbound_rpc_subject(PushGetSubject::new(self.prefix(), &self.agent_id).to_string())?;
         let req_id = ReqId::new();
-        send_unary(
+        send_unary_validated(
             &self.nats,
             &subject,
-            "tasks/pushNotificationConfig/list",
+            "tasks/pushNotificationConfig/get",
             req,
             &req_id,
             self.operation_timeout(),
@@ -226,24 +282,16 @@ where
         &self,
         req: &GetTaskPushNotificationConfigRequest,
     ) -> Result<TaskPushNotificationConfig, ClientError> {
-        let subject = self.outbound_rpc_subject(PushGetSubject::new(self.prefix(), &self.agent_id).to_string())?;
-        let req_id = ReqId::new();
-        send_unary(
-            &self.nats,
-            &subject,
-            "tasks/pushNotificationConfig/get",
-            req,
-            &req_id,
-            self.operation_timeout(),
-            self.gateway_caller_jwt(),
-        )
-        .await
+        Ok(self.push_get_validated(req).await?.value)
     }
 
-    pub async fn push_set(&self, req: &TaskPushNotificationConfig) -> Result<TaskPushNotificationConfig, ClientError> {
+    pub async fn push_set_validated(
+        &self,
+        req: &TaskPushNotificationConfig,
+    ) -> Result<ValidatedRpc<TaskPushNotificationConfig>, ClientError> {
         let subject = self.outbound_rpc_subject(PushSetSubject::new(self.prefix(), &self.agent_id).to_string())?;
         let req_id = ReqId::new();
-        send_unary(
+        send_unary_validated(
             &self.nats,
             &subject,
             "tasks/pushNotificationConfig/set",
@@ -255,11 +303,15 @@ where
         .await
     }
 
-    pub async fn agent_card(&self) -> Result<AgentCard, ClientError> {
+    pub async fn push_set(&self, req: &TaskPushNotificationConfig) -> Result<TaskPushNotificationConfig, ClientError> {
+        Ok(self.push_set_validated(req).await?.value)
+    }
+
+    pub async fn agent_card_validated(&self) -> Result<ValidatedRpc<AgentCard>, ClientError> {
         let subject = self.outbound_rpc_subject(AgentCardSubject::new(self.prefix(), &self.agent_id).to_string())?;
         let req_id = ReqId::new();
         let req = GetExtendedAgentCardRequest { tenant: None };
-        send_unary(
+        send_unary_validated(
             &self.nats,
             &subject,
             "agent/getAuthenticatedExtendedCard",
@@ -269,6 +321,10 @@ where
             self.gateway_caller_jwt(),
         )
         .await
+    }
+
+    pub async fn agent_card(&self) -> Result<AgentCard, ClientError> {
+        Ok(self.agent_card_validated().await?.value)
     }
 }
 
@@ -283,11 +339,11 @@ where
     <<<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::MessagesError: std::fmt::Display + Send + 'static,
     <<<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::StreamError: std::fmt::Display + Send + 'static,
 {
-    pub async fn tasks_resubscribe(
+    pub async fn tasks_resubscribe_validated(
         &self,
         task_id: &A2aTaskId,
         last_seq: u64,
-    ) -> Result<(Task, TypedEventStream), ClientError> {
+    ) -> Result<(ValidatedRpc<Task>, TypedEventStream), ClientError> {
         let subject =
             self.outbound_rpc_subject(TasksResubscribeSubject::new(self.prefix(), &self.agent_id).to_string())?;
         let req_id = ReqId::new();
@@ -295,7 +351,7 @@ where
             id: task_id.as_str().to_owned(),
             tenant: None,
         };
-        let snapshot: Task = send_unary(
+        let snapshot = send_unary_validated(
             &self.nats,
             &subject,
             "tasks/resubscribe",
@@ -309,10 +365,19 @@ where
         Ok((snapshot, stream))
     }
 
-    pub async fn message_stream(
+    pub async fn tasks_resubscribe(
+        &self,
+        task_id: &A2aTaskId,
+        last_seq: u64,
+    ) -> Result<(Task, TypedEventStream), ClientError> {
+        let (snapshot, stream) = self.tasks_resubscribe_validated(task_id, last_seq).await?;
+        Ok((snapshot.value, stream))
+    }
+
+    pub async fn message_stream_validated(
         &self,
         req: &SendMessageRequest,
-    ) -> Result<(SendMessageResponse, TypedEventStream), ClientError> {
+    ) -> Result<(ValidatedRpc<SendMessageResponse>, TypedEventStream), ClientError> {
         let subject = self.outbound_rpc_subject(MessageStreamSubject::new(self.prefix(), &self.agent_id).to_string())?;
         let req_id = ReqId::new();
         let ctx = StreamingRequest {
@@ -325,7 +390,15 @@ where
             op_timeout: self.operation_timeout(),
             gateway_caller_jwt: self.gateway_caller_jwt(),
         };
-        send_streaming(ctx, req).await
+        send_streaming_validated(ctx, req).await
+    }
+
+    pub async fn message_stream(
+        &self,
+        req: &SendMessageRequest,
+    ) -> Result<(SendMessageResponse, TypedEventStream), ClientError> {
+        let (bootstrap, stream) = self.message_stream_validated(req).await?;
+        Ok((bootstrap.value, stream))
     }
 }
 

@@ -1,0 +1,57 @@
+edition = "2024";
+
+package trogonai.session.sessions.replay.v1alpha1;
+
+import "google/protobuf/duration.proto";
+
+// The byte layout of a command-output replay artifact, format version 1.
+//
+// An artifact is two regions. The frame region runs from offset 0 and holds
+// frames back to back, each one a little-endian uint32 byte length followed by
+// that many bytes of a serialized ReplayFrame. The index region is a trailer
+// holding a serialized ReplayIndex; its offset and length are recorded on the
+// log, in CommandOutputReplayRef.
+//
+// These types are defined here rather than on the write side because they
+// describe bytes a reader parses, not a field an event carries. The write side
+// records where the capture is and what it is worth; this is what is inside it,
+// and the two change for different reasons (ADR#0035 facet 3).
+
+// ReplayFrame is one contiguous run of output the capturer read in one go.
+//
+// A frame boundary is a fact about the capturer's read loop and nothing else.
+// It is not a line, not a write() by the process, and not a flush. A renderer
+// that treats frames as lines will split a line that arrived in two reads, and
+// it will do it differently on a fast machine than a slow one.
+message ReplayFrame {
+  // The capturer's own count, starting at 0, never compacted.
+  //
+  // When frames are dropped the surviving ones keep the numbers they were
+  // given, so a gap in this sequence is a gap in the output. Renumbering to
+  // stay contiguous would erase the only evidence inside the artifact that
+  // anything is missing.
+  uint64 sequence = 1 [features.field_presence = LEGACY_REQUIRED];
+  ReplayStream stream = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Raw bytes as captured. Not decoded, not normalized, and specifically not
+  // stripped of control sequences: a terminal replay that removes them is
+  // replaying something the terminal never showed. Decoding is the renderer's
+  // job and is a decision it gets to make at render time, more than once.
+  bytes payload = 3;
+  // Elapsed time from the start of capture to when the capturer observed this
+  // frame. Present only when CommandOutputReplayRef.timing is
+  // TIMING_FIDELITY_CAPTURE_ELAPSED, and unset on every frame otherwise.
+  google.protobuf.Duration elapsed = 4;
+}
+
+// ReplayStream is which stream a frame came from.
+enum ReplayStream {
+  REPLAY_STREAM_UNSPECIFIED = 0;
+  REPLAY_STREAM_STDOUT = 1;
+  REPLAY_STREAM_STDERR = 2;
+  // Captured through one terminal or one pipe, where the two streams were
+  // already indistinguishable before the capturer saw them. Every frame of a
+  // CAPTURE_MODE_MERGED_TERMINAL artifact carries this. It means attribution is
+  // unavailable, not that it is pending, and a renderer must not infer stderr
+  // from content to fill it in.
+  REPLAY_STREAM_MERGED = 3;
+}

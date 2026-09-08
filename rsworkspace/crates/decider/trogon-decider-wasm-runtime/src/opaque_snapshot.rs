@@ -29,7 +29,7 @@ impl OpaqueSnapshotPayload {
 }
 
 impl SnapshotType for OpaqueSnapshotPayload {
-    type Error = trogon_decider_runtime::InvalidSnapshotTypeName;
+    type Error = trogon_decider_runtime::InvalidSnapshotTypeNameError;
 
     fn snapshot_type() -> Result<SnapshotTypeName, Self::Error> {
         SnapshotTypeName::new("wasm-decider-opaque.v1")

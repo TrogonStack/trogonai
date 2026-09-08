@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+#MISE description="Generate sha256 checksums for the downloaded acp-nats-stdio release artifacts"
+set -euo pipefail
+
+ROOT="${GITHUB_WORKSPACE:-$(git rev-parse --show-toplevel)}"
+cd "$ROOT/artifacts"
+
+sha256sum acp-nats-stdio-* > sha256sums.txt

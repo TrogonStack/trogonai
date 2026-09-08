@@ -31,14 +31,16 @@ impl ::buffa::MessageName for Schedule {
 impl ::buffa::Message for Schedule {
     /// Returns the total encoded size in bytes.
     ///
-    /// The result is a `u32`; the protobuf specification requires all
-    /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
-    /// compliant message will never overflow this type.
+    /// Accumulates in `u64` (which cannot overflow for in-memory
+    /// data) and saturates to `u32` at return, so a message whose
+    /// encoded size exceeds the 2 GiB protobuf limit yields a value
+    /// above [`::buffa::MAX_MESSAGE_BYTES`] that the encode entry
+    /// points reject, never a silently wrapped size.
     #[allow(clippy::let_and_return)]
     fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        let mut size = 0u32;
+        let mut size = 0u64;
         if let ::core::option::Option::Some(ref v) = self.kind {
             match v {
                 __buffa::oneof::schedule::Kind::At(x) => {
@@ -46,41 +48,41 @@ impl ::buffa::Message for Schedule {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::schedule::Kind::Every(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::schedule::Kind::Cron(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::schedule::Kind::Rrule(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
             }
         }
-        size
+        ::buffa::saturate_size(size)
     }
     fn write_to(
         &self,
         __cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
+        buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
@@ -89,7 +91,7 @@ impl ::buffa::Message for Schedule {
                 __buffa::oneof::schedule::Kind::At(x) => {
                     ::buffa::types::put_len_delimited_header(
                         1u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -97,7 +99,7 @@ impl ::buffa::Message for Schedule {
                 __buffa::oneof::schedule::Kind::Every(x) => {
                     ::buffa::types::put_len_delimited_header(
                         2u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -105,7 +107,7 @@ impl ::buffa::Message for Schedule {
                 __buffa::oneof::schedule::Kind::Cron(x) => {
                     ::buffa::types::put_len_delimited_header(
                         3u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -113,7 +115,7 @@ impl ::buffa::Message for Schedule {
                 __buffa::oneof::schedule::Kind::Rrule(x) => {
                     ::buffa::types::put_len_delimited_header(
                         4u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -382,7 +384,10 @@ pub mod schedule {
         ///
         /// Field 1: `at`
         #[serde(rename = "at")]
-        pub at: ::buffa::MessageField<::buffa_types::google::protobuf::Timestamp>,
+        pub at: ::buffa::MessageField<
+            ::buffa_types::google::protobuf::Timestamp,
+            ::buffa::Inline<::buffa_types::google::protobuf::Timestamp>,
+        >,
     }
     impl ::core::fmt::Debug for At {
         fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -406,35 +411,37 @@ pub mod schedule {
     impl ::buffa::Message for At {
         /// Returns the total encoded size in bytes.
         ///
-        /// The result is a `u32`; the protobuf specification requires all
-        /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
-        /// compliant message will never overflow this type.
+        /// Accumulates in `u64` (which cannot overflow for in-memory
+        /// data) and saturates to `u32` at return, so a message whose
+        /// encoded size exceeds the 2 GiB protobuf limit yields a value
+        /// above [`::buffa::MAX_MESSAGE_BYTES`] that the encode entry
+        /// points reject, never a silently wrapped size.
         #[allow(clippy::let_and_return)]
         fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
             #[allow(unused_imports)]
             use ::buffa::Enumeration as _;
-            let mut size = 0u32;
+            let mut size = 0u64;
             if self.at.is_set() {
                 let __slot = __cache.reserve();
                 let inner_size = self.at.compute_size(__cache);
                 __cache.set(__slot, inner_size);
                 size
-                    += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                        + inner_size;
+                    += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                        + inner_size as u64;
             }
-            size
+            ::buffa::saturate_size(size)
         }
         fn write_to(
             &self,
             __cache: &mut ::buffa::SizeCache,
-            buf: &mut impl ::buffa::bytes::BufMut,
+            buf: &mut impl ::buffa::EncodeSink,
         ) {
             #[allow(unused_imports)]
             use ::buffa::Enumeration as _;
             if self.at.is_set() {
                 ::buffa::types::put_len_delimited_header(
                     1u32,
-                    __cache.consume_next(),
+                    u64::from(__cache.consume_next()),
                     buf,
                 );
                 self.at.write_to(__cache, buf);
@@ -500,7 +507,10 @@ pub mod schedule {
         ///
         /// Field 1: `every`
         #[serde(rename = "every")]
-        pub every: ::buffa::MessageField<::buffa_types::google::protobuf::Duration>,
+        pub every: ::buffa::MessageField<
+            ::buffa_types::google::protobuf::Duration,
+            ::buffa::Inline<::buffa_types::google::protobuf::Duration>,
+        >,
     }
     impl ::core::fmt::Debug for Every {
         fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -524,35 +534,37 @@ pub mod schedule {
     impl ::buffa::Message for Every {
         /// Returns the total encoded size in bytes.
         ///
-        /// The result is a `u32`; the protobuf specification requires all
-        /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
-        /// compliant message will never overflow this type.
+        /// Accumulates in `u64` (which cannot overflow for in-memory
+        /// data) and saturates to `u32` at return, so a message whose
+        /// encoded size exceeds the 2 GiB protobuf limit yields a value
+        /// above [`::buffa::MAX_MESSAGE_BYTES`] that the encode entry
+        /// points reject, never a silently wrapped size.
         #[allow(clippy::let_and_return)]
         fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
             #[allow(unused_imports)]
             use ::buffa::Enumeration as _;
-            let mut size = 0u32;
+            let mut size = 0u64;
             if self.every.is_set() {
                 let __slot = __cache.reserve();
                 let inner_size = self.every.compute_size(__cache);
                 __cache.set(__slot, inner_size);
                 size
-                    += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                        + inner_size;
+                    += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                        + inner_size as u64;
             }
-            size
+            ::buffa::saturate_size(size)
         }
         fn write_to(
             &self,
             __cache: &mut ::buffa::SizeCache,
-            buf: &mut impl ::buffa::bytes::BufMut,
+            buf: &mut impl ::buffa::EncodeSink,
         ) {
             #[allow(unused_imports)]
             use ::buffa::Enumeration as _;
             if self.every.is_set() {
                 ::buffa::types::put_len_delimited_header(
                     1u32,
-                    __cache.consume_next(),
+                    u64::from(__cache.consume_next()),
                     buf,
                 );
                 self.every.write_to(__cache, buf);
@@ -625,6 +637,7 @@ pub mod schedule {
         #[serde(rename = "timezone")]
         pub timezone: ::buffa::MessageField<
             super::super::super::super::super::google::r#type::TimeZone,
+            ::buffa::Inline<super::super::super::super::super::google::r#type::TimeZone>,
         >,
     }
     impl ::core::fmt::Debug for Cron {
@@ -652,29 +665,31 @@ pub mod schedule {
     impl ::buffa::Message for Cron {
         /// Returns the total encoded size in bytes.
         ///
-        /// The result is a `u32`; the protobuf specification requires all
-        /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
-        /// compliant message will never overflow this type.
+        /// Accumulates in `u64` (which cannot overflow for in-memory
+        /// data) and saturates to `u32` at return, so a message whose
+        /// encoded size exceeds the 2 GiB protobuf limit yields a value
+        /// above [`::buffa::MAX_MESSAGE_BYTES`] that the encode entry
+        /// points reject, never a silently wrapped size.
         #[allow(clippy::let_and_return)]
         fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
             #[allow(unused_imports)]
             use ::buffa::Enumeration as _;
-            let mut size = 0u32;
-            size += 1u32 + ::buffa::types::string_encoded_len(&self.expr) as u32;
+            let mut size = 0u64;
+            size += 1u64 + ::buffa::types::string_encoded_len(&self.expr) as u64;
             if self.timezone.is_set() {
                 let __slot = __cache.reserve();
                 let inner_size = self.timezone.compute_size(__cache);
                 __cache.set(__slot, inner_size);
                 size
-                    += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                        + inner_size;
+                    += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                        + inner_size as u64;
             }
-            size
+            ::buffa::saturate_size(size)
         }
         fn write_to(
             &self,
             __cache: &mut ::buffa::SizeCache,
-            buf: &mut impl ::buffa::bytes::BufMut,
+            buf: &mut impl ::buffa::EncodeSink,
         ) {
             #[allow(unused_imports)]
             use ::buffa::Enumeration as _;
@@ -682,7 +697,7 @@ pub mod schedule {
             if self.timezone.is_set() {
                 ::buffa::types::put_len_delimited_header(
                     2u32,
-                    __cache.consume_next(),
+                    u64::from(__cache.consume_next()),
                     buf,
                 );
                 self.timezone.write_to(__cache, buf);
@@ -760,7 +775,10 @@ pub mod schedule {
         ///
         /// Field 1: `dtstart`
         #[serde(rename = "dtstart")]
-        pub dtstart: ::buffa::MessageField<::buffa_types::google::protobuf::Timestamp>,
+        pub dtstart: ::buffa::MessageField<
+            ::buffa_types::google::protobuf::Timestamp,
+            ::buffa::Inline<::buffa_types::google::protobuf::Timestamp>,
+        >,
         /// Single RFC 5545 RRULE value; writers should omit the RRULE: prefix.
         ///
         /// Field 2: `rrule`
@@ -772,6 +790,7 @@ pub mod schedule {
         #[serde(rename = "timezone")]
         pub timezone: ::buffa::MessageField<
             super::super::super::super::super::google::r#type::TimeZone,
+            ::buffa::Inline<super::super::super::super::super::google::r#type::TimeZone>,
         >,
         /// Instants that are included even when they are not generated by rrule.
         ///
@@ -820,60 +839,62 @@ pub mod schedule {
     impl ::buffa::Message for RRule {
         /// Returns the total encoded size in bytes.
         ///
-        /// The result is a `u32`; the protobuf specification requires all
-        /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
-        /// compliant message will never overflow this type.
+        /// Accumulates in `u64` (which cannot overflow for in-memory
+        /// data) and saturates to `u32` at return, so a message whose
+        /// encoded size exceeds the 2 GiB protobuf limit yields a value
+        /// above [`::buffa::MAX_MESSAGE_BYTES`] that the encode entry
+        /// points reject, never a silently wrapped size.
         #[allow(clippy::let_and_return)]
         fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
             #[allow(unused_imports)]
             use ::buffa::Enumeration as _;
-            let mut size = 0u32;
+            let mut size = 0u64;
             if self.dtstart.is_set() {
                 let __slot = __cache.reserve();
                 let inner_size = self.dtstart.compute_size(__cache);
                 __cache.set(__slot, inner_size);
                 size
-                    += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                        + inner_size;
+                    += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                        + inner_size as u64;
             }
-            size += 1u32 + ::buffa::types::string_encoded_len(&self.rrule) as u32;
+            size += 1u64 + ::buffa::types::string_encoded_len(&self.rrule) as u64;
             if self.timezone.is_set() {
                 let __slot = __cache.reserve();
                 let inner_size = self.timezone.compute_size(__cache);
                 __cache.set(__slot, inner_size);
                 size
-                    += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                        + inner_size;
+                    += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                        + inner_size as u64;
             }
             for v in &self.rdate {
                 let __slot = __cache.reserve();
                 let inner_size = v.compute_size(__cache);
                 __cache.set(__slot, inner_size);
                 size
-                    += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                        + inner_size;
+                    += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                        + inner_size as u64;
             }
             for v in &self.exdate {
                 let __slot = __cache.reserve();
                 let inner_size = v.compute_size(__cache);
                 __cache.set(__slot, inner_size);
                 size
-                    += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                        + inner_size;
+                    += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                        + inner_size as u64;
             }
-            size
+            ::buffa::saturate_size(size)
         }
         fn write_to(
             &self,
             __cache: &mut ::buffa::SizeCache,
-            buf: &mut impl ::buffa::bytes::BufMut,
+            buf: &mut impl ::buffa::EncodeSink,
         ) {
             #[allow(unused_imports)]
             use ::buffa::Enumeration as _;
             if self.dtstart.is_set() {
                 ::buffa::types::put_len_delimited_header(
                     1u32,
-                    __cache.consume_next(),
+                    u64::from(__cache.consume_next()),
                     buf,
                 );
                 self.dtstart.write_to(__cache, buf);
@@ -882,7 +903,7 @@ pub mod schedule {
             if self.timezone.is_set() {
                 ::buffa::types::put_len_delimited_header(
                     3u32,
-                    __cache.consume_next(),
+                    u64::from(__cache.consume_next()),
                     buf,
                 );
                 self.timezone.write_to(__cache, buf);
@@ -890,7 +911,7 @@ pub mod schedule {
             for v in &self.rdate {
                 ::buffa::types::put_len_delimited_header(
                     4u32,
-                    __cache.consume_next(),
+                    u64::from(__cache.consume_next()),
                     buf,
                 );
                 v.write_to(__cache, buf);
@@ -898,7 +919,7 @@ pub mod schedule {
             for v in &self.exdate {
                 ::buffa::types::put_len_delimited_header(
                     5u32,
-                    __cache.consume_next(),
+                    u64::from(__cache.consume_next()),
                     buf,
                 );
                 v.write_to(__cache, buf);
@@ -950,6 +971,9 @@ pub mod schedule {
                         ::buffa::encoding::WireType::LengthDelimited,
                     )?;
                     let mut elem = ::core::default::Default::default();
+                    ctx.register_element_memory(
+                        ::buffa::__private::element_footprint(&elem),
+                    )?;
                     ::buffa::Message::merge_length_delimited(&mut elem, buf, ctx)?;
                     self.rdate.push(elem);
                 }
@@ -959,6 +983,9 @@ pub mod schedule {
                         ::buffa::encoding::WireType::LengthDelimited,
                     )?;
                     let mut elem = ::core::default::Default::default();
+                    ctx.register_element_memory(
+                        ::buffa::__private::element_footprint(&elem),
+                    )?;
                     ::buffa::Message::merge_length_delimited(&mut elem, buf, ctx)?;
                     self.exdate.push(elem);
                 }

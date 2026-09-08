@@ -12,7 +12,7 @@ impl GlobalAllSubject {
 
 impl std::fmt::Display for GlobalAllSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.agent.>", self.prefix.as_str())
+        write!(f, "{}.v1.global.agent.>", self.prefix.as_str())
     }
 }
 
@@ -40,7 +40,7 @@ mod tests {
     #[test]
     fn display_formats_subject_correctly() {
         let s = GlobalAllSubject::new(&prefix());
-        assert_eq!(s.to_string(), "acp.agent.>");
+        assert_eq!(s.to_string(), "acp.v1.global.agent.>");
     }
 
     #[test]

@@ -1,0 +1,176 @@
+edition = "2024";
+
+package trogonai.session.sessions.queries.v1alpha1;
+
+// HistoryItem is one entry in a session's reader-visible history.
+//
+// The discriminated-union hazard this shape is built around: a caller decoding
+// a `oneof` arm added after its contract minor sees an unset `oneof` and cannot
+// distinguish "a variant I do not know" from "a variant that was not set".
+// Silently rendering nothing for a real event is a correctness failure, not a
+// cosmetic one.
+//
+// Two mechanisms close that gap:
+//
+//  1. `kind` is a plain enum outside the `oneof`. Proto enums are open, so an
+//     unrecognized kind decodes as its raw number rather than vanishing, and a
+//     caller can always tell that something is here it does not understand.
+//  2. The server clamps to the caller's declared contract minor and emits
+//     HISTORY_ITEM_KIND_ELIDED with an `elided` payload rather than a variant
+//     the caller cannot decode. Elision is affirmative: the caller reads that
+//     an item was withheld instead of inferring it from an empty field.
+message HistoryItem {
+  // Stable within a session, opaque, and safe to use as a rendering key. It
+  // remains stable across an elision, so a client that upgrades sees the same
+  // item resolve to a real variant.
+  string item_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The session's own 1-indexed position for this item.
+  uint64 ordinal = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Set even when the matching `item` arm is absent, so an unknown or withheld
+  // item is still identifiable.
+  HistoryItemKind kind = 3 [features.field_presence = LEGACY_REQUIRED];
+  oneof item {
+    UserMessageItem user_message = 4;
+    AssistantMessageItem assistant_message = 5;
+    ToolCallItem tool_call = 6;
+    FileChangeItem file_change = 7;
+    SystemNoticeItem system_notice = 8;
+    CompactionItem compaction = 9;
+    HistoryItemElided elided = 10;
+  }
+}
+
+// HistoryItemKind is what an item is, readable without decoding the union.
+enum HistoryItemKind {
+  HISTORY_ITEM_KIND_UNSPECIFIED = 0;
+  HISTORY_ITEM_KIND_USER_MESSAGE = 1;
+  HISTORY_ITEM_KIND_ASSISTANT_MESSAGE = 2;
+  HISTORY_ITEM_KIND_TOOL_CALL = 3;
+  HISTORY_ITEM_KIND_FILE_CHANGE = 4;
+  HISTORY_ITEM_KIND_SYSTEM_NOTICE = 5;
+  HISTORY_ITEM_KIND_COMPACTION = 6;
+  // The item exists but was not rendered. `elided` says why.
+  HISTORY_ITEM_KIND_ELIDED = 7;
+}
+
+// HistoryItemElided is an item the server chose not to render, stated
+// affirmatively so a caller never mistakes a withheld item for a missing one.
+message HistoryItemElided {
+  ElisionReason reason = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// ElisionReason is why an item was withheld.
+enum ElisionReason {
+  ELISION_REASON_UNSPECIFIED = 0;
+  // The item needs a variant introduced after the caller's contract minor.
+  // Upgrading the caller resolves it.
+  ELISION_REASON_CONTRACT_CLAMPED = 1;
+  // A redaction masked the item's content. The item's existence is still a
+  // fact; only the content is gone.
+  ELISION_REASON_REDACTED = 2;
+  // The caller is not authorized to see this item's content.
+  ELISION_REASON_NOT_AUTHORIZED = 3;
+}
+
+// UserMessageItem is a message from the user.
+message UserMessageItem {
+  string turn_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Rendered plain text. Structured and provider-native content is reachable
+  // through the artifact surface, not inlined here.
+  string text = 2 [features.field_presence = LEGACY_REQUIRED];
+  // The text was shortened for transport. The full content is not recoverable
+  // from this response.
+  bool truncated = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// AssistantMessageItem is one assistant generation and its outcome.
+//
+// It carries a terminal state rather than a completion flag, because a
+// generation that was interrupted is a different fact from one still running,
+// and a boolean cannot hold that difference.
+message AssistantMessageItem {
+  string turn_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string model = 2 [features.field_presence = LEGACY_REQUIRED];
+  string text = 3 [features.field_presence = LEGACY_REQUIRED];
+  bool truncated = 4 [features.field_presence = LEGACY_REQUIRED];
+  AssistantMessageOutcome outcome = 5 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// AssistantMessageOutcome is how a generation ended.
+enum AssistantMessageOutcome {
+  ASSISTANT_MESSAGE_OUTCOME_UNSPECIFIED = 0;
+  // Started, with no terminal fact recorded. Either still running or stranded
+  // by a crash; the reader cannot tell which, and must not present it as done.
+  ASSISTANT_MESSAGE_OUTCOME_IN_FLIGHT = 1;
+  ASSISTANT_MESSAGE_OUTCOME_COMPLETED = 2;
+  ASSISTANT_MESSAGE_OUTCOME_FAILED = 3;
+}
+
+// ToolCallItem is one tool call and its lifecycle position.
+message ToolCallItem {
+  string turn_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string tool_call_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string tool_name = 3 [features.field_presence = LEGACY_REQUIRED];
+  ToolCallOutcome outcome = 4 [features.field_presence = LEGACY_REQUIRED];
+  // True when the call started and no terminal outcome was ever recorded. This
+  // is the reader-visible form of an interrupted call awaiting reconciliation.
+  bool unreconciled = 5 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// ToolCallOutcome is where a tool call stopped.
+enum ToolCallOutcome {
+  TOOL_CALL_OUTCOME_UNSPECIFIED = 0;
+  TOOL_CALL_OUTCOME_REQUESTED = 1;
+  TOOL_CALL_OUTCOME_APPROVED = 2;
+  TOOL_CALL_OUTCOME_DENIED = 3;
+  // Running, or stranded by a crash. See `unreconciled`.
+  TOOL_CALL_OUTCOME_STARTED = 4;
+  TOOL_CALL_OUTCOME_COMPLETED = 5;
+  TOOL_CALL_OUTCOME_FAILED = 6;
+}
+
+// FileChangeItem is one workspace file change attributed to a tool call.
+message FileChangeItem {
+  string turn_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string tool_call_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Workspace-relative, forward slashes, no leading slash.
+  string path = 3 [features.field_presence = LEGACY_REQUIRED];
+  FileChangeKindView change_kind = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Set only for a rename.
+  string previous_path = 5;
+}
+
+// FileChangeKindView is what happened to a file.
+enum FileChangeKindView {
+  FILE_CHANGE_KIND_VIEW_UNSPECIFIED = 0;
+  FILE_CHANGE_KIND_VIEW_CREATED = 1;
+  FILE_CHANGE_KIND_VIEW_MODIFIED = 2;
+  FILE_CHANGE_KIND_VIEW_DELETED = 3;
+  FILE_CHANGE_KIND_VIEW_RENAMED = 4;
+}
+
+// SystemNoticeItem is a system-originated notice surfaced in the transcript.
+message SystemNoticeItem {
+  NoticeLevelView level = 1 [features.field_presence = LEGACY_REQUIRED];
+  string text = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// NoticeLevelView is a notice's severity.
+enum NoticeLevelView {
+  NOTICE_LEVEL_VIEW_UNSPECIFIED = 0;
+  NOTICE_LEVEL_VIEW_INFO = 1;
+  NOTICE_LEVEL_VIEW_WARNING = 2;
+  NOTICE_LEVEL_VIEW_ERROR = 3;
+}
+
+// CompactionItem marks where a range of history was replaced by a summary.
+//
+// It is surfaced rather than hidden so a reader can see that the transcript it
+// is looking at is not the whole transcript.
+message CompactionItem {
+  // Inclusive ordinal range this summary stands in for.
+  uint64 covers_from = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint64 covers_through = 2 [features.field_presence = LEGACY_REQUIRED];
+  string summary_text = 3 [features.field_presence = LEGACY_REQUIRED];
+  bool truncated = 4 [features.field_presence = LEGACY_REQUIRED];
+}

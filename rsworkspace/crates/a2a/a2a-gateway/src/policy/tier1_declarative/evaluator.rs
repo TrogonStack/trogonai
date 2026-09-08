@@ -13,6 +13,8 @@ use super::bundle::{
 use super::loader::Tier1DeclarativeLoadError;
 use super::time_predicate::time_of_day_pattern_matches;
 
+use crate::constants::{ENV_TIER1_BUNDLE_DIR, ENV_TIER1_DECLARATIVE_ENABLED};
+
 pub trait Tier1Clock: Send + Sync {
     fn now(&self) -> SystemTime;
 }
@@ -40,9 +42,6 @@ impl Tier1Clock for FixedTier1Clock {
         self.0
     }
 }
-
-pub const ENV_TIER1_DECLARATIVE_ENABLED: &str = "A2A_GATEWAY_TIER1_DECLARATIVE_ENABLED";
-pub const ENV_TIER1_BUNDLE_DIR: &str = "A2A_GATEWAY_TIER1_BUNDLE_DIR";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tier1DeclarativeContext {
@@ -141,8 +140,8 @@ fn match_hits(ctx: &Tier1DeclarativeContext, item: &Tier1DeclarativeMatch, clock
             .is_some_and(|subject| pattern_matches(&item.pattern, subject.as_str())),
         // NATS subjects are dot-tokenized; `*` matches exactly one token
         // and `>` matches the trailing tail. Without the NATS-aware
-        // matcher, a rule like `a2a.gateway.*.message.send` would also
-        // allow `a2a.gateway.tenant.x.message.send` because the generic
+        // matcher, a rule like `a2a.v1.gateway.*.message.send` would also
+        // allow `a2a.v1.gateway.tenant.x.message.send` because the generic
         // `glob_match` lets `*` span dots.
         Tier1ResourceKind::NatsSubjectPattern => nats_subject_matches(&item.pattern, &ctx.nats_subject),
         kind => {

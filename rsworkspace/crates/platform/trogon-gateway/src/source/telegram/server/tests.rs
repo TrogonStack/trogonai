@@ -5,6 +5,7 @@ use std::time::Duration;
 use tower::ServiceExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use trogon_nats::jetstream::StreamMaxAge;
+use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore,
 };
@@ -26,8 +27,7 @@ fn test_config() -> TelegramSourceConfig {
 fn wrap_publisher(publisher: MockJetStreamPublisher) -> ClaimCheckPublisher<MockJetStreamPublisher, MockObjectStore> {
     ClaimCheckPublisher::new(
         publisher,
-        MockObjectStore::new(),
-        "test-bucket".to_string(),
+        ClaimBucketBinding::for_test(MockObjectStore::new(), ClaimBucket::default()),
         MaxPayload::from_server_limit(usize::MAX),
     )
 }
@@ -322,8 +322,7 @@ async fn ack_failure_returns_500() {
     let state = AppState {
         publisher: ClaimCheckPublisher::new(
             publisher,
-            MockObjectStore::new(),
-            "test-bucket".to_string(),
+            ClaimBucketBinding::for_test(MockObjectStore::new(), ClaimBucket::default()),
             MaxPayload::from_server_limit(usize::MAX),
         ),
         webhook_secret: TelegramWebhookSecret::new(TEST_SECRET).unwrap(),
@@ -350,8 +349,7 @@ async fn ack_timeout_returns_500() {
     let state = AppState {
         publisher: ClaimCheckPublisher::new(
             publisher,
-            MockObjectStore::new(),
-            "test-bucket".to_string(),
+            ClaimBucketBinding::for_test(MockObjectStore::new(), ClaimBucket::default()),
             MaxPayload::from_server_limit(usize::MAX),
         ),
         webhook_secret: TelegramWebhookSecret::new(TEST_SECRET).unwrap(),

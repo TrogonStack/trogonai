@@ -22,6 +22,29 @@ pub enum CredentialError {
     /// The verifier ran and refused the credential material itself.
     #[error("credential verification failed: {0}")]
     InvalidCredentials(String),
+    /// The caller verified, but the principal document minted for them could
+    /// not be encoded. Kept apart from [`Self::InvalidCredentials`] because the
+    /// credential was good: the failure is this side's, and it carries the
+    /// serde error rather than a rendering of it.
+    #[error("principal serialization failed")]
+    PrincipalSerialization(#[source] serde_json::Error),
+    /// The token nominated an `alg` outside the verifier's allowlist. Kept
+    /// apart from [`Self::InvalidCredentials`] because an algorithm-confusion
+    /// attempt is a different signal from a merely bad signature, and a
+    /// rejection counter should be able to tell them apart without matching
+    /// on message text.
+    #[error("credential verification failed: unsupported token algorithm {algorithm:?}")]
+    UnsupportedTokenAlgorithm { algorithm: jsonwebtoken::Algorithm },
+    /// The JWK named by `kid` verified as well-formed but its own `alg`,
+    /// `use`, or `key_ops` do not permit verifying signatures with the
+    /// token's algorithm.
+    #[error(
+        "credential verification failed: JWK for kid {kid:?} is not published for verifying {algorithm:?} signatures"
+    )]
+    JwkNotPublishedForVerification {
+        kid: String,
+        algorithm: jsonwebtoken::Algorithm,
+    },
 }
 
 impl From<CredentialError> for AuthCalloutError {
@@ -52,6 +75,15 @@ pub enum AuthCalloutError {
     Jwt(#[source] JwtError),
     #[error("auth callout wire format error: {0}")]
     WireFormat(String),
+    /// A section of a synthetic bridge authorization request failed to convert
+    /// through serde. Names the section and keeps the serde error, so the
+    /// failing section is matchable instead of parsed back out of a message.
+    #[error("auth callout wire format error: bridge {section}")]
+    BridgeWireFormat {
+        section: &'static str,
+        #[source]
+        source: serde_json::Error,
+    },
     #[error("internal error: {0}")]
     Internal(String),
     /// Required process-edge environment variable was missing.

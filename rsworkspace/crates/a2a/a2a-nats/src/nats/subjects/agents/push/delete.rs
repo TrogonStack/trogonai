@@ -21,7 +21,7 @@ impl std::fmt::Display for PushDeleteSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.agents.{}.push.delete",
+            "{}.v1.agents.{}.push.delete",
             self.prefix.as_str(),
             self.agent_id.as_str()
         )

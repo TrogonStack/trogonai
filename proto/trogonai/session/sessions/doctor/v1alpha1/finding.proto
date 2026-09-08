@@ -1,0 +1,244 @@
+edition = "2024";
+
+package trogonai.session.sessions.doctor.v1alpha1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/session/sessions/doctor/v1alpha1/orphan.proto";
+import "trogonai/session/sessions/doctor/v1alpha1/repair_action.proto";
+
+// Finding is one inconsistency the doctor observed.
+//
+// A finding is an observation, never an instruction. It says what disagrees
+// with what, and it names the repairs that could address it, but producing one
+// mutates nothing. That separation is the whole design: diagnosis and repair are
+// different operations with different messages, so a caller cannot reach a
+// mutation by filling in one more field on a read.
+message Finding {
+  // Stable identity for this problem: a digest over `kind` and `subject`.
+  //
+  // Deliberately not a digest over the observed values. A projection that falls
+  // further behind between diagnosis and repair is still the same finding, and
+  // an id that changed with every observed byte would make repairs impossible on
+  // a busy session. Staleness is caught by re-verifying the finding at repair
+  // time, not by comparing ids.
+  string finding_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  FindingKind kind = 2 [features.field_presence = LEGACY_REQUIRED];
+  FindingSeverity severity = 3 [features.field_presence = LEGACY_REQUIRED];
+  SubjectRef subject = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Human-readable, non-contractual, safe to log. Never parse it.
+  string summary = 5 [features.field_presence = LEGACY_REQUIRED];
+  // Repairs that could address this finding, and the only actions a
+  // RepairSessionRequest may name for it. An empty list means nothing the
+  // doctor can do will help, which is the normal case for a CORRUPT finding.
+  repeated RepairAction available_repairs = 6;
+  google.protobuf.Timestamp observed_at = 7 [features.field_presence = LEGACY_REQUIRED];
+  // Machine-readable specifics. `kind` sits outside this union on purpose: an
+  // unset oneof and a variant added after the reader was built are
+  // indistinguishable, so the kind is what stays readable either way.
+  oneof detail {
+    EventDecodeDetail event_decode = 8;
+    ProjectionCheckpointDetail projection_checkpoint = 9;
+    ArtifactDigestDetail artifact_digest = 10;
+    OperationLedgerDetail operation_ledger = 11;
+    UnreconciledWorkDetail unreconciled_work = 12;
+    OrphanDetail orphan = 13;
+  }
+}
+
+// FindingSeverity is what an operator has to decide, not a feelings scale.
+//
+// The question a severity answers here is whether rebuilding derived state can
+// fix this. That is the only distinction that changes what an operator does
+// next, so it is the one the enum encodes.
+enum FindingSeverity {
+  FINDING_SEVERITY_UNSPECIFIED = 0;
+  // Worth knowing, nothing is wrong. A projection a few events behind a busy
+  // stream is the normal state of a projection, not a defect.
+  FINDING_SEVERITY_INFO = 1;
+  // Derived state disagrees with the stream. Reads may be wrong, the stream is
+  // intact, and rebuilding from it is expected to resolve the finding.
+  FINDING_SEVERITY_DEGRADED = 2;
+  // The stream itself cannot be fully interpreted. No amount of rebuilding
+  // helps, because the thing that would be rebuilt from is the problem. These
+  // findings usually carry no available repairs, and that is the honest answer
+  // rather than a gap.
+  FINDING_SEVERITY_CORRUPT = 3;
+}
+
+// FindingKind is what was observed.
+//
+// Open by protobuf's rules and treated as open here: a reader that meets an
+// unrecognized kind has reached a newer doctor and must surface it as an
+// unknown finding rather than drop it. A dropped finding reads as health.
+enum FindingKind {
+  FINDING_KIND_UNSPECIFIED = 0;
+  // The session's stream does not exist.
+  FINDING_KIND_STREAM_MISSING = 1;
+  // A creation batch landed partially. The session exists but its opening
+  // invariants were never completed.
+  FINDING_KIND_CREATION_BATCH_INCOMPLETE = 2;
+  // An event at a known ordinal could not be decoded.
+  FINDING_KIND_EVENT_DECODE_FAILED = 3;
+  // An event carries a type this build does not know. Distinct from a decode
+  // failure: the bytes may be fine and this reader is simply older.
+  FINDING_KIND_UNSUPPORTED_EVENT_TYPE = 4;
+  // Folding the stream did not produce a state. Usually downstream of a decode
+  // failure, reported separately because a replay can also fail on events that
+  // each decode cleanly.
+  FINDING_KIND_AGGREGATE_REPLAY_FAILED = 5;
+  // A snapshot does not match a replay of the events it claims to cover.
+  FINDING_KIND_SNAPSHOT_INVALID = 6;
+  // A snapshot is valid but far enough behind to have stopped being useful.
+  FINDING_KIND_SNAPSHOT_BEHIND = 7;
+  // A projection is behind its source beyond the configured tolerance.
+  FINDING_KIND_PROJECTION_BEHIND = 8;
+  // A projection failed its own validity checks.
+  FINDING_KIND_PROJECTION_INVALID = 9;
+  // A projection checkpoint claims a position the source stream does not have.
+  // Nothing legitimate produces this; it means the checkpoint and the stream
+  // come from different histories.
+  FINDING_KIND_PROJECTION_CHECKPOINT_AHEAD_OF_SOURCE = 10;
+  // A projection checkpoint claims to have applied an event that is absent from
+  // the materialized view. The checkpoint and the view disagree about the same
+  // projection.
+  FINDING_KIND_PROJECTION_CHECKPOINT_INCONSISTENT = 11;
+  // An artifact referenced by the session is not present in storage.
+  FINDING_KIND_ARTIFACT_MISSING = 12;
+  // An artifact is present and its content no longer matches its recorded
+  // digest.
+  FINDING_KIND_ARTIFACT_DIGEST_MISMATCH = 13;
+  // An artifact claim or multipart upload references nothing durable.
+  FINDING_KIND_ORPHANED_ARTIFACT_CLAIM = 14;
+  // A recovery checkpoint or its attestation failed verification.
+  FINDING_KIND_CHECKPOINT_ATTESTATION_INVALID = 15;
+  // A delegation, detach, or cascade sequence started and never reached a
+  // terminal step.
+  FINDING_KIND_SAGA_INCOMPLETE = 16;
+  // A reserved operation recorded an indeterminate outcome. Non-terminal by
+  // design, so this is a finding only once it is also overdue.
+  FINDING_KIND_OPERATION_OUTCOME_UNKNOWN = 17;
+  // A reserved operation has recorded no outcome past its expected settlement
+  // window.
+  FINDING_KIND_OPERATION_OUTCOME_OVERDUE = 18;
+  // A tool call reached a started state and never recorded a terminal outcome,
+  // in a session that is already terminal. This is the crash-recovery case the
+  // aggregate's fold exists to expose.
+  FINDING_KIND_TOOL_CALL_UNRECONCILED = 19;
+  // A retention or cold-tier watermark disagrees with what is actually
+  // retained.
+  FINDING_KIND_RETENTION_WATERMARK_INCONSISTENT = 20;
+  // Derived state left behind by a computation that no longer runs: an
+  // abandoned projection generation, staging from a finished migration, a
+  // reconciliation lease whose holder never came back.
+  //
+  // Separate from ORPHANED_ARTIFACT_CLAIM because releasing it destroys
+  // something the stream can regenerate, and that difference is the whole basis
+  // on which an operator decides how carefully to look first.
+  FINDING_KIND_ORPHANED_DERIVED_STATE = 21;
+}
+
+// SubjectRef says what a finding is about.
+//
+// `kind` is what gives `entity_id` meaning, and the pair travels together for
+// that reason: an id with no idea what it identifies is not a reference.
+message SubjectRef {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  SubjectKind kind = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Interpreted according to `kind`: an artifact id, an operation id, a tool
+  // execution id, a projection name. Unset when `kind` is STREAM, which needs
+  // no further identity than the session.
+  string entity_id = 3;
+  // The SessionOrdinal the finding is anchored at. Unset when the finding is
+  // not ordinal-scoped, which is not the same as ordinal zero.
+  uint64 ordinal = 4;
+}
+
+// SubjectKind is which part of a session a finding concerns.
+enum SubjectKind {
+  SUBJECT_KIND_UNSPECIFIED = 0;
+  SUBJECT_KIND_STREAM = 1;
+  SUBJECT_KIND_EVENT = 2;
+  SUBJECT_KIND_SNAPSHOT = 3;
+  SUBJECT_KIND_PROJECTION = 4;
+  SUBJECT_KIND_ARTIFACT = 5;
+  SUBJECT_KIND_OPERATION = 6;
+  SUBJECT_KIND_TOOL_CALL = 7;
+  SUBJECT_KIND_DELEGATION = 8;
+  SUBJECT_KIND_CHECKPOINT = 9;
+}
+
+// EventDecodeDetail is enough to find the offending event without re-running
+// the scan.
+message EventDecodeDetail {
+  uint64 ordinal = 1 [features.field_presence = LEGACY_REQUIRED];
+  string type_url = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Decoder error text. Diagnostic only, never parsed.
+  string decoder_error = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// ProjectionCheckpointDetail carries the three positions whose disagreement is
+// the finding, because a checkpoint inconsistency is unreadable without all
+// three.
+message ProjectionCheckpointDetail {
+  string projection_name = 1 [features.field_presence = LEGACY_REQUIRED];
+  string projection_generation = 2 [features.field_presence = LEGACY_REQUIRED];
+  // What the checkpoint claims was applied.
+  uint64 checkpoint_watermark = 3 [features.field_presence = LEGACY_REQUIRED];
+  // What the materialized view actually reflects. Below the checkpoint means
+  // the checkpoint is lying about work the view never received.
+  uint64 view_applied_through = 4 [features.field_presence = LEGACY_REQUIRED];
+  // The source head. Below the checkpoint means the checkpoint refers to
+  // history this stream does not have.
+  uint64 source_high_watermark = 5 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// ArtifactDigestDetail distinguishes the three ways an artifact fails
+// verification, which the digests alone cannot express.
+message ArtifactDigestDetail {
+  string artifact_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ArtifactDigestObservation observation = 2 [features.field_presence = LEGACY_REQUIRED];
+  // The digest recorded when the artifact was stored.
+  string expected_digest = 3 [features.field_presence = LEGACY_REQUIRED];
+  // The digest computed during this check. Unset when the content could not be
+  // read at all, which is why this is not simply compared to the expected one.
+  string observed_digest = 4;
+}
+
+// ArtifactDigestObservation is what the verification attempt found.
+enum ArtifactDigestObservation {
+  ARTIFACT_DIGEST_OBSERVATION_UNSPECIFIED = 0;
+  // Content read, digest computed, digests differ.
+  ARTIFACT_DIGEST_OBSERVATION_MISMATCH = 1;
+  // Content is not present in storage.
+  ARTIFACT_DIGEST_OBSERVATION_ABSENT = 2;
+  // Content is present and could not be read. Distinct from absent: an
+  // unreadable artifact may be a permissions or transport problem rather than
+  // data loss, and treating it as loss invites a destructive repair.
+  ARTIFACT_DIGEST_OBSERVATION_UNREADABLE = 3;
+}
+
+// OperationLedgerDetail describes a side effect that never settled.
+message OperationLedgerDetail {
+  string operation_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp reserved_at = 2 [features.field_presence = LEGACY_REQUIRED];
+  // How far past its expected settlement window the operation is. Unset when no
+  // window applies.
+  google.protobuf.Duration overdue_by = 3;
+  // True when an indeterminate outcome was recorded, meaning the side effect
+  // may or may not have run. An operator must not assume either.
+  bool outcome_indeterminate = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// UnreconciledWorkDetail describes work the fold shows as started and never
+// finished.
+message UnreconciledWorkDetail {
+  // Tool execution id, delegation id, or saga id, per the subject kind.
+  string entity_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp started_at = 2 [features.field_presence = LEGACY_REQUIRED];
+  // True when the session has already reached a terminal marker. A session can
+  // be terminally successful and still have work stranded in flight, and that
+  // combination is exactly what a reader treating terminal as complete will
+  // miss.
+  bool session_terminal = 3 [features.field_presence = LEGACY_REQUIRED];
+}

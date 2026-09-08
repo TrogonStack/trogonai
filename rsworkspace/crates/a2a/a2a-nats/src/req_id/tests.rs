@@ -24,6 +24,21 @@ fn display_and_deref() {
 }
 
 #[test]
+fn matches_event_headers_compares_the_trimmed_req_id() {
+    let mut headers = async_nats::HeaderMap::new();
+    headers.insert(crate::constants::REQ_ID_HEADER, " req-1 ");
+    assert!(ReqId::from_header("req-1").matches_event_headers(Some(&headers)));
+    assert!(!ReqId::from_header("req-2").matches_event_headers(Some(&headers)));
+}
+
+#[test]
+fn matches_event_headers_rejects_events_carrying_no_req_id() {
+    assert!(!ReqId::from_header("req-1").matches_event_headers(None));
+    let empty = async_nats::HeaderMap::new();
+    assert!(!ReqId::from_header("req-1").matches_event_headers(Some(&empty)));
+}
+
+#[test]
 fn new_is_unique() {
     let a = ReqId::new();
     let b = ReqId::new();

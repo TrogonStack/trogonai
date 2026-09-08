@@ -74,7 +74,7 @@ impl GatewayUnaryPublish for HarnessGatewayUnary {
         let jwt_present = headers.get(CALLER_JWT_HEADER_NAME).is_some();
         *self.last_caller_jwt_present.lock().expect("harness mutex poisoned") = jwt_present;
 
-        let gateway_prefix = format!("{}.gateway.{}.", self.prefix.as_str(), self.agent_id.as_str());
+        let gateway_prefix = format!("{}.v1.gateway.{}.", self.prefix.as_str(), self.agent_id.as_str());
         let method_dots = subject.strip_prefix(&gateway_prefix).unwrap_or("message.send");
         let method_slashes = method_dots.replace('.', "/");
         let envelope = AuditEnvelope::new(
@@ -121,8 +121,16 @@ pub fn build_nats_transport_app_state(
     let agent = A2aAgentId::new(agent_id).expect("fixture agent id");
     let harness = Arc::new(HarnessGatewayUnary::new(nats, prefix.clone(), agent));
     let publisher = GatewayInboundPublisher::new(harness.clone());
+    // The scripted event carries a transport id the caller never sent, which is
+    // what the hops behind the bridge correlate on. The SSE edge is expected to
+    // restamp it with the caller's own id.
     let jetstream: Arc<dyn TaskJetStreamPort> = Arc::new(ScriptedTaskJetstream::single_ok(
-        json!({ "event": "task-status", "taskId": "task-sse-1" }).to_string(),
+        json!({
+            "jsonrpc": "2.0",
+            "id": "transport-9",
+            "result": { "statusUpdate": { "taskId": "task-sse-1" } }
+        })
+        .to_string(),
     ));
 
     let tenant = BridgeTenantAccount::new(HARNESS_TENANT).expect("harness tenant");

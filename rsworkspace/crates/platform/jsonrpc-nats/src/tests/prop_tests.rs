@@ -56,9 +56,29 @@ fn arb_message() -> impl Strategy<Value = Message> {
     ]
 }
 
+fn is_canonical_message(message: &Message) -> bool {
+    match message {
+        Message::Request { params, .. } | Message::Notification { params, .. } => {
+            params.is_object() || params.is_array()
+        }
+        Message::Success { id, .. } => !matches!(id, ResponseId::Null),
+        Message::Error { .. } => true,
+    }
+}
+
 proptest! {
     #[test]
-    fn decode_encode_roundtrip_preserves_message(message in arb_message()) {
+    fn json_value_roundtrip_preserves_canonical_message(message in arb_message()) {
+        let json = to_json_value(&message);
+        let parsed = from_json_value(&json).unwrap();
+        prop_assert_eq!(&parsed, &message);
+        prop_assert_eq!(to_json_value(&parsed), json);
+    }
+
+    #[test]
+    fn wire_roundtrip_preserves_message(
+        message in arb_message().prop_filter("canonical message", is_canonical_message)
+    ) {
         let wire = encode(&message).unwrap();
         let direction = match message {
             Message::Request { .. } | Message::Notification { .. } => Direction::Request,
@@ -66,15 +86,16 @@ proptest! {
         };
         let method = message.method();
         let decoded = decode(direction, method, &wire.headers, &wire.body).unwrap();
+        let has_id = wire.headers.get(crate::HEADER_ID).is_some();
+        let has_error_code = wire.headers.get(crate::HEADER_ERROR_CODE).is_some();
+        let expects_id = match &message {
+            Message::Notification { .. } => false,
+            Message::Success { id: ResponseId::Null, .. } | Message::Error { id: ResponseId::Null, .. } => false,
+            Message::Request { .. } | Message::Success { .. } | Message::Error { .. } => true,
+        };
+        prop_assert_eq!(has_id, expects_id);
+        prop_assert_eq!(has_error_code, message.is_error());
         prop_assert_eq!(decoded, message);
-    }
-
-    #[test]
-    fn json_value_roundtrip_preserves_canonical_message(message in arb_message()) {
-        let json = to_json_value(&message);
-        let parsed = from_json_value(&json).unwrap();
-        prop_assert_eq!(&parsed, &message);
-        prop_assert_eq!(to_json_value(&parsed), json);
     }
 
     #[test]
@@ -91,12 +112,5 @@ proptest! {
             Message::Request { id: RequestId::String(_), .. } => prop_assert_eq!(header, "\"1\""),
             _ => unreachable!(),
         }
-    }
-
-    #[test]
-    fn error_iff_error_code_header_present(message in arb_message()) {
-        let wire = encode(&message).unwrap();
-        let has_error_code = wire.headers.get(crate::HEADER_ERROR_CODE).is_some();
-        prop_assert_eq!(has_error_code, message.is_error());
     }
 }

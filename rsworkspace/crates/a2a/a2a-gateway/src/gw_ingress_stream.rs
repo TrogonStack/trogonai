@@ -24,19 +24,12 @@ use futures::StreamExt;
 #[cfg(not(coverage))]
 use tracing::{debug, warn};
 
-pub const ENV_GATEWAY_STREAMING_INGRESS: &str = "A2A_GATEWAY_STREAMING_INGRESS";
-pub const ENV_GATEWAY_STREAMING_MAX_ACK_PENDING: &str = "A2A_GATEWAY_STREAMING_MAX_ACK_PENDING";
-pub const ENV_GATEWAY_STREAMING_MAX_INFLIGHT: &str = "A2A_GATEWAY_STREAMING_MAX_INFLIGHT";
-
-pub const DEFAULT_STREAMING_MAX_ACK_PENDING: i64 = 32;
-pub const DEFAULT_STREAMING_MAX_INFLIGHT: usize = 32;
-
-/// Cap on JetStream redelivery attempts before the streaming ingress pump
-/// Term's a message that the caller reply persistently rejects. Mirrors the
-/// 3-attempt budget the egress planner uses so the two pumps behave the
-/// same under a permanently broken reply subject (bad ACL, closed inbox).
 #[cfg(not(coverage))]
-const STREAMING_INGRESS_MAX_FORWARD_ATTEMPTS: i64 = 3;
+use crate::constants::STREAMING_INGRESS_MAX_FORWARD_ATTEMPTS;
+pub use crate::constants::{
+    DEFAULT_STREAMING_MAX_ACK_PENDING, DEFAULT_STREAMING_MAX_INFLIGHT, ENV_GATEWAY_STREAMING_INGRESS,
+    ENV_GATEWAY_STREAMING_MAX_ACK_PENDING, ENV_GATEWAY_STREAMING_MAX_INFLIGHT,
+};
 
 /// JetStream max-ack-pending for a streaming pump. Floored at 1 so a config
 /// can't construct a value that stalls the consumer with zero unacked slots.
@@ -158,6 +151,7 @@ pub fn gateway_streaming_ingress_enabled<E: ReadEnv>(env: &E) -> bool {
 pub enum StreamingIngressKind {
     MessageStream {
         req_id: ReqId,
+        last_seq: u64,
     },
     TasksResubscribe {
         req_id: ReqId,
@@ -176,9 +170,8 @@ pub struct StreamingIngressSpawn {
 impl StreamingIngressSpawn {
     fn req_id(&self) -> &ReqId {
         match &self.kind {
-            StreamingIngressKind::MessageStream { req_id } | StreamingIngressKind::TasksResubscribe { req_id, .. } => {
-                req_id
-            }
+            StreamingIngressKind::MessageStream { req_id, .. }
+            | StreamingIngressKind::TasksResubscribe { req_id, .. } => req_id,
         }
     }
 
@@ -351,6 +344,39 @@ async fn publish_to_caller_reply<C: trogon_nats::PublishClient>(
         .await
 }
 
+/// Read the events stream head so a `message/stream` pump can start just past it.
+///
+/// Must be called before the request is forwarded to the agent: the pump is
+/// spawned after the forward and creates its consumer asynchronously, so an
+/// anchor taken any later could sit behind events the agent has already
+/// published. `None` means the stream could not be reached, in which case there
+/// is no safe start position and the caller declines to spawn.
+#[cfg(not(coverage))]
+pub async fn events_stream_last_seq(client: &async_nats::Client, prefix: &A2aPrefix) -> Option<u64> {
+    let stream_name = events_stream_name(prefix);
+    match jetstream::new(client.clone()).get_stream(&stream_name).await {
+        Ok(mut stream) => match stream.info().await {
+            Ok(info) => Some(info.state.last_sequence),
+            Err(error) => {
+                warn!(
+                    stream = %stream_name,
+                    error = %error,
+                    "gateway streaming ingress could not read events stream head",
+                );
+                None
+            }
+        },
+        Err(error) => {
+            warn!(
+                stream = %stream_name,
+                error = %error,
+                "gateway streaming ingress could not open events stream",
+            );
+            None
+        }
+    }
+}
+
 #[cfg(not(coverage))]
 async fn run_streaming_ingress_pump(
     client: async_nats::Client,
@@ -374,13 +400,15 @@ async fn run_streaming_ingress_pump(
         }
     };
 
-    let consumer_config = match &spawn.kind {
-        StreamingIngressKind::MessageStream { req_id } => {
-            gateway_stream_events_consumer(&prefix, req_id, config.max_ack_pending.as_i64())
-        }
-        StreamingIngressKind::TasksResubscribe { task_id, last_seq, .. } => {
-            resubscribe_consumer_with_flow(&prefix, task_id, *last_seq, config.max_ack_pending.as_i64())
-        }
+    let (consumer_config, demux_req_id) = match &spawn.kind {
+        StreamingIngressKind::MessageStream { req_id, last_seq } => (
+            gateway_stream_events_consumer(&prefix, *last_seq, config.max_ack_pending.as_i64()),
+            Some(req_id),
+        ),
+        StreamingIngressKind::TasksResubscribe { task_id, last_seq, .. } => (
+            resubscribe_consumer_with_flow(&prefix, task_id, *last_seq, config.max_ack_pending.as_i64()),
+            None,
+        ),
     };
 
     let consumer = match stream.create_consumer(consumer_config).await {
@@ -427,6 +455,20 @@ async fn run_streaming_ingress_pump(
                 break;
             }
         };
+
+        // A `message/stream` consumer cannot filter by task, because the agent
+        // answers the caller's inbox directly and the gateway never sees the
+        // bootstrap reply that names it. So it sees every task's events and
+        // drops what `Trogon-Req-Id` says belongs to another request.
+        // `tasks/resubscribe` is exempt: its consumer is already task-filtered, and
+        // the events carry the `req_id` of the original subscription, not of the
+        // resubscribe request.
+        if let Some(req_id) = demux_req_id
+            && !req_id.matches_event_headers(message.message.headers.as_ref())
+        {
+            let _ = message.ack().await;
+            continue;
+        }
 
         // JetStream tracks per-message delivery attempts; carry that count
         // so a permanently failing publish (bad reply subject, ACL, etc.)
@@ -537,11 +579,17 @@ fn parse_last_event_id_as_u64(value: serde_json::Value) -> Option<u64> {
     }
 }
 
+/// Correlation id for a streaming ingress envelope. Falls back to
+/// [`a2a_nats::jsonrpc::correlation_key_from_body`], which yields the same text
+/// the agent stamps its task events with, so the pump's filter can match; a
+/// `null` or absent id spawns no pump at all.
 pub fn req_id_from_headers_or_payload(headers: &async_nats::HeaderMap, payload: &[u8]) -> Option<ReqId> {
     if let Some(value) = headers.get(a2a_nats::constants::REQ_ID_HEADER) {
         return Some(ReqId::from_header(value.as_str()));
     }
-    a2a_nats::jsonrpc::extract_request_id_from_body(payload).map(|id| ReqId::from_header(id.to_string()))
+    Some(ReqId::from_header(a2a_nats::jsonrpc::correlation_key_from_body(
+        payload,
+    )?))
 }
 
 #[cfg(test)]

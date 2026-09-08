@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 
 /// SpiceDB subject string parsed out of a [`SpiceDbPrincipal`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -16,6 +16,13 @@ impl SpiceDbSubject {
     }
 }
 
+/// The one claim [`SpiceDbPrincipal`] mints on its own; an inbound principal
+/// carries whatever else the issuer put in the document.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct SpiceDbSubjectClaim {
+    spicedb_subject: String,
+}
+
 /// Caller identity payload carried in the JWT's `data` field. Wraps an opaque
 /// JSON document but exposes the `spicedb_subject` extraction the rest of the
 /// stack relies on for authorization lookups.
@@ -25,7 +32,12 @@ pub struct SpiceDbPrincipal(pub Value);
 
 impl SpiceDbPrincipal {
     pub fn new(subject: impl Into<String>) -> Self {
-        Self(json!({ "spicedb_subject": subject.into() }))
+        let claim = SpiceDbSubjectClaim {
+            spicedb_subject: subject.into(),
+        };
+        // The claim is a single String; serde_json::to_value cannot fail at
+        // runtime, and an authorization payload must never panic.
+        Self(serde_json::to_value(claim).unwrap_or(Value::Null))
     }
 
     pub fn spicedb_subject(&self) -> Option<SpiceDbSubject> {

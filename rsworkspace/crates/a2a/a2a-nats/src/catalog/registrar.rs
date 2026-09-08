@@ -6,9 +6,12 @@
 //! reply serialisation, JSON-RPC error mapping) that the loop is built from.
 
 use bytes::Bytes;
+use jsonrpc_nats::ResponseId;
+use serde_json::Value;
 
 use crate::a2a_prefix::A2aPrefix;
 use crate::agent_id::{A2aAgentId, AgentIdError};
+use crate::wire::{encode_error, encode_success};
 
 use super::store::CatalogStoreError;
 
@@ -22,29 +25,29 @@ impl RegistrarSubject {
     }
 
     pub fn wildcard(&self) -> String {
-        format!("{}.catalog.register.*", self.prefix.as_str())
+        format!("{}.v1.catalog.register.*", self.prefix.as_str())
     }
 
     pub fn for_agent(&self, agent_id: &A2aAgentId) -> String {
-        format!("{}.catalog.register.{}", self.prefix.as_str(), agent_id.as_str())
+        format!("{}.v1.catalog.register.{}", self.prefix.as_str(), agent_id.as_str())
     }
 }
 
 impl std::fmt::Display for RegistrarSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.catalog.register.*", self.prefix.as_str())
+        write!(f, "{}.v1.catalog.register.*", self.prefix.as_str())
     }
 }
 
 pub fn register_subject_prefix(prefix: &A2aPrefix) -> String {
-    format!("{}.catalog.register.", prefix.as_str())
+    format!("{}.v1.catalog.register.", prefix.as_str())
 }
 
-/// Why a wire subject failed `{prefix}.catalog.register.{agent_id}` parsing.
+/// Why a wire subject failed `{prefix}.v1.catalog.register.{agent_id}` parsing.
 #[derive(Debug, thiserror::Error)]
 pub enum AgentSuffixError {
-    /// The subject didn't carry the expected `{prefix}.catalog.register.` leader.
-    #[error("subject is not a `{{prefix}}.catalog.register.` register subject")]
+    /// The subject didn't carry the expected `{prefix}.v1.catalog.register.` leader.
+    #[error("subject is not a `{{prefix}}.v1.catalog.register.` register subject")]
     NotARegisterSubject,
     /// Subject had the right leader but no agent-id token after the dot.
     #[error("register subject is missing the `{{agent_id}}` segment")]
@@ -54,7 +57,7 @@ pub enum AgentSuffixError {
     InvalidAgentId(#[source] AgentIdError),
 }
 
-/// Extract a validated `A2aAgentId` from a `{prefix}.catalog.register.{agent_id}` subject.
+/// Extract a validated `A2aAgentId` from a `{prefix}.v1.catalog.register.{agent_id}` subject.
 ///
 /// Returns a typed error instead of an `Option<&str>` so the bad-shape, missing
 /// agent-id, and validation-failed paths each propagate distinctly to the caller.
@@ -70,21 +73,15 @@ pub fn agent_id_from_subject(subject: &str, prefix: &A2aPrefix) -> Result<A2aAge
 }
 
 pub fn success_reply() -> Option<Bytes> {
-    let body = serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": null,
-        "result": null
-    });
-    serde_json::to_vec(&body).ok().map(Bytes::from)
+    encode_success(ResponseId::Null, &Value::Null)
+        .ok()
+        .map(|encoded| encoded.body)
 }
 
 pub fn error_reply(code: i32, message: &str) -> Option<Bytes> {
-    let body = serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": null,
-        "error": { "code": code, "message": message }
-    });
-    serde_json::to_vec(&body).ok().map(Bytes::from)
+    encode_error(ResponseId::Null, code, message, None)
+        .ok()
+        .map(|encoded| encoded.body)
 }
 
 #[derive(Debug, thiserror::Error)]

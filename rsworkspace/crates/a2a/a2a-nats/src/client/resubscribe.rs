@@ -39,7 +39,7 @@ where
         .map_err(|e| ClientError::ConsumerSetup(format!("create resubscribe consumer: {e}")))?;
 
     let last_seq_cell = Arc::new(Mutex::new(last_seq));
-    Ok(build_event_stream(consumer, last_seq_cell))
+    Ok(build_event_stream(consumer, last_seq_cell, None))
 }
 
 #[cfg(test)]

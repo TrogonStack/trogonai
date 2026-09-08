@@ -8,9 +8,7 @@ use crate::commands::domain::{ScheduleId as DomainScheduleId, ScheduleIdError as
 /// A schedule identifier for read-model queries.
 ///
 /// This shares the command domain's identifier contract so any schedule that can
-/// be created can also be queried: the read model derives a token-safe KV key
-/// from the raw id, so ids the underlying NATS KV key syntax would reject (dots,
-/// slashes, `:`, `@`, non-ASCII) are still addressable here.
+/// be created can also be queried by the same canonical identifier.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ScheduleId(String);
 
@@ -21,7 +19,7 @@ pub struct ScheduleIdError(#[source] DomainScheduleIdError);
 impl ScheduleId {
     pub fn parse(raw: &str) -> Result<Self, ScheduleIdError> {
         DomainScheduleId::parse(raw)
-            .map(|id| Self(id.as_str().to_string()))
+            .map(|id| Self(id.to_string()))
             .map_err(ScheduleIdError)
     }
 

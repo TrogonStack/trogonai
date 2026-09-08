@@ -2,13 +2,16 @@ use super::*;
 
 #[test]
 fn rejects_empty_token() {
-    assert_eq!(DottedNatsToken::new(""), Err(SubjectTokenViolation::Empty));
+    assert_eq!(DottedNatsToken::new(""), Err(SubjectTokenViolationError::Empty));
 }
 
 #[test]
 fn rejects_token_over_max_length() {
     let value = "a".repeat(129);
-    assert_eq!(DottedNatsToken::new(&value), Err(SubjectTokenViolation::TooLong(129)));
+    assert_eq!(
+        DottedNatsToken::new(&value),
+        Err(SubjectTokenViolationError::TooLong(129))
+    );
 }
 
 #[test]

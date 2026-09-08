@@ -2,8 +2,7 @@
 
 use std::sync::Arc;
 
-const MIN_REPRESENTATIVE_QUERIES: usize = 2;
-const MAX_REPRESENTATIVE_QUERIES: usize = 5;
+use crate::constants::{MAX_REPRESENTATIVE_QUERIES, MIN_REPRESENTATIVE_QUERIES};
 
 /// Error returned when [`RepresentativeQueries`] validation fails.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

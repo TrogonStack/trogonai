@@ -1,4 +1,4 @@
-//! Task-scoped subjects (`{prefix}.tasks.{task_id}.events.{seq}`).
+//! Task-scoped subjects (`{prefix}.v1.tasks.{task_id}.events`).
 
 pub mod events;
 

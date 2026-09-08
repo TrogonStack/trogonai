@@ -6,7 +6,6 @@ use crate::nats::{
     self, ExtSessionReady, FlushClient, FlushPolicy, PublishClient, PublishOptions, RequestClient, RetryPolicy,
     SubscribeClient, responses,
 };
-use crate::pending_prompt_waiters::PendingSessionPromptResponseWaiters;
 use crate::telemetry::metrics::Metrics;
 use agent_client_protocol::Result;
 use agent_client_protocol::schema::v1::{
@@ -15,12 +14,10 @@ use agent_client_protocol::schema::v1::{
     ExtRequest, ExtResponse, ForkSessionRequest, ForkSessionResponse, InitializeRequest, InitializeResponse,
     ListProvidersRequest, ListProvidersResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
     LoadSessionResponse, LogoutRequest, LogoutResponse, NewSessionRequest, NewSessionResponse, PromptRequest,
-    PromptResponse, ResumeSessionRequest, ResumeSessionResponse, SessionId, SessionNotification, SetProviderRequest,
-    SetProviderResponse, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
-    SetSessionModeResponse,
+    PromptResponse, ResumeSessionRequest, ResumeSessionResponse, SessionId, SetProviderRequest, SetProviderResponse,
+    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
 };
 use opentelemetry::metrics::Meter;
-use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
 use trogon_nats::jetstream::{JetStreamGetStream, JetStreamPublisher, JsRequestMessage};
@@ -40,28 +37,17 @@ pub struct Bridge<N, C: GetElapsed, J> {
     pub(crate) clock: C,
     pub(crate) config: Config,
     pub(crate) metrics: Metrics,
-    pub(crate) notification_sender: mpsc::Sender<SessionNotification>,
-    pub(crate) pending_session_prompt_responses: PendingSessionPromptResponseWaiters<C::Instant>,
     pub(crate) background_tasks: Mutex<Vec<JoinHandle<()>>>,
 }
 
 impl<N, C: GetElapsed, J> Bridge<N, C, J> {
-    pub fn new(
-        nats: N,
-        js: J,
-        clock: C,
-        meter: &Meter,
-        config: Config,
-        notification_sender: mpsc::Sender<SessionNotification>,
-    ) -> Self {
+    pub fn new(nats: N, js: J, clock: C, meter: &Meter, config: Config) -> Self {
         Self {
             nats,
             js,
             clock,
             config,
             metrics: Metrics::new(meter),
-            notification_sender,
-            pending_session_prompt_responses: PendingSessionPromptResponseWaiters::new(),
             background_tasks: Mutex::new(Vec::new()),
         }
     }

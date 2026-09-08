@@ -4,10 +4,8 @@ use std::time::Instant;
 
 use acp_nats::{AcpPrefix, AgentHandler, Bridge, Config, NatsJetStreamClient};
 use agent_client_protocol::schema::v1::{
-    CloseSessionRequest, ExtRequest, NewSessionRequest, SessionNotification, SetSessionConfigOptionRequest,
-    SetSessionModeRequest,
+    CloseSessionRequest, ExtRequest, NewSessionRequest, SetSessionConfigOptionRequest, SetSessionModeRequest,
 };
-use tokio::sync::mpsc;
 use trogon_registry::{Registry, RegistryStore};
 use trogon_std::time::SystemClock;
 use trogonai_session_contracts::{
@@ -37,9 +35,8 @@ type ConcreteBridge = Bridge<async_nats::Client, SystemClock, NatsJetStreamClien
 // The receiver is never polled here — CrossRunnerSwitcher only calls new_session
 // and ext_method, which never trigger notifications.  Storing them as a pair
 // makes it structurally impossible to drop the receiver without also dropping
-// the bridge (two parallel HashMaps can silently diverge; one map of tuples
-// cannot).
-type BridgeSlot = (ConcreteBridge, mpsc::Receiver<SessionNotification>);
+// the bridge (two parallel HashMaps can silently diverge; one map cannot).
+type BridgeSlot = ConcreteBridge;
 
 // ── RunnerSwitcher trait ──────────────────────────────────────────────────────
 
@@ -106,8 +103,7 @@ pub struct CrossRunnerSwitcher<S: RegistryStore> {
     base_config: Config,
     registry: Registry<S>,
     kernel_stack: Option<crate::session_kernel::SessionKernelStack>,
-    /// Each entry is `(Bridge, notification_rx)`.  The receiver is kept alive
-    /// for exactly as long as the bridge; they are inserted and removed together.
+    /// One bridge per ACP prefix, created on demand and reused across switches.
     bridges: HashMap<String, BridgeSlot>,
 }
 
@@ -398,7 +394,7 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
         )
         .map_err(|e| e.to_string())?;
         let messages_json = {
-            let (bridge, _) = self
+            let bridge = self
                 .bridges
                 .get(current_prefix)
                 .ok_or_else(|| format!("no bridge registered for prefix: {current_prefix}"))?;
@@ -832,7 +828,7 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
     ) -> Result<String, String> {
         self.ensure_bridge(prefix)?;
         let new_session_id = {
-            let (bridge, _) = self
+            let bridge = self
                 .bridges
                 .get(prefix)
                 .ok_or_else(|| format!("no bridge registered for prefix: {prefix}"))?;
@@ -849,7 +845,7 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
         ))
         .map_err(|e| e.to_string())?;
         {
-            let (bridge, _) = self
+            let bridge = self
                 .bridges
                 .get(prefix)
                 .ok_or_else(|| format!("no bridge registered for prefix: {prefix}"))?;
@@ -880,7 +876,7 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
             r#"{{"sessionId":"{target_session_id}","messages":{import_messages_json}}}"#
         ))
         .map_err(|e| e.to_string())?;
-        let (bridge, _) = self
+        let bridge = self
             .bridges
             .get(target_prefix)
             .ok_or_else(|| format!("no bridge registered for prefix: {target_prefix}"))?;
@@ -900,7 +896,7 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
         portable: &trogonai_switching::PortableRunnerConfig,
     ) -> Result<String, String> {
         let new_session_id = {
-            let (bridge, _) = self
+            let bridge = self
                 .bridges
                 .get(target_prefix)
                 .ok_or_else(|| format!("no bridge registered for prefix: {target_prefix}"))?;
@@ -917,7 +913,7 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
         ))
         .map_err(|e| e.to_string())?;
         {
-            let (bridge, _) = self
+            let bridge = self
                 .bridges
                 .get(target_prefix)
                 .ok_or_else(|| format!("no bridge registered for prefix: {target_prefix}"))?;
@@ -943,16 +939,14 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
         let acp_prefix = AcpPrefix::new(prefix).map_err(|e| e.to_string())?;
         let config = self.base_config.for_prefix(acp_prefix);
         let js = NatsJetStreamClient::new(async_nats::jetstream::new(self.nats.clone()));
-        let (notification_tx, notification_rx) = mpsc::channel(1);
         let bridge = Bridge::new(
             self.nats.clone(),
             js,
             SystemClock,
             &opentelemetry::global::meter("trogon-cli"),
             config,
-            notification_tx,
         );
-        self.bridges.insert(prefix.to_string(), (bridge, notification_rx));
+        self.bridges.insert(prefix.to_string(), bridge);
         Ok(())
     }
 }

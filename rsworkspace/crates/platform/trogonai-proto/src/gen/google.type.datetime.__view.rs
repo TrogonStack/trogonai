@@ -87,6 +87,7 @@ impl<'a> ::buffa::MessageView<'a> for DateTimeView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         <Self as ::buffa::MessageView>::decode_view_ctx(buf, ctx)
     }
+    #[inline]
     fn merge_view_field(
         &mut self,
         tag: ::buffa::encoding::Tag,
@@ -273,27 +274,27 @@ impl<'a> ::buffa::ViewEncode<'a> for DateTimeView<'a> {
     fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        let mut size = 0u32;
+        let mut size = 0u64;
         if self.year != 0i32 {
-            size += 1u32 + ::buffa::types::int32_encoded_len(self.year) as u32;
+            size += 1u64 + ::buffa::types::int32_encoded_len(self.year) as u64;
         }
         if self.month != 0i32 {
-            size += 1u32 + ::buffa::types::int32_encoded_len(self.month) as u32;
+            size += 1u64 + ::buffa::types::int32_encoded_len(self.month) as u64;
         }
         if self.day != 0i32 {
-            size += 1u32 + ::buffa::types::int32_encoded_len(self.day) as u32;
+            size += 1u64 + ::buffa::types::int32_encoded_len(self.day) as u64;
         }
         if self.hours != 0i32 {
-            size += 1u32 + ::buffa::types::int32_encoded_len(self.hours) as u32;
+            size += 1u64 + ::buffa::types::int32_encoded_len(self.hours) as u64;
         }
         if self.minutes != 0i32 {
-            size += 1u32 + ::buffa::types::int32_encoded_len(self.minutes) as u32;
+            size += 1u64 + ::buffa::types::int32_encoded_len(self.minutes) as u64;
         }
         if self.seconds != 0i32 {
-            size += 1u32 + ::buffa::types::int32_encoded_len(self.seconds) as u32;
+            size += 1u64 + ::buffa::types::int32_encoded_len(self.seconds) as u64;
         }
         if self.nanos != 0i32 {
-            size += 1u32 + ::buffa::types::int32_encoded_len(self.nanos) as u32;
+            size += 1u64 + ::buffa::types::int32_encoded_len(self.nanos) as u64;
         }
         if let ::core::option::Option::Some(ref v) = self.time_offset {
             match v {
@@ -304,8 +305,8 @@ impl<'a> ::buffa::ViewEncode<'a> for DateTimeView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::date_time::TimeOffset::TimeZone(
                     x,
@@ -314,18 +315,18 @@ impl<'a> ::buffa::ViewEncode<'a> for DateTimeView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
             }
         }
-        size
+        ::buffa::saturate_size(size)
     }
     #[allow(clippy::needless_borrow)]
     fn write_to(
         &self,
         __cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
+        buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
@@ -357,7 +358,7 @@ impl<'a> ::buffa::ViewEncode<'a> for DateTimeView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         8u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -367,7 +368,7 @@ impl<'a> ::buffa::ViewEncode<'a> for DateTimeView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         9u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -502,7 +503,9 @@ impl DateTimeOwnedView {
     ///
     /// # Errors
     ///
-    /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+    /// Returns [`::buffa::DecodeError::MessageTooLarge`] if the
+    /// message's encoded size exceeds the 2 GiB protobuf limit, or
+    /// another [`::buffa::DecodeError`] if the re-encoded bytes are
     /// somehow invalid (should not happen for well-formed messages).
     pub fn from_owned(
         msg: &super::super::DateTime,
@@ -518,13 +521,13 @@ impl DateTimeOwnedView {
     }
     /// Convert to the owned message type.
     ///
-    /// # Errors
-    ///
-    /// Returns an error if re-materializing preserved unknown fields
-    /// fails (e.g. the unknown-field limit is exceeded).
-    pub fn to_owned_message(
-        &self,
-    ) -> ::core::result::Result<super::super::DateTime, ::buffa::DecodeError> {
+    /// Infallible: this type's constructors wire-decode their
+    /// buffer, and a view produced by wire decoding always
+    /// converts. Delegates to [`::buffa::OwnedView::to_owned_message`],
+    /// whose contract also governs handles converted from a raw
+    /// [`::buffa::OwnedView`].
+    #[must_use]
+    pub fn to_owned_message(&self) -> super::super::DateTime {
         self.0.to_owned_message()
     }
     /// The underlying bytes buffer.
@@ -661,6 +664,7 @@ impl<'a> ::buffa::MessageView<'a> for TimeZoneView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         <Self as ::buffa::MessageView>::decode_view_ctx(buf, ctx)
     }
+    #[inline]
     fn merge_view_field(
         &mut self,
         tag: ::buffa::encoding::Tag,
@@ -718,20 +722,20 @@ impl<'a> ::buffa::ViewEncode<'a> for TimeZoneView<'a> {
     fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        let mut size = 0u32;
+        let mut size = 0u64;
         if !self.id.is_empty() {
-            size += 1u32 + ::buffa::types::string_encoded_len(&self.id) as u32;
+            size += 1u64 + ::buffa::types::string_encoded_len(&self.id) as u64;
         }
         if !self.version.is_empty() {
-            size += 1u32 + ::buffa::types::string_encoded_len(&self.version) as u32;
+            size += 1u64 + ::buffa::types::string_encoded_len(&self.version) as u64;
         }
-        size
+        ::buffa::saturate_size(size)
     }
     #[allow(clippy::needless_borrow)]
     fn write_to(
         &self,
         _cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
+        buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
@@ -819,7 +823,9 @@ impl TimeZoneOwnedView {
     ///
     /// # Errors
     ///
-    /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+    /// Returns [`::buffa::DecodeError::MessageTooLarge`] if the
+    /// message's encoded size exceeds the 2 GiB protobuf limit, or
+    /// another [`::buffa::DecodeError`] if the re-encoded bytes are
     /// somehow invalid (should not happen for well-formed messages).
     pub fn from_owned(
         msg: &super::super::TimeZone,
@@ -835,13 +841,13 @@ impl TimeZoneOwnedView {
     }
     /// Convert to the owned message type.
     ///
-    /// # Errors
-    ///
-    /// Returns an error if re-materializing preserved unknown fields
-    /// fails (e.g. the unknown-field limit is exceeded).
-    pub fn to_owned_message(
-        &self,
-    ) -> ::core::result::Result<super::super::TimeZone, ::buffa::DecodeError> {
+    /// Infallible: this type's constructors wire-decode their
+    /// buffer, and a view produced by wire decoding always
+    /// converts. Delegates to [`::buffa::OwnedView::to_owned_message`],
+    /// whose contract also governs handles converted from a raw
+    /// [`::buffa::OwnedView`].
+    #[must_use]
+    pub fn to_owned_message(&self) -> super::super::TimeZone {
         self.0.to_owned_message()
     }
     /// The underlying bytes buffer.

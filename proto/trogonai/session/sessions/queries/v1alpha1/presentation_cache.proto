@@ -1,0 +1,139 @@
+edition = "2024";
+
+package trogonai.session.sessions.queries.v1alpha1;
+
+import "trogonai/session/sessions/queries/v1alpha1/contract_version.proto";
+import "trogonai/session/sessions/queries/v1alpha1/projection_freshness.proto";
+
+// PresentationCacheBinding is the projection state a client-side cache was
+// rendered against.
+//
+// A client that reopens a session wants to paint the timeline before the first
+// query returns. The cached copy is only safe to paint if the projection it
+// came from still exists and still says the same things. This message is what
+// the cache stores alongside its rendered content so that question has an
+// answer other than a guess about elapsed time.
+//
+// The four projection coordinates are the same four a page cursor pins in
+// `CursorValidity`, because the events that invalidate a cursor and the events
+// that invalidate a cache are the same events. They are separate messages
+// rather than one shared one because they are checked by different parties: a
+// cursor is minted by the server, opaque to the client, and validated by the
+// server on the next page; a binding is held by the client, readable by the
+// client, and checked before anything is painted. Sharing the type would make
+// a change made for one validator's benefit land on the other's.
+//
+// Nothing here describes the rendering itself. Terminal width, scroll position,
+// theme, and ANSI handling are the client's state and stay in the client: the
+// Session event log records what happened, not what a viewer looked like while
+// watching it, and a projection that stored presentation state would be one
+// that has to be rebuilt every time a renderer changes.
+message PresentationCacheBinding {
+  // The projection instance that produced the cached content. A projection
+  // rebuild mints a new generation, and content from the old one is not a
+  // stale version of the new one, it is output from a different computation.
+  string projection_generation = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Stream position the projection had applied through when it rendered this.
+  uint64 processed_watermark = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Revision of the session's effective history, bumped by rewind and by
+  // compaction.
+  //
+  // This is the field that makes "my cache is just older" checkable rather than
+  // assumed. A cache at a lower watermark is a safe prefix of the current view
+  // only when history is append-only between the two positions. Rewind and
+  // compaction retract content that was there, so after either one a lower
+  // watermark is not a prefix of a higher one and the cache is wrong rather
+  // than incomplete.
+  uint64 effective_history_revision = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Revision of the session's privacy state, bumped by redaction and by
+  // artifact erasure.
+  //
+  // Tracked apart from history because it is the one that must be checked even
+  // when nothing else moved, and because getting it wrong is not a staleness
+  // annoyance. A cache painted after a redaction shows content someone
+  // deliberately destroyed, on a screen, to a person, which is the failure the
+  // redaction was performed to prevent.
+  uint64 privacy_revision = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Query contract version the cached content was rendered at. A cache built
+  // from a response the current contract would render differently is not
+  // reusable even when every projection coordinate still matches.
+  ContractVersion contract_version = 5 [features.field_presence = LEGACY_REQUIRED];
+  // Opaque identifier for the client-side rendering code that produced the
+  // cached content.
+  //
+  // The server never interprets it and never compares it. It is carried so a
+  // client that ships a new renderer can discard its own caches without the
+  // server having to know anything about renderers, which is the arrangement
+  // that keeps rendering changes from being a server deployment.
+  string renderer_version = 6 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// CheckPresentationCacheRequest asks whether a held cache may still be shown.
+//
+// It is deliberately not a read. A caller that wanted the content would call
+// GetSessionHistory; this exists for the caller that already has content and
+// needs a verdict cheaper than fetching it again. There is no field here that
+// could make it return timeline data, so it cannot quietly become the
+// expensive path it was added to avoid.
+message CheckPresentationCacheRequest {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ContractVersion accepted_contract = 2 [features.field_presence = LEGACY_REQUIRED];
+  // What the held cache was rendered against.
+  PresentationCacheBinding binding = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// CheckPresentationCacheResponse is the verdict on a held cache.
+message CheckPresentationCacheResponse {
+  ContractNegotiation contract = 1 [features.field_presence = LEGACY_REQUIRED];
+  CacheUsability usability = 2 [features.field_presence = LEGACY_REQUIRED];
+  // What a cache rendered now would be bound to.
+  //
+  // Present on every verdict, including a discard, so a client that is about to
+  // refetch knows what to bind the replacement to without a second round trip.
+  PresentationCacheBinding current = 3 [features.field_presence = LEGACY_REQUIRED];
+  // How current the projection that answered was. A usable verdict from a
+  // lagging projection is a verdict about a lagging view, and the caller is
+  // owed that distinction.
+  ProjectionFreshness freshness = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// CacheUsability is what a client may do with the cache it holds.
+//
+// The values are ordered by how much of the cache survives, and the zero value
+// is the one that discards, so a client that reads a variant it does not know
+// falls back to fetching rather than to painting.
+enum CacheUsability {
+  // Unknown verdict. Treat as DISCARD.
+  CACHE_USABILITY_UNSPECIFIED = 0;
+  // Every coordinate matches. The cache is the current view and may be painted
+  // as final.
+  CACHE_USABILITY_CURRENT = 1;
+  // The cache is a strict prefix: same generation, same history revision, same
+  // privacy revision, lower watermark.
+  //
+  // It may be painted immediately and then extended by reading forward from
+  // `binding.processed_watermark`. This is the only variant that lets a client
+  // show something before its first query returns, and it is gated on the
+  // revisions rather than on the watermark, because a lower watermark alone
+  // does not establish that the interval between them only added.
+  CACHE_USABILITY_APPENDABLE = 2;
+  // Content the cache holds no longer exists, because a rewind, a compaction, a
+  // redaction, or an artifact erasure removed it.
+  //
+  // Distinct from REPLACED because the projection is fine; the history changed
+  // underneath it. Distinct from STALE because there is no safe subset: the
+  // client cannot know which of its rows were the retracted ones, so it
+  // discards all of them.
+  CACHE_USABILITY_RETRACTED = 3;
+  // The projection generation differs. The cache came from a computation that
+  // no longer runs, so it is not old output, it is foreign output.
+  CACHE_USABILITY_REPLACED = 4;
+  // The contract major or the renderer version differs from what a fresh render
+  // would use. The content may still be accurate and is still not reusable.
+  CACHE_USABILITY_INCOMPATIBLE = 5;
+  // The server could not decide, because its own projection state is unknown to
+  // it. Reported rather than resolved to DISCARD so a client can tell a cache
+  // that was rejected from a cache that was never judged, and so a degraded
+  // server does not silently trigger a refetch storm it cannot serve.
+  CACHE_USABILITY_INDETERMINATE = 6;
+}

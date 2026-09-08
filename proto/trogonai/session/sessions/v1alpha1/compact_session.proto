@@ -1,0 +1,36 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "trogonai/session/sessions/v1alpha1/compacted.proto";
+import "trogonai/session/sessions/v1alpha1/digest.proto";
+import "trogonai/session/sessions/v1alpha1/session_ordinal.proto";
+import "trogonai/session/sessions/v1alpha1/token_usage.proto";
+
+// CompactSession replaces a covered span of history with a summary, recording
+// [Compacted]. The command carries the summary its producer generated; the
+// aggregate decides whether that cut is admissible.
+//
+// Write precondition At. The heaviest invariant set in the aggregate: the cut
+// must start at the context root, land between complete turn groups, leave a
+// non-empty complete-turn tail, include the prior usable marker, match the
+// plan-versioned covered input digest, and come from the current Ready attempt
+// (ADR#0035 facet 4).
+message CompactSession {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string summary_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string summary_content = 3 [features.field_presence = LEGACY_REQUIRED];
+  SessionOrdinal covers_from = 4 [features.field_presence = LEGACY_REQUIRED];
+  SessionOrdinal covers_through = 5 [features.field_presence = LEGACY_REQUIRED];
+  CompactionTrigger trigger = 6 [features.field_presence = LEGACY_REQUIRED];
+  string guidance = 7;
+  uint64 tokens_before = 8;
+  uint64 tokens_after = 9;
+  string model = 10;
+  TokenUsage usage = 11;
+  CompactionContextRoot context_root = 12 [features.field_presence = LEGACY_REQUIRED];
+  CompactionProducer producer = 13 [features.field_presence = LEGACY_REQUIRED];
+  // Digest over the plan-versioned covered input, recomputed and compared
+  // before the cut is admitted.
+  Digest covered_input_digest = 14 [features.field_presence = LEGACY_REQUIRED];
+}

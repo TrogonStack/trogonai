@@ -82,6 +82,8 @@ pub enum MintError {
     Encode(#[source] jsonwebtoken::errors::Error),
     #[error("ttl overflowed i64 when added to iat ({iat} + {ttl_secs})")]
     TtlOverflow { iat: i64, ttl_secs: i64 },
+    #[error("confirmation key rejected: {0}")]
+    Cnf(#[from] trogon_identity_types::aauth::CnfError),
 }
 
 /// Top-level error for one AS token-endpoint evaluation, per "Token Endpoint

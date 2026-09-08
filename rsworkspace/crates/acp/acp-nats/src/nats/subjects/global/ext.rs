@@ -16,7 +16,7 @@ impl ExtSubject {
 
 impl std::fmt::Display for ExtSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.agent.ext.{}", self.prefix.as_str(), self.method)
+        write!(f, "{}.v1.global.agent.ext.{}", self.prefix.as_str(), self.method)
     }
 }
 
@@ -40,6 +40,6 @@ mod tests {
     #[test]
     fn display_formats_subject_correctly() {
         let s = ExtSubject::new(&prefix(), &method());
-        assert_eq!(s.to_string(), "acp.agent.ext.my_op");
+        assert_eq!(s.to_string(), "acp.v1.global.agent.ext.my_op");
     }
 }

@@ -40,7 +40,7 @@ where
     let result = bridge
         .session_request::<ForkSessionRequest, ForkSessionResponse>(
             &subject,
-            SessionAgentMethod::Fork.wire_method(),
+            SessionAgentMethod::Fork.protocol_method(),
             &args,
             &session_id,
         )

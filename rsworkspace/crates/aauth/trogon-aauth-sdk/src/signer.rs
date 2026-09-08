@@ -12,14 +12,10 @@ use trogon_aauth_verify::nats_pop::content_digest_sha256;
 use trogon_identity_types::aauth::NatsSignatureEnvelope;
 use trogon_identity_types::aauth::headers;
 
+use crate::constants::SIG_INPUT;
 use crate::error::AgentSignerError;
 use rand_core::{OsRng, RngCore};
 use std::time::{SystemTime, UNIX_EPOCH};
-
-/// Order of covered components in the `AAuth-Sig-Input` header. Must match
-/// `NatsSignatureEnvelope::canonical_base` and what `NatsPopVerifier` expects.
-const SIG_INPUT: &str =
-    "(\"@subject\" \"@reply\" \"content-digest\" \"aauth-token\" \"aauth-sig-created\" \"aauth-sig-nonce\")";
 
 /// The six NATS headers produced by a signed request, in the order the
 /// verifier expects to find them (order doesn't matter on the wire, but a
@@ -168,15 +164,26 @@ fn random_nonce() -> String {
     URL_SAFE_NO_PAD.encode(bytes)
 }
 
+/// The agent's public key as a JWK, in the RFC 7518 member spelling the
+/// thumbprint is computed over.
+#[derive(serde::Serialize)]
+struct EcPublicJwk {
+    kty: &'static str,
+    crv: &'static str,
+    x: String,
+    y: String,
+}
+
 fn public_jwk(signing_key: &SigningKey) -> Result<serde_json::Value, AgentSignerError> {
     let verifying = signing_key.verifying_key();
     let point = verifying.to_encoded_point(false);
     let x = point.x().ok_or(AgentSignerError::InvalidPublicKey)?;
     let y = point.y().ok_or(AgentSignerError::InvalidPublicKey)?;
-    Ok(serde_json::json!({
-        "kty": "EC",
-        "crv": "P-256",
-        "x": URL_SAFE_NO_PAD.encode(x),
-        "y": URL_SAFE_NO_PAD.encode(y),
-    }))
+    let jwk = EcPublicJwk {
+        kty: "EC",
+        crv: "P-256",
+        x: URL_SAFE_NO_PAD.encode(x),
+        y: URL_SAFE_NO_PAD.encode(y),
+    };
+    serde_json::to_value(jwk).map_err(|_| AgentSignerError::InvalidPublicKey)
 }

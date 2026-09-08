@@ -15,6 +15,7 @@ use trogon_decider_runtime::{
 };
 use trogon_std::{NowV7, UuidV7Generator};
 
+use crate::commands::domain::ScheduleId as CommandScheduleId;
 use crate::{
     DeliveryKind, GetSchedule, ListSchedules, ScheduleEventCase, ScheduleKind, ScheduleStatusKind, SourceKind,
     config::{ScheduleWriteCondition, ScheduleWriteState},
@@ -380,17 +381,26 @@ fn message_from_proto(message: &v1::Message) -> MessageEnvelope {
     }
 }
 
-impl StreamRead<str> for MockSchedulerStore {
+impl StreamRead<CommandScheduleId> for MockSchedulerStore {
     type Error = SchedulerError;
 
-    async fn read_stream(&self, request: ReadStreamRequest<'_, str>) -> Result<ReadStreamResponse, Self::Error> {
-        let stream_id = request.stream_id;
+    async fn read_stream(
+        &self,
+        request: ReadStreamRequest<'_, CommandScheduleId>,
+    ) -> Result<ReadStreamResponse, Self::Error> {
+        let stream_id = request.stream_id.to_string();
         let from_sequence = match request.from {
             ReadFrom::Beginning => 1,
             ReadFrom::Position(position) => position.as_u64(),
         };
-        let current_position = self.stream_positions.lock().unwrap().get(stream_id).copied();
-        let stream_events = self.events.lock().unwrap().get(stream_id).cloned().unwrap_or_default();
+        let current_position = self.stream_positions.lock().unwrap().get(stream_id.as_str()).copied();
+        let stream_events = self
+            .events
+            .lock()
+            .unwrap()
+            .get(stream_id.as_str())
+            .cloned()
+            .unwrap_or_default();
 
         let mut recorded = Vec::new();
         for (index, event) in stream_events.into_iter().enumerate() {
@@ -417,10 +427,13 @@ impl StreamRead<str> for MockSchedulerStore {
     }
 }
 
-impl StreamAppend<str> for MockSchedulerStore {
+impl StreamAppend<CommandScheduleId> for MockSchedulerStore {
     type Error = SchedulerError;
 
-    async fn append_stream(&self, request: AppendStreamRequest<'_, str>) -> Result<AppendStreamResponse, Self::Error> {
+    async fn append_stream(
+        &self,
+        request: AppendStreamRequest<'_, CommandScheduleId>,
+    ) -> Result<AppendStreamResponse, Self::Error> {
         let stream_id = request.stream_id.to_string();
         let expected_state = request.stream_write_precondition;
         let events = request.events;
@@ -524,7 +537,7 @@ impl StreamAppend<str> for MockSchedulerStore {
     }
 }
 
-impl<Payload> SnapshotRead<Payload, str> for MockSchedulerStore
+impl<Payload> SnapshotRead<Payload, CommandScheduleId> for MockSchedulerStore
 where
     Payload: SnapshotPayloadDecode + SnapshotType + Send,
     <Payload as SnapshotPayloadDecode>::Error: std::error::Error + Send + Sync + 'static,
@@ -534,14 +547,14 @@ where
 
     async fn read_snapshot(
         &self,
-        request: ReadSnapshotRequest<'_, str>,
+        request: ReadSnapshotRequest<'_, CommandScheduleId>,
     ) -> Result<ReadSnapshotResponse<Payload>, Self::Error> {
-        self.read_command_snapshot(request.snapshot_id)
+        self.read_command_snapshot(&request.snapshot_id.to_string())
             .map(|snapshot| ReadSnapshotResponse { snapshot })
     }
 }
 
-impl<Payload> SnapshotWrite<Payload, str> for MockSchedulerStore
+impl<Payload> SnapshotWrite<Payload, CommandScheduleId> for MockSchedulerStore
 where
     Payload: SnapshotPayloadEncode + SnapshotType + Send,
     <Payload as SnapshotPayloadEncode>::Error: std::error::Error + Send + Sync + 'static,
@@ -551,7 +564,7 @@ where
 
     async fn write_snapshot(
         &self,
-        request: WriteSnapshotRequest<'_, Payload, str>,
+        request: WriteSnapshotRequest<'_, Payload, CommandScheduleId>,
     ) -> Result<WriteSnapshotResponse, Self::Error> {
         let snapshot =
             EncodedSnapshot {

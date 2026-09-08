@@ -2081,7 +2081,6 @@ mod tests {
                 SystemClock,
                 &opentelemetry::global::meter("unit-test"),
                 config,
-                notif_tx.clone(),
             );
             let agent = TrogonAcpAgent::new(
                 bridge,
@@ -2470,7 +2469,6 @@ mod tests {
                 SystemClock,
                 &opentelemetry::global::meter("acp-test"),
                 config,
-                notif_tx.clone(),
             );
 
             let agent = TrogonAcpAgent::new(
@@ -4454,9 +4452,8 @@ mod tests {
         )
         .with_operation_timeout(std::time::Duration::from_millis(500));
         let meter = opentelemetry::global::meter("trogon-acp-test");
-        let (bridge_notif_tx, _) = mpsc::channel(1);
         let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(js.clone());
-        let bridge = Bridge::new(nats.clone(), js_client, SystemClock, &meter, config, bridge_notif_tx);
+        let bridge = Bridge::new(nats.clone(), js_client, SystemClock, &meter, config);
         let gateway_config = std::sync::Arc::new(RwLock::new(None));
         let (tx, rx) = mpsc::channel(64);
         (
@@ -4510,8 +4507,7 @@ mod tests {
         );
         let meter = opentelemetry::global::meter("test");
         let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(js);
-        let (bridge_tx, _) = mpsc::channel(1);
-        let bridge = Bridge::new(nats.clone(), js_client, SystemClock, &meter, config, bridge_tx);
+        let bridge = Bridge::new(nats.clone(), js_client, SystemClock, &meter, config);
         let gateway_config = std::sync::Arc::new(RwLock::new(None));
         let (tx, _rx) = mpsc::channel(64);
         let agent = TrogonAcpAgent::new(

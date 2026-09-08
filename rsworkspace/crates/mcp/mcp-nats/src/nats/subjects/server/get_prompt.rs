@@ -17,7 +17,7 @@ impl std::fmt::Display for GetPromptSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.server.{}.prompts.get",
+            "{}.v1.server.{}.prompts.get",
             self.prefix.as_str(),
             self.server_id.as_str()
         )

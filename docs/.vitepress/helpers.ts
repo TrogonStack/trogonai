@@ -64,6 +64,7 @@ const GLOSSARY_SECTION_ORDER = [
   "Protocols and transports",
   "Event sourcing and the decider",
   "Agent execution model",
+  "Channels and conversations",
   "Messaging and storage infrastructure",
   "WebAssembly execution",
   "Wire contracts and serialization",

@@ -45,7 +45,7 @@ fn error_response(code: i32, msg: &str) -> (async_nats::HeaderMap, Bytes) {
 async fn push_get_targets_agent_subject_by_default() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = push_response("c-1");
-    nats.set_response_wire("a2a.agents.test-agent.push.get", headers, body);
+    nats.set_response_wire("a2a.v1.agents.test-agent.push.get", headers, body);
     let client = A2aClient::new(prefix(), agent_id(), nats, ());
     let cfg = client.push_get(&get_request("c-1")).await.unwrap();
     assert_eq!(cfg.id.as_deref(), Some("c-1"));
@@ -55,7 +55,7 @@ async fn push_get_targets_agent_subject_by_default() {
 async fn push_get_targets_gateway_subject_under_gateway_routing() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = push_response("c-gw");
-    nats.set_response_wire("a2a.gateway.test-agent.push.get", headers, body);
+    nats.set_response_wire("a2a.v1.gateway.test-agent.push.get", headers, body);
     let jwt = MintedUserJwt::new("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjk5OTk5OTk5OTl9.signature").unwrap();
     let client = A2aClient::new(prefix(), agent_id(), nats, ()).routing_via_gateway_ingress(jwt);
     client.push_get(&get_request("c-gw")).await.unwrap();
@@ -65,7 +65,7 @@ async fn push_get_targets_gateway_subject_under_gateway_routing() {
 async fn push_get_propagates_task_not_found() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = error_response(-32001, "missing");
-    nats.set_response_wire("a2a.agents.test-agent.push.get", headers, body);
+    nats.set_response_wire("a2a.v1.agents.test-agent.push.get", headers, body);
     let client = A2aClient::new(prefix(), agent_id(), nats, ());
     assert!(matches!(
         client.push_get(&get_request("c")).await,

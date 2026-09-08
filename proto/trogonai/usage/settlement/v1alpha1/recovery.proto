@@ -1,0 +1,142 @@
+edition = "2024";
+
+package trogonai.usage.settlement.v1alpha1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/usage/settlement/v1alpha1/ledger.proto";
+
+// Recovery for a billing consumer: where it got to, and what it left open.
+
+// ConsumerCheckpoint is how far a billing consumer has read its source.
+//
+// Consumption position and settlement state are tracked separately, and that
+// separation is deliberate. If the watermark could not advance past an
+// unresolved settlement, one charge stuck behind a provider outage would stop
+// billing for everything after it, and the outage would turn into a backlog
+// measured in whatever the busiest tenant produced meanwhile. The watermark
+// says what has been turned into ledger records; the ledger says what those
+// records came to.
+message ConsumerCheckpoint {
+  string consumer_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The source this consumer reads. Opaque here; a stream name, a subject, a
+  // partition.
+  string source = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Position every usage fact below has a durable ledger record for. Advancing
+  // this before writing those records would lose usage on a crash, which is the
+  // one failure this ledger cannot detect afterwards: an unrecorded charge
+  // leaves nothing behind to reconcile against.
+  uint64 processed_watermark = 3 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp processed_at = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Records not in a terminal state.
+  uint32 open_settlement_count = 5 [features.field_presence = LEGACY_REQUIRED];
+  // Records specifically in UNKNOWN. Broken out because it is the number that
+  // means money may have moved without anyone knowing, and burying it inside a
+  // general open count is how it stops being looked at.
+  uint32 unknown_settlement_count = 6 [features.field_presence = LEGACY_REQUIRED];
+  // Source position of the oldest open settlement. Unset when nothing is open.
+  //
+  // Reported to bound a recovery scan, not to hold the watermark back. It is
+  // the floor a scan can start from instead of re-reading everything the
+  // consumer has ever processed.
+  uint64 oldest_open_watermark = 7;
+}
+
+// ScanOpenSettlementsRequest enumerates settlements that still need attention.
+//
+// Bounded on purpose. A recovery pass that scans the whole ledger gets slower
+// exactly as the system gets busier, so the pass meant to run during an
+// incident is the one that stops finishing during an incident.
+message ScanOpenSettlementsRequest {
+  string consumer_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Which states to return. Empty means every non-terminal state, which is the
+  // ordinary recovery sweep.
+  repeated SettlementState states = 2;
+  // Only records untouched for at least this long.
+  //
+  // A settlement published a second ago and not yet acknowledged is not stuck,
+  // it is in flight, and a recovery pass that republishes it is competing with
+  // the attempt already running. Unset means no age filter, which is correct
+  // for a report and wrong for an automated retry loop.
+  google.protobuf.Duration idle_for = 3;
+  // Only records at or above this source position. Set from
+  // `ConsumerCheckpoint.oldest_open_watermark` to make a sweep proportional to
+  // what is actually open rather than to the ledger's size.
+  uint64 from_watermark = 4;
+  uint32 page_size = 5 [features.field_presence = LEGACY_REQUIRED];
+  // Opaque continuation. Unset starts a new scan.
+  bytes page_token = 6;
+}
+
+// ScanOpenSettlementsResponse is one page of unresolved settlements.
+message ScanOpenSettlementsResponse {
+  repeated SettlementRecord records = 1;
+  // Unset when this is the last page. Presence, and not an empty `records`
+  // list, is the end signal.
+  bytes next_page_token = 2;
+  ScanCoverage coverage = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// ScanCoverage is what the scan did not look at.
+//
+// Always present, including on a scan that covered everything. An operator
+// reading an empty page needs to know whether that means nothing is open or
+// the scan ran out of budget, and those two look identical without this.
+message ScanCoverage {
+  bool exhaustive = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Source position the scan covered through.
+  uint64 scanned_through_watermark = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Records matching the filter that a fault made unreadable. Non-zero means
+  // unresolved settlements exist that this scan cannot name, so the sweep must
+  // not be treated as having cleared anything.
+  uint32 unreadable_count = 3 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp observed_at = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// ReconcileSettlementRequest asks the provider what actually happened to a
+// settlement whose outcome was never observed.
+//
+// A query, not a retry. It exists so a consumer facing UNKNOWN has a move other
+// than publishing again and hoping the idempotency key holds, and there is no
+// field on it that could cause a charge.
+message ReconcileSettlementRequest {
+  string consumer_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string settlement_id = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// ReconcileSettlementResponse is what the provider says it knows.
+message ReconcileSettlementResponse {
+  ReconciliationOutcome outcome = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The updated ledger record, so a caller never has to reconstruct the new
+  // state from the outcome and hope its transition table matches the server's.
+  SettlementRecord record = 2 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp observed_at = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// ReconciliationOutcome is what asking the provider established.
+//
+// The zero value keeps the settlement unresolved, so a reconciliation that
+// returns a variant the caller does not understand leaves the record needing
+// attention instead of closing it.
+enum ReconciliationOutcome {
+  // Unknown result. Nothing changes; the record stays unresolved.
+  RECONCILIATION_OUTCOME_UNSPECIFIED = 0;
+  // The provider has the charge. The record becomes SETTLED.
+  RECONCILIATION_OUTCOME_CHARGE_FOUND = 1;
+  // The provider has no charge under this idempotency key and confirms it
+  // never processed one. The record becomes INTENDED and may be published.
+  RECONCILIATION_OUTCOME_CHARGE_ABSENT = 2;
+  // The provider refused, and says so now. The record becomes REJECTED.
+  RECONCILIATION_OUTCOME_CHARGE_REFUSED = 3;
+  // The provider cannot say, usually because the key is older than its
+  // retention for idempotency records.
+  //
+  // Reported rather than folded into ABSENT, because they differ on the only
+  // question that matters: absent means republishing is safe, and this means
+  // the provider has forgotten the key that was making it safe. This is what
+  // opens INCIDENT_KIND_UNKNOWN_OUTCOME_EXPIRED.
+  RECONCILIATION_OUTCOME_PROVIDER_CANNOT_SAY = 4;
+  // The provider could not be reached. Says nothing about the charge; the
+  // record stays UNKNOWN and the reconciliation can be tried again.
+  RECONCILIATION_OUTCOME_PROVIDER_UNREACHABLE = 5;
+}

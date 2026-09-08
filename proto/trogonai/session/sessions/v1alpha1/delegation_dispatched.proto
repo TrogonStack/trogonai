@@ -1,0 +1,25 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "trogonai/session/sessions/v1alpha1/cascade_policy.proto";
+
+// DelegationDispatched is the parent-side link fact recording a dispatched
+// child session, reusing the operation-ledger id to dedupe dispatch (ADR#0035
+// facet 6). It carries no position field: this event's own fold-derived
+// SessionOrdinal on the parent stream is the dispatch point, copied by the
+// child's ParentLinked.parent_dispatched_at after the parent append acks
+// (parent-first ordering). It is an invariant-bearing transition
+// (WRITE_PRECONDITION = At), letting DispatchDelegation refuse to spawn under
+// an already-terminal parent race-safely. Crash repair: the reconciler
+// observes a DelegationDispatched with no child stream and re-issues child
+// creation; NoStream makes the repair exactly-once. cascade_policy here is the
+// authoritative saga input: repair mints the child from this fact alone, and
+// ParentLinked.cascade_policy is copied verbatim from it, with a mismatching
+// copy rejected at child creation as a typed conflict.
+message DelegationDispatched {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string operation_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string child_session_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  CascadePolicy cascade_policy = 5 [features.field_presence = LEGACY_REQUIRED];
+}

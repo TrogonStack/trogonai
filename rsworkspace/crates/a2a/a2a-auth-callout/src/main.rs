@@ -16,9 +16,6 @@ use {
 };
 
 #[cfg(not(coverage))]
-const DEFAULT_USER_JWT_TTL_SECS: u64 = 300;
-
-#[cfg(not(coverage))]
 fn split_env_list(env: &impl ReadEnv, name: &str) -> Vec<String> {
     env.var(name)
         .ok()
@@ -117,7 +114,7 @@ async fn main() {
                 std::process::exit(1);
             }
         },
-        Err(_) => Duration::from_secs(DEFAULT_USER_JWT_TTL_SECS),
+        Err(_) => Duration::from_secs(a2a_auth_callout::constants::DEFAULT_USER_JWT_TTL_SECS),
     };
 
     let server_issuer = match load_nkey_public_env(&env, "AUTH_CALLOUT_SERVER_NKEY_PUBLIC") {

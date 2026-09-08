@@ -206,7 +206,7 @@ where
                     cnf_jwk: verified
                         .subagent_claims
                         .as_ref()
-                        .map_or(&verified.agent_claims.cnf.jwk, |s| &s.cnf.jwk)
+                        .map_or(verified.agent_claims.cnf.jwk(), |s| s.cnf.jwk())
                         .clone(),
                     scope: &scope,
                     act,

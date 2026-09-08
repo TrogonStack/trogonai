@@ -56,9 +56,9 @@ where
     C: PublishClient,
 {
     warn!(
-        "tier-1 SpiceDB denied ingress for agent {} method {}",
-        ctx.agent_id.as_str(),
-        ctx.method_slashes
+        agent_id = ctx.agent_id.as_str(),
+        method = ctx.method_slashes,
+        "tier-1 SpiceDB denied ingress"
     );
     reply_error(client, reply, HeaderMap::new(), body).await;
     let latency_ms = ctx.started_mono.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;

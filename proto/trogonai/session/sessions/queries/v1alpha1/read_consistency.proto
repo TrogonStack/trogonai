@@ -1,0 +1,72 @@
+edition = "2024";
+
+package trogonai.session.sessions.queries.v1alpha1;
+
+import "google/protobuf/duration.proto";
+
+// ReadConsistency is the freshness the caller requires, declared before the
+// server answers.
+//
+// The case it exists for is read-your-writes. A caller that has just issued a
+// command knows the position its write landed at, and an eventual read of a
+// projection that has not applied it yet returns a view that is correct and
+// wrong at the same time: correct as of the projection, wrong as of what the
+// caller knows to have happened. Redaction is the sharp version, since the view
+// still contains content the caller was told is gone.
+//
+// Every request carries one. Unset is EVENTUAL, which keeps the common read
+// cheap while still reporting freshness on the way back.
+message ReadConsistency {
+  ReadConsistencyMode mode = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Required for MODE_AT_LEAST, ignored otherwise. A MODE_AT_LEAST request with
+  // no token is QUERY_ERROR_CODE_INVALID_ARGUMENT rather than a silent
+  // downgrade to an eventual read.
+  ConsistencyToken token = 2;
+  // How long the read may wait for the projection to reach the token. Unset or
+  // zero means do not wait: answer if the projection is already there, fail
+  // otherwise.
+  //
+  // The budget is the caller's because only the caller knows whether it is
+  // serving an interactive request. A read that cannot be satisfied within it
+  // fails with QUERY_ERROR_CODE_PROJECTION_UNAVAILABLE and
+  // PROJECTION_UNAVAILABLE_REASON_LAGGING, carrying the freshness it reached so
+  // the caller can retry with a larger budget or fall back to an eventual read
+  // on purpose.
+  google.protobuf.Duration max_wait = 3;
+}
+
+// ReadConsistencyMode is how strictly the read is bound to a known write.
+enum ReadConsistencyMode {
+  // Treated as EVENTUAL. Unset is the ordinary case, not an error, because
+  // most reads have no write to be consistent with.
+  READ_CONSISTENCY_MODE_UNSPECIFIED = 0;
+  // Serve whatever the projection has applied. Freshness is still reported.
+  READ_CONSISTENCY_MODE_EVENTUAL = 1;
+  // Serve only once the projection has applied `token`.
+  READ_CONSISTENCY_MODE_AT_LEAST = 2;
+}
+
+// ConsistencyToken names a write the read must reflect.
+//
+// Unlike a page cursor this is a plain typed message, not opaque authenticated
+// bytes, and the difference is deliberate. A cursor names a scan position and
+// is therefore an instruction the server follows, so a forged one is a way to
+// read what the caller should not. A token only ever makes a read wait or fail:
+// the worst a forged one achieves is the caller's own bounded wait followed by
+// a LAGGING error, and it discloses nothing. Paying for a MAC to prevent that
+// would buy nothing and cost every caller the ability to debug its own reads.
+//
+// The write path mints these. The command-response shape that hands one back is
+// not defined yet.
+message ConsistencyToken {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The SessionOrdinal the caller's write landed at.
+  //
+  // An ordinal rather than a stream sequence, for the same reason page cursors
+  // use one: it is fold-derived and reproduces identically on replay, so it
+  // survives a projection rebuild. A list read uses this too, since a list
+  // projection that consumes many streams still knows how far it has applied
+  // each one, and "the list reflects my change to session X" is the only
+  // freshness question a caller actually has.
+  uint64 session_ordinal = 2 [features.field_presence = LEGACY_REQUIRED];
+}

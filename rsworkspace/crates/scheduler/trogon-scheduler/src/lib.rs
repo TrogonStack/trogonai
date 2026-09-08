@@ -2,11 +2,19 @@
     any(test, feature = "test-support"),
     allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)
 )]
+#![cfg_attr(
+    dylint_lib = "trogon_lints",
+    expect(
+        acyclic_modules,
+        reason = "a query reads the rows its projection writes and the projector is defined against the query's row types"
+    )
+)]
 
 //! Generic scheduling control plane backed by native NATS scheduled messages.
 
 pub mod commands;
 pub mod config;
+pub mod constants;
 pub mod error;
 pub mod kv;
 pub mod nats;
@@ -26,8 +34,8 @@ pub use commands::{
     ResumeScheduleError, ScheduleNextOccurrence, ScheduleNextOccurrenceError,
 };
 pub use config::ScheduleWriteCondition;
+pub use constants::{SCHEDULES_BUCKET, SCHEDULES_CHECKPOINT_KEY};
 pub use error::{ScheduleSpecError, SchedulerError};
-pub use projections::storage::{SCHEDULES_BUCKET, SCHEDULES_CHECKPOINT_KEY};
 #[cfg(all(feature = "postgres", not(coverage)))]
 pub use projections::{PostgresSchedulesProjection, SchedulesProjector};
 

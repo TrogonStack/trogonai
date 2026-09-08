@@ -2,7 +2,7 @@
 
 use async_nats::jetstream::kv;
 
-use crate::{error::SchedulerError, projections::storage::read_model_key};
+use crate::error::SchedulerError;
 
 use super::ScheduleId;
 use super::decode::decode_schedule;
@@ -22,7 +22,7 @@ impl GetSchedule {
 #[cfg(not(coverage))]
 pub async fn run(store: &kv::Store, command: GetSchedule) -> Result<Option<Schedule>, SchedulerError> {
     let Some(value) = store
-        .get(read_model_key(command.id.as_str()))
+        .get(command.id.as_str())
         .await
         .map_err(|source| SchedulerError::kv_source("failed to read projected schedule", source))?
     else {

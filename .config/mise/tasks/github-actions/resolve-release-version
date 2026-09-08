@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+#MISE description="Extract the release version from the acp-nats-stdio tag into GITHUB_OUTPUT"
+set -euo pipefail
+
+: "${GITHUB_REF_NAME:?GITHUB_REF_NAME is required}"
+: "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
+
+echo "version=${GITHUB_REF_NAME#acp-nats-stdio@v}" >>"$GITHUB_OUTPUT"

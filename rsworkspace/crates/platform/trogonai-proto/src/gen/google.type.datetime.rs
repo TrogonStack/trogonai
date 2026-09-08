@@ -139,34 +139,36 @@ impl ::buffa::MessageName for DateTime {
 impl ::buffa::Message for DateTime {
     /// Returns the total encoded size in bytes.
     ///
-    /// The result is a `u32`; the protobuf specification requires all
-    /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
-    /// compliant message will never overflow this type.
+    /// Accumulates in `u64` (which cannot overflow for in-memory
+    /// data) and saturates to `u32` at return, so a message whose
+    /// encoded size exceeds the 2 GiB protobuf limit yields a value
+    /// above [`::buffa::MAX_MESSAGE_BYTES`] that the encode entry
+    /// points reject, never a silently wrapped size.
     #[allow(clippy::let_and_return)]
     fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        let mut size = 0u32;
+        let mut size = 0u64;
         if self.year != 0i32 {
-            size += 1u32 + ::buffa::types::int32_encoded_len(self.year) as u32;
+            size += 1u64 + ::buffa::types::int32_encoded_len(self.year) as u64;
         }
         if self.month != 0i32 {
-            size += 1u32 + ::buffa::types::int32_encoded_len(self.month) as u32;
+            size += 1u64 + ::buffa::types::int32_encoded_len(self.month) as u64;
         }
         if self.day != 0i32 {
-            size += 1u32 + ::buffa::types::int32_encoded_len(self.day) as u32;
+            size += 1u64 + ::buffa::types::int32_encoded_len(self.day) as u64;
         }
         if self.hours != 0i32 {
-            size += 1u32 + ::buffa::types::int32_encoded_len(self.hours) as u32;
+            size += 1u64 + ::buffa::types::int32_encoded_len(self.hours) as u64;
         }
         if self.minutes != 0i32 {
-            size += 1u32 + ::buffa::types::int32_encoded_len(self.minutes) as u32;
+            size += 1u64 + ::buffa::types::int32_encoded_len(self.minutes) as u64;
         }
         if self.seconds != 0i32 {
-            size += 1u32 + ::buffa::types::int32_encoded_len(self.seconds) as u32;
+            size += 1u64 + ::buffa::types::int32_encoded_len(self.seconds) as u64;
         }
         if self.nanos != 0i32 {
-            size += 1u32 + ::buffa::types::int32_encoded_len(self.nanos) as u32;
+            size += 1u64 + ::buffa::types::int32_encoded_len(self.nanos) as u64;
         }
         if let ::core::option::Option::Some(ref v) = self.time_offset {
             match v {
@@ -175,25 +177,25 @@ impl ::buffa::Message for DateTime {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::date_time::TimeOffset::TimeZone(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
             }
         }
-        size
+        ::buffa::saturate_size(size)
     }
     fn write_to(
         &self,
         __cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
+        buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
@@ -223,7 +225,7 @@ impl ::buffa::Message for DateTime {
                 __buffa::oneof::date_time::TimeOffset::UtcOffset(x) => {
                     ::buffa::types::put_len_delimited_header(
                         8u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -231,7 +233,7 @@ impl ::buffa::Message for DateTime {
                 __buffa::oneof::date_time::TimeOffset::TimeZone(x) => {
                     ::buffa::types::put_len_delimited_header(
                         9u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -650,26 +652,28 @@ impl ::buffa::MessageName for TimeZone {
 impl ::buffa::Message for TimeZone {
     /// Returns the total encoded size in bytes.
     ///
-    /// The result is a `u32`; the protobuf specification requires all
-    /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
-    /// compliant message will never overflow this type.
+    /// Accumulates in `u64` (which cannot overflow for in-memory
+    /// data) and saturates to `u32` at return, so a message whose
+    /// encoded size exceeds the 2 GiB protobuf limit yields a value
+    /// above [`::buffa::MAX_MESSAGE_BYTES`] that the encode entry
+    /// points reject, never a silently wrapped size.
     #[allow(clippy::let_and_return)]
     fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        let mut size = 0u32;
+        let mut size = 0u64;
         if !self.id.is_empty() {
-            size += 1u32 + ::buffa::types::string_encoded_len(&self.id) as u32;
+            size += 1u64 + ::buffa::types::string_encoded_len(&self.id) as u64;
         }
         if !self.version.is_empty() {
-            size += 1u32 + ::buffa::types::string_encoded_len(&self.version) as u32;
+            size += 1u64 + ::buffa::types::string_encoded_len(&self.version) as u64;
         }
-        size
+        ::buffa::saturate_size(size)
     }
     fn write_to(
         &self,
         _cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
+        buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;

@@ -1,11 +1,11 @@
-//! `{prefix}.gateway.>` ingress dispatch orchestrator.
+//! `{prefix}.v1.gateway.>` ingress dispatch orchestrator.
 //!
 //! Runs each ingress request through the full policy stack in
 //! order: caller-identity resolution -> Tier-1 SpiceDB ->
 //! Tier-1 declarative -> Tier-2 CEL -> Tier-3 redaction. Each
 //! denial path replies on the caller inbox with the matching
 //! JSON-RPC error code and publishes an audit envelope; the
-//! allow path forwards to `{prefix}.agent.{agent}.{method}` and
+//! allow path forwards to `{prefix}.v1.global.agent.{agent}.{method}` and
 //! (when configured) spawns a streaming pump for stream-shaped
 //! methods.
 //!
@@ -38,7 +38,9 @@ use uuid::Uuid;
 
 use crate::aauth::{AAuthMode, GatewayAAuthIngress};
 use crate::config::Config;
-use crate::gw_ingress_stream::{CallerKey, GatewayStreamingIngressConfig, StreamingIngressGate};
+use crate::gw_ingress_stream::{
+    CallerKey, GatewayStreamingIngressConfig, StreamingIngressGate, events_stream_last_seq,
+};
 use crate::jwt_caller_identity::{
     GatewayCallerIdentityPolicy, JwtHeaderCallerIdentitySource, gateway_audit_caller_attribution,
     resolve_gateway_caller_identity,
@@ -69,26 +71,13 @@ use crate::runtime::streaming::maybe_spawn_streaming_ingress_pump;
 use crate::runtime::tier1::{enrich_audit_caller, tier1_declarative_context_from_ingress};
 use crate::runtime::tier1_denial::{Tier1DenialCtx, deny_tier1};
 
-const ANONYMOUS_CALLER: &str = "_";
-const MESSAGE_SEND_METHOD_DOTS: &str = "message.send";
-const JWT_AUDIENCE_ENV: &str = "A2A_GATEWAY_JWT_AUDIENCE";
-
-const SPAN_GATEWAY_INGRESS_DISPATCH: &str = "gateway.ingress.dispatch";
-const ATTR_CALLER_ID: &str = "caller_id";
-const ATTR_AGENT_SUBJECT: &str = "agent_subject";
-const ATTR_ROUTING_OUTCOME: &str = "routing_outcome";
-const ATTR_AAUTH_AGENT_ID: &str = "aauth_agent_id";
-
-const ROUTING_IGNORED_NO_REPLY: &str = "ignored_no_reply";
-const ROUTING_AAUTH_DENIED: &str = "aauth_denied";
-const ROUTING_TIER1_DENIED: &str = "tier1_denied";
-const ROUTING_POLICY_DENIED: &str = "policy_denied";
-const ROUTING_TIER3_REFUSED: &str = "tier3_refused";
-const ROUTING_TIER3_ENGINE_ERROR: &str = "tier3_engine_error";
-const ROUTING_FORWARDED: &str = "forwarded";
-const ROUTING_FORWARD_FAILED: &str = "forward_failed";
-const ROUTING_DEADLINE_EXCEEDED: &str = "deadline_exceeded";
-const ROUTING_INGRESS_ERROR: &str = "ingress_error";
+use crate::constants::{
+    ANONYMOUS_CALLER_SLUG, ATTR_AAUTH_AGENT_ID, ATTR_AGENT_SUBJECT, ATTR_CALLER_ID, ATTR_ROUTING_OUTCOME,
+    ENV_GATEWAY_JWT_AUDIENCE, ROUTING_AAUTH_DENIED, ROUTING_DEADLINE_EXCEEDED, ROUTING_FORWARD_FAILED,
+    ROUTING_FORWARDED, ROUTING_IGNORED_NO_REPLY, ROUTING_INGRESS_ERROR, ROUTING_POLICY_DENIED, ROUTING_TIER1_DENIED,
+    ROUTING_TIER3_ENGINE_ERROR, ROUTING_TIER3_REFUSED, SPAN_GATEWAY_INGRESS_DISPATCH,
+};
+use crate::constants::{MESSAGE_SEND_METHOD_DOTS, MESSAGE_STREAM_METHOD_DOTS};
 
 /// Run a single ingress envelope through the full gateway dispatch
 /// chain. Returns once the reply (or detached audit publish) has
@@ -214,7 +203,7 @@ async fn dispatch_routed<E: ReadEnv>(
     mut audit_caller_source: Option<String>,
 ) {
     let agent_subject = format!(
-        "{}.agents.{}.{}",
+        "{}.v1.agents.{}.{}",
         config.a2a_prefix.as_str(),
         agent_id.as_str(),
         method_dots
@@ -225,7 +214,7 @@ async fn dispatch_routed<E: ReadEnv>(
     let mut payload: Bytes = msg.payload.clone();
     let started_mono = Instant::now();
     let started_wall_ms = unix_epoch_ms();
-    let trace_id = Uuid::new_v4().to_string();
+    let trace_id = Uuid::now_v7().to_string();
     let audit_enabled = gateway_audit_publish_enabled(env);
     let method_slashes = method_dots.replace('.', "/");
     let _unary_deadline_guard = unary_deadline_for_method(env, method_dots.as_str());
@@ -291,10 +280,10 @@ async fn dispatch_routed<E: ReadEnv>(
                     reason = %deny.reason,
                     "gateway aauth verification rejected ingress envelope",
                 );
-                // Full wire encoding, not just the body: the JSON-RPC-over-
-                // NATS binding discriminates errors via the Jsonrpc-Error-Code
-                // and Jsonrpc-Id headers, so the deny must carry them for
-                // clients to see -32118 at all.
+                // Emit the full wire encoding: body is authoritative (ADR#0056);
+                // derived Jsonrpc-Id / Jsonrpc-Error-Code projections stay for
+                // routing and metrics so clients that only inspect headers still
+                // see -32118.
                 let encoded = match ingress_error_response_wire(
                     &headers_owned,
                     payload.as_ref(),
@@ -360,7 +349,7 @@ async fn dispatch_routed<E: ReadEnv>(
         headers_owned.insert(aauth_headers::ACCESS, jti);
     }
 
-    if audit_caller_id != ANONYMOUS_CALLER {
+    if audit_caller_id != ANONYMOUS_CALLER_SLUG {
         tracing::Span::current().record(ATTR_CALLER_ID, audit_caller_id.as_str());
     }
 
@@ -678,6 +667,15 @@ async fn dispatch_routed<E: ReadEnv>(
         "gateway forwarding to agent subject",
     );
 
+    // Anchor the streaming pump before the agent can publish anything: the pump is
+    // spawned after the forward and creates its consumer asynchronously, so the
+    // start position has to be read from this side of the publish.
+    let events_last_seq = if streaming_ingress_enabled && method_dots.as_str() == MESSAGE_STREAM_METHOD_DOTS {
+        events_stream_last_seq(client, &config.a2a_prefix).await
+    } else {
+        None
+    };
+
     let disposition = forward_to_agent(
         client,
         env,
@@ -713,6 +711,7 @@ async fn dispatch_routed<E: ReadEnv>(
                     payload.as_ref(),
                     reply.clone(),
                     caller_key,
+                    events_last_seq,
                 );
             }
             spawn_gateway_audit_publish(
@@ -892,7 +891,7 @@ async fn run_tier1_spicedb<'a, E: ReadEnv>(
     env: &E,
 ) -> Tier1SpiceDbStepOutcome {
     let publisher_account = env
-        .var(JWT_AUDIENCE_ENV)
+        .var(ENV_GATEWAY_JWT_AUDIENCE)
         .unwrap_or_else(|_| config.a2a_prefix.as_str().to_owned());
     let caller_slug_str = caller_slug.unwrap_or("");
     let principal = tier1_principal_from_caller(caller_slug_str, publisher_account.as_str());

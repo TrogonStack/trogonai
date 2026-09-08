@@ -510,6 +510,14 @@ mod tests {
         ) -> Result<Self::Stream, Self::Error> {
             self.context.get_or_create_stream(config).await
         }
+
+        async fn create_or_reconcile_stream<S: Into<async_nats::jetstream::stream::Config> + Send>(
+            &self,
+            desired: S,
+            owned: &[trogon_nats::jetstream::ProvisionedStreamField],
+        ) -> Result<(), Self::Error> {
+            self.context.create_or_reconcile_stream(desired, owned).await
+        }
     }
 
     #[tokio::test]

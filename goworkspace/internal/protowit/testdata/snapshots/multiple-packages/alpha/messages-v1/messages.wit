@@ -1,0 +1,7 @@
+package alpha:messages-v1;
+
+interface messages {
+  record alpha-message {
+    id: string,
+  }
+}

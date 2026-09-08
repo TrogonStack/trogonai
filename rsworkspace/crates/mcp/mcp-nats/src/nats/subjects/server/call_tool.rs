@@ -17,7 +17,7 @@ impl std::fmt::Display for CallToolSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.server.{}.tools.call",
+            "{}.v1.server.{}.tools.call",
             self.prefix.as_str(),
             self.server_id.as_str()
         )

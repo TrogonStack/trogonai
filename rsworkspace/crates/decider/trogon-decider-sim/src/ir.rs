@@ -8,6 +8,7 @@
 //! same `ScenarioIr` value, so one scenario can be executed through either path without being
 //! re-specified per path.
 
+use trogon_decider_wasm_runtime::WasmEngineConfig;
 use trogon_decider_wit::host;
 
 use crate::host::SimInstance;
@@ -85,6 +86,42 @@ pub enum ExpectedOutcome {
     Accepted,
     /// The command must fail (rejected or faulted) with this code or message.
     Error(String),
+    /// The guest call must trap: a Wasmtime-level fault such as fuel exhaustion, an expired epoch
+    /// deadline, or a memory ceiling, rather than a decider-level rejection or fault.
+    Trap,
+}
+
+/// Fault-injection overrides layered onto a [`WasmEngineConfig`] for one scenario.
+///
+/// A `None` field leaves the underlying config's value untouched, so a scenario only needs to
+/// name the budget it means to starve.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct BudgetOverrides {
+    /// Overrides the fuel budget applied before each guest export call.
+    pub fuel_per_call: Option<u64>,
+    /// Overrides the epoch ticks allowed for a single guest export call before it is interrupted.
+    pub epoch_ticks_per_call: Option<u64>,
+    /// Overrides the memory ceiling applied to each guest store, in bytes.
+    pub max_memory_bytes: Option<usize>,
+}
+
+impl BudgetOverrides {
+    /// Layers these overrides onto `config`, leaving any field this value leaves unset at
+    /// `config`'s existing value.
+    pub fn apply(&self, config: WasmEngineConfig) -> WasmEngineConfig {
+        let config = match self.fuel_per_call {
+            Some(fuel_per_call) => config.with_fuel_per_call(fuel_per_call),
+            None => config,
+        };
+        let config = match self.epoch_ticks_per_call {
+            Some(epoch_ticks_per_call) => config.with_epoch_ticks_per_call(epoch_ticks_per_call),
+            None => config,
+        };
+        match self.max_memory_bytes {
+            Some(max_memory_bytes) => config.with_max_memory_bytes(max_memory_bytes),
+            None => config,
+        }
+    }
 }
 
 /// One `when`/`then` pair in a scenario's ordered step sequence.
@@ -183,6 +220,9 @@ pub struct ScenarioIr {
     pub given: Vec<WireEnvelope>,
     /// The scenario's ordered `when`/`then` steps, run against a single open session.
     pub steps: Vec<ScenarioStep>,
+    /// Fault-injection overrides this scenario runs the wasm component under, when it means to
+    /// exercise a resource trap rather than the component's default production budget.
+    pub budget: Option<BudgetOverrides>,
 }
 
 impl ScenarioIr {
@@ -193,6 +233,7 @@ impl ScenarioIr {
             stream_id: None,
             given: Vec::new(),
             steps: Vec::new(),
+            budget: None,
         }
     }
 
@@ -212,6 +253,7 @@ impl ScenarioIr {
                 ExpectedOutcome::Rejected => sim.then_rejected(),
                 ExpectedOutcome::Accepted => sim.then_accepted(),
                 ExpectedOutcome::Error(expected) => sim.then_error(expected.clone()),
+                ExpectedOutcome::Trap => sim.then_trap(),
             };
         }
         sim
@@ -247,10 +289,7 @@ impl ScenarioIr {
             session
                 .evolve(&given)
                 .map_err(|source| ScenarioError::EvolveCall { source })?
-                .map_err(|err| ScenarioError::Evolve {
-                    code: err.code,
-                    message: err.message,
-                })?;
+                .map_err(|err| ScenarioError::Evolve { error: err.into() })?;
         }
 
         let mut outcomes = Vec::with_capacity(self.steps.len());
@@ -261,10 +300,7 @@ impl ScenarioIr {
                 session
                     .evolve(&forwarded)
                     .map_err(|source| ScenarioError::EvolveCall { source })?
-                    .map_err(|err| ScenarioError::Evolve {
-                        code: err.code,
-                        message: err.message,
-                    })?;
+                    .map_err(|err| ScenarioError::Evolve { error: err.into() })?;
                 forwarded.clear();
             }
 

@@ -15,9 +15,9 @@ use trogon_decider_runtime::{Event, EventId, Headers, StreamPosition};
 use super::replay::is_empty_replay_range;
 use super::{
     NATS_BATCH_COMMIT, NATS_BATCH_ID, NATS_BATCH_SEQUENCE, PublishStreamError, StreamStoreError, StreamSubject,
-    TROGON_EVENT_HEADER_PREFIX, TROGON_EVENT_TYPE, append_stream, build_publish_message, event_header_name,
-    event_header_value, headers_from_nats_headers, read_stream, read_stream_range, subject_current_position,
-    validate_event_headers,
+    SubjectScope, SubjectScopeError, TROGON_EVENT_HEADER_PREFIX, TROGON_EVENT_TYPE, append_stream,
+    build_publish_message, event_header_name, event_header_value, headers_from_nats_headers, read_stream,
+    read_stream_range, subject_current_position, validate_event_headers,
 };
 
 #[test]
@@ -567,6 +567,45 @@ async fn read_subject_stream_respects_from_and_to_sequence_bounds() {
 }
 
 #[tokio::test]
+async fn read_subject_stream_bounded_caps_the_fetched_event_count() {
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
+    let stream = create_events_stream(&js, "BOUNDED_TEST", "bounded.test.>").await;
+
+    let subject = "bounded.test.alpha";
+    let mut positions = Vec::new();
+    for index in 0..5u128 {
+        let position = append_stream(
+            &js,
+            make_subject(subject),
+            None,
+            &[make_event(index, format!("event-{index}").as_bytes())],
+        )
+        .await
+        .expect("publish event");
+        positions.push(position);
+    }
+    let to_sequence = positions.last().unwrap().as_u64();
+
+    let capped = super::read_subject_stream_bounded(&stream, "alpha", subject, positions[0].as_u64(), to_sequence, 2)
+        .await
+        .expect("bounded replay should succeed");
+
+    assert_eq!(
+        capped.len(),
+        2,
+        "the bounded read must stop at max_events instead of fetching the whole five-event range"
+    );
+    assert_eq!(capped[0].stream_position, positions[0]);
+    assert_eq!(capped[1].stream_position, positions[1]);
+
+    let unbounded = super::read_subject_stream(&stream, "alpha", subject, positions[0].as_u64(), to_sequence)
+        .await
+        .expect("unbounded replay should still return the full range");
+    assert_eq!(unbounded.len(), 5);
+}
+
+#[tokio::test]
 async fn read_subject_stream_uses_caller_stream_id() {
     let server = JetStreamTestServer::start().await;
     let js = server.jetstream().await;
@@ -699,4 +738,74 @@ async fn read_subject_stream_resumes_from_next_sequence_after_partial_progress()
     assert_eq!(resumed[1].event.id, full[4].event.id);
     assert_eq!(resumed[0].stream_position, full[3].stream_position);
     assert_eq!(resumed[1].stream_position, full[4].stream_position);
+}
+
+fn scope(prefix: &str) -> SubjectScope {
+    SubjectScope::new(prefix).expect("the test prefixes are valid scopes")
+}
+
+fn subject(subject: &str) -> StreamSubject {
+    StreamSubject::new(subject).expect("the test subjects are valid")
+}
+
+#[test]
+fn a_scope_ends_on_a_token_boundary_with_or_without_a_trailing_dot() {
+    assert_eq!(scope("acme.orders"), scope("acme.orders."));
+    assert_eq!(scope("acme.orders").pattern(), "acme.orders.>");
+    assert_eq!(scope("acme.orders").as_prefix(), "acme.orders.");
+}
+
+#[test]
+fn a_sibling_sharing_the_scopes_leading_characters_is_outside_it() {
+    let orders = scope("acme.orders");
+
+    assert!(orders.contains(&subject("acme.orders.7")));
+    assert!(
+        !orders.contains(&subject("acme.orders_archive.7")),
+        "a prefix compared without its token boundary would swallow the sibling"
+    );
+}
+
+#[test]
+fn the_bare_scope_is_not_a_stream_inside_itself() {
+    assert!(!scope("acme.orders").contains(&subject("acme.orders")));
+}
+
+#[test]
+fn one_tenants_scope_does_not_contain_anothers_subject() {
+    assert!(!scope("tenant.alpha").contains(&subject("tenant.beta.orders.1")));
+}
+
+#[test]
+fn a_wildcard_prefix_is_refused_rather_than_admitting_everything() {
+    assert_eq!(
+        SubjectScope::new("acme.>"),
+        Err(SubjectScopeError::Wildcard {
+            prefix: "acme.>".to_owned()
+        })
+    );
+    assert_eq!(
+        SubjectScope::new("acme.*.orders"),
+        Err(SubjectScopeError::Wildcard {
+            prefix: "acme.*.orders".to_owned()
+        })
+    );
+}
+
+#[test]
+fn a_prefix_naming_no_token_boundary_is_refused() {
+    assert_eq!(SubjectScope::new(""), Err(SubjectScopeError::Empty));
+    assert_eq!(SubjectScope::new("..."), Err(SubjectScopeError::Empty));
+    assert_eq!(
+        SubjectScope::new(".acme"),
+        Err(SubjectScopeError::MalformedDots {
+            prefix: ".acme".to_owned()
+        })
+    );
+    assert_eq!(
+        SubjectScope::new("acme..orders"),
+        Err(SubjectScopeError::MalformedDots {
+            prefix: "acme..orders".to_owned()
+        })
+    );
 }

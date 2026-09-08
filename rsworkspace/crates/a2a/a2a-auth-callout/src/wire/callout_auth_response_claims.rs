@@ -1,3 +1,5 @@
+use std::fmt;
+
 use nats_jwt_rs::authorization::AuthResponse;
 use nkeys::{KeyPair, XKey};
 
@@ -6,9 +8,19 @@ use crate::error::AuthCalloutError;
 use crate::jwt::MintedUserJwt;
 
 /// Callout-signed authorization **response** JWT for `$SYS.REQ.USER.AUTH` reply.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct CalloutAuthResponseClaims {
     encoded: String,
+}
+
+/// `encoded` carries the minted user JWT inside `nats.jwt`, so printing it
+/// would put a usable credential wherever the response is traced.
+impl fmt::Debug for CalloutAuthResponseClaims {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CalloutAuthResponseClaims")
+            .field("encoded", &"<redacted>")
+            .finish()
+    }
 }
 
 impl CalloutAuthResponseClaims {

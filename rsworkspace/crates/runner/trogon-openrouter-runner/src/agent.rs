@@ -2298,9 +2298,6 @@ impl<
                             .as_ref()
                             .map(|w| w.path.clone())
                             .unwrap_or_else(|| parent_cwd.clone());
-                        let (notif_tx, _unused) =
-                            tokio::sync::mpsc::channel::<SessionNotification>(1);
-                        drop(_unused);
                         let acp_prefix_str = runner_cfg.acp_prefix().to_string();
                         let bridge = acp_nats::Bridge::new(
                             nats.clone(),
@@ -2310,7 +2307,6 @@ impl<
                             trogon_std::time::SystemClock,
                             &opentelemetry::global::meter("trogon-openrouter-runner"),
                             runner_cfg,
-                            notif_tx,
                         );
                         let spawn_ctx = trogon_runner_tools::spawn_session::SubSessionSpawnContext {
                             tool_allowlist: subagent

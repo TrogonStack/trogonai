@@ -13,15 +13,15 @@ use trogon_nats::jetstream::{
     JetStreamKeyValueUpdate, JetStreamKvCreate, JetStreamKvEntry, JetStreamKvGet, JetStreamKvKeys,
 };
 
-use crate::processor::execution::reconciliation::{ScheduleKey, ScheduleSubject};
+use crate::commands::domain::ScheduleId;
+use crate::constants::CHECKPOINT_KEY_PREFIX;
+use crate::processor::execution::reconciliation::ScheduleSubject;
 
 use super::ScheduleCheckpointRecord;
 use super::codec::{
     CheckpointCodecError, decode_checkpoint_envelope, decode_checkpoint_record, encode_checkpoint_record,
 };
 use super::failure::{ProcessingFailureRecord, encode_failure_record};
-
-const CHECKPOINT_KEY_PREFIX: &str = "v1.";
 
 /// Error raised while reading or writing scheduler checkpoints.
 #[derive(Debug, thiserror::Error)]
@@ -170,15 +170,15 @@ where
         Self { kv }
     }
 
-    fn checkpoint_key(key: &ScheduleKey) -> String {
-        format!("{CHECKPOINT_KEY_PREFIX}{}", key.simple())
+    fn checkpoint_key(schedule_id: &ScheduleId) -> String {
+        format!("{CHECKPOINT_KEY_PREFIX}{schedule_id}")
     }
 
-    /// Reads the current checkpoint for a schedule key, returning the revision for a
+    /// Reads the current checkpoint for a schedule, returning the revision for a
     /// subsequent optimistic [`save`](Self::save). A deleted or purged entry is
     /// treated as absent.
-    pub async fn load(&self, key: &ScheduleKey) -> Result<Option<LoadedCheckpoint>, CheckpointStoreError> {
-        let kv_key = Self::checkpoint_key(key);
+    pub async fn load(&self, schedule_id: &ScheduleId) -> Result<Option<LoadedCheckpoint>, CheckpointStoreError> {
+        let kv_key = Self::checkpoint_key(schedule_id);
         let entry = self.kv.entry(kv_key).await.map_err(CheckpointStoreError::backend)?;
 
         let Some(entry) = entry else {
@@ -197,11 +197,8 @@ where
     }
 
     /// Reads current checkpoint by the original schedule id.
-    pub async fn load_by_id(
-        &self,
-        schedule_id: &crate::commands::domain::ScheduleId,
-    ) -> Result<Option<LoadedCheckpoint>, CheckpointStoreError> {
-        self.load(&ScheduleKey::derive(schedule_id)).await
+    pub async fn load_by_id(&self, schedule_id: &ScheduleId) -> Result<Option<LoadedCheckpoint>, CheckpointStoreError> {
+        self.load(schedule_id).await
     }
 
     /// Reads current checkpoint by execution subject.
@@ -209,7 +206,7 @@ where
         &self,
         subject: &ScheduleSubject,
     ) -> Result<Option<LoadedCheckpoint>, CheckpointStoreError> {
-        self.load(subject.key()).await
+        self.load(subject.schedule_id()).await
     }
 
     /// Persists a checkpoint record. `revision` is `None` for a first write (create)
@@ -230,7 +227,7 @@ where
                 });
             }
         };
-        let kv_key = Self::checkpoint_key(&record.key());
+        let kv_key = Self::checkpoint_key(&record.schedule_id);
 
         match revision {
             Some(0) => Err(CheckpointStoreError::InvalidRevision),

@@ -1,8 +1,8 @@
 use async_nats::header::HeaderMap;
-use jsonrpc_nats::{Message, RequestId};
+use jsonrpc_nats::{Message, RequestId, encode};
 
 pub fn encode_wire_request<Req: serde::Serialize>(method: &str, id: RequestId, params: &Req) -> (HeaderMap, Vec<u8>) {
-    let encoded = jsonrpc_nats::encode(&Message::Request {
+    let encoded = encode(&Message::Request {
         id,
         method: method.to_string(),
         params: serde_json::to_value(params).unwrap(),
@@ -12,7 +12,7 @@ pub fn encode_wire_request<Req: serde::Serialize>(method: &str, id: RequestId, p
 }
 
 pub fn encode_wire_notification<Req: serde::Serialize>(method: &str, params: &Req) -> (HeaderMap, Vec<u8>) {
-    let encoded = jsonrpc_nats::encode(&Message::Notification {
+    let encoded = encode(&Message::Notification {
         method: method.to_string(),
         params: serde_json::to_value(params).unwrap(),
     })

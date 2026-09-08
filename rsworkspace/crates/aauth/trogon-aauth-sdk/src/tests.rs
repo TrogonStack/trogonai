@@ -41,7 +41,7 @@ fn mint_agent_jwt(ap_signing: &SigningKey, agent_jwk_val: &serde_json::Value, no
         "iat": now - 5,
         "exp": now + 600,
         "dwk": DWK_AGENT,
-        "cnf": Cnf { jwk: agent_jwk_val.clone() },
+        "cnf": Cnf::public(agent_jwk_val.clone()).expect("test fixture is a public jwk"),
     });
     encode(&header, &claims, &enc).expect("encode agent jwt")
 }

@@ -10,6 +10,7 @@ use trogon_decider_runtime::{
     StreamAppend, StreamRead, WriteSnapshotRequest, WriteSnapshotResponse,
 };
 
+use crate::commands::domain::ScheduleId;
 use crate::config::ScheduleWriteState;
 use crate::error::SchedulerError;
 use crate::nats::{event_subject, resolve_event_subject_state};
@@ -28,13 +29,13 @@ fn coverage_unavailable(context: &'static str) -> SchedulerError {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct ScheduleEventSubjectResolver;
 
-impl StreamSubjectResolver<str> for ScheduleEventSubjectResolver {
+impl StreamSubjectResolver<ScheduleId> for ScheduleEventSubjectResolver {
     type Error = SchedulerError;
 
     async fn resolve_subject_state(
         &self,
         events_stream: &jetstream::stream::Stream,
-        stream_id: &str,
+        stream_id: &ScheduleId,
     ) -> Result<SubjectState, Self::Error> {
         #[cfg(not(coverage))]
         {
@@ -87,10 +88,10 @@ impl EventStore {
     }
 }
 
-impl StreamRead<str> for EventStore {
+impl StreamRead<ScheduleId> for EventStore {
     type Error = SchedulerError;
 
-    async fn read_stream(&self, request: ReadStreamRequest<'_, str>) -> Result<ReadStreamResponse, Self::Error> {
+    async fn read_stream(&self, request: ReadStreamRequest<'_, ScheduleId>) -> Result<ReadStreamResponse, Self::Error> {
         #[cfg(not(coverage))]
         {
             self.inner.read_stream(request).await.map_err(SchedulerError::from)
@@ -103,15 +104,19 @@ impl StreamRead<str> for EventStore {
     }
 }
 
-impl StreamAppend<str> for EventStore {
+impl StreamAppend<ScheduleId> for EventStore {
     type Error = SchedulerError;
 
-    async fn append_stream(&self, request: AppendStreamRequest<'_, str>) -> Result<AppendStreamResponse, Self::Error> {
+    async fn append_stream(
+        &self,
+        request: AppendStreamRequest<'_, ScheduleId>,
+    ) -> Result<AppendStreamResponse, Self::Error> {
         #[cfg(not(coverage))]
         {
             let stream_id = request.stream_id;
             let projected_events = request.events.clone();
             let outcome = self.inner.append_stream(request).await.map_err(SchedulerError::from)?;
+            let stream_id = stream_id.to_string();
 
             // The append is the source of truth and has committed. The KV read model
             // is a derived projection, so a projection failure must NOT turn a durable
@@ -120,7 +125,7 @@ impl StreamAppend<str> for EventStore {
             // idempotent). Surface the failure loudly for observability instead.
             if let Err(source) = project_appended_events(
                 &self.schedules_bucket,
-                stream_id,
+                stream_id.as_str(),
                 projected_events.as_slice(),
                 outcome.stream_position,
             )
@@ -145,7 +150,7 @@ impl StreamAppend<str> for EventStore {
     }
 }
 
-impl<Payload> SnapshotRead<Payload, str> for EventStore
+impl<Payload> SnapshotRead<Payload, ScheduleId> for EventStore
 where
     Payload: SnapshotPayloadDecode + SnapshotType + Send,
     <Payload as SnapshotPayloadDecode>::Error: std::error::Error + Send + Sync + 'static,
@@ -155,7 +160,7 @@ where
 
     async fn read_snapshot(
         &self,
-        request: ReadSnapshotRequest<'_, str>,
+        request: ReadSnapshotRequest<'_, ScheduleId>,
     ) -> Result<ReadSnapshotResponse<Payload>, Self::Error> {
         #[cfg(not(coverage))]
         {
@@ -169,7 +174,7 @@ where
     }
 }
 
-impl<Payload> SnapshotWrite<Payload, str> for EventStore
+impl<Payload> SnapshotWrite<Payload, ScheduleId> for EventStore
 where
     Payload: SnapshotPayloadEncode + SnapshotType + Send,
     <Payload as SnapshotPayloadEncode>::Error: std::error::Error + Send + Sync + 'static,
@@ -179,7 +184,7 @@ where
 
     async fn write_snapshot(
         &self,
-        request: WriteSnapshotRequest<'_, Payload, str>,
+        request: WriteSnapshotRequest<'_, Payload, ScheduleId>,
     ) -> Result<WriteSnapshotResponse, Self::Error> {
         #[cfg(not(coverage))]
         {

@@ -14,6 +14,8 @@ use a2a_nats::audit::envelope::AuditEnvelopeFields;
 use crate::policy::spicedb_tier1::tier1_principal_from_caller;
 use crate::policy::tier1_declarative::Tier1DeclarativeContext;
 
+pub use crate::constants::ANONYMOUS_CALLER_SLUG;
+
 /// Build the Tier-1 declarative evaluation context for an ingress
 /// request. Returns `None` when the method dots don't resolve to a
 /// typed `A2aMethod` -- the gateway routes those to the
@@ -53,13 +55,6 @@ pub fn tier1_declarative_context_from_ingress(
         nats_subject,
     ))
 }
-
-/// Sentinel slug used when an ingress request carries no caller
-/// identity. Distinct from any real caller value so a deny-anonymous
-/// declarative rule can match on it precisely. Kept as a single
-/// constant so the value matches between the context builder and
-/// the bundle authors who write rules against it.
-pub const ANONYMOUS_CALLER_SLUG: &str = "_";
 
 /// Stamp the caller-correlation fields onto an audit envelope
 /// extras block. Lives on the dispatch side because the denial

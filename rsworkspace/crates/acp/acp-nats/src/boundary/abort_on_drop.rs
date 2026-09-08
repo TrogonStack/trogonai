@@ -21,7 +21,17 @@ impl<T> AbortOnDrop<T> {
         self.0.is_finished()
     }
 
+    /// Aborts the task and waits for it to stop.
+    ///
+    /// A finished task is left alone: awaiting a `JoinHandle` a second time
+    /// panics, and a caller that raced [`Self::handle_mut`] in a `select!` has
+    /// already awaited it on the normal-exit path. Guarding here rather than at
+    /// every call site keeps that panic from being one forgotten `is_finished`
+    /// check away. Nothing is lost by skipping: the join result is discarded.
     pub async fn abort_and_wait(mut self) {
+        if self.0.is_finished() {
+            return;
+        }
         self.0.abort();
         let _ = (&mut self.0).await;
     }

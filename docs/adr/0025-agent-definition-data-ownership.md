@@ -753,6 +753,18 @@ and equip the tool call outside the prompt.
   AgentRevision, Proposal, the exact AgentImplementation binding, exact model
   selections, and `variables_schema`. A partial charter plus an opaque
   content digest is not a complete definition contract.
+- Whether model selection is platform-owned is unresolved while this ADR is
+  draft. The model above places `primary_model_selection` on
+  AgentConfiguration, and
+  [ADR#0032](./0032-model-route-and-credential-binding.md) builds allowed-model
+  policy, route admission, and credential binding on the platform being able to
+  read that value. The shipped contract does the opposite: `AgentConfiguration`
+  carries runtime-owned `settings` that own model selection, because model
+  vocabularies, parameter names, and reasoning knobs differ per runtime and some
+  runtimes expose no model selection at all. Reconciling the two is a decision
+  in its own right, not a field rename: a platform-readable model is a
+  precondition for everything that ADR decides, so runtime-owned model selection
+  defers that plane rather than relocating it.
 - The definition records alone answer which agent existed, which revision
   ran, and which proposal justified it. What the model saw and what was
   authorized are answered by the session and policy domains through the

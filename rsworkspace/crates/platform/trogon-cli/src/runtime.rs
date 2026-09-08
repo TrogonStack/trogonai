@@ -3,11 +3,9 @@
 //! `Bridge` and `CrossRunnerSwitcher` are `!Send` — must run inside `LocalSet`.
 
 use acp_nats::Config;
-use agent_client_protocol::schema::v1::SessionNotification;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc;
 
 use crate::client_supervisor::AcpClientSupervisor;
 use crate::fs::Fs;
@@ -106,9 +104,6 @@ where
     SW: RunnerSwitcher,
     RS: trogon_registry::RegistryStore,
 {
-    let (notification_tx, mut notification_rx) = mpsc::channel::<SessionNotification>(64);
-    tokio::task::spawn_local(async move { while notification_rx.recv().await.is_some() {} });
-
     let js = async_nats::jetstream::new(nats.clone());
     let js_client = NatsJetStreamClient::new(js);
 
@@ -118,7 +113,7 @@ where
         allowed_tools: Vec::new(),
     }));
     let permission_coordinator = PermissionCoordinator::new();
-    let tui_client = Rc::new(TuiClient::new(client_state.clone(), permission_coordinator.clone()));
+    let tui_client = Arc::new(TuiClient::new(client_state.clone(), permission_coordinator.clone()));
 
     let supervisor = Rc::new(AcpClientSupervisor::new(
         client_state,
@@ -126,7 +121,6 @@ where
         nats,
         js_client,
         nats_url,
-        notification_tx,
         prefix,
     )?);
 

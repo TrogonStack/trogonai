@@ -172,7 +172,7 @@ async fn handle_client_error_publishes_error_reply() {
     let payloads = nats.published_payloads();
     let body: serde_json::Value = serde_json::from_slice(payloads[0].as_ref()).unwrap();
     assert!(
-        body["message"]
+        body["error"]["message"]
             .as_str()
             .unwrap()
             .contains("mock wait_for_terminal_exit failure")

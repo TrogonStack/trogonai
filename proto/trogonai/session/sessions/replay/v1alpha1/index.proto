@@ -1,0 +1,60 @@
+edition = "2024";
+
+package trogonai.session.sessions.replay.v1alpha1;
+
+import "google/protobuf/duration.proto";
+
+// ReplayIndex is the trailer that makes a bounded range read of a replay
+// artifact useful.
+//
+// Range reads are byte-granular and frames are variable-length, so a read into
+// the middle of the frame region lands mid-frame, with no way to tell from the
+// bytes where the next boundary is. Without an index the only correct way to
+// reach frame one million is to parse the previous 999,999, which is exactly
+// the cost that keeping the output out of the log was supposed to avoid.
+//
+// The index is sparse. It marks frame boundaries at intervals rather than every
+// frame, because an entry per frame is an index whose size grows with the
+// output it indexes, which is the problem again with more steps. A reader seeks
+// to the nearest preceding entry and scans forward a bounded distance.
+message ReplayIndex {
+  // Total frames in the capture, and total payload bytes across them.
+  //
+  // Both are also on the log, in CommandOutputReplayRef. The repetition is the
+  // point: a reader that has fetched only this trailer can check it against the
+  // event before trusting a single offset in it, and the event is the copy the
+  // artifact store did not supply. An index that disagrees with the log is not
+  // a stale index, it is the wrong artifact or a damaged one.
+  uint64 frame_count = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint64 output_byte_count = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Seek points in artifact order, always including a first entry at frame 0.
+  //
+  // The stride is the capturer's choice and is not recorded, because a reader
+  // has no use for it: it binary-searches on whichever coordinate it is seeking
+  // by, and a fixed stride would be a promise a capturer that stops early
+  // cannot keep.
+  repeated ReplayIndexEntry entries = 3;
+}
+
+// ReplayIndexEntry is one seek point, expressed in every coordinate a reader
+// might be seeking by.
+//
+// The three offsets are not redundant. They answer different questions, and a
+// reader converting between them would have to parse the frames to do it, which
+// is what it came here to avoid.
+message ReplayIndexEntry {
+  // Byte offset of a frame boundary, from the start of the artifact. This is
+  // the value a range read takes.
+  uint64 byte_offset = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Sequence of the frame at that boundary. Not the entry's position times a
+  // stride: dropped frames leave gaps in the sequence, so this has to be
+  // recorded.
+  uint64 frame_sequence = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Payload bytes emitted before that frame. This is what a UI scrolls and
+  // measures in, since a user positions themselves in output, not in framing
+  // overhead.
+  uint64 output_byte_offset = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Elapsed time at that frame. Present only when the capture recorded timing,
+  // and it is what makes seeking by time possible without reading anything.
+  google.protobuf.Duration elapsed = 4;
+}

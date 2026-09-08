@@ -1,0 +1,35 @@
+error: `serde_json_macro` suppressed by `allow` without a stated reason
+  --> $DIR/serde_json_macro_allow_without_reason.rs:4:1
+   |
+LL | #[allow(serde_json_macro)]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: state why the payload cannot be a `Serialize` type: `allow(serde_json_macro, reason = "...")`
+   = note: `#[deny(serde_json_macro_allow_without_reason)]` on by default
+
+error: `serde_json_macro` suppressed by `expect` without a stated reason
+  --> $DIR/serde_json_macro_allow_without_reason.rs:8:1
+   |
+LL | #[expect(serde_json_macro)]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: state why the payload cannot be a `Serialize` type: `expect(serde_json_macro, reason = "...")`
+
+error: `serde_json_macro` suppressed by `allow` without a stated reason
+  --> $DIR/serde_json_macro_allow_without_reason.rs:12:1
+   |
+LL | #[allow(serde_json_macro, reason = "")]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: state why the payload cannot be a `Serialize` type: `allow(serde_json_macro, reason = "...")`
+
+warning: this lint expectation is unfulfilled
+  --> $DIR/serde_json_macro_allow_without_reason.rs:8:10
+   |
+LL | #[expect(serde_json_macro)]
+   |          ^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unfulfilled_lint_expectations)]` on by default
+
+error: aborting due to 3 previous errors; 1 warning emitted
+

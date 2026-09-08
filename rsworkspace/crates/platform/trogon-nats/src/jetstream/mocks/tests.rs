@@ -74,8 +74,43 @@ async fn mock_context_records_stream_creation() {
 async fn mock_context_fails_when_configured() {
     let ctx = MockJetStreamContext::new();
     ctx.fail_next();
-    let result = ctx.get_or_create_stream(stream::Config::default()).await;
-    assert!(result.is_err());
+    let err = ctx.get_or_create_stream(stream::Config::default()).await.unwrap_err();
+    assert_eq!(err, MockStreamProvisionError::Creation);
+}
+
+#[tokio::test]
+async fn mock_context_names_a_reconcile_refusal_apart_from_a_creation_one() {
+    let ctx = MockJetStreamContext::new();
+    ctx.fail_next();
+    let err = ctx
+        .create_or_reconcile_stream(stream::Config::default(), &[ProvisionedStreamField::Subjects])
+        .await
+        .unwrap_err();
+    assert_eq!(err, MockStreamProvisionError::Reconciliation);
+}
+
+#[tokio::test]
+async fn reconciling_a_stream_that_already_matches_writes_nothing() {
+    let ctx = MockJetStreamContext::new();
+    let declared = stream::Config {
+        name: "RECONCILED".to_owned(),
+        subjects: vec!["reconciled.>".to_owned()],
+        duplicate_window: Duration::from_secs(300),
+        ..Default::default()
+    };
+    let owned = [
+        ProvisionedStreamField::Subjects,
+        ProvisionedStreamField::DuplicateWindow,
+    ];
+
+    ctx.create_or_reconcile_stream(declared.clone(), &owned).await.unwrap();
+    assert_eq!(ctx.stream_writes(), 1);
+
+    // The second boot finds the stream already holding what it declares. An
+    // update would resend the whole config for nothing, and every resend is a
+    // chance to land on top of an operator's concurrent edit.
+    ctx.create_or_reconcile_stream(declared, &owned).await.unwrap();
+    assert_eq!(ctx.stream_writes(), 1);
 }
 
 #[tokio::test]

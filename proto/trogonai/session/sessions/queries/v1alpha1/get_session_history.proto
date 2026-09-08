@@ -1,0 +1,78 @@
+edition = "2024";
+
+package trogonai.session.sessions.queries.v1alpha1;
+
+import "trogonai/session/sessions/queries/v1alpha1/contract_version.proto";
+import "trogonai/session/sessions/queries/v1alpha1/history_item.proto";
+import "trogonai/session/sessions/queries/v1alpha1/projection_freshness.proto";
+import "trogonai/session/sessions/queries/v1alpha1/read_consistency.proto";
+
+// GetSessionHistoryRequest reads one page of a session's history.
+//
+// History is a separate query from GetSession because it is unbounded. A detail
+// read that inlined it would have no bound on its response size, and a client
+// would have no way to ask for less.
+message GetSessionHistoryRequest {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ContractVersion accepted_contract = 2 [features.field_presence = LEGACY_REQUIRED];
+  HistoryDirection direction = 3 [features.field_presence = LEGACY_REQUIRED];
+  uint32 page_size = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Opaque continuation from a prior response, a serialized CursorEnvelope.
+  // Unset starts a new scan. `direction` is fixed when the scan opens, so a
+  // continuation that disagrees with the cursor is refused rather than
+  // reversed.
+  bytes page_token = 5;
+  // Freshness the caller requires. Honored when the scan opens and ignored on
+  // a continuation, whose contents are fixed by the anchor. A continuation
+  // asking for more than the scan was opened with is
+  // QUERY_ERROR_CODE_INVALID_ARGUMENT.
+  //
+  // This is the field that answers "does this transcript include the redaction
+  // I just applied". An eventual read cannot say, and the anchor alone cannot
+  // either: it says which ordinal the scan covers, not whether the projection
+  // had applied the event at that ordinal when the scan opened.
+  ReadConsistency consistency = 6;
+}
+
+// HistoryDirection is which end of history a fresh scan starts from.
+enum HistoryDirection {
+  HISTORY_DIRECTION_UNSPECIFIED = 0;
+  // Oldest first.
+  HISTORY_DIRECTION_FORWARD = 1;
+  // Newest first, the usual transcript-scrollback order.
+  HISTORY_DIRECTION_REVERSE = 2;
+}
+
+// GetSessionHistoryResponse is one page of history items.
+//
+// The elision counters are the honest part of this message. A caller that reads
+// only `items` cannot tell a complete page from one that quietly dropped half
+// its content, and "the response parsed" is not evidence that it is complete.
+message GetSessionHistoryResponse {
+  ContractNegotiation contract = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated HistoryItem items = 2;
+  // Unset when the scan is exhausted. Presence, not an empty `items` list, is
+  // the end signal.
+  bytes next_page_token = 3;
+  // Items on this page rendered as HISTORY_ITEM_KIND_ELIDED because they need a
+  // variant newer than the caller's contract minor. Non-zero means upgrading
+  // the caller would show more.
+  uint32 contract_clamped_count = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Items on this page whose content was withheld by redaction or
+  // authorization. Distinct from the clamped count: upgrading the caller will
+  // not reveal these, and a client should not prompt for an upgrade.
+  uint32 withheld_count = 5 [features.field_presence = LEGACY_REQUIRED];
+  // The effective history boundary this page was rendered against, after
+  // rewind masking, as a SessionOrdinal. It is the scan's anchor and is equal
+  // on every page of one scan.
+  //
+  // Turns appended after the scan opened are above this boundary and are not
+  // in it. That is the property that keeps paging stable while a session is
+  // still being written to, and it means an in-progress scan is not how a
+  // caller learns about new turns. Should the effective boundary itself move,
+  // by rewind or redaction, the continuation fails with STALE_CURSOR rather
+  // than quietly reporting a different value here.
+  uint64 effective_through = 6 [features.field_presence = LEGACY_REQUIRED];
+  // How current the read model was when the scan opened. Equal on every page.
+  ProjectionFreshness freshness = 7 [features.field_presence = LEGACY_REQUIRED];
+}

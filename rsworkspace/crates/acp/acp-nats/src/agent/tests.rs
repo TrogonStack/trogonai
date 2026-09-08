@@ -5,10 +5,7 @@ use crate::AgentHandler;
 use crate::agent::test_support::MockJs;
 use crate::config::Config;
 use agent_client_protocol::ErrorCode;
-use agent_client_protocol::schema::v1::{
-    ExtNotification, ExtRequest, PromptRequest, PromptResponse, SessionNotification, StopReason,
-};
-use tokio::sync::mpsc;
+use agent_client_protocol::schema::v1::{ExtNotification, ExtRequest, PromptRequest, PromptResponse, StopReason};
 use trogon_nats::AdvancedMockNatsClient;
 
 fn mock_bridge() -> (
@@ -18,14 +15,12 @@ fn mock_bridge() -> (
 ) {
     let mock = AdvancedMockNatsClient::new();
     let js = MockJs::new();
-    let (tx, _rx) = mpsc::channel::<SessionNotification>(64);
     let bridge = Bridge::new(
         mock.clone(),
         js.clone(),
         trogon_std::time::SystemClock,
         &opentelemetry::global::meter("acp-nats-test"),
         Config::for_test("acp"),
-        tx,
     );
     (mock, js, bridge)
 }
@@ -55,25 +50,19 @@ async fn prompt_via_agent_trait_returns_done() {
     // cancel sub for core NATS
     let _cancel_tx = mock.inject_messages();
 
-    // notification consumer
-    let (notif_consumer, _notif_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
-    js.consumer_factory.add_consumer(notif_consumer);
-
     // response consumer
     let (resp_consumer, resp_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
     js.consumer_factory.add_consumer(resp_consumer);
 
-    let response = PromptResponse::new(StopReason::EndTurn);
-    let msg = trogon_nats::jetstream::MockJsMessage::new(async_nats::Message {
-        subject: "test".into(),
-        reply: None,
-        payload: bytes::Bytes::from(serde_json::to_vec(&response).unwrap()),
-        headers: None,
-        status: None,
-        description: None,
-        length: 0,
+    let result = serde_json::to_value(PromptResponse::new(StopReason::EndTurn)).unwrap();
+    crate::agent::test_support::reply_when_published(&js.publisher, resp_tx, move |request_headers| {
+        let encoded = jsonrpc_nats::encode(&jsonrpc_nats::Message::Success {
+            id: crate::wire::response_id_from_request_headers(&request_headers),
+            result,
+        })
+        .unwrap();
+        (encoded.headers, encoded.body)
     });
-    resp_tx.unbounded_send(Ok(msg)).unwrap();
 
     let result = bridge.prompt(PromptRequest::new("s1", vec![])).await;
     assert!(result.is_ok());

@@ -1,4 +1,5 @@
-//! Compile-fail and compile-pass cases for `TestCase`'s given/when/then typestate chain.
+//! Compile-fail and compile-pass cases for `TestCase`'s given/when/then typestate chain,
+//! and for the `must_use` guards on `ActBuilder` and `ActChain`.
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
 #[test]

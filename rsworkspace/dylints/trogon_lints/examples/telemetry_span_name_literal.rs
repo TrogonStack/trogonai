@@ -4,7 +4,7 @@
 
 use tracing::instrument;
 
-const HTTP_SERVER_REQUEST: &str = "http.server.request";
+static HTTP_SERVER_REQUEST: &str = "http.server.request";
 
 fn inline_span() {
     let _span = tracing::info_span!("http.server.request", method = "GET");

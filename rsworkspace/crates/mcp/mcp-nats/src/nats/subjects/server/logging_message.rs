@@ -17,7 +17,7 @@ impl std::fmt::Display for LoggingMessageSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.client.{}.notifications.message",
+            "{}.v1.client.{}.notifications.message",
             self.prefix.as_str(),
             self.client_id.as_str()
         )

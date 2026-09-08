@@ -27,3 +27,10 @@ fn peer_id_error_display_covers_validation_failures() {
         "mcp_peer_id is too long: 129 characters (max 128)"
     );
 }
+
+#[test]
+fn peer_id_displays_as_its_token() {
+    let peer_id = McpPeerId::new("server-1").unwrap();
+
+    assert_eq!(peer_id.to_string(), "server-1");
+}

@@ -4,7 +4,7 @@
 
 use opentelemetry::metrics::Meter;
 
-const ACP_REQUESTS: &str = "acp.requests";
+static ACP_REQUESTS: &str = "acp.requests";
 
 fn inline_name(meter: &Meter) {
     let _counter = meter.u64_counter("acp.requests").build();

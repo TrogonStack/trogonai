@@ -1,4 +1,4 @@
-use trogon_nats::{DottedNatsToken, SubjectTokenViolation};
+use trogon_nats::{DottedNatsToken, SubjectTokenViolationError};
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum McpPrefixError {
@@ -10,12 +10,12 @@ pub enum McpPrefixError {
     TooLong(usize),
 }
 
-impl From<SubjectTokenViolation> for McpPrefixError {
-    fn from(violation: SubjectTokenViolation) -> Self {
+impl From<SubjectTokenViolationError> for McpPrefixError {
+    fn from(violation: SubjectTokenViolationError) -> Self {
         match violation {
-            SubjectTokenViolation::Empty => Self::Empty,
-            SubjectTokenViolation::InvalidCharacter(ch) => Self::InvalidCharacter(ch),
-            SubjectTokenViolation::TooLong(len) => Self::TooLong(len),
+            SubjectTokenViolationError::Empty => Self::Empty,
+            SubjectTokenViolationError::InvalidCharacter(ch) => Self::InvalidCharacter(ch),
+            SubjectTokenViolationError::TooLong(len) => Self::TooLong(len),
         }
     }
 }

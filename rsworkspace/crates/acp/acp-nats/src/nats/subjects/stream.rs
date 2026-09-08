@@ -9,17 +9,15 @@ pub enum AcpStream {
     Commands,
     Responses,
     ClientOps,
-    Notifications,
     Global,
     GlobalExt,
 }
 
 impl AcpStream {
-    pub const ALL: [AcpStream; 6] = [
+    pub const ALL: [AcpStream; 5] = [
         Self::Commands,
         Self::Responses,
         Self::ClientOps,
-        Self::Notifications,
         Self::Global,
         Self::GlobalExt,
     ];
@@ -29,7 +27,6 @@ impl AcpStream {
             Self::Commands => "COMMANDS",
             Self::Responses => "RESPONSES",
             Self::ClientOps => "CLIENT_OPS",
-            Self::Notifications => "NOTIFICATIONS",
             Self::Global => "GLOBAL",
             Self::GlobalExt => "GLOBAL_EXT",
         }
@@ -43,32 +40,30 @@ impl AcpStream {
         let p = prefix.as_str();
         match self {
             Self::Commands => vec![
-                format!("{p}.session.*.agent.prompt"),
-                format!("{p}.session.*.agent.cancel"),
-                format!("{p}.session.*.agent.steer"),
-                format!("{p}.session.*.agent.load"),
-                format!("{p}.session.*.agent.set_mode"),
-                format!("{p}.session.*.agent.set_config_option"),
-                format!("{p}.session.*.agent.fork"),
-                format!("{p}.session.*.agent.resume"),
-                format!("{p}.session.*.agent.close"),
-                format!("{p}.session.*.agent.delete"),
+                format!("{p}.v1.session.*.agent.prompt"),
+                format!("{p}.v1.session.*.agent.cancel"),
+                format!("{p}.v1.session.*.agent.steer"),
+                format!("{p}.v1.session.*.agent.load"),
+                format!("{p}.v1.session.*.agent.set_mode"),
+                format!("{p}.v1.session.*.agent.set_config_option"),
+                format!("{p}.v1.session.*.agent.fork"),
+                format!("{p}.v1.session.*.agent.resume"),
+                format!("{p}.v1.session.*.agent.close"),
+                format!("{p}.v1.session.*.agent.delete"),
             ],
             Self::Responses => vec![
-                format!("{p}.session.*.agent.prompt.response.>"),
-                format!("{p}.session.*.agent.response.>"),
-                format!("{p}.session.*.agent.ext.ready"),
-                format!("{p}.session.*.agent.cancelled"),
+                format!("{p}.v1.session.*.agent.response"),
+                format!("{p}.v1.session.*.agent.ext.ready"),
+                format!("{p}.v1.session.*.agent.cancelled"),
             ],
-            Self::ClientOps => vec![format!("{p}.session.*.client.>")],
-            Self::Notifications => vec![format!("{p}.session.*.agent.update.>")],
+            Self::ClientOps => vec![format!("{p}.v1.session.*.client.>")],
             Self::Global => vec![
-                format!("{p}.agent.initialize"),
-                format!("{p}.agent.authenticate"),
-                format!("{p}.agent.logout"),
-                format!("{p}.agent.session.new"),
+                format!("{p}.v1.global.agent.initialize"),
+                format!("{p}.v1.global.agent.authenticate"),
+                format!("{p}.v1.global.agent.logout"),
+                format!("{p}.v1.global.agent.session.new"),
             ],
-            Self::GlobalExt => vec![format!("{p}.agent.ext.>")],
+            Self::GlobalExt => vec![format!("{p}.v1.global.agent.ext.>")],
         }
     }
 
@@ -95,9 +90,19 @@ impl AcpStream {
         }
     }
 
-    pub fn all_configs(prefix: &AcpPrefix) -> [Config; 6] {
+    pub fn all_configs(prefix: &AcpPrefix) -> [Config; 5] {
         Self::ALL.map(|s| s.config(prefix))
     }
+}
+
+/// Stream names an upgraded deployment may still be carrying, for the prefix
+/// it was provisioned under.
+pub fn retired_stream_names(prefix: &AcpPrefix) -> Vec<String> {
+    let root = prefix.as_str().to_uppercase().replace('.', "_");
+    crate::constants::RETIRED_STREAM_SUFFIXES
+        .iter()
+        .map(|s| format!("{root}_{s}"))
+        .collect()
 }
 
 impl std::fmt::Display for AcpStream {
@@ -121,12 +126,11 @@ mod tests {
     }
 
     #[test]
-    fn all_array_contains_all_six_variants() {
-        assert_eq!(AcpStream::ALL.len(), 6);
+    fn all_array_contains_all_five_variants() {
+        assert_eq!(AcpStream::ALL.len(), 5);
         assert!(AcpStream::ALL.contains(&AcpStream::Commands));
         assert!(AcpStream::ALL.contains(&AcpStream::Responses));
         assert!(AcpStream::ALL.contains(&AcpStream::ClientOps));
-        assert!(AcpStream::ALL.contains(&AcpStream::Notifications));
         assert!(AcpStream::ALL.contains(&AcpStream::Global));
         assert!(AcpStream::ALL.contains(&AcpStream::GlobalExt));
     }
@@ -136,7 +140,6 @@ mod tests {
         assert_eq!(AcpStream::Commands.suffix(), "COMMANDS");
         assert_eq!(AcpStream::Responses.suffix(), "RESPONSES");
         assert_eq!(AcpStream::ClientOps.suffix(), "CLIENT_OPS");
-        assert_eq!(AcpStream::Notifications.suffix(), "NOTIFICATIONS");
         assert_eq!(AcpStream::Global.suffix(), "GLOBAL");
         assert_eq!(AcpStream::GlobalExt.suffix(), "GLOBAL_EXT");
     }
@@ -160,9 +163,9 @@ mod tests {
         let p = prefix("acp");
         let patterns = AcpStream::Commands.subject_patterns(&p);
         assert!(!patterns.is_empty());
-        assert!(patterns.contains(&"acp.session.*.agent.prompt".to_string()));
-        assert!(patterns.contains(&"acp.session.*.agent.cancel".to_string()));
-        assert!(patterns.contains(&"acp.session.*.agent.load".to_string()));
+        assert!(patterns.contains(&"acp.v1.session.*.agent.prompt".to_string()));
+        assert!(patterns.contains(&"acp.v1.session.*.agent.cancel".to_string()));
+        assert!(patterns.contains(&"acp.v1.session.*.agent.load".to_string()));
         for pat in &patterns {
             assert!(pat.starts_with("acp."), "every pattern must start with prefix: {pat}");
         }
@@ -172,18 +175,18 @@ mod tests {
     fn subject_patterns_for_responses_contain_response_paths() {
         let p = prefix("acp");
         let patterns = AcpStream::Responses.subject_patterns(&p);
-        assert!(patterns.contains(&"acp.session.*.agent.ext.ready".to_string()));
-        assert!(patterns.iter().any(|p| p.ends_with('>')));
+        assert!(patterns.contains(&"acp.v1.session.*.agent.ext.ready".to_string()));
+        assert!(patterns.contains(&"acp.v1.session.*.agent.response".to_string()));
     }
 
     #[test]
     fn subject_patterns_for_global_contain_initialize_and_authenticate() {
         let p = prefix("acp");
         let patterns = AcpStream::Global.subject_patterns(&p);
-        assert!(patterns.contains(&"acp.agent.initialize".to_string()));
-        assert!(patterns.contains(&"acp.agent.authenticate".to_string()));
-        assert!(patterns.contains(&"acp.agent.logout".to_string()));
-        assert!(patterns.contains(&"acp.agent.session.new".to_string()));
+        assert!(patterns.contains(&"acp.v1.global.agent.initialize".to_string()));
+        assert!(patterns.contains(&"acp.v1.global.agent.authenticate".to_string()));
+        assert!(patterns.contains(&"acp.v1.global.agent.logout".to_string()));
+        assert!(patterns.contains(&"acp.v1.global.agent.session.new".to_string()));
     }
 
     #[test]
@@ -191,7 +194,7 @@ mod tests {
         let p = prefix("myns");
         let patterns = AcpStream::GlobalExt.subject_patterns(&p);
         assert_eq!(patterns.len(), 1);
-        assert_eq!(patterns[0], "myns.agent.ext.>");
+        assert_eq!(patterns[0], "myns.v1.global.agent.ext.>");
     }
 
     #[test]
@@ -199,7 +202,7 @@ mod tests {
         let p = prefix("acp");
         let patterns = AcpStream::ClientOps.subject_patterns(&p);
         assert_eq!(patterns.len(), 1);
-        assert_eq!(patterns[0], "acp.session.*.client.>");
+        assert_eq!(patterns[0], "acp.v1.session.*.client.>");
     }
 
     #[test]
@@ -213,7 +216,7 @@ mod tests {
         for s in [AcpStream::Global, AcpStream::GlobalExt, AcpStream::ClientOps] {
             assert!(s.config(&pfx).no_ack, "{s} must set no_ack");
         }
-        for s in [AcpStream::Commands, AcpStream::Responses, AcpStream::Notifications] {
+        for s in [AcpStream::Commands, AcpStream::Responses] {
             assert!(!s.config(&pfx).no_ack, "{s} must not set no_ack");
         }
     }
@@ -241,10 +244,10 @@ mod tests {
     }
 
     #[test]
-    fn all_configs_returns_six_configs() {
+    fn all_configs_returns_five_configs() {
         let p = prefix("acp");
         let configs = AcpStream::all_configs(&p);
-        assert_eq!(configs.len(), 6);
+        assert_eq!(configs.len(), 5);
     }
 
     #[test]
@@ -254,7 +257,7 @@ mod tests {
         let mut names: Vec<_> = configs.iter().map(|c| c.name.clone()).collect();
         names.sort();
         names.dedup();
-        assert_eq!(names.len(), 6, "all config names must be unique");
+        assert_eq!(names.len(), 5, "all config names must be unique");
     }
 
     #[test]

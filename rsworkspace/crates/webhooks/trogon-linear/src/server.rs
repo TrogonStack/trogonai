@@ -355,6 +355,14 @@ mod tests {
         ) -> Result<(), CreateStreamError> {
             (self.ensure_fn)().await
         }
+
+        async fn create_or_reconcile_stream<S: Into<stream::Config> + Send>(
+            &self,
+            _desired: S,
+            _owned: &[trogon_nats::jetstream::ProvisionedStreamField],
+        ) -> Result<(), CreateStreamError> {
+            (self.ensure_fn)().await
+        }
     }
 
     fn make_js(

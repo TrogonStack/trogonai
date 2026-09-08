@@ -6,6 +6,7 @@ use testcontainers_modules::nats::{Nats, NatsServerCmd};
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 
 use super::*;
+use crate::constants::SCHEDULE_EXECUTION_STREAM;
 use crate::processor::execution::reconciliation::EVENT_SUBJECT_PREFIX;
 use crate::processor::execution::worker::dispatcher::DeliveredMessage;
 

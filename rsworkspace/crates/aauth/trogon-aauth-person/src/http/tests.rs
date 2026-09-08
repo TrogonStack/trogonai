@@ -55,9 +55,7 @@ fn mint_agent_jwt(fixture: &KeyFixture, iss: &str, sub: &str, kid: &str) -> Stri
         iat: now - 5,
         exp: now + 600,
         dwk: "aauth-agent.json".to_string(),
-        cnf: Cnf {
-            jwk: fixture.jwk.clone(),
-        },
+        cnf: Cnf::public(fixture.jwk.clone()).expect("test fixture is a public jwk"),
         ps: None,
     };
     let mut header = Header::new(Algorithm::ES256);
@@ -531,9 +529,7 @@ async fn seed_pending(store: &InMemoryStore, phase: PendingPhase) -> String {
         iat: now_unix() - 5,
         exp: now_unix() + 600,
         dwk: "aauth-agent.json".to_string(),
-        cnf: Cnf {
-            jwk: agent_fixture.jwk.clone(),
-        },
+        cnf: Cnf::public(agent_fixture.jwk.clone()).expect("test fixture is a public jwk"),
         ps: None,
     };
     let resource = ResourceClaims {

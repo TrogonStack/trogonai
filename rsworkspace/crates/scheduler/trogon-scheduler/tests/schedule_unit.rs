@@ -7,17 +7,32 @@ use trogon_scheduler::{
     ScheduleId, ScheduleWriteCondition, commands::domain as command_domain, mocks::MockSchedulerStore,
 };
 
+fn fixture_schedule_id(label: &str) -> String {
+    match label {
+        "alpha" => "00000000000000000000000000000001",
+        "backup" => "00000000000000000000000000000002",
+        "toggle" => "00000000000000000000000000000003",
+        "beta" => "00000000000000000000000000000004",
+        _ => panic!("missing explicit schedule ID fixture for {label}"),
+    }
+    .to_string()
+}
+
 fn position(value: u64) -> StreamPosition {
     StreamPosition::try_new(value).expect("test stream position must be non-zero")
 }
 
 fn command_schedule_id(id: &str) -> command_domain::ScheduleId {
-    command_domain::ScheduleId::parse(id).unwrap()
+    command_domain::ScheduleId::parse(&fixture_schedule_id(id)).unwrap()
+}
+
+fn query_schedule_id(id: &str) -> ScheduleId {
+    ScheduleId::parse(&fixture_schedule_id(id)).unwrap()
 }
 
 fn expected_schedule(id: &str) -> Schedule {
     Schedule {
-        id: id.to_string(),
+        id: fixture_schedule_id(id),
         status: ScheduleEventStatus::Scheduled,
         completed: false,
         next_occurrence_at: None,
@@ -59,7 +74,7 @@ async fn client_register_then_get() {
     CommandExecution::new(&store, &job).execute().await.unwrap();
 
     let got = store
-        .get_schedule(GetScheduleCommand::new(ScheduleId::parse("backup").unwrap()))
+        .get_schedule(GetScheduleCommand::new(query_schedule_id("backup")))
         .await
         .unwrap();
     assert_eq!(got, Some(expected_schedule("backup")));
@@ -81,7 +96,7 @@ async fn client_pause_job_toggles_job() {
         .unwrap();
 
     let got = store
-        .get_schedule(GetScheduleCommand::new(ScheduleId::parse("toggle").unwrap()))
+        .get_schedule(GetScheduleCommand::new(query_schedule_id("toggle")))
         .await
         .unwrap()
         .unwrap();
@@ -113,7 +128,7 @@ async fn client_remove_and_list_schedules_use_store_paths() {
 
     assert!(
         store
-            .get_schedule(GetScheduleCommand::new(ScheduleId::parse("beta").unwrap()))
+            .get_schedule(GetScheduleCommand::new(query_schedule_id("beta")))
             .await
             .unwrap()
             .is_none()

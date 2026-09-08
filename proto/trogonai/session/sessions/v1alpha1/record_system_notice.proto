@@ -1,0 +1,18 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "trogonai/session/sessions/v1alpha1/system_notice_recorded.proto";
+
+// RecordSystemNotice appends a system-originated notice, recording
+// [SystemNoticeRecorded], so model-visible system content and the user-visible
+// transcript both rebuild from the log alone (ADR#0035 facet 8).
+//
+// Write precondition Any.
+message RecordSystemNotice {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  NoticeLevel level = 2 [features.field_presence = LEGACY_REQUIRED];
+  string text = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Set when the notice concerns a specific call.
+  string tool_call_id = 4;
+}

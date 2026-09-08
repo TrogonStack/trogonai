@@ -9,6 +9,16 @@ crates_io() {
     jq -r '.crate.max_stable_version // .crate.max_version'
 }
 
+# The SDK pins its schema crate exactly, so a newer schema on crates.io is only
+# adoptable once the SDK itself moves to it. Resolve that pin to avoid reporting
+# schema drift nobody can act on.
+sdk_schema_pin() {
+  curl -sf --retry 3 -A "trogonai-acp-freshness" \
+    "https://crates.io/api/v1/crates/agent-client-protocol/$1/dependencies" |
+    jq -r '.dependencies[] | select(.crate_id == "agent-client-protocol-schema" and .kind == "normal") | .req' |
+    grep -oE '^=[0-9]+\.[0-9]+\.[0-9]+$' | tr -d '='
+}
+
 pinned="$(grep -oE 'agent-client-protocol = \{ version = "=?[0-9]+\.[0-9]+\.[0-9]+"' "$root/rsworkspace/Cargo.toml" |
   grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
 if [[ -z "$pinned" ]]; then
@@ -16,28 +26,134 @@ if [[ -z "$pinned" ]]; then
   exit 1
 fi
 
-bundled_schema="$(grep -A2 'name = "agent-client-protocol-schema"' "$root/rsworkspace/Cargo.lock" |
-  grep -oE 'version = "[0-9]+\.[0-9]+\.[0-9]+"' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+# Every resolved version, not just the first: cargo writes same-name packages
+# oldest-first, so reading one entry hides a forked graph behind a healthy-looking
+# version. Two schema crates is the failure this whole pin exists to prevent.
+lock_package_versions() {
+  awk -F' = ' -v pkg="$1" '
+    /^\[\[package\]\]/ { inpkg = 1; name = ""; next }
+    /^\[/ { inpkg = 0 }
+    inpkg && /^name = / { name = $2; gsub(/"/, "", name); next }
+    inpkg && /^version = / { version = $2; gsub(/"/, "", version); if (name == pkg) print version; next }
+  ' "$2"
+}
+
+mapfile -t schema_versions < <(lock_package_versions agent-client-protocol-schema "$root/rsworkspace/Cargo.lock" | sort -u -V)
+schema_count="${#schema_versions[@]}"
+if ((schema_count == 0)); then
+  bundled_schema="unknown"
+else
+  bundled_schema="$(
+    IFS=,
+    echo "${schema_versions[*]}"
+  )"
+  bundled_schema="${bundled_schema//,/, }"
+fi
 
 latest_sdk="$(crates_io agent-client-protocol)"
 latest_schema="$(crates_io agent-client-protocol-schema)"
+latest_sdk_schema_pin="$(sdk_schema_pin "$latest_sdk" || true)"
+
+# Adoptable schema level: whatever the latest SDK pins, falling back to the
+# newest published schema when the SDK does not pin one exactly.
+schema_target="${latest_sdk_schema_pin:-$latest_schema}"
+
+sdk_drift=false
+if [[ "$pinned" != "$latest_sdk" ]]; then
+  sdk_drift=true
+fi
+schema_forked=false
+schema_drift=false
+if ((schema_count > 1)); then
+  schema_forked=true
+  schema_drift=true
+elif [[ "$bundled_schema" != "$schema_target" ]]; then
+  schema_drift=true
+fi
+
+# The SDK repo publishes companion crates (HTTP/WebSocket transport, polyfills,
+# rmcp bridge) that release in lockstep with the core crate. Watching only the
+# core crate hides capability upstream already ships, which is how a hand-rolled
+# transport can duplicate an official one unnoticed. The recorded versions live in
+# the conformance doc's "Companion crates" table so the doc stays authoritative
+# and this task never becomes a second place to update.
+conformance_doc="$root/docs/architecture/acp-conformance.md"
+
+companion_rows() {
+  awk '
+    /^## Companion crates/ { inside = 1; next }
+    inside && /^## / { inside = 0 }
+    inside && /^\| `agent-client-protocol/ {
+      split($0, f, "|")
+      name = f[2]
+      recorded = f[3]
+      gsub(/[ `]/, "", name)
+      gsub(/ /, "", recorded)
+      print name "\t" recorded
+    }
+  ' "$1"
+}
+
+companion_drift=false
+companion_table=""
+companion_checked=0
+while IFS=$'\t' read -r name recorded; do
+  # The core and schema crates have dedicated drift logic above (the schema pin
+  # needs resolving, a plain version compare would misreport it). The derive crate
+  # arrives transitively and carries no decision of its own.
+  case "$name" in
+  agent-client-protocol | agent-client-protocol-schema | agent-client-protocol-derive) continue ;;
+  esac
+  companion_checked=$((companion_checked + 1))
+  # Fail rather than fall back to a sentinel. A sentinel never equals the recorded
+  # version, so a transient crates.io blip or a rate limit would read as a release
+  # and open or rewrite a drift issue. The core and schema lookups above already
+  # abort on fetch failure; match them.
+  if ! latest="$(crates_io "$name")" || [[ -z "$latest" ]]; then
+    echo "Failed to look up $name on crates.io; refusing to report a fetch failure as drift" >&2
+    exit 1
+  fi
+  echo "  companion $name recorded=$recorded latest=$latest"
+  if [[ "$latest" != "$recorded" ]]; then
+    companion_drift=true
+    companion_table+="| \`$name\` | $recorded | $latest |"$'\n'
+  fi
+done < <(companion_rows "$conformance_doc")
+
+# Zero rows means the table was renamed, reformatted, or deleted. Reporting that
+# as drift is deliberate: a silent skip is the exact failure this check exists to
+# prevent, so a parse miss must be as loud as a real version bump.
+companion_unparsed=false
+if ((companion_checked == 0)); then
+  companion_unparsed=true
+  companion_drift=true
+fi
 
 drift=false
-if [[ "$pinned" != "$latest_sdk" || "${bundled_schema:-unknown}" != "$latest_schema" ]]; then
+if [[ "$sdk_drift" == "true" || "$schema_drift" == "true" || "$companion_drift" == "true" ]]; then
   drift=true
 fi
 
 echo "ACP freshness:"
 echo "  SDK    pinned=$pinned latest=$latest_sdk"
-echo "  schema bundled=${bundled_schema:-unknown} latest=$latest_schema"
-echo "  drift=$drift"
+echo "  schema resolved=$bundled_schema adoptable=$schema_target latest=$latest_schema"
+echo "  companions checked=$companion_checked drift=$companion_drift unparsed=$companion_unparsed"
+echo "  drift=$drift (sdk=$sdk_drift schema=$schema_drift forked=$schema_forked companion=$companion_drift)"
 
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   {
     echo "pinned=$pinned"
     echo "latest_sdk=$latest_sdk"
-    echo "bundled_schema=${bundled_schema:-unknown}"
+    echo "bundled_schema=$bundled_schema"
+    echo "schema_count=$schema_count"
     echo "latest_schema=$latest_schema"
+    echo "schema_target=$schema_target"
+    echo "sdk_drift=$sdk_drift"
+    echo "schema_drift=$schema_drift"
+    echo "schema_forked=$schema_forked"
+    echo "companion_drift=$companion_drift"
+    echo "companion_checked=$companion_checked"
+    echo "companion_unparsed=$companion_unparsed"
     echo "drift=$drift"
   } >>"$GITHUB_OUTPUT"
 fi
@@ -46,16 +162,69 @@ if [[ "$drift" != "true" || "${ACP_FRESHNESS_FILE_ISSUE:-}" != "true" ]]; then
   exit 0
 fi
 
-title="ACP drift: agent-client-protocol $pinned is behind $latest_sdk"
+if [[ "$sdk_drift" == "true" ]]; then
+  title="ACP drift: agent-client-protocol $pinned is behind $latest_sdk"
+  lead="The pinned \`agent-client-protocol\` version has fallen behind crates.io."
+elif [[ "$schema_forked" == "true" ]]; then
+  title="ACP drift: the graph carries $schema_count agent-client-protocol-schema versions ($bundled_schema)"
+  lead="\`Cargo.lock\` resolves more than one \`agent-client-protocol-schema\` version. Cargo unifies features per crate version, so the schema-level unstable flags the direct dependency turns on no longer reach the types \`agent-client-protocol\` re-exports, and the bridge silently drops every field they gate. Nothing fails to compile. Pin the direct dependency back to the single version the SDK requires."
+elif [[ "$schema_drift" == "true" ]]; then
+  # Direction-neutral: the resolved version can be ahead of the target as easily
+  # as behind it, and calling an ahead version "behind" sends the reader the wrong way.
+  title="ACP drift: agent-client-protocol-schema $bundled_schema does not match the $schema_target that agent-client-protocol $latest_sdk requires"
+  lead="The resolved \`agent-client-protocol-schema\` version is not the schema level \`agent-client-protocol\` $latest_sdk builds on."
+elif [[ "$companion_unparsed" == "true" ]]; then
+  title="ACP drift: the Companion crates table in the conformance doc could not be read"
+  lead="\`docs/architecture/acp-conformance.md\` no longer yields any rows under a \`## Companion crates\` heading, so companion crate versions are not being checked at all. Restore the table (or update the parser in \`.config/mise/tasks/acp-freshness\`) rather than leaving the check silently disabled."
+else
+  title="ACP drift: companion crates released past the versions recorded in the conformance doc"
+  lead="One or more companion crates from the SDK repository have released past the version recorded in the \`## Companion crates\` table. Companions release in lockstep with the core crate, so a bump here usually means the core crate moved too."
+fi
+
+schema_note=""
+if [[ "$schema_target" != "$latest_schema" ]]; then
+  schema_note="
+
+\`agent-client-protocol\` $latest_sdk pins \`agent-client-protocol-schema\` at exactly $schema_target, so schema $latest_schema and anything it adds are not adoptable until the SDK moves. Track the gap in the conformance matrix rather than bumping the schema past the SDK's pin: a mismatched direct dependency puts two schema crates in the graph and the schema-level unstable flags stop reaching the SDK's re-exported types."
+fi
+
+companion_note=""
+if [[ -n "$companion_table" ]]; then
+  companion_note="
+
+Companion crates past their recorded version:
+
+| crate | recorded | latest |
+| --- | --- | --- |
+$companion_table"
+fi
+
+# Stated unconditionally, not just when it wins the title. An unreadable table means
+# companion checking is off entirely, and that fact must not be buried because a core
+# or schema bump happens to be the more eye-catching headline: with no rows parsed
+# there is also no companion table below, so without this the issue would say nothing
+# about companions at all. A check that can go quiet unnoticed is the failure this
+# whole task exists to prevent.
+companion_unparsed_note=""
+if [[ "$companion_unparsed" == "true" ]]; then
+  companion_unparsed_note="> [!WARNING]
+> Companion crate checking is currently disabled. No rows could be read from the
+> \`## Companion crates\` table in \`docs/architecture/acp-conformance.md\`, so none of
+> the companion versions were compared. Restore that table, or update the parser in
+> \`.config/mise/tasks/acp-freshness\`, before trusting this issue to be complete.
+
+"
+fi
+
 body_file="$(mktemp)"
 trap 'rm -f "$body_file"' EXIT
 cat >"$body_file" <<EOF
-The pinned \`agent-client-protocol\` version has fallen behind crates.io.
+$companion_unparsed_note$lead
 
-| | pinned | latest |
+| | resolved | target |
 | --- | --- | --- |
 | SDK (\`agent-client-protocol\`) | $pinned | $latest_sdk |
-| Schema (\`agent-client-protocol-schema\`) | ${bundled_schema:-unknown} | $latest_schema |
+| Schema (\`agent-client-protocol-schema\`) | $bundled_schema | $schema_target |$schema_note$companion_note
 
 A version bump is never just a version change. Per the upgrade ritual in \`docs/architecture/acp-conformance.md\`, the bump PR must:
 
@@ -63,6 +232,7 @@ A version bump is never just a version change. Per the upgrade ritual in \`docs/
 - [ ] For each added or stabilized method: add subject mapping in \`acp-nats/src/nats/parsing.rs\`, a handler, and tests, or a conformance matrix row with opt-out rationale
 - [ ] For each added field or \`session/update\` variant: add a round-trip test through the bridge (typed re-encode silently drops unmapped fields)
 - [ ] For each new unstable flag: enable it per the opt-in policy and wire it
+- [ ] Update the \`## Companion crates\` table with the new versions, and re-evaluate every row marked \`no\`: companions release in lockstep, so a core bump is the moment their gaps may have closed
 - [ ] Update \`docs/architecture/acp-conformance.md\` (matrix and spec position) in the same PR
 
 This issue is filed automatically by \`.github/workflows/acp-freshness.yml\` and updated on re-runs.

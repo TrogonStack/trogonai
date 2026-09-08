@@ -4,8 +4,8 @@ use trogon_aauth_verify::{StaticJwks, TokenError};
 
 use super::*;
 
-fn deny(reason: AAuthDenyReason, challenge: Option<String>) -> AAuthDeny {
-    AAuthDeny {
+fn deny(reason: AAuthDenyReasonError, challenge: Option<String>) -> AAuthDenyError {
+    AAuthDenyError {
         code: AAUTH_REQUIRED_CODE,
         reason,
         challenge,
@@ -19,7 +19,10 @@ fn unsupported_token_error() -> TokenError {
 
 #[test]
 fn deny_renders_requirement_header_when_challenge_present() {
-    let d = deny(AAuthDenyReason::Auth(unsupported_token_error()), Some("tok123".into()));
+    let d = deny(
+        AAuthDenyReasonError::Auth(unsupported_token_error()),
+        Some("tok123".into()),
+    );
     let (name, value) = d.to_requirement_header().expect("header");
     assert_eq!(name, aauth_headers::REQUIREMENT);
     assert!(value.contains("tok123"));
@@ -28,13 +31,13 @@ fn deny_renders_requirement_header_when_challenge_present() {
 
 #[test]
 fn deny_without_challenge_has_no_header() {
-    let d = deny(AAuthDenyReason::Auth(unsupported_token_error()), None);
+    let d = deny(AAuthDenyReasonError::Auth(unsupported_token_error()), None);
     assert!(d.to_requirement_header().is_none());
 }
 
 #[test]
 fn deny_display_carries_reason_source_chain() {
-    let d = deny(AAuthDenyReason::Auth(unsupported_token_error()), None);
+    let d = deny(AAuthDenyReasonError::Auth(unsupported_token_error()), None);
     let display = format!("{d}");
     assert!(display.contains("aauth denied"));
     let source = d.source().expect("typed source");
@@ -67,7 +70,14 @@ async fn resolve_nats_with_off_mode_returns_anonymous() {
     };
     let ingress = AAuthIngress::new_in_memory(cfg);
     let res = ingress
-        .resolve_nats("a2a.gateway.bot.message.send", None, b"{}", &[], None, "message.send")
+        .resolve_nats(
+            "a2a.v1.gateway.bot.message.send",
+            None,
+            b"{}",
+            &[],
+            None,
+            "message.send",
+        )
         .await
         .expect("off-mode short-circuits");
     assert!(res.agent_id.is_none());
@@ -101,7 +111,14 @@ async fn resolve_nats_shadow_mode_swallows_pop_failure_to_anonymous() {
     // so production traffic isn't blocked while operators evaluate.
     let ingress = AAuthIngress::new_in_memory(shadow_cfg());
     let res = ingress
-        .resolve_nats("a2a.gateway.bot.message.send", None, b"{}", &[], None, "message.send")
+        .resolve_nats(
+            "a2a.v1.gateway.bot.message.send",
+            None,
+            b"{}",
+            &[],
+            None,
+            "message.send",
+        )
         .await
         .expect("shadow mode never errors");
     assert!(res.agent_id.is_none());
@@ -114,17 +131,24 @@ async fn resolve_nats_enforce_mode_denies_without_jkt_carries_no_challenge() {
     // challenge=None rather than panicking or fabricating one.
     let ingress = AAuthIngress::new_in_memory(enforce_cfg());
     let err = ingress
-        .resolve_nats("a2a.gateway.bot.message.send", None, b"{}", &[], None, "message.send")
+        .resolve_nats(
+            "a2a.v1.gateway.bot.message.send",
+            None,
+            b"{}",
+            &[],
+            None,
+            "message.send",
+        )
         .await
         .expect_err("enforce mode denies");
     assert_eq!(err.code, AAUTH_REQUIRED_CODE);
     assert!(err.challenge.is_none());
-    assert!(matches!(err.reason, AAuthDenyReason::Pop(_)));
+    assert!(matches!(err.reason, AAuthDenyReasonError::Pop(_)));
 }
 
 #[test]
 fn auth_agent_mismatch_variant_carries_both_sides() {
-    let reason = AAuthDenyReason::AuthAgentMismatch {
+    let reason = AAuthDenyReasonError::AuthAgentMismatch {
         agent_sub: "agent-A".into(),
         agent_jkt: "jkt-A".into(),
         auth_agent: "agent-B".into(),
@@ -229,7 +253,7 @@ fn scope_covers_method_matrix() {
 
 #[test]
 fn scope_not_covered_variant_carries_scope_and_method() {
-    let reason = AAuthDenyReason::ScopeNotCovered {
+    let reason = AAuthDenyReasonError::ScopeNotCovered {
         scope: "tasks.*".into(),
         method: "message.send".into(),
     };
@@ -249,7 +273,7 @@ fn mission_mismatch_variant_carries_source() {
         s256: "hash-a".into(),
     };
     let err = verify_mission_header_matches_claim(&header, &claim).expect_err("approver mismatch");
-    let reason = AAuthDenyReason::MissionMismatch(err);
+    let reason = AAuthDenyReasonError::MissionMismatch(err);
     let display = format!("{reason}");
     assert!(display.contains("mismatch"));
     let source = std::error::Error::source(&reason).expect("typed source");
@@ -299,7 +323,14 @@ async fn resolve_nats_records_capabilities_header_on_resolution() {
     // any capabilities when the header is absent).
     let ingress = AAuthIngress::new_in_memory(shadow_cfg());
     let res = ingress
-        .resolve_nats("a2a.gateway.bot.message.send", None, b"{}", &[], None, "message.send")
+        .resolve_nats(
+            "a2a.v1.gateway.bot.message.send",
+            None,
+            b"{}",
+            &[],
+            None,
+            "message.send",
+        )
         .await
         .expect("shadow mode never errors");
     assert!(res.capabilities.is_none());

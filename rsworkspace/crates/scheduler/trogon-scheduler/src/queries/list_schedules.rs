@@ -4,7 +4,7 @@ use futures::StreamExt;
 
 use async_nats::jetstream::kv;
 
-use crate::{error::SchedulerError, projections::storage::SCHEDULES_CHECKPOINT_KEY};
+use crate::{constants::SCHEDULES_CHECKPOINT_KEY, error::SchedulerError};
 
 use super::decode::decode_schedule;
 use super::read_model::Schedule;

@@ -8,7 +8,7 @@ use agent_client_protocol::schema::v1::{ListSessionsRequest, ListSessionsRespons
 async fn list_sessions_forwards_request_and_returns_response() {
     let (mock, _js, bridge) = mock_bridge();
     let expected = ListSessionsResponse::new(vec![]);
-    set_json_response(&mock, "acp.agent.session.list", &expected);
+    set_json_response(&mock, "acp.v1.global.agent.session.list", &expected);
 
     let request = ListSessionsRequest::new();
     let result = bridge.list_sessions(request).await;
@@ -30,7 +30,7 @@ async fn list_sessions_returns_error_when_nats_fails() {
 #[tokio::test]
 async fn list_sessions_returns_error_when_response_is_invalid_json() {
     let (mock, _js, bridge) = mock_bridge();
-    mock.set_response("acp.agent.session.list", "not json".into());
+    mock.set_response("acp.v1.global.agent.session.list", "not json".into());
 
     let request = ListSessionsRequest::new();
     let err = bridge.list_sessions(request).await.unwrap_err();
@@ -41,7 +41,11 @@ async fn list_sessions_returns_error_when_response_is_invalid_json() {
 #[tokio::test]
 async fn list_sessions_records_metrics_on_success() {
     let (mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
-    set_json_response(&mock, "acp.agent.session.list", &ListSessionsResponse::new(vec![]));
+    set_json_response(
+        &mock,
+        "acp.v1.global.agent.session.list",
+        &ListSessionsResponse::new(vec![]),
+    );
 
     let _ = bridge.list_sessions(ListSessionsRequest::new()).await;
 

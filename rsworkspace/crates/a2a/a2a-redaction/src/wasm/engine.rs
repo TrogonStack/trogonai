@@ -2,27 +2,10 @@
 
 use wasmtime::{Engine, Instance, Linker, Module, Store, StoreLimits, StoreLimitsBuilder};
 
+use crate::constants::{
+    GUEST_FUEL_PER_CALL, GUEST_PAGE_BYTES, MAX_GUEST_OUTPUT_BYTES, MAX_STORE_MEMORY_BYTES, SCRATCH_OFFSET,
+};
 use crate::error::RedactionError;
-
-const SCRATCH_OFFSET: usize = 0x0800;
-const GUEST_PAGE_BYTES: usize = 65536;
-/// Cap on the length the guest can declare for its output buffer. Without a
-/// ceiling, a malicious or buggy module can return a near-`i32::MAX` length
-/// and force the host to allocate gigabytes (or OOM) before we'd even hit
-/// the linear-memory read. We bound it to the single-page payload window
-/// the guest is allowed to write into in the first place.
-const MAX_GUEST_OUTPUT_BYTES: usize = GUEST_PAGE_BYTES;
-/// Fuel budget for a single `redact_part` call. Wasmtime decrements this per
-/// instruction executed; a guest that loops indefinitely traps with
-/// `OutOfFuel` instead of blocking the caller thread. The value is sized
-/// for the canonical per-part redact workload (one JSON part, scan-and-
-/// replace); the gateway can lift the cap if a skill genuinely needs more.
-const GUEST_FUEL_PER_CALL: u64 = 10_000_000;
-/// Hard cap on a single store's linear-memory growth. The guest already
-/// only writes into one page worth of scratch, but a buggy module could
-/// allocate more pages internally; bound that to keep one bad guest from
-/// pinning the host's RAM.
-const MAX_STORE_MEMORY_BYTES: usize = 16 * 1024 * 1024;
 
 pub(crate) fn new_engine() -> Result<Engine, RedactionError> {
     let mut config = wasmtime::Config::default();

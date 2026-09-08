@@ -1,0 +1,26 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "trogonai/session/sessions/v1alpha1/execution_plan.proto";
+import "trogonai/session/sessions/v1alpha1/session_forked.proto";
+import "trogonai/session/sessions/v1alpha1/session_ordinal.proto";
+import "trogonai/session/sessions/v1alpha1/workspace.proto";
+
+// ForkSession opens a child stream that inherits a prefix of another session's
+// context, recording [SessionStarted, SessionForked] as one batch.
+//
+// Write precondition NoStream on the new stream. The source's existence is
+// checked at the command boundary, not by the fold: the source is a different
+// aggregate and this decider never reads it. The plan and workspace are carried
+// rather than inherited for the same reason.
+message ForkSession {
+  // The new session's own id.
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  StoredSessionExecutionPlan execution_plan = 2 [features.field_presence = LEGACY_REQUIRED];
+  WorkspaceRef workspace = 3 [features.field_presence = LEGACY_REQUIRED];
+  string source_session_id = 4 [features.field_presence = LEGACY_REQUIRED];
+  // The source's own ordinal the inherited prefix ends at.
+  SessionOrdinal context_prefix_boundary = 5 [features.field_presence = LEGACY_REQUIRED];
+  ForkReason reason = 6 [features.field_presence = LEGACY_REQUIRED];
+}

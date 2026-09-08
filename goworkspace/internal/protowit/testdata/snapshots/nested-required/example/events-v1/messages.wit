@@ -1,0 +1,11 @@
+package example:events-v1;
+
+interface messages {
+  record container {
+    item: container-item,
+  }
+
+  record container-item {
+    id: option<string>,
+  }
+}

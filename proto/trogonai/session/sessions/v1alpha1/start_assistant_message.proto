@@ -1,0 +1,21 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "trogonai/session/sessions/v1alpha1/model_settings.proto";
+
+// StartAssistantMessage opens an assistant turn, recording
+// [AssistantMessageStarted]. Streamed token deltas are delivered out of band
+// and never appended per token.
+//
+// Write precondition Any.
+message StartAssistantMessage {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string message_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Carried so a replay reproduces the request that was made, not the
+  // request today's defaults would produce.
+  string model = 3 [features.field_presence = LEGACY_REQUIRED];
+  string turn_id = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Unset when every setting was left at the provider default.
+  ModelSettings settings = 5;
+}

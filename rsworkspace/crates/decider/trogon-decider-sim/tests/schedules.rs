@@ -14,11 +14,23 @@ use trogonai_proto::scheduler::schedules::{
     CREATE_SCHEDULE_TYPE_URL, PAUSE_SCHEDULE_TYPE_URL, RESUME_SCHEDULE_TYPE_URL, v1,
 };
 
+const BACKUP_SCHEDULE_ID: &str = "0198be07a38479e1a376f250f9181be9";
+const MISSING_SCHEDULE_ID: &str = "0198be07a38479e1a376f250f9181bea";
+const OTHER_SCHEDULE_ID: &str = "0198be07a38479e1a376f250f9181beb";
+
 fn schedules_wasm() -> Vec<u8> {
     SimFixture::schedules().bytes().to_vec()
 }
 
 fn create_command(id: &str) -> CommandEnvelope {
+    create_command_with_data(id, br#"{"kind":"heartbeat"}"#.to_vec())
+}
+
+fn oversized_create_command(id: &str) -> CommandEnvelope {
+    create_command_with_data(id, vec![0u8; 1_000_000])
+}
+
+fn create_command_with_data(id: &str, data: Vec<u8>) -> CommandEnvelope {
     CommandEnvelope {
         type_: CREATE_SCHEDULE_TYPE_URL.to_string(),
         payload: v1::CreateSchedule {
@@ -51,7 +63,7 @@ fn create_command(id: &str) -> CommandEnvelope {
             message: MessageField::some(v1::Message {
                 content: MessageField::some(content_v1alpha1::Content {
                     content_type: "application/json".to_string(),
-                    data: br#"{"kind":"heartbeat"}"#.to_vec(),
+                    data,
                 }),
                 headers: Vec::new(),
             }),
@@ -175,8 +187,11 @@ fn stream_id_returns_schedule_id() {
     let host = SimHost::load(&schedules_wasm()).unwrap();
     let mut instance = host.instantiate(()).unwrap();
 
-    let stream = instance.stream_id(&create_command("backup")).unwrap().unwrap();
-    assert_eq!(stream, "backup");
+    let stream = instance
+        .stream_id(&create_command(BACKUP_SCHEDULE_ID))
+        .unwrap()
+        .unwrap();
+    assert_eq!(stream, BACKUP_SCHEDULE_ID);
 }
 
 #[test]
@@ -186,12 +201,15 @@ fn run_wasm_resolves_the_first_steps_stream_id() {
 
     let mut scenario = ScenarioIr::new("resolve stream id");
     scenario.steps.push(ScenarioStep {
-        when: WireEnvelope::from(create_command("backup")),
+        when: WireEnvelope::from(create_command(BACKUP_SCHEDULE_ID)),
         expect: ExpectedOutcome::Accepted,
     });
 
     let run = scenario.run_wasm(&mut instance).unwrap();
-    assert_eq!(run.stream_id, Some(StreamIdOutcome::Resolved("backup".to_string())));
+    assert_eq!(
+        run.stream_id,
+        Some(StreamIdOutcome::Resolved(BACKUP_SCHEDULE_ID.to_string()))
+    );
 }
 
 #[test]
@@ -233,12 +251,48 @@ fn a_runaway_decider_traps_on_fuel_exhaustion_like_production_would() {
 }
 
 #[test]
+fn a_runaway_decider_traps_on_an_expired_epoch_deadline_like_production_would() {
+    let config = WasmEngineConfig::default().with_epoch_ticks_per_call(0);
+    let host = SimHost::load_with_config(&schedules_wasm(), config).unwrap();
+
+    // A zero-tick deadline is already expired before the first guest call arms it, so either
+    // instantiation or the first guest export call must trap with `Interrupt`, not run unbounded.
+    let trap = match host.instantiate(()) {
+        Err(SimError::Instantiate { source }) => source,
+        Err(other) => panic!("expected SimError::Instantiate on epoch expiry, got {other}"),
+        Ok(mut instance) => match instance.descriptor() {
+            Err(source) => source,
+            Ok(descriptor) => panic!("expected an epoch-expiry trap, but the guest call succeeded: {descriptor:?}"),
+        },
+    };
+    assert!(
+        matches!(trap.downcast_ref::<wasmtime::Trap>(), Some(wasmtime::Trap::Interrupt)),
+        "expected an Interrupt trap, got {trap}"
+    );
+}
+
+#[test]
+fn a_runaway_decider_traps_on_a_memory_ceiling_like_production_would() {
+    let config = WasmEngineConfig::default().with_max_memory_bytes(2 * 1024 * 1024);
+    let host = SimHost::load_with_config(&schedules_wasm(), config).unwrap();
+    let mut instance = host.instantiate(()).unwrap();
+
+    // A payload this large forces the guest to grow its linear memory past the starved ceiling
+    // mid-`decide`, matching how production would trap a session that outgrows its budget.
+    SimScenario::new()
+        .when(oversized_create_command(BACKUP_SCHEDULE_ID))
+        .then_trap()
+        .run(&mut instance)
+        .unwrap();
+}
+
+#[test]
 fn then_accepted_passes_for_create() {
     let host = SimHost::load(&schedules_wasm()).unwrap();
     let mut instance = host.instantiate(()).unwrap();
 
     SimScenario::new()
-        .when(create_command("backup"))
+        .when(create_command(BACKUP_SCHEDULE_ID))
         .then_accepted()
         .run(&mut instance)
         .unwrap();
@@ -250,7 +304,7 @@ fn then_accepted_reports_rejection_mismatch() {
     let mut instance = host.instantiate(()).unwrap();
 
     let error = SimScenario::new()
-        .when(pause_command("missing"))
+        .when(pause_command(MISSING_SCHEDULE_ID))
         .then_accepted()
         .run(&mut instance)
         .unwrap_err();
@@ -291,7 +345,7 @@ fn then_error_matches_rejection() {
     let mut instance = host.instantiate(()).unwrap();
 
     SimScenario::new()
-        .when(pause_command("missing"))
+        .when(pause_command(MISSING_SCHEDULE_ID))
         .then_error("rejected")
         .run(&mut instance)
         .unwrap();
@@ -303,12 +357,12 @@ fn then_error_reports_rejection_mismatch() {
     let mut instance = host.instantiate(()).unwrap();
 
     let error = SimScenario::new()
-        .when(pause_command("missing"))
+        .when(pause_command(MISSING_SCHEDULE_ID))
         .then_error("some-other-code")
         .run(&mut instance)
         .unwrap_err();
     assert!(
-        matches!(&error, ScenarioError::ErrorGotRejection { code, .. } if code.as_str() == "rejected"),
+        matches!(&error, ScenarioError::ErrorGotRejection { error, .. } if error.code() == "rejected"),
         "{error}"
     );
 }
@@ -324,7 +378,7 @@ fn then_error_reports_fault_mismatch() {
         .run(&mut instance)
         .unwrap_err();
     assert!(
-        matches!(&error, ScenarioError::ErrorGotFault { code, .. } if code.as_str() == "invalid-command"),
+        matches!(&error, ScenarioError::ErrorGotFault { error, .. } if error.code() == "invalid-command"),
         "{error}"
     );
 }
@@ -335,7 +389,7 @@ fn then_error_reports_unexpected_events() {
     let mut instance = host.instantiate(()).unwrap();
 
     let error = SimScenario::new()
-        .when(create_command("backup"))
+        .when(create_command(BACKUP_SCHEDULE_ID))
         .then_error("rejected")
         .run(&mut instance)
         .unwrap_err();
@@ -351,7 +405,7 @@ fn then_rejected_passes_for_missing_pause() {
     let mut instance = host.instantiate(()).unwrap();
 
     SimScenario::new()
-        .when(pause_command("missing"))
+        .when(pause_command(MISSING_SCHEDULE_ID))
         .then_rejected()
         .run(&mut instance)
         .unwrap();
@@ -363,7 +417,7 @@ fn then_rejected_reports_event_count() {
     let mut instance = host.instantiate(()).unwrap();
 
     let error = SimScenario::new()
-        .when(create_command("backup"))
+        .when(create_command(BACKUP_SCHEDULE_ID))
         .then_rejected()
         .run(&mut instance)
         .unwrap_err();
@@ -392,7 +446,7 @@ fn then_events_reports_count_mismatch() {
     let mut instance = host.instantiate(()).unwrap();
 
     let error = SimScenario::new()
-        .when(create_command("backup"))
+        .when(create_command(BACKUP_SCHEDULE_ID))
         .then_events([])
         .run(&mut instance)
         .unwrap_err();
@@ -408,8 +462,8 @@ fn then_events_reports_payload_mismatch() {
     let mut instance = host.instantiate(()).unwrap();
 
     let error = SimScenario::new()
-        .when(create_command("backup"))
-        .then_events([schedule_created_event("other")])
+        .when(create_command(BACKUP_SCHEDULE_ID))
+        .then_events([schedule_created_event(OTHER_SCHEDULE_ID)])
         .run(&mut instance)
         .unwrap_err();
     assert!(
@@ -425,11 +479,11 @@ fn then_events_reports_fault() {
 
     let error = SimScenario::new()
         .when(unknown_command())
-        .then_events([schedule_created_event("backup")])
+        .then_events([schedule_created_event(BACKUP_SCHEDULE_ID)])
         .run(&mut instance)
         .unwrap_err();
     assert!(
-        matches!(&error, ScenarioError::EventsGotFault { code, .. } if code.as_str() == "invalid-command"),
+        matches!(&error, ScenarioError::EventsGotFault { error, .. } if error.code() == "invalid-command"),
         "{error}"
     );
 }
@@ -449,7 +503,7 @@ fn run_requires_a_then_expectation() {
     let mut instance = host.instantiate(()).unwrap();
 
     let error = SimScenario::new()
-        .when(create_command("backup"))
+        .when(create_command(BACKUP_SCHEDULE_ID))
         .run(&mut instance)
         .unwrap_err();
     assert!(matches!(&error, ScenarioError::MissingExpectation), "{error}");
@@ -461,11 +515,24 @@ fn then_events_reports_rejection() {
     let mut instance = host.instantiate(()).unwrap();
 
     let error = SimScenario::new()
-        .when(pause_command("missing"))
-        .then_events([schedule_created_event("backup")])
+        .when(pause_command(MISSING_SCHEDULE_ID))
+        .then_events([schedule_created_event(BACKUP_SCHEDULE_ID)])
         .run(&mut instance)
         .unwrap_err();
     assert!(matches!(&error, ScenarioError::EventsGotRejection { .. }), "{error}");
+}
+
+#[test]
+fn then_trap_reports_events_mismatch_when_no_trap_occurs() {
+    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let mut instance = host.instantiate(()).unwrap();
+
+    let error = SimScenario::new()
+        .when(create_command(BACKUP_SCHEDULE_ID))
+        .then_trap()
+        .run(&mut instance)
+        .unwrap_err();
+    assert!(matches!(&error, ScenarioError::TrapGotEvents { count: 1 }), "{error}");
 }
 
 #[test]
@@ -474,7 +541,7 @@ fn default_scenario_matches_new() {
     let mut instance = host.instantiate(()).unwrap();
 
     SimScenario::default()
-        .when(create_command("backup"))
+        .when(create_command(BACKUP_SCHEDULE_ID))
         .then_accepted()
         .run(&mut instance)
         .unwrap();
@@ -486,8 +553,8 @@ fn create_schedule_from_initial_state() {
     let mut instance = host.instantiate(()).unwrap();
 
     SimScenario::new()
-        .when(create_command("backup"))
-        .then_events([schedule_created_event("backup")])
+        .when(create_command(BACKUP_SCHEDULE_ID))
+        .then_events([schedule_created_event(BACKUP_SCHEDULE_ID)])
         .run(&mut instance)
         .unwrap();
 }
@@ -498,18 +565,18 @@ fn pause_existing_schedule() {
     let mut instance = host.instantiate(()).unwrap();
 
     SimScenario::new()
-        .given([schedule_created_event("backup")])
+        .given([schedule_created_event(BACKUP_SCHEDULE_ID)])
         .when(CommandEnvelope {
             type_: PAUSE_SCHEDULE_TYPE_URL.to_string(),
             payload: v1::PauseSchedule {
-                schedule_id: "backup".to_string(),
+                schedule_id: BACKUP_SCHEDULE_ID.to_string(),
             }
             .encode_to_vec(),
         })
         .then_events([host::AnyEnvelope {
             type_: v1::SchedulePaused::FULL_NAME.to_string(),
             payload: v1::SchedulePaused {
-                schedule_id: "backup".to_string(),
+                schedule_id: BACKUP_SCHEDULE_ID.to_string(),
             }
             .encode_to_vec(),
         }])
@@ -530,8 +597,8 @@ fn evolve_skips_events_outside_this_deciders_set() {
     };
     SimScenario::new()
         .given([foreign])
-        .when(create_command("backup"))
-        .then_events([schedule_created_event("backup")])
+        .when(create_command(BACKUP_SCHEDULE_ID))
+        .then_events([schedule_created_event(BACKUP_SCHEDULE_ID)])
         .run(&mut instance)
         .unwrap();
 }
@@ -545,12 +612,12 @@ fn multi_step_scenario_feeds_events_forward_within_one_session() {
     // before the next step's command is decided, so resume only succeeds
     // because it observes the pause this scenario decided one step earlier.
     SimScenario::new()
-        .when(create_command("backup"))
-        .then_events([schedule_created_event("backup")])
-        .when(pause_command("backup"))
-        .then_events([schedule_paused_event("backup")])
-        .when(resume_command("backup"))
-        .then_events([schedule_resumed_event("backup")])
+        .when(create_command(BACKUP_SCHEDULE_ID))
+        .then_events([schedule_created_event(BACKUP_SCHEDULE_ID)])
+        .when(pause_command(BACKUP_SCHEDULE_ID))
+        .then_events([schedule_paused_event(BACKUP_SCHEDULE_ID)])
+        .when(resume_command(BACKUP_SCHEDULE_ID))
+        .then_events([schedule_resumed_event(BACKUP_SCHEDULE_ID)])
         .run(&mut instance)
         .unwrap();
 }
@@ -561,9 +628,9 @@ fn multi_step_scenario_reports_which_step_failed() {
     let mut instance = host.instantiate(()).unwrap();
 
     let error = SimScenario::new()
-        .when(create_command("backup"))
-        .then_events([schedule_created_event("backup")])
-        .when(pause_command("backup"))
+        .when(create_command(BACKUP_SCHEDULE_ID))
+        .then_events([schedule_created_event(BACKUP_SCHEDULE_ID)])
+        .when(pause_command(BACKUP_SCHEDULE_ID))
         .then_rejected()
         .run(&mut instance)
         .unwrap_err();
@@ -587,7 +654,10 @@ fn snapshot_round_trips_into_a_restored_session() {
     // Fold a creation into one session, then capture its snapshot.
     let snapshot = {
         let mut session = instance.open_session(None).unwrap();
-        session.evolve(&[schedule_created_event("backup")]).unwrap().unwrap();
+        session
+            .evolve(&[schedule_created_event(BACKUP_SCHEDULE_ID)])
+            .unwrap()
+            .unwrap();
         session.snapshot().unwrap()
     };
     assert!(snapshot.is_some(), "guest should produce a snapshot frame");
@@ -595,6 +665,6 @@ fn snapshot_round_trips_into_a_restored_session() {
     // A fresh session restored from that snapshot must already see the schedule as present,
     // so re-creating it is rejected without replaying any events.
     let mut restored = instance.open_session(snapshot.as_deref()).unwrap();
-    let outcome = restored.decide(&create_command("backup")).unwrap();
+    let outcome = restored.decide(&create_command(BACKUP_SCHEDULE_ID)).unwrap();
     assert!(matches!(outcome, Err(host::DecideError::Rejected(_))), "{outcome:?}");
 }

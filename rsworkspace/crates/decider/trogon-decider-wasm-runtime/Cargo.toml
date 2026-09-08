@@ -28,7 +28,7 @@ trogon-decider-runtime = { workspace = true }
 trogon-decider-wit = { workspace = true, features = ["host"] }
 trogon-semconv = { workspace = true }
 trogon-std = { workspace = true, features = ["uuid"] }
-wasmtime = { version = "=46.0.1", default-features = false, features = ["anyhow", "component-model", "pooling-allocator", "runtime", "cranelift"] }
+wasmtime = { version = "=47.0.3", default-features = false, features = ["anyhow", "component-model", "pooling-allocator", "runtime", "cranelift"] }
 
 [dev-dependencies]
 async-nats = { workspace = true, features = ["jetstream", "kv", "server_2_10", "server_2_12"] }

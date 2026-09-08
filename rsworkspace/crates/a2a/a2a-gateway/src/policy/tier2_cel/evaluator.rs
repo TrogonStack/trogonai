@@ -6,6 +6,7 @@ use a2a_nats::server::A2aMethod;
 use a2a_nats::{A2aAgentId, A2aTaskId};
 use async_nats::HeaderMap;
 use cel_interpreter::{Context, Value, to_value};
+use serde::Serialize;
 use tracing::warn;
 
 use crate::policy::error::Tier2EvalError;
@@ -120,29 +121,43 @@ impl Tier2CelEvaluator for RealTier2CelEvaluator {
     }
 }
 
+/// The `request` activation variable a Tier-2 rule reads.
+#[derive(Debug, Serialize)]
+struct RequestBinding<'a> {
+    method: &'a str,
+    params: &'a serde_json::Value,
+}
+
+/// The `caller`, `agent`, and `task` activation variables, which all expose a
+/// single id to a Tier-2 rule.
+#[derive(Debug, Serialize)]
+struct IdBinding<'a> {
+    id: Option<&'a str>,
+}
+
 fn bind_evaluation_context(cel_ctx: &mut Context, ctx: &Tier2EvaluationContext) -> Result<(), Tier2EvalError> {
-    let request = to_value(serde_json::json!({
-        "method": ctx.request_method().as_str(),
-        "params": ctx.request_params(),
-    }))
+    let request = to_value(RequestBinding {
+        method: ctx.request_method().as_str(),
+        params: ctx.request_params(),
+    })
     .map_err(|err| Tier2EvalError::binding("request", err.to_string()))?;
     cel_ctx.add_variable_from_value("request", request);
 
-    let caller = to_value(serde_json::json!({
-        "id": ctx.caller_id().map(SpiceDbSubject::as_str),
-    }))
+    let caller = to_value(IdBinding {
+        id: ctx.caller_id().map(SpiceDbSubject::as_str),
+    })
     .map_err(|err| Tier2EvalError::binding("caller", err.to_string()))?;
     cel_ctx.add_variable_from_value("caller", caller);
 
-    let agent = to_value(serde_json::json!({
-        "id": ctx.agent_id().as_str(),
-    }))
+    let agent = to_value(IdBinding {
+        id: Some(ctx.agent_id().as_str()),
+    })
     .map_err(|err| Tier2EvalError::binding("agent", err.to_string()))?;
     cel_ctx.add_variable_from_value("agent", agent);
 
-    let task = to_value(serde_json::json!({
-        "id": ctx.task_id().map(A2aTaskId::as_str),
-    }))
+    let task = to_value(IdBinding {
+        id: ctx.task_id().map(A2aTaskId::as_str),
+    })
     .map_err(|err| Tier2EvalError::binding("task", err.to_string()))?;
     cel_ctx.add_variable_from_value("task", task);
 

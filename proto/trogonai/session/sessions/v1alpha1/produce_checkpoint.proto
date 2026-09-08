@@ -1,0 +1,19 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "trogonai/session/sessions/v1alpha1/checkpoint.proto";
+
+// ProduceCheckpoint records opaque durable state an execution attempt captured
+// mid-run, recording [CheckpointProduced], so a later attempt can restore it
+// instead of replaying from the beginning.
+//
+// Write precondition Any: the first evidence admitted per checkpoint_id wins; a
+// later event reusing the id stays on the log but never replaces it, so a
+// restore always resolves to the same bytes.
+message ProduceCheckpoint {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Self-describing: checkpoint id, producing attempt, covered boundary,
+  // and the execution plan digest it is bound to all live here.
+  Checkpoint checkpoint = 2 [features.field_presence = LEGACY_REQUIRED];
+}

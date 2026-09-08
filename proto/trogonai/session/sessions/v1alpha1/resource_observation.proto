@@ -1,0 +1,70 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "trogonai/session/sessions/v1alpha1/digest.proto";
+
+// ResourceObservation records that a tool call put the content of a resource
+// into the model's context, and what that content hashed to at the moment it was
+// read. It is what makes a later write checkable: a replayed or retried write
+// carries the digest its decision was based on, and a projection can tell
+// "this write is a duplicate of one already applied" from "this write was
+// decided against content that has since changed" without keeping the bytes.
+//
+// Reads are recorded here, on the completion of the call that performed them,
+// and deliberately not as their own event: reads outnumber writes by more than
+// an order of magnitude, and a per-read event would make the dominant kind in
+// every session stream a fact no projection folds. The same reasoning applies
+// within a call: record an observation only for a resource whose content
+// actually entered the model's context, never for every path a search walked.
+//
+// A change with a proximate tool call is a FileChanged. A change first noticed
+// because a resource hashed differently than when it was last observed is not:
+// it surfaces as an observation with a new digest, with no FileChanged to
+// attribute it to, which is precisely the signal that something outside the
+// session moved underneath it.
+message ResourceObservation {
+  // Resource location, in the same URI form as WorkspaceRef.uri. For a
+  // resource inside the workspace this is workspace.uri + "/" +
+  // FileChanged.path, which is the join a projection uses to attribute or
+  // exclude a later digest change against that path; a resource with no such
+  // join (a fetched URL, an MCP resource) can only ever appear here, never as
+  // a FileChanged.
+  string uri = 1 [features.field_presence = LEGACY_REQUIRED];
+  // What the read found. Exactly one arm is always recorded, so a producer that
+  // failed to compute a digest can never be mistaken for one that observed
+  // genuine absence.
+  oneof outcome {
+    // Digest over the observed content.
+    Digest content_digest = 2;
+    // Positive report that no content exists at uri, which is itself an
+    // observation a later write may depend on.
+    ResourceAbsent absent = 5;
+  }
+  // The extent actually read, when the read did not necessarily span the whole
+  // resource. This is provenance of what was fetched, not a claim about
+  // coverage: complete carries that claim, so a full-covering range alongside
+  // complete is not a contradiction. Unset when the outcome is absent, where
+  // there is no extent to record.
+  ByteRange range = 3;
+  // True when the observation covered the resource in its entirety, with
+  // nothing elided by truncation or by a range limit. A write against a
+  // resource the model only saw part of is a weaker precondition than one
+  // against a resource it saw entirely, and that difference must be a recorded
+  // fact rather than inferred from the presence of range. With an absent
+  // outcome it asserts the resource was confirmed absent in full, which is the
+  // precondition a create-if-not-exists write depends on.
+  bool complete = 4;
+}
+
+// ResourceAbsent is the observation arm for a resource that was looked for and
+// found not to exist. It carries no fields: the fact is the absence itself, and
+// it is a message rather than a bool so the arm can gain detail later without
+// changing the shape of the outcome.
+message ResourceAbsent {}
+
+// ByteRange is a half-open extent over a resource's bytes.
+message ByteRange {
+  uint64 offset = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint64 length = 2 [features.field_presence = LEGACY_REQUIRED];
+}

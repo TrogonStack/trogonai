@@ -2,13 +2,13 @@ use std::fmt;
 
 use trogon_nats::NatsToken;
 use trogon_nats::jetstream::StreamMaxAge;
-use trogon_std::{EmptySecret, NonZeroDuration, SecretString};
+use trogon_std::{EmptySecretError, NonZeroDuration, SecretString};
 
 #[derive(Clone)]
 pub struct SlackSigningSecret(SecretString);
 
 impl SlackSigningSecret {
-    pub fn new(s: impl AsRef<str>) -> Result<Self, EmptySecret> {
+    pub fn new(s: impl AsRef<str>) -> Result<Self, EmptySecretError> {
         SecretString::new(s).map(Self)
     }
 
@@ -26,7 +26,7 @@ impl fmt::Debug for SlackSigningSecret {
 #[derive(Debug, thiserror::Error)]
 pub enum SlackAppTokenError {
     #[error("{0}")]
-    Empty(#[source] EmptySecret),
+    Empty(#[source] EmptySecretError),
     #[error("must start with xapp-")]
     MissingPrefix,
 }

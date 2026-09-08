@@ -16,9 +16,8 @@ use bytes::Bytes;
 use std::future::IntoFuture;
 use trogon_nats::jetstream::{JetStreamPublisher, JetStreamSubjectPurger, PurgeOutcome};
 
+use crate::constants::NATS_MSG_ID_HEADER;
 use crate::processor::execution::reconciliation::{DispatchRequest, ScheduleRequest, ScheduleSubject};
-
-const NATS_MSG_ID_HEADER: &str = "Nats-Msg-Id";
 
 /// Error raised while writing an execution-schedule operation. Every variant is
 /// a transient NATS failure: the record must not be acknowledged and should be
@@ -142,7 +141,7 @@ where
 
         if !response.is_success() {
             return Err(ExecutionScheduleWriteError::Purge {
-                source: Box::new(PurgeUnacknowledged),
+                source: Box::new(UnacknowledgedPurgeError),
             });
         }
 
@@ -154,7 +153,7 @@ where
 /// acknowledge it as successful.
 #[derive(Debug, thiserror::Error)]
 #[error("purge was not acknowledged as successful by the server")]
-struct PurgeUnacknowledged;
+struct UnacknowledgedPurgeError;
 
 fn build_headers(request: &ScheduleRequest, msg_id: &str, trace_headers: &HeaderMap) -> HeaderMap {
     let mut headers = trace_headers.clone();

@@ -18,7 +18,7 @@ impl std::fmt::Display for SessionUpdateSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.session.{}.client.session.update",
+            "{}.v1.session.{}.client.session.update",
             self.prefix.as_str(),
             self.session_id.as_str()
         )
@@ -45,6 +45,6 @@ mod tests {
     #[test]
     fn display_formats_subject_correctly() {
         let s = SessionUpdateSubject::new(&prefix(), &session_id());
-        assert_eq!(s.to_string(), "acp.session.ses1.client.session.update");
+        assert_eq!(s.to_string(), "acp.v1.session.ses1.client.session.update");
     }
 }

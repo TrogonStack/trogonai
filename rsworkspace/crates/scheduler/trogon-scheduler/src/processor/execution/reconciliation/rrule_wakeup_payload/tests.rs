@@ -13,7 +13,7 @@ fn occurrence_at() -> DateTime<Utc> {
 
 #[test]
 fn encode_decode_round_trips() {
-    let payload = RRuleWakeupPayload::new(schedule_id("orders/rrule"), occurrence_at());
+    let payload = RRuleWakeupPayload::new(schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c04"), occurrence_at());
     let bytes = payload.encode().unwrap();
     let decoded = RRuleWakeupPayload::decode(&bytes).unwrap();
     assert_eq!(decoded, payload);
@@ -33,7 +33,10 @@ fn decode_rejects_invalid_schedule_id() {
 
 #[test]
 fn decode_rejects_invalid_occurrence_at() {
-    let err =
-        RRuleWakeupPayload::decode(br#"{"schedule_id":"orders/rrule","occurrence_at":"not-a-time"}"#).unwrap_err();
+    let payload = format!(
+        r#"{{"schedule_id":"{}","occurrence_at":"not-a-time"}}"#,
+        schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c04")
+    );
+    let err = RRuleWakeupPayload::decode(payload.as_bytes()).unwrap_err();
     assert!(matches!(err, RRuleWakeupPayloadDecodeError::OccurrenceAt { .. }));
 }

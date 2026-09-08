@@ -11,7 +11,7 @@ impl AllServerSubject {
 
 impl std::fmt::Display for AllServerSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.server.>", self.prefix.as_str())
+        write!(f, "{}.v1.server.>", self.prefix.as_str())
     }
 }
 

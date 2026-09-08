@@ -1,0 +1,108 @@
+edition = "2024";
+
+package trogonai.session.sessions.doctor.v1alpha1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/session/sessions/doctor/v1alpha1/repair_action.proto";
+
+// RepairSessionRequest applies typed repairs to findings from a specific
+// diagnosis.
+//
+// Three properties make this safe, and each of them closes a failure that
+// operator tooling reaches for eventually.
+//
+// It is targeted. There is no "repair everything" shape. A caller names exact
+// findings and the exact action for each, because a bulk repair is a repair
+// whose blast radius nobody reviewed.
+//
+// It is provenanced. `diagnosis_id` binds every mutation to the report that
+// justified it, so an audit can answer what the operator was looking at.
+//
+// It re-verifies. The server re-runs each finding's check before acting on it.
+// The interval between running a doctor and running a repair is where state
+// changes, and a repair that trusts a report from ten minutes ago will happily
+// discard a projection that already rebuilt itself.
+message RepairSessionRequest {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The diagnosis whose findings are being acted on. Findings from a different
+  // diagnosis are refused rather than looked up, so a repair cannot be
+  // assembled from ids an operator collected by hand.
+  string diagnosis_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  RepairMode mode = 3 [features.field_presence = LEGACY_REQUIRED];
+  repeated RepairTarget targets = 4;
+  // Why the operator is doing this, for the audit record. Required, and
+  // required to be non-empty: a repair with no stated reason is the one that
+  // will need explaining later.
+  string operator_reason = 5 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// RepairMode is whether this call is allowed to mutate anything.
+//
+// The numbering is load-bearing. Zero is DRY_RUN, so a caller that forgets the
+// field, decodes an older message, or builds a request programmatically and
+// misses a branch gets a preview rather than a mutation. Every other ordering
+// of these values makes the default destructive, and a default that destroys
+// is a defect no amount of documentation fixes.
+enum RepairMode {
+  // Treated as DRY_RUN. Unset is a preview, never an apply.
+  REPAIR_MODE_UNSPECIFIED = 0;
+  // Re-verify every target and report what would happen. Mutates nothing.
+  REPAIR_MODE_DRY_RUN = 1;
+  // Re-verify every target and apply the ones that still hold.
+  REPAIR_MODE_APPLY = 2;
+}
+
+// RepairTarget is one finding and the action to take on it.
+message RepairTarget {
+  string finding_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Must be one of the finding's `available_repairs`. An action the doctor did
+  // not offer for this finding is refused, so the set of legal repairs is
+  // decided by the code that understands the finding rather than by the caller.
+  RepairAction action = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// RepairSessionResponse is what happened, or what would have.
+message RepairSessionResponse {
+  // Echoes the mode that ran. A dry run and an apply must never be
+  // distinguishable only by what the caller believes it sent.
+  RepairMode mode = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated RepairResult results = 2;
+  google.protobuf.Timestamp observed_at = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// RepairResult is the outcome for one target.
+message RepairResult {
+  string finding_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  RepairAction action = 2 [features.field_presence = LEGACY_REQUIRED];
+  RepairResultStatus status = 3 [features.field_presence = LEGACY_REQUIRED];
+  // What the action touched, or would touch: projection generations, snapshot
+  // ids, claim ids. The substance of a dry run, and the audit trail of an
+  // apply.
+  repeated string affected = 4;
+  // Human-readable detail. Never parsed.
+  string detail = 5;
+}
+
+// RepairResultStatus is per-target, because a repair call is not atomic and
+// pretending otherwise would hide which half of it landed.
+enum RepairResultStatus {
+  REPAIR_RESULT_STATUS_UNSPECIFIED = 0;
+  // Dry run: the finding still holds and the action would be taken.
+  REPAIR_RESULT_STATUS_WOULD_APPLY = 1;
+  // Apply: the action was taken.
+  REPAIR_RESULT_STATUS_APPLIED = 2;
+  // Re-verification found the finding no longer holds. Not an error: the
+  // problem resolved itself between diagnosis and repair, and doing nothing is
+  // the correct outcome.
+  REPAIR_RESULT_STATUS_NOT_REPRODUCIBLE = 3;
+  // The action is not among the finding's available repairs.
+  REPAIR_RESULT_STATUS_ACTION_NOT_AVAILABLE = 4;
+  // The finding still holds and the server declined to act, because applying
+  // the action in the current state could destroy something recoverable. An
+  // unreadable artifact is the standard case: it is not yet known to be lost,
+  // so nothing that treats it as lost may run.
+  REPAIR_RESULT_STATUS_REFUSED_UNSAFE = 5;
+  // The action was attempted and failed. Distinct from refused: something may
+  // have partially changed, and `affected` says what.
+  REPAIR_RESULT_STATUS_FAILED = 6;
+}

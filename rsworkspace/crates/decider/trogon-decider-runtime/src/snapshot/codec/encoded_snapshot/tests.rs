@@ -33,7 +33,7 @@ impl SnapshotPayloadDecode for TestPayload {
 }
 
 impl SnapshotType for TestPayload {
-    type Error = crate::InvalidSnapshotTypeName;
+    type Error = crate::InvalidSnapshotTypeNameError;
 
     fn snapshot_type() -> Result<SnapshotTypeName, Self::Error> {
         SnapshotTypeName::new("test.snapshot.v1")

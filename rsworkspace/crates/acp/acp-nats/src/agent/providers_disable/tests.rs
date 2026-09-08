@@ -12,7 +12,7 @@ fn request() -> DisableProviderRequest {
 async fn disable_provider_forwards_request_and_returns_response() {
     let (mock, _js, bridge) = mock_bridge();
     let expected = DisableProviderResponse::new();
-    set_json_response(&mock, "acp.agent.providers.disable", &expected);
+    set_json_response(&mock, "acp.v1.global.agent.providers.disable", &expected);
 
     let result = bridge.disable_provider(request()).await;
 
@@ -32,7 +32,7 @@ async fn disable_provider_returns_error_when_nats_fails() {
 #[tokio::test]
 async fn disable_provider_returns_error_when_response_is_invalid_json() {
     let (mock, _js, bridge) = mock_bridge();
-    mock.set_response("acp.agent.providers.disable", "not json".into());
+    mock.set_response("acp.v1.global.agent.providers.disable", "not json".into());
 
     let err = bridge.disable_provider(request()).await.unwrap_err();
 
@@ -42,7 +42,11 @@ async fn disable_provider_returns_error_when_response_is_invalid_json() {
 #[tokio::test]
 async fn disable_provider_records_metrics_on_success() {
     let (mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
-    set_json_response(&mock, "acp.agent.providers.disable", &DisableProviderResponse::new());
+    set_json_response(
+        &mock,
+        "acp.v1.global.agent.providers.disable",
+        &DisableProviderResponse::new(),
+    );
 
     let _ = bridge.disable_provider(request()).await;
 

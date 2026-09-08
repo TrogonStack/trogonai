@@ -1,0 +1,60 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+// TargetOutcome records one target a multi-resource tool call failed to apply.
+//
+// A batch edit over ten files that succeeds for eight and fails for two is not a
+// failure. Eight files really changed, and those changes exist independently of
+// how the call is labelled: they are FileChanged facts on the log and no result
+// status can retract them. Such a call is therefore a ToolCallCompleted with
+// result status TOOL_CALL_RESULT_STATUS_APPLICATION_ERROR, never a
+// ToolCallFailed, which means nothing was applied at all.
+//
+// Only failures are recorded here. The successes are already durable as
+// FileChanged, and recording them a second time would create two facts for one
+// change that can disagree after a rewind or a redaction masks one of them. What
+// no other event can express is the negative: that a target was named, attempted,
+// and did not happen. Without it a reader sees eight changes for a ten-file
+// request and has to infer the gap by comparing against tool arguments, which is
+// exactly the inference a typed record exists to make unnecessary.
+message TargetOutcome {
+  // The target as addressed by the call, in the same URI form as
+  // WorkspaceRef.uri. A URI rather than a workspace-relative path because a
+  // multi-resource tool's targets are not always files, and a failure against an
+  // MCP resource or a remote endpoint has no path to record.
+  string target_uri = 1 [features.field_presence = LEGACY_REQUIRED];
+  TargetFailureReason reason = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Detail from the tool, for humans. Never parsed.
+  string detail = 3;
+}
+
+// TargetFailureReason is why one target of a multi-target call did not apply.
+//
+// Typed because the reasons carry different meanings for whether retrying is
+// sound. A permission fault is durable and a retry repeats it; a stale
+// precondition means the resource moved under the agent and a retry against
+// fresh content may well succeed; a not-attempted target failed for no reason of
+// its own at all.
+enum TargetFailureReason {
+  TARGET_FAILURE_REASON_UNSPECIFIED = 0;
+  // The target did not exist.
+  TARGET_FAILURE_REASON_NOT_FOUND = 1;
+  // Access was refused by the underlying system.
+  TARGET_FAILURE_REASON_PERMISSION_DENIED = 2;
+  // The target's content no longer matched what the change was decided against,
+  // which is the ResourceObservation digest that justified the write.
+  TARGET_FAILURE_REASON_PRECONDITION_FAILED = 3;
+  // The requested edit did not match anything in the target.
+  TARGET_FAILURE_REASON_NO_MATCH = 4;
+  // The edit matched ambiguously and was refused rather than guessed at.
+  TARGET_FAILURE_REASON_AMBIGUOUS_MATCH = 5;
+  // The target could not be interpreted in the form the tool required.
+  TARGET_FAILURE_REASON_UNSUPPORTED_CONTENT = 6;
+  // The call stopped before reaching this target. It is not a failure of the
+  // target and says nothing about whether it would have succeeded; recorded so a
+  // reader never concludes an unreached target was rejected.
+  TARGET_FAILURE_REASON_NOT_ATTEMPTED = 7;
+  // The underlying system failed in a way the tool could not classify.
+  TARGET_FAILURE_REASON_IO_ERROR = 8;
+}

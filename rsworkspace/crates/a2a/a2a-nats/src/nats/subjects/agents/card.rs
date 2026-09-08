@@ -19,7 +19,7 @@ impl AgentCardSubject {
 
 impl std::fmt::Display for AgentCardSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.agents.{}.card", self.prefix.as_str(), self.agent_id.as_str())
+        write!(f, "{}.v1.agents.{}.card", self.prefix.as_str(), self.agent_id.as_str())
     }
 }
 

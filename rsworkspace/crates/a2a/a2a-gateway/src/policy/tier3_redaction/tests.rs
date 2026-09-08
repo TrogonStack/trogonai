@@ -129,20 +129,17 @@ fn real_gate_trap_maps_to_error() {
 
 #[test]
 fn tier3_refused_response_uses_32802_and_rule_data() {
-    // Wire shape on main: jsonrpc-nats splits the JSON-RPC error code
-    // into the NATS header `Jsonrpc-Error-Code` and leaves only
-    // `message` + `data` in the body. Assert both halves so a
-    // regression that flipped the code header would still fail —
-    // checking the body alone would not catch a -32801 leak into the
-    // tier-3 refusal path.
+    // Canonical body carries the full JSON-RPC error object; `Jsonrpc-Error-Code`
+    // is a derived projection. Assert both so a regression that flipped the
+    // code header would still fail.
     let payload = br#"{"jsonrpc":"2.0","id":"x","method":"message/send","params":{}}"#;
     let headers = async_nats::HeaderMap::new();
     let bytes =
         ingress_gateway_tier3_refused_response_bytes(&headers, payload, "tier-3 skill refused part", "deny-part")
             .unwrap();
     let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-    assert_eq!(value["message"], "tier-3 skill refused part");
-    assert_eq!(value["data"]["rule"], "deny-part");
+    assert_eq!(value["error"]["message"], "tier-3 skill refused part");
+    assert_eq!(value["error"]["data"]["rule"], "deny-part");
 
     let wire = ingress_error_response_wire(
         &headers,
@@ -165,7 +162,7 @@ fn tier3_engine_error_response_uses_32801() {
     let bytes =
         ingress_gateway_policy_denied_response_bytes(&headers, payload, "tier-3 redaction engine error").unwrap();
     let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-    assert_eq!(value["message"], "tier-3 redaction engine error");
+    assert_eq!(value["error"]["message"], "tier-3 redaction engine error");
 
     let wire = ingress_error_response_wire(&headers, payload, -32_801, "tier-3 redaction engine error", None).unwrap();
     assert_eq!(
@@ -413,7 +410,7 @@ fn merge_forward_audit_rewrites_with_only_tier3_returns_tier3_array() {
     let agent_id = a2a_nats::A2aAgentId::new("planner").expect("agent");
     let (audit, _stream_consumer) = super::merge_forward_audit_rewrites(
         &[rewrite],
-        "a2a.gateway.bot.message.send",
+        "a2a.v1.gateway.bot.message.send",
         "a2a.agent.planner.message.send",
         &agent_id,
         "message.send",

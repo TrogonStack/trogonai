@@ -1,0 +1,11 @@
+error: constant `MAX_INSPECTED_BODY` declared outside the `constants` module
+  --> $DIR/constant_outside_constants_module.rs:5:1
+   |
+LL | const MAX_INSPECTED_BODY: usize = 1024 * 1024;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: move `MAX_INSPECTED_BODY` into a `constants` module (`constants.rs`) and refer to it as `constants::MAX_INSPECTED_BODY`
+   = note: `#[deny(constant_outside_constants_module)]` on by default
+
+error: aborting due to 1 previous error
+

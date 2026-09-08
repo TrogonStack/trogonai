@@ -11,31 +11,18 @@ use trogon_aauth_verify::{CachedJwksResolver, HttpJwksResolver, SystemTimeSource
 use trogon_std::env::ReadEnv;
 
 use crate::aauth::{
-    AAuthConfig, AAuthDenyReason, AAuthIngress, AAuthMode, ChallengeKid, ChallengeKidError, GatewayAAuthIngress,
+    AAuthConfig, AAuthDenyReasonError, AAuthIngress, AAuthMode, ChallengeKid, ChallengeKidError, GatewayAAuthIngress,
     GatewayJwksResolver, LeewaySecs, NonNegativeSecs, NonNegativeSecsError, PersonServerAudience,
     PersonServerAudienceError, ResourceIssuer, ResourceIssuerError, StaticJwks,
 };
 
-pub const ENV_AAUTH_MODE: &str = "A2A_GATEWAY_AAUTH_MODE";
-pub const ENV_AAUTH_JWKS_PATH: &str = "A2A_GATEWAY_AAUTH_JWKS_PATH";
-pub const ENV_AAUTH_JWKS_DISCOVERY: &str = "A2A_GATEWAY_AAUTH_JWKS_DISCOVERY";
-pub const ENV_AAUTH_JWKS_TTL_SECS: &str = "A2A_GATEWAY_AAUTH_JWKS_TTL_SECS";
-pub const ENV_AAUTH_JWKS_ALLOWED_ISSUERS: &str = "A2A_GATEWAY_AAUTH_JWKS_ALLOWED_ISSUERS";
-pub const ENV_AAUTH_RESOURCE_ISS: &str = "A2A_GATEWAY_AAUTH_RESOURCE_ISS";
-pub const ENV_AAUTH_PERSON_SERVER_AUD: &str = "A2A_GATEWAY_AAUTH_PERSON_SERVER_AUD";
-pub const ENV_AAUTH_CHALLENGE_KID: &str = "A2A_GATEWAY_AAUTH_CHALLENGE_KID";
-pub const ENV_AAUTH_CHALLENGE_KEY_PATH: &str = "A2A_GATEWAY_AAUTH_CHALLENGE_KEY_PATH";
-pub const ENV_AAUTH_LEEWAY_SECS: &str = "A2A_GATEWAY_AAUTH_LEEWAY_SECS";
-pub const ENV_AAUTH_CHALLENGE_TTL_SECS: &str = "A2A_GATEWAY_AAUTH_CHALLENGE_TTL_SECS";
-pub const ENV_AAUTH_MAX_SKEW_SECS: &str = "A2A_GATEWAY_AAUTH_MAX_SKEW_SECS";
-
-/// Audit `caller_source` recorded once a verified `aa-auth+jwt` principal
-/// supersedes the JWT-header caller identity for the remainder of dispatch.
-pub const AAUTH_CALLER_SOURCE: &str = "aauth";
-
-const DEFAULT_LEEWAY_SECS: u64 = 60;
-const DEFAULT_CHALLENGE_TTL_SECS: i64 = 300;
-const DEFAULT_MAX_SKEW_SECS: i64 = 60;
+pub use crate::constants::{
+    AAUTH_CALLER_SOURCE, ENV_AAUTH_CHALLENGE_KEY_PATH, ENV_AAUTH_CHALLENGE_KID, ENV_AAUTH_CHALLENGE_TTL_SECS,
+    ENV_AAUTH_JWKS_ALLOWED_ISSUERS, ENV_AAUTH_JWKS_DISCOVERY, ENV_AAUTH_JWKS_PATH, ENV_AAUTH_JWKS_TTL_SECS,
+    ENV_AAUTH_LEEWAY_SECS, ENV_AAUTH_MAX_SKEW_SECS, ENV_AAUTH_MODE, ENV_AAUTH_PERSON_SERVER_AUD,
+    ENV_AAUTH_RESOURCE_ISS,
+};
+use crate::constants::{DEFAULT_CHALLENGE_TTL_SECS, DEFAULT_LEEWAY_SECS, DEFAULT_MAX_SKEW_SECS};
 
 /// Every variant names the exact env var an operator needs to fix -- shadow
 /// and enforce mode must never silently fall back to a Noop/Off layer just
@@ -153,14 +140,14 @@ pub fn gateway_aauth_from_env<E: ReadEnv>(env: &E) -> Result<Option<GatewayAAuth
 /// Maps a denial reason to the audit `rules_fired` entry dispatch.rs
 /// records for an AAuth denial. Kept outside the `not(coverage)`-gated
 /// dispatch module so this branch stays covered under coverage builds.
-pub fn aauth_deny_rule_fired(reason: &AAuthDenyReason) -> &'static str {
+pub fn aauth_deny_rule_fired(reason: &AAuthDenyReasonError) -> &'static str {
     match reason {
-        AAuthDenyReason::Pop(_) => "gateway.aauth.denied.pop",
-        AAuthDenyReason::Auth(_) => "gateway.aauth.denied.auth",
-        AAuthDenyReason::AuthAgentMismatch { .. } => "gateway.aauth.denied.auth_agent_mismatch",
-        AAuthDenyReason::ScopeNotCovered { .. } => "gateway.aauth.denied.scope",
-        AAuthDenyReason::MissionMismatch(_) => "gateway.aauth.denied.mission",
-        AAuthDenyReason::MissionHeaderMissing { .. } => "gateway.aauth.denied.mission_header_missing",
+        AAuthDenyReasonError::Pop(_) => "gateway.aauth.denied.pop",
+        AAuthDenyReasonError::Auth(_) => "gateway.aauth.denied.auth",
+        AAuthDenyReasonError::AuthAgentMismatch { .. } => "gateway.aauth.denied.auth_agent_mismatch",
+        AAuthDenyReasonError::ScopeNotCovered { .. } => "gateway.aauth.denied.scope",
+        AAuthDenyReasonError::MissionMismatch(_) => "gateway.aauth.denied.mission",
+        AAuthDenyReasonError::MissionHeaderMissing { .. } => "gateway.aauth.denied.mission_header_missing",
     }
 }
 

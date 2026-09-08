@@ -14,22 +14,24 @@
 //! the first time concurrently) is still handled by falling back to a get on
 //! an already-exists conflict from create. When the resource already
 //! exists, its configuration is validated against the caller's requirements
-//! and a [`StreamConfigMismatch`] or [`KvConfigMismatch`] names the specific
+//! and a [`StreamConfigMismatchError`] or [`KvConfigMismatchError`] names the specific
 //! field that diverged, rather than dumping the whole configuration.
 
+use std::time::Duration;
+
 use async_nats::jetstream;
-use async_nats::jetstream::ErrorCode;
-use async_nats::jetstream::context::{
-    CreateKeyValueError, CreateStreamError, GetStreamError, GetStreamErrorKind, KeyValueError, KeyValueErrorKind,
-};
+use async_nats::jetstream::context::{CreateKeyValueError, CreateStreamError, GetStreamError, KeyValueError};
 use async_nats::jetstream::kv;
 use async_nats::jetstream::stream::RetentionPolicy;
-use trogon_nats::jetstream::{is_create_key_value_already_exists, is_create_stream_already_exists};
+use trogon_nats::jetstream::{
+    is_create_key_value_already_exists, is_create_stream_already_exists, is_get_key_value_not_found,
+    is_get_stream_not_found,
+};
 
 /// A single divergent field between a required and an existing stream
 /// configuration.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum StreamConfigMismatch {
+pub enum StreamConfigMismatchError {
     /// The existing stream's retention policy does not match the requirement.
     #[error("stream '{stream}' retention mismatch: expected {expected:?}, found {actual:?}")]
     Retention {
@@ -67,7 +69,7 @@ pub enum StreamConfigMismatch {
 /// A single divergent field between a required and an existing Key/Value
 /// bucket configuration.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum KvConfigMismatch {
+pub enum KvConfigMismatchError {
     /// The existing bucket's history depth does not match the requirement.
     #[error("bucket '{bucket}' history mismatch: expected {expected}, found {actual}")]
     History {
@@ -78,6 +80,106 @@ pub enum KvConfigMismatch {
         /// History depth found on the existing bucket.
         actual: i64,
     },
+}
+
+/// A validated JetStream duplicate-detection window.
+///
+/// This bounds how long the JetStream server retains its per-subject
+/// `Nats-Msg-Id` dedup table for duplicate detection, an operational
+/// capacity knob on stream provisioning rather than a delivery guarantee.
+/// NATS itself accepts a zero window (meaning "use the server's own
+/// default"), but a caller-configured window of zero silently drops that
+/// intent, so this type rejects it: callers who want the server default
+/// should not call [`apply_duplicate_window`] at all. A non-zero window
+/// below 100ms is rejected because the NATS server itself rejects it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DuplicateWindow(Duration);
+
+impl DuplicateWindow {
+    /// The smallest non-zero duplicate window the NATS server accepts.
+    pub const MINIMUM: Duration = Duration::from_millis(100);
+
+    /// Creates a duplicate window after rejecting zero and any non-zero
+    /// value below [`DuplicateWindow::MINIMUM`].
+    pub const fn try_new(value: Duration) -> Result<Self, InvalidDuplicateWindowError> {
+        if value.is_zero() {
+            return Err(InvalidDuplicateWindowError::Zero);
+        }
+        if value.as_nanos() < Self::MINIMUM.as_nanos() {
+            return Err(InvalidDuplicateWindowError::BelowMinimum {
+                value,
+                minimum: Self::MINIMUM,
+            });
+        }
+        Ok(Self(value))
+    }
+
+    /// Returns the window as a plain [`Duration`] for adapter APIs.
+    pub const fn as_duration(self) -> Duration {
+        self.0
+    }
+}
+
+impl TryFrom<Duration> for DuplicateWindow {
+    type Error = InvalidDuplicateWindowError;
+
+    fn try_from(value: Duration) -> Result<Self, Self::Error> {
+        Self::try_new(value)
+    }
+}
+
+impl From<DuplicateWindow> for Duration {
+    fn from(value: DuplicateWindow) -> Self {
+        value.as_duration()
+    }
+}
+
+/// Error returned when constructing an invalid [`DuplicateWindow`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum InvalidDuplicateWindowError {
+    /// The caller supplied a zero duplicate window.
+    #[error("duplicate window must be non-zero")]
+    Zero,
+    /// The caller supplied a non-zero duplicate window below what the NATS
+    /// server accepts.
+    #[error("duplicate window must be at least {minimum:?}, got {value:?}")]
+    BelowMinimum {
+        /// The rejected duplicate window.
+        value: Duration,
+        /// The smallest duplicate window the NATS server accepts.
+        minimum: Duration,
+    },
+}
+
+/// Error returned when a [`DuplicateWindow`] is wider than a stream's `max_age`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("duplicate window {duplicate_window:?} exceeds stream max age {max_age:?}")]
+pub struct DuplicateWindowExceedsMaxAgeError {
+    /// The duplicate window that was rejected.
+    pub duplicate_window: Duration,
+    /// The stream's configured `max_age`.
+    pub max_age: Duration,
+}
+
+/// Applies a validated duplicate detection window to a stream configuration.
+///
+/// JetStream rejects a `duplicate_window` wider than a non-zero `max_age`;
+/// this is checked here rather than left for the server to reject at create
+/// time, so the failure is typed and attributable to the specific field
+/// instead of an opaque create error.
+pub fn apply_duplicate_window(
+    mut config: jetstream::stream::Config,
+    duplicate_window: DuplicateWindow,
+) -> Result<jetstream::stream::Config, DuplicateWindowExceedsMaxAgeError> {
+    let duplicate_window = duplicate_window.as_duration();
+    if !config.max_age.is_zero() && duplicate_window.as_nanos() > config.max_age.as_nanos() {
+        return Err(DuplicateWindowExceedsMaxAgeError {
+            duplicate_window,
+            max_age: config.max_age,
+        });
+    }
+    config.duplicate_window = duplicate_window;
+    Ok(config)
 }
 
 /// Error returned by [`ensure_stream`].
@@ -103,7 +205,7 @@ pub enum EnsureStreamError {
     },
     /// The stream already existed with a configuration that diverges from the requirement.
     #[error(transparent)]
-    ConfigMismatch(#[from] StreamConfigMismatch),
+    ConfigMismatch(#[from] StreamConfigMismatchError),
 }
 
 /// Error returned by [`ensure_bucket`].
@@ -129,7 +231,7 @@ pub enum EnsureBucketError {
     },
     /// The bucket already existed with a configuration that diverges from the requirement.
     #[error(transparent)]
-    ConfigMismatch(#[from] KvConfigMismatch),
+    ConfigMismatch(#[from] KvConfigMismatchError),
 }
 
 /// Creates a JetStream stream, or opens it if it already exists.
@@ -209,38 +311,21 @@ pub async fn ensure_bucket(js: &jetstream::Context, config: kv::Config) -> Resul
     }
 }
 
-fn is_get_stream_not_found(error: &GetStreamError) -> bool {
-    matches!(
-        error.kind(),
-        GetStreamErrorKind::JetStream(ref source) if source.error_code() == ErrorCode::STREAM_NOT_FOUND
-    )
-}
-
-fn is_get_key_value_not_found(error: &KeyValueError) -> bool {
-    if error.kind() != KeyValueErrorKind::GetBucket {
-        return false;
-    }
-
-    std::error::Error::source(error)
-        .and_then(|source| source.downcast_ref::<GetStreamError>())
-        .is_some_and(is_get_stream_not_found)
-}
-
 fn validate_stream_config(
     name: &str,
     required: &jetstream::stream::Config,
     actual: &jetstream::stream::Info,
-) -> Result<(), StreamConfigMismatch> {
+) -> Result<(), StreamConfigMismatchError> {
     let actual = &actual.config;
     if actual.retention != required.retention {
-        return Err(StreamConfigMismatch::Retention {
+        return Err(StreamConfigMismatchError::Retention {
             stream: name.to_string(),
             expected: required.retention,
             actual: actual.retention,
         });
     }
     if actual.allow_atomic_publish != required.allow_atomic_publish {
-        return Err(StreamConfigMismatch::AllowAtomicPublish {
+        return Err(StreamConfigMismatchError::AllowAtomicPublish {
             stream: name.to_string(),
             expected: required.allow_atomic_publish,
             actual: actual.allow_atomic_publish,
@@ -248,7 +333,7 @@ fn validate_stream_config(
     }
     for subject in &required.subjects {
         if !actual.subjects.contains(subject) {
-            return Err(StreamConfigMismatch::MissingSubject {
+            return Err(StreamConfigMismatchError::MissingSubject {
                 stream: name.to_string(),
                 subject: subject.clone(),
             });
@@ -261,9 +346,9 @@ fn validate_kv_config(
     bucket: &str,
     required: &kv::Config,
     actual: &jetstream::stream::Config,
-) -> Result<(), KvConfigMismatch> {
+) -> Result<(), KvConfigMismatchError> {
     if actual.max_messages_per_subject != required.history {
-        return Err(KvConfigMismatch::History {
+        return Err(KvConfigMismatchError::History {
             bucket: bucket.to_string(),
             expected: required.history,
             actual: actual.max_messages_per_subject,

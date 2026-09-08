@@ -1,0 +1,12 @@
+package example:events-v1;
+
+interface messages {
+  record event-sample {
+    event-id: string,
+    sequence: s64,
+    payload: list<u8>,
+    tags: list<string>,
+    active: bool,
+    score: f64,
+  }
+}

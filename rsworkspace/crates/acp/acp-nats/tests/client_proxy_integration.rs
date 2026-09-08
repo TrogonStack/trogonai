@@ -6,7 +6,6 @@
 //! Run with:
 //!   cargo test -p acp-nats --test client_proxy_integration
 
-use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -149,14 +148,12 @@ fn make_bridge(
     )
     .with_operation_timeout(Duration::from_millis(500));
     let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
-    let (tx, _rx) = tokio::sync::mpsc::channel(1);
     Bridge::new(
         nats,
         js_client,
         SystemClock,
         &opentelemetry::global::meter("acp-nats-client-proxy-test"),
         config,
-        tx,
     )
 }
 
@@ -209,7 +206,7 @@ async fn fs_read_text_file_through_proxy_returns_file_content() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let client_rc = Rc::new(mock_client);
+            let client_rc = Arc::new(mock_client);
             let bridge_rc = Arc::new(bridge);
 
             tokio::task::spawn_local(async move {
@@ -244,7 +241,7 @@ async fn fs_write_text_file_through_proxy_returns_success() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let client_rc = Rc::new(mock_client);
+            let client_rc = Arc::new(mock_client);
             let bridge_rc = Arc::new(bridge);
 
             tokio::task::spawn_local(async move {
@@ -283,7 +280,7 @@ async fn request_permission_through_proxy_returns_outcome() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let client_rc = Rc::new(mock_client);
+            let client_rc = Arc::new(mock_client);
             let bridge_rc = Arc::new(bridge);
 
             tokio::task::spawn_local(async move {
@@ -348,7 +345,7 @@ async fn session_update_through_proxy_calls_client() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let client_rc = Rc::new(TrackingClient { called: called_clone });
+            let client_rc = Arc::new(TrackingClient { called: called_clone });
             let bridge_rc = Arc::new(bridge);
 
             tokio::task::spawn_local(async move {
@@ -390,7 +387,7 @@ async fn terminal_create_through_proxy_returns_terminal_id() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let client_rc = Rc::new(mock_client);
+            let client_rc = Arc::new(mock_client);
             let bridge_rc = Arc::new(bridge);
 
             tokio::task::spawn_local(async move {
@@ -429,7 +426,7 @@ async fn terminal_output_through_proxy_returns_success() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let client_rc = Rc::new(mock_client);
+            let client_rc = Arc::new(mock_client);
             let bridge_rc = Arc::new(bridge);
 
             tokio::task::spawn_local(async move {
@@ -464,7 +461,7 @@ async fn terminal_release_through_proxy_returns_success() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let client_rc = Rc::new(mock_client);
+            let client_rc = Arc::new(mock_client);
             let bridge_rc = Arc::new(bridge);
 
             tokio::task::spawn_local(async move {
@@ -499,7 +496,7 @@ async fn terminal_wait_for_exit_through_proxy_returns_exit_code() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let client_rc = Rc::new(mock_client);
+            let client_rc = Arc::new(mock_client);
             let bridge_rc = Arc::new(bridge);
 
             tokio::task::spawn_local(async move {
@@ -534,7 +531,7 @@ async fn ext_session_prompt_response_through_proxy_does_not_panic() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let client_rc = Rc::new(mock_client);
+            let client_rc = Arc::new(mock_client);
             let bridge_rc = Arc::new(bridge);
 
             tokio::task::spawn_local(async move {
@@ -573,7 +570,7 @@ async fn terminal_kill_through_proxy_returns_success() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let client_rc = Rc::new(mock_client);
+            let client_rc = Arc::new(mock_client);
             let bridge_rc = Arc::new(bridge);
 
             tokio::task::spawn_local(async move {

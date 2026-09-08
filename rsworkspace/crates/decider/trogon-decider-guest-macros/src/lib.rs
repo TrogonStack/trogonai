@@ -111,24 +111,19 @@ pub fn export_decider(input: TokenStream) -> TokenStream {
     let command_specs = commands.iter().map(|command| {
         let type_url = &command.type_url;
         let ty = &command.ty;
-        let write_precondition = match &command.write_precondition {
-            WritePreconditionSpec::Any => {
-                quote! { ::trogon_decider_guest_sdk::map_write_precondition(Some(::trogon_decider::WritePrecondition::Any)) }
-            }
-            WritePreconditionSpec::StreamExists => {
-                quote! { ::trogon_decider_guest_sdk::map_write_precondition(Some(::trogon_decider::WritePrecondition::StreamExists)) }
-            }
-            WritePreconditionSpec::NoStream => {
-                quote! { ::trogon_decider_guest_sdk::map_write_precondition(Some(::trogon_decider::WritePrecondition::NoStream)) }
-            }
-            WritePreconditionSpec::Default => {
-                quote! { ::trogon_decider_guest_sdk::map_write_precondition(<#ty as ::trogon_decider::Decider>::WRITE_PRECONDITION) }
-            }
-        };
         quote! {
             __trogon_decider_bindings::CommandSpec {
                 command_type: (#type_url).to_string(),
-                write_precondition: __trogon_decider_bindings::map_write_precondition_tag(#write_precondition),
+                write_precondition: __trogon_decider_bindings::map_write_precondition_tag(
+                    ::trogon_decider_guest_sdk::map_write_precondition(
+                        <#ty as ::trogon_decider::Decider>::WRITE_PRECONDITION,
+                    ),
+                ),
+                snapshot_policy: __trogon_decider_bindings::map_snapshot_policy_tag(
+                    ::trogon_decider_guest_sdk::map_snapshot_cadence(
+                        <#ty as ::trogon_decider::Decider>::SNAPSHOT_CADENCE,
+                    ),
+                ),
             }
         }
     });
@@ -231,11 +226,11 @@ pub fn export_decider(input: TokenStream) -> TokenStream {
 
             use ::trogon_decider_guest_sdk::{
                 AnyEnvelopeParts, AnyEnvelopeView, CommandEnvelopeView, DecideErrorView, DomainErrorParts,
-                WritePreconditionTag,
+                SnapshotPolicyTag, WritePreconditionTag,
             };
             pub use exports::trogon::decider::handler::{
                 AnyEnvelope, CommandEnvelope, CommandSpec, DecideError, DomainError, Guest, GuestSession,
-                ModuleDescriptor, WritePrecondition,
+                ModuleDescriptor, SnapshotPolicy, WritePrecondition,
             };
 
             impl From<DomainErrorParts> for DomainError {
@@ -287,14 +282,20 @@ pub fn export_decider(input: TokenStream) -> TokenStream {
                 }
             }
 
-            pub fn map_write_precondition_tag(
-                tag: Option<WritePreconditionTag>,
-            ) -> Option<WritePrecondition> {
-                tag.map(|value| match value {
-                    WritePreconditionTag::Any => WritePrecondition::Any,
-                    WritePreconditionTag::StreamExists => WritePrecondition::StreamExists,
+            pub fn map_write_precondition_tag(tag: WritePreconditionTag) -> WritePrecondition {
+                match tag {
+                    WritePreconditionTag::StreamUnchanged => WritePrecondition::StreamUnchanged,
                     WritePreconditionTag::NoStream => WritePrecondition::NoStream,
-                })
+                    WritePreconditionTag::StreamExists => WritePrecondition::StreamExists,
+                    WritePreconditionTag::Any => WritePrecondition::Any,
+                }
+            }
+
+            pub fn map_snapshot_policy_tag(tag: SnapshotPolicyTag) -> SnapshotPolicy {
+                match tag {
+                    SnapshotPolicyTag::NoSnapshot => SnapshotPolicy::NoSnapshot,
+                    SnapshotPolicyTag::Frequency(frequency) => SnapshotPolicy::Frequency(frequency),
+                }
             }
         }
 
@@ -378,9 +379,9 @@ pub fn export_decider(input: TokenStream) -> TokenStream {
             }
 
             fn snapshot(&self) -> Option<Vec<u8>> {
-                ::trogon_decider_guest_sdk::encode_current::<
+                Some(::trogon_decider_guest_sdk::encode_current::<
                     <#canonical_ty as ::trogon_decider::Decider>::State,
-                >(&self.state.borrow(), #state_schema_version)
+                >(&self.state.borrow(), #state_schema_version))
             }
         }
 
@@ -397,14 +398,6 @@ struct CommandSpec {
     module: syn::LitStr,
     version: syn::LitStr,
     state_schema_version: syn::Expr,
-    write_precondition: WritePreconditionSpec,
-}
-
-enum WritePreconditionSpec {
-    Default,
-    Any,
-    StreamExists,
-    NoStream,
 }
 
 impl syn::parse::Parse for CommandSpec {
@@ -417,7 +410,6 @@ impl syn::parse::Parse for CommandSpec {
         let mut module = None;
         let mut version = None;
         let mut state_schema_version = None;
-        let mut write_precondition = WritePreconditionSpec::Default;
 
         while !content.is_empty() {
             let key: syn::Ident = content.parse()?;
@@ -428,21 +420,6 @@ impl syn::parse::Parse for CommandSpec {
                 "module" => module = Some(content.parse()?),
                 "version" => version = Some(content.parse()?),
                 "state_schema_version" => state_schema_version = Some(content.parse()?),
-                "write_precondition" => {
-                    let value: syn::Ident = content.parse()?;
-                    write_precondition = match value.to_string().as_str() {
-                        "any" => WritePreconditionSpec::Any,
-                        "stream_exists" => WritePreconditionSpec::StreamExists,
-                        "no_stream" => WritePreconditionSpec::NoStream,
-                        "default" => WritePreconditionSpec::Default,
-                        other => {
-                            return Err(syn::Error::new(
-                                value.span(),
-                                format!("unknown write_precondition '{other}'"),
-                            ));
-                        }
-                    };
-                }
                 other => return Err(syn::Error::new(key.span(), format!("unknown field '{other}'"))),
             }
             if content.peek(Token![,]) {
@@ -458,7 +435,6 @@ impl syn::parse::Parse for CommandSpec {
             version: version.ok_or_else(|| syn::Error::new(input.span(), "missing version"))?,
             state_schema_version: state_schema_version
                 .ok_or_else(|| syn::Error::new(input.span(), "missing state_schema_version"))?,
-            write_precondition,
         })
     }
 }

@@ -1,0 +1,14 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "trogonai/session/sessions/v1alpha1/session_failed.proto";
+
+// FailSession seals a session as failed, recording [SessionFailed].
+//
+// Write precondition At: rejected if the session is already terminal.
+message FailSession {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  SessionFailureReason reason = 2 [features.field_presence = LEGACY_REQUIRED];
+  string detail = 3;
+}

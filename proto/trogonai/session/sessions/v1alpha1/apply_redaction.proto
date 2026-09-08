@@ -1,0 +1,17 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+// ApplyRedaction marks recorded events as redacted, recording
+// [RedactionApplied]. Redaction is a recorded fact about history, not a
+// rewrite of it (ADR#0035 facet 5).
+//
+// Write precondition At. The invariant that the targeted ids exist in this
+// session cannot be checked from folded state today: no event carries its own
+// envelope id into evolve, which ADR#0035 lists as an unmet substrate
+// obligation.
+message ApplyRedaction {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated string redacted_event_ids = 2;
+  string reason = 3;
+}

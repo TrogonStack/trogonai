@@ -1,0 +1,16 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+// StartToolCall records that execution began, recording [ToolCallStarted].
+//
+// Write precondition Any. This is the fact a crash strands: a started call with
+// no terminal outcome is exactly what replay must expose so reconciliation can
+// finish or reject it. A start whose tool_call_id matches no request folds as
+// unjoined and is flagged, never refused (ADR#0035 orphan happened-fact rule).
+message StartToolCall {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string tool_call_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string tool_execution_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  string turn_id = 4 [features.field_presence = LEGACY_REQUIRED];
+}

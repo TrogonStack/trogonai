@@ -284,7 +284,7 @@ fn ingress_audit_subject_rejects_overlong_segment() {
     let err = ingress_audit_subject("a2a", IngressAuditOutcome::Allow, &skill(&long)).expect_err("overlong must error");
     assert!(matches!(
         err,
-        IngressAuditSubjectError::InvalidSkillSegment(SubjectTokenViolation::TooLong(_))
+        IngressAuditSubjectError::InvalidSkillSegment(SubjectTokenViolationError::TooLong(_))
     ));
 }
 

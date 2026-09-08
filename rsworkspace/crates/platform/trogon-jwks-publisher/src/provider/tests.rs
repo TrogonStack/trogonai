@@ -182,7 +182,7 @@ fn mint_produces_header_and_claims_per_spec() {
     assert_eq!(claims.iss, "https://ap.example");
     assert_eq!(claims.sub, sub.as_str());
     assert_eq!(claims.dwk, DWK_AGENT);
-    assert_eq!(claims.cnf.jwk, test_agent_jwk());
+    assert_eq!(claims.cnf.jwk(), &test_agent_jwk());
     assert_eq!(claims.ps.as_deref(), Some("https://ps.example"));
     assert!(claims.exp > claims.iat);
     assert_eq!(claims.exp - claims.iat, 3600);
@@ -237,4 +237,27 @@ fn base64_decode(segment: &str) -> Vec<u8> {
     base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(segment)
         .expect("valid base64url")
+}
+
+#[test]
+fn mint_refuses_to_publish_private_key_material_in_cnf() {
+    // Passing the full keypair instead of its public half would sign the
+    // agent's private scalar into a token every resource server receives.
+    let key = AgentProviderKey::new(
+        test_encoding_key(),
+        KeyId::new("ap-key-1").expect("kid"),
+        ProviderIssuer::new("https://ap.example").expect("iss"),
+    );
+    let provider = AgentProvider::new(key);
+    let mut jwk = test_agent_jwk();
+    jwk["d"] = serde_json::json!("evZzL1gdAFr88hb2OF_2NxApJCzGCEDdfSp6VQO30hw");
+    let req = AgentTokenRequest {
+        sub: AgentIdentifier::new("aauth:assistant-v2@agent.example").expect("sub"),
+        agent_jwk: jwk,
+        ttl: TokenTtl::new(3600).expect("ttl"),
+        ps: None,
+    };
+
+    let err = provider.mint(req).expect_err("private key material refused");
+    assert!(matches!(err, ProviderError::Cnf(_)), "got {err:?}");
 }

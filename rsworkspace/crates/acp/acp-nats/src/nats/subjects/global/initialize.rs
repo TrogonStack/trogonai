@@ -12,7 +12,7 @@ impl InitializeSubject {
 
 impl std::fmt::Display for InitializeSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.agent.initialize", self.prefix.as_str())
+        write!(f, "{}.v1.global.agent.initialize", self.prefix.as_str())
     }
 }
 
@@ -33,6 +33,6 @@ mod tests {
     #[test]
     fn display_formats_subject_correctly() {
         let s = InitializeSubject::new(&prefix());
-        assert_eq!(s.to_string(), "acp.agent.initialize");
+        assert_eq!(s.to_string(), "acp.v1.global.agent.initialize");
     }
 }

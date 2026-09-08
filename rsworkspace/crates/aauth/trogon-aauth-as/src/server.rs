@@ -273,13 +273,13 @@ fn cnf_jwk_for(verified: &VerifiedRequest) -> serde_json::Value {
         .as_ref()
         .unwrap_or(&verified.agent_claims)
         .cnf
-        .jwk
+        .jwk()
         .clone()
 }
 
 /// CSPRNG-backed: this value keys the pending store and rides in the
 /// `Location` URL, so it must be neither guessable nor collision-prone
-/// under bursty issuance.
+/// under bursty issuance. Keep UUID v4 (not v7): security token, not correlation.
 fn fresh_pending_id() -> String {
     format!("as-{}", uuid::Uuid::new_v4().simple())
 }

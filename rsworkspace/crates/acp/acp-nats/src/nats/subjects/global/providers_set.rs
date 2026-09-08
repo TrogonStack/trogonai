@@ -12,7 +12,7 @@ impl ProvidersSetSubject {
 
 impl std::fmt::Display for ProvidersSetSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.agent.providers.set", self.prefix.as_str())
+        write!(f, "{}.v1.global.agent.providers.set", self.prefix.as_str())
     }
 }
 

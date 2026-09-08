@@ -85,7 +85,7 @@ fn valid_claims(agent_jwk: serde_json::Value) -> AuthClaims {
         consent_id: None,
         resource: None,
         act: None,
-        cnf: Some(Cnf { jwk: agent_jwk }),
+        cnf: Some(Cnf::public(agent_jwk).expect("test fixture is a public jwk")),
     }
 }
 

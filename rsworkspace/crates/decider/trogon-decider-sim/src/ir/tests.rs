@@ -60,3 +60,36 @@ fn to_sim_scenario_builds_without_running() {
 
     let _sim = scenario.to_sim_scenario();
 }
+
+#[test]
+fn to_sim_scenario_builds_a_trap_expectation_without_running() {
+    let mut scenario = ScenarioIr::new("trap scenario");
+    scenario.steps.push(ScenarioStep {
+        when: WireEnvelope::new("a", Vec::new()),
+        expect: ExpectedOutcome::Trap,
+    });
+
+    let _sim = scenario.to_sim_scenario();
+}
+
+#[test]
+fn new_scenario_has_no_budget_overrides() {
+    let scenario = ScenarioIr::new("no overrides");
+    assert!(scenario.budget.is_none());
+}
+
+#[test]
+fn budget_overrides_apply_only_layers_the_fields_that_are_set() {
+    let overrides = BudgetOverrides {
+        fuel_per_call: Some(1),
+        epoch_ticks_per_call: None,
+        max_memory_bytes: None,
+    };
+    let default = WasmEngineConfig::default();
+
+    let config = overrides.apply(default);
+
+    assert_eq!(config.fuel_per_call(), 1);
+    assert_eq!(config.epoch_ticks_per_call(), default.epoch_ticks_per_call());
+    assert_eq!(config.max_memory_bytes(), default.max_memory_bytes());
+}

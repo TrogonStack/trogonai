@@ -53,11 +53,14 @@ fn callee_is_key_value_new<'tcx>(cx: &LateContext<'tcx>, callee: &'tcx Expr<'tcx
     if cx.tcx.item_name(did).as_str() != "new" {
         return false;
     }
-    let self_ty = cx
-        .tcx
-        .type_of(cx.tcx.parent(did))
-        .instantiate_identity()
-        .peel_refs();
+    // Only an inherent or trait `impl` has a self type to ask for; a call that
+    // resolves to a trait's own associated fn (`Trait::new`) has a trait as its
+    // parent, and asking `type_of` for one is an ICE rather than a `None`.
+    let parent = cx.tcx.parent(did);
+    if !matches!(cx.tcx.def_kind(parent), DefKind::Impl { .. }) {
+        return false;
+    }
+    let self_ty = cx.tcx.type_of(parent).instantiate_identity().peel_refs();
     let ty::Adt(adt, _) = self_ty.kind() else {
         return false;
     };

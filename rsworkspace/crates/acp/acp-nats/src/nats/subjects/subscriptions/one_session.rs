@@ -16,7 +16,7 @@ impl OneSessionSubject {
 
 impl std::fmt::Display for OneSessionSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.session.{}.>", self.prefix.as_str(), self.session_id.as_str())
+        write!(f, "{}.v1.session.{}.>", self.prefix.as_str(), self.session_id.as_str())
     }
 }
 
@@ -47,7 +47,7 @@ mod tests {
     #[test]
     fn display_formats_subject_correctly() {
         let s = OneSessionSubject::new(&prefix(), &session_id());
-        assert_eq!(s.to_string(), "acp.session.ses1.>");
+        assert_eq!(s.to_string(), "acp.v1.session.ses1.>");
     }
 
     #[test]

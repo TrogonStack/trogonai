@@ -7,15 +7,24 @@ use std::num::NonZeroU64;
 /// has ever recorded when no snapshot exists, or every event recorded after
 /// the loaded snapshot's position. A misconfigured or forgotten snapshot
 /// policy then grows per-command latency without bound and goes unnoticed.
-/// Setting a [`ReplayLimit`] fails the command with a typed error once a
-/// stream read returns more events than the limit, before any folding
-/// happens. The check runs after the read, so it makes the misconfiguration
-/// fail loudly rather than bounding the read itself.
+/// Setting a [`ReplayLimit`] asks for a read of one more than the limit and
+/// fails the command with a typed error once that many events come back,
+/// before any folding happens.
 ///
-/// A discard-and-replay snapshot recovery is exempt: its full replay is a
-/// deliberate one-off that ends by overwriting the discarded snapshot, and
-/// failing it would leave the bad snapshot in place for every later command
-/// to trip over again.
+/// A discard-and-replay snapshot recovery is bounded by the same limit. Its
+/// full replay is otherwise a deliberate one-off that ends by overwriting
+/// the discarded snapshot, but a stream that has grown far beyond the
+/// configured limit still fails loudly instead of replaying without bound.
+///
+/// What the limit bounds depends on the store. The typed failure and the
+/// skipped fold hold for every [`StreamRead`](crate::StreamRead)
+/// implementation. The I/O and memory bound holds only for implementations
+/// that override
+/// [`StreamRead::read_stream_bounded`](crate::StreamRead::read_stream_bounded)
+/// with a genuinely capped fetch; a store still on the default fallback reads
+/// the whole stream first and only then discovers it exceeded the limit, so
+/// "a stream far past the limit is never read in full" is a property of the
+/// store, not of this type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ReplayLimit(NonZeroU64);
 

@@ -21,11 +21,11 @@ impl ReadFrom {
     /// Encapsulates the `+1` arithmetic that snapshot-resume requires when a
     /// snapshot records the position of its last applied event. The result
     /// remains inclusive `Position(p + 1)`, but callers see intent, not math.
-    pub fn after(position: StreamPosition) -> Result<Self, ReadAfterOverflow> {
+    pub fn after(position: StreamPosition) -> Result<Self, ReadAfterOverflowError> {
         let next = position
             .as_non_zero()
             .checked_add(1)
-            .ok_or(ReadAfterOverflow { position })?;
+            .ok_or(ReadAfterOverflowError { position })?;
         Ok(Self::Position(StreamPosition::new(next)))
     }
 }
@@ -33,7 +33,7 @@ impl ReadFrom {
 /// Error returned when `ReadFrom::after` would overflow `u64`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("cannot read after position {position}: u64 overflow")]
-pub struct ReadAfterOverflow {
+pub struct ReadAfterOverflowError {
     /// Position that could not be advanced.
     pub position: StreamPosition,
 }
@@ -74,4 +74,25 @@ pub trait StreamRead<StreamId: ?Sized>: Send + Sync {
         &self,
         request: ReadStreamRequest<'_, StreamId>,
     ) -> impl std::future::Future<Output = Result<ReadStreamResponse, Self::Error>> + Send;
+
+    /// Reads at most `max_events` events from the requested stream.
+    ///
+    /// Lets a caller that only needs to know whether a stream has more than
+    /// `max_events` events avoid paying for a full unbounded read. The
+    /// default implementation delegates to [`StreamRead::read_stream`], so
+    /// existing implementations keep compiling and behave exactly as before
+    /// until they opt into a real bound by overriding this method.
+    ///
+    /// `max_events` is therefore a request, not a guarantee: a caller cannot
+    /// assume the response holds at most `max_events` events, only that a
+    /// store which overrode this method stopped fetching there. Callers that
+    /// need the cap enforced must check the returned length themselves.
+    fn read_stream_bounded(
+        &self,
+        request: ReadStreamRequest<'_, StreamId>,
+        max_events: u64,
+    ) -> impl std::future::Future<Output = Result<ReadStreamResponse, Self::Error>> + Send {
+        let _ = max_events;
+        self.read_stream(request)
+    }
 }

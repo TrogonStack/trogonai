@@ -8,6 +8,7 @@
 
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
+mod constants;
 pub mod dispatch;
 pub mod io_loop;
 pub mod runtime;

@@ -121,8 +121,7 @@ fn claim_check_publisher_debug_formats() {
 
     let publisher = ClaimCheckPublisher::new(
         MockPublisher,
-        MockStore,
-        "claims".into(),
+        ClaimBucketBinding::for_test(MockStore, ClaimBucket::new("claims").expect("valid bucket name")),
         MaxPayload::from_server_limit(1_024),
     );
     let debug = format!("{publisher:?}");

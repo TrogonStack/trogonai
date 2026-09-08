@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 use super::*;
 use crate::snapshot::SnapshotPayloadData;
-use crate::{EventId, Headers, InvalidSnapshotTypeName, Snapshot, SnapshotTypeName};
+use crate::{EventId, Headers, InvalidSnapshotTypeNameError, Snapshot, SnapshotTypeName};
 
 fn position(value: u64) -> StreamPosition {
     StreamPosition::try_new(value).expect("test stream position must be non-zero")
@@ -57,7 +57,7 @@ impl SnapshotPayloadDecode for TestPayload {
 }
 
 impl SnapshotType for TestPayload {
-    type Error = InvalidSnapshotTypeName;
+    type Error = InvalidSnapshotTypeNameError;
 
     fn snapshot_type() -> Result<SnapshotTypeName, Self::Error> {
         SnapshotTypeName::new("test.memory.v1.Snapshot")
@@ -68,14 +68,14 @@ fn write_snapshot(
     store: &InMemoryStore,
     snapshot_id: &str,
     snapshot: Snapshot<TestPayload>,
-) -> Result<WriteSnapshotResponse, SnapshotEncodeError<serde_json::Error, InvalidSnapshotTypeName>> {
+) -> Result<WriteSnapshotResponse, SnapshotEncodeError<serde_json::Error, InvalidSnapshotTypeNameError>> {
     futures::executor::block_on(store.write_snapshot(WriteSnapshotRequest { snapshot_id, snapshot }))
 }
 
 fn read_snapshot(
     store: &InMemoryStore,
     snapshot_id: &str,
-) -> Result<ReadSnapshotResponse<TestPayload>, SnapshotDecodeError<serde_json::Error, InvalidSnapshotTypeName>> {
+) -> Result<ReadSnapshotResponse<TestPayload>, SnapshotDecodeError<serde_json::Error, InvalidSnapshotTypeNameError>> {
     futures::executor::block_on(store.read_snapshot(ReadSnapshotRequest { snapshot_id }))
 }
 
@@ -280,6 +280,29 @@ fn read_stream_filters_events_starting_at_the_requested_position() {
     assert_eq!(response.events.len(), 2);
     assert_eq!(response.events[0].stream_position, position(2));
     assert_eq!(response.events[1].stream_position, position(3));
+}
+
+#[test]
+fn read_stream_bounded_ignores_the_bound_for_a_store_that_does_not_override_it() {
+    let store = InMemoryStore::new();
+    append(
+        &store,
+        "orders/1",
+        StreamWritePrecondition::NoStream,
+        vec![event(1, b"one"), event(2, b"two"), event(3, b"three")],
+    )
+    .expect("append must succeed");
+
+    let response = futures::executor::block_on(store.read_stream_bounded(
+        ReadStreamRequest {
+            stream_id: "orders/1",
+            from: ReadFrom::Beginning,
+        },
+        1,
+    ))
+    .expect("read never fails");
+
+    assert_eq!(response.events.len(), 3, "max_events is a request, not a guarantee");
 }
 
 #[test]

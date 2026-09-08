@@ -1,0 +1,46 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+// TokenUsage is the token accounting recorded for one completed assistant
+// message; audit and budgeting input, never an identity or ordering input.
+message TokenUsage {
+  // Counters are intentionally not required: a provider may not report every
+  // class (e.g. cache tokens), and edition-2024 presence distinguishes an unset
+  // "not reported" counter from a reported 0.
+  uint64 input_tokens = 1;
+  uint64 output_tokens = 2;
+  uint64 cache_creation_tokens = 3;
+  uint64 cache_read_tokens = 4;
+  // Monetary cost of this usage, priced at generation time. Recorded as a fact so
+  // a deterministic cost projection folds recorded amounts and never re-reads a
+  // drifting price catalog. Unset when cost is not tracked.
+  Cost cost = 5;
+  // Whether these counters are the provider's final accounting for the message
+  // or a mid-generation reading. A partial reading exists so a turn that failed
+  // or was interrupted still accounts for what it consumed, but summing partial
+  // and final readings for the same message double-counts. Unset is read as
+  // final, which is what every counter recorded before this field meant.
+  UsageCompleteness completeness = 6;
+}
+
+// UsageCompleteness distinguishes a settled token accounting from a reading
+// taken while generation was still in flight.
+enum UsageCompleteness {
+  USAGE_COMPLETENESS_UNSPECIFIED = 0;
+  // The provider's final accounting for the message; safe to sum.
+  USAGE_COMPLETENESS_FINAL = 1;
+  // A reading taken before the message settled; superseded by any later final
+  // accounting for the same message and never summed with one.
+  USAGE_COMPLETENESS_PARTIAL = 2;
+}
+
+// Cost is a fixed-point monetary amount priced when the usage was recorded.
+message Cost {
+  // Amount in millionths of one currency unit (micros); avoids floating point.
+  int64 amount_micros = 1 [features.field_presence = LEGACY_REQUIRED];
+  // ISO 4217 currency code, for example "USD".
+  string currency_code = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Reference to the price catalog or rate version applied; empty when untracked.
+  string rate_ref = 3;
+}

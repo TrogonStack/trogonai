@@ -1,14 +1,14 @@
 //! NATS-safe A2A prefix value object.
 //!
 //! The prefix is embedded in every NATS subject the binding publishes:
-//! `{prefix}.agents.{agent_id}.message.send`, `{prefix}.tasks.{task_id}.events.{req_id}`, etc.
+//! `{prefix}.v1.agents.{agent_id}.message.send`, `{prefix}.v1.tasks.{task_id}.events`, etc.
 //! Validation follows [NATS subject naming](https://docs.nats.io/nats-concepts/subjects#characters-allowed-and-recommended-for-subject-names):
 //! rejects `*`, `>`, whitespace; allows dotted namespaces (e.g. `my.multi.part`) but rejects
 //! malformed dots (consecutive, leading, trailing). Max 128 bytes. Validity is guaranteed at
 //! construction.
 
 use trogon_nats::DottedNatsToken;
-use trogon_nats::SubjectTokenViolation;
+use trogon_nats::SubjectTokenViolationError;
 
 /// Error returned when [`A2aPrefix`] validation fails.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -21,12 +21,12 @@ pub enum A2aPrefixError {
     TooLong(usize),
 }
 
-impl From<SubjectTokenViolation> for A2aPrefixError {
-    fn from(violation: SubjectTokenViolation) -> Self {
+impl From<SubjectTokenViolationError> for A2aPrefixError {
+    fn from(violation: SubjectTokenViolationError) -> Self {
         match violation {
-            SubjectTokenViolation::Empty => Self::Empty,
-            SubjectTokenViolation::InvalidCharacter(ch) => Self::InvalidCharacter(ch),
-            SubjectTokenViolation::TooLong(len) => Self::TooLong(len),
+            SubjectTokenViolationError::Empty => Self::Empty,
+            SubjectTokenViolationError::InvalidCharacter(ch) => Self::InvalidCharacter(ch),
+            SubjectTokenViolationError::TooLong(len) => Self::TooLong(len),
         }
     }
 }

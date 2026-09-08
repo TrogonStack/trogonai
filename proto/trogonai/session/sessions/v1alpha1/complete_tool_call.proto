@@ -1,0 +1,41 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "google/protobuf/duration.proto";
+import "trogonai/session/sessions/v1alpha1/command_output_replay.proto";
+import "trogonai/session/sessions/v1alpha1/command_termination.proto";
+import "trogonai/session/sessions/v1alpha1/detached_work.proto";
+import "trogonai/session/sessions/v1alpha1/resource_access.proto";
+import "trogonai/session/sessions/v1alpha1/resource_observation.proto";
+import "trogonai/session/sessions/v1alpha1/target_outcome.proto";
+import "trogonai/session/sessions/v1alpha1/tool_call.proto";
+
+// CompleteToolCall settles a call with a result, recording [ToolCallCompleted].
+//
+// Write precondition Any: it races FailToolCall for the same execution, and the
+// fold resolves that by first-terminal-outcome-wins keyed on
+// tool_execution_id. A later conflicting outcome stays on the log, flagged by a
+// projection, and never changes state.
+message CompleteToolCall {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string tool_call_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string tool_execution_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  ToolCallResult result = 4 [features.field_presence = LEGACY_REQUIRED];
+  string turn_id = 5 [features.field_presence = LEGACY_REQUIRED];
+  CommandTermination termination = 6;
+  google.protobuf.Duration duration = 7;
+  repeated ResourceObservation observed = 8;
+  // Captured stdout and stderr, already sealed and stored as an artifact by the
+  // time this command is issued. The capture is not part of the decision: a
+  // decider that had to write 40 MB before it could append would be one whose
+  // append latency is set by the noisiest command that ever ran.
+  CommandOutputReplayRef output_replay = 9;
+  // Set when the call is settling with a handle rather than an outcome. The
+  // work it names must already be reserved in the operation ledger, so the
+  // completion never points at an operation that does not exist.
+  DetachedWork detached = 10;
+  repeated ResourceAccessRecord accessed = 11;
+  repeated TargetOutcome failed_targets = 12;
+  uint32 targets_attempted = 13;
+}

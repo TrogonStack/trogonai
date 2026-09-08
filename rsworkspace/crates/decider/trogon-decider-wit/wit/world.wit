@@ -1,6 +1,8 @@
-// 0.2.0: `domain-error` gained `details`, changing the record's ABI layout. Guest and host
-// bindings must be regenerated from the same WIT version; this is not wire-compatible with 0.1.0.
-package trogon:decider@0.2.0;
+// 0.3.0: `command-spec` gained a required `snapshot-policy` and its `write-precondition` lost the
+// `option<>` wrapper, so a module now declares both its concurrency guard and its snapshot cadence
+// rather than leaving either to the host. Guest and host bindings must be regenerated from the same
+// WIT version; this is not wire-compatible with 0.2.0.
+package trogon:decider@0.3.0;
 
 /// Contract every compiled Trogon decider component exports.
 interface handler {
@@ -30,22 +32,46 @@ interface handler {
     details: list<tuple<string, string>>,
   }
 
-  /// Optimistic concurrency precondition a command's emitted events must satisfy on append.
+  /// Concurrency guard a command's meaning requires when its emitted events are appended.
+  ///
+  /// Mirrors the guest-side `trogon-decider` enum of the same name. Every case is a predicate over
+  /// the stream's state at append time. A caller-supplied expected revision can strengthen the
+  /// declared guard host-side, but never weaken it.
   variant write-precondition {
-    /// Append without checking the stream's current position.
-    any,
+    /// Append only if the stream is still exactly as replay observed it. The host supplies the
+    /// observed position, which is why this case names the intent rather than a revision.
+    stream-unchanged,
+    /// Append only if the stream has no events, so the first of several concurrent writers wins.
+    no-stream,
     /// Append only if the stream already has at least one event.
     stream-exists,
-    /// Append only if the stream has no events.
-    no-stream,
+    /// Append regardless of the stream's current state. Only for commands whose events commute.
+    any,
   }
 
-  /// One command type a decider module handles, plus the write precondition it requires.
+  /// How often the host should persist a snapshot of the session's state for a command.
+  ///
+  /// Mirrors the host-side `SnapshotPolicy` implementations the native path selects through
+  /// `CommandSnapshotPolicy`, so a decider keeps one cadence across both execution paths.
+  variant snapshot-policy {
+    /// Never snapshot. The host does not call `session.snapshot` for this command.
+    no-snapshot,
+    /// Snapshot once at least this many events have been read or appended since the last one.
+    ///
+    /// Must be greater than zero; a host rejects the module at registration otherwise. A host may
+    /// also clamp the value up to a configured floor so a module cannot impose an arbitrary
+    /// snapshot-write rate on shared storage.
+    frequency(u64),
+  }
+
+  /// One command type a decider module handles, plus the policies its execution requires.
   record command-spec {
     /// Persistent command type name this spec covers.
     command-type: string,
-    /// Write precondition required for this command's events, or none for no constraint.
-    write-precondition: option<write-precondition>,
+    /// Concurrency guard this command's events require on append.
+    write-precondition: write-precondition,
+    /// Snapshot cadence the host applies after this command's events are appended.
+    snapshot-policy: snapshot-policy,
   }
 
   /// Static identity and command coverage of a compiled decider module, returned by `descriptor`.
@@ -88,7 +114,10 @@ interface handler {
     /// this, so hosts and guests must enforce it themselves.
     decide: func(command: command-envelope) -> result<list<any-envelope>, decide-error>;
 
-    /// Serializes the session's current state, or `none` if the module does not snapshot.
+    /// Serializes the session's current state, or `none` if the state is not snapshottable.
+    ///
+    /// Cadence is not decided here: the host calls this only when the command's
+    /// `snapshot-policy` says a snapshot is due.
     snapshot: func() -> option<list<u8>>;
   }
 }

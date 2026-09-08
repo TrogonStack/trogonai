@@ -1,0 +1,101 @@
+error: constructor `new` can panic, and its signature gives the caller no failure to handle
+  --> $DIR/fallible_new.rs:18:8
+   |
+LL |     fn new(raw: &str) -> Self {
+   |        ^^^
+   |
+note: `unwrap()` here ends the process instead of returning to the caller
+  --> $DIR/fallible_new.rs:20:38
+   |
+LL |             port: raw.parse::<u16>().unwrap(),
+   |                                      ^^^^^^
+   = help: return `Result<Self, _>` and propagate the failure with `?`, renaming the constructor to `try_new` (or `try_new_*`) when an infallible one stays beside it, or move the fallible work out to the caller
+   = note: if the panic is an invariant the caller cannot break, opt out at the site with `#[cfg_attr(dylint_lib = "trogon_lints", allow(fallible_new, reason = "..."))]`
+   = note: `#[deny(fallible_new)]` on by default
+
+error: constructor `new` can panic, and its signature gives the caller no failure to handle
+  --> $DIR/fallible_new.rs:27:8
+   |
+LL |     fn new(port: Option<u16>) -> Self {
+   |        ^^^
+   |
+note: `expect()` here ends the process instead of returning to the caller
+  --> $DIR/fallible_new.rs:29:24
+   |
+LL |             port: port.expect("port must be given"),
+   |                        ^^^^^^
+   = help: return `Result<Self, _>` and propagate the failure with `?`, renaming the constructor to `try_new` (or `try_new_*`) when an infallible one stays beside it, or move the fallible work out to the caller
+   = note: if the panic is an invariant the caller cannot break, opt out at the site with `#[cfg_attr(dylint_lib = "trogon_lints", allow(fallible_new, reason = "..."))]`
+
+error: constructor `new` can panic, and its signature gives the caller no failure to handle
+  --> $DIR/fallible_new.rs:36:8
+   |
+LL |     fn new(capacity: usize) -> Self {
+   |        ^^^
+   |
+note: `panic!` here ends the process instead of returning to the caller
+  --> $DIR/fallible_new.rs:38:13
+   |
+LL |             panic!("capacity must not be zero");
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = help: return `Result<Self, _>` and propagate the failure with `?`, renaming the constructor to `try_new` (or `try_new_*`) when an infallible one stays beside it, or move the fallible work out to the caller
+   = note: if the panic is an invariant the caller cannot break, opt out at the site with `#[cfg_attr(dylint_lib = "trogon_lints", allow(fallible_new, reason = "..."))]`
+
+error: constructor `new_from_pair` can panic, and its signature gives the caller no failure to handle
+  --> $DIR/fallible_new.rs:46:8
+   |
+LL |     fn new_from_pair(pair: (u16, u16)) -> Self {
+   |        ^^^^^^^^^^^^^
+   |
+note: `unreachable!` here ends the process instead of returning to the caller
+  --> $DIR/fallible_new.rs:48:23
+   |
+LL |             (0, _) => unreachable!("the first slot is never zero"),
+   |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = help: return `Result<Self, _>` and propagate the failure with `?`, renaming the constructor to `try_new` (or `try_new_*`) when an infallible one stays beside it, or move the fallible work out to the caller
+   = note: if the panic is an invariant the caller cannot break, opt out at the site with `#[cfg_attr(dylint_lib = "trogon_lints", allow(fallible_new, reason = "..."))]`
+
+error: constructor `new_with_capacity` can panic, and its signature gives the caller no failure to handle
+  --> $DIR/fallible_new.rs:56:8
+   |
+LL |     fn new_with_capacity(capacity: Option<usize>) -> Self {
+   |        ^^^^^^^^^^^^^^^^^
+   |
+note: `unwrap()` here ends the process instead of returning to the caller
+  --> $DIR/fallible_new.rs:58:48
+   |
+LL |             slots: Vec::with_capacity(capacity.unwrap()),
+   |                                                ^^^^^^
+   = help: return `Result<Self, _>` and propagate the failure with `?`, renaming the constructor to `try_new` (or `try_new_*`) when an infallible one stays beside it, or move the fallible work out to the caller
+   = note: if the panic is an invariant the caller cannot break, opt out at the site with `#[cfg_attr(dylint_lib = "trogon_lints", allow(fallible_new, reason = "..."))]`
+
+error: constructor `new_mapped` can panic, and its signature gives the caller no failure to handle
+  --> $DIR/fallible_new.rs:64:8
+   |
+LL |     fn new_mapped(raw: &str) -> Self {
+   |        ^^^^^^^^^^
+   |
+note: `unwrap()` here ends the process instead of returning to the caller
+  --> $DIR/fallible_new.rs:66:66
+   |
+LL |             slots: raw.split(',').map(|slot| slot.parse::<u16>().unwrap()).collect(),
+   |                                                                  ^^^^^^
+   = help: return `Result<Self, _>` and propagate the failure with `?`, renaming the constructor to `try_new` (or `try_new_*`) when an infallible one stays beside it, or move the fallible work out to the caller
+   = note: if the panic is an invariant the caller cannot break, opt out at the site with `#[cfg_attr(dylint_lib = "trogon_lints", allow(fallible_new, reason = "..."))]`
+
+error: constructor `new` can panic, and its signature gives the caller no failure to handle
+  --> $DIR/fallible_new.rs:149:14
+   |
+LL |     async fn new(raw: &str) -> Self {
+   |              ^^^
+   |
+note: `unwrap()` here ends the process instead of returning to the caller
+  --> $DIR/fallible_new.rs:151:38
+   |
+LL |             port: raw.parse::<u16>().unwrap(),
+   |                                      ^^^^^^
+   = help: return `Result<Self, _>` and propagate the failure with `?`, renaming the constructor to `try_new` (or `try_new_*`) when an infallible one stays beside it, or move the fallible work out to the caller
+   = note: if the panic is an invariant the caller cannot break, opt out at the site with `#[cfg_attr(dylint_lib = "trogon_lints", allow(fallible_new, reason = "..."))]`
+
+error: aborting due to 7 previous errors
+

@@ -112,3 +112,15 @@ fn from_bridge_mint_builds_api_key_claims() {
     assert_eq!(claims.connect_opts_auth_token(), Some("secret-key"));
     assert!(claims.connect_opts_jwt().is_none());
 }
+
+#[test]
+fn a_section_that_does_not_read_back_as_its_wire_type_names_itself() {
+    let err = decode_section::<ClientTLS>("client_tls", serde_json::Value::String("not a section".into())).unwrap_err();
+    assert!(matches!(
+        err,
+        AuthCalloutError::BridgeWireFormat {
+            section: "client_tls",
+            ..
+        }
+    ));
+}

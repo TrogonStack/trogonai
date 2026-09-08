@@ -87,7 +87,7 @@ async fn end_to_end_nats_pop_verifies() {
         "iat": now - 5,
         "exp": now + 600,
         "dwk": DWK_AGENT,
-        "cnf": Cnf { jwk: agent_jwk_val.clone() },
+        "cnf": Cnf::public(agent_jwk_val.clone()).expect("test fixture is a public jwk"),
     });
     let agent_jwt = encode(&header, &claims, &enc_key).expect("encode agent jwt");
 

@@ -5,6 +5,13 @@
 //! the current slice ships value objects + JSON-RPC codec + protocol constants.
 
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
+#![cfg_attr(
+    dylint_lib = "trogon_lints",
+    expect(
+        acyclic_modules,
+        reason = "a subject carries the JetStream stream configuration it is published under and the consumer definitions are typed with those subjects"
+    )
+)]
 
 pub mod a2a_prefix;
 pub mod agent_id;
@@ -22,6 +29,7 @@ pub mod nats;
 pub mod push;
 pub mod req_id;
 pub mod server;
+pub mod task_event;
 pub mod task_id;
 pub mod wire;
 
@@ -38,7 +46,8 @@ pub use gateway_ingress::{
     ingress_gateway_tier3_refused_response_bytes, ingress_invalid_request_response_bytes,
     resolve_gateway_ingress_subject,
 };
-pub use jsonrpc::{JsonRpcId, extract_request_id};
+pub use jsonrpc::extract_request_id;
+pub use jsonrpc_nats::{RequestId, ResponseId};
 pub use req_id::ReqId;
 pub use server::A2aMethod;
 pub use task_id::{A2aTaskId, TaskIdError};

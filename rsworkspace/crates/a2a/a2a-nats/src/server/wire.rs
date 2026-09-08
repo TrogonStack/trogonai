@@ -1,10 +1,9 @@
 //! Server-side JSON-RPC content-mode wire helpers for A2A over NATS.
 
 use async_nats::header::HeaderMap;
-use jsonrpc_nats::Encoded;
+use jsonrpc_nats::{Encoded, ResponseId};
 use trogon_nats::PublishClient;
 
-use crate::jsonrpc::JsonRpcId;
 use crate::wire::{WireError, encode_error, encode_success, response_id_from_request_headers};
 
 pub use crate::wire::{WireError as ServerWireError, decode_request_params as parse_request_params, is_notification};
@@ -47,7 +46,7 @@ pub fn encode_error_reply(
     encode_error(response_id_from_request_headers(request_headers), code, message, data)
 }
 
-pub fn request_id(headers: &HeaderMap) -> Option<JsonRpcId> {
+pub fn request_id(headers: &HeaderMap) -> Option<ResponseId> {
     crate::jsonrpc::extract_request_id(headers)
 }
 

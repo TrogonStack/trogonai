@@ -22,11 +22,10 @@ use agent_client_protocol::schema::v1::{
     InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
     LogoutRequest, LogoutResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
     ResumeSessionRequest, ResumeSessionResponse, SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory,
-    SessionConfigOptionValue, SessionConfigSelectOption, SessionId, SessionNotification, SetSessionConfigOptionRequest,
+    SessionConfigOptionValue, SessionConfigSelectOption, SessionId, SetSessionConfigOptionRequest,
     SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
 };
 use agent_client_protocol::{Error, ErrorCode, Result};
-use tokio::sync::mpsc;
 use tracing::warn;
 use trogon_acp_runner::{SessionNotifier, SessionStore};
 use trogon_cli::CrossRunnerSwitcher;
@@ -66,9 +65,6 @@ where
     js: J,
     clock: C,
     base_config: Config,
-    /// Shared with each pool `Bridge` so runner notifications reach the IDE channel
-    /// (remapped runner_sid → acp_sid by the loop in `main.rs`).
-    notification_sender: mpsc::Sender<SessionNotification>,
     /// Discovers which runner prefix owns a given model.
     registry: trogon_registry::Registry<R>,
     /// The embedded (Claude) runner's prefix. Models on this prefix stay on `inner`.
@@ -111,7 +107,6 @@ where
         clock: C,
         base_config: Config,
         registry: trogon_registry::Registry<R>,
-        notification_sender: mpsc::Sender<SessionNotification>,
         embedded_prefix: impl Into<String>,
     ) -> Self {
         Self {
@@ -121,7 +116,6 @@ where
             js,
             clock,
             base_config,
-            notification_sender,
             registry,
             embedded_prefix: embedded_prefix.into(),
             runner_bridges: Arc::new(Mutex::new(HashMap::new())),
@@ -162,7 +156,6 @@ where
             self.clock.clone(),
             &meter,
             config,
-            self.notification_sender.clone(),
         ));
         self.runner_bridges
             .lock()
@@ -928,6 +921,7 @@ where
 mod tests {
     use super::*;
     use acp_nats::{AcpPrefix, Bridge, Config, NatsAuth, NatsConfig};
+    use agent_client_protocol::schema::v1::SessionNotification;
     use tokio::sync::{RwLock, mpsc};
     use trogon_acp_runner::{
         SessionState, session_notifier::mock::MockSessionNotifier, session_store::mock::MemorySessionStore,
@@ -1024,28 +1018,17 @@ mod tests {
             SystemClock,
             &opentelemetry::global::meter("multi-runner-test"),
             config.clone(),
-            notif_tx.clone(),
         );
         let inner = crate::agent::TrogonAcpAgent::new(
             bridge,
             store.clone(),
             notifier,
             EMBEDDED_PREFIX,
-            notif_tx.clone(),
+            notif_tx,
             "claude-opus-4-6",
             gateway_config,
         );
-        MultiRunnerAgent::new(
-            inner,
-            store,
-            nats,
-            js,
-            SystemClock,
-            config,
-            registry,
-            notif_tx,
-            EMBEDDED_PREFIX,
-        )
+        MultiRunnerAgent::new(inner, store, nats, js, SystemClock, config, registry, EMBEDDED_PREFIX)
     }
 
     fn make_agent() -> (TestAgent, AdvancedMockNatsClient, MemorySessionStore) {
@@ -1769,28 +1752,17 @@ mod tests {
                 SystemClock,
                 &opentelemetry::global::meter("multi-runner-integration-test"),
                 config.clone(),
-                notif_tx.clone(),
             );
             let inner = crate::agent::TrogonAcpAgent::new(
                 bridge,
                 store.clone(),
                 notifier,
                 EMBEDDED,
-                notif_tx.clone(),
+                notif_tx,
                 "claude-opus-4-6",
                 gateway_config,
             );
-            MultiRunnerAgent::new(
-                inner,
-                store,
-                nats,
-                js_client,
-                SystemClock,
-                config,
-                registry,
-                notif_tx,
-                EMBEDDED,
-            )
+            MultiRunnerAgent::new(inner, store, nats, js_client, SystemClock, config, registry, EMBEDDED)
         }
 
         async fn register_model(

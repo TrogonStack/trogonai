@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 use tower::ServiceExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use trogon_nats::jetstream::StreamMaxAge;
+use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore,
 };
@@ -23,8 +24,7 @@ const TEST_SECRET: &str = "test-secret";
 fn wrap_publisher(publisher: MockJetStreamPublisher) -> ClaimCheckPublisher<MockJetStreamPublisher, MockObjectStore> {
     ClaimCheckPublisher::new(
         publisher,
-        MockObjectStore::new(),
-        "test-bucket".to_string(),
+        ClaimBucketBinding::for_test(MockObjectStore::new(), ClaimBucket::default()),
         MaxPayload::from_server_limit(usize::MAX),
     )
 }
@@ -353,8 +353,7 @@ async fn publish_ack_failure_returns_internal_server_error() {
     let state = AppState {
         publisher: ClaimCheckPublisher::new(
             publisher,
-            MockObjectStore::new(),
-            "test-bucket".to_string(),
+            ClaimBucketBinding::for_test(MockObjectStore::new(), ClaimBucket::default()),
             MaxPayload::from_server_limit(usize::MAX),
         ),
         consumer_secret: TwitterConsumerSecret::new(TEST_SECRET).unwrap(),
@@ -386,8 +385,7 @@ async fn unroutable_publish_ack_failure_returns_internal_server_error() {
     let state = AppState {
         publisher: ClaimCheckPublisher::new(
             publisher,
-            MockObjectStore::new(),
-            "test-bucket".to_string(),
+            ClaimBucketBinding::for_test(MockObjectStore::new(), ClaimBucket::default()),
             MaxPayload::from_server_limit(usize::MAX),
         ),
         consumer_secret: TwitterConsumerSecret::new(TEST_SECRET).unwrap(),

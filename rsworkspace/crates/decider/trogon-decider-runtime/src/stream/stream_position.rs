@@ -43,16 +43,16 @@ impl StreamPosition {
     }
 
     /// Creates a stream position after rejecting zero.
-    pub const fn try_new(value: u64) -> Result<Self, InvalidStreamPosition> {
+    pub const fn try_new(value: u64) -> Result<Self, InvalidStreamPositionError> {
         match NonZeroU64::new(value) {
             Some(value) => Ok(Self(value)),
-            None => Err(InvalidStreamPosition { value }),
+            None => Err(InvalidStreamPositionError { value }),
         }
     }
 }
 
 impl TryFrom<u64> for StreamPosition {
-    type Error = InvalidStreamPosition;
+    type Error = InvalidStreamPositionError;
 
     fn try_from(value: u64) -> Result<Self, Self::Error> {
         Self::try_new(value)
@@ -74,11 +74,11 @@ impl std::fmt::Display for StreamPosition {
 /// Error returned when constructing an invalid [`StreamPosition`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("stream position must be greater than zero, got {value}")]
-pub struct InvalidStreamPosition {
+pub struct InvalidStreamPositionError {
     value: u64,
 }
 
-impl InvalidStreamPosition {
+impl InvalidStreamPositionError {
     /// Returns the rejected position value.
     pub const fn value(self) -> u64 {
         self.value

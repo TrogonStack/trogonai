@@ -177,7 +177,7 @@ fn invalid_confirmation_key_unsupported_alg_surfaces() {
     let err = verify_signature_with_jwk(&jwk, b"base", "sig").unwrap_err();
     assert!(matches!(
         err,
-        NatsPopError::InvalidConfirmationKey(InvalidConfirmationKey::UnsupportedAlgorithm)
+        NatsPopError::InvalidConfirmationKey(InvalidConfirmationKeyError::UnsupportedAlgorithm)
     ));
 }
 
@@ -188,7 +188,7 @@ fn invalid_confirmation_key_bad_shape_surfaces_deserialize_source() {
     let err = verify_signature_with_jwk(&jwk, b"base", "sig").unwrap_err();
     assert!(matches!(
         err,
-        NatsPopError::InvalidConfirmationKey(InvalidConfirmationKey::Deserialize(_))
+        NatsPopError::InvalidConfirmationKey(InvalidConfirmationKeyError::Deserialize(_))
     ));
 }
 

@@ -1,5 +1,14 @@
 version: v2
 clean: true
+# Packages still under active design are excluded from codegen so their shape
+# can churn without dragging the Rust workspace along. They stay in the module,
+# so `buf format`, `buf lint`, `buf build`, and `buf breaking` still cover them.
+# Removing a path here is what promotes a package into the generated crate.
+inputs:
+  - directory: .
+    exclude_paths:
+      - proto/trogonai/session
+      - proto/trogonai/usage
 plugins:
   - local: protoc-gen-buffa
     out: rsworkspace/crates/platform/trogonai-proto/src/gen

@@ -1,8 +1,7 @@
 use async_nats::header::HeaderMap;
-use jsonrpc_nats::encode;
+use jsonrpc_nats::{ResponseId, encode};
 
 use super::*;
-use crate::jsonrpc::JsonRpcId;
 use crate::wire::{
     decode_request_params, encode_error, encode_success, is_notification, response_id_from_request_headers,
 };
@@ -39,7 +38,7 @@ fn encode_success_reply_sets_result_body_only() {
     )
     .unwrap();
     let body: serde_json::Value = serde_json::from_slice(&encoded.body).unwrap();
-    assert_eq!(body["ok"], true);
+    assert_eq!(body["result"]["ok"], true);
     assert!(encoded.headers.get(jsonrpc_nats::HEADER_ERROR_CODE).is_none());
 }
 
@@ -58,7 +57,7 @@ fn encode_error_reply_sets_error_code_header() {
 fn optional_id_states_decode_from_headers() {
     let mut headers = HeaderMap::new();
     headers.insert(jsonrpc_nats::HEADER_ID, "null");
-    assert_eq!(crate::jsonrpc::extract_request_id(&headers), Some(JsonRpcId::Null));
+    assert_eq!(crate::jsonrpc::extract_request_id(&headers), Some(ResponseId::Null));
 }
 
 #[test]
@@ -74,7 +73,7 @@ fn encode_success_reply_with_no_id_header_produces_null_id() {
     let headers = HeaderMap::new();
     let encoded = encode_success_reply(&headers, &serde_json::json!({"result": true})).unwrap();
     let body: serde_json::Value = serde_json::from_slice(&encoded.body).unwrap();
-    assert_eq!(body["result"], true);
+    assert_eq!(body["result"]["result"], true);
 }
 
 #[test]
@@ -97,5 +96,5 @@ fn request_id_returns_none_when_header_absent() {
 fn request_id_returns_some_when_header_present() {
     let mut headers = HeaderMap::new();
     headers.insert(jsonrpc_nats::HEADER_ID, "5");
-    assert_eq!(request_id(&headers), Some(JsonRpcId::Number(5)));
+    assert_eq!(request_id(&headers), Some(ResponseId::Number(5)));
 }

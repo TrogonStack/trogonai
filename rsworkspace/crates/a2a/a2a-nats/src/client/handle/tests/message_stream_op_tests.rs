@@ -50,7 +50,7 @@ fn bootstrap_response(task_id: &str) -> (async_nats::HeaderMap, Bytes) {
 async fn message_stream_targets_agent_subject_by_default() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = bootstrap_response("t-1");
-    nats.set_response_wire("a2a.agents.test-agent.message.stream", headers, body);
+    nats.set_response_wire("a2a.v1.agents.test-agent.message.stream", headers, body);
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, _tx) = MockJetStreamConsumer::new();
     js.add_consumer(consumer);
@@ -63,7 +63,7 @@ async fn message_stream_targets_agent_subject_by_default() {
 async fn message_stream_targets_gateway_subject_under_gateway_routing() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = bootstrap_response("t-gw");
-    nats.set_response_wire("a2a.gateway.test-agent.message.stream", headers, body);
+    nats.set_response_wire("a2a.v1.gateway.test-agent.message.stream", headers, body);
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, _tx) = MockJetStreamConsumer::new();
     js.add_consumer(consumer);

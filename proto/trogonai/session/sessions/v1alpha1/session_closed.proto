@@ -1,0 +1,19 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "trogonai/session/sessions/v1alpha1/artifact.proto";
+
+// SessionClosed is the normal-completion terminal marker for a session. It is an
+// invariant-bearing transition (WRITE_PRECONDITION = At); a second close is
+// rejected (ADR#0035 facet 2). A delegating parent's durable receipt of this
+// session's result is not this event but the delegation operation's own
+// OperationOutcomeRecorded on the parent stream, written by the reconciler;
+// the At guard plus one-terminal-outcome-per-operation makes redelivery
+// idempotent (D6).
+message SessionClosed {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Claim-check to the session's final output; unset when the session produced
+  // none.
+  ArtifactRef result_ref = 2;
+}

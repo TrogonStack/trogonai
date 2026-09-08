@@ -36,7 +36,7 @@ pub fn headers_with_trace_context() -> HeaderMap {
 
 pub fn build_request_headers() -> HeaderMap {
     let mut headers = headers_with_trace_context();
-    headers.insert(REQ_ID_HEADER, uuid::Uuid::new_v4().to_string().as_str());
+    headers.insert(REQ_ID_HEADER, uuid::Uuid::now_v7().to_string().as_str());
     headers
 }
 

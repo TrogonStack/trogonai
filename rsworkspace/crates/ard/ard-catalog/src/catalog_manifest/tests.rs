@@ -3,7 +3,8 @@ use serde_json::json;
 use crate::catalog_entry_wire::CatalogEntryWire;
 use crate::catalog_host_wire::CatalogHostWire;
 use crate::catalog_manifest::CatalogManifest;
-use crate::catalog_manifest_wire::{CatalogManifestWire, CatalogManifestWireError, SPEC_VERSION};
+use crate::catalog_manifest_wire::{CatalogManifestWire, CatalogManifestWireError};
+use crate::constants::SPEC_VERSION;
 
 fn sample_entry_wire() -> CatalogEntryWire {
     CatalogEntryWire {

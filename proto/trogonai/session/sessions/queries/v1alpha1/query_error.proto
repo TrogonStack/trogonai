@@ -1,0 +1,169 @@
+edition = "2024";
+
+package trogonai.session.sessions.queries.v1alpha1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/session/sessions/queries/v1alpha1/contract_version.proto";
+import "trogonai/session/sessions/queries/v1alpha1/projection_freshness.proto";
+
+// QueryError is the typed failure payload for every Session query.
+//
+// It is not carried inside a success response. A query either answers or
+// fails, and collapsing the two into one message invites a caller to read a
+// zero-valued success shape as an empty result. On the JSON-RPC-over-NATS
+// binding (ADR#0056) this rides in the error object's `data`; the numeric code
+// assignment is a separate reservation and is deliberately not invented here.
+//
+// `code` is the machine-readable discriminant and the only field a caller
+// should branch on. `message` is for humans and may change at any time without
+// a version bump, so treating it as an API is a bug.
+message QueryError {
+  QueryErrorCode code = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Human-readable, non-contractual, safe to log. Never parse it.
+  string message = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Machine-readable specifics for the codes that have them. A caller must
+  // tolerate an unset detail: a code may gain one additively, and an older
+  // caller will not decode a variant added after its minor.
+  oneof detail {
+    UnsupportedContractVersionDetail unsupported_contract_version = 3;
+    StaleCursorDetail stale_cursor = 4;
+    ProjectionUnavailableDetail projection_unavailable = 5;
+    InvalidArgumentDetail invalid_argument = 6;
+  }
+}
+
+// QueryErrorCode is the closed set of reasons a Session query fails.
+//
+// A caller that receives an unknown value here has reached a server newer than
+// its contract minor and must treat it as a non-retryable failure, not as
+// success and not as an unconditional retry.
+enum QueryErrorCode {
+  QUERY_ERROR_CODE_UNSPECIFIED = 0;
+  // The session id resolves to no stream. Distinct from an existing session the
+  // caller may not see, which is QUERY_ERROR_CODE_PERMISSION_DENIED, so that
+  // probing cannot use the difference to prove existence.
+  QUERY_ERROR_CODE_SESSION_NOT_FOUND = 1;
+  // The caller's declared major is one this server cannot render. Fail closed:
+  // answering in an unreadable shape is worse than not answering.
+  QUERY_ERROR_CODE_UNSUPPORTED_CONTRACT_VERSION = 2;
+  // The request is malformed: an unparsable id, a page size out of range, a
+  // filter combination with no meaning.
+  QUERY_ERROR_CODE_INVALID_ARGUMENT = 3;
+  // The page token was minted by this contract but no longer names a valid
+  // position. See CursorValidity for what a cursor binds to and
+  // StaleCursorReason for which binding broke. Restarting the scan is the fix.
+  QUERY_ERROR_CODE_STALE_CURSOR = 4;
+  // The page token was not minted by this contract, is corrupt, fails its MAC,
+  // or does not match the request it was presented with. Distinct from stale:
+  // stale means it was valid and the view moved, so a caller can restart the
+  // scan; malformed means the caller sent something this server never issued
+  // for this request, and retrying will not help.
+  QUERY_ERROR_CODE_MALFORMED_CURSOR = 5;
+  // The backing projection cannot serve the read as asked. Also how an
+  // unsatisfiable ReadConsistency is reported: a requirement the server could
+  // not meet is a failure, not a success carrying a flag.
+  QUERY_ERROR_CODE_PROJECTION_UNAVAILABLE = 6;
+  // The caller is not authorized for this session. Returned in place of
+  // NOT_FOUND when disclosing the difference would leak existence.
+  QUERY_ERROR_CODE_PERMISSION_DENIED = 7;
+  // The request is valid but too expensive to serve as asked, for example a
+  // page size above the configured admission limit.
+  QUERY_ERROR_CODE_RESOURCE_EXHAUSTED = 8;
+  // An unexpected server-side failure. Carries no detail on purpose.
+  QUERY_ERROR_CODE_INTERNAL = 9;
+}
+
+// UnsupportedContractVersionDetail tells the caller what it would have to
+// speak, so an incompatibility is actionable rather than merely reported.
+message UnsupportedContractVersionDetail {
+  ContractVersion requested = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Inclusive range of majors this server can render.
+  uint32 supported_major_min = 2 [features.field_presence = LEGACY_REQUIRED];
+  uint32 supported_major_max = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// StaleCursorDetail says why a previously valid cursor stopped being valid, so
+// a caller can tell a benign restart from a view that changed underneath it.
+message StaleCursorDetail {
+  StaleCursorReason reason = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// StaleCursorReason is what invalidated a cursor.
+enum StaleCursorReason {
+  STALE_CURSOR_REASON_UNSPECIFIED = 0;
+  // A rewind moved the effective history boundary the cursor was anchored to.
+  STALE_CURSOR_REASON_REWOUND = 1;
+  // A redaction or artifact erasure changed the prefix the cursor covered.
+  STALE_CURSOR_REASON_PRIVACY_CHANGED = 2;
+  // The projection the cursor was minted against was replaced or rebuilt.
+  STALE_CURSOR_REASON_PROJECTION_REPLACED = 3;
+  // The cursor was minted under a contract version this server no longer
+  // renders.
+  STALE_CURSOR_REASON_CONTRACT_CHANGED = 4;
+  // The cursor outlived the window a pinned scan is held open for. Nothing
+  // about the session changed; the scan simply took too long.
+  STALE_CURSOR_REASON_EXPIRED = 5;
+  // A compaction replaced a span the cursor was scanning. Reported separately
+  // from REWOUND because nothing was retracted: the same history is still
+  // there, summarized, and a caller may reasonably restart without treating it
+  // as loss.
+  STALE_CURSOR_REASON_COMPACTED = 6;
+}
+
+// ProjectionUnavailableDetail distinguishes "come back shortly" from "this is
+// broken", which a caller cannot guess from the code alone.
+message ProjectionUnavailableDetail {
+  ProjectionUnavailableReason reason = 1 [features.field_presence = LEGACY_REQUIRED];
+  // How current the projection was when it gave up. Present for REASON_LAGGING,
+  // where it is the difference between an actionable failure and a bare one: a
+  // caller that can see it reached the required position minus two can retry
+  // with a larger budget, while one that cannot see it can only guess.
+  ProjectionFreshness freshness = 2;
+  // How far along the rebuild is. Present for REASON_REBUILDING when the
+  // rebuilder can report it.
+  //
+  // Without this, "come back shortly" is a claim with no number attached, and a
+  // caller has to choose between polling a rebuild that will take four hours
+  // and giving up on one that will take four seconds. Absent means the
+  // rebuilder could not say, which is different from a rebuild that has made no
+  // progress.
+  RebuildProgress rebuild = 3;
+}
+
+// RebuildProgress is how far a projection rebuild has got.
+message RebuildProgress {
+  google.protobuf.Timestamp started_at = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Position the rebuild has applied through, in the same units the finished
+  // projection will report as its processed watermark.
+  uint64 processed_watermark = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Position the rebuild is working toward, as known when it started.
+  //
+  // Unset when the rebuilder does not know its own end, which is the honest
+  // answer for a rebuild over a stream that is still being written to. Reported
+  // as unset rather than as the current head, because a target that moves is a
+  // percentage that goes backwards.
+  uint64 target_watermark = 3;
+}
+
+// ProjectionUnavailableReason is why the read could not be served.
+enum ProjectionUnavailableReason {
+  PROJECTION_UNAVAILABLE_REASON_UNSPECIFIED = 0;
+  // A rebuild is in progress and no prior generation is readable; the read is
+  // expected to succeed later. A rebuild that keeps the prior generation
+  // readable is not this: it answers, with PROJECTION_CONDITION_LAGGING.
+  PROJECTION_UNAVAILABLE_REASON_REBUILDING = 1;
+  // The projection is present but failed its own validity checks.
+  PROJECTION_UNAVAILABLE_REASON_INVALID = 2;
+  // No projection exists for this scope yet.
+  PROJECTION_UNAVAILABLE_REASON_MISSING = 3;
+  // The projection is too far behind to satisfy the requested consistency.
+  PROJECTION_UNAVAILABLE_REASON_LAGGING = 4;
+}
+
+// InvalidArgumentDetail names the offending input. It carries a field path
+// rather than a rendered sentence so a caller can map the failure back to its
+// own request structure.
+message InvalidArgumentDetail {
+  // Dotted path into the request message, for example `page_size`.
+  string field_path = 1 [features.field_presence = LEGACY_REQUIRED];
+}

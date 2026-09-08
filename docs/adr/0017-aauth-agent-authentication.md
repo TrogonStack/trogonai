@@ -197,6 +197,30 @@ the tier-1 SpiceDB layer already uses. Optional tuning
 when unset, but an unparseable value is still a startup error rather than a
 silently-ignored default.
 
+### 7. Discovery mode accepts any HTTPS issuer unless an allowlist is pinned
+
+`iss` is read from an unverified JWT claim in order to locate the key that
+will verify it, so in discovery mode it is attacker-influenced input that
+drives an outbound fetch. `HttpJwksResolver` bounds the damage structurally:
+HTTPS only, DNS hosts only (IP literals and loopback names rejected outright
+as SSRF attempts), a request timeout, and a streamed response-size cap that
+holds even when `Content-Length` is absent or lies.
+
+What it does not do by default is bound *which* issuers may be resolved at
+all. `A2A_GATEWAY_AAUTH_JWKS_ALLOWED_ISSUERS` takes a comma-separated exact
+list (trailing slashes ignored) and rejects any other `iss` before a network
+call is made; when it is unset, any issuer that is HTTPS-reachable and serves
+a parseable well-known document can mint a token this gateway will
+successfully verify. That default is deliberate and follows from the draft's
+self-sovereign premise, that an agent needs no pre-registration, but it means
+**verification success carries no admission decision on its own**. The
+authority plane of [ADR#0037](./0037-agent-identity-governance.md) is what
+decides whether a verified-but-unknown agent may act, and a deployment that
+knows its federation partners should pin them here rather than rely on that
+plane alone. This variable is part of the fail-loud inventory above only in
+the sense that a malformed value is rejected; being unset is a valid,
+documented posture, not a misconfiguration.
+
 ## Consequences
 
 - Agents authenticate to the gateway with a self-sovereign, key-bound identity
@@ -219,11 +243,24 @@ silently-ignored default.
   alongside whatever auth token the Person Server issued.
 - `-32118` is now reserved on the JSON-RPC-over-NATS error surface for AAuth
   denials specifically; no other gateway error path may reuse it.
-- Replay protection today is `InMemoryReplayStore`, process-local. A
-  multi-node gateway deployment can have the same nonce accepted once per
-  node until a shared store (NATS [JetStream](../glossary/jetstream) KV, per the doc comment in
-  `trogon-aauth-person`) is wired in; single-node deployments are fully
-  protected, multi-node deployments are not yet.
+- Replay protection today is `InMemoryReplayStore`, process-local, and it is
+  the *only* `ReplayStore` implementation in the workspace. A multi-node
+  gateway deployment has the same nonce accepted once per node; single-node
+  deployments are fully protected, multi-node deployments are not. A shared
+  store (NATS [JetStream](../glossary/jetstream) KV keyed with a per-key TTL
+  is the intended backend) has not been built. `AAuthIngress` is generic over
+  `S: ReplayStore` and `ReplayError::Backend` is reserved for it, so adding
+  one is a construction change rather than a signature change.
+- Verification success is not admission. In discovery mode with no issuer
+  allowlist pinned (Decision 7), any HTTPS-reachable issuer can mint a token
+  that verifies. Deployments that rely on AAuth as an authorization boundary
+  rather than an authentication one are misreading it; that boundary is
+  [ADR#0037](./0037-agent-identity-governance.md)'s authority plane.
+- The three algorithms this ADR admits (ES256, ES384, EdDSA) are the whole
+  verifier allowlist, and none of them is RS256. Federating this platform's
+  identities *out* to an external OIDC-consuming IdP is therefore not
+  reachable from this surface; that boundary is
+  [ADR#0053](./0053-external-oidc-federation-surface.md).
 - JWKS resolution is env-selected between a static file (`StaticJwks`) and
   live `.well-known/{dwk}` discovery (`HttpJwksResolver`, HTTPS-only, size-
   and timeout-capped, wrapped in `CachedJwksResolver`). Static deployments

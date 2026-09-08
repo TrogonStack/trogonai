@@ -10,6 +10,13 @@ use ard_registry::{Registry, RegistryConfig, SourceUrl, router};
 use tokio::net::TcpListener;
 
 #[tokio::main]
+#[cfg_attr(
+    dylint_lib = "trogon_lints",
+    allow(
+        debug_remnants,
+        reason = "the bound address on stdout is this demo's contract with whatever started it and reads the port back"
+    )
+)]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
     let first = args.next();
@@ -34,12 +41,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// The host block of the demo manifest. A serialization failure lands as
+/// `Value::Null`, which the host wire type rejects as not-an-object.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DemoHost {
+    display_name: &'static str,
+}
+
 fn demo_manifest() -> Result<CatalogManifest, CatalogManifestWireError> {
+    let host = DemoHost {
+        display_name: "Trogon ARD Demo Registry",
+    };
     CatalogManifestWire {
         spec_version: SPEC_VERSION.to_owned(),
-        host: Some(CatalogHostWire(serde_json::json!({
-            "displayName": "Trogon ARD Demo Registry"
-        }))),
+        host: Some(CatalogHostWire(
+            serde_json::to_value(host).unwrap_or(serde_json::Value::Null),
+        )),
         entries: vec![
             CatalogEntryWire {
                 identifier: "urn:air:trogon.ai:mcp:weather".to_owned(),

@@ -11,15 +11,15 @@ fn pfx() -> A2aPrefix {
 #[test]
 fn message_send() {
     assert_eq!(
-        resolve_gateway_ingress_subject("a2a.gateway.bot.message.send", &pfx()).unwrap(),
-        "a2a.agents.bot.message.send"
+        resolve_gateway_ingress_subject("a2a.v1.gateway.bot.message.send", &pfx()).unwrap(),
+        "a2a.v1.agents.bot.message.send"
     );
 }
 
 #[test]
 fn legacy_two_segment_identity_area_rejected() {
     assert!(matches!(
-        resolve_gateway_ingress_subject("a2a.gateway.acme.bot.message.send", &pfx()),
+        resolve_gateway_ingress_subject("a2a.v1.gateway.acme.bot.message.send", &pfx()),
         Err(GatewayIngressError::UnknownMethodSuffix)
     ));
 }
@@ -27,8 +27,8 @@ fn legacy_two_segment_identity_area_rejected() {
 #[test]
 fn push_set_two_token_suffix() {
     assert_eq!(
-        resolve_gateway_ingress_subject("a2a.gateway.planner.push.set", &pfx()).unwrap(),
-        "a2a.agents.planner.push.set"
+        resolve_gateway_ingress_subject("a2a.v1.gateway.planner.push.set", &pfx()).unwrap(),
+        "a2a.v1.agents.planner.push.set"
     );
 }
 
@@ -36,8 +36,8 @@ fn push_set_two_token_suffix() {
 fn dotted_prefix() {
     let p = A2aPrefix::new("my.app").unwrap();
     assert_eq!(
-        resolve_gateway_ingress_subject("my.app.gateway.planner.tasks.get", &p).unwrap(),
-        "my.app.agents.planner.tasks.get"
+        resolve_gateway_ingress_subject("my.app.v1.gateway.planner.tasks.get", &p).unwrap(),
+        "my.app.v1.agents.planner.tasks.get"
     );
 }
 
@@ -52,7 +52,7 @@ fn wrong_prefix_returns_not_gateway() {
 #[test]
 fn invalid_agent_id_rejected_instead_of_silent_typo_subject() {
     assert!(matches!(
-        resolve_gateway_ingress_subject("a2a.gateway.bad*agent.message.send", &pfx()),
+        resolve_gateway_ingress_subject("a2a.v1.gateway.bad*agent.message.send", &pfx()),
         Err(GatewayIngressError::InvalidAgentId)
     ));
 }
@@ -60,7 +60,7 @@ fn invalid_agent_id_rejected_instead_of_silent_typo_subject() {
 #[test]
 fn too_many_segments_before_suffix_rejected() {
     assert!(matches!(
-        resolve_gateway_ingress_subject("a2a.gateway.t1.t2.bot.message.send", &pfx()),
+        resolve_gateway_ingress_subject("a2a.v1.gateway.t1.t2.bot.message.send", &pfx()),
         Err(GatewayIngressError::UnknownMethodSuffix)
     ));
 }
@@ -70,10 +70,10 @@ fn compose_then_resolve_round_trips() {
     let p = pfx();
     let aid = A2aAgentId::new("planner").unwrap();
     let g = compose_gateway_ingress_subject(&p, &aid, "message.send").unwrap();
-    assert_eq!(g, "a2a.gateway.planner.message.send");
+    assert_eq!(g, "a2a.v1.gateway.planner.message.send");
     assert_eq!(
         resolve_gateway_ingress_subject(&g, &p).unwrap(),
-        "a2a.agents.planner.message.send"
+        "a2a.v1.agents.planner.message.send"
     );
 }
 
@@ -81,27 +81,27 @@ fn compose_then_resolve_round_trips() {
 fn ingress_from_agent_subject_transform() {
     let p = pfx();
     assert_eq!(
-        gateway_ingress_subject_from_agent_subject("a2a.agents.planner.message.stream", &p).unwrap(),
-        "a2a.gateway.planner.message.stream"
+        gateway_ingress_subject_from_agent_subject("a2a.v1.agents.planner.message.stream", &p).unwrap(),
+        "a2a.v1.gateway.planner.message.stream"
     );
 }
 
 #[test]
 fn ingress_from_agent_wrong_leader_returns_none() {
-    assert!(gateway_ingress_subject_from_agent_subject("a2a.gateway.x.message.send", &pfx()).is_none());
+    assert!(gateway_ingress_subject_from_agent_subject("a2a.v1.gateway.x.message.send", &pfx()).is_none());
     assert!(gateway_ingress_subject_from_agent_subject("wrong.agent.x.message.send", &pfx()).is_none());
 }
 
 #[test]
 fn ingress_agent_method_matches_resolve_subject() {
     let p = pfx();
-    let subject = "a2a.gateway.planner.message.send";
+    let subject = "a2a.v1.gateway.planner.message.send";
     let (agent, method_dots) = gateway_ingress_agent_and_method_dots(subject, &p).unwrap();
     assert_eq!(agent.as_str(), "planner");
     assert_eq!(method_dots, "message.send");
     assert_eq!(
         resolve_gateway_ingress_subject(subject, &p).unwrap(),
-        "a2a.agents.planner.message.send"
+        "a2a.v1.agents.planner.message.send"
     );
 }
 
@@ -134,11 +134,11 @@ fn invalid_request_payload_produces_stable_jsonrpc_wrapper() {
 #[test]
 fn empty_rest_after_gateway_leader_is_bad_shape() {
     assert!(matches!(
-        resolve_gateway_ingress_subject("a2a.gateway.", &pfx()),
+        resolve_gateway_ingress_subject("a2a.v1.gateway.", &pfx()),
         Err(GatewayIngressError::BadSubjectShape)
     ));
     assert!(matches!(
-        gateway_ingress_agent_and_method_dots("a2a.gateway.", &pfx()),
+        gateway_ingress_agent_and_method_dots("a2a.v1.gateway.", &pfx()),
         Err(GatewayIngressError::BadSubjectShape)
     ));
 }
@@ -146,7 +146,7 @@ fn empty_rest_after_gateway_leader_is_bad_shape() {
 #[test]
 fn no_known_suffix_matches_returns_unknown_method() {
     assert!(matches!(
-        resolve_gateway_ingress_subject("a2a.gateway.bot.foo.bar", &pfx()),
+        resolve_gateway_ingress_subject("a2a.v1.gateway.bot.foo.bar", &pfx()),
         Err(GatewayIngressError::UnknownMethodSuffix)
     ));
 }
@@ -169,11 +169,11 @@ fn compose_rejects_unknown_method_suffix() {
 fn ingress_error_display_covers_every_variant() {
     assert_eq!(
         GatewayIngressError::NotGatewayIngress.to_string(),
-        "subject does not start with '{prefix}.gateway.' for the configured prefix"
+        "subject does not start with '{prefix}.v1.gateway.' for the configured prefix"
     );
     assert_eq!(
         GatewayIngressError::BadSubjectShape.to_string(),
-        "expected '{prefix}.gateway.{agent_id}.{method…}'"
+        "expected '{prefix}.v1.gateway.{agent_id}.{method…}'"
     );
     assert_eq!(
         GatewayIngressError::UnknownMethodSuffix.to_string(),
@@ -237,7 +237,7 @@ fn aauth_denied_response_bytes_emits_code_minus_32118() {
     let headers = HeaderMap::new();
     let bytes = ingress_gateway_aauth_denied_response_bytes(&headers, b"{}", "aauth required").unwrap();
     let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-    assert_eq!(value["message"], "aauth required");
+    assert_eq!(value["error"]["message"], "aauth required");
 
     let wire = ingress_error_response_wire(&headers, b"{}", -32_118, "aauth required", None).unwrap();
     assert_eq!(wire.body.as_ref(), bytes.as_ref());

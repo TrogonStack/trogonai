@@ -1,12 +1,12 @@
 use std::fmt;
 
-use trogon_std::{EmptySecret, SecretString};
+use trogon_std::{EmptySecretError, SecretString};
 
 #[derive(Clone)]
 pub struct NotionVerificationToken(SecretString);
 
 impl NotionVerificationToken {
-    pub fn new(value: impl AsRef<str>) -> Result<Self, EmptySecret> {
+    pub fn new(value: impl AsRef<str>) -> Result<Self, EmptySecretError> {
         SecretString::new(value).map(Self)
     }
 

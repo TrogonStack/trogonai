@@ -1,4 +1,4 @@
-//! Per-operation `{prefix}.agents.{agent_id}.{op}` subjects.
+//! Per-operation `{prefix}.v1.agents.{agent_id}.{op}` subjects.
 //!
 //! Each operation subject ships in its own dedicated PR so the wire contract
 //! is reviewed on its own. `tasks/*` and `push/*` operations land in

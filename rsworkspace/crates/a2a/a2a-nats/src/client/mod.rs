@@ -10,7 +10,10 @@ pub mod handle;
 pub mod resubscribe;
 pub mod streaming;
 pub mod unary;
+pub mod validated;
 pub mod wire;
 
 pub use error::ClientError;
 pub use handle::A2aClient;
+pub use unary::send_unary_validated;
+pub use validated::{ValidatedRpc, rewrite_response_id};

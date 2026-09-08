@@ -39,7 +39,7 @@ where
     let result = bridge
         .session_request::<CloseSessionRequest, CloseSessionResponse>(
             &subject,
-            SessionAgentMethod::Close.wire_method(),
+            SessionAgentMethod::Close.protocol_method(),
             &args,
             &session_id,
         )

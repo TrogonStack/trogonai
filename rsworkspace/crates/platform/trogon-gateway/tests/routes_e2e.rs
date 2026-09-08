@@ -23,7 +23,9 @@ use tower::ServiceExt as _;
 use trogon_gateway::source::github::config::{GitHubWebhookSecret, GithubConfig};
 use trogon_gateway::source::linear::config::{LinearConfig, LinearWebhookSecret};
 use trogon_nats::NatsToken;
-use trogon_nats::jetstream::{ClaimCheckPublisher, MaxPayload, NatsJetStreamClient, NatsObjectStore, StreamMaxAge};
+use trogon_nats::jetstream::{
+    ClaimBucket, ClaimBucketBinding, ClaimCheckPublisher, MaxPayload, NatsJetStreamClient, NatsObjectStore, StreamMaxAge,
+};
 use trogon_std::NonZeroDuration;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -126,8 +128,7 @@ async fn setup() -> TestFixture {
 
     let publisher = ClaimCheckPublisher::new(
         js_client,
-        object_store,
-        "test-claims".to_string(),
+        ClaimBucketBinding::for_test(object_store, ClaimBucket::new("test-claims").expect("valid bucket name")),
         MaxPayload::from_server_limit(1024 * 1024),
     );
 

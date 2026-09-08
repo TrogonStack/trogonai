@@ -1,0 +1,289 @@
+edition = "2024";
+
+package trogonai.session.sessions.queries.v1alpha1;
+
+import "google/protobuf/timestamp.proto";
+
+// Read-model value types for the Session query contract.
+//
+// These are redefined here rather than imported from the write side on purpose
+// (ADR#0035 facet 3). The write-side event and state types change whenever the
+// domain changes; a public read contract must be able to hold still across
+// those changes, and a shared type would forward every write-side edit straight
+// to every client.
+//
+// Every identifier here is opaque. A caller may compare ids for equality and
+// pass them back, and must not parse structure out of them.
+
+// SessionLifecycle is the coarse lifecycle state a reader sees.
+//
+// It is deliberately coarser than the write side's terminal markers: a reader
+// needs to know whether a session is still going, not which command sealed it.
+// The specific marker is available on `terminal_reason`.
+enum SessionLifecycle {
+  SESSION_LIFECYCLE_UNSPECIFIED = 0;
+  SESSION_LIFECYCLE_ACTIVE = 1;
+  SESSION_LIFECYCLE_TERMINAL = 2;
+}
+
+// TerminalReason is why a session ended, set only for a terminal session.
+enum TerminalReason {
+  TERMINAL_REASON_UNSPECIFIED = 0;
+  TERMINAL_REASON_CLOSED = 1;
+  TERMINAL_REASON_CANCELLED = 2;
+  TERMINAL_REASON_FAILED = 3;
+  TERMINAL_REASON_HIDDEN = 4;
+}
+
+// SessionSummary is the list-row shape: enough to render a picker, and no more.
+//
+// It deliberately excludes anything requiring a per-session fan-out to compute,
+// because a list query that costs one read per row stops being a list query.
+message SessionSummary {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  SessionLifecycle lifecycle = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Unset while the session is active.
+  TerminalReason terminal_reason = 3;
+  // Display name, resolved by the precedence on TitleSource. Always set: when
+  // there is nothing to show it holds a server-chosen fallback rather than an
+  // empty string, so a picker never has to invent one and two clients never
+  // invent different ones.
+  string title = 4 [features.field_presence = LEGACY_REQUIRED];
+  TitleSource title_source = 5 [features.field_presence = LEGACY_REQUIRED];
+  string workspace_id = 6 [features.field_presence = LEGACY_REQUIRED];
+  bool archived = 7 [features.field_presence = LEGACY_REQUIRED];
+  // Effective history length in SessionOrdinals, after rewind masking. A caller
+  // must not treat this as a count of decodable history items: redaction can
+  // mask an ordinal without removing it.
+  uint64 effective_length = 8 [features.field_presence = LEGACY_REQUIRED];
+  // Set when this session is a copy salvaged from a damaged one. On the list row
+  // and not only the detail view, because a picker that renders a salvaged
+  // session identically to an intact one is where the substitution actually
+  // happens: by the time a user opens it they have already decided it is theirs.
+  RecoveryProvenanceView recovery = 9;
+  // Short excerpt of the session's opening content. Always set, including when
+  // there is nothing to preview, because the reason there is nothing is itself
+  // what a caller needs in order to render the row honestly.
+  SessionPreview preview = 10 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// SessionPreview is the excerpt shown beneath a session's title.
+//
+// It is derived from effective history, which is what makes it a projection
+// concern rather than a stored string. Rewind masks ordinals, redaction removes
+// content from ordinals that remain, and either can take away the very message a
+// preview was cut from. A preview cached without regard for that is the case
+// where deliberately destroyed text reappears on a screen, which is a privacy
+// failure and not a staleness annoyance.
+//
+// Its validity therefore tracks `effective_history_revision` and
+// `privacy_revision`, the same two coordinates a presentation cache binds
+// against. A cached preview whose binding fails those two must be discarded, not
+// shown as merely older.
+message SessionPreview {
+  // The excerpt, truncated at a server-chosen bound. Empty for every
+  // availability other than SESSION_PREVIEW_AVAILABILITY_AVAILABLE.
+  string text = 1 [features.field_presence = LEGACY_REQUIRED];
+  SessionPreviewAvailability availability = 2 [features.field_presence = LEGACY_REQUIRED];
+  // True when the excerpt is shorter than the content it came from, so a
+  // renderer can mark the cut rather than presenting a fragment as a whole
+  // message.
+  bool truncated = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// SessionPreviewAvailability is why a preview is or is not there.
+//
+// Absence has several causes with different meanings, and collapsing them into
+// an empty string tells a user that a session is empty when it may only be one
+// they are not cleared to see, or one whose opening message was deliberately
+// removed.
+enum SessionPreviewAvailability {
+  SESSION_PREVIEW_AVAILABILITY_UNSPECIFIED = 0;
+  // An excerpt is present in `text`.
+  SESSION_PREVIEW_AVAILABILITY_AVAILABLE = 1;
+  // The session has no effective authored content to preview.
+  SESSION_PREVIEW_AVAILABILITY_EMPTY = 2;
+  // Content exists but is not text: an image-only or attachment-only opening.
+  SESSION_PREVIEW_AVAILABILITY_NON_TEXTUAL = 3;
+  // The content a preview would come from was redacted. Distinguished from empty
+  // because a session that was emptied on purpose is not a session that was
+  // never used, and a UI that says "no messages" about a redaction is lying
+  // about what happened.
+  SESSION_PREVIEW_AVAILABILITY_REDACTED = 4;
+  // The content exists and this caller may not see it. Per-caller, like
+  // ArtifactCompletenessView.hidden: two readers of the same session can get
+  // different answers, and the difference is authorization rather than content.
+  SESSION_PREVIEW_AVAILABILITY_WITHHELD = 5;
+}
+
+// RecoveryProvenanceView marks a session that was salvaged rather than lived.
+//
+// Unset is the ordinary case. When set, a reader must not present the session as
+// the source: it has a different id, its ordinals are its own, and a partial
+// recovery is missing content the original had.
+message RecoveryProvenanceView {
+  string source_session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  RecoveryCompletenessView completeness = 2 [features.field_presence = LEGACY_REQUIRED];
+  // How many source items the salvage could not carry. The enumeration is an
+  // operator-side record and is deliberately not on the read contract: a client
+  // needs to know the session is incomplete, not to render a damage report.
+  uint32 omitted_count = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// RecoveryCompletenessView is how much of the source a salvaged session carries.
+enum RecoveryCompletenessView {
+  RECOVERY_COMPLETENESS_VIEW_UNSPECIFIED = 0;
+  RECOVERY_COMPLETENESS_VIEW_COMPLETE = 1;
+  RECOVERY_COMPLETENESS_VIEW_PARTIAL = 2;
+}
+
+// TitleSource says where a rendered title came from, and by doing so fixes the
+// precedence that produced it.
+//
+// The projection resolves a title in one order, always: the latest effective
+// SessionRenamed if one survives, otherwise a title derived from the first
+// effective user message, otherwise a fallback. Publishing which rule fired is
+// what makes the result checkable, and it lets a client style a guess
+// differently from a name a human chose.
+//
+// The two sources invalidate differently, and that asymmetry is the reason this
+// field exists rather than a `title_is_explicit` bool. A derived title is a
+// function of effective history, so a rewind past the first user message or a
+// redaction of it changes the title. An explicit title is an authoritative fact
+// of its own and survives both. What it does not survive is being redacted
+// itself, and when that happens the resolution falls back down the same
+// precedence rather than keeping a name whose source no longer exists.
+enum TitleSource {
+  TITLE_SOURCE_UNSPECIFIED = 0;
+  // A human renamed the session, and that rename is still effective.
+  TITLE_SOURCE_EXPLICIT = 1;
+  // Derived from the first effective user message. Follows effective history:
+  // rewinding or redacting that message changes it.
+  TITLE_SOURCE_DERIVED = 2;
+  // Nothing to derive from: an empty or image-only session, or one whose
+  // openings are all masked. The server supplies the string.
+  TITLE_SOURCE_FALLBACK = 3;
+}
+
+// SessionView is the detail shape returned by GetSession.
+//
+// It reports lifecycle and shape, never the transcript. History is a separate,
+// paginated query because a session's history has no bound and a detail read
+// that inlines it has no bound either.
+message SessionView {
+  SessionSummary summary = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Set when this session was forked from another.
+  ForkOriginView fork_origin = 2;
+  // Set when this session was dispatched by a parent.
+  ParentView parent = 3;
+  // Sessions this one dispatched, parent side.
+  repeated DelegationView delegations = 4;
+  // True when at least one tool call has started with no terminal outcome, or
+  // at least one reserved operation is unsettled. This is the reader-visible
+  // form of "something needs reconciling"; a caller must not conclude a session
+  // is complete from a terminal lifecycle alone.
+  bool has_unreconciled_work = 5 [features.field_presence = LEGACY_REQUIRED];
+  // How much of this session's artifact content is still retrievable. Always
+  // set, including when everything is intact, so a caller never has to read an
+  // absent field as good news.
+  ArtifactCompletenessView artifacts = 6 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// ArtifactCompletenessView is how complete this session's artifact content is,
+// reported separately from its lifecycle.
+//
+// The two are independent and routinely disagree. A session can close having
+// done exactly what was asked and still be missing the output it produced,
+// because artifact bytes live outside the log and outlive nothing in
+// particular: they get erased under a retention policy, or under a deletion
+// request, or by a storage fault. A reader that infers retrievability from
+// TERMINAL_REASON_CLOSED will present an empty result as a successful one.
+//
+// This rollup counts only what the log itself establishes. Whether the bytes an
+// intact claim-check points to are actually there is a fact about an external
+// store, and learning it costs one probe per artifact, which is not something a
+// list or detail query can do and remain a query. That answer arrives through
+// `observed` when someone has gone and looked.
+message ArtifactCompletenessView {
+  // Artifacts recorded on this session's effective history. Rewind-masked and
+  // redacted ordinals contribute nothing, so this counts what the caller can
+  // see referenced rather than everything ever recorded.
+  uint32 recorded = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Recorded with durably stored bytes and no erasure since. This is the count
+  // the log supports; it is a claim about what was promised, not about what a
+  // store would return right now.
+  uint32 claimed_retrievable = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Destroyed on purpose, recorded by ArtifactErased. Counted apart from every
+  // other absence because it is the one that is working as intended.
+  uint32 erased = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Recorded as an external reference whose bytes were never durably stored.
+  // Nothing was lost; nothing was ever held.
+  uint32 external_only = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Referenced by this session and not readable by this caller. Per-caller, so
+  // two readers of the same session can see different totals, and the point of
+  // surfacing it is that the difference is authorization rather than damage.
+  uint32 hidden = 5 [features.field_presence = LEGACY_REQUIRED];
+  // Set only when the artifact store has actually been checked for this
+  // session. Unset means nobody has looked, which is not the same as nothing
+  // being wrong, and the field is absent rather than zeroed so the two cannot
+  // be confused.
+  ObservedIntegrityView observed = 6;
+}
+
+// ObservedIntegrityView is what a probe of the artifact store found, and when.
+//
+// These counts age. They describe a store at the instant it was read, and an
+// artifact can be lost the moment after; `observed_at` is here so a caller can
+// decide whether the answer is still worth acting on rather than treating a
+// stale all-clear as a current one.
+message ObservedIntegrityView {
+  // Claim-checks the store had no object for, with no erasure recorded. This is
+  // the count that means data was lost.
+  uint32 missing = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Objects present whose content does not match the digest on the log.
+  uint32 digest_mismatch = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Objects that could not be read at all, which makes no claim about whether
+  // they exist. Counted apart from `missing` because a transport or permissions
+  // fault reported as data loss sends an operator looking for a backup instead
+  // of a broken credential.
+  uint32 unreadable = 3 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp observed_at = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// ForkOriginView names the session this one branched from.
+message ForkOriginView {
+  string source_session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The source ordinal this session's inherited context ends at.
+  uint64 context_prefix_boundary = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// ParentView names the session that dispatched this one, and whether that
+// lineage still holds.
+message ParentView {
+  string parent_session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The parent ended and this session observed it.
+  bool parent_terminated = 2 [features.field_presence = LEGACY_REQUIRED];
+  // The parent rewound past the dispatch: the inherited context no longer
+  // exists, so this session's history is no longer grounded in the parent's.
+  bool history_invalidated = 3 [features.field_presence = LEGACY_REQUIRED];
+  // The lineage was explicitly released.
+  bool detached = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// DelegationView is one dispatched child or external delegate.
+message DelegationView {
+  string operation_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  DelegationKindView kind = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Set for DELEGATION_KIND_VIEW_CHILD_SESSION.
+  string child_session_id = 3;
+  // Set for DELEGATION_KIND_VIEW_EXTERNAL.
+  string delegate_reference = 4;
+  bool detached = 5 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// DelegationKindView is where delegated work runs.
+enum DelegationKindView {
+  DELEGATION_KIND_VIEW_UNSPECIFIED = 0;
+  DELEGATION_KIND_VIEW_CHILD_SESSION = 1;
+  DELEGATION_KIND_VIEW_EXTERNAL = 2;
+}

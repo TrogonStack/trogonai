@@ -1,6 +1,7 @@
 use super::*;
 use std::sync::{Arc, Mutex};
 use trogon_nats::jetstream::JetStreamPublisher;
+use trogon_std::log_capture::{CapturedEvents, LevelFilter};
 
 /// Captures (subject, headers, payload) and resolves the ack future with a
 /// canned PublishAck. `duplicate` controls whether the ack reports the
@@ -99,7 +100,7 @@ async fn dispatch_publishes_to_resolved_jetstream_subject() {
     dispatcher
         .dispatch(
             &task(),
-            &config("jetstream:a2a.push.bot.caller.t1", Some("cfg-1")),
+            &config("jetstream:a2a.v1.push.bot.caller.t1", Some("cfg-1")),
             DeliverySemantics::AtLeastOnce,
             TerminalPushTaskState::Completed,
             br#"{"ok":true}"#,
@@ -107,7 +108,7 @@ async fn dispatch_publishes_to_resolved_jetstream_subject() {
         .await
         .unwrap();
     let captured = js.captured.lock().unwrap();
-    assert_eq!(captured[0].0, "a2a.push.bot.caller.t1");
+    assert_eq!(captured[0].0, "a2a.v1.push.bot.caller.t1");
 }
 
 #[tokio::test]
@@ -117,7 +118,7 @@ async fn dispatch_stamps_nats_msg_id_under_exactly_once_semantics() {
     dispatcher
         .dispatch(
             &task(),
-            &config("jetstream:a2a.push.bot.caller.t1", Some("cfg-1")),
+            &config("jetstream:a2a.v1.push.bot.caller.t1", Some("cfg-1")),
             DeliverySemantics::ExactlyOnce {
                 idempotency_key_header: None,
             },
@@ -135,12 +136,15 @@ async fn dispatch_succeeds_when_jetstream_reports_duplicate_ack() {
     // Duplicate ack just means JetStream already accepted the same
     // Msg-Id — the dispatcher must treat it as success (the desired
     // dedup behaviour, not an error).
+    let events = CapturedEvents::new();
+    let guard = events.install(LevelFilter::TRACE);
+
     let js = RecordingJetStream::new().with_duplicate();
     let dispatcher = JetStreamPublishPushDispatcher::new(js);
     dispatcher
         .dispatch(
             &task(),
-            &config("jetstream:a2a.push.bot.caller.t1", Some("cfg-1")),
+            &config("jetstream:a2a.v1.push.bot.caller.t1", Some("cfg-1")),
             DeliverySemantics::ExactlyOnce {
                 idempotency_key_header: None,
             },
@@ -149,6 +153,15 @@ async fn dispatch_succeeds_when_jetstream_reports_duplicate_ack() {
         )
         .await
         .unwrap();
+
+    drop(guard);
+    let captured = events.events();
+    let message = "JetStream accepted duplicate Msg-Id terminal push ack";
+    let event = captured
+        .iter()
+        .find(|event| event.message() == Some(message))
+        .unwrap_or_else(|| panic!("expected the duplicate-ack event, got {captured:?}"));
+    assert_eq!(event.field("subject"), Some("a2a.v1.push.bot.caller.t1"));
 }
 
 #[tokio::test]
@@ -158,7 +171,7 @@ async fn dispatch_rejects_non_jetstream_target() {
     let err = dispatcher
         .dispatch(
             &task(),
-            &config("subject:a2a.push.bot.caller.t1", Some("cfg-1")),
+            &config("subject:a2a.v1.push.bot.caller.t1", Some("cfg-1")),
             DeliverySemantics::AtLeastOnce,
             TerminalPushTaskState::Completed,
             br#"{}"#,
@@ -175,7 +188,7 @@ async fn dispatch_returns_prep_error_when_exactly_once_lacks_config_id() {
     let err = dispatcher
         .dispatch(
             &task(),
-            &config("jetstream:a2a.push.bot.caller.t1", None),
+            &config("jetstream:a2a.v1.push.bot.caller.t1", None),
             DeliverySemantics::ExactlyOnce {
                 idempotency_key_header: None,
             },
@@ -194,7 +207,7 @@ async fn dispatch_surfaces_publish_error_after_budget_exhaustion() {
     let err = dispatcher
         .dispatch(
             &task(),
-            &config("jetstream:a2a.push.bot.caller.t1", Some("cfg-1")),
+            &config("jetstream:a2a.v1.push.bot.caller.t1", Some("cfg-1")),
             DeliverySemantics::AtLeastOnce,
             TerminalPushTaskState::Completed,
             br#"{}"#,
@@ -211,7 +224,7 @@ async fn dispatch_surfaces_ack_failure_after_budget_exhaustion() {
     let err = dispatcher
         .dispatch(
             &task(),
-            &config("jetstream:a2a.push.bot.caller.t1", Some("cfg-1")),
+            &config("jetstream:a2a.v1.push.bot.caller.t1", Some("cfg-1")),
             DeliverySemantics::AtLeastOnce,
             TerminalPushTaskState::Completed,
             br#"{}"#,

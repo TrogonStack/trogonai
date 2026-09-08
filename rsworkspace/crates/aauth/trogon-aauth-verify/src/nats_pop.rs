@@ -15,6 +15,7 @@ use jsonwebtoken::{
 use sha2::{Digest, Sha256};
 use trogon_identity_types::aauth::{NatsSignatureEnvelope, headers};
 
+use crate::constants::{MIN_REPLAY_TTL_SECS, NATS_SECURITY_HEADERS};
 use crate::jwks::JwksResolver;
 use crate::replay::{ReplayError, ReplayStore};
 use crate::time_source::TimeSource;
@@ -53,7 +54,7 @@ pub enum NatsPopError {
     /// `cnf.jwk` either failed to deserialize or named an algorithm the PoP
     /// verifier doesn't support.
     #[error("invalid cnf.jwk")]
-    InvalidConfirmationKey(#[source] InvalidConfirmationKey),
+    InvalidConfirmationKey(#[source] InvalidConfirmationKeyError),
     #[error("agent token: {0}")]
     Agent(#[from] TokenError),
     /// The PoP signature did not verify against `cnf.jwk` over the canonical
@@ -76,7 +77,7 @@ pub enum NatsPopError {
 /// Reason that the agent's `cnf.jwk` could not be used to verify the PoP
 /// signature.
 #[derive(Debug, thiserror::Error)]
-pub enum InvalidConfirmationKey {
+pub enum InvalidConfirmationKeyError {
     /// `cnf.jwk` did not deserialize into a JWK structure.
     #[error("cnf.jwk did not deserialize")]
     Deserialize(#[source] serde_json::Error),
@@ -99,31 +100,6 @@ pub struct NatsRequest<'a> {
     pub payload: &'a [u8],
     pub headers: NatsHeaders<'a>,
 }
-
-/// Floor for the replay-store TTL. The derived TTL is
-/// `max(MIN_REPLAY_TTL_SECS, max_skew_secs * 2)` so a zero-skew configuration
-/// still keeps nonce entries long enough to refuse the same signed request
-/// arriving twice — without this floor a `max_skew_secs = 0` deployment would
-/// install nonces with a zero-second TTL and lose replay protection on the
-/// next GC pass.
-const MIN_REPLAY_TTL_SECS: i64 = 60;
-
-/// Security-sensitive headers that drive PoP verification. If any appears more
-/// than once (case-insensitive) in a request, the verifier refuses rather
-/// than silently picking one value and letting the rest go unauthenticated.
-const SECURITY_HEADERS: &[&str] = &[
-    headers::NATS_TOKEN,
-    headers::NATS_SIG_INPUT,
-    headers::NATS_SIG,
-    headers::NATS_SIG_CREATED,
-    headers::NATS_SIG_NONCE,
-    headers::CONTENT_DIGEST,
-    // Not part of the PoP envelope, but verification reads one value while
-    // downstream consumers could read another -- the same smuggling shape
-    // the six envelope headers are guarded against.
-    headers::NATS_AUTH_TOKEN,
-    headers::MISSION,
-];
 
 /// Header view: pick the first value for a given case-insensitive name.
 pub struct NatsHeaders<'a> {
@@ -158,7 +134,7 @@ impl<'a> NatsHeaders<'a> {
     /// insensitive) found in this view, if any. Used by both the
     /// constructor and the verifier so the check is unconditional.
     fn ensure_no_duplicate_security_headers(&self) -> Result<(), NatsPopError> {
-        for &name in SECURITY_HEADERS {
+        for &name in NATS_SECURITY_HEADERS {
             let count = self.items.iter().filter(|(k, _)| k.eq_ignore_ascii_case(name)).count();
             if count > 1 {
                 return Err(NatsPopError::DuplicateHeader(name));
@@ -288,7 +264,7 @@ impl<R: JwksResolver, C: TimeSource, S: ReplayStore> NatsPopVerifier<R, C, S> {
         // and a later valid retry from the same agent is wrongly rejected as
         // a replay.
         let canonical = envelope.canonical_base(req.subject, req.reply, &verified_agent.jkt);
-        verify_signature_with_jwk(&verified_agent.claims.cnf.jwk, canonical.as_bytes(), sig)?;
+        verify_signature_with_jwk(verified_agent.claims.cnf.jwk(), canonical.as_bytes(), sig)?;
 
         // Replay protection only fires once the signature has authenticated
         // the request. Derive the TTL using saturating arithmetic and floor
@@ -317,19 +293,19 @@ pub fn content_digest_sha256(payload: &[u8]) -> String {
 
 fn verify_signature_with_jwk(jwk_val: &serde_json::Value, base: &[u8], sig_b64: &str) -> Result<(), NatsPopError> {
     let jwk: Jwk = serde_json::from_value(jwk_val.clone())
-        .map_err(|source| NatsPopError::InvalidConfirmationKey(InvalidConfirmationKey::Deserialize(source)))?;
+        .map_err(|source| NatsPopError::InvalidConfirmationKey(InvalidConfirmationKeyError::Deserialize(source)))?;
     let alg = match &jwk.algorithm {
         AlgorithmParameters::EllipticCurve(ec) if ec.curve == EllipticCurve::P256 => Algorithm::ES256,
         AlgorithmParameters::EllipticCurve(ec) if ec.curve == EllipticCurve::P384 => Algorithm::ES384,
         AlgorithmParameters::OctetKeyPair(okp) if okp.curve == EllipticCurve::Ed25519 => Algorithm::EdDSA,
         _ => {
             return Err(NatsPopError::InvalidConfirmationKey(
-                InvalidConfirmationKey::UnsupportedAlgorithm,
+                InvalidConfirmationKeyError::UnsupportedAlgorithm,
             ));
         }
     };
     let key = DecodingKey::from_jwk(&jwk)
-        .map_err(|source| NatsPopError::InvalidConfirmationKey(InvalidConfirmationKey::DecodingKey(source)))?;
+        .map_err(|source| NatsPopError::InvalidConfirmationKey(InvalidConfirmationKeyError::DecodingKey(source)))?;
     // `verify` operates on the raw signing input (no JWS wrapping). The
     // signature is base64url-no-pad encoded in our envelope.
     let ok = verify(sig_b64, base, &key, alg).map_err(NatsPopError::Verify)?;

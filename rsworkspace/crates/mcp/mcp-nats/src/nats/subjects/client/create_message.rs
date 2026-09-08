@@ -17,7 +17,7 @@ impl std::fmt::Display for CreateMessageSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.client.{}.sampling.create_message",
+            "{}.v1.client.{}.sampling.create_message",
             self.prefix.as_str(),
             self.client_id.as_str()
         )

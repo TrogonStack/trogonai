@@ -50,9 +50,7 @@ fn mint_agent_jwt(fixture: &KeyFixture, iss: &str, sub: &str, kid: &str) -> Stri
         iat: now - 5,
         exp: now + 600,
         dwk: "aauth-agent.json".to_string(),
-        cnf: Cnf {
-            jwk: fixture.jwk.clone(),
-        },
+        cnf: Cnf::public(fixture.jwk.clone()).expect("test fixture is a public jwk"),
         ps: None,
     };
     let mut header = Header::new(Algorithm::ES256);
@@ -267,7 +265,7 @@ async fn needs_clarification_then_grant_walks_full_round_trip() {
 async fn clarification_round_limit_is_enforced() {
     let (_a, _r, agent_jwt, resource_jwt, jwks) = agent_and_resource(None);
     let mut decisions = Vec::new();
-    for _ in 0..(crate::pending::MAX_CLARIFICATION_ROUNDS + 1) {
+    for _ in 0..(crate::constants::MAX_CLARIFICATION_ROUNDS + 1) {
         decisions.push(PolicyDecision::NeedsClarification {
             clarification: "still unclear".to_string(),
             options: None,
@@ -282,7 +280,7 @@ async fn clarification_round_limit_is_enforced() {
         other => panic!("expected Pending, got {other:?}"),
     };
 
-    for _ in 0..(crate::pending::MAX_CLARIFICATION_ROUNDS - 1) {
+    for _ in 0..(crate::constants::MAX_CLARIFICATION_ROUNDS - 1) {
         let outcome = server
             .respond_to_clarification(
                 &pending_id,
@@ -891,9 +889,8 @@ async fn respond_to_clarification_on_terminal_pending_returns_gone() {
             iat: 0,
             exp: 1000,
             dwk: "aauth-agent.json".to_string(),
-            cnf: Cnf {
-                jwk: serde_json::json!({"kty": "EC"}),
-            },
+            cnf: Cnf::public(serde_json::json!({"kty": "EC", "crv": "P-256", "x": "AAA", "y": "BBB"}))
+                .expect("test fixture is a public jwk"),
             ps: None,
         },
         trogon_identity_types::aauth::ResourceClaims {

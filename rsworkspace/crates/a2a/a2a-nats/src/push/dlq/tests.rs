@@ -96,7 +96,7 @@ fn push_dlq_subject_default_caller_round_trips_expected_pattern() {
     let tid = A2aTaskId::new("task7").unwrap();
     assert_eq!(
         push_dlq_publish_subject(&prefix, &CallerId::default(), &tid),
-        "a2a.push.dlq._.task7"
+        "a2a.v1.push.dlq._.task7"
     );
 }
 
@@ -109,7 +109,7 @@ fn push_dlq_subject_includes_derived_principal_caller_segment() {
     ));
     assert_eq!(
         push_dlq_publish_subject(&prefix, &cid, &tid),
-        "a2a.push.dlq.c1_d2.task7"
+        "a2a.v1.push.dlq.c1_d2.task7"
     );
 }
 
@@ -148,7 +148,7 @@ fn resolve_principal_with_spicedb_subject_builds_dlq_subject() {
     let cid = resolve_push_dlq_caller_id(Some(&p), &CallerId::default());
     assert_eq!(
         push_dlq_publish_subject(&prefix, &cid, &tid),
-        "a2a.push.dlq.c1_d2.task7"
+        "a2a.v1.push.dlq.c1_d2.task7"
     );
 }
 
@@ -158,7 +158,7 @@ fn resolve_principal_without_spicedb_subject_falls_back() {
     let tid = A2aTaskId::new("task7").unwrap();
     let p = a2a_identity_types::SpiceDbPrincipal(serde_json::json!({}));
     let cid = resolve_push_dlq_caller_id(Some(&p), &CallerId::default());
-    assert_eq!(push_dlq_publish_subject(&prefix, &cid, &tid), "a2a.push.dlq._.task7");
+    assert_eq!(push_dlq_publish_subject(&prefix, &cid, &tid), "a2a.v1.push.dlq._.task7");
 }
 
 #[tokio::test]

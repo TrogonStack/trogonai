@@ -24,7 +24,9 @@ fn rrule_schedule(count: u32) -> v1::Schedule {
     .unwrap()
 }
 
-fn timestamp(at: DateTime<Utc>) -> MessageField<buffa_types::google::protobuf::Timestamp> {
+fn timestamp<P: buffa::ProtoBox<buffa_types::google::protobuf::Timestamp>>(
+    at: DateTime<Utc>,
+) -> MessageField<buffa_types::google::protobuf::Timestamp, P> {
     MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&at))
 }
 
@@ -34,8 +36,8 @@ fn record(id: &str) -> RecordScheduleOccurrence {
 
 #[test]
 fn decider_identity_delegates_to_schedule_state() {
-    let command = record("recurring");
-    assert_eq!(command.stream_id(), "recurring");
+    let command = record("0198fa2f6d0a7b1a8cf9f762e73a1c15");
+    assert_eq!(command.stream_id(), &schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c15"));
     assert_eq!(
         RecordScheduleOccurrence::initial_state(),
         super::super::state::initial_state()
@@ -46,7 +48,7 @@ fn recorded(id: &str, sequence: u64, at: DateTime<Utc>) -> v1::ScheduleEvent {
     v1::ScheduleEvent {
         event: Some(
             v1::ScheduleOccurrenceRecorded {
-                schedule_id: id.to_string(),
+                schedule_id: schedule_id(id).to_string(),
                 occurrence_sequence: Some(sequence),
                 occurrence_at: timestamp(at),
                 recorded_at: timestamp(recorded_at()),
@@ -60,7 +62,7 @@ fn scheduled(id: &str, sequence: u64, at: DateTime<Utc>) -> v1::ScheduleEvent {
     v1::ScheduleEvent {
         event: Some(
             v1::ScheduleOccurrenceScheduled {
-                schedule_id: id.to_string(),
+                schedule_id: schedule_id(id).to_string(),
                 occurrence_sequence: Some(sequence),
                 occurrence_at: timestamp(at),
                 scheduled_at: timestamp(recorded_at()),
@@ -74,7 +76,7 @@ fn completed(id: &str, last_sequence: u64) -> v1::ScheduleEvent {
     v1::ScheduleEvent {
         event: Some(
             v1::ScheduleCompleted {
-                schedule_id: id.to_string(),
+                schedule_id: schedule_id(id).to_string(),
                 last_occurrence_sequence: Some(last_sequence),
             }
             .into(),
@@ -91,7 +93,7 @@ fn created(id: &str, enabled: bool, schedule: v1::Schedule) -> v1::ScheduleEvent
     v1::ScheduleEvent {
         event: Some(
             v1::ScheduleCreated {
-                schedule_id: id.to_string(),
+                schedule_id: schedule_id(id).to_string(),
                 status: MessageField::some(v1::ScheduleStatus { kind: Some(kind) }),
                 schedule: MessageField::some(schedule),
                 delivery: MessageField::default(),
@@ -106,7 +108,7 @@ fn removed(id: &str) -> v1::ScheduleEvent {
     v1::ScheduleEvent {
         event: Some(
             v1::ScheduleRemoved {
-                schedule_id: id.to_string(),
+                schedule_id: schedule_id(id).to_string(),
             }
             .into(),
         ),
@@ -115,7 +117,7 @@ fn removed(id: &str) -> v1::ScheduleEvent {
 
 #[test]
 fn records_occurrence_and_schedules_the_next_one() {
-    let id = "recurring";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c15";
 
     TestCase::<RecordScheduleOccurrence>::new()
         .given([created(id, true, rrule_schedule(3)), scheduled(id, 1, occurrence_at())])
@@ -128,7 +130,7 @@ fn records_occurrence_and_schedules_the_next_one() {
 
 #[test]
 fn records_final_occurrence_and_completes() {
-    let id = "recurring";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c15";
 
     TestCase::<RecordScheduleOccurrence>::new()
         .given([
@@ -142,7 +144,7 @@ fn records_final_occurrence_and_completes() {
 
 #[test]
 fn records_paused_pending_occurrence_without_scheduling_follow_up() {
-    let id = "recurring";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c15";
 
     TestCase::<RecordScheduleOccurrence>::new()
         .given([created(id, false, rrule_schedule(3)), scheduled(id, 1, occurrence_at())])
@@ -152,7 +154,7 @@ fn records_paused_pending_occurrence_without_scheduling_follow_up() {
 
 #[test]
 fn records_final_occurrence_while_paused_completes() {
-    let id = "recurring";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c15";
 
     TestCase::<RecordScheduleOccurrence>::new()
         .given([
@@ -166,7 +168,7 @@ fn records_final_occurrence_while_paused_completes() {
 
 #[test]
 fn rejects_missing_and_deleted_schedules() {
-    let id = "recurring";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c15";
 
     TestCase::<RecordScheduleOccurrence>::new()
         .given_no_history()
@@ -181,7 +183,7 @@ fn rejects_missing_and_deleted_schedules() {
 
 #[test]
 fn rejects_duplicate_or_stale_occurrences() {
-    let id = "recurring";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c15";
     let last_recorded_at = occurrence_at();
 
     TestCase::<RecordScheduleOccurrence>::new()
@@ -200,7 +202,7 @@ fn rejects_duplicate_or_stale_occurrences() {
 
 #[test]
 fn rejects_occurrences_that_were_not_planned() {
-    let id = "recurring";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c15";
 
     TestCase::<RecordScheduleOccurrence>::new()
         .given([created(id, true, rrule_schedule(2))])
@@ -233,7 +235,7 @@ fn rejects_occurrences_that_were_not_planned() {
 
 #[test]
 fn rejects_occurrence_sequence_overflow() {
-    let id = "recurring";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c15";
 
     TestCase::<RecordScheduleOccurrence>::new()
         .given([
@@ -249,7 +251,7 @@ fn rejects_occurrence_sequence_overflow() {
 
 #[test]
 fn rejects_malformed_state_values() {
-    let id = "recurring";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c15";
 
     TestCase::<RecordScheduleOccurrence>::new()
         .given_state(state_v1::State {

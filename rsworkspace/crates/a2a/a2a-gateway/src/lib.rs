@@ -9,7 +9,7 @@
 //! Modules:
 //! - [`aauth`] — AAuth (draft-hardt-aauth-protocol) ingress verifier; turns
 //!   inline `aa-agent+jwt` + PoP + optional `aa-auth+jwt` headers into an
-//!   [`aauth::AAuthResolution`] or an [`aauth::AAuthDeny`] carrying a
+//!   [`aauth::AAuthResolution`] or an [`aauth::AAuthDenyError`] carrying a
 //!   `ResourceChallenge` for the reply.
 //! - [`agent_card_surface`] — schema-validates AgentCard JSON before the
 //!   gateway's discover surface returns it, so a stored card that drifted
@@ -26,7 +26,7 @@
 //!   labs-only header-trust fallback gated behind an env flag.
 //! - [`policy`] — shared policy-tier scaffold; later slices layer Tier 1
 //!   declarative, Tier 1 SpiceDB, Tier 2 CEL, and Tier 3 redaction on top.
-//! - [`push_dlq_mirror`] — pull-consumer that mirrors `{prefix}.push.dlq.>`
+//! - [`push_dlq_mirror`] — pull-consumer that mirrors `{prefix}.v1.push.dlq.>`
 //!   into a tenant-readable `mirror.*` view with in-process dedupe so a
 //!   re-delivered DLQ envelope only publishes once.
 //! - [`runtime`] — boot orchestration; surfaces [`RuntimeError`] as the
@@ -40,6 +40,7 @@ pub mod agent_card_surface;
 pub mod audit_ingress;
 pub mod caller_jwt_header;
 pub mod config;
+pub mod constants;
 pub mod gw_ingress_stream;
 pub mod gw_pull_backpressure;
 pub mod jwt_caller_identity;

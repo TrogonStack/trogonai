@@ -1,6 +1,6 @@
 use std::fmt;
 
-use trogon_nats::{DottedNatsToken, SubjectTokenViolation};
+use trogon_nats::{DottedNatsToken, SubjectTokenViolationError};
 
 /// Validated NATS subject for push notification delivery.
 ///
@@ -10,7 +10,7 @@ pub struct NatsPushSubject(DottedNatsToken);
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 #[error("invalid NATS push subject: {0}")]
-pub struct NatsPushSubjectError(#[source] SubjectTokenViolation);
+pub struct NatsPushSubjectError(#[source] SubjectTokenViolationError);
 
 impl NatsPushSubject {
     pub fn new(subject: impl AsRef<str>) -> Result<Self, NatsPushSubjectError> {

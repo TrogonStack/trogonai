@@ -109,15 +109,15 @@ fn settings_ignore_invalid_durable_env_value() {
 #[test]
 fn mirror_subject_maps_agent_dlq_shape() {
     assert_eq!(
-        push_dlq_mirror_subject(&prefix(), "a2a.push.dlq.c1.task-9"),
-        Some("a2a.push.dlq.mirror.c1.task-9".to_string())
+        push_dlq_mirror_subject(&prefix(), "a2a.v1.push.dlq.c1.task-9"),
+        Some("a2a.v1.push.dlq.mirror.c1.task-9".to_string())
     );
 }
 
 #[test]
 fn mirror_subject_rejects_existing_mirror_and_extra_tokens() {
-    assert!(push_dlq_mirror_subject(&prefix(), "a2a.push.dlq.mirror.c1.task-9").is_none());
-    assert!(push_dlq_mirror_subject(&prefix(), "a2a.push.dlq.c1.task-9.extra").is_none());
+    assert!(push_dlq_mirror_subject(&prefix(), "a2a.v1.push.dlq.mirror.c1.task-9").is_none());
+    assert!(push_dlq_mirror_subject(&prefix(), "a2a.v1.push.dlq.c1.task-9.extra").is_none());
 }
 
 #[test]
@@ -127,16 +127,16 @@ fn mirror_subject_rejects_unrelated_subject() {
 
 #[test]
 fn skip_mirror_loop_markers() {
-    assert!(should_skip_push_dlq_mirror("a2a.push.dlq.mirror.c1.task-9", None));
+    assert!(should_skip_push_dlq_mirror("a2a.v1.push.dlq.mirror.c1.task-9", None));
     let mut headers = HeaderMap::new();
     headers.insert(PUSH_DLQ_MIRROR_HEADER, "true");
-    assert!(should_skip_push_dlq_mirror("a2a.push.dlq.c1.task-9", Some(&headers)));
+    assert!(should_skip_push_dlq_mirror("a2a.v1.push.dlq.c1.task-9", Some(&headers)));
 }
 
 #[test]
 fn pull_consumer_filter_uses_prefix_wildcard() {
     let config = push_dlq_mirror_pull_config(&prefix(), &PushDlqMirrorDurable::default_durable());
-    assert_eq!(config.filter_subject, "a2a.push.dlq.>");
+    assert_eq!(config.filter_subject, "a2a.v1.push.dlq.>");
     assert_eq!(config.durable_name.as_deref(), Some(PushDlqMirrorDurable::DEFAULT));
 }
 
@@ -145,12 +145,12 @@ async fn mirror_publish_adds_header_and_retries() {
     let js = RecordingPublisher::default();
     js.fail_next_n(2);
     let dedup = PushDlqDedupGate::with_capacity(32);
-    let payload = br#"{"schema":"a2a.push.dlq/v1","idempotency_key":"task-1:failed:https://example.com/hook"}"#;
-    let outcome = mirror_push_dlq_envelope(&js, &prefix(), "a2a.push.dlq.alice.task-1", None, payload, &dedup).await;
+    let payload = br#"{"schema":"a2a.v1.push.dlq/v1","idempotency_key":"task-1:failed:https://example.com/hook"}"#;
+    let outcome = mirror_push_dlq_envelope(&js, &prefix(), "a2a.v1.push.dlq.alice.task-1", None, payload, &dedup).await;
     assert_eq!(outcome, MirrorDispatchOutcome::Mirrored);
     let published = js.publishes.lock().unwrap();
     assert_eq!(published.len(), 1);
-    assert_eq!(published[0].0, "a2a.push.dlq.mirror.alice.task-1");
+    assert_eq!(published[0].0, "a2a.v1.push.dlq.mirror.alice.task-1");
     assert!(published[0].1.get(PUSH_DLQ_MIRROR_HEADER).is_some());
     // Mirror Nats-Msg-Id MUST be prefixed so JetStream doesn't dedup the
     // mirror against the authoritative envelope within its duplicate_window
@@ -169,7 +169,15 @@ async fn mirror_msg_id_is_prefixed_to_avoid_jetstream_dedup_collision() {
     let js = RecordingPublisher::default();
     let dedup = PushDlqDedupGate::with_capacity(32);
     let payload = br#"{"idempotency_key":"task-collide:failed"}"#;
-    mirror_push_dlq_envelope(&js, &prefix(), "a2a.push.dlq.alice.task-collide", None, payload, &dedup).await;
+    mirror_push_dlq_envelope(
+        &js,
+        &prefix(),
+        "a2a.v1.push.dlq.alice.task-collide",
+        None,
+        payload,
+        &dedup,
+    )
+    .await;
     let published = js.publishes.lock().unwrap();
     let msg_id = published[0].1.get(NATS_MSG_ID_HEADER).unwrap().as_str();
     assert!(
@@ -189,7 +197,7 @@ async fn mirror_skips_already_mirrored_subjects() {
     let outcome = mirror_push_dlq_envelope(
         &js,
         &prefix(),
-        "a2a.push.dlq.mirror.alice.task-1",
+        "a2a.v1.push.dlq.mirror.alice.task-1",
         None,
         br#"{"idempotency_key":"k1"}"#,
         &dedup,
@@ -203,14 +211,14 @@ async fn mirror_skips_already_mirrored_subjects() {
 async fn mirror_second_publish_with_same_key_is_suppressed() {
     let js = RecordingPublisher::default();
     let dedup = PushDlqDedupGate::with_capacity(32);
-    let payload = br#"{"schema":"a2a.push.dlq/v1","idempotency_key":"task-1:failed:https://example.com/hook"}"#;
+    let payload = br#"{"schema":"a2a.v1.push.dlq/v1","idempotency_key":"task-1:failed:https://example.com/hook"}"#;
 
     assert_eq!(
-        mirror_push_dlq_envelope(&js, &prefix(), "a2a.push.dlq.alice.task-1", None, payload, &dedup).await,
+        mirror_push_dlq_envelope(&js, &prefix(), "a2a.v1.push.dlq.alice.task-1", None, payload, &dedup).await,
         MirrorDispatchOutcome::Mirrored
     );
     assert_eq!(
-        mirror_push_dlq_envelope(&js, &prefix(), "a2a.push.dlq.alice.task-1", None, payload, &dedup).await,
+        mirror_push_dlq_envelope(&js, &prefix(), "a2a.v1.push.dlq.alice.task-1", None, payload, &dedup).await,
         MirrorDispatchOutcome::Skipped
     );
     assert_eq!(js.publishes.lock().unwrap().len(), 1);
@@ -223,7 +231,7 @@ async fn mirror_publish_failed_when_all_attempts_fail() {
     js.fail_next_n(MAX_PUBLISH_RETRIES + 1);
     let dedup = PushDlqDedupGate::with_capacity(32);
     let payload = br#"{"idempotency_key":"task-2:failed"}"#;
-    let outcome = mirror_push_dlq_envelope(&js, &prefix(), "a2a.push.dlq.bob.task-2", None, payload, &dedup).await;
+    let outcome = mirror_push_dlq_envelope(&js, &prefix(), "a2a.v1.push.dlq.bob.task-2", None, payload, &dedup).await;
     assert_eq!(outcome, MirrorDispatchOutcome::PublishFailed);
     assert!(js.publishes.lock().unwrap().is_empty());
 }
@@ -240,13 +248,13 @@ async fn mirror_publish_failure_releases_dedup_so_redelivery_can_retry() {
     let dedup = PushDlqDedupGate::with_capacity(32);
     let payload = br#"{"idempotency_key":"task-3:failed"}"#;
     assert_eq!(
-        mirror_push_dlq_envelope(&js, &prefix(), "a2a.push.dlq.alice.task-3", None, payload, &dedup).await,
+        mirror_push_dlq_envelope(&js, &prefix(), "a2a.v1.push.dlq.alice.task-3", None, payload, &dedup).await,
         MirrorDispatchOutcome::PublishFailed
     );
 
     // Second attempt — let publish succeed this time. The redelivery must
     // NOT be dedup-suppressed.
-    let outcome = mirror_push_dlq_envelope(&js, &prefix(), "a2a.push.dlq.alice.task-3", None, payload, &dedup).await;
+    let outcome = mirror_push_dlq_envelope(&js, &prefix(), "a2a.v1.push.dlq.alice.task-3", None, payload, &dedup).await;
     assert_eq!(outcome, MirrorDispatchOutcome::Mirrored);
     assert_eq!(js.publishes.lock().unwrap().len(), 1);
 }
@@ -258,9 +266,9 @@ async fn mirror_skips_payload_without_idempotency_key() {
     let outcome = mirror_push_dlq_envelope(
         &js,
         &prefix(),
-        "a2a.push.dlq.alice.task-1",
+        "a2a.v1.push.dlq.alice.task-1",
         None,
-        br#"{"schema":"a2a.push.dlq/v1"}"#,
+        br#"{"schema":"a2a.v1.push.dlq/v1"}"#,
         &dedup,
     )
     .await;
@@ -277,7 +285,7 @@ async fn mirror_carries_content_type_header_through() {
     let outcome = mirror_push_dlq_envelope(
         &js,
         &prefix(),
-        "a2a.push.dlq.alice.task-1",
+        "a2a.v1.push.dlq.alice.task-1",
         Some(&source_headers),
         payload,
         &dedup,

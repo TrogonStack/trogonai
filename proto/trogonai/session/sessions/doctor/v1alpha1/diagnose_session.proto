@@ -1,0 +1,112 @@
+edition = "2024";
+
+package trogonai.session.sessions.doctor.v1alpha1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/session/sessions/doctor/v1alpha1/finding.proto";
+
+// DiagnoseSessionRequest inspects one session and reports what disagrees.
+//
+// This operation mutates nothing. It is not a mode of a repair operation and it
+// has no flag that would make it one, because a report-only default that lives
+// in a field is one typo away from not being the default.
+message DiagnoseSessionRequest {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Checks to run. Empty runs the default set, which excludes the checks whose
+  // cost scales with artifact storage rather than with the stream.
+  repeated CheckKind checks = 2;
+  InspectionBudget budget = 3;
+}
+
+// InspectionBudget bounds the work a diagnosis may do.
+//
+// Inspection is unbounded by nature: verifying every artifact digest on a long
+// session means reading every artifact. Without a budget the doctor becomes a
+// load generator that operators learn not to run, and a diagnostic nobody dares
+// use is worth nothing.
+//
+// Unset fields mean the server's default, not unlimited.
+message InspectionBudget {
+  uint64 max_events_scanned = 1;
+  uint64 max_artifacts_verified = 2;
+  google.protobuf.Duration max_duration = 3;
+}
+
+// CheckKind is one family of inspection. Checks are the unit a budget is spent
+// on and the unit completeness is reported against.
+enum CheckKind {
+  CHECK_KIND_UNSPECIFIED = 0;
+  // Stream presence and creation-batch completeness.
+  CHECK_KIND_STREAM_INTEGRITY = 1;
+  // Decode every event in range and report the ones that fail.
+  CHECK_KIND_EVENT_DECODE = 2;
+  // Fold the stream and confirm it produces a state.
+  CHECK_KIND_AGGREGATE_REPLAY = 3;
+  // Compare snapshots against a replay of the events they claim to cover.
+  CHECK_KIND_SNAPSHOT = 4;
+  // Projection lag, validity, and checkpoint agreement with the view.
+  CHECK_KIND_PROJECTION = 5;
+  // Read artifact content and recompute digests. Not in the default set: its
+  // cost is bounded by storage, not by the stream.
+  CHECK_KIND_ARTIFACT_DIGEST = 6;
+  // Reserved operations with indeterminate or overdue outcomes.
+  CHECK_KIND_OPERATION_LEDGER = 7;
+  // Delegation, detach, and cascade sequences that never terminated, and tool
+  // calls stranded in flight.
+  CHECK_KIND_UNRECONCILED_WORK = 8;
+  // Recovery checkpoints and their attestations.
+  CHECK_KIND_CHECKPOINT_ATTESTATION = 9;
+  // Claims and uploads with no durable owner. Not in the default set: deciding
+  // an orphan requires tracing ownership and projector watermarks, which is
+  // expensive and must never be approximated by a reference search.
+  CHECK_KIND_ORPHAN = 10;
+  // Retention and cold-tier watermarks against what is actually retained.
+  CHECK_KIND_RETENTION = 11;
+}
+
+// DiagnoseSessionResponse is what the inspection found and, as importantly,
+// what it did not look at.
+//
+// An empty `findings` list means the session is healthy only when every entry
+// in `checks` reports CHECK_STATUS_COMPLETED. A doctor that ran out of budget
+// halfway produces the same empty list as a clean session, and an operator
+// reading only `findings` cannot tell those apart. Which checks ran is
+// therefore part of the answer, not metadata about it.
+message DiagnoseSessionResponse {
+  // Identifies this diagnosis. A repair must name it, so every mutation is
+  // traceable to the report that justified it.
+  string diagnosis_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated Finding findings = 2;
+  // One entry per check the server considered, including checks it skipped.
+  repeated CheckOutcome checks = 3;
+  google.protobuf.Timestamp observed_at = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// CheckOutcome is whether a check actually ran.
+message CheckOutcome {
+  CheckKind check = 1 [features.field_presence = LEGACY_REQUIRED];
+  CheckStatus status = 2 [features.field_presence = LEGACY_REQUIRED];
+  uint32 findings_produced = 3 [features.field_presence = LEGACY_REQUIRED];
+  // How far the check got before stopping, in whatever unit it consumes. Only
+  // meaningful with BUDGET_EXHAUSTED, where it tells an operator how much
+  // larger a budget would need to be.
+  uint64 progress = 4;
+  // Why a check was skipped or failed. Human-readable, never parsed.
+  string reason = 5;
+}
+
+// CheckStatus is how a check ended.
+enum CheckStatus {
+  CHECK_STATUS_UNSPECIFIED = 0;
+  // Ran to completion. Its findings, including none, are conclusive.
+  CHECK_STATUS_COMPLETED = 1;
+  // Ran and stopped early against the budget. Its findings are real; their
+  // absence proves nothing.
+  CHECK_STATUS_BUDGET_EXHAUSTED = 2;
+  // Not requested, or not applicable to this session.
+  CHECK_STATUS_SKIPPED = 3;
+  // The check itself failed. Reported rather than swallowed: a diagnostic that
+  // hides its own failures is worse than no diagnostic, because it is trusted.
+  CHECK_STATUS_FAILED = 4;
+}

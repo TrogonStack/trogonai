@@ -3,10 +3,9 @@
 //! When the durable consumer delivers from a multiplexed event stream, records
 //! for the same `schedule_id` must be processed one at a time so a pause,
 //! resume, or remove cannot race ahead of the definition it depends on. Records
-//! for different schedules map to different `ScheduleKey`s and may process
-//! concurrently.
+//! for different schedules map to different lanes and may process concurrently.
 //!
-//! Lanes are lazily created per `ScheduleKey`, kept strictly serial, evicted
+//! Lanes are lazily created per schedule id, kept strictly serial, evicted
 //! once empty so the lane map cannot grow without bound, and the number of
 //! concurrently active lanes is bounded so it stays consistent with the
 //! consumer's `max_ack_pending`. A record is settled (acked/termed/retried) by
@@ -30,10 +29,11 @@ use trogon_nats::jetstream::{
 };
 
 use crate::commands::domain::ScheduleId;
+use crate::constants::MISSING_CHECKPOINT_DELIVERY_CEILING;
 use crate::processor::execution::checkpoints::ProcessingFailureRecord;
-use crate::processor::execution::reconciliation::{DecodedScheduleEvent, ScheduleKey, lane_route_from_stream_event};
+use crate::processor::execution::reconciliation::{DecodedScheduleEvent, lane_route_from_stream_event};
 
-use super::processor::{AckAction, PoisonReason, Processed, ProcessedOutcome, RetrySignal, ScheduleProcessor};
+use super::processor::{AckAction, PoisonReasonError, Processed, ProcessedOutcome, RetryableError, ScheduleProcessor};
 
 /// A delivered NATS message the dispatcher settles after a durable outcome.
 pub trait DeliveredMessage: Send + 'static {
@@ -83,7 +83,7 @@ pub struct DispatchReport {
     /// Position of the record in its schedule stream.
     pub stream_position: StreamPosition,
     /// Aggregate lane the record was processed on.
-    pub lane: ScheduleKey,
+    pub lane: String,
     /// Outcome, or a description of the transient failure that forced a retry.
     pub result: Result<ProcessedOutcome, String>,
 }
@@ -118,13 +118,13 @@ where
     P: JetStreamPublisher,
     U: JetStreamSubjectPurger,
     S: JetStreamKvEntry + JetStreamKvGet + JetStreamKvCreate + JetStreamKeyValueUpdate + JetStreamKvKeys,
-    E: trogon_decider_runtime::StreamRead<str>
-        + trogon_decider_runtime::StreamAppend<str>
+    E: trogon_decider_runtime::StreamRead<ScheduleId>
+        + trogon_decider_runtime::StreamAppend<ScheduleId>
         + ::core::marker::Send
         + ::core::marker::Sync
         + 'static,
-    <E as trogon_decider_runtime::StreamRead<str>>::Error: ::std::error::Error + Send + Sync + 'static,
-    <E as trogon_decider_runtime::StreamAppend<str>>::Error: ::std::error::Error + Send + Sync + 'static,
+    <E as trogon_decider_runtime::StreamRead<ScheduleId>>::Error: ::std::error::Error + Send + Sync + 'static,
+    <E as trogon_decider_runtime::StreamAppend<ScheduleId>>::Error: ::std::error::Error + Send + Sync + 'static,
     M: DeliveredMessage + Sync,
 {
     assert!(
@@ -157,18 +157,18 @@ async fn run<P, U, S, E, M>(
     P: JetStreamPublisher,
     U: JetStreamSubjectPurger,
     S: JetStreamKvEntry + JetStreamKvGet + JetStreamKvCreate + JetStreamKeyValueUpdate + JetStreamKvKeys,
-    E: trogon_decider_runtime::StreamRead<str>
-        + trogon_decider_runtime::StreamAppend<str>
+    E: trogon_decider_runtime::StreamRead<ScheduleId>
+        + trogon_decider_runtime::StreamAppend<ScheduleId>
         + ::core::marker::Send
         + ::core::marker::Sync
         + 'static,
-    <E as trogon_decider_runtime::StreamRead<str>>::Error: ::std::error::Error + Send + Sync + 'static,
-    <E as trogon_decider_runtime::StreamAppend<str>>::Error: ::std::error::Error + Send + Sync + 'static,
+    <E as trogon_decider_runtime::StreamRead<ScheduleId>>::Error: ::std::error::Error + Send + Sync + 'static,
+    <E as trogon_decider_runtime::StreamAppend<ScheduleId>>::Error: ::std::error::Error + Send + Sync + 'static,
     M: DeliveredMessage + Sync,
 {
-    let mut pending: HashMap<ScheduleKey, VecDeque<(StreamEvent, DecodedScheduleEvent, M)>> = HashMap::new();
-    let mut in_flight: std::collections::HashSet<ScheduleKey> = std::collections::HashSet::new();
-    let mut ready = VecDeque::new();
+    let mut pending: HashMap<String, VecDeque<(StreamEvent, DecodedScheduleEvent, M)>> = HashMap::new();
+    let mut in_flight: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut ready: VecDeque<String> = VecDeque::new();
     let mut queued_ready = std::collections::HashSet::new();
     let mut workers = FuturesUnordered::new();
     let mut submit_open = true;
@@ -187,14 +187,16 @@ async fn run<P, U, S, E, M>(
             // unreachable through the public API; `resolve_ready_key` is
             // unit-tested for each. `if let` drops the wildcard branch
             // entirely so the loop has no untestable defensive arm.
-            if let ReadyOutcome::Dispatch(event, decoded, message) = resolve_ready_key(key, &in_flight, &mut pending) {
-                in_flight.insert(key);
+            if let ReadyOutcome::Dispatch(event, decoded, message) =
+                resolve_ready_key(key.clone(), &in_flight, &mut pending)
+            {
+                in_flight.insert(key.clone());
                 active_lanes.store(in_flight.len(), Ordering::SeqCst);
 
                 let processor = processor.clone();
                 let clock = clock.clone();
                 workers.push(async move {
-                    let report = process_one(processor, clock, event, decoded, message, key).await;
+                    let report = process_one(processor, clock, event, decoded, message, key.clone()).await;
                     (key, report)
                 });
             }
@@ -213,11 +215,11 @@ async fn run<P, U, S, E, M>(
                 match received {
                     Some((event, message)) => {
                         let (key, decoded) = lane_route_from_stream_event(&event);
-                        let queue = pending.entry(key).or_default();
+                        let queue = pending.entry(key.clone()).or_default();
                         let was_empty = queue.is_empty();
                         queue.push_back((event, decoded, message));
-                        if was_empty && !in_flight.contains(&key) && queued_ready.insert(key) {
-                            ready.push_back(key);
+                        if was_empty && !in_flight.contains(&key) && queued_ready.insert(key.clone()) {
+                            ready.push_back(key.clone());
                         }
                     }
                     None => submit_open = false,
@@ -230,7 +232,7 @@ async fn run<P, U, S, E, M>(
                 // lane map cannot grow without bound.
                 if pending.get(&key).is_none_or(VecDeque::is_empty) {
                     pending.remove(&key);
-                } else if queued_ready.insert(key) {
+                } else if queued_ready.insert(key.clone()) {
                     ready.push_back(key);
                 }
                 match reports_tx.try_send(report) {
@@ -245,31 +247,25 @@ async fn run<P, U, S, E, M>(
     }
 }
 
-/// Deliveries after which a missing-checkpoint record stops retrying and is
-/// poisoned with a durable failure record. With the consumer's `max_deliver: -1`
-/// and the 30s nak-delay cap this bounds the retry window to roughly an hour
-/// instead of occupying an ack-pending slot forever.
-const MISSING_CHECKPOINT_DELIVERY_CEILING: i64 = 120;
-
 async fn process_one<P, U, S, E, M>(
     processor: Arc<ScheduleProcessor<P, U, S, E>>,
     clock: Clock,
     event: StreamEvent,
     decoded: DecodedScheduleEvent,
     message: M,
-    lane: ScheduleKey,
+    lane: String,
 ) -> DispatchReport
 where
     P: JetStreamPublisher,
     U: JetStreamSubjectPurger,
     S: JetStreamKvEntry + JetStreamKvGet + JetStreamKvCreate + JetStreamKeyValueUpdate + JetStreamKvKeys,
-    E: trogon_decider_runtime::StreamRead<str>
-        + trogon_decider_runtime::StreamAppend<str>
+    E: trogon_decider_runtime::StreamRead<ScheduleId>
+        + trogon_decider_runtime::StreamAppend<ScheduleId>
         + ::core::marker::Send
         + ::core::marker::Sync
         + 'static,
-    <E as trogon_decider_runtime::StreamRead<str>>::Error: ::std::error::Error + Send + Sync + 'static,
-    <E as trogon_decider_runtime::StreamAppend<str>>::Error: ::std::error::Error + Send + Sync + 'static,
+    <E as trogon_decider_runtime::StreamRead<ScheduleId>>::Error: ::std::error::Error + Send + Sync + 'static,
+    <E as trogon_decider_runtime::StreamAppend<ScheduleId>>::Error: ::std::error::Error + Send + Sync + 'static,
     M: DeliveredMessage + Sync,
 {
     let stream_position = event.stream_position;
@@ -280,13 +276,13 @@ where
     }
 
     // Reduce the process result to `Send`-only values before any settlement
-    // await: a transient `RetrySignal` can wrap a non-`Send` domain error, so it
+    // await: a transient `RetryableError` can wrap a non-`Send` domain error, so it
     // must not survive across `message.*().await`.
     let step = match AssertUnwindSafe(processor.process_decoded(&event, decoded, now))
         .catch_unwind()
         .await
     {
-        Ok(Err(RetrySignal::MissingCheckpoint { schedule_id }))
+        Ok(Err(RetryableError::MissingCheckpoint { schedule_id }))
             if message.delivery_count() >= MISSING_CHECKPOINT_DELIVERY_CEILING =>
         {
             ProcessStep::MissingExhausted { schedule_id }
@@ -300,7 +296,7 @@ where
         ProcessStep::MissingExhausted { schedule_id } => {
             let failure = processor.failure_record(
                 &event,
-                PoisonReason::MissingCheckpointExhausted {
+                PoisonReasonError::MissingCheckpointExhausted {
                     schedule_id,
                     deliveries: message.delivery_count(),
                 },
@@ -308,7 +304,7 @@ where
             return poison_record(processor, message, lane, stream_position, failure).await;
         }
         ProcessStep::Panic(stream_position) => {
-            let failure = processor.failure_record(&event, PoisonReason::ProcessorPanic { stream_position });
+            let failure = processor.failure_record(&event, PoisonReasonError::ProcessorPanic { stream_position });
             return poison_record(processor, message, lane, stream_position, failure).await;
         }
     };
@@ -328,7 +324,7 @@ enum ProcessStep {
     Panic(StreamPosition),
 }
 
-fn reduce_processed(processed: Result<Processed, RetrySignal>) -> (Settle, Result<ProcessedOutcome, String>) {
+fn reduce_processed(processed: Result<Processed, RetryableError>) -> (Settle, Result<ProcessedOutcome, String>) {
     match processed {
         Ok(processed) => (Settle::from(processed.ack), Ok(processed.outcome)),
         Err(retry) => (Settle::Retry, Err(retry.to_string())),
@@ -338,7 +334,7 @@ fn reduce_processed(processed: Result<Processed, RetrySignal>) -> (Settle, Resul
 async fn poison_record<P, U, S, E, M>(
     processor: Arc<ScheduleProcessor<P, U, S, E>>,
     message: M,
-    lane: ScheduleKey,
+    lane: String,
     stream_position: StreamPosition,
     failure: ProcessingFailureRecord,
 ) -> DispatchReport
@@ -346,18 +342,18 @@ where
     P: JetStreamPublisher,
     U: JetStreamSubjectPurger,
     S: JetStreamKvEntry + JetStreamKvGet + JetStreamKvCreate + JetStreamKeyValueUpdate + JetStreamKvKeys,
-    E: trogon_decider_runtime::StreamRead<str>
-        + trogon_decider_runtime::StreamAppend<str>
+    E: trogon_decider_runtime::StreamRead<ScheduleId>
+        + trogon_decider_runtime::StreamAppend<ScheduleId>
         + ::core::marker::Send
         + ::core::marker::Sync
         + 'static,
-    <E as trogon_decider_runtime::StreamRead<str>>::Error: ::std::error::Error + Send + Sync + 'static,
-    <E as trogon_decider_runtime::StreamAppend<str>>::Error: ::std::error::Error + Send + Sync + 'static,
+    <E as trogon_decider_runtime::StreamRead<ScheduleId>>::Error: ::std::error::Error + Send + Sync + 'static,
+    <E as trogon_decider_runtime::StreamAppend<ScheduleId>>::Error: ::std::error::Error + Send + Sync + 'static,
     M: DeliveredMessage + Sync,
 {
     let (settlement, result) = match AssertUnwindSafe(processor.poison_failure(failure)).catch_unwind().await {
         Ok(processed) => reduce_processed(processed),
-        Err(_) => (Settle::Retry, Err(PoisonReason::FailureRecordPanic.to_string())),
+        Err(_) => (Settle::Retry, Err(PoisonReasonError::FailureRecordPanic.to_string())),
     };
 
     let result = finalize_report(message, settlement, stream_position, result).await;
@@ -468,9 +464,9 @@ enum ReadyOutcome<M> {
 /// Removes the pending entry if the queue turns out to be empty, keeping the
 /// map from accumulating tombstone entries.
 fn resolve_ready_key<M>(
-    key: ScheduleKey,
-    in_flight: &std::collections::HashSet<ScheduleKey>,
-    pending: &mut HashMap<ScheduleKey, VecDeque<(StreamEvent, DecodedScheduleEvent, M)>>,
+    key: String,
+    in_flight: &std::collections::HashSet<String>,
+    pending: &mut HashMap<String, VecDeque<(StreamEvent, DecodedScheduleEvent, M)>>,
 ) -> ReadyOutcome<M> {
     if in_flight.contains(&key) {
         return ReadyOutcome::AlreadyInFlight;

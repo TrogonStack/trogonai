@@ -17,7 +17,7 @@ impl std::fmt::Display for ListRootsSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.client.{}.roots.list",
+            "{}.v1.client.{}.roots.list",
             self.prefix.as_str(),
             self.client_id.as_str()
         )

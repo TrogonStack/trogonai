@@ -13,5 +13,5 @@ fn expire_after() {
 
 #[test]
 fn zero_rejected() {
-    assert!(matches!(StreamMaxAge::from_secs(0), Err(ZeroDuration)));
+    assert!(matches!(StreamMaxAge::from_secs(0), Err(ZeroDurationError)));
 }

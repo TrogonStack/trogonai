@@ -22,10 +22,9 @@ use trogon_nats::jetstream::JetStreamGetStream;
 
 use crate::error::SchedulerError;
 use crate::kv::open_events_stream;
-use crate::projections::schedules::storage::read_model_key;
 use crate::projections::schedules::{
     ProjectionChange, ScheduleStreamState, apply, decode_recorded_delivery_message, event_message_sequence,
-    event_replay_consumer_config, event_schedule_id, projection_change, read_model_token_from_event_subject,
+    event_replay_consumer_config, event_schedule_id, projection_change, schedule_id_from_event_subject,
 };
 use crate::queries::ScheduleId;
 use crate::v1;
@@ -162,7 +161,7 @@ impl SchedulesProjector {
             .store
             .get_projection(&routed.id)
             .await?
-            .map_or(ScheduleStreamState::Initial, ScheduleStreamState::Present);
+            .map_or(ScheduleStreamState::Initial, ScheduleStreamState::from);
         let after = match apply(&routed.schedule_id, before.clone(), &routed.event) {
             Ok(after) => after,
             Err(source) => {
@@ -261,7 +260,7 @@ fn route(message: &jetstream::Message) -> Option<RoutedEvent> {
     };
     // A foreign or newer-than-this-deploy event type: not part of this read model.
     let decoded = decoded.into_decoded()?;
-    let subject_token = match read_model_token_from_event_subject(event.stream_id()) {
+    let subject_schedule_id = match schedule_id_from_event_subject(event.stream_id()) {
         Ok(token) => token,
         Err(source) => {
             tracing::warn!(%source, "skipping schedule event with unrecognized subject during projection");
@@ -269,12 +268,12 @@ fn route(message: &jetstream::Message) -> Option<RoutedEvent> {
         }
     };
     let Some(schedule_id) = event_schedule_id(&decoded) else {
-        tracing::warn!(%subject_token, "skipping schedule event without a payload schedule id during projection");
+        tracing::warn!(%subject_schedule_id, "skipping schedule event without a payload schedule id during projection");
         return None;
     };
-    if read_model_key(schedule_id) != subject_token {
+    if schedule_id != subject_schedule_id.to_string() {
         tracing::warn!(
-            %subject_token,
+            %subject_schedule_id,
             %schedule_id,
             "skipping schedule event whose payload id does not route to its subject during projection"
         );

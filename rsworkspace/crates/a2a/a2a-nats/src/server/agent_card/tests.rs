@@ -131,7 +131,11 @@ async fn malformed_json_still_publishes_parse_error_with_null_id() {
 async fn id_present_but_undecodable_still_publishes_error() {
     let nats = AdvancedMockNatsClient::new();
     let handler = stub();
-    let (headers, payload) = wire_request("METHOD", RequestId::Number(5), serde_json::Value::Null);
+    let (headers, payload) = wire_request(
+        "agent/getAuthenticatedExtendedCard",
+        RequestId::Number(5),
+        serde_json::Value::Null,
+    );
     handle(&handler, &headers, &payload, Some("r".into()), &nats).await;
     assert!(!nats.published_payloads().is_empty());
 }

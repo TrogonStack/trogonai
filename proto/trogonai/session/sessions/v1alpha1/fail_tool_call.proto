@@ -1,0 +1,20 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "trogonai/session/sessions/v1alpha1/tool_call_failed.proto";
+
+// FailToolCall settles a call with an error, recording [ToolCallFailed]. It is
+// how a reconciler rejects a call it found interrupted, with reason
+// TOOL_CALL_FAILURE_REASON_INTERRUPTED.
+//
+// Write precondition Any: first-terminal-outcome-wins against CompleteToolCall,
+// keyed on tool_execution_id.
+message FailToolCall {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string tool_call_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string tool_execution_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  string error = 4 [features.field_presence = LEGACY_REQUIRED];
+  ToolCallFailureReason reason = 5 [features.field_presence = LEGACY_REQUIRED];
+  string turn_id = 6 [features.field_presence = LEGACY_REQUIRED];
+}

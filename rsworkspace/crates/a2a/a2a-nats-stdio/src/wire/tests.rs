@@ -1,49 +1,62 @@
 use super::*;
+use bytes::Bytes;
 use serde_json::json;
 
 #[test]
-fn inbound_request_deserializes_numeric_id() {
-    let raw = r#"{"jsonrpc":"2.0","id":42,"method":"tasks/get","params":{"id":"t1","tenant":""}}"#;
-    let req: InboundRequest = serde_json::from_str(raw).unwrap();
-    assert_eq!(req.id, RpcId::Number(42));
-    assert_eq!(req.method, "tasks/get");
-}
-
-#[test]
-fn inbound_request_deserializes_string_id() {
-    let raw = r#"{"jsonrpc":"2.0","id":"abc","method":"agent/getAuthenticatedExtendedCard","params":{}}"#;
-    let req: InboundRequest = serde_json::from_str(raw).unwrap();
-    assert_eq!(req.id, RpcId::String("abc".into()));
-}
-
-#[test]
-fn outbound_response_serializes() {
-    let resp = OutboundResponse::new(RpcId::Number(1), json!({"id": "task-1"}));
-    let v = serde_json::to_value(&resp).unwrap();
+fn outbound_raw_body_rewrites_via_serde() {
+    let body =
+        Bytes::from(serde_json::to_vec(&json!({"jsonrpc":"2.0","id":"transport","result":{"id":"task-1"}})).unwrap());
+    let frame = OutboundFrame::RawBody(body);
+    let v = serde_json::to_value(&frame).unwrap();
     assert_eq!(v["jsonrpc"], "2.0");
-    assert_eq!(v["id"], 1);
-    assert!(v["result"]["id"] == "task-1");
+    assert_eq!(v["id"], "transport");
+    assert_eq!(v["result"]["id"], "task-1");
 }
 
 #[test]
 fn outbound_error_serializes() {
-    let err = OutboundError::new(RpcId::Number(2), -32001, "not found".into());
-    let v = serde_json::to_value(&err).unwrap();
+    let frame = OutboundFrame::error(ResponseId::Number(2), -32001, "not found");
+    let v = serde_json::to_value(&frame).unwrap();
+    assert_eq!(v["jsonrpc"], "2.0");
+    assert_eq!(v["id"], 2);
     assert_eq!(v["error"]["code"], -32001);
     assert_eq!(v["error"]["message"], "not found");
 }
 
 #[test]
-fn outbound_notification_serializes() {
-    let notif = OutboundNotification::new(RpcId::Number(3), "message/stream", json!({"event": "x"}));
-    let v = serde_json::to_value(&notif).unwrap();
-    assert_eq!(v["method"], "message/stream");
+fn outbound_success_serializes() {
+    let frame = OutboundFrame::success(ResponseId::Number(3), json!({"event": "x"}));
+    let v = serde_json::to_value(&frame).unwrap();
+    assert_eq!(v["jsonrpc"], "2.0");
     assert_eq!(v["id"], 3);
+    assert_eq!(v["result"]["event"], "x");
+    assert!(v.get("method").is_none(), "a response carries no method");
 }
 
 #[test]
-fn outbound_frame_error_variant_serializes() {
-    let frame = OutboundFrame::Error(OutboundError::new(RpcId::Null, -32600, "invalid".into()));
+fn null_id_still_serializes_as_a_response() {
+    let frame = OutboundFrame::error(ResponseId::Null, -32600, "invalid");
     let v = serde_json::to_value(&frame).unwrap();
+    assert_eq!(v["id"], Value::Null);
     assert_eq!(v["error"]["code"], -32600);
+}
+
+#[test]
+fn with_error_id_stamps_errors_and_leaves_other_frames_alone() {
+    let stamped = OutboundFrame::error(ResponseId::Null, -32602, "bad params").with_error_id(ResponseId::Number(9));
+    assert_eq!(serde_json::to_value(&stamped).unwrap()["id"], 9);
+
+    let raw = Bytes::from(serde_json::to_vec(&json!({"jsonrpc":"2.0","id":"keep","result":{}})).unwrap());
+    let untouched = OutboundFrame::RawBody(raw).with_error_id(ResponseId::Number(9));
+    assert_eq!(serde_json::to_value(&untouched).unwrap()["id"], "keep");
+}
+
+#[test]
+fn error_code_is_none_for_frames_that_are_not_errors() {
+    assert!(
+        OutboundFrame::success(ResponseId::Number(1), json!({}))
+            .error_code()
+            .is_none()
+    );
+    assert!(OutboundFrame::RawBody(Bytes::from_static(b"{}")).error_code().is_none());
 }

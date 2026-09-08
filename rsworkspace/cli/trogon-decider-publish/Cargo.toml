@@ -1,0 +1,34 @@
+[package]
+name = "trogon-decider-publish"
+version = "0.1.0"
+edition = "2024"
+description = "Publishes a decider component into the ADR#0058 module store, gated on its conformance suite"
+license = "Apache-2.0"
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+name = "trogon_decider_publish"
+path = "src/lib.rs"
+
+[[bin]]
+name = "decider-publish"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+async-nats = { workspace = true, features = ["jetstream", "kv", "server_2_10", "server_2_12"] }
+clap = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+trogon-decider-nats-server = { workspace = true }
+trogon-decider-test = { workspace = true }
+trogon-decider-wasm-runtime = { workspace = true }
+trogon-nats = { workspace = true }
+trogon-std = { workspace = true, features = ["clap"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+trogon-nats = { workspace = true, features = ["test-support"] }

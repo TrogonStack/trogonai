@@ -1,0 +1,28 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "trogonai/session/sessions/v1alpha1/artifact.proto";
+import "trogonai/session/sessions/v1alpha1/provider_tool_intent_rejected.proto";
+
+// RejectProviderToolIntent records a refused provider tool intent, producing
+// [ProviderToolIntentRejected].
+//
+// Write precondition Any: the provider already emitted it, and no lifecycle
+// state can retract that.
+//
+// The raw emission is stored as an artifact before this command is issued, for
+// the same reason captured command output is: a decider that must write an
+// unbounded attacker-shaped payload before it can append has an append latency
+// set by the worst input it ever received.
+message RejectProviderToolIntent {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string rejection_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string message_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  string turn_id = 4 [features.field_presence = LEGACY_REQUIRED];
+  ProviderToolIntentRejectionReason reason = 5 [features.field_presence = LEGACY_REQUIRED];
+  string claimed_tool_call_id = 6;
+  string claimed_tool_name = 7;
+  ArtifactRef raw_intent = 8;
+  string detail = 9;
+}

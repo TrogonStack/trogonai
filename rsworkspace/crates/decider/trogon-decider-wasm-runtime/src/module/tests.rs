@@ -1,3 +1,6 @@
+use trogon_decider_runtime::{SnapshotCadence, WritePrecondition};
+use trogon_decider_wit::host;
+
 use super::*;
 use crate::WasmEngineConfig;
 use crate::test_fixture::schedules_bytes;
@@ -20,7 +23,7 @@ fn loads_a_zero_import_component_and_probes_its_descriptor() {
         .iter()
         .find(|spec| spec.command_type().as_str() == trogonai_proto::scheduler::schedules::CREATE_SCHEDULE_TYPE_URL)
         .expect("create command is declared");
-    assert!(create_spec.write_precondition().is_some());
+    assert_eq!(create_spec.write_precondition(), WritePrecondition::NoStream);
 }
 
 #[test]
@@ -52,13 +55,15 @@ fn duplicate_command_type_error_names_the_offending_type() {
         name: "module".to_string(),
         version: "1.0.0".to_string(),
         commands: vec![
-            trogon_decider_wit::host::CommandSpec {
+            host::CommandSpec {
                 command_type: "Foo".to_string(),
-                write_precondition: None,
+                write_precondition: host::WritePrecondition::StreamUnchanged,
+                snapshot_policy: host::SnapshotPolicy::NoSnapshot,
             },
-            trogon_decider_wit::host::CommandSpec {
+            host::CommandSpec {
                 command_type: "Foo".to_string(),
-                write_precondition: None,
+                write_precondition: host::WritePrecondition::StreamUnchanged,
+                snapshot_policy: host::SnapshotPolicy::NoSnapshot,
             },
         ],
     };
@@ -73,20 +78,22 @@ fn duplicate_command_type_error_names_the_offending_type() {
 }
 
 #[test]
-fn unique_command_types_pass_validation() {
+fn unique_command_types_carry_their_declared_policies_through_validation() {
     let descriptor = ModuleDescriptor {
         name: "module".to_string(),
         version: "1.0.0".to_string(),
-        commands: vec![trogon_decider_wit::host::CommandSpec {
+        commands: vec![host::CommandSpec {
             command_type: "Foo".to_string(),
-            write_precondition: None,
+            write_precondition: host::WritePrecondition::StreamExists,
+            snapshot_policy: host::SnapshotPolicy::Frequency(64),
         }],
     };
 
     let commands = validate_commands(descriptor).expect("unique command types validate");
     assert_eq!(commands.len(), 1);
     assert_eq!(commands[0].command_type().as_str(), "Foo");
-    assert!(commands[0].write_precondition().is_none());
+    assert_eq!(commands[0].write_precondition(), WritePrecondition::StreamExists);
+    assert_eq!(commands[0].snapshot_cadence(), SnapshotCadence::every_events(64));
 }
 
 #[test]
@@ -94,9 +101,10 @@ fn an_invalid_command_type_preserves_the_validation_source() {
     let descriptor = ModuleDescriptor {
         name: "module".to_string(),
         version: "1.0.0".to_string(),
-        commands: vec![trogon_decider_wit::host::CommandSpec {
+        commands: vec![host::CommandSpec {
             command_type: String::new(),
-            write_precondition: None,
+            write_precondition: host::WritePrecondition::StreamUnchanged,
+            snapshot_policy: host::SnapshotPolicy::NoSnapshot,
         }],
     };
 

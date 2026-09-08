@@ -172,7 +172,7 @@ async fn session_id_mismatch_publishes_error() {
     );
     let payloads = nats.published_payloads();
     let body: serde_json::Value = serde_json::from_slice(payloads[0].as_ref()).unwrap();
-    assert!(body["message"].as_str().unwrap().contains("does not match"));
+    assert!(body["error"]["message"].as_str().unwrap().contains("does not match"));
 }
 
 #[tokio::test]

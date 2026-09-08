@@ -306,7 +306,7 @@ mod tests {
 
         // Setup mock response for NATS
         let nats_response = r#"{"agentCapabilities": {"loadSession": false, "mcpCapabilities": {"http": false, "sse": false}, "promptCapabilities": {"audio": false, "embeddedContext": false, "image": false}, "sessionCapabilities": {}}, "authMethods": [], "protocolVersion": 0}"#;
-        nats_mock.set_response("acp.agent.initialize", nats_response.into());
+        nats_mock.set_response("acp.v1.global.agent.initialize", nats_response.into());
 
         // Connect client
         let ws_url = format!("ws://{}/ws", addr);

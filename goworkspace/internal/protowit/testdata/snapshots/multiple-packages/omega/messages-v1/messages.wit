@@ -1,0 +1,7 @@
+package omega:messages-v1;
+
+interface messages {
+  record omega-message {
+    id: string,
+  }
+}

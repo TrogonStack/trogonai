@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+#MISE description="Resolve service-specific build settings from a JSON config file into GITHUB_OUTPUT"
+set -euo pipefail
+
+: "${SERVICE:?SERVICE is required}"
+: "${CONFIG_FILE:?CONFIG_FILE is required}"
+: "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
+
+image=$(jq -r --arg service "$SERVICE" '.[$service].image // $service' "$CONFIG_FILE")
+context=$(jq -r --arg service "$SERVICE" '.[$service].context // empty' "$CONFIG_FILE")
+dockerfile=$(jq -r --arg service "$SERVICE" '.[$service].dockerfile // empty' "$CONFIG_FILE")
+if [ -z "$image" ] || [ -z "$context" ] || [ -z "$dockerfile" ]; then
+    echo "Missing config for service '$SERVICE' in $CONFIG_FILE" >&2
+    exit 1
+fi
+echo "image=$image" >>"$GITHUB_OUTPUT"
+echo "context=$context" >>"$GITHUB_OUTPUT"
+echo "dockerfile=$dockerfile" >>"$GITHUB_OUTPUT"

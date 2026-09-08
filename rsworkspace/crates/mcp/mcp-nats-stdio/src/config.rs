@@ -3,10 +3,7 @@ use mcp_nats::{Config, McpPeerId, McpPeerIdError, McpPrefix, McpPrefixError, Nat
 use trogon_std::ParseArgs;
 use trogon_std::env::ReadEnv;
 
-pub const DEFAULT_MCP_CLIENT_ID: &str = "stdio";
-pub const DEFAULT_MCP_SERVER_ID: &str = "default";
-pub const ENV_MCP_CLIENT_ID: &str = "MCP_CLIENT_ID";
-pub const ENV_MCP_SERVER_ID: &str = "MCP_SERVER_ID";
+use crate::constants::{DEFAULT_MCP_CLIENT_ID, DEFAULT_MCP_SERVER_ID, ENV_MCP_CLIENT_ID, ENV_MCP_SERVER_ID};
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "mcp-nats-stdio")]

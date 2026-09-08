@@ -1,0 +1,85 @@
+edition = "2024";
+
+package trogonai.session.sessions.queries.v1alpha1;
+
+import "trogonai/session/sessions/queries/v1alpha1/contract_version.proto";
+import "trogonai/session/sessions/queries/v1alpha1/projection_freshness.proto";
+import "trogonai/session/sessions/queries/v1alpha1/read_consistency.proto";
+import "trogonai/session/sessions/queries/v1alpha1/session_view.proto";
+
+// ListSessionsRequest enumerates sessions in a scope, newest first.
+message ListSessionsRequest {
+  ContractVersion accepted_contract = 1 [features.field_presence = LEGACY_REQUIRED];
+  ListSessionsScope scope = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Required for SCOPE_WORKSPACE, ignored otherwise.
+  string workspace_id = 3;
+  ArchivedFilter archived = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Maximum rows to return. The server may return fewer. A value above the
+  // configured admission limit is refused with
+  // QUERY_ERROR_CODE_RESOURCE_EXHAUSTED rather than silently clamped, so a
+  // caller is never left believing it asked for more than it received.
+  uint32 page_size = 5 [features.field_presence = LEGACY_REQUIRED];
+  // Opaque continuation from a prior response, a serialized CursorEnvelope.
+  // Unset starts a new scan. The caller must treat this as bytes and never
+  // construct, parse, or edit one.
+  //
+  // A continuation still carries the scope, workspace, and archived filter, and
+  // they must match what the cursor was minted with. The server refuses a
+  // disagreement rather than re-scoping the scan in flight.
+  bytes page_token = 6;
+  // Freshness the caller requires. Honored when the scan opens and ignored on
+  // a continuation, because a continuation is served from the pinned watermark
+  // and waiting for anything newer could not change what it returns.
+  //
+  // A continuation whose requirement is stricter than the one the scan was
+  // opened with is QUERY_ERROR_CODE_INVALID_ARGUMENT. Silently ignoring it
+  // would let a caller believe a later page reflects a write that it cannot.
+  ReadConsistency consistency = 7;
+}
+
+// ListSessionsScope is which sessions are in range.
+enum ListSessionsScope {
+  LIST_SESSIONS_SCOPE_UNSPECIFIED = 0;
+  // Sessions bound to one workspace.
+  LIST_SESSIONS_SCOPE_WORKSPACE = 1;
+  // Every session the caller may see, across workspaces.
+  LIST_SESSIONS_SCOPE_ALL = 2;
+}
+
+// ArchivedFilter is how archived sessions are treated.
+//
+// A tri-state rather than a boolean, because "exclude archived" and "archived
+// only" are both real views and a boolean can only express one of them
+// alongside the default.
+enum ArchivedFilter {
+  ARCHIVED_FILTER_UNSPECIFIED = 0;
+  ARCHIVED_FILTER_EXCLUDE = 1;
+  ARCHIVED_FILTER_INCLUDE = 2;
+  ARCHIVED_FILTER_ONLY = 3;
+}
+
+// ListSessionsResponse is one page of session summaries.
+message ListSessionsResponse {
+  ContractNegotiation contract = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated SessionSummary sessions = 2;
+  // Unset when this is the last page. Presence, not an empty `sessions` list,
+  // is the end-of-scan signal: a page may legitimately be empty while more
+  // pages remain.
+  bytes next_page_token = 3;
+  // Rows the server could not decode or render and therefore skipped. A
+  // non-zero count means this page is incomplete, and a caller must not read
+  // the result as an exhaustive list. Reporting zero is not the same as not
+  // reporting.
+  uint32 skipped_count = 4 [features.field_presence = LEGACY_REQUIRED];
+  // The projection position this scan is pinned to, equal on every page of one
+  // scan. It is the scan anchor, not a freshness report.
+  //
+  // A scan enumerates the ordering as it stood here, so a session that entered
+  // the scope afterwards is not in it and will not appear on a later page. A
+  // caller that needs newer rows starts a new scan; it does not keep paging and
+  // wait for them to show up.
+  uint64 pinned_watermark = 5 [features.field_presence = LEGACY_REQUIRED];
+  // How current the read model was when the scan opened. Equal on every page,
+  // since a pinned scan does not become fresher as it is paged.
+  ProjectionFreshness freshness = 6 [features.field_presence = LEGACY_REQUIRED];
+}

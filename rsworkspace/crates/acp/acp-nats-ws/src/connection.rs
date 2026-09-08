@@ -1,10 +1,8 @@
 use acp_nats::boundary::{AbortOnDrop, BoundaryExit, ConnectionClient, connect_agent_boundary};
-use acp_nats::{agent::Bridge, client, spawn_notification_forwarder};
-use agent_client_protocol::schema::v1::SessionNotification;
+use acp_nats::{agent::Bridge, client};
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
-use std::rc::Rc;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::sync::watch;
@@ -26,8 +24,10 @@ pub async fn handle<N, J>(
         + acp_nats::FlushClient
         + acp_nats::SubscribeClient
         + Clone
+        + Send
+        + Sync
         + 'static,
-    J: acp_nats::JetStreamPublisher + acp_nats::JetStreamGetStream + 'static,
+    J: acp_nats::JetStreamPublisher + acp_nats::JetStreamGetStream + Send + Sync + 'static,
     trogon_nats::jetstream::JsMessageOf<J>: trogon_nats::jetstream::JsRequestMessage,
 {
     let (ws_sender, ws_receiver) = socket.split();
@@ -39,30 +39,17 @@ pub async fn handle<N, J>(
     let outgoing = async_compat::Compat::new(agent_write);
 
     let meter = trogon_telemetry::meter("acp-nats-ws");
-    let (notification_tx, notification_rx) = tokio::sync::mpsc::channel::<SessionNotification>(64);
-    let bridge = Arc::new(Bridge::new(
-        nats_client.clone(),
-        js_client,
-        SystemClock,
-        &meter,
-        config,
-        notification_tx,
-    ));
+    let bridge = Arc::new(Bridge::new(nats_client.clone(), js_client, SystemClock, &meter, config));
 
-    let recv_pump = tokio::task::spawn_local(run_recv_pump(ws_receiver, ws_recv_write));
-    let send_pump = tokio::task::spawn_local(run_send_pump(ws_sender, ws_send_read));
+    let recv_pump = tokio::spawn(run_recv_pump(ws_receiver, ws_recv_write));
+    let send_pump = tokio::spawn(run_send_pump(ws_sender, ws_send_read));
 
     info!("WebSocket connection established, ACP bridge running");
 
     let boundary_result = connect_agent_boundary(bridge.clone(), outgoing, incoming, async move |cx| {
-        let _forwarder_guard = AbortOnDrop::new(spawn_notification_forwarder(
-            ConnectionClient::new(cx.clone()),
-            notification_rx,
-        ));
-
-        let mut client_task = AbortOnDrop::new(tokio::task::spawn_local(client::run(
+        let mut client_task = AbortOnDrop::new(tokio::spawn(client::run(
             nats_client,
-            Rc::new(ConnectionClient::new(cx)),
+            Arc::new(ConnectionClient::new(cx)),
             bridge,
         )));
 

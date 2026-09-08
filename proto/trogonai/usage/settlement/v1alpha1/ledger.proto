@@ -1,0 +1,192 @@
+edition = "2024";
+
+package trogonai.usage.settlement.v1alpha1;
+
+import "google/protobuf/timestamp.proto";
+
+// The settlement ledger a downstream billing consumer keeps for itself.
+//
+// This lives outside the Session domain on purpose. Session records what was
+// consumed; a billing consumer reads that and turns it into charges, and the
+// retry state of that second job is the consumer's problem, not the session's.
+// Publishing settlement progress back into a session stream would put a
+// downstream system's bookkeeping into a log that is never truncated
+// (ADR#0035 facet 7), so a transient provider outage would leave permanent
+// noise in the history of every session it touched.
+//
+// The one thing this ledger exists for is the case where a charge is published
+// and the acknowledgment is lost. At that moment the consumer knows less than
+// it did before it tried, and the only safe record is one that says so. Every
+// design choice here follows from refusing to let that state be written as
+// either success or failure.
+
+// UsageRef identifies the usage a settlement is for.
+//
+// It points at the event that recorded consumption, not at a running total.
+// Totals are derived and can be recomputed differently; the fact that a
+// specific ordinal recorded a specific quantity cannot change, which is what
+// makes it usable as an idempotency basis.
+message UsageRef {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The SessionOrdinal that recorded the consumption.
+  uint64 ordinal = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Which meter this is: a model's input tokens, its output tokens, a tool's
+  // invocations. Opaque to this contract.
+  string meter = 3 [features.field_presence = LEGACY_REQUIRED];
+  uint64 quantity = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Who is charged. Carried on the record rather than resolved at settlement
+  // time, because an account can be reassigned between consumption and billing
+  // and the charge belongs to whoever owned the work when it ran.
+  string account_id = 5 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// SettlementRecord is one usage fact and everything known about charging for it.
+//
+// The record is written before the charge is published, never after. A ledger
+// written after a successful publish cannot describe the failure it exists to
+// describe: if the process dies between publishing and recording, the only
+// evidence that a charge might exist is gone.
+message SettlementRecord {
+  // Idempotency key and primary identity, derived deterministically from
+  // `usage`.
+  //
+  // Derived from the usage fact and never from the attempt. This is the single
+  // property that makes double charging impossible rather than unlikely: a
+  // retry recomputes the same key from the same session, ordinal, and meter,
+  // so the provider sees the same request it may already have processed. A key
+  // minted per attempt would make every retry a new charge, and the retry path
+  // is exactly the path a lost acknowledgment forces a consumer down.
+  string settlement_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  UsageRef usage = 2 [features.field_presence = LEGACY_REQUIRED];
+  SettlementState state = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Publish attempts made. Counts attempts, not charges: the whole point of a
+  // stable idempotency key is that these two numbers are allowed to differ.
+  uint32 attempt_count = 4 [features.field_presence = LEGACY_REQUIRED];
+  // When the consumer durably recorded its intent to charge.
+  google.protobuf.Timestamp intended_at = 5 [features.field_presence = LEGACY_REQUIRED];
+  // When the most recent publish was attempted. Unset before the first attempt.
+  google.protobuf.Timestamp last_attempt_at = 6;
+  // When a terminal state was reached. Unset while unresolved.
+  google.protobuf.Timestamp resolved_at = 7;
+  // What the provider returned, once it returned anything. Unset for every
+  // state that never heard back, which is the same set of states that need
+  // reconciling.
+  ProviderReceipt receipt = 8;
+  // Set when this settlement needed a human. Its presence is what distinguishes
+  // a resolution someone decided from one the protocol reached on its own.
+  SettlementIncident incident = 9;
+}
+
+// SettlementState is how far a settlement got, and what a retry is allowed to
+// assume.
+//
+// The zero value is the one that blocks a blind retry, because the failure mode
+// this ledger prevents is a retry that assumes nothing happened. A reader that
+// does not recognize a variant must reconcile before charging again.
+enum SettlementState {
+  // Unknown state. Treat as UNKNOWN: reconcile before any further publish.
+  SETTLEMENT_STATE_UNSPECIFIED = 0;
+  // Intent is durable and no publish has been attempted.
+  //
+  // The only state that lets a consumer conclude no charge exists. It holds
+  // because the transition to IN_FLIGHT is itself durable and happens before
+  // the publish call, so a crash cannot skip past it.
+  SETTLEMENT_STATE_INTENDED = 1;
+  // A publish is in progress.
+  //
+  // Not durable across a restart in the sense a reader might expect: a consumer
+  // recovering from a crash has no in-progress calls, so every record found in
+  // this state on startup is moved to UNKNOWN. Its useful life is entirely
+  // within one process lifetime.
+  SETTLEMENT_STATE_IN_FLIGHT = 2;
+  // A publish was attempted and its outcome was never observed.
+  //
+  // This is the state the ledger is for. The charge may exist and may not, and
+  // the consumer must not guess in either direction: republishing under the
+  // same idempotency key is safe, and treating it as failed and re-deriving a
+  // key is the double charge.
+  SETTLEMENT_STATE_UNKNOWN = 3;
+  // The provider confirmed the charge. Terminal.
+  SETTLEMENT_STATE_SETTLED = 4;
+  // The provider refused the charge and said so. Terminal, and not a retry:
+  // a refusal that is republished unchanged is refused again.
+  SETTLEMENT_STATE_REJECTED = 5;
+  // Closed without settling, by a decision recorded in `incident`. Terminal.
+  //
+  // Reachable only through an incident, so nothing in the automated path can
+  // reach it. A consumer that could abandon a charge on its own would be one
+  // that quietly stops billing under sustained provider failure.
+  SETTLEMENT_STATE_ABANDONED = 6;
+}
+
+// ProviderReceipt is the provider's own record of a charge.
+message ProviderReceipt {
+  // The provider's identifier for the charge. Kept so a later reconciliation
+  // can ask about this charge specifically rather than searching by amount and
+  // time, which is how a reconciliation matches the wrong one.
+  string provider_charge_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp acknowledged_at = 2 [features.field_presence = LEGACY_REQUIRED];
+  // True when the provider reported this as a repeat of a charge it had already
+  // processed under the same idempotency key.
+  //
+  // Worth recording rather than discarding as a duplicate-suppressed success:
+  // it is direct evidence that an earlier attempt landed and its acknowledgment
+  // was lost, which is the difference between a system that is retrying
+  // correctly and one that is about to be found out at reconciliation.
+  bool deduplicated = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// SettlementIncident is a settlement that needed a decision.
+message SettlementIncident {
+  string incident_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  IncidentKind kind = 2 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp opened_at = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Unset while open.
+  google.protobuf.Timestamp resolved_at = 4;
+  IncidentResolution resolution = 5 [features.field_presence = LEGACY_REQUIRED];
+  // Free text for whoever has to read this later. Never parsed.
+  string note = 6 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// IncidentKind is why a settlement stopped being something the protocol could
+// finish by itself.
+enum IncidentKind {
+  INCIDENT_KIND_UNSPECIFIED = 0;
+  // A settlement sat in UNKNOWN past the window in which the provider could
+  // still be asked about it. Someone has to establish whether the money moved.
+  INCIDENT_KIND_UNKNOWN_OUTCOME_EXPIRED = 1;
+  // Two settled records were found for the same usage. Either the idempotency
+  // key was not derived deterministically, or the provider processed the same
+  // key twice, and both call for a refund rather than a retry.
+  INCIDENT_KIND_DUPLICATE_CHARGE_DETECTED = 2;
+  // The provider refused in a way that will not resolve by retrying: a closed
+  // account, an unrecognized meter, a rejected currency.
+  INCIDENT_KIND_PROVIDER_REFUSED = 3;
+  // The session this usage belongs to no longer shows it, because a rewind,
+  // compaction, or redaction removed the ordinal from effective history.
+  //
+  // Opened as an incident rather than reversed automatically, because usage is
+  // not part of effective history. Tokens that were spent were spent, and
+  // rewinding a session does not un-consume them, so a ledger that followed
+  // effective history would refund real compute every time a user backed up a
+  // turn. What is genuinely ambiguous is whether the removal was a correction
+  // or a privacy action, and that is a question for a person.
+  INCIDENT_KIND_USAGE_RETRACTED = 4;
+}
+
+// IncidentResolution is what was decided, once someone decided.
+enum IncidentResolution {
+  // Still open. The zero value, so an incident record that was never resolved
+  // cannot read as one that was.
+  INCIDENT_RESOLUTION_UNSPECIFIED = 0;
+  // Established that the charge exists. The record moves to SETTLED.
+  INCIDENT_RESOLUTION_CONFIRMED_CHARGED = 1;
+  // Established that no charge exists. The record returns to INTENDED and may
+  // be published again.
+  INCIDENT_RESOLUTION_CONFIRMED_NOT_CHARGED = 2;
+  // A charge existed and was reversed.
+  INCIDENT_RESOLUTION_REFUNDED = 3;
+  // Closed without charging and without further attempts. The record moves to
+  // ABANDONED.
+  INCIDENT_RESOLUTION_WRITTEN_OFF = 4;
+}

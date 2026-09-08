@@ -1,0 +1,59 @@
+edition = "2024";
+
+package trogonai.session.sessions.maintenance.v1alpha1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/session/sessions/maintenance/v1alpha1/salvage.proto";
+
+// SalvageSession copies what can be read from a damaged session into a new
+// session identity, leaving the source untouched.
+//
+// Ordering of effects matches the migration and for the same reason: record the
+// intent, stage the copied artifacts, create the target session as one atomic
+// batch, validate. The source is never written to at any point, so a salvage
+// that fails halfway costs a partially staged target and nothing else.
+message SalvageSessionRequest {
+  string source_session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Distinguishes this salvage from another salvage of the same source, and is
+  // what the target session id is derived from. A caller retrying a salvage
+  // must reuse it; a caller wanting a second, independent salvage must not.
+  string salvage_key = 2 [features.field_presence = LEGACY_REQUIRED];
+  string actor = 3 [features.field_presence = LEGACY_REQUIRED];
+  string reason = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Unset is PLAN_ONLY.
+  SalvageMode mode = 5;
+  // Workspace for the salvaged session. Needed only when the source's own
+  // workspace could not be read, which is exactly the case a damaged source
+  // makes likely.
+  string workspace_id = 6;
+  SalvageLimits limits = 7;
+}
+
+// SalvageMode is whether this call may write.
+enum SalvageMode {
+  SALVAGE_MODE_UNSPECIFIED = 0;
+  // Read the source, decide what would be carried, write nothing.
+  SALVAGE_MODE_PLAN_ONLY = 1;
+  SALVAGE_MODE_COMMIT = 2;
+}
+
+// SalvageLimits bounds one call.
+message SalvageLimits {
+  uint64 max_source_events = 1;
+  uint64 max_source_bytes = 2;
+  uint64 max_artifacts_verified = 3;
+  google.protobuf.Duration max_duration = 4;
+}
+
+message SalvageSessionResponse {
+  SalvageResult result = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Always present, including on refusal.
+  SalvageRecord record = 2 [features.field_presence = LEGACY_REQUIRED];
+  // The derived id, present even when nothing was written, so a caller can find
+  // the target of a call whose response it never received.
+  string target_session_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Set only for SALVAGE_RESULT_REFUSED.
+  RefusalDetail refused = 4;
+  google.protobuf.Timestamp observed_at = 5 [features.field_presence = LEGACY_REQUIRED];
+}

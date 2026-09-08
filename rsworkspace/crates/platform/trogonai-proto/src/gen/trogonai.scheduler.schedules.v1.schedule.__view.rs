@@ -23,6 +23,7 @@ impl<'a> ::buffa::MessageView<'a> for ScheduleView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         <Self as ::buffa::MessageView>::decode_view_ctx(buf, ctx)
     }
+    #[inline]
     fn merge_view_field(
         &mut self,
         tag: ::buffa::encoding::Tag,
@@ -231,7 +232,7 @@ impl<'a> ::buffa::ViewEncode<'a> for ScheduleView<'a> {
     fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        let mut size = 0u32;
+        let mut size = 0u64;
         if let ::core::option::Option::Some(ref v) = self.kind {
             match v {
                 super::super::__buffa::view::oneof::schedule::Kind::At(x) => {
@@ -239,42 +240,42 @@ impl<'a> ::buffa::ViewEncode<'a> for ScheduleView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::schedule::Kind::Every(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::schedule::Kind::Cron(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::schedule::Kind::Rrule(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
             }
         }
-        size
+        ::buffa::saturate_size(size)
     }
     #[allow(clippy::needless_borrow)]
     fn write_to(
         &self,
         __cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
+        buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
@@ -283,7 +284,7 @@ impl<'a> ::buffa::ViewEncode<'a> for ScheduleView<'a> {
                 super::super::__buffa::view::oneof::schedule::Kind::At(x) => {
                     ::buffa::types::put_len_delimited_header(
                         1u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -291,7 +292,7 @@ impl<'a> ::buffa::ViewEncode<'a> for ScheduleView<'a> {
                 super::super::__buffa::view::oneof::schedule::Kind::Every(x) => {
                     ::buffa::types::put_len_delimited_header(
                         2u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -299,7 +300,7 @@ impl<'a> ::buffa::ViewEncode<'a> for ScheduleView<'a> {
                 super::super::__buffa::view::oneof::schedule::Kind::Cron(x) => {
                     ::buffa::types::put_len_delimited_header(
                         3u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -307,7 +308,7 @@ impl<'a> ::buffa::ViewEncode<'a> for ScheduleView<'a> {
                 super::super::__buffa::view::oneof::schedule::Kind::Rrule(x) => {
                     ::buffa::types::put_len_delimited_header(
                         4u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -402,7 +403,9 @@ impl ScheduleOwnedView {
     ///
     /// # Errors
     ///
-    /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+    /// Returns [`::buffa::DecodeError::MessageTooLarge`] if the
+    /// message's encoded size exceeds the 2 GiB protobuf limit, or
+    /// another [`::buffa::DecodeError`] if the re-encoded bytes are
     /// somehow invalid (should not happen for well-formed messages).
     pub fn from_owned(
         msg: &super::super::Schedule,
@@ -418,13 +421,13 @@ impl ScheduleOwnedView {
     }
     /// Convert to the owned message type.
     ///
-    /// # Errors
-    ///
-    /// Returns an error if re-materializing preserved unknown fields
-    /// fails (e.g. the unknown-field limit is exceeded).
-    pub fn to_owned_message(
-        &self,
-    ) -> ::core::result::Result<super::super::Schedule, ::buffa::DecodeError> {
+    /// Infallible: this type's constructors wire-decode their
+    /// buffer, and a view produced by wire decoding always
+    /// converts. Delegates to [`::buffa::OwnedView::to_owned_message`],
+    /// whose contract also governs handles converted from a raw
+    /// [`::buffa::OwnedView`].
+    #[must_use]
+    pub fn to_owned_message(&self) -> super::super::Schedule {
         self.0.to_owned_message()
     }
     /// The underlying bytes buffer.
@@ -516,6 +519,7 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
         ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
             <Self as ::buffa::MessageView>::decode_view_ctx(buf, ctx)
         }
+        #[inline]
         fn merge_view_field(
             &mut self,
             tag: ::buffa::encoding::Tag,
@@ -583,6 +587,7 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
                     Some(v) => {
                         ::buffa::MessageField::<
                             ::buffa_types::google::protobuf::Timestamp,
+                            ::buffa::Inline<::buffa_types::google::protobuf::Timestamp>,
                         >::some(v.to_owned_from_source(__buffa_src)?)
                     }
                     None => ::buffa::MessageField::none(),
@@ -596,29 +601,29 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
         fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
             #[allow(unused_imports)]
             use ::buffa::Enumeration as _;
-            let mut size = 0u32;
+            let mut size = 0u64;
             if self.at.is_set() {
                 let __slot = __cache.reserve();
                 let inner_size = self.at.compute_size(__cache);
                 __cache.set(__slot, inner_size);
                 size
-                    += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                        + inner_size;
+                    += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                        + inner_size as u64;
             }
-            size
+            ::buffa::saturate_size(size)
         }
         #[allow(clippy::needless_borrow)]
         fn write_to(
             &self,
             __cache: &mut ::buffa::SizeCache,
-            buf: &mut impl ::buffa::bytes::BufMut,
+            buf: &mut impl ::buffa::EncodeSink,
         ) {
             #[allow(unused_imports)]
             use ::buffa::Enumeration as _;
             if self.at.is_set() {
                 ::buffa::types::put_len_delimited_header(
                     1u32,
-                    __cache.consume_next(),
+                    u64::from(__cache.consume_next()),
                     buf,
                 );
                 self.at.write_to(__cache, buf);
@@ -700,7 +705,9 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
         ///
         /// # Errors
         ///
-        /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+        /// Returns [`::buffa::DecodeError::MessageTooLarge`] if the
+        /// message's encoded size exceeds the 2 GiB protobuf limit, or
+        /// another [`::buffa::DecodeError`] if the re-encoded bytes are
         /// somehow invalid (should not happen for well-formed messages).
         pub fn from_owned(
             msg: &super::super::super::schedule::At,
@@ -714,16 +721,13 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
         }
         /// Convert to the owned message type.
         ///
-        /// # Errors
-        ///
-        /// Returns an error if re-materializing preserved unknown fields
-        /// fails (e.g. the unknown-field limit is exceeded).
-        pub fn to_owned_message(
-            &self,
-        ) -> ::core::result::Result<
-            super::super::super::schedule::At,
-            ::buffa::DecodeError,
-        > {
+        /// Infallible: this type's constructors wire-decode their
+        /// buffer, and a view produced by wire decoding always
+        /// converts. Delegates to [`::buffa::OwnedView::to_owned_message`],
+        /// whose contract also governs handles converted from a raw
+        /// [`::buffa::OwnedView`].
+        #[must_use]
+        pub fn to_owned_message(&self) -> super::super::super::schedule::At {
             self.0.to_owned_message()
         }
         /// The underlying bytes buffer.
@@ -811,6 +815,7 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
         ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
             <Self as ::buffa::MessageView>::decode_view_ctx(buf, ctx)
         }
+        #[inline]
         fn merge_view_field(
             &mut self,
             tag: ::buffa::encoding::Tag,
@@ -878,6 +883,7 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
                     Some(v) => {
                         ::buffa::MessageField::<
                             ::buffa_types::google::protobuf::Duration,
+                            ::buffa::Inline<::buffa_types::google::protobuf::Duration>,
                         >::some(v.to_owned_from_source(__buffa_src)?)
                     }
                     None => ::buffa::MessageField::none(),
@@ -891,29 +897,29 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
         fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
             #[allow(unused_imports)]
             use ::buffa::Enumeration as _;
-            let mut size = 0u32;
+            let mut size = 0u64;
             if self.every.is_set() {
                 let __slot = __cache.reserve();
                 let inner_size = self.every.compute_size(__cache);
                 __cache.set(__slot, inner_size);
                 size
-                    += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                        + inner_size;
+                    += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                        + inner_size as u64;
             }
-            size
+            ::buffa::saturate_size(size)
         }
         #[allow(clippy::needless_borrow)]
         fn write_to(
             &self,
             __cache: &mut ::buffa::SizeCache,
-            buf: &mut impl ::buffa::bytes::BufMut,
+            buf: &mut impl ::buffa::EncodeSink,
         ) {
             #[allow(unused_imports)]
             use ::buffa::Enumeration as _;
             if self.every.is_set() {
                 ::buffa::types::put_len_delimited_header(
                     1u32,
-                    __cache.consume_next(),
+                    u64::from(__cache.consume_next()),
                     buf,
                 );
                 self.every.write_to(__cache, buf);
@@ -997,7 +1003,9 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
         ///
         /// # Errors
         ///
-        /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+        /// Returns [`::buffa::DecodeError::MessageTooLarge`] if the
+        /// message's encoded size exceeds the 2 GiB protobuf limit, or
+        /// another [`::buffa::DecodeError`] if the re-encoded bytes are
         /// somehow invalid (should not happen for well-formed messages).
         pub fn from_owned(
             msg: &super::super::super::schedule::Every,
@@ -1013,16 +1021,13 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
         }
         /// Convert to the owned message type.
         ///
-        /// # Errors
-        ///
-        /// Returns an error if re-materializing preserved unknown fields
-        /// fails (e.g. the unknown-field limit is exceeded).
-        pub fn to_owned_message(
-            &self,
-        ) -> ::core::result::Result<
-            super::super::super::schedule::Every,
-            ::buffa::DecodeError,
-        > {
+        /// Infallible: this type's constructors wire-decode their
+        /// buffer, and a view produced by wire decoding always
+        /// converts. Delegates to [`::buffa::OwnedView::to_owned_message`],
+        /// whose contract also governs handles converted from a raw
+        /// [`::buffa::OwnedView`].
+        #[must_use]
+        pub fn to_owned_message(&self) -> super::super::super::schedule::Every {
             self.0.to_owned_message()
         }
         /// The underlying bytes buffer.
@@ -1129,6 +1134,7 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
         ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
             <Self as ::buffa::MessageView>::decode_view_ctx(buf, ctx)
         }
+        #[inline]
         fn merge_view_field(
             &mut self,
             tag: ::buffa::encoding::Tag,
@@ -1205,6 +1211,9 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
                     Some(v) => {
                         ::buffa::MessageField::<
                             super::super::super::super::super::super::super::google::r#type::TimeZone,
+                            ::buffa::Inline<
+                                super::super::super::super::super::super::super::google::r#type::TimeZone,
+                            >,
                         >::some(v.to_owned_from_source(__buffa_src)?)
                     }
                     None => ::buffa::MessageField::none(),
@@ -1218,23 +1227,23 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
         fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
             #[allow(unused_imports)]
             use ::buffa::Enumeration as _;
-            let mut size = 0u32;
-            size += 1u32 + ::buffa::types::string_encoded_len(&self.expr) as u32;
+            let mut size = 0u64;
+            size += 1u64 + ::buffa::types::string_encoded_len(&self.expr) as u64;
             if self.timezone.is_set() {
                 let __slot = __cache.reserve();
                 let inner_size = self.timezone.compute_size(__cache);
                 __cache.set(__slot, inner_size);
                 size
-                    += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                        + inner_size;
+                    += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                        + inner_size as u64;
             }
-            size
+            ::buffa::saturate_size(size)
         }
         #[allow(clippy::needless_borrow)]
         fn write_to(
             &self,
             __cache: &mut ::buffa::SizeCache,
-            buf: &mut impl ::buffa::bytes::BufMut,
+            buf: &mut impl ::buffa::EncodeSink,
         ) {
             #[allow(unused_imports)]
             use ::buffa::Enumeration as _;
@@ -1242,7 +1251,7 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
             if self.timezone.is_set() {
                 ::buffa::types::put_len_delimited_header(
                     2u32,
-                    __cache.consume_next(),
+                    u64::from(__cache.consume_next()),
                     buf,
                 );
                 self.timezone.write_to(__cache, buf);
@@ -1327,7 +1336,9 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
         ///
         /// # Errors
         ///
-        /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+        /// Returns [`::buffa::DecodeError::MessageTooLarge`] if the
+        /// message's encoded size exceeds the 2 GiB protobuf limit, or
+        /// another [`::buffa::DecodeError`] if the re-encoded bytes are
         /// somehow invalid (should not happen for well-formed messages).
         pub fn from_owned(
             msg: &super::super::super::schedule::Cron,
@@ -1343,16 +1354,13 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
         }
         /// Convert to the owned message type.
         ///
-        /// # Errors
-        ///
-        /// Returns an error if re-materializing preserved unknown fields
-        /// fails (e.g. the unknown-field limit is exceeded).
-        pub fn to_owned_message(
-            &self,
-        ) -> ::core::result::Result<
-            super::super::super::schedule::Cron,
-            ::buffa::DecodeError,
-        > {
+        /// Infallible: this type's constructors wire-decode their
+        /// buffer, and a view produced by wire decoding always
+        /// converts. Delegates to [`::buffa::OwnedView::to_owned_message`],
+        /// whose contract also governs handles converted from a raw
+        /// [`::buffa::OwnedView`].
+        #[must_use]
+        pub fn to_owned_message(&self) -> super::super::super::schedule::Cron {
             self.0.to_owned_message()
         }
         /// The underlying bytes buffer.
@@ -1498,6 +1506,7 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
         ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
             <Self as ::buffa::MessageView>::decode_view_ctx(buf, ctx)
         }
+        #[inline]
         fn merge_view_field(
             &mut self,
             tag: ::buffa::encoding::Tag,
@@ -1575,6 +1584,11 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
                     )?;
                     let __sub_ctx = ctx.descend()?;
                     let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                    ctx.register_element_memory(
+                        ::core::mem::size_of::<
+                            ::buffa_types::google::protobuf::__buffa::view::TimestampView,
+                        >(),
+                    )?;
                     view.rdate
                         .push(
                             <::buffa_types::google::protobuf::__buffa::view::TimestampView as ::buffa::MessageView>::decode_view_ctx(
@@ -1590,6 +1604,11 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
                     )?;
                     let __sub_ctx = ctx.descend()?;
                     let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                    ctx.register_element_memory(
+                        ::core::mem::size_of::<
+                            ::buffa_types::google::protobuf::__buffa::view::TimestampView,
+                        >(),
+                    )?;
                     view.exdate
                         .push(
                             <::buffa_types::google::protobuf::__buffa::view::TimestampView as ::buffa::MessageView>::decode_view_ctx(
@@ -1628,6 +1647,7 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
                     Some(v) => {
                         ::buffa::MessageField::<
                             ::buffa_types::google::protobuf::Timestamp,
+                            ::buffa::Inline<::buffa_types::google::protobuf::Timestamp>,
                         >::some(v.to_owned_from_source(__buffa_src)?)
                     }
                     None => ::buffa::MessageField::none(),
@@ -1637,6 +1657,9 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
                     Some(v) => {
                         ::buffa::MessageField::<
                             super::super::super::super::super::super::super::google::r#type::TimeZone,
+                            ::buffa::Inline<
+                                super::super::super::super::super::super::super::google::r#type::TimeZone,
+                            >,
                         >::some(v.to_owned_from_source(__buffa_src)?)
                     }
                     None => ::buffa::MessageField::none(),
@@ -1660,54 +1683,54 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
         fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
             #[allow(unused_imports)]
             use ::buffa::Enumeration as _;
-            let mut size = 0u32;
+            let mut size = 0u64;
             if self.dtstart.is_set() {
                 let __slot = __cache.reserve();
                 let inner_size = self.dtstart.compute_size(__cache);
                 __cache.set(__slot, inner_size);
                 size
-                    += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                        + inner_size;
+                    += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                        + inner_size as u64;
             }
-            size += 1u32 + ::buffa::types::string_encoded_len(&self.rrule) as u32;
+            size += 1u64 + ::buffa::types::string_encoded_len(&self.rrule) as u64;
             if self.timezone.is_set() {
                 let __slot = __cache.reserve();
                 let inner_size = self.timezone.compute_size(__cache);
                 __cache.set(__slot, inner_size);
                 size
-                    += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                        + inner_size;
+                    += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                        + inner_size as u64;
             }
             for v in &self.rdate {
                 let __slot = __cache.reserve();
                 let inner_size = v.compute_size(__cache);
                 __cache.set(__slot, inner_size);
                 size
-                    += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                        + inner_size;
+                    += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                        + inner_size as u64;
             }
             for v in &self.exdate {
                 let __slot = __cache.reserve();
                 let inner_size = v.compute_size(__cache);
                 __cache.set(__slot, inner_size);
                 size
-                    += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                        + inner_size;
+                    += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                        + inner_size as u64;
             }
-            size
+            ::buffa::saturate_size(size)
         }
         #[allow(clippy::needless_borrow)]
         fn write_to(
             &self,
             __cache: &mut ::buffa::SizeCache,
-            buf: &mut impl ::buffa::bytes::BufMut,
+            buf: &mut impl ::buffa::EncodeSink,
         ) {
             #[allow(unused_imports)]
             use ::buffa::Enumeration as _;
             if self.dtstart.is_set() {
                 ::buffa::types::put_len_delimited_header(
                     1u32,
-                    __cache.consume_next(),
+                    u64::from(__cache.consume_next()),
                     buf,
                 );
                 self.dtstart.write_to(__cache, buf);
@@ -1716,7 +1739,7 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
             if self.timezone.is_set() {
                 ::buffa::types::put_len_delimited_header(
                     3u32,
-                    __cache.consume_next(),
+                    u64::from(__cache.consume_next()),
                     buf,
                 );
                 self.timezone.write_to(__cache, buf);
@@ -1724,7 +1747,7 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
             for v in &self.rdate {
                 ::buffa::types::put_len_delimited_header(
                     4u32,
-                    __cache.consume_next(),
+                    u64::from(__cache.consume_next()),
                     buf,
                 );
                 v.write_to(__cache, buf);
@@ -1732,7 +1755,7 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
             for v in &self.exdate {
                 ::buffa::types::put_len_delimited_header(
                     5u32,
-                    __cache.consume_next(),
+                    u64::from(__cache.consume_next()),
                     buf,
                 );
                 v.write_to(__cache, buf);
@@ -1830,7 +1853,9 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
         ///
         /// # Errors
         ///
-        /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+        /// Returns [`::buffa::DecodeError::MessageTooLarge`] if the
+        /// message's encoded size exceeds the 2 GiB protobuf limit, or
+        /// another [`::buffa::DecodeError`] if the re-encoded bytes are
         /// somehow invalid (should not happen for well-formed messages).
         pub fn from_owned(
             msg: &super::super::super::schedule::RRule,
@@ -1846,16 +1871,13 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
         }
         /// Convert to the owned message type.
         ///
-        /// # Errors
-        ///
-        /// Returns an error if re-materializing preserved unknown fields
-        /// fails (e.g. the unknown-field limit is exceeded).
-        pub fn to_owned_message(
-            &self,
-        ) -> ::core::result::Result<
-            super::super::super::schedule::RRule,
-            ::buffa::DecodeError,
-        > {
+        /// Infallible: this type's constructors wire-decode their
+        /// buffer, and a view produced by wire decoding always
+        /// converts. Delegates to [`::buffa::OwnedView::to_owned_message`],
+        /// whose contract also governs handles converted from a raw
+        /// [`::buffa::OwnedView`].
+        #[must_use]
+        pub fn to_owned_message(&self) -> super::super::super::schedule::RRule {
             self.0.to_owned_message()
         }
         /// The underlying bytes buffer.

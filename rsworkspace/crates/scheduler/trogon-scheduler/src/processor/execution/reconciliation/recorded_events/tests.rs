@@ -88,7 +88,7 @@ fn delivery_round_trips_with_ttl_and_source() {
 fn message_round_trips_content_type_and_headers() {
     let message = DomainMessage {
         content: DomainContent::json(r#"{"ok":true}"#),
-        headers: DomainHeaders::new([("x-kind", "heartbeat")]).unwrap(),
+        headers: DomainHeaders::new([("x-kind", "0198fa2f6d0a7b1a8cf9f762e73a1c19")]).unwrap(),
     };
     let decoded = message_from_proto(&proto_message(&message)).unwrap();
     assert_eq!(decoded, message);
@@ -97,7 +97,9 @@ fn message_round_trips_content_type_and_headers() {
 #[test]
 fn created_event_missing_schedule_field_is_rejected() {
     let created = v1::ScheduleCreated {
-        schedule_id: "orders/created".to_string(),
+        schedule_id: crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c01")
+            .unwrap()
+            .to_string(),
         status: MessageField::some(v1::ScheduleStatus::from(ScheduleEventStatus::Scheduled)),
         schedule: MessageField::none(),
         delivery: MessageField::some(proto_delivery(&DomainDelivery::nats_event("agent.run").unwrap())),
@@ -141,7 +143,9 @@ fn message_without_content_defaults_payload() {
 #[test]
 fn created_event_missing_delivery_field_is_rejected() {
     let created = v1::ScheduleCreated {
-        schedule_id: "orders/created".to_string(),
+        schedule_id: crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c01")
+            .unwrap()
+            .to_string(),
         status: MessageField::some(v1::ScheduleStatus::from(ScheduleEventStatus::Scheduled)),
         schedule: MessageField::some(proto_schedule(&DomainSchedule::every(Duration::from_secs(30)).unwrap())),
         delivery: MessageField::none(),
@@ -164,7 +168,9 @@ fn created_event_missing_delivery_field_is_rejected() {
 #[test]
 fn created_event_missing_message_field_is_rejected() {
     let created = v1::ScheduleCreated {
-        schedule_id: "orders/created".to_string(),
+        schedule_id: crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c01")
+            .unwrap()
+            .to_string(),
         status: MessageField::some(v1::ScheduleStatus::from(ScheduleEventStatus::Scheduled)),
         schedule: MessageField::some(proto_schedule(&DomainSchedule::every(Duration::from_secs(30)).unwrap())),
         delivery: MessageField::some(proto_delivery(&DomainDelivery::nats_event("agent.run").unwrap())),
@@ -244,7 +250,9 @@ fn schedule_proto_kinds_decode_successfully() {
 #[test]
 fn definition_from_created_rejects_missing_schedule() {
     let created = v1::ScheduleCreated {
-        schedule_id: "orders/created".to_string(),
+        schedule_id: crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c01")
+            .unwrap()
+            .to_string(),
         status: MessageField::none(),
         schedule: MessageField::none(),
         delivery: MessageField::some(proto_delivery(&DomainDelivery::nats_event("agent.run").unwrap())),
@@ -264,7 +272,9 @@ fn definition_from_created_rejects_missing_schedule() {
 #[test]
 fn definition_from_created_rejects_missing_delivery() {
     let created = v1::ScheduleCreated {
-        schedule_id: "orders/created".to_string(),
+        schedule_id: crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c01")
+            .unwrap()
+            .to_string(),
         status: MessageField::none(),
         schedule: MessageField::some(proto_schedule(&DomainSchedule::every(Duration::from_secs(30)).unwrap())),
         delivery: MessageField::none(),
@@ -284,7 +294,9 @@ fn definition_from_created_rejects_missing_delivery() {
 #[test]
 fn definition_from_created_rejects_missing_message() {
     let created = v1::ScheduleCreated {
-        schedule_id: "orders/created".to_string(),
+        schedule_id: crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c01")
+            .unwrap()
+            .to_string(),
         status: MessageField::none(),
         schedule: MessageField::some(proto_schedule(&DomainSchedule::every(Duration::from_secs(30)).unwrap())),
         delivery: MessageField::some(proto_delivery(&DomainDelivery::nats_event("agent.run").unwrap())),
@@ -301,7 +313,9 @@ fn definition_from_created_rejects_missing_message() {
 #[test]
 fn definition_from_created_decodes_all_fields() {
     let created = v1::ScheduleCreated {
-        schedule_id: "orders/created".to_string(),
+        schedule_id: crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c01")
+            .unwrap()
+            .to_string(),
         status: MessageField::some(v1::ScheduleStatus::from(ScheduleEventStatus::Paused)),
         schedule: MessageField::some(proto_schedule(&DomainSchedule::every(Duration::from_secs(30)).unwrap())),
         delivery: MessageField::some(proto_delivery(&DomainDelivery::nats_event("agent.run").unwrap())),
@@ -318,7 +332,9 @@ fn definition_from_created_decodes_all_fields() {
 #[test]
 fn created_event_decodes_into_a_schedule_change() {
     let created = v1::ScheduleCreated {
-        schedule_id: "orders/created".to_string(),
+        schedule_id: crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c01")
+            .unwrap()
+            .to_string(),
         status: MessageField::some(v1::ScheduleStatus::from(ScheduleEventStatus::Paused)),
         schedule: MessageField::some(proto_schedule(&DomainSchedule::every(Duration::from_secs(30)).unwrap())),
         delivery: MessageField::some(proto_delivery(&DomainDelivery::nats_event("agent.run").unwrap())),
@@ -338,7 +354,10 @@ fn created_event_decodes_into_a_schedule_change() {
     else {
         panic!("expected Created");
     };
-    assert_eq!(schedule_id.as_str(), "orders/created");
+    assert_eq!(
+        schedule_id,
+        crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c01").unwrap()
+    );
     assert_eq!(definition.status, ScheduleEventStatus::Paused);
 }
 
@@ -349,38 +368,44 @@ fn recorded_events_decode_for_pause_resume_remove() {
             v1::ScheduleEvent {
                 event: Some(
                     v1::SchedulePaused {
-                        schedule_id: "a".to_string(),
+                        schedule_id: crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c08")
+                            .unwrap()
+                            .to_string(),
                     }
                     .into(),
                 ),
             },
-            "a",
+            "0198fa2f6d0a7b1a8cf9f762e73a1c08",
         ),
         (
             v1::ScheduleEvent {
                 event: Some(
                     v1::ScheduleResumed {
-                        schedule_id: "b".to_string(),
+                        schedule_id: crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c09")
+                            .unwrap()
+                            .to_string(),
                     }
                     .into(),
                 ),
             },
-            "b",
+            "0198fa2f6d0a7b1a8cf9f762e73a1c09",
         ),
         (
             v1::ScheduleEvent {
                 event: Some(
                     v1::ScheduleRemoved {
-                        schedule_id: "c".to_string(),
+                        schedule_id: crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c0a")
+                            .unwrap()
+                            .to_string(),
                     }
                     .into(),
                 ),
             },
-            "c",
+            "0198fa2f6d0a7b1a8cf9f762e73a1c0a",
         ),
     ] {
         let change = decode_schedule_change(&event).unwrap();
-        assert_eq!(change.schedule_id().as_str(), expect_id);
+        assert_eq!(change.schedule_id(), &ScheduleId::parse(expect_id).unwrap());
     }
 }
 
@@ -399,7 +424,9 @@ fn occurrence_lifecycle_events_decode_into_schedule_changes() {
     let event = v1::ScheduleEvent {
         event: Some(
             v1::ScheduleOccurrenceRecorded {
-                schedule_id: "backup".to_string(),
+                schedule_id: crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c06")
+                    .unwrap()
+                    .to_string(),
                 occurrence_sequence: Some(2),
                 occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&occurrence_at)),
                 recorded_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&occurrence_at)),
@@ -415,13 +442,13 @@ fn occurrence_lifecycle_events_decode_into_schedule_changes() {
             ref schedule_id,
             ref occurrence_sequence,
             occurrence_at: decoded_at,
-        } if schedule_id.as_str() == "backup"
+        } if schedule_id == &crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c06").unwrap()
             && occurrence_sequence.as_u64() == 2
             && decoded_at == occurrence_at
     ));
 
     let stream_event = StreamEvent {
-        stream_id: "backup".to_string(),
+        stream_id: "0198fa2f6d0a7b1a8cf9f762e73a1c06".to_string(),
         event: Event {
             id: EventId::new(Uuid::from_u128(3)),
             r#type: event.event_type().expect("event has a type").to_string(),
@@ -440,7 +467,9 @@ fn occurrence_lifecycle_events_decode_into_schedule_changes() {
     let event = v1::ScheduleEvent {
         event: Some(
             v1::ScheduleOccurrenceScheduled {
-                schedule_id: "backup".to_string(),
+                schedule_id: crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c06")
+                    .unwrap()
+                    .to_string(),
                 occurrence_sequence: Some(3),
                 occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&occurrence_at)),
                 scheduled_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&occurrence_at)),
@@ -455,7 +484,7 @@ fn occurrence_lifecycle_events_decode_into_schedule_changes() {
             ref schedule_id,
             ref occurrence_sequence,
             occurrence_at: decoded_at,
-        } if schedule_id.as_str() == "backup"
+        } if schedule_id == &crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c06").unwrap()
             && occurrence_sequence.as_u64() == 3
             && decoded_at == occurrence_at
     ));
@@ -466,7 +495,9 @@ fn scheduled_occurrence_requires_valid_sequence() {
     let event = v1::ScheduleEvent {
         event: Some(
             v1::ScheduleOccurrenceScheduled {
-                schedule_id: "backup".to_string(),
+                schedule_id: crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c06")
+                    .unwrap()
+                    .to_string(),
                 occurrence_sequence: None,
                 occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&at_instant())),
                 scheduled_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&at_instant())),
@@ -484,7 +515,9 @@ fn scheduled_occurrence_requires_valid_sequence() {
     let event = v1::ScheduleEvent {
         event: Some(
             v1::ScheduleOccurrenceScheduled {
-                schedule_id: "backup".to_string(),
+                schedule_id: crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c06")
+                    .unwrap()
+                    .to_string(),
                 occurrence_sequence: Some(0),
                 occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&at_instant())),
                 scheduled_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&at_instant())),
@@ -515,7 +548,9 @@ fn out_of_range_duration_nanos_is_rejected() {
 #[test]
 fn lane_key_routes_decodable_events_by_payload_schedule_id() {
     let created = v1::ScheduleCreated {
-        schedule_id: "orders/created".to_string(),
+        schedule_id: crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c01")
+            .unwrap()
+            .to_string(),
         status: MessageField::some(v1::ScheduleStatus::from(ScheduleEventStatus::Scheduled)),
         schedule: MessageField::some(proto_schedule(&DomainSchedule::every(Duration::from_secs(30)).unwrap())),
         delivery: MessageField::some(proto_delivery(&DomainDelivery::nats_event("agent.run").unwrap())),
@@ -542,19 +577,27 @@ fn lane_key_routes_decodable_events_by_payload_schedule_id() {
     };
 
     let (key, decoded) = lane_route_from_stream_event(&stream_event);
-    assert_eq!(key, ScheduleKey::derive(&ScheduleId::parse("orders/created").unwrap()));
-    assert_ne!(key, ScheduleKey::for_stream(&StreamRoutingId::from("wrong-stream")));
+    assert_eq!(
+        key.as_str(),
+        crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c01")
+            .unwrap()
+            .to_string()
+    );
+    assert_ne!(key.as_str(), "wrong-stream");
     // The decoded change is threaded so the worker does not decode again.
     let DecodedScheduleEvent::Change(change) = decoded else {
         panic!("expected the decoded schedule change to be threaded");
     };
-    assert_eq!(change.schedule_id().as_str(), "orders/created");
+    assert_eq!(
+        change.schedule_id(),
+        &crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c01").unwrap()
+    );
 }
 
 #[test]
 fn lane_key_falls_back_to_stream_id_for_foreign_events() {
     let stream_event = StreamEvent {
-        stream_id: "orders/created".to_string(),
+        stream_id: "0198fa2f6d0a7b1a8cf9f762e73a1c01".to_string(),
         event: Event {
             id: EventId::new(Uuid::from_u128(2)),
             r#type: "foreign.event.v1".to_string(),
@@ -566,10 +609,7 @@ fn lane_key_falls_back_to_stream_id_for_foreign_events() {
     };
 
     let (key, decoded) = lane_route_from_stream_event(&stream_event);
-    assert_eq!(
-        key,
-        ScheduleKey::for_stream(&StreamRoutingId::from(stream_event.stream_id.as_str()))
-    );
+    assert_eq!(key.as_str(), stream_event.stream_id);
     assert!(matches!(decoded, DecodedScheduleEvent::Foreign));
 }
 
@@ -578,7 +618,9 @@ fn schedule_completed_decodes_into_completed_change() {
     let event = v1::ScheduleEvent {
         event: Some(
             v1::ScheduleCompleted {
-                schedule_id: "orders/done".to_string(),
+                schedule_id: crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c02")
+                    .unwrap()
+                    .to_string(),
                 last_occurrence_sequence: Some(1),
             }
             .into(),
@@ -589,14 +631,14 @@ fn schedule_completed_decodes_into_completed_change() {
         change,
         ScheduleChange::Completed {
             ref schedule_id,
-        } if schedule_id.as_str() == "orders/done"
+        } if schedule_id == &crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c02").unwrap()
     ));
 }
 
 #[test]
 fn lane_route_from_stream_event_routes_undecoded_on_decode_error() {
     let stream_event = StreamEvent {
-        stream_id: "orders/created".to_string(),
+        stream_id: "0198fa2f6d0a7b1a8cf9f762e73a1c01".to_string(),
         event: Event {
             id: EventId::new(Uuid::from_u128(3)),
             r#type: v1::ScheduleRemoved::FULL_NAME.to_string(),
@@ -608,9 +650,6 @@ fn lane_route_from_stream_event_routes_undecoded_on_decode_error() {
     };
 
     let (key, decoded) = lane_route_from_stream_event(&stream_event);
-    assert_eq!(
-        key,
-        ScheduleKey::for_stream(&StreamRoutingId::from(stream_event.stream_id.as_str()))
-    );
+    assert_eq!(key.as_str(), stream_event.stream_id);
     assert!(matches!(decoded, DecodedScheduleEvent::Undecoded));
 }

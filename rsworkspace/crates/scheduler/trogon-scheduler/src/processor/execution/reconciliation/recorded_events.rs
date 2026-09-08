@@ -25,7 +25,6 @@ use crate::commands::domain::{
 };
 
 use super::reconcile::{ScheduleChange, ScheduleDefinition};
-use super::{ScheduleKey, StreamRoutingId};
 
 pub use trogonai_proto::scheduler::schedules::ScheduleEventPayloadError;
 
@@ -151,8 +150,8 @@ pub fn schedule_change_from_stream_event(
     }
 }
 
-fn stream_lane_key(stream_event: &StreamEvent) -> ScheduleKey {
-    ScheduleKey::for_stream(&StreamRoutingId::from(stream_event.stream_id.as_str()))
+fn stream_lane_id(stream_event: &StreamEvent) -> String {
+    stream_event.stream_id.clone()
 }
 
 /// The payload decode threaded from lane routing to the worker so one record is
@@ -175,18 +174,15 @@ pub enum DecodedScheduleEvent {
 /// Decodable schedule events route by the payload [`ScheduleId`] so lane
 /// serialization matches checkpoint load/save. Foreign or undecodable records
 /// fall back to the stream id so they still land on a deterministic lane.
-pub fn lane_route_from_stream_event(stream_event: &StreamEvent) -> (ScheduleKey, DecodedScheduleEvent) {
+pub fn lane_route_from_stream_event(stream_event: &StreamEvent) -> (String, DecodedScheduleEvent) {
     // The dispatcher derives lane keys outside its per-message panic boundary,
     // so a payload-decode panic here must not escape and kill every lane.
     let decoded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         schedule_change_from_stream_event(stream_event)
     }));
     match decoded {
-        Ok(Ok(Some(change))) => (
-            ScheduleKey::derive(change.schedule_id()),
-            DecodedScheduleEvent::Change(change),
-        ),
-        Ok(Ok(None)) => (stream_lane_key(stream_event), DecodedScheduleEvent::Foreign),
+        Ok(Ok(Some(change))) => (change.schedule_id().to_string(), DecodedScheduleEvent::Change(change)),
+        Ok(Ok(None)) => (stream_lane_id(stream_event), DecodedScheduleEvent::Foreign),
         Ok(Err(error)) => {
             tracing::warn!(
                 stream_id = %stream_event.stream_id,
@@ -194,7 +190,7 @@ pub fn lane_route_from_stream_event(stream_event: &StreamEvent) -> (ScheduleKey,
                 error = %error,
                 "schedule event payload failed to decode; routing lane by stream id"
             );
-            (stream_lane_key(stream_event), DecodedScheduleEvent::Undecoded)
+            (stream_lane_id(stream_event), DecodedScheduleEvent::Undecoded)
         }
         Err(_) => {
             tracing::error!(
@@ -202,7 +198,7 @@ pub fn lane_route_from_stream_event(stream_event: &StreamEvent) -> (ScheduleKey,
                 stream_position = %stream_event.stream_position,
                 "schedule event payload decode panicked; routing lane by stream id"
             );
-            (stream_lane_key(stream_event), DecodedScheduleEvent::Undecoded)
+            (stream_lane_id(stream_event), DecodedScheduleEvent::Undecoded)
         }
     }
 }
@@ -210,7 +206,7 @@ pub fn lane_route_from_stream_event(stream_event: &StreamEvent) -> (ScheduleKey,
 /// Returns whether the stream envelope id resolves to the same lane as the
 /// decoded payload schedule id.
 pub fn stream_routing_matches_payload(stream_event: &StreamEvent, change: &ScheduleChange) -> bool {
-    ScheduleKey::derive(change.schedule_id()) == stream_lane_key(stream_event)
+    change.schedule_id().to_string() == stream_event.stream_id
 }
 
 /// Decodes a fully materialized `v1::ScheduleEvent` into a schedule change.

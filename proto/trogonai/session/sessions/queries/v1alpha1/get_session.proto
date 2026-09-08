@@ -1,0 +1,37 @@
+edition = "2024";
+
+package trogonai.session.sessions.queries.v1alpha1;
+
+import "trogonai/session/sessions/queries/v1alpha1/contract_version.proto";
+import "trogonai/session/sessions/queries/v1alpha1/projection_freshness.proto";
+import "trogonai/session/sessions/queries/v1alpha1/read_consistency.proto";
+import "trogonai/session/sessions/queries/v1alpha1/session_view.proto";
+
+// GetSessionRequest reads one session's detail view.
+//
+// The caller declares the contract version it understands. This is what turns
+// an incompatibility into a typed refusal instead of a parse failure: the
+// server can see, before rendering anything, whether the caller can read the
+// answer.
+message GetSessionRequest {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The highest contract version this caller understands. The server renders at
+  // no higher than this, and refuses outright when the major does not match.
+  ContractVersion accepted_contract = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Freshness the caller requires. Unset is an eventual read.
+  ReadConsistency consistency = 3;
+}
+
+// GetSessionResponse is a session's detail view.
+//
+// A failure is not a variant here. It arrives as a QueryError on the
+// transport's error channel, so a caller can never read a zero-valued success
+// shape as an empty answer.
+message GetSessionResponse {
+  ContractNegotiation contract = 1 [features.field_presence = LEGACY_REQUIRED];
+  SessionView session = 2 [features.field_presence = LEGACY_REQUIRED];
+  // How current the read model was when it answered. Always present, including
+  // on an eventual read, so currency is something the server stated rather than
+  // something the caller assumed.
+  ProjectionFreshness freshness = 3 [features.field_presence = LEGACY_REQUIRED];
+}

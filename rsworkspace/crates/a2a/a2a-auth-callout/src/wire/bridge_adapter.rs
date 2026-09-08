@@ -1,13 +1,44 @@
 //! Converts internal JSON bridge mint requests into [`ServerAuthRequestClaims`]
 //! for reuse of [`crate::dispatcher::CalloutDispatcher`].
 
-use nats_jwt_rs::Claims;
-use nats_jwt_rs::authorization::AuthRequest;
+use nats_jwt_rs::authorization::{AuthRequest, ClientInfo, ClientTLS, ConnectOpts, ServerID};
+use nats_jwt_rs::types::GenericFields;
+use nats_jwt_rs::{ClaimType, Claims};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 use super::ServerAuthRequestClaims;
 use crate::account_resolver::RequestedAccount;
 use crate::bridge_mint::{BridgeAuthScheme, BridgeMintRequest};
 use crate::error::{AuthCalloutError, CredentialError};
+
+/// The `client_tls` section of a synthetic bridge request. [`ClientTLS`] keeps
+/// its fields private, so the bridge states its own view of the section and
+/// converts through serde.
+#[derive(Debug, Serialize)]
+struct BridgeClientTls {
+    version: &'static str,
+    cipher: &'static str,
+    certs: Vec<String>,
+    verified_chains: Vec<Vec<String>>,
+}
+
+impl BridgeClientTls {
+    fn into_client_tls(self) -> Result<ClientTLS, AuthCalloutError> {
+        decode_section("client_tls", encode_section("client_tls", self)?)
+    }
+}
+
+/// A section the bridge authors, as the JSON document the wire types are
+/// defined over.
+fn encode_section(section: &'static str, value: impl Serialize) -> Result<serde_json::Value, AuthCalloutError> {
+    serde_json::to_value(value).map_err(|source| AuthCalloutError::BridgeWireFormat { section, source })
+}
+
+/// The same document read back as the wire type, whose fields are private.
+fn decode_section<T: DeserializeOwned>(section: &'static str, value: serde_json::Value) -> Result<T, AuthCalloutError> {
+    serde_json::from_value(value).map_err(|source| AuthCalloutError::BridgeWireFormat { section, source })
+}
 
 impl ServerAuthRequestClaims {
     /// Synthetic authorization claims for `a2a.bridge.auth.callout.request` (not server-signed).
@@ -63,53 +94,68 @@ impl ServerAuthRequestClaims {
             .as_ref()
             .and_then(|c| c.client_cert_pem.clone())
             .map(|pem| {
-                serde_json::json!({
-                    "version": "1.3",
-                    "cipher": "bridge-internal",
-                    "certs": [pem],
-                    "verified_chains": []
-                })
-            });
+                BridgeClientTls {
+                    version: "1.3",
+                    cipher: "bridge-internal",
+                    certs: vec![pem],
+                    verified_chains: Vec::new(),
+                }
+                .into_client_tls()
+            })
+            .transpose()?;
 
-        let nats = serde_json::json!({
-            "server_id": {
-                "name": "bridge-internal",
-                "host": "127.0.0.1",
-                "id": "BRIDGEINTERNALAUTHCALLOUT000000000000"
+        let nats = AuthRequest {
+            server: ServerID {
+                name: "bridge-internal".to_owned(),
+                host: "127.0.0.1".to_owned(),
+                id: "BRIDGEINTERNALAUTHCALLOUT000000000000".to_owned(),
+                ..ServerID::default()
             },
-            "user_nkey": request
+            user_nkey: request
                 .user_nkey
                 .unwrap_or_else(|| nkeys::KeyPair::new_user().public_key()),
-            "client_info": {
-                "host": "127.0.0.1",
-                "id": 0,
-                "user": account,
-                "name_tag": "",
-                "kind": "Client",
-                "type": "nats",
-                "nonce": ""
+            client_info: ClientInfo {
+                host: "127.0.0.1".to_owned(),
+                id: 0,
+                user: account,
+                kind: "Client".to_owned(),
+                client_type: "nats".to_owned(),
+                ..ClientInfo::default()
             },
-            "connect_opts": {
-                "jwt": jwt,
-                "auth_token": auth_token,
-                "protocol": 1
+            connect_opts: ConnectOpts {
+                jwt,
+                auth_token,
+                protocol: 1,
+                ..ConnectOpts::default()
             },
-            "client_tls": client_tls,
-            "type": "authorization_request",
-            "version": 2
-        });
+            client_tls,
+            request_nonce: None,
+            generic_fields: GenericFields {
+                claim_type: ClaimType::AuthorizationRequest,
+                version: 2,
+                ..GenericFields::default()
+            },
+        };
+
+        // `ServerAuthRequestClaims` reads the sections `AuthRequest` keeps
+        // private (the TLS certificates) off the raw `nats` document, so the
+        // synthetic request carries the same projection a server-signed one
+        // would.
+        let nats_json = encode_section("nats", &nats)?;
 
         let bridge_issuer = nkeys::KeyPair::new_account();
-        let nats_json = nats.clone();
-        let inner: Claims<AuthRequest> = serde_json::from_value(serde_json::json!({
-            "aud": super::AUTH_REQUEST_AUDIENCE,
-            "iat": 1,
-            "iss": bridge_issuer.public_key(),
-            "jti": "bridge",
-            "sub": bridge_issuer.public_key(),
-            "nats": nats
-        }))
-        .map_err(|e| AuthCalloutError::WireFormat(format!("bridge mint claims: {e}")))?;
+        let inner: Claims<AuthRequest> = Claims {
+            aud: Some(super::AUTH_REQUEST_AUDIENCE.to_owned()),
+            exp: None,
+            iat: 1,
+            id: None,
+            iss: bridge_issuer.public_key(),
+            jti: "bridge".to_owned(),
+            name: None,
+            nats,
+            nbf: None,
+            sub: bridge_issuer.public_key(),
+        };
 
         Ok(Self::from_decoded(inner, nats_json))
     }

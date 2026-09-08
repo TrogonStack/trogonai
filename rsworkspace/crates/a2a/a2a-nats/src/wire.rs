@@ -1,9 +1,9 @@
-//! JSON-RPC content-mode wire helpers for A2A over NATS (ADR#0011).
+//! Canonical JSON-RPC wire helpers for A2A over NATS (ADR#0056).
 //!
-//! Per-message signing is **not** implemented in this crate. Signed A2A paths must
-//! remain blocked until a signing scheme exists that covers `Jsonrpc-Id` and
-//! `Jsonrpc-Error-Code` in addition to the body — do not route signed traffic
-//! through this encoding prematurely.
+//! The NATS body carries the complete JSON-RPC 2.0 object. `Jsonrpc-Id` and
+//! `Jsonrpc-Error-Code` are non-authoritative projections of the body. Per-message
+//! signing is not implemented in this crate yet; the canonical body is the payload
+//! digest input required by ADR#0051 (subject and operation remain separate claims).
 
 use async_nats::header::HeaderMap;
 use jsonrpc_nats::{CodecError, Direction, Encoded, Message, RequestId, ResponseId, decode, encode};
@@ -38,7 +38,7 @@ pub fn is_notification(headers: &HeaderMap) -> bool {
     headers.get(jsonrpc_nats::HEADER_ID).is_none()
 }
 
-/// Encode a JSON-RPC request call (params in body, id in `Jsonrpc-Id`).
+/// Encode a JSON-RPC request (complete body; id projected to `Jsonrpc-Id`).
 pub fn encode_request<Req: Serialize>(method: &str, id: RequestId, params: &Req) -> Result<Encoded, WireError> {
     let params = serde_json::to_value(params).map_err(WireError::Serialize)?;
     encode(&Message::Request {
@@ -49,13 +49,13 @@ pub fn encode_request<Req: Serialize>(method: &str, id: RequestId, params: &Req)
     .map_err(WireError::from)
 }
 
-/// Encode a success response (result in body).
+/// Encode a success response (complete body).
 pub fn encode_success<Res: Serialize>(id: ResponseId, result: &Res) -> Result<Encoded, WireError> {
     let result = serde_json::to_value(result).map_err(WireError::Serialize)?;
     encode(&Message::Success { id, result }).map_err(WireError::from)
 }
 
-/// Encode an error response (`Jsonrpc-Error-Code` + message body).
+/// Encode an error response (complete body; code projected to `Jsonrpc-Error-Code`).
 pub fn encode_error(
     id: ResponseId,
     code: i32,
@@ -87,6 +87,8 @@ pub fn decode_response<Res: DeserializeOwned>(
 }
 
 /// Decode a JSON-RPC request params body.
+///
+/// `method` is the A2A protocol method expected in the body (slash form).
 pub fn decode_request_params<Req: DeserializeOwned>(
     method: &str,
     headers: &HeaderMap,

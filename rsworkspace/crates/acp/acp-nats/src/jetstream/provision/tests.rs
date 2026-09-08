@@ -8,17 +8,17 @@ fn p(s: &str) -> AcpPrefix {
 }
 
 #[tokio::test]
-async fn provision_creates_six_streams() {
+async fn provision_creates_five_streams() {
     let ctx = MockJetStreamContext::new();
     provision_streams(&ctx, &p("acp")).await.unwrap();
-    assert_eq!(ctx.created_streams().len(), 6);
+    assert_eq!(ctx.created_streams().len(), 5);
 }
 
 #[tokio::test]
-async fn provision_updates_six_streams() {
+async fn provision_updates_five_streams() {
     let ctx = MockJetStreamContext::new();
     provision_streams(&ctx, &p("acp")).await.unwrap();
-    assert_eq!(ctx.updated_streams().len(), 6);
+    assert_eq!(ctx.updated_streams().len(), 5);
 }
 
 #[tokio::test]
@@ -29,7 +29,6 @@ async fn provision_creates_correct_stream_names() {
     assert!(names.contains(&"ACP_COMMANDS".to_string()));
     assert!(names.contains(&"ACP_RESPONSES".to_string()));
     assert!(names.contains(&"ACP_CLIENT_OPS".to_string()));
-    assert!(names.contains(&"ACP_NOTIFICATIONS".to_string()));
     assert!(names.contains(&"ACP_GLOBAL".to_string()));
     assert!(names.contains(&"ACP_GLOBAL_EXT".to_string()));
 }
@@ -57,5 +56,5 @@ async fn provision_is_idempotent() {
     let ctx = MockJetStreamContext::new();
     provision_streams(&ctx, &p("acp")).await.unwrap();
     provision_streams(&ctx, &p("acp")).await.unwrap();
-    assert_eq!(ctx.created_streams().len(), 12);
+    assert_eq!(ctx.created_streams().len(), 10);
 }

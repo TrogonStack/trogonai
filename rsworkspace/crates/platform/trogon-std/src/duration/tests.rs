@@ -8,7 +8,14 @@ fn from_secs_valid() {
 
 #[test]
 fn from_secs_zero_rejected() {
-    assert!(matches!(NonZeroDuration::from_secs(0), Err(ZeroDuration)));
+    assert!(matches!(NonZeroDuration::from_secs(0), Err(ZeroDurationError)));
+}
+
+#[test]
+fn from_secs_const_valid() {
+    // Call at runtime (not in a `const` binding) so the body is covered.
+    let d = NonZeroDuration::from_secs_const(10);
+    assert_eq!(Duration::from(d), Duration::from_secs(10));
 }
 
 #[test]
@@ -19,12 +26,12 @@ fn from_millis_valid() {
 
 #[test]
 fn from_millis_zero_rejected() {
-    assert!(matches!(NonZeroDuration::from_millis(0), Err(ZeroDuration)));
+    assert!(matches!(NonZeroDuration::from_millis(0), Err(ZeroDurationError)));
 }
 
 #[test]
 fn error_display() {
-    assert_eq!(ZeroDuration.to_string(), "duration must not be zero");
+    assert_eq!(ZeroDurationError.to_string(), "duration must not be zero");
 }
 
 #[test]

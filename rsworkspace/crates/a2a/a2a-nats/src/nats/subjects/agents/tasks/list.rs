@@ -21,7 +21,7 @@ impl std::fmt::Display for TasksListSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.agents.{}.tasks.list",
+            "{}.v1.agents.{}.tasks.list",
             self.prefix.as_str(),
             self.agent_id.as_str()
         )

@@ -9,7 +9,7 @@ use trogon_aauth_verify::nats_pop::NatsPopError;
 use trogon_std::env::InMemoryEnv;
 
 use super::*;
-use crate::aauth::AAuthDenyReason;
+use crate::aauth::AAuthDenyReasonError;
 
 fn write_temp_file(contents: &str) -> NamedTempFile {
     let mut file = NamedTempFile::new().expect("tempfile");
@@ -432,13 +432,13 @@ fn negative_or_non_numeric_optional_secs_errors() {
 
 #[test]
 fn aauth_deny_rule_fired_maps_all_variants() {
-    let pop = AAuthDenyReason::Pop(NatsPopError::MissingHeader("x"));
+    let pop = AAuthDenyReasonError::Pop(NatsPopError::MissingHeader("x"));
     assert_eq!(aauth_deny_rule_fired(&pop), "gateway.aauth.denied.pop");
 
-    let auth = AAuthDenyReason::Auth(TokenError::BadHeader);
+    let auth = AAuthDenyReasonError::Auth(TokenError::BadHeader);
     assert_eq!(aauth_deny_rule_fired(&auth), "gateway.aauth.denied.auth");
 
-    let mismatch = AAuthDenyReason::AuthAgentMismatch {
+    let mismatch = AAuthDenyReasonError::AuthAgentMismatch {
         agent_sub: "agent-A".into(),
         agent_jkt: "jkt-A".into(),
         auth_agent: "agent-B".into(),
@@ -449,7 +449,7 @@ fn aauth_deny_rule_fired_maps_all_variants() {
         "gateway.aauth.denied.auth_agent_mismatch"
     );
 
-    let scope = AAuthDenyReason::ScopeNotCovered {
+    let scope = AAuthDenyReasonError::ScopeNotCovered {
         scope: "tasks.*".into(),
         method: "message.send".into(),
     };
@@ -465,10 +465,10 @@ fn aauth_deny_rule_fired_maps_all_variants() {
     };
     let mission_err =
         trogon_aauth_verify::mission::verify_mission_header_matches_claim(&header, &claim).expect_err("mismatch");
-    let mission = AAuthDenyReason::MissionMismatch(mission_err);
+    let mission = AAuthDenyReasonError::MissionMismatch(mission_err);
     assert_eq!(aauth_deny_rule_fired(&mission), "gateway.aauth.denied.mission");
 
-    let missing_header = AAuthDenyReason::MissionHeaderMissing {
+    let missing_header = AAuthDenyReasonError::MissionHeaderMissing {
         approver: "approver-1".into(),
     };
     assert_eq!(

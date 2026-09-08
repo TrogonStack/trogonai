@@ -1,12 +1,14 @@
+use std::fmt;
 use std::sync::Arc;
 
+use crate::constants::OIDC_ALLOWED_ALGORITHMS;
 use crate::error::{AuthCalloutError, CredentialError};
 use crate::jwt::{
     AudienceAccount, ExternalSubject, UserJwtClaims, derive_caller_id, spicedb_principal_from_oidc_claims,
 };
 use crate::permissions::IssuedPermissions;
-use jsonwebtoken::jwk::{AlgorithmParameters, JwkSet};
-use jsonwebtoken::{DecodingKey, Validation, decode, decode_header};
+use jsonwebtoken::jwk::{AlgorithmParameters, JwkSet, KeyAlgorithm, KeyOperations, PublicKeyUse};
+use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OidcIssuerUrl(String);
@@ -50,8 +52,14 @@ impl OidcClientId {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct BearerToken(String);
+
+impl fmt::Debug for BearerToken {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("BearerToken").field(&"<redacted>").finish()
+    }
+}
 
 impl BearerToken {
     pub fn new(token: impl Into<String>) -> Self {
@@ -189,6 +197,46 @@ fn url_origin(s: &str) -> Option<(String, String, Option<String>)> {
     Some((scheme, host.to_ascii_lowercase(), port))
 }
 
+/// A JWK may verify an OIDC ID token under `alg` only when the key's own
+/// advertised purpose permits verification and its declared algorithm, if any,
+/// is the one asserted.
+///
+/// RFC 7517 makes `use` (section 4.2), `key_ops` (section 4.3), and `alg`
+/// (section 4.4) optional, so an absent member stays permissive: an external
+/// IdP's JWKS is not ours to constrain beyond what it states. But a publisher
+/// that does set them has declared what the key is for, and honoring that stops
+/// a key published for encryption, or pinned to one RSA algorithm, from being
+/// conscripted into verifying another.
+///
+/// Mirrors `jwk_compatible_with_alg` in `trogon-aauth-verify`'s token
+/// verifier. Kept separate rather than shared because the two crates compile
+/// against different major versions of `jsonwebtoken`, so the `Jwk` types are
+/// distinct.
+fn jwk_permits_verification_with(jwk: &jsonwebtoken::jwk::Jwk, alg: jsonwebtoken::Algorithm) -> bool {
+    if let Some(public_key_use) = &jwk.common.public_key_use
+        && !matches!(public_key_use, PublicKeyUse::Signature)
+    {
+        return false;
+    }
+    if let Some(key_operations) = &jwk.common.key_operations
+        && !key_operations.iter().any(|op| matches!(op, KeyOperations::Verify))
+    {
+        return false;
+    }
+    let Some(declared) = jwk.common.key_algorithm else {
+        return true;
+    };
+    matches!(
+        (declared, alg),
+        (KeyAlgorithm::RS256, Algorithm::RS256)
+            | (KeyAlgorithm::RS384, Algorithm::RS384)
+            | (KeyAlgorithm::RS512, Algorithm::RS512)
+            | (KeyAlgorithm::PS256, Algorithm::PS256)
+            | (KeyAlgorithm::PS384, Algorithm::PS384)
+            | (KeyAlgorithm::PS512, Algorithm::PS512)
+    )
+}
+
 impl JwksOidcVerifier {
     pub(crate) async fn fetch_jwks(&self) -> Result<JwkSet, AuthCalloutError> {
         match &self.jwks {
@@ -239,7 +287,19 @@ impl JwksOidcVerifier {
         let jwk = jwks
             .find(kid)
             .ok_or_else(|| CredentialError::InvalidCredentials(format!("no JWK for kid {kid}")))?;
+        if !OIDC_ALLOWED_ALGORITHMS.contains(&header.alg) {
+            return Err(CredentialError::UnsupportedTokenAlgorithm { algorithm: header.alg }.into());
+        }
+        if !jwk_permits_verification_with(jwk, header.alg) {
+            return Err(CredentialError::JwkNotPublishedForVerification {
+                kid: kid.clone(),
+                algorithm: header.alg,
+            }
+            .into());
+        }
         let auds: Vec<&str> = self.expected_id_token_audiences.iter().map(String::as_str).collect();
+        // Built from the header only after the allowlist above has vetted it,
+        // so the token cannot nominate its own algorithm.
         let mut validation = Validation::new(header.alg);
         validation.set_issuer(&[self.issuer.as_str()]);
         validation.set_audience(&auds);

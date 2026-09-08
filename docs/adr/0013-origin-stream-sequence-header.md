@@ -14,10 +14,11 @@ date: 2026-06-29
 an [event](../glossary/event) in the stream they are consuming. That position is the correct cursor
 for [checkpoints](../glossary/checkpoint), high-water marks, and replay progress within the current stream.
 
-Some [event-sourcing](../glossary/event-sourcing) workflows can republish an event into a different stream from
-the one where it originally lived. Examples include restoring archived events,
-backfilling historical events, rebuilding a stream after a topology change, or
-migrating events between stream layouts.
+Some application-level [event-sourcing](../glossary/event-sourcing) workflows can append an event into a
+different stream from the one where it originally lived. Examples include
+restoring archived events outside native JetStream snapshot restore, backfilling
+historical events, rebuilding a stream after a topology change, or migrating
+events between stream layouts.
 
 In those workflows, JetStream assigns a new stream sequence in the destination
 stream. The current sequence still identifies where the event lives now, but it
@@ -36,13 +37,27 @@ The header records the original JetStream stream sequence of an event when that
 event is written into a stream other than the stream position where it originally
 lived.
 
+This is the logical event-header name. The NATS event-store adapter applies its
+generic physical mapping, so the stored NATS header is
+`Trogon-Header-Trogon-Origin-Stream-Sequence`. Reads remove only the adapter
+prefix and return the logical name above. Application code and projections use
+the logical name rather than the physical storage spelling.
+
 Set `Trogon-Origin-Stream-Sequence` when:
 
-- Restoring archived events into a replacement or recovery stream.
+- Restoring archived events through an application that appends them into a
+  replacement or recovery stream.
 - Backfilling historical events into a live or rebuilt stream.
 - Migrating events into a different stream topology.
 - Rebuilding a stream while preserving provenance for projection verification,
   diagnostics, or repair tooling.
+
+Do not add this header during native JetStream snapshot restore. A native
+restore reconstructs the stored stream data, including the original message
+headers and sequence state. Native source and mirror replication may add the
+server-owned `Nats-Stream-Source` header, and server-side `RePublish` adds its
+own origin headers. Those server mechanisms do not require an application to
+synthesize this header.
 
 Do not set `Trogon-Origin-Stream-Sequence` during ordinary event appends. During
 normal operation, the current JetStream message metadata already provides the
@@ -97,5 +112,7 @@ diagnostics, or repair.
 
 - [ADR#0004: Protocol and Transport Layering](./0004-protocol-and-transport-layering.md)
 - [ADR#0010: Unit Tests First, Testcontainers Only When Necessary](./0010-testcontainers-for-infrastructure-tests.md)
+- [ADR#0042: NATS Trace Context and Message Path Tracing (Draft)](./0042-nats-trace-context-and-message-path-tracing.md)
 - [NATS JetStream Headers](https://docs.nats.io/nats-concepts/jetstream/headers)
 - [NATS JetStream Source and Mirror Streams](https://docs.nats.io/nats-concepts/jetstream/source_and_mirror)
+- [NATS JetStream Disaster Recovery](https://docs.nats.io/running-a-nats-service/nats_admin/jetstream_admin/disaster_recovery)

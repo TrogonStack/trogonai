@@ -9,7 +9,7 @@ use opentelemetry::metrics::Counter;
 use opentelemetry::{KeyValue, global};
 use trogon_semconv::{attribute, metric};
 
-const METER_NAME: &str = "trogon-scheduler";
+use crate::constants::METER_NAME;
 
 /// Counters recorded for each processed record and execution operation.
 #[derive(Clone)]

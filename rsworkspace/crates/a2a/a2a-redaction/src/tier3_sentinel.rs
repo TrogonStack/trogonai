@@ -1,9 +1,6 @@
 //! Host-side refusal convention for Tier-3 `redact_part` guest output.
 
-/// UTF-8 prefix written to guest linear memory when a skill refuses to redact a part.
-///
-/// Collisions with legitimate JSON payloads are bundle bugs; the gateway logs a warning.
-pub const TIER3_REFUSE_SENTINEL: &[u8] = b"A2A_T3_REFUSE";
+use crate::constants::TIER3_REFUSE_SENTINEL;
 
 pub fn output_is_tier3_refusal(out: &[u8]) -> bool {
     out.starts_with(TIER3_REFUSE_SENTINEL)

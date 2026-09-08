@@ -10,6 +10,7 @@ use agent_client_protocol::schema::v1::{
 use async_nats::header::HeaderMap;
 use async_trait::async_trait;
 use jsonrpc_nats::RequestId;
+use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex};
 use trogon_nats::{AdvancedMockNatsClient, MockNatsClient};
 use trogon_std::time::SystemClock;
@@ -122,7 +123,6 @@ fn make_bridge(nats: MockNatsClient) -> Arc<Bridge<MockNatsClient, SystemClock, 
         SystemClock,
         &opentelemetry::global::meter("acp-nats-test"),
         crate::config::Config::for_test("acp"),
-        tokio::sync::mpsc::channel(1).0,
     ))
 }
 
@@ -135,7 +135,6 @@ fn make_bridge_advanced(
         SystemClock,
         &opentelemetry::global::meter("acp-nats-test"),
         crate::config::Config::for_test("acp"),
-        tokio::sync::mpsc::channel(1).0,
     ))
 }
 
@@ -396,7 +395,7 @@ async fn mock_client_request_permission_returns_err() {
 async fn run_returns_early_when_subscribe_fails() {
     let nats = MockNatsClient::new();
     let bridge = make_bridge(nats.clone());
-    let client = Rc::new(MockClient::new());
+    let client = Arc::new(MockClient::new());
 
     run(nats, client, bridge).await;
 }
@@ -408,7 +407,7 @@ async fn run_processes_messages_then_exits_when_stream_ends() {
         .run_until(async {
             let nats = MockNatsClient::new();
             let bridge = make_bridge(nats.clone());
-            let client = Rc::new(MockClient::new());
+            let client = Arc::new(MockClient::new());
 
             let notification = SessionNotification::new(
                 "sess1",
@@ -417,7 +416,7 @@ async fn run_processes_messages_then_exits_when_stream_ends() {
             let (wire_headers, payload_bytes) =
                 crate::client::test_support::encode_wire_notification("session/update", &notification);
             let msg = make_msg(
-                "acp.session.sess1.client.session.update",
+                "acp.v1.session.sess1.client.session.update",
                 Some(wire_headers),
                 &payload_bytes,
                 None,
@@ -461,7 +460,7 @@ async fn dispatch_client_method_dispatches_session_update() {
         bridge: &bridge,
     };
     dispatch_client_method(
-        "acp.session.sess-1.client.session.update",
+        "acp.v1.session.sess-1.client.session.update",
         parsed,
         &headers,
         payload,
@@ -498,7 +497,7 @@ async fn dispatch_client_method_dispatches_fs_read_text_file() {
         bridge: &bridge,
     };
     dispatch_client_method(
-        "acp.session.sess-1.client.fs.read_text_file",
+        "acp.v1.session.sess-1.client.fs.read_text_file",
         parsed,
         &headers,
         payload,
@@ -532,7 +531,7 @@ async fn dispatch_client_method_dispatches_fs_write_text_file() {
         bridge: &bridge,
     };
     dispatch_client_method(
-        "acp.session.sess-1.client.fs.read_text_file",
+        "acp.v1.session.sess-1.client.fs.read_text_file",
         parsed,
         &headers,
         payload,
@@ -564,7 +563,7 @@ async fn dispatch_client_method_terminal_wait_for_exit_failing_client_terminal_c
         bridge: &bridge,
     };
     dispatch_client_method(
-        "acp.session.sess-1.client.fs.read_text_file",
+        "acp.v1.session.sess-1.client.fs.read_text_file",
         parsed,
         &headers,
         payload,
@@ -599,7 +598,7 @@ async fn dispatch_client_method_terminal_wait_for_exit_timeout_client_terminal_c
         bridge: &bridge,
     };
     dispatch_client_method(
-        "acp.session.sess-1.client.fs.read_text_file",
+        "acp.v1.session.sess-1.client.fs.read_text_file",
         parsed,
         &headers,
         payload,
@@ -636,7 +635,7 @@ async fn dispatch_client_method_dispatches_terminal_create_with_terminal_release
         bridge: &bridge,
     };
     dispatch_client_method(
-        "acp.session.sess-1.client.fs.read_text_file",
+        "acp.v1.session.sess-1.client.fs.read_text_file",
         parsed,
         &headers,
         payload,
@@ -673,7 +672,7 @@ async fn dispatch_client_method_dispatches_terminal_create_with_terminal_kill_fa
         bridge: &bridge,
     };
     dispatch_client_method(
-        "acp.session.sess-1.client.fs.read_text_file",
+        "acp.v1.session.sess-1.client.fs.read_text_file",
         parsed,
         &headers,
         payload,
@@ -740,7 +739,7 @@ async fn dispatch_client_method_dispatches_session_update_with_rpc_mock_client()
         bridge: &bridge,
     };
     dispatch_client_method(
-        "acp.session.sess-1.client.session.update",
+        "acp.v1.session.sess-1.client.session.update",
         parsed,
         &headers,
         payload,
@@ -775,7 +774,7 @@ async fn dispatch_client_method_dispatches_fs_read_text_file_with_rpc_mock_clien
         bridge: &bridge,
     };
     dispatch_client_method(
-        "acp.session.sess-1.client.fs.read_text_file",
+        "acp.v1.session.sess-1.client.fs.read_text_file",
         parsed,
         &headers,
         payload,
@@ -817,7 +816,7 @@ async fn dispatch_client_method_dispatches_request_permission() {
         bridge: &bridge,
     };
     dispatch_client_method(
-        "acp.session.sess-1.client.session.request_permission",
+        "acp.v1.session.sess-1.client.session.request_permission",
         parsed,
         &headers,
         payload,
@@ -850,7 +849,7 @@ async fn dispatch_client_method_rpc_mock_client_write_text_file_covers_stubs() {
         bridge: &bridge,
     };
     dispatch_client_method(
-        "acp.session.sess-1.client.fs.write_text_file",
+        "acp.v1.session.sess-1.client.fs.write_text_file",
         parsed,
         &headers,
         payload,
@@ -891,7 +890,7 @@ async fn dispatch_client_method_dispatches_request_permission_client_error_publi
         bridge: &bridge,
     };
     dispatch_client_method(
-        "acp.session.sess-1.client.session.request_permission",
+        "acp.v1.session.sess-1.client.session.request_permission",
         parsed,
         &headers,
         payload,
@@ -933,7 +932,7 @@ async fn dispatch_client_method_dispatches_request_permission_with_advanced_mock
         bridge: &bridge,
     };
     dispatch_client_method(
-        "acp.session.sess-1.client.session.request_permission",
+        "acp.v1.session.sess-1.client.session.request_permission",
         parsed,
         &headers,
         payload,
@@ -972,7 +971,7 @@ async fn dispatch_client_method_dispatches_elicitation_create_method_not_found()
         bridge: &bridge,
     };
     dispatch_client_method(
-        "acp.session.sess-1.client.elicitation.create",
+        "acp.v1.session.sess-1.client.elicitation.create",
         parsed,
         &headers,
         payload,
@@ -1007,7 +1006,7 @@ async fn dispatch_client_method_dispatches_elicitation_complete() {
         bridge: &bridge,
     };
     dispatch_client_method(
-        "acp.session.sess-1.client.elicitation.complete",
+        "acp.v1.session.sess-1.client.elicitation.complete",
         parsed,
         &headers,
         payload,
@@ -1023,8 +1022,8 @@ async fn dispatch_client_method_dispatches_elicitation_complete() {
 async fn process_message_invalid_subject_no_reply_does_not_publish() {
     let nats = MockNatsClient::new();
     let bridge = make_bridge(nats.clone());
-    let client = Rc::new(MockClient::new());
-    let in_flight = Rc::new(Cell::new(0usize));
+    let client = Arc::new(MockClient::new());
+    let in_flight = Arc::new(AtomicUsize::new(0));
 
     let msg = make_msg("acp.sess.unknown.method", None, b"{}", None);
     process_message(msg, &nats, client, bridge, &in_flight, 256).await;
@@ -1036,8 +1035,8 @@ async fn process_message_invalid_subject_no_reply_does_not_publish() {
 async fn process_message_invalid_subject_with_reply_is_ignored() {
     let nats = MockNatsClient::new();
     let bridge = make_bridge(nats.clone());
-    let client = Rc::new(MockClient::new());
-    let in_flight = Rc::new(Cell::new(0usize));
+    let client = Arc::new(MockClient::new());
+    let in_flight = Arc::new(AtomicUsize::new(0));
 
     let msg = make_msg("acp.sess.unknown.method", None, b"{}", Some("_INBOX.reply"));
     process_message(msg, &nats, client, bridge, &in_flight, 256).await;
@@ -1049,10 +1048,10 @@ async fn process_message_invalid_subject_with_reply_is_ignored() {
 async fn process_message_backpressure_no_reply_does_not_publish() {
     let nats = MockNatsClient::new();
     let bridge = make_bridge(nats.clone());
-    let client = Rc::new(MockClient::new());
-    let in_flight = Rc::new(Cell::new(1usize));
+    let client = Arc::new(MockClient::new());
+    let in_flight = Arc::new(AtomicUsize::new(1));
 
-    let msg = make_msg("acp.session.sess1.client.session.update", None, b"{}", None);
+    let msg = make_msg("acp.v1.session.sess1.client.session.update", None, b"{}", None);
     process_message(msg, &nats, client, bridge, &in_flight, 1).await;
 
     assert!(nats.published_messages().is_empty());
@@ -1062,8 +1061,8 @@ async fn process_message_backpressure_no_reply_does_not_publish() {
 async fn process_message_backpressure_with_reply_publishes_error() {
     let nats = MockNatsClient::new();
     let bridge = make_bridge(nats.clone());
-    let client = Rc::new(MockClient::new());
-    let in_flight = Rc::new(Cell::new(1usize));
+    let client = Arc::new(MockClient::new());
+    let in_flight = Arc::new(AtomicUsize::new(1));
 
     let (headers, payload) = crate::client::test_support::encode_wire_request(
         "fs/read_text_file",
@@ -1071,7 +1070,7 @@ async fn process_message_backpressure_with_reply_publishes_error() {
         &ReadTextFileRequest::new("sess1", "/tmp/foo"),
     );
     let msg = make_msg(
-        "acp.session.sess1.client.fs.read_text_file",
+        "acp.v1.session.sess1.client.fs.read_text_file",
         Some(headers),
         &payload,
         Some("_INBOX.reply"),
@@ -1086,8 +1085,8 @@ async fn process_message_backpressure_with_reply_flush_failure_exercises_warn_pa
     let nats = AdvancedMockNatsClient::new();
     nats.fail_next_flush();
     let bridge = make_bridge_advanced(nats.clone());
-    let client = Rc::new(MockClient::new());
-    let in_flight = Rc::new(Cell::new(1usize));
+    let client = Arc::new(MockClient::new());
+    let in_flight = Arc::new(AtomicUsize::new(1));
 
     let (headers, payload) = crate::client::test_support::encode_wire_request(
         "fs/read_text_file",
@@ -1095,7 +1094,7 @@ async fn process_message_backpressure_with_reply_flush_failure_exercises_warn_pa
         &ReadTextFileRequest::new("sess1", "/tmp/foo"),
     );
     let msg = make_msg(
-        "acp.session.sess1.client.fs.read_text_file",
+        "acp.v1.session.sess1.client.fs.read_text_file",
         Some(headers),
         &payload,
         Some("_INBOX.reply"),
@@ -1110,8 +1109,8 @@ async fn process_message_backpressure_with_reply_publish_failure_exercises_error
     let nats = AdvancedMockNatsClient::new();
     nats.fail_next_publish();
     let bridge = make_bridge_advanced(nats.clone());
-    let client = Rc::new(MockClient::new());
-    let in_flight = Rc::new(Cell::new(1usize));
+    let client = Arc::new(MockClient::new());
+    let in_flight = Arc::new(AtomicUsize::new(1));
 
     let (headers, payload) = crate::client::test_support::encode_wire_request(
         "fs/read_text_file",
@@ -1119,7 +1118,7 @@ async fn process_message_backpressure_with_reply_publish_failure_exercises_error
         &ReadTextFileRequest::new("sess1", "/tmp/foo"),
     );
     let msg = make_msg(
-        "acp.session.sess1.client.fs.read_text_file",
+        "acp.v1.session.sess1.client.fs.read_text_file",
         Some(headers),
         &payload,
         Some("_INBOX.reply"),
@@ -1133,8 +1132,8 @@ async fn process_message_backpressure_with_reply_publish_failure_exercises_error
 async fn process_message_backpressure_first_serialize_fails_uses_fallback() {
     let nats = MockNatsClient::new();
     let bridge = make_bridge(nats.clone());
-    let client = Rc::new(MockClient::new());
-    let in_flight = Rc::new(Cell::new(1usize));
+    let client = Arc::new(MockClient::new());
+    let in_flight = Arc::new(AtomicUsize::new(1));
 
     let (headers, payload) = crate::client::test_support::encode_wire_request(
         "fs/read_text_file",
@@ -1142,7 +1141,7 @@ async fn process_message_backpressure_first_serialize_fails_uses_fallback() {
         &ReadTextFileRequest::new("sess1", "/tmp/foo"),
     );
     let msg = make_msg(
-        "acp.session.sess1.client.fs.read_text_file",
+        "acp.v1.session.sess1.client.fs.read_text_file",
         Some(headers),
         &payload,
         Some("_INBOX.reply"),
@@ -1159,8 +1158,8 @@ async fn process_message_valid_dispatch_spawns_task() {
         .run_until(async {
             let nats = MockNatsClient::new();
             let bridge = make_bridge(nats.clone());
-            let client = Rc::new(MockClient::new());
-            let in_flight = Rc::new(Cell::new(0usize));
+            let client = Arc::new(MockClient::new());
+            let in_flight = Arc::new(AtomicUsize::new(0));
 
             let notification = SessionNotification::new(
                 "sess1",
@@ -1169,7 +1168,7 @@ async fn process_message_valid_dispatch_spawns_task() {
             let (wire_headers, payload_bytes) =
                 crate::client::test_support::encode_wire_notification("session/update", &notification);
             let msg = make_msg(
-                "acp.session.sess1.client.session.update",
+                "acp.v1.session.sess1.client.session.update",
                 Some(wire_headers),
                 &payload_bytes,
                 None,
@@ -1182,4 +1181,28 @@ async fn process_message_valid_dispatch_spawns_task() {
             assert_eq!(client.notifications.lock().unwrap().len(), 1);
         })
         .await;
+}
+
+/// Compile-time guard: the client proxy must stay `Send`.
+///
+/// The SDK's `ConnectTo::connect_to` returns `impl Future<Output = Result<()>> + Send`,
+/// so anything that drives the bridge from an SDK-owned transport has to be `Send`
+/// end to end. This test asserts the property rather than the mechanism: reintroducing
+/// an `Rc`, a `Cell`, or a `spawn_local` anywhere under `client::run` fails to compile
+/// here instead of surfacing as an unsatisfiable bound at a distant call site.
+#[test]
+fn client_proxy_stays_send_for_sdk_transports() {
+    const fn assert_send<T: Send>() {}
+    fn assert_send_val<T: Send>(_: &T) {}
+
+    assert_send::<crate::boundary::ConnectionClient>();
+    assert_send::<Arc<MockClient>>();
+
+    let nats = MockNatsClient::new();
+    let bridge = make_bridge(nats.clone());
+    let client = Arc::new(MockClient::new());
+
+    let future = run(nats, client, bridge);
+    assert_send_val(&future);
+    drop(future);
 }

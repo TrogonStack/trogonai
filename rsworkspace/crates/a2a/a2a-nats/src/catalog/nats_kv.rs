@@ -1,8 +1,7 @@
 use async_nats::jetstream::kv;
 
-pub const A2A_AGENT_CARDS: &str = "A2A_AGENT_CARDS";
-
-const MAX_VALUE_SIZE: i32 = 65536;
+pub use crate::constants::A2A_AGENT_CARDS;
+use crate::constants::MAX_VALUE_SIZE;
 
 pub fn catalog_bucket_config() -> kv::Config {
     kv::Config {

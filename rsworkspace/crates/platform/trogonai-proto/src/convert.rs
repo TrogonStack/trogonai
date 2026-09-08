@@ -1,8 +1,7 @@
 use buffa_types::google::protobuf::{Duration, Timestamp};
 use chrono::{DateTime, Utc};
 
-pub const PROTOBUF_DURATION_MAX_SECONDS: u64 = 315_576_000_000;
-pub const PROTOBUF_DURATION_MAX: std::time::Duration = std::time::Duration::from_secs(PROTOBUF_DURATION_MAX_SECONDS);
+pub use crate::constants::{PROTOBUF_DURATION_MAX, PROTOBUF_DURATION_MAX_SECONDS};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("duration must fit the protobuf Duration range: max {max:?}, got {actual:?}")]

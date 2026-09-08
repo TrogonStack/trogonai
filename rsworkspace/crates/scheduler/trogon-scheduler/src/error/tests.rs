@@ -2,7 +2,7 @@ use super::*;
 use crate::commands::domain::MessageHeadersError as CommandMessageHeadersError;
 use trogon_decider_nats::{JetStreamStoreError, OptimisticConcurrencyConflictError, SnapshotStoreError};
 use trogon_decider_runtime::{StreamPosition, StreamWritePrecondition};
-use trogon_nats::SubjectTokenViolation;
+use trogon_nats::SubjectTokenViolationError;
 
 fn position(value: u64) -> StreamPosition {
     StreamPosition::try_new(value).expect("test stream position must be non-zero")
@@ -168,7 +168,7 @@ fn scheduler_error_display_and_sources_cover_remaining_variants() {
 fn job_spec_error_display_and_sources_cover_remaining_variants() {
     let invalid_id = ScheduleSpecError::InvalidId {
         id: "".to_string(),
-        source: SubjectTokenViolation::Empty,
+        source: SubjectTokenViolationError::Empty,
     };
     assert!(matches!(&invalid_id, ScheduleSpecError::InvalidId { id, .. } if id.is_empty()));
     assert!(std::error::Error::source(&invalid_id).is_some());
@@ -191,14 +191,14 @@ fn job_spec_error_display_and_sources_cover_remaining_variants() {
 
     let route = ScheduleSpecError::InvalidRoute {
         route: "agent.>".to_string(),
-        source: SubjectTokenViolation::InvalidCharacter('>'),
+        source: SubjectTokenViolationError::InvalidCharacter('>'),
     };
     assert!(matches!(&route, ScheduleSpecError::InvalidRoute { route, .. } if route == "agent.>"));
     assert!(std::error::Error::source(&route).is_some());
 
     let sampling = ScheduleSpecError::InvalidSamplingSource {
         subject: "sensors.>".to_string(),
-        source: SubjectTokenViolation::InvalidCharacter('>'),
+        source: SubjectTokenViolationError::InvalidCharacter('>'),
     };
     assert!(matches!(&sampling, ScheduleSpecError::InvalidSamplingSource { subject, .. } if subject == "sensors.>"));
     assert!(std::error::Error::source(&sampling).is_some());

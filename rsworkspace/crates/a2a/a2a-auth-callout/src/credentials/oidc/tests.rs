@@ -38,7 +38,9 @@ fn test_jwks_and_encoding_key(rng: &mut OsRng) -> (JwkSet, jsonwebtoken::Encodin
     let jwk = Jwk {
         common: CommonParameters {
             public_key_use: Some(PublicKeyUse::Signature),
-            key_operations: Some(vec![KeyOperations::Sign]),
+            // `verify`, not `sign`: this is the *public* half of the pair, and
+            // RFC 7517 section 4.3 scopes `key_ops` to what this key can do.
+            key_operations: Some(vec![KeyOperations::Verify]),
             key_id: Some("test-kid".into()),
             x509_url: None,
             x509_chain: None,
@@ -353,10 +355,10 @@ async fn verify_fails_with_non_rsa_jwk() {
     let jwks = JwkSet { keys: vec![ec_jwk] };
     let verifier = JwksOidcVerifier::with_static_jwks(issuer, vec!["aud".into()], jwks);
 
-    // Craft a fake JWT whose kid matches the EC JWK; decode_header will succeed
-    // but decoding_key_for_jwk must reject the non-RSA key.
-    // We can't sign with the EC key easily, but we can make a header-only token
-    // that references the EC kid.  decode_header just parses the header.
+    // The kid resolves to the EC JWK, but ES256 is outside the deployment's
+    // allow-list, so the token is refused on its algorithm before the key it
+    // points at is ever considered. A header-only token is enough: nothing
+    // past decode_header runs.
     let header_b64 =
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(br#"{"alg":"ES256","kid":"ec-kid","typ":"JWT"}"#);
     let payload_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"{}");
@@ -366,10 +368,77 @@ async fn verify_fails_with_non_rsa_jwk() {
         .verify_internal(&BearerToken::new(fake_token), &AudienceAccount::new("acct"))
         .await
         .unwrap_err();
-    assert!(matches!(
-        err,
-        AuthCalloutError::CredentialVerification(CredentialError::InvalidCredentials(_))
-    ));
+    let AuthCalloutError::CredentialVerification(CredentialError::UnsupportedTokenAlgorithm { algorithm }) = err else {
+        panic!("expected UnsupportedTokenAlgorithm, got {err:?}");
+    };
+    assert_eq!(algorithm, jsonwebtoken::Algorithm::ES256);
+}
+
+#[tokio::test]
+async fn verify_fails_with_a_non_rsa_jwk_reached_under_an_allowed_algorithm() {
+    let issuer = OidcIssuerUrl::parse("https://issuer.example").unwrap();
+    let ec_jwk = Jwk {
+        common: CommonParameters {
+            key_id: Some("ec-kid".into()),
+            ..Default::default()
+        },
+        algorithm: AlgorithmParameters::EllipticCurve(EllipticCurveKeyParameters {
+            key_type: EllipticCurveKeyType::EC,
+            curve: jsonwebtoken::jwk::EllipticCurve::P256,
+            x: "dummyx".into(),
+            y: "dummyy".into(),
+        }),
+    };
+    let jwks = JwkSet { keys: vec![ec_jwk] };
+    let verifier = JwksOidcVerifier::with_static_jwks(issuer, vec!["aud".into()], jwks);
+
+    // RS256 is allow-listed and the EC JWK declares no purpose of its own, so
+    // neither guard ahead of the key material refuses this token. What refuses
+    // it is the verifier's own RSA-only support, which the guards must not be
+    // allowed to mask.
+    let header_b64 = URL_SAFE_NO_PAD.encode(br#"{"alg":"RS256","kid":"ec-kid","typ":"JWT"}"#);
+    let payload_b64 = URL_SAFE_NO_PAD.encode(b"{}");
+    let fake_token = format!("{header_b64}.{payload_b64}.sig");
+
+    let err = verifier
+        .verify_internal(&BearerToken::new(fake_token), &AudienceAccount::new("acct"))
+        .await
+        .unwrap_err();
+    let AuthCalloutError::CredentialVerification(CredentialError::InvalidCredentials(message)) = err else {
+        panic!("expected InvalidCredentials, got {err:?}");
+    };
+    assert!(message.contains("must be RSA"), "{message}");
+}
+
+#[tokio::test]
+async fn verify_fails_with_an_rsa_jwk_whose_components_do_not_decode() {
+    let issuer = OidcIssuerUrl::parse("https://issuer.example").unwrap();
+    let broken_jwk = Jwk {
+        common: CommonParameters {
+            key_id: Some("broken-kid".into()),
+            ..Default::default()
+        },
+        algorithm: AlgorithmParameters::RSA(RSAKeyParameters {
+            key_type: RSAKeyType::RSA,
+            n: "not base64url".into(),
+            e: "AQAB".into(),
+        }),
+    };
+    let jwks = JwkSet { keys: vec![broken_jwk] };
+    let verifier = JwksOidcVerifier::with_static_jwks(issuer, vec!["aud".into()], jwks);
+
+    let header_b64 = URL_SAFE_NO_PAD.encode(br#"{"alg":"RS256","kid":"broken-kid","typ":"JWT"}"#);
+    let payload_b64 = URL_SAFE_NO_PAD.encode(b"{}");
+    let fake_token = format!("{header_b64}.{payload_b64}.sig");
+
+    let err = verifier
+        .verify_internal(&BearerToken::new(fake_token), &AudienceAccount::new("acct"))
+        .await
+        .unwrap_err();
+    let AuthCalloutError::CredentialVerification(CredentialError::InvalidCredentials(message)) = err else {
+        panic!("expected InvalidCredentials, got {err:?}");
+    };
+    assert!(message.contains("invalid RSA JWK components"), "{message}");
 }
 
 #[tokio::test]
@@ -405,4 +474,196 @@ async fn oidc_verifier_trait_delegates_to_verify_internal() {
         .await
         .expect("verify via trait");
     assert_eq!(claims.sub.as_str(), "user-1");
+}
+
+/// Signs `claims` as an RS256 token naming `test-kid`, the shape every guard
+/// test below starts from before varying one thing about the JWK.
+fn rs256_token_for(issuer: &OidcIssuerUrl, enc: &jsonwebtoken::EncodingKey) -> String {
+    #[derive(Serialize)]
+    struct IdClaims {
+        sub: String,
+        iss: String,
+        aud: String,
+        exp: u64,
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let id = IdClaims {
+        sub: "user-guard".into(),
+        iss: issuer.as_str().to_owned(),
+        aud: "a2a-client".into(),
+        exp: now + 600,
+    };
+    let mut header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::RS256);
+    header.kid = Some("test-kid".into());
+    jsonwebtoken::encode(&header, &id, enc).expect("encode")
+}
+
+fn jwks_with_common(jwks: &JwkSet, mutate: impl FnOnce(&mut CommonParameters)) -> JwkSet {
+    let mut jwk = jwks.keys[0].clone();
+    mutate(&mut jwk.common);
+    JwkSet { keys: vec![jwk] }
+}
+
+#[tokio::test]
+async fn verify_rejects_algorithm_outside_the_allowlist() {
+    let rng = &mut OsRng;
+    let (jwks, _) = test_jwks_and_encoding_key(rng);
+    let issuer = OidcIssuerUrl::parse("https://issuer.example").unwrap();
+    let verifier = JwksOidcVerifier::with_static_jwks(issuer.clone(), vec!["a2a-client".into()], jwks);
+
+    #[derive(Serialize)]
+    struct IdClaims {
+        sub: String,
+        iss: String,
+        aud: String,
+        exp: u64,
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let id = IdClaims {
+        sub: "user-hs".into(),
+        iss: issuer.as_str().to_owned(),
+        aud: "a2a-client".into(),
+        exp: now + 600,
+    };
+    let mut header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256);
+    header.kid = Some("test-kid".into());
+    let token =
+        jsonwebtoken::encode(&header, &id, &jsonwebtoken::EncodingKey::from_secret(b"shared")).expect("encode hs256");
+
+    let err = verifier
+        .verify_internal(&BearerToken::new(token), &AudienceAccount::new("acct"))
+        .await
+        .unwrap_err();
+    let AuthCalloutError::CredentialVerification(CredentialError::UnsupportedTokenAlgorithm { algorithm }) = err else {
+        panic!("expected UnsupportedTokenAlgorithm, got {err:?}");
+    };
+    assert_eq!(algorithm, jsonwebtoken::Algorithm::HS256);
+}
+
+#[tokio::test]
+async fn verify_rejects_a_jwk_published_for_encryption() {
+    let rng = &mut OsRng;
+    let (jwks, enc) = test_jwks_and_encoding_key(rng);
+    let issuer = OidcIssuerUrl::parse("https://issuer.example").unwrap();
+    let token = rs256_token_for(&issuer, &enc);
+    let jwks = jwks_with_common(&jwks, |common| {
+        common.public_key_use = Some(PublicKeyUse::Encryption);
+        common.key_operations = None;
+    });
+    let verifier = JwksOidcVerifier::with_static_jwks(issuer, vec!["a2a-client".into()], jwks);
+
+    let err = verifier
+        .verify_internal(&BearerToken::new(token), &AudienceAccount::new("acct"))
+        .await
+        .unwrap_err();
+    let AuthCalloutError::CredentialVerification(CredentialError::JwkNotPublishedForVerification { kid, algorithm }) =
+        err
+    else {
+        panic!("expected JwkNotPublishedForVerification, got {err:?}");
+    };
+    assert_eq!(kid, "test-kid");
+    assert_eq!(algorithm, jsonwebtoken::Algorithm::RS256);
+}
+
+#[tokio::test]
+async fn verify_rejects_a_jwk_whose_key_ops_omit_verify() {
+    let rng = &mut OsRng;
+    let (jwks, enc) = test_jwks_and_encoding_key(rng);
+    let issuer = OidcIssuerUrl::parse("https://issuer.example").unwrap();
+    let token = rs256_token_for(&issuer, &enc);
+    let jwks = jwks_with_common(&jwks, |common| {
+        common.key_operations = Some(vec![KeyOperations::Encrypt]);
+    });
+    let verifier = JwksOidcVerifier::with_static_jwks(issuer, vec!["a2a-client".into()], jwks);
+
+    let err = verifier
+        .verify_internal(&BearerToken::new(token), &AudienceAccount::new("acct"))
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        AuthCalloutError::CredentialVerification(CredentialError::JwkNotPublishedForVerification { .. })
+    ));
+}
+
+#[tokio::test]
+async fn verify_rejects_a_jwk_pinned_to_a_different_rsa_algorithm() {
+    let rng = &mut OsRng;
+    let (jwks, enc) = test_jwks_and_encoding_key(rng);
+    let issuer = OidcIssuerUrl::parse("https://issuer.example").unwrap();
+    let token = rs256_token_for(&issuer, &enc);
+    let jwks = jwks_with_common(&jwks, |common| {
+        common.key_algorithm = Some(jsonwebtoken::jwk::KeyAlgorithm::PS512);
+    });
+    let verifier = JwksOidcVerifier::with_static_jwks(issuer, vec!["a2a-client".into()], jwks);
+
+    let err = verifier
+        .verify_internal(&BearerToken::new(token), &AudienceAccount::new("acct"))
+        .await
+        .unwrap_err();
+    let AuthCalloutError::CredentialVerification(CredentialError::JwkNotPublishedForVerification { kid, algorithm }) =
+        err
+    else {
+        panic!("expected JwkNotPublishedForVerification, got {err:?}");
+    };
+    assert_eq!(kid, "test-kid");
+    assert_eq!(algorithm, jsonwebtoken::Algorithm::RS256);
+}
+
+#[tokio::test]
+async fn verify_accepts_a_jwk_that_declares_the_asserted_algorithm() {
+    let rng = &mut OsRng;
+    let (jwks, enc) = test_jwks_and_encoding_key(rng);
+    let issuer = OidcIssuerUrl::parse("https://issuer.example").unwrap();
+    let token = rs256_token_for(&issuer, &enc);
+    let jwks = jwks_with_common(&jwks, |common| {
+        common.key_algorithm = Some(jsonwebtoken::jwk::KeyAlgorithm::RS256);
+    });
+    let verifier = JwksOidcVerifier::with_static_jwks(issuer, vec!["a2a-client".into()], jwks);
+
+    let claims = verifier
+        .verify_internal(&BearerToken::new(token), &AudienceAccount::new("acct"))
+        .await
+        .expect("declared alg matches the asserted one");
+    assert_eq!(claims.sub.as_str(), "user-guard");
+}
+
+#[tokio::test]
+async fn verify_accepts_a_jwk_that_declares_no_purpose_at_all() {
+    let rng = &mut OsRng;
+    let (jwks, enc) = test_jwks_and_encoding_key(rng);
+    let issuer = OidcIssuerUrl::parse("https://issuer.example").unwrap();
+    let token = rs256_token_for(&issuer, &enc);
+    let jwks = jwks_with_common(&jwks, |common| {
+        common.public_key_use = None;
+        common.key_operations = None;
+        common.key_algorithm = None;
+    });
+    let verifier = JwksOidcVerifier::with_static_jwks(issuer, vec!["a2a-client".into()], jwks);
+
+    let claims = verifier
+        .verify_internal(&BearerToken::new(token), &AudienceAccount::new("acct"))
+        .await
+        .expect("absent RFC 7517 members stay permissive");
+    assert_eq!(claims.sub.as_str(), "user-guard");
+}
+
+#[test]
+fn bearer_token_debug_does_not_leak_the_assertion() {
+    let token = BearerToken::new("hhh.ppp.sss");
+    let dbg = format!("{token:?}");
+    assert!(!dbg.contains(token.as_str()), "{dbg}");
+    // Each segment separately: a Debug that printed only the header, or only
+    // the signature, would still disclose the assertion piecewise.
+    for segment in ["hhh", "ppp", "sss"] {
+        assert!(!dbg.contains(segment), "{dbg}");
+    }
+    assert!(dbg.contains("<redacted>"), "{dbg}");
+    assert_eq!(token.as_str(), "hhh.ppp.sss");
 }

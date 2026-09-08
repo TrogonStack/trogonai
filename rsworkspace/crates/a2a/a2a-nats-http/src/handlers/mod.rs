@@ -5,7 +5,7 @@ use a2a::types::{
     CancelTaskRequest, DeleteTaskPushNotificationConfigRequest, GetTaskPushNotificationConfigRequest, GetTaskRequest,
     ListTaskPushNotificationConfigsRequest, ListTasksRequest, SendMessageRequest, TaskPushNotificationConfig,
 };
-use a2a_nats::client::{A2aClient, ClientError};
+use a2a_nats::client::{A2aClient, ClientError, ValidatedRpc};
 use a2a_nats::task_id::A2aTaskId;
 use axum::Json;
 use axum::extract::State;
@@ -13,24 +13,18 @@ use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use futures::{Stream, StreamExt};
+use jsonrpc_nats::{INVALID_PARAMS, INVALID_REQUEST, METHOD_NOT_FOUND, ResponseId};
 use serde::Deserialize;
 use serde_json::Value;
 use trogon_nats::RequestClient;
 use trogon_nats::jetstream::{JetStreamCreateConsumer, JetStreamGetStream, JsAck, JsMessageOf, JsMessageRef};
 
 use crate::sse::{client_error_to_jsonrpc_code, typed_event_stream_to_sse};
-
-#[derive(Debug, Deserialize)]
-pub struct JsonRpcEnvelope {
-    pub jsonrpc: Option<String>,
-    pub id: Option<Value>,
-    pub method: String,
-    pub params: Option<Value>,
-}
+use crate::wire::{self, InboundRequest, RestError};
 
 pub async fn handle_jsonrpc<N, J>(
     State(client): State<Arc<A2aClient<N, J>>>,
-    Json(envelope): Json<JsonRpcEnvelope>,
+    Json(mut envelope): Json<InboundRequest>,
 ) -> Response
 where
     N: RequestClient + Clone + Send + Sync + 'static,
@@ -42,29 +36,34 @@ where
     <<<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::MessagesError: std::fmt::Display + Send + 'static,
     <<<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::StreamError: std::fmt::Display + Send + 'static,
 {
-    let id = envelope.id.clone().unwrap_or(Value::Null);
-    let params = envelope.params.unwrap_or(Value::Null);
+    let id = envelope.response_id();
+    let params = envelope.params();
 
     // JSON-RPC 2.0 requires the version field to be exactly "2.0". Reject
     // anything else with `-32600 Invalid Request` before dispatching, so the
     // bridge doesn't silently front another protocol's calls.
-    if envelope.jsonrpc.as_deref() != Some("2.0") {
-        let body = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "error": { "code": -32600, "message": "invalid request: missing or unsupported jsonrpc version" }
-        });
+    if !envelope.has_supported_version() {
+        let body = wire::error(
+            &id,
+            INVALID_REQUEST,
+            "invalid request: missing or unsupported jsonrpc version",
+        );
         return (StatusCode::OK, Json(body)).into_response();
     }
 
-    match envelope.method.as_str() {
+    let Some(method) = envelope.method() else {
+        let body = wire::error(&id, INVALID_REQUEST, "invalid request: missing or non-string method");
+        return (StatusCode::OK, Json(body)).into_response();
+    };
+
+    match method {
         "message/send" => {
             let req: SendMessageRequest = match serde_json::from_value(params) {
                 Ok(r) => r,
                 Err(e) => return jsonrpc_parse_error(&id, &e.to_string()),
             };
-            match client.message_send(&req).await {
-                Ok(result) => jsonrpc_ok(&id, result),
+            match client.message_send_validated(&req).await {
+                Ok(validated) => jsonrpc_forward(&id, validated),
                 Err(e) => jsonrpc_error_response(&id, &e),
             }
         }
@@ -73,23 +72,19 @@ where
                 Ok(r) => r,
                 Err(e) => return jsonrpc_parse_error(&id, &e.to_string()),
             };
-            match client.message_stream(&req).await {
+            match client.message_stream_validated(&req).await {
                 Ok((bootstrap, stream)) => {
                     // Mirror tasks/resubscribe and the stdio bridge: emit the
-                    // unary `SendMessageResponse` as the opening JSON-RPC
-                    // `result` so the caller has a task handle to attach the
-                    // subsequent JetStream notifications to.
-                    let bootstrap_event = serde_json::json!({
-                        "jsonrpc": "2.0",
-                        "id": id.clone(),
-                        "result": bootstrap,
-                    });
+                    // unary response envelope as the opening SSE event so the
+                    // caller has a task handle for subsequent JetStream events.
+                    let bootstrap_bytes = match bootstrap.body_with_client_id(&id) {
+                        Ok(body) => body,
+                        Err(e) => return jsonrpc_parse_error(&id, &e.to_string()),
+                    };
                     let bootstrap_sse = futures::stream::once(async move {
-                        Ok::<Event, Infallible>(
-                            Event::default().data(serde_json::to_string(&bootstrap_event).unwrap_or_default()),
-                        )
+                        Ok::<Event, Infallible>(Event::default().data(String::from_utf8_lossy(&bootstrap_bytes)))
                     });
-                    let sse_stream = typed_event_stream_to_sse(stream, id, "message/stream");
+                    let sse_stream = typed_event_stream_to_sse(stream, id);
                     sse_response(bootstrap_sse.chain(sse_stream))
                 }
                 Err(e) => jsonrpc_error_response(&id, &e),
@@ -100,8 +95,8 @@ where
                 Ok(r) => r,
                 Err(e) => return jsonrpc_parse_error(&id, &e.to_string()),
             };
-            match client.tasks_get(&req).await {
-                Ok(result) => jsonrpc_ok(&id, result),
+            match client.tasks_get_validated(&req).await {
+                Ok(validated) => jsonrpc_forward(&id, validated),
                 Err(e) => jsonrpc_error_response(&id, &e),
             }
         }
@@ -110,8 +105,8 @@ where
                 Ok(r) => r,
                 Err(e) => return jsonrpc_parse_error(&id, &e.to_string()),
             };
-            match client.tasks_list(&req).await {
-                Ok(result) => jsonrpc_ok(&id, result),
+            match client.tasks_list_validated(&req).await {
+                Ok(validated) => jsonrpc_forward(&id, validated),
                 Err(e) => jsonrpc_error_response(&id, &e),
             }
         }
@@ -120,8 +115,8 @@ where
                 Ok(r) => r,
                 Err(e) => return jsonrpc_parse_error(&id, &e.to_string()),
             };
-            match client.tasks_cancel(&req).await {
-                Ok(result) => jsonrpc_ok(&id, result),
+            match client.tasks_cancel_validated(&req).await {
+                Ok(validated) => jsonrpc_forward(&id, validated),
                 Err(e) => jsonrpc_error_response(&id, &e),
             }
         }
@@ -158,19 +153,16 @@ where
                 Ok(t) => t,
                 Err(e) => return jsonrpc_parse_error(&id, &e.to_string()),
             };
-            match client.tasks_resubscribe(&task_id, last_seq).await {
+            match client.tasks_resubscribe_validated(&task_id, last_seq).await {
                 Ok((snapshot, stream)) => {
-                    let snapshot_event = serde_json::json!({
-                        "jsonrpc": "2.0",
-                        "id": id.clone(),
-                        "result": snapshot,
-                    });
+                    let snapshot_bytes = match snapshot.body_with_client_id(&id) {
+                        Ok(body) => body,
+                        Err(e) => return jsonrpc_parse_error(&id, &e.to_string()),
+                    };
                     let snapshot_sse = futures::stream::once(async move {
-                        Ok::<Event, Infallible>(
-                            Event::default().data(serde_json::to_string(&snapshot_event).unwrap_or_default()),
-                        )
+                        Ok::<Event, Infallible>(Event::default().data(String::from_utf8_lossy(&snapshot_bytes)))
                     });
-                    let sse_stream = typed_event_stream_to_sse(stream, id, "tasks/resubscribe");
+                    let sse_stream = typed_event_stream_to_sse(stream, id);
                     sse_response(snapshot_sse.chain(sse_stream))
                 }
                 Err(e) => jsonrpc_error_response(&id, &e),
@@ -181,8 +173,8 @@ where
                 Ok(r) => r,
                 Err(e) => return jsonrpc_parse_error(&id, &e.to_string()),
             };
-            match client.push_set(&req).await {
-                Ok(result) => jsonrpc_ok(&id, result),
+            match client.push_set_validated(&req).await {
+                Ok(validated) => jsonrpc_forward(&id, validated),
                 Err(e) => jsonrpc_error_response(&id, &e),
             }
         }
@@ -191,8 +183,8 @@ where
                 Ok(r) => r,
                 Err(e) => return jsonrpc_parse_error(&id, &e.to_string()),
             };
-            match client.push_get(&req).await {
-                Ok(result) => jsonrpc_ok(&id, result),
+            match client.push_get_validated(&req).await {
+                Ok(validated) => jsonrpc_forward(&id, validated),
                 Err(e) => jsonrpc_error_response(&id, &e),
             }
         }
@@ -201,8 +193,8 @@ where
                 Ok(r) => r,
                 Err(e) => return jsonrpc_parse_error(&id, &e.to_string()),
             };
-            match client.push_list(&req).await {
-                Ok(result) => jsonrpc_ok(&id, result),
+            match client.push_list_validated(&req).await {
+                Ok(validated) => jsonrpc_forward(&id, validated),
                 Err(e) => jsonrpc_error_response(&id, &e),
             }
         }
@@ -211,21 +203,17 @@ where
                 Ok(r) => r,
                 Err(e) => return jsonrpc_parse_error(&id, &e.to_string()),
             };
-            match client.push_delete(&req).await {
-                Ok(()) => jsonrpc_ok(&id, Value::Null),
+            match client.push_delete_validated(&req).await {
+                Ok(validated) => jsonrpc_forward(&id, validated),
                 Err(e) => jsonrpc_error_response(&id, &e),
             }
         }
-        "agent/getAuthenticatedExtendedCard" => match client.agent_card().await {
-            Ok(result) => jsonrpc_ok(&id, result),
+        "agent/getAuthenticatedExtendedCard" => match client.agent_card_validated().await {
+            Ok(validated) => jsonrpc_forward(&id, validated),
             Err(e) => jsonrpc_error_response(&id, &e),
         },
         method => {
-            let body = serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "error": { "code": -32601, "message": format!("method not found: {method}") }
-            });
+            let body = wire::error(&id, METHOD_NOT_FOUND, format!("method not found: {method}"));
             (StatusCode::OK, Json(body)).into_response()
         }
     }
@@ -251,39 +239,29 @@ where
             // response → 502, etc.) instead of bucketing everything as 500.
             let (code, message) = client_error_to_jsonrpc_code(&e);
             let status = crate::rest::http_status_for_jsonrpc_code(code);
-            let body = serde_json::json!({
-                "error": { "code": code, "message": message }
-            });
-            (status, Json(body)).into_response()
+            (status, Json(RestError::new(code, message))).into_response()
         }
     }
 }
 
-fn jsonrpc_ok<T: serde::Serialize>(id: &Value, result: T) -> Response {
-    let body = serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "result": result,
-    });
-    (StatusCode::OK, Json(body)).into_response()
+fn jsonrpc_forward<T>(id: &ResponseId, validated: ValidatedRpc<T>) -> Response {
+    match validated.body_with_client_id(id) {
+        Ok(body) => match serde_json::from_slice::<Value>(&body) {
+            Ok(value) => (StatusCode::OK, Json(value)).into_response(),
+            Err(e) => jsonrpc_parse_error(id, &e.to_string()),
+        },
+        Err(e) => jsonrpc_parse_error(id, &e.to_string()),
+    }
 }
 
-fn jsonrpc_error_response(id: &Value, err: &ClientError) -> Response {
+fn jsonrpc_error_response(id: &ResponseId, err: &ClientError) -> Response {
     let (code, message) = client_error_to_jsonrpc_code(err);
-    let body = serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "error": { "code": code, "message": message }
-    });
+    let body = wire::error(id, code, message);
     (StatusCode::OK, Json(body)).into_response()
 }
 
-fn jsonrpc_parse_error(id: &Value, message: &str) -> Response {
-    let body = serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "error": { "code": -32602, "message": format!("invalid params: {message}") }
-    });
+fn jsonrpc_parse_error(id: &ResponseId, message: &str) -> Response {
+    let body = wire::error(id, INVALID_PARAMS, format!("invalid params: {message}"));
     (StatusCode::OK, Json(body)).into_response()
 }
 

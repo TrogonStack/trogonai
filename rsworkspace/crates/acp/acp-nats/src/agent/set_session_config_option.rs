@@ -39,7 +39,7 @@ where
     let result = bridge
         .session_request::<SetSessionConfigOptionRequest, SetSessionConfigOptionResponse>(
             &subject,
-            SessionAgentMethod::SetConfigOption.wire_method(),
+            SessionAgentMethod::SetConfigOption.protocol_method(),
             &args,
             &session_id,
         )

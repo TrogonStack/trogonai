@@ -77,7 +77,7 @@ fn enabled_creation_with_future_at_publishes_schedule() {
     let reconciliation = reconcile(
         None,
         &created(
-            "orders",
+            "0198fa2f6d0a7b1a8cf9f762e73a1c05",
             ScheduleEventStatus::Scheduled,
             Schedule::At {
                 at: instant("2999-01-01T00:00:00Z"),
@@ -104,7 +104,7 @@ fn enabled_creation_with_at_within_the_grace_window_still_publishes() {
     let reconciliation = reconcile(
         None,
         &created(
-            "orders",
+            "0198fa2f6d0a7b1a8cf9f762e73a1c05",
             ScheduleEventStatus::Scheduled,
             Schedule::At {
                 at: now() - PAST_AT_GRACE + chrono::Duration::seconds(1),
@@ -126,7 +126,7 @@ fn enabled_creation_with_at_at_the_grace_boundary_expires() {
     let reconciliation = reconcile(
         None,
         &created(
-            "orders",
+            "0198fa2f6d0a7b1a8cf9f762e73a1c05",
             ScheduleEventStatus::Scheduled,
             Schedule::At {
                 at: now() - PAST_AT_GRACE,
@@ -148,7 +148,7 @@ fn enabled_creation_with_past_at_expires_without_publishing() {
     let reconciliation = reconcile(
         None,
         &created(
-            "orders",
+            "0198fa2f6d0a7b1a8cf9f762e73a1c05",
             ScheduleEventStatus::Scheduled,
             Schedule::At {
                 at: instant("2000-01-01T00:00:00Z"),
@@ -170,7 +170,11 @@ fn enabled_creation_with_rrule_arms_the_next_occurrence() {
     let rrule = Schedule::rrule("2026-06-03T00:00:00Z", "FREQ=DAILY;COUNT=2", None).unwrap();
     let reconciliation = reconcile(
         None,
-        &created("recurring", ScheduleEventStatus::Scheduled, rrule),
+        &created(
+            "0198fa2f6d0a7b1a8cf9f762e73a1c15",
+            ScheduleEventStatus::Scheduled,
+            rrule,
+        ),
         position(1),
         None,
         now(),
@@ -182,7 +186,7 @@ fn enabled_creation_with_rrule_arms_the_next_occurrence() {
     assert_eq!(
         reconciliation.action,
         ReconcileAction::ArmNext {
-            schedule_id: schedule_id("recurring"),
+            schedule_id: schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c15"),
             now: now(),
         }
     );
@@ -193,13 +197,13 @@ fn enabled_creation_with_rrule_arms_the_next_occurrence() {
 #[test]
 fn recorded_occurrence_dispatches_the_user_message() {
     let current = scheduled_record(
-        "recurring",
+        "0198fa2f6d0a7b1a8cf9f762e73a1c15",
         Schedule::rrule("2026-06-03T00:00:00Z", "FREQ=DAILY;COUNT=2", None).unwrap(),
     );
 
     let dispatch = reconcile(
         Some(&current),
-        &occurrence_recorded("recurring", 1, "2026-06-03T00:00:00Z"),
+        &occurrence_recorded("0198fa2f6d0a7b1a8cf9f762e73a1c15", 1, "2026-06-03T00:00:00Z"),
         position(2),
         Some("event-2"),
         now(),
@@ -207,7 +211,7 @@ fn recorded_occurrence_dispatches_the_user_message() {
     .unwrap();
 
     let expected_dispatch = DispatchRequest::build_occurrence(
-        &schedule_id("recurring"),
+        &schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c15"),
         ScheduleOccurrenceSequence::try_new(1).unwrap(),
         instant("2026-06-03T00:00:00Z"),
         &Delivery::nats_event("agent.run").unwrap(),
@@ -223,14 +227,14 @@ fn recorded_occurrence_dispatches_the_user_message() {
 #[test]
 fn recorded_occurrence_dispatches_while_checkpoint_is_paused() {
     let mut current = scheduled_record(
-        "recurring",
+        "0198fa2f6d0a7b1a8cf9f762e73a1c15",
         Schedule::rrule("2026-06-03T00:00:00Z", "FREQ=DAILY;COUNT=2", None).unwrap(),
     );
     current.status = ScheduleStatus::Paused;
 
     let dispatch = reconcile(
         Some(&current),
-        &occurrence_recorded("recurring", 1, "2026-06-03T00:00:00Z"),
+        &occurrence_recorded("0198fa2f6d0a7b1a8cf9f762e73a1c15", 1, "2026-06-03T00:00:00Z"),
         position(2),
         Some("event-2"),
         now(),
@@ -238,7 +242,7 @@ fn recorded_occurrence_dispatches_while_checkpoint_is_paused() {
     .unwrap();
 
     let expected_dispatch = DispatchRequest::build_occurrence(
-        &schedule_id("recurring"),
+        &schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c15"),
         ScheduleOccurrenceSequence::try_new(1).unwrap(),
         instant("2026-06-03T00:00:00Z"),
         &Delivery::nats_event("agent.run").unwrap(),
@@ -254,13 +258,13 @@ fn recorded_occurrence_dispatches_while_checkpoint_is_paused() {
 #[test]
 fn scheduled_occurrence_publishes_the_planned_wakeup() {
     let current = scheduled_record(
-        "recurring",
+        "0198fa2f6d0a7b1a8cf9f762e73a1c15",
         Schedule::rrule("2026-06-03T00:00:00Z", "FREQ=DAILY;COUNT=2", None).unwrap(),
     );
 
     let continuation = reconcile(
         Some(&current),
-        &occurrence_scheduled("recurring", "2026-06-04T00:00:00Z"),
+        &occurrence_scheduled("0198fa2f6d0a7b1a8cf9f762e73a1c15", "2026-06-04T00:00:00Z"),
         position(3),
         Some("event-3"),
         now(),
@@ -268,7 +272,7 @@ fn scheduled_occurrence_publishes_the_planned_wakeup() {
     .unwrap();
 
     let expected = ScheduleRequest::build_rrule_wakeup(
-        &schedule_id("recurring"),
+        &schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c15"),
         instant("2026-06-04T00:00:00Z"),
         &Delivery::nats_event("agent.run").unwrap(),
     )
@@ -281,13 +285,13 @@ fn scheduled_occurrence_publishes_the_planned_wakeup() {
 #[test]
 fn completed_event_purges_and_expires() {
     let current = scheduled_record(
-        "recurring",
+        "0198fa2f6d0a7b1a8cf9f762e73a1c15",
         Schedule::rrule("2026-06-03T00:00:00Z", "FREQ=DAILY;COUNT=1", None).unwrap(),
     );
 
     let completion = reconcile(
         Some(&current),
-        &completed("recurring"),
+        &completed("0198fa2f6d0a7b1a8cf9f762e73a1c15"),
         position(3),
         Some("event-3"),
         now(),
@@ -301,11 +305,14 @@ fn completed_event_purges_and_expires() {
 
 #[test]
 fn completed_event_noops_for_non_rrule_checkpoints() {
-    let current = scheduled_record("recurring", Schedule::every(Duration::from_secs(30)).unwrap());
+    let current = scheduled_record(
+        "0198fa2f6d0a7b1a8cf9f762e73a1c15",
+        Schedule::every(Duration::from_secs(30)).unwrap(),
+    );
 
     let completion = reconcile(
         Some(&current),
-        &completed("recurring"),
+        &completed("0198fa2f6d0a7b1a8cf9f762e73a1c15"),
         position(3),
         Some("event-3"),
         now(),
@@ -323,14 +330,14 @@ fn completed_event_noops_for_non_rrule_checkpoints() {
 #[test]
 fn completed_event_expires_paused_rrule_checkpoints() {
     let mut current = scheduled_record(
-        "recurring",
+        "0198fa2f6d0a7b1a8cf9f762e73a1c15",
         Schedule::rrule("2026-06-03T00:00:00Z", "FREQ=DAILY;COUNT=1", None).unwrap(),
     );
     current.status = ScheduleStatus::Paused;
 
     let completion = reconcile(
         Some(&current),
-        &completed("recurring"),
+        &completed("0198fa2f6d0a7b1a8cf9f762e73a1c15"),
         position(3),
         Some("event-3"),
         now(),
@@ -344,11 +351,14 @@ fn completed_event_expires_paused_rrule_checkpoints() {
 
 #[test]
 fn recorded_occurrence_noops_for_non_rrule_checkpoints() {
-    let current = scheduled_record("recurring", Schedule::every(Duration::from_secs(30)).unwrap());
+    let current = scheduled_record(
+        "0198fa2f6d0a7b1a8cf9f762e73a1c15",
+        Schedule::every(Duration::from_secs(30)).unwrap(),
+    );
 
     let continuation = reconcile(
         Some(&current),
-        &occurrence_recorded("recurring", 1, "2026-06-03T00:00:00Z"),
+        &occurrence_recorded("0198fa2f6d0a7b1a8cf9f762e73a1c15", 1, "2026-06-03T00:00:00Z"),
         position(2),
         Some("event-2"),
         now(),
@@ -365,14 +375,14 @@ fn recorded_occurrence_noops_for_non_rrule_checkpoints() {
 #[test]
 fn resume_of_rrule_arms_the_next_occurrence() {
     let current = scheduled_record(
-        "recurring",
+        "0198fa2f6d0a7b1a8cf9f762e73a1c15",
         Schedule::rrule("2026-06-03T00:00:00Z", "FREQ=DAILY;COUNT=2", None).unwrap(),
     );
 
     let reconciliation = reconcile(
         Some(&current),
         &ScheduleChange::Resumed {
-            schedule_id: schedule_id("recurring"),
+            schedule_id: schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c15"),
         },
         position(2),
         None,
@@ -383,7 +393,7 @@ fn resume_of_rrule_arms_the_next_occurrence() {
     assert_eq!(
         reconciliation.action,
         ReconcileAction::ArmNext {
-            schedule_id: schedule_id("recurring"),
+            schedule_id: schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c15"),
             now: now(),
         }
     );
@@ -395,7 +405,7 @@ fn paused_creation_stores_checkpoint_without_publishing() {
     let reconciliation = reconcile(
         None,
         &created(
-            "orders",
+            "0198fa2f6d0a7b1a8cf9f762e73a1c05",
             ScheduleEventStatus::Paused,
             Schedule::every(Duration::from_secs(30)).unwrap(),
         ),
@@ -415,11 +425,14 @@ fn paused_creation_stores_checkpoint_without_publishing() {
 
 #[test]
 fn pause_purges_the_subject() {
-    let current = scheduled_record("orders", Schedule::every(Duration::from_secs(30)).unwrap());
+    let current = scheduled_record(
+        "0198fa2f6d0a7b1a8cf9f762e73a1c05",
+        Schedule::every(Duration::from_secs(30)).unwrap(),
+    );
     let reconciliation = reconcile(
         Some(&current),
         &ScheduleChange::Paused {
-            schedule_id: schedule_id("orders"),
+            schedule_id: schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c05"),
         },
         position(2),
         None,
@@ -437,7 +450,7 @@ fn resume_republishes_from_the_stored_definition() {
     let paused = reconcile(
         None,
         &created(
-            "orders",
+            "0198fa2f6d0a7b1a8cf9f762e73a1c05",
             ScheduleEventStatus::Paused,
             Schedule::every(Duration::from_secs(30)).unwrap(),
         ),
@@ -451,7 +464,7 @@ fn resume_republishes_from_the_stored_definition() {
     let reconciliation = reconcile(
         Some(&paused),
         &ScheduleChange::Resumed {
-            schedule_id: schedule_id("orders"),
+            schedule_id: schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c05"),
         },
         position(2),
         None,
@@ -465,11 +478,14 @@ fn resume_republishes_from_the_stored_definition() {
 
 #[test]
 fn resume_from_removed_checkpoint_reports_unrecoverable_checkpoint() {
-    let current = scheduled_record("orders", Schedule::every(Duration::from_secs(30)).unwrap());
+    let current = scheduled_record(
+        "0198fa2f6d0a7b1a8cf9f762e73a1c05",
+        Schedule::every(Duration::from_secs(30)).unwrap(),
+    );
     let removed = reconcile(
         Some(&current),
         &ScheduleChange::Removed {
-            schedule_id: schedule_id("orders"),
+            schedule_id: schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c05"),
         },
         position(2),
         None,
@@ -481,7 +497,7 @@ fn resume_from_removed_checkpoint_reports_unrecoverable_checkpoint() {
     let error = reconcile(
         Some(&removed),
         &ScheduleChange::Resumed {
-            schedule_id: schedule_id("orders"),
+            schedule_id: schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c05"),
         },
         position(3),
         None,
@@ -494,7 +510,10 @@ fn resume_from_removed_checkpoint_reports_unrecoverable_checkpoint() {
 
 #[test]
 fn resume_from_corrupt_placeholder_checkpoint_reports_unrecoverable_checkpoint() {
-    let mut current = scheduled_record("orders", Schedule::every(Duration::from_secs(30)).unwrap());
+    let mut current = scheduled_record(
+        "0198fa2f6d0a7b1a8cf9f762e73a1c05",
+        Schedule::every(Duration::from_secs(30)).unwrap(),
+    );
     current.status = ScheduleStatus::Paused;
     current.delivery = Delivery::nats_event(CORRUPT_CHECKPOINT_PLACEHOLDER_ROUTE).unwrap();
     current.last_outcome = ReconcileOutcome::Purged;
@@ -502,7 +521,7 @@ fn resume_from_corrupt_placeholder_checkpoint_reports_unrecoverable_checkpoint()
     let error = reconcile(
         Some(&current),
         &ScheduleChange::Resumed {
-            schedule_id: schedule_id("orders"),
+            schedule_id: schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c05"),
         },
         position(3),
         None,
@@ -522,12 +541,15 @@ fn corrupt_placeholder_route_is_unclaimable_by_user_schedules() {
 
 #[test]
 fn resume_rejects_a_checkpoint_for_a_different_schedule() {
-    let current = scheduled_record("orders", Schedule::every(Duration::from_secs(30)).unwrap());
+    let current = scheduled_record(
+        "0198fa2f6d0a7b1a8cf9f762e73a1c05",
+        Schedule::every(Duration::from_secs(30)).unwrap(),
+    );
 
     let error = reconcile(
         Some(&current),
         &ScheduleChange::Resumed {
-            schedule_id: schedule_id("invoices"),
+            schedule_id: schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c17"),
         },
         position(2),
         None,
@@ -540,11 +562,14 @@ fn resume_rejects_a_checkpoint_for_a_different_schedule() {
 
 #[test]
 fn remove_purges_and_marks_removed() {
-    let current = scheduled_record("orders", Schedule::every(Duration::from_secs(30)).unwrap());
+    let current = scheduled_record(
+        "0198fa2f6d0a7b1a8cf9f762e73a1c05",
+        Schedule::every(Duration::from_secs(30)).unwrap(),
+    );
     let reconciliation = reconcile(
         Some(&current),
         &ScheduleChange::Removed {
-            schedule_id: schedule_id("orders"),
+            schedule_id: schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c05"),
         },
         position(2),
         None,
@@ -558,12 +583,15 @@ fn remove_purges_and_marks_removed() {
 
 #[test]
 fn purge_rejects_a_checkpoint_for_a_different_schedule() {
-    let current = scheduled_record("orders", Schedule::every(Duration::from_secs(30)).unwrap());
+    let current = scheduled_record(
+        "0198fa2f6d0a7b1a8cf9f762e73a1c05",
+        Schedule::every(Duration::from_secs(30)).unwrap(),
+    );
 
     let error = reconcile(
         Some(&current),
         &ScheduleChange::Removed {
-            schedule_id: schedule_id("invoices"),
+            schedule_id: schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c17"),
         },
         position(2),
         None,
@@ -579,7 +607,7 @@ fn schedule_changes_without_prior_checkpoint_report_missing_checkpoint() {
     let error = reconcile(
         None,
         &ScheduleChange::Resumed {
-            schedule_id: schedule_id("orders"),
+            schedule_id: schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c05"),
         },
         position(2),
         None,
@@ -593,20 +621,26 @@ fn schedule_changes_without_prior_checkpoint_report_missing_checkpoint() {
 #[test]
 fn reconcile_errors_display_and_expose_sources() {
     let missing = ReconcileError::MissingCheckpoint {
-        schedule_id: schedule_id("orders"),
+        schedule_id: schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c05"),
     };
     assert_eq!(
         missing.to_string(),
-        "no scheduler checkpoint exists for schedule 'orders'"
+        format!(
+            "no scheduler checkpoint exists for schedule '{}'",
+            schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c05")
+        )
     );
     assert!(std::error::Error::source(&missing).is_none());
 
     let unrecoverable = ReconcileError::UnrecoverableCheckpoint {
-        schedule_id: schedule_id("orders"),
+        schedule_id: schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c05"),
     };
     assert_eq!(
         unrecoverable.to_string(),
-        "scheduler checkpoint for schedule 'orders' cannot be resumed"
+        format!(
+            "scheduler checkpoint for schedule '{}' cannot be resumed",
+            schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c05")
+        )
     );
     assert!(std::error::Error::source(&unrecoverable).is_none());
 
@@ -622,7 +656,10 @@ fn reconcile_errors_display_and_expose_sources() {
 
 #[test]
 fn resume_with_invalid_delivery_target_fails_schedule_request() {
-    let current = scheduled_record("orders", Schedule::every(Duration::from_secs(30)).unwrap());
+    let current = scheduled_record(
+        "0198fa2f6d0a7b1a8cf9f762e73a1c05",
+        Schedule::every(Duration::from_secs(30)).unwrap(),
+    );
     let subject = current.subject();
     let mut current = current;
     current.delivery = Delivery::nats_event(subject.as_str()).unwrap();
@@ -630,7 +667,7 @@ fn resume_with_invalid_delivery_target_fails_schedule_request() {
     let error = reconcile(
         Some(&current),
         &ScheduleChange::Resumed {
-            schedule_id: schedule_id("orders"),
+            schedule_id: schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c05"),
         },
         position(3),
         None,
@@ -643,11 +680,14 @@ fn resume_with_invalid_delivery_target_fails_schedule_request() {
 
 #[test]
 fn stale_records_are_a_no_op_that_preserves_the_definition() {
-    let current = scheduled_record("orders", Schedule::every(Duration::from_secs(30)).unwrap());
+    let current = scheduled_record(
+        "0198fa2f6d0a7b1a8cf9f762e73a1c05",
+        Schedule::every(Duration::from_secs(30)).unwrap(),
+    );
     let reconciliation = reconcile(
         Some(&current),
         &ScheduleChange::Removed {
-            schedule_id: schedule_id("orders"),
+            schedule_id: schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c05"),
         },
         position(1),
         None,
@@ -667,7 +707,7 @@ fn stale_records_are_a_no_op_that_preserves_the_definition() {
 #[test]
 fn schedule_change_exposes_its_schedule_id() {
     let event = ScheduleChange::Paused {
-        schedule_id: schedule_id("orders"),
+        schedule_id: schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c05"),
     };
-    assert_eq!(event.schedule_id().as_str(), "orders");
+    assert_eq!(event.schedule_id(), &schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c05"));
 }

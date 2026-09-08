@@ -16,7 +16,6 @@ pub const MIN_TIMEOUT_SECS: u64 = 1;
 // TODO: replace with Duration::from_days(30) once duration_constructors is stable
 pub const DEFAULT_STREAM_MAX_AGE: Duration = Duration::from_hours(30 * 24);
 pub const SESSION_READY_DELAY: Duration = Duration::from_millis(100);
-pub const PROMPT_TIMEOUT_WARNING_SUPPRESSION_WINDOW: Duration = Duration::from_secs(5);
 pub const TEST_PROMPT_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub const AGENT_UNAVAILABLE: i32 = -32001;
@@ -31,3 +30,16 @@ pub const CONTENT_TYPE_PLAIN: &str = "text/plain";
 
 pub const SESSION_ID_HEADER: &str = "X-Session-Id";
 pub const CAUSATION_ID_HEADER: &str = "X-Causation-Id";
+
+/// Stream suffixes this crate used to provision and no longer does.
+///
+/// Dropping a variant from `AcpStream` stops the provisioner from creating the
+/// stream, but a deployment that ran an earlier release still has it, still has
+/// its stored messages, and still bills for its storage. Nothing here deletes
+/// anything: a stream delete is unrecoverable, it races an operator who may still
+/// be draining the old stream, and a rollback to the prior release would silently
+/// re-create it empty. Retirement is an operator step, and this list is what names
+/// the streams that step applies to.
+///
+/// See `docs/how-to/retire-acp-notifications-stream.md`.
+pub const RETIRED_STREAM_SUFFIXES: [&str; 1] = ["NOTIFICATIONS"];

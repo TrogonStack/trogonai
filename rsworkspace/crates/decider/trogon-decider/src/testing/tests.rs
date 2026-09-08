@@ -1,7 +1,7 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use super::*;
-use crate::Decision;
+use crate::{Decision, WritePrecondition};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum TestState {
@@ -42,6 +42,7 @@ enum TestAction {
     EmitDisabled,
     EmitRegistered,
     ActReject,
+    RegisterThenDisable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -92,6 +93,13 @@ impl TestCommand {
             action: TestAction::ActReject,
         }
     }
+
+    fn register_then_disable(id: &'static str) -> Self {
+        Self {
+            id,
+            action: TestAction::RegisterThenDisable,
+        }
+    }
 }
 
 impl Decider for TestCommand {
@@ -100,6 +108,7 @@ impl Decider for TestCommand {
     type Event = TestEvent;
     type DecideError = TestCommandError;
     type EvolveError = TestDomainError;
+    const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 
     fn stream_id(&self) -> &Self::StreamId {
         self.id
@@ -160,6 +169,24 @@ impl Decider for TestCommand {
                     Err(TestCommandError::JobNotFound {
                         id: command.id.to_string(),
                     })
+                })
+                .into(),
+            (TestAction::RegisterThenDisable, TestState::Present { .. }) => Err(TestCommandError::AlreadyRegistered {
+                id: command.id.to_string(),
+            }),
+            (TestAction::RegisterThenDisable, TestState::Missing) => Decision::act()
+                .execute(|_: &TestState, command: &TestCommand| {
+                    Decision::event(TestEvent::Registered {
+                        id: command.id.to_string(),
+                    })
+                })
+                .execute(|state: &TestState, command: &TestCommand| match state {
+                    TestState::Present { enabled: true } => Ok(Decision::event(TestEvent::Disabled {
+                        id: command.id.to_string(),
+                    })),
+                    _ => Err(TestCommandError::JobNotFound {
+                        id: command.id.to_string(),
+                    }),
                 })
                 .into(),
         }
@@ -522,6 +549,34 @@ fn act_decide_failure_is_reported_as_decide_error() {
         .then_error(TestCommandError::JobNotFound {
             id: "alpha".to_string(),
         });
+}
+
+#[test]
+fn given_no_history_when_multi_step_act_then_full_event_sequence_threads_state() {
+    let registered_then_disabled = TestCase::<TestCommand>::new()
+        .given_no_history()
+        .when(TestCommand::register_then_disable("alpha"))
+        .then([
+            TestEvent::Registered {
+                id: "alpha".to_string(),
+            },
+            TestEvent::Disabled {
+                id: "alpha".to_string(),
+            },
+        ])
+        .then_state(TestState::Present { enabled: false });
+
+    assert_eq!(
+        registered_then_disabled.then_events(),
+        [
+            TestEvent::Registered {
+                id: "alpha".to_string(),
+            },
+            TestEvent::Disabled {
+                id: "alpha".to_string(),
+            },
+        ]
+    );
 }
 
 #[test]

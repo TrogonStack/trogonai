@@ -1,5 +1,6 @@
 use std::{str::FromStr, time::Duration};
 
+use crate::constants::RESERVED_SCHEDULE_HEADERS;
 use crate::subject::DottedNatsToken;
 use chrono::{DateTime, Utc};
 use trogonai_proto::convert::PROTOBUF_DURATION_MAX;
@@ -549,7 +550,7 @@ pub enum DeliveryRouteError {
     Invalid {
         route: String,
         #[source]
-        source: crate::subject::SubjectTokenViolation,
+        source: crate::subject::SubjectTokenViolationError,
     },
 }
 
@@ -598,7 +599,7 @@ pub enum SamplingSubjectError {
     Invalid {
         subject: String,
         #[source]
-        source: crate::subject::SubjectTokenViolation,
+        source: crate::subject::SubjectTokenViolationError,
     },
 }
 
@@ -722,14 +723,6 @@ impl Delivery {
         })
     }
 }
-
-const RESERVED_SCHEDULE_HEADERS: [&str; 5] = [
-    "Nats-Schedule",
-    "Nats-Schedule-Source",
-    "Nats-Schedule-Target",
-    "Nats-Schedule-Time-Zone",
-    "Nats-Schedule-TTL",
-];
 
 fn validate_reserved_scheduler_headers(headers: &[MessageHeader]) -> Result<(), ScheduleHeadersError> {
     for header in headers {

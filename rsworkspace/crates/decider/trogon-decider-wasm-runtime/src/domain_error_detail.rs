@@ -8,7 +8,7 @@
 /// that survives of the original chain.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{code}: {message}")]
-pub struct DomainErrorDetail {
+pub struct GuestDomainError {
     /// Stable, machine-readable rejection code the guest reported.
     pub code: String,
     /// Human-readable description of the failure.
@@ -17,7 +17,7 @@ pub struct DomainErrorDetail {
     pub details: Vec<(String, String)>,
 }
 
-impl From<trogon_decider_wit::host::DomainError> for DomainErrorDetail {
+impl From<trogon_decider_wit::host::DomainError> for GuestDomainError {
     fn from(value: trogon_decider_wit::host::DomainError) -> Self {
         Self {
             code: value.code,

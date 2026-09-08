@@ -10,7 +10,7 @@ use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
 };
 use trogon_semconv::span::NOTION_WEBHOOK;
-use trogon_std::{EmptySecret, NonZeroDuration};
+use trogon_std::{EmptySecretError, NonZeroDuration};
 
 use super::NotionEventType;
 use super::NotionVerificationToken;
@@ -80,7 +80,7 @@ struct VerificationRequest {
 #[derive(Debug, thiserror::Error)]
 enum VerificationRequestParseError {
     #[error("verification_token must not be empty")]
-    InvalidVerificationToken(#[source] EmptySecret),
+    InvalidVerificationToken(#[source] EmptySecretError),
 }
 
 fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode {

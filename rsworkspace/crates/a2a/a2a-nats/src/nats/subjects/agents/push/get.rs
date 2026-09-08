@@ -19,7 +19,12 @@ impl PushGetSubject {
 
 impl std::fmt::Display for PushGetSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.agents.{}.push.get", self.prefix.as_str(), self.agent_id.as_str())
+        write!(
+            f,
+            "{}.v1.agents.{}.push.get",
+            self.prefix.as_str(),
+            self.agent_id.as_str()
+        )
     }
 }
 

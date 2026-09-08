@@ -27,6 +27,7 @@ axum = { workspace = true }
 bytes = { workspace = true }
 futures-util = { workspace = true }
 reqwest = { workspace = true, features = ["json", "rustls-tls"] }
+serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync"] }
@@ -34,6 +35,7 @@ tracing = { workspace = true }
 tracing-subscriber = { version = "=0.3.23", features = ["fmt", "env-filter"] }
 
 [dev-dependencies]
+a2a = { workspace = true }
 futures-util = { workspace = true }
 nkeys = { workspace = true }
 serde_json = { workspace = true }

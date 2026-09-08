@@ -16,11 +16,7 @@
 
 use trogon_identity_types::aauth::Act;
 
-/// Defensive recursion bound for `act` chain traversal. Not specified by the
-/// draft; chosen generously above any plausible legitimate delegation depth
-/// (call chaining hops + at most one sub-agent hop) while still bounding
-/// worst-case work for a crafted token.
-pub const MAX_CHAIN_DEPTH: usize = 16;
+use crate::constants::MAX_CHAIN_DEPTH;
 
 /// Errors verifying an `act` delegation chain.
 #[derive(Debug, thiserror::Error)]

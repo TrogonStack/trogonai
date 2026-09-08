@@ -1,14 +1,12 @@
 use std::path::Path;
 
+use crate::constants::{VERSION_CURRENT, VERSION_PREVIOUS};
 use crate::error::AuthCalloutError;
 use crate::jwt::SigningKey;
 
 use super::SigningKeySource;
 use super::key_version::KeyVersion;
 use super::signing_key_handle::SigningKeyHandle;
-
-const VERSION_CURRENT: &str = "current";
-const VERSION_PREVIOUS: &str = "previous";
 
 #[derive(Debug)]
 pub struct FileSigningKeySource {

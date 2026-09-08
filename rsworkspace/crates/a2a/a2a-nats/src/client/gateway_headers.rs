@@ -1,6 +1,7 @@
 use async_nats::HeaderMap;
 
-use a2a_identity_types::{CALLER_JWT_HEADER_NAME, CallerJwtHeaderValue, JwtError, MintedUserJwt};
+use a2a_identity_types::constants::CALLER_JWT_HEADER_NAME;
+use a2a_identity_types::{CallerJwtHeaderValue, JwtError, MintedUserJwt};
 
 use crate::constants::REQ_ID_HEADER;
 use crate::req_id::ReqId;

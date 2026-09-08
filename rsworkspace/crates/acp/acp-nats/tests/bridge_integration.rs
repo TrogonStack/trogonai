@@ -73,7 +73,6 @@ fn make_bridge(nats: async_nats::Client, prefix: &str) -> Bridge<async_nats::Cli
         SystemClock,
         &opentelemetry::global::meter("acp-nats-integration-test"),
         config,
-        tokio::sync::mpsc::channel(1).0,
     )
 }
 

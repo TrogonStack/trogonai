@@ -2433,12 +2433,7 @@ impl<
                                         // Bridge needs a notification_sender but we don't read from it:
                                         // Bridge subscribes to agent.update.* (JetStream) but xai-runner publishes
                                         // to client.session.update (plain NATS) — different subjects, Bridge never fires.
-                                        // We subscribe directly to the correct subject after sub_sid is known.
-                                        let (notif_tx, _notif_rx_bridge_unused) =
-                                            tokio::sync::mpsc::channel::<SessionNotification>(1);
-                                        // _notif_rx_bridge_unused dropped immediately → Bridge.send() silently fails → logged as warning, prompt continues
-
-                                        // Build Bridge (notif_tx is a dummy; clone runner_cfg first so acp_prefix() is available after move)
+                                        // Clone runner_cfg first so acp_prefix() is available after move.
                                         let acp_prefix_str = runner_cfg.acp_prefix().to_string();
                                         let js = acp_nats::NatsJetStreamClient::new(async_nats::jetstream::new(
                                             nats.clone(),
@@ -2449,7 +2444,6 @@ impl<
                                             trogon_std::time::SystemClock,
                                             &opentelemetry::global::meter("trogon-xai-runner"),
                                             runner_cfg,
-                                            notif_tx,
                                         );
 
                                         let create_result = trogon_runner_tools::spawn_session::create_sub_session(

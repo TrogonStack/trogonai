@@ -1,0 +1,46 @@
+edition = "2024";
+
+package trogonai.session.sessions.maintenance.v1alpha1;
+
+// MaintenanceError is the typed failure payload for the migration and salvage
+// surface.
+//
+// Kept separate from QueryError and DoctorError on the same reasoning each of
+// those applies: these are operator operations that rewrite or duplicate
+// durable state, and their failure vocabulary should be free to grow without
+// that growth being a client-visible or diagnostic-visible change.
+//
+// An operation that ran and could not be classified is not an error. It is a
+// successful call reporting MAINTENANCE_STATE_INDETERMINATE, because it has a
+// durable record and a defined next step, and turning it into an error would
+// discard both.
+message MaintenanceError {
+  MaintenanceErrorCode code = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Human-readable, non-contractual. Never parse it.
+  string message = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Dotted path into the request for INVALID_ARGUMENT.
+  string field_path = 3;
+}
+
+// MaintenanceErrorCode is why an operation could not be attempted.
+enum MaintenanceErrorCode {
+  MAINTENANCE_ERROR_CODE_UNSPECIFIED = 0;
+  MAINTENANCE_ERROR_CODE_SESSION_NOT_FOUND = 1;
+  MAINTENANCE_ERROR_CODE_INVALID_ARGUMENT = 2;
+  // Reconciliation was asked about an identity with no recorded intent. Distinct
+  // from an indeterminate outcome: there is no operation to reconcile, so there
+  // is nothing to report a state for.
+  MAINTENANCE_ERROR_CODE_INTENT_NOT_FOUND = 3;
+  // The request's parameters do not reproduce the identity it names. Refused
+  // rather than treated as a new operation, because the caller believes it is
+  // retrying something it is not.
+  MAINTENANCE_ERROR_CODE_IDENTITY_MISMATCH = 4;
+  // Another maintenance operation holds this session. Two concurrent migrations
+  // of one session both write a target, and only one can be right.
+  MAINTENANCE_ERROR_CODE_OPERATION_IN_PROGRESS = 5;
+  // Planning and committing are authorized separately: the right to see what a
+  // migration would do does not carry the right to run it.
+  MAINTENANCE_ERROR_CODE_PERMISSION_DENIED = 6;
+  MAINTENANCE_ERROR_CODE_RESOURCE_EXHAUSTED = 7;
+  MAINTENANCE_ERROR_CODE_INTERNAL = 8;
+}

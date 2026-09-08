@@ -3,8 +3,9 @@ use proptest::prelude::*;
 
 proptest! {
     #[test]
-    fn accepts_any_non_empty_bounded_value(s in "[a-zA-Z0-9._:@/-]{1,256}") {
-        let id = ScheduleId::parse(&s).unwrap();
-        prop_assert_eq!(id.as_str(), s.as_str());
+    fn accepts_uuid_bytes(bytes in any::<[u8; 16]>()) {
+        let uuid = Uuid::from_bytes(bytes);
+        let id = ScheduleId::parse(&uuid.hyphenated().to_string()).unwrap();
+        prop_assert_eq!(id.to_string(), uuid.as_simple().to_string());
     }
 }

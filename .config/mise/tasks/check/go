@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+#MISE description="Check the Go workspace: formatting, tests, vet, and WIT snapshots"
+set -euo pipefail
+
+ROOT="${GITHUB_WORKSPACE:-$(git rev-parse --show-toplevel)}"
+cd "$ROOT/goworkspace"
+
+unformatted="$(gofmt -l .)"
+if [ -n "$unformatted" ]; then
+  echo "gofmt found unformatted files:" >&2
+  echo "$unformatted" >&2
+  exit 1
+fi
+
+go test ./...
+go vet ./...
+
+find internal/protowit/testdata/snapshots -name '*.wit' -exec dirname {} \; \
+  | sort -u \
+  | xargs -r -I{} wasm-tools component wit {} --wasm -o /dev/null

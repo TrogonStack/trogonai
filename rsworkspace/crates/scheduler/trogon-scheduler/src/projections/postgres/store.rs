@@ -17,12 +17,13 @@
 
 use std::collections::HashSet;
 
-use buffa::MessageField;
+use buffa::{MessageField, ProtoBox};
 use buffa_types::google::protobuf::{Duration, Timestamp};
 use chrono::{DateTime, TimeZone, Utc};
 use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Row};
 
+use crate::constants::{SCHEDULES_CHECKPOINT_ID, SELECT_ALL_PROJECTIONS, SELECT_PROJECTION_BY_ID};
 use crate::queries::ScheduleId;
 use crate::{error::SchedulerError, projections_v1};
 
@@ -30,9 +31,6 @@ use projections_v1::__buffa::oneof::delivery::Kind as DeliveryKind;
 use projections_v1::__buffa::oneof::delivery::nats_message::source::Kind as SourceKind;
 use projections_v1::__buffa::oneof::schedule::Kind as ScheduleKind;
 use projections_v1::__buffa::oneof::schedule_status::Kind as ScheduleStatusKind;
-
-/// This projection's id in the shared `jetstream_projection_checkpoint` table.
-const SCHEDULES_CHECKPOINT_ID: &str = "schedules_read_model";
 
 /// A schedules read model stored in a Postgres table.
 #[derive(Clone)]
@@ -61,19 +59,6 @@ impl PostgresSchedulesProjection {
         &self.pool
     }
 }
-
-macro_rules! select_columns {
-    () => {
-        "SELECT schedule_id, status, completed, next_occurrence_at, last_occurrence_at, \
-         schedule_kind, at_at, every_seconds, cron_expr, rrule, rrule_dtstart, timezone, rrule_rdate, rrule_exdate, \
-         delivery_kind, delivery_subject, delivery_ttl_seconds, delivery_source_subject, \
-         message_content_type, message_body, message_headers \
-         FROM schedules_projection"
-    };
-}
-
-const SELECT_PROJECTION_BY_ID: &str = concat!(select_columns!(), " WHERE schedule_id = $1");
-const SELECT_ALL_PROJECTIONS: &str = concat!(select_columns!(), " ORDER BY schedule_id");
 
 fn malformed(context: &'static str) -> SchedulerError {
     SchedulerError::kv_source(
@@ -115,7 +100,9 @@ fn timestamp_to_datetime(ts: &Timestamp) -> Result<DateTime<Utc>, SchedulerError
     })
 }
 
-fn optional_datetime(ts: &MessageField<Timestamp>) -> Result<Option<DateTime<Utc>>, SchedulerError> {
+fn optional_datetime<P: ProtoBox<Timestamp>>(
+    ts: &MessageField<Timestamp, P>,
+) -> Result<Option<DateTime<Utc>>, SchedulerError> {
     ts.as_option().map(timestamp_to_datetime).transpose()
 }
 
@@ -131,13 +118,13 @@ fn datetime_to_timestamp(dt: &DateTime<Utc>) -> Timestamp {
     }
 }
 
-fn optional_timestamp(dt: Option<DateTime<Utc>>) -> MessageField<Timestamp> {
+fn optional_timestamp<P: ProtoBox<Timestamp>>(dt: Option<DateTime<Utc>>) -> MessageField<Timestamp, P> {
     dt.map_or_else(MessageField::none, |dt| MessageField::some(datetime_to_timestamp(&dt)))
 }
 
 /// Schedule intervals/TTLs are stored as whole seconds (`BIGINT`); sub-second
 /// precision is dropped, which is fine for a second-granularity read model.
-fn optional_duration(seconds: Option<i64>) -> MessageField<Duration> {
+fn optional_duration<P: ProtoBox<Duration>>(seconds: Option<i64>) -> MessageField<Duration, P> {
     seconds.map_or_else(MessageField::none, |seconds| {
         MessageField::some(Duration {
             seconds,
@@ -146,11 +133,15 @@ fn optional_duration(seconds: Option<i64>) -> MessageField<Duration> {
     })
 }
 
-fn timezone_text(tz: &MessageField<trogonai_proto::google::r#type::TimeZone>) -> Option<String> {
+fn timezone_text<P: ProtoBox<trogonai_proto::google::r#type::TimeZone>>(
+    tz: &MessageField<trogonai_proto::google::r#type::TimeZone, P>,
+) -> Option<String> {
     tz.as_option().map(|tz| tz.id.clone()).filter(|id| !id.is_empty())
 }
 
-fn optional_timezone(id: Option<String>) -> MessageField<trogonai_proto::google::r#type::TimeZone> {
+fn optional_timezone<P: ProtoBox<trogonai_proto::google::r#type::TimeZone>>(
+    id: Option<String>,
+) -> MessageField<trogonai_proto::google::r#type::TimeZone, P> {
     match id.filter(|id| !id.is_empty()) {
         Some(id) => MessageField::some(trogonai_proto::google::r#type::TimeZone {
             id,
@@ -187,14 +178,23 @@ fn source_subject(source: &projections_v1::delivery::nats_message::Source) -> Op
         .map(|SourceKind::LatestFromSubject(inner)| inner.subject.clone())
 }
 
-fn headers_to_json(message: &projections_v1::Message) -> serde_json::Value {
-    serde_json::Value::Array(
-        message
-            .headers
-            .iter()
-            .map(|header| serde_json::json!({ "name": header.name, "value": header.value }))
-            .collect(),
-    )
+/// A message header as it sits in the `message_headers` JSONB column.
+#[derive(serde::Serialize)]
+struct HeaderWire<'a> {
+    name: &'a str,
+    value: &'a str,
+}
+
+fn headers_to_json(message: &projections_v1::Message) -> Result<serde_json::Value, SchedulerError> {
+    let headers: Vec<HeaderWire<'_>> = message
+        .headers
+        .iter()
+        .map(|header| HeaderWire {
+            name: &header.name,
+            value: &header.value,
+        })
+        .collect();
+    serde_json::to_value(headers).map_err(|_| malformed("message headers could not be encoded as JSON"))
 }
 
 fn headers_from_json(value: &serde_json::Value) -> Result<Vec<projections_v1::Header>, SchedulerError> {
@@ -414,7 +414,7 @@ impl PostgresSchedulesProjection {
             Some(content) => (Some(content.content_type.clone()), Some(content.data.clone())),
             None => (None, None),
         };
-        let message_headers = headers_to_json(message);
+        let message_headers = headers_to_json(message)?;
 
         sqlx::query(
             "INSERT INTO schedules_projection ( \

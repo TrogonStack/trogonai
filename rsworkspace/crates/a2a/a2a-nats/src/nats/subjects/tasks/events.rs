@@ -1,38 +1,29 @@
 use crate::a2a_prefix::A2aPrefix;
-use crate::req_id::ReqId;
 use crate::task_id::A2aTaskId;
 
-/// `{prefix}.tasks.{task_id}.events.{req_id}` — JetStream-backed task event subject.
+/// `{prefix}.v1.tasks.{task_id}.events`: JetStream-backed task event subject.
 ///
-/// Published by the agent for `message/stream` and `tasks/resubscribe`. The `req_id`
-/// suffix lets a single task fan out to multiple concurrent subscribers without
-/// cross-talk.
+/// Published by the agent for `message/stream` and `tasks/resubscribe`. Scoped to
+/// the task, not the request (ADR#0055). Concurrent subscribers of the same task
+/// are told apart by the `Trogon-Req-Id` header, which every event carries.
 #[derive(Debug)]
 pub struct TaskEventsSubject {
     prefix: A2aPrefix,
     task_id: A2aTaskId,
-    req_id: ReqId,
 }
 
 impl TaskEventsSubject {
-    pub fn new(prefix: &A2aPrefix, task_id: &A2aTaskId, req_id: &ReqId) -> Self {
+    pub fn new(prefix: &A2aPrefix, task_id: &A2aTaskId) -> Self {
         Self {
             prefix: prefix.clone(),
             task_id: task_id.clone(),
-            req_id: req_id.clone(),
         }
     }
 }
 
 impl std::fmt::Display for TaskEventsSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}.tasks.{}.events.{}",
-            self.prefix.as_str(),
-            self.task_id.as_str(),
-            self.req_id.as_str()
-        )
+        write!(f, "{}.v1.tasks.{}.events", self.prefix.as_str(), self.task_id.as_str())
     }
 }
 

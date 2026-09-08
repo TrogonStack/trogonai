@@ -9,11 +9,13 @@
 //! pulling in signing key management or NATS auth-callout server logic.
 
 pub mod caller;
+pub mod constants;
 pub mod error;
 pub mod jwt;
 pub mod principal;
 
 pub use caller::CallerId;
+pub use constants::CALLER_JWT_HEADER_NAME;
 pub use error::JwtError;
-pub use jwt::{CALLER_JWT_HEADER_NAME, CallerJwtHeaderValue, MintedUserJwt, decode_nats_user_payload};
+pub use jwt::{CallerJwtHeaderValue, MintedUserJwt, decode_nats_user_payload};
 pub use principal::{SpiceDbPrincipal, SpiceDbSubject};

@@ -110,6 +110,53 @@ async fn initialize_round_trips_through_boundary() {
     assert!(matches!(boundary_result, Ok(BoundaryExit::TransportClosed)));
 }
 
+#[tokio::test]
+async fn jsonrpc_batch_round_trips_as_a_single_grouped_response() {
+    let (client_io, server_io) = tokio::io::duplex(8192);
+    let (client_read, client_write) = tokio::io::split(client_io);
+    let (server_read, server_write) = tokio::io::split(server_io);
+
+    let boundary = connect_agent_boundary(
+        Arc::new(StubAgent),
+        async_compat::Compat::new(server_write),
+        async_compat::Compat::new(server_read),
+        async move |_cx| std::future::pending::<Result<()>>().await,
+    );
+
+    let client = async move {
+        let mut writer = client_write;
+        let batch = serde_json::json!([
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": 1}},
+            {"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": "s1"}},
+            {"jsonrpc": "2.0", "id": 2, "method": "session/new", "params": {"cwd": "/tmp", "mcpServers": []}},
+            {"jsonrpc": "2.0", "id": 3, "method": "session/set_mode", "params": {"sessionId": "s1", "modeId": "ask"}},
+        ]);
+        writer.write_all(format!("{batch}\n").as_bytes()).await.unwrap();
+
+        let mut lines = BufReader::new(client_read).lines();
+        let line = lines.next_line().await.unwrap().unwrap();
+        let value: serde_json::Value = serde_json::from_str(&line).unwrap();
+        let entries = value.as_array().expect("batch requests answer with one response array");
+        assert_eq!(entries.len(), 3, "the notification must not produce an entry: {line}");
+
+        let by_id: std::collections::HashMap<u64, &serde_json::Value> = entries
+            .iter()
+            .map(|entry| (entry["id"].as_u64().unwrap(), entry))
+            .collect();
+        assert_eq!(by_id[&1]["result"]["protocolVersion"], 1);
+        assert_eq!(by_id[&2]["result"]["sessionId"], "sess-1");
+        assert_eq!(
+            by_id[&3]["error"]["code"],
+            i32::from(agent_client_protocol::ErrorCode::MethodNotFound),
+            "unrouted methods keep answering method_not_found inside a batch: {line}"
+        );
+        drop(writer);
+    };
+
+    let (boundary_result, ()) = tokio::join!(boundary, client);
+    assert!(matches!(boundary_result, Ok(BoundaryExit::TransportClosed)));
+}
+
 struct PendingPromptAgent;
 
 #[async_trait::async_trait]
@@ -512,4 +559,72 @@ async fn boundary_covers_ext_success_and_notification_fallthroughs() {
 fn log_notification_error_covers_both_outcomes() {
     super::log_notification_error("session/cancel", Ok(()));
     super::log_notification_error("session/cancel", Err(Error::internal_error()));
+}
+
+#[tokio::test]
+async fn boundary_with_a_transport_returns_the_main_result() {
+    let result = connect_agent_boundary_with(
+        Arc::new(StubAgent),
+        ByteStreams::new(futures::io::sink(), PendingRead),
+        async move |_cx| Ok(42u32),
+    )
+    .await;
+
+    assert!(matches!(result, Ok(BoundaryExit::Main(42))));
+}
+
+/// The generic variant detects closure through `ConnectionTo::incoming_closed`
+/// rather than by wrapping the reader, so assert that path independently of the
+/// byte-stream variant's `EofSignalReader`.
+#[tokio::test]
+async fn boundary_with_a_transport_ends_on_incoming_close() {
+    let result = connect_agent_boundary_with(
+        Arc::new(StubAgent),
+        ByteStreams::new(futures::io::sink(), futures::io::empty()),
+        async move |_cx| std::future::pending::<Result<()>>().await,
+    )
+    .await;
+
+    assert!(matches!(result, Ok(BoundaryExit::TransportClosed)));
+}
+
+/// `$/cancel_request` is swallowed by its own registered handler so it never
+/// reaches the dispatch match. Proven by showing the connection still answers a
+/// following request rather than erroring on an unhandled notification.
+#[tokio::test]
+async fn boundary_with_a_transport_swallows_cancel_request_notifications() {
+    let (client_io, server_io) = tokio::io::duplex(4096);
+    let (client_read, client_write) = tokio::io::split(client_io);
+    let (server_read, server_write) = tokio::io::split(server_io);
+
+    let boundary = connect_agent_boundary_with(
+        Arc::new(StubAgent),
+        ByteStreams::new(
+            async_compat::Compat::new(server_write),
+            async_compat::Compat::new(server_read),
+        ),
+        async move |_cx| std::future::pending::<Result<()>>().await,
+    );
+
+    let client = async move {
+        let mut writer = client_write;
+        writer
+            .write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"$/cancel_request\",\"params\":{\"requestId\":7}}\n")
+            .await
+            .unwrap();
+        writer
+            .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":1}}\n")
+            .await
+            .unwrap();
+
+        let mut lines = BufReader::new(client_read).lines();
+        let line = lines.next_line().await.unwrap().unwrap();
+        let value: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(value["id"], 1, "the connection must survive the notification");
+        assert_eq!(value["result"]["protocolVersion"], 1);
+        drop(writer);
+    };
+
+    let (boundary_result, ()) = tokio::join!(boundary, client);
+    assert!(matches!(boundary_result, Ok(BoundaryExit::TransportClosed)));
 }

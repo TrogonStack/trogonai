@@ -5,9 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::catalog_entry_wire::{CatalogEntryWire, CatalogEntryWireError};
 use crate::catalog_host::CatalogHostError;
 use crate::catalog_host_wire::CatalogHostWire;
-
-/// Pinned ARD manifest spec version for this crate snapshot.
-pub const SPEC_VERSION: &str = "1.0";
+use crate::constants::SPEC_VERSION;
 
 /// Error returned when converting [`CatalogManifestWire`] into domain values.
 #[derive(Debug, PartialEq, thiserror::Error)]

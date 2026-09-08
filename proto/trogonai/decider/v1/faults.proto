@@ -1,0 +1,164 @@
+edition = "2024";
+
+package trogonai.decider.v1;
+
+import "trogon/error/v1alpha1/options.proto";
+
+// The reasons the decider host itself can report, as annotations rather than
+// as prose.
+//
+// Every message here is schema-only. None is referenced by a field, none is
+// ever encoded, and a caller will never decode one. What travels is the
+// `google.rpc.Status` on the error channel, per
+// [ADR#0016](../../../../docs/adr/0016-protobuf-rpc-over-nats-micro-binding.md);
+// these declare what the host puts in it, in a form a reader does not have to
+// take on trust from a comment.
+//
+// `Template.message` is the invariant description of the condition. The host
+// substitutes the live error text when it emits, because a status message that
+// did not name the failing subject or revision would cost an operator the one
+// detail worth reading.
+//
+// A module's own refusal has no template here on purpose. It reaches a caller
+// as the same kind of `google.rpc.Status` these do, but its domain is the
+// module that owns the code space and its reason is the code that module
+// chose, so neither is the host's to declare.
+
+// No activated module claims the command type the subject names.
+message CommandTypeUnroutableError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "trogonai.decider.v1"
+    reason: "COMMAND_TYPE_UNROUTABLE"
+    message: "No activated module claims this command type."
+    code: UNIMPLEMENTED
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+// The subject or the headers could not be read as a command at all.
+message CommandRequestMalformedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "trogonai.decider.v1"
+    reason: "COMMAND_REQUEST_MALFORMED"
+    message: "The subject or headers could not be read as a command."
+    code: INVALID_ARGUMENT
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+// The caller asserted an expected revision no stream state can satisfy.
+//
+// `INVALID_ARGUMENT` and not `ABORTED`, which is the distinction that matters
+// most in this file: a contended append succeeds on a retry that replays the
+// stream, and a fabricated revision never does. Advertising this one with the
+// retry advice of a conflict sends a caller into a loop it cannot leave.
+message ExpectedRevisionUnsatisfiableError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "trogonai.decider.v1"
+    reason: "EXPECTED_REVISION_UNSATISFIABLE"
+    message: "No stream state satisfies the expected revision the caller asserted."
+    code: INVALID_ARGUMENT
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+// The stream moved under the command between the read and the append.
+message StreamWriteConflictError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "trogonai.decider.v1"
+    reason: "STREAM_WRITE_CONFLICT"
+    message: "A concurrent writer advanced the stream; retry replays it as it now stands."
+    code: ABORTED
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+// The guest faulted, trapped, or broke the WIT contract.
+message GuestFaultError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "trogonai.decider.v1"
+    reason: "GUEST_FAULT"
+    message: "The module faulted, trapped, or broke the guest contract."
+    code: INTERNAL
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+// The guest exceeded its wall-clock deadline.
+message GuestDeadlineExceededError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "trogonai.decider.v1"
+    reason: "GUEST_DEADLINE_EXCEEDED"
+    message: "The module exceeded its wall-clock deadline."
+    code: DEADLINE_EXCEEDED
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+// Event or snapshot storage failed.
+message StorageUnavailableError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "trogonai.decider.v1"
+    reason: "STORAGE_UNAVAILABLE"
+    message: "Event or snapshot storage failed."
+    code: UNAVAILABLE
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+// The host broke one of its own invariants.
+//
+// Shares `INTERNAL` with `GuestFaultError` and is a separate reason for that
+// reason: the code tells a caller what to do and the reason tells an operator
+// who is answerable, and here the two answers differ.
+message HostInternalError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "trogonai.decider.v1"
+    reason: "HOST_INTERNAL"
+    message: "The host broke one of its own invariants."
+    code: INTERNAL
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+// Admission control refused the command before any work began.
+//
+// The status also carries a `QuotaFailure` naming the committed limit, which
+// the template has no slot for. A caller sizing a backoff reads that detail,
+// not this reason.
+message AdmissionLimitReachedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "trogonai.decider.v1"
+    reason: "ADMISSION_LIMIT_REACHED"
+    message: "Every concurrent execution slot is already committed."
+    code: RESOURCE_EXHAUSTED
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+// The execution carried no principal at all.
+message PrincipalMissingError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "trogonai.decider.v1"
+    reason: "PRINCIPAL_MISSING"
+    message: "The command carried no principal."
+    code: UNAUTHENTICATED
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+// The authorizer refused the principal the execution carried.
+//
+// Separate from `PrincipalMissingError` because the caller's next move
+// differs: present credentials, versus present different ones. Neither names
+// the rule that refused it, which would tell an unauthorized caller how to
+// become an authorized one.
+message PrincipalUnauthorizedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "trogonai.decider.v1"
+    reason: "PRINCIPAL_UNAUTHORIZED"
+    message: "The configured authorizer refused this principal."
+    code: PERMISSION_DENIED
+    visibility: VISIBILITY_PUBLIC
+  };
+}

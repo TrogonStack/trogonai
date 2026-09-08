@@ -3,6 +3,7 @@ use axum::http::{HeaderMap, HeaderValue};
 use std::error::Error;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::source::gitlab::constants::{HEADER_WEBHOOK_ID, HEADER_WEBHOOK_SIGNATURE, HEADER_WEBHOOK_TIMESTAMP};
 use crate::source::standard_webhooks::sign_for_test;
 
 const TEST_SIGNING_TOKEN: &str = "whsec_MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=";

@@ -40,11 +40,16 @@ impl JetStreamTestServer {
 
     /// Connects to the isolated server and returns its JetStream context.
     pub async fn jetstream(&self) -> jetstream::Context {
-        let client = async_nats::ConnectOptions::new()
+        jetstream::new(self.client().await)
+    }
+
+    /// A raw connection to the isolated server, for tests that need a context
+    /// built some other way (a non-default API prefix, a domain).
+    pub async fn client(&self) -> async_nats::Client {
+        async_nats::ConnectOptions::new()
             .connection_timeout(CONNECT_TIMEOUT)
             .connect(&self.address)
             .await
-            .expect("connect to JetStream testcontainer");
-        jetstream::new(client)
+            .expect("connect to JetStream testcontainer")
     }
 }

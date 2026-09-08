@@ -1,0 +1,22 @@
+package example:events-v1;
+
+interface messages {
+  record customer {
+    id: string,
+  }
+
+  record order {
+    customer: option<customer>,
+    primary-item: option<order-line-item>,
+    items: list<order-line-item>,
+  }
+
+  record order-line-item {
+    sku: string,
+    metadata: option<order-line-item-metadata>,
+  }
+
+  record order-line-item-metadata {
+    note: string,
+  }
+}

@@ -10,9 +10,7 @@ on:
       - 'rsworkspace/**'
       - 'LICENSE'
       - '.mise.toml'
-      - 'rust-toolchain.toml'
       - '.config/mise/tasks/**'
-      - '.github/actions/enforce-cargo-license/**'
       - '.github/actions/setup-rust/**'
       - '.github/workflows/ci-rust.yml'
 
@@ -36,7 +34,7 @@ jobs:
       actions: write
       contents: read
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -46,11 +44,10 @@ jobs:
           dylint-toolchain-dir: rsworkspace/dylints/trogon_lints
 
       - name: Enforce crate licenses
-        uses: ./.github/actions/enforce-cargo-license
+        run: mise run --skip-tools github-actions:enforce-cargo-license
 
       - name: Enforce TLS policy (ADR#0015)
-        run: cargo deny check bans
-        working-directory: rsworkspace
+        run: mise run --skip-tools rust:tls-policy
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
@@ -68,8 +65,7 @@ jobs:
         run: mise run github-actions:dylint-tests
 
       - name: Run repo Rust policy lints
-        run: env -u RUSTUP_TOOLCHAIN cargo dylint --path dylints/trogon_lints --workspace --no-deps -- --all-features --all-targets
-        working-directory: rsworkspace
+        run: mise run --skip-tools github-actions:rust-dylint
 
       - name: Run clippy
         run: cargo clippy --all-targets --all-features
@@ -84,7 +80,7 @@ jobs:
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: true
@@ -101,7 +97,7 @@ jobs:
           cache-workspace-crates: true
 
       - name: Install coverage tools
-        uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
+        uses: taiki-e/install-action@065d6a08a14e61e89fb0a4c10eecdbdef39c7d8e # v2.85.4
         with:
           tool: cargo-llvm-cov,nextest
 
@@ -113,8 +109,7 @@ jobs:
         working-directory: rsworkspace
 
       - name: Run tests with coverage
-        run: cargo cov nextest --cobertura --output-path coverage.xml
-        working-directory: rsworkspace
+        run: mise run --skip-tools github-actions:rust-coverage
         env:
           RUSTC_BOOTSTRAP: "1"
 
@@ -141,7 +136,7 @@ jobs:
       actions: write
       contents: read
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -166,7 +161,7 @@ jobs:
       actions: write
       contents: read
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -190,4 +185,8 @@ jobs:
 
       - name: Run wasm decider runtime tests
         run: cargo test -p trogon-decider-wasm-runtime
+        working-directory: rsworkspace
+
+      - name: Run trogon-decider-nats live JetStream tests
+        run: cargo test -p trogon-decider-nats
         working-directory: rsworkspace

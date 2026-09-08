@@ -111,3 +111,17 @@ fn into_wire_bytes_errors_when_server_xkey_but_no_account_xkey() {
     let err = resp.into_wire_bytes(&req, None).unwrap_err();
     assert!(matches!(err, AuthCalloutError::WireFormat(_)));
 }
+
+#[test]
+fn debug_does_not_leak_the_encoded_response() {
+    let (req, callout) = fixture_request();
+    let resp = CalloutAuthResponseClaims::success(
+        &req,
+        &MintedUserJwt::new("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ4In0.c2ln").unwrap(),
+        &callout,
+    )
+    .unwrap();
+    let dbg = format!("{resp:?}");
+    assert!(!dbg.contains(resp.as_jwt_str()), "{dbg}");
+    assert!(dbg.contains("<redacted>"), "{dbg}");
+}

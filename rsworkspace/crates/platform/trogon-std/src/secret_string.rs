@@ -6,13 +6,13 @@ pub struct SecretString(Arc<str>);
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 #[error("secret must not be empty")]
-pub struct EmptySecret;
+pub struct EmptySecretError;
 
 impl SecretString {
-    pub fn new(s: impl AsRef<str>) -> Result<Self, EmptySecret> {
+    pub fn new(s: impl AsRef<str>) -> Result<Self, EmptySecretError> {
         let s = s.as_ref();
         if s.is_empty() {
-            return Err(EmptySecret);
+            return Err(EmptySecretError);
         }
         Ok(Self(Arc::from(s)))
     }

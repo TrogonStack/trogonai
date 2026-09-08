@@ -9,6 +9,7 @@ use trogon_std::env::ReadEnv;
 #[cfg(test)]
 static ENV_DEV_WARN_COUNT: AtomicUsize = AtomicUsize::new(0);
 
+use crate::constants::{VERSION_CURRENT, VERSION_PREVIOUS};
 use crate::error::AuthCalloutError;
 use crate::jwt::SigningKey;
 
@@ -17,9 +18,6 @@ use super::key_version::KeyVersion;
 use super::signing_key_handle::SigningKeyHandle;
 
 static ENV_DEV_WARN_ONCE: Once = Once::new();
-
-const VERSION_CURRENT: &str = "current";
-const VERSION_PREVIOUS: &str = "previous";
 
 #[derive(Debug)]
 pub struct EnvSigningKeySource {

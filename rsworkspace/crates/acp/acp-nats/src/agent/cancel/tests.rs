@@ -20,7 +20,6 @@ fn mock_bridge_with_clock() -> (
         clock.clone(),
         &opentelemetry::global::meter("acp-nats-test"),
         Config::for_test("acp"),
-        tokio::sync::mpsc::channel(1).0,
     );
     (mock, clock, bridge)
 }
@@ -33,8 +32,8 @@ async fn cancel_publishes_to_correct_subject() {
 
     let published = mock.published_messages();
     assert!(
-        published.contains(&"acp.session.s1.agent.cancel".to_string()),
-        "expected publish to acp.session.s1.agent.cancel, got: {:?}",
+        published.contains(&"acp.v1.session.s1.agent.cancel".to_string()),
+        "expected publish to acp.v1.session.s1.agent.cancel, got: {:?}",
         published
     );
 }
@@ -47,8 +46,8 @@ async fn cancel_also_publishes_session_cancelled_broadcast() {
 
     let published = mock.published_messages();
     assert!(
-        published.contains(&"acp.session.s1.agent.cancelled".to_string()),
-        "expected publish to acp.session.s1.agent.cancelled (prompt broadcast), got: {:?}",
+        published.contains(&"acp.v1.session.s1.agent.cancelled".to_string()),
+        "expected publish to acp.v1.session.s1.agent.cancelled (prompt broadcast), got: {:?}",
         published
     );
 }

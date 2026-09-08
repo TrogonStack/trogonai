@@ -1,6 +1,6 @@
 use buffa::MessageField;
 use chrono::{DateTime, Utc};
-use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot};
+use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot, WritePrecondition};
 use trogonai_proto::convert::{TimestampConversionError, timestamp_from_datetime};
 use trogonai_proto::scheduler::schedules::{state_v1, v1};
 
@@ -8,10 +8,7 @@ use super::domain::{
     RRuleCursor, Recurrence, RecurrenceError, RecurrenceStep, ScheduleId, ScheduleOccurrenceSequence,
     ScheduleOccurrenceSequenceError,
 };
-
-/// Occurrences whose due instant is at most this far in the past are still armed,
-/// absorbing scheduling/processing latency around recently due occurrences.
-const PAST_OCCURRENCE_GRACE: chrono::Duration = chrono::Duration::minutes(5);
+use crate::constants::PAST_OCCURRENCE_GRACE;
 
 /// Arms the next recurrence occurrence for an enabled RRULE schedule.
 ///
@@ -67,14 +64,15 @@ impl ScheduleNextOccurrence {
 }
 
 impl Decider for ScheduleNextOccurrence {
-    type StreamId = str;
+    type StreamId = ScheduleId;
     type State = state_v1::State;
     type Event = v1::ScheduleEvent;
     type DecideError = ScheduleNextOccurrenceError;
     type EvolveError = super::EvolveError;
+    const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 
     fn stream_id(&self) -> &Self::StreamId {
-        self.id.as_str()
+        &self.id
     }
 
     fn initial_state() -> Self::State {
@@ -136,7 +134,7 @@ impl Decider for ScheduleNextOccurrence {
                     .plan_next(cursor)
                     .map_err(|source| ScheduleNextOccurrenceError::NextOccurrence { source })?;
 
-                let event = recurrence_event(command.id.as_str(), step, last_sequence, command.now)?;
+                let event = recurrence_event(&command.id.to_string(), step, last_sequence, command.now)?;
 
                 Ok(Decision::event(event))
             }

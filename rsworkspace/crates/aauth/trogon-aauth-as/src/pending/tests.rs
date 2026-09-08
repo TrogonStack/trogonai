@@ -13,9 +13,8 @@ fn verified_request() -> VerifiedRequest {
         iat: 0,
         exp: 1000,
         dwk: "aauth-agent.json".into(),
-        cnf: Cnf {
-            jwk: serde_json::json!({"kty": "EC"}),
-        },
+        cnf: Cnf::public(serde_json::json!({"kty": "EC", "crv": "P-256", "x": "AAA", "y": "BBB"}))
+            .expect("test fixture is a public jwk"),
         ps: None,
     };
     let resource = ResourceClaims {

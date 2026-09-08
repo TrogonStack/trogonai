@@ -26,6 +26,7 @@ use trogon_identity_types::aauth::person_server::{
     AuditRequest, InteractionRequest, PermissionDecision, PermissionRequest, PermissionResponse, TokenRequest,
 };
 
+use crate::constants::SIGNATURE_KEY_HEADER;
 use crate::decision::PolicyEngine;
 use crate::error::PersonServerError;
 use crate::interaction::InteractionChannel;
@@ -33,12 +34,6 @@ use crate::mission::MissionId;
 use crate::pending::PendingPhase;
 use crate::server::{PersonServer, TokenEndpointOutcome};
 use crate::store::PersonStateStore;
-
-/// Header carrying the agent's presentation of its `aa-agent+jwt`, per
-/// "Agent Token Request": `Signature-Key: sig=jwt;jwt="<token>"`. Only the
-/// embedded token is extracted here; see module docs for the signature
-/// verification gap.
-const SIGNATURE_KEY_HEADER: &str = "signature-key";
 
 /// Shared axum extractor type for handlers below; factored out to avoid
 /// clippy's `type_complexity` lint on the generic `PersonServer` binding.

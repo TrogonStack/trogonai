@@ -94,7 +94,7 @@ async fn rest_get_card_returns_200_and_agent_card() {
     let envelope = json!({ "jsonrpc": "2.0", "id": "ignored", "result": card });
     respond(
         &nats,
-        "a2a.agents.test-agent.card",
+        "a2a.v1.agents.test-agent.card",
         success_wire(envelope["result"].clone()),
     );
 
@@ -111,7 +111,7 @@ async fn rest_get_card_error_returns_503() {
     let nats = AdvancedMockNatsClient::new();
     respond(
         &nats,
-        "a2a.agents.test-agent.card",
+        "a2a.v1.agents.test-agent.card",
         error_response_bytes(-32050, "unavailable"),
     );
 
@@ -128,7 +128,7 @@ async fn rest_message_send_returns_200_and_task() {
     let nats = AdvancedMockNatsClient::new();
     respond(
         &nats,
-        "a2a.agents.test-agent.message.send",
+        "a2a.v1.agents.test-agent.message.send",
         send_message_response_bytes("msg-task-1"),
     );
 
@@ -146,7 +146,7 @@ async fn rest_message_send_error_returns_error_status() {
     let nats = AdvancedMockNatsClient::new();
     respond(
         &nats,
-        "a2a.agents.test-agent.message.send",
+        "a2a.v1.agents.test-agent.message.send",
         error_response_bytes(-32050, "agent unavailable"),
     );
 
@@ -162,7 +162,7 @@ async fn rest_message_stream_returns_sse_content_type() {
     let nats = AdvancedMockNatsClient::new();
     respond(
         &nats,
-        "a2a.agents.test-agent.message.stream",
+        "a2a.v1.agents.test-agent.message.stream",
         send_message_response_bytes("stream-task-1"),
     );
 
@@ -189,7 +189,7 @@ async fn rest_message_stream_error_returns_error_status() {
     let nats = AdvancedMockNatsClient::new();
     respond(
         &nats,
-        "a2a.agents.test-agent.message.stream",
+        "a2a.v1.agents.test-agent.message.stream",
         error_response_bytes(-32050, "unavailable"),
     );
 
@@ -216,7 +216,7 @@ async fn rest_tasks_list_returns_200_and_tasks() {
     let envelope = json!({ "jsonrpc": "2.0", "id": "ignored", "result": list_resp });
     respond(
         &nats,
-        "a2a.agents.test-agent.tasks.list",
+        "a2a.v1.agents.test-agent.tasks.list",
         success_wire(envelope["result"].clone()),
     );
 
@@ -235,7 +235,7 @@ async fn rest_tasks_list_with_query_params_returns_200() {
     let envelope = json!({ "jsonrpc": "2.0", "id": "ignored", "result": list_resp });
     respond(
         &nats,
-        "a2a.agents.test-agent.tasks.list",
+        "a2a.v1.agents.test-agent.tasks.list",
         success_wire(envelope["result"].clone()),
     );
 
@@ -255,7 +255,7 @@ async fn rest_tasks_list_error_returns_error_status() {
     let nats = AdvancedMockNatsClient::new();
     respond(
         &nats,
-        "a2a.agents.test-agent.tasks.list",
+        "a2a.v1.agents.test-agent.tasks.list",
         error_response_bytes(-32050, "unavailable"),
     );
 
@@ -270,7 +270,7 @@ async fn rest_tasks_get_returns_200_and_task() {
     let nats = AdvancedMockNatsClient::new();
     respond(
         &nats,
-        "a2a.agents.test-agent.tasks.get",
+        "a2a.v1.agents.test-agent.tasks.get",
         task_response_bytes("task-rest-1"),
     );
 
@@ -287,7 +287,7 @@ async fn rest_tasks_get_with_history_length_param_returns_200() {
     let nats = AdvancedMockNatsClient::new();
     respond(
         &nats,
-        "a2a.agents.test-agent.tasks.get",
+        "a2a.v1.agents.test-agent.tasks.get",
         task_response_bytes("task-hist-1"),
     );
 
@@ -307,7 +307,7 @@ async fn rest_tasks_get_not_found_returns_404() {
     let nats = AdvancedMockNatsClient::new();
     respond(
         &nats,
-        "a2a.agents.test-agent.tasks.get",
+        "a2a.v1.agents.test-agent.tasks.get",
         error_response_bytes(-32001, "not found"),
     );
 
@@ -324,7 +324,7 @@ async fn rest_tasks_cancel_returns_200_and_task() {
     let nats = AdvancedMockNatsClient::new();
     respond(
         &nats,
-        "a2a.agents.test-agent.tasks.cancel",
+        "a2a.v1.agents.test-agent.tasks.cancel",
         task_response_bytes("task-cancel-1"),
     );
 
@@ -344,7 +344,7 @@ async fn rest_tasks_cancel_via_slash_path_returns_200() {
     let nats = AdvancedMockNatsClient::new();
     respond(
         &nats,
-        "a2a.agents.test-agent.tasks.cancel",
+        "a2a.v1.agents.test-agent.tasks.cancel",
         task_response_bytes("task-slash-c"),
     );
 
@@ -364,7 +364,7 @@ async fn rest_tasks_cancel_not_cancelable_returns_409() {
     let nats = AdvancedMockNatsClient::new();
     respond(
         &nats,
-        "a2a.agents.test-agent.tasks.cancel",
+        "a2a.v1.agents.test-agent.tasks.cancel",
         error_response_bytes(-32002, "not cancelable"),
     );
 
@@ -382,7 +382,7 @@ async fn rest_tasks_subscribe_returns_sse_content_type() {
     let nats = AdvancedMockNatsClient::new();
     respond(
         &nats,
-        "a2a.agents.test-agent.tasks.resubscribe",
+        "a2a.v1.agents.test-agent.tasks.resubscribe",
         task_snapshot_bytes("task-sub-1"),
     );
 
@@ -408,7 +408,7 @@ async fn rest_tasks_subscribe_via_slash_path_returns_sse() {
     let nats = AdvancedMockNatsClient::new();
     respond(
         &nats,
-        "a2a.agents.test-agent.tasks.resubscribe",
+        "a2a.v1.agents.test-agent.tasks.resubscribe",
         task_snapshot_bytes("task-slash-sub"),
     );
 
@@ -434,7 +434,7 @@ async fn rest_tasks_subscribe_error_returns_error_status() {
     let nats = AdvancedMockNatsClient::new();
     respond(
         &nats,
-        "a2a.agents.test-agent.tasks.resubscribe",
+        "a2a.v1.agents.test-agent.tasks.resubscribe",
         error_response_bytes(-32001, "task not found"),
     );
 
@@ -476,7 +476,7 @@ async fn rest_push_set_returns_200_and_config() {
     let nats = AdvancedMockNatsClient::new();
     respond(
         &nats,
-        "a2a.agents.test-agent.push.set",
+        "a2a.v1.agents.test-agent.push.set",
         push_config_response_bytes("task-push-1", "cfg-1"),
     );
 
@@ -513,7 +513,7 @@ async fn rest_push_set_error_returns_501() {
     let nats = AdvancedMockNatsClient::new();
     respond(
         &nats,
-        "a2a.agents.test-agent.push.set",
+        "a2a.v1.agents.test-agent.push.set",
         error_response_bytes(-32003, "not supported"),
     );
 
@@ -530,7 +530,7 @@ async fn rest_push_set_error_returns_501() {
 #[tokio::test]
 async fn rest_push_list_returns_200_and_empty_configs() {
     let nats = AdvancedMockNatsClient::new();
-    respond(&nats, "a2a.agents.test-agent.push.list", push_list_response_bytes());
+    respond(&nats, "a2a.v1.agents.test-agent.push.list", push_list_response_bytes());
 
     let app = build_app(nats);
     let response = app
@@ -548,7 +548,7 @@ async fn rest_push_list_error_returns_error_status() {
     let nats = AdvancedMockNatsClient::new();
     respond(
         &nats,
-        "a2a.agents.test-agent.push.list",
+        "a2a.v1.agents.test-agent.push.list",
         error_response_bytes(-32003, "not supported"),
     );
 
@@ -566,7 +566,7 @@ async fn rest_push_get_returns_200_and_config() {
     let nats = AdvancedMockNatsClient::new();
     respond(
         &nats,
-        "a2a.agents.test-agent.push.get",
+        "a2a.v1.agents.test-agent.push.get",
         push_config_response_bytes("task-pg-1", "cfg-get-1"),
     );
 
@@ -586,7 +586,7 @@ async fn rest_push_get_not_found_returns_404() {
     let nats = AdvancedMockNatsClient::new();
     respond(
         &nats,
-        "a2a.agents.test-agent.push.get",
+        "a2a.v1.agents.test-agent.push.get",
         error_response_bytes(-32001, "not found"),
     );
 
@@ -605,7 +605,7 @@ async fn rest_push_delete_returns_204() {
     let envelope = json!({ "jsonrpc": "2.0", "id": "ignored", "result": null });
     respond(
         &nats,
-        "a2a.agents.test-agent.push.delete",
+        "a2a.v1.agents.test-agent.push.delete",
         success_wire(envelope["result"].clone()),
     );
 
@@ -623,7 +623,7 @@ async fn rest_push_delete_error_returns_error_status() {
     let nats = AdvancedMockNatsClient::new();
     respond(
         &nats,
-        "a2a.agents.test-agent.push.delete",
+        "a2a.v1.agents.test-agent.push.delete",
         error_response_bytes(-32001, "not found"),
     );
 
@@ -685,7 +685,7 @@ async fn router_rewrite_does_not_rewrite_unrelated_paths() {
     let envelope = json!({ "jsonrpc": "2.0", "id": "ignored", "result": card });
     respond(
         &nats,
-        "a2a.agents.test-agent.card",
+        "a2a.v1.agents.test-agent.card",
         success_wire(envelope["result"].clone()),
     );
 
@@ -699,7 +699,7 @@ async fn router_cancel_with_query_param_returns_200() {
     let nats = AdvancedMockNatsClient::new();
     respond(
         &nats,
-        "a2a.agents.test-agent.tasks.cancel",
+        "a2a.v1.agents.test-agent.tasks.cancel",
         task_response_bytes("task-qp"),
     );
 
@@ -741,7 +741,7 @@ async fn jsonrpc_tasks_resubscribe_returns_sse() {
     let nats = AdvancedMockNatsClient::new();
     respond(
         &nats,
-        "a2a.agents.test-agent.tasks.resubscribe",
+        "a2a.v1.agents.test-agent.tasks.resubscribe",
         task_snapshot_bytes("task-resub-jsonrpc"),
     );
 
@@ -776,7 +776,7 @@ async fn jsonrpc_tasks_resubscribe_with_metadata_last_event_id() {
     let nats = AdvancedMockNatsClient::new();
     respond(
         &nats,
-        "a2a.agents.test-agent.tasks.resubscribe",
+        "a2a.v1.agents.test-agent.tasks.resubscribe",
         task_snapshot_bytes("task-meta-resub"),
     );
 
@@ -838,7 +838,7 @@ async fn jsonrpc_tasks_resubscribe_error_returns_error() {
     let nats = AdvancedMockNatsClient::new();
     respond(
         &nats,
-        "a2a.agents.test-agent.tasks.resubscribe",
+        "a2a.v1.agents.test-agent.tasks.resubscribe",
         error_response_bytes(-32001, "not found"),
     );
 
@@ -873,7 +873,7 @@ async fn jsonrpc_push_notification_config_get_returns_result() {
     let nats = AdvancedMockNatsClient::new();
     respond(
         &nats,
-        "a2a.agents.test-agent.push.get",
+        "a2a.v1.agents.test-agent.push.get",
         push_config_response_bytes("task-j-pg", "cfg-j-1"),
     );
 
@@ -900,7 +900,7 @@ async fn jsonrpc_push_notification_config_get_returns_result() {
 #[tokio::test]
 async fn jsonrpc_push_notification_config_list_returns_result() {
     let nats = AdvancedMockNatsClient::new();
-    respond(&nats, "a2a.agents.test-agent.push.list", push_list_response_bytes());
+    respond(&nats, "a2a.v1.agents.test-agent.push.list", push_list_response_bytes());
 
     let app = build_app(nats);
     let response = app
@@ -928,7 +928,7 @@ async fn jsonrpc_push_notification_config_delete_returns_null_result() {
     let envelope = json!({ "jsonrpc": "2.0", "id": "ignored", "result": null });
     respond(
         &nats,
-        "a2a.agents.test-agent.push.delete",
+        "a2a.v1.agents.test-agent.push.delete",
         success_wire(envelope["result"].clone()),
     );
 
@@ -974,7 +974,7 @@ async fn jsonrpc_agent_get_authenticated_extended_card_returns_result() {
     let envelope = json!({ "jsonrpc": "2.0", "id": "ignored", "result": card });
     respond(
         &nats,
-        "a2a.agents.test-agent.card",
+        "a2a.v1.agents.test-agent.card",
         success_wire(envelope["result"].clone()),
     );
 
@@ -1054,7 +1054,7 @@ async fn jsonrpc_message_stream_error_returns_jsonrpc_error() {
     let nats = AdvancedMockNatsClient::new();
     respond(
         &nats,
-        "a2a.agents.test-agent.message.stream",
+        "a2a.v1.agents.test-agent.message.stream",
         error_response_bytes(-32050, "unavailable"),
     );
 
@@ -1113,7 +1113,7 @@ async fn jsonrpc_tasks_cancel_error_returns_error() {
     let nats = AdvancedMockNatsClient::new();
     respond(
         &nats,
-        "a2a.agents.test-agent.tasks.cancel",
+        "a2a.v1.agents.test-agent.tasks.cancel",
         error_response_bytes(-32002, "not cancelable"),
     );
 
@@ -1166,7 +1166,7 @@ async fn jsonrpc_tasks_list_error_returns_error() {
     let nats = AdvancedMockNatsClient::new();
     respond(
         &nats,
-        "a2a.agents.test-agent.tasks.list",
+        "a2a.v1.agents.test-agent.tasks.list",
         error_response_bytes(-32050, "unavailable"),
     );
 
@@ -1291,7 +1291,7 @@ async fn jsonrpc_push_delete_error_returns_jsonrpc_error() {
     let nats = AdvancedMockNatsClient::new();
     respond(
         &nats,
-        "a2a.agents.test-agent.push.delete",
+        "a2a.v1.agents.test-agent.push.delete",
         error_response_bytes(-32001, "not found"),
     );
 
@@ -1320,7 +1320,7 @@ async fn jsonrpc_push_get_error_returns_jsonrpc_error() {
     let nats = AdvancedMockNatsClient::new();
     respond(
         &nats,
-        "a2a.agents.test-agent.push.get",
+        "a2a.v1.agents.test-agent.push.get",
         error_response_bytes(-32001, "not found"),
     );
 
@@ -1349,7 +1349,7 @@ async fn jsonrpc_push_list_error_returns_jsonrpc_error() {
     let nats = AdvancedMockNatsClient::new();
     respond(
         &nats,
-        "a2a.agents.test-agent.push.list",
+        "a2a.v1.agents.test-agent.push.list",
         error_response_bytes(-32003, "not supported"),
     );
 
@@ -1378,7 +1378,7 @@ async fn jsonrpc_agent_card_error_returns_jsonrpc_error() {
     let nats = AdvancedMockNatsClient::new();
     respond(
         &nats,
-        "a2a.agents.test-agent.card",
+        "a2a.v1.agents.test-agent.card",
         error_response_bytes(-32050, "unavailable"),
     );
 
@@ -1407,7 +1407,7 @@ async fn jsonrpc_push_set_error_returns_jsonrpc_error_result() {
     let nats = AdvancedMockNatsClient::new();
     respond(
         &nats,
-        "a2a.agents.test-agent.push.set",
+        "a2a.v1.agents.test-agent.push.set",
         error_response_bytes(-32003, "not supported"),
     );
 
@@ -1436,7 +1436,7 @@ async fn well_known_agent_card_error_returns_proper_status() {
     let nats = AdvancedMockNatsClient::new();
     respond(
         &nats,
-        "a2a.agents.test-agent.card",
+        "a2a.v1.agents.test-agent.card",
         error_response_bytes(-32006, "invalid response"),
     );
 

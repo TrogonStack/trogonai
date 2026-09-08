@@ -155,8 +155,7 @@ fn make_mock_bridge(mock: MultiStreamMock, js: MockJs) -> Bridge<MultiStreamMock
         },
     );
     let meter = opentelemetry::global::meter("prompt-handle-mock-test");
-    let (tx, _rx) = tokio::sync::mpsc::channel(1);
-    Bridge::new(mock, js, SystemClock, &meter, config, tx)
+    Bridge::new(mock, js, SystemClock, &meter, config)
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
@@ -248,8 +247,7 @@ async fn event_stream_timeout_after_600_seconds_returns_error() {
                 )
                 .with_prompt_timeout(Duration::from_secs(5));
                 let meter = opentelemetry::global::meter("prompt-handle-mock-test");
-                let (tx, _rx) = tokio::sync::mpsc::channel(1);
-                let bridge = Bridge::new(mock, js, SystemClock, &meter, config, tx);
+                let bridge = Bridge::new(mock, js, SystemClock, &meter, config);
 
                 bridge.prompt(PromptRequest::new("session-123", vec![])).await
             });

@@ -1,3 +1,11 @@
+#![cfg_attr(
+    dylint_lib = "trogon_lints",
+    expect(
+        acyclic_modules,
+        reason = "`bridge` dispatches each ACP method to its handler module and every handler takes the `Bridge` it was dispatched from"
+    )
+)]
+
 mod authenticate;
 mod bridge;
 mod cancel;
@@ -24,7 +32,6 @@ mod set_session_mode;
 pub(crate) mod test_support;
 
 pub use bridge::Bridge;
-pub use prompt::REQ_ID_HEADER;
 
 #[cfg(test)]
 mod tests;

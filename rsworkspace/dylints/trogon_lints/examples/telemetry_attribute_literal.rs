@@ -4,7 +4,7 @@
 
 use tracing::Span;
 
-const SESSION_ID: &str = "session_id";
+static SESSION_ID: &str = "session_id";
 
 fn inline_key(span: &Span) {
     span.record("session_id", "value");

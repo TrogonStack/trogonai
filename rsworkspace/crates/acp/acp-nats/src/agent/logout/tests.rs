@@ -8,7 +8,7 @@ use agent_client_protocol::schema::v1::{LogoutRequest, LogoutResponse};
 async fn logout_forwards_request_and_returns_response() {
     let (mock, _js, bridge) = mock_bridge();
     let expected = LogoutResponse::new();
-    set_json_response(&mock, "acp.agent.logout", &expected);
+    set_json_response(&mock, "acp.v1.global.agent.logout", &expected);
 
     let request = LogoutRequest::new();
     let result = bridge.logout(request).await;
@@ -29,7 +29,7 @@ async fn logout_returns_error_when_nats_request_fails() {
 #[tokio::test]
 async fn logout_returns_error_when_response_is_invalid_json() {
     let (mock, _js, bridge) = mock_bridge();
-    mock.set_response("acp.agent.logout", "not json".into());
+    mock.set_response("acp.v1.global.agent.logout", "not json".into());
 
     let request = LogoutRequest::new();
     let err = bridge.logout(request).await.unwrap_err();
@@ -41,7 +41,7 @@ async fn logout_returns_error_when_response_is_invalid_json() {
 #[tokio::test]
 async fn logout_records_metrics_on_success() {
     let (mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
-    set_json_response(&mock, "acp.agent.logout", &LogoutResponse::default());
+    set_json_response(&mock, "acp.v1.global.agent.logout", &LogoutResponse::default());
 
     let _ = bridge.logout(LogoutRequest::new()).await;
 

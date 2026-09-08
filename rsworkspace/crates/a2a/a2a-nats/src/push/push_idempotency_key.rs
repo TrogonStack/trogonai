@@ -1,5 +1,6 @@
 use std::fmt;
 
+use crate::constants::{DLQ_KIND, TERMINAL_KIND};
 use crate::push::push_notification_config_id::PushNotificationConfigId;
 use crate::push::status_transition_id::StatusTransitionId;
 use crate::push::terminal_push_task_state::TerminalPushTaskState;
@@ -60,9 +61,6 @@ impl PushIdempotencyKey {
         Self(raw.into())
     }
 }
-
-const TERMINAL_KIND: &str = "terminal";
-const DLQ_KIND: &str = "dlq";
 
 /// `{len(comp[0])}:{comp[0]}|{len(comp[1])}:{comp[1]}|…` — injective because
 /// every component starts with its byte length, so the parser can recover

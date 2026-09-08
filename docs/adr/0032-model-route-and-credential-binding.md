@@ -29,6 +29,17 @@ Those choices have different ownership and lifecycle:
 4. A credential binding authorizes the platform model access service to use
    that connection.
 
+Item 1 is a precondition this ADR does not itself establish, and it is currently
+unmet. The shipped agent contract gives model selection to the runtime, inside
+the runtime-owned settings on AgentConfiguration, rather than carrying it as a
+platform-readable field. Everything decided below depends on the platform reading
+an exact model before a Session becomes runnable, so while that ownership question
+is open this ADR is blocked rather than merely unbuilt: allowed-model policy,
+route admission, and the `ProviderModelMismatch` check have nothing to read. The
+consequence recorded in
+[ADR#0025](./0025-agent-definition-data-ownership.md) tracks the conflict, and
+resolving it is a decision in its own right.
+
 Calling all of these choices a Codex key, an OpenClaw profile, or implementation
 configuration would make provider selection, secret custody, rotation, and
 audit behavior depend on whichever implementation happens to run the Session.
@@ -49,6 +60,8 @@ The repository already fixes adjacent boundaries:
 - Draft [ADR#0025](./0025-agent-definition-data-ownership.md) makes exact
   implementation and model selections immutable AgentConfiguration content
   while keeping live credential bindings outside [Agent revisions](../glossary/agentrevision).
+  Its own consequences now record that model-selection ownership is unresolved,
+  so this is a contested dependency rather than a settled boundary.
 - Draft
   [ADR#0031](./0031-agent-implementation-and-session-plan.md) defines
   [SessionExecutionPlan](../glossary/sessionexecutionplan) as the immutable Session record of the exact revision,

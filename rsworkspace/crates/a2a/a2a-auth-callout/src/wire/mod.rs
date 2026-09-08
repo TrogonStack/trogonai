@@ -22,11 +22,4 @@ pub use server_auth_request_envelope::ServerAuthRequestEnvelope;
 pub use wire_codec::AuthCalloutWireCodec;
 pub use xkey_public::XkeyPublic;
 
-/// JWT `aud` on authorization **request** claims (`nats-server` `AuthRequestSubject`).
-pub const AUTH_REQUEST_AUDIENCE: &str = "nats-authorization-request";
-
-/// NATS message header carrying the server one-time XKey public key when encryption is enabled.
-pub const AUTH_REQUEST_XKEY_HEADER: &str = "Nats-Server-Xkey";
-
-/// Prefix of an encoded NATS JWT payload (before optional XKey encryption).
-pub const NATS_JWT_PREFIX: &[u8] = b"eyJ";
+pub use crate::constants::{AUTH_REQUEST_AUDIENCE, AUTH_REQUEST_XKEY_HEADER, NATS_JWT_PREFIX};

@@ -12,7 +12,7 @@ impl SessionListSubject {
 
 impl std::fmt::Display for SessionListSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.agent.session.list", self.prefix.as_str())
+        write!(f, "{}.v1.global.agent.session.list", self.prefix.as_str())
     }
 }
 
@@ -33,6 +33,6 @@ mod tests {
     #[test]
     fn display_formats_subject_correctly() {
         let s = SessionListSubject::new(&prefix());
-        assert_eq!(s.to_string(), "acp.agent.session.list");
+        assert_eq!(s.to_string(), "acp.v1.global.agent.session.list");
     }
 }

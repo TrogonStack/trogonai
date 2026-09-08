@@ -1,5 +1,5 @@
 use super::*;
-use trogon_decider::Decision;
+use trogon_decider::{Decision, WritePrecondition};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum FixtureEvent {
@@ -85,6 +85,7 @@ impl Decider for OpenAndFund {
     type Event = FixtureEvent;
     type DecideError = FixtureDecideError;
     type EvolveError = FixtureEvolveError;
+    const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 
     fn stream_id(&self) -> &str {
         &self.id
@@ -241,9 +242,9 @@ fn act_rejection_matches_native_evaluation() {
     let native_failure =
         evaluate_decision::<OpenAndFund>(state, &command).expect_err("first step should reject natively");
     match native_failure {
-        trogon_decider::DecisionFailure::Decide(error) => {
+        trogon_decider::DecisionError::Decide(error) => {
             assert_eq!(error, FixtureDecideError::AlreadyOpen);
         }
-        trogon_decider::DecisionFailure::Evolve(_) => panic!("expected a decide rejection, not an evolve failure"),
+        trogon_decider::DecisionError::Evolve(_) => panic!("expected a decide rejection, not an evolve failure"),
     }
 }

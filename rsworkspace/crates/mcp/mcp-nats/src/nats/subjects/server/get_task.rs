@@ -17,7 +17,7 @@ impl std::fmt::Display for GetTaskSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.server.{}.tasks.get",
+            "{}.v1.server.{}.tasks.get",
             self.prefix.as_str(),
             self.server_id.as_str()
         )

@@ -2,10 +2,9 @@ use std::borrow::Cow;
 
 use serde_json::Value;
 
+pub use crate::constants::PUSH_IDEMPOTENCY_JSON_FIELD;
 use crate::push::delivery_semantics::DeliverySemantics;
 use crate::push::push_idempotency_key::PushIdempotencyKey;
-
-pub const PUSH_IDEMPOTENCY_JSON_FIELD: &str = "_a2aPushIdempotencyKey";
 
 #[derive(Debug, thiserror::Error)]
 pub enum PushPayloadAugmentError {

@@ -115,8 +115,10 @@ fn normalize_auth_request_payload(payload: &mut serde_json::Value) {
     else {
         return;
     };
-    tls.entry("certs").or_insert_with(|| serde_json::json!([]));
-    tls.entry("verified_chains").or_insert_with(|| serde_json::json!([]));
+    tls.entry("certs")
+        .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+    tls.entry("verified_chains")
+        .or_insert_with(|| serde_json::Value::Array(Vec::new()));
 }
 
 impl fmt::Debug for NkeyPublic {

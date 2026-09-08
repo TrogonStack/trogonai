@@ -39,7 +39,7 @@ where
     let result = bridge
         .session_request::<DeleteSessionRequest, DeleteSessionResponse>(
             &subject,
-            SessionAgentMethod::Delete.wire_method(),
+            SessionAgentMethod::Delete.protocol_method(),
             &args,
             &session_id,
         )

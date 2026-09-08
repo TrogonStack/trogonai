@@ -17,7 +17,7 @@ impl std::fmt::Display for ResourceUpdatedSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.client.{}.notifications.resources.updated",
+            "{}.v1.client.{}.notifications.resources.updated",
             self.prefix.as_str(),
             self.client_id.as_str()
         )

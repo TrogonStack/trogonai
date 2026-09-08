@@ -27,6 +27,7 @@ impl<'a> ::buffa::MessageView<'a> for ScheduleStatusView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         <Self as ::buffa::MessageView>::decode_view_ctx(buf, ctx)
     }
+    #[inline]
     fn merge_view_field(
         &mut self,
         tag: ::buffa::encoding::Tag,
@@ -157,7 +158,7 @@ impl<'a> ::buffa::ViewEncode<'a> for ScheduleStatusView<'a> {
     fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        let mut size = 0u32;
+        let mut size = 0u64;
         if let ::core::option::Option::Some(ref v) = self.kind {
             match v {
                 super::super::__buffa::view::oneof::schedule_status::Kind::Scheduled(
@@ -167,26 +168,26 @@ impl<'a> ::buffa::ViewEncode<'a> for ScheduleStatusView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::schedule_status::Kind::Paused(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
             }
         }
-        size
+        ::buffa::saturate_size(size)
     }
     #[allow(clippy::needless_borrow)]
     fn write_to(
         &self,
         __cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
+        buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
@@ -197,7 +198,7 @@ impl<'a> ::buffa::ViewEncode<'a> for ScheduleStatusView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         1u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -205,7 +206,7 @@ impl<'a> ::buffa::ViewEncode<'a> for ScheduleStatusView<'a> {
                 super::super::__buffa::view::oneof::schedule_status::Kind::Paused(x) => {
                     ::buffa::types::put_len_delimited_header(
                         2u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -300,7 +301,9 @@ impl ScheduleStatusOwnedView {
     ///
     /// # Errors
     ///
-    /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+    /// Returns [`::buffa::DecodeError::MessageTooLarge`] if the
+    /// message's encoded size exceeds the 2 GiB protobuf limit, or
+    /// another [`::buffa::DecodeError`] if the re-encoded bytes are
     /// somehow invalid (should not happen for well-formed messages).
     pub fn from_owned(
         msg: &super::super::ScheduleStatus,
@@ -316,13 +319,13 @@ impl ScheduleStatusOwnedView {
     }
     /// Convert to the owned message type.
     ///
-    /// # Errors
-    ///
-    /// Returns an error if re-materializing preserved unknown fields
-    /// fails (e.g. the unknown-field limit is exceeded).
-    pub fn to_owned_message(
-        &self,
-    ) -> ::core::result::Result<super::super::ScheduleStatus, ::buffa::DecodeError> {
+    /// Infallible: this type's constructors wire-decode their
+    /// buffer, and a view produced by wire decoding always
+    /// converts. Delegates to [`::buffa::OwnedView::to_owned_message`],
+    /// whose contract also governs handles converted from a raw
+    /// [`::buffa::OwnedView`].
+    #[must_use]
+    pub fn to_owned_message(&self) -> super::super::ScheduleStatus {
         self.0.to_owned_message()
     }
     /// The underlying bytes buffer.
@@ -401,6 +404,7 @@ pub mod schedule_status {
         ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
             <Self as ::buffa::MessageView>::decode_view_ctx(buf, ctx)
         }
+        #[inline]
         fn merge_view_field(
             &mut self,
             tag: ::buffa::encoding::Tag,
@@ -448,14 +452,14 @@ pub mod schedule_status {
         fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
             #[allow(unused_imports)]
             use ::buffa::Enumeration as _;
-            let size = 0u32;
-            size
+            let size = 0u64;
+            ::buffa::saturate_size(size)
         }
         #[allow(clippy::needless_borrow)]
         fn write_to(
             &self,
             _cache: &mut ::buffa::SizeCache,
-            _buf: &mut impl ::buffa::bytes::BufMut,
+            _buf: &mut impl ::buffa::EncodeSink,
         ) {
             #[allow(unused_imports)]
             use ::buffa::Enumeration as _;
@@ -533,7 +537,9 @@ pub mod schedule_status {
         ///
         /// # Errors
         ///
-        /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+        /// Returns [`::buffa::DecodeError::MessageTooLarge`] if the
+        /// message's encoded size exceeds the 2 GiB protobuf limit, or
+        /// another [`::buffa::DecodeError`] if the re-encoded bytes are
         /// somehow invalid (should not happen for well-formed messages).
         pub fn from_owned(
             msg: &super::super::super::schedule_status::Scheduled,
@@ -549,16 +555,15 @@ pub mod schedule_status {
         }
         /// Convert to the owned message type.
         ///
-        /// # Errors
-        ///
-        /// Returns an error if re-materializing preserved unknown fields
-        /// fails (e.g. the unknown-field limit is exceeded).
+        /// Infallible: this type's constructors wire-decode their
+        /// buffer, and a view produced by wire decoding always
+        /// converts. Delegates to [`::buffa::OwnedView::to_owned_message`],
+        /// whose contract also governs handles converted from a raw
+        /// [`::buffa::OwnedView`].
+        #[must_use]
         pub fn to_owned_message(
             &self,
-        ) -> ::core::result::Result<
-            super::super::super::schedule_status::Scheduled,
-            ::buffa::DecodeError,
-        > {
+        ) -> super::super::super::schedule_status::Scheduled {
             self.0.to_owned_message()
         }
         /// The underlying bytes buffer.
@@ -625,6 +630,7 @@ pub mod schedule_status {
         ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
             <Self as ::buffa::MessageView>::decode_view_ctx(buf, ctx)
         }
+        #[inline]
         fn merge_view_field(
             &mut self,
             tag: ::buffa::encoding::Tag,
@@ -672,14 +678,14 @@ pub mod schedule_status {
         fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
             #[allow(unused_imports)]
             use ::buffa::Enumeration as _;
-            let size = 0u32;
-            size
+            let size = 0u64;
+            ::buffa::saturate_size(size)
         }
         #[allow(clippy::needless_borrow)]
         fn write_to(
             &self,
             _cache: &mut ::buffa::SizeCache,
-            _buf: &mut impl ::buffa::bytes::BufMut,
+            _buf: &mut impl ::buffa::EncodeSink,
         ) {
             #[allow(unused_imports)]
             use ::buffa::Enumeration as _;
@@ -757,7 +763,9 @@ pub mod schedule_status {
         ///
         /// # Errors
         ///
-        /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+        /// Returns [`::buffa::DecodeError::MessageTooLarge`] if the
+        /// message's encoded size exceeds the 2 GiB protobuf limit, or
+        /// another [`::buffa::DecodeError`] if the re-encoded bytes are
         /// somehow invalid (should not happen for well-formed messages).
         pub fn from_owned(
             msg: &super::super::super::schedule_status::Paused,
@@ -773,16 +781,13 @@ pub mod schedule_status {
         }
         /// Convert to the owned message type.
         ///
-        /// # Errors
-        ///
-        /// Returns an error if re-materializing preserved unknown fields
-        /// fails (e.g. the unknown-field limit is exceeded).
-        pub fn to_owned_message(
-            &self,
-        ) -> ::core::result::Result<
-            super::super::super::schedule_status::Paused,
-            ::buffa::DecodeError,
-        > {
+        /// Infallible: this type's constructors wire-decode their
+        /// buffer, and a view produced by wire decoding always
+        /// converts. Delegates to [`::buffa::OwnedView::to_owned_message`],
+        /// whose contract also governs handles converted from a raw
+        /// [`::buffa::OwnedView`].
+        #[must_use]
+        pub fn to_owned_message(&self) -> super::super::super::schedule_status::Paused {
             self.0.to_owned_message()
         }
         /// The underlying bytes buffer.

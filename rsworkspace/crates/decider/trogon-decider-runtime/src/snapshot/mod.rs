@@ -11,7 +11,7 @@ pub use codec::{
     encode_snapshot,
 };
 pub use read_snapshot::{ReadSnapshotRequest, ReadSnapshotResponse, SnapshotRead};
-pub use snapshot_type::{InvalidSnapshotTypeName, SnapshotType, SnapshotTypeName};
+pub use snapshot_type::{InvalidSnapshotTypeNameError, SnapshotType, SnapshotTypeName};
 pub use write_snapshot::{SnapshotWrite, WriteSnapshotRequest, WriteSnapshotResponse};
 
 /// A point-in-time capture of decider state, tagged with the stream position

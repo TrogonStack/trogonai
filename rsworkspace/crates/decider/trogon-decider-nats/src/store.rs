@@ -18,8 +18,8 @@ use trogon_decider_runtime::snapshot::{
 };
 #[cfg(not(coverage))]
 use trogon_decider_runtime::{
-    AppendStreamRequest, AppendStreamResponse, ReadStreamRequest, ReadStreamResponse, SnapshotRead, SnapshotWrite,
-    StreamAppend, StreamRead,
+    AppendFailure, AppendStreamRequest, AppendStreamResponse, ReadStreamRequest, ReadStreamResponse, SnapshotRead,
+    SnapshotWrite, StreamAppend, StreamRead,
 };
 use trogon_decider_runtime::{StreamPosition, StreamWritePrecondition};
 #[cfg(not(coverage))]
@@ -28,12 +28,15 @@ use trogon_semconv::{attribute, metric, span};
 use crate::snapshot_store::{NatsSnapshotConfig, SnapshotStoreError};
 use crate::stream_store::StreamStoreError;
 #[cfg(not(coverage))]
-use crate::stream_store::{StreamSubjectResolver, append_stream as append_subject_stream, read_subject_stream};
+use crate::stream_store::{
+    StreamSubjectResolver, SubjectState, append_stream as append_subject_stream, read_subject_stream,
+    read_subject_stream_bounded,
+};
 #[cfg(not(coverage))]
 use tracing::Instrument;
 
 #[cfg(not(coverage))]
-const METER_NAME: &str = "trogon-decider-nats";
+use crate::constants::METER_NAME;
 
 #[cfg(not(coverage))]
 struct StoreMetrics {
@@ -113,6 +116,14 @@ pub enum JetStreamStoreError<Error, SnapshotPayloadError = Infallible, SnapshotT
     /// Subject resolution failed before JetStream storage was accessed.
     #[error("failed to resolve stream subject state: {0}")]
     ResolveSubject(#[source] Error),
+    /// The resolver returned a subject outside the scope it declared.
+    #[error("resolved subject '{subject}' falls outside the resolver's declared scope '{scope}'")]
+    SubjectOutsideScope {
+        /// The subject the resolver computed.
+        subject: String,
+        /// The scope the resolver promised to stay inside.
+        scope: String,
+    },
     /// Reading stream events from JetStream failed.
     #[error("failed to read stream events: {0}")]
     ReadStream(#[source] StreamStoreError),
@@ -220,18 +231,16 @@ impl<Resolver> JetStreamStore<Resolver> {
 #[cfg(not(coverage))]
 impl<StreamId, Resolver> StreamRead<StreamId> for JetStreamStore<Resolver>
 where
-    StreamId: AsRef<str> + ToString + Send + Sync + ?Sized,
+    StreamId: std::fmt::Display + Send + Sync + ?Sized,
     Resolver: StreamSubjectResolver<StreamId>,
 {
     type Error = JetStreamStoreError<Resolver::Error>;
 
     async fn read_stream(&self, request: ReadStreamRequest<'_, StreamId>) -> Result<ReadStreamResponse, Self::Error> {
         let stream_id = request.stream_id;
-        let subject_state = self
-            .subject_resolver
-            .resolve_subject_state(self.events_stream(), stream_id)
-            .await
-            .map_err(JetStreamStoreError::ResolveSubject)?;
+        let stream_id_text = stream_id.to_string();
+        let subject_state =
+            resolve_scoped_subject_state(&self.subject_resolver, self.events_stream(), stream_id).await?;
         let Some(current_position) = subject_state.current_position else {
             return Ok(ReadStreamResponse {
                 current_position: None,
@@ -242,7 +251,7 @@ where
         let to_sequence = current_position.as_u64();
         let events = read_subject_stream(
             self.events_stream(),
-            stream_id.as_ref(),
+            stream_id_text.as_str(),
             subject_state.subject.as_str(),
             from_sequence,
             to_sequence,
@@ -255,6 +264,74 @@ where
             events,
         })
     }
+
+    async fn read_stream_bounded(
+        &self,
+        request: ReadStreamRequest<'_, StreamId>,
+        max_events: u64,
+    ) -> Result<ReadStreamResponse, Self::Error> {
+        let stream_id = request.stream_id;
+        let stream_id_text = stream_id.to_string();
+        let subject_state =
+            resolve_scoped_subject_state(&self.subject_resolver, self.events_stream(), stream_id).await?;
+        let Some(current_position) = subject_state.current_position else {
+            return Ok(ReadStreamResponse {
+                current_position: None,
+                events: Vec::new(),
+            });
+        };
+        let from_sequence = stream_read_from_to_sequence(request.from);
+        let to_sequence = current_position.as_u64();
+        let events = read_subject_stream_bounded(
+            self.events_stream(),
+            stream_id_text.as_str(),
+            subject_state.subject.as_str(),
+            from_sequence,
+            to_sequence,
+            max_events,
+        )
+        .await
+        .map_err(JetStreamStoreError::ReadStream)?;
+
+        Ok(ReadStreamResponse {
+            current_position: Some(current_position),
+            events,
+        })
+    }
+}
+
+/// Resolves a stream id, then holds the resolver to the scope it declared.
+///
+/// The scope was fixed when the resolver was constructed and the subject was
+/// derived from a stream id supplied per call, so this compares two facts with
+/// different origins. A resolver that declares no scope is passed through
+/// unchecked, which is all the store can honestly do with a topology nobody
+/// described to it.
+#[cfg(not(coverage))]
+async fn resolve_scoped_subject_state<StreamId, Resolver>(
+    resolver: &Resolver,
+    events_stream: &jetstream::stream::Stream,
+    stream_id: &StreamId,
+) -> Result<SubjectState, JetStreamStoreError<Resolver::Error>>
+where
+    StreamId: Send + Sync + ?Sized,
+    Resolver: StreamSubjectResolver<StreamId>,
+{
+    let subject_state = resolver
+        .resolve_subject_state(events_stream, stream_id)
+        .await
+        .map_err(JetStreamStoreError::ResolveSubject)?;
+
+    if let Some(scope) = resolver.subject_scope()
+        && !scope.contains(&subject_state.subject)
+    {
+        return Err(JetStreamStoreError::SubjectOutsideScope {
+            subject: subject_state.subject.to_string(),
+            scope: scope.to_string(),
+        });
+    }
+
+    Ok(subject_state)
 }
 
 #[cfg(any(test, not(coverage)))]
@@ -268,7 +345,7 @@ fn stream_read_from_to_sequence(from: ReadFrom) -> u64 {
 #[cfg(not(coverage))]
 impl<StreamId, Resolver> StreamAppend<StreamId> for JetStreamStore<Resolver>
 where
-    StreamId: AsRef<str> + ToString + Send + Sync + ?Sized,
+    StreamId: std::fmt::Display + Send + Sync + ?Sized,
     Resolver: StreamSubjectResolver<StreamId>,
 {
     type Error = JetStreamStoreError<Resolver::Error>;
@@ -283,16 +360,13 @@ where
         let span = tracing::info_span!(
             span::DECIDER_APPEND_STREAM,
             otel.kind = "client",
-            stream_id = %stream_id.as_ref(),
+            stream_id = %stream_id,
             write_precondition = %write_precondition_attribute(expected_state).as_str(),
         );
 
         async move {
-            let subject_state = self
-                .subject_resolver
-                .resolve_subject_state(self.events_stream(), stream_id)
-                .await
-                .map_err(JetStreamStoreError::ResolveSubject)?;
+            let subject_state =
+                resolve_scoped_subject_state(&self.subject_resolver, self.events_stream(), stream_id).await?;
             let current_position = subject_state.current_position;
             let expected_last_subject_sequence =
                 resolve_expected_last_subject_sequence(stream_id, expected_state, current_position)?;
@@ -326,12 +400,19 @@ where
         .instrument(span)
         .await
     }
+
+    fn classify_append_failure(&self, error: &Self::Error) -> AppendFailure {
+        match error {
+            JetStreamStoreError::OptimisticConcurrencyConflict(_) => AppendFailure::WriteConflict,
+            _ => AppendFailure::Fatal,
+        }
+    }
 }
 
 #[cfg(not(coverage))]
 impl<StreamId, Payload, Resolver> SnapshotRead<Payload, StreamId> for JetStreamStore<Resolver>
 where
-    StreamId: AsRef<str> + Send + Sync + ?Sized,
+    StreamId: std::fmt::Display + Send + Sync + ?Sized,
     Payload: SnapshotPayloadDecode + SnapshotType + Send,
     <Payload as SnapshotPayloadDecode>::Error: std::error::Error + Send + Sync + 'static,
     <Payload as SnapshotType>::Error: std::error::Error + Send + Sync + 'static,
@@ -347,7 +428,7 @@ where
         &self,
         request: ReadSnapshotRequest<'_, StreamId>,
     ) -> Result<ReadSnapshotResponse<Payload>, Self::Error> {
-        crate::snapshot_store::read_snapshot(self.snapshot_bucket(), request.snapshot_id.as_ref())
+        crate::snapshot_store::read_snapshot(self.snapshot_bucket(), &request.snapshot_id.to_string())
             .await
             .map(|snapshot| ReadSnapshotResponse { snapshot })
             .map_err(JetStreamStoreError::Snapshot)
@@ -357,7 +438,7 @@ where
 #[cfg(not(coverage))]
 impl<StreamId, Payload, Resolver> SnapshotWrite<Payload, StreamId> for JetStreamStore<Resolver>
 where
-    StreamId: AsRef<str> + Send + Sync + ?Sized,
+    StreamId: std::fmt::Display + Send + Sync + ?Sized,
     Payload: SnapshotPayloadEncode + SnapshotType + Send,
     <Payload as SnapshotPayloadEncode>::Error: std::error::Error + Send + Sync + 'static,
     <Payload as SnapshotType>::Error: std::error::Error + Send + Sync + 'static,
@@ -373,10 +454,14 @@ where
         &self,
         request: WriteSnapshotRequest<'_, Payload, StreamId>,
     ) -> Result<WriteSnapshotResponse, Self::Error> {
-        crate::snapshot_store::write_snapshot(self.snapshot_bucket(), request.snapshot_id.as_ref(), request.snapshot)
-            .await
-            .map(|()| WriteSnapshotResponse)
-            .map_err(JetStreamStoreError::Snapshot)
+        crate::snapshot_store::write_snapshot(
+            self.snapshot_bucket(),
+            &request.snapshot_id.to_string(),
+            request.snapshot,
+        )
+        .await
+        .map(|()| WriteSnapshotResponse)
+        .map_err(JetStreamStoreError::Snapshot)
     }
 }
 

@@ -85,6 +85,26 @@ fn wire_format_and_internal_map_to_internal_error() {
         DenialCategory::from_auth_callout_error(&AuthCalloutError::Internal("x".into())),
         DenialCategory::InternalError
     );
+    assert_eq!(
+        DenialCategory::from_auth_callout_error(&AuthCalloutError::BridgeWireFormat {
+            section: "client_tls",
+            source: serde_json::from_str::<serde_json::Value>("not json").unwrap_err(),
+        }),
+        DenialCategory::InternalError
+    );
+}
+
+// The caller's credential was good, so the failure is this side's and must not
+// come back as a rejection of them.
+#[test]
+fn credential_principal_serialization_maps_to_internal_error() {
+    let err = AuthCalloutError::CredentialVerification(CredentialError::PrincipalSerialization(
+        serde_json::from_str::<serde_json::Value>("not json").unwrap_err(),
+    ));
+    assert_eq!(
+        DenialCategory::from_auth_callout_error(&err),
+        DenialCategory::InternalError
+    );
 }
 
 #[test]

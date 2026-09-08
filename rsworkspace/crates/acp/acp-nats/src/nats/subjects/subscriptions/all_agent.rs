@@ -12,7 +12,7 @@ impl AllAgentSubject {
 
 impl std::fmt::Display for AllAgentSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.session.*.agent.>", self.prefix.as_str())
+        write!(f, "{}.v1.session.*.agent.>", self.prefix.as_str())
     }
 }
 
@@ -40,7 +40,7 @@ mod tests {
     #[test]
     fn display_formats_subject_correctly() {
         let s = AllAgentSubject::new(&prefix());
-        assert_eq!(s.to_string(), "acp.session.*.agent.>");
+        assert_eq!(s.to_string(), "acp.v1.session.*.agent.>");
     }
 
     #[test]

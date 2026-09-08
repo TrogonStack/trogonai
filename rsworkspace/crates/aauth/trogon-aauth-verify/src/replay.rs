@@ -1,8 +1,14 @@
 //! Replay-protection store: dedup `jti` and PoP nonces with TTLs.
 //!
-//! The production-grade implementation lives in `trogon-aauth-person` backed by
-//! NATS JetStream KV (TTL per key). This module provides the trait + an in-memory
-//! variant used by the gateway when no shared store is configured.
+//! This module provides the [`ReplayStore`] trait and [`InMemoryReplayStore`],
+//! its only implementation today. The in-memory store is process-local, so a
+//! multi-replica gateway accepts the same nonce once per replica: replay
+//! protection is complete for a single-process deployment and partial for any
+//! other. A shared backend (NATS JetStream KV, keyed with a per-key TTL, is
+//! the intended one) has not been built yet; [`ReplayError::Backend`] exists
+//! so it can be added without changing this trait, and `AAuthIngress` is
+//! already generic over `S: ReplayStore` so wiring one in is a construction
+//! change rather than a signature change.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -24,14 +30,18 @@ pub enum ReplayError {
     /// failed-closed.
     #[error("replay store mutex poisoned")]
     MutexPoisoned,
-    /// Pluggable backends (NATS JetStream KV, Redis, etc.) surface their own
-    /// typed source error here instead of being flattened to a String.
+    /// Reserved for shared backends (NATS JetStream KV, Redis, etc.) so they
+    /// surface their own typed source error here instead of being flattened
+    /// to a String. No such backend ships today.
     #[error("replay store backend failure")]
     Backend(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
-/// Best-effort in-memory replay protection. Suitable for a single-process gateway
-/// or unit tests. Multi-instance deployments should use the JetStream-backed store.
+/// Best-effort in-memory replay protection: complete for a single-process
+/// gateway or unit tests, and partial for a multi-replica deployment, where
+/// each replica keeps its own map and a nonce is therefore accepted once per
+/// replica. There is no shared-store implementation to fall back to yet; see
+/// the module docs.
 pub struct InMemoryReplayStore {
     inner: Mutex<HashMap<String, i64>>,
     clock: Box<dyn Fn() -> i64 + Send + Sync>,

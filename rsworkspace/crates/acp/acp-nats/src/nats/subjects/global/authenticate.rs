@@ -12,7 +12,7 @@ impl AuthenticateSubject {
 
 impl std::fmt::Display for AuthenticateSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.agent.authenticate", self.prefix.as_str())
+        write!(f, "{}.v1.global.agent.authenticate", self.prefix.as_str())
     }
 }
 
@@ -33,6 +33,6 @@ mod tests {
     #[test]
     fn display_formats_subject_correctly() {
         let s = AuthenticateSubject::new(&prefix());
-        assert_eq!(s.to_string(), "acp.agent.authenticate");
+        assert_eq!(s.to_string(), "acp.v1.global.agent.authenticate");
     }
 }
