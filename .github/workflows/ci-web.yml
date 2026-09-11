@@ -38,8 +38,12 @@ jobs:
           cache: pnpm
           cache-dependency-path: tsworkspace/pnpm-lock.yaml
 
+      - name: Waive the minimum release age policy
+        if: contains(github.event.pull_request.labels.*.name, 'pnpm:skip:release-age')
+        run: echo 'PNPM_CONFIG_MINIMUM_RELEASE_AGE=0' >> "$GITHUB_ENV"
+
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile ${{ contains(github.event.pull_request.labels.*.name, 'pnpm:skip:release-age') && '--config.minimumReleaseAge=0' || '' }}
+        run: pnpm install --frozen-lockfile
         working-directory: tsworkspace
 
       - name: Format check
