@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
     paths:
       - 'tsworkspace/**'
       - '.mise.toml'
@@ -39,7 +39,7 @@ jobs:
           cache-dependency-path: tsworkspace/pnpm-lock.yaml
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile ${{ contains(github.event.pull_request.labels.*.name, 'pnpm:skip:release-age') && '--config.minimumReleaseAge=0' || '' }}
         working-directory: tsworkspace
 
       - name: Format check
