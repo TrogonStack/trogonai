@@ -13,6 +13,9 @@ message SystemNoticeRecorded {
   string text = 3 [features.field_presence = LEGACY_REQUIRED];
   // Tool call this notice concerns, when applicable; empty for a general notice.
   string tool_call_id = 4;
+  // Turn the notice was surfaced during, when one was open; empty for a
+  // notice tied to no turn (see UserMessageRecorded.turn_id).
+  string turn_id = 5;
 }
 
 // NoticeLevel is the severity of a system notice.

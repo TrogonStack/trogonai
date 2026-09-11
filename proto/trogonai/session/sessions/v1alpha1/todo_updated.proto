@@ -16,6 +16,8 @@ message TodoUpdated {
   // Monotonic revision from the single logical writer; the fold keeps the
   // highest-revision update.
   uint64 revision = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Turn this update was made in (see UserMessageRecorded.turn_id).
+  string turn_id = 4 [features.field_presence = LEGACY_REQUIRED];
 }
 
 // TodoItem is one entry in the agent's task/plan list.

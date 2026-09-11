@@ -23,6 +23,9 @@ message OperationOutcomeRecorded {
     OperationCancelled cancelled = 5;
     OperationUnknown unknown = 6;
   }
+  // Turn this operation belongs to, copied from its reservation (see
+  // UserMessageRecorded.turn_id).
+  string turn_id = 7 [features.field_presence = LEGACY_REQUIRED];
 }
 
 // OperationSucceeded is the determinate success outcome of a reserved

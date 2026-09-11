@@ -18,4 +18,5 @@ message ReserveOperation {
   // bytes is refused instead of executed as if it were the same call.
   Digest request_digest = 3 [features.field_presence = LEGACY_REQUIRED];
   OperationKind operation_kind = 4 [features.field_presence = LEGACY_REQUIRED];
+  string turn_id = 5 [features.field_presence = LEGACY_REQUIRED];
 }

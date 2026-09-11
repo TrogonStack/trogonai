@@ -15,4 +15,6 @@ message RecordSystemNotice {
   string text = 3 [features.field_presence = LEGACY_REQUIRED];
   // Set when the notice concerns a specific call.
   string tool_call_id = 4;
+  // Set when a turn was open at the time of the notice.
+  string turn_id = 5;
 }

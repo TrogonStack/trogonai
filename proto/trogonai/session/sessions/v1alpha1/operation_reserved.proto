@@ -13,6 +13,8 @@ message OperationReserved {
   string operation_id = 2 [features.field_presence = LEGACY_REQUIRED];
   Digest request_digest = 3 [features.field_presence = LEGACY_REQUIRED];
   OperationKind operation_kind = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Turn this reservation belongs to (see UserMessageRecorded.turn_id).
+  string turn_id = 5 [features.field_presence = LEGACY_REQUIRED];
 }
 
 // OperationKind is the kind of side effect an operation guards. Model

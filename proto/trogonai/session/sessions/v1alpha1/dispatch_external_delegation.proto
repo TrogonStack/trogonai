@@ -16,4 +16,5 @@ message DispatchExternalDelegation {
   string authorization_reference = 5 [features.field_presence = LEGACY_REQUIRED];
   Digest request_digest = 6 [features.field_presence = LEGACY_REQUIRED];
   string correlation_id = 7 [features.field_presence = LEGACY_REQUIRED];
+  string turn_id = 8 [features.field_presence = LEGACY_REQUIRED];
 }

@@ -18,4 +18,5 @@ message DispatchDelegation {
   // Recorded at dispatch so an orphaned child is never a silent accident
   // (ADR#0035 facet 6).
   CascadePolicy cascade_policy = 4 [features.field_presence = LEGACY_REQUIRED];
+  string turn_id = 5 [features.field_presence = LEGACY_REQUIRED];
 }

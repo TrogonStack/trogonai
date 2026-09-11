@@ -11,4 +11,5 @@ message RequestOperationCancellation {
   string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
   string operation_id = 2 [features.field_presence = LEGACY_REQUIRED];
   string reason = 3;
+  string turn_id = 4 [features.field_presence = LEGACY_REQUIRED];
 }

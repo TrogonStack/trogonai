@@ -23,4 +23,5 @@ message RecordOperationOutcome {
     // supersedable exactly once.
     OperationUnknown unknown = 6;
   }
+  string turn_id = 7 [features.field_presence = LEGACY_REQUIRED];
 }
