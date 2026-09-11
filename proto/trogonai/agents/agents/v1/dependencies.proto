@@ -13,10 +13,10 @@ import "trogonai/agents/agents/v1/digest.proto";
 // Invalid declarations or mismatched pin digests fail admission even when the
 // dependency is optional; only an unavailable eligible dependency may be omitted.
 message AgentDependencies {
-  repeated ExactSkillPin exact_skill_pins = 1;
-  repeated ToolDeclaration tool_declarations = 2;
-  repeated DelegateDeclaration delegate_declarations = 3;
-  repeated MemoryDeclaration memory_declarations = 4;
+  repeated ExactSkillPin skills = 1;
+  repeated ToolDeclaration tools = 2;
+  repeated DelegateDeclaration delegates = 3;
+  repeated MemoryDeclaration memories = 4;
 }
 
 // Unspecified and unknown values are invalid. A required declaration must

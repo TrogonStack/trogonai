@@ -147,7 +147,7 @@ AgentConfiguration
      native models, parameters, instructions, and context controls live here)
   variables_schema
     (when the platform owns the caller-facing variable interface)
-  exact_skill_pins
+  skills
   required_tool_declarations + optional_tool_declarations
   required_delegate_declarations + optional_delegate_declarations
   required_memory_declarations + optional_memory_declarations
@@ -409,7 +409,7 @@ agent_configurations:
         output_language:
           type: string
           required: false
-      exact_skill_pins:
+      skills:
         - skill_id: skill-code-review
           version: 3
           content_digest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -468,7 +468,7 @@ agent_configurations:
         output_language:
           type: string
           required: false
-      exact_skill_pins:
+      skills:
         - skill_id: skill-code-review
           version: 4
           content_digest: "sha256:1515151515151515151515151515151515151515151515151515151515151515"
@@ -520,7 +520,7 @@ proposal:
       operation: replace
       before_digest: "sha256:1212121212121212121212121212121212121212121212121212121212121212"
       after_digest: "sha256:1313131313131313131313131313131313131313131313131313131313131313"
-    - field: exact_skill_pins.skill-code-review
+    - field: skills.skill-code-review
       operation: replace
       before_version: 3
       before_content_digest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
