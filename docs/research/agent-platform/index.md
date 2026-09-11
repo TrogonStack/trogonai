@@ -39,7 +39,7 @@ and evidence rules behind each product dossier remain reproducible.
 ## Contract impact
 
 - [Contract impact: OpenAI Agents API](./contract-impact-agents-api.md),
-  the dossier findings read back against `proto/trogonai/agents/agents/v1`
+  the dossier findings read back against `proto/trogonai/agents/agents/v1alpha1`
   and `proto/trogonai/session/sessions/v1alpha1`. Analysis only; every
   proposed change is gated on an ADR.
 

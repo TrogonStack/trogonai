@@ -1,0 +1,27 @@
+edition = "2024";
+
+package trogonai.agents.agents.v1alpha1;
+
+import "google/protobuf/empty.proto";
+import "trogonai/agents/agents/v1alpha1/configuration_artifact.proto";
+
+// Configuration identity is the exact admitted artifact, not a reconstruction
+// from decoded fields. The revision number and provenance are outside its digest.
+// The identity is nonempty and revision_number is positive.
+message AgentRevisionRef {
+  string agent_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint64 revision_number = 2 [features.field_presence = LEGACY_REQUIRED];
+  AgentConfigurationRef configuration = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message AgentRevision {
+  AgentRevisionRef reference = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Provisioning is valid only for revision 1. A revert names a previously
+  // activated revision of this agent and preserves that configuration exactly.
+  // Exactly one known source is required; a proposal id must be nonempty.
+  oneof source {
+    google.protobuf.Empty provisioning = 2;
+    string proposal_id = 3;
+    AgentRevisionRef revert_of_revision = 4;
+  }
+}

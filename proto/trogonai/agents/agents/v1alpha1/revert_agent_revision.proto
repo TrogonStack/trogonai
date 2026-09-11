@@ -1,0 +1,13 @@
+edition = "2024";
+
+package trogonai.agents.agents.v1alpha1;
+
+import "trogonai/agents/agents/v1alpha1/agent_revision.proto";
+
+// Dispatch authorizes reversion; the registry verifies both references belong
+// to this agent and the target was activated. A revert mints the next highest
+// revision with the target configuration; it never moves a stored pointer back.
+message RevertAgentRevision {
+  AgentRevisionRef expected_current_revision = 1 [features.field_presence = LEGACY_REQUIRED];
+  AgentRevisionRef revert_of_revision = 2 [features.field_presence = LEGACY_REQUIRED];
+}

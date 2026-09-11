@@ -14,7 +14,7 @@ and [ADR#0040](../../adr/0040-contract-field-vocabulary.md).
 Where a conclusion here differs from an accepted record in the
 [ADR index](../../adr/index.md), the ADR is authoritative.
 
-Contracts examined: `proto/trogonai/agents/agents/v1/` (6 files) and
+Contracts examined: `proto/trogonai/agents/agents/v1alpha1/` (6 files) and
 `proto/trogonai/session/sessions/v1alpha1/` (109 files).
 
 ## The deadline that governs all of this

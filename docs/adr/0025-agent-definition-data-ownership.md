@@ -82,6 +82,13 @@ This decision must preserve four properties:
 Place each datum with the resource whose invariants and change cadence it
 describes.
 
+Under draft [ADR#0062](./0062-runtime-owned-settings-and-platform-declarations.md),
+the general configuration binds an exact runtime to one runtime-owned typed
+settings message. Platform-owned dependency declarations remain common typed
+values when the selected adapter supports those integrations. The logical
+inventory below does not require every runtime to accept the platform harness's
+native model, instruction, or context controls.
+
 A datum belongs to an `AgentConfiguration` only when all three statements are
 true:
 
@@ -131,23 +138,16 @@ AgentRevision
 
 AgentConfiguration
   description
-  agent_implementation -> AgentImplementation
+  runtime -> AgentImplementation
     implementation_version_ref -> AgentImplementationVersion
       (exact typed implementation kind + immutable version)
     implementation_definition_digest
-    implementation_configuration
-      (typed for that exact implementation version)
-    implementation_configuration_digest
-  primary_model_selection -> ModelSelection
-    model_version_ref -> ModelVersion
-    model_definition_digest
-    deterministic_parameters
-  auxiliary_model_selections
-    role + ModelSelection
-  instructions
-  turn_wrappers
+  settings -> one google.protobuf.Any
+    (the complete settings message accepted by that exact runtime version;
+     native models, parameters, instructions, and context controls live here)
   variables_schema
-  exact_skill_pins
+    (when the platform owns the caller-facing variable interface)
+  skills
   required_tool_declarations + optional_tool_declarations
   required_delegate_declarations + optional_delegate_declarations
   required_memory_declarations + optional_memory_declarations
@@ -196,9 +196,12 @@ Activation assigns the revision number and records provenance. It never
 rebuilds the candidate. `configuration_digest` is the revision digest and
 remains unchanged through activation; the revision number and provenance are
 not part of the configuration digest. The digest commits transitively to the
-exact implementation version, implementation definition, typed implementation
-configuration, primary model, auxiliary models, deterministic parameters, and
-every other configuration-owned artifact.
+exact runtime version, implementation definition, settings type and admitted
+bytes, common platform declarations, and every configuration-owned artifact.
+Model selections or instructions enter that digest through the runtime's
+settings when its contract exposes them. A platform-managed model capability
+may derive typed selections from those settings; it does not create a second
+authored model configuration.
 
 ### 2. Keep adjacent resources behind references
 
@@ -210,11 +213,13 @@ not move data across the boundary fixed here.
 
 - **Session.** A session pins exactly one AgentRevision at start, by reference
   and digest. Its immutable [SessionExecutionPlan](../glossary/sessionexecutionplan) copies the revision's exact
-  implementation version and definition digest, implementation configuration
-  digest, and primary and auxiliary ModelSelection values. It never selects a
-  newer implementation or another model. The plan resolves only external facts:
-  [ResolvedModelRoute](../glossary/resolvedmodelroute) values that bind those exact models to authorized
-  credential routes, variable bindings, tool versions, memory selections, work
+  implementation version and definition digest and binds the exact settings.
+  When platform-managed model access is required, a pinned adapter derives
+  verifiable primary and auxiliary ModelSelection values from those settings
+  and admission records them in the plan. It never selects a newer
+  implementation or substitutes another declared model. The plan resolves
+  external facts: [ResolvedModelRoute](../glossary/resolvedmodelroute) values for
+  that admitted capability, variable bindings, tool versions, memory selections, work
   input, and other dependencies under
   [ADR#0031](./0031-agent-implementation-and-session-plan.md).
   Session-owned [ExecutionAttempt](../glossary/executionattempt) facts separately record behavior-neutral
@@ -311,13 +316,21 @@ Everything else remains with its existing owner:
   and
 - skill resources own skill content, while an AgentConfiguration owns exact pins.
 
+A common declaration is not proof that a runtime can consume it. Admission
+checks the pinned adapter's supported integrations before resolving declared
+skills, tools, delegates, memories, or platform variables. Optionality permits
+an absent resource under the declared resolution rules; it does not permit
+silently ignoring a declaration the adapter cannot interpret. Native runtime
+mechanisms without a platform integration stay in that runtime's settings and
+do not inherit platform management or authorization guarantees.
+
 The revision boundary is therefore mechanical:
 
 | Change | Owner and effect | New AgentRevision? |
 | --- | --- | --- |
-| Instructions, wrappers, description | AgentConfiguration proposal | Yes |
-| AgentImplementation kind, version, typed configuration, or digest | AgentConfiguration proposal | Yes |
-| Primary or auxiliary model selections, parameters, or `variables_schema` | AgentConfiguration proposal | Yes |
+| Runtime-owned instructions or wrappers, or common description | AgentConfiguration proposal | Yes |
+| Runtime version, definition, settings type, or settings bytes | AgentConfiguration proposal | Yes |
+| Runtime-owned model settings or platform-owned `variables_schema` | AgentConfiguration proposal | Yes |
 | Skill pins or tool/delegate/memory declarations | AgentConfiguration proposal | Yes |
 | Selectable labels | AgentConfiguration proposal | Yes |
 | Skill content | Skill resource; a revision changes only when its pin changes | No by itself |
@@ -337,7 +350,14 @@ The revision boundary is therefore mechanical:
 #### Worked example: one proposal becomes revision 2
 
 The following values use the logical names above. They are not proposed
-protobuf field names.
+protobuf field names or an SDK settings contract. This example assumes a
+platform-harness settings type with model and instruction controls, and a pinned
+adapter supporting the shown platform declarations and semantic differences.
+Each `field` path in the canonical typed difference names a difference category
+first and a native field inside the runtime's own settings message second. The
+platform defines the categories; the registered classifier for the pinned
+runtime resolves everything past the first segment, so `runtime_settings` never
+becomes a platform-owned namespace over the settings envelope.
 
 | Record | Concrete binding |
 | --- | --- |
@@ -363,29 +383,29 @@ agent_configurations:
     configuration_digest: "sha256:0101010101010101010101010101010101010101010101010101010101010101"
     content:
       description: Reviews pull requests for correctness and maintainability.
-      agent_implementation:
+      runtime:
         implementation_version_ref:
-          kind: managed
+          kind: platform_harness
           version: 3
         implementation_definition_digest: "sha256:0202020202020202020202020202020202020202020202020202020202020202"
-        implementation_configuration:
-          context_strategy: rolling-summary-v2
-          max_tool_iterations: 24
-        implementation_configuration_digest: "sha256:0303030303030303030303030303030303030303030303030303030303030303"
-      primary_model_selection:
-        model_version_ref:
-          model_id: model-reviewer
-          version: 1
-        model_definition_digest: "sha256:0404040404040404040404040404040404040404040404040404040404040404"
-        deterministic_parameters:
-          temperature: 0.2
-          max_output_tokens: 4096
-      auxiliary_model_selections: []
-      instructions:
-        - Report correctness defects with file and line evidence.
-        - Separate blocking findings from suggestions.
-      turn_wrappers:
-        - wrapper-repository-context-v1
+      settings:
+        type: illustrative-platform-harness-settings-v1
+        context_strategy: rolling-summary-v2
+        max_tool_iterations: 24
+        primary_model_selection:
+          model_version_ref:
+            model_id: model-reviewer
+            version: 1
+          model_definition_digest: "sha256:0404040404040404040404040404040404040404040404040404040404040404"
+          deterministic_parameters:
+            temperature: 0.2
+            max_output_tokens: 4096
+        auxiliary_model_selections: []
+        instructions:
+          - Report correctness defects with file and line evidence.
+          - Separate blocking findings from suggestions.
+        turn_wrappers:
+          - wrapper-repository-context-v1
       variables_schema:
         review_depth:
           type: string
@@ -394,7 +414,7 @@ agent_configurations:
         output_language:
           type: string
           required: false
-      exact_skill_pins:
+      skills:
         - skill_id: skill-code-review
           version: 3
           content_digest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -421,30 +441,30 @@ agent_configurations:
     configuration_digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
     content:
       description: Reviews pull requests for correctness and maintainability.
-      agent_implementation:
+      runtime:
         implementation_version_ref:
-          kind: managed
+          kind: platform_harness
           version: 3
         implementation_definition_digest: "sha256:0202020202020202020202020202020202020202020202020202020202020202"
-        implementation_configuration:
-          context_strategy: rolling-summary-v2
-          max_tool_iterations: 24
-        implementation_configuration_digest: "sha256:0303030303030303030303030303030303030303030303030303030303030303"
-      primary_model_selection:
-        model_version_ref:
-          model_id: model-reviewer
-          version: 1
-        model_definition_digest: "sha256:0404040404040404040404040404040404040404040404040404040404040404"
-        deterministic_parameters:
-          temperature: 0.2
-          max_output_tokens: 4096
-      auxiliary_model_selections: []
-      instructions:
-        - Report correctness defects with file and line evidence.
-        - Treat missing regression coverage as blocking when behavior changes.
-        - Separate blocking findings from suggestions.
-      turn_wrappers:
-        - wrapper-repository-context-v1
+      settings:
+        type: illustrative-platform-harness-settings-v1
+        context_strategy: rolling-summary-v2
+        max_tool_iterations: 24
+        primary_model_selection:
+          model_version_ref:
+            model_id: model-reviewer
+            version: 1
+          model_definition_digest: "sha256:0404040404040404040404040404040404040404040404040404040404040404"
+          deterministic_parameters:
+            temperature: 0.2
+            max_output_tokens: 4096
+        auxiliary_model_selections: []
+        instructions:
+          - Report correctness defects with file and line evidence.
+          - Treat missing regression coverage as blocking when behavior changes.
+          - Separate blocking findings from suggestions.
+        turn_wrappers:
+          - wrapper-repository-context-v1
       variables_schema:
         review_depth:
           type: string
@@ -453,7 +473,7 @@ agent_configurations:
         output_language:
           type: string
           required: false
-      exact_skill_pins:
+      skills:
         - skill_id: skill-code-review
           version: 4
           content_digest: "sha256:1515151515151515151515151515151515151515151515151515151515151515"
@@ -500,11 +520,12 @@ proposal:
   candidate_configuration_ref: configuration-pr-reviewer-v2
   candidate_configuration_digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
   canonical_typed_difference:
-    - field: instructions
+    - field: runtime_settings.instructions
+      interpreter: pinned-runtime-semantic-difference-adapter
       operation: replace
       before_digest: "sha256:1212121212121212121212121212121212121212121212121212121212121212"
       after_digest: "sha256:1313131313131313131313131313131313131313131313131313131313131313"
-    - field: exact_skill_pins.skill-code-review
+    - field: skills.skill-code-review
       operation: replace
       before_version: 3
       before_content_digest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -559,10 +580,9 @@ field. Annotations are opaque record metadata and never affect selection,
 model input, implementation behavior, hosting behavior, or the configuration
 digest.
 
-`AgentConfiguration.agent_implementation` binds the exact typed
-implementation kind, immutable AgentImplementationVersion reference and
-definition digest, typed per-Agent implementation configuration, and
-implementation-configuration digest. It is behavior, not placement. A newer
+`AgentConfiguration.runtime` binds the exact implementation version and
+definition digest. Its single `settings` envelope contains the complete typed
+configuration accepted by that version. These are behavior, not placement. A newer
 implementation version is never selected automatically. Changing the
 implementation kind, version, definition digest, configuration, or
 configuration digest creates a candidate AgentConfiguration and requires the
@@ -573,24 +593,24 @@ mutating an existing revision or replacing the stable Agent identity.
 The stable Agent contains neither an implementation binding nor a model
 selection. Both are behavior facts owned by its immutable configurations.
 
-`primary_model_selection` and every `auxiliary_model_selections` entry are
-equally exact configuration facts. An AgentImplementationVersion may declare
-which typed model roles it requires and validate their compatibility, but the
-AgentConfiguration contains the exact model and deterministic parameters for
-every role, including its ModelVersion reference and definition digest. Session
-admission does not add a hidden model role, replace a model, or merge in a newer
-implementation default.
+Model and parameter vocabularies belong to each runtime's settings contract.
+A runtime may expose one model, several roles, or no caller-controlled model
+selection. The absence of such controls does not establish that the runtime
+uses no models. Native defaults are reproducible only to the extent that the
+pinned runtime contract fixes their meaning.
 
-The SessionExecutionPlan copies these implementation and model pins from the
-AgentRevision and resolves a `ResolvedModelRoute` only to authorize each exact
-model through an exact provider driver, provider connection, and credential
-binding. Attempt-scoped model-access grants remain live authorization outside
-the immutable plan. The provider driver is a Session fact because it adapts an
-already-pinned model to an external provider rather than defining Agent
-behavior. Its exact pin remains part of verification evidence. The plan also
-resolves external dependencies and inputs under
-[ADR#0031](./0031-agent-implementation-and-session-plan.md). It never resolves
-the agent's implementation or model identity.
+When a Session requires platform-managed model access, the exact adapter must
+derive verifiable ModelSelection values from the admitted settings and prove
+that execution can honor them. Admission rejects unsupported or hidden model
+choices for that capability. The SessionExecutionPlan records this derived
+projection and resolves a `ResolvedModelRoute` for each exact model under
+[ADR#0032](./0032-model-route-and-credential-binding.md). It never adds a model
+role, substitutes a model, or creates another authored selection source.
+Attempt-scoped grants remain live authorization outside the plan. The provider
+driver is a Session fact because it adapts an already-pinned model to an
+external provider; its exact pin remains part of verification evidence. Other
+Session modes cannot claim these managed-model guarantees merely because their
+Agent configuration is valid.
 
 Process, container, microVM, remote host, placement, isolation, network,
 filesystem, lifecycle, cancellation, recovery, and hosting authentication are
@@ -603,8 +623,8 @@ AgentConfiguration before use.
 
 Verification evidence records what it actually exercised: AgentRevision and
 configuration digests, the exact implementation version and configuration
-digests, exact model selections, ResolvedModelRoute values, tool versions, and
-memory snapshots. A revision's score is always interpretable as "under these
+digests, any admitted model selections and ResolvedModelRoute values, tool
+versions, and memory snapshots. A revision's score is always interpretable as "under these
 resolved facts", never as a context-free claim.
 
 An AgentConfiguration is content-addressed and never edited. Its digest
@@ -653,13 +673,14 @@ The charter and learned layer classify changes; they are not two mutable
 documents and do not create competing sources of truth. Every activation
 still produces an `AgentRevision` bound to one complete `AgentConfiguration`.
 
-- Learned-layer changes include instructions, turn wrappers, description,
-  skill pins, optional tool, delegate, or memory declarations, and
+- Learned-layer changes include runtime instructions or wrappers only when a
+  pinned semantic difference adapter can prove that classification; common
+  description, skill pins, optional tool, delegate, or memory declarations, and
   selectable labels that do not alter a well-known routing or comparison
   group.
-- Charter-class changes include AgentImplementation kind, version, definition
-  digest, typed configuration, or implementation-configuration digest; primary
-  and auxiliary model selections and deterministic model parameters; required
+- Charter-class changes include runtime version, definition digest, or settings
+  contract; model selections and parameters identified by the runtime adapter;
+  settings changes without a supported semantic classification; required
   tool, delegate, or memory declarations; well-known grouping labels such as
   `family`; and the `variables_schema`.
 - Name is an immutable agent fact. Implementation and model evolution use
@@ -667,7 +688,13 @@ still produces an `AgentRevision` bound to one complete `AgentConfiguration`.
   operations and authority changes are policy operations, never proposals for
   behavior revisions.
 
-For v1, the variable schema is charter-class because it is an interface
+Full validation of the runtime's settings is mandatory even when semantic
+change classification is unsupported. An opaque but validated settings change
+defaults to charter-class; it cannot claim to be an instruction-only
+learned-layer edit. This avoids treating every settings edit as equivalent
+while preserving a conservative path for runtimes without semantic diff support.
+
+For v1, the platform-owned variable schema is charter-class because it is an interface
 offered to session callers. Adding or removing a binding, changing a type, or
 changing requiredness can make previously valid session starts invalid. The
 agent may freely evolve how existing variables are used inside learned-layer
@@ -689,9 +716,11 @@ WorkContract because work is reusable across agents and an agent is reusable
 across kinds of work. That is a TrogonAI ownership decision, not an industry
 invariant.
 
-- `AgentConfiguration.variables_schema` declares the names, types, and requiredness
-  of session-start values referenced by the configuration. Variable values
-  belong to the session.
+- `AgentConfiguration.variables_schema`, when present, declares the names,
+  types, and requiredness of session-start values in the platform-owned caller
+  interface. Its use requires a supported runtime integration. Runtime-native
+  input controls stay inside settings when the platform does not own that
+  interface. Bound variable values belong to the session.
 - `ToolDefinition.input_schema` declares the input accepted by that version
   of a reusable tool.
 - `WorkContract.input_schema` and `WorkContract.result_schema` declare the
@@ -750,21 +779,16 @@ and equip the tool call outside the prompt.
 - The definition contract stays small enough to hand to another engineer:
   four records, one membership test, and one revision-boundary table.
 - The agent platform needs typed contracts for Agent, AgentConfiguration,
-  AgentRevision, Proposal, the exact AgentImplementation binding, exact model
-  selections, and `variables_schema`. A partial charter plus an opaque
-  content digest is not a complete definition contract.
-- Whether model selection is platform-owned is unresolved while this ADR is
-  draft. The model above places `primary_model_selection` on
-  AgentConfiguration, and
-  [ADR#0032](./0032-model-route-and-credential-binding.md) builds allowed-model
-  policy, route admission, and credential binding on the platform being able to
-  read that value. The shipped contract does the opposite: `AgentConfiguration`
-  carries runtime-owned `settings` that own model selection, because model
-  vocabularies, parameter names, and reasoning knobs differ per runtime and some
-  runtimes expose no model selection at all. Reconciling the two is a decision
-  in its own right, not a field rename: a platform-readable model is a
-  precondition for everything that ADR decides, so runtime-owned model selection
-  defers that plane rather than relocating it.
+  AgentRevision, Proposal, an exact runtime binding, runtime-owned settings,
+  and supported platform declarations. One `Any` preserves a different complete
+  settings type for each runtime without making its payload unvalidated.
+- Draft [ADR#0062](./0062-runtime-owned-settings-and-platform-declarations.md)
+  resolves model-setting ownership in favor of the runtime. The typed
+  selections needed by
+  [ADR#0032](./0032-model-route-and-credential-binding.md) are a derived
+  capability projection from those settings. Model admission and no-substitution
+  guarantees apply only where the pinned adapter can prove that projection and
+  enforce it; a valid Agent schema does not promise every runtime that capability.
 - The definition records alone answer which agent existed, which revision
   ran, and which proposal justified it. What the model saw and what was
   authorized are answered by the session and policy domains through the

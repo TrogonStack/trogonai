@@ -1,0 +1,13 @@
+edition = "2024";
+
+package trogonai.agents.agents.v1alpha1;
+
+// Digest identifies exact immutable bytes, never a decoded message re-encoding.
+// It is stored beside the bytes it commits to and verified before decoding.
+message Digest {
+  // The v1 admission contract accepts only "sha256" with a 32-byte value;
+  // unknown algorithms and invalid lengths are rejected.
+  string algorithm = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Raw digest bytes produced by algorithm over the committed content.
+  bytes value = 2 [features.field_presence = LEGACY_REQUIRED];
+}

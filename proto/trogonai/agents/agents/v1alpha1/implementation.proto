@@ -1,0 +1,42 @@
+edition = "2024";
+
+package trogonai.agents.agents.v1alpha1;
+
+import "trogonai/agents/agents/v1alpha1/digest.proto";
+import "trogonai/agents/agents/v1alpha1/model_selection.proto";
+
+message PlatformHarnessVersionRef {
+  string version = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message RegisteredExtensionVersionRef {
+  string extension_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string version = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// This concrete settings contract belongs to the platform harness. Other
+// runtimes admit their own message types in AgentConfiguration.settings.
+// Instruction assembly and model controls follow the exact harness release.
+message PlatformHarnessConfiguration {
+  // Absent or empty means no authored standing instructions.
+  string instructions = 1;
+  // This harness uses platform-managed model access. Its native settings own
+  // these selections; they are not required controls for other runtimes.
+  ModelSelections models = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// The definition commits transitively to every behavior-significant artifact,
+// the accepted settings type URL, contract version, descriptor closure, and
+// validation and interpretation semantics, plus supported integrations and
+// inspection capabilities. Type URLs name registered types; never fetch them.
+// Admission rejects missing releases, digest mismatches, incompatible settings,
+// and unsupported declarations. Settings live only in AgentConfiguration.settings.
+// Exactly one known arm is required. Versions name immutable admitted releases;
+// mutable aliases, version ranges, and release-selection fallback are invalid.
+message AgentImplementation {
+  oneof implementation {
+    PlatformHarnessVersionRef platform_harness = 1;
+    RegisteredExtensionVersionRef registered_extension = 2;
+  }
+  Digest definition_digest = 3 [features.field_presence = LEGACY_REQUIRED];
+}

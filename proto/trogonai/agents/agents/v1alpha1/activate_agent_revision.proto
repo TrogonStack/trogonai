@@ -1,0 +1,22 @@
+edition = "2024";
+
+package trogonai.agents.agents.v1alpha1;
+
+import "trogonai/agents/agents/v1alpha1/agent_revision.proto";
+import "trogonai/agents/agents/v1alpha1/configuration_artifact.proto";
+
+// Dispatch derives these exact bindings from the proposal's immutable opening
+// and approved verdict. It never accepts this fact directly from an untrusted
+// caller; judgment and the complete difference remain proposal-owned.
+message ApprovedProposalActivation {
+  string proposal_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  AgentRevisionRef base_revision = 2 [features.field_presence = LEGACY_REQUIRED];
+  AgentConfigurationRef candidate_configuration = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Dispatch loads the immutable approval from the proposal stream and enforces
+// live authorization, including the charter-class human gate. The registry
+// rejects an archived agent, a stale base, or an already activated proposal.
+message ActivateAgentRevision {
+  ApprovedProposalActivation approved_proposal = 1 [features.field_presence = LEGACY_REQUIRED];
+}

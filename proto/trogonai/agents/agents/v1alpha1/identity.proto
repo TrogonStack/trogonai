@@ -1,0 +1,16 @@
+edition = "2024";
+
+package trogonai.agents.agents.v1alpha1;
+
+// The message fixes JWK kty=OKP, crv=Ed25519, and alg=EdDSA. No private JWK
+// members are representable; x is unpadded base64url encoding of 32 public bytes.
+message Ed25519PublicJwk {
+  string x = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Provisioning verifies did:key derivation and possession of this key upstream.
+// The public anchor proves identity, never current authorization or affiliation.
+message AgentIdentity {
+  string agent_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  Ed25519PublicJwk public_key = 2 [features.field_presence = LEGACY_REQUIRED];
+}

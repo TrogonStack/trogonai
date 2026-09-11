@@ -1,0 +1,33 @@
+edition = "2024";
+
+package trogonai.agents.agents.v1alpha1;
+
+import "google/protobuf/any.proto";
+import "trogonai/agents/agents/v1alpha1/dependencies.proto";
+import "trogonai/agents/agents/v1alpha1/implementation.proto";
+import "trogonai/agents/agents/v1alpha1/variables.proto";
+
+// AgentConfiguration owns immutable behavior and dependency declarations.
+// Changes, including implementation changes, require a new AgentRevision.
+// Grants, credentials, provider routes, live memory, and session inputs belong
+// to their own planes and cannot be embedded in this declaration.
+message AgentConfiguration {
+  AgentImplementation runtime = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The exact runtime definition admits one concrete settings contract. The
+  // envelope and its registered type URL remain required for a zero-field
+  // payload. Absent native fields may use defaults fixed by that contract.
+  google.protobuf.Any settings = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Must be 1 for this contract. Unsupported versions and unknown fields are
+  // rejected before admission so older readers cannot erase behavior.
+  uint32 contract_version = 3 [features.field_presence = LEGACY_REQUIRED];
+  string description = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Absent or empty declarations impose no integration requirement. Every
+  // declared integration requires support from the pinned runtime or adapter.
+  AgentDependencies dependencies = 5;
+  // This is the platform-supplied caller interface when declared. Native-only
+  // variables remain in settings; concrete platform bindings belong to Session.
+  VariableSchema variables_schema = 6;
+  // Selection consumes the labels of the pinned revision. Annotation changes
+  // cannot change this set or which declarations a session starts with.
+  map<string, string> selectable_labels = 7;
+}

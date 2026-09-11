@@ -1,0 +1,12 @@
+edition = "2024";
+
+package trogonai.agents.proposals.v1alpha1;
+
+import "trogonai/agents/proposals/v1alpha1/proposal.proto";
+
+// Dispatch checks current Agent availability and derives the difference before
+// opening this independent NoStream history. Opening reserves no revision number.
+message OpenProposal {
+  string proposal_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ProposalDefinition proposal = 2 [features.field_presence = LEGACY_REQUIRED];
+}

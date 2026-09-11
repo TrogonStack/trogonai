@@ -1,0 +1,27 @@
+edition = "2024";
+
+package trogonai.agents.agents.v1alpha1;
+
+import "trogonai/agents/agents/v1alpha1/agent_revision.proto";
+import "trogonai/agents/agents/v1alpha1/identity.proto";
+
+enum AgentLifecycle {
+  AGENT_LIFECYCLE_UNSPECIFIED = 0;
+  AGENT_LIFECYCLE_ACTIVE = 1;
+  AGENT_LIFECYCLE_ARCHIVED = 2;
+}
+
+// A derived logical record joining the registry and hierarchy. It is not a
+// write-side state or an independently writable placement or revision pointer.
+message Agent {
+  AgentIdentity identity = 1 [features.field_presence = LEGACY_REQUIRED];
+  string display_name = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Current hierarchy placement, which may differ from genesis placement.
+  string parent = 3 [features.field_presence = LEGACY_REQUIRED];
+  // The highest registry-minted revision for this identity, including reverts.
+  AgentRevisionRef latest_revision = 4 [features.field_presence = LEGACY_REQUIRED];
+  // UNSPECIFIED and unknown values reject. Archival has no reverse transition.
+  AgentLifecycle lifecycle = 5 [features.field_presence = LEGACY_REQUIRED];
+  // Nonbehavioral metadata; selectors consume the pinned configuration's labels.
+  map<string, string> annotations = 6;
+}

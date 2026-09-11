@@ -7,10 +7,11 @@ order: 4
 # ModelSelection
 
 An exact, versioned model catalog pin plus deterministic parameters, distinct
-from a display name, mutable alias, or provider credential. The shipped contract
-carries no such platform-owned pin: model selection lives in the runtime-owned
-settings on AgentConfiguration, so this term names the intended platform concept
-that route admission and credential binding would need, not a field that exists
-today. See [ADR#0031](../adr/0031-agent-implementation-and-session-plan.md) and
-the consequence recorded in
-[ADR#0025](../adr/0025-agent-definition-data-ownership.md).
+from a display name, mutable alias, or provider credential. For platform-managed
+model access, a supported pinned adapter derives and validates this projection
+from the runtime-owned settings. Session admission records it and resolves its
+provider route without substituting another model. It is not an independently
+authored universal AgentConfiguration field. A runtime that cannot expose and
+enforce this information cannot use that capability. See draft
+[ADR#0032](../adr/0032-model-route-and-credential-binding.md) and
+[ADR#0062](../adr/0062-runtime-owned-settings-and-platform-declarations.md).

@@ -1,33 +1,33 @@
 edition = "2024";
 
-package trogonai.agents.agents.v1;
+package trogonai.agents.agents.v1alpha1;
 
-import "trogonai/agents/agents/v1/agent.proto";
-import "trogonai/agents/agents/v1/digest.proto";
+import "trogonai/agents/agents/v1alpha1/configuration_artifact.proto";
+import "trogonai/agents/agents/v1alpha1/identity.proto";
 
 // AgentProvisioned is the Agent registry stream's genesis event, minting
 // revision 1. No limits, no rubrics, no grants live here (design Q15/Q16);
 // those are stances on their own planes.
 message AgentProvisioned {
+  // Must be the did:key derived from public_identity_key.
   string agent_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Immutable registry metadata, excluded from behavior and configuration identity.
   string display_name = 2 [features.field_presence = LEGACY_REQUIRED];
   // Placement node the agent is provisioned under: the node ref that anchors
   // the agent in the placement hierarchy and scopes ownership and addressing.
   // Bare spelling is deliberate per the spelling rule: unsuffixed `parent`
   // always denotes placement, while kinship refs are always `parent<Type>Id`.
-  // Immutable for the agent's v1 lifetime; re-placement mints a new agent
-  // rather than mutating this ref.
+  // This is creation placement. Hierarchy owns subsequent moves and projects
+  // current placement; the registry records no relocation event.
   string parent = 3 [features.field_presence = LEGACY_REQUIRED];
-  AgentConfiguration configuration = 4 [features.field_presence = LEGACY_REQUIRED];
   // Revision minted by this genesis event, recorded explicitly so no consumer
   // derives it from convention. Always 1; the decider rejects any other value
   // at write time.
-  uint64 revision = 5 [features.field_presence = LEGACY_REQUIRED];
-  // Content digest over the provisioned revision bundle, carrying its own
-  // algorithm identifier rather than assuming one by convention.
-  Digest content_digest = 6 [features.field_presence = LEGACY_REQUIRED];
+  uint64 revision = 4 [features.field_presence = LEGACY_REQUIRED];
   // Opaque record metadata present from genesis. Excluded from
-  // `content_digest` and from model input; later changes arrive as
+  // configuration identity and from model input; later changes arrive as
   // AgentAnnotated and mint no revision.
-  map<string, string> annotations = 7;
+  map<string, string> annotations = 5;
+  AgentConfigurationRef configuration_ref = 6 [features.field_presence = LEGACY_REQUIRED];
+  Ed25519PublicJwk public_identity_key = 7 [features.field_presence = LEGACY_REQUIRED];
 }

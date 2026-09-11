@@ -1,0 +1,115 @@
+edition = "2024";
+
+package trogonai.agents.agents.v1alpha1;
+
+import "trogonai/agents/agents/v1alpha1/digest.proto";
+
+// These declarations are revision-owned. Session admission resolves them under
+// live hierarchy and policy, then records exact references and digests. A
+// declaration grants no authority. Binding names are nonempty, case-sensitive,
+// and unique across all four collections. Resource identifiers must be nonempty.
+// Each declared integration requires a supported runtime or adapter consumption
+// contract; an absent or empty collection creates no integration requirement.
+// Invalid declarations or mismatched pin digests fail admission even when the
+// dependency is optional; only an unavailable eligible dependency may be omitted.
+message AgentDependencies {
+  repeated SkillDeclaration skills = 1;
+  repeated ToolDeclaration tools = 2;
+  repeated DelegateDeclaration delegates = 3;
+  repeated MemoryDeclaration memories = 4;
+}
+
+// Unspecified and unknown values are invalid. A required declaration must
+// resolve to at least one authorized dependency before Session start. An
+// optional declaration may resolve to none; it never permits a substitution
+// outside the declaration. Availability is not an authorization grant.
+enum DependencyRequirement {
+  DEPENDENCY_REQUIREMENT_UNSPECIFIED = 0;
+  DEPENDENCY_REQUIREMENT_REQUIRED = 1;
+  DEPENDENCY_REQUIREMENT_OPTIONAL = 2;
+}
+
+// Every skill declaration is required; Session admission cannot upgrade its
+// content.
+message SkillDeclaration {
+  string binding_name = 1 [features.field_presence = LEGACY_REQUIRED];
+  SkillVersionRef version_ref = 2 [features.field_presence = LEGACY_REQUIRED];
+  Digest content_digest = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message SkillVersionRef {
+  string skill_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Exact immutable version identifier. Empty values and moving aliases are invalid.
+  string version = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Name and every label predicate must match by exact, case-sensitive equality.
+// Empty name and label keys are invalid; at least one predicate is required.
+// Selectors apply only within the Session's authorized resolution scope and
+// match logical resources. Multiple matching resources fail admission, even
+// for optional declarations. They never imply an arbitrary first match.
+message ToolSelector {
+  string name = 1;
+  map<string, string> labels = 2;
+}
+
+message ToolDeclaration {
+  string binding_name = 1 [features.field_presence = LEGACY_REQUIRED];
+  DependencyRequirement requirement = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Exactly one known arm is required. A selector resolves the ToolDefinition
+  // resource; its owning domain resolves a version at Session start, which the
+  // Session must pin. The tool's input schema stays with that version.
+  oneof selection {
+    ToolSelector selector = 3;
+    ExactToolVersionPin exact_pin = 4;
+  }
+}
+
+message ExactToolVersionPin {
+  string tool_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Exact immutable version identifier. Empty values and moving aliases are invalid.
+  string version = 2 [features.field_presence = LEGACY_REQUIRED];
+  Digest definition_digest = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message DelegateDeclaration {
+  string binding_name = 1 [features.field_presence = LEGACY_REQUIRED];
+  DependencyRequirement requirement = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Exactly one known arm is required. Selectors match each Agent's latest
+  // minted revision's configuration-owned labels. Display names and annotations
+  // never participate. Session admission pins the selected revision.
+  oneof selection {
+    DelegateSelector selector = 3;
+    ExactDelegateRevisionPin exact_pin = 4;
+  }
+}
+
+// Every label predicate must match by exact, case-sensitive equality. At least
+// one predicate is required and empty keys are invalid. Multiple matching
+// Agents fail admission, even for optional declarations, within the Session's
+// authorized resolution scope.
+message DelegateSelector {
+  map<string, string> labels = 1;
+}
+
+message ExactDelegateRevisionPin {
+  string agent_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Positive minted revision number, never a moving latest alias.
+  uint64 revision = 2 [features.field_presence = LEGACY_REQUIRED];
+  Digest configuration_digest = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// A memory dependency may resolve to multiple instances of the declared kind.
+// Their references and digests belong to the Session. No instance identity,
+// memory content, or cross-hierarchy authority belongs in this declaration.
+message MemoryDeclaration {
+  string binding_name = 1 [features.field_presence = LEGACY_REQUIRED];
+  DependencyRequirement requirement = 2 [features.field_presence = LEGACY_REQUIRED];
+  MemoryKindSelector selector = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message MemoryKindSelector {
+  // Nonempty memory-domain kind identifier, matched by exact equality within
+  // the Session's authorized hierarchy context. This is never an instance ID.
+  string kind = 1 [features.field_presence = LEGACY_REQUIRED];
+}

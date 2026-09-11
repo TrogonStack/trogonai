@@ -30,23 +30,17 @@ the main registry invariant: an Agent is a stable identity, revision 1 is minted
 at provisioning, and later behavior changes become new immutable revisions
 through a separate proposal and activation lifecycle.
 
-The current `v1` wire contract is only the first slice of that lifecycle:
+The Agent wire contracts under `proto/trogonai/agents/` are still being
+designed. They cover configuration artifacts, identity, revision history,
+annotations, archive, and the separate proposal lifecycle. Annotations remain
+nonbehavioral record metadata outside the configuration digest. Archive is
+permanent; reviving the behavior requires provisioning another Agent.
 
-- `proto/trogonai/agents/agents/v1/agent.proto` defines
-  `AgentConfiguration` as a runtime identifier plus runtime-owned settings.
-- `proto/trogonai/agents/agents/v1/agent_provisioned.proto` records identity,
-  display name, placement, configuration, revision 1, its digest, and the
-  genesis annotations.
-- `proto/trogonai/agents/agents/v1/agent_annotated.proto` replaces the
-  agent's annotations wholesale. Annotations are opaque record metadata
-  outside the digest, so the event mints no revision.
-- `proto/trogonai/agents/agents/v1/agent_archived.proto` is the stream's
-  terminal event. Archive is permanent: there is no unarchive, and reviving
-  the behavior means provisioning a new agent.
-- `proto/trogonai/agents/agents/v1/events.proto` exposes those three events.
-
-This is not yet the complete Agent Registry. Revision activation, proposal
-streams, onboarding APIs, and onboarding UI remain future work. The console home screen is currently an operator-console placeholder.
+These contracts do not establish a complete Agent Registry or onboarding
+service. Agent code generation is excluded in `buf.gen.yaml` while the design
+is active. The configuration draft follows the runtime-owned settings boundary
+in draft
+[ADR#0062](../adr/0062-runtime-owned-settings-and-platform-declarations.md).
 
 ### Session event contracts
 
@@ -60,12 +54,11 @@ The repository has a broad `v1alpha1` Session event catalog under
 - parent and child facts such as `delegation_dispatched.proto` and
   `parent_linked.proto`.
 
-Generated Rust types, event codecs, and local per-event semantic validation
-live in `rsworkspace/crates/platform/trogonai-proto/`. The package remains
-`v1alpha1`, and [ADR#0035](../adr/0035-session-store-decider-aggregate.md) is
-still draft. Session commands, aggregate decisions, projections, the
-coordinator, and the executing harness are not made complete by the event
-catalog alone.
+Session code generation is also excluded in `buf.gen.yaml` while the contract
+is being designed. The package remains `v1alpha1`, and
+[ADR#0035](../adr/0035-session-store-decider-aggregate.md) is still draft.
+Session commands, aggregate decisions, projections, the coordinator, and the
+executing harness are not made complete by the event catalog alone.
 
 ### Protocol and discovery building blocks
 
@@ -99,21 +92,26 @@ the target Session admission and execution contracts by themselves.
 An onboarding API, and eventually a product UI, should collect enough data to
 create a complete Agent behavior declaration:
 
-- name, description, and instructions;
-- one concrete Agent implementation and its typed configuration;
-- model selections and deterministic model parameters;
-- declared tool, skill, memory, and delegate dependencies;
-- runtime requirements and version metadata.
+- identity and display metadata;
+- one exact runtime implementation and its single typed settings payload;
+- description and selectable labels;
+- declared platform tool, skill, memory, and delegate dependencies;
+- a platform caller-variable interface where the Agent uses one.
 
-The exact wire shape is not settled. The shipped contract keeps instruction,
-model, and dependency details inside runtime-owned settings. Draft
-[ADR#0043](../adr/0043-agent-instructions-ownership-and-shape.md) preserves
-that runtime-owned instruction shape and defers a generic platform instruction
-abstraction. Draft
-[ADR#0025](../adr/0025-agent-definition-data-ownership.md) and
-[ADR#0031](../adr/0031-agent-implementation-and-session-plan.md) propose a
-broader platform-readable configuration model. These views must be reconciled
-before any conflicting platform fields become normative.
+Draft [ADR#0062](../adr/0062-runtime-owned-settings-and-platform-declarations.md)
+sets the ownership boundary: each runtime or adapter defines its own concrete
+settings message, carried in one `google.protobuf.Any`. Native instructions,
+model options, and other runtime controls remain inside that message. The exact
+runtime binding determines which settings type, version, and validation rules
+are accepted. Different runtimes need not share those fields.
+
+The platform may define common typed declarations for resources it owns.
+For example, AgentConfiguration pins platform skill versions and declares
+memory dependencies, while the skill and memory resources own their content
+and lifecycle. Each declared integration requires support from the selected
+runtime or adapter. An empty declaration creates no integration requirement;
+an unsupported declaration rejects admission. The common envelope does not
+prescribe how every runtime receives a skill or accesses memory.
 
 Registration does not copy every operational concern into an Agent revision.
 The Agent revision owns behavior and dependency declarations. Separate planes
@@ -208,10 +206,16 @@ A later accepted coordinator policy must choose that transition and record the
 applicable message, attempt, or Session lifecycle fact. Model calls remain
 outside the Session operation ledger.
 
-[ADR#0032](../adr/0032-model-route-and-credential-binding.md) is draft and
-blocked on the unresolved model-ownership contract. No complete model access
-service exists in this checkout, so this is target architecture rather than
-current behavior.
+This managed-model path requires a pinned adapter that can derive verifiable
+exact model selections from native settings and enforce the admitted routes.
+A runtime can have valid settings without exposing that capability, but cannot
+enter an execution mode that requires these guarantees. Hidden model selection
+does not mean model-free execution.
+
+[ADR#0032](../adr/0032-model-route-and-credential-binding.md) and
+[ADR#0062](../adr/0062-runtime-owned-settings-and-platform-declarations.md)
+remain draft. No complete model access service exists in this checkout, so
+this is target architecture rather than current behavior.
 
 ### Gateways depend on, but do not absorb, control-plane services
 
@@ -264,6 +268,8 @@ External MCP client
 Cross-cutting: identity, live policy, SecretStore, audit, and tracing
 ```
 
+The model access branch applies to Sessions admitted to that capability.
+
 ### Session admission freezes one execution
 
 Starting a Session resolves the immutable definition and the live environment
@@ -278,9 +284,9 @@ appropriate product, Agent protocol, or channel edge
   v
 Session admission
   |-- pinned AgentRevision
-  |-- exact Agent implementation version and typed settings
-  |-- exact model selections and admitted provider routes
-  |-- resolved tool, skill, delegate, memory, and workspace inputs
+  |-- exact runtime version and its typed settings
+  |-- managed-model capability: derived selections and admitted routes
+  |-- resolved declared dependencies and workspace inputs
   |-- live policy and authorization checks
   v
 immutable SessionExecutionPlan
@@ -288,7 +294,7 @@ immutable SessionExecutionPlan
   v
 durable Session shell <--> pinned Agent implementation or harness
   |                         |
-  |                         +--> model access service --> model provider
+  |                         +--> managed-model path --> model provider
   |                         +--> operation ledger --> MCP gateway or adapter
   |                                                    |
   |                                                    +--> MCP server or tool
@@ -297,16 +303,18 @@ durable Session shell <--> pinned Agent implementation or harness
 ```
 
 The `SessionExecutionPlan` is the reproducibility boundary. Draft ADRs propose
-that it commit to the exact revision, implementation, models, routes,
-dependencies, and inputs admitted for one Session. It contains references and
-digests, not plaintext secrets or a frozen copy of live grants. Changing a
-behavioral pin starts another Session or an explicit fork rather than mutating
-the running plan.
+that it commit to the exact revision, runtime, settings, platform declarations,
+and resolved inputs admitted for one Session. It records the facts required by
+each admitted capability. It contains references and digests, not plaintext
+secrets or a frozen copy of live grants. Changing a behavioral pin starts
+another Session or an explicit fork rather than mutating the running plan.
 
-[ADR#0032](../adr/0032-model-route-and-credential-binding.md) proposes the
-model-route and credential portion, but it is draft and explicitly blocked on
-the unresolved model-ownership contract. It is a target, not current runtime
-behavior.
+For managed-model access under draft
+[ADR#0032](../adr/0032-model-route-and-credential-binding.md), the plan includes
+the adapter-derived model selections and their admitted routes. Those
+selections are a verified projection of native settings, not a second authored
+configuration. The plan must not claim guarantees that the runtime or its
+adapter cannot establish.
 
 ### The Session shell is generic, the implementation is concrete
 
@@ -373,7 +381,7 @@ The following possibilities should not be read as promised architecture:
   implementation catalogs are useful target capabilities. Their service
   boundaries, storage topology, and ownership contracts require separate
   decisions.
-- **Draft ADR details.** ADRs 0025, 0031, 0032, 0035, and 0043 are proposals.
+- **Draft ADR details.** ADRs 0025, 0031, 0032, 0035, 0043, 0061, and 0062 are proposals.
   Their concepts help describe the target, but acceptance and implementation
   are still required.
 

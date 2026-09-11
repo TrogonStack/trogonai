@@ -1,0 +1,44 @@
+edition = "2024";
+
+package trogonai.agents.agents.v1alpha1;
+
+import "trogonai/agents/agents/v1alpha1/configuration_artifact.proto";
+import "trogonai/agents/agents/v1alpha1/digest.proto";
+
+// Both values identify an immutable catalog release, never a provider route,
+// credential, display name, mutable alias, version range, or automatic choice.
+message ModelVersionRef {
+  string model_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string version = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Platform-managed model access consumes a verified projection of native
+// settings. The platform harness also uses this shape in its native settings;
+// other runtimes need not expose these controls or support this capability.
+message ModelSelection {
+  ModelVersionRef version_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  Digest definition_digest = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Deterministic parameters include native defaults whose meaning is fixed by
+  // the pinned runtime and model contracts. Admission rejects unknown values,
+  // unresolved mutable defaults, and incompatible parameter contracts.
+  NativeConfiguration parameters = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// A nonempty role declared by the exact implementation's managed-model
+// capability. Adding or removing a role requires another revision.
+message ModelRole {
+  string name = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message AuxiliaryModelSelection {
+  ModelRole role = 1 [features.field_presence = LEGACY_REQUIRED];
+  ModelSelection selection = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ModelSelections {
+  ModelSelection primary = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Roles are unique, include every role required by the pinned implementation
+  // and settings, and contain no unsupported role. Platform-managed model
+  // access cannot authorize undeclared auxiliary model calls.
+  repeated AuxiliaryModelSelection auxiliary = 2;
+}
