@@ -381,7 +381,7 @@ The following possibilities should not be read as promised architecture:
   implementation catalogs are useful target capabilities. Their service
   boundaries, storage topology, and ownership contracts require separate
   decisions.
-- **Draft ADR details.** ADRs 0025, 0031, 0032, 0035, 0043, and 0061 are proposals.
+- **Draft ADR details.** ADRs 0025, 0031, 0032, 0035, 0043, and 0062 are proposals.
   Their concepts help describe the target, but acceptance and implementation
   are still required.
 
