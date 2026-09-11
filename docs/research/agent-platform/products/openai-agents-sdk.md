@@ -6,6 +6,14 @@ Evidence from the Agents SDK docs, the `openai-agents-python` source, and the
 Assistants API migration guide. AgentKit/Agent Builder pages were not
 publicly reachable (403); noted under Open questions.
 
+> **Superseded in part, 2026-09-11.** OpenAI announced the
+> [Agents API](./openai-agents-api.md) on 2026-09-10, a managed server-side
+> product with a stored `agent` resource, a durable `session`, and a
+> first-class `turn`. The directional reading below, that OpenAI retired
+> server-side agent resources in favor of code objects, no longer describes
+> the vendor's position: both now ship, and the API docs state no preference
+> between them. The SDK facts recorded here remain accurate for the SDK.
+
 ## The `agent` noun (primary-source quotes)
 
 - SDK docs: an agent is "a large language model (LLM) configured with

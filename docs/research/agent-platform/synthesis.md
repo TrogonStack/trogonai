@@ -27,6 +27,18 @@ ADR is authoritative.
 > Divergences A, C, D, and E, and the conceptual and comparison tables. The
 > revisions are marked inline.
 
+> [OpenAI Agents API](./products/openai-agents-api.md) was researched on
+> 2026-09-11, one day after its public beta announcement. It is the first
+> product in the corpus to *contradict* a recorded finding rather than
+> qualify one: the same vendor whose retreat from server-side agent
+> resources anchors Divergence A now ships a stored `agent` resource with
+> CRUD, a durable `session`, and a first-class `turn`, alongside the SDK,
+> with no statement of which is preferred. Its evidence revises Divergence A
+> and both tables, adds an `environment` axis none of the other dossiers
+> forced, and is read back against our wire contracts in
+> [contract impact](./contract-impact-agents-api.md). The revisions are
+> marked inline.
+
 ## Convergence
 
 **1. The behavioral definition is settled.** Every product that states one
@@ -205,6 +217,20 @@ went the other way historically: it *had* the versioned server-side agent
 resource (Assistants), deprecated it, and decomposed it into config
 (Prompts) + state (Conversations) + loop (SDK).
 
+*Revised after the [Agents API](./products/openai-agents-api.md) (2026-09-10)*:
+the OpenAI extreme above is no longer a direction, it is one of two postures
+the same vendor now holds at once. `POST /v1/agents` stores an agent with an
+id, update, and delete; `POST /v1/agents/sessions` creates a durable session
+that "persists indefinitely"; and a session may instead carry an inline
+`agent` object with no stored record at all. So one vendor spans
+server-side config resource, in-memory code object, *and* an ephemeral
+inline definition, and publishes no guidance on which to choose. The lesson
+for the spectrum is that position on it is a per-product *posture*, not a
+per-vendor conviction, and a platform may need to serve more than one point
+on it simultaneously. The Agents API also forces an axis no other dossier
+did: `environment`, a compute identity with its own lifetime that the
+session outlives.
+
 *Revised after IronClaw*, which adds a new low end to the spectrum: **nothing
 at all**. `AgentId` is declared alongside `TenantId` and `UserId` by the same
 `string_id!` macro with the same scope-id validator, and that is the whole of
@@ -382,6 +408,7 @@ from the scope plus a run profile rather than published from a definition.
 | agent-as-config (versioned record) | OpenComputer, Managed Agents, LangGraph assistant, AgentCore harness |
 | agent-as-file (git-versioned persona) | Claude Code, Vercel eve, OpenClaw workspace |
 | agent-as-code-object | OpenAI Agents SDK, CrewAI, ADK, Vercel AI SDK, Jido struct |
+| agent-as-config *or* inline-per-session (same vendor, same API) | [OpenAI Agents API](./products/openai-agents-api.md) (added post-synthesis) |
 | agent-as-process/actor | Jido AgentServer, Cloudflare durable object |
 | agent-as-deployed-service | Bedrock AgentCore, Vertex Agent Engine |
 | agent-as-network-endpoint | A2A AgentCard |
@@ -407,6 +434,7 @@ makes it legible: the scope answers "whose," the files answer "who."
 | Jido | immutable struct + module (process separate) | dynamic spawn directive, logical refs, orphan policy | compile-time macro; state via cmd/2 | customer BEAM app | no session noun |
 | Claude Code / Agent SDK | markdown file → fresh context window | richest: 5 scopes, depth 5, fork, background | live reload per invocation; no versions | customer process (harness/SDK) | subagent ⊂ session |
 | OpenAI Agents SDK | code object (dataclass) | handoffs (transfer) + agent-as-tool (return) | construction + per-run overrides; no versions | customer process | sessions independent of agents |
+| [OpenAI Agents API](./products/openai-agents-api.md) (added post-synthesis) | stored resource with id and CRUD, or an inline object on the session; no revisions, no pinning | in-session subagents sharing one filesystem and one environment; `max_concurrent_subagents` default 6; own context, no function tools | stored agent at create, inline agent at session create; harness version moves underneath the customer | OpenAI owns the loop; `self_hosted` environment gives the customer compute only | 1:N; session is durable and outlives its environment |
 | Bedrock AgentCore | ARN'd deployed container service | none, inside the container; A2A between peers | immutable versions + endpoint pointers | customer loop, AWS shell | 1:N, session = microVM |
 | LangGraph Platform | assistant = versioned config over a graph | subgraphs + Command handoffs, declared in code | deploy (graph) / versioned (assistant) / per-run | platform executes customer graph | assistant N:M threads |
 | Google ADK + A2A | code object in a tree / endpoint + card | first-class sub_agents tree; A2A = opaque peers | construction / discovery-time (card) | customer (ADK) / managed (Vertex) | runner binds agent↔sessions; task = unit of work |
