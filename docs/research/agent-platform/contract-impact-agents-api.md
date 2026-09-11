@@ -6,10 +6,13 @@ Part of Agent Definition Research. Written 2026-09-11 against the
 This document reads the Agents API back against our shipped wire contracts
 and names where they differ. It is **analysis, not a decision**. Every
 delta below that touches `proto/` is gated on an ADR, because
-`proto/trogonai/session/sessions/v1alpha1` is governed by ADR#0031, #0035,
-and #0040 and its own package preamble. Where a conclusion here differs from
-an accepted record in the [ADR index](../../adr/index.md), the ADR is
-authoritative.
+`proto/trogonai/session/sessions/v1alpha1` is governed by its own package
+preamble and by
+[ADR#0031](../../adr/0031-agent-implementation-and-session-plan.md),
+[ADR#0035](../../adr/0035-session-store-decider-aggregate.md),
+and [ADR#0040](../../adr/0040-contract-field-vocabulary.md).
+Where a conclusion here differs from an accepted record in the
+[ADR index](../../adr/index.md), the ADR is authoritative.
 
 Contracts examined: `proto/trogonai/agents/agents/v1/` (6 files) and
 `proto/trogonai/session/sessions/v1alpha1/` (109 files).
@@ -80,8 +83,10 @@ projection and to a reconciler.
 
 **Recommendation.** Do not add an `Environment` message to v1alpha1 yet. The
 prior question is an ADR question: is compute a facet of the session
-aggregate or its own aggregate with its own stream? ADR#0031 §3, "Keep every
-implementation attached to its platform Session", biases toward facet, but a
+aggregate or its own aggregate with its own stream?
+[ADR#0031](../../adr/0031-agent-implementation-and-session-plan.md) §3,
+"Keep every implementation attached to its platform Session", biases toward
+facet, but a
 reconnectable environment shared across attempts is exactly the shape that
 argues for its own stream. What the ADR should settle:
 
@@ -225,8 +230,10 @@ and is not subject to the required-field window.
 The Agents API maps onto `AgentConfiguration{runtime, Any settings}` without
 strain: `runtime` names the Agents API, `settings` carries `model`,
 `instructions`, `tools`, `multi_agent`, `reasoning`. This is an independent
-confirmation of ADR#0043's central claim, "Even the content half of that
-contract is runtime vocabulary": OpenAI's `instructions` is a bare string,
+confirmation of the central claim in
+[ADR#0043](../../adr/0043-agent-instructions-ownership-and-shape.md),
+"Even the content half of that contract is runtime vocabulary": OpenAI's
+`instructions` is a bare string,
 the Claude Agent SDK's is a four-way union, and both fit under `settings`
 with no platform-level field left empty. A third sample point that would
 have broken a mirrored platform field instead cost nothing.
@@ -242,20 +249,28 @@ new sessions". `AgentProvisioned` mints numbered revisions with a
 model launch. We maintain and continuously improve the harness alongside
 your models." Under our model, a vendor-side harness upgrade changes an
 agent's behavior while `runtime`, `settings`, `revision`, and
-`content_digest` all stay byte-identical. ADR#0025's revision model assumes
-configuration change is the only behavior change, and ADR#0024 pins a
-revision per session on that assumption.
+`content_digest` all stay byte-identical. The revision model in
+[ADR#0025](../../adr/0025-agent-definition-data-ownership.md)
+assumes configuration change is the only behavior change, and
+[ADR#0024](../../adr/0024-agent-platform-stream-topology.md)
+pins a revision per session on that assumption.
 
-This lands directly on two of ADR#0025's stated goals: "Revisions change
-only when agent behavior changes" and "Every execution is traceable to the
+This lands directly on two stated goals of
+[ADR#0025](../../adr/0025-agent-definition-data-ownership.md):
+"Revisions change only when agent behavior changes" and "Every execution is
+traceable to the
 exact revision it ran, by reference and digest, so verification results
 remain meaningful." A vendor-side harness upgrade changes behavior without
 changing a revision, and a verification result recorded against revision N
-stops meaning what it meant. ADR#0024's "Sessions pin the revision they
-started on" pins a number that no longer pins behavior.
+stops meaning what it meant. The rule in
+[ADR#0024](../../adr/0024-agent-platform-stream-topology.md),
+"Sessions pin the revision they started on", pins a number that no longer
+pins behavior.
 
-This is not a proto field. It is a question ADR#0025 does not currently
-answer: **what does a revision mean when the runtime's own behavior is
+This is not a proto field. It is a question
+[ADR#0025](../../adr/0025-agent-definition-data-ownership.md)
+does not currently answer: **what does a revision mean when the runtime's
+own behavior is
 versioned by a third party?** Options range from recording an observed
 runtime build on the session's execution plan, to declaring runtime drift
 out of scope and saying so explicitly. Worth raising as a decision-record
@@ -268,8 +283,10 @@ it says.
   first-class axis (`connection_origin: service` versus `environment`,
   plus `stdio` inside the sandbox) because it determines both reachability
   and which secret store applies, with vaults working only for
-  service-origin connections. Before ADR#0041's canonical MCP bodies meet a
-  BYO-compute story, we should confirm we can express that distinction; we
+  service-origin connections. Before the canonical MCP bodies of
+  [ADR#0041](../../adr/0041-canonical-mcp-jsonrpc-bodies-over-nats.md)
+  meet a BYO-compute story, we should confirm we can express that
+  distinction; we
   are not obviously missing a field, but nothing today records it.
 - **Residency.** "The Agents API currently supports data residency only in
   the United States and does not support Zero Data Retention (ZDR).
@@ -290,4 +307,6 @@ it says.
    aggregate. This is the largest piece of work here.
 4. **D4** as a decision-record entry feeding an ADR, since the honest answer
    may be "child session is our subagent, written down".
-5. **D6** as a decision-record entry against ADR#0025. No proto change.
+5. **D6** as a decision-record entry against
+   [ADR#0025](../../adr/0025-agent-definition-data-ownership.md).
+   No proto change.
