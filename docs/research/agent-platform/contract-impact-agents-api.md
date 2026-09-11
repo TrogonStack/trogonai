@@ -97,14 +97,22 @@ window above.
 
 ## D2. `turn_id` is stamped on conversation events and missing from every event a turn is billed and audited by
 
-**Verified gap.** `turn_id` is present on 24 messages, all of them
-conversation, tool-call, or file-change shaped. It is absent from:
+**Verified gap.** Of the 43 arms of the `SessionEvent` union, 12 carry
+`turn_id` and 31 do not. Most of the 31 are correctly turnless: session
+lifecycle, the `Parent*` lineage family, and `ExecutionAttempt*`, which spans
+turns by construction. The ones that are *not* correctly turnless are:
 
-`ArtifactRecorded`, `Compacted`, `DelegationDispatched`,
-`ExternalDelegationDispatched`, `OperationReserved`,
-`OperationOutcomeRecorded`, `OperationCancellationRequested`,
-`CheckpointProduced`, `ResourceObservation`, `TodoUpdated`,
-`SystemNoticeRecorded`, `RedactionApplied`, `ArtifactErased`.
+`OperationReserved`, `OperationOutcomeRecorded`,
+`OperationCancellationRequested`, `DelegationDispatched`,
+`ExternalDelegationDispatched`, `ArtifactRecorded`, `TodoUpdated`,
+`SystemNoticeRecorded`.
+
+`Compacted` and `CheckpointProduced` are excluded from that set on purpose:
+both already carry `SessionOrdinal` ranges (`covers_from`, `covers_through`),
+which is the correct shape for a fact that spans turns, and an id would be
+the wrong one. `ResourceObservation` is excluded because it is not an event
+at all; it is a value message inside `ToolCallCompleted.observed`, and
+`ToolCallCompleted` already carries `turn_id`.
 
 **Why that is the wrong set to omit.** `user_message_recorded.proto`
 justifies stamping precisely so that "what happened in this turn" is "a
@@ -121,15 +129,22 @@ The Agents API makes exactly these the first-class turn queries:
 `turns.list`, `turn.usage`, `turn.subagent_id`, and "filter session items by
 `turn_id`". That is corroboration, not the reason.
 
-**Recommendation.** Add `turn_id` to the delegation, operation-ledger,
-artifact, compaction, and resource-observation events. Highest value and
-lowest risk delta in this document, and the one most exposed to the window.
-Two carve-outs to decide rather than assume:
+**Recommendation.** Add `turn_id` to the eight events named above, required
+on seven and optional on `SystemNoticeRecorded` (whose existing
+`tool_call_id` is optional for the same reason: a notice can be emitted out
+of band). Highest value and lowest risk delta in this document, and the one
+most exposed to the window.
 
-- `Compacted` and `CheckpointProduced` may legitimately span turns, in which
-  case the right field is a covered range, not an id.
-- `SessionForked`, `SessionRewound`, `ParentLinked` are structural and
-  plausibly turnless; leaving them out should be a written choice.
+The repo's own convention settles the one question this raises. The
+operation-ledger outcome events carry `operation_id` and could reach a turn
+by a single join to `OperationReserved`, so stamping them is denormalization.
+But `ToolCallCompleted` already carries `turn_id` despite being able to join
+to `ToolCallRequested` on `tool_call_id`, so stamp-over-join is the
+established choice and consistency favors stamping all three. One semantic
+must be written into the doc comment: on `OperationOutcomeRecorded`,
+`turn_id` is the turn that *reserved* the operation, not the turn the
+outcome landed in, because `DetachedWork` exists precisely so work can
+outlive its turn.
 
 **Separately, verify one existing inconsistency.** `turn_id` is optional on
 `ApproveToolCall`, `ToolCallApproved`, `DenyToolCall`, and `ToolCallDenied`
