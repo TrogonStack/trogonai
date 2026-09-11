@@ -1,8 +1,8 @@
 edition = "2024";
 
-package trogonai.agents.agents.v1;
+package trogonai.agents.agents.v1alpha1;
 
-import "trogonai/agents/agents/v1/agent_revision.proto";
+import "trogonai/agents/agents/v1alpha1/agent_revision.proto";
 
 // Dispatch authorizes reversion; the registry verifies both references belong
 // to this agent and the target was activated. A revert mints the next highest

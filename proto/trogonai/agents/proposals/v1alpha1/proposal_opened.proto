@@ -1,8 +1,8 @@
 edition = "2024";
 
-package trogonai.agents.proposals.v1;
+package trogonai.agents.proposals.v1alpha1;
 
-import "trogonai/agents/proposals/v1/proposal.proto";
+import "trogonai/agents/proposals/v1alpha1/proposal.proto";
 
 message ProposalOpened {
   string proposal_id = 1 [features.field_presence = LEGACY_REQUIRED];

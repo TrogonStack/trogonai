@@ -1,10 +1,10 @@
 edition = "2024";
 
-package trogonai.agents.proposals.v1;
+package trogonai.agents.proposals.v1alpha1;
 
-import "trogonai/agents/proposals/v1/proposal_opened.proto";
-import "trogonai/agents/proposals/v1/proposal_verdict_recorded.proto";
-import "trogonai/agents/proposals/v1/proposal_withdrawn.proto";
+import "trogonai/agents/proposals/v1alpha1/proposal_opened.proto";
+import "trogonai/agents/proposals/v1alpha1/proposal_verdict_recorded.proto";
+import "trogonai/agents/proposals/v1alpha1/proposal_withdrawn.proto";
 
 // Activation belongs only to the Agent registry; no second closing marker is
 // written here. Projections join the independent histories when needed.

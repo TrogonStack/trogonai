@@ -1,8 +1,8 @@
 edition = "2024";
 
-package trogonai.agents.agents.v1;
+package trogonai.agents.agents.v1alpha1;
 
-import "trogonai/agents/agents/v1/digest.proto";
+import "trogonai/agents/agents/v1alpha1/digest.proto";
 
 // These declarations are revision-owned. Session admission resolves them under
 // live hierarchy and policy, then records exact references and digests. A

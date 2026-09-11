@@ -353,6 +353,11 @@ The following values use the logical names above. They are not proposed
 protobuf field names or an SDK settings contract. This example assumes a
 platform-harness settings type with model and instruction controls, and a pinned
 adapter supporting the shown platform declarations and semantic differences.
+Each `field` path in the canonical typed difference names a difference category
+first and a native field inside the runtime's own settings message second. The
+platform defines the categories; the registered classifier for the pinned
+runtime resolves everything past the first segment, so `runtime_settings` never
+becomes a platform-owned namespace over the settings envelope.
 
 | Record | Concrete binding |
 | --- | --- |
@@ -380,7 +385,7 @@ agent_configurations:
       description: Reviews pull requests for correctness and maintainability.
       runtime:
         implementation_version_ref:
-          kind: managed
+          kind: platform_harness
           version: 3
         implementation_definition_digest: "sha256:0202020202020202020202020202020202020202020202020202020202020202"
       settings:
@@ -438,7 +443,7 @@ agent_configurations:
       description: Reviews pull requests for correctness and maintainability.
       runtime:
         implementation_version_ref:
-          kind: managed
+          kind: platform_harness
           version: 3
         implementation_definition_digest: "sha256:0202020202020202020202020202020202020202020202020202020202020202"
       settings:

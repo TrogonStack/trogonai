@@ -1,11 +1,11 @@
 edition = "2024";
 
-package trogonai.agents.agents.v1;
+package trogonai.agents.agents.v1alpha1;
 
 import "google/protobuf/any.proto";
-import "trogonai/agents/agents/v1/dependencies.proto";
-import "trogonai/agents/agents/v1/implementation.proto";
-import "trogonai/agents/agents/v1/variables.proto";
+import "trogonai/agents/agents/v1alpha1/dependencies.proto";
+import "trogonai/agents/agents/v1alpha1/implementation.proto";
+import "trogonai/agents/agents/v1alpha1/variables.proto";
 
 // AgentConfiguration owns immutable behavior and dependency declarations.
 // Changes, including implementation changes, require a new AgentRevision.

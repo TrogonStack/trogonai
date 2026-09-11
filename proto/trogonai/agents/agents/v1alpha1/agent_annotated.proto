@@ -1,6 +1,6 @@
 edition = "2024";
 
-package trogonai.agents.agents.v1;
+package trogonai.agents.agents.v1alpha1;
 
 // AgentAnnotated replaces the agent's annotations with the set carried here.
 // Annotations are opaque record metadata: they never reach model input,

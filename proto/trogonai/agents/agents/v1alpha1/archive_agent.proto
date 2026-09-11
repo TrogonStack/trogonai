@@ -1,6 +1,6 @@
 edition = "2024";
 
-package trogonai.agents.agents.v1;
+package trogonai.agents.agents.v1alpha1;
 
 // Archival is permanent and blocks new work without interrupting pinned sessions.
 message ArchiveAgent {

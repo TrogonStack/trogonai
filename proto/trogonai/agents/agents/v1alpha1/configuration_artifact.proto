@@ -1,8 +1,8 @@
 edition = "2024";
 
-package trogonai.agents.agents.v1;
+package trogonai.agents.agents.v1alpha1;
 
-import "trogonai/agents/agents/v1/digest.proto";
+import "trogonai/agents/agents/v1alpha1/digest.proto";
 
 // The exact contract artifact commits to its protobuf descriptor closure and
 // validation and interpretation semantics. Admission requires this registered

@@ -1,9 +1,9 @@
 edition = "2024";
 
-package trogonai.agents.agents.v1;
+package trogonai.agents.agents.v1alpha1;
 
-import "trogonai/agents/agents/v1/configuration_artifact.proto";
-import "trogonai/agents/agents/v1/identity.proto";
+import "trogonai/agents/agents/v1alpha1/configuration_artifact.proto";
+import "trogonai/agents/agents/v1alpha1/identity.proto";
 
 // AgentProvisioned is the Agent registry stream's genesis event, minting
 // revision 1. No limits, no rubrics, no grants live here (design Q15/Q16);

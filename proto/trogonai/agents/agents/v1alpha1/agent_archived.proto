@@ -1,6 +1,6 @@
 edition = "2024";
 
-package trogonai.agents.agents.v1;
+package trogonai.agents.agents.v1alpha1;
 
 // AgentArchived is the Agent registry stream's terminal event. An archived
 // agent accepts no further revisions or annotation changes, and

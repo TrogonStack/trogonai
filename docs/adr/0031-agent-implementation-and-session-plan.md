@@ -154,9 +154,11 @@ or launcher version is insufficient.
 The runtime binding inside AgentConfiguration selects one exact version. Its
 single settings envelope contains the complete message accepted by that
 version, including native models, parameters, instructions, and context
-controls when supported. The AgentConfiguration digest commits to the binding,
-settings type and admitted bytes, and platform-owned declarations. AgentRevision
-binds the same configuration and digest after activation.
+controls when supported. The AgentConfiguration digest is taken over the exact
+admitted configuration bytes, which carry the binding, the settings type and its
+payload, and the platform-owned declarations. The digest is never a field of the
+bytes it covers. AgentRevision binds those same bytes and that digest after
+activation, and owns the durable record of both.
 
 ModelSelection identifies an exact versioned model catalog record, not a
 display name, mutable provider alias, auto value, or provider credential. Its
@@ -301,7 +303,9 @@ declared resolution rules. Admission never falls back to another implementation
 release, model, provider account, credential, or extension.
 
 Across admission, Ready, recovery, dependency revalidation, and compaction, the
-minimum failure categories are:
+minimum failure categories are the following. These are internal category names
+for this ADR, not wire values; the boundary error contract that maps them to
+reported reasons is not decided here.
 
 - ImplementationKindMismatch;
 - ImplementationArtifactMismatch;

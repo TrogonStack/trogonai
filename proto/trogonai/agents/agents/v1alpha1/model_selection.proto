@@ -1,9 +1,9 @@
 edition = "2024";
 
-package trogonai.agents.agents.v1;
+package trogonai.agents.agents.v1alpha1;
 
-import "trogonai/agents/agents/v1/configuration_artifact.proto";
-import "trogonai/agents/agents/v1/digest.proto";
+import "trogonai/agents/agents/v1alpha1/configuration_artifact.proto";
+import "trogonai/agents/agents/v1alpha1/digest.proto";
 
 // Both values identify an immutable catalog release, never a provider route,
 // credential, display name, mutable alias, version range, or automatic choice.

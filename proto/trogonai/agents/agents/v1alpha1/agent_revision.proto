@@ -1,9 +1,9 @@
 edition = "2024";
 
-package trogonai.agents.agents.v1;
+package trogonai.agents.agents.v1alpha1;
 
 import "google/protobuf/empty.proto";
-import "trogonai/agents/agents/v1/configuration_artifact.proto";
+import "trogonai/agents/agents/v1alpha1/configuration_artifact.proto";
 
 // Configuration identity is the exact admitted artifact, not a reconstruction
 // from decoded fields. The revision number and provenance are outside its digest.

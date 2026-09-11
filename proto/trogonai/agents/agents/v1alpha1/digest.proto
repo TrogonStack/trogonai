@@ -1,6 +1,6 @@
 edition = "2024";
 
-package trogonai.agents.agents.v1;
+package trogonai.agents.agents.v1alpha1;
 
 // Digest identifies exact immutable bytes, never a decoded message re-encoding.
 // It is stored beside the bytes it commits to and verified before decoding.

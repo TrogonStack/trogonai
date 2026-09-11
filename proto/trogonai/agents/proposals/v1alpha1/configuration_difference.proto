@@ -1,14 +1,14 @@
 edition = "2024";
 
-package trogonai.agents.proposals.v1;
+package trogonai.agents.proposals.v1alpha1;
 
 import "google/protobuf/any.proto";
 import "google/protobuf/empty.proto";
-import "trogonai/agents/agents/v1/configuration_artifact.proto";
-import "trogonai/agents/agents/v1/dependencies.proto";
-import "trogonai/agents/agents/v1/digest.proto";
-import "trogonai/agents/agents/v1/implementation.proto";
-import "trogonai/agents/agents/v1/variables.proto";
+import "trogonai/agents/agents/v1alpha1/configuration_artifact.proto";
+import "trogonai/agents/agents/v1alpha1/dependencies.proto";
+import "trogonai/agents/agents/v1alpha1/digest.proto";
+import "trogonai/agents/agents/v1alpha1/implementation.proto";
+import "trogonai/agents/agents/v1alpha1/variables.proto";
 
 enum AgentChangeClass {
   AGENT_CHANGE_CLASS_UNSPECIFIED = 0;
@@ -25,9 +25,9 @@ enum AgentChangeClass {
 // Encoding-only changes are not differences. Fully validated native changes with
 // no registered semantic classifier use the conservative charter case below.
 message VerifiedConfigurationDifference {
-  trogonai.agents.agents.v1.AgentConfigurationRef base_configuration = 1 [features.field_presence = LEGACY_REQUIRED];
-  trogonai.agents.agents.v1.AgentConfigurationRef candidate_configuration = 2 [features.field_presence = LEGACY_REQUIRED];
-  trogonai.agents.agents.v1.ConfigurationContractRef differencer_contract = 3 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.agents.v1alpha1.AgentConfigurationRef base_configuration = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.agents.v1alpha1.AgentConfigurationRef candidate_configuration = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.agents.v1alpha1.ConfigurationContractRef differencer_contract = 3 [features.field_presence = LEGACY_REQUIRED];
   // Nonempty, complete, and one entry per changed category; duplicates reject.
   repeated ConfigurationChange changes = 4;
   // Charter dominates learned-layer. Unknown enum values and UNSPECIFIED reject;
@@ -50,8 +50,8 @@ message ConfigurationChange {
 // Runtime identity, artifact, or settings-contract changes are charter. Settings
 // payload changes have their own entry, including when the runtime also changes.
 message RuntimeDifference {
-  trogonai.agents.agents.v1.AgentImplementation before = 1 [features.field_presence = LEGACY_REQUIRED];
-  trogonai.agents.agents.v1.AgentImplementation after = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.agents.v1alpha1.AgentImplementation before = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.agents.v1alpha1.AgentImplementation after = 2 [features.field_presence = LEGACY_REQUIRED];
 }
 
 // Both snapshots equal the settings envelopes in the verified configurations.
@@ -79,28 +79,28 @@ message RuntimeSettingsDifference {
 // Native model, role, and parameter changes are charter; instruction-only learned
 // changes require proof under unchanged runtime and settings contracts.
 message RuntimeSettingsGovernanceResponse {
-  trogonai.agents.agents.v1.ConfigurationContractRef base_settings_contract = 1 [features.field_presence = LEGACY_REQUIRED];
-  trogonai.agents.agents.v1.Digest base_settings_digest = 2 [features.field_presence = LEGACY_REQUIRED];
-  trogonai.agents.agents.v1.ConfigurationContractRef candidate_settings_contract = 3 [features.field_presence = LEGACY_REQUIRED];
-  trogonai.agents.agents.v1.Digest candidate_settings_digest = 4 [features.field_presence = LEGACY_REQUIRED];
-  trogonai.agents.agents.v1.ConfigurationContractRef governance_contract = 5 [features.field_presence = LEGACY_REQUIRED];
-  trogonai.agents.agents.v1.NativeConfiguration difference = 6 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.agents.v1alpha1.ConfigurationContractRef base_settings_contract = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.agents.v1alpha1.Digest base_settings_digest = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.agents.v1alpha1.ConfigurationContractRef candidate_settings_contract = 3 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.agents.v1alpha1.Digest candidate_settings_digest = 4 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.agents.v1alpha1.ConfigurationContractRef governance_contract = 5 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.agents.v1alpha1.NativeConfiguration difference = 6 [features.field_presence = LEGACY_REQUIRED];
   AgentChangeClass derived_change_class = 7 [features.field_presence = LEGACY_REQUIRED];
 }
 
 // Caller-contract changes are charter, including presence, type, and requiredness
 // changes. Snapshot absence must match the corresponding configuration exactly.
 message VariableSchemaDifference {
-  trogonai.agents.agents.v1.VariableSchema before = 1;
-  trogonai.agents.agents.v1.VariableSchema after = 2;
+  trogonai.agents.agents.v1alpha1.VariableSchema before = 1;
+  trogonai.agents.agents.v1alpha1.VariableSchema after = 2;
 }
 
 // Required declaration changes are charter; optional declaration and skill-pin
 // changes are learned-layer. Requirement transitions therefore remain charter.
 // Snapshot absence must match the corresponding configuration exactly.
 message DependenciesDifference {
-  trogonai.agents.agents.v1.AgentDependencies before = 1;
-  trogonai.agents.agents.v1.AgentDependencies after = 2;
+  trogonai.agents.agents.v1alpha1.AgentDependencies before = 1;
+  trogonai.agents.agents.v1alpha1.AgentDependencies after = 2;
 }
 
 // Grouping-label changes, including family, are charter. The pinned differencer
