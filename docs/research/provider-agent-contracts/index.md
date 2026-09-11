@@ -51,8 +51,18 @@ The four dossiers are complete for the evidence snapshot dated 2026-09-11. The
 combined proposal is a draft proposal, not a decision: it closes some questions
 that were open (egress substitution now has four independent implementations,
 so it is no longer a live design choice) and opens others that each want their
-own record. Nothing in this corpus has been accepted into an ADR yet, and the
-next free ADR number at the time of writing is 0063.
+own record.
+
+One finding has since been recorded. Draft
+[ADR#0063](../../adr/0063-agent-connection-declarations.md) takes the
+declaration half of the proposal's §6.1 and adds `ConnectionDeclaration` to
+`AgentDependencies`, citing this corpus for the two findings that fix its
+shape: that material rotates while structural identity does not, which is why
+that declaration is the one dependency in the contract that pins no version,
+and that the secret never enters the agent process. Everything else here
+remains a draft proposal rather than a decision, and the proposal's
+[sequencing](./combined-schema-proposal.md#_8-sequencing) records what the
+first pass through the contract changed about the order of the rest.
 
 The headline findings, in the order they carry weight. Each is scoped to the
 providers whose documentation supports it, because the weight of a finding in
