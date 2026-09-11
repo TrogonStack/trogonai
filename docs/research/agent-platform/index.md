@@ -30,10 +30,18 @@ and evidence rules behind each product dossier remain reproducible.
 - [LangGraph Platform](./products/langgraph-platform.md)
 - [LangSmith Managed Deep Agents](./products/managed-deep-agents.md)
 - [Netclaw](./products/netclaw.md)
+- [OpenAI Agents API](./products/openai-agents-api.md)
 - [OpenAI Agents SDK](./products/openai-agents-sdk.md)
 - [OpenClaw](./products/openclaw.md)
 - [OpenComputer](./products/opencomputer.md)
 - [Vercel](./products/vercel.md)
+
+## Contract impact
+
+- [Contract impact: OpenAI Agents API](./contract-impact-agents-api.md),
+  the dossier findings read back against `proto/trogonai/agents/agents/v1`
+  and `proto/trogonai/session/sessions/v1alpha1`. Analysis only; every
+  proposed change is gated on an ADR.
 
 ## Synthesis
 
