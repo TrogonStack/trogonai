@@ -18,4 +18,5 @@ message UpdateTodo {
   // Monotonic per session from the single logical writer, the active
   // attempt's loop.
   uint64 revision = 3 [features.field_presence = LEGACY_REQUIRED];
+  string turn_id = 4 [features.field_presence = LEGACY_REQUIRED];
 }

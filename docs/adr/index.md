@@ -66,3 +66,4 @@ future implementation work.
 - [ADR#0058: Decider Module Distribution (Draft)](./0058-decider-module-distribution.md)
 - [ADR#0059: Stream Incarnation Fencing by Subject Isolation and Sealing (Draft)](./0059-session-stream-incarnation-fencing.md)
 - [ADR#0060: The Session Read Contract Is a Query Proto, Not the Projection Value (Draft)](./0060-session-query-contract-separate-from-projection.md)
+- [ADR#0061: Turn Identity Belongs on Every Turn-Scoped Session Event, Not Only the Conversation and Tool Ones (Draft)](./0061-session-turn-id-on-turn-scoped-events.md)

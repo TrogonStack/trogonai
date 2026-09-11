@@ -9,4 +9,7 @@ import "trogonai/session/sessions/v1alpha1/artifact.proto";
 message ArtifactRecorded {
   string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
   ArtifactMetadata artifact = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Turn that produced the artifact, when a turn did; empty when the
+  // producer holds no turn context (see UserMessageRecorded.turn_id).
+  string turn_id = 3;
 }

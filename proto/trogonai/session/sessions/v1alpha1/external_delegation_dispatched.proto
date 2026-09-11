@@ -28,4 +28,6 @@ message ExternalDelegationDispatched {
   // meaningful here at the dispatch event, not on the eventual outcome (the
   // outcome joins by operation_id).
   string correlation_id = 7 [features.field_presence = LEGACY_REQUIRED];
+  // Turn this dispatch belongs to (see UserMessageRecorded.turn_id).
+  string turn_id = 8 [features.field_presence = LEGACY_REQUIRED];
 }

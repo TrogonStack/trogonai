@@ -14,4 +14,7 @@ message OperationCancellationRequested {
   string operation_id = 2 [features.field_presence = LEGACY_REQUIRED];
   // Command-time reason for the cancellation request; empty when none.
   string reason = 3;
+  // Turn the cancelled operation belongs to, copied from its reservation
+  // (see UserMessageRecorded.turn_id).
+  string turn_id = 4 [features.field_presence = LEGACY_REQUIRED];
 }
