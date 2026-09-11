@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
     paths:
       - 'tsworkspace/**'
       - '.mise.toml'
@@ -37,6 +37,10 @@ jobs:
           node-version: 26
           cache: pnpm
           cache-dependency-path: tsworkspace/pnpm-lock.yaml
+
+      - name: Waive the minimum release age policy
+        if: contains(github.event.pull_request.labels.*.name, 'pnpm:skip:release-age')
+        run: echo 'PNPM_CONFIG_MINIMUM_RELEASE_AGE=0' >> "$GITHUB_ENV"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
