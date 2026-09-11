@@ -36,17 +36,14 @@ message VerifiedConfigurationDifference {
 }
 
 message ConfigurationChange {
-  reserved 3, 8;
-  reserved models, platform_harness_settings, implementation;
-
   // Exactly one known arm is required; unknown or unset changes reject.
   oneof change {
     RuntimeDifference runtime = 1;
     RuntimeSettingsDifference runtime_settings = 2;
-    VariableSchemaDifference variables_schema = 4;
-    DependenciesDifference dependencies = 5;
-    SelectableLabelsDifference selectable_labels = 6;
-    DescriptionDifference description = 7;
+    VariableSchemaDifference variables_schema = 3;
+    DependenciesDifference dependencies = 4;
+    SelectableLabelsDifference selectable_labels = 5;
+    DescriptionDifference description = 6;
   }
 }
 

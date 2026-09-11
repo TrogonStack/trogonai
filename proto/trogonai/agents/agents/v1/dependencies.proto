@@ -13,7 +13,7 @@ import "trogonai/agents/agents/v1/digest.proto";
 // Invalid declarations or mismatched pin digests fail admission even when the
 // dependency is optional; only an unavailable eligible dependency may be omitted.
 message AgentDependencies {
-  repeated ExactSkillPin skills = 1;
+  repeated SkillDeclaration skills = 1;
   repeated ToolDeclaration tools = 2;
   repeated DelegateDeclaration delegates = 3;
   repeated MemoryDeclaration memories = 4;
@@ -29,8 +29,9 @@ enum DependencyRequirement {
   DEPENDENCY_REQUIREMENT_OPTIONAL = 2;
 }
 
-// Every skill pin is required; Session admission cannot upgrade its content.
-message ExactSkillPin {
+// Every skill declaration is required; Session admission cannot upgrade its
+// content.
+message SkillDeclaration {
   string binding_name = 1 [features.field_presence = LEGACY_REQUIRED];
   SkillVersionRef version_ref = 2 [features.field_presence = LEGACY_REQUIRED];
   Digest content_digest = 3 [features.field_presence = LEGACY_REQUIRED];

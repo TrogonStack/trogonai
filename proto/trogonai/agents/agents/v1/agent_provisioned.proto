@@ -9,9 +9,6 @@ import "trogonai/agents/agents/v1/identity.proto";
 // revision 1. No limits, no rubrics, no grants live here (design Q15/Q16);
 // those are stances on their own planes.
 message AgentProvisioned {
-  reserved 4, 6;
-  reserved configuration, content_digest;
-
   // Must be the did:key derived from public_identity_key.
   string agent_id = 1 [features.field_presence = LEGACY_REQUIRED];
   // Immutable registry metadata, excluded from behavior and configuration identity.
@@ -26,11 +23,11 @@ message AgentProvisioned {
   // Revision minted by this genesis event, recorded explicitly so no consumer
   // derives it from convention. Always 1; the decider rejects any other value
   // at write time.
-  uint64 revision = 5 [features.field_presence = LEGACY_REQUIRED];
+  uint64 revision = 4 [features.field_presence = LEGACY_REQUIRED];
   // Opaque record metadata present from genesis. Excluded from
   // configuration identity and from model input; later changes arrive as
   // AgentAnnotated and mint no revision.
-  map<string, string> annotations = 7;
-  AgentConfigurationRef configuration_ref = 8 [features.field_presence = LEGACY_REQUIRED];
-  Ed25519PublicJwk public_identity_key = 9 [features.field_presence = LEGACY_REQUIRED];
+  map<string, string> annotations = 5;
+  AgentConfigurationRef configuration_ref = 6 [features.field_presence = LEGACY_REQUIRED];
+  Ed25519PublicJwk public_identity_key = 7 [features.field_presence = LEGACY_REQUIRED];
 }

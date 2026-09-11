@@ -23,11 +23,11 @@ message AgentConfiguration {
   string description = 4 [features.field_presence = LEGACY_REQUIRED];
   // Absent or empty declarations impose no integration requirement. Every
   // declared integration requires support from the pinned runtime or adapter.
-  AgentDependencies dependencies = 7;
+  AgentDependencies dependencies = 5;
   // This is the platform-supplied caller interface when declared. Native-only
   // variables remain in settings; concrete platform bindings belong to Session.
-  VariableSchema variables_schema = 8;
+  VariableSchema variables_schema = 6;
   // Selection consumes the labels of the pinned revision. Annotation changes
   // cannot change this set or which declarations a session starts with.
-  map<string, string> selectable_labels = 9;
+  map<string, string> selectable_labels = 7;
 }
