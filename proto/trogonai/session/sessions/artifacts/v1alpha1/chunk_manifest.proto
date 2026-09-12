@@ -2,11 +2,19 @@ edition = "2024";
 
 package trogonai.session.sessions.artifacts.v1alpha1;
 
+import "buf/validate/validate.proto";
+
 // GetChunkManifestRequest asks for the per-chunk digests that make ranges of an
 // artifact checkable.
 message GetChunkManifestRequest {
-  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
-  string artifact_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string artifact_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
 }
 
 // GetChunkManifestResponse carries the ordered chunk digests.
@@ -18,7 +26,10 @@ message GetChunkManifestRequest {
 // not supply. A caller that skips that comparison has verified nothing and
 // should say so rather than report a verified read.
 message GetChunkManifestResponse {
-  string artifact_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string artifact_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // Hash used for each chunk digest and for the digest over their
   // concatenation, for example "sha256".
   string algorithm = 2 [features.field_presence = LEGACY_REQUIRED];

@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "trogonai/session/sessions/v1alpha1/artifact.proto";
 import "trogonai/session/sessions/v1alpha1/copy_source.proto";
 import "trogonai/session/sessions/v1alpha1/diff_summary.proto";
@@ -16,7 +17,16 @@ import "trogonai/session/sessions/v1alpha1/file_change.proto";
 // resource, which is the signal that something outside the session moved
 // underneath it, and which must not be attributed to the session's own work.
 message FileChanged {
-  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  option (buf.validate.message).cel = {
+    id: "file_changed.copied_from_requires_copy_kind"
+    message: "copied_from may be set only when change_kind is FILE_CHANGE_KIND_COPIED"
+    expression: "!has(this.copied_from) || this.change_kind == trogonai.session.sessions.v1alpha1.FileChangeKind.FILE_CHANGE_KIND_COPIED"
+  };
+
+  string session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // Workspace-relative path to the changed file (forward slashes, no leading
   // slash). A projection joins this to ResourceObservation.uri by resolving
   // workspace.uri + "/" + path against the session's WorkspaceRef.uri
@@ -41,9 +51,15 @@ message FileChanged {
   // it, "which call touched this file" is only answerable by correlating
   // adjacency in fold order, which concurrent Any-precondition appends make
   // unsound.
-  string tool_call_id = 7 [features.field_presence = LEGACY_REQUIRED];
+  string tool_call_id = 7 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // Turn the causing call belongs to (see UserMessageRecorded.turn_id).
-  string turn_id = 8 [features.field_presence = LEGACY_REQUIRED];
+  string turn_id = 8 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // Precomputed line counts and rendered diff; unset when no diff was computed.
   DiffSummary diff = 9;
   // Where the content came from, set only for FILE_CHANGE_KIND_COPIED.

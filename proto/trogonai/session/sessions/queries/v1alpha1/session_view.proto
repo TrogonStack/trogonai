@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.queries.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 
 // Read-model value types for the Session query contract.
@@ -40,7 +41,18 @@ enum TerminalReason {
 // It deliberately excludes anything requiring a per-session fan-out to compute,
 // because a list query that costs one read per row stops being a list query.
 message SessionSummary {
-  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  option (buf.validate.message).cel = {
+    id: "session_summary.terminal_reason_unset_while_active"
+    message: "terminal_reason must be unset while the session is active"
+    expression:
+      "this.lifecycle != trogonai.session.sessions.queries.v1alpha1.SessionLifecycle.SESSION_LIFECYCLE_ACTIVE "
+      "|| !has(this.terminal_reason)"
+  };
+
+  string session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   SessionLifecycle lifecycle = 2 [features.field_presence = LEGACY_REQUIRED];
   // Unset while the session is active.
   TerminalReason terminal_reason = 3;
@@ -48,9 +60,15 @@ message SessionSummary {
   // there is nothing to show it holds a server-chosen fallback rather than an
   // empty string, so a picker never has to invent one and two clients never
   // invent different ones.
-  string title = 4 [features.field_presence = LEGACY_REQUIRED];
+  string title = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   TitleSource title_source = 5 [features.field_presence = LEGACY_REQUIRED];
-  string workspace_id = 6 [features.field_presence = LEGACY_REQUIRED];
+  string workspace_id = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   bool archived = 7 [features.field_presence = LEGACY_REQUIRED];
   // Effective history length in SessionOrdinals, after rewind masking. A caller
   // must not treat this as a count of decodable history items: redaction can
@@ -81,6 +99,15 @@ message SessionSummary {
 // against. A cached preview whose binding fails those two must be discarded, not
 // shown as merely older.
 message SessionPreview {
+  option (buf.validate.message).cel = {
+    id: "session_preview.text_empty_unless_available"
+    message: "text must be empty for every availability other than SESSION_PREVIEW_AVAILABILITY_AVAILABLE"
+    expression:
+      "this.availability == "
+      "trogonai.session.sessions.queries.v1alpha1.SessionPreviewAvailability.SESSION_PREVIEW_AVAILABILITY_AVAILABLE "
+      "|| this.text == ''"
+  };
+
   // The excerpt, truncated at a server-chosen bound. Empty for every
   // availability other than SESSION_PREVIEW_AVAILABILITY_AVAILABLE.
   string text = 1 [features.field_presence = LEGACY_REQUIRED];
@@ -122,7 +149,10 @@ enum SessionPreviewAvailability {
 // the source: it has a different id, its ordinals are its own, and a partial
 // recovery is missing content the original had.
 message RecoveryProvenanceView {
-  string source_session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string source_session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   RecoveryCompletenessView completeness = 2 [features.field_presence = LEGACY_REQUIRED];
   // How many source items the salvage could not carry. The enumeration is an
   // operator-side record and is deliberately not on the read contract: a client
@@ -252,7 +282,10 @@ message ObservedIntegrityView {
 
 // ForkOriginView names the session this one branched from.
 message ForkOriginView {
-  string source_session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string source_session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // The source ordinal this session's inherited context ends at.
   uint64 context_prefix_boundary = 2 [features.field_presence = LEGACY_REQUIRED];
 }
@@ -260,7 +293,10 @@ message ForkOriginView {
 // ParentView names the session that dispatched this one, and whether that
 // lineage still holds.
 message ParentView {
-  string parent_session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string parent_session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // The parent ended and this session observed it.
   bool parent_terminated = 2 [features.field_presence = LEGACY_REQUIRED];
   // The parent rewound past the dispatch: the inherited context no longer
@@ -272,7 +308,25 @@ message ParentView {
 
 // DelegationView is one dispatched child or external delegate.
 message DelegationView {
-  string operation_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  option (buf.validate.message).cel = {
+    id: "delegation_view.child_session_id_set_for_child_session"
+    message: "child_session_id must be set for DELEGATION_KIND_VIEW_CHILD_SESSION"
+    expression:
+      "this.kind != trogonai.session.sessions.queries.v1alpha1.DelegationKindView.DELEGATION_KIND_VIEW_CHILD_SESSION "
+      "|| has(this.child_session_id)"
+  };
+  option (buf.validate.message).cel = {
+    id: "delegation_view.delegate_reference_set_for_external"
+    message: "delegate_reference must be set for DELEGATION_KIND_VIEW_EXTERNAL"
+    expression:
+      "this.kind != trogonai.session.sessions.queries.v1alpha1.DelegationKindView.DELEGATION_KIND_VIEW_EXTERNAL "
+      "|| has(this.delegate_reference)"
+  };
+
+  string operation_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   DelegationKindView kind = 2 [features.field_presence = LEGACY_REQUIRED];
   // Set for DELEGATION_KIND_VIEW_CHILD_SESSION.
   string child_session_id = 3;

@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "trogonai/session/sessions/v1alpha1/token_usage.proto";
 
 // AssistantMessageFailed records that an assistant turn did not complete
@@ -19,8 +20,14 @@ import "trogonai/session/sessions/v1alpha1/token_usage.proto";
 // the start is validated. It is a commuting happened-fact
 // (WRITE_PRECONDITION = Any, ADR#0035 facet 2).
 message AssistantMessageFailed {
-  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
-  string message_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string message_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   AssistantMessageFailureReason reason = 3 [features.field_presence = LEGACY_REQUIRED];
   // Human-readable detail; empty when none.
   string detail = 4;
@@ -29,7 +36,10 @@ message AssistantMessageFailed {
   // consumed by a turn that failed mid-generation.
   TokenUsage usage = 5;
   // Turn this generation belongs to (see UserMessageRecorded.turn_id).
-  string turn_id = 6 [features.field_presence = LEGACY_REQUIRED];
+  string turn_id = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
 }
 
 // AssistantMessageFailureReason is why an assistant turn did not complete.

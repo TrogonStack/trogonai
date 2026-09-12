@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 import "trogonai/session/sessions/v1alpha1/content_chunks.proto";
 import "trogonai/session/sessions/v1alpha1/digest.proto";
@@ -14,7 +15,10 @@ import "trogonai/session/sessions/v1alpha1/digest.proto";
 // declared_mime (D11).
 message ArtifactRef {
   // Stable artifact id within the session.
-  string artifact_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string artifact_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // Content digest over the artifact bytes; the claim-check key (ADR#0035 facet 3).
   // Uses the shared Digest type for consistency with every other digest in the
   // package (algorithm is typically "sha256").
@@ -46,7 +50,10 @@ message ArtifactRef {
 // "application/octet-stream" (D11).
 message ArtifactMetadata {
   // Stable artifact id within the session.
-  string artifact_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string artifact_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // Short human-readable preview; empty when none was produced.
   string preview = 3;
   // True when preview is a truncation of the full content.

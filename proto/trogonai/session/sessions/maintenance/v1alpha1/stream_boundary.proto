@@ -2,6 +2,8 @@ edition = "2024";
 
 package trogonai.session.sessions.maintenance.v1alpha1;
 
+import "buf/validate/validate.proto";
+
 // Value types shared by the Session maintenance workflows: migration and
 // salvage.
 //
@@ -17,10 +19,16 @@ package trogonai.session.sessions.maintenance.v1alpha1;
 // Both workflows pin against one, and every indeterminate outcome is ultimately
 // the statement that an observed boundary did not match an expected one.
 message StreamBoundary {
-  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // The 1-indexed SessionOrdinal of the last event in the cut. Fold-derived,
   // never a JetStream sequence, so it survives restore and relocation.
-  uint64 ordinal = 2 [features.field_presence = LEGACY_REQUIRED];
+  uint64 ordinal = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
   ContentDigest content_digest = 3 [features.field_presence = LEGACY_REQUIRED];
   // Which incarnation of the physical stream this cut was taken from: the
   // subject token that isolates one incarnation's subject space from the next,

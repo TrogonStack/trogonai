@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.usage.settlement.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 
 // The settlement ledger a downstream billing consumer keeps for itself.
@@ -27,7 +28,10 @@ import "google/protobuf/timestamp.proto";
 // specific ordinal recorded a specific quantity cannot change, which is what
 // makes it usable as an idempotency basis.
 message UsageRef {
-  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // The SessionOrdinal that recorded the consumption.
   uint64 ordinal = 2 [features.field_presence = LEGACY_REQUIRED];
   // Which meter this is: a model's input tokens, its output tokens, a tool's
@@ -37,7 +41,10 @@ message UsageRef {
   // Who is charged. Carried on the record rather than resolved at settlement
   // time, because an account can be reassigned between consumption and billing
   // and the charge belongs to whoever owned the work when it ran.
-  string account_id = 5 [features.field_presence = LEGACY_REQUIRED];
+  string account_id = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
 }
 
 // SettlementRecord is one usage fact and everything known about charging for it.
@@ -47,6 +54,20 @@ message UsageRef {
 // describe: if the process dies between publishing and recording, the only
 // evidence that a charge might exist is gone.
 message SettlementRecord {
+  option (buf.validate.message).cel = {
+    id: "settlement_record.resolved_at_matches_terminal_state"
+    message: "resolved_at is set exactly when state has reached a terminal state, and unset while unresolved"
+    expression:
+      "has(this.resolved_at) == (this.state == trogonai.usage.settlement.v1alpha1.SettlementState.SETTLEMENT_STATE_SETTLED || "
+      "this.state == trogonai.usage.settlement.v1alpha1.SettlementState.SETTLEMENT_STATE_REJECTED || "
+      "this.state == trogonai.usage.settlement.v1alpha1.SettlementState.SETTLEMENT_STATE_ABANDONED)"
+  };
+  option (buf.validate.message).cel = {
+    id: "settlement_record.last_attempt_at_unset_before_first_attempt"
+    message: "last_attempt_at is unset before the first attempt"
+    expression: "this.state != trogonai.usage.settlement.v1alpha1.SettlementState.SETTLEMENT_STATE_INTENDED || !has(this.last_attempt_at)"
+  };
+
   // Idempotency key and primary identity, derived deterministically from
   // `usage`.
   //
@@ -56,7 +77,10 @@ message SettlementRecord {
   // so the provider sees the same request it may already have processed. A key
   // minted per attempt would make every retry a new charge, and the retry path
   // is exactly the path a lost acknowledgment forces a consumer down.
-  string settlement_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string settlement_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   UsageRef usage = 2 [features.field_presence = LEGACY_REQUIRED];
   SettlementState state = 3 [features.field_presence = LEGACY_REQUIRED];
   // Publish attempts made. Counts attempts, not charges: the whole point of a
@@ -124,7 +148,10 @@ message ProviderReceipt {
   // The provider's identifier for the charge. Kept so a later reconciliation
   // can ask about this charge specifically rather than searching by amount and
   // time, which is how a reconciliation matches the wrong one.
-  string provider_charge_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string provider_charge_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   google.protobuf.Timestamp acknowledged_at = 2 [features.field_presence = LEGACY_REQUIRED];
   // True when the provider reported this as a repeat of a charge it had already
   // processed under the same idempotency key.
@@ -138,7 +165,16 @@ message ProviderReceipt {
 
 // SettlementIncident is a settlement that needed a decision.
 message SettlementIncident {
-  string incident_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  option (buf.validate.message).cel = {
+    id: "settlement_incident.resolved_at_unset_while_open"
+    message: "resolved_at is unset while the incident is still open"
+    expression: "this.resolution != trogonai.usage.settlement.v1alpha1.IncidentResolution.INCIDENT_RESOLUTION_UNSPECIFIED || !has(this.resolved_at)"
+  };
+
+  string incident_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   IncidentKind kind = 2 [features.field_presence = LEGACY_REQUIRED];
   google.protobuf.Timestamp opened_at = 3 [features.field_presence = LEGACY_REQUIRED];
   // Unset while open.

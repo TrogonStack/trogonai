@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.doctor.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "trogonai/session/sessions/doctor/v1alpha1/orphan.proto";
@@ -22,7 +23,10 @@ message Finding {
   // an id that changed with every observed byte would make repairs impossible on
   // a busy session. Staleness is caught by re-verifying the finding at repair
   // time, not by comparing ids.
-  string finding_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string finding_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   FindingKind kind = 2 [features.field_presence = LEGACY_REQUIRED];
   FindingSeverity severity = 3 [features.field_presence = LEGACY_REQUIRED];
   SubjectRef subject = 4 [features.field_presence = LEGACY_REQUIRED];
@@ -143,7 +147,10 @@ enum FindingKind {
 // `kind` is what gives `entity_id` meaning, and the pair travels together for
 // that reason: an id with no idea what it identifies is not a reference.
 message SubjectRef {
-  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   SubjectKind kind = 2 [features.field_presence = LEGACY_REQUIRED];
   // Interpreted according to `kind`: an artifact id, an operation id, a tool
   // execution id, a projection name. Unset when `kind` is STREAM, which needs
@@ -181,7 +188,10 @@ message EventDecodeDetail {
 // the finding, because a checkpoint inconsistency is unreadable without all
 // three.
 message ProjectionCheckpointDetail {
-  string projection_name = 1 [features.field_presence = LEGACY_REQUIRED];
+  string projection_name = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   string projection_generation = 2 [features.field_presence = LEGACY_REQUIRED];
   // What the checkpoint claims was applied.
   uint64 checkpoint_watermark = 3 [features.field_presence = LEGACY_REQUIRED];
@@ -196,7 +206,10 @@ message ProjectionCheckpointDetail {
 // ArtifactDigestDetail distinguishes the three ways an artifact fails
 // verification, which the digests alone cannot express.
 message ArtifactDigestDetail {
-  string artifact_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string artifact_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   ArtifactDigestObservation observation = 2 [features.field_presence = LEGACY_REQUIRED];
   // The digest recorded when the artifact was stored.
   string expected_digest = 3 [features.field_presence = LEGACY_REQUIRED];
@@ -220,7 +233,10 @@ enum ArtifactDigestObservation {
 
 // OperationLedgerDetail describes a side effect that never settled.
 message OperationLedgerDetail {
-  string operation_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string operation_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   google.protobuf.Timestamp reserved_at = 2 [features.field_presence = LEGACY_REQUIRED];
   // How far past its expected settlement window the operation is. Unset when no
   // window applies.
@@ -234,7 +250,10 @@ message OperationLedgerDetail {
 // finished.
 message UnreconciledWorkDetail {
   // Tool execution id, delegation id, or saga id, per the subject kind.
-  string entity_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string entity_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   google.protobuf.Timestamp started_at = 2 [features.field_presence = LEGACY_REQUIRED];
   // True when the session has already reached a terminal marker. A session can
   // be terminally successful and still have work stranded in flight, and that

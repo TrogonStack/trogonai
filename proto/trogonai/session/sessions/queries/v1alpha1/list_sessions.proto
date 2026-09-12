@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.queries.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "trogonai/session/sessions/queries/v1alpha1/contract_version.proto";
 import "trogonai/session/sessions/queries/v1alpha1/projection_freshness.proto";
 import "trogonai/session/sessions/queries/v1alpha1/read_consistency.proto";
@@ -9,6 +10,14 @@ import "trogonai/session/sessions/queries/v1alpha1/session_view.proto";
 
 // ListSessionsRequest enumerates sessions in a scope, newest first.
 message ListSessionsRequest {
+  option (buf.validate.message).cel = {
+    id: "list_sessions_request.workspace_id_required_for_scope"
+    message: "workspace_id is required for LIST_SESSIONS_SCOPE_WORKSPACE"
+    expression:
+      "this.scope != trogonai.session.sessions.queries.v1alpha1.ListSessionsScope.LIST_SESSIONS_SCOPE_WORKSPACE "
+      "|| this.workspace_id != ''"
+  };
+
   ContractVersion accepted_contract = 1 [features.field_presence = LEGACY_REQUIRED];
   ListSessionsScope scope = 2 [features.field_presence = LEGACY_REQUIRED];
   // Required for SCOPE_WORKSPACE, ignored otherwise.

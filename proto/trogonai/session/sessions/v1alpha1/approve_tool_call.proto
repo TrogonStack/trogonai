@@ -2,6 +2,8 @@ edition = "2024";
 
 package trogonai.session.sessions.v1alpha1;
 
+import "buf/validate/validate.proto";
+
 // ApproveToolCall records a human decision to allow a call, recording
 // [ToolCallApproved].
 //
@@ -9,9 +11,18 @@ package trogonai.session.sessions.v1alpha1;
 // taken against a stale head must be rejected rather than appended beside its
 // opposite.
 message ApproveToolCall {
-  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
-  string tool_call_id = 2 [features.field_presence = LEGACY_REQUIRED];
-  string tool_execution_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  string session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string tool_call_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string tool_execution_id = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   string approved_by = 4 [features.field_presence = LEGACY_REQUIRED];
   string turn_id = 5;
 }

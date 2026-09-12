@@ -2,6 +2,8 @@ edition = "2024";
 
 package trogonai.session.sessions.queries.v1alpha1;
 
+import "buf/validate/validate.proto";
+
 // HistoryItem is one entry in a session's reader-visible history.
 //
 // The discriminated-union hazard this shape is built around: a caller decoding
@@ -23,9 +25,15 @@ message HistoryItem {
   // Stable within a session, opaque, and safe to use as a rendering key. It
   // remains stable across an elision, so a client that upgrades sees the same
   // item resolve to a real variant.
-  string item_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string item_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // The session's own 1-indexed position for this item.
-  uint64 ordinal = 2 [features.field_presence = LEGACY_REQUIRED];
+  uint64 ordinal = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
   // Set even when the matching `item` arm is absent, so an unknown or withheld
   // item is still identifiable.
   HistoryItemKind kind = 3 [features.field_presence = LEGACY_REQUIRED];
@@ -74,7 +82,10 @@ enum ElisionReason {
 
 // UserMessageItem is a message from the user.
 message UserMessageItem {
-  string turn_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string turn_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // Rendered plain text. Structured and provider-native content is reachable
   // through the artifact surface, not inlined here.
   string text = 2 [features.field_presence = LEGACY_REQUIRED];
@@ -89,7 +100,10 @@ message UserMessageItem {
 // generation that was interrupted is a different fact from one still running,
 // and a boolean cannot hold that difference.
 message AssistantMessageItem {
-  string turn_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string turn_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   string model = 2 [features.field_presence = LEGACY_REQUIRED];
   string text = 3 [features.field_presence = LEGACY_REQUIRED];
   bool truncated = 4 [features.field_presence = LEGACY_REQUIRED];
@@ -108,9 +122,18 @@ enum AssistantMessageOutcome {
 
 // ToolCallItem is one tool call and its lifecycle position.
 message ToolCallItem {
-  string turn_id = 1 [features.field_presence = LEGACY_REQUIRED];
-  string tool_call_id = 2 [features.field_presence = LEGACY_REQUIRED];
-  string tool_name = 3 [features.field_presence = LEGACY_REQUIRED];
+  string turn_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string tool_call_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string tool_name = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   ToolCallOutcome outcome = 4 [features.field_presence = LEGACY_REQUIRED];
   // True when the call started and no terminal outcome was ever recorded. This
   // is the reader-visible form of an interrupted call awaiting reconciliation.
@@ -131,8 +154,22 @@ enum ToolCallOutcome {
 
 // FileChangeItem is one workspace file change attributed to a tool call.
 message FileChangeItem {
-  string turn_id = 1 [features.field_presence = LEGACY_REQUIRED];
-  string tool_call_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  option (buf.validate.message).cel = {
+    id: "file_change_item.previous_path_set_for_renamed"
+    message: "previous_path must be set when change_kind is FILE_CHANGE_KIND_VIEW_RENAMED"
+    expression:
+      "this.change_kind != trogonai.session.sessions.queries.v1alpha1.FileChangeKindView.FILE_CHANGE_KIND_VIEW_RENAMED "
+      "|| has(this.previous_path)"
+  };
+
+  string turn_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string tool_call_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // Workspace-relative, forward slashes, no leading slash.
   string path = 3 [features.field_presence = LEGACY_REQUIRED];
   FileChangeKindView change_kind = 4 [features.field_presence = LEGACY_REQUIRED];

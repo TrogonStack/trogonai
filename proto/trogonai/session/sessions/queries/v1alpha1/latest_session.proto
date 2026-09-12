@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.queries.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "trogonai/session/sessions/queries/v1alpha1/contract_version.proto";
 import "trogonai/session/sessions/queries/v1alpha1/projection_freshness.proto";
 import "trogonai/session/sessions/queries/v1alpha1/read_consistency.proto";
@@ -21,10 +22,19 @@ import "trogonai/session/sessions/queries/v1alpha1/session_view.proto";
 // latest-pointer is the one answer the caller acts on, so the whole error lands
 // on the session that gets opened.
 message GetLatestSessionRequest {
-  string workspace_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string workspace_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   ContractVersion accepted_contract = 2 [features.field_presence = LEGACY_REQUIRED];
   // Which session counts as the answer.
-  SessionSelector selector = 3 [features.field_presence = LEGACY_REQUIRED];
+  SessionSelector selector = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
   // Which timestamp "latest" is measured by.
   RecencyBasis recency = 4 [features.field_presence = LEGACY_REQUIRED];
   // Freshness the caller requires. Unset is an eventual read.

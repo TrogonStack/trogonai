@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.queries.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 import "trogonai/session/sessions/queries/v1alpha1/contract_version.proto";
 import "trogonai/session/sessions/queries/v1alpha1/projection_freshness.proto";
@@ -113,6 +114,14 @@ enum StaleCursorReason {
 // ProjectionUnavailableDetail distinguishes "come back shortly" from "this is
 // broken", which a caller cannot guess from the code alone.
 message ProjectionUnavailableDetail {
+  option (buf.validate.message).cel = {
+    id: "projection_unavailable_detail.freshness_present_for_lagging"
+    message: "freshness must be present when reason is PROJECTION_UNAVAILABLE_REASON_LAGGING"
+    expression:
+      "this.reason != trogonai.session.sessions.queries.v1alpha1.ProjectionUnavailableReason.PROJECTION_UNAVAILABLE_REASON_LAGGING "
+      "|| has(this.freshness)"
+  };
+
   ProjectionUnavailableReason reason = 1 [features.field_presence = LEGACY_REQUIRED];
   // How current the projection was when it gave up. Present for REASON_LAGGING,
   // where it is the difference between an actionable failure and a bare one: a

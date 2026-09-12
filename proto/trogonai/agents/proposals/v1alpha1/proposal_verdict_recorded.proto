@@ -2,10 +2,14 @@ edition = "2024";
 
 package trogonai.agents.proposals.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "trogonai/agents/proposals/v1alpha1/proposal.proto";
 
 // The verdict judges the candidate fixed at opening and cannot be replaced.
 message ProposalVerdictRecorded {
-  string proposal_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string proposal_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   ProposalVerdict verdict = 2 [features.field_presence = LEGACY_REQUIRED];
 }

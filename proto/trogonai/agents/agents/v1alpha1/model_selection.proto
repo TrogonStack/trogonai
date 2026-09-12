@@ -2,14 +2,21 @@ edition = "2024";
 
 package trogonai.agents.agents.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "trogonai/agents/agents/v1alpha1/configuration_artifact.proto";
 import "trogonai/agents/agents/v1alpha1/digest.proto";
 
 // Both values identify an immutable catalog release, never a provider route,
 // credential, display name, mutable alias, version range, or automatic choice.
 message ModelVersionRef {
-  string model_id = 1 [features.field_presence = LEGACY_REQUIRED];
-  string version = 2 [features.field_presence = LEGACY_REQUIRED];
+  string model_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string version = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
 }
 
 // Platform-managed model access consumes a verified projection of native
@@ -27,7 +34,10 @@ message ModelSelection {
 // A nonempty role declared by the exact implementation's managed-model
 // capability. Adding or removing a role requires another revision.
 message ModelRole {
-  string name = 1 [features.field_presence = LEGACY_REQUIRED];
+  string name = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
 }
 
 message AuxiliaryModelSelection {
@@ -36,6 +46,12 @@ message AuxiliaryModelSelection {
 }
 
 message ModelSelections {
+  option (buf.validate.message).cel = {
+    id: "model_selections.auxiliary_roles_unique"
+    message: "auxiliary model roles must be unique"
+    expression: "this.auxiliary.map(s, s.role.name).unique()"
+  };
+
   ModelSelection primary = 1 [features.field_presence = LEGACY_REQUIRED];
   // Roles are unique, include every role required by the pinned implementation
   // and settings, and contain no unsupported role. Platform-managed model

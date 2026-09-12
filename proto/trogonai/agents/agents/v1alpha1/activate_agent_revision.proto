@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.agents.agents.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "trogonai/agents/agents/v1alpha1/agent_revision.proto";
 import "trogonai/agents/agents/v1alpha1/configuration_artifact.proto";
 
@@ -9,7 +10,10 @@ import "trogonai/agents/agents/v1alpha1/configuration_artifact.proto";
 // and approved verdict. It never accepts this fact directly from an untrusted
 // caller; judgment and the complete difference remain proposal-owned.
 message ApprovedProposalActivation {
-  string proposal_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string proposal_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   AgentRevisionRef base_revision = 2 [features.field_presence = LEGACY_REQUIRED];
   AgentConfigurationRef candidate_configuration = 3 [features.field_presence = LEGACY_REQUIRED];
 }

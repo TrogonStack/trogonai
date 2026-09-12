@@ -2,14 +2,21 @@ edition = "2024";
 
 package trogonai.agents.agents.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "trogonai/agents/agents/v1alpha1/digest.proto";
 
 // The exact contract artifact commits to its protobuf descriptor closure and
 // validation and interpretation semantics. Admission requires this registered
 // tuple; a matching message name with different bytes or semantics is invalid.
 message ConfigurationContractRef {
-  string message_type = 1 [features.field_presence = LEGACY_REQUIRED];
-  string version = 2 [features.field_presence = LEGACY_REQUIRED];
+  string message_type = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string version = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   Digest definition_digest = 3 [features.field_presence = LEGACY_REQUIRED];
 }
 

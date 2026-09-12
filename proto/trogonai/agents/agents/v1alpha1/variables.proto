@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.agents.agents.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/struct.proto";
 
 // This schema governs caller bindings at Session start, not work inputs, tool
@@ -11,13 +12,28 @@ import "google/protobuf/struct.proto";
 // be omitted; omission never supplies a default. No type in this schema admits
 // null, so explicit null is rejected even for optional variables.
 message VariableSchema {
+  option (buf.validate.message).cel = {
+    id: "variable_schema.names_unique"
+    message: "variable names must be unique in each scope"
+    expression: "this.variables.map(v, v.name).unique()"
+  };
+
   repeated VariableDefinition variables = 1;
 }
 
 message VariableDefinition {
-  string name = 1 [features.field_presence = LEGACY_REQUIRED];
+  string name = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   VariableType value_type = 2 [features.field_presence = LEGACY_REQUIRED];
-  VariableRequirement requirement = 3 [features.field_presence = LEGACY_REQUIRED];
+  VariableRequirement requirement = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
 }
 
 // Unspecified and unknown values are invalid, so omission cannot silently make
@@ -34,6 +50,8 @@ enum VariableRequirement {
 // Unknown arms and unsupported behavior-affecting fields fail admission.
 message VariableType {
   oneof kind {
+    option (buf.validate.oneof).required = true;
+
     StringVariableType string_type = 1;
     BooleanVariableType boolean_type = 2;
     IntegerVariableType integer_type = 3;
@@ -49,9 +67,20 @@ message VariableType {
 // the length bounds are invalid schema definitions. Minimum must not exceed
 // maximum.
 message StringVariableType {
+  option (buf.validate.message).cel = {
+    id: "string_variable_type.bounds_ordered"
+    message: "min_length must not exceed max_length"
+    expression: "!has(this.max_length) || this.min_length <= this.max_length"
+  };
+
   uint32 min_length = 1;
   uint32 max_length = 2;
-  repeated string allowed_values = 3;
+  repeated string allowed_values = 3 [(buf.validate.field).repeated = {
+    unique: true
+    items: {
+      string: {min_len: 1}
+    }
+  }];
 }
 
 message BooleanVariableType {}
@@ -60,20 +89,44 @@ message BooleanVariableType {}
 // safe integer range [-9007199254740991, 9007199254740991]. Bounds must use that
 // same range; absent bounds use its endpoints. Minimum must not exceed maximum.
 message IntegerVariableType {
-  sint64 minimum = 1;
-  sint64 maximum = 2;
+  option (buf.validate.message).cel = {
+    id: "integer_variable_type.bounds_ordered"
+    message: "minimum must not exceed maximum"
+    expression: "!has(this.minimum) || !has(this.maximum) || this.minimum <= this.maximum"
+  };
+
+  sint64 minimum = 1 [(buf.validate.field).sint64 = {
+    gte: -9007199254740991
+    lte: 9007199254740991
+  }];
+  sint64 maximum = 2 [(buf.validate.field).sint64 = {
+    gte: -9007199254740991
+    lte: 9007199254740991
+  }];
 }
 
 // Bounds and bindings must be finite IEEE 754 binary64 values. Bounds are
 // inclusive; absent bounds add no restriction. Minimum must not exceed maximum.
 message NumberVariableType {
-  double minimum = 1;
-  double maximum = 2;
+  option (buf.validate.message).cel = {
+    id: "number_variable_type.bounds_ordered"
+    message: "minimum must not exceed maximum"
+    expression: "!has(this.minimum) || !has(this.maximum) || this.minimum <= this.maximum"
+  };
+
+  double minimum = 1 [(buf.validate.field).double.finite = true];
+  double maximum = 2 [(buf.validate.field).double.finite = true];
 }
 
 // Every element must match element_type. Bounds are inclusive; absent bounds
 // add no restriction. Minimum must not exceed maximum.
 message ListVariableType {
+  option (buf.validate.message).cel = {
+    id: "list_variable_type.bounds_ordered"
+    message: "min_items must not exceed max_items"
+    expression: "!has(this.max_items) || this.min_items <= this.max_items"
+  };
+
   VariableType element_type = 1 [features.field_presence = LEGACY_REQUIRED];
   uint32 min_items = 2;
   uint32 max_items = 3;
@@ -82,6 +135,12 @@ message ListVariableType {
 // Objects are closed: undeclared fields fail validation, including in nested
 // objects. Field names and requiredness follow VariableSchema's rules.
 message ObjectVariableType {
+  option (buf.validate.message).cel = {
+    id: "object_variable_type.field_names_unique"
+    message: "field names must be unique in each scope"
+    expression: "this.fields.map(f, f.name).unique()"
+  };
+
   repeated VariableDefinition fields = 1;
 }
 

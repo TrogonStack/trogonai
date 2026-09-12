@@ -1,6 +1,13 @@
 version: v2
 
 deps:
+  # protovalidate is a documentation dependency. The agents, session, and usage
+  # contracts state their invariants in prose, and ADR#0064 records the decision
+  # to also declare them as constraints so `buf lint` type-checks them. No
+  # plugin in buf.gen.yaml emits validators and no Rust crate takes a validation
+  # runtime, so nothing enforces these constraints yet. Enabling enforcement
+  # starts here and in buf.gen.yaml, not in the annotated files.
+  - buf.build/bufbuild/protovalidate
   - buf.build/googleapis/googleapis:c17df5b2beca46928cc87d5656bd5343
   - buf.build/protocolbuffers/wellknowntypes:122a3d2fdc814e0bb6fcf821bcce7957
   - buf.build/trogonstack/trogon-proto:v0.15.0

@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.agents.agents.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "trogonai/agents/agents/v1alpha1/digest.proto";
 
 // These declarations are revision-owned. Session admission resolves them under
@@ -15,6 +16,15 @@ import "trogonai/agents/agents/v1alpha1/digest.proto";
 // may be omitted. Connections are the one collection that pins no version, for
 // the reason recorded on ConnectionDeclaration.
 message AgentDependencies {
+  option (buf.validate.message).cel = {
+    id: "agent_dependencies.binding_names_unique"
+    message: "binding names must be unique across every declaration collection"
+    expression:
+      "(this.skills.map(d, d.binding_name) + this.tools.map(d, d.binding_name) + "
+      "this.delegates.map(d, d.binding_name) + this.memories.map(d, d.binding_name) + "
+      "this.connections.map(d, d.binding_name)).unique()"
+  };
+
   repeated SkillDeclaration skills = 1;
   repeated ToolDeclaration tools = 2;
   repeated DelegateDeclaration delegates = 3;
@@ -35,15 +45,24 @@ enum DependencyRequirement {
 // Every skill declaration is required; Session admission cannot upgrade its
 // content.
 message SkillDeclaration {
-  string binding_name = 1 [features.field_presence = LEGACY_REQUIRED];
+  string binding_name = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   SkillVersionRef version_ref = 2 [features.field_presence = LEGACY_REQUIRED];
   Digest content_digest = 3 [features.field_presence = LEGACY_REQUIRED];
 }
 
 message SkillVersionRef {
-  string skill_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string skill_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // Exact immutable version identifier. Empty values and moving aliases are invalid.
-  string version = 2 [features.field_presence = LEGACY_REQUIRED];
+  string version = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
 }
 
 // Name and every label predicate must match by exact, case-sensitive equality.
@@ -52,36 +71,70 @@ message SkillVersionRef {
 // match logical resources. Multiple matching resources fail admission, even
 // for optional declarations. They never imply an arbitrary first match.
 message ToolSelector {
+  option (buf.validate.message).cel = {
+    id: "tool_selector.predicate_required"
+    message: "at least one predicate is required"
+    expression: "this.name != '' || this.labels.size() > 0"
+  };
+
   string name = 1;
-  map<string, string> labels = 2;
+  map<string, string> labels = 2 [(buf.validate.field).map.keys.string.min_len = 1];
 }
 
 message ToolDeclaration {
-  string binding_name = 1 [features.field_presence = LEGACY_REQUIRED];
-  DependencyRequirement requirement = 2 [features.field_presence = LEGACY_REQUIRED];
+  string binding_name = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  DependencyRequirement requirement = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
   // Exactly one known arm is required. A selector resolves the ToolDefinition
   // resource; its owning domain resolves a version at Session start, which the
   // Session must pin. The tool's input schema stays with that version.
   oneof selection {
+    option (buf.validate.oneof).required = true;
+
     ToolSelector selector = 3;
     ExactToolVersionPin exact_pin = 4;
   }
 }
 
 message ExactToolVersionPin {
-  string tool_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string tool_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // Exact immutable version identifier. Empty values and moving aliases are invalid.
-  string version = 2 [features.field_presence = LEGACY_REQUIRED];
+  string version = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   Digest definition_digest = 3 [features.field_presence = LEGACY_REQUIRED];
 }
 
 message DelegateDeclaration {
-  string binding_name = 1 [features.field_presence = LEGACY_REQUIRED];
-  DependencyRequirement requirement = 2 [features.field_presence = LEGACY_REQUIRED];
+  string binding_name = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  DependencyRequirement requirement = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
   // Exactly one known arm is required. Selectors match each Agent's latest
   // minted revision's configuration-owned labels. Display names and annotations
   // never participate. Session admission pins the selected revision.
   oneof selection {
+    option (buf.validate.oneof).required = true;
+
     DelegateSelector selector = 3;
     ExactDelegateRevisionPin exact_pin = 4;
   }
@@ -92,13 +145,24 @@ message DelegateDeclaration {
 // Agents fail admission, even for optional declarations, within the Session's
 // authorized resolution scope.
 message DelegateSelector {
-  map<string, string> labels = 1;
+  map<string, string> labels = 1 [(buf.validate.field).map = {
+    min_pairs: 1
+    keys: {
+      string: {min_len: 1}
+    }
+  }];
 }
 
 message ExactDelegateRevisionPin {
-  string agent_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string agent_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // Positive minted revision number, never a moving latest alias.
-  uint64 revision = 2 [features.field_presence = LEGACY_REQUIRED];
+  uint64 revision = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
   Digest configuration_digest = 3 [features.field_presence = LEGACY_REQUIRED];
 }
 
@@ -106,15 +170,27 @@ message ExactDelegateRevisionPin {
 // Their references and digests belong to the Session. No instance identity,
 // memory content, or cross-hierarchy authority belongs in this declaration.
 message MemoryDeclaration {
-  string binding_name = 1 [features.field_presence = LEGACY_REQUIRED];
-  DependencyRequirement requirement = 2 [features.field_presence = LEGACY_REQUIRED];
+  string binding_name = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  DependencyRequirement requirement = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
   MemoryKindSelector selector = 3 [features.field_presence = LEGACY_REQUIRED];
 }
 
 message MemoryKindSelector {
   // Nonempty memory-domain kind identifier, matched by exact equality within
   // the Session's authorized hierarchy context. This is never an instance ID.
-  string kind = 1 [features.field_presence = LEGACY_REQUIRED];
+  string kind = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
 }
 
 // ConnectionDeclaration is how a revision states which external systems its
@@ -135,8 +211,17 @@ message MemoryKindSelector {
 // identity is the part that holds still under rotation, and it is therefore the
 // only part a revision declares.
 message ConnectionDeclaration {
-  string binding_name = 1 [features.field_presence = LEGACY_REQUIRED];
-  DependencyRequirement requirement = 2 [features.field_presence = LEGACY_REQUIRED];
+  string binding_name = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  DependencyRequirement requirement = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
   ConnectionSelector selector = 3 [features.field_presence = LEGACY_REQUIRED];
 }
 
@@ -156,6 +241,9 @@ message ConnectionDeclaration {
 // connections fail admission, even for an optional declaration, because an
 // arbitrary first match would pick which external system the behavior reaches.
 message ConnectionSelector {
-  string provider = 1 [features.field_presence = LEGACY_REQUIRED];
-  map<string, string> labels = 2;
+  string provider = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  map<string, string> labels = 2 [(buf.validate.field).map.keys.string.min_len = 1];
 }

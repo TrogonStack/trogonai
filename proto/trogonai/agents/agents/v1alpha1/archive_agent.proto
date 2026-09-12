@@ -2,7 +2,12 @@ edition = "2024";
 
 package trogonai.agents.agents.v1alpha1;
 
+import "buf/validate/validate.proto";
+
 // Archival is permanent and blocks new work without interrupting pinned sessions.
 message ArchiveAgent {
-  string agent_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string agent_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
 }

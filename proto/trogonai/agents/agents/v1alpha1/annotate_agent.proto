@@ -2,8 +2,13 @@ edition = "2024";
 
 package trogonai.agents.agents.v1alpha1;
 
+import "buf/validate/validate.proto";
+
 // Replaces nonbehavioral metadata on an active agent; it mints no revision.
 message AnnotateAgent {
-  string agent_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string agent_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   map<string, string> annotations = 2;
 }

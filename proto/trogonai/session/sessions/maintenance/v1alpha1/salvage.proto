@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.maintenance.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 import "trogonai/session/sessions/maintenance/v1alpha1/outcome.proto";
 import "trogonai/session/sessions/maintenance/v1alpha1/stream_boundary.proto";
@@ -25,7 +26,10 @@ import "trogonai/session/sessions/maintenance/v1alpha1/stream_boundary.proto";
 
 // SalvageIdentity is the retry identity of a salvage.
 message SalvageIdentity {
-  string source_session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string source_session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // Chosen by the operator or orchestrator. Two salvages of one damaged source
   // are legitimately different operations, so identity cannot be derived from
   // the source alone.
@@ -45,7 +49,10 @@ message SalvageIntent {
   // randomly minted id would leave a retry unable to find its own prior work,
   // which is the same trap the migration reconciler exists to escape, closed
   // here by the write precondition rather than by a later comparison.
-  string target_session_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  string target_session_id = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   OrderProof order_proof = 4 [features.field_presence = LEGACY_REQUIRED];
   string actor = 5 [features.field_presence = LEGACY_REQUIRED];
   string reason = 6 [features.field_presence = LEGACY_REQUIRED];
@@ -54,6 +61,14 @@ message SalvageIntent {
 
 // SalvageRecord is the intent plus everything learned since.
 message SalvageRecord {
+  option (buf.validate.message).cel = {
+    id: "salvage_record.indeterminate_only_for_indeterminate"
+    message: "indeterminate may be set only for MAINTENANCE_STATE_INDETERMINATE"
+    expression:
+      "!has(this.indeterminate) || "
+      "this.state == trogonai.session.sessions.maintenance.v1alpha1.MaintenanceState.MAINTENANCE_STATE_INDETERMINATE"
+  };
+
   SalvageIntent intent = 1 [features.field_presence = LEGACY_REQUIRED];
   MaintenanceState state = 2 [features.field_presence = LEGACY_REQUIRED];
   // Set only for MAINTENANCE_STATE_INDETERMINATE.

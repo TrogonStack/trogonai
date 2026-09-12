@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.queries.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/duration.proto";
 
 // ReadConsistency is the freshness the caller requires, declared before the
@@ -17,6 +18,14 @@ import "google/protobuf/duration.proto";
 // Every request carries one. Unset is EVENTUAL, which keeps the common read
 // cheap while still reporting freshness on the way back.
 message ReadConsistency {
+  option (buf.validate.message).cel = {
+    id: "read_consistency.token_required_for_at_least"
+    message: "token is required when mode is READ_CONSISTENCY_MODE_AT_LEAST"
+    expression:
+      "this.mode != trogonai.session.sessions.queries.v1alpha1.ReadConsistencyMode.READ_CONSISTENCY_MODE_AT_LEAST "
+      "|| has(this.token)"
+  };
+
   ReadConsistencyMode mode = 1 [features.field_presence = LEGACY_REQUIRED];
   // Required for MODE_AT_LEAST, ignored otherwise. A MODE_AT_LEAST request with
   // no token is QUERY_ERROR_CODE_INVALID_ARGUMENT rather than a silent
@@ -59,7 +68,10 @@ enum ReadConsistencyMode {
 // The write path mints these. The command-response shape that hands one back is
 // not defined yet.
 message ConsistencyToken {
-  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // The SessionOrdinal the caller's write landed at.
   //
   // An ordinal rather than a stream sequence, for the same reason page cursors
