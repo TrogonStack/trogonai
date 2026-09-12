@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-#MISE description="Assert every ADR#NNNN reference in markdown and proto resolves to its docs/adr/NNNN-*.md file"
+#MISE description="Assert every ADR#NNNN reference in markdown, proto, and yaml resolves to its docs/adr/NNNN-*.md file"
 
 """Lint ADR references and the ADR catalog itself.
 
@@ -9,17 +9,18 @@ Markdown reference rules (every `ADR#NNNN` where NNNN is exactly 4 digits):
   B. The link target must resolve (relative to the file) to an existing
      docs/adr/NNNN-*.md whose leading number equals NNNN.
 
-Proto reference rules (`.proto` comments cite ADRs as load-bearing rationale
-for field shape and invariants, so those citations need the same guarantee that
-they still point at something):
+Unrendered-source reference rules (`.proto` comments cite ADRs as load-bearing
+rationale for field shape and invariants, and `buf.yaml` cites the ADR that
+explains why a dependency is present, so those citations need the same guarantee
+that they still point at something). Applied to `.proto`, `.yaml`, and `.yml`:
   E. Every `ADR#NNNN` must name an existing docs/adr/NNNN-*.md. A markdown link
-     is NOT required, because a link is the wrong form inside a proto comment.
+     is NOT required, because a link is the wrong form in a file nothing renders.
   F. The citation must use the canonical `ADR#NNNN` form, which is what 100 of
      the 103 existing proto citations already use. `ADR 0016` and `ADR-0016` are
      rejected: without the `#` they are invisible to rule E, so a renamed or
      superseded ADR would leave them dangling with CI still green. The markdown
-     link form is rejected too: nothing renders a .proto, and the relative path
-     it carries is checked by no build step.
+     link form is rejected too: nothing renders these files, and the relative
+     path it carries is checked by no build step.
      Not yet applied to markdown, where the `ADR NNNN` form is still widespread
      in docs/research/acp and needs its own pass.
 
@@ -165,7 +166,7 @@ def check_file(path: Path) -> list[str]:
 NONCANONICAL_RE = re.compile(r"\bADR[ \-]#?" + N)
 
 
-def check_proto(path: Path, known: set[str]) -> list[str]:
+def check_bare_citation(path: Path, known: set[str]) -> list[str]:
     problems: list[str] = []
     text = read_text(path)
     if text is None:
@@ -189,9 +190,9 @@ def check_proto(path: Path, known: set[str]) -> list[str]:
         num = m.group(1)
         line = text.count("\n", 0, m.start()) + 1
         problems.append(
-            f"{rel}:{line}: ADR#{num} is a markdown link; proto comments cite it bare "
-            f"(use ADR#{num}), because the relative path is unresolvable from a .proto "
-            f"and nothing renders it"
+            f"{rel}:{line}: ADR#{num} is a markdown link; this file cites it bare "
+            f"(use ADR#{num}), because the relative path resolves against nothing here "
+            f"and no build step renders it"
         )
     return problems
 
@@ -247,8 +248,9 @@ def main() -> int:
     for path in iter_sources("*.md"):
         problems.extend(check_file(path))
     known = adr_numbers()
-    for path in iter_sources("*.proto"):
-        problems.extend(check_proto(path, known))
+    for pattern in ("*.proto", "*.yaml", "*.yml"):
+        for path in iter_sources(pattern):
+            problems.extend(check_bare_citation(path, known))
     problems.extend(check_catalog())
 
     if problems:

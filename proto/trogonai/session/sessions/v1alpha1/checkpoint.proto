@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "trogonai/session/sessions/v1alpha1/digest.proto";
 import "trogonai/session/sessions/v1alpha1/session_ordinal.proto";
 
@@ -28,9 +29,15 @@ message Checkpoint {
   string implementation_version = 4 [features.field_presence = LEGACY_REQUIRED];
   // Stable checkpoint id, joining a restore back to its producing
   // CheckpointProduced event unambiguously.
-  string checkpoint_id = 5 [features.field_presence = LEGACY_REQUIRED];
+  string checkpoint_id = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // The execution attempt that produced this checkpoint.
-  string producing_execution_attempt_id = 6 [features.field_presence = LEGACY_REQUIRED];
+  string producing_execution_attempt_id = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // This session's own fold-derived ordinal the checkpoint's state is current
   // through, so a restore resolves to a checkpoint deterministically rather
   // than by guessing which checkpoint covers a given position.

@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 import "trogonai/session/sessions/v1alpha1/checkpoint.proto";
 import "trogonai/session/sessions/v1alpha1/digest.proto";
@@ -14,13 +15,19 @@ import "trogonai/session/sessions/v1alpha1/digest.proto";
 // evidence for its id with no later redaction or erasure reaching at or before
 // its covers_through (ADR#0035 harness recovery).
 message StartExecutionAttempt {
-  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
-  string execution_attempt_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string execution_attempt_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // Must equal the session's stored plan digest; a mismatch means the runner
   // is about to execute a different plan than the session was started with.
   Digest session_execution_plan_digest = 3 [features.field_presence = LEGACY_REQUIRED];
   uint64 attempt_number = 4 [features.field_presence = LEGACY_REQUIRED];
-  string previous_attempt_id = 5;
+  string previous_attempt_id = 5 [(buf.validate.field).string.min_len = 1];
   // Unset when the attempt starts from scratch rather than restoring.
   Checkpoint restored_checkpoint = 6;
   string host_artifact_ref = 7 [features.field_presence = LEGACY_REQUIRED];

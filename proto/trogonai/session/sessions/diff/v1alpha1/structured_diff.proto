@@ -2,6 +2,8 @@ edition = "2024";
 
 package trogonai.session.sessions.diff.v1alpha1;
 
+import "buf/validate/validate.proto";
+
 // Structured diff artifact content for a recorded file change.
 //
 // This is artifact payload, not an event. It sits behind
@@ -54,6 +56,17 @@ message DiffHunk {
 
 // DiffLine is one line of a hunk.
 message DiffLine {
+  option (buf.validate.message).cel = {
+    id: "diff_line.text_only_for_elided"
+    message: "text is empty for LINE_KIND_ELIDED"
+    expression: "this.kind != trogonai.session.sessions.diff.v1alpha1.LineKind.LINE_KIND_ELIDED || this.text == ''"
+  };
+  option (buf.validate.message).cel = {
+    id: "diff_line.elided_count_zero_unless_elided"
+    message: "elided_count is zero for every kind but LINE_KIND_ELIDED"
+    expression: "this.kind == trogonai.session.sessions.diff.v1alpha1.LineKind.LINE_KIND_ELIDED || this.elided_count == 0u"
+  };
+
   LineKind kind = 1 [features.field_presence = LEGACY_REQUIRED];
   // Line content without its trailing newline and without a leading diff marker.
   // The marker is `kind`, so a renderer never has to strip one character off the

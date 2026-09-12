@@ -2,6 +2,8 @@ edition = "2024";
 
 package trogonai.agents.agents.v1alpha1;
 
+import "buf/validate/validate.proto";
+
 // AgentArchived is the Agent registry stream's terminal event. An archived
 // agent accepts no further revisions or annotation changes, and
 // there is no unarchive: reviving the behaviour means provisioning a new
@@ -9,5 +11,8 @@ package trogonai.agents.agents.v1alpha1;
 // interrupted; the registry only stops resolving it for new work. Dispatch
 // rejects new proposals, while orphan proposals cannot pass registry activation.
 message AgentArchived {
-  string agent_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string agent_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
 }

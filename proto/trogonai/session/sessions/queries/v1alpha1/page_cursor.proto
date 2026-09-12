@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.queries.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 import "trogonai/session/sessions/queries/v1alpha1/contract_version.proto";
 import "trogonai/session/sessions/queries/v1alpha1/get_session_history.proto";
@@ -61,7 +62,10 @@ message PageCursor {
 // the session grows. A position expressed as an offset from either end does
 // not, which is why the count of items is deliberately absent here.
 message HistoryScanCursor {
-  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // Contract the scan was opened at. The server keeps rendering at this version
   // for the life of the scan so a page is not shaped differently from its
   // predecessors. A continuation presenting a different major is
@@ -104,7 +108,7 @@ message SessionListScanCursor {
 // nor the new one, and the caller has no way to notice.
 message ListScanSelector {
   ListSessionsScope scope = 1 [features.field_presence = LEGACY_REQUIRED];
-  string workspace_id = 2;
+  string workspace_id = 2 [(buf.validate.field).string.min_len = 1];
   ArchivedFilter archived = 3 [features.field_presence = LEGACY_REQUIRED];
 }
 
@@ -124,7 +128,10 @@ message SessionOrderingKey {
   // removes that skip, and it is an obligation on the list projection rather
   // than something this contract can assert by itself.
   uint64 ordering_value = 1 [features.field_presence = LEGACY_REQUIRED];
-  string session_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string session_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
 }
 
 // CursorValidity is everything a cursor binds to besides its position.

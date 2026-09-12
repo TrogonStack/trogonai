@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.doctor.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "trogonai/session/sessions/doctor/v1alpha1/finding.proto";
@@ -12,7 +13,10 @@ import "trogonai/session/sessions/doctor/v1alpha1/finding.proto";
 // has no flag that would make it one, because a report-only default that lives
 // in a field is one typo away from not being the default.
 message DiagnoseSessionRequest {
-  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // Checks to run. Empty runs the default set, which excludes the checks whose
   // cost scales with artifact storage rather than with the stream.
   repeated CheckKind checks = 2;
@@ -76,7 +80,10 @@ enum CheckKind {
 message DiagnoseSessionResponse {
   // Identifies this diagnosis. A repair must name it, so every mutation is
   // traceable to the report that justified it.
-  string diagnosis_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string diagnosis_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   repeated Finding findings = 2;
   // One entry per check the server considered, including checks it skipped.
   repeated CheckOutcome checks = 3;

@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/duration.proto";
 import "trogonai/session/sessions/v1alpha1/command_output_replay.proto";
 import "trogonai/session/sessions/v1alpha1/command_termination.proto";
@@ -18,11 +19,23 @@ import "trogonai/session/sessions/v1alpha1/tool_call.proto";
 // tool_execution_id. A later conflicting outcome stays on the log, flagged by a
 // projection, and never changes state.
 message CompleteToolCall {
-  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
-  string tool_call_id = 2 [features.field_presence = LEGACY_REQUIRED];
-  string tool_execution_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  string session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string tool_call_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string tool_execution_id = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   ToolCallResult result = 4 [features.field_presence = LEGACY_REQUIRED];
-  string turn_id = 5 [features.field_presence = LEGACY_REQUIRED];
+  string turn_id = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   CommandTermination termination = 6;
   google.protobuf.Duration duration = 7;
   repeated ResourceObservation observed = 8;

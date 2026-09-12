@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "trogonai/session/sessions/v1alpha1/digest.proto";
 import "trogonai/session/sessions/v1alpha1/operation_reserved.proto";
 
@@ -12,11 +13,20 @@ import "trogonai/session/sessions/v1alpha1/operation_reserved.proto";
 // reservation per operation_id; a retry carrying different bytes under the same
 // id is a contract violation, not a duplicate (ADR#0035 facet 3).
 message ReserveOperation {
-  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
-  string operation_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string operation_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // Digest of the request the id is reserved for, so a retry with different
   // bytes is refused instead of executed as if it were the same call.
   Digest request_digest = 3 [features.field_presence = LEGACY_REQUIRED];
   OperationKind operation_kind = 4 [features.field_presence = LEGACY_REQUIRED];
-  string turn_id = 5 [features.field_presence = LEGACY_REQUIRED];
+  string turn_id = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
 }

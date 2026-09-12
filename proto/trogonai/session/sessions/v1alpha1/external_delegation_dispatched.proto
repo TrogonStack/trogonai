@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "trogonai/session/sessions/v1alpha1/digest.proto";
 
 // ExternalDelegationDispatched is the dispatching session's link fact recording
@@ -14,8 +15,14 @@ import "trogonai/session/sessions/v1alpha1/digest.proto";
 // (WRITE_PRECONDITION = At), letting the dispatching command refuse to spawn
 // under an already-terminal session race-safely.
 message ExternalDelegationDispatched {
-  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
-  string operation_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string operation_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // Locator for the external delegate the operation was dispatched to.
   string delegate_reference = 3 [features.field_presence = LEGACY_REQUIRED];
   // Authenticated remote subject the dispatch was made under.
@@ -27,7 +34,13 @@ message ExternalDelegationDispatched {
   // Correlation id for tracing this dispatch across the external system;
   // meaningful here at the dispatch event, not on the eventual outcome (the
   // outcome joins by operation_id).
-  string correlation_id = 7 [features.field_presence = LEGACY_REQUIRED];
+  string correlation_id = 7 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // Turn this dispatch belongs to (see UserMessageRecorded.turn_id).
-  string turn_id = 8 [features.field_presence = LEGACY_REQUIRED];
+  string turn_id = 8 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
 }

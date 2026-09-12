@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.doctor.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 import "trogonai/session/sessions/doctor/v1alpha1/repair_action.proto";
 
@@ -23,17 +24,26 @@ import "trogonai/session/sessions/doctor/v1alpha1/repair_action.proto";
 // changes, and a repair that trusts a report from ten minutes ago will happily
 // discard a projection that already rebuilt itself.
 message RepairSessionRequest {
-  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // The diagnosis whose findings are being acted on. Findings from a different
   // diagnosis are refused rather than looked up, so a repair cannot be
   // assembled from ids an operator collected by hand.
-  string diagnosis_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string diagnosis_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   RepairMode mode = 3 [features.field_presence = LEGACY_REQUIRED];
   repeated RepairTarget targets = 4;
   // Why the operator is doing this, for the audit record. Required, and
   // required to be non-empty: a repair with no stated reason is the one that
   // will need explaining later.
-  string operator_reason = 5 [features.field_presence = LEGACY_REQUIRED];
+  string operator_reason = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
 }
 
 // RepairMode is whether this call is allowed to mutate anything.
@@ -54,7 +64,10 @@ enum RepairMode {
 
 // RepairTarget is one finding and the action to take on it.
 message RepairTarget {
-  string finding_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string finding_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // Must be one of the finding's `available_repairs`. An action the doctor did
   // not offer for this finding is refused, so the set of legal repairs is
   // decided by the code that understands the finding rather than by the caller.
@@ -72,7 +85,10 @@ message RepairSessionResponse {
 
 // RepairResult is the outcome for one target.
 message RepairResult {
-  string finding_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string finding_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   RepairAction action = 2 [features.field_presence = LEGACY_REQUIRED];
   RepairResultStatus status = 3 [features.field_presence = LEGACY_REQUIRED];
   // What the action touched, or would touch: projection generations, snapshot

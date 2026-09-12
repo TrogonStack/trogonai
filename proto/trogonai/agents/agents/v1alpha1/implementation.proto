@@ -2,16 +2,26 @@ edition = "2024";
 
 package trogonai.agents.agents.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "trogonai/agents/agents/v1alpha1/digest.proto";
 import "trogonai/agents/agents/v1alpha1/model_selection.proto";
 
 message PlatformHarnessVersionRef {
-  string version = 1 [features.field_presence = LEGACY_REQUIRED];
+  string version = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
 }
 
 message RegisteredExtensionVersionRef {
-  string extension_id = 1 [features.field_presence = LEGACY_REQUIRED];
-  string version = 2 [features.field_presence = LEGACY_REQUIRED];
+  string extension_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string version = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
 }
 
 // This concrete settings contract belongs to the platform harness. Other
@@ -35,6 +45,8 @@ message PlatformHarnessConfiguration {
 // mutable aliases, version ranges, and release-selection fallback are invalid.
 message AgentImplementation {
   oneof implementation {
+    option (buf.validate.oneof).required = true;
+
     PlatformHarnessVersionRef platform_harness = 1;
     RegisteredExtensionVersionRef registered_extension = 2;
   }

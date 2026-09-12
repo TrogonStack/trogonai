@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.state.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "trogonai/session/sessions/v1alpha1/cascade_policy.proto";
 import "trogonai/session/sessions/v1alpha1/checkpoint.proto";
 import "trogonai/session/sessions/v1alpha1/digest.proto";
@@ -22,7 +23,10 @@ import "trogonai/session/sessions/v1alpha1/session_recovered.proto";
 // interrupted call rather than silently dropping it.
 message State {
   StateValue state = 1 [features.field_presence = LEGACY_REQUIRED];
-  string session_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string session_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // Count of events folded so far: this session's own fold-derived ordinal of
   // the last applied event, never a JetStream sequence (ADR#0013).
   trogonai.session.sessions.v1alpha1.SessionOrdinal position = 3 [features.field_presence = LEGACY_REQUIRED];
@@ -53,7 +57,7 @@ message State {
   ExecutionAttempt active_attempt = 10;
   // Most recently started attempt, still active or already ended, so a new
   // attempt can be checked for monotonic numbering and exact predecessor.
-  string last_attempt_id = 11;
+  string last_attempt_id = 11 [(buf.validate.field).string.min_len = 1];
   uint64 last_attempt_number = 12;
   // Tool calls keyed by tool_call_id, in first-observed fold order.
   repeated ToolCall tool_calls = 13;
@@ -89,7 +93,10 @@ enum TerminalMarker {
 }
 
 message ForkOrigin {
-  string source_session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string source_session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   trogonai.session.sessions.v1alpha1.SessionOrdinal context_prefix_boundary = 2 [features.field_presence = LEGACY_REQUIRED];
 }
 
@@ -99,7 +106,10 @@ message ForkOrigin {
 // session's ordinals count its own events and start at 1 regardless of where the
 // source's cut ended.
 message RecoveryOrigin {
-  string source_session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string source_session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   trogonai.session.sessions.v1alpha1.SessionOrdinal source_boundary = 2 [features.field_presence = LEGACY_REQUIRED];
   trogonai.session.sessions.v1alpha1.Digest source_digest = 3 [features.field_presence = LEGACY_REQUIRED];
   string salvage_key = 4 [features.field_presence = LEGACY_REQUIRED];
@@ -108,31 +118,51 @@ message RecoveryOrigin {
 }
 
 message ParentLink {
-  string parent_session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string parent_session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // The parent's own ordinal of the dispatch that created this session.
   trogonai.session.sessions.v1alpha1.SessionOrdinal parent_dispatched_at = 2 [features.field_presence = LEGACY_REQUIRED];
   trogonai.session.sessions.v1alpha1.CascadePolicy cascade_policy = 3 [features.field_presence = LEGACY_REQUIRED];
   // The parent-side operation this session was dispatched under.
-  string operation_id = 4 [features.field_presence = LEGACY_REQUIRED];
+  string operation_id = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // The parent reached a terminal state and this session observed it.
   bool parent_terminated = 5 [features.field_presence = LEGACY_REQUIRED];
   // The parent rewound past the dispatch: the inherited prefix no longer holds.
   bool history_invalidated = 6 [features.field_presence = LEGACY_REQUIRED];
   // Set once the lineage is detached, making the detach idempotent per id.
-  string detach_operation_id = 7;
+  string detach_operation_id = 7 [(buf.validate.field).string.min_len = 1];
 }
 
 message Delegation {
-  string operation_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  option (buf.validate.message).cel = {
+    id: "delegation.child_session_id_set_for_child_session"
+    message: "child_session_id is set for DELEGATION_KIND_CHILD_SESSION"
+    expression: "this.kind != trogonai.session.sessions.state.v1alpha1.DelegationKind.DELEGATION_KIND_CHILD_SESSION || this.child_session_id != ''"
+  };
+  option (buf.validate.message).cel = {
+    id: "delegation.delegate_reference_set_for_external"
+    message: "delegate_reference is set for DELEGATION_KIND_EXTERNAL"
+    expression: "this.kind != trogonai.session.sessions.state.v1alpha1.DelegationKind.DELEGATION_KIND_EXTERNAL || this.delegate_reference != ''"
+  };
+
+  string operation_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   DelegationKind kind = 2 [features.field_presence = LEGACY_REQUIRED];
   // Set for DELEGATION_KIND_CHILD_SESSION.
-  string child_session_id = 3;
+  string child_session_id = 3 [(buf.validate.field).string.min_len = 1];
   trogonai.session.sessions.v1alpha1.CascadePolicy cascade_policy = 4;
   // Set for DELEGATION_KIND_EXTERNAL.
   string delegate_reference = 5;
   trogonai.session.sessions.v1alpha1.SessionOrdinal dispatched_at = 6 [features.field_presence = LEGACY_REQUIRED];
   // Set once the child is detached, making the detach idempotent per id.
-  string detach_operation_id = 7;
+  string detach_operation_id = 7 [(buf.validate.field).string.min_len = 1];
 }
 
 enum DelegationKind {
@@ -142,7 +172,10 @@ enum DelegationKind {
 }
 
 message ExecutionAttempt {
-  string execution_attempt_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string execution_attempt_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   uint64 attempt_number = 2 [features.field_presence = LEGACY_REQUIRED];
   // The attempt published its ready attestation; until then it holds the
   // session but must not be treated as serving.
@@ -155,7 +188,10 @@ message ExecutionAttempt {
 }
 
 message CompactionMarker {
-  string summary_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string summary_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // Ordinal of the Compacted event itself.
   trogonai.session.sessions.v1alpha1.SessionOrdinal marker_ordinal = 2 [features.field_presence = LEGACY_REQUIRED];
   trogonai.session.sessions.v1alpha1.SessionOrdinal covers_from = 3 [features.field_presence = LEGACY_REQUIRED];
@@ -164,14 +200,26 @@ message CompactionMarker {
 }
 
 message ToolCall {
-  string tool_call_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string tool_call_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // Retry identity of the call, and the key its terminal outcome joins on.
-  string tool_execution_id = 2 [features.field_presence = LEGACY_REQUIRED];
-  string tool_name = 3 [features.field_presence = LEGACY_REQUIRED];
-  string turn_id = 4 [features.field_presence = LEGACY_REQUIRED];
+  string tool_execution_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string tool_name = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string turn_id = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // The operation ledger entry guarding this call's side effect, when it
   // reserves one.
-  string operation_id = 5;
+  string operation_id = 5 [(buf.validate.field).string.min_len = 1];
   ToolCallStatus status = 6 [features.field_presence = LEGACY_REQUIRED];
   trogonai.session.sessions.v1alpha1.SessionOrdinal requested_at = 7 [features.field_presence = LEGACY_REQUIRED];
   // Set when the call started executing. A call with started_at set and
@@ -193,7 +241,10 @@ enum ToolCallStatus {
 }
 
 message Operation {
-  string operation_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string operation_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   trogonai.session.sessions.v1alpha1.OperationKind operation_kind = 2 [features.field_presence = LEGACY_REQUIRED];
   // Digest of the reserved request, so a retry carrying different bytes under
   // the same id is refused instead of executed twice.
@@ -220,7 +271,10 @@ enum OperationStatus {
 }
 
 message CheckpointEvidence {
-  string checkpoint_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string checkpoint_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   trogonai.session.sessions.v1alpha1.Checkpoint checkpoint = 2 [features.field_presence = LEGACY_REQUIRED];
   // Ordinal of the CheckpointProduced event that admitted this evidence.
   trogonai.session.sessions.v1alpha1.SessionOrdinal produced_at = 3 [features.field_presence = LEGACY_REQUIRED];

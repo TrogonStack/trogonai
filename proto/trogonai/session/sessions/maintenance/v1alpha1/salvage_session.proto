@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.maintenance.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "trogonai/session/sessions/maintenance/v1alpha1/salvage.proto";
@@ -14,7 +15,10 @@ import "trogonai/session/sessions/maintenance/v1alpha1/salvage.proto";
 // batch, validate. The source is never written to at any point, so a salvage
 // that fails halfway costs a partially staged target and nothing else.
 message SalvageSessionRequest {
-  string source_session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string source_session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // Distinguishes this salvage from another salvage of the same source, and is
   // what the target session id is derived from. A caller retrying a salvage
   // must reuse it; a caller wanting a second, independent salvage must not.
@@ -26,7 +30,7 @@ message SalvageSessionRequest {
   // Workspace for the salvaged session. Needed only when the source's own
   // workspace could not be read, which is exactly the case a damaged source
   // makes likely.
-  string workspace_id = 6;
+  string workspace_id = 6 [(buf.validate.field).string.min_len = 1];
   SalvageLimits limits = 7;
 }
 
@@ -47,12 +51,23 @@ message SalvageLimits {
 }
 
 message SalvageSessionResponse {
+  option (buf.validate.message).cel = {
+    id: "salvage_session_response.refused_only_for_refused"
+    message: "refused may be set only for SALVAGE_RESULT_REFUSED"
+    expression:
+      "!has(this.refused) || "
+      "this.result == trogonai.session.sessions.maintenance.v1alpha1.SalvageResult.SALVAGE_RESULT_REFUSED"
+  };
+
   SalvageResult result = 1 [features.field_presence = LEGACY_REQUIRED];
   // Always present, including on refusal.
   SalvageRecord record = 2 [features.field_presence = LEGACY_REQUIRED];
   // The derived id, present even when nothing was written, so a caller can find
   // the target of a call whose response it never received.
-  string target_session_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  string target_session_id = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // Set only for SALVAGE_RESULT_REFUSED.
   RefusalDetail refused = 4;
   google.protobuf.Timestamp observed_at = 5 [features.field_presence = LEGACY_REQUIRED];

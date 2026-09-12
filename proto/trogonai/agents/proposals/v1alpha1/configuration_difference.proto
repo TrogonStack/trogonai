@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.agents.proposals.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/any.proto";
 import "google/protobuf/empty.proto";
 import "trogonai/agents/agents/v1alpha1/configuration_artifact.proto";
@@ -29,15 +30,23 @@ message VerifiedConfigurationDifference {
   trogonai.agents.agents.v1alpha1.AgentConfigurationRef candidate_configuration = 2 [features.field_presence = LEGACY_REQUIRED];
   trogonai.agents.agents.v1alpha1.ConfigurationContractRef differencer_contract = 3 [features.field_presence = LEGACY_REQUIRED];
   // Nonempty, complete, and one entry per changed category; duplicates reject.
-  repeated ConfigurationChange changes = 4;
+  repeated ConfigurationChange changes = 4 [(buf.validate.field).repeated.min_items = 1];
   // Charter dominates learned-layer. Unknown enum values and UNSPECIFIED reject;
   // understood content without a known governance class is assigned CHARTER.
-  AgentChangeClass derived_change_class = 5 [features.field_presence = LEGACY_REQUIRED];
+  AgentChangeClass derived_change_class = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
 }
 
 message ConfigurationChange {
   // Exactly one known arm is required; unknown or unset changes reject.
   oneof change {
+    option (buf.validate.oneof).required = true;
+
     RuntimeDifference runtime = 1;
     RuntimeSettingsDifference runtime_settings = 2;
     VariableSchemaDifference variables_schema = 3;
@@ -64,6 +73,8 @@ message RuntimeSettingsDifference {
   google.protobuf.Any before = 1 [features.field_presence = LEGACY_REQUIRED];
   google.protobuf.Any after = 2 [features.field_presence = LEGACY_REQUIRED];
   oneof classification {
+    option (buf.validate.oneof).required = true;
+
     RuntimeSettingsGovernanceResponse classified = 3;
     google.protobuf.Empty conservative_charter = 4;
   }
@@ -85,7 +96,13 @@ message RuntimeSettingsGovernanceResponse {
   trogonai.agents.agents.v1alpha1.Digest candidate_settings_digest = 4 [features.field_presence = LEGACY_REQUIRED];
   trogonai.agents.agents.v1alpha1.ConfigurationContractRef governance_contract = 5 [features.field_presence = LEGACY_REQUIRED];
   trogonai.agents.agents.v1alpha1.NativeConfiguration difference = 6 [features.field_presence = LEGACY_REQUIRED];
-  AgentChangeClass derived_change_class = 7 [features.field_presence = LEGACY_REQUIRED];
+  AgentChangeClass derived_change_class = 7 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
 }
 
 // Caller-contract changes are charter, including presence, type, and requiredness

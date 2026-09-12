@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.agents.agents.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/any.proto";
 import "trogonai/agents/agents/v1alpha1/dependencies.proto";
 import "trogonai/agents/agents/v1alpha1/implementation.proto";
@@ -18,10 +19,20 @@ message AgentConfiguration {
   // The exact runtime definition admits one concrete settings contract. The
   // envelope and its registered type URL remain required for a zero-field
   // payload. Absent native fields may use defaults fixed by that contract.
-  google.protobuf.Any settings = 2 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Any settings = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).cel = {
+      id: "agent_configuration.settings.type_url_required"
+      message: "the settings envelope must carry its registered type URL"
+      expression: "this.type_url != ''"
+    }
+  ];
   // Must be 1 for this contract. Unsupported versions and unknown fields are
   // rejected before admission so older readers cannot erase behavior.
-  uint32 contract_version = 3 [features.field_presence = LEGACY_REQUIRED];
+  uint32 contract_version = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32.const = 1
+  ];
   string description = 4 [features.field_presence = LEGACY_REQUIRED];
   // Absent or empty declarations impose no integration requirement. Every
   // declared integration requires support from the pinned runtime or adapter.

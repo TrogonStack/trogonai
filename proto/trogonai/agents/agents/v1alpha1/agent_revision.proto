@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.agents.agents.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/empty.proto";
 import "trogonai/agents/agents/v1alpha1/configuration_artifact.proto";
 
@@ -9,8 +10,14 @@ import "trogonai/agents/agents/v1alpha1/configuration_artifact.proto";
 // from decoded fields. The revision number and provenance are outside its digest.
 // The identity is nonempty and revision_number is positive.
 message AgentRevisionRef {
-  string agent_id = 1 [features.field_presence = LEGACY_REQUIRED];
-  uint64 revision_number = 2 [features.field_presence = LEGACY_REQUIRED];
+  string agent_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  uint64 revision_number = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
   AgentConfigurationRef configuration = 3 [features.field_presence = LEGACY_REQUIRED];
 }
 
@@ -20,8 +27,10 @@ message AgentRevision {
   // activated revision of this agent and preserves that configuration exactly.
   // Exactly one known source is required; a proposal id must be nonempty.
   oneof source {
+    option (buf.validate.oneof).required = true;
+
     google.protobuf.Empty provisioning = 2;
-    string proposal_id = 3;
+    string proposal_id = 3 [(buf.validate.field).string.min_len = 1];
     AgentRevisionRef revert_of_revision = 4;
   }
 }

@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "trogonai/session/sessions/v1alpha1/digest.proto";
 
 // ResourceObservation records that a tool call put the content of a resource
@@ -24,6 +25,12 @@ import "trogonai/session/sessions/v1alpha1/digest.proto";
 // attribute it to, which is precisely the signal that something outside the
 // session moved underneath it.
 message ResourceObservation {
+  option (buf.validate.message).cel = {
+    id: "resource_observation.range_unset_when_absent"
+    message: "range must be unset when the outcome is absent"
+    expression: "!has(this.absent) || !has(this.range)"
+  };
+
   // Resource location, in the same URI form as WorkspaceRef.uri. For a
   // resource inside the workspace this is workspace.uri + "/" +
   // FileChanged.path, which is the join a projection uses to attribute or
@@ -35,6 +42,8 @@ message ResourceObservation {
   // failed to compute a digest can never be mistaken for one that observed
   // genuine absence.
   oneof outcome {
+    option (buf.validate.oneof).required = true;
+
     // Digest over the observed content.
     Digest content_digest = 2;
     // Positive report that no content exists at uri, which is itself an

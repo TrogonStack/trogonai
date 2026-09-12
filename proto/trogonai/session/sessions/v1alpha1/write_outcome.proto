@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "trogonai/session/sessions/v1alpha1/session_ordinal.proto";
 
 // WriteOutcome is what a caller learned about its own append.
@@ -21,6 +22,24 @@ import "trogonai/session/sessions/v1alpha1/session_ordinal.proto";
 // Disposition is derived from `state`, because two fields for one fact can
 // disagree, and the one that disagrees is the one a caller trusted.
 message WriteOutcome {
+  option (buf.validate.message).cel = {
+    id: "write_outcome.ordinal_presence"
+    message: "ordinal is present for COMMITTED and DEDUPLICATED, and absent for every other state"
+    expression:
+      "has(this.ordinal) == "
+      "(this.state == trogonai.session.sessions.v1alpha1.WriteState.WRITE_STATE_COMMITTED || this.state == trogonai.session.sessions.v1alpha1.WriteState.WRITE_STATE_DEDUPLICATED)"
+  };
+  option (buf.validate.message).cel = {
+    id: "write_outcome.indeterminate_presence"
+    message: "indeterminate is present when and only when state is UNKNOWN"
+    expression: "has(this.indeterminate) == (this.state == trogonai.session.sessions.v1alpha1.WriteState.WRITE_STATE_UNKNOWN)"
+  };
+  option (buf.validate.message).cel = {
+    id: "write_outcome.conflict_presence"
+    message: "conflict is present when and only when state is CONFLICT"
+    expression: "has(this.conflict) == (this.state == trogonai.session.sessions.v1alpha1.WriteState.WRITE_STATE_CONFLICT)"
+  };
+
   WriteState state = 1 [features.field_presence = LEGACY_REQUIRED];
   // Where the write landed. Present for COMMITTED and DEDUPLICATED, and absent
   // for every other state, including UNKNOWN: a position reported for a write

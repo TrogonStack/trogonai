@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.usage.settlement.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "trogonai/usage/settlement/v1alpha1/ledger.proto";
@@ -18,7 +19,16 @@ import "trogonai/usage/settlement/v1alpha1/ledger.proto";
 // says what has been turned into ledger records; the ledger says what those
 // records came to.
 message ConsumerCheckpoint {
-  string consumer_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  option (buf.validate.message).cel = {
+    id: "consumer_checkpoint.oldest_open_watermark_unset_when_nothing_open"
+    message: "oldest_open_watermark is unset when nothing is open"
+    expression: "this.open_settlement_count > 0u || !has(this.oldest_open_watermark)"
+  };
+
+  string consumer_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // The source this consumer reads. Opaque here; a stream name, a subject, a
   // partition.
   string source = 2 [features.field_presence = LEGACY_REQUIRED];
@@ -48,7 +58,10 @@ message ConsumerCheckpoint {
 // exactly as the system gets busier, so the pass meant to run during an
 // incident is the one that stops finishing during an incident.
 message ScanOpenSettlementsRequest {
-  string consumer_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string consumer_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // Which states to return. Empty means every non-terminal state, which is the
   // ordinary recovery sweep.
   repeated SettlementState states = 2;
@@ -100,8 +113,14 @@ message ScanCoverage {
 // than publishing again and hoping the idempotency key holds, and there is no
 // field on it that could cause a charge.
 message ReconcileSettlementRequest {
-  string consumer_id = 1 [features.field_presence = LEGACY_REQUIRED];
-  string settlement_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string consumer_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string settlement_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
 }
 
 // ReconcileSettlementResponse is what the provider says it knows.

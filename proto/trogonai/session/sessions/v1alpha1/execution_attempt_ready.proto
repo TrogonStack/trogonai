@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 import "trogonai/session/sessions/v1alpha1/digest.proto";
 
@@ -10,8 +11,14 @@ import "trogonai/session/sessions/v1alpha1/digest.proto";
 // same attempt's Ready-after-Started invariant, so it is invariant-bearing
 // (WRITE_PRECONDITION = At), not a commuting happened-fact.
 message ExecutionAttemptReady {
-  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
-  string execution_attempt_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string execution_attempt_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   string ready_attestation_ref = 3 [features.field_presence = LEGACY_REQUIRED];
   Digest ready_attestation_digest = 4 [features.field_presence = LEGACY_REQUIRED];
   // Wall-clock instant the attempt actually became ready: a real external

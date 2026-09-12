@@ -2,6 +2,8 @@ edition = "2024";
 
 package trogonai.session.sessions.v1alpha1;
 
+import "buf/validate/validate.proto";
+
 // OperationCancellationRequested records cancellation intent for a reserved
 // operation, separately from its eventual outcome: decide rejects this command
 // as a typed no-op when the operation is already terminal. After intent, the
@@ -10,11 +12,20 @@ package trogonai.session.sessions.v1alpha1;
 // ledger (ADR#0031 §4, ADR#0035 facet 6). It is an invariant-bearing
 // transition (WRITE_PRECONDITION = At).
 message OperationCancellationRequested {
-  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
-  string operation_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string operation_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // Command-time reason for the cancellation request; empty when none.
   string reason = 3;
   // Turn the cancelled operation belongs to, copied from its reservation
   // (see UserMessageRecorded.turn_id).
-  string turn_id = 4 [features.field_presence = LEGACY_REQUIRED];
+  string turn_id = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
 }

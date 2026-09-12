@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.agents.agents.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "trogonai/agents/agents/v1alpha1/configuration_artifact.proto";
 import "trogonai/agents/agents/v1alpha1/identity.proto";
 
@@ -10,7 +11,10 @@ import "trogonai/agents/agents/v1alpha1/identity.proto";
 // those are stances on their own planes.
 message AgentProvisioned {
   // Must be the did:key derived from public_identity_key.
-  string agent_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string agent_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // Immutable registry metadata, excluded from behavior and configuration identity.
   string display_name = 2 [features.field_presence = LEGACY_REQUIRED];
   // Placement node the agent is provisioned under: the node ref that anchors
@@ -19,11 +23,17 @@ message AgentProvisioned {
   // always denotes placement, while kinship refs are always `parent<Type>Id`.
   // This is creation placement. Hierarchy owns subsequent moves and projects
   // current placement; the registry records no relocation event.
-  string parent = 3 [features.field_presence = LEGACY_REQUIRED];
+  string parent = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // Revision minted by this genesis event, recorded explicitly so no consumer
   // derives it from convention. Always 1; the decider rejects any other value
   // at write time.
-  uint64 revision = 4 [features.field_presence = LEGACY_REQUIRED];
+  uint64 revision = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.const = 1
+  ];
   // Opaque record metadata present from genesis. Excluded from
   // configuration identity and from model input; later changes arrive as
   // AgentAnnotated and mint no revision.

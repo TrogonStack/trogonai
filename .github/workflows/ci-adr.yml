@@ -8,10 +8,13 @@ on:
     # skills, architecture and research docs), not only under docs/adr, so this
     # guard is intentionally repo-wide rather than scoped to one workspace dir.
     # Proto comments cite ADRs as the rationale for field shape and invariants,
-    # which is the same claim needing the same guarantee, so they trigger it too.
+    # and buf.yaml cites the ADR explaining why a dependency is present, which is
+    # the same claim needing the same guarantee, so they trigger it too.
     paths:
       - "**/*.md"
       - "**/*.proto"
+      - "**/*.yaml"
+      - "**/*.yml"
       - ".config/mise/tasks/github-actions/lint-adr-refs"
       - ".github/workflows/ci-adr.yml"
 
