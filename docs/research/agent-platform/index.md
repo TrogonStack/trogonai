@@ -55,3 +55,10 @@ and evidence rules behind each product dossier remain reproducible.
   running Q&A (Q1 through Q26) that turned the synthesis into directional
   design decisions, including the mistakes surfaced along the way and where
   the design is heading next.
+
+## Later research on the same providers
+
+The [provider agent contracts corpus](../provider-agent-contracts/index.md)
+re-studied three of the products above, plus xAI, against a narrower question:
+how each provider designs sessions, agents, and vault secrets. It goes deeper
+on credentials than the dossiers here and does not revise them.
