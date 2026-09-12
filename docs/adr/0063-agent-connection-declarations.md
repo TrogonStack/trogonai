@@ -61,6 +61,24 @@ sets the authenticated form and strips the placeholder rather than leaving both
 present. [ADR#0032](./0032-model-route-and-credential-binding.md) Decision 4
 already reaches the same conclusion for models through its supervisor and proxy.
 
+One platform in the corpus does declare connections, and it is the closest prior
+art this record has. OpenComputer's `defineConnection` lives in the agent's
+deployed code rather than in a stored resource, is inert on its own, since the
+docs state it "does not itself give the model a tool", and every render
+publishes the set it selected as `requiredConnections`. That is a revision-owned
+statement of outbound reach, which is the same thing this record adds.
+
+It is also the form this record rejects. A `defineConnection` fuses the
+destination and the credential into one literal: `origin`, `methods`, and
+`pathPrefix` describe the host, and a header template names the secret directly
+as `useSecret("GITHUB_TOKEN")`. Two consequences follow. The declaration names
+material, so it holds exactly the identity that rotation is free to replace,
+which is the failure Decision 2 below exists to avoid. And the external system
+is never a resource anywhere: every agent that reaches the same host re-authors
+its own description of that host, so nothing can provision it once, revoke it
+once, or answer which agents depend on it. Decision 3 takes the opposite side,
+and the security plane's catalog is what a declaration resolves against.
+
 This record fixes the declaration only. It does not define the session-scoped
 grant, the connection resource for non-model providers, or the egress mediation
 component, for the reasons in Decision 5.
@@ -136,8 +154,11 @@ execution, and that something is not defined here.
 plane's answer looks like and it is a substantial record on its own: an
 attempt-scoped grant, a confirmation key held outside the implementation, a
 proxy on the hot path, and typed failure and retry rules. The research corpus
-found no usable prior art for the tool and channel equivalent, because none of
-the four platforms studied separates a declaration from a grant at all. Writing
+offers no model for that second half. OpenComputer declares connections, as the
+Context records, but it resolves one by substituting a statically named secret
+at egress, so there is no grant in it to copy: nothing there represents a live
+authorization decision scoped to one execution. The other three separate the two
+not at all. Writing
 that record from the model plane's shape by analogy, with no evidence that the
 analogy holds, is how a contract acquires a mistake that later has to be
 migrated out of durable events.
@@ -183,5 +204,6 @@ grant design needs.
 - [ADR#0048: One-Time Plaintext Exposure Contract](./0048-one-time-plaintext-exposure.md)
 - [ADR#0062: Runtime-Owned Settings and Platform Declarations](./0062-runtime-owned-settings-and-platform-declarations.md)
 - [Provider agent contracts research corpus](../research/provider-agent-contracts/index.md)
+- [OpenComputer Serverless Agents dossier](../research/provider-agent-contracts/products/opencomputer-serverless-agents.md)
 - [Combined schema proposal](../research/provider-agent-contracts/combined-schema-proposal.md)
 - [Secret Management](../architecture/secret-management.md)

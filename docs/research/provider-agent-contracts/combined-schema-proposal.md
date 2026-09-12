@@ -737,8 +737,11 @@ New from this study:
    The grant record's job is therefore narrower than this document assumed, and
    it should be written against [ADR#0032](../../adr/0032-model-route-and-credential-binding.md)'s
    shape rather than from scratch. Whether that shape transfers is the thing to
-   establish, not assume: none of the four platforms studied here separates a
-   declaration from a grant at all, so there is no external prior art to lean on.
+   establish, not assume. OpenComputer is the only platform here that declares
+   connections at all, and its `defineConnection` names the secret inline and
+   substitutes it at egress, so it supplies prior art for the declaration and
+   none for a grant scoped to one execution. The other three separate the two not
+   at all.
 3. **V2 and V3** fold into the grant record as decided semantics rather than
    separate records; both are small and both are questions the vendors left
    unanswered.
