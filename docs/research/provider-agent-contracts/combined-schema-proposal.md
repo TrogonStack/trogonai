@@ -233,16 +233,37 @@ study flagged this as unverified and I am carrying it forward as unverified.
 $ grep -rilE 'secret|credential|vault|oauth|api_key' proto/
 ```
 
-matches prose comments only. **There is no secrets, vault, or credential
-message anywhere in the proto tree.** Not a message, not an enum, not a field.
+On `main`, that matches prose comments only, in seven files. No message, enum,
+or field in the committed tree names a credential.
 
-Meanwhile `agent.proto:12` already promises that credentials live in "their own
-plane," and `dependencies.proto` already declares four collections of
-dependencies (skills, tools, delegates, memories) with the rule "A declaration
-grants no authority."
+That number is a fact about `main` and not about the design, and reading it as
+the latter was the error in the first draft of this section. A gateway
+credentials plane exists on an unmerged branch and covers the store half
+thoroughly: a credential aggregate, its reference and metadata value objects,
+its lifecycle states, and a ten-arm event oneof for write, activation,
+rotation, revocation, and destruction, each failure mode included. It satisfies
+[ADR#0048](../../adr/0048-one-time-plaintext-exposure.md) by shape rather than
+by rule, because no event in it carries a plaintext-capable field at all.
+The store is not what is missing.
 
-The gap is not that we lack a vault. It is that we declared a boundary and never
-built the thing on the other side of it.
+Nor is the model provider path missing. Draft
+[ADR#0032](../../adr/0032-model-route-and-credential-binding.md) already defines
+a connection, a credential binding, and an attempt-scoped grant brokered
+through a session-scoped proxy, which is the same declaration-and-grant split
+proposed in §6.1 below. Its Decision 3 excludes channel and tool credentials by
+name.
+
+What is genuinely absent is the agent-facing half for everything that is not a
+model provider. `agent.proto:12` promises that credentials live in "their own
+plane," and `dependencies.proto` declares four collections of dependencies
+(skills, tools, delegates, memories) under the rule "A declaration grants no
+authority." Neither gives an Agent revision any way to say which external
+systems its behavior reaches. The store can hold a token for an issue tracker
+and the contract has no field in which an agent can ask for one.
+
+So the gap is narrower than a vault and more specific than a boundary never
+built: the store exists, the model plane's grant exists, and the declaration
+that would connect them for tool and channel connections does not.
 
 ---
 
