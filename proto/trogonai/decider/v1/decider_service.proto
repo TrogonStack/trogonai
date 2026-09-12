@@ -17,11 +17,10 @@ import "trogonai/decider/v1/decide_response.proto";
 // schema's transitive closure, so a generated client has the types it needs to
 // read a failed call without being told out of band which ones to expect.
 
-// The decider's command surface, bound to NATS micro by
-// [ADR#0016](../../../../docs/adr/0016-protobuf-rpc-over-nats-micro-binding.md).
+// The decider's command surface, bound to NATS micro by ADR#0016.
 //
-// One method rather than one per command type. 0016 derives an endpoint from
-// each `rpc`, which requires the method set to be known when the schema is
+// One method rather than one per command type. ADR#0016 derives an endpoint
+// from each `rpc`, which requires the method set to be known when the schema is
 // written; a decider's command set is not, because it is whatever the modules
 // activated at run time declare. Naming the command in `DecideRequest.command`
 // is what lets a fixed descriptor carry an open set.
