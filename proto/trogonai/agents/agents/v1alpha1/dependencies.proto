@@ -12,12 +12,14 @@ import "trogonai/agents/agents/v1alpha1/digest.proto";
 // consumption contract; an absent or empty collection creates no integration
 // requirement. Invalid declarations or mismatched pin digests fail admission
 // even when the dependency is optional; only an unavailable eligible dependency
-// may be omitted.
+// may be omitted. Connections are the one collection that pins no version, for
+// the reason recorded on ConnectionDeclaration.
 message AgentDependencies {
   repeated SkillDeclaration skills = 1;
   repeated ToolDeclaration tools = 2;
   repeated DelegateDeclaration delegates = 3;
   repeated MemoryDeclaration memories = 4;
+  repeated ConnectionDeclaration connections = 5;
 }
 
 // Unspecified and unknown values are invalid. A required declaration must
@@ -113,4 +115,47 @@ message MemoryKindSelector {
   // Nonempty memory-domain kind identifier, matched by exact equality within
   // the Session's authorized hierarchy context. This is never an instance ID.
   string kind = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// ConnectionDeclaration is how a revision states which external systems its
+// behavior reaches, without naming a credential, a connection resource, or a
+// secret handle. ADR#0032 Decision 3 keeps every one of those out of
+// AgentConfiguration, and this declaration does not reopen that boundary: it
+// names a requirement class, so a reviewer can read a revision and see what it
+// talks to without the revision becoming the custodian of how it authenticates.
+//
+// Unlike every other declaration in this file, this one has no exact pin arm,
+// and the omission is the decision rather than an unfinished shape. A pin
+// commits a revision to an immutable version, which is what makes a skill,
+// tool, or delegate reviewable. Credential material has no such version to
+// commit to. Rotation replaces the material while the connection it belongs to
+// remains the same connection, so a pin would either name material that the
+// next rotation invalidates, forcing a new revision for every rotation, or name
+// a version that is forbidden to change, which defeats rotation. Structural
+// identity is the part that holds still under rotation, and it is therefore the
+// only part a revision declares.
+message ConnectionDeclaration {
+  string binding_name = 1 [features.field_presence = LEGACY_REQUIRED];
+  DependencyRequirement requirement = 2 [features.field_presence = LEGACY_REQUIRED];
+  ConnectionSelector selector = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// The provider names the external security and billing boundary the behavior
+// reaches, matched by exact, case-sensitive equality within the Session's
+// authorized resolution scope. It is an open identifier rather than an
+// enumeration because the set of systems the platform can provision belongs to
+// the security plane's catalog; mirroring that catalog here would make every
+// new integration a change to the Agent contract and to every configuration
+// digest that encodes it.
+//
+// Everything narrower than the provider is a label predicate for the same
+// reason. Credential kind, environment, and account distinctions are the
+// security plane's vocabulary, and a declaration that restated them would hold
+// a second copy free to drift from the first. Every predicate must match by
+// exact, case-sensitive equality and empty keys are invalid. Multiple matching
+// connections fail admission, even for an optional declaration, because an
+// arbitrary first match would pick which external system the behavior reaches.
+message ConnectionSelector {
+  string provider = 1 [features.field_presence = LEGACY_REQUIRED];
+  map<string, string> labels = 2;
 }

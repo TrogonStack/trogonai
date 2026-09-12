@@ -306,10 +306,9 @@ record rather than to the declaration, and a digest over the connection's
 structural fields would duplicate the configuration digest that already commits
 to them. Reproducibility of the admission record is preserved by the structural
 fields being locked after creation, not by a digest over material that is
-designed to change. This is the single exception to pin-at-admission, and it
-needs to be recorded as a deliberate exception in whichever ADR adopts the
-declaration, so that a later reader does not read the missing digest as an
-oversight and add one.
+designed to change. Draft [ADR#0063](../../adr/0063-agent-connection-declarations.md)
+records this as the single documented exception to pin-at-admission, so that a
+later reader does not read the missing digest as an oversight and add one.
 
 **(b) A credential grant, session-scoped, resolved at admission.**
 
@@ -723,16 +722,30 @@ New from this study:
 
 ## 8. Sequencing
 
-Next free ADR number is **0063**.
-
-1. **The vault plane itself** (6.1 through 6.5), one ADR. It is the only item
-   here that closes a stated-but-unbuilt boundary, and everything else in this
-   document is either a divergence note or an existing open item.
-2. **V2 and V3** fold into that ADR as decided semantics rather than separate
-   records; both are small and both are questions the vendors left unanswered.
-3. **D7 reopened** with the origin-plus-secrets evidence.
-4. **V4** as an architecture record once the plane's shape is settled.
-5. **D1 and D5 together**, unchanged from the existing sequencing.
+1. **The declaration half of 6.1** is recorded in draft
+   [ADR#0063](../../adr/0063-agent-connection-declarations.md) and shipped as
+   `ConnectionDeclaration` at tag 5 of `AgentDependencies`. It took two of this
+   document's findings as load-bearing: the declaration pins no version, because
+   material rotates and structural identity does not (§1), and the provider is
+   an open identifier rather than an enumeration, so the Agent contract never
+   holds a second copy of the security plane's catalog (§6.2).
+2. **The grant half of 6.1**, plus 6.2 through 6.5, is deliberately not in that
+   record. §5 as first drafted understated what already exists: draft
+   [ADR#0032](../../adr/0032-model-route-and-credential-binding.md) answers
+   connection, binding, and grant for model providers and excludes tool and
+   channel credentials by name, and the store half exists on an unmerged branch.
+   The grant record's job is therefore narrower than this document assumed, and
+   it should be written against [ADR#0032](../../adr/0032-model-route-and-credential-binding.md)'s
+   shape rather than from scratch. Whether that shape transfers is the thing to
+   establish, not assume: none of the four platforms studied here separates a
+   declaration from a grant at all, so there is no external prior art to lean on.
+3. **V2 and V3** fold into the grant record as decided semantics rather than
+   separate records; both are small and both are questions the vendors left
+   unanswered.
+4. **D7 reopened** with the origin-plus-secrets evidence.
+5. **V4** as an architecture record once the grant's shape is settled.
+6. **D1 and D5 together**, unchanged from the existing sequencing.
 
 Nothing in this document proposes changing the session aggregate or the agent
-configuration. The delta is one new plane and one declaration collection.
+configuration. The delta is one declaration collection, now shipped, and one
+grant record still to write.

@@ -10,7 +10,9 @@ import "trogonai/agents/agents/v1alpha1/variables.proto";
 // AgentConfiguration owns immutable behavior and dependency declarations.
 // Changes, including implementation changes, require a new AgentRevision.
 // Grants, credentials, provider routes, live memory, and session inputs belong
-// to their own planes and cannot be embedded in this declaration.
+// to their own planes and cannot be embedded in this declaration. Stating that
+// behavior reaches an external system is a dependency rather than a credential;
+// ConnectionDeclaration holds that statement and nothing else.
 message AgentConfiguration {
   AgentImplementation runtime = 1 [features.field_presence = LEGACY_REQUIRED];
   // The exact runtime definition admits one concrete settings contract. The

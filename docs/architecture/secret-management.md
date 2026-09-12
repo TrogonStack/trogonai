@@ -131,6 +131,50 @@ trace. JetStream carries only the metadata that surrounds a credential:
 rotation, revocation, cache-invalidation, and audit-correlation events,
 never the value itself ([ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) Decision 3).
 
+## Who may resolve a ref
+
+[Resolution](#resolution) above answers how a caller that already holds a
+`SecretRef` exchanges it for a value, and how tenant scoping bounds which
+company's refs that caller can address. It does not answer how a caller comes to
+hold a ref in the first place. That question has three parts, and this page owns
+only one of them.
+
+- **The store.** Everything above: what material exists, what state it is in,
+  and how a holder resolves it. Fixed by
+  [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) and, for
+  the credential aggregate's events and exposure rule, by
+  [ADR#0047](../adr/0047-event-sourced-credential-metadata.md) and
+  [ADR#0048](../adr/0048-one-time-plaintext-exposure.md).
+- **The declaration.** What an Agent revision says it needs. Draft
+  [ADR#0063](../adr/0063-agent-connection-declarations.md) puts a
+  `ConnectionDeclaration` on `AgentDependencies` that names a provider and label
+  predicates and carries no credential, no ref, and no version. It grants
+  nothing; it is a reviewable statement that this behavior reaches that system.
+- **The grant.** What turns a declared requirement plus a live authorization
+  decision into a usable connection for the duration of one execution. For
+  model providers, draft
+  [ADR#0032](../adr/0032-model-route-and-credential-binding.md) defines this as
+  an attempt-scoped `ModelAccessGrant`. For tool and channel connections it is
+  undecided (see [Open decisions](#open-decisions)).
+
+The agent runtime is not the caller in any of these cases. Draft
+[ADR#0032](../adr/0032-model-route-and-credential-binding.md) Decision 4 fixes
+that for the model path: the native implementation "never receives the token,
+confirmation key, renewal authority, upstream credential, or permission to
+resolve a `SecretRef`", because a platform-controlled supervisor holds the grant
+and exposes only a session-scoped endpoint.
+
+The [provider agent contracts research corpus](../research/provider-agent-contracts/index.md)
+found the same boundary reached independently by four external implementations
+outside this repository, which is worth recording because it means the shape is
+not a local preference. In all four the agent holds an opaque placeholder and
+the real value is substituted into the outbound request at network egress, and
+in all four the substitution both sets the authenticated form and removes the
+placeholder rather than leaving both present. Whether this platform's tool and
+channel egress point works that way is part of the undecided grant above, not
+something [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md)
+fixes.
+
 ## Caching
 
 Caches are bounded, with event-driven invalidation from rotation and
@@ -204,6 +248,13 @@ which means this behavior must be answered before adoption, not assumed.
 - **Audit-sink failure behavior.** [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) names correct behavior when
   audit sinks fail as a required adoption proof, without answering what
   that behavior is ([ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) Consequences).
+- **Grant shape for tool and channel connections.** Draft
+  [ADR#0063](../adr/0063-agent-connection-declarations.md) fixes the Agent-side
+  declaration and explicitly leaves the grant, the non-model connection
+  resource, and the egress mediation point open. Draft
+  [ADR#0032](../adr/0032-model-route-and-credential-binding.md) answers all
+  three for model providers only, and its Decision 3 excludes channel and tool
+  credentials by name.
 - **Anomaly detection scope.** [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) states that anomaly detection on
   resolve subjects is structural rather than optional, given that this
   service is the platform's highest-value compromise target, without
@@ -212,6 +263,8 @@ which means this behavior must be answered before adoption, not assumed.
 
 ## See also
 
+- [ADR#0063: An Agent Declares the Connections It Needs](../adr/0063-agent-connection-declarations.md)
+- [Provider agent contracts research corpus](../research/provider-agent-contracts/index.md)
 - [Key Management](./key-management.md)
 - [Key Custody](./key-custody.md)
 - [Key States](./key-states.md)
