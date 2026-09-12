@@ -7,11 +7,12 @@ import "trogonai/agents/agents/v1alpha1/digest.proto";
 // These declarations are revision-owned. Session admission resolves them under
 // live hierarchy and policy, then records exact references and digests. A
 // declaration grants no authority. Binding names are nonempty, case-sensitive,
-// and unique across all four collections. Resource identifiers must be nonempty.
-// Each declared integration requires a supported runtime or adapter consumption
-// contract; an absent or empty collection creates no integration requirement.
-// Invalid declarations or mismatched pin digests fail admission even when the
-// dependency is optional; only an unavailable eligible dependency may be omitted.
+// and unique across every collection below. Resource identifiers must be
+// nonempty. Each declared integration requires a supported runtime or adapter
+// consumption contract; an absent or empty collection creates no integration
+// requirement. Invalid declarations or mismatched pin digests fail admission
+// even when the dependency is optional; only an unavailable eligible dependency
+// may be omitted.
 message AgentDependencies {
   repeated SkillDeclaration skills = 1;
   repeated ToolDeclaration tools = 2;

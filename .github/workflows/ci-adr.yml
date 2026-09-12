@@ -7,8 +7,11 @@ on:
     # ADR#NNNN references live in markdown across the whole repo (crate READMEs,
     # skills, architecture and research docs), not only under docs/adr, so this
     # guard is intentionally repo-wide rather than scoped to one workspace dir.
+    # Proto comments cite ADRs as the rationale for field shape and invariants,
+    # which is the same claim needing the same guarantee, so they trigger it too.
     paths:
       - "**/*.md"
+      - "**/*.proto"
       - ".config/mise/tasks/github-actions/lint-adr-refs"
       - ".github/workflows/ci-adr.yml"
 

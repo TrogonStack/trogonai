@@ -5,8 +5,7 @@
 ///
 /// The reply to an acceptance and to nothing else. Every other outcome, a
 /// module's own refusal included, is a service error: one complete
-/// `google.rpc.Status` under `Nats-Service-Error-Code`, per
-/// [ADR#0016](../../../../docs/adr/0016-protobuf-rpc-over-nats-micro-binding.md).
+/// `google.rpc.Status` under `Nats-Service-Error-Code`, per ADR#0016.
 /// A caller learns which of the two it is holding from that header and never by
 /// trying to decode this message first.
 #[derive(Clone, Debug, Default)]
