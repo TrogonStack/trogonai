@@ -42,7 +42,6 @@ things and diverge on one.
   **shape of the schema** rather than by redacting a field (6.7).
 - **Credentials attach to the session, not to the agent.** The agent is the
   product-level abstraction; the session is the end-user abstraction.
-- **Archive purges the payload and keeps the record; delete keeps nothing.**
 - **Material rotates; structural identity does not.** Anthropic locks
   `mcp_server_url`, `secret_name`, `token_endpoint`, `client_id` after creation.
   OpenAI replaces a token "without changing its ID, authentication type, or
@@ -52,6 +51,16 @@ things and diverge on one.
   Counting the two open-source implementations we already had notes on, this is
   **four independent designs converging on one mechanism** (6.8), which retires
   it as an open design question.
+
+**Not convergence, one source only:** archive purges the payload and keeps the
+record while delete keeps nothing. Anthropic documents this explicitly and
+applies it uniformly across vaults, credentials, sessions, agents, memory
+stores, and environments. OpenAI documents status filters and no archive
+operation on a vault or credential at all. OpenComputer documents
+`opencomputer secrets remove` with no archive, retention, or audit semantics.
+xAI has no vault. Section 6.5 argues for reusing our existing erasure idiom,
+and that argument rests on our own contract rather than on vendor agreement;
+it is recorded here so the distinction is not lost when 6.5 is read alone.
 
 **They diverge on:** how tightly a credential is bound to the destination it may
 be used against. This is the axis that actually separates the designs, and it is
@@ -204,11 +213,15 @@ study flagged this as unverified and I am carrying it forward as unverified.
   guardrails, which appear nowhere in their Agents API, and for treating tool
   output as untrusted, for which they publish no provenance field and no
   prompt-injection guidance at all.
-- **Credential use is auditable.** No vendor records which credential was
-  selected for a given tool call. OpenAI's binding is implicit URL matching, so
-  a URL typo "silently produces an unauthenticated call rather than an error."
-  Our grant is explicit and admission-resolved, so the selected credential is a
-  recorded fact rather than a runtime coincidence.
+- **Credential authority is auditable at grant level.** No vendor records which
+  credential was selected for a given tool call, and neither would we: an
+  admission-resolved grant records the authority a session was given, not the
+  selection made on each egress. What it buys is still real. OpenAI's binding is
+  implicit URL matching against the tool's server URL, so which credential a
+  call used is derivable only by replaying that match against the vault contents
+  at the time; our grant makes the authorized set a recorded fact at admission.
+  Per-call attribution is a separate record that does not exist yet in any
+  design surveyed, ours included, and V1 leaves its event shape open.
 - **Admission-time pinning** of skills by content digest, tools by exact version,
   delegates by revision number, with moving aliases explicitly invalid.
 
@@ -255,6 +268,27 @@ This is OpenComputer's `defineConnection` idea expressed in our existing idiom:
 the destination is part of the immutable, content-addressed, reviewable artifact,
 because *which hosts an agent talks to is behavior*, and behavior belongs to the
 revision.
+
+`dependencies.proto`'s existing invariants apply unchanged and must be stated
+rather than assumed: a connection's `binding_name` is nonempty, case-sensitive,
+and unique across all five collections, not just within connections, so a
+connection cannot collide with a skill, tool, delegate, or memory binding.
+Invalid declarations fail admission even when the declaration is optional, and
+multiple matching connections fail admission for the same reason a
+`ToolSelector` with multiple matches does.
+
+One invariant deliberately does not carry over. The other four collections have
+admission record an exact reference **and a digest**; a connection records a
+reference only. A digest over credential material would be invalidated by the
+next rotation, which is the finding in §1 and §6.2 applied to the admission
+record rather than to the declaration, and a digest over the connection's
+structural fields would duplicate the configuration digest that already commits
+to them. Reproducibility of the admission record is preserved by the structural
+fields being locked after creation, not by a digest over material that is
+designed to change. This is the single exception to pin-at-admission, and it
+needs to be recorded as a deliberate exception in whichever ADR adopts the
+declaration, so that a later reader does not read the missing digest as an
+oversight and add one.
 
 **(b) A credential grant, session-scoped, resolved at admission.**
 
@@ -394,12 +428,38 @@ is a second, independent gate that must also permit the host.
 OpenComputer does the same thing with a sealed placeholder (`osb_sealed_...`) and
 states the security property plainly: "Bypass fails closed."
 
-The property this buys is the one that matters: **a compromised agent process
-cannot exfiltrate the secret, only use it against hosts already allowlisted.**
+The property this buys is narrower than it first looks, and worth stating
+precisely because the imprecise version is the one that gets repeated: **a
+compromised agent process cannot read the secret value.** It can still use that
+value against any allowlisted host and read the response, so the mechanism
+bounds *where* the credential reaches, not what the agent learns by using it.
+Substitution is a confidentiality control on the material, not an exfiltration
+control on the channel.
 
-We have no representation for this. It should be in the plane from the start,
-not retrofitted, because it changes the shape of the credential message (a
-credential needs a substitution policy, not just a value).
+Three controls have to come with it, and none of the four providers documents
+all three:
+
+1. **Scheme.** The destination must be HTTPS, and so must every redirect
+   target. OpenComputer states this for the declared origin ("The origin must
+   use HTTPS.") and it is the only provider in the study that does. Substituting
+   a credential into a cleartext request puts the material on the wire, which
+   defeats the entire mechanism.
+2. **Redirects.** A destination that passes the allowlist check can redirect to
+   one that does not. Every redirect target must be revalidated against both the
+   substitution policy and the network policy, and on failure the request fails
+   closed with the managed credential stripped rather than following the
+   redirect with the header attached. None of the four providers documents
+   redirect handling for credential substitution; Anthropic's docs are silent on
+   it and our own gaps list for that dossier records the silence.
+3. **Response isolation.** The proxy sees the authenticated response. Whether it
+   returns that response to the agent unmodified, and therefore whether the
+   substitution boundary is a confidentiality boundary in one direction only, is
+   undocumented everywhere and is a decision we have to make rather than copy.
+
+We have no representation for any of this. It should be in the plane from the
+start, not retrofitted, because it changes the shape of the credential message
+(a credential needs a substitution policy, not just a value), and the policy has
+to carry scheme and redirect rules rather than a host list alone.
 
 ### 6.5 Archive versus delete: reuse, do not invent
 
