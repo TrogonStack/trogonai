@@ -48,6 +48,25 @@ first-class entity with its own lifecycle (created, renamed, and deleted
 independently of the secrets inside it) or purely a naming attribute on a
 `SecretRef` is not fixed by the ADR and is an open decision.
 
+### Connection
+
+A connection is the external system a credential authenticates against: a
+source host, an issue tracker, a chat workspace, an observability backend. It
+is the structural half of a pair whose other half is the material, and it is
+the half that holds still under rotation. Replacing the bytes behind a
+credential does not make it a different connection.
+
+No general connection resource exists in this platform yet.
+[ADR#0032](../adr/0032-model-route-and-credential-binding.md) defines a
+[ModelProviderConnection](../glossary/modelproviderconnection) for one provider
+class, and draft [ADR#0063](../adr/0063-agent-connection-declarations.md)
+Decision 5 defers the form for every other class to its own record. So a
+`ConnectionDeclaration` names a provider and label predicates that admission is
+meant to resolve against a catalog the security plane owns, and that catalog is
+not described anywhere on this page because it is not decided. Recording the
+gap is the point: until the resource exists, a declaration is a reviewable
+statement of intent rather than a resolution path.
+
 ### Fingerprints and reason enums
 
 Events and snapshots in the write model below carry references,
@@ -174,6 +193,54 @@ placeholder rather than leaving both present. Whether this platform's tool and
 channel egress point works that way is part of the undecided grant above, not
 something [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md)
 fixes.
+
+### The same words mean different things elsewhere
+
+Five layers sit between stored material and a usable connection, and this page
+owns only the first. Naming them in order is what keeps the rest legible:
+
+1. **Vault.** A policy-enforced grouping of stored material within a company.
+2. **Credential.** The material itself plus its state, addressed by a
+   `SecretRef`.
+3. **Connection.** The external system that material authenticates against.
+4. **Declaration.** What an Agent revision says it reaches. Grants nothing.
+5. **Grant.** What turns a declaration plus a live authorization decision into
+   something usable for one execution.
+
+The [research corpus](../research/provider-agent-contracts/index.md) uses some
+of the same words for different layers, so a reader comparing the two needs the
+mapping rather than the vocabulary:
+
+| Layer | Anthropic Managed Agents | OpenAI Agents API | OpenComputer | xAI |
+| --- | --- | --- | --- | --- |
+| Vault | `vault` (`vlt_...`) | `vault` | `SecretStore` | none |
+| Credential | `vault_credential` (`vcrd_...`) | `vault.credential` | a name passed to `useSecret()` | passed inline on every request |
+| Connection | not separable, a credential is bound to one `mcp_server_url` | not separable, a credential matches a server URL | `defineConnection`, fused with the credential | none |
+| Declaration | none | none | `defineConnection` in source, published as `requiredConnections` | none |
+| Grant | none | none | none, egress substitution stands in for one | none |
+| Attachment point | `vault_ids[]` fixed at session creation | `vault_ids[]` at session creation | `secretStore` at sandbox creation | none |
+
+Two collisions in that table are worth stating outright, because both have
+already produced a wrong reading of the corpus.
+
+The first is the word vault. Ours is a console-visible organizing boundary and
+nothing more: two vaults in the same company are a policy grouping, not two
+OpenBao security boundaries ([ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) Decision 5).
+Anthropic's and OpenAI's vault is that plus an attachment point. `vault_ids[]`
+is fixed on the session at creation, which makes their vault the unit of
+session-scoped reach. Ours carries no such meaning, and nothing in this
+platform attaches a vault to a session today.
+
+The second is the word connector, which is not another name for a vault id. In
+the OpenAI **Responses** API a `connector_id` points at a provider-held stored
+connection, one layer below a vault. The **Agents** API has no such field: its
+per-tool selector is `credential_id`, documented as "The vault credential
+selected for this MCP server", so it selects material and not a connection.
+xAI's OpenAPI schema carries `connector_id` and the documentation states that
+it and `require_approval` "are not currently supported", so the only other
+appearance of the word in the corpus is a rejection. A connector in the sense
+either vendor uses it is the resource our
+[Connection](#connection) concept says we do not have.
 
 ## Caching
 
