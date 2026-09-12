@@ -30,9 +30,9 @@ message RequestToolCall {
     (buf.validate.field).string.min_len = 1
   ];
   string input_json = 5 [features.field_presence = LEGACY_REQUIRED];
-  string parent_tool_use_id = 6 [(buf.validate.field).string.min_len = 1];
+  string parent_tool_use_id = 6;
   // The ledger operation guarding this call's side effect, when it reserves one.
-  string operation_id = 7 [(buf.validate.field).string.min_len = 1];
+  string operation_id = 7;
   string turn_id = 8 [
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1

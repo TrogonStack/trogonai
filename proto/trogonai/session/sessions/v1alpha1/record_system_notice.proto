@@ -18,7 +18,7 @@ message RecordSystemNotice {
   NoticeLevel level = 2 [features.field_presence = LEGACY_REQUIRED];
   string text = 3 [features.field_presence = LEGACY_REQUIRED];
   // Set when the notice concerns a specific call.
-  string tool_call_id = 4 [(buf.validate.field).string.min_len = 1];
+  string tool_call_id = 4;
   // Set when a turn was open at the time of the notice.
-  string turn_id = 5 [(buf.validate.field).string.min_len = 1];
+  string turn_id = 5;
 }

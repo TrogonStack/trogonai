@@ -30,7 +30,7 @@ message SalvageSessionRequest {
   // Workspace for the salvaged session. Needed only when the source's own
   // workspace could not be read, which is exactly the case a damaged source
   // makes likely.
-  string workspace_id = 6 [(buf.validate.field).string.min_len = 1];
+  string workspace_id = 6;
   SalvageLimits limits = 7;
 }
 

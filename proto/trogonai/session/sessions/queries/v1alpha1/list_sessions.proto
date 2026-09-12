@@ -21,7 +21,7 @@ message ListSessionsRequest {
   ContractVersion accepted_contract = 1 [features.field_presence = LEGACY_REQUIRED];
   ListSessionsScope scope = 2 [features.field_presence = LEGACY_REQUIRED];
   // Required for SCOPE_WORKSPACE, ignored otherwise.
-  string workspace_id = 3 [(buf.validate.field).string.min_len = 1];
+  string workspace_id = 3;
   ArchivedFilter archived = 4 [features.field_presence = LEGACY_REQUIRED];
   // Maximum rows to return. The server may return fewer. A value above the
   // configured admission limit is refused with

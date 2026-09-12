@@ -57,7 +57,7 @@ message State {
   ExecutionAttempt active_attempt = 10;
   // Most recently started attempt, still active or already ended, so a new
   // attempt can be checked for monotonic numbering and exact predecessor.
-  string last_attempt_id = 11 [(buf.validate.field).string.min_len = 1];
+  string last_attempt_id = 11;
   uint64 last_attempt_number = 12;
   // Tool calls keyed by tool_call_id, in first-observed fold order.
   repeated ToolCall tool_calls = 13;
@@ -135,7 +135,7 @@ message ParentLink {
   // The parent rewound past the dispatch: the inherited prefix no longer holds.
   bool history_invalidated = 6 [features.field_presence = LEGACY_REQUIRED];
   // Set once the lineage is detached, making the detach idempotent per id.
-  string detach_operation_id = 7 [(buf.validate.field).string.min_len = 1];
+  string detach_operation_id = 7;
 }
 
 message Delegation {
@@ -156,13 +156,13 @@ message Delegation {
   ];
   DelegationKind kind = 2 [features.field_presence = LEGACY_REQUIRED];
   // Set for DELEGATION_KIND_CHILD_SESSION.
-  string child_session_id = 3 [(buf.validate.field).string.min_len = 1];
+  string child_session_id = 3;
   trogonai.session.sessions.v1alpha1.CascadePolicy cascade_policy = 4;
   // Set for DELEGATION_KIND_EXTERNAL.
   string delegate_reference = 5;
   trogonai.session.sessions.v1alpha1.SessionOrdinal dispatched_at = 6 [features.field_presence = LEGACY_REQUIRED];
   // Set once the child is detached, making the detach idempotent per id.
-  string detach_operation_id = 7 [(buf.validate.field).string.min_len = 1];
+  string detach_operation_id = 7;
 }
 
 enum DelegationKind {
@@ -219,7 +219,7 @@ message ToolCall {
   ];
   // The operation ledger entry guarding this call's side effect, when it
   // reserves one.
-  string operation_id = 5 [(buf.validate.field).string.min_len = 1];
+  string operation_id = 5;
   ToolCallStatus status = 6 [features.field_presence = LEGACY_REQUIRED];
   trogonai.session.sessions.v1alpha1.SessionOrdinal requested_at = 7 [features.field_presence = LEGACY_REQUIRED];
   // Set when the call started executing. A call with started_at set and

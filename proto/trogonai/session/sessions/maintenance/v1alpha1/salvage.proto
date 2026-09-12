@@ -89,7 +89,7 @@ message OmittedItem {
   // The source position, for an omission that had one.
   uint64 source_ordinal = 2;
   // The artifact, checkpoint, or child session id, for an omission that had one.
-  string entity_id = 3 [(buf.validate.field).string.min_len = 1];
+  string entity_id = 3;
   OmissionReason reason = 4 [features.field_presence = LEGACY_REQUIRED];
 }
 

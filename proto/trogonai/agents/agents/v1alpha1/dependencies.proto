@@ -77,7 +77,7 @@ message ToolSelector {
     expression: "this.name != '' || this.labels.size() > 0"
   };
 
-  string name = 1 [(buf.validate.field).string.min_len = 1];
+  string name = 1;
   map<string, string> labels = 2 [(buf.validate.field).map.keys.string.min_len = 1];
 }
 

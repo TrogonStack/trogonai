@@ -155,7 +155,7 @@ message SubjectRef {
   // Interpreted according to `kind`: an artifact id, an operation id, a tool
   // execution id, a projection name. Unset when `kind` is STREAM, which needs
   // no further identity than the session.
-  string entity_id = 3 [(buf.validate.field).string.min_len = 1];
+  string entity_id = 3;
   // The SessionOrdinal the finding is anchored at. Unset when the finding is
   // not ordinal-scoped, which is not the same as ordinal zero.
   uint64 ordinal = 4;

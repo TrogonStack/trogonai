@@ -23,5 +23,5 @@ message DenyToolCall {
   ];
   string denied_by = 4 [features.field_presence = LEGACY_REQUIRED];
   string reason = 5;
-  string turn_id = 6 [(buf.validate.field).string.min_len = 1];
+  string turn_id = 6;
 }

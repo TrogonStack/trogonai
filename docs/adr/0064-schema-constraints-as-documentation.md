@@ -123,13 +123,31 @@ comment blesses the empty string is skipped, because there a `min_len`
 would contradict a stated behavior instead of restating one:
 `ToolCallRequested.operation_id` is "empty for a call that reserves no
 operation", `ExecutionAttemptStarted.previous_attempt_id` is "empty exactly
-when attempt_number is 1", and seven more in the session plane read the same
-way, among them `ToolCallRequested.parent_tool_use_id`, which carries the
-same top-level linkage that `ToolUseBlock` documents as empty. A comment
-that says "empty" about some other value does not trigger the exclusion,
-which is why `ProviderToolIntentRejected.rejection_id` keeps its constraint:
-the emptiness it describes belongs to the provider's identifier, not to the
-runtime-minted one it is there to replace.
+when attempt_number is 1", and `ToolCallRequested.parent_tool_use_id`
+carries the same top-level linkage that `ToolUseBlock` documents as empty.
+
+The exclusion follows the identity, not the message that carries it. A
+command, an event, and a folded-state record that all hold the same optional
+reference describe one fact about the domain, and annotating whichever of
+the three happens to have the terser comment would make the contract
+disagree with itself about whether that reference may be absent. So
+`RequestToolCall.parent_tool_use_id` is skipped because
+`ToolCallRequested.parent_tool_use_id` is, and the pairs behind `turn_id`
+on an approval, `operation_id` on a tool call, `claimed_tool_name` on a
+rejected provider intent, and `detach_operation_id` in folded delegation
+state resolve the same way. The one optional string that keeps a `min_len`
+is `AgentRevision.proposal_id`, and it keeps it because its own comment
+says a proposal id must be nonempty and the oneof around it is required, so
+the constraint restates a stated invariant rather than inventing one.
+
+A comment that says "empty" about some other value does not trigger the
+exclusion, which is why `ProviderToolIntentRejected.rejection_id` keeps its
+constraint: the emptiness it describes belongs to the provider's
+identifier, not to the runtime-minted one it is there to replace. Nor does
+the rule override a constraint stated at the message level. `ToolSelector`
+requires that a name or a label predicate be present, which makes an empty
+`name` a legal selector, so `name` carries no `min_len` and the CEL rule
+remains the only statement about it.
 
 The second exclusion is that ADR's wire-fidelity exemption, which governs
 `ToolUseBlock` and `ToolResultBlock`. Their job is to reproduce what a

@@ -329,7 +329,7 @@ message DelegationView {
   ];
   DelegationKindView kind = 2 [features.field_presence = LEGACY_REQUIRED];
   // Set for DELEGATION_KIND_VIEW_CHILD_SESSION.
-  string child_session_id = 3 [(buf.validate.field).string.min_len = 1];
+  string child_session_id = 3;
   // Set for DELEGATION_KIND_VIEW_EXTERNAL.
   string delegate_reference = 4;
   bool detached = 5 [features.field_presence = LEGACY_REQUIRED];

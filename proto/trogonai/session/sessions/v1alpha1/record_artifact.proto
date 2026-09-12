@@ -16,5 +16,5 @@ message RecordArtifact {
   ];
   ArtifactMetadata artifact = 2 [features.field_presence = LEGACY_REQUIRED];
   // Set when a turn produced the artifact.
-  string turn_id = 3 [(buf.validate.field).string.min_len = 1];
+  string turn_id = 3;
 }

@@ -108,7 +108,7 @@ message SessionListScanCursor {
 // nor the new one, and the caller has no way to notice.
 message ListScanSelector {
   ListSessionsScope scope = 1 [features.field_presence = LEGACY_REQUIRED];
-  string workspace_id = 2 [(buf.validate.field).string.min_len = 1];
+  string workspace_id = 2;
   ArchivedFilter archived = 3 [features.field_presence = LEGACY_REQUIRED];
 }
 

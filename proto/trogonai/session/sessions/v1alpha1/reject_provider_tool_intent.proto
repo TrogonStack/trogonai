@@ -34,8 +34,8 @@ message RejectProviderToolIntent {
     (buf.validate.field).string.min_len = 1
   ];
   ProviderToolIntentRejectionReason reason = 5 [features.field_presence = LEGACY_REQUIRED];
-  string claimed_tool_call_id = 6 [(buf.validate.field).string.min_len = 1];
-  string claimed_tool_name = 7 [(buf.validate.field).string.min_len = 1];
+  string claimed_tool_call_id = 6;
+  string claimed_tool_name = 7;
   ArtifactRef raw_intent = 8;
   string detail = 9;
 }

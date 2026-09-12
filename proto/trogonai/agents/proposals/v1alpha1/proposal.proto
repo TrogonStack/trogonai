@@ -35,7 +35,7 @@ message ProposalDefinition {
   ];
   repeated ProposalEvidenceRef evidence = 4;
   // Supersession does not close another stream; its author withdraws it separately.
-  string supersedes_proposal_id = 5 [(buf.validate.field).string.min_len = 1];
+  string supersedes_proposal_id = 5;
 }
 
 message ProposalJudgment {

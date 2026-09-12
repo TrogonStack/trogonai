@@ -32,5 +32,5 @@ message ToolCallDenied {
   // Turn the denied call belongs to (see UserMessageRecorded.turn_id). Optional
   // for the same reason as on ToolCallApproved: the refusing principal, policy,
   // or hook may not hold the turn context.
-  string turn_id = 6 [(buf.validate.field).string.min_len = 1];
+  string turn_id = 6;
 }

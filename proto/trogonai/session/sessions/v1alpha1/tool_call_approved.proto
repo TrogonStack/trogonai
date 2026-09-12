@@ -28,5 +28,5 @@ message ToolCallApproved {
   // approval may be recorded by an external approver that holds the call
   // identity without the turn context, and forcing a value would invite a
   // fabricated one.
-  string turn_id = 5 [(buf.validate.field).string.min_len = 1];
+  string turn_id = 5;
 }

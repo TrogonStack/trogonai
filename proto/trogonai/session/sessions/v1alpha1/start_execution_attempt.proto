@@ -27,7 +27,7 @@ message StartExecutionAttempt {
   // is about to execute a different plan than the session was started with.
   Digest session_execution_plan_digest = 3 [features.field_presence = LEGACY_REQUIRED];
   uint64 attempt_number = 4 [features.field_presence = LEGACY_REQUIRED];
-  string previous_attempt_id = 5 [(buf.validate.field).string.min_len = 1];
+  string previous_attempt_id = 5;
   // Unset when the attempt starts from scratch rather than restoring.
   Checkpoint restored_checkpoint = 6;
   string host_artifact_ref = 7 [features.field_presence = LEGACY_REQUIRED];
