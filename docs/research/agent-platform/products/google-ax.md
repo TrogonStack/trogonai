@@ -5,13 +5,18 @@ source_urls:
   - https://github.com/google/ax/tree/703a79f2a55def5be183ad7bd54da7c38cc22cc5
   - https://github.com/google/ax/blob/703a79f2a55def5be183ad7bd54da7c38cc22cc5/README.md
   - https://github.com/google/ax/blob/703a79f2a55def5be183ad7bd54da7c38cc22cc5/proto/ax.proto
+  - https://github.com/google/ax/blob/703a79f2a55def5be183ad7bd54da7c38cc22cc5/proto/content.proto
   - https://github.com/google/ax/blob/703a79f2a55def5be183ad7bd54da7c38cc22cc5/internal/controller/controller.go
   - https://github.com/google/ax/blob/703a79f2a55def5be183ad7bd54da7c38cc22cc5/internal/controller/eventlog/eventlog.go
   - https://github.com/google/ax/blob/703a79f2a55def5be183ad7bd54da7c38cc22cc5/internal/controller/registry.go
+  - https://github.com/google/ax/blob/703a79f2a55def5be183ad7bd54da7c38cc22cc5/internal/server/server.go
+  - https://github.com/google/ax/blob/703a79f2a55def5be183ad7bd54da7c38cc22cc5/internal/server/interceptors.go
   - https://github.com/google/ax/blob/703a79f2a55def5be183ad7bd54da7c38cc22cc5/internal/harness/harness.go
   - https://github.com/google/ax/blob/703a79f2a55def5be183ad7bd54da7c38cc22cc5/internal/harness/substrate/substrate.go
   - https://github.com/google/ax/blob/703a79f2a55def5be183ad7bd54da7c38cc22cc5/internal/config/config.go
   - https://github.com/google/ax/blob/703a79f2a55def5be183ad7bd54da7c38cc22cc5/internal/skills/skills.go
+  - https://github.com/google/ax/blob/703a79f2a55def5be183ad7bd54da7c38cc22cc5/ax.yaml
+  - https://github.com/google/ax/blob/703a79f2a55def5be183ad7bd54da7c38cc22cc5/cmd/ax/agentconfig.go
   - https://github.com/google/ax/blob/703a79f2a55def5be183ad7bd54da7c38cc22cc5/python/antigravity/harness_server.py
 retrieved: 2026-09-15
 status: done
@@ -119,10 +124,16 @@ Every finding below should be read against that warning.
   ([`controller.go:74-75`](https://github.com/google/ax/blob/703a79f2a55def5be183ad7bd54da7c38cc22cc5/internal/controller/controller.go#L74-L75)).
 
 - **Conceptual model: agent-as-request-parameter.** Not agent-as-identity,
-  not agent-as-config in any stored sense, and not agent-as-process, since
-  the process-shaped noun is the harness. The closest honest description is that
+  not agent-as-config as a resource, and not agent-as-process, since the
+  process-shaped noun is the harness. The closest honest description is that
   "agent" in AX names whichever harness a caller selects, plus the JSON that
-  caller hands it on that call.
+  caller hands it on that call. The distinction is narrow but load-bearing:
+  the config is *recorded*, since `LogInputs` parses valid `agent_config`
+  into `StepEvent.agent_config` and appends it to the event log
+  ([`controller.go:243-264`](https://github.com/google/ax/blob/703a79f2a55def5be183ad7bd54da7c38cc22cc5/internal/controller/controller.go#L243-L264)),
+  yet nothing reads it back. `ResumptionState` recovers only `state` and
+  `agent_id`, so the stored copy is an audit annotation on one turn rather
+  than a definition the runtime resolves.
 
 The absence is unusual in this corpus not because a product declines to store
 an agent, but because here it coexists with a fully specified server-side
@@ -236,13 +247,20 @@ conversation creation"
 for Vertex ([README:111-129](https://github.com/google/ax/blob/703a79f2a55def5be183ad7bd54da7c38cc22cc5/README.md#L111-L129)).
 There is no secret resource, no credential binding, and no brokered egress.
 
-**There is no authentication or authorization.** The overview diagram labels
-the server "AX Server (multi-tenant)"
+**AX itself ships no authentication or authorization.** The overview diagram
+labels the server "AX Server (multi-tenant)"
 ([README:44-49](https://github.com/google/ax/blob/703a79f2a55def5be183ad7bd54da7c38cc22cc5/README.md#L44-L49)),
-but the only server interceptors at the pin are `LoggingInterceptor` and
+but the only interceptors AX installs are `LoggingInterceptor` and
 `StreamLoggingInterceptor`
-([`interceptors.go:30-79`](https://github.com/google/ax/blob/703a79f2a55def5be183ad7bd54da7c38cc22cc5/internal/server/interceptors.go#L30-L79)).
-Tenancy is a stated intent, not an implemented control.
+([`interceptors.go:30-79`](https://github.com/google/ax/blob/703a79f2a55def5be183ad7bd54da7c38cc22cc5/internal/server/interceptors.go#L30-L79)),
+and they only log. Scope that claim to the in-process server: `Serve` appends
+its own chain to caller-supplied `grpc.ServerOption` values
+([`server.go:75-87`](https://github.com/google/ax/blob/703a79f2a55def5be183ad7bd54da7c38cc22cc5/internal/server/server.go#L75-L87)),
+so an embedder can add credentials or an interceptor of their own, and
+nothing here says anything about a deployment's transport or ingress. What
+the pinned tree does show is that no tenant identifier reaches the
+controller, the registry, or the event log, so multi-tenancy is a label on
+the diagram rather than a control AX implements.
 
 ## Binding time
 
@@ -266,10 +284,17 @@ Tenancy is a stated intent, not an implemented control.
   turns of one conversation with no record beyond the log line.
 - **Versioning: none.** There is no version, revision, digest, or activation
   concept attached to an agent, a harness selection, or a skill anywhere in
-  the pinned tree. Because the harness id resolves through a mutable
-  in-process map, restarting the server with a different image behind the
-  same id silently changes the behavior of every existing conversation that
-  resumes afterwards.
+  the pinned tree. The harness id resolves through a mutable in-process map,
+  so restarting the server with a different template behind the same id
+  changes what that id means with nothing recorded about the change. The
+  blast radius is narrower than that sounds, and AX does not decide it:
+  `Start` calls `CreateActor` and tolerates `AlreadyExists` without
+  re-applying a template
+  ([`substrate.go:87-96`](https://github.com/google/ax/blob/703a79f2a55def5be183ad7bd54da7c38cc22cc5/internal/harness/substrate/substrate.go#L87-L96)),
+  so whether an existing conversation keeps its original image is a property
+  of Agent Substrate, which is outside this pin. What AX does determine is
+  that a conversation whose actor is created after the change gets the new
+  template under the old id, and no artifact in AX records which one ran.
 
 ## Relationships between nouns
 
@@ -359,6 +384,16 @@ than the phrasing suggests.
   because there is a single writer per conversation"
   ([`harness.go:36-41`](https://github.com/google/ax/blob/703a79f2a55def5be183ad7bd54da7c38cc22cc5/internal/harness/harness.go#L36-L41)).
   No fence, lease, or compare-and-swap implements it at the pin.
+- **The controller can break its own invariant.** On a `STATE_PENDING`
+  conversation with non-empty inputs, `Exec` starts an execution, runs it,
+  and defers `Close` to the end of the *function*; if inputs remain it then
+  calls `h.Start` again for the same conversation id while the first
+  execution is still open
+  ([`controller.go:108-132`](https://github.com/google/ax/blob/703a79f2a55def5be183ad7bd54da7c38cc22cc5/internal/controller/controller.go#L108-L132)).
+  Two `Execution` values for one conversation therefore overlap on exactly
+  the resume path, which is the path the single-writer comment exists to
+  protect. The invariant is the intent; the implementation does not yet hold
+  it, and because the log has no precondition nothing downstream notices.
 - **The log is not the recovery mechanism.** `ResumptionState` reads the
   entire conversation only to derive two scalars: the last non-unspecified
   `state`, and the first non-empty `agent_id`
@@ -381,9 +416,10 @@ than the phrasing suggests.
   while the code below it does restart a `STATE_PENDING` execution against
   the recorded harness.
 
-One consequence for modelling: because history is the actor's and not the
-log's, a lost or evicted snapshot is a lost conversation, and the durable
-log cannot reconstitute it.
+One consequence for modelling: because usable history is the actor's and not
+the log's, a lost or evicted snapshot leaves the durable transcript intact
+but leaves no path back to a running conversation. The record survives; the
+harness state cannot be resumed or reconstituted from the log alone.
 
 ## What makes it "an agent" here (our inference)
 
