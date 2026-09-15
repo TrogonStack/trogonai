@@ -22,6 +22,7 @@ and evidence rules behind each product dossier remain reproducible.
 - [CrewAI](./products/crewai.md)
 - [DeepSeek Harness](./products/deepseek-harness.md)
 - [Devin](./products/devin.md)
+- [Google Agent Executor (AX)](./products/google-ax.md)
 - [Hermes Agent](./products/hermes-agent.md)
 - [IronClaw (NEAR AI)](./products/ironclaw.md)
 - [Jido](./products/jido.md)
