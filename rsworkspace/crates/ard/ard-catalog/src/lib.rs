@@ -1,6 +1,6 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 #![cfg_attr(
-    dylint_lib = "trogon_lints",
+    dylint_lib = "trogonai_dylint",
     expect(
         acyclic_modules,
         reason = "each wire type parses into its domain type and the domain type serializes back through it, so the pair is bidirectional by construction"

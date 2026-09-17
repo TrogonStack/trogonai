@@ -65,7 +65,7 @@ step "fmt-check" cargo fmt --all -- --check
 #    install it the same way rust-pr-check does before running the lints.
 load_dylint_toolchain_config() {
     local parsed
-    if ! parsed="$(TOOLCHAIN_FILE="dylints/trogon_lints/rust-toolchain.toml" python3 - <<'PY'
+    if ! parsed="$(TOOLCHAIN_FILE="dylints/trogonai_dylint/rust-toolchain.toml" python3 - <<'PY'
 import os
 import sys
 import tomllib
@@ -104,12 +104,12 @@ if [[ ${#DYLINT_COMPONENTS[@]} -gt 0 ]]; then
 fi
 
 # Mirrors CI 'Test repo Rust policy lints'.
-step "policy-lint-tests" bash -c 'cd dylints/trogon_lints && rustup run "$1" cargo test' _ "$DYLINT_TOOLCHAIN"
+step "policy-lint-tests" bash -c 'cd dylints/trogonai_dylint && rustup run "$1" cargo test' _ "$DYLINT_TOOLCHAIN"
 
 # Mirrors CI 'Run repo Rust policy lints': note `--all-targets` so test-target
 # violations (inline test modules, function-local `use`, ...) are caught too.
 step "policy-lints" env -u RUSTUP_TOOLCHAIN rustup run "$DYLINT_TOOLCHAIN" \
-    cargo dylint --path dylints/trogon_lints --workspace --no-deps -- --all-features --all-targets
+    cargo dylint --path dylints/trogonai_dylint --workspace --no-deps -- --all-features --all-targets
 
 # 5. clippy: mirrors CI 'Run clippy'.
 step "clippy" cargo clippy --all-targets --all-features

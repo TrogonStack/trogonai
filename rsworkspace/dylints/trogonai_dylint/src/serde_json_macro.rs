@@ -58,7 +58,7 @@ impl SerdeJsonMacro {
                 );
                 diag.note(
                     "if the shape is genuinely dynamic, opt out at the site with \
-                     `#[cfg_attr(dylint_lib = \"trogon_lints\", allow(serde_json_macro, reason = \"...\"))]`",
+                     `#[cfg_attr(dylint_lib = \"trogonai_dylint\", allow(serde_json_macro, reason = \"...\"))]`",
                 );
             },
         );

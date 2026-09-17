@@ -3,7 +3,7 @@
     allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)
 )]
 #![cfg_attr(
-    dylint_lib = "trogon_lints",
+    dylint_lib = "trogonai_dylint",
     expect(
         acyclic_modules,
         reason = "a query reads the rows its projection writes and the projector is defined against the query's row types"

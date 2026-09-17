@@ -38,7 +38,7 @@ struct Args {
 
 #[tokio::main]
 #[cfg_attr(
-    dylint_lib = "trogon_lints",
+    dylint_lib = "trogonai_dylint",
     allow(
         debug_remnants,
         reason = "the CLI exits before a subscriber is installed, so stderr is the only channel left to report on"
@@ -53,7 +53,7 @@ async fn main() {
 }
 
 #[cfg_attr(
-    dylint_lib = "trogon_lints",
+    dylint_lib = "trogonai_dylint",
     allow(
         debug_remnants,
         reason = "the published reference on stdout is this CLI's result, which a caller pipes onward"

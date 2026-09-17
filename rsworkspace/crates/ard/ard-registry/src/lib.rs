@@ -3,7 +3,7 @@
 //! ARD-compatible HTTP registry runtime.
 
 #![cfg_attr(
-    dylint_lib = "trogon_lints",
+    dylint_lib = "trogonai_dylint",
     expect(
         acyclic_modules,
         reason = "`registry_error` names the search request's own failure and the search modules return the registry error, so the pair references each other by construction"

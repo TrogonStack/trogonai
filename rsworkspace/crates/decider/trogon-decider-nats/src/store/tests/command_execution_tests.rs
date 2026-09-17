@@ -267,7 +267,7 @@ impl Decider for UnguardedAppendCommand {
     type DecideError = Infallible;
     type EvolveError = Infallible;
     #[cfg_attr(
-        dylint_lib = "trogon_lints",
+        dylint_lib = "trogonai_dylint",
         allow(
             weakened_write_precondition,
             reason = "the fixture exists to prove an unguarded append reaches the store as one, which is the case it cannot make with a guard"

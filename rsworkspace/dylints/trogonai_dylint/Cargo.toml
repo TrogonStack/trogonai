@@ -1,5 +1,5 @@
 [package]
-name = "trogon_lints"
+name = "trogonai_dylint"
 version = "0.1.0"
 description = "Repository-owned Rust policy lints for Trogon"
 edition = "2024"

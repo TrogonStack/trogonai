@@ -5,7 +5,7 @@ use rustc_lint::{EarlyContext, EarlyLintPass};
 use crate::SERDE_JSON_MACRO_ALLOW_WITHOUT_REASON;
 
 /// Lint level attributes are consumed before HIR, and `cfg_attr(dylint_lib =
-/// "trogon_lints", ...)` is expanded during macro expansion, so the suppression
+/// "trogonai_dylint", ...)` is expanded during macro expansion, so the suppression
 /// is only visible to an early (AST) pass.
 pub(crate) struct SerdeJsonMacroAllowWithoutReason;
 

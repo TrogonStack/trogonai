@@ -388,7 +388,7 @@ fn emit_cycle(
 
             diag.note(format!(
                 "if the coupling is deliberate, opt out on `{parent_path}` with \
-                 `#[cfg_attr(dylint_lib = \"trogon_lints\", expect(acyclic_modules, reason = \"...\"))]`"
+                 `#[cfg_attr(dylint_lib = \"trogonai_dylint\", expect(acyclic_modules, reason = \"...\"))]`"
             ));
         },
     );

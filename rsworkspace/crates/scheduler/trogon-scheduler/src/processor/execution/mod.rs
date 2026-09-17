@@ -6,7 +6,7 @@
 //! reconciliation rules, execution schedule writes, checkpoint persistence, and
 //! the durable worker.
 #![cfg_attr(
-    dylint_lib = "trogon_lints",
+    dylint_lib = "trogonai_dylint",
     expect(
         acyclic_modules,
         reason = "reconciliation resumes from the checkpoint it last wrote and a checkpoint records the reconciliation position it was taken at"
