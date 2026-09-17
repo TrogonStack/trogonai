@@ -1,5 +1,5 @@
 #![cfg_attr(
-    dylint_lib = "trogonai_dylint",
+    dylint_lib = "trogon_dylint_lints",
     expect(
         acyclic_modules,
         reason = "a schedule is defined by the delivery and event value objects it holds and each of those is typed with the schedule vocabulary it belongs to"

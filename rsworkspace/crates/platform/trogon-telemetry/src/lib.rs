@@ -85,7 +85,7 @@ fn try_open_log_file<F: CreateDirAll + OpenAppendFile>(
 }
 
 #[cfg_attr(
-    dylint_lib = "trogonai_dylint",
+    dylint_lib = "trogon_dylint_lints",
     allow(
         debug_remnants,
         reason = "these warnings report that the subscriber itself could not be installed, so there is no `tracing` event to record them as"

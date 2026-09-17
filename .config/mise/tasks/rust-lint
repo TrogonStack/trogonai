@@ -108,8 +108,8 @@ step "policy-lint-tests" bash -c 'cd dylints/trogonai_dylint && rustup run "$1" 
 
 # Mirrors CI 'Run repo Rust policy lints': note `--all-targets` so test-target
 # violations (inline test modules, function-local `use`, ...) are caught too.
-step "policy-lints" env -u RUSTUP_TOOLCHAIN rustup run "$DYLINT_TOOLCHAIN" \
-    cargo dylint --path dylints/trogonai_dylint --workspace --no-deps -- --all-features --all-targets
+step "policy-lints" env -u RUSTUP_TOOLCHAIN RUSTC_WRAPPER="" CARGO_BUILD_RUSTC_WRAPPER="" rustup run "$DYLINT_TOOLCHAIN" \
+    cargo dylint --all --workspace --no-deps -- --all-features --all-targets
 
 # 5. clippy: mirrors CI 'Run clippy'.
 step "clippy" cargo clippy --all-targets --all-features

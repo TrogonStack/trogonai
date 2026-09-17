@@ -65,7 +65,7 @@ impl Strictness {
 /// suite that runs green against a component it was not written for proves
 /// nothing about either.
 #[cfg_attr(
-    dylint_lib = "trogonai_dylint",
+    dylint_lib = "trogon_dylint_lints",
     allow(
         debug_remnants,
         reason = "the per-scenario lines are this CLI's result, and in `tap` format they are a machine-read protocol on stdout"
@@ -152,7 +152,7 @@ pub fn run_suite(wasm_bytes: &[u8], suite: &Suite, format: OutputFormat, strictn
 /// count fails the run, so both the command and event checks always run and
 /// report in full before the run bails.
 #[cfg_attr(
-    dylint_lib = "trogonai_dylint",
+    dylint_lib = "trogon_dylint_lints",
     allow(
         debug_remnants,
         reason = "the coverage gaps are part of the report this CLI exists to print"

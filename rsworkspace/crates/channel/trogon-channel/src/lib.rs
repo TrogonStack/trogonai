@@ -15,7 +15,7 @@
 
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 #![cfg_attr(
-    dylint_lib = "trogonai_dylint",
+    dylint_lib = "trogon_dylint_lints",
     expect(
         acyclic_modules,
         reason = "a conversation record is keyed by the agent session that owns it and the agent port reads that record back"

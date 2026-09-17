@@ -1,6 +1,6 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 #![cfg_attr(
-    dylint_lib = "trogonai_dylint",
+    dylint_lib = "trogon_dylint_lints",
     expect(
         acyclic_modules,
         reason = "`wire` is typed with the transport error it produces and `transport` frames its payloads through `wire`"

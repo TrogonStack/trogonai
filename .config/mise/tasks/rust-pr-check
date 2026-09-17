@@ -58,7 +58,7 @@ if [[ ${#DYLINT_COMPONENTS[@]} -gt 0 ]]; then
     step "repo-rust-policy-lint-components" rustup component add "${DYLINT_COMPONENTS[@]}" --toolchain "$DYLINT_TOOLCHAIN"
 fi
 step "repo-rust-policy-lint-tests" bash -c 'cd dylints/trogonai_dylint && rustup run "$1" cargo test' _ "$DYLINT_TOOLCHAIN"
-step "repo-rust-policy-lints" env -u RUSTUP_TOOLCHAIN DYLINT_RUSTFLAGS='-Derror-string-comparison' rustup run "$DYLINT_TOOLCHAIN" cargo dylint --path dylints/trogonai_dylint --workspace --no-deps -- --all-features
+step "repo-rust-policy-lints" env -u RUSTUP_TOOLCHAIN RUSTC_WRAPPER="" CARGO_BUILD_RUSTC_WRAPPER="" DYLINT_RUSTFLAGS='-Derror-string-comparison' rustup run "$DYLINT_TOOLCHAIN" cargo dylint --all --workspace --no-deps -- --all-features
 
 # 3. clippy from a clean cache — workspace lints (deny warnings, unwrap_used,
 #    expect_used, panic) only fire on a real rebuild; cached builds skip them.

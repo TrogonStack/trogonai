@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
-#MISE description="Run the repo Rust policy lints via cargo dylint with RUSTUP_TOOLCHAIN unset"
+#MISE description="Run the Rust policy lints via cargo dylint with RUSTUP_TOOLCHAIN unset"
 set -euo pipefail
 
 ROOT="${GITHUB_WORKSPACE:-$(git rev-parse --show-toplevel)}"
 cd "$ROOT/rsworkspace"
 
 unset RUSTUP_TOOLCHAIN
-cargo dylint --path dylints/trogonai_dylint --workspace --no-deps -- --all-features --all-targets
+
+# A caching rustc wrapper replays the compile without invoking the linker, so
+# `dylint-link` never makes the `lib<name>@<toolchain>.dylib` copy dylint looks for.
+export RUSTC_WRAPPER=""
+export CARGO_BUILD_RUSTC_WRAPPER=""
+
+cargo dylint --all --workspace --no-deps -- --all-features --all-targets

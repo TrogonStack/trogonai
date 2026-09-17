@@ -1,5 +1,5 @@
 #![cfg_attr(
-    dylint_lib = "trogonai_dylint",
+    dylint_lib = "trogon_dylint_lints",
     expect(
         acyclic_modules,
         reason = "`bridge` dispatches each ACP method to its handler module and every handler takes the `Bridge` it was dispatched from"

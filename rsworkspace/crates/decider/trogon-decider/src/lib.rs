@@ -3,7 +3,7 @@
     allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)
 )]
 #![cfg_attr(
-    dylint_lib = "trogonai_dylint",
+    dylint_lib = "trogon_dylint_lints",
     expect(
         acyclic_modules,
         reason = "`Decision::Act` holds an `Act` whose steps each produce a `Decision`, so the two types are mutually recursive"
