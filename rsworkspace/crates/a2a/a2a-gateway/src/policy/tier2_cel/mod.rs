@@ -1,5 +1,5 @@
 #![cfg_attr(
-    dylint_lib = "trogon_lints",
+    dylint_lib = "trogonai_dylint",
     expect(
         acyclic_modules,
         reason = "a compiled bundle holds the programs the compiler produced and the compiler is typed with the handles the bundle hands back"

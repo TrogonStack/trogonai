@@ -2,7 +2,7 @@
 
 #[allow(clippy::all)]
 #[cfg_attr(
-    dylint_lib = "trogon_lints",
+    dylint_lib = "trogonai_dylint",
     allow(
         acyclic_modules,
         reason = "buffa-codegen emits each message's view module beside the message it views, so the generated tree is cyclic by construction and is not edited here"

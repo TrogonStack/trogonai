@@ -7,7 +7,7 @@
 //! PRs under [`agents`], [`tasks`], and [`subscriptions`].
 
 #![cfg_attr(
-    dylint_lib = "trogon_lints",
+    dylint_lib = "trogonai_dylint",
     expect(
         acyclic_modules,
         reason = "a stream names the subjects it captures and each subject names the stream it is captured by"

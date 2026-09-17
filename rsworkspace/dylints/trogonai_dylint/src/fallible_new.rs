@@ -75,7 +75,7 @@ pub(crate) fn check_fn<'tcx>(
             );
             diag.note(
                 "if the panic is an invariant the caller cannot break, opt out at the site with \
-                 `#[cfg_attr(dylint_lib = \"trogon_lints\", allow(fallible_new, reason = \"...\"))]`",
+                 `#[cfg_attr(dylint_lib = \"trogonai_dylint\", allow(fallible_new, reason = \"...\"))]`",
             );
         },
     );

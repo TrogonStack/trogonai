@@ -4,7 +4,7 @@
     allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)
 )]
 #![cfg_attr(
-    dylint_lib = "trogon_lints",
+    dylint_lib = "trogonai_dylint",
     expect(
         acyclic_modules,
         reason = "`error` names every module's failure and those modules return it, and the wire claims are typed with the same value objects they parse into, so both directions are load-bearing"

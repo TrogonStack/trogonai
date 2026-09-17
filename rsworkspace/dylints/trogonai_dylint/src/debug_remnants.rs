@@ -82,7 +82,7 @@ impl DebugRemnants {
                 ));
                 diag.note(
                     "if the write is the program's own output rather than a diagnostic, opt out at the site with \
-                     `#[cfg_attr(dylint_lib = \"trogon_lints\", allow(debug_remnants, reason = \"...\"))]`",
+                     `#[cfg_attr(dylint_lib = \"trogonai_dylint\", allow(debug_remnants, reason = \"...\"))]`",
                 );
             },
         );

@@ -6,7 +6,7 @@
 
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 #![cfg_attr(
-    dylint_lib = "trogon_lints",
+    dylint_lib = "trogonai_dylint",
     expect(
         acyclic_modules,
         reason = "a subject carries the JetStream stream configuration it is published under and the consumer definitions are typed with those subjects"

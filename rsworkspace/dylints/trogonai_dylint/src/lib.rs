@@ -242,7 +242,7 @@ rustc_session::declare_lint! {
     /// fatal error before a subscriber exists) is not exempt by position,
     /// because nothing distinguishes it from a leftover line except intent; it
     /// says so at the site with
-    /// `#[cfg_attr(dylint_lib = "trogon_lints", allow(debug_remnants, reason = "..."))]`.
+    /// `#[cfg_attr(dylint_lib = "trogonai_dylint", allow(debug_remnants, reason = "..."))]`.
     ///
     /// This rule is ported from the `debug_remnants` lint in
     /// <https://github.com/li-kai/rust-lints>; the credit for it is theirs.
@@ -578,7 +578,7 @@ rustc_session::declare_lint! {
     /// ### Example
     ///
     /// ```rust,ignore
-    /// #[cfg_attr(dylint_lib = "trogon_lints", allow(serde_json_macro))]
+    /// #[cfg_attr(dylint_lib = "trogonai_dylint", allow(serde_json_macro))]
     /// fn passthrough(document: &RawValue) -> Value { ... }
     /// ```
     ///
@@ -586,7 +586,7 @@ rustc_session::declare_lint! {
     ///
     /// ```rust,ignore
     /// #[cfg_attr(
-    ///     dylint_lib = "trogon_lints",
+    ///     dylint_lib = "trogonai_dylint",
     ///     allow(
     ///         serde_json_macro,
     ///         reason = "the upstream document is forwarded verbatim and has no fixed schema"
@@ -1066,7 +1066,7 @@ rustc_session::declare_lint! {
     /// ```rust,ignore
     /// impl Decider for RenameSession {
     ///     #[cfg_attr(
-    ///         dylint_lib = "trogon_lints",
+    ///         dylint_lib = "trogonai_dylint",
     ///         allow(
     ///             weakened_write_precondition,
     ///             reason = "a rename is a last-writer-wins fact that guards no invariant"

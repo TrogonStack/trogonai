@@ -3,7 +3,7 @@
 //! NATS storage and indexing primitives for ARD-compatible catalog data.
 
 #![cfg_attr(
-    dylint_lib = "trogon_lints",
+    dylint_lib = "trogonai_dylint",
     expect(
         acyclic_modules,
         reason = "the store is defined in terms of the catalog events it persists and a catalog event fails with the store's error"

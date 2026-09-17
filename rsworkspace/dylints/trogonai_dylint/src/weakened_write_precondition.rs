@@ -14,7 +14,7 @@ const PRECONDITION_ENUM: &str = "WritePrecondition";
 const UNCHECKED_VARIANT: &str = "Any";
 
 const ESCAPE_HATCH: &str = "if appending unconditionally is deliberate, argue it in place: \
-     `#[cfg_attr(dylint_lib = \"trogon_lints\", allow(weakened_write_precondition, reason = \"...\"))]`";
+     `#[cfg_attr(dylint_lib = \"trogonai_dylint\", allow(weakened_write_precondition, reason = \"...\"))]`";
 
 pub(crate) fn check_impl_item<'tcx>(cx: &LateContext<'tcx>, impl_item: &'tcx ImplItem<'tcx>) {
     if impl_item.span.from_expansion() || impl_item.ident.as_str() != PRECONDITION_CONST {

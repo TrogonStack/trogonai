@@ -1293,7 +1293,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "trogon_lints"
+name = "trogonai_dylint"
 version = "0.1.0"
 dependencies = [
  "clippy_utils",

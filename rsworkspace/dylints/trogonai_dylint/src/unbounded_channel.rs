@@ -106,7 +106,7 @@ pub(crate) fn check_expr<'tcx>(cx: &LateContext<'tcx>, expr: &'tcx Expr<'tcx>) {
             ));
             diag.note(
                 "if the queue is bounded by something other than its capacity, opt out at the site with \
-                 `#[cfg_attr(dylint_lib = \"trogon_lints\", allow(unbounded_channel, reason = \"...\"))]`",
+                 `#[cfg_attr(dylint_lib = \"trogonai_dylint\", allow(unbounded_channel, reason = \"...\"))]`",
             );
         },
     );
