@@ -27,7 +27,7 @@ pub use constants::WIT_DIR;
 /// individual doc anchor in `world.wit`; see the WIT source and this module's re-exported types
 /// for their contract.
 #[cfg(feature = "guest")]
-#[cfg_attr(dylint_lib = "trogonai_dylint", allow(inline_module_block))]
+#[cfg_attr(dylint_lib = "trogon_dylint_lints", allow(inline_module_block))]
 pub mod guest {
     mod bindings {
         #![allow(missing_docs, reason = "generated bindings; see the module doc and world.wit")]
@@ -52,7 +52,7 @@ pub mod guest {
 /// generated `Decider` bindings struct directly, so the execution boundary stays a small,
 /// reviewable surface independent of `wasmtime-component-macro`'s generated shape.
 #[cfg(all(feature = "host", not(target_arch = "wasm32")))]
-#[cfg_attr(dylint_lib = "trogonai_dylint", allow(inline_module_block))]
+#[cfg_attr(dylint_lib = "trogon_dylint_lints", allow(inline_module_block))]
 pub mod host {
     use wasmtime::component::ResourceAny;
 

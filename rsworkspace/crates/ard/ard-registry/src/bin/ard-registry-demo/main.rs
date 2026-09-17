@@ -12,7 +12,7 @@ use tokio::net::TcpListener;
 
 #[tokio::main]
 #[cfg_attr(
-    dylint_lib = "trogonai_dylint",
+    dylint_lib = "trogon_dylint_lints",
     allow(
         debug_remnants,
         reason = "the bound address on stdout is this demo's contract with whatever started it and reads the port back"

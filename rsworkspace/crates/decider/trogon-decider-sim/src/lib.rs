@@ -1,7 +1,7 @@
 //! In-memory wasmtime host for Trogon decider WASM components.
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 #![cfg_attr(
-    dylint_lib = "trogonai_dylint",
+    dylint_lib = "trogon_dylint_lints",
     expect(
         acyclic_modules,
         reason = "the host owns the sessions it instantiates and a session is typed with the host it runs against"

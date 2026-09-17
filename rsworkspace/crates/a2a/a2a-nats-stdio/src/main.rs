@@ -6,7 +6,7 @@
 
 #[tokio::main]
 #[cfg_attr(
-    dylint_lib = "trogonai_dylint",
+    dylint_lib = "trogon_dylint_lints",
     allow(
         debug_remnants,
         reason = "the bridge exits before a subscriber is installed, so stderr is the only channel left to report on"

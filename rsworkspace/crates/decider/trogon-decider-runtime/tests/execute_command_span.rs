@@ -30,7 +30,7 @@ impl Decider for RecordCommand {
     type EvolveError = Infallible;
 
     #[cfg_attr(
-        dylint_lib = "trogonai_dylint",
+        dylint_lib = "trogon_dylint_lints",
         allow(
             weakened_write_precondition,
             reason = "the fixture exists to observe telemetry, and appends against a stream no other writer touches"

@@ -67,7 +67,7 @@
     allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)
 )]
 #![cfg_attr(
-    dylint_lib = "trogonai_dylint",
+    dylint_lib = "trogon_dylint_lints",
     expect(
         acyclic_modules,
         reason = "a stream is defined as an ordered sequence of the crate's events and an event carries the stream position it was read at"

@@ -72,7 +72,7 @@ enum CliError {
 }
 
 #[cfg_attr(
-    dylint_lib = "trogonai_dylint",
+    dylint_lib = "trogon_dylint_lints",
     allow(
         debug_remnants,
         reason = "the per-bundle progress is this CLI's own output to the operator running it"
