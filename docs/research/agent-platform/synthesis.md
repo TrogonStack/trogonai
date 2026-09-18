@@ -40,7 +40,9 @@ ADR is authoritative.
 > marked inline.
 
 > [Guild](./products/guild.md) was researched on 2026-09-17 from unversioned
-> live documentation. It is the corpus's sharpest separation between the agent
+> live documentation, with a second pass on 2026-09-18 over the running product
+> console, recorded in its own section and kept apart as the weaker evidence
+> class. It is the corpus's sharpest separation between the agent
 > record and its deployment: the workspace install is its own resource, with
 > its own id, a pinned version, and the credential associations, so the
 > definition itself never holds a secret and cannot grant itself one. It also

@@ -8,6 +8,9 @@ markdown by appending `.md` to each doc path (for example
 page index, plus the OpenAPI document embedded in every `api-reference` page
 and served at `https://docs.guild.ai/api-reference/openapi.json`. Component
 versions are the ones the docs declare about themselves. Retrieved 2026-09-17.
+A second and weaker evidence class, the running product console, is recorded
+separately in [The product surface](#the-product-surface-observed-in-the-console)
+and dated there.
 
 ## Source anchors
 
@@ -36,7 +39,10 @@ are rewritten to their absolute `https://docs.guild.ai` form, since a
 site-relative target would resolve against this site. Template placeholders
 that Guild writes bare, such as the workspace-variable reference, are marked as
 code so the renderer does not evaluate them; where a placeholder cannot survive
-that treatment the quote elides it and says so.
+that treatment the quote elides it and says so. Console strings quoted in
+[The product surface](#the-product-surface-observed-in-the-console) take a
+third adaptation: where the string uses a dash separator, the quote is split at
+the dash rather than reproducing it, and the split is noted where it happens.
 
 Primary pages behind this dossier: `index`, `quickstart`,
 `platform/{agents,sessions,workspaces,publish-to-agent-hub,goose-recipes,skills,context,workspace-variables,environments,credentials,credential-policies,llm-settings,integrations,triggers,event-triggers,schedule-triggers,api-triggers,security-architecture,organizations,artifacts,evaluations}`,
@@ -1005,6 +1011,239 @@ ships an "unscoped allow-all policy" until an operator deletes it; and it
 describes "tamper-evident" audit logs with no stated mechanism beyond being
 read-only.
 
+## The product surface (observed in the console)
+
+Everything above comes from documentation. This section comes from the running
+product, recorded as a screenshot set of one account's console on 2026-09-18,
+covering the agent creation flow, the agent editor, the integration and
+sub-agent pickers, and the versions, validation, and test screens. It is a
+weaker evidence class than the rest of this dossier and is kept separate for
+that reason: a console string has no URL, no named section, and no page
+anchor, so a later reader cannot re-fetch it the way they can re-fetch a doc
+page. Strings below are transcribed from the interface as rendered. Where a
+console string uses a dash separator, the quote is split at the dash rather
+than reproduced, and the split is noted at that point.
+
+Catalog entries naming accounts other than the observed one are described but
+not transcribed. They are other people's usernames and agent names, several of
+them evidently security probes against the platform, and none of it is needed
+to make the structural point.
+
+### Agent Builder: the creation form
+
+Creation is a two-step flow, with the steps labelled "Setup" and "Create". The
+Setup step collects:
+
+| Field | Control | Helper text |
+| --- | --- | --- |
+| Agent Name (required) | text, placeholder `my-agent-name` | "Start with a letter. Use lowercase, numbers, and hyphens." |
+| Avatar | image upload | "PNG, JPG up to 2MB" |
+| Category (required) | single select, defaulted to `Productivity` | "Helps people discover and browse agents like yours." |
+| Tags | chip input, prefilled | "Maximum of 5 tags." |
+| Owner (required) | account select | "Which account will own this agent" |
+
+The Category options are `Development`, `Productivity`, `Communication`,
+`Data & Analytics`, `Sales & Marketing`, `Customer Support`, `HR & Finance`,
+`Security`, and `Other`. The prefilled tags are `workflows`, `assistants`,
+`summaries`, `project-management`, and `automation`.
+
+Beside the form is a live "Card Preview" captioned "Updates as you type",
+showing the avatar, the agent name, a type badge reading `Native`, the owning
+handle, the description, and three counters rendered as a heart, a fork, and a
+download, each at zero. The footer carries a link out to "Agent SDK docs" next
+to "Cancel" and "Continue".
+
+The form ends with a warning callout headed "Choose carefully":
+
+> Owner and name cannot be changed after creation, and agents cannot be
+> deleted.
+
+That single sentence is the most useful thing in the whole console. The
+documentation never says it. This dossier inferred an owned, permanent record
+from `owner_id`, `full_name`, and an `archived_at` that is not a delete; the
+product states the consequence to the user's face at the moment of creation.
+Identity is the `owner~name` pair, it is fixed at birth, and the record does
+not leave.
+
+Note also what the form collects that the documented `Agent` schema does not
+carry: a category, up to five tags, and an avatar. None appears in the OpenAPI
+`Agent` object. The card's like, fork, and download counters point the same
+way, at an Agent Hub discovery and social layer that the public API surface
+does not describe.
+
+### The editor: what is edited, and what is merely attached
+
+The editor's left rail is `Editor`, `Test`, `Versions`, `Settings`, and
+`Documentation`. Its header carries the account switcher, the agent name, a
+settings affordance, a `Test` action, a version selector, a terminal
+affordance, and then two separate buttons, `Commit` and `Publish`. Under the
+header sits the provenance line, of the form "Viewing" plus the short commit
+`69222f`, plus "Committed Sep 18, 2026", plus the commit summary. Once
+validation has run, a `Passed` badge appears beside `Commit`.
+
+The editing area has three tabs: `System prompt`, `README` marked `optional`,
+and `guild.yaml`. A freshly scaffolded agent's system prompt is itself a
+prompt to the author:
+
+> You are an AI assistant called "yordis~github-issue-categorizer". Describe
+> your agent's role and behavior here.
+>
+> Guidelines:
+> - What should the agent do?
+> - What should it avoid?
+> - How should it handle edge cases?
+
+The scaffolded README is just the agent's full name as a heading.
+
+The right rail holds three panels, each with its own `Add` and `Clear all`
+controls: `Integrations`, `Sub-agents`, and `Capabilities`. Their empty states
+are "Add integrations to give this agent tools it can call." and "Add agents
+this one can call to handle specific subtasks." The `Capabilities` panel is
+not a list but a pair of switches, both on by default:
+
+| Capability | Description |
+| --- | --- |
+| Ask the user | "Pause and ask the user a question before continuing." |
+| Post progress updates | "Post status updates while working through a request." |
+
+Hovering the panel's help affordance explains what the category is:
+
+> Built-in platform tools for interacting with the user mid-run.
+
+At the bottom of the editing area, when anything is dirty, sits "Unsaved
+changes" with `Discard` and `Save`.
+
+So there are three separate persistence actions, in order: `Save` writes the
+draft, `Commit` freezes the files in git, and `Publish` mints the deployable
+version. The binding-time analysis above was assembled from API routes and
+prose; the console lays the same three steps out as three buttons.
+
+### Three classes of callee, three different grant models
+
+The right rail is the config surface's real shape. What an agent may call is
+divided by who owns the callee, and each class is granted differently:
+
+| Class | Callee | Granularity offered |
+| --- | --- | --- |
+| Integrations | an external service, addressed as `owner~name` | per tool, with a read and write classification |
+| Sub-agents | another published agent, addressed as `owner~name` | the whole agent, no visible per-tool or per-version control |
+| Capabilities | the platform itself | a switch per capability |
+
+The asymmetry runs the wrong way. The finest-grained control sits on the
+integration, the least privileged callee, where the author picks individual
+tools and can filter them by whether they read or write. The coarsest sits on
+the sub-agent, a full agent with its own tools, credentials, and loop, which is
+attached as a single chip.
+
+### Integrations and tools: grants are per tool
+
+The picker is titled "Integrations and tools". Attached integrations are listed
+down the left with a per-integration count badge, above a "+ Add integration"
+entry. Selecting one opens its tool list on the right, headed by a count of
+the form "1 of 2 tools", a search box scoped to that integration, a
+"Select all" control that becomes "Deselect all", and a segmented filter
+reading `read`, `write`, `all`, with `all` active. Tools are grouped by tag,
+and a group with no tags is headed "Untagged" with its own selected-count.
+
+For the observed integration, `guildai~skills`, the tools are `activate`,
+described as "Activate an org skill", and `search`, described as "Open org
+skill catalog". With one of the two selected the left badge reads `1`; with
+both it reads `All`.
+
+Two things follow that the docs do not state. Every tool carries a read or
+write classification, since the filter can select on it. And a grant is per
+tool, not per integration, so the resolved tool manifest that a published
+version records is the output of a per-tool selection made in this dialog.
+
+The "+ Add integration" panel is a searchable catalog of cards, each showing
+an `owner~name` and a free-text description. The catalog is cross-account by
+default: the observed account's picker listed integrations owned by many
+unrelated accounts. Several descriptions contained markup and
+template-expression payloads rather than prose, so the description field is
+third-party-controlled text rendered into this dialog, and several entries were
+plainly other users' security probes against the platform. The creation form
+never asks whether an agent or integration should be listed this way, though
+`is_public` exists on the `Agent` schema.
+
+### Sub-agents are picked from a catalog, not written into a file
+
+The sub-agent picker is a single search box headed "Search agents..." over a
+flat list headed "Sub-agents", each row an `owner~name` with its own avatar,
+again spanning accounts unrelated to the observed one. There is no version
+selector, no per-tool expansion, and no read or write filter.
+
+This sits awkwardly against the documented model, where `sub_agents` in
+`guild.yaml` pins a published version by semver. The console offers no way to
+express that pin, and does not show which version the chip resolved to. Either
+the dialog writes a default constraint into `guild.yaml` that the author never
+sees, or the two paths do not produce the same thing.
+
+### Versions, validation, and test are three screens
+
+The `Versions` screen is headed "Drafts, commits, and published releases" and
+filtered by two checkboxes, `Drafts` (checked) and `Ephemeral`. Its columns are
+`Version`, `Summary`, `Commit`, `Author`, `Date`, `Status`, and `Validation`.
+The observed row is a committed draft: the `Version` cell reads as a placeholder
+dash, the `Commit` cell carries a short sha, `Status` is `Draft`, and
+`Validation` is `Valid`.
+
+So a version number is minted at publish, not at commit. A committed, validated
+draft has a sha and no number. The tour makes the same point: "Each published
+version is a snapshot. Add it to a workspace and it's live for your team." The
+`Ephemeral` filter names a third version class that appears nowhere in the
+documentation.
+
+The `Validation` screen targets one commit and offers a "Run Validation"
+action, over a table of `Run`, `Status`, `Started`, and `Duration`. The observed
+run is numbered `#1`, named "Validation", `Succeeded`, and took `0.3s`. So
+validation is a numbered, repeatable run with history per commit, not a
+one-shot gate. What it covers, per the tour: "Validation checks schema,
+required fields, and tool definitions. Fix anything flagged here before
+publishing."
+
+The `Test` screen's empty state is "This is where you run your agent", with the
+subtitle "Once your code passes validation, you can send it real inputs and
+watch it respond. No publish required." Its right rail holds `Tasks`, a
+`Tokens` readout with `TOTAL`, `INPUT`, `OUTPUT`, and `CACHE` fields, a
+`Workspaces` panel reading "No workspaces found", and a `Context` panel reading
+"Select a workspace to view context".
+
+That last pairing is the sharpest open question the console raises. A test run
+needs no published version and no workspace, yet credentials in this product
+are held by the workspace install, and context is workspace-scoped. What
+identity a pre-publish test run executes under is therefore unaccounted for.
+
+### The console and the CLI address the same object
+
+The header's terminal affordance opens a modal titled "Edit with the Guild
+CLI", with two tabs. `Clone` shows `guild agent clone owner~name` and `Fork`
+shows `guild agent fork owner~name`, each with a copy control, over the line
+"Directions for using the Guild CLI can be found here:" and a link out to the
+Guild CLI documentation. The console is one client of the same git-backed
+record, not a separate authoring model, and `fork` is offered at the same level
+as `clone`, consistent with the fork counter on the Agent Hub card.
+
+### What the console adds to the inference
+
+Nothing here overturns the reading above, and two things sharpen it.
+
+The identity claim stops being an inference. "Owner and name cannot be changed
+after creation, and agents cannot be deleted." is the product telling the
+author that the `owner~name` pair is permanent and the record is append-only.
+An owned, permanent, git-backed record is exactly what the API schema implied
+and the prose never said.
+
+The grant model is finer than the documented tool manifest suggests, and
+lopsided. Tools are granted one at a time and carry a read or write
+classification; a whole sub-agent, with its own credentials and loop, is
+granted as one chip with no version shown. If we copy anything from this
+product, copy the per-tool read and write classification, and do not copy the
+asymmetry: the more powerful the callee, the finer the grant should be, not the
+coarser.
+
+The tour's own summary of the intended loop, in its closing card: "That's the
+loop. Code it, test it, validate it, ship it."
+
 ## Open questions
 
 - **`LANGGRAPH`.** The API enums carry `agent_type: LANGGRAPH` and
@@ -1090,6 +1329,45 @@ read-only.
   that receive a `Task` with no page documenting what it is for; `task.baseurl`
   is referenced in the Codex driver's base URL template but is absent from the
   Task object's member tables.
+- **`Ephemeral` versions.** The console's Versions screen filters on
+  "Ephemeral" alongside "Drafts". No page in the index names an ephemeral
+  version, states what creates one, or says when it is collected.
+- **When a version number is minted.** A committed, validated draft shows a
+  placeholder where its number would go, so numbering happens at publish. No
+  page states the rule, whether numbering is sequential per agent, or whether
+  `force_publish` or unpublishing perturbs it.
+- **Where a tool's read or write classification comes from.** The tool picker
+  filters an integration's tools by `read` and `write`, so every tool carries
+  that classification, but no page documents the field, who sets it (the
+  integration manifest, the platform, or an annotation), or whether the filter
+  narrows the grant or only the view.
+- **Category, tags, and avatar.** Creation collects a required category from a
+  fixed list, up to five tags, and an avatar image. None appears in the
+  OpenAPI `Agent` object, and no page documents them or the Agent Hub
+  like, fork, and download counters shown on the card preview.
+- **Which version a sub-agent chip pins.** `guild.yaml` pins sub-agents by
+  semver, but the console's picker offers no version control and displays no
+  resolved version. Whether it writes a default constraint or bypasses pinning
+  is not stated.
+- **What a pre-publish test run executes as.** The Test screen advertises
+  "No publish required" while reporting no workspace, yet credentials are held
+  by the workspace-agent install and context is workspace-scoped. The identity,
+  credentials, and container of a test run are unaccounted for.
+- **Cross-account listing by default.** The integration and sub-agent pickers
+  list resources owned by unrelated accounts. `is_public` exists on the `Agent`
+  schema, the creation form never asks about it, and no page states the default
+  or who can change it.
+- **Third-party text rendered into the pickers.** Catalog descriptions are
+  free text supplied by the owning account and rendered into another account's
+  dialog; observed entries carried markup and template-expression payloads
+  rather than prose. No page documents sanitization, length, or review.
+- **"Agents cannot be deleted" versus the API.** The creation warning is
+  categorical. The schema offers `archived_at`, the audit log records an agent
+  "uninstall", and the OpenAPI document has no agent `DELETE`. No page
+  reconciles archival with the categorical claim.
+- **Validation run retention.** Validation is a numbered, repeatable run per
+  commit with a duration. No page documents how many runs are kept, whether a
+  new commit resets numbering, or whether a stale pass can gate a publish.
 - **Retrieval of prior doc states.** No archive or snapshot URL and no content
   digest is published, so every record here rests on the local copies plus the
   retrieval date.
