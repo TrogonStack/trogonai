@@ -44,7 +44,8 @@ ADR is authoritative.
 > console, recorded in its own section and kept apart as the weaker evidence
 > class. It is the corpus's sharpest separation between the agent
 > record and its deployment: the workspace install is its own resource, with
-> its own id, a pinned version, and the credential associations, so the
+> its own id, the version it currently points at, and the credential
+> associations, so the
 > definition itself never holds a secret and cannot grant itself one. It also
 > inverts the usual session binding, since the session carries no agent id and
 > the per-message task pins the version instead. Only the tables below were
@@ -422,7 +423,7 @@ from the scope plus a run profile rather than published from a definition.
 | agent-as-file (git-versioned persona) | Claude Code, Vercel eve, OpenClaw workspace |
 | agent-as-code-object | OpenAI Agents SDK, CrewAI, ADK, Vercel AI SDK, Jido struct |
 | agent-as-config *or* inline-per-session (same vendor, same API) | [OpenAI Agents API](./products/openai-agents-api.md) (added post-synthesis) |
-| agent-as-git-backed record, installed per workspace at a pinned version | [Guild](./products/guild.md) (added post-synthesis) |
+| agent-as-git-backed record, installed per workspace by a separate record naming one version | [Guild](./products/guild.md) (added post-synthesis) |
 | agent-as-process/actor | Jido AgentServer, Cloudflare durable object |
 | agent-as-deployed-service | Bedrock AgentCore, Vertex Agent Engine |
 | agent-as-network-endpoint | A2A AgentCard |
@@ -465,7 +466,7 @@ makes it legible: the scope answers "whose," the files answer "who."
 | [LangChain Deep Agents](./products/deep-agents.md) (added post-synthesis) | compiled LangGraph harness graph; no durable Agent resource | sync child = stateless nested invocation; async child = independent thread and run | construction plus per-run context; thread state via checkpointer; no definition version contract | customer process or surrounding deployment | graph serves N threads; thread is the session boundary, run is one invocation |
 | [LangSmith Managed Deep Agents](./products/managed-deep-agents.md) (added post-synthesis) | code-first pre-runtime definition compiled into an assistant and deployment | underlying Deep Agents sync and async models; no MDA-specific child resource | code/model/tools at build; instructions/skills on every run; state on thread | LangSmith managed harness and runtime | one assistant serves N threads; session maps to thread, with N runs |
 | [DeepSeek Harness](./products/deepseek-harness.md) (added post-synthesis) | live Agent handle over one same-ID durable Session; no definition resource | provider-backed one-shot or continuable children; spawn, fork, and remote implementations; depth defaults to 3 | profile at boot; preset generation at create; prompt and tools per step; fresh setup on resume; no definition version | user-run process with a replaceable first-party loop plugin | 1:1 while live under one ID; persisted Session may later rehydrate a fresh Agent |
-| [Guild](./products/guild.md) (added post-synthesis) | owned, git-backed record whose published versions are immutable; the workspace install is a separate resource pinning one version | declared in config and resolved to a published version at build, invoked agent-as-tool; 50 agent tasks per execution tree, no documented depth cap | version content frozen for the task's life; account credential and model policy re-checked per request, including mid-session | Guild owns the loop, in its own runtime containers | 1:N; the session holds no agent id, the per-message task pins the version |
+| [Guild](./products/guild.md) (added post-synthesis) | owned, git-backed record whose published version is frozen for the lifetime of each task that runs it, with general version immutability undocumented; the workspace install is a separate resource naming one version, following new publishes unless `should_autoupdate` is off | declared in config and resolved to a published version at build, invoked agent-as-tool; 50 agent tasks per execution tree by default and 250,000 under `unlimited_power_mode`, no documented depth cap | version content frozen for the task's life; account credential and model policy re-checked per request, including mid-session | Guild owns the loop, in its own runtime containers | 1:N; the session holds no agent id, the per-message task pins the version |
 
 ## Working definition
 

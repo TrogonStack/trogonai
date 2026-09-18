@@ -495,8 +495,9 @@ LLM settings for that workspace's owner account."
 outright, and it is the clearest single "why" statement in the corpus: "Together
 these settings act as a central model gateway: credentials are held
 server-side and never distributed to agents, [model
-policies](#model-policies) control which models each workspace and agent may
-call, the [daily token limit](#daily-token-limit) caps spend, and every call is
+policies](https://docs.guild.ai/platform/llm-settings#model-policies) control which models each workspace and agent may
+call, the [daily token
+limit](https://docs.guild.ai/platform/llm-settings#daily-token-limit) caps spend, and every call is
 attributed to its workspace, agent, and user in
 [Insights](https://docs.guild.ai/insights/usage)." Policies are an allowlist ("a model is available
 only if a matching rule allows it"), they resolve down "Account (root) ->
@@ -655,7 +656,8 @@ by roughly one in-flight call before the block takes effect."
 
 ## Binding time
 
-Guild binds configuration at five distinguishable moments. The clearest single
+Guild binds configuration at distinguishable moments that run from author time
+down to the individual tool call. The clearest single
 statement of the model is per-task prompt immutability: "The system prompt is
 written once, at the task's first dispatch, and is immutable for that task's
 lifetime. Editing `PROMPT.md` therefore applies to tasks created after the next
@@ -681,9 +683,19 @@ validates `package-lock.json` so dependency installs stay reproducible."
 (https://docs.guild.ai/cli/getting-started). Goose reports everything at once
 and persists the derived contract: "On success, three values are persisted on
 the agent version: `description`, `input_schema`, and `output_schema`."
-(https://docs.guild.ai/guide/goose-agents). Native and Goose skip the step
-entirely: both "skip the build validation step and immediately transition to
-`READY` after initialization." (https://docs.guild.ai/cli/getting-started).
+(https://docs.guild.ai/guide/goose-agents). The docs then contradict
+themselves about whether the step runs at all for these types. Native and
+Goose both "skip the build validation step and immediately transition to
+`READY` after initialization."
+(https://docs.guild.ai/cli/getting-started, and the same claim on
+https://docs.guild.ai/guide/agent-types under each type's own heading), yet
+the Goose page gives a "**Build time**" phase in which "The recipe is fully
+validated" and "Any validation error fails the build, and all errors are
+reported together." (https://docs.guild.ai/platform/goose-recipes,
+"Lifecycle"). The sentences may be about different events, initialization
+versus save, but no page says so, so this dossier does not treat either as
+the binding-time rule for Goose. Recorded in
+[Open questions](#open-questions).
 
 **At publish.** "When you publish with `guild agent save --publish`, Guild
 derives the next version number from the latest published version." with
@@ -727,11 +739,17 @@ call".
 
 Three answers, consistent with each other.
 
-- **Version content: no.** Editing the prompt "applies to tasks created after
+- **Version content: no, though the documented guarantee is narrower than
+  the word suggests.** Editing the prompt "applies to tasks created after
   the next build, not to a session already in flight." Immutability is asserted
   as the premise for that: "Because versions are immutable, a recipe that
   validated at build time parses identically at task start."
-  (https://docs.guild.ai/platform/goose-recipes). The driver layer repeats the
+  (https://docs.guild.ai/platform/goose-recipes). That premise appears only on
+  the Goose and OpenClaw pages, each time to support a local argument, and no
+  page states it as a platform contract. What is documented, then, is that a
+  task's view of its version is frozen for the task's life, not that a
+  committed version cannot be rewritten; see
+  [Open questions](#open-questions). The driver layer repeats the
   pattern: "A session's instructions are fixed when it is created, so passing
   them again would be silently ignored."
   (https://docs.guild.ai/guide/codex-driver).
@@ -750,7 +768,8 @@ Three answers, consistent with each other.
 Stopping a session is terminal rather than pausing: "Stopping a session
 immediately transitions its running tasks to **Interrupted**, records who
 stopped the session and when, and writes the interruption to the session's
-[event log](#event-log)." and "Interrupted sessions cannot be resumed."
+[event log](https://docs.guild.ai/platform/sessions#event-log)." and "Interrupted
+sessions cannot be resumed."
 (https://docs.guild.ai/platform/sessions).
 
 Four things carry independent versions: agent versions (semver, derived at
@@ -967,13 +986,14 @@ the version's committed files".
 ## What makes it "an agent" here (our inference)
 
 Our inference: in Guild an agent is **an owned, git-backed configuration record
-whose immutable published versions are executed by Guild's own loop under
-account-held policy**. The definition names its input and output types, its
+whose published versions, frozen for the lifetime of each task that runs them,
+are executed by Guild's own loop under account-held policy**. The definition names its input and output types, its
 prompt or code, and the tools it may ask for; it never holds a credential, a
 model choice it can guarantee, a network route, or the loop that runs it. What
 separates it from a plain LLM call is not autonomy: it is that the thing is
-addressable (`owner/name` plus a UUID), installable into a workspace at a
-pinned version, budgeted per execution tree, and observable as a task tree in a
+addressable (`owner/name` plus a UUID), installed into a workspace by a
+separate record that names one version and by default follows new publishes,
+budgeted per execution tree, and observable as a task tree in a
 session event log, with every outbound effect crossing a proxy that re-checks
 policy on each request.
 
@@ -991,7 +1011,7 @@ surfaces "at save time rather than as a literal ..." placeholder "in the
 model's context"; a skill directory with no `SKILL.md` is rejected because otherwise
 "the skill is silently never discovered"; and a rejected recipe field is
 rejected because "running without it would produce confusing behavior". The
-determinism actually delivered is narrow: immutable versions, a resolved tool
+determinism actually delivered is narrow: versions frozen for a task's life, a resolved tool
 manifest recorded on the version, semver pinning of sub-agents to published
 versions, and a per-task system prompt frozen at first dispatch. It does not
 extend to the model, which "Changes apply immediately" at the account level, or
@@ -1256,6 +1276,13 @@ loop. Code it, test it, validate it, ship it."
   authoritative ("it doesn't mean the agent is still following the template
   now"). How the runtime chooses at dispatch is documented only implicitly, via
   the default export's shape.
+- **Whether Goose and Native versions are validated at build.** The CLI and
+  agent-types pages say both types "skip the build validation step and
+  immediately transition to `READY` after initialization", while the Goose
+  page devotes a "**Build time**" phase to full recipe validation that can
+  "fail the build". Nothing states whether these describe different events,
+  which of the two applies to a saved version, or what a Goose agent's
+  `validation_status` reads after a save.
 - **Immutability of versions in general.** The word "immutable" is applied to
   versions only on the Goose and OpenClaw pages, each time as the premise for a
   local argument. No general statement says a committed version's files cannot
