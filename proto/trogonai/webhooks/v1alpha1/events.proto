@@ -1,0 +1,272 @@
+edition = "2024";
+
+package trogonai.webhooks.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/provisioning/v1alpha1/events.proto";
+import "trogonai/webhooks/v1alpha1/common.proto";
+import "trogonai/webhooks/v1alpha1/endpoint.proto";
+import "trogonai/webhooks/v1alpha1/subscription.proto";
+
+// The local stream exists before any secret or provider registration write.
+// Shared step plans and ownership receipts append to this same authoritative
+// stream. A timeout leaves an unresolved step; absence is never inferred.
+message InboundWebhookEndpointReserved {
+  option (buf.validate.message).cel = {
+    id: "webhook.endpoint.reservation"
+    message: "reservation begins revision one in the provisioning project"
+    expression: "this.metadata.revision == 1u && this.metadata.project_id == this.provisioning.project_id"
+  };
+  WebhookEventMetadata metadata = 1 [features.field_presence = LEGACY_REQUIRED];
+  string endpoint_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  trogonai.provisioning.v1alpha1.ProvisioningRef provisioning = 3 [features.field_presence = LEGACY_REQUIRED];
+  InboundWebhookDefinition definition = 4 [features.field_presence = LEGACY_REQUIRED];
+  string route_id = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// Activation is one parent-stream append after every dependency and exact
+// receipt has been verified. Adoption transfers cleanup authority atomically;
+// child cleanup must reread the parent and cannot seize an adopted dependency
+// because a worker lease expired.
+// Prepared owned children activate afterward; runtime use remains closed until
+// that acknowledgment or an authoritative adoption-aware custody check.
+message InboundWebhookEndpointActivated {
+  option (buf.validate.message).cel = {
+    id: "webhook.endpoint.activation"
+    message: "activation must follow reservation and match project, revision and lifecycle"
+    expression: "this.metadata.revision > 1u && this.metadata.project_id == this.endpoint.project_id && this.metadata.project_id == this.evidence.provisioning.project_id && this.metadata.revision == this.endpoint.revision && this.endpoint.lifecycle == 1"
+  };
+  WebhookEventMetadata metadata = 1 [features.field_presence = LEGACY_REQUIRED];
+  InboundWebhookEndpoint endpoint = 2 [features.field_presence = LEGACY_REQUIRED];
+  WebhookActivationEvidence evidence = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Cleanup immediately disables the route or dispatch and fences further setup
+// and activation. Owned registrations are removed and owned credential material
+// is destroyed using exact receipts. Borrowed credentials are never deleted.
+// Unknown remote outcomes keep cleanup pending until reconciled and absent.
+// Remote registration removal precedes destruction of credentials and protected
+// locators needed for cleanup; shared cleanup prerequisites enforce that order.
+message InboundWebhookEndpointCleanupRequested {
+  option (buf.validate.message).cel = {
+    id: "webhook.endpoint.cleanup_scope"
+    message: "cleanup must belong to the resource project"
+    expression: "this.metadata.project_id == this.provisioning.project_id"
+  };
+  WebhookEventMetadata metadata = 1 [features.field_presence = LEGACY_REQUIRED];
+  string endpoint_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  trogonai.provisioning.v1alpha1.ProvisioningRef provisioning = 3 [features.field_presence = LEGACY_REQUIRED];
+  WebhookCleanupReason reason = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+// cleanup_confirmations resolve to shared CleanupConfirmed or Compensated facts.
+// This terminal fact requires confirmed absence for every owned external
+// effect and adopted child, including work whose original result was unknown.
+// No deadline, worker exit or revocation acknowledgment substitutes for absence.
+message InboundWebhookEndpointCleanupCompleted {
+  option (buf.validate.message).cel = {
+    id: "webhook.endpoint.cleanup_completion_scope"
+    message: "completed cleanup must belong to the resource project"
+    expression: "this.metadata.project_id == this.provisioning.project_id"
+  };
+  WebhookEventMetadata metadata = 1 [features.field_presence = LEGACY_REQUIRED];
+  string endpoint_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  trogonai.provisioning.v1alpha1.ProvisioningRef provisioning = 3 [features.field_presence = LEGACY_REQUIRED];
+  repeated trogonai.provisioning.v1alpha1.EventRef cleanup_confirmations = 4;
+}
+
+// The local stream exists before any secret or provider registration write.
+// Shared step plans and ownership receipts append to this same authoritative
+// stream. A timeout leaves an unresolved step; absence is never inferred.
+message OutboundWebhookSubscriptionReserved {
+  option (buf.validate.message).cel = {
+    id: "webhook.subscription.reservation"
+    message: "reservation begins revision one in the provisioning project"
+    expression: "this.metadata.revision == 1u && this.metadata.project_id == this.provisioning.project_id"
+  };
+  WebhookEventMetadata metadata = 1 [features.field_presence = LEGACY_REQUIRED];
+  string subscription_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  trogonai.provisioning.v1alpha1.ProvisioningRef provisioning = 3 [features.field_presence = LEGACY_REQUIRED];
+  OutboundWebhookDefinition definition = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Activation is one parent-stream append after every dependency and exact
+// receipt has been verified. Adoption transfers cleanup authority atomically;
+// child cleanup must reread the parent and cannot seize an adopted dependency
+// because a worker lease expired.
+// Prepared owned children activate afterward; runtime use remains closed until
+// that acknowledgment or an authoritative adoption-aware custody check.
+message OutboundWebhookSubscriptionActivated {
+  option (buf.validate.message).cel = {
+    id: "webhook.subscription.activation"
+    message: "activation must follow reservation and match project, revision and lifecycle"
+    expression: "this.metadata.revision > 1u && this.metadata.project_id == this.subscription.project_id && this.metadata.project_id == this.evidence.provisioning.project_id && this.metadata.revision == this.subscription.revision && this.subscription.lifecycle == 1"
+  };
+  WebhookEventMetadata metadata = 1 [features.field_presence = LEGACY_REQUIRED];
+  OutboundWebhookSubscription subscription = 2 [features.field_presence = LEGACY_REQUIRED];
+  WebhookActivationEvidence evidence = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Cleanup immediately disables the route or dispatch and fences further setup
+// and activation. Owned registrations are removed and owned credential material
+// is destroyed using exact receipts. Borrowed credentials are never deleted.
+// Unknown remote outcomes keep cleanup pending until reconciled and absent.
+message OutboundWebhookSubscriptionCleanupRequested {
+  option (buf.validate.message).cel = {
+    id: "webhook.subscription.cleanup_scope"
+    message: "cleanup must belong to the resource project"
+    expression: "this.metadata.project_id == this.provisioning.project_id"
+  };
+  WebhookEventMetadata metadata = 1 [features.field_presence = LEGACY_REQUIRED];
+  string subscription_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  trogonai.provisioning.v1alpha1.ProvisioningRef provisioning = 3 [features.field_presence = LEGACY_REQUIRED];
+  WebhookCleanupReason reason = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+// cleanup_confirmations resolve to shared CleanupConfirmed or Compensated facts.
+// This terminal fact requires confirmed absence for every owned external
+// effect and adopted child, including work whose original result was unknown.
+// No deadline, worker exit or revocation acknowledgment substitutes for absence.
+message OutboundWebhookSubscriptionCleanupCompleted {
+  option (buf.validate.message).cel = {
+    id: "webhook.subscription.cleanup_completion_scope"
+    message: "completed cleanup must belong to the resource project"
+    expression: "this.metadata.project_id == this.provisioning.project_id"
+  };
+  WebhookEventMetadata metadata = 1 [features.field_presence = LEGACY_REQUIRED];
+  string subscription_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  trogonai.provisioning.v1alpha1.ProvisioningRef provisioning = 3 [features.field_presence = LEGACY_REQUIRED];
+  repeated trogonai.provisioning.v1alpha1.EventRef cleanup_confirmations = 4;
+}
+
+// Active/paused transitions do not relinquish ownership or trigger cleanup.
+// Revocation and deletion instead require the dedicated cleanup facts.
+message InboundWebhookLifecycleChanged {
+  WebhookEventMetadata metadata = 1 [features.field_presence = LEGACY_REQUIRED];
+  string endpoint_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  WebhookLifecycle lifecycle = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      in: [
+        1,
+        2
+      ]
+    }
+  ];
+}
+
+message InboundWebhookVerificationReplaced {
+  WebhookEventMetadata metadata = 1 [features.field_presence = LEGACY_REQUIRED];
+  string endpoint_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  InboundWebhookVerification verification = 3 [features.field_presence = LEGACY_REQUIRED];
+  WebhookActivationEvidence evidence = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message OutboundWebhookLifecycleChanged {
+  WebhookEventMetadata metadata = 1 [features.field_presence = LEGACY_REQUIRED];
+  string subscription_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  WebhookLifecycle lifecycle = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      in: [
+        1,
+        2
+      ]
+    }
+  ];
+}
+
+// Replaced owned signing material stays cleanup-owned until its shared receipt
+// records destruction. A binding replacement never deletes a borrowed secret.
+message OutboundWebhookSigningChanged {
+  WebhookEventMetadata metadata = 1 [features.field_presence = LEGACY_REQUIRED];
+  string subscription_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  WebhookSigningPolicy signing = 3 [features.field_presence = LEGACY_REQUIRED];
+  WebhookActivationEvidence evidence = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Provisioning facts are embedded in the endpoint stream, not a second saga
+// stream. Their project, owner and revision must match this authoritative stream.
+message InboundWebhookEndpointEvent {
+  option (buf.validate.message).cel = {
+    id: "webhook.endpoint.provisioning_owner"
+    message: "embedded provisioning must belong to an inbound endpoint"
+    expression: "!has(this.provisioning) || this.provisioning.owner.kind == 3"
+  };
+  oneof event {
+    option (buf.validate.oneof).required = true;
+    InboundWebhookEndpointReserved reserved = 1;
+    InboundWebhookEndpointActivated activated = 2;
+    InboundWebhookLifecycleChanged lifecycle_changed = 3;
+    InboundWebhookVerificationReplaced verification_replaced = 4;
+    InboundWebhookEndpointCleanupRequested cleanup_requested = 5;
+    InboundWebhookEndpointCleanupCompleted cleanup_completed = 6;
+    trogonai.provisioning.v1alpha1.ProvisioningEvent provisioning = 7;
+  }
+}
+
+// Provisioning facts share the subscription stream and its authority checks.
+message OutboundWebhookSubscriptionEvent {
+  option (buf.validate.message).cel = {
+    id: "webhook.subscription.provisioning_owner"
+    message: "embedded provisioning must belong to an outbound subscription"
+    expression: "!has(this.provisioning) || this.provisioning.owner.kind == 4"
+  };
+  oneof event {
+    option (buf.validate.oneof).required = true;
+    OutboundWebhookSubscriptionReserved reserved = 1;
+    OutboundWebhookSubscriptionActivated activated = 2;
+    OutboundWebhookLifecycleChanged lifecycle_changed = 3;
+    OutboundWebhookSigningChanged signing_changed = 4;
+    OutboundWebhookSubscriptionCleanupRequested cleanup_requested = 5;
+    OutboundWebhookSubscriptionCleanupCompleted cleanup_completed = 6;
+    trogonai.provisioning.v1alpha1.ProvisioningEvent provisioning = 7;
+  }
+}

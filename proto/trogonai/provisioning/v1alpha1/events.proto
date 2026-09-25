@@ -1,0 +1,601 @@
+edition = "2024";
+
+package trogonai.provisioning.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+// Shared facts compose into the owning domain's aggregate stream. This package
+// is a provisioning protocol, not an independently committed workflow store.
+message ProvisioningRef {
+  string id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string project_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+enum ResourceKind {
+  RESOURCE_KIND_UNSPECIFIED = 0;
+  RESOURCE_KIND_CREDENTIAL = 1;
+  RESOURCE_KIND_CONNECTION = 2;
+  RESOURCE_KIND_INBOUND_WEBHOOK_ENDPOINT = 3;
+  RESOURCE_KIND_OUTBOUND_WEBHOOK_SUBSCRIPTION = 4;
+  RESOURCE_KIND_PROVIDER_REGISTRATION = 5;
+  RESOURCE_KIND_SECRET_VERSION = 6;
+  RESOURCE_KIND_PROVIDER_CREDENTIAL = 7;
+  RESOURCE_KIND_AGENT_SECRET_LEASE = 8;
+  RESOURCE_KIND_WEBHOOK_RECEIPT = 9;
+  RESOURCE_KIND_WEBHOOK_DELIVERY = 10;
+  RESOURCE_KIND_WEBHOOK_PAYLOAD_ARTIFACT = 11;
+}
+
+// IDs identify metadata, never backend paths, bearer tokens or protected URLs.
+// A version ID resolves to an immutable domain-owned version record. Kind and
+// ID together are unique within the ProvisioningRef's immutable project.
+message ResourceRef {
+  ResourceKind kind = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  string id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// Points to an immutable fact, not a mutable projection or operation cache.
+message EventRef {
+  string stream_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  uint64 revision = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  string event_id = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+enum ProvisioningPurpose {
+  PROVISIONING_PURPOSE_UNSPECIFIED = 0;
+  PROVISIONING_PURPOSE_CREATE = 1;
+  PROVISIONING_PURPOSE_ROTATE = 2;
+  PROVISIONING_PURPOSE_REMOVE = 3;
+  PROVISIONING_PURPOSE_RECONNECT = 4;
+  PROVISIONING_PURPOSE_ACQUIRE_LEASE = 5;
+  PROVISIONING_PURPOSE_REVALIDATE = 6;
+  PROVISIONING_PURPOSE_RECONFIGURE = 7;
+}
+
+enum EffectKind {
+  EFFECT_KIND_UNSPECIFIED = 0;
+  EFFECT_KIND_WRITE_SECRET_VERSION = 1;
+  EFFECT_KIND_CREATE_PROVIDER_REGISTRATION = 2;
+  EFFECT_KIND_ACQUIRE_PROVIDER_CREDENTIAL = 3;
+  EFFECT_KIND_PROVISION_CHILD = 4;
+  EFFECT_KIND_VERIFY_BORROWED_RESOURCE = 5;
+  EFFECT_KIND_REMOVE_OWNED_RESOURCE = 6;
+  EFFECT_KIND_WRITE_PAYLOAD_ARTIFACT = 7;
+  EFFECT_KIND_VERIFY_CONFIGURATION = 8;
+}
+
+enum ResourceOwnership {
+  RESOURCE_OWNERSHIP_UNSPECIFIED = 0;
+  RESOURCE_OWNERSHIP_NEWLY_OWNED = 1;
+  RESOURCE_OWNERSHIP_ALREADY_OWNED = 2;
+  RESOURCE_OWNERSHIP_BORROWED = 3;
+}
+
+enum RecoveryStrategy {
+  RECOVERY_STRATEGY_UNSPECIFIED = 0;
+  RECOVERY_STRATEGY_PROVIDER_IDEMPOTENCY = 1;
+  RECOVERY_STRATEGY_DETERMINISTIC_IDENTITY = 2;
+  RECOVERY_STRATEGY_CONDITIONAL_VERSION_WRITE = 3;
+  RECOVERY_STRATEGY_READ_ONLY = 4;
+  RECOVERY_STRATEGY_OWNED_IDEMPOTENT_DELETE = 5;
+}
+
+// The pinned adapter must support exact-object lookup and a documented bound
+// on late effects, or a provider fence that closes all prior attempts. Local
+// lease expiry never fences a remote service. Unsupported creates are rejected.
+message EffectRecovery {
+  option (buf.validate.message).cel = {
+    id: "effectrecovery.idempotency_retention"
+    message: "provider idempotency requires an explicit deduplication expiry"
+    expression: "this.strategy != 1 || has(this.deduplication_expires_at)"
+  };
+  RecoveryStrategy strategy = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  string adapter_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  bytes adapter_sha256 = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.len = 32
+  ];
+  string operation_id = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  // Random, server-generated correlation, not a digest of submitted material.
+  string idempotency_key = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  // Retry creation only while the provider guarantees retention of this key.
+  // After expiry, reconcile or compensate; never silently mint a replacement.
+  google.protobuf.Timestamp deduplication_expires_at = 6;
+}
+
+// Entire dependency graph is fixed before the first external effect. IDs are
+// unique and dependencies acyclic. A plan cannot be extended after start; a
+// genuinely new effect needs a new operation. Owned cleanup is mandatory even
+// after an effect whose response was lost. Borrowed resources are never deleted.
+message ProvisioningStep {
+  option (buf.validate.message).cel = {
+    id: "provisioningstep.ownership_evidence"
+    message: "ownership classification must match its evidence"
+    expression: "(this.ownership == 1 && has(this.ownership_token)) || (this.ownership == 2 && has(this.prior_adoption)) || (this.ownership == 3 && has(this.borrowed_admission))"
+  };
+  option (buf.validate.message).cel = {
+    id: "provisioningstep.borrowed_read_only"
+    message: "borrowed resources allow only read-only verification"
+    expression: "this.ownership != 3 || (this.kind == 5 && this.recovery.strategy == 4)"
+  };
+  option (buf.validate.message).cel = {
+    id: "provisioningstep.no_self_dependency"
+    message: "a step cannot depend on itself"
+    expression: "!this.prerequisite_step_ids.exists(id, id == this.id)"
+  };
+  string id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ResourceRef resource = 2 [features.field_presence = LEGACY_REQUIRED];
+  EffectKind kind = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  ResourceOwnership ownership = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  EffectRecovery recovery = 5 [features.field_presence = LEGACY_REQUIRED];
+  repeated string prerequisite_step_ids = 6 [(buf.validate.field).repeated = {
+    unique: true
+    items: {
+      string: {min_len: 1}
+    }
+  }];
+  // Only this operation may create or compensate this identity. Existing-owned
+  // removal instead binds to its prior adoption fact. Neither authorizes access.
+  oneof ownership_evidence {
+    option (buf.validate.oneof).required = true;
+    string ownership_token = 7 [(buf.validate.field).string.min_len = 1];
+    EventRef prior_adoption = 8;
+    EventRef borrowed_admission = 9;
+  }
+}
+
+// Appended with expected-revision concurrency before any OpenBao, OAuth,
+// provider registration or child-provisioning IO. CREATE owners are unusable.
+// ROTATE/ACQUIRE_LEASE keep existing current material usable unless separately
+// denied by policy; REMOVE closes use before external cleanup begins.
+// deadline_at starts compensation when provisioning stalls, not journal expiry.
+message ProvisioningStarted {
+  option (buf.validate.message).cel = {
+    id: "provisioningstarted.parent_pair"
+    message: "parent operation and owner must appear together"
+    expression: "has(this.parent) == has(this.parent_owner)"
+  };
+  option (buf.validate.message).cel = {
+    id: "provisioningstarted.unique_steps"
+    message: "step ids must be unique"
+    expression: "this.steps.map(s, s.id).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "provisioningstarted.known_dependencies"
+    message: "step dependencies must reference the immutable plan"
+    expression: "this.steps.all(s, s.prerequisite_step_ids.all(id, this.steps.exists(p, p.id == id)))"
+  };
+  ProvisioningPurpose purpose = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  repeated ProvisioningStep steps = 2 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 128
+  }];
+  google.protobuf.Timestamp deadline_at = 3 [features.field_presence = LEGACY_REQUIRED];
+  // A child may prepare material, but cannot independently become available or
+  // garbage-collect it while a parent's adoption decision is unresolved.
+  ProvisioningRef parent = 4;
+  ResourceRef parent_owner = 5;
+}
+
+enum AttemptPurpose {
+  ATTEMPT_PURPOSE_UNSPECIFIED = 0;
+  ATTEMPT_PURPOSE_APPLY = 1;
+  ATTEMPT_PURPOSE_RECONCILE = 2;
+  ATTEMPT_PURPOSE_COMPENSATE = 3;
+}
+
+// Receipt of worker authority is durable before IO. Fences increase per step;
+// stale workers cannot append authoritative results. Their possible external
+// effects still belong to the plan and must be found by reconciliation.
+message EffectAttemptStarted {
+  option (buf.validate.message).cel = {
+    id: "effectattemptstarted.cleanup_identity"
+    message: "compensation attempts require a cleanup id; apply attempts cannot name one"
+    expression: "(this.purpose != 3 || has(this.cleanup_id)) && (this.purpose != 1 || !has(this.cleanup_id))"
+  };
+  string step_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string attempt_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  uint64 fence = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  AttemptPurpose purpose = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  google.protobuf.Timestamp lease_expires_at = 5 [features.field_presence = LEGACY_REQUIRED];
+  // Required for compensation; distinguishes several debts for the same step.
+  string cleanup_id = 6 [(buf.validate.field).string.min_len = 1];
+}
+
+// Evidence resolves to domain metadata with exact version, remote object
+// locator, adapter digest and ownership. A secret locator must itself be kept
+// in custody; arbitrary provider bodies cannot be attached to this receipt.
+message EffectReceipt {
+  string id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string step_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ResourceRef resource = 3 [features.field_presence = LEGACY_REQUIRED];
+  EventRef evidence = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Records the recoverable identity returned by an external creation. The
+// pinned plan supplies the provider account, adapter and operation context.
+// protected_locator must refer to an owned custody record in this project;
+// cleanup retains it until the provider object is confirmed absent. A lost
+// create response is reconciled by the plan's stable ownership/idempotency key.
+message ExternalObjectObserved {
+  option (buf.validate.message).cel = {
+    id: "external_object_observed.locator_kind"
+    message: "a protected locator must reference a credential metadata identity"
+    expression: "!has(this.protected_locator) || this.protected_locator.kind == 1"
+  };
+  string step_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string attempt_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  uint64 fence = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  ResourceRef resource = 4 [features.field_presence = LEGACY_REQUIRED];
+  string ownership_token = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  oneof locator {
+    option (buf.validate.oneof).required = true;
+    string provider_object_id = 6 [(buf.validate.field).string = {
+      min_len: 1
+      max_len: 1024
+    }];
+    ResourceRef protected_locator = 7;
+  }
+}
+
+// Cross-aggregate adoption names the exact creator and prepared receipt. A
+// parent activation owns the handoff decision; a child's acknowledgement may
+// lag. Cleanup reads that parent decision before treating a child as abandoned.
+message ResourceReceiptRef {
+  ProvisioningRef provisioning = 1 [features.field_presence = LEGACY_REQUIRED];
+  string receipt_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ResourceRef resource = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+enum ObservationKind {
+  OBSERVATION_KIND_UNSPECIFIED = 0;
+  OBSERVATION_KIND_APPLIED = 1;
+  OBSERVATION_KIND_ABSENT = 2;
+  OBSERVATION_KIND_UNKNOWN = 3;
+  OBSERVATION_KIND_BORROWED_VERIFIED = 4;
+}
+
+// APPLIED requires its receipt, UNKNOWN has none. ABSENT is merely an observed
+// fact until EffectQuiescenceConfirmed proves older attempts cannot arrive.
+// An ambiguous transport failure cannot be classified as absence or failure.
+message EffectObserved {
+  option (buf.validate.message).cel = {
+    id: "effectobserved.receipt_presence"
+    message: "applied and borrowed-verified observations require exactly their receipt"
+    expression: "((this.kind == 1 || this.kind == 4) == has(this.receipt)) && (!has(this.receipt) || this.receipt.step_id == this.step_id)"
+  };
+  string step_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string attempt_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  uint64 fence = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  ObservationKind kind = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  EffectReceipt receipt = 5;
+  EventRef observation_evidence = 6 [features.field_presence = LEGACY_REQUIRED];
+  string cleanup_id = 7 [(buf.validate.field).string.min_len = 1];
+}
+
+enum QuiescenceBasis {
+  QUIESCENCE_BASIS_UNSPECIFIED = 0;
+  QUIESCENCE_BASIS_PROVIDER_FENCE_CONFIRMED = 1;
+  QUIESCENCE_BASIS_ADAPTER_SETTLEMENT_BOUND_ELAPSED = 2;
+  QUIESCENCE_BASIS_NO_EFFECT_ATTEMPTED = 3;
+  QUIESCENCE_BASIS_CONDITIONAL_WRITE_CLOSED = 4;
+}
+
+// Covers every dispatched attempt through through_fence. The adapter's proven
+// remote bound includes in-flight requests and eventual consistency. A local
+// timeout, cancellation, expired worker lease or one 404 is insufficient.
+message EffectQuiescenceConfirmed {
+  option (buf.validate.message).cel = {
+    id: "effectquiescenceconfirmed.no_attempt_fence"
+    message: "no-attempt proof requires zero high-water fence; dispatched proof requires a positive fence"
+    expression: "(this.basis == 3) == (this.through_fence == 0u)"
+  };
+  string step_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  uint64 through_fence = 2 [features.field_presence = LEGACY_REQUIRED];
+  QuiescenceBasis basis = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  EventRef evidence = 4 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp confirmed_at = 5 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Ready is provisional. Activation rechecks live borrowed dependencies and
+// authorization; readiness alone grants no runtime use or material access.
+// Prepared owned children may await the parent's adoption; requiring those
+// children to be active first would create a circular activation dependency.
+message ProvisioningPrepared {
+  repeated string receipt_ids = 1 [(buf.validate.field).repeated = {
+    min_items: 1
+    unique: true
+    items: {
+      string: {min_len: 1}
+    }
+  }];
+}
+
+// Authoritative domain activation/removal fact is the commit decision. It is
+// appended under the same owner's expected revision. This acknowledgement may
+// follow after a crash; workers recover from the domain fact, never KV status.
+// A committed operation cannot subsequently enter compensation. Retirement of
+// superseded versions or registrations is a new tracked removal operation.
+message ProvisioningCommitted {
+  EventRef decision = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated string adopted_receipt_ids = 2 [(buf.validate.field).repeated = {
+    unique: true
+    items: {
+      string: {min_len: 1}
+    }
+  }];
+}
+
+enum CompensationReason {
+  COMPENSATION_REASON_UNSPECIFIED = 0;
+  COMPENSATION_REASON_CANCELLED = 1;
+  COMPENSATION_REASON_DEADLINE_EXCEEDED = 2;
+  COMPENSATION_REASON_VERIFICATION_FAILED = 3;
+  COMPENSATION_REASON_DEPENDENCY_REVOKED = 4;
+  COMPENSATION_REASON_PERMISSION_REVOKED = 5;
+  COMPENSATION_REASON_PARENT_ABORTED = 6;
+  COMPENSATION_REASON_UNRECOVERABLE_MATERIAL = 7;
+}
+
+// Irreversibly closes activation and schedules all newly owned effects for
+// reconciliation/cleanup, including unknown effects. Existing or borrowed live
+// material is preserved. Already-started IO must be settled, not forgotten.
+// REMOVE operations cannot compensate: deletion is irreversible and failed
+// removal remains pending until its obligations succeed. No event restores use.
+message ProvisioningCompensationStarted {
+  CompensationReason reason = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+enum CleanupKind {
+  CLEANUP_KIND_UNSPECIFIED = 0;
+  CLEANUP_KIND_DESTROY_SECRET_VERSION = 1;
+  CLEANUP_KIND_PURGE_OWNED_SECRET_METADATA = 2;
+  CLEANUP_KIND_REVOKE_PROVIDER_CREDENTIAL = 3;
+  CLEANUP_KIND_DELETE_PROVIDER_REGISTRATION = 4;
+  CLEANUP_KIND_ABORT_OWNED_CHILD = 5;
+  CLEANUP_KIND_REMOVE_OWNED_RESOURCE = 6;
+  CLEANUP_KIND_DELETE_PAYLOAD_ARTIFACT = 7;
+}
+
+// May target one of several remnants of an effect (version, path metadata,
+// provider grant). Dependencies keep cleanup credentials until the remote
+// object they authorize has been removed. A retry limit never closes this debt.
+message CleanupRequired {
+  option (buf.validate.message).cel = {
+    id: "cleanuprequired.no_self_dependency"
+    message: "a cleanup cannot depend on itself"
+    expression: "!this.prerequisite_cleanup_ids.exists(id, id == this.id)"
+  };
+  string id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string step_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ResourceRef resource = 3 [features.field_presence = LEGACY_REQUIRED];
+  CleanupKind kind = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  repeated string prerequisite_cleanup_ids = 5 [(buf.validate.field).repeated = {
+    unique: true
+    items: {
+      string: {min_len: 1}
+    }
+  }];
+}
+
+// Confirmed only after quiescence and exact ownership-scoped absence. For
+// OpenBao, soft delete is insufficient: destroy candidate versions and purge
+// metadata only when the path is exclusively owned and no live version needs it.
+message CleanupConfirmed {
+  string cleanup_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  EventRef absence_evidence = 2 [features.field_presence = LEGACY_REQUIRED];
+  uint64 through_fence = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+enum CleanupBlockReason {
+  CLEANUP_BLOCK_REASON_UNSPECIFIED = 0;
+  CLEANUP_BLOCK_REASON_PROVIDER_UNAVAILABLE = 1;
+  CLEANUP_BLOCK_REASON_AUTHORIZATION_UNAVAILABLE = 2;
+  CLEANUP_BLOCK_REASON_EFFECT_UNRESOLVED = 3;
+  CLEANUP_BLOCK_REASON_OWNERSHIP_UNPROVEN = 4;
+  CLEANUP_BLOCK_REASON_PARENT_DECISION_UNAVAILABLE = 5;
+}
+
+// An operator-visible pending obligation with a scheduled retry, not a DLQ
+// success or an excuse to drop state. Diagnostics contain no provider text.
+message CleanupDeferred {
+  string cleanup_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  CleanupBlockReason reason = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  google.protobuf.Timestamp retry_at = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Terminal abort only after every possible owned effect is quiescent/absent,
+// every derived cleanup obligation is confirmed, and no parent adopted it.
+// The minimal tombstone and idempotency identity remain; replay cannot recreate
+// the abandoned resource. Tombstones are audit evidence, not orphaned material.
+message ProvisioningCompensated {
+  repeated string confirmed_cleanup_ids = 1 [(buf.validate.field).repeated = {
+    unique: true
+    items: {
+      string: {min_len: 1}
+    }
+  }];
+}
+
+// Embedded envelopes use the owning stream's event ID/revision/time, equal to
+// any outer envelope. Ref and owner are immutable through this operation. The
+// domain decides transitions; annotations do not implement saga correctness.
+message ProvisioningEvent {
+  ProvisioningRef provisioning = 1 [features.field_presence = LEGACY_REQUIRED];
+  ResourceRef owner = 2 [features.field_presence = LEGACY_REQUIRED];
+  string event_id = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  uint64 revision = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  google.protobuf.Timestamp occurred_at = 5 [features.field_presence = LEGACY_REQUIRED];
+  oneof fact {
+    option (buf.validate.oneof).required = true;
+    ProvisioningStarted started = 10;
+    EffectAttemptStarted effect_attempt_started = 11;
+    EffectObserved effect_observed = 12;
+    EffectQuiescenceConfirmed effect_quiescence_confirmed = 13;
+    ProvisioningPrepared prepared = 14;
+    ProvisioningCommitted committed = 15;
+    ProvisioningCompensationStarted compensation_started = 16;
+    CleanupRequired cleanup_required = 17;
+    CleanupConfirmed cleanup_confirmed = 18;
+    CleanupDeferred cleanup_deferred = 19;
+    ProvisioningCompensated compensated = 20;
+    ExternalObjectObserved external_object_observed = 21;
+  }
+}

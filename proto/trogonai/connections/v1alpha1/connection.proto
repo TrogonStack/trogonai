@@ -1,0 +1,118 @@
+edition = "2024";
+
+package trogonai.connections.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/connections/v1alpha1/connector.proto";
+import "trogonai/connections/v1alpha1/digest.proto";
+import "trogonai/provisioning/v1alpha1/events.proto";
+
+// Project and creation-provisioning ownership are immutable and checked against
+// authenticated context. This pending metadata is the stream reservation; its
+// immutable provisioning plan follows before remote or child-credential creation.
+// Labels and display_name are mutable metadata, never authorization. The
+// positive revision orders all connection and credential binding mutations.
+message Connection {
+  string id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string project_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  StoredConnectionConfiguration configuration = 3 [features.field_presence = LEGACY_REQUIRED];
+  string display_name = 5;
+  map<string, string> labels = 6 [(buf.validate.field).map.keys.string.min_len = 1];
+  // Unknown and unspecified states are invalid. Only ACTIVE admits use.
+  // Revocation is terminal. Suspension or reconnect never revives old grants.
+  ConnectionState state = 7 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  uint64 revision = 8 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  trogonai.provisioning.v1alpha1.ProvisioningRef creation_provisioning = 9 [features.field_presence = LEGACY_REQUIRED];
+}
+
+enum ConnectionState {
+  CONNECTION_STATE_UNSPECIFIED = 0;
+  CONNECTION_STATE_ACTIVE = 1;
+  CONNECTION_STATE_DISABLED = 2;
+  CONNECTION_STATE_REVOKED = 3;
+  CONNECTION_STATE_PENDING = 4;
+  CONNECTION_STATE_RECONNECT_REQUIRED = 5;
+  // Initial provisioning is terminal only after every possible owned effect
+  // is quiescent, cleanup is confirmed and no parent activation adopted it.
+  CONNECTION_STATE_PROVISIONING_ABORTED = 6;
+}
+
+// Authoritative retained snapshot, including in creation and upgrade events.
+// Serialize validated ConnectionConfiguration once, hash these exact bytes,
+// and persist them unchanged. Verify the digest before decoding and validate
+// the decoded message before use. A parsed read-side projection is derived
+// from this artifact and must never recreate its digest by re-encoding.
+// Pending creation validates shape and endpoint policy; activation additionally
+// proves account/binding readiness without rewriting configuration identity.
+message StoredConnectionConfiguration {
+  // Nonempty serialized ConnectionConfiguration in this exact package/version.
+  bytes configuration_bytes = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.min_len = 1
+  ];
+  Digest configuration_digest = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Immutable content retained in StoredConnectionConfiguration. Endpoint/account changes
+// create another Connection. An explicit, revalidated connector upgrade creates
+// another configuration snapshot; existing references never silently switch.
+// Secret rotation behind an unchanged SecretRef changes neither identity nor
+// configuration digest. This message and its labels contain no secret material.
+message ConnectionConfiguration {
+  ConnectorVersionRef connector_version = 1 [features.field_presence = LEGACY_REQUIRED];
+  EndpointIdentity endpoint = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Exactly one known arm is required. An account identifier must come from
+  // adapter validation before activation. A pending connection's expected
+  // account identifier is not evidence of account ownership.
+  oneof account {
+    option (buf.validate.oneof).required = true;
+    string provider_account_id = 3 [(buf.validate.field).string.min_len = 1];
+    AccountlessEndpoint accountless = 4;
+  }
+}
+
+// Canonical HTTPS origin and nonsecret path prefix only. Origin has no userinfo,
+// path, query, or fragment. Prefix is an absolute path without query/fragment or
+// credential-bearing segments; '/' covers an origin. Adapter validation rejects
+// redirects, unsafe DNS/address ranges and cross-origin credential forwarding.
+// A token-bearing webhook URL is a WEBHOOK_DESTINATION binding, not this field.
+message EndpointIdentity {
+  string https_origin = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.pattern = "^https://[^/?#@]+$"
+  ];
+  string public_path_prefix = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.pattern = "^/[^?#]*$"
+  ];
+}
+
+// An adapter explicitly establishes that the endpoint has no provider account
+// identity to validate. This never asserts successful account verification.
+message AccountlessEndpoint {}
+
+// A resolution pins the exact configuration and adapter. Every use compares it
+// with live state; a changed configuration fails instead of selecting a new one.
+message ConnectionRef {
+  string id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  Digest configuration_digest = 2 [features.field_presence = LEGACY_REQUIRED];
+  ConnectorVersionRef connector_version = 3 [features.field_presence = LEGACY_REQUIRED];
+}

@@ -1,0 +1,343 @@
+edition = "2024";
+
+package trogonai.connections.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/connections/v1alpha1/connection.proto";
+import "trogonai/connections/v1alpha1/connector.proto";
+import "trogonai/connections/v1alpha1/credential_binding.proto";
+import "trogonai/connections/v1alpha1/digest.proto";
+import "trogonai/connections/v1alpha1/grant.proto";
+import "trogonai/provisioning/v1alpha1/events.proto";
+
+// Connection-owned metadata events. The positive revision serializes all
+// binding activations with connection edits. Embedded project/connection IDs
+// must equal this envelope. These events never contain provider credentials,
+// token-bearing endpoints, proof tokens, secret material or confirmation keys.
+// Provisioning facts share this authoritative stream and revision sequence;
+// there is no separately committed coordinator deciding connection activation.
+message ConnectionEvent {
+  option (buf.validate.message).cel = {
+    id: "connection_event.created_identity"
+    message: "creation must reserve this pending connection at revision one"
+    expression: "!has(this.created) || (this.created.id == this.connection_id && this.created.project_id == this.project_id && this.created.creation_provisioning.project_id == this.project_id && this.created.revision == this.revision && this.revision == 1u && this.created.state == 4)"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_event.initial_reservation"
+    message: "revision one must reserve the pending connection before provisioning starts"
+    expression: "this.revision != 1u || has(this.created)"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_event.binding_identity"
+    message: "activated binding must identify this connection and installation revision"
+    expression: "!has(this.credential_activated) || (this.credential_activated.binding.project_id == this.project_id && this.credential_activated.binding.connection_id == this.connection_id && this.credential_activated.binding.binding_revision == this.revision)"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_event.provisioning_identity"
+    message: "provisioning must use this connection owner and exact stream envelope"
+    expression: "!has(this.provisioning) || (this.provisioning.provisioning.project_id == this.project_id && this.provisioning.owner.kind == 2 && this.provisioning.owner.id == this.connection_id && this.provisioning.event_id == this.event_id && this.provisioning.revision == this.revision && this.provisioning.occurred_at == this.occurred_at)"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_event.activation_project"
+    message: "activation prerequisites must belong to this project"
+    expression: "(!has(this.activated) || this.activated.prerequisites.provisioning.project_id == this.project_id) && (!has(this.enabled) || this.enabled.prerequisites.provisioning.project_id == this.project_id) && (!has(this.connector_upgraded) || this.connector_upgraded.prerequisites.provisioning.project_id == this.project_id) && (!has(this.resources_removed) || this.resources_removed.provisioning.project_id == this.project_id)"
+  };
+
+  string event_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string project_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string connection_id = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  uint64 revision = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  google.protobuf.Timestamp occurred_at = 5 [features.field_presence = LEGACY_REQUIRED];
+  string operation_id = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  // Exactly one known arm is required. Revision one reserves pending connection
+  // metadata; ProvisioningStarted then fixes the plan before any external IO.
+  // Every fact advances this stream revision under optimistic concurrency.
+  oneof change {
+    option (buf.validate.oneof).required = true;
+    Connection created = 7;
+    ConnectionMetadataUpdated metadata_updated = 8;
+    ConnectionConnectorUpgraded connector_upgraded = 9;
+    ConnectionStopped stopped = 10;
+    CredentialBindingActivated credential_activated = 11;
+    ConnectionCredentialRevoked credential_revoked = 12;
+    ConnectionActivated activated = 13;
+    ConnectionEnabled enabled = 14;
+    ConnectionReconnectRequired reconnect_required = 15;
+    trogonai.provisioning.v1alpha1.ProvisioningEvent provisioning = 16;
+    ConnectionResourcesRemoved resources_removed = 17;
+  }
+}
+
+message ConnectionMetadataUpdated {
+  string display_name = 1;
+  map<string, string> labels = 2 [(buf.validate.field).map.keys.string.min_len = 1];
+}
+
+// Both snapshots are retained for audit. Only the admitted connector release
+// may differ; endpoint/account identity is immutable across this transition.
+message ConnectionConnectorUpgraded {
+  option (buf.validate.message).cel = {
+    id: "connection_connector_upgraded.verified_configuration"
+    message: "upgrade prerequisites must verify the admitted configuration bytes"
+    expression: "this.prerequisites.configuration_digest.value == this.configuration.configuration_digest.value"
+  };
+
+  Digest previous_configuration_digest = 1 [features.field_presence = LEGACY_REQUIRED];
+  StoredConnectionConfiguration configuration = 2 [features.field_presence = LEGACY_REQUIRED];
+  ConnectionActivationPrerequisites prerequisites = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ConnectionStopped {
+  // Only disabled and revoked are valid; revocation is terminal for authority.
+  // This does not assert that owned resources were removed. Cleanup remains a
+  // durable provisioning obligation until exact resource absence is confirmed.
+  ConnectionState state = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      in: [
+        2,
+        3
+      ]
+    }
+  ];
+}
+
+// A trusted verifier records readiness receipts for the exact configuration
+// and installed role bindings. The referenced plan contains all prerequisites,
+// including live borrowed resources, endpoint/account verification, required
+// child credentials and provider registrations. Nothing may be omitted because
+// its first remote attempt timed out or a worker lease expired.
+message ConnectionActivationPrerequisites {
+  option (buf.validate.message).cel = {
+    id: "connection_activation_prerequisites.roles_unique"
+    message: "verified binding roles must be unique"
+    expression: "this.credential_bindings.map(b, b.role.name).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_activation_prerequisites.bindings_unique"
+    message: "verified binding identifiers must be unique"
+    expression: "this.credential_bindings.map(b, b.binding_id).unique()"
+  };
+
+  trogonai.provisioning.v1alpha1.ProvisioningRef provisioning = 1 [features.field_presence = LEGACY_REQUIRED];
+  Digest configuration_digest = 2 [features.field_presence = LEGACY_REQUIRED];
+  repeated CredentialBindingRef credential_bindings = 3;
+  // Complete, unique, nonempty receipt set from this provisioning plan.
+  // Each receipt resolves to immutable metadata and an exact owned/borrowed
+  // resource. Recheck current authorization and dependencies at activation.
+  repeated string prerequisite_receipt_ids = 4 [(buf.validate.field).repeated = {
+    min_items: 1
+    unique: true
+    items: {
+      string: {min_len: 1}
+    }
+  }];
+}
+
+// This durable fact is the activation and ownership-transfer decision. It is
+// legal only while its provisioning plan is prepared, not compensating, and all
+// prerequisite receipts still match live configuration, bindings and authority.
+// Child acknowledgment may lag; sweepers read this exact parent stream before
+// cleanup and cannot infer an orphan from elapsed time or an unavailable parent.
+// Prepared owned children are sufficient for adoption; borrowed dependencies
+// must already be active. Runtime use waits for child activation acknowledgement
+// or an authoritative custody check of the parent adoption.
+// Owned children and registrations transfer atomically with this fact. Borrowed
+// material never appears in adopted_resources and is never destroyed by cleanup.
+// Reconnection repeats these checks and cannot revive revoked/expired grants.
+message ConnectionActivated {
+  option (buf.validate.message).cel = {
+    id: "connection_activated.adoption_project"
+    message: "adopted resources must belong to the activation project"
+    expression: "this.adopted_resources.all(r, r.provisioning.project_id == this.prerequisites.provisioning.project_id)"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_activated.adoption_unique"
+    message: "each resource may be adopted only once"
+    expression: "this.adopted_resources.all(r, this.adopted_resources.filter(s, s.resource.kind == r.resource.kind && s.resource.id == r.resource.id).size() == 1)"
+  };
+
+  ConnectionActivationPrerequisites prerequisites = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated trogonai.provisioning.v1alpha1.ResourceReceiptRef adopted_resources = 2;
+}
+
+// Reversible suspension ends only after current readiness is verified and the
+// previous suspension's grant revocations are complete. No ownership changes;
+// expired or revoked grants remain invalid after this fact.
+message ConnectionEnabled {
+  ConnectionActivationPrerequisites prerequisites = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Final removal decision after the independently tracked removal plan proves
+// quiescence and exact absence for every owned resource. The connection is
+// already revoked; stopping authority never waits for remote cleanup. Borrowed
+// credentials are excluded, and cleanup credentials remain until all dependent
+// remote removals finish. A failed/unknown cleanup attempt cannot emit this fact.
+// The minimal ownership and idempotency tombstone is retained after removal.
+message ConnectionResourcesRemoved {
+  option (buf.validate.message).cel = {
+    id: "connection_resources_removed.unique"
+    message: "removed resource identities must be unique"
+    expression: "this.removed_resources.all(r, this.removed_resources.filter(s, s.resource.kind == r.resource.kind && s.resource.id == r.resource.id).size() == 1)"
+  };
+
+  trogonai.provisioning.v1alpha1.ProvisioningRef provisioning = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated ConnectionResourceRemoval removed_resources = 2;
+}
+
+// Every reference points to an authoritative CleanupConfirmed fact in this
+// removal plan. Resolve its cleanup ID back to the exact owned resource and
+// quiescence evidence; an APPLIED/prepared effect receipt is not absence proof.
+// Confirmations cover all cleanup obligations for this resource, including
+// provider revocation and child material cleanup where the plan requires both.
+message ConnectionResourceRemoval {
+  trogonai.provisioning.v1alpha1.ResourceRef resource = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated trogonai.provisioning.v1alpha1.EventRef cleanup_confirmations = 2 [(buf.validate.field).repeated.min_items = 1];
+}
+
+message ConnectionReconnectRequired {
+  // Unknown and unspecified reasons are invalid.
+  ConnectionReconnectReason reason = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+enum ConnectionReconnectReason {
+  CONNECTION_RECONNECT_REASON_UNSPECIFIED = 0;
+  CONNECTION_RECONNECT_REASON_REFRESH_REJECTED = 1;
+  CONNECTION_RECONNECT_REASON_PROVIDER_AUTHENTICATION_REJECTED = 2;
+  CONNECTION_RECONNECT_REASON_ACCOUNT_CONTINUITY_LOST = 3;
+}
+
+message ConnectionCredentialRevoked {
+  string binding_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// Grant lifecycle has independent identity and no connection aggregate revision.
+// A grant is issued once and can be revoked once; expiration is checked live.
+// No stream event can serve as a proof token or revive expired authority.
+message ConnectionGrantEvent {
+  option (buf.validate.message).cel = {
+    id: "connection_grant_event.issued_identity"
+    message: "issued grant identity must match the event envelope"
+    expression: "!has(this.issued) || (this.issued.id == this.grant_id && this.issued.project_id == this.project_id)"
+  };
+
+  string event_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string project_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string grant_id = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  google.protobuf.Timestamp occurred_at = 4 [features.field_presence = LEGACY_REQUIRED];
+  string operation_id = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  // Exactly one known arm is required.
+  oneof change {
+    option (buf.validate.oneof).required = true;
+    ConnectionGrant issued = 6;
+    ConnectionGrantRevoked revoked = 7;
+  }
+}
+
+message ConnectionGrantRevoked {
+  // Unknown and unspecified reasons are invalid.
+  ConnectionGrantRevocationReason reason = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+enum ConnectionGrantRevocationReason {
+  CONNECTION_GRANT_REVOCATION_REASON_UNSPECIFIED = 0;
+  CONNECTION_GRANT_REVOCATION_REASON_EXPLICIT = 1;
+  CONNECTION_GRANT_REVOCATION_REASON_POLICY = 2;
+  CONNECTION_GRANT_REVOCATION_REASON_SUBJECT_ENDED = 3;
+  CONNECTION_GRANT_REVOCATION_REASON_CONNECTION_CHANGED = 4;
+  CONNECTION_GRANT_REVOCATION_REASON_CREDENTIAL_REVOKED = 5;
+  CONNECTION_GRANT_REVOCATION_REASON_COMPROMISE = 6;
+}
+
+// Adapter catalog facts retain the immutable operation, role and provisioning
+// definition. Registration verifies it against the exact release artifact and
+// descriptor pins; a release's catalog definition is never edited in place.
+// Retirement blocks new admissions and live use of that release. It is terminal
+// and never causes an existing connection to select a substitute release.
+message ConnectorCatalogEvent {
+  option (buf.validate.message).cel = {
+    id: "connector_catalog_event.registered_identity"
+    message: "the registered definition must match this exact release"
+    expression: "!has(this.registered) || (this.registered.version_ref.provider == this.version_ref.provider && this.registered.version_ref.version == this.version_ref.version && this.registered.version_ref.artifact_digest.value == this.version_ref.artifact_digest.value)"
+  };
+
+  string event_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ConnectorVersionRef version_ref = 2 [features.field_presence = LEGACY_REQUIRED];
+  uint64 revision = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  google.protobuf.Timestamp occurred_at = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Exactly one known fact is required. Registration occurs once; retirement
+  // follows it under optimistic concurrency in this release's catalog stream.
+  oneof fact {
+    option (buf.validate.oneof).required = true;
+    ConnectorVersion registered = 5;
+    ConnectorVersionRetired retired = 6;
+  }
+}
+
+message ConnectorVersionRetired {
+  // Unknown and unspecified reasons are invalid; provider error text is absent.
+  ConnectorRetirementReason reason = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+enum ConnectorRetirementReason {
+  CONNECTOR_RETIREMENT_REASON_UNSPECIFIED = 0;
+  CONNECTOR_RETIREMENT_REASON_OPERATOR_REQUESTED = 1;
+  CONNECTOR_RETIREMENT_REASON_SECURITY_REVOKED = 2;
+  CONNECTOR_RETIREMENT_REASON_PROVIDER_UNSUPPORTED = 3;
+}

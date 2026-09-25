@@ -1,0 +1,18 @@
+edition = "2024";
+
+package trogonai.connections.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// SHA-256 over the exact immutable bytes identified by the containing field.
+// Re-encoding a decoded protobuf is not a substitute for those bytes.
+message Digest {
+  string algorithm = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.const = "sha256"
+  ];
+  bytes value = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.len = 32
+  ];
+}

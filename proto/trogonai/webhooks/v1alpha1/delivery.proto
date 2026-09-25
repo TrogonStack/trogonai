@@ -1,0 +1,497 @@
+edition = "2024";
+
+package trogonai.webhooks.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/connections/v1alpha1/connection.proto";
+import "trogonai/provisioning/v1alpha1/events.proto";
+import "trogonai/webhooks/v1alpha1/common.proto";
+import "trogonai/webhooks/v1alpha1/subscription.proto";
+
+enum WebhookTransportFailure {
+  WEBHOOK_TRANSPORT_FAILURE_UNSPECIFIED = 0;
+  WEBHOOK_TRANSPORT_FAILURE_DNS = 1;
+  WEBHOOK_TRANSPORT_FAILURE_TLS = 2;
+  WEBHOOK_TRANSPORT_FAILURE_CONNECT = 3;
+}
+
+enum WebhookUnknownOutcomeReason {
+  WEBHOOK_UNKNOWN_OUTCOME_REASON_UNSPECIFIED = 0;
+  WEBHOOK_UNKNOWN_OUTCOME_REASON_TIMEOUT = 1;
+  WEBHOOK_UNKNOWN_OUTCOME_REASON_CONNECTION_LOST = 2;
+  WEBHOOK_UNKNOWN_OUTCOME_REASON_INVALID_RESPONSE = 3;
+  WEBHOOK_UNKNOWN_OUTCOME_REASON_LEASE_EXPIRED = 4;
+}
+
+enum WebhookDeliveryFailureReason {
+  WEBHOOK_DELIVERY_FAILURE_REASON_UNSPECIFIED = 0;
+  WEBHOOK_DELIVERY_FAILURE_REASON_ATTEMPTS_EXHAUSTED = 1;
+  WEBHOOK_DELIVERY_FAILURE_REASON_DEADLINE_EXCEEDED = 2;
+  WEBHOOK_DELIVERY_FAILURE_REASON_PAYLOAD_EXPIRED = 3;
+  WEBHOOK_DELIVERY_FAILURE_REASON_HTTP_REJECTED = 4;
+  WEBHOOK_DELIVERY_FAILURE_REASON_TARGET_REJECTED = 5;
+  WEBHOOK_DELIVERY_FAILURE_REASON_AUTHORIZATION_REVOKED = 6;
+  WEBHOOK_DELIVERY_FAILURE_REASON_PAYLOAD_INTEGRITY = 7;
+  WEBHOOK_DELIVERY_FAILURE_REASON_OPERATOR_CANCELLED = 8;
+  WEBHOOK_DELIVERY_FAILURE_REASON_SIGNING_UNAVAILABLE = 9;
+}
+
+enum WebhookRetryReason {
+  WEBHOOK_RETRY_REASON_UNSPECIFIED = 0;
+  WEBHOOK_RETRY_REASON_HTTP_TRANSIENT = 1;
+  WEBHOOK_RETRY_REASON_TRANSPORT_NOT_SENT = 2;
+  WEBHOOK_RETRY_REASON_OUTCOME_UNKNOWN = 3;
+}
+
+message WebhookHttpSuccess {
+  uint32 status_code = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32 = {
+      gte: 200
+      lte: 299
+    }
+  ];
+}
+
+// Redirect responses are terminal and are never followed. Only 408, 425,
+// 429 and 5xx qualify for automatic HTTP retry; other final failures are
+// terminal. Response bodies and headers are not retained in delivery state.
+message WebhookHttpFailure {
+  uint32 status_code = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32 = {
+      gte: 300
+      lte: 599
+    }
+  ];
+  // Parsed service time, not the raw Retry-After header. Scheduling rejects
+  // values beyond the cycle deadline rather than silently extending it.
+  google.protobuf.Timestamp retry_after = 2;
+}
+
+message WebhookRequestNotSent {
+  WebhookTransportFailure reason = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+message WebhookOutcomeUnknown {
+  WebhookUnknownOutcomeReason reason = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+// Unknown outcomes remain eligible for at-least-once retry with the same
+// delivery identity. Receiver deduplication is necessary because the earlier
+// attempt may already have succeeded.
+message WebhookAttemptOutcome {
+  oneof outcome {
+    option (buf.validate.oneof).required = true;
+    WebhookHttpSuccess succeeded = 1;
+    WebhookHttpFailure http_failure = 2;
+    WebhookRequestNotSent not_sent = 3;
+    WebhookOutcomeUnknown unknown = 4;
+  }
+}
+
+message WebhookDeliveryCycle {
+  option (buf.validate.message).cel = {
+    id: "webhook.delivery_cycle.deadline"
+    message: "retry cycle deadline must follow its start"
+    expression: "this.deadline > this.started_at"
+  };
+  // Initial cycle is zero; an authorized manual replay increments it.
+  uint64 number = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Every attempt in this cycle must use a strictly greater fencing epoch.
+  uint64 fencing_epoch_floor = 2 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp started_at = 3 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp deadline = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Attempt identity is new for every dispatch. The monotonically increasing
+// fencing epoch prevents stale workers from completing or rescheduling a
+// newer attempt. An expired lease becomes an unknown outcome, never success.
+// Dispatch is authorized as a service operation for this delivery attempt.
+message WebhookDeliveryAttempt {
+  option (buf.validate.message).cel = {
+    id: "webhook.attempt.lease"
+    message: "request deadline and lease must be positive and bounded"
+    expression: "this.request_deadline > this.started_at && this.request_deadline - this.started_at <= duration('30s') && this.lease_expires_at >= this.request_deadline && this.lease_expires_at - this.started_at <= duration('60s')"
+  };
+  string id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string delivery_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string worker_id = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  uint64 ordinal = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  uint64 cycle_number = 5 [features.field_presence = LEGACY_REQUIRED];
+  uint32 cycle_ordinal = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32 = {
+      gte: 1
+      lte: 30
+    }
+  ];
+  uint64 fencing_epoch = 7 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  string authorization_id = 8 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  uint64 authorized_subscription_revision = 9 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  string signing_binding_id = 10 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  google.protobuf.Timestamp started_at = 11 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp request_deadline = 12 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp lease_expires_at = 13 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message WebhookDeliveryScheduled {
+  google.protobuf.Timestamp not_before = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Absent only before the first attempt in a retry cycle.
+  string previous_attempt_id = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+// Durable handoff to the scheduler after a transient or unknown outcome.
+// Recovery can reschedule this state without inventing another attempt.
+message WebhookDeliveryAwaitingRetry {
+  string previous_attempt_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  WebhookRetryReason reason = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  google.protobuf.Timestamp completed_at = 3 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp retry_after = 4;
+}
+
+message WebhookDeliverySucceeded {
+  string attempt_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  google.protobuf.Timestamp completed_at = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message WebhookDeliveryFailed {
+  WebhookDeliveryFailureReason reason = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  google.protobuf.Timestamp failed_at = 2 [features.field_presence = LEGACY_REQUIRED];
+  string last_attempt_id = 3 [(buf.validate.field).string.min_len = 1];
+}
+
+// The id is the stable Standard Webhooks webhook-id across automatic and
+// manual retries. Payload bytes, source event and destination never change.
+// Each dispatch signs that id, a fresh timestamp and the exact retained bytes;
+// neither the generated signature nor secret headers enter this record.
+message WebhookDeliveryDefinition {
+  string id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string project_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string subscription_id = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  uint64 subscription_revision = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  trogonai.connections.v1alpha1.ConnectionRef connection = 5 [features.field_presence = LEGACY_REQUIRED];
+  string source_event_id = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string event_type = 7 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  WebhookPayloadRef payload = 8 [features.field_presence = LEGACY_REQUIRED];
+  WebhookTarget target = 9 [features.field_presence = LEGACY_REQUIRED];
+  WebhookRetryPolicy retry_policy = 10 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp created_at = 11 [features.field_presence = LEGACY_REQUIRED];
+  string reissued_from_delivery_id = 12 [(buf.validate.field).string.min_len = 1];
+}
+
+// Ordinary fan-out deduplicates project, subscription and source event. An
+// authorized reissue gets a new delivery identity with its explicit source ref.
+message WebhookDeliveryEnqueued {
+  option (buf.validate.message).cel = {
+    id: "webhook.delivery.enqueue_state"
+    message: "initial schedule and cycle must match the immutable delivery and payload retention"
+    expression: "this.metadata.project_id == this.delivery.project_id && this.metadata.revision > 1u && this.metadata.project_id == this.evidence.provisioning.project_id && this.evidence.adopted_resources.exists(r, r.resource.kind == 11 && r.resource.id == this.delivery.payload.artifact_id) && this.cycle.number == 0u && this.cycle.fencing_epoch_floor == 0u && this.cycle.started_at >= this.delivery.created_at && this.cycle.deadline <= this.delivery.payload.expires_at && this.cycle.deadline - this.cycle.started_at <= this.delivery.retry_policy.retry_window && this.schedule.not_before >= this.cycle.started_at && this.schedule.not_before < this.cycle.deadline && !has(this.schedule.previous_attempt_id)"
+  };
+  WebhookEventMetadata metadata = 1 [features.field_presence = LEGACY_REQUIRED];
+  WebhookDeliveryDefinition delivery = 2 [features.field_presence = LEGACY_REQUIRED];
+  WebhookDeliveryCycle cycle = 3 [features.field_presence = LEGACY_REQUIRED];
+  WebhookDeliveryScheduled schedule = 4 [features.field_presence = LEGACY_REQUIRED];
+  WebhookActivationEvidence evidence = 5 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message WebhookDeliveryAttemptStarted {
+  option (buf.validate.message).cel = {
+    id: "webhook.attempt.start_identity"
+    message: "attempt must belong to the event delivery"
+    expression: "this.delivery_id == this.attempt.delivery_id"
+  };
+  WebhookEventMetadata metadata = 1 [features.field_presence = LEGACY_REQUIRED];
+  string delivery_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  WebhookDeliveryAttempt attempt = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Attempt completion and the resulting aggregate state are one decision.
+// Successful outcomes select succeeded; a transient/unknown outcome selects
+// awaiting_retry, or failed when no retry budget remains.
+message WebhookDeliveryAttemptCompleted {
+  option (buf.validate.message).cel = {
+    id: "webhook.attempt.completion_disposition"
+    message: "success and retry dispositions must match the attempt outcome"
+    expression: "has(this.outcome.succeeded) == has(this.succeeded) && (!has(this.succeeded) || this.succeeded.attempt_id == this.attempt_id) && (!has(this.awaiting_retry) || (this.awaiting_retry.previous_attempt_id == this.attempt_id && ((this.awaiting_retry.reason == 1 && has(this.outcome.http_failure) && (this.outcome.http_failure.status_code in [408u, 425u, 429u] || this.outcome.http_failure.status_code >= 500)) || (this.awaiting_retry.reason == 2 && has(this.outcome.not_sent)) || (this.awaiting_retry.reason == 3 && has(this.outcome.unknown)))))"
+  };
+  WebhookEventMetadata metadata = 1 [features.field_presence = LEGACY_REQUIRED];
+  string delivery_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string attempt_id = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  uint64 fencing_epoch = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  WebhookAttemptOutcome outcome = 5 [features.field_presence = LEGACY_REQUIRED];
+  oneof disposition {
+    option (buf.validate.oneof).required = true;
+    WebhookDeliverySucceeded succeeded = 6;
+    WebhookDeliveryAwaitingRetry awaiting_retry = 7;
+    WebhookDeliveryFailed failed = 8;
+  }
+}
+
+message WebhookDeliveryRetryScheduled {
+  option (buf.validate.message).cel = {
+    id: "webhook.retry.schedule_identity"
+    message: "retry must name its preceding attempt"
+    expression: "has(this.schedule.previous_attempt_id) && this.previous_attempt_id == this.schedule.previous_attempt_id"
+  };
+  WebhookEventMetadata metadata = 1 [features.field_presence = LEGACY_REQUIRED];
+  string delivery_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string previous_attempt_id = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  WebhookRetryReason reason = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  WebhookDeliveryScheduled schedule = 5 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message WebhookDeliveryFailureRecorded {
+  option (buf.validate.message).cel = {
+    id: "webhook.failure.last_outcome"
+    message: "terminal failure must preserve its last attempt outcome and fence"
+    expression: "has(this.failure.last_attempt_id) == has(this.last_attempt) && (!has(this.last_attempt) || (this.failure.last_attempt_id == this.last_attempt.attempt_id && this.closed_fencing_epoch >= this.last_attempt.fencing_epoch && !has(this.last_attempt.outcome.succeeded)))"
+  };
+  WebhookEventMetadata metadata = 1 [features.field_presence = LEGACY_REQUIRED];
+  string delivery_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  WebhookDeliveryFailed failure = 3 [features.field_presence = LEGACY_REQUIRED];
+  WebhookTerminalAttempt last_attempt = 4;
+  uint64 closed_fencing_epoch = 5 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// An unknown final attempt is preserved even when no retry budget remains.
+// Exhaustion and cancellation cannot be rewritten as "not sent".
+message WebhookTerminalAttempt {
+  string attempt_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  uint64 fencing_epoch = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  WebhookAttemptOutcome outcome = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Requires the current terminal failure fact, no live worker lease, retained
+// unchanged bytes and fresh authorization. The new floor exceeds every prior
+// attempt fence; stale workers cannot complete or schedule this cycle. Remote
+// effects may still complete, so unknown outcomes and delivery identity persist.
+message WebhookDeliveryReplayed {
+  option (buf.validate.message).cel = {
+    id: "webhook.replay.cycle"
+    message: "manual replay starts a fresh bounded cycle with no attempts"
+    expression: "this.cycle.number > 0u && this.cycle.fencing_epoch_floor > this.previous_fencing_epoch && this.terminal_event.revision < this.metadata.revision && this.schedule.not_before >= this.cycle.started_at && this.schedule.not_before < this.cycle.deadline && !has(this.schedule.previous_attempt_id)"
+  };
+  WebhookEventMetadata metadata = 1 [features.field_presence = LEGACY_REQUIRED];
+  string delivery_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  WebhookDeliveryCycle cycle = 3 [features.field_presence = LEGACY_REQUIRED];
+  WebhookDeliveryScheduled schedule = 4 [features.field_presence = LEGACY_REQUIRED];
+  uint64 previous_fencing_epoch = 5 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.provisioning.v1alpha1.EventRef terminal_event = 6 [features.field_presence = LEGACY_REQUIRED];
+  string authorized_by = 7 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+message WebhookDeliveryEvent {
+  option (buf.validate.message).cel = {
+    id: "webhook.delivery.provisioning_owner"
+    message: "embedded provisioning must belong to a delivery"
+    expression: "!has(this.provisioning) || this.provisioning.owner.kind == 10"
+  };
+  oneof event {
+    option (buf.validate.oneof).required = true;
+    WebhookDeliveryEnqueued enqueued = 1;
+    WebhookDeliveryAttemptStarted attempt_started = 2;
+    WebhookDeliveryAttemptCompleted attempt_completed = 3;
+    WebhookDeliveryRetryScheduled retry_scheduled = 4;
+    WebhookDeliveryFailureRecorded failure_recorded = 5;
+    WebhookDeliveryReplayed replayed = 6;
+    WebhookDeliveryReserved reserved = 7;
+    WebhookDeliveryCleanupRequested cleanup_requested = 8;
+    WebhookDeliveryCleanupCompleted cleanup_completed = 9;
+    trogonai.provisioning.v1alpha1.ProvisioningEvent provisioning = 10;
+  }
+}
+
+// Reserves an exclusively owned serialized payload identity before artifact IO.
+// Shared plans cover artifact creation and every new child dependency. No
+// delivery can dispatch until its Enqueued adoption fact commits.
+message WebhookDeliveryReserved {
+  WebhookEventMetadata metadata = 1 [features.field_presence = LEGACY_REQUIRED];
+  string delivery_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  trogonai.provisioning.v1alpha1.ProvisioningRef provisioning = 3 [features.field_presence = LEGACY_REQUIRED];
+  string subscription_id = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  uint64 subscription_revision = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  trogonai.connections.v1alpha1.ConnectionRef connection = 6 [features.field_presence = LEGACY_REQUIRED];
+  string source_event_id = 7 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string event_type = 8 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string payload_artifact_id = 9 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string reissued_from_delivery_id = 10 [(buf.validate.field).string.min_len = 1];
+  option (buf.validate.message).cel = {
+    id: "webhook.delivery.reservation"
+    message: "reservation starts in its provisioning project"
+    expression: "this.metadata.revision == 1u && this.metadata.project_id == this.provisioning.project_id"
+  };
+}
+
+// Removes retained payload independently of the delivery's terminal outcome.
+// Any live attempt is first closed with its actual or unknown outcome; cleanup
+// cannot synthesize success or erase that ambiguity. A committed delivery uses
+// a new REMOVE provisioning; abandonment compensates an uncommitted reservation.
+message WebhookDeliveryCleanupRequested {
+  WebhookEventMetadata metadata = 1 [features.field_presence = LEGACY_REQUIRED];
+  string delivery_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  trogonai.provisioning.v1alpha1.ProvisioningRef provisioning = 3 [features.field_presence = LEGACY_REQUIRED];
+  WebhookCleanupReason reason = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  option (buf.validate.message).cel = {
+    id: "webhook.delivery_id.cleanup_scope"
+    message: "cleanup must belong to the owning project"
+    expression: "this.metadata.project_id == this.provisioning.project_id"
+  };
+}
+
+// Shared cleanup confirmations prove exact absence after every late effect
+// is quiescent. The immutable identity tombstone remains for deduplication.
+// Borrowed resources and children adopted by another live owner are retained.
+message WebhookDeliveryCleanupCompleted {
+  WebhookEventMetadata metadata = 1 [features.field_presence = LEGACY_REQUIRED];
+  string delivery_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  trogonai.provisioning.v1alpha1.ProvisioningRef provisioning = 3 [features.field_presence = LEGACY_REQUIRED];
+  repeated trogonai.provisioning.v1alpha1.EventRef cleanup_confirmations = 4;
+  option (buf.validate.message).cel = {
+    id: "webhook.delivery_id.cleanup_complete_scope"
+    message: "cleanup completion must belong to the owning project"
+    expression: "this.metadata.project_id == this.provisioning.project_id"
+  };
+}

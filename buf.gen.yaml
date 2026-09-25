@@ -14,6 +14,10 @@ inputs:
       - proto/trogonai/agents
       - proto/trogonai/session
       - proto/trogonai/usage
+      - proto/trogonai/secrets
+      - proto/trogonai/connections
+      - proto/trogonai/webhooks
+      - proto/trogonai/provisioning
 plugins:
   - local: protoc-gen-buffa
     out: rsworkspace/crates/platform/trogonai-proto/src/gen

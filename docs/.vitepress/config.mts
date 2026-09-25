@@ -100,6 +100,13 @@ export default async () => {
           ],
         },
         {
+          text: "Reference",
+          items: [
+            { text: "Contract Reference", link: "/reference/README" },
+            { text: "Secrets, Connections and Webhooks", link: "/reference/secret-and-connection-contracts" },
+          ],
+        },
+        {
           text: "Glossary",
           items: [{ text: "Overview", link: "/glossary/" }, ...toGlossarySidebarGroups(glossaryRecords)],
         },

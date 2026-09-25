@@ -1,0 +1,269 @@
+edition = "2024";
+
+package trogonai.connections.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+import "trogonai/connections/v1alpha1/digest.proto";
+import "trogonai/provisioning/v1alpha1/events.proto";
+import "trogonai/secrets/v1alpha1/credential.proto";
+
+// Provider is an open, case-sensitive catalog identifier. Version names one
+// immutable adapter release, never a range, alias, or automatic selection.
+message ConnectorVersionRef {
+  string provider = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string version = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  Digest artifact_digest = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// The pinned adapter owns endpoint resolution, protocol mapping, authentication
+// schemes, and credential stripping. Caller-defined headers, secret templates,
+// and arbitrary provider configuration are not part of this catalog contract.
+// Operation and credential role names are unique; every required role exists.
+message ConnectorVersion {
+  option (buf.validate.message).cel = {
+    id: "connector_version.operation_names_unique"
+    message: "operation names must be unique"
+    expression: "this.operations.map(o, o.name).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "connector_version.role_names_unique"
+    message: "credential role names must be unique"
+    expression: "this.credential_roles.map(r, r.name).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "connector_version.roles_declared"
+    message: "every operation credential role must be declared"
+    expression: "this.operations.all(o, !has(o.credential_roles) || o.credential_roles.names.all(n, this.credential_roles.exists(r, r.name == n)))"
+  };
+  // Incoming verification can use only verification roles, and other operation
+  // kinds cannot consume verification roles as outgoing authentication.
+  option (buf.validate.message).cel = {
+    id: "connector_version.directional_roles"
+    message: "verification roles cannot authorize outgoing operations"
+    expression: "this.operations.all(o, !has(o.credential_roles) || o.credential_roles.names.all(n, this.credential_roles.exists(r, r.name == n && (o.kind == 3 ? r.purpose == 2 : r.purpose != 2))))"
+  };
+  option (buf.validate.message).cel = {
+    id: "connector_version.provisioning_names_unique"
+    message: "remote provisioning capability names must be unique"
+    expression: "this.remote_provisioning.map(p, p.name).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "connector_version.provisioning_operations"
+    message: "provisioning capabilities must name declared create, reconciliation and compensation operations"
+    expression: "this.remote_provisioning.all(p, this.operations.exists(o, o.name == p.create_operation_name && o.kind == 8) && this.operations.exists(o, o.name == p.reconcile_operation_name && o.kind == 9) && this.operations.exists(o, o.name == p.compensate_operation_name && o.kind == 10))"
+  };
+  option (buf.validate.message).cel = {
+    id: "connector_version.provisioned_roles"
+    message: "provisioned credential roles must exist in this connector release"
+    expression: "this.remote_provisioning.all(p, p.provisioned_credential_role_names.all(n, this.credential_roles.exists(r, r.name == n)))"
+  };
+  option (buf.validate.message).cel = {
+    id: "connector_version.provisioning_fence"
+    message: "a provider fence must name a declared resource-fencing operation"
+    expression: "this.remote_provisioning.all(p, !has(p.provider_fence) || this.operations.exists(o, o.name == p.provider_fence.operation_name && o.kind == 11))"
+  };
+
+  ConnectorVersionRef version_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  // An adapter exposes at least one explicitly named operation.
+  repeated ConnectorOperation operations = 2 [(buf.validate.field).repeated.min_items = 1];
+  repeated CredentialRole credential_roles = 3;
+  // Absence denies automatic remote creation. Each capability has an immutable
+  // nonempty name and exact recovery/cleanup operations in this same release.
+  repeated RemoteProvisioningCapability remote_provisioning = 4;
+}
+
+// A durable provisioning reservation and effect attempt precede remote IO.
+// The adapter must recover the exact owned remote object using the recorded
+// correlation, even after an ambiguous response. Timeouts and expired provider
+// lookup windows never prove absence. A provider that cannot meet this contract
+// cannot expose automatic creation; an operator may attach an existing object
+// under separately authorized borrowed-resource semantics instead.
+message RemoteProvisioningCapability {
+  string name = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  // Only remote provider registrations and provider credentials are supported.
+  // Platform child credentials use the secrets domain's provisioning events.
+  trogonai.provisioning.v1alpha1.ResourceKind resource_kind = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      in: [
+        5,
+        7
+      ]
+    }
+  ];
+  string create_operation_name = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string reconcile_operation_name = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  // Compensation addresses only the exact owned object established by its
+  // receipt. It cannot delete a borrowed object, a label match or an account.
+  string compensate_operation_name = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  // Unknown and unspecified recovery methods are invalid.
+  RemoteObjectRecovery recovery = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // Unique existing role names whose material is supplied to the provider for
+  // registration under narrow management provisioning authority. These roles
+  // are not operation authentication: incoming verification material cannot
+  // authorize the outbound API call that registers it.
+  repeated string provisioned_credential_role_names = 7 [(buf.validate.field).repeated = {
+    unique: true
+    items: {
+      string: {min_len: 1}
+    }
+  }];
+  // Exactly one known settlement guarantee is required. Finding no object is
+  // insufficient while a prior request might still create it later. A positive
+  // delay must come from proven provider/transport bounds covering processing,
+  // in-flight requests and eventual consistency, never a local worker timeout.
+  oneof settlement {
+    option (buf.validate.oneof).required = true;
+    ProviderEffectFence provider_fence = 8;
+    google.protobuf.Duration maximum_effect_settlement_delay = 9 [(buf.validate.field).duration.gt = {}];
+  }
+}
+
+message ProviderEffectFence {
+  // Exact operation that closes all earlier attempts for this owned identity.
+  string operation_name = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+enum RemoteObjectRecovery {
+  REMOTE_OBJECT_RECOVERY_UNSPECIFIED = 0;
+  // Provider-documented idempotency/operation correlation identifies the exact
+  // created object or authoritative absence. It is never a best-effort retry.
+  REMOTE_OBJECT_RECOVERY_PROVIDER_OPERATION = 1;
+  // A unique provider-stored marker bound to the reserved provisioning step
+  // identifies the object. The adapter proves ownership before adoption/deletion.
+  REMOTE_OBJECT_RECOVERY_OWNERSHIP_MARKER = 2;
+}
+
+message CredentialRole {
+  string name = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  // Unknown and unspecified purposes are invalid. A role grants only its
+  // declared direction; webhook verification never implies signing or API use.
+  trogonai.secrets.v1alpha1.SecretPurpose purpose = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+message ConnectorOperation {
+  string name = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  // Unknown and unspecified kinds are invalid.
+  ConnectorOperationKind kind = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // Exactly one known arm is required. Absence never means anonymous access.
+  oneof authentication {
+    option (buf.validate.oneof).required = true;
+    RequiredCredentialRoles credential_roles = 3;
+    UnauthenticatedOperation unauthenticated = 4;
+  }
+  OperationContract contract = 5 [features.field_presence = LEGACY_REQUIRED];
+  // Unknown and unspecified semantics are invalid. Invocation identifiers alone
+  // do not make upstream side effects idempotent.
+  OperationRetrySemantics retry_semantics = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+// The release artifact contains the exact descriptor set committed by this
+// digest, including transitive imports. Both nonempty type URLs must resolve in
+// that set. Input and output are decoded and validated against this pin, never
+// interpreted as unchecked JSON or according to a caller-supplied schema.
+message OperationContract {
+  string input_type_url = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string output_type_url = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  Digest descriptor_digest = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+enum OperationRetrySemantics {
+  OPERATION_RETRY_SEMANTICS_UNSPECIFIED = 0;
+  // After dispatch, an unknown result requires reconciliation, not replay.
+  OPERATION_RETRY_SEMANTICS_NO_AUTOMATIC_RETRY = 1;
+  // The adapter proves repeating the exact operation has no additional effect.
+  OPERATION_RETRY_SEMANTICS_SAFE_REPEAT = 2;
+  // The adapter maps invocation_id to the provider's documented idempotency
+  // scope and retention window. Outside that window, do not resend blindly.
+  OPERATION_RETRY_SEMANTICS_PROVIDER_IDEMPOTENCY = 3;
+}
+
+enum ConnectorOperationKind {
+  CONNECTOR_OPERATION_KIND_UNSPECIFIED = 0;
+  CONNECTOR_OPERATION_KIND_API_CALL = 1;
+  CONNECTOR_OPERATION_KIND_MCP_CALL = 2;
+  CONNECTOR_OPERATION_KIND_WEBHOOK_VERIFY = 3;
+  CONNECTOR_OPERATION_KIND_WEBHOOK_SIGN = 4;
+  CONNECTOR_OPERATION_KIND_CHANNEL_CONNECT = 5;
+  CONNECTOR_OPERATION_KIND_OAUTH_REFRESH = 6;
+  CONNECTOR_OPERATION_KIND_WEBHOOK_DELIVER = 7;
+  CONNECTOR_OPERATION_KIND_PROVISION_RESOURCE = 8;
+  CONNECTOR_OPERATION_KIND_RECONCILE_RESOURCE = 9;
+  CONNECTOR_OPERATION_KIND_COMPENSATE_RESOURCE = 10;
+  CONNECTOR_OPERATION_KIND_FENCE_RESOURCE = 11;
+}
+
+// All listed roles are required. Names are nonempty and unique; this is not a
+// fallback list of credentials to try until one authenticates successfully.
+message RequiredCredentialRoles {
+  repeated string names = 1 [(buf.validate.field).repeated = {
+    min_items: 1
+    unique: true
+    items: {
+      string: {min_len: 1}
+    }
+  }];
+}
+
+// Explicitly permits an operation without provider credentials. Connection
+// authorization, destination controls, and grants remain mandatory.
+message UnauthenticatedOperation {}

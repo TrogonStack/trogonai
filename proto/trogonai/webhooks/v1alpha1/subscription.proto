@@ -1,0 +1,101 @@
+edition = "2024";
+
+package trogonai.webhooks.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/connections/v1alpha1/connection.proto";
+import "trogonai/webhooks/v1alpha1/common.proto";
+
+// The origin is immutable public security policy. Secret callback URLs live
+// behind an endpoint binding whose resolved origin must equal this origin.
+// HTTPS, DNS/address revalidation and no redirects apply before credentials.
+// Private destinations require deployment-attested policy, never caller CIDRs.
+message WebhookTarget {
+  string origin = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.pattern = "^https://[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[0-9]{1,5})?$"
+  ];
+  oneof destination {
+    option (buf.validate.oneof).required = true;
+    string public_path = 2 [(buf.validate.field).string.pattern = "^/(?:[A-Za-z0-9._~!$&'()*+,;=:@%-][A-Za-z0-9._~!$&'()*+,;=:@%/-]*)?$"];
+    string endpoint_binding_id = 3 [(buf.validate.field).string.min_len = 1];
+  }
+  string deployment_egress_policy_id = 4 [(buf.validate.field).string.min_len = 1];
+}
+
+enum WebhookSigningProfile {
+  WEBHOOK_SIGNING_PROFILE_UNSPECIFIED = 0;
+  WEBHOOK_SIGNING_PROFILE_STANDARD_WEBHOOKS_HMAC_SHA256_V1 = 1;
+}
+
+// The current key is 32 cryptographically random bytes unique to this
+// subscription. Keys and generated signatures never occur in these records.
+// Dual-signing additionally requires purpose-specific authorization for the
+// previous material version under the same binding. SecretStore owns its
+// bounded overlap; revocation disqualifies it. Current-only is the default.
+message WebhookSigningPolicy {
+  WebhookSigningProfile profile = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  string signing_binding_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  WebhookMaterialVersionPolicy material_version_policy = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+message OutboundWebhookDefinition {
+  // Admission and every attempt require the same project, an active connection,
+  // and an exact current configuration/adapter match. An upgrade fails closed
+  // pending explicit replacement and revalidation, never changing serialization.
+  trogonai.connections.v1alpha1.ConnectionRef connection = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Exact handles from the platform's externally exposed event catalog.
+  // Wildcards and internal event type names do not match.
+  repeated string event_types = 2 [(buf.validate.field).repeated = {
+    min_items: 1
+    unique: true
+    items: {
+      string: {min_len: 1}
+    }
+  }];
+  WebhookTarget target = 3 [features.field_presence = LEGACY_REQUIRED];
+  WebhookRetryPolicy retry_policy = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Generic platform event delivery only. A provider-specific outgoing message
+// or signature belongs to connector execution. Definition changes create a
+// new subscription; retries never redirect to a changed target. Paused keeps
+// pending deliveries until their deadline; revoked prevents further attempts.
+message OutboundWebhookSubscription {
+  string id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string project_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  OutboundWebhookDefinition definition = 3 [features.field_presence = LEGACY_REQUIRED];
+  WebhookSigningPolicy signing = 4 [features.field_presence = LEGACY_REQUIRED];
+  WebhookLifecycle lifecycle = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  uint64 revision = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+}

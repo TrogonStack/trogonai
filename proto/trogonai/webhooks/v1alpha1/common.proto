@@ -1,0 +1,133 @@
+edition = "2024";
+
+package trogonai.webhooks.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/provisioning/v1alpha1/events.proto";
+
+enum WebhookLifecycle {
+  WEBHOOK_LIFECYCLE_UNSPECIFIED = 0;
+  WEBHOOK_LIFECYCLE_ACTIVE = 1;
+  WEBHOOK_LIFECYCLE_PAUSED = 2;
+  WEBHOOK_LIFECYCLE_REVOKED = 3;
+}
+
+message WebhookEventMetadata {
+  string project_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  uint64 revision = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  google.protobuf.Timestamp recorded_at = 3 [features.field_presence = LEGACY_REQUIRED];
+  string event_id = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// Immutable sanitized business bytes in a project-scoped artifact store.
+// Raw authentication headers, signatures and embedded credential-bearing URLs
+// are excluded. The verifier extracts embedded capabilities into SecretStore
+// before storage. Hash and size cover the exact retained bytes, not parsed JSON.
+message WebhookPayloadRef {
+  string artifact_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  bytes sha256 = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.len = 32
+  ];
+  uint64 size_bytes = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  google.protobuf.Timestamp expires_at = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// SecretStore owns previous material versions under the same stable binding.
+// An absolute overlap deadline of at most 24 hours and purpose authorization
+// apply there; revocation overrides overlap. No webhook resource extends it.
+enum WebhookMaterialVersionPolicy {
+  WEBHOOK_MATERIAL_VERSION_POLICY_UNSPECIFIED = 0;
+  WEBHOOK_MATERIAL_VERSION_POLICY_CURRENT_ONLY = 1;
+  WEBHOOK_MATERIAL_VERSION_POLICY_CURRENT_AND_PREVIOUS = 2;
+}
+
+// These defaults are materialized at creation: 72 hours, 30 attempts,
+// 5-second initial delay, 6-hour cap, 30-second request timeout. Backoff is
+// min(cap, initial * 2^(cycle_attempt - 1)) with full jitter in [0, backoff].
+// Retry-After may postpone a retry only within the cycle deadline.
+message WebhookRetryPolicy {
+  option (buf.validate.message).cel = {
+    id: "webhook.retry.delay_order"
+    message: "initial delay must not exceed maximum delay"
+    expression: "this.initial_delay <= this.maximum_delay"
+  };
+  google.protobuf.Duration retry_window = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).duration = {
+      gt: {}
+      lte: {seconds: 259200}
+    }
+  ];
+  uint32 maximum_attempts = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32 = {
+      gte: 1
+      lte: 30
+    }
+  ];
+  google.protobuf.Duration initial_delay = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).duration = {
+      gt: {}
+      lte: {seconds: 21600}
+    }
+  ];
+  google.protobuf.Duration maximum_delay = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).duration = {
+      gt: {}
+      lte: {seconds: 21600}
+    }
+  ];
+  google.protobuf.Duration request_timeout = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).duration = {
+      gt: {}
+      lte: {seconds: 30}
+    }
+  ];
+}
+
+enum WebhookCleanupReason {
+  WEBHOOK_CLEANUP_REASON_UNSPECIFIED = 0;
+  WEBHOOK_CLEANUP_REASON_SETUP_ABANDONED = 1;
+  WEBHOOK_CLEANUP_REASON_REVOKED = 2;
+  WEBHOOK_CLEANUP_REASON_DELETED = 3;
+  WEBHOOK_CLEANUP_REASON_RETENTION_EXPIRED = 4;
+}
+
+// A receipt identifies the shared provisioning fact, including exact remote
+// registration or credential ownership. Only owned children are adopted here;
+// borrowed resources remain borrowed and are never deleted by webhook cleanup.
+// Owned children need verified PREPARED receipts, not prior child activation.
+// Borrowed dependencies must already be active and authorized. Runtime use stays
+// denied until child activation acknowledges adoption, or custody verifies the
+// authoritative parent decision directly under adoption-aware policy.
+message WebhookActivationEvidence {
+  trogonai.provisioning.v1alpha1.ProvisioningRef provisioning = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated trogonai.provisioning.v1alpha1.ResourceReceiptRef verified_dependencies = 2 [(buf.validate.field).repeated.min_items = 1];
+  repeated trogonai.provisioning.v1alpha1.ResourceReceiptRef adopted_resources = 3;
+  option (buf.validate.message).cel = {
+    id: "webhook.activation.dependency_scope"
+    message: "verified receipts must be distinct and in the same project; adoption requires a verified exact receipt"
+    expression: "this.verified_dependencies.all(a, a.provisioning.project_id == this.provisioning.project_id && this.verified_dependencies.filter(b, b.provisioning.id == a.provisioning.id && b.receipt_id == a.receipt_id).size() == 1) && this.adopted_resources.all(a, this.verified_dependencies.exists(b, b == a) && this.adopted_resources.filter(b, b.provisioning.id == a.provisioning.id && b.receipt_id == a.receipt_id).size() == 1)"
+  };
+}

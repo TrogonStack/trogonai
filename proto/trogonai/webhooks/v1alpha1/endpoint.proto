@@ -1,0 +1,144 @@
+edition = "2024";
+
+package trogonai.webhooks.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+import "trogonai/connections/v1alpha1/connection.proto";
+import "trogonai/webhooks/v1alpha1/common.proto";
+
+enum WebhookIdentityBasis {
+  WEBHOOK_IDENTITY_BASIS_UNSPECIFIED = 0;
+  // Admission permits this basis only when the pinned adapter authenticates
+  // the event identity. An unsigned delivery header alone is insufficient;
+  // those adapters select VERIFIED_SEMANTIC_DIGEST instead.
+  WEBHOOK_IDENTITY_BASIS_PROVIDER_EVENT_ID = 1;
+  WEBHOOK_IDENTITY_BASIS_VERIFIED_SEMANTIC_DIGEST = 2;
+}
+
+message IngressReplayPolicy {
+  WebhookIdentityBasis identity_basis = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // The bound is explicit because a provider may redeliver after retention.
+  // It must also cover the adapter's authenticated timestamp acceptance window.
+  google.protobuf.Duration deduplication_window = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).duration = {
+      gt: {}
+      lte: {seconds: 2592000}
+    }
+  ];
+  // Absent for protocols without authenticated timestamps. Such protocols
+  // cannot claim timestamp freshness; the verified identity ledger still applies.
+  google.protobuf.Duration authenticated_timestamp_tolerance = 3 [(buf.validate.field).duration = {
+    gt: {}
+    lte: {seconds: 300}
+  }];
+}
+
+message InboundWebhookDefinition {
+  // Admission and every use require the same project, an active connection,
+  // and an exact current configuration/adapter match. An upgrade fails closed
+  // pending explicit replacement and revalidation, never changing the verifier.
+  trogonai.connections.v1alpha1.ConnectionRef connection = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Resolved through the connection's pinned adapter, never a caller-supplied verifier.
+  string verification_operation_name = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  repeated string accepted_event_types = 3 [(buf.validate.field).repeated = {
+    min_items: 1
+    unique: true
+    items: {
+      string: {min_len: 1}
+    }
+  }];
+  IngressReplayPolicy replay_policy = 4 [features.field_presence = LEGACY_REQUIRED];
+  // A platform-owned event route, not a caller-supplied NATS subject or Agent grant.
+  string event_route_id = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// Definition and route identity are immutable. A changed verifier, connection,
+// event route or replay contract requires a new endpoint. Paused rejects new
+// arrivals; revoked is terminal. Verification needs no Session.
+message InboundWebhookEndpoint {
+  string id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string project_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string route_id = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  InboundWebhookDefinition definition = 4 [features.field_presence = LEGACY_REQUIRED];
+  InboundWebhookVerification verification = 5 [features.field_presence = LEGACY_REQUIRED];
+  WebhookLifecycle lifecycle = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  uint64 revision = 7 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+}
+
+message WebhookVerificationBinding {
+  string binding_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  WebhookMaterialVersionPolicy material_version_policy = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+// This is public trust material. Registration validates its provider ownership
+// out of band through the pinned adapter, and verifies the fingerprint. An
+// incoming request cannot supply, replace or choose its own trusted key.
+message WebhookEd25519VerificationKey {
+  bytes public_key = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.len = 32
+  ];
+  bytes public_key_sha256 = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.len = 32
+  ];
+}
+
+message InboundWebhookVerification {
+  oneof trust {
+    option (buf.validate.oneof).required = true;
+    WebhookVerificationBinding credential_binding = 1;
+    WebhookEd25519VerificationKey ed25519_key = 2;
+  }
+}
+
+// Only an authenticated platform verifier can produce this evidence. Public
+// verification identifies the registered key without inventing a secret ref.
+message WebhookVerificationEvidence {
+  oneof verifier {
+    option (buf.validate.oneof).required = true;
+    string binding_id = 1 [(buf.validate.field).string.min_len = 1];
+    bytes public_key_sha256 = 2 [(buf.validate.field).bytes.len = 32];
+  }
+}

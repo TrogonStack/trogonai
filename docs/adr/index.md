@@ -69,4 +69,7 @@ future implementation work.
 - [ADR#0061: Turn Identity Belongs on Every Turn-Scoped Session Event, Not Only the Conversation and Tool Ones (Draft)](./0061-session-turn-id-on-turn-scoped-events.md)
 - [ADR#0062: Runtime-Owned Settings and Platform Declarations (Draft)](./0062-runtime-owned-settings-and-platform-declarations.md)
 - [ADR#0063: An Agent Declares the Connections It Needs, and the Declaration Carries No Version (Draft)](./0063-agent-connection-declarations.md)
+- [ADR#0066: Secret Custody and Connection Authority Have Separate Contracts](./0066-secret-service-and-connection-boundaries.md)
+- [ADR#0067: Incoming Webhooks and Outgoing Deliveries Have Independent Authority](./0067-webhook-ingress-and-delivery.md)
 - [ADR#0064: Invariants Are Declared in the Schema Before Anything Enforces Them (Draft)](./0064-schema-constraints-as-documentation.md)
+- [ADR#0068: Provisioning Starts in the Owner Stream and Ends with Accounted Effects (Draft)](./0068-provisioning-sagas-and-owned-resource-cleanup.md)

@@ -1,0 +1,111 @@
+edition = "2024";
+
+package trogonai.connections.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/connections/v1alpha1/connection.proto";
+import "trogonai/connections/v1alpha1/credential_binding.proto";
+import "trogonai/connections/v1alpha1/digest.proto";
+
+// Metadata only, never a bearer credential. The mediation service authenticates
+// the sender and proof of possession, verifies request binding, and reauthorizes
+// the project, subject, operation, adapter, connection, bindings and policy on
+// every use. No authority is inherited by children or replacement attempts.
+// Binding roles are unique and exactly cover the selected operations' required
+// roles. Unauthenticated operations have no implicit credential binding.
+message ConnectionGrant {
+  option (buf.validate.message).cel = {
+    id: "connection_grant.lifetime"
+    message: "grant expiry must follow issuance by at most five minutes"
+    expression: "this.expires_at > this.issued_at && this.expires_at - this.issued_at <= duration('300s')"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_grant.roles_unique"
+    message: "credential binding roles must be unique"
+    expression: "this.credential_bindings.map(b, b.role.name).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_grant.binding_ids_unique"
+    message: "credential binding identifiers must be unique"
+    expression: "this.credential_bindings.map(b, b.binding_id).unique()"
+  };
+
+  string id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string project_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ConnectionRef connection = 3 [features.field_presence = LEGACY_REQUIRED];
+  // A nonempty, unique set of exact catalog operation names; wildcards and
+  // undeclared operations cannot be admitted.
+  repeated string operation_names = 4 [(buf.validate.field).repeated = {
+    min_items: 1
+    unique: true
+    items: {
+      string: {min_len: 1}
+    }
+  }];
+  repeated CredentialBindingRef credential_bindings = 5;
+  GrantSubject subject = 6 [features.field_presence = LEGACY_REQUIRED];
+  // The exact authenticated mediation service that may consume this grant.
+  string audience = 7 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  // Public key digest only. Private confirmation keys and proof tokens never
+  // enter durable contracts or the agent implementation's address space.
+  Digest confirmation_key_digest = 8 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp issued_at = 9 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp expires_at = 10 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message GrantSubject {
+  // Exactly one known arm is required; claimed identities are verified against
+  // authenticated context and current execution state before issuance and use.
+  oneof subject {
+    option (buf.validate.oneof).required = true;
+    SessionAttemptSubject session_attempt = 1;
+    WorkloadOperationSubject workload_operation = 2;
+  }
+}
+
+// The supervisor owns the confirmation key. Ending the attempt invalidates all
+// its grants; a new attempt must independently establish identity and authority.
+message SessionAttemptSubject {
+  string session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string execution_attempt_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string agent_id = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  // Positive immutable revision number.
+  uint64 agent_revision = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  Digest agent_configuration_digest = 5 [features.field_presence = LEGACY_REQUIRED];
+  Digest session_execution_plan_digest = 6 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Used by ingress, delivery and channel services. This authenticated principal
+// acts only for the named project operation, never as an ambient service grant.
+message WorkloadOperationSubject {
+  string service_principal_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string operation_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}

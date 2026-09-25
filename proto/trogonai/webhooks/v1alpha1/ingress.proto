@@ -1,0 +1,197 @@
+edition = "2024";
+
+package trogonai.webhooks.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/connections/v1alpha1/connection.proto";
+import "trogonai/provisioning/v1alpha1/events.proto";
+import "trogonai/webhooks/v1alpha1/common.proto";
+import "trogonai/webhooks/v1alpha1/endpoint.proto";
+
+// The deduplication key is (project_id, endpoint_id, provider_event_id).
+// A matching semantic digest is a duplicate; a different digest is a conflict.
+// The pinned verifier hashes only approved authenticated non-secret fields and
+// stable extraction-role markers, never raw request bytes or secret-derived
+// hashes. Opaque extraction IDs are reused from the same reservation, never
+// freshly minted into a retry's identity input. Unsigned transport metadata is
+// excluded. For digest identity, provider_event_id is lowercase semantic SHA-256
+// hex. If no stable secret-free identity exists, admission rejects the adapter.
+message WebhookIngressIdentity {
+  option (buf.validate.message).cel = {
+    id: "webhook.ingress.digest_identity"
+    message: "digest-derived provider event identity must be lowercase SHA-256 hex"
+    expression: "this.basis != 2 || this.provider_event_id.matches('^[0-9a-f]{64}$')"
+  };
+  string project_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string endpoint_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string provider_event_id = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  WebhookIdentityBasis basis = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  bytes semantic_sha256 = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.len = 32
+  ];
+}
+
+// The sanitized artifact is durable before this receipt event is appended.
+// This authoritative event is both the identity ledger and publication outbox;
+// recovery replays it to publish without a cross-store transaction. Receipt
+// existence alone is insufficient for HTTP 2xx: publication must also be
+// confirmed. Unreferenced artifacts can be reclaimed after retention.
+message WebhookIngressAccepted {
+  option (buf.validate.message).cel = {
+    id: "webhook.ingress.adoption"
+    message: "accepted receipt must adopt its owned payload in the reserved project"
+    expression: "this.metadata.revision > 1u && this.metadata.project_id == this.identity.project_id && this.metadata.project_id == this.evidence.provisioning.project_id && this.metadata.recorded_at == this.accepted_at && this.evidence.adopted_resources.exists(r, r.resource.kind == 11 && r.resource.id == this.payload.artifact_id)"
+  };
+  string id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  WebhookIngressIdentity identity = 2 [features.field_presence = LEGACY_REQUIRED];
+  uint64 endpoint_revision = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  string connection_id = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  WebhookVerificationEvidence verification = 5 [features.field_presence = LEGACY_REQUIRED];
+  string event_type = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  WebhookPayloadRef payload = 7 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp received_at = 8 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp accepted_at = 9 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp deduplication_expires_at = 10 [features.field_presence = LEGACY_REQUIRED];
+  WebhookEventMetadata metadata = 11 [features.field_presence = LEGACY_REQUIRED];
+  WebhookActivationEvidence evidence = 12 [features.field_presence = LEGACY_REQUIRED];
+  option (buf.validate.message).cel = {
+    id: "webhook.ingress.retention"
+    message: "acceptance and retention must follow receipt"
+    expression: "this.accepted_at >= this.received_at && this.deduplication_expires_at > this.accepted_at && this.payload.expires_at > this.accepted_at"
+  };
+}
+
+message WebhookIngressPublished {
+  WebhookEventMetadata metadata = 1 [features.field_presence = LEGACY_REQUIRED];
+  string accepted_ingress_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string publication_receipt_id = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+message WebhookIngressEvent {
+  option (buf.validate.message).cel = {
+    id: "webhook.ingress.provisioning_owner"
+    message: "embedded provisioning must belong to an ingress receipt"
+    expression: "!has(this.provisioning) || this.provisioning.owner.kind == 9"
+  };
+  oneof event {
+    option (buf.validate.oneof).required = true;
+    WebhookIngressAccepted accepted = 1;
+    WebhookIngressPublished published = 2;
+    WebhookIngressReserved reserved = 3;
+    WebhookIngressCleanupRequested cleanup_requested = 4;
+    WebhookIngressCleanupCompleted cleanup_completed = 5;
+    trogonai.provisioning.v1alpha1.ProvisioningEvent provisioning = 6;
+  }
+}
+
+// Verification precedes reservation, but extracting secret children and writing
+// sanitized bytes cannot start before this event and the complete shared plan.
+// Repeated submissions must match the reserved authenticated semantic identity.
+// Raw request bodies, signatures and protected callback URLs are never stored.
+message WebhookIngressReserved {
+  WebhookEventMetadata metadata = 1 [features.field_presence = LEGACY_REQUIRED];
+  string ingress_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  trogonai.provisioning.v1alpha1.ProvisioningRef provisioning = 3 [features.field_presence = LEGACY_REQUIRED];
+  WebhookIngressIdentity identity = 4 [features.field_presence = LEGACY_REQUIRED];
+  uint64 endpoint_revision = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  trogonai.connections.v1alpha1.ConnectionRef connection = 6 [features.field_presence = LEGACY_REQUIRED];
+  WebhookVerificationEvidence verification = 7 [features.field_presence = LEGACY_REQUIRED];
+  string event_type = 8 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string payload_artifact_id = 9 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  option (buf.validate.message).cel = {
+    id: "webhook.ingress.reservation"
+    message: "reservation must start in its authenticated project"
+    expression: "this.metadata.revision == 1u && this.metadata.project_id == this.provisioning.project_id && this.metadata.project_id == this.identity.project_id"
+  };
+}
+
+// Disables further processing before removing owned payload artifacts and
+// secret children. A committed resource uses a new REMOVE provisioning;
+// abandonment compensates its uncommitted reservation instead.
+message WebhookIngressCleanupRequested {
+  WebhookEventMetadata metadata = 1 [features.field_presence = LEGACY_REQUIRED];
+  string ingress_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  trogonai.provisioning.v1alpha1.ProvisioningRef provisioning = 3 [features.field_presence = LEGACY_REQUIRED];
+  WebhookCleanupReason reason = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  option (buf.validate.message).cel = {
+    id: "webhook.ingress_id.cleanup_scope"
+    message: "cleanup must belong to the owning project"
+    expression: "this.metadata.project_id == this.provisioning.project_id"
+  };
+}
+
+// Shared cleanup confirmations prove exact absence after every late effect
+// is quiescent. The immutable identity tombstone remains for deduplication.
+// Borrowed resources and children adopted by another live owner are retained.
+// Cleanup cannot expire an accepted but unpublished outbox obligation; explicit
+// deletion first disables publication durably, without issuing HTTP success.
+message WebhookIngressCleanupCompleted {
+  WebhookEventMetadata metadata = 1 [features.field_presence = LEGACY_REQUIRED];
+  string ingress_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  trogonai.provisioning.v1alpha1.ProvisioningRef provisioning = 3 [features.field_presence = LEGACY_REQUIRED];
+  repeated trogonai.provisioning.v1alpha1.EventRef cleanup_confirmations = 4;
+  option (buf.validate.message).cel = {
+    id: "webhook.ingress_id.cleanup_complete_scope"
+    message: "cleanup completion must belong to the owning project"
+    expression: "this.metadata.project_id == this.provisioning.project_id"
+  };
+}

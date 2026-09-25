@@ -1,5 +1,15 @@
 # Secret Management
 
+The completed event-contract design for custody, connections and webhooks is in
+[ADR#0066](../adr/0066-secret-service-and-connection-boundaries.md),
+[ADR#0067](../adr/0067-webhook-ingress-and-delivery.md),
+[ADR#0068](../adr/0068-provisioning-sagas-and-owned-resource-cleanup.md), and the
+[contract reference](../reference/secret-and-connection-contracts.md). They
+settle the contract choices listed on this page. The custody/connection and
+webhook decisions are accepted; the provisioning decision remains draft pending
+its separate maintainer signoff. The description below records the earlier accepted custody
+direction and its implementation gaps; it does not claim the new services exist.
+
 This page describes the intended design recorded in
 [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md)
 (accepted) and
@@ -33,20 +43,19 @@ A `SecretRef` is an opaque handle a caller holds in place of a
 credential. The secrets service resolves it internally to a
 [tenant](../glossary/tenant), a vault, and a key; it is never an OpenBao
 path, and a caller cannot parse or construct one ([ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) Decision 2).
-The concrete identity scheme behind a `SecretRef`, how it is encoded, and
-whether it is issued at store time or derived deterministically, is not
-fixed by the ADR and is an open decision (see
-[Open decisions](#open-decisions)).
+The accepted contract in
+[ADR#0066](../adr/0066-secret-service-and-connection-boundaries.md) makes it a
+random stable identifier that survives material rotation. See the
+[settled contract decisions](#settled-contract-decisions) for related boundaries.
 
 ### Vault
 
 A vault is a user-visible logical grouping of secrets within a company.
 It is enforced by policy, not by cryptographic separation: two vaults in
 the same company are a console-visible organizing boundary, not two
-OpenBao security boundaries ([ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) Decision 5). Whether a vault is a
-first-class entity with its own lifecycle (created, renamed, and deleted
-independently of the secrets inside it) or purely a naming attribute on a
-`SecretRef` is not fixed by the ADR and is an open decision.
+OpenBao security boundaries ([ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) Decision 5). The event contract in
+[ADR#0066](../adr/0066-secret-service-and-connection-boundaries.md) makes vaults
+independent project-owned metadata aggregates with their own lifecycle.
 
 ### Connection
 
@@ -56,33 +65,31 @@ is the structural half of a pair whose other half is the material, and it is
 the half that holds still under rotation. Replacing the bytes behind a
 credential does not make it a different connection.
 
-No general connection resource exists in this platform yet.
+The general connection protobuf resource is defined by accepted
+[ADR#0066](../adr/0066-secret-service-and-connection-boundaries.md); its runtime
+does not exist yet.
 [ADR#0032](../adr/0032-model-route-and-credential-binding.md) defines a
 [ModelProviderConnection](../glossary/modelproviderconnection) for one provider
 class, and draft [ADR#0063](../adr/0063-agent-connection-declarations.md)
 Decision 5 defers the form for every other class to its own record. So a
 `ConnectionDeclaration` names a provider and label predicates that admission is
 meant to resolve against a catalog the security plane owns, and that catalog is
-not described anywhere on this page because it is not decided. Recording the
-gap is the point: until the resource exists, a declaration is a reviewable
-statement of intent rather than a resolution path.
+described in the [contract reference](../reference/secret-and-connection-contracts.md).
+Until a runtime implements admission and mediation, a declaration remains a
+reviewable statement of intent rather than an operational resolution path.
 
 ### Fingerprints and reason enums
 
 Events and snapshots in the write model below carry references,
-fingerprints, and reason enums, never values ([ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) Decision 4). A
-fingerprint lets the aggregate and the recovery worker compare whether
-this is the same credential material as before, without holding or
-re-deriving the material itself. A reason field records why a state
-changed (for example, a rotation trigger versus an operator-initiated
-revocation) without carrying the credential value. [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) calls these
-reason enums; whether the implementation fixes a closed set of typed
-values or a bounded non-secret string is an open decision (see
-[Open decisions](#open-decisions)).
+fingerprints, and reason enums, never values ([ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) Decision 4). The new event contracts use fingerprints only for non-secret account,
+endpoint and configuration identities, never secret material. Version attribution
+uses opaque operation ownership recorded atomically with material inside custody.
+Closed reason enums describe lifecycle changes without provider response text,
+as fixed by [ADR#0066](../adr/0066-secret-service-and-connection-boundaries.md).
 
 ## The write model
 
-The write model has three parts, which [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) Decision 4 records as
+The baseline write model in [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) Decision 4 was
 validated end to end by the gateway-embedded prototype:
 
 - **The credential aggregate.** An event-sourced aggregate on
@@ -94,7 +101,8 @@ validated end to end by the gateway-embedded prototype:
   is written to OpenBao inside that saga; the platform's own event log
   never receives it.
 - **The recovery worker.** It reconciles an aggregate stuck between the
-  pending event and activation by reading OpenBao metadata, never a
+  pending event and activation. The final contract inspects private atomic
+  version attribution inside custody and exposes only metadata, never a
   value, to determine whether the write actually landed.
 
 There is no distributed transaction between the platform's state and
@@ -117,18 +125,18 @@ complete; active follows once activation is recorded with metadata only
 and the credential is resolvable. The recovery worker reconciles an
 aggregate stuck between those two. Richer lifecycle states (an explicit
 write-failure state, rotation in progress, revocation) are not enumerated
-by [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md); the complete credential state machine is an open decision
-(see [Open decisions](#open-decisions)).
+by [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md); the completed event lifecycle is defined by
+[ADR#0066](../adr/0066-secret-service-and-connection-boundaries.md) and its
+compensation rules by
+[ADR#0068](../adr/0068-provisioning-sagas-and-owned-resource-cleanup.md).
 
-A separate axis, which version of the credential material is current and
-whether an older version has been removed, is not tracked as platform
-state in parallel with OpenBao. It derives from OpenBao KV v2 mechanics
-instead ([ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) Decision 4): the key-level `current_version` pointer
-identifies the version resolution serves, and the per-version `destroyed`
-and `deletion_time` fields report whether that version, or an earlier
-one, has been removed. The KV v2 version counter is the credential's
-version number; rotation advances `current_version` rather than the
-platform maintaining a second counter.
+Physical version numbers remain OpenBao KV v2 version numbers; the platform
+records observed destruction and deletion metadata rather than inventing a
+second backend version counter. The active version used by the platform is the
+version named in its durable activation event. OpenBao's `current_version` may
+instead identify an unverified candidate or non-secret fence marker and must
+never independently select material for use. This refinement is fixed in
+[ADR#0068](../adr/0068-provisioning-sagas-and-owned-resource-cleanup.md).
 
 [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) does not enumerate a complete credential lifecycle state machine
 beyond what Decision 4 fixes here. The five explicit states in Decision 6
@@ -173,8 +181,8 @@ only one of them.
   decision into a usable connection for the duration of one execution. For
   model providers, draft
   [ADR#0032](../adr/0032-model-route-and-credential-binding.md) defines this as
-  an attempt-scoped `ModelAccessGrant`. For tool and channel connections it is
-  undecided (see [Open decisions](#open-decisions)).
+  an attempt-scoped `ModelAccessGrant`. Tool and channel grants use the connection event contracts in
+  [ADR#0066](../adr/0066-secret-service-and-connection-boundaries.md).
 
 The agent runtime is not the caller in any of these cases. Draft
 [ADR#0032](../adr/0032-model-route-and-credential-binding.md) Decision 4 fixes
@@ -189,10 +197,9 @@ outside this repository, which is worth recording because it means the shape is
 not a local preference. In all four the agent holds an opaque placeholder and
 the real value is substituted into the outbound request at network egress, and
 in all four the substitution both sets the authenticated form and removes the
-placeholder rather than leaving both present. Whether this platform's tool and
-channel egress point works that way is part of the undecided grant above, not
-something [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md)
-fixes.
+placeholder rather than leaving both present. The connection executor boundary in
+[ADR#0066](../adr/0066-secret-service-and-connection-boundaries.md) now owns
+credential-bearing tool and channel transport; its runtime remains future work.
 
 ### The same words mean different things elsewhere
 
@@ -255,9 +262,9 @@ evict one replica's cache and leave the others serving a stale or revoked
 credential. A consumer holds a resolved value only for the duration of an
 in-flight operation, never as ambient state ([ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) Decision 6).
 
-Whether a resolved secret value is held in a single-owner, zeroizing
-wrapper analogous to `KeyManagement`'s `Dek` wrapper, and exactly what
-that wrapper requires, is not fixed by [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) and is an open decision.
+[ADR#0066](../adr/0066-secret-service-and-connection-boundaries.md) requires
+single-owner zeroizing material values, with redacted formatting and bounded
+operation lifetimes. This is a future implementation requirement.
 
 ## Failure handling
 
@@ -269,18 +276,16 @@ lapses, does not report ready, does not join the resolve queue group, and
 retries with backoff rather than serving in a degraded mode ([ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md)
 Decision 3).
 
-Whether resolve failures map to a stable, caller-visible taxonomy
-analogous to `KeyManagement`'s eight `wrap_dek` and `unwrap_dek`
-categories is not fixed by [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md), so this taxonomy is an open decision
-rather than a restatement of an existing model.
+[ADR#0066](../adr/0066-secret-service-and-connection-boundaries.md) fixes
+closed non-secret failure enums. Provider response strings cannot become public
+diagnostics or durable event payloads.
 
 [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) commits to dual audit: a business-context record (caller,
 tenant, vault, ref, purpose, outcome) with a correlation ID threaded into
 the OpenBao request, so the provider's own audit log joins back to who
-asked and why ([ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) Decision 6). What the service does when an audit
-sink itself fails to accept a record is not fixed; [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) lists correct
-behavior when audit sinks fail among the proofs required before adoption,
-which means this behavior must be answered before adoption, not assumed.
+asked and why ([ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) Decision 6). [ADR#0066](../adr/0066-secret-service-and-connection-boundaries.md) requires
+durable audit acceptance before secret use, including cache hits; failure stops
+the operation. Runtime proof remains required before adoption.
 
 ## What the service never does
 
@@ -292,41 +297,27 @@ which means this behavior must be answered before adoption, not assumed.
 - Serve a cached value past its bounded window as a plaintext fallback
   when an invalidation event is missed.
 
-## Open decisions
+## Settled contract decisions
 
-- **`SecretRef` identity scheme.** How the opaque handle is constructed
-  and encoded is not fixed by [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md).
-- **Reason value typing.** Whether the reason field recorded on a state
-  change becomes a closed set of typed values, as [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) Decision 4's
-  wording suggests, or stays a bounded non-secret string is not settled.
-- **Credential lifecycle state machine.** [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) fixes only the pending
-  and active states of the write saga; whether the aggregate also models
-  explicit write-failure, rotation-in-progress, or revocation states is
-  not fixed.
-- **Vault entity lifecycle.** Whether a vault is a first-class entity
-  with its own lifecycle, or purely a policy grouping attribute, is not
-  fixed by [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) Decision 5.
-- **Resolved-secret-value wrapper requirements.** Whether resolved values
-  use a zeroizing wrapper analogous to `KeyManagement`'s `Dek` wrapper,
-  and what that wrapper requires, is not fixed.
-- **Caller-visible resolve failure taxonomy.** Whether resolve failures
-  map to a stable set of categories, comparable to `KeyManagement`'s
-  eight, is not fixed.
-- **Audit-sink failure behavior.** [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) names correct behavior when
-  audit sinks fail as a required adoption proof, without answering what
-  that behavior is ([ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) Consequences).
-- **Grant shape for tool and channel connections.** Draft
-  [ADR#0063](../adr/0063-agent-connection-declarations.md) fixes the Agent-side
-  declaration and explicitly leaves the grant, the non-model connection
-  resource, and the egress mediation point open. Draft
-  [ADR#0032](../adr/0032-model-route-and-credential-binding.md) answers all
-  three for model providers only, and its Decision 3 excludes channel and tool
-  credentials by name.
-- **Anomaly detection scope.** [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) states that anomaly detection on
-  resolve subjects is structural rather than optional, given that this
-  service is the platform's highest-value compromise target, without
-  defining what counts as anomalous or what response it triggers
-  ([ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) Consequences).
+The earlier baseline left the following choices open.
+[ADR#0066](../adr/0066-secret-service-and-connection-boundaries.md),
+[ADR#0067](../adr/0067-webhook-ingress-and-delivery.md) and
+[ADR#0068](../adr/0068-provisioning-sagas-and-owned-resource-cleanup.md) now supply concrete
+answers and protobuf contracts. The custody/connection and webhook decisions
+are accepted; only the provisioning decision awaits maintainer signoff.
+
+| Choice | Event contract |
+| --- | --- |
+| SecretRef identity | Random opaque identity, stable across rotation |
+| Reason values and resolve failures | Closed non-secret enums |
+| Credential lifecycle | Separate policy state, physical versions and recoverable operations |
+| Vault lifecycle | Independent project-owned metadata aggregate |
+| External side effects | Owner-stream reservation, immutable plan, exact receipts and compensation through confirmed absence |
+| Resolved value lifetime | Zeroizing single-owner value, bounded to one operation |
+| Audit failure | Fail secret use closed, including cache hits |
+| Non-model connection access | Versioned connector, stable connection, purpose binding and scoped grant |
+| Incoming and outgoing webhooks | Separate verification and delivery authority, durable recovery |
+| Anomaly response | Inline denial and metadata alerts; policy changes remain explicit audited commands |
 
 ## See also
 
