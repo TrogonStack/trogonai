@@ -6,8 +6,8 @@ import "trogon/error/v1alpha1/options.proto";
 
 // Schema-only templates on the DeciderService error channel. The module must
 // declare agents.profiles as its descriptor name; these messages are never
-// encoded. Dispatch authorization, Agent availability, and reference admission
-// retain their owning failure contracts.
+// encoded. Dispatch authorization, Agent availability, and avatar and category
+// admission retain their owning failure contracts.
 message AgentProfileCommandInvalidError {
   option (trogon.error.v1alpha1.message).template = {
     domain: "agents.profiles"

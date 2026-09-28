@@ -25,7 +25,7 @@ message AgentProfile {
       expression: "this.trim() != ''"
     }
   ];
-  AvatarReference avatar = 2;
+  Avatar avatar = 2;
   CategoryReference category = 3;
   repeated DiscoveryTag discovery_tags = 4;
 }

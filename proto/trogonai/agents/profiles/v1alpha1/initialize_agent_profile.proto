@@ -5,7 +5,8 @@ package trogonai.agents.profiles.v1alpha1;
 import "trogonai/agents/profiles/v1alpha1/profile.proto";
 
 // Dispatch proves the Agent exists and is active, authorizes the writer, and
-// admits media and category references. Those live facts stay outside this fold.
+// admits avatar content or URLs and category references. Those checks stay
+// outside this fold.
 // Only missing state accepts initialization with the no_stream precondition.
 // Dispatch requires DecideRequest.command_id and preserves it across retries;
 // no expected_revision is supplied because zero is not an empty-stream revision.

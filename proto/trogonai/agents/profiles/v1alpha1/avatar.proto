@@ -3,14 +3,27 @@ edition = "2024";
 package trogonai.agents.profiles.v1alpha1;
 
 import "buf/validate/validate.proto";
+import "trogon/content/v1alpha1/content.proto";
 
-// Media admission owns upload, decoding, resizing, and content validation.
-// Neither source supplies authority to fetch or expose the referenced image.
-message AvatarReference {
+message Avatar {
   oneof source {
     option (buf.validate.oneof).required = true;
 
-    ManagedMediaAvatarReference managed_media = 1;
+    // Embedded PNG, JPEG, WebP, or GIF data is limited to 1..262144 bytes (256 KiB).
+    // Schema rules check declared MIME type and length; admission must decode
+    // the bytes and verify they are an image of the declared type.
+    trogon.content.v1alpha1.Content embedded = 1 [
+      (buf.validate.field).cel = {
+        id: "avatar.embedded_content_type"
+        message: "embedded avatars must declare image/png, image/jpeg, image/webp, or image/gif"
+        expression: "this.content_type in ['image/png', 'image/jpeg', 'image/webp', 'image/gif']"
+      },
+      (buf.validate.field).cel = {
+        id: "avatar.embedded_data_length"
+        message: "embedded avatar data must contain between 1 and 262144 bytes"
+        expression: "this.data.size() >= 1 && this.data.size() <= 262144"
+      }
+    ];
     // Only credential-free absolute HTTPS URLs are durable profile data.
     // Admission rejects signed URLs and secrets wherever encoded in the URL;
     // syntax validation alone cannot prove their absence. Remote bytes may
@@ -20,18 +33,4 @@ message AvatarReference {
       pattern: "(?i)^https://(?:\\[[0-9a-f:.]+\\]|[^:/?#@\\[\\]]+)(?::[0-9]+)?(?:[/?#].*)?$"
     }];
   }
-}
-
-// The media owner guarantees that this opaque id resolves to immutable content.
-// Admission verifies the caller may reference it; profile replacement never
-// transfers ownership or deletes media still referenced elsewhere.
-message ManagedMediaAvatarReference {
-  string asset_id = 1 [
-    features.field_presence = LEGACY_REQUIRED,
-    (buf.validate.field).cel = {
-      id: "managed_media_avatar_reference.asset_id_nonblank"
-      message: "asset_id must contain a non-whitespace character"
-      expression: "this.trim() != ''"
-    }
-  ];
 }
