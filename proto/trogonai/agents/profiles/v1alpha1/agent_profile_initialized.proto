@@ -1,0 +1,10 @@
+edition = "2024";
+
+package trogonai.agents.profiles.v1alpha1;
+
+import "trogonai/agents/profiles/v1alpha1/profile.proto";
+
+// Genesis of this Agent's profile history; it does not provision the Agent.
+message AgentProfileInitialized {
+  AgentProfile profile = 1 [features.field_presence = LEGACY_REQUIRED];
+}

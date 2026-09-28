@@ -1,0 +1,16 @@
+edition = "2024";
+
+package trogonai.policy.agent_budgets.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/policy/agent_budgets/v1alpha1/budget_policy.proto";
+
+// Genesis fixes the Agent identity and accounting currency for this history.
+// Reinitializing after a clear cannot create a fresh lifetime allowance.
+message AgentBudgetInitialized {
+  string agent_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  AgentBudgetPolicy policy = 2 [features.field_presence = LEGACY_REQUIRED];
+}

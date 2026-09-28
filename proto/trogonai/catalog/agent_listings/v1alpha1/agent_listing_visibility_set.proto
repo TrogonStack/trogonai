@@ -1,0 +1,11 @@
+edition = "2024";
+
+package trogonai.catalog.agent_listings.v1alpha1;
+
+import "trogonai/catalog/agent_listings/v1alpha1/agent_listing.proto";
+
+// Replaces authored intent for the initialized identity. Effective public
+// listing still depends on the current lifecycle, hierarchy, and policy.
+message AgentListingVisibilitySet {
+  AgentListing listing = 1 [features.field_presence = LEGACY_REQUIRED];
+}

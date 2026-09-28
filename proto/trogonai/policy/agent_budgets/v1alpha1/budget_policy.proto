@@ -1,0 +1,88 @@
+edition = "2024";
+
+package trogonai.policy.agent_budgets.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/type/money.proto";
+
+// The period is attributed when spending is authorized, not when its eventual
+// settlement arrives. Unknown and unspecified periods reject admission.
+enum AgentBudgetPeriod {
+  AGENT_BUDGET_PERIOD_UNSPECIFIED = 0;
+  // Half-open UTC calendar months, from midnight on the first day through the
+  // next month's first midnight. This is not a rolling duration or local time.
+  AGENT_BUDGET_PERIOD_CALENDAR_MONTH_UTC = 1;
+  // All spending attributable to this Agent, including before policy creation.
+  AGENT_BUDGET_PERIOD_LIFETIME = 2;
+}
+
+message AgentBudgetLimit {
+  AgentBudgetPeriod period = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // Exact nonnegative money. Zero forbids new positive spending; omission is
+  // invalid. Admission also verifies a supported ISO 4217 currency and exact
+  // agreement with the Agent's authoritative accounting denomination.
+  google.type.Money maximum = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).cel = {
+      id: "agent_budget_limit.currency_format"
+      message: "the currency code must use three uppercase ASCII letters"
+      expression: "this.currency_code.matches('^[A-Z]{3}$')"
+    },
+    (buf.validate.field).cel = {
+      id: "agent_budget_limit.nonnegative_money"
+      message: "the amount must have nonnegative units and nanos below one whole unit"
+      expression: "this.units >= 0 && this.nanos >= 0 && this.nanos <= 999999999"
+    }
+  ];
+}
+
+// Limits are an unordered conjunction: every configured period must admit new
+// spending. An absent policy removes only this Agent-specific ceiling, never
+// another scope's limit or an authorization check. It does not mean a zero cap.
+//
+// Hard-cap admission atomically accounts for incurred spend, remaining reserved
+// liability, and the new operation's maximum liability in every applicable
+// period. Settled billing totals alone cannot authorize spending. Unbounded or
+// unpriced work rejects; an uncertain outcome retains its reservation until
+// reconciled. Lowering a cap may put existing exposure above it, blocking new
+// positive spending without invalidating already authorized settlement.
+// Known zero-liability work can continue; an unknown price is never zero.
+//
+// Authoritative accounting owns consumption, reservations, and their immutable
+// Agent, original billing-account, currency, and authorization-period attribution.
+// Session-recorded costs are inputs; partial and final readings of one usage
+// fact are reconciled rather than summed. Replaying usage never charges it again.
+// Cross-currency amounts cannot be silently converted or excluded from a check.
+//
+// Delegated spending retains ancestor Agent budget scopes in its authorization
+// provenance, including scopes without a configured policy at dispatch. Each
+// new reservation evaluates their current policies. Detach does not remove
+// inherited scopes; repeated Agent identities in a lineage count once. One
+// underlying charge is attributed once to each applicable budget scope, never
+// billed again merely because several scopes constrain it. External delegation
+// without bounded, attributable liability cannot bypass an inherited hard cap.
+//
+// Counters belong to that accounting history, not this policy stream. Setting,
+// clearing, restoring, archiving, changing Agent revisions, or replaying cannot
+// reset them. Spending while a policy is absent still counts when it returns.
+// Existing reservations settle in their original periods after a month boundary.
+message AgentBudgetPolicy {
+  option (buf.validate.message).cel = {
+    id: "agent_budget_policy.periods_unique"
+    message: "each budget period may appear at most once"
+    expression: "this.limits.map(limit, limit.period).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "agent_budget_policy.currency_consistent"
+    message: "every limit must use the same accounting currency"
+    expression: "this.limits.all(limit, limit.maximum.currency_code == this.limits[0].maximum.currency_code)"
+  };
+
+  repeated AgentBudgetLimit limits = 1 [(buf.validate.field).repeated.min_items = 1];
+}

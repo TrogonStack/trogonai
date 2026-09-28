@@ -1,0 +1,18 @@
+edition = "2024";
+
+package trogonai.agents.profiles.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// The taxonomy owner resolves this stable identity and its current display label.
+// Category membership is presentation metadata, never routing or authorization.
+message CategoryReference {
+  string category_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).cel = {
+      id: "category_reference.category_id_nonblank"
+      message: "category_id must contain a non-whitespace character"
+      expression: "this.trim() != ''"
+    }
+  ];
+}

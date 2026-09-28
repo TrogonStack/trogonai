@@ -1,0 +1,20 @@
+edition = "2024";
+
+package trogonai.agents.profiles.state.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "trogonai/agents/profiles/v1alpha1/profile.proto";
+
+// Missing is the explicit initial state. Only initialization leaves it; only
+// replacements may follow initialization, preserving the same Agent identity.
+// Unknown events or illegal transitions fail replay. Agent archival and media
+// availability do not mutate this independently retained profile history.
+message State {
+  oneof state {
+    option (buf.validate.oneof).required = true;
+
+    google.protobuf.Empty missing = 1;
+    trogonai.agents.profiles.v1alpha1.AgentProfile present = 2;
+  }
+}

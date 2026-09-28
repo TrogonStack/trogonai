@@ -1,0 +1,10 @@
+edition = "2024";
+
+package trogonai.catalog.agent_listings.v1alpha1;
+
+import "trogonai/catalog/agent_listings/v1alpha1/agent_listing.proto";
+
+// Records authored intent, never evidence of current public eligibility.
+message AgentListingVisibilityInitialized {
+  AgentListing listing = 1 [features.field_presence = LEGACY_REQUIRED];
+}

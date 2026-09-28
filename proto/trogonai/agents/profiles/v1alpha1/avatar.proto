@@ -1,0 +1,37 @@
+edition = "2024";
+
+package trogonai.agents.profiles.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// Media admission owns upload, decoding, resizing, and content validation.
+// Neither source supplies authority to fetch or expose the referenced image.
+message AvatarReference {
+  oneof source {
+    option (buf.validate.oneof).required = true;
+
+    ManagedMediaAvatarReference managed_media = 1;
+    // Only credential-free absolute HTTPS URLs are durable profile data.
+    // Admission rejects signed URLs and secrets wherever encoded in the URL;
+    // syntax validation alone cannot prove their absence. Remote bytes may
+    // change, so this arm is not an immutable media claim.
+    string https_url = 2 [(buf.validate.field).string = {
+      uri: true
+      pattern: "(?i)^https://(?:\\[[0-9a-f:.]+\\]|[^:/?#@\\[\\]]+)(?::[0-9]+)?(?:[/?#].*)?$"
+    }];
+  }
+}
+
+// The media owner guarantees that this opaque id resolves to immutable content.
+// Admission verifies the caller may reference it; profile replacement never
+// transfers ownership or deletes media still referenced elsewhere.
+message ManagedMediaAvatarReference {
+  string asset_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).cel = {
+      id: "managed_media_avatar_reference.asset_id_nonblank"
+      message: "asset_id must contain a non-whitespace character"
+      expression: "this.trim() != ''"
+    }
+  ];
+}

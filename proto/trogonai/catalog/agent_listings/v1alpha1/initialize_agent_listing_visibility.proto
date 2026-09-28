@@ -1,0 +1,16 @@
+edition = "2024";
+
+package trogonai.catalog.agent_listings.v1alpha1;
+
+import "trogonai/catalog/agent_listings/v1alpha1/agent_listing.proto";
+
+// Dispatch requires a nonempty DecideRequest.command_id, proves Agent existence
+// and live authority, and admits PUBLIC only for an active Agent eligible for
+// public discovery. PRIVATE is allowed while archived. The catalog fold rejects
+// any already initialized listing.
+// Initialization supplies no expected_revision; the module declares no_stream.
+// Delivery retries preserve the original command_id and omit expected_revision;
+// an initialization rejection does not acknowledge an earlier successful write.
+message InitializeAgentListingVisibility {
+  AgentListing listing = 1 [features.field_presence = LEGACY_REQUIRED];
+}

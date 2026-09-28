@@ -1,0 +1,20 @@
+edition = "2024";
+
+package trogonai.catalog.agent_listings.state.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "trogonai/catalog/agent_listings/v1alpha1/agent_listing.proto";
+
+// Fold of authored discovery intent only. Missing has private eligibility.
+// Initialization transitions missing to present; later sets retain agent_id.
+// Lifecycle, placement, grants, and effective eligibility are read live from
+// their owning planes and never inferred from this cached write-side state.
+message State {
+  oneof state {
+    option (buf.validate.oneof).required = true;
+
+    google.protobuf.Empty missing = 1;
+    trogonai.catalog.agent_listings.v1alpha1.AgentListing present = 2;
+  }
+}

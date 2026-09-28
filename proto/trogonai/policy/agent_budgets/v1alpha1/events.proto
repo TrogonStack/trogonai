@@ -1,0 +1,20 @@
+edition = "2024";
+
+package trogonai.policy.agent_budgets.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/policy/agent_budgets/v1alpha1/agent_budget_cleared.proto";
+import "trogonai/policy/agent_budgets/v1alpha1/agent_budget_initialized.proto";
+import "trogonai/policy/agent_budgets/v1alpha1/agent_budget_set.proto";
+
+// An unset or unknown event rejects replay; skipping a policy change could
+// authorize spending against a ceiling that no longer applies.
+message AgentBudgetEvent {
+  oneof event {
+    option (buf.validate.oneof).required = true;
+
+    AgentBudgetInitialized agent_budget_initialized = 1;
+    AgentBudgetSet agent_budget_set = 2;
+    AgentBudgetCleared agent_budget_cleared = 3;
+  }
+}
