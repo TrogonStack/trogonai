@@ -15,6 +15,12 @@ enum AgentLifecycle {
 // A derived logical record joining the registry and hierarchy. It is not a
 // write-side state or an independently writable placement or revision pointer.
 message Agent {
+  option (buf.validate.message).cel = {
+    id: "agent.latest_revision_identity"
+    message: "the latest revision must belong to this agent"
+    expression: "this.identity.agent_id == this.latest_revision.agent_id"
+  };
+
   AgentIdentity identity = 1 [features.field_presence = LEGACY_REQUIRED];
   string display_name = 2 [features.field_presence = LEGACY_REQUIRED];
   // Current hierarchy placement, which may differ from genesis placement.
@@ -24,7 +30,7 @@ message Agent {
   ];
   // The highest registry-minted revision for this identity, including reverts.
   AgentRevisionRef latest_revision = 4 [features.field_presence = LEGACY_REQUIRED];
-  // UNSPECIFIED and unknown values reject. Archival has no reverse transition.
+  // UNSPECIFIED and unknown values reject.
   AgentLifecycle lifecycle = 5 [
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).enum = {

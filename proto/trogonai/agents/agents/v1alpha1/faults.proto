@@ -1,0 +1,101 @@
+edition = "2024";
+
+package trogonai.agents.agents.v1alpha1;
+
+import "trogon/error/v1alpha1/options.proto";
+
+// Schema-only rejection templates for google.rpc.Status and ErrorInfo on the
+// DeciderService error channel. These messages are never encoded. The registry
+// module must declare the name agents.agents so the host preserves this domain.
+// A retry may be rejected against already changed state even when the original
+// command succeeded; a rejection is not an acknowledgement of its first outcome.
+message AgentCommandInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.agents"
+    reason: "AGENT_COMMAND_INVALID"
+    message: "The command violates the Agent registry contract."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentNotProvisionedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.agents"
+    reason: "AGENT_NOT_PROVISIONED"
+    message: "The Agent must be provisioned before this command can be accepted."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentAlreadyProvisionedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.agents"
+    reason: "AGENT_ALREADY_PROVISIONED"
+    message: "The Agent identity has already been provisioned."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentArchivedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.agents"
+    reason: "AGENT_ARCHIVED"
+    message: "The command requires an active Agent, but the Agent is archived."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentNotArchivedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.agents"
+    reason: "AGENT_NOT_ARCHIVED"
+    message: "The Agent must be archived before it can be unarchived."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentRevisionStaleError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.agents"
+    reason: "AGENT_REVISION_STALE"
+    message: "The complete expected Agent revision does not match the latest revision."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentProposalAlreadyActivatedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.agents"
+    reason: "AGENT_PROPOSAL_ALREADY_ACTIVATED"
+    message: "The proposal has already activated a revision of this Agent."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+// A matching number with a different configuration is not the recorded revision.
+message AgentRevisionNotFoundError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.agents"
+    reason: "AGENT_REVISION_NOT_FOUND"
+    message: "The revert target does not match an exact recorded revision of this Agent."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentRevisionExhaustedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.agents"
+    reason: "AGENT_REVISION_EXHAUSTED"
+    message: "The next Agent revision cannot be represented without overflow."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}

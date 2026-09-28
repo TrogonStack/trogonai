@@ -21,6 +21,9 @@ message ApprovedProposalActivation {
 // Dispatch loads the immutable approval from the proposal stream and enforces
 // live authorization, including the charter-class human gate. The registry
 // rejects an archived agent, a stale base, or an already activated proposal.
+// The complete base reference must equal the latest recorded revision. Consumed
+// proposal ids survive reverts and archive/unarchive cycles. Revision exhaustion
+// rejects instead of wrapping.
 message ActivateAgentRevision {
   ApprovedProposalActivation approved_proposal = 1 [features.field_presence = LEGACY_REQUIRED];
 }

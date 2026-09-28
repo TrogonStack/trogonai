@@ -7,7 +7,17 @@ import "trogonai/agents/proposals/v1alpha1/proposal.proto";
 
 // Dispatch checks current Agent availability and derives the difference before
 // opening this independent NoStream history. Opening reserves no revision number.
+// A superseded proposal must belong to the same Agent. Its existence and
+// ownership are checked at dispatch; supersession never mutates that history.
+// Reusing an existing proposal id rejects, even for identical proposal content.
+// Delivery retries reuse the Decider command_id and expected_revision instead.
 message OpenProposal {
+  option (buf.validate.message).cel = {
+    id: "open_proposal.cannot_supersede_itself"
+    message: "a proposal cannot supersede itself"
+    expression: "!has(this.proposal.supersedes_proposal_id) || this.proposal.supersedes_proposal_id != this.proposal_id"
+  };
+
   string proposal_id = 1 [
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1

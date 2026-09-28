@@ -5,6 +5,9 @@ package trogonai.agents.agents.v1alpha1;
 import "buf/validate/validate.proto";
 
 // Replaces nonbehavioral metadata on an active agent; it mints no revision.
+// Dispatch requires DecideRequest.expected_revision. Retrying preserves the
+// original stream revision and command id so an older replacement cannot
+// silently overwrite newer annotations.
 message AnnotateAgent {
   string agent_id = 1 [
     features.field_presence = LEGACY_REQUIRED,

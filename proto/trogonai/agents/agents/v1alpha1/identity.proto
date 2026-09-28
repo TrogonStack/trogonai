@@ -9,7 +9,7 @@ import "buf/validate/validate.proto";
 message Ed25519PublicJwk {
   string x = 1 [
     features.field_presence = LEGACY_REQUIRED,
-    (buf.validate.field).string.pattern = "^[A-Za-z0-9_-]{43}$"
+    (buf.validate.field).string.pattern = "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"
   ];
 }
 

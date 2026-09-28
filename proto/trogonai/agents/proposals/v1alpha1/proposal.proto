@@ -26,6 +26,12 @@ message EvaluationResultRef {
 // The difference's base configuration must equal the pinned base revision's
 // configuration. Its candidate remains the same artifact through activation.
 message ProposalDefinition {
+  option (buf.validate.message).cel = {
+    id: "proposal_definition.base_configuration_matches"
+    message: "the difference base must equal the pinned base revision configuration"
+    expression: "this.base_revision.configuration == this.difference.base_configuration"
+  };
+
   trogonai.agents.agents.v1alpha1.AgentRevisionRef base_revision = 1 [features.field_presence = LEGACY_REQUIRED];
   VerifiedConfigurationDifference difference = 2 [features.field_presence = LEGACY_REQUIRED];
   // Authenticated opaque identity; principal kind remains outside this domain.
@@ -35,7 +41,7 @@ message ProposalDefinition {
   ];
   repeated ProposalEvidenceRef evidence = 4;
   // Supersession does not close another stream; its author withdraws it separately.
-  string supersedes_proposal_id = 5;
+  string supersedes_proposal_id = 5 [(buf.validate.field).string.min_len = 1];
 }
 
 message ProposalJudgment {

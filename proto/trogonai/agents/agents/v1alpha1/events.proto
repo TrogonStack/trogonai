@@ -2,17 +2,24 @@ edition = "2024";
 
 package trogonai.agents.agents.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "trogonai/agents/agents/v1alpha1/agent_annotated.proto";
 import "trogonai/agents/agents/v1alpha1/agent_archived.proto";
 import "trogonai/agents/agents/v1alpha1/agent_provisioned.proto";
 import "trogonai/agents/agents/v1alpha1/agent_revision_activated.proto";
+import "trogonai/agents/agents/v1alpha1/agent_unarchived.proto";
 
-// AgentEvent is the Agent registry stream's event union.
+// AgentEvent is the Agent registry stream's event union. An unset or unknown
+// event rejects replay; skipping it could lose a consumed proposal or lifecycle
+// transition and admit a command against incomplete state.
 message AgentEvent {
   oneof event {
+    option (buf.validate.oneof).required = true;
+
     AgentProvisioned agent_provisioned = 1;
     AgentArchived agent_archived = 2;
     AgentAnnotated agent_annotated = 3;
     AgentRevisionActivated agent_revision_activated = 4;
+    AgentUnarchived agent_unarchived = 5;
   }
 }
