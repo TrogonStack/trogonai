@@ -3,6 +3,7 @@ edition = "2024";
 package trogonai.agents.agents.v1alpha1;
 
 import "buf/validate/validate.proto";
+import "google/protobuf/any.proto";
 import "trogonai/agents/agents/v1alpha1/digest.proto";
 import "trogonai/agents/agents/v1alpha1/model_selection.proto";
 
@@ -24,6 +25,14 @@ message RegisteredExtensionVersionRef {
   ];
 }
 
+// Enables requesting user input before continuing through the harness's
+// interaction contract. Presence declares behavior and grants no authority.
+message AskUserCapability {}
+
+// Enables intermediate progress output through the harness's interaction
+// contract. It does not choose a destination or grant permission to publish.
+message ProgressUpdatesCapability {}
+
 // This concrete settings contract belongs to the platform harness. Other
 // runtimes admit their own message types in AgentConfiguration.settings.
 // Instruction assembly and model controls follow the exact harness release.
@@ -33,6 +42,16 @@ message PlatformHarnessConfiguration {
   // This harness uses platform-managed model access. Its native settings own
   // these selections; they are not required controls for other runtimes.
   ModelSelections models = 2 [features.field_presence = LEGACY_REQUIRED];
+  // An unordered set of runtime-owned declarations. Presence enables a
+  // capability and absence disables it. The exact harness release registers
+  // supported contracts. Admission rejects duplicate canonical message types,
+  // unsupported types, malformed payloads, and unknown behavior-affecting fields.
+  // These checks require the release registry; the Any rule below only requires
+  // a nonempty type URL.
+  // Type URLs resolve only in that registry and are never fetched. These built-in
+  // interactions must not be independently configured again as tool dependencies.
+  // Capability changes are charter-class, including when instructions also change.
+  repeated google.protobuf.Any capabilities = 3 [(buf.validate.field).repeated.items.any.not_in = ""];
 }
 
 // The definition commits transitively to every behavior-significant artifact,
