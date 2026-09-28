@@ -4,7 +4,12 @@ package trogonai.agents.agents.v1alpha1;
 
 import "buf/validate/validate.proto";
 
-// Archival is permanent and blocks new work without interrupting pinned sessions.
+// Archival blocks new work without interrupting pinned sessions until unarchived.
+// Only an active agent accepts this command; an archived agent rejects it.
+// Dispatch requires DecideRequest.expected_revision for this transition. Retrying
+// preserves that original stream revision and command id. Refreshing the revision
+// is a new intent, so delayed delivery cannot archive an agent again after an
+// intervening unarchive.
 message ArchiveAgent {
   string agent_id = 1 [
     features.field_presence = LEGACY_REQUIRED,

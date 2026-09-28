@@ -26,6 +26,66 @@ enum AgentChangeClass {
 // Encoding-only changes are not differences. Fully validated native changes with
 // no registered semantic classifier use the conservative charter case below.
 message VerifiedConfigurationDifference {
+  option (buf.validate.message).cel = {
+    id: "verified_configuration_difference.distinct_artifacts"
+    message: "a proposal must change the configuration artifact"
+    expression: "this.base_configuration != this.candidate_configuration"
+  };
+  option (buf.validate.message).cel = {
+    id: "verified_configuration_difference.unique_categories"
+    message: "each changed category must appear exactly once"
+    expression:
+      "this.changes.map(c, has(c.runtime) ? 1 : has(c.runtime_settings) ? 2 : "
+      "has(c.variables_schema) ? 3 : has(c.dependencies) ? 4 : "
+      "has(c.selectable_labels) ? 5 : 6).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "verified_configuration_difference.charter_dominates"
+    message: "known charter changes require the overall charter class"
+    expression:
+      "!this.changes.exists(c, has(c.runtime) || has(c.variables_schema) || "
+      "(has(c.runtime_settings) && (has(c.runtime_settings.conservative_charter) || "
+      "(has(c.runtime_settings.classified) && c.runtime_settings.classified.derived_change_class == "
+      "trogonai.agents.proposals.v1alpha1.AgentChangeClass.AGENT_CHANGE_CLASS_CHARTER))) || "
+      "(has(c.selectable_labels) && "
+      "(('family' in c.selectable_labels.before) != ('family' in c.selectable_labels.after) || "
+      "('family' in c.selectable_labels.before && 'family' in c.selectable_labels.after && "
+      "c.selectable_labels.before['family'] != c.selectable_labels.after['family'])))) || "
+      "this.derived_change_class == trogonai.agents.proposals.v1alpha1.AgentChangeClass.AGENT_CHANGE_CLASS_CHARTER"
+  };
+
+  option (buf.validate.message).cel = {
+    id: "verified_configuration_difference.required_dependencies_charter"
+    message: "required dependency changes require the overall charter class"
+    expression:
+      "this.derived_change_class == trogonai.agents.proposals.v1alpha1.AgentChangeClass.AGENT_CHANGE_CLASS_CHARTER || "
+      "this.changes.filter(c, has(c.dependencies)).all(c, (!has(c.dependencies.before) || "
+      "c.dependencies.before.tools.all(d, d.requirement != "
+      "trogonai.agents.agents.v1alpha1.DependencyRequirement.DEPENDENCY_REQUIREMENT_REQUIRED || "
+      "(has(c.dependencies.after) && c.dependencies.after.tools.exists(e, d == e)))) && (!has(c.dependencies.after) || "
+      "c.dependencies.after.tools.all(d, d.requirement != "
+      "trogonai.agents.agents.v1alpha1.DependencyRequirement.DEPENDENCY_REQUIREMENT_REQUIRED || "
+      "(has(c.dependencies.before) && c.dependencies.before.tools.exists(e, d == e)))) && (!has(c.dependencies.before) || "
+      "c.dependencies.before.delegates.all(d, d.requirement != "
+      "trogonai.agents.agents.v1alpha1.DependencyRequirement.DEPENDENCY_REQUIREMENT_REQUIRED || "
+      "(has(c.dependencies.after) && c.dependencies.after.delegates.exists(e, d == e)))) && (!has(c.dependencies.after) "
+      "|| c.dependencies.after.delegates.all(d, d.requirement != "
+      "trogonai.agents.agents.v1alpha1.DependencyRequirement.DEPENDENCY_REQUIREMENT_REQUIRED || "
+      "(has(c.dependencies.before) && c.dependencies.before.delegates.exists(e, d == e)))) && "
+      "(!has(c.dependencies.before) || c.dependencies.before.memories.all(d, d.requirement != "
+      "trogonai.agents.agents.v1alpha1.DependencyRequirement.DEPENDENCY_REQUIREMENT_REQUIRED || "
+      "(has(c.dependencies.after) && c.dependencies.after.memories.exists(e, d == e)))) && (!has(c.dependencies.after) || "
+      "c.dependencies.after.memories.all(d, d.requirement != "
+      "trogonai.agents.agents.v1alpha1.DependencyRequirement.DEPENDENCY_REQUIREMENT_REQUIRED || "
+      "(has(c.dependencies.before) && c.dependencies.before.memories.exists(e, d == e)))) && (!has(c.dependencies.before) "
+      "|| c.dependencies.before.connections.all(d, d.requirement != "
+      "trogonai.agents.agents.v1alpha1.DependencyRequirement.DEPENDENCY_REQUIREMENT_REQUIRED || "
+      "(has(c.dependencies.after) && c.dependencies.after.connections.exists(e, d == e)))) && (!has(c.dependencies.after) "
+      "|| c.dependencies.after.connections.all(d, d.requirement != "
+      "trogonai.agents.agents.v1alpha1.DependencyRequirement.DEPENDENCY_REQUIREMENT_REQUIRED || "
+      "(has(c.dependencies.before) && c.dependencies.before.connections.exists(e, d == e)))))"
+  };
+
   trogonai.agents.agents.v1alpha1.AgentConfigurationRef base_configuration = 1 [features.field_presence = LEGACY_REQUIRED];
   trogonai.agents.agents.v1alpha1.AgentConfigurationRef candidate_configuration = 2 [features.field_presence = LEGACY_REQUIRED];
   trogonai.agents.agents.v1alpha1.ConfigurationContractRef differencer_contract = 3 [features.field_presence = LEGACY_REQUIRED];
@@ -59,6 +119,12 @@ message ConfigurationChange {
 // Runtime identity, artifact, or settings-contract changes are charter. Settings
 // payload changes have their own entry, including when the runtime also changes.
 message RuntimeDifference {
+  option (buf.validate.message).cel = {
+    id: "runtime_difference.changed"
+    message: "a runtime difference must change the runtime"
+    expression: "this.before != this.after"
+  };
+
   trogonai.agents.agents.v1alpha1.AgentImplementation before = 1 [features.field_presence = LEGACY_REQUIRED];
   trogonai.agents.agents.v1alpha1.AgentImplementation after = 2 [features.field_presence = LEGACY_REQUIRED];
 }
@@ -69,9 +135,17 @@ message RuntimeDifference {
 // classifier supports this exact transition; it is not a fallback for a failed
 // classifier or unsupported decoder. A runtime change remains charter regardless
 // of how this settings difference is classified.
+// The registered differencer rejects semantic no-ops from the preserved payload
+// bytes. Generic CEL equality cannot compare arbitrary runtime-owned Any values.
 message RuntimeSettingsDifference {
-  google.protobuf.Any before = 1 [features.field_presence = LEGACY_REQUIRED];
-  google.protobuf.Any after = 2 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Any before = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).any.not_in = ""
+  ];
+  google.protobuf.Any after = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).any.not_in = ""
+  ];
   oneof classification {
     option (buf.validate.oneof).required = true;
 
@@ -90,6 +164,14 @@ message RuntimeSettingsDifference {
 // Native model, role, and parameter changes are charter; instruction-only learned
 // changes require proof under unchanged runtime and settings contracts.
 message RuntimeSettingsGovernanceResponse {
+  option (buf.validate.message).cel = {
+    id: "runtime_settings_governance_response.learned_contract_unchanged"
+    message: "a learned-layer classification requires unchanged settings contracts"
+    expression:
+      "this.derived_change_class != trogonai.agents.proposals.v1alpha1.AgentChangeClass.AGENT_CHANGE_CLASS_LEARNED_LAYER || "
+      "this.base_settings_contract == this.candidate_settings_contract"
+  };
+
   trogonai.agents.agents.v1alpha1.ConfigurationContractRef base_settings_contract = 1 [features.field_presence = LEGACY_REQUIRED];
   trogonai.agents.agents.v1alpha1.Digest base_settings_digest = 2 [features.field_presence = LEGACY_REQUIRED];
   trogonai.agents.agents.v1alpha1.ConfigurationContractRef candidate_settings_contract = 3 [features.field_presence = LEGACY_REQUIRED];
@@ -108,6 +190,12 @@ message RuntimeSettingsGovernanceResponse {
 // Caller-contract changes are charter, including presence, type, and requiredness
 // changes. Snapshot absence must match the corresponding configuration exactly.
 message VariableSchemaDifference {
+  option (buf.validate.message).cel = {
+    id: "variable_schema_difference.changed"
+    message: "a variable schema difference must change a snapshot or its presence"
+    expression: "has(this.before) != has(this.after) || (has(this.before) && has(this.after) && this.before != this.after)"
+  };
+
   trogonai.agents.agents.v1alpha1.VariableSchema before = 1;
   trogonai.agents.agents.v1alpha1.VariableSchema after = 2;
 }
@@ -116,6 +204,12 @@ message VariableSchemaDifference {
 // changes are learned-layer. Requirement transitions therefore remain charter.
 // Snapshot absence must match the corresponding configuration exactly.
 message DependenciesDifference {
+  option (buf.validate.message).cel = {
+    id: "dependencies_difference.changed"
+    message: "a dependencies difference must change a snapshot or its presence"
+    expression: "has(this.before) != has(this.after) || (has(this.before) && has(this.after) && this.before != this.after)"
+  };
+
   trogonai.agents.agents.v1alpha1.AgentDependencies before = 1;
   trogonai.agents.agents.v1alpha1.AgentDependencies after = 2;
 }
@@ -123,12 +217,24 @@ message DependenciesDifference {
 // Grouping-label changes, including family, are charter. The pinned differencer
 // defines the remaining well-known grouping labels; other labels are learned-layer.
 message SelectableLabelsDifference {
+  option (buf.validate.message).cel = {
+    id: "selectable_labels_difference.changed"
+    message: "a selectable labels difference must change a label"
+    expression: "this.before != this.after"
+  };
+
   map<string, string> before = 1;
   map<string, string> after = 2;
 }
 
 // Description changes are learned-layer and do not alter registry metadata.
 message DescriptionDifference {
+  option (buf.validate.message).cel = {
+    id: "description_difference.changed"
+    message: "a description difference must change the description"
+    expression: "this.before != this.after"
+  };
+
   string before = 1 [features.field_presence = LEGACY_REQUIRED];
   string after = 2 [features.field_presence = LEGACY_REQUIRED];
 }

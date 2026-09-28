@@ -1,0 +1,60 @@
+edition = "2024";
+
+package trogonai.agents.agents.state.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "trogonai/agents/agents/v1alpha1/agent_record.proto";
+import "trogonai/agents/agents/v1alpha1/agent_revision.proto";
+
+// Fold state belongs to the registry, not the joined Agent read model. Missing
+// is the explicit initial state. Replay rejects unknown events, mismatched agent
+// identities, and illegal transitions instead of skipping facts. Only unarchive
+// leaves archived state; neither lifecycle transition changes revision history.
+message State {
+  oneof state {
+    option (buf.validate.oneof).required = true;
+
+    google.protobuf.Empty missing = 1;
+    ProvisionedAgent present = 2;
+  }
+}
+
+// Retain every exact revision to prove revert targets and prevent a proposal
+// from activating again after reverts or lifecycle changes. The highest key is
+// the latest revision; hierarchy and presentation facts are not decision inputs.
+message ProvisionedAgent {
+  option (buf.validate.message).cel = {
+    id: "provisioned_agent.revision_identity"
+    message: "every retained revision must belong to this agent and match its map key"
+    expression: "this.revisions.all(number, this.revisions[number].reference.agent_id == this.agent_id && this.revisions[number].reference.revision_number == number)"
+  };
+  option (buf.validate.message).cel = {
+    id: "provisioned_agent.contiguous_revisions"
+    message: "retained revisions must cover every number from 1 through the latest revision"
+    expression: "this.revisions.all(number, number > 0u && number <= uint(this.revisions.size()))"
+  };
+  option (buf.validate.message).cel = {
+    id: "provisioned_agent.unique_proposals"
+    message: "a proposal may activate at most one retained revision"
+    expression: "this.revisions.map(number, this.revisions[number]).filter(revision, has(revision.proposal_id)).map(revision, revision.proposal_id).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "provisioned_agent.exact_reverts"
+    message: "each revert must reference the exact retained revision it reuses"
+    expression: "this.revisions.all(number, !has(this.revisions[number].revert_of_revision) || (this.revisions[number].revert_of_revision.revision_number in this.revisions && this.revisions[this.revisions[number].revert_of_revision.revision_number].reference == this.revisions[number].revert_of_revision))"
+  };
+
+  string agent_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  trogonai.agents.agents.v1alpha1.AgentLifecycle lifecycle = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  map<uint64, trogonai.agents.agents.v1alpha1.AgentRevision> revisions = 3 [(buf.validate.field).map.min_pairs = 1];
+}

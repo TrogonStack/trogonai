@@ -1,0 +1,43 @@
+edition = "2024";
+
+package trogonai.agents.proposals.state.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+
+// Only identity and lifecycle are needed by later proposal decisions. Candidate
+// bytes, difference, evidence, and verdict remain in the immutable history.
+// Activation is registry-owned and never changes this fold.
+message State {
+  oneof state {
+    option (buf.validate.oneof).required = true;
+
+    google.protobuf.Empty missing = 1;
+    PresentProposal present = 2;
+  }
+}
+
+message PresentProposal {
+  string proposal_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string author_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ProposalStatus status = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+enum ProposalStatus {
+  PROPOSAL_STATUS_UNSPECIFIED = 0;
+  PROPOSAL_STATUS_OPEN = 1;
+  PROPOSAL_STATUS_JUDGED = 2;
+  PROPOSAL_STATUS_WITHDRAWN = 3;
+}

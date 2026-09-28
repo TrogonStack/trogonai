@@ -2,11 +2,28 @@ edition = "2024";
 
 package trogonai.agents.agents.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "trogonai/agents/agents/v1alpha1/agent_revision.proto";
 
 // Only the registry records activation. The new revision is the previous
 // revision plus one, including reverts; existing sessions retain their pins.
 message AgentRevisionActivated {
+  option (buf.validate.message).cel = {
+    id: "agent_revision_activated.identity"
+    message: "activation must preserve the agent identity"
+    expression: "this.previous_revision.agent_id == this.revision.reference.agent_id"
+  };
+  option (buf.validate.message).cel = {
+    id: "agent_revision_activated.next_revision"
+    message: "activation must mint exactly the next revision without overflow"
+    expression: "this.revision.reference.revision_number > this.previous_revision.revision_number && this.revision.reference.revision_number - this.previous_revision.revision_number == 1u"
+  };
+  option (buf.validate.message).cel = {
+    id: "agent_revision_activated.source"
+    message: "activation must originate from an approved proposal or a revert"
+    expression: "has(this.revision.proposal_id) || has(this.revision.revert_of_revision)"
+  };
+
   AgentRevisionRef previous_revision = 1 [features.field_presence = LEGACY_REQUIRED];
   // Its source is proposal_id or revert_of_revision, never provisioning.
   AgentRevision revision = 2 [features.field_presence = LEGACY_REQUIRED];

@@ -66,7 +66,8 @@ message SkillVersionRef {
 }
 
 // Name and every label predicate must match by exact, case-sensitive equality.
-// Empty name and label keys are invalid; at least one predicate is required.
+// An empty name omits that predicate; at least a name or label is required.
+// Empty label keys are invalid.
 // Selectors apply only within the Session's authorized resolution scope and
 // match logical resources. Multiple matching resources fail admission, even
 // for optional declarations. They never imply an arbitrary first match.

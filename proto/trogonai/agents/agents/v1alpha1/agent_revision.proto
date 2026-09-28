@@ -22,6 +22,17 @@ message AgentRevisionRef {
 }
 
 message AgentRevision {
+  option (buf.validate.message).cel = {
+    id: "agent_revision.provisioning_source"
+    message: "revision 1 must have provisioning provenance, and only revision 1 may have it"
+    expression: "has(this.provisioning) == (this.reference.revision_number == 1u)"
+  };
+  option (buf.validate.message).cel = {
+    id: "agent_revision.revert_source"
+    message: "a revert must preserve the exact configuration of an earlier revision of this agent"
+    expression: "!has(this.revert_of_revision) || (this.revert_of_revision.agent_id == this.reference.agent_id && this.revert_of_revision.revision_number < this.reference.revision_number && this.revert_of_revision.configuration == this.reference.configuration)"
+  };
+
   AgentRevisionRef reference = 1 [features.field_presence = LEGACY_REQUIRED];
   // Provisioning is valid only for revision 1. A revert names a previously
   // activated revision of this agent and preserves that configuration exactly.
