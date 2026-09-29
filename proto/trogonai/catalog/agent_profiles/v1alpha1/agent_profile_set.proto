@@ -1,10 +1,11 @@
 edition = "2024";
 
-package trogonai.agents.profiles.v1alpha1;
+package trogonai.catalog.agent_profiles.v1alpha1;
 
-import "trogonai/agents/profiles/v1alpha1/profile.proto";
+import "trogonai/catalog/agent_profiles/v1alpha1/profile.proto";
 
 // This complete replacement clears any prior values absent from the profile.
+// It never changes the provisioning provenance retained from genesis.
 message AgentProfileSet {
   AgentProfile profile = 1 [features.field_presence = LEGACY_REQUIRED];
 }

@@ -13,6 +13,9 @@ import "trogonai/session/sessions/v1alpha1/workspace.proto";
 // second history (ADR#0035 facet 2). The execution plan is immutable for the
 // session's life; every later attempt, checkpoint, and compaction is bound to
 // its digest.
+// Agent-backed admission requires the registry's current ACTIVE lifecycle and
+// live policy authorization. A pinned revision or prepared execution plan never
+// bypasses pending or cancelled provisioning (ADR#0024).
 message CreateSession {
   string session_id = 1 [
     features.field_presence = LEGACY_REQUIRED,

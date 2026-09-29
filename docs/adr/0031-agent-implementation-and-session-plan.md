@@ -269,8 +269,12 @@ sharing the general configuration envelope.
 
 Admission proceeds in this order:
 
-1. Load the requested AgentRevision and verify AgentConfiguration bytes and
-   digest.
+1. Require the Agent registry's current active lifecycle and live execution
+   authorization, then load the requested AgentRevision and verify
+   AgentConfiguration bytes and digest. Pending or cancelled provisioning
+   cannot be bypassed by naming an already-pinned revision or execution plan
+   ([ADR#0024](./0024-agent-platform-stream-topology.md)). This also applies to
+   new delegated and forked Sessions.
 2. Load the exact AgentImplementationVersion and verify its definition and
    harness artifact digests. A registered edge extension verifies its own
    pinned product and adapter artifacts under the extension contract.

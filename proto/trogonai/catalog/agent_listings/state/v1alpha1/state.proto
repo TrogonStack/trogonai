@@ -10,11 +10,24 @@ import "trogonai/catalog/agent_listings/v1alpha1/agent_listing.proto";
 // Initialization transitions missing to present; later sets retain agent_id.
 // Lifecycle, placement, grants, and effective eligibility are read live from
 // their owning planes and never inferred from this cached write-side state.
+// The genesis provisioning origin survives visibility replacement, including
+// publication after activation; it proves provenance, not public eligibility.
 message State {
+  option (buf.validate.message).cel = {
+    id: "agent_listing_state.provisioning_origin_requires_listing"
+    message: "provisioning provenance requires an initialized listing"
+    expression: "!has(this.provisioning_id) || has(this.present)"
+  };
+
   oneof state {
     option (buf.validate.oneof).required = true;
 
     google.protobuf.Empty missing = 1;
     trogonai.catalog.agent_listings.v1alpha1.AgentListing present = 2;
   }
+  string provisioning_id = 3 [(buf.validate.field).cel = {
+    id: "agent_listing_state.provisioning_id_nonblank"
+    message: "a supplied provisioning_id must contain a non-whitespace character"
+    expression: "this.trim() != ''"
+  }];
 }

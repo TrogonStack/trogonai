@@ -1,0 +1,89 @@
+edition = "2024";
+
+package trogonai.agents.provisioning.v1alpha1;
+
+import "trogon/error/v1alpha1/options.proto";
+
+// Schema-only module rejections on the DeciderService error channel. The
+// module name must be agents.provisioning. Authentication and participant
+// admission remain their owners' failures, not successful workflow outcomes.
+
+message AgentProvisioningCommandInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.provisioning"
+    reason: "PROVISIONING_COMMAND_INVALID"
+    message: "The command violates the provisioning contract."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentProvisioningAlreadyBeganError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.provisioning"
+    reason: "PROVISIONING_ALREADY_BEGAN"
+    message: "This provisioning operation already has an immutable plan."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentProvisioningNotBeganError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.provisioning"
+    reason: "PROVISIONING_NOT_BEGAN"
+    message: "The provisioning intent must be recorded first."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentProvisioningIdentityMismatchError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.provisioning"
+    reason: "PROVISIONING_IDENTITY_MISMATCH"
+    message: "The Agent or operation identity does not match the original plan."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentProvisioningStepConflictError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.provisioning"
+    reason: "PROVISIONING_STEP_CONFLICT"
+    message: "The step conflicts with its immutable plan or dispatch."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentProvisioningPhaseInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.provisioning"
+    reason: "PROVISIONING_PHASE_INVALID"
+    message: "The step is not permitted in this phase."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentProvisioningReceiptMismatchError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.provisioning"
+    reason: "PROVISIONING_RECEIPT_MISMATCH"
+    message: "The outcome does not prove the original dispatched effect."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentProvisioningTerminalError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.provisioning"
+    reason: "PROVISIONING_TERMINAL"
+    message: "The provisioning operation is already terminal."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}

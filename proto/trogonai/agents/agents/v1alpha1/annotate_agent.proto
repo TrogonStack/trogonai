@@ -4,7 +4,8 @@ package trogonai.agents.agents.v1alpha1;
 
 import "buf/validate/validate.proto";
 
-// Replaces nonbehavioral metadata on an active agent; it mints no revision.
+// Replaces nonbehavioral metadata only in ACTIVE; it mints no revision and
+// rejects pending or cancelled provisioning.
 // Dispatch requires DecideRequest.expected_revision. Retrying preserves the
 // original stream revision and command id so an older replacement cannot
 // silently overwrite newer annotations.

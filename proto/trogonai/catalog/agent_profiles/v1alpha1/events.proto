@@ -1,10 +1,10 @@
 edition = "2024";
 
-package trogonai.agents.profiles.v1alpha1;
+package trogonai.catalog.agent_profiles.v1alpha1;
 
 import "buf/validate/validate.proto";
-import "trogonai/agents/profiles/v1alpha1/agent_profile_initialized.proto";
-import "trogonai/agents/profiles/v1alpha1/agent_profile_set.proto";
+import "trogonai/catalog/agent_profiles/v1alpha1/agent_profile_initialized.proto";
+import "trogonai/catalog/agent_profiles/v1alpha1/agent_profile_set.proto";
 
 // Unknown or unset events reject replay instead of producing incomplete state.
 message AgentProfileEvent {

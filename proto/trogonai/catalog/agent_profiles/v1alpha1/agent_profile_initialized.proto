@@ -1,0 +1,18 @@
+edition = "2024";
+
+package trogonai.catalog.agent_profiles.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/catalog/agent_profiles/v1alpha1/profile.proto";
+
+// Genesis of this Agent's profile history; it does not provision the Agent.
+// The admitted origin and exact initial profile remain receipt evidence even
+// after later profile replacements. A recovery reader verifies the event itself.
+message AgentProfileInitialized {
+  AgentProfile profile = 1 [features.field_presence = LEGACY_REQUIRED];
+  string provisioning_id = 2 [(buf.validate.field).cel = {
+    id: "agent_profile_initialized.provisioning_id_nonblank"
+    message: "a supplied provisioning_id must contain a non-whitespace character"
+    expression: "this.trim() != ''"
+  }];
+}

@@ -5,7 +5,8 @@ package trogonai.agents.agents.v1alpha1;
 import "buf/validate/validate.proto";
 
 // Archival blocks new work without interrupting pinned sessions until unarchived.
-// Only an active agent accepts this command; an archived agent rejects it.
+// Only ACTIVE accepts this command; pending or cancelled provisioning cannot
+// escape its gate through archival.
 // Dispatch requires DecideRequest.expected_revision for this transition. Retrying
 // preserves that original stream revision and command id. Refreshing the revision
 // is a new intent, so delayed delivery cannot archive an agent again after an

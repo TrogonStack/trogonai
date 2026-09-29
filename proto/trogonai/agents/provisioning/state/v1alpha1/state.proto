@@ -1,0 +1,172 @@
+edition = "2024";
+
+package trogonai.agents.provisioning.state.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "trogonai/agents/provisioning/v1alpha1/outcome.proto";
+import "trogonai/agents/provisioning/v1alpha1/plan.proto";
+
+enum ProvisioningStatus {
+  PROVISIONING_STATUS_UNSPECIFIED = 0;
+  PROVISIONING_STATUS_PREPARING = 1;
+  PROVISIONING_STATUS_PUBLISHING = 2;
+  PROVISIONING_STATUS_CANCELLING = 3;
+  PROVISIONING_STATUS_COMPLETED = 4;
+  PROVISIONING_STATUS_CANCELLED = 5;
+  PROVISIONING_STATUS_REJECTED = 6;
+}
+
+message State {
+  oneof state {
+    option (buf.validate.oneof).required = true;
+    google.protobuf.Empty missing = 1;
+    OperationState present = 2;
+  }
+}
+
+// Replay preserves the exact immutable plan and dispatch envelopes. Registered
+// adapters validate Any payload/provenance against that plan before recording.
+// CREATE_REGISTRY must succeed before participant dispatch. All PREPARE receipts
+// precede MAKE_READY dispatch; PUBLISH dispatch requires actual readiness.
+// Cancellation before any registry dispatch is terminal locally. Once a registry
+// dispatch exists, missing receipt is ambiguous: reconcile genesis before actual
+// registry cancellation. Verified foreign genesis rejects this operation.
+// Readiness winning a race requires forward recovery of requested publication.
+// There is no automatic participant deletion or multi-stream rollback.
+message OperationState {
+  option (buf.validate.message).cel = {
+    id: "provisioning_state.steps_unique"
+    message: "each planned or system step may be dispatched at most once"
+    expression:
+      "this.steps.filter(s, has(s.dispatch.step.system)).map(s, s.dispatch.step.system).unique() && "
+      "this.steps.filter(s, has(s.dispatch.step.action_id)).map(s, s.dispatch.step.action_id).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "provisioning_state.dispatch_matches_plan"
+    message: "dispatch identities and original action preconditions must match the immutable plan"
+    expression:
+      "this.steps.all(s, has(s.dispatch.step.action_id) ? this.plan.actions.exists(a, a.action_id ==  "
+      "s.dispatch.step.action_id && a.request.command_id == s.dispatch.request.command_id &&  "
+      "has(a.request.expected_revision) == has(s.dispatch.request.expected_revision) &&  "
+      "(!has(a.request.expected_revision) || a.request.expected_revision == s.dispatch.request.expected_revision)) :  "
+      "s.dispatch.request.command_id == (s.dispatch.step.system ==  "
+      "trogonai.agents.provisioning.v1alpha1.ProvisioningSystemStep.PROVISIONING_SYSTEM_STEP_CREATE_REGISTRY ?  "
+      "this.plan.registry_command_id : s.dispatch.step.system ==  "
+      "trogonai.agents.provisioning.v1alpha1.ProvisioningSystemStep.PROVISIONING_SYSTEM_STEP_MAKE_READY ?  "
+      "this.plan.readiness_command_id : this.plan.cancellation_command_id))"
+  };
+  option (buf.validate.message).cel = {
+    id: "provisioning_state.creation_precedes_other_steps"
+    message: "every later dispatch requires a verified registry genesis receipt"
+    expression:
+      "this.steps.all(s, (has(s.dispatch.step.system) && s.dispatch.step.system ==  "
+      "trogonai.agents.provisioning.v1alpha1.ProvisioningSystemStep.PROVISIONING_SYSTEM_STEP_CREATE_REGISTRY) ||  "
+      "(this.steps.exists(s, has(s.dispatch.step.system) && s.dispatch.step.system ==  "
+      "trogonai.agents.provisioning.v1alpha1.ProvisioningSystemStep.PROVISIONING_SYSTEM_STEP_CREATE_REGISTRY &&  "
+      "has(s.outcome.receipt))))"
+  };
+  option (buf.validate.message).cel = {
+    id: "provisioning_state.preparation_precedes_readiness"
+    message: "readiness dispatch requires every PREPARE action receipt"
+    expression:
+      "!this.steps.exists(s, has(s.dispatch.step.system) && s.dispatch.step.system == "
+      "trogonai.agents.provisioning.v1alpha1.ProvisioningSystemStep.PROVISIONING_SYSTEM_STEP_MAKE_READY) || "
+      "(this.plan.actions.filter(a, a.phase == "
+      "trogonai.agents.provisioning.v1alpha1.ProvisioningPhase.PROVISIONING_PHASE_PREPARE).all(a, "
+      "this.steps.exists(s, has(s.dispatch.step.action_id) && s.dispatch.step.action_id == a.action_id && "
+      "has(s.outcome.receipt))))"
+  };
+  option (buf.validate.message).cel = {
+    id: "provisioning_state.readiness_precedes_publication"
+    message: "PUBLISH dispatch requires an actual registry readiness receipt"
+    expression:
+      "this.steps.all(s, !has(s.dispatch.step.action_id) || !this.plan.actions.exists(a, a.action_id == "
+      "s.dispatch.step.action_id && a.phase == "
+      "trogonai.agents.provisioning.v1alpha1.ProvisioningPhase.PROVISIONING_PHASE_PUBLISH) || "
+      "(this.steps.exists(s, has(s.dispatch.step.system) && s.dispatch.step.system == "
+      "trogonai.agents.provisioning.v1alpha1.ProvisioningSystemStep.PROVISIONING_SYSTEM_STEP_MAKE_READY && "
+      "has(s.outcome.receipt))))"
+  };
+  option (buf.validate.message).cel = {
+    id: "provisioning_state.cancellation_intent_required"
+    message: "registry cancellation dispatch requires durable cancellation intent"
+    expression:
+      "!this.steps.exists(s, has(s.dispatch.step.system) && s.dispatch.step.system ==  "
+      "trogonai.agents.provisioning.v1alpha1.ProvisioningSystemStep.PROVISIONING_SYSTEM_STEP_CANCEL_REGISTRY) ||  "
+      "has(this.cancellation_requested)"
+  };
+  option (buf.validate.message).cel = {
+    id: "provisioning_state.registry_winner_unique"
+    message: "registry readiness and cancellation cannot both have succeeded"
+    expression:
+      "!((this.steps.exists(s, has(s.dispatch.step.system) && s.dispatch.step.system ==  "
+      "trogonai.agents.provisioning.v1alpha1.ProvisioningSystemStep.PROVISIONING_SYSTEM_STEP_MAKE_READY &&  "
+      "has(s.outcome.receipt))) && (this.steps.exists(s, has(s.dispatch.step.system) && s.dispatch.step.system ==  "
+      "trogonai.agents.provisioning.v1alpha1.ProvisioningSystemStep.PROVISIONING_SYSTEM_STEP_CANCEL_REGISTRY &&  "
+      "has(s.outcome.receipt))))"
+  };
+  option (buf.validate.message).cel = {
+    id: "provisioning_state.registry_precondition_fixed"
+    message: "readiness and cancellation retain the same original registry precondition"
+    expression:
+      "this.steps.filter(s, has(s.dispatch.step.system) && s.dispatch.step.system !=  "
+      "trogonai.agents.provisioning.v1alpha1.ProvisioningSystemStep.PROVISIONING_SYSTEM_STEP_CREATE_REGISTRY).all(s,  "
+      "this.steps.filter(t, has(t.dispatch.step.system) && t.dispatch.step.system !=  "
+      "trogonai.agents.provisioning.v1alpha1.ProvisioningSystemStep.PROVISIONING_SYSTEM_STEP_CREATE_REGISTRY).all(t,  "
+      "s.dispatch.request.expected_revision == t.dispatch.request.expected_revision))"
+  };
+  option (buf.validate.message).cel = {
+    id: "provisioning_state.status_from_receipts"
+    message: "status must be derived from verified receipts or cancellation before dispatch"
+    expression:
+      "this.status == ((this.steps.exists(s, has(s.outcome.registry_conflict))) ?  "
+      "trogonai.agents.provisioning.state.v1alpha1.ProvisioningStatus.PROVISIONING_STATUS_REJECTED :  "
+      "((this.steps.exists(s, has(s.dispatch.step.system) && s.dispatch.step.system ==  "
+      "trogonai.agents.provisioning.v1alpha1.ProvisioningSystemStep.PROVISIONING_SYSTEM_STEP_CANCEL_REGISTRY &&  "
+      "has(s.outcome.receipt))) || (has(this.cancellation_requested) && !this.steps.exists(s,  "
+      "has(s.dispatch.step.system) && s.dispatch.step.system ==  "
+      "trogonai.agents.provisioning.v1alpha1.ProvisioningSystemStep.PROVISIONING_SYSTEM_STEP_CREATE_REGISTRY))) ?  "
+      "trogonai.agents.provisioning.state.v1alpha1.ProvisioningStatus.PROVISIONING_STATUS_CANCELLED :  "
+      "(this.steps.exists(s, has(s.dispatch.step.system) && s.dispatch.step.system ==  "
+      "trogonai.agents.provisioning.v1alpha1.ProvisioningSystemStep.PROVISIONING_SYSTEM_STEP_MAKE_READY &&  "
+      "has(s.outcome.receipt))) ? ((this.plan.actions.all(a, this.steps.exists(s, has(s.dispatch.step.action_id) &&  "
+      "s.dispatch.step.action_id == a.action_id && has(s.outcome.receipt)))) ?  "
+      "trogonai.agents.provisioning.state.v1alpha1.ProvisioningStatus.PROVISIONING_STATUS_COMPLETED :  "
+      "trogonai.agents.provisioning.state.v1alpha1.ProvisioningStatus.PROVISIONING_STATUS_PUBLISHING) :  "
+      "has(this.cancellation_requested) ?  "
+      "trogonai.agents.provisioning.state.v1alpha1.ProvisioningStatus.PROVISIONING_STATUS_CANCELLING :  "
+      "trogonai.agents.provisioning.state.v1alpha1.ProvisioningStatus.PROVISIONING_STATUS_PREPARING)"
+  };
+
+  option (buf.validate.message).cel = {
+    id: "provisioning_state.foreign_genesis_binding"
+    message: "conflicting genesis must name this Agent but a different or absent operation"
+    expression:
+      "this.steps.all(s, !has(s.outcome.registry_conflict) || (s.outcome.registry_conflict.genesis.agent_id ==  "
+      "this.plan.identity.agent_id && (!has(s.outcome.registry_conflict.genesis.provisioning_id) ||  "
+      "s.outcome.registry_conflict.genesis.provisioning_id != this.plan.identity.provisioning_id)))"
+  };
+  option (buf.validate.message).cel = {
+    id: "provisioning_state.registry_precondition_from_genesis"
+    message: "readiness and cancellation must preserve the verified frozen genesis position"
+    expression:
+      "this.steps.filter(s, has(s.dispatch.step.system) && s.dispatch.step.system !=  "
+      "trogonai.agents.provisioning.v1alpha1.ProvisioningSystemStep.PROVISIONING_SYSTEM_STEP_CREATE_REGISTRY).all(s,  "
+      "this.steps.exists(g, has(g.dispatch.step.system) && g.dispatch.step.system ==  "
+      "trogonai.agents.provisioning.v1alpha1.ProvisioningSystemStep.PROVISIONING_SYSTEM_STEP_CREATE_REGISTRY &&  "
+      "has(g.outcome.receipt) && s.dispatch.request.expected_revision == g.outcome.receipt.response.stream_position))"
+  };
+
+  trogonai.agents.provisioning.v1alpha1.AgentProvisioningPlan plan = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated trogonai.agents.provisioning.v1alpha1.ProvisioningStepProgress steps = 2;
+  google.protobuf.Empty cancellation_requested = 3;
+  // Derived status is not an independently authored success or cancellation flag.
+  ProvisioningStatus status = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}

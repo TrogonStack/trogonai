@@ -1,6 +1,6 @@
 edition = "2024";
 
-package trogonai.agents.profiles.v1alpha1;
+package trogonai.catalog.agent_profiles.v1alpha1;
 
 import "buf/validate/validate.proto";
 

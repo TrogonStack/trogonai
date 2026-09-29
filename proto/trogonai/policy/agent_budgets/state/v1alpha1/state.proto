@@ -10,6 +10,7 @@ import "trogonai/policy/agent_budgets/v1alpha1/budget_policy.proto";
 // belong to accounting, and are never reconstructed from these policy events.
 // Replay rejects unknown events, identity or currency changes, repeated genesis,
 // and mutations before initialization. Clear retains initialized state.
+// Provisioning origin is copied from genesis and never cleared or replaced.
 message State {
   oneof state {
     option (buf.validate.oneof).required = true;
@@ -37,4 +38,9 @@ message InitializedAgentBudget {
   ];
   // Absence means cleared, not zero. Restoring limits consults the same history.
   trogonai.policy.agent_budgets.v1alpha1.AgentBudgetPolicy policy = 3;
+  string provisioning_id = 4 [(buf.validate.field).cel = {
+    id: "initialized_agent_budget.provisioning_id_nonblank"
+    message: "a supplied provisioning_id must contain a non-whitespace character"
+    expression: "this.trim() != ''"
+  }];
 }

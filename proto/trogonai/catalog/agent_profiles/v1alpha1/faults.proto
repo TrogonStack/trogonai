@@ -1,16 +1,16 @@
 edition = "2024";
 
-package trogonai.agents.profiles.v1alpha1;
+package trogonai.catalog.agent_profiles.v1alpha1;
 
 import "trogon/error/v1alpha1/options.proto";
 
 // Schema-only templates on the DeciderService error channel. The module must
-// declare agents.profiles as its descriptor name; these messages are never
+// declare catalog.agent_profiles as its descriptor name; these messages are never
 // encoded. Dispatch authorization, Agent availability, and avatar and category
 // admission retain their owning failure contracts.
 message AgentProfileCommandInvalidError {
   option (trogon.error.v1alpha1.message).template = {
-    domain: "agents.profiles"
+    domain: "catalog.agent_profiles"
     reason: "AGENT_PROFILE_COMMAND_INVALID"
     message: "The command violates the Agent profile contract."
     code: FAILED_PRECONDITION
@@ -20,7 +20,7 @@ message AgentProfileCommandInvalidError {
 
 message AgentProfileMissingError {
   option (trogon.error.v1alpha1.message).template = {
-    domain: "agents.profiles"
+    domain: "catalog.agent_profiles"
     reason: "AGENT_PROFILE_MISSING"
     message: "The Agent profile must be initialized before it can be replaced."
     code: FAILED_PRECONDITION
@@ -30,7 +30,7 @@ message AgentProfileMissingError {
 
 message AgentProfileAlreadyInitializedError {
   option (trogon.error.v1alpha1.message).template = {
-    domain: "agents.profiles"
+    domain: "catalog.agent_profiles"
     reason: "AGENT_PROFILE_ALREADY_INITIALIZED"
     message: "The Agent profile has already been initialized."
     code: FAILED_PRECONDITION
@@ -40,7 +40,7 @@ message AgentProfileAlreadyInitializedError {
 
 message AgentProfileIdentityMismatchError {
   option (trogon.error.v1alpha1.message).template = {
-    domain: "agents.profiles"
+    domain: "catalog.agent_profiles"
     reason: "AGENT_PROFILE_IDENTITY_MISMATCH"
     message: "The command names a different Agent from this profile history."
     code: FAILED_PRECONDITION

@@ -9,7 +9,7 @@ import "trogonai/agents/agents/v1alpha1/agent_revision.proto";
 // to this agent and the target was activated. A revert mints the next highest
 // revision with the target configuration; it never moves a stored pointer back.
 // Both references must match their recorded immutable values, not just their
-// revision numbers. An archived agent rejects reversion. Revision exhaustion
+// revision numbers. Only ACTIVE accepts reversion. Revision exhaustion
 // rejects instead of wrapping. A target may be the current revision.
 message RevertAgentRevision {
   option (buf.validate.message).cel = {

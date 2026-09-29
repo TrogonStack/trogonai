@@ -4,7 +4,7 @@ package trogonai.agents.agents.v1alpha1;
 
 import "buf/validate/validate.proto";
 
-// AgentArchived transitions the agent to archived. An archived agent accepts
+// AgentArchived transitions an ACTIVE agent to archived. An archived agent accepts
 // no further revisions or annotation changes until unarchived. Sessions already
 // running against the archived agent are not interrupted; the registry only
 // stops resolving it for new work. Dispatch rejects new proposals, while orphan

@@ -5,8 +5,9 @@ package trogonai.agents.agents.v1alpha1;
 import "buf/validate/validate.proto";
 import "trogonai/agents/agents/v1alpha1/agent_revision.proto";
 
-// Only the registry records activation. The new revision is the previous
-// revision plus one, including reverts; existing sessions retain their pins.
+// Only the registry records activation, and only while the Agent is ACTIVE.
+// The new revision is the previous revision plus one, including reverts;
+// existing sessions retain their pins.
 message AgentRevisionActivated {
   option (buf.validate.message).cel = {
     id: "agent_revision_activated.identity"

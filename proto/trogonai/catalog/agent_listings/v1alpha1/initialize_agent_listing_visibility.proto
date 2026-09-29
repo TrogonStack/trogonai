@@ -2,15 +2,31 @@ edition = "2024";
 
 package trogonai.catalog.agent_listings.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "trogonai/catalog/agent_listings/v1alpha1/agent_listing.proto";
 
 // Dispatch requires a nonempty DecideRequest.command_id, proves Agent existence
-// and live authority, and admits PUBLIC only for an active Agent eligible for
-// public discovery. PRIVATE is allowed while archived. The catalog fold rejects
-// any already initialized listing.
+// and live authority, and reads authoritative current registry lifecycle.
+// PUBLIC requires ACTIVE and current public-discovery eligibility; PRIVATE is
+// also allowed while ARCHIVED. During PROVISIONING, only the owning operation
+// may initialize a PRIVATE listing after dispatch verifies registry origin,
+// immutable setup intent, and exact participant payload. Caller provenance alone
+// proves nothing. PROVISIONING_CANCELLED or unknown lifecycle rejects.
+// This PREPARE path requires provisioning_id. The owning operation may instead
+// initialize PUBLIC with that origin as its planned PUBLISH step only after
+// authoritative ACTIVE readiness. Dispatch verifies the phase and intended
+// visibility; origin presence alone never establishes either.
+// The catalog fold rejects any already initialized listing.
 // Initialization supplies no expected_revision; the module declares no_stream.
 // Delivery retries preserve the original command_id and omit expected_revision;
 // an initialization rejection does not acknowledge an earlier successful write.
+// Recovery verifies the durable genesis receipt's Agent, provisioning origin,
+// and exact requested listing before acknowledging this participant.
 message InitializeAgentListingVisibility {
   AgentListing listing = 1 [features.field_presence = LEGACY_REQUIRED];
+  string provisioning_id = 2 [(buf.validate.field).cel = {
+    id: "initialize_agent_listing_visibility.provisioning_id_nonblank"
+    message: "a supplied provisioning_id must contain a non-whitespace character"
+    expression: "this.trim() != ''"
+  }];
 }

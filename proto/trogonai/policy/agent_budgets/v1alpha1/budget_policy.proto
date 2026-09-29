@@ -45,6 +45,9 @@ message AgentBudgetLimit {
 // Limits are an unordered conjunction: every configured period must admit new
 // spending. An absent policy removes only this Agent-specific ceiling, never
 // another scope's limit or an authorization check. It does not mean a zero cap.
+// Absence cannot satisfy budget setup requested by a provisioning operation.
+// Authoritative registry readiness gates execution and new spending while setup
+// is pending or cancelled; an absent policy is never a shortcut around that gate.
 //
 // Hard-cap admission atomically accounts for incurred spend, remaining reserved
 // liability, and the new operation's maximum liability in every applicable

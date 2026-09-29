@@ -99,3 +99,43 @@ message AgentRevisionExhaustedError {
     visibility: VISIBILITY_PUBLIC
   };
 }
+
+message AgentProvisioningPendingError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.agents"
+    reason: "AGENT_PROVISIONING_PENDING"
+    message: "The Agent is still provisioning and cannot accept this command."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentProvisioningCancelledError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.agents"
+    reason: "AGENT_PROVISIONING_CANCELLED"
+    message: "The Agent's provisioning was cancelled and its registry lifecycle is terminal."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentProvisioningMismatchError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.agents"
+    reason: "AGENT_PROVISIONING_MISMATCH"
+    message: "The command's Agent and provisioning ids do not match the genesis binding."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentNotProvisioningError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.agents"
+    reason: "AGENT_NOT_PROVISIONING"
+    message: "Only pending coordinated provisioning may be completed or cancelled."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}

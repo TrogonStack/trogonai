@@ -9,6 +9,9 @@ import "trogonai/agents/agents/v1alpha1/identity.proto";
 // AgentProvisioned is the Agent registry stream's genesis event, minting
 // revision 1. No limits, no rubrics, no grants live here (design Q15/Q16);
 // those are stances on their own planes.
+// Absent provisioning_id preserves direct ACTIVE genesis. Presence creates
+// PROVISIONING and permanently binds this identity to that operation; the Agent
+// remains unavailable for new work until AgentProvisioningCompleted.
 message AgentProvisioned {
   // Must be the did:key derived from public_identity_key.
   string agent_id = 1 [
@@ -40,4 +43,9 @@ message AgentProvisioned {
   map<string, string> annotations = 5;
   AgentConfigurationRef configuration_ref = 6 [features.field_presence = LEGACY_REQUIRED];
   Ed25519PublicJwk public_identity_key = 7 [features.field_presence = LEGACY_REQUIRED];
+  string provisioning_id = 8 [(buf.validate.field).cel = {
+    id: "agent_provisioned.provisioning_id_nonblank"
+    message: "a present provisioning_id must contain a non-whitespace character"
+    expression: "this.trim() != ''"
+  }];
 }

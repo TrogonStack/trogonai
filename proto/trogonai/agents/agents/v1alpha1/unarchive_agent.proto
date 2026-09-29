@@ -5,7 +5,8 @@ package trogonai.agents.agents.v1alpha1;
 import "buf/validate/validate.proto";
 
 // Unarchiving restores an archived agent for new work.
-// Only an archived agent accepts this command; an active agent rejects it.
+// Only ARCHIVED accepts this command; it cannot activate pending or cancelled
+// provisioning.
 // Dispatch requires DecideRequest.expected_revision for this transition. Retrying
 // preserves that original stream revision and command id, so delivery after a
 // later archive cannot silently undo that archive.

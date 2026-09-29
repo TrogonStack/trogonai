@@ -15,6 +15,9 @@ import "trogonai/session/sessions/v1alpha1/workspace.proto";
 // Write precondition NoStream on the child. parent_dispatched_at and
 // cascade_policy are copied verbatim from the parent's DelegationDispatched, so
 // a redelivered saga step reproduces the same link (ADR#0035 facet 6).
+// Agent-backed child admission requires the target registry's current ACTIVE
+// lifecycle and live policy. Parent dispatch and a pinned plan do not authorize
+// execution of an Agent whose provisioning is pending or cancelled (ADR#0024).
 message CreateChildSession {
   // The child session's own id.
   string session_id = 1 [

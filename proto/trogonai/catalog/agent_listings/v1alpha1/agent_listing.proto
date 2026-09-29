@@ -16,13 +16,16 @@ enum AgentListingVisibility {
 
 // One independently mutable catalog record per Agent identity. Public intent
 // permits only discovery/profile presentation after live catalog eligibility,
-// hierarchy, and policy checks. It never makes behavior or protected data public.
+// hierarchy, policy, and authoritative current ACTIVE registry lifecycle checks.
+// It never makes behavior or protected data public.
 // A missing record has private eligibility without implying a persisted record.
 //
 // Archive always suppresses effective public listing without rewriting intent.
 // Unarchive preserves intent: PUBLIC becomes eligible only after fresh live
 // checks; PRIVATE stays private. An unavailable or stale eligibility decision
 // cannot expose a public listing. No copied lifecycle or owner scope is trusted.
+// PROVISIONING, PROVISIONING_CANCELLED, unspecified, and unknown lifecycle never
+// qualify for public discovery, even if authored intent or a projection says PUBLIC.
 message AgentListing {
   string agent_id = 1 [
     features.field_presence = LEGACY_REQUIRED,

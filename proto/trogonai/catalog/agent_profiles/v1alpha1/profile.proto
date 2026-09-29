@@ -1,15 +1,17 @@
 edition = "2024";
 
-package trogonai.agents.profiles.v1alpha1;
+package trogonai.catalog.agent_profiles.v1alpha1;
 
 import "buf/validate/validate.proto";
-import "trogonai/agents/profiles/v1alpha1/avatar.proto";
-import "trogonai/agents/profiles/v1alpha1/category.proto";
-import "trogonai/agents/profiles/v1alpha1/discovery_tag.proto";
+import "trogonai/catalog/agent_profiles/v1alpha1/avatar.proto";
+import "trogonai/catalog/agent_profiles/v1alpha1/category.proto";
+import "trogonai/catalog/agent_profiles/v1alpha1/discovery_tag.proto";
 
 // Mutable presentation data never enters model input or runtime selection and
 // never mints an AgentRevision. Description remains configuration-owned and
 // display_name remains registry-owned. Profile presence grants no visibility.
+// Private profile retention and public listing authority have independent
+// lifecycles, so a listing change never erases or creates this profile.
 message AgentProfile {
   option (buf.validate.message).cel = {
     id: "agent_profile.discovery_tags_unique"

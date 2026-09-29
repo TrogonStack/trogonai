@@ -9,6 +9,9 @@ import "buf/validate/validate.proto";
 // Dispatch requires live authority and a nonempty Decider command_id plus
 // the original positive expected_revision; retries preserve both. An already
 // cleared policy succeeds without an event after that concurrency check.
+// Authoritative current registry lifecycle must be ACTIVE or ARCHIVED. Pending,
+// cancelled, or unknown lifecycle rejects clearing, so requested provisioning
+// limits cannot disappear before activation. Genesis provisioning origin remains.
 message ClearAgentBudget {
   string agent_id = 1 [
     features.field_presence = LEGACY_REQUIRED,

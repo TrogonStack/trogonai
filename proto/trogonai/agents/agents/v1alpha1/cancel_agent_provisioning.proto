@@ -1,0 +1,30 @@
+edition = "2024";
+
+package trogonai.agents.agents.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// Dispatch authorizes the owning workflow's cancellation. Only PROVISIONING
+// with the exact genesis operation binding may cancel. Dispatch requires the
+// plan's command_id and an expected_revision, preserving both original values
+// on retries. If completion won the registry race, cancellation rejects and the
+// workflow must reconcile that winner; requesting cancellation elsewhere never
+// rolls this stream back.
+message CancelAgentProvisioning {
+  string agent_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).cel = {
+      id: "cancel_agent_provisioning.agent_id_nonblank"
+      message: "agent_id must contain a non-whitespace character"
+      expression: "this.trim() != ''"
+    }
+  ];
+  string provisioning_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).cel = {
+      id: "cancel_agent_provisioning.provisioning_id_nonblank"
+      message: "provisioning_id must contain a non-whitespace character"
+      expression: "this.trim() != ''"
+    }
+  ];
+}

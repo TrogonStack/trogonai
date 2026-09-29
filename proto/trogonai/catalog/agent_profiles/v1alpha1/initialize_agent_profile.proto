@@ -1,0 +1,28 @@
+edition = "2024";
+
+package trogonai.catalog.agent_profiles.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/catalog/agent_profiles/v1alpha1/profile.proto";
+
+// Dispatch authorizes the writer and admits avatar and category data. Without
+// provisioning_id, authoritative current registry state must be ACTIVE. During
+// PROVISIONING, only the owning operation may initialize its requested profile:
+// dispatch verifies the registry origin, immutable setup intent, and exact
+// participant payload rather than trusting the caller's provisioning_id.
+// That PREPARE path requires provisioning_id; a supplied origin is valid only
+// through that path while the owning operation is preparing this participant.
+// PROVISIONING_CANCELLED and unknown lifecycle values reject initialization.
+// Only missing state accepts initialization with the no_stream precondition.
+// Dispatch requires DecideRequest.command_id and preserves it across retries;
+// no expected_revision is supplied because zero is not an empty-stream revision.
+// An already-initialized rejection is not success: recovery verifies the durable
+// genesis receipt's Agent, provisioning origin, and exact requested profile.
+message InitializeAgentProfile {
+  AgentProfile profile = 1 [features.field_presence = LEGACY_REQUIRED];
+  string provisioning_id = 2 [(buf.validate.field).cel = {
+    id: "initialize_agent_profile.provisioning_id_nonblank"
+    message: "a supplied provisioning_id must contain a non-whitespace character"
+    expression: "this.trim() != ''"
+  }];
+}
