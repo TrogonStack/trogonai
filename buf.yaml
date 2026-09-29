@@ -30,7 +30,6 @@ lint:
   ignore_only:
     IMPORT_USED:
       - proto/trogonai/decider/v1/decider_service.proto
-      - proto/trogonai/grpc_nats_micro/v1/echo.proto
 
 breaking:
   use:
