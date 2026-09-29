@@ -70,3 +70,4 @@ future implementation work.
 - [ADR#0062: Runtime-Owned Settings and Platform Declarations (Draft)](./0062-runtime-owned-settings-and-platform-declarations.md)
 - [ADR#0063: An Agent Declares the Connections It Needs, and the Declaration Carries No Version (Draft)](./0063-agent-connection-declarations.md)
 - [ADR#0064: Invariants Are Declared in the Schema Before Anything Enforces Them (Draft)](./0064-schema-constraints-as-documentation.md)
+- [ADR#0065: Generation Settings, Usage, and Citations Grow to the Provider-Neutral Superset of Anthropic, OpenAI, and Gemini (Draft)](./0065-generation-settings-usage-and-citations-provider-superset.md)

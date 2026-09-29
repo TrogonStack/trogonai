@@ -42,10 +42,17 @@ enum FinishReason {
   FINISH_REASON_TOOL_USE = 3;
   // Output stopped at a configured stop sequence.
   FINISH_REASON_STOP_SEQUENCE = 4;
-  // Output stopped by a content filter.
+  // Output stopped by a content filter partway through generation. A prompt
+  // the provider refused before generating anything is recorded instead as
+  // AssistantMessageFailed with
+  // AssistantMessageFailureReason.INPUT_REJECTED, since there is no partial
+  // message here to complete.
   FINISH_REASON_CONTENT_FILTER = 5;
   // Resumable server-side pause of a tool loop (e.g. Claude pause_turn).
   FINISH_REASON_PAUSE_TURN = 6;
-  // Model declined to respond on safety grounds (e.g. Claude refusal).
+  // Model declined to respond on safety grounds after generation began (e.g.
+  // Claude refusal). A refusal issued before generation began is recorded
+  // instead as AssistantMessageFailed with
+  // AssistantMessageFailureReason.INPUT_REJECTED.
   FINISH_REASON_REFUSAL = 7;
 }

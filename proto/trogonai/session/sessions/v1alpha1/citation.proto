@@ -1,0 +1,97 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/session/sessions/v1alpha1/artifact.proto";
+
+// Citation attributes a span of a text content block to the source it was
+// grounded in. It is a sibling field on ContentBlock rather than structure
+// added to the text oneof member itself, because the member is a bare
+// string on the wire today and giving it internal structure would change
+// what every existing reader receives for it. A repeated sibling field is
+// additive instead, and ContentBlock's own CEL rule ties it back to text.
+message Citation {
+  // The span of the text member this citation attributes. Recorded in
+  // Unicode code points rather than UTF-8 bytes: both Anthropic and OpenAI
+  // report citation offsets against decoded string positions, not encoded
+  // byte positions, and a byte offset risks landing inside a multi-byte
+  // character, which a code-point offset cannot do.
+  TextSpan span = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Excerpt of the source that grounds span, for display without a fetch;
+  // empty when the provider did not supply one.
+  string cited_text = 2;
+  oneof source {
+    option (buf.validate.oneof).required = true;
+
+    CitedArtifact artifact = 3;
+    CitedUrl url = 4;
+    CitedToolResult tool_result = 5;
+  }
+}
+
+// TextSpan is a half-open extent over a text block's content, in Unicode
+// code points. Kept distinct from ByteRange, which is an offset and length
+// over opaque resource bytes: the two are never interchangeable, because a
+// code-point count and a byte count agree only for pure ASCII content.
+message TextSpan {
+  option (buf.validate.message).cel = {
+    id: "text_span.start_before_end"
+    message: "start must be less than or equal to end"
+    expression: "this.start <= this.end"
+  };
+
+  uint64 start = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint64 end = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// CitedArtifact is the source arm for a citation grounded in an artifact
+// already recorded in this session, joined by ArtifactRef the same way every
+// other artifact reference in this package is.
+message CitedArtifact {
+  ArtifactRef artifact_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Where inside the artifact the grounding sits, when the provider reported
+  // a location narrower than the whole artifact; unset when the citation
+  // covers the artifact as recorded.
+  oneof location {
+    PageRange pages = 2;
+    TextSpan characters = 3;
+  }
+}
+
+// PageRange is an inclusive, one-based range of pages within a paginated
+// artifact such as a PDF.
+message PageRange {
+  option (buf.validate.message).cel = {
+    id: "page_range.first_not_after_last"
+    message: "first must be less than or equal to last"
+    expression: "this.first <= this.last"
+  };
+
+  uint64 first = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gte = 1
+  ];
+  uint64 last = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gte = 1
+  ];
+}
+
+// CitedUrl is the source arm for a citation grounded in a web page the model
+// consulted directly rather than through a recorded artifact.
+message CitedUrl {
+  string url = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.uri = true
+  ];
+  // Page title as reported by the provider; empty when none was supplied.
+  string title = 2;
+}
+
+// CitedToolResult is the source arm for a citation grounded in a tool result
+// already recorded in this session, joined by tool_use_id the same way
+// ToolResultBlock joins to its ToolUseBlock.
+message CitedToolResult {
+  string tool_use_id = 1 [features.field_presence = LEGACY_REQUIRED];
+}
