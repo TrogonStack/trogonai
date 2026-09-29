@@ -1,0 +1,33 @@
+edition = "2024";
+
+package trogonai.catalog.agent_profiles.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/catalog/agent_profiles/v1alpha1/avatar.proto";
+import "trogonai/catalog/agent_profiles/v1alpha1/category.proto";
+import "trogonai/catalog/agent_profiles/v1alpha1/discovery_tag.proto";
+
+// Mutable presentation data never enters model input or runtime selection and
+// never mints an AgentRevision. Description remains configuration-owned and
+// display_name remains registry-owned. Profile presence grants no visibility.
+// Private profile retention and public listing authority have independent
+// lifecycles, so a listing change never erases or creates this profile.
+message AgentProfile {
+  option (buf.validate.message).cel = {
+    id: "agent_profile.discovery_tags_unique"
+    message: "discovery tag values must be unique by exact case-sensitive equality"
+    expression: "this.discovery_tags.map(tag, tag.value).unique()"
+  };
+
+  string agent_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).cel = {
+      id: "agent_profile.agent_id_nonblank"
+      message: "agent_id must contain a non-whitespace character"
+      expression: "this.trim() != ''"
+    }
+  ];
+  Avatar avatar = 2;
+  CategoryReference category = 3;
+  repeated DiscoveryTag discovery_tags = 4;
+}

@@ -1,0 +1,33 @@
+edition = "2024";
+
+package trogonai.catalog.agent_profiles.state.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "trogonai/catalog/agent_profiles/v1alpha1/profile.proto";
+
+// Missing is the explicit initial state. Only initialization leaves it; only
+// replacements may follow initialization, preserving the same Agent identity.
+// Unknown events or illegal transitions fail replay. Agent archival and media
+// availability do not mutate this independently retained profile history.
+// Provisioning provenance is copied from genesis and survives every replacement;
+// it supports receipt recovery but is never evidence of current Agent readiness.
+message State {
+  option (buf.validate.message).cel = {
+    id: "agent_profile_state.provisioning_origin_requires_profile"
+    message: "provisioning provenance requires an initialized profile"
+    expression: "!has(this.provisioning_id) || has(this.present)"
+  };
+
+  oneof state {
+    option (buf.validate.oneof).required = true;
+
+    google.protobuf.Empty missing = 1;
+    trogonai.catalog.agent_profiles.v1alpha1.AgentProfile present = 2;
+  }
+  string provisioning_id = 3 [(buf.validate.field).cel = {
+    id: "agent_profile_state.provisioning_id_nonblank"
+    message: "a supplied provisioning_id must contain a non-whitespace character"
+    expression: "this.trim() != ''"
+  }];
+}

@@ -1,0 +1,22 @@
+edition = "2024";
+
+package trogonai.catalog.agent_listings.v1alpha1;
+
+import "trogonai/catalog/agent_listings/v1alpha1/agent_listing.proto";
+
+// Replaces intent on an existing listing for the same Agent. Dispatch requires
+// a nonempty DecideRequest.command_id and the original positive revision of
+// this listing stream in expected_revision. Retries preserve both values so a
+// delayed PUBLIC request cannot undo a later PRIVATE choice.
+// Dispatch checks authoritative current Agent lifecycle and live authority;
+// PUBLIC requires ACTIVE and current catalog eligibility. PRIVATE remains
+// available while ARCHIVED. PROVISIONING, PROVISIONING_CANCELLED, and unknown
+// lifecycle reject this normal mutation path so it cannot replace pending setup.
+// This never initializes a missing listing or changes access
+// grants, hierarchy placement, registry lifecycle, or the Agent revision.
+// Equal intent succeeds without an event only after the original revision and
+// live admission checks pass; equality never turns a stale request into success.
+// Initialization provenance is retained through every visibility change.
+message SetAgentListingVisibility {
+  AgentListing listing = 1 [features.field_presence = LEGACY_REQUIRED];
+}

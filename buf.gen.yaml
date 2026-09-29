@@ -12,6 +12,8 @@ inputs:
   - directory: .
     exclude_paths:
       - proto/trogonai/agents
+      - proto/trogonai/catalog
+      - proto/trogonai/policy
       - proto/trogonai/session
       - proto/trogonai/usage
 plugins:

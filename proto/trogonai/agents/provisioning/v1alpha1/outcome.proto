@@ -1,0 +1,167 @@
+edition = "2024";
+
+package trogonai.agents.provisioning.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/rpc/status.proto";
+import "trogonai/agents/agents/v1alpha1/agent_provisioned.proto";
+import "trogonai/decider/v1/decide_request.proto";
+import "trogonai/decider/v1/decide_response.proto";
+
+enum ProvisioningSystemStep {
+  PROVISIONING_SYSTEM_STEP_UNSPECIFIED = 0;
+  PROVISIONING_SYSTEM_STEP_CREATE_REGISTRY = 1;
+  PROVISIONING_SYSTEM_STEP_MAKE_READY = 2;
+  PROVISIONING_SYSTEM_STEP_CANCEL_REGISTRY = 3;
+}
+
+message ProvisioningStep {
+  option (buf.validate.message).cel = {
+    id: "provisioning_step.action_id_nonblank"
+    message: "a present action id must contain a non-whitespace character"
+    expression: "!has(this.action_id) || this.action_id.trim() != ''"
+  };
+  oneof step {
+    option (buf.validate.oneof).required = true;
+    ProvisioningSystemStep system = 1 [(buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }];
+    string action_id = 2 [(buf.validate.field).string.min_len = 1];
+  }
+}
+
+// Durable authorization to send this exact envelope, recorded before the effect.
+// The registered adapter verifies the payload against the immutable plan.
+// Readiness and cancellation retain the same original positive registry write
+// precondition obtained from verified genesis while the registry is frozen.
+// Neither an unknown outcome nor a retry refreshes that original precondition.
+message ProvisioningDispatch {
+  option (buf.validate.message).cel = {
+    id: "provisioning_dispatch.request_identity"
+    message: "dispatch requires a nonempty command id and positive expected revision when present"
+    expression: "has(this.request.command_id) && this.request.command_id.trim() != '' && (!has(this.request.expected_revision) || this.request.expected_revision > 0)"
+  };
+  option (buf.validate.message).cel = {
+    id: "provisioning_dispatch.registry_precondition"
+    message: "registry creation omits expected_revision while readiness and cancellation require it"
+    expression: "!has(this.step.system) || (has(this.request.expected_revision) == (this.step.system != trogonai.agents.provisioning.v1alpha1.ProvisioningSystemStep.PROVISIONING_SYSTEM_STEP_CREATE_REGISTRY))"
+  };
+
+  ProvisioningStep step = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.decider.v1.DecideRequest request = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Dispatch constructs this from an authenticated target response or verified
+// read-back of the original effect, never an untrusted caller's success claim.
+// Resolve target, scope, operation provenance, event ids, and exact original
+// payload through the immutable dispatch. AlreadyExists, matching display data,
+// or a revision conflict alone proves nothing. Reconcile a lost acknowledgment
+// before classifying refusal or retrying. Core steps require their actual
+// matching AgentProvisioned/Completed/Cancelled event, not only present state.
+// Action no-op responses require independent verification of the exact accepted
+// outcome. This does not grant permission to overwrite a conflicting target.
+message ProvisioningReceipt {
+  option (buf.validate.message).cel = {
+    id: "provisioning_receipt.command_id_nonblank"
+    message: "receipt command id must contain a non-whitespace character"
+    expression: "this.command_id.trim() != ''"
+  };
+  option (buf.validate.message).cel = {
+    id: "provisioning_receipt.event_ids"
+    message: "receipt event ids must be nonempty and unique"
+    expression: "this.response.events.all(e, e.id.trim() != '') && this.response.events.map(e, e.id).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "provisioning_receipt.position"
+    message: "a verified target receipt requires a positive stream position"
+    expression: "this.response.stream_position > 0"
+  };
+
+  string command_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  trogonai.decider.v1.DecideResponse response = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+enum ProvisioningFailureKind {
+  PROVISIONING_FAILURE_KIND_UNSPECIFIED = 0;
+  // A determinate refusal whose cause may clear; recheck before another attempt.
+  PROVISIONING_FAILURE_KIND_TRANSIENT = 1;
+  // The unchanged plan needs external repair or cancellation.
+  PROVISIONING_FAILURE_KIND_BLOCKED = 2;
+  // The write may have committed; reconcile rather than blindly repeating it.
+  PROVISIONING_FAILURE_KIND_OUTCOME_UNKNOWN = 3;
+}
+
+// Failures do not terminate the operation, remove readiness gates, or undo prior
+// effects. Status is diagnostic evidence; scheduling never parses its message.
+message ProvisioningFailure {
+  option (buf.validate.message).cel = {
+    id: "provisioning_failure.status_non_success"
+    message: "failure evidence must use a defined non-success canonical status code"
+    expression: "this.status.code > 0 && this.status.code <= 16"
+  };
+
+  ProvisioningFailureKind kind = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  google.rpc.Status status = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Authoritative immutable genesis belonging to a direct caller or another
+// operation. Admission verifies this event in the intended registry history;
+// AlreadyExists alone and an absent stream cannot establish this outcome.
+// No foreign resource may be cancelled or cleaned up by the losing operation.
+message ProvisioningRegistryConflict {
+  string event_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).cel = {
+      id: "provisioning_registry_conflict.event_id_nonblank"
+      message: "the conflicting genesis event id must be nonblank"
+      expression: "this.trim() != ''"
+    }
+  ];
+  uint64 stream_position = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  trogonai.agents.agents.v1alpha1.AgentProvisioned genesis = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ProvisioningStepOutcome {
+  oneof outcome {
+    option (buf.validate.oneof).required = true;
+    ProvisioningReceipt receipt = 1;
+    ProvisioningFailure failure = 2;
+    ProvisioningRegistryConflict registry_conflict = 3;
+  }
+}
+
+message ProvisioningStepProgress {
+  option (buf.validate.message).cel = {
+    id: "provisioning_step_progress.conflict_only_at_creation"
+    message: "only registry creation may report conflicting genesis"
+    expression: "!has(this.outcome.registry_conflict) || (has(this.dispatch.step.system) && this.dispatch.step.system == trogonai.agents.provisioning.v1alpha1.ProvisioningSystemStep.PROVISIONING_SYSTEM_STEP_CREATE_REGISTRY)"
+  };
+  option (buf.validate.message).cel = {
+    id: "provisioning_step_progress.receipt_command"
+    message: "a receipt must belong to its immutable dispatch command"
+    expression: "!has(this.outcome.receipt) || this.outcome.receipt.command_id == this.dispatch.request.command_id"
+  };
+  option (buf.validate.message).cel = {
+    id: "provisioning_step_progress.registry_receipt"
+    message: "a registry success receipt must preserve its actual committed event"
+    expression: "!has(this.dispatch.step.system) || !has(this.outcome.receipt) || this.outcome.receipt.response.events.size() > 0"
+  };
+
+  ProvisioningDispatch dispatch = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Unset means dispatched with no known outcome. Receipt success is immutable;
+  // later failures cannot replace it. Failed/unknown steps remain recoverable.
+  ProvisioningStepOutcome outcome = 2;
+}

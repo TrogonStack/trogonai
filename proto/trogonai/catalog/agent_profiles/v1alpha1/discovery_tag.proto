@@ -1,0 +1,18 @@
+edition = "2024";
+
+package trogonai.catalog.agent_profiles.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// Values are exact and case-sensitive. Validation does not trim or normalize
+// them. Search may index these tags, but runtime selectors never consume them.
+message DiscoveryTag {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).cel = {
+      id: "discovery_tag.value_nonblank"
+      message: "a discovery tag must contain a non-whitespace character"
+      expression: "this.trim() != ''"
+    }
+  ];
+}

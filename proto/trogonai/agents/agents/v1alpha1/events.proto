@@ -6,6 +6,8 @@ import "buf/validate/validate.proto";
 import "trogonai/agents/agents/v1alpha1/agent_annotated.proto";
 import "trogonai/agents/agents/v1alpha1/agent_archived.proto";
 import "trogonai/agents/agents/v1alpha1/agent_provisioned.proto";
+import "trogonai/agents/agents/v1alpha1/agent_provisioning_cancelled.proto";
+import "trogonai/agents/agents/v1alpha1/agent_provisioning_completed.proto";
 import "trogonai/agents/agents/v1alpha1/agent_revision_activated.proto";
 import "trogonai/agents/agents/v1alpha1/agent_unarchived.proto";
 
@@ -21,5 +23,7 @@ message AgentEvent {
     AgentAnnotated agent_annotated = 3;
     AgentRevisionActivated agent_revision_activated = 4;
     AgentUnarchived agent_unarchived = 5;
+    AgentProvisioningCompleted agent_provisioning_completed = 6;
+    AgentProvisioningCancelled agent_provisioning_cancelled = 7;
   }
 }

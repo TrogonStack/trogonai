@@ -1,0 +1,32 @@
+edition = "2024";
+
+package trogonai.policy.agent_budgets.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/policy/agent_budgets/v1alpha1/budget_policy.proto";
+
+// Dispatch verifies the Agent exists, live budget-administration authority, and
+// agreement with its accounting denomination. Authoritative current registry
+// lifecycle must be ACTIVE or ARCHIVED for ordinary initialization. During
+// PROVISIONING only its owning operation may initialize a requested budget;
+// dispatch verifies registry origin, immutable setup intent, and exact policy
+// rather than trusting caller-supplied provenance. PROVISIONING_CANCELLED and
+// unknown lifecycle reject. The PREPARE path requires provisioning_id; a supplied
+// origin is valid only while its operation is preparing this participant.
+// NoStream creation requires a
+// nonempty Decider command_id and no expected_revision; retries preserve the id.
+// Initialization creates policy history, never a new accounting period.
+// An already-initialized rejection is not success. Recovery verifies the durable
+// genesis receipt's Agent, provisioning origin, denomination, and exact policy.
+message InitializeAgentBudget {
+  string agent_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  AgentBudgetPolicy policy = 2 [features.field_presence = LEGACY_REQUIRED];
+  string provisioning_id = 3 [(buf.validate.field).cel = {
+    id: "initialize_agent_budget.provisioning_id_nonblank"
+    message: "a supplied provisioning_id must contain a non-whitespace character"
+    expression: "this.trim() != ''"
+  }];
+}

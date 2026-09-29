@@ -15,6 +15,9 @@ import "trogonai/session/sessions/v1alpha1/workspace.proto";
 // checked at the command boundary, not by the fold: the source is a different
 // aggregate and this decider never reads it. The plan and workspace are carried
 // rather than inherited for the same reason.
+// Agent-backed fork admission requires the target registry's current ACTIVE
+// lifecycle and live policy; an existing source Session never bypasses pending
+// or cancelled Agent provisioning (ADR#0024).
 message ForkSession {
   // The new session's own id.
   string session_id = 1 [

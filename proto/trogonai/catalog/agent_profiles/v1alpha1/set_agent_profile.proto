@@ -1,0 +1,17 @@
+edition = "2024";
+
+package trogonai.catalog.agent_profiles.v1alpha1;
+
+import "trogonai/catalog/agent_profiles/v1alpha1/profile.proto";
+
+// Replaces an initialized profile without changing its Agent identity. Absent
+// avatar/category and empty tags clear those values. Dispatch authorizes the
+// writer, applies initialization's content checks, and requires authoritative
+// current ACTIVE lifecycle plus DecideRequest.command_id and expected_revision.
+// Pending setup cannot be replaced through this normal mutation path; cancelled
+// or unknown lifecycle rejects. Retrying preserves both original values so an
+// older replacement cannot overwrite newer metadata. After those checks, an
+// identical profile succeeds without an event. Initialization origin is retained.
+message SetAgentProfile {
+  AgentProfile profile = 1 [features.field_presence = LEGACY_REQUIRED];
+}

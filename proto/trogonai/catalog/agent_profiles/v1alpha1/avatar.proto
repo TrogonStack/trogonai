@@ -1,0 +1,36 @@
+edition = "2024";
+
+package trogonai.catalog.agent_profiles.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogon/content/v1alpha1/content.proto";
+
+message Avatar {
+  oneof source {
+    option (buf.validate.oneof).required = true;
+
+    // Embedded PNG, JPEG, WebP, or GIF data is limited to 1..262144 bytes (256 KiB).
+    // Schema rules check declared MIME type and length; admission must decode
+    // the bytes and verify they are an image of the declared type.
+    trogon.content.v1alpha1.Content embedded = 1 [
+      (buf.validate.field).cel = {
+        id: "avatar.embedded_content_type"
+        message: "embedded avatars must declare image/png, image/jpeg, image/webp, or image/gif"
+        expression: "this.content_type in ['image/png', 'image/jpeg', 'image/webp', 'image/gif']"
+      },
+      (buf.validate.field).cel = {
+        id: "avatar.embedded_data_length"
+        message: "embedded avatar data must contain between 1 and 262144 bytes"
+        expression: "this.data.size() >= 1 && this.data.size() <= 262144"
+      }
+    ];
+    // Only credential-free absolute HTTPS URLs are durable profile data.
+    // Admission rejects signed URLs and secrets wherever encoded in the URL;
+    // syntax validation alone cannot prove their absence. Remote bytes may
+    // change, so this arm is not an immutable media claim.
+    string https_url = 2 [(buf.validate.field).string = {
+      uri: true
+      pattern: "(?i)^https://(?:\\[[0-9a-f:.]+\\]|[^:/?#@\\[\\]]+)(?::[0-9]+)?(?:[/?#].*)?$"
+    }];
+  }
+}

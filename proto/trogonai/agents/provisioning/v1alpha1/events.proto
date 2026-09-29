@@ -1,0 +1,44 @@
+edition = "2024";
+
+package trogonai.agents.provisioning.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/agents/provisioning/v1alpha1/outcome.proto";
+import "trogonai/agents/provisioning/v1alpha1/plan.proto";
+
+message AgentProvisioningBegan {
+  AgentProvisioningPlan plan = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message AgentProvisioningDispatchRecorded {
+  ProvisioningIdentity identity = 1 [features.field_presence = LEGACY_REQUIRED];
+  ProvisioningDispatch dispatch = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message AgentProvisioningStepOutcomeRecorded {
+  ProvisioningIdentity identity = 1 [features.field_presence = LEGACY_REQUIRED];
+  ProvisioningStep step = 2 [features.field_presence = LEGACY_REQUIRED];
+  ProvisioningStepOutcome outcome = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message AgentProvisioningCancellationRequested {
+  ProvisioningIdentity identity = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message AgentProvisioningResumed {
+  ProvisioningIdentity identity = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Unknown events or invalid ordering reject replay and deny a usable workflow
+// status. Registry events remain authoritative in their own stream; this
+// history checkpoints their verified receipts, not a second lifecycle decision.
+message AgentProvisioningEvent {
+  oneof event {
+    option (buf.validate.oneof).required = true;
+    AgentProvisioningBegan began = 1;
+    AgentProvisioningDispatchRecorded dispatch_recorded = 2;
+    AgentProvisioningStepOutcomeRecorded step_outcome_recorded = 3;
+    AgentProvisioningCancellationRequested cancellation_requested = 4;
+    AgentProvisioningResumed resumed = 5;
+  }
+}

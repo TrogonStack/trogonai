@@ -1,0 +1,17 @@
+edition = "2024";
+
+package trogonai.catalog.agent_profiles.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/catalog/agent_profiles/v1alpha1/agent_profile_initialized.proto";
+import "trogonai/catalog/agent_profiles/v1alpha1/agent_profile_set.proto";
+
+// Unknown or unset events reject replay instead of producing incomplete state.
+message AgentProfileEvent {
+  oneof event {
+    option (buf.validate.oneof).required = true;
+
+    AgentProfileInitialized agent_profile_initialized = 1;
+    AgentProfileSet agent_profile_set = 2;
+  }
+}

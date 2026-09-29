@@ -1,0 +1,63 @@
+edition = "2024";
+
+package trogonai.agents.provisioning.v1alpha1;
+
+import "trogonai/agents/provisioning/v1alpha1/outcome.proto";
+import "trogonai/agents/provisioning/v1alpha1/plan.proto";
+
+// NoStream creation requires the plan's begin_command_id as the enclosing
+// Decider command_id, and no expected_revision. Dispatch proves Agent identity
+// possession, plan authority, participant support, and every phase assignment.
+message BeginAgentProvisioning {
+  AgentProvisioningPlan plan = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Every mutation below requires an authenticated coordinator, a nonempty
+// Decider command_id, and the original positive expected_revision of the
+// operation stream. Retrying preserves both. The identity must match genesis.
+// A repeated identical checkpoint is a no-op only after these checks; a
+// different payload under the same step or command identity rejects.
+// If another operation checkpoint wins concurrency, first reconcile this one.
+// When absent, submit a new checkpoint intent with a new operation command id
+// and current operation revision. Its target command, payload, and original
+// target precondition stay unchanged; operation concurrency never refreshes them.
+// Terminal operations reject new dispatch, resume, and cancellation intent;
+// only verified reconciliation of an existing dispatch remains admissible.
+message RecordAgentProvisioningDispatch {
+  ProvisioningIdentity identity = 1 [features.field_presence = LEGACY_REQUIRED];
+  ProvisioningDispatch dispatch = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// A participant adapter verifies receipts against the original dispatch and
+// actual target history. Record outcomes only for already-dispatched steps;
+// success is immutable and contradictory/stale failure reports reject.
+// After a terminal outcome, accept only verified reconciliation of an existing
+// dispatch that preserves the terminal status. A PREPARE effect admitted before
+// cancellation can commit afterward; its receipt remains recordable without
+// authorizing a new effect, resume, or reversal of registry cancellation.
+message RecordAgentProvisioningStepOutcome {
+  ProvisioningIdentity identity = 1 [features.field_presence = LEGACY_REQUIRED];
+  ProvisioningStep step = 2 [features.field_presence = LEGACY_REQUIRED];
+  ProvisioningStepOutcome outcome = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Before any durable registry dispatch, this serializes local cancellation and
+// forbids later dispatch without creating an Agent. After registry dispatch it
+// records only cancellation intent: stop new PREPARE dispatches and reconcile
+// outstanding effects. Missing acknowledgment never proves no registry write.
+// Reconcile or retry the original genesis creation, then cancel the pending
+// registry. If readiness won first, record that receipt and recover requested
+// publication forward; an ACTIVE
+// registry can never be relabeled cancelled. No participant cleanup is implied.
+message RequestAgentProvisioningCancellation {
+  ProvisioningIdentity identity = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Reconciles durable dispatches and resumes the unchanged plan after external
+// repair or a lost worker. Retains successful receipts and cancellation intent;
+// never refreshes target request ids, payloads, or original write preconditions.
+// COMPLETED, CANCELLED, and REJECTED reject new dispatch, resume, and cancellation
+// intent; only reconciliation of already-dispatched effects remains allowed.
+message ResumeAgentProvisioning {
+  ProvisioningIdentity identity = 1 [features.field_presence = LEGACY_REQUIRED];
+}

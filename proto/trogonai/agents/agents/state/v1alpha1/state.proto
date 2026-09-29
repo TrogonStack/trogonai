@@ -11,6 +11,9 @@ import "trogonai/agents/agents/v1alpha1/agent_revision.proto";
 // is the explicit initial state. Replay rejects unknown events, mismatched agent
 // identities, and illegal transitions instead of skipping facts. Only unarchive
 // leaves archived state; neither lifecycle transition changes revision history.
+// Bound genesis enters PROVISIONING; unbound genesis enters ACTIVE. Pending
+// provisioning accepts only matching completion or cancellation. Cancellation is
+// terminal, and all lifecycle transitions preserve the immutable operation id.
 message State {
   oneof state {
     option (buf.validate.oneof).required = true;
@@ -44,6 +47,11 @@ message ProvisionedAgent {
     message: "each revert must reference the exact retained revision it reuses"
     expression: "this.revisions.all(number, !has(this.revisions[number].revert_of_revision) || (this.revisions[number].revert_of_revision.revision_number in this.revisions && this.revisions[this.revisions[number].revert_of_revision.revision_number].reference == this.revisions[number].revert_of_revision))"
   };
+  option (buf.validate.message).cel = {
+    id: "provisioned_agent.provisioning_binding"
+    message: "pending or cancelled provisioning requires its genesis operation and only revision 1"
+    expression: "!(this.lifecycle in [3, 4]) || (has(this.provisioning_id) && this.revisions.size() == 1 && 1u in this.revisions)"
+  };
 
   string agent_id = 1 [
     features.field_presence = LEGACY_REQUIRED,
@@ -57,4 +65,9 @@ message ProvisionedAgent {
     }
   ];
   map<uint64, trogonai.agents.agents.v1alpha1.AgentRevision> revisions = 3 [(buf.validate.field).map.min_pairs = 1];
+  string provisioning_id = 4 [(buf.validate.field).cel = {
+    id: "provisioned_agent.provisioning_id_nonblank"
+    message: "a present provisioning_id must contain a non-whitespace character"
+    expression: "this.trim() != ''"
+  }];
 }

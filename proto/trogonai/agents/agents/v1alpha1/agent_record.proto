@@ -6,10 +6,17 @@ import "buf/validate/validate.proto";
 import "trogonai/agents/agents/v1alpha1/agent_revision.proto";
 import "trogonai/agents/agents/v1alpha1/identity.proto";
 
+// New direct execution, delegation, and public discovery require ACTIVE and
+// current policy authorization, including callers that already know an Agent id
+// or revision. Provisioning is a registry admission gate, not a UI filter.
 enum AgentLifecycle {
   AGENT_LIFECYCLE_UNSPECIFIED = 0;
   AGENT_LIFECYCLE_ACTIVE = 1;
   AGENT_LIFECYCLE_ARCHIVED = 2;
+  // Only completion or cancellation of the bound provisioning may leave this phase.
+  AGENT_LIFECYCLE_PROVISIONING = 3;
+  // Terminal: this identity cannot be completed, unarchived, or provisioned again.
+  AGENT_LIFECYCLE_PROVISIONING_CANCELLED = 4;
 }
 
 // A derived logical record joining the registry and hierarchy. It is not a
@@ -19,6 +26,11 @@ message Agent {
     id: "agent.latest_revision_identity"
     message: "the latest revision must belong to this agent"
     expression: "this.identity.agent_id == this.latest_revision.agent_id"
+  };
+  option (buf.validate.message).cel = {
+    id: "agent.provisioning_binding"
+    message: "pending or cancelled provisioning requires its genesis operation and revision 1"
+    expression: "!(this.lifecycle in [3, 4]) || (has(this.provisioning_id) && this.latest_revision.revision_number == 1u)"
   };
 
   AgentIdentity identity = 1 [features.field_presence = LEGACY_REQUIRED];
@@ -40,4 +52,10 @@ message Agent {
   ];
   // Nonbehavioral metadata; selectors consume the pinned configuration's labels.
   map<string, string> annotations = 6;
+  // Immutable genesis binding, retained after completion or cancellation.
+  string provisioning_id = 7 [(buf.validate.field).cel = {
+    id: "agent.provisioning_id_nonblank"
+    message: "a present provisioning_id must contain a non-whitespace character"
+    expression: "this.trim() != ''"
+  }];
 }
