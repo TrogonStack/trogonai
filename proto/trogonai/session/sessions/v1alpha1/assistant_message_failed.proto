@@ -54,4 +54,11 @@ enum AssistantMessageFailureReason {
   // Generation hung and exceeded its time budget (parity with
   // ToolCallFailureReason.TIMEOUT).
   ASSISTANT_MESSAGE_FAILURE_REASON_TIMEOUT = 4;
+  // The provider refused the request before producing any output, for
+  // example a prompt blocked by policy pre-generation. Distinct from
+  // FinishReason.CONTENT_FILTER and FinishReason.REFUSAL, which both describe
+  // a generation that started and stopped; this reason describes one that
+  // never started, so there is no partial CanonicalMessage to complete and
+  // the turn is recorded as failed rather than completed.
+  ASSISTANT_MESSAGE_FAILURE_REASON_INPUT_REJECTED = 5;
 }

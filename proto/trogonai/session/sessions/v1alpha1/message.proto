@@ -5,6 +5,7 @@ package trogonai.session.sessions.v1alpha1;
 import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 import "trogonai/session/sessions/v1alpha1/artifact.proto";
+import "trogonai/session/sessions/v1alpha1/citation.proto";
 import "trogonai/session/sessions/v1alpha1/token_usage.proto";
 import "trogonai/session/sessions/v1alpha1/tool_call.proto";
 
@@ -40,6 +41,12 @@ enum MessageRole {
 
 // ContentBlock is one typed block inside a CanonicalMessage.
 message ContentBlock {
+  option (buf.validate.message).cel = {
+    id: "content_block.citations_require_text"
+    message: "citations may be set only when kind is text"
+    expression: "this.citations.size() == 0 || has(this.text)"
+  };
+
   oneof kind {
     string text = 1;
     ArtifactRef artifact_ref = 2;
@@ -50,6 +57,12 @@ message ContentBlock {
     bytes redacted_thinking = 6;
     ProviderBlock provider = 7;
   }
+  // Attributions for spans of text, present only when kind is text. Kept as
+  // a sibling field rather than structure inside text itself, because text
+  // is a bare string on the wire and giving it internal structure would be a
+  // breaking change to what every existing reader receives for it; empty
+  // when the model produced this text ungrounded.
+  repeated Citation citations = 8;
 }
 
 // ProviderBlock is a content block this package does not model, kept verbatim so

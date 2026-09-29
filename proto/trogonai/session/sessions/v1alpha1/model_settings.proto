@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "trogonai/session/sessions/v1alpha1/artifact.proto";
 
 // ModelSettings is the sampling configuration a generation actually ran with,
@@ -11,7 +12,9 @@ import "trogonai/session/sessions/v1alpha1/artifact.proto";
 // asked. Every scalar field has explicit presence: unset means the provider
 // default applied, which is a different fact from an explicitly configured
 // zero. stop_sequences is repeated and carries no presence, so an omitted list
-// and an empty list are the same recorded fact.
+// and an empty list are the same recorded fact. A field earns a place here only
+// when more than one provider exposes the same control under a matching
+// definition; a control only one provider has travels in raw_settings instead.
 message ModelSettings {
   uint64 max_output_tokens = 1;
   double temperature = 2;
@@ -23,4 +26,109 @@ message ModelSettings {
   // this message does not model. Kept out of line because it is replay input,
   // not projection input: no reader interprets it (D11).
   ArtifactRef raw_settings = 6;
+  // Recorded tool-forcing fact for this generation; unset when the provider's
+  // own default applied.
+  ToolChoice tool_choice = 7;
+  // Recorded structured-output fact for this generation; unset when the
+  // provider's own default applied.
+  ResponseFormat response_format = 8;
+  // Restricts sampling to the k highest-probability tokens at each step;
+  // unset means the provider default applied. Anthropic and Gemini both
+  // expose this; OpenAI does not.
+  uint64 top_k = 9;
+  // Deterministic-sampling seed; unset means the provider chose its own, or
+  // the provider does not support determinism at all. OpenAI and Gemini both
+  // expose this; Anthropic does not.
+  int64 seed = 10;
+  // Penalizes tokens already present in the generation so far, independent of
+  // how many times each appeared; unset means the provider default applied.
+  // OpenAI and Gemini both expose this; Anthropic does not.
+  double presence_penalty = 11;
+  // Penalizes tokens in proportion to how often they already appeared; unset
+  // means the provider default applied. OpenAI and Gemini both expose this;
+  // Anthropic does not.
+  double frequency_penalty = 12;
+  // Whether the model was allowed to request more than one tool call in a
+  // single turn; unset means the provider default applied. OpenAI exposes
+  // this directly, as parallel_tool_calls; Anthropic exposes the same control
+  // inverted, as disable_parallel_tool_use. This field takes OpenAI's
+  // polarity so true always reads as permission rather than as a double
+  // negative; an Anthropic adapter negates disable_parallel_tool_use when
+  // populating it.
+  bool parallel_tool_calls_allowed = 13;
+}
+
+// ToolChoice is how strongly a generation was steered toward invoking a tool,
+// recorded as an explicit fact rather than left to whatever the provider
+// defaulted to. AUTO leaves the choice to the model; NONE forbids tool use;
+// REQUIRED forces some tool call without naming which tool; SPECIFIC forces
+// one of tool_names. A provider mode that describes how the provider honors a
+// choice rather than a distinct choice the caller made collapses into
+// REQUIRED or SPECIFIC at the adapter.
+message ToolChoice {
+  option (buf.validate.message).cel = {
+    id: "tool_choice.tool_names_iff_specific"
+    message: "tool_names is set when and only when mode is SPECIFIC"
+    expression:
+      "(this.mode == trogonai.session.sessions.v1alpha1.ToolChoiceMode.TOOL_CHOICE_MODE_SPECIFIC) "
+      "== (this.tool_names.size() > 0)"
+  };
+
+  ToolChoiceMode mode = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Exact tool names a SPECIFIC choice is restricted to; empty for every
+  // other mode.
+  repeated string tool_names = 2 [(buf.validate.field).repeated.items.string.min_len = 1];
+}
+
+// ToolChoiceMode is the closed set of ways a generation can be steered toward
+// tool use.
+enum ToolChoiceMode {
+  TOOL_CHOICE_MODE_UNSPECIFIED = 0;
+  // The model decides whether, and which, tool to call.
+  TOOL_CHOICE_MODE_AUTO = 1;
+  // Tool use is forbidden; the turn must answer in text.
+  TOOL_CHOICE_MODE_NONE = 2;
+  // Some tool must be called; which one is the model's choice.
+  TOOL_CHOICE_MODE_REQUIRED = 3;
+  // One of ToolChoice.tool_names must be called.
+  TOOL_CHOICE_MODE_SPECIFIC = 4;
+}
+
+// ResponseFormat is how strongly a generation was steered toward a structured
+// reply. TEXT is unconstrained prose; JSON_OBJECT forces syntactically valid
+// JSON with no schema; JSON_SCHEMA forces JSON conforming to schema_json.
+// A provider without a dedicated response-format control that reaches
+// structured output by forcing a tool call records that as a ToolChoice fact,
+// not a ResponseFormat one.
+message ResponseFormat {
+  option (buf.validate.message).cel = {
+    id: "response_format.schema_iff_json_schema"
+    message: "schema_json is set when and only when kind is JSON_SCHEMA"
+    expression:
+      "has(this.schema_json) "
+      "== (this.kind == trogonai.session.sessions.v1alpha1.ResponseFormatKind.RESPONSE_FORMAT_KIND_JSON_SCHEMA)"
+  };
+
+  ResponseFormatKind kind = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The requested JSON Schema document, opaque JSON text; set only for
+  // JSON_SCHEMA. Stored inline, like ToolUseBlock.input_json, rather than
+  // claim-checked: it is a request-sized schema document, not the unbounded
+  // provider payload raw_settings exists to hold out of line.
+  string schema_json = 2;
+  // Caller-assigned name for the schema, for providers that require one to
+  // address it; empty when the provider needs none.
+  string schema_name = 3;
+  // Whether the provider was asked to enforce the schema exactly rather than
+  // as a best-effort hint; only meaningful for JSON_SCHEMA. Unset means the
+  // provider's own default leniency applied.
+  bool strict = 4;
+}
+
+// ResponseFormatKind is the closed set of ways a generation can be steered
+// toward structured output.
+enum ResponseFormatKind {
+  RESPONSE_FORMAT_KIND_UNSPECIFIED = 0;
+  RESPONSE_FORMAT_KIND_TEXT = 1;
+  RESPONSE_FORMAT_KIND_JSON_OBJECT = 2;
+  RESPONSE_FORMAT_KIND_JSON_SCHEMA = 3;
 }
