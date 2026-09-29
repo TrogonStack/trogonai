@@ -5,6 +5,7 @@ package trogonai.agents.agents.v1alpha1;
 import "buf/validate/validate.proto";
 import "trogonai/agents/agents/v1alpha1/agent_revision.proto";
 import "trogonai/agents/agents/v1alpha1/identity.proto";
+import "trogonai/agents/agents/v1alpha1/version_snapshot_reference.proto";
 
 // New direct execution, delegation, and public discovery require ACTIVE and
 // current policy authorization, including callers that already know an Agent id
@@ -32,6 +33,16 @@ message Agent {
     message: "pending or cancelled provisioning requires its genesis operation and revision 1"
     expression: "!(this.lifecycle in [3, 4]) || (has(this.provisioning_id) && this.latest_revision.revision_number == 1u)"
   };
+  option (buf.validate.message).cel = {
+    id: "agent.fork_origin"
+    message: "a fork must name another Agent and preserve its exact configuration at revision 1"
+    expression: "!has(this.forked_from_revision) || (this.forked_from_revision.agent_id != this.identity.agent_id && (this.latest_revision.revision_number != 1u || this.forked_from_revision.configuration == this.latest_revision.configuration))"
+  };
+  option (buf.validate.message).cel = {
+    id: "agent.fork_snapshot"
+    message: "a fork must name another Agent and preserve its exact snapshot configuration at revision 1"
+    expression: "!has(this.forked_from_snapshot) || (this.forked_from_snapshot.agent_id != this.identity.agent_id && (this.latest_revision.revision_number != 1u || this.forked_from_snapshot.configuration_digest == this.latest_revision.configuration.configuration_digest))"
+  };
 
   AgentIdentity identity = 1 [features.field_presence = LEGACY_REQUIRED];
   string display_name = 2 [features.field_presence = LEGACY_REQUIRED];
@@ -58,4 +69,9 @@ message Agent {
     message: "a present provisioning_id must contain a non-whitespace character"
     expression: "this.trim() != ''"
   }];
+  // Derived from immutable genesis, even when the latest configuration differs.
+  oneof fork_origin {
+    AgentRevisionRef forked_from_revision = 8;
+    AgentVersionSnapshotRef forked_from_snapshot = 9;
+  }
 }

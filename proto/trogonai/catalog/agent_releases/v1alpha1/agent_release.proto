@@ -1,0 +1,110 @@
+edition = "2024";
+
+package trogonai.catalog.agent_releases.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/agents/agents/v1alpha1/agent_revision.proto";
+import "trogonai/agents/agents/v1alpha1/digest.proto";
+import "trogonai/agents/agents/v1alpha1/version_snapshot_reference.proto";
+import "trogonai/agents/validations/v1alpha1/validation.proto";
+
+// Publication policy is owned outside the candidate it judges. Its immutable
+// definition fixes the required validator and release eligibility rules.
+message ReleasePolicyRef {
+  string policy_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).cel = {
+      id: "release_policy_ref.policy_id_nonblank"
+      message: "policy_id must contain a non-whitespace character"
+      expression: "this.trim() != ''"
+    }
+  ];
+  string version = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).cel = {
+      id: "release_policy_ref.version_nonblank"
+      message: "version must contain a non-whitespace character"
+      expression: "this.trim() != ''"
+    }
+  ];
+  trogonai.agents.agents.v1alpha1.Digest definition_digest = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Immutable publication of one committed authoring snapshot and an admitted
+// registry revision with identical Agent identity and configuration bytes.
+// This record neither activates a revision nor grants public discovery/access.
+// A label is presentation metadata; it is not globally unique or a version pin.
+message AgentRelease {
+  option (buf.validate.message).cel = {
+    id: "agent_release.revision_matches_snapshot"
+    message: "release revision must belong to the snapshot Agent and exact configuration"
+    expression: "this.revision.agent_id == this.snapshot.agent_id && this.revision.configuration.configuration_digest == this.snapshot.configuration_digest"
+  };
+  option (buf.validate.message).cel = {
+    id: "agent_release.validation_matches_snapshot"
+    message: "release validation must bind the exact authoring snapshot"
+    expression: "this.validation.snapshot == this.snapshot"
+  };
+
+  string release_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).cel = {
+      id: "agent_release.release_id_nonblank"
+      message: "release_id must contain a non-whitespace character"
+      expression: "this.trim() != ''"
+    }
+  ];
+  trogonai.agents.agents.v1alpha1.AgentVersionSnapshotRef snapshot = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.agents.v1alpha1.AgentRevisionRef revision = 3 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.validations.v1alpha1.ValidationResultRef validation = 4 [features.field_presence = LEGACY_REQUIRED];
+  ReleasePolicyRef policy = 5 [features.field_presence = LEGACY_REQUIRED];
+  string publisher_id = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).cel = {
+      id: "agent_release.publisher_id_nonblank"
+      message: "publisher_id must contain a non-whitespace character"
+      expression: "this.trim() != ''"
+    }
+  ];
+  string label = 7 [(buf.validate.field).cel = {
+    id: "agent_release.label_nonblank"
+    message: "a supplied label must contain a non-whitespace character"
+    expression: "this.trim() != ''"
+  }];
+}
+
+message AgentReleaseWithdrawal {
+  string withdrawn_by = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).cel = {
+      id: "agent_release_withdrawal.withdrawn_by_nonblank"
+      message: "withdrawn_by must contain a non-whitespace character"
+      expression: "this.trim() != ''"
+    }
+  ];
+  string reason = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+enum AgentReleaseStatus {
+  AGENT_RELEASE_STATUS_UNSPECIFIED = 0;
+  AGENT_RELEASE_STATUS_PUBLISHED = 1;
+  AGENT_RELEASE_STATUS_WITHDRAWN = 2;
+}
+
+message AgentReleaseRecord {
+  option (buf.validate.message).cel = {
+    id: "agent_release_record.withdrawal_matches_status"
+    message: "only a withdrawn release must contain withdrawal provenance"
+    expression: "has(this.withdrawal) == (this.status == 2)"
+  };
+
+  AgentRelease release = 1 [features.field_presence = LEGACY_REQUIRED];
+  AgentReleaseStatus status = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  AgentReleaseWithdrawal withdrawal = 3;
+}

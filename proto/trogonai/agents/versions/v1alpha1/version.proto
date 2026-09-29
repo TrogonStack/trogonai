@@ -1,0 +1,141 @@
+edition = "2024";
+
+package trogonai.agents.versions.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/agents/agents/v1alpha1/agent_revision.proto";
+import "trogonai/agents/agents/v1alpha1/version_snapshot_reference.proto";
+
+// Verify SHA-256 over the original bytes before recording. The bytes encode
+// AgentConfiguration but may be incomplete or invalid; authoring admission
+// cannot imply registry admission. Empty bytes represent an empty configuration.
+message AgentVersionSnapshot {
+  trogonai.agents.agents.v1alpha1.AgentVersionSnapshotRef reference = 1 [features.field_presence = LEGACY_REQUIRED];
+  bytes configuration_bytes = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Repository identity resolves through the caller's integration. It is never a
+// credential, clone URL, or signed URL. Git object ids use canonical lower hex.
+message GitCommitReference {
+  string repository_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).cel = {
+      id: "agent_version.identity_nonblank"
+      message: "identity must contain a non-whitespace character"
+      expression: "this.trim() != ''"
+    }
+  ];
+  oneof object_id {
+    option (buf.validate.oneof).required = true;
+
+    string sha1 = 2 [(buf.validate.field).string.pattern = "^[0-9a-f]{40}$"];
+    string sha256 = 3 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
+  }
+}
+
+// A base is an immutable same-Agent source verified at dispatch. A committed
+// snapshot proves authoring lineage without claiming it was ever executable.
+message AgentVersionBase {
+  oneof source {
+    option (buf.validate.oneof).required = true;
+
+    trogonai.agents.agents.v1alpha1.AgentVersionSnapshotRef committed_snapshot = 1;
+    trogonai.agents.agents.v1alpha1.AgentRevisionRef admitted_revision = 2;
+  }
+}
+
+message AgentVersionRetention {
+  oneof retention {
+    option (buf.validate.oneof).required = true;
+
+    google.protobuf.Empty durable = 1;
+    google.protobuf.Timestamp expires_at = 2;
+  }
+}
+
+message AgentVersionCreation {
+  option (buf.validate.message).cel = {
+    id: "agent_version_creation.first_snapshot"
+    message: "a new authoring version starts at snapshot 1"
+    expression: "this.snapshot.reference.snapshot_number == 1u"
+  };
+  option (buf.validate.message).cel = {
+    id: "agent_version_creation.base_identity"
+    message: "the base must belong to the same agent and a different version"
+    expression: "!has(this.base) || (has(this.base.committed_snapshot) ? (this.base.committed_snapshot.agent_id == this.snapshot.reference.agent_id && this.base.committed_snapshot.version_id != this.snapshot.reference.version_id) : this.base.admitted_revision.agent_id == this.snapshot.reference.agent_id)"
+  };
+
+  AgentVersionSnapshot snapshot = 1 [features.field_presence = LEGACY_REQUIRED];
+  string creator_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).cel = {
+      id: "agent_version.identity_nonblank"
+      message: "identity must contain a non-whitespace character"
+      expression: "this.trim() != ''"
+    }
+  ];
+  AgentVersionRetention retention = 3 [features.field_presence = LEGACY_REQUIRED];
+  AgentVersionBase base = 4;
+}
+
+// Committing freezes authoring bytes, not their validation or executability.
+// Optional Git provenance describes the source; it does not replace byte identity.
+message AgentVersionCommit {
+  trogonai.agents.agents.v1alpha1.AgentVersionSnapshotRef snapshot = 1 [features.field_presence = LEGACY_REQUIRED];
+  string summary = 2 [features.field_presence = LEGACY_REQUIRED];
+  string author_id = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).cel = {
+      id: "agent_version.identity_nonblank"
+      message: "identity must contain a non-whitespace character"
+      expression: "this.trim() != ''"
+    }
+  ];
+  GitCommitReference git_commit = 4;
+}
+
+message AgentVersionEdit {
+  option (buf.validate.message).cel = {
+    id: "agent_version_edit.same_identity"
+    message: "replacement must retain the same agent and version identity"
+    expression: "this.previous.agent_id == this.snapshot.reference.agent_id && this.previous.version_id == this.snapshot.reference.version_id"
+  };
+  option (buf.validate.message).cel = {
+    id: "agent_version_edit.next_snapshot"
+    message: "replacement must advance exactly one snapshot without overflow"
+    expression: "this.previous.snapshot_number < 18446744073709551615u && this.snapshot.reference.snapshot_number == this.previous.snapshot_number + 1u"
+  };
+
+  trogonai.agents.agents.v1alpha1.AgentVersionSnapshotRef previous = 1 [features.field_presence = LEGACY_REQUIRED];
+  AgentVersionSnapshot snapshot = 2 [features.field_presence = LEGACY_REQUIRED];
+  string editor_id = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).cel = {
+      id: "agent_version.identity_nonblank"
+      message: "identity must contain a non-whitespace character"
+      expression: "this.trim() != ''"
+    }
+  ];
+}
+
+message AgentVersionDiscard {
+  trogonai.agents.agents.v1alpha1.AgentVersionSnapshotRef snapshot = 1 [features.field_presence = LEGACY_REQUIRED];
+  string discarded_by = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).cel = {
+      id: "agent_version.identity_nonblank"
+      message: "identity must contain a non-whitespace character"
+      expression: "this.trim() != ''"
+    }
+  ];
+}
+
+enum AgentVersionStatus {
+  AGENT_VERSION_STATUS_UNSPECIFIED = 0;
+  AGENT_VERSION_STATUS_DRAFT = 1;
+  AGENT_VERSION_STATUS_COMMITTED = 2;
+  AGENT_VERSION_STATUS_DISCARDED = 3;
+  AGENT_VERSION_STATUS_EXPIRED = 4;
+}
