@@ -1,0 +1,170 @@
+edition = "2024";
+
+package trogonai.agents.validations.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/agents/agents/v1alpha1/digest.proto";
+import "trogonai/agents/agents/v1alpha1/version_snapshot_reference.proto";
+
+// The registered definition fixes the validator's checks and interpretation.
+// A display name or mutable latest version cannot establish this identity.
+message ValidatorRef {
+  string validator_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).cel = {
+      id: "validator_ref.validator_id_nonblank"
+      message: "validator_id must contain a non-whitespace character"
+      expression: "this.trim() != ''"
+    }
+  ];
+  string version = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).cel = {
+      id: "validator_ref.version_nonblank"
+      message: "version must contain a non-whitespace character"
+      expression: "this.trim() != ''"
+    }
+  ];
+  trogonai.agents.agents.v1alpha1.Digest definition_digest = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Resolves to one immutable completed run. The reference alone proves neither
+// completion nor success; consumers verify the persisted run and its authority.
+message ValidationResultRef {
+  string validation_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).cel = {
+      id: "validation_result_ref.validation_id_nonblank"
+      message: "validation_id must contain a non-whitespace character"
+      expression: "this.trim() != ''"
+    }
+  ];
+  trogonai.agents.agents.v1alpha1.AgentVersionSnapshotRef snapshot = 2 [features.field_presence = LEGACY_REQUIRED];
+  ValidatorRef validator = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+enum ValidationDiagnosticSeverity {
+  VALIDATION_DIAGNOSTIC_SEVERITY_UNSPECIFIED = 0;
+  VALIDATION_DIAGNOSTIC_SEVERITY_INFO = 1;
+  VALIDATION_DIAGNOSTIC_SEVERITY_WARNING = 2;
+  VALIDATION_DIAGNOSTIC_SEVERITY_ERROR = 3;
+}
+
+message ValidationDiagnostic {
+  // Stable rule identifier defined by the pinned validator contract.
+  string code = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).cel = {
+      id: "validation_diagnostic.code_nonblank"
+      message: "code must contain a non-whitespace character"
+      expression: "this.trim() != ''"
+    }
+  ];
+  ValidationDiagnosticSeverity severity = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  string message = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Optional source location, interpreted by the pinned validator contract.
+  string source_path = 4 [(buf.validate.field).cel = {
+    id: "validation_diagnostic.source_path_nonblank"
+    message: "a supplied source_path must contain a non-whitespace character"
+    expression: "this.trim() != ''"
+  }];
+}
+
+message ValidationReport {
+  repeated ValidationDiagnostic diagnostics = 1;
+}
+
+enum ValidationExecutionFailureCode {
+  VALIDATION_EXECUTION_FAILURE_CODE_UNSPECIFIED = 0;
+  VALIDATION_EXECUTION_FAILURE_CODE_UNAVAILABLE = 1;
+  VALIDATION_EXECUTION_FAILURE_CODE_UNSUPPORTED = 2;
+  VALIDATION_EXECUTION_FAILURE_CODE_INTERNAL = 3;
+}
+
+// Execution failure says nothing about whether the candidate is valid.
+// Retrying creates a new run instead of replacing this terminal result.
+message ValidationExecutionFailure {
+  ValidationExecutionFailureCode code = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  string message = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ValidationResult {
+  option (buf.validate.message).cel = {
+    id: "validation_result.valid_has_no_errors"
+    message: "a valid result cannot contain error diagnostics"
+    expression: "!has(this.valid) || this.valid.diagnostics.all(d, d.severity != 3)"
+  };
+  option (buf.validate.message).cel = {
+    id: "validation_result.invalid_has_errors"
+    message: "an invalid result requires an error diagnostic"
+    expression: "!has(this.invalid) || this.invalid.diagnostics.exists(d, d.severity == 3)"
+  };
+
+  // Authenticated execution principal, bound to this registered validator by
+  // dispatch. A caller-supplied identity or success claim is not proof.
+  string validator_principal_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).cel = {
+      id: "validation_result.validator_principal_id_nonblank"
+      message: "validator_principal_id must contain a non-whitespace character"
+      expression: "this.trim() != ''"
+    }
+  ];
+  oneof outcome {
+    option (buf.validate.oneof).required = true;
+
+    ValidationReport valid = 2;
+    ValidationReport invalid = 3;
+    ValidationExecutionFailure error = 4;
+  }
+}
+
+message AgentValidationRequest {
+  ValidationResultRef reference = 1 [features.field_presence = LEGACY_REQUIRED];
+  string requested_by = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).cel = {
+      id: "agent_validation_request.requested_by_nonblank"
+      message: "requested_by must contain a non-whitespace character"
+      expression: "this.trim() != ''"
+    }
+  ];
+}
+
+enum AgentValidationStatus {
+  AGENT_VALIDATION_STATUS_UNSPECIFIED = 0;
+  AGENT_VALIDATION_STATUS_PENDING = 1;
+  AGENT_VALIDATION_STATUS_VALID = 2;
+  AGENT_VALIDATION_STATUS_INVALID = 3;
+  AGENT_VALIDATION_STATUS_ERROR = 4;
+}
+
+message AgentValidation {
+  option (buf.validate.message).cel = {
+    id: "agent_validation.status_matches_result"
+    message: "pending has no result; terminal status must match its immutable result"
+    expression: "(this.status == 1 && !has(this.result)) || (has(this.result) && ((this.status == 2 && has(this.result.valid)) || (this.status == 3 && has(this.result.invalid)) || (this.status == 4 && has(this.result.error))))"
+  };
+
+  AgentValidationRequest request = 1 [features.field_presence = LEGACY_REQUIRED];
+  AgentValidationStatus status = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  ValidationResult result = 3;
+}

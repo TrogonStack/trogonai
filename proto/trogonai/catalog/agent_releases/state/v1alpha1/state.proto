@@ -1,0 +1,19 @@
+edition = "2024";
+
+package trogonai.catalog.agent_releases.state.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "trogonai/catalog/agent_releases/v1alpha1/agent_release.proto";
+
+// Publish transitions missing to PUBLISHED. Withdrawal changes only status and
+// withdrawal provenance, preserving every original release field. WITHDRAWN is
+// terminal. Effective discovery and access always belong to their live planes.
+message State {
+  oneof state {
+    option (buf.validate.oneof).required = true;
+
+    google.protobuf.Empty missing = 1;
+    trogonai.catalog.agent_releases.v1alpha1.AgentReleaseRecord present = 2;
+  }
+}

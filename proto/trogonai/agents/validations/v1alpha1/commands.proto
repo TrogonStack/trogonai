@@ -1,0 +1,29 @@
+edition = "2024";
+
+package trogonai.agents.validations.v1alpha1;
+
+import "trogonai/agents/validations/v1alpha1/validation.proto";
+
+// agents.validations owns one stream per validation_id. Every command requires
+// a stable nonblank DecideRequest.command_id. Request declares NoStream without
+// expected_revision; completion declares StreamUnchanged with the positive
+// expected_revision observed by its caller. Retries preserve both inputs.
+// Authentication, live authority, source access, Agent eligibility, and the
+// registered validator's exact definition are dispatch preconditions.
+// Dispatch verifies the persisted snapshot and its retained bytes/digest;
+// changing a draft afterward cannot change the source of this run.
+// requested_by equals the authenticated caller. Requests reject existing runs.
+message RequestAgentValidation {
+  AgentValidationRequest request = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Dispatch authenticates the reporting validator and verifies its registration
+// for the requested exact definition and source. Only trusted execution output
+// may produce a result; an author's claimed validity never satisfies this gate.
+// The fold requires exact equality with the opening reference and PENDING.
+// All outcomes are immutable terminals, including execution errors; a later
+// completion with a new command_id rejects even when the result is identical.
+message CompleteAgentValidation {
+  ValidationResultRef reference = 1 [features.field_presence = LEGACY_REQUIRED];
+  ValidationResult result = 2 [features.field_presence = LEGACY_REQUIRED];
+}

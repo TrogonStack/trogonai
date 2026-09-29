@@ -1,0 +1,58 @@
+edition = "2024";
+
+package trogonai.agents.validations.v1alpha1;
+
+import "trogon/error/v1alpha1/options.proto";
+
+// Local rejection templates for agents.validations on DeciderService's error
+// channel. Authentication, authorization, source, and validator proof failures
+// remain dispatch-owned; an execution failure is a result, not a command fault.
+message AgentValidationCommandInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.validations"
+    reason: "AGENT_VALIDATION_COMMAND_INVALID"
+    message: "The command violates the Agent validation contract."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentValidationNotFoundError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.validations"
+    reason: "AGENT_VALIDATION_NOT_FOUND"
+    message: "The Agent validation run has not been requested."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentValidationAlreadyExistsError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.validations"
+    reason: "AGENT_VALIDATION_ALREADY_EXISTS"
+    message: "The Agent validation run already exists."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentValidationAlreadyCompletedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.validations"
+    reason: "AGENT_VALIDATION_ALREADY_COMPLETED"
+    message: "The Agent validation run already has its terminal result."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentValidationReferenceMismatchError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.validations"
+    reason: "AGENT_VALIDATION_REFERENCE_MISMATCH"
+    message: "The command does not match this run's validation identity, source, or validator."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}

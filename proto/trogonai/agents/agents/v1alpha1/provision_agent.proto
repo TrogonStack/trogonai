@@ -3,8 +3,10 @@ edition = "2024";
 package trogonai.agents.agents.v1alpha1;
 
 import "buf/validate/validate.proto";
+import "trogonai/agents/agents/v1alpha1/agent_revision.proto";
 import "trogonai/agents/agents/v1alpha1/configuration_artifact.proto";
 import "trogonai/agents/agents/v1alpha1/identity.proto";
+import "trogonai/agents/agents/v1alpha1/version_snapshot_reference.proto";
 
 // Dispatch proves key possession and registration authority before this command
 // reaches decide. NoStream provisioning mints revision 1 only after verifying
@@ -13,7 +15,23 @@ import "trogonai/agents/agents/v1alpha1/identity.proto";
 // proves the owning workflow's immutable plan and records PROVISIONING instead;
 // completing that workflow's preparation is required before new work may run.
 // Coordinated creation preserves its plan's command_id across NoStream retries.
+// Fork admission proves the source exists and permits the caller to reuse its
+// exact artifact. An authoring snapshot may be a historical draft: its bytes
+// require independent registry admission, regardless of authoring validation.
+// A fork inherits configuration only, never identity, grants, credentials,
+// profile, listing, budget policy, or live resource bindings.
 message ProvisionAgent {
+  option (buf.validate.message).cel = {
+    id: "provision_agent.fork_origin"
+    message: "a fork requires another Agent's exact revision configuration"
+    expression: "!has(this.forked_from_revision) || (this.forked_from_revision.agent_id != this.identity.agent_id && this.forked_from_revision.configuration == this.configuration)"
+  };
+  option (buf.validate.message).cel = {
+    id: "provision_agent.fork_snapshot"
+    message: "a fork requires another Agent's exact authoring snapshot configuration"
+    expression: "!has(this.forked_from_snapshot) || (this.forked_from_snapshot.agent_id != this.identity.agent_id && this.forked_from_snapshot.configuration_digest == this.configuration.configuration_digest)"
+  };
+
   AgentIdentity identity = 1 [features.field_presence = LEGACY_REQUIRED];
   string display_name = 2 [features.field_presence = LEGACY_REQUIRED];
   string parent = 3 [
@@ -27,4 +45,8 @@ message ProvisionAgent {
     message: "a present provisioning_id must contain a non-whitespace character"
     expression: "this.trim() != ''"
   }];
+  oneof fork_origin {
+    AgentRevisionRef forked_from_revision = 7;
+    AgentVersionSnapshotRef forked_from_snapshot = 8;
+  }
 }

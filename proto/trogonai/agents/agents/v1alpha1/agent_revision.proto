@@ -5,6 +5,7 @@ package trogonai.agents.agents.v1alpha1;
 import "buf/validate/validate.proto";
 import "google/protobuf/empty.proto";
 import "trogonai/agents/agents/v1alpha1/configuration_artifact.proto";
+import "trogonai/agents/agents/v1alpha1/version_snapshot_reference.proto";
 
 // Configuration identity is the exact admitted artifact, not a reconstruction
 // from decoded fields. The revision number and provenance are outside its digest.
@@ -32,6 +33,16 @@ message AgentRevision {
     message: "a revert must preserve the exact configuration of an earlier revision of this agent"
     expression: "!has(this.revert_of_revision) || (this.revert_of_revision.agent_id == this.reference.agent_id && this.revert_of_revision.revision_number < this.reference.revision_number && this.revert_of_revision.configuration == this.reference.configuration)"
   };
+  option (buf.validate.message).cel = {
+    id: "agent_revision.fork_origin"
+    message: "only provisioning revision 1 may retain another Agent's exact source revision configuration"
+    expression: "!has(this.forked_from_revision) || (has(this.provisioning) && this.reference.revision_number == 1u && this.forked_from_revision.agent_id != this.reference.agent_id && this.forked_from_revision.configuration == this.reference.configuration)"
+  };
+  option (buf.validate.message).cel = {
+    id: "agent_revision.fork_snapshot"
+    message: "only provisioning revision 1 may retain another Agent's exact authoring snapshot configuration"
+    expression: "!has(this.forked_from_snapshot) || (has(this.provisioning) && this.reference.revision_number == 1u && this.forked_from_snapshot.agent_id != this.reference.agent_id && this.forked_from_snapshot.configuration_digest == this.reference.configuration.configuration_digest)"
+  };
 
   AgentRevisionRef reference = 1 [features.field_presence = LEGACY_REQUIRED];
   // Provisioning is valid only for revision 1. A revert names a previously
@@ -43,5 +54,10 @@ message AgentRevision {
     google.protobuf.Empty provisioning = 2;
     string proposal_id = 3 [(buf.validate.field).string.min_len = 1];
     AgentRevisionRef revert_of_revision = 4;
+  }
+  // Copied from verified genesis only; later revisions retain it in revision 1.
+  oneof fork_origin {
+    AgentRevisionRef forked_from_revision = 5;
+    AgentVersionSnapshotRef forked_from_snapshot = 6;
   }
 }

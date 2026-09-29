@@ -3,8 +3,10 @@ edition = "2024";
 package trogonai.agents.agents.v1alpha1;
 
 import "buf/validate/validate.proto";
+import "trogonai/agents/agents/v1alpha1/agent_revision.proto";
 import "trogonai/agents/agents/v1alpha1/configuration_artifact.proto";
 import "trogonai/agents/agents/v1alpha1/identity.proto";
+import "trogonai/agents/agents/v1alpha1/version_snapshot_reference.proto";
 
 // AgentProvisioned is the Agent registry stream's genesis event, minting
 // revision 1. No limits, no rubrics, no grants live here (design Q15/Q16);
@@ -12,7 +14,20 @@ import "trogonai/agents/agents/v1alpha1/identity.proto";
 // Absent provisioning_id preserves direct ACTIVE genesis. Presence creates
 // PROVISIONING and permanently binds this identity to that operation; the Agent
 // remains unavailable for new work until AgentProvisioningCompleted.
+// Fork provenance is the source verified at admission, never an unchecked
+// caller claim. It remains immutable through activation and lifecycle changes.
 message AgentProvisioned {
+  option (buf.validate.message).cel = {
+    id: "agent_provisioned.fork_origin"
+    message: "fork genesis requires another Agent's exact revision configuration"
+    expression: "!has(this.forked_from_revision) || (this.forked_from_revision.agent_id != this.agent_id && this.forked_from_revision.configuration == this.configuration_ref)"
+  };
+  option (buf.validate.message).cel = {
+    id: "agent_provisioned.fork_snapshot"
+    message: "fork genesis requires another Agent's exact authoring snapshot configuration"
+    expression: "!has(this.forked_from_snapshot) || (this.forked_from_snapshot.agent_id != this.agent_id && this.forked_from_snapshot.configuration_digest == this.configuration_ref.configuration_digest)"
+  };
+
   // Must be the did:key derived from public_identity_key.
   string agent_id = 1 [
     features.field_presence = LEGACY_REQUIRED,
@@ -48,4 +63,8 @@ message AgentProvisioned {
     message: "a present provisioning_id must contain a non-whitespace character"
     expression: "this.trim() != ''"
   }];
+  oneof fork_origin {
+    AgentRevisionRef forked_from_revision = 9;
+    AgentVersionSnapshotRef forked_from_snapshot = 10;
+  }
 }

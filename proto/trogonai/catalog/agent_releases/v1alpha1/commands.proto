@@ -1,0 +1,46 @@
+edition = "2024";
+
+package trogonai.catalog.agent_releases.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/catalog/agent_releases/v1alpha1/agent_release.proto";
+
+// catalog.agent_releases owns one stream per release_id. Dispatch requires a
+// stable nonblank DecideRequest.command_id and no expected_revision; the module
+// declares NoStream. Delivery retries retain that identity. An existing release,
+// including a withdrawn one, rejects another publish under a new command_id.
+//
+// Dispatch proves the exact source snapshot is the terminal committed version,
+// the pinned registry revision exists, and the persisted validation completed
+// VALID for that same snapshot and validator definition. It resolves the policy
+// selected by the policy authority, verifies its exact definition and required
+// validator, and rejects self-selected or stale policy. References are claims
+// until those authoritative facts have been checked. Retain their source bytes
+// and records while this release exists, including after withdrawal.
+//
+// Live authentication, source accessibility, publication authority, and current
+// ACTIVE registry lifecycle are also required. publisher_id is the authenticated
+// caller. Publication grants no access and does not alter listing visibility,
+// current revision, installations, or sessions. Retrieval evaluates live policy.
+message PublishAgentRelease {
+  AgentRelease release = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Dispatch proves current withdrawal authority and authenticated withdrawn_by,
+// even if the Agent is archived. Fold requires the exact release_id and PUBLISHED.
+// Withdrawal is terminal, retains the original publication, and cannot unpublish
+// already retrieved bytes or rewrite pinned sessions/installations.
+// This command requires a stable nonblank command_id and a positive observed
+// expected_revision; the module declares StreamUnchanged. Retries retain
+// both. A later withdrawal with a new command_id rejects, even if identical.
+message WithdrawAgentRelease {
+  string release_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).cel = {
+      id: "withdraw_agent_release.release_id_nonblank"
+      message: "release_id must contain a non-whitespace character"
+      expression: "this.trim() != ''"
+    }
+  ];
+  AgentReleaseWithdrawal withdrawal = 2 [features.field_presence = LEGACY_REQUIRED];
+}

@@ -26,6 +26,7 @@ message State {
 // Retain every exact revision to prove revert targets and prevent a proposal
 // from activating again after reverts or lifecycle changes. The highest key is
 // the latest revision; hierarchy and presentation facts are not decision inputs.
+// Revision 1 retains the exact fork provenance admitted by genesis, if present.
 message ProvisionedAgent {
   option (buf.validate.message).cel = {
     id: "provisioned_agent.revision_identity"

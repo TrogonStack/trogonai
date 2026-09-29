@@ -1,0 +1,26 @@
+edition = "2024";
+
+package trogonai.agents.validations.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/agents/validations/v1alpha1/validation.proto";
+
+message AgentValidationRequested {
+  AgentValidationRequest request = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message AgentValidationCompleted {
+  ValidationResultRef reference = 1 [features.field_presence = LEGACY_REQUIRED];
+  ValidationResult result = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Event-envelope recorded_at owns request and completion dates. Unknown events,
+// duplicate genesis/completion, or a changed reference reject replay.
+message AgentValidationEvent {
+  oneof event {
+    option (buf.validate.oneof).required = true;
+
+    AgentValidationRequested requested = 1;
+    AgentValidationCompleted completed = 2;
+  }
+}

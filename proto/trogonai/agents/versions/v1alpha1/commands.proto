@@ -1,0 +1,40 @@
+edition = "2024";
+
+package trogonai.agents.versions.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/agents/agents/v1alpha1/version_snapshot_reference.proto";
+import "trogonai/agents/versions/v1alpha1/version.proto";
+
+// NoStream creation verifies Agent authority, immutable base provenance, digest,
+// and a future expiry when supplied. Creator/editor/author identities must match
+// authenticated command provenance. Stream identity is the new version_id.
+message CreateAgentVersion {
+  AgentVersionCreation creation = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Every mutation requires a nonempty Decider command_id and the original
+// positive expected_revision. Retries preserve both. The supplied snapshot must
+// equal the current snapshot, including its digest; CAS failure never rebases.
+// Only DRAFT accepts mutations. Commit freezes its final snapshot permanently
+// and promotes ephemeral authoring to durable retention. Discard and expiry are
+// terminal. Dispatch rejects edits/commit/discard at or after an ephemeral
+// deadline using trusted current time, independently of an expiry worker.
+message ReplaceAgentVersionSnapshot {
+  AgentVersionEdit edit = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message CommitAgentVersion {
+  AgentVersionCommit commit = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message DiscardAgentVersion {
+  AgentVersionDiscard discard = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Dispatch proves the genesis deadline has elapsed using trusted current time.
+// Durable drafts cannot expire. Winning commit or discard makes expiry reject;
+// an expiry race never changes the terminal winner or deletes its history.
+message ExpireAgentVersion {
+  trogonai.agents.agents.v1alpha1.AgentVersionSnapshotRef snapshot = 1 [features.field_presence = LEGACY_REQUIRED];
+}
