@@ -1,4 +1,5 @@
 use super::*;
+use crate::credentials::oidc::OidcIssuerUrl;
 use crate::signing_key_source::{KeyVersion, SigningKeyHandle, StaticSigningKeySource};
 use nkeys::KeyPair;
 use serde_json::json;
@@ -241,10 +242,58 @@ fn caller_id_from_minted_jwt_missing_claim_errors() {
 #[test]
 fn derive_caller_id_is_stable_per_subject_and_tenant() {
     let tenant = AccountName::new("tenant-acme");
-    let first = derive_caller_id("alice", &tenant).unwrap();
-    let second = derive_caller_id("alice", &tenant).unwrap();
+    let first = derive_caller_id(CallerNamespace::Mtls, "alice", &tenant).unwrap();
+    let second = derive_caller_id(CallerNamespace::Mtls, "alice", &tenant).unwrap();
     assert_eq!(first, second);
-    assert_ne!(derive_caller_id("bob", &tenant).unwrap(), first);
+    assert_ne!(derive_caller_id(CallerNamespace::Mtls, "bob", &tenant).unwrap(), first);
+}
+
+#[test]
+fn derive_caller_id_differs_across_credential_sources_for_same_subject() {
+    let tenant = AccountName::new("tenant-acme");
+    let oidc = derive_caller_id(
+        CallerNamespace::Oidc {
+            issuer: &OidcIssuerUrl::parse("https://idp.example").unwrap(),
+        },
+        "alice",
+        &tenant,
+    )
+    .unwrap();
+    let mtls = derive_caller_id(CallerNamespace::Mtls, "alice", &tenant).unwrap();
+    let api_key = derive_caller_id(CallerNamespace::ApiKey, "alice", &tenant).unwrap();
+    assert_ne!(oidc, mtls);
+    assert_ne!(oidc, api_key);
+    assert_ne!(mtls, api_key);
+}
+
+#[test]
+fn derive_caller_id_differs_across_oidc_issuers_for_same_subject_and_tenant() {
+    let tenant = AccountName::new("tenant-acme");
+    let issuer_a = derive_caller_id(
+        CallerNamespace::Oidc {
+            issuer: &OidcIssuerUrl::parse("https://idp-a.example").unwrap(),
+        },
+        "alice",
+        &tenant,
+    )
+    .unwrap();
+    let issuer_b = derive_caller_id(
+        CallerNamespace::Oidc {
+            issuer: &OidcIssuerUrl::parse("https://idp-b.example").unwrap(),
+        },
+        "alice",
+        &tenant,
+    )
+    .unwrap();
+    assert_ne!(issuer_a, issuer_b);
+}
+
+#[test]
+fn derive_caller_id_length_prefixing_avoids_concatenation_ambiguity() {
+    let namespace = CallerNamespace::Mtls;
+    let left = derive_caller_id(namespace, "a|", &AccountName::new("b")).unwrap();
+    let right = derive_caller_id(namespace, "a", &AccountName::new("|b")).unwrap();
+    assert_ne!(left, right);
 }
 
 #[test]
