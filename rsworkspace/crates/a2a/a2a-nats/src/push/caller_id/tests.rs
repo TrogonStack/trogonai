@@ -49,6 +49,13 @@ fn from_str_percent_encodes_forbidden_characters() {
 }
 
 #[test]
+fn from_str_blank_is_placeholder() {
+    for blank in ["", "   ", "\t\n"] {
+        assert_eq!(CallerId::from(blank), CallerId::default());
+    }
+}
+
+#[test]
 fn default_matches_env_placeholder_literal() {
     assert_eq!(CallerId::default().as_str(), DEFAULT_PUSH_DLQ_CALLER_SEGMENT);
 }

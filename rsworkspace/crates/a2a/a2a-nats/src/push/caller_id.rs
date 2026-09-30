@@ -40,18 +40,8 @@ fn percent_encode_caller_segment(raw: &str) -> String {
 
 impl CallerId {
     fn from_raw_subject(raw: &str) -> Self {
-        let trimmed = raw.trim();
-        if trimmed.is_empty() {
-            return Self::default();
-        }
-        let encoded = percent_encode_caller_segment(trimmed);
-        match ValidatedCallerId::new(&encoded) {
-            Ok(id) => Self(id.as_str().to_owned()),
-            Err(_) => {
-                warn!(%encoded, "push DLQ caller_id: percent-encoded segment failed validation; using fallback segment");
-                Self::default()
-            }
-        }
+        ValidatedCallerId::new(percent_encode_caller_segment(raw.trim()))
+            .map_or_else(|_| Self::default(), |id| Self(id.as_str().to_owned()))
     }
 
     pub fn from_principal(principal: &SpiceDbPrincipal) -> Self {
