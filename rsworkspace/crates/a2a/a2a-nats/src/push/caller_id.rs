@@ -1,7 +1,6 @@
-use std::borrow::Cow;
 use std::fmt;
 
-use a2a_identity_types::SpiceDbPrincipal;
+use a2a_identity_types::{CallerId as ValidatedCallerId, SpiceDbPrincipal};
 use tracing::warn;
 
 use crate::constants::DEFAULT_PUSH_DLQ_CALLER_SEGMENT;
@@ -11,31 +10,44 @@ use crate::constants::DEFAULT_PUSH_DLQ_CALLER_SEGMENT;
 // `from_principal(&claims.data)` and lands in the auth-callout PR alongside
 // the minted-JWT integration tests.
 
+/// Push DLQ `{caller_id}` subject segment, built with an injective
+/// percent-encoding so distinct `spicedb_subject` values can never collapse
+/// onto the same segment.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct CallerId(String);
 
-pub(crate) fn sanitize_subject_token(raw: &str) -> Cow<'_, str> {
-    const fn forbidden(c: char) -> bool {
-        matches!(c, '.' | '*' | '>' | ' ' | '\t' | '\n' | '\r' | '\0'..='\x1f')
-    }
+/// Characters forbidden in a `a2a_identity_types::CallerId` segment, plus the
+/// escape character itself so the encoding stays injective.
+fn needs_percent_encoding(c: char) -> bool {
+    matches!(c, '.' | '*' | '>' | '%') || c.is_whitespace() || matches!(c, '\u{0}'..='\u{1f}' | '\u{7f}')
+}
 
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return Cow::Borrowed(DEFAULT_PUSH_DLQ_CALLER_SEGMENT);
+fn percent_encode_caller_segment(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut utf8_buf = [0u8; 4];
+    for c in raw.chars() {
+        if needs_percent_encoding(c) {
+            for byte in c.encode_utf8(&mut utf8_buf).as_bytes() {
+                out.push('%');
+                out.push_str(&format!("{byte:02X}"));
+            }
+        } else {
+            out.push(c);
+        }
     }
-
-    if !trimmed.chars().any(forbidden) {
-        Cow::Borrowed(trimmed)
-    } else {
-        Cow::Owned(trimmed.chars().map(|c| if forbidden(c) { '_' } else { c }).collect())
-    }
+    out
 }
 
 impl CallerId {
+    fn from_raw_subject(raw: &str) -> Self {
+        ValidatedCallerId::new(percent_encode_caller_segment(raw.trim()))
+            .map_or_else(|_| Self::default(), |id| Self(id.as_str().to_owned()))
+    }
+
     pub fn from_principal(principal: &SpiceDbPrincipal) -> Self {
         match principal.spicedb_subject() {
-            Some(subject) => Self(sanitize_subject_token(subject.as_str()).into_owned()),
-            None => Self(DEFAULT_PUSH_DLQ_CALLER_SEGMENT.to_string()),
+            Some(subject) => Self::from_raw_subject(subject.as_str()),
+            None => Self::default(),
         }
     }
 
@@ -49,19 +61,12 @@ pub fn resolve_push_dlq_caller_id(principal: Option<&SpiceDbPrincipal>, fallback
     let Some(p) = principal else {
         return fallback.clone();
     };
-    // A whitespace-only `spicedb_subject` is treated as absent — letting it
-    // through to `from_principal` would silently sanitise to the
-    // DEFAULT_PUSH_DLQ_CALLER_SEGMENT instead of honouring the operator's
-    // configured fallback.
-    let has_subject = p
-        .spicedb_subject()
-        .map(|s| !s.as_str().trim().is_empty())
-        .unwrap_or(false);
-    if has_subject {
-        CallerId::from_principal(p)
-    } else {
-        warn!(%fallback, "push DLQ caller_id: principal present but spicedb_subject absent/blank; using fallback segment");
-        fallback.clone()
+    match p.spicedb_subject() {
+        Some(s) if !s.as_str().trim().is_empty() => CallerId::from_raw_subject(s.as_str()),
+        _ => {
+            warn!(%fallback, "push DLQ caller_id: principal present but spicedb_subject absent/blank; using fallback segment");
+            fallback.clone()
+        }
     }
 }
 
@@ -79,7 +84,7 @@ impl fmt::Display for CallerId {
 
 impl From<&str> for CallerId {
     fn from(s: &str) -> Self {
-        Self(sanitize_subject_token(s).into_owned())
+        Self::from_raw_subject(s)
     }
 }
 

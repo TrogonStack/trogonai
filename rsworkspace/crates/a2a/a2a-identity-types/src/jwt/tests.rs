@@ -30,6 +30,18 @@ fn header_value_rejects_non_compact() {
 }
 
 #[test]
+fn header_value_parse_trims_surrounding_whitespace() {
+    let value = CallerJwtHeaderValue::parse("  a.b.c  ").unwrap();
+    assert_eq!(value.as_str(), "a.b.c");
+}
+
+#[test]
+fn minted_jwt_new_trims_surrounding_whitespace() {
+    let minted = MintedUserJwt::new("  a.b.c  ").unwrap();
+    assert_eq!(minted.as_str(), "a.b.c");
+}
+
+#[test]
 fn header_value_redacts_on_display() {
     let value = CallerJwtHeaderValue::parse("a.b.c").unwrap();
     assert_eq!(format!("{value}"), "<redacted>");
