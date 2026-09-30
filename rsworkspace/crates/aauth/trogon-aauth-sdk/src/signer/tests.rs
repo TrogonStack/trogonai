@@ -9,7 +9,7 @@ fn pop_headers_debug_redacts_agent_and_auth_jwt() {
     let signer = AgentSigner::from_pkcs8_pem(P256_PEM, "agent.jwt.value")
         .expect("valid PKCS8 key")
         .with_auth_token("auth.jwt.value");
-    let headers = signer.sign_nats_request("subject.example", None, b"payload", 1000, "nonce-1");
+    let headers = signer.sign_nats_request_now("subject.example", None, b"payload");
     let debug_output = format!("{headers:?}");
     assert!(
         !debug_output.contains("agent.jwt.value"),
