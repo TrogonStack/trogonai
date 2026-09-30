@@ -160,6 +160,20 @@ async fn reqwest_test_api(body: &'static str) -> String {
 }
 
 #[test]
+fn set_webhook_debug_redacts_bot_token_and_secret() {
+    let request = SetWebhook {
+        bot_token: TEST_BOT_TOKEN.to_string(),
+        public_webhook_url: "https://example.com/sources/telegram/primary/webhook".to_string(),
+        webhook_secret: "webhook-secret".to_string(),
+    };
+    let debug_output = format!("{request:?}");
+    assert!(!debug_output.contains(TEST_BOT_TOKEN));
+    assert!(!debug_output.contains("webhook-secret"));
+    assert!(debug_output.contains("https://example.com/sources/telegram/primary/webhook"));
+    assert!(debug_output.contains("<redacted>"));
+}
+
+#[test]
 fn set_webhook_endpoint_uses_bot_token() {
     assert_eq!(
         set_webhook_endpoint("https://api.telegram.org/", TEST_BOT_TOKEN),

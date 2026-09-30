@@ -2,13 +2,15 @@
 //! user interaction, clarification chat, permission endpoint, audit endpoint,
 //! interaction endpoint, and re-authorization (which defines no new wire shapes).
 
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 
 use super::MissionRef;
 
 /// Agent token request body sent to the PS's `token_endpoint`, per "Agent Token
 /// Request". All fields but `resource_token` are optional per the draft.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct TokenRequest {
     pub resource_token: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -33,6 +35,24 @@ pub struct TokenRequest {
     pub capabilities: Option<Vec<String>>,
 }
 
+impl fmt::Debug for TokenRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TokenRequest")
+            .field("resource_token", &"<redacted>")
+            .field("upstream_token", &self.upstream_token.as_ref().map(|_| "<redacted>"))
+            .field("subagent_token", &self.subagent_token.as_ref().map(|_| "<redacted>"))
+            .field("justification", &self.justification)
+            .field("login_hint", &self.login_hint)
+            .field("tenant", &self.tenant)
+            .field("domain_hint", &self.domain_hint)
+            .field("prompt", &self.prompt)
+            .field("platform", &self.platform)
+            .field("device", &self.device)
+            .field("capabilities", &self.capabilities)
+            .finish()
+    }
+}
+
 impl TokenRequest {
     #[must_use]
     pub fn new(resource_token: impl Into<String>) -> Self {
@@ -44,10 +64,19 @@ impl TokenRequest {
 }
 
 /// PS direct grant response (`200`) per "PS Response".
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TokenGrantResponse {
     pub auth_token: String,
     pub expires_in: i64,
+}
+
+impl fmt::Debug for TokenGrantResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TokenGrantResponse")
+            .field("auth_token", &"<redacted>")
+            .field("expires_in", &self.expires_in)
+            .finish()
+    }
 }
 
 /// Pending response body (`202`) per "Pending Response". `status` is a string

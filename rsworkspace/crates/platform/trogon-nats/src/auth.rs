@@ -1,3 +1,4 @@
+use std::fmt;
 use std::path::PathBuf;
 use trogon_std::env::ReadEnv;
 
@@ -13,13 +14,30 @@ use crate::constants::{
 /// 3. User/Password (`NATS_USER` + `NATS_PASSWORD`)
 /// 4. Token (`NATS_TOKEN`)
 /// 5. No auth
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum NatsAuth {
     Credentials(PathBuf),
     NKey(String),
     UserPassword { user: String, password: String },
     Token(String),
     None,
+}
+
+/// `NKey`, `password`, and `Token` are bearer credentials and must not be logged.
+impl fmt::Debug for NatsAuth {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Credentials(path) => f.debug_tuple("Credentials").field(path).finish(),
+            Self::NKey(_) => f.debug_tuple("NKey").field(&"<redacted>").finish(),
+            Self::UserPassword { user, .. } => f
+                .debug_struct("UserPassword")
+                .field("user", user)
+                .field("password", &"<redacted>")
+                .finish(),
+            Self::Token(_) => f.debug_tuple("Token").field(&"<redacted>").finish(),
+            Self::None => f.write_str("None"),
+        }
+    }
 }
 
 impl NatsAuth {

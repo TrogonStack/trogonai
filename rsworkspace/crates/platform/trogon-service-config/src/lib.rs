@@ -1,5 +1,6 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 use clap::Args;
@@ -15,7 +16,7 @@ pub struct RuntimeConfigArgs {
     pub nats: NatsArgs,
 }
 
-#[derive(Args, Clone, Debug, Default)]
+#[derive(Args, Clone, Default)]
 pub struct NatsArgs {
     #[arg(long, global = true)]
     pub nats_url: Option<String>,
@@ -31,7 +32,20 @@ pub struct NatsArgs {
     pub nats_token: Option<String>,
 }
 
-#[derive(Config, Clone, Debug)]
+impl fmt::Debug for NatsArgs {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("NatsArgs")
+            .field("nats_url", &self.nats_url)
+            .field("nats_creds", &self.nats_creds)
+            .field("nats_nkey", &self.nats_nkey.as_ref().map(|_| "<redacted>"))
+            .field("nats_user", &self.nats_user)
+            .field("nats_password", &self.nats_password.as_ref().map(|_| "<redacted>"))
+            .field("nats_token", &self.nats_token.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
+}
+
+#[derive(Config, Clone)]
 pub struct NatsConfigSection {
     #[config(env = "NATS_URL", default = "localhost:4222")]
     pub url: String,
@@ -45,6 +59,19 @@ pub struct NatsConfigSection {
     pub password: Option<String>,
     #[config(env = "NATS_TOKEN")]
     pub token: Option<String>,
+}
+
+impl fmt::Debug for NatsConfigSection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("NatsConfigSection")
+            .field("url", &self.url)
+            .field("creds", &self.creds)
+            .field("nkey", &self.nkey.as_ref().map(|_| "<redacted>"))
+            .field("user", &self.user)
+            .field("password", &self.password.as_ref().map(|_| "<redacted>"))
+            .field("token", &self.token.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
 }
 
 pub fn load_config<T: Config>(config_path: Option<&Path>) -> Result<T, confique::Error> {

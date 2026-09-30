@@ -104,3 +104,32 @@ fn description_matches_variant() {
     assert_eq!(NatsAuth::Token("t".into()).description(), "token");
     assert_eq!(NatsAuth::None.description(), "none");
 }
+
+#[test]
+fn debug_redacts_credentials() {
+    let nkey = format!("{:?}", NatsAuth::NKey("super-secret-nkey".into()));
+    assert!(!nkey.contains("super-secret-nkey"));
+    assert!(nkey.contains("<redacted>"));
+
+    let user_password = format!(
+        "{:?}",
+        NatsAuth::UserPassword {
+            user: "alice".into(),
+            password: "super-secret-password".into(),
+        }
+    );
+    assert!(user_password.contains("alice"));
+    assert!(!user_password.contains("super-secret-password"));
+    assert!(user_password.contains("<redacted>"));
+
+    let token = format!("{:?}", NatsAuth::Token("super-secret-token".into()));
+    assert!(!token.contains("super-secret-token"));
+    assert!(token.contains("<redacted>"));
+}
+
+#[test]
+fn debug_shows_non_secret_variants() {
+    let creds = format!("{:?}", NatsAuth::Credentials(PathBuf::from("/etc/nats/app.creds")));
+    assert!(creds.contains("/etc/nats/app.creds"));
+    assert_eq!(format!("{:?}", NatsAuth::None), "None");
+}

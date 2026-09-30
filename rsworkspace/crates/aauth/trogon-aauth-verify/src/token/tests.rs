@@ -932,3 +932,79 @@ fn request_context_error_display_messages_are_distinct() {
         assert_ne!(window[0], window[1]);
     }
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn verified_agent_debug_redacts_raw_jwt() {
+    let signing = jsonwebtoken::EncodingKey::from_ec_pem(P256_PEM).expect("signing key");
+    let jwks = StaticJwks::new().with(
+        "iss.example",
+        jsonwebtoken::jwk::JwkSet {
+            keys: vec![p256_jwk_for_test()],
+        },
+    );
+    let mut header = jsonwebtoken::Header::new(Algorithm::ES256);
+    header.typ = Some(TYP_AGENT.into());
+    header.kid = Some("k1".into());
+    let claims = serde_json::json!({
+        "iss": "iss.example",
+        "sub": "agent-1",
+        "jti": "j1",
+        "iat": 1000,
+        "exp": 9999999999_i64,
+        "dwk": "aa-agent",
+        "cnf": { "jwk": {
+            "kty": "EC", "crv": "P-256",
+            "x": "EVs_o5-uQbTjL3chynL4wXgUg2R9q9UU8I5mEovUf84",
+            "y": "kGe5DgSIycKp8w9aJmoHhB1sB3QTugfnRWm5nU_TzsY"
+        }},
+    });
+    let jwt = jsonwebtoken::encode(&header, &claims, &signing).expect("encode");
+    let v = TokenVerifier::new(jwks, SystemTimeSource);
+    let verified = v.verify_agent(&jwt).await.expect("verify_agent");
+    let debug_output = format!("{verified:?}");
+    assert!(
+        !debug_output.contains(&jwt),
+        "debug output leaked raw_jwt: {debug_output}"
+    );
+    assert!(debug_output.contains("<redacted>"));
+    assert!(debug_output.contains("iss.example"));
+}
+
+#[test]
+fn verified_auth_debug_redacts_raw_jwt() {
+    let verified = verified_auth_with_cnf(None, None);
+    let debug_output = format!("{verified:?}");
+    assert!(
+        !debug_output.contains(&verified.raw_jwt),
+        "debug output leaked raw_jwt: {debug_output}"
+    );
+    assert!(debug_output.contains("<redacted>"));
+    assert!(debug_output.contains("person-1"));
+}
+
+#[test]
+fn verified_resource_debug_redacts_raw_jwt() {
+    let claims: ResourceClaims = serde_json::from_value(serde_json::json!({
+        "iss": "iss.example",
+        "aud": "resource.example",
+        "jti": "j1",
+        "iat": 1000,
+        "exp": 9999999999_i64,
+        "dwk": "aa-resource",
+        "agent": "agent-1",
+        "agent_jkt": "abc",
+        "scope": "read",
+    }))
+    .expect("valid ResourceClaims shape");
+    let verified = VerifiedResource {
+        claims,
+        raw_jwt: "raw.resource.jwt".to_string(),
+    };
+    let debug_output = format!("{verified:?}");
+    assert!(
+        !debug_output.contains(&verified.raw_jwt),
+        "debug output leaked raw_jwt: {debug_output}"
+    );
+    assert!(debug_output.contains("<redacted>"));
+    assert!(debug_output.contains("iss.example"));
+}
