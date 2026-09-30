@@ -126,3 +126,10 @@ fn debug_redacts_credentials() {
     assert!(!token.contains("super-secret-token"));
     assert!(token.contains("<redacted>"));
 }
+
+#[test]
+fn debug_shows_non_secret_variants() {
+    let creds = format!("{:?}", NatsAuth::Credentials(PathBuf::from("/etc/nats/app.creds")));
+    assert!(creds.contains("/etc/nats/app.creds"));
+    assert_eq!(format!("{:?}", NatsAuth::None), "None");
+}
