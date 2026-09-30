@@ -33,7 +33,8 @@ pub use delegation::Act;
 /// constructor; the field is private so no caller can assemble one around it.
 /// Deserialization is deliberately exempt: a peer's inbound `cnf` is parsed as
 /// sent, because what a peer put in its own confirmation claim is not this
-/// type's call to reject, and verification reads only the public parameters.
+/// type's call to reject at the wire-format layer. Verifiers call
+/// [`Cnf::reject_if_not_public`] before trusting a peer-supplied `cnf`.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Cnf {
     /// Embedded JWK. Stored as serde_json::Value so this crate avoids depending on
@@ -82,14 +83,7 @@ impl Cnf {
         let Some(kty) = members.get("kty").and_then(Value::as_str) else {
             return Err(CnfError::MissingKeyType);
         };
-        if kty.eq_ignore_ascii_case(crate::constants::KTY_OCT) {
-            return Err(CnfError::SymmetricKey);
-        }
-        for member in crate::constants::JWK_PRIVATE_MEMBERS {
-            if members.contains_key(member) {
-                return Err(CnfError::PrivateKeyMaterial { member });
-            }
-        }
+        Self::reject_private_or_symmetric(members, Some(kty))?;
         let (kty, required): (&'static str, &[&'static str]) = match kty {
             crate::constants::KTY_EC => (crate::constants::KTY_EC, &crate::constants::JWK_REQUIRED_EC_MEMBERS),
             crate::constants::KTY_RSA => (crate::constants::KTY_RSA, &crate::constants::JWK_REQUIRED_RSA_MEMBERS),
@@ -110,6 +104,31 @@ impl Cnf {
     #[must_use]
     pub fn jwk(&self) -> &Value {
         &self.jwk
+    }
+
+    /// RFC 7800 Section 3.2: a `cnf` JWK carries only the public key. Structural
+    /// completeness is left to the verifier, which already fails closed on it.
+    pub fn reject_if_not_public(&self) -> Result<(), CnfError> {
+        let Some(members) = self.jwk.as_object() else {
+            return Err(CnfError::NotAnObject);
+        };
+        let kty = members.get("kty").and_then(Value::as_str);
+        Self::reject_private_or_symmetric(members, kty)
+    }
+
+    fn reject_private_or_symmetric(
+        members: &serde_json::Map<String, Value>,
+        kty: Option<&str>,
+    ) -> Result<(), CnfError> {
+        if kty.is_some_and(|k| k.eq_ignore_ascii_case(crate::constants::KTY_OCT)) {
+            return Err(CnfError::SymmetricKey);
+        }
+        for member in crate::constants::JWK_PRIVATE_MEMBERS {
+            if members.contains_key(member) {
+                return Err(CnfError::PrivateKeyMaterial { member });
+            }
+        }
+        Ok(())
     }
 }
 

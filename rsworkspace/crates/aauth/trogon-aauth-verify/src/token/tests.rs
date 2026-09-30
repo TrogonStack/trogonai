@@ -288,6 +288,68 @@ async fn verify_auth_happy_path() {
     assert_eq!(verified.claims.iss, "iss.example");
 }
 
+async fn verify_auth_with_cnf_jwk(cnf_jwk: serde_json::Value) -> Result<VerifiedAuth, TokenError> {
+    let signing = jsonwebtoken::EncodingKey::from_ec_pem(P256_PEM).expect("signing key");
+    let jwks = StaticJwks::new().with(
+        "iss.example",
+        jsonwebtoken::jwk::JwkSet {
+            keys: vec![p256_jwk_for_test()],
+        },
+    );
+    let mut header = jsonwebtoken::Header::new(Algorithm::ES256);
+    header.typ = Some(TYP_AUTH.into());
+    header.kid = Some("k1".into());
+    let claims = serde_json::json!({
+        "iss": "iss.example",
+        "sub": "person-1",
+        "aud": "resource.example",
+        "jti": "j1",
+        "iat": 1000,
+        "exp": 9999999999_i64,
+        "agent": "agent-1",
+        "agent_jkt": "abc",
+        "scope": "read",
+        "cnf": { "jwk": cnf_jwk },
+    });
+    let jwt = jsonwebtoken::encode(&header, &claims, &signing).expect("encode");
+    let v = TokenVerifier::new(jwks, SystemTimeSource);
+    v.verify_auth(&jwt, "resource.example").await
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_auth_rejects_peer_cnf_carrying_private_key_material() {
+    let err = verify_auth_with_cnf_jwk(serde_json::json!({
+        "kty": "EC", "crv": "P-256",
+        "x": "EVs_o5-uQbTjL3chynL4wXgUg2R9q9UU8I5mEovUf84",
+        "y": "kGe5DgSIycKp8w9aJmoHhB1sB3QTugfnRWm5nU_TzsY",
+        "d": "SECRET",
+    }))
+    .await
+    .unwrap_err();
+    assert!(matches!(
+        err,
+        TokenError::ConfirmationKeyNotPublic(CnfError::PrivateKeyMaterial { member: "d" })
+    ));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_auth_accepts_valid_public_ec_okp_and_rsa_confirmation_keys() {
+    let ec = ed25519_fixture("ed-k1").jwk_json;
+    for cnf_jwk in [
+        serde_json::json!({
+            "kty": "EC", "crv": "P-256",
+            "x": "EVs_o5-uQbTjL3chynL4wXgUg2R9q9UU8I5mEovUf84",
+            "y": "kGe5DgSIycKp8w9aJmoHhB1sB3QTugfnRWm5nU_TzsY",
+        }),
+        ec,
+        serde_json::json!({"kty": "RSA", "n": "AAA", "e": "AQAB"}),
+    ] {
+        verify_auth_with_cnf_jwk(cnf_jwk)
+            .await
+            .expect("valid public cnf.jwk verifies");
+    }
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn verify_resource_happy_path() {
     let signing = jsonwebtoken::EncodingKey::from_ec_pem(P256_PEM).expect("signing key");
@@ -453,6 +515,73 @@ async fn verify_agent_maps_missing_cnf_to_invalid_claim() {
     let v = TokenVerifier::new(jwks, SystemTimeSource);
     let err = v.verify_agent(&jwt).await.unwrap_err();
     assert!(matches!(err, TokenError::InvalidClaim(_)));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_agent_rejects_peer_cnf_carrying_private_key_material() {
+    // A peer-supplied cnf.jwk with otherwise-valid EC public members plus `d`
+    // must be refused, not merely have `d` ignored.
+    let err = verify_agent_with_cnf_jwk(serde_json::json!({
+        "kty": "EC", "crv": "P-256",
+        "x": "EVs_o5-uQbTjL3chynL4wXgUg2R9q9UU8I5mEovUf84",
+        "y": "kGe5DgSIycKp8w9aJmoHhB1sB3QTugfnRWm5nU_TzsY",
+        "d": "SECRET",
+    }))
+    .await;
+    assert!(matches!(
+        err,
+        TokenError::ConfirmationKeyNotPublic(CnfError::PrivateKeyMaterial { member: "d" })
+    ));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_agent_rejects_peer_cnf_naming_a_symmetric_key() {
+    let err = verify_agent_with_cnf_jwk(serde_json::json!({"kty": "oct", "k": "SECRET"})).await;
+    assert!(matches!(
+        err,
+        TokenError::ConfirmationKeyNotPublic(CnfError::SymmetricKey)
+    ));
+}
+
+async fn verify_agent_accepts_cnf_jwk(cnf_jwk: serde_json::Value) -> VerifiedAgent {
+    let signing = jsonwebtoken::EncodingKey::from_ec_pem(P256_PEM).expect("signing key");
+    let jwks = StaticJwks::new().with(
+        "iss.example",
+        jsonwebtoken::jwk::JwkSet {
+            keys: vec![p256_jwk_for_test()],
+        },
+    );
+    let mut header = jsonwebtoken::Header::new(Algorithm::ES256);
+    header.typ = Some(TYP_AGENT.into());
+    header.kid = Some("k1".into());
+    let claims = serde_json::json!({
+        "iss": "iss.example",
+        "sub": "agent-1",
+        "jti": "j1",
+        "iat": 1000,
+        "exp": 9999999999_i64,
+        "dwk": "aa-agent",
+        "cnf": { "jwk": cnf_jwk },
+    });
+    let jwt = jsonwebtoken::encode(&header, &claims, &signing).expect("encode");
+    let v = TokenVerifier::new(jwks, SystemTimeSource);
+    v.verify_agent(&jwt).await.expect("valid public cnf.jwk verifies")
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_agent_accepts_valid_public_ec_okp_and_rsa_confirmation_keys() {
+    let ec = ed25519_fixture("ed-k1").jwk_json;
+    for cnf_jwk in [
+        serde_json::json!({
+            "kty": "EC", "crv": "P-256",
+            "x": "EVs_o5-uQbTjL3chynL4wXgUg2R9q9UU8I5mEovUf84",
+            "y": "kGe5DgSIycKp8w9aJmoHhB1sB3QTugfnRWm5nU_TzsY",
+        }),
+        ec,
+        serde_json::json!({"kty": "RSA", "n": "AAA", "e": "AQAB"}),
+    ] {
+        verify_agent_accepts_cnf_jwk(cnf_jwk).await;
+    }
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -700,6 +829,29 @@ fn verify_auth_request_context_rejects_structurally_incomplete_key_distinct_from
         )
         .unwrap_err();
     assert!(matches!(err, RequestContextError::InvalidKeyMaterial(_)));
+}
+
+#[test]
+fn verify_auth_request_context_rejects_peer_cnf_carrying_private_key_material() {
+    // Standalone defense-in-depth: this method is documented to run against
+    // a VerifiedAuth obtained by any means, not only via verify_auth.
+    let fixture = p256_fixture("k1");
+    let mut jwk_with_d = fixture.jwk_json.clone();
+    jwk_with_d["d"] = serde_json::json!("SECRET");
+    let jkt = crate::jkt::jwk_thumbprint(&fixture.jwk_json).expect("thumbprint");
+    let verified = verified_auth_with_cnf(Some(serde_json::json!({"jwk": jwk_with_d})), None);
+    let v = TokenVerifier::new(StaticJwks::new(), SystemTimeSource);
+    let err = v
+        .verify_auth_request_context(
+            &verified,
+            "resource.example",
+            &signing_ctx("aauth:asst@agent.example", &jkt),
+        )
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        RequestContextError::ConfirmationKeyNotPublic(CnfError::PrivateKeyMaterial { member: "d" })
+    ));
 }
 
 #[test]

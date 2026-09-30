@@ -7,7 +7,7 @@ use p256::ecdsa::SigningKey;
 use rand_core::OsRng;
 use trogon_aauth_verify::StaticJwks;
 use trogon_aauth_verify::time_source::SystemTimeSource;
-use trogon_identity_types::aauth::{Act, Cnf, TYP_AUTH};
+use trogon_identity_types::aauth::{Act, Cnf, CnfError, TYP_AUTH};
 
 use super::*;
 
@@ -136,11 +136,6 @@ fn rule4_fails_when_cnf_claim_is_missing() {
 
 #[test]
 fn rule4_fails_when_peer_supplied_cnf_jwk_is_symmetric() {
-    // A wire-decoded `AuthClaims` bypasses `Cnf::public` (a peer's own `cnf`
-    // is parsed as sent), so nothing upstream of this call stops a symmetric
-    // `cnf.jwk` from arriving here. The thumbprint step must refuse it
-    // outright rather than compute a digest from a `k` value the peer
-    // controls and treat the outcome as an ordinary key mismatch.
     let jwk = own_jwk();
     let claims_json = serde_json::json!({
         "iss": RESOURCE_TOKEN_AUD,
@@ -156,7 +151,37 @@ fn rule4_fails_when_peer_supplied_cnf_jwk_is_symmetric() {
     });
     let claims: AuthClaims = serde_json::from_value(claims_json).expect("peer claims decode");
     let err = verify_auth_claims(&claims, RESOURCE_TOKEN_AUD, RESOURCE, &jwk, OWN_AGENT, None).unwrap_err();
-    assert!(matches!(err, VerifyResponseError::ConfirmationKeyThumbprint(_)));
+    assert!(matches!(
+        err,
+        VerifyResponseError::ConfirmationKeyNotPublic(CnfError::SymmetricKey)
+    ));
+}
+
+#[test]
+fn rule4_fails_when_cnf_jwk_carries_private_key_material() {
+    // A peer-supplied cnf reaches AuthClaims through Deserialize, not
+    // Cnf::public, so this exercises the path Cnf::public's own tests can't.
+    let jwk = own_jwk();
+    let mut peer_jwk = jwk.clone();
+    peer_jwk["d"] = serde_json::json!("SECRET");
+    let claims: AuthClaims = serde_json::from_value(valid_auth_token_claims_json(&peer_jwk)).expect("claims parse");
+    let err = verify_auth_claims(&claims, RESOURCE_TOKEN_AUD, RESOURCE, &jwk, OWN_AGENT, None).unwrap_err();
+    assert!(matches!(
+        err,
+        VerifyResponseError::ConfirmationKeyNotPublic(CnfError::PrivateKeyMaterial { member: "d" })
+    ));
+}
+
+#[test]
+fn rule4_accepts_valid_public_okp_and_rsa_confirmation_keys() {
+    for jwk in [
+        serde_json::json!({"kty": "OKP", "crv": "Ed25519", "x": "AAA"}),
+        serde_json::json!({"kty": "RSA", "n": "AAA", "e": "AQAB"}),
+    ] {
+        let claims = valid_claims(jwk.clone());
+        verify_auth_claims(&claims, RESOURCE_TOKEN_AUD, RESOURCE, &jwk, OWN_AGENT, None)
+            .unwrap_or_else(|e| panic!("{jwk} must be accepted, got {e:?}"));
+    }
 }
 
 #[test]
