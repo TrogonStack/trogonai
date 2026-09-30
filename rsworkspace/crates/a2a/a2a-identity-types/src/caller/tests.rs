@@ -31,6 +31,12 @@ fn rejects_whitespace() {
 }
 
 #[test]
+fn rejects_control_characters() {
+    assert!(matches!(CallerId::new("a\u{1}b"), Err(JwtError::InvalidCallerId)));
+    assert!(matches!(CallerId::new("a\u{7f}b"), Err(JwtError::InvalidCallerId)));
+}
+
+#[test]
 fn serializes_transparent() {
     let caller = CallerId::new("alice").unwrap();
     let json = serde_json::to_string(&caller).unwrap();

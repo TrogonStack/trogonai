@@ -123,7 +123,7 @@ fn account_name_display_round_trips() {
 
 #[test]
 fn caller_id_rejects_wildcards_and_whitespace() {
-    for bad in ["", "a.b", "a*b", "a>b", "a b", "\ta"] {
+    for bad in ["", "a.b", "a*b", "a>b", "a b", "\ta", "a\u{1}b", "a\u{7f}b"] {
         assert!(CallerId::new(bad).is_err(), "expected rejection for {bad:?}");
     }
 }

@@ -27,7 +27,7 @@ impl CallerJwtHeaderValue {
     }
 
     pub fn parse(token: impl Into<String>) -> Result<Self, JwtError> {
-        let token = token.into();
+        let token = token.into().trim().to_owned();
         validate_compact_jwt_shape(&token)?;
         Ok(Self(token))
     }
@@ -74,7 +74,7 @@ impl MintedUserJwt {
     /// Returns an error if the input is not three non-empty `.`-separated
     /// segments. Signature verification still lives gateway-side.
     pub fn new(token: impl Into<String>) -> Result<Self, JwtError> {
-        let token = token.into();
+        let token = token.into().trim().to_owned();
         validate_compact_jwt_shape(&token)?;
         Ok(Self(token))
     }
