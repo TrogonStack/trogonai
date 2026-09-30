@@ -1,8 +1,4 @@
-//! Crate-wide constants: AAuth wire values, HTTP/NATS header names, and
-//! act-chain bounds.
-
-/// Maximum number of entries allowed in an `act` delegation chain.
-pub const MAX_ACT_CHAIN_DEPTH: usize = 8;
+//! Crate-wide constants: AAuth wire values and HTTP/NATS header names.
 
 /// JWK members that carry private key material, across every key type AAuth
 /// can encounter: `d` for EC (RFC 7518 Section 6.2.2), RSA (Section 6.3.2),
