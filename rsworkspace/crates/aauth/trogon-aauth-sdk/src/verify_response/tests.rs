@@ -135,6 +135,31 @@ fn rule4_fails_when_cnf_claim_is_missing() {
 }
 
 #[test]
+fn rule4_fails_when_peer_supplied_cnf_jwk_is_symmetric() {
+    // A wire-decoded `AuthClaims` bypasses `Cnf::public` (a peer's own `cnf`
+    // is parsed as sent), so nothing upstream of this call stops a symmetric
+    // `cnf.jwk` from arriving here. The thumbprint step must refuse it
+    // outright rather than compute a digest from a `k` value the peer
+    // controls and treat the outcome as an ordinary key mismatch.
+    let jwk = own_jwk();
+    let claims_json = serde_json::json!({
+        "iss": RESOURCE_TOKEN_AUD,
+        "sub": "user-1",
+        "aud": RESOURCE,
+        "jti": "auth-jti-1",
+        "iat": 1_700_000_000,
+        "exp": 1_700_003_600,
+        "agent": OWN_AGENT,
+        "agent_jkt": "unused-legacy-field",
+        "scope": "calendar.read",
+        "cnf": { "jwk": { "kty": "oct", "k": "GawgguFyGrWKav7AX4VKUg" } },
+    });
+    let claims: AuthClaims = serde_json::from_value(claims_json).expect("peer claims decode");
+    let err = verify_auth_claims(&claims, RESOURCE_TOKEN_AUD, RESOURCE, &jwk, OWN_AGENT, None).unwrap_err();
+    assert!(matches!(err, VerifyResponseError::ConfirmationKeyThumbprint(_)));
+}
+
+#[test]
 fn rule5_fails_when_agent_does_not_match_own_identifier() {
     let jwk = own_jwk();
     let mut claims = valid_claims(jwk.clone());
