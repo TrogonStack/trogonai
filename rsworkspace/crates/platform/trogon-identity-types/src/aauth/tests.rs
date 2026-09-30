@@ -392,6 +392,14 @@ fn reject_if_not_public_rejects_a_peer_cnf_naming_a_symmetric_key() {
 }
 
 #[test]
+fn reject_if_not_public_rejects_a_peer_cnf_whose_jwk_is_not_an_object() {
+    for raw in [r#"{"jwk":"not-a-jwk"}"#, r#"{"jwk":null}"#, r#"{"jwk":[{"kty":"EC"}]}"#] {
+        let cnf: Cnf = serde_json::from_str(raw).expect("inbound cnf parses");
+        assert_eq!(cnf.reject_if_not_public().unwrap_err(), CnfError::NotAnObject);
+    }
+}
+
+#[test]
 fn reject_if_not_public_accepts_valid_public_ec_okp_and_rsa_keys() {
     for raw in [
         r#"{"jwk":{"kty":"EC","crv":"P-256","x":"AAA","y":"BBB"}}"#,
