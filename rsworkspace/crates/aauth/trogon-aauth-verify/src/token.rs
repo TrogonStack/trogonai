@@ -7,7 +7,9 @@ use jsonwebtoken::{
     },
 };
 use serde::Deserialize;
-use trogon_identity_types::aauth::{AgentClaims, AuthClaims, ResourceClaims, TYP_AGENT, TYP_AUTH, TYP_RESOURCE};
+use trogon_identity_types::aauth::{
+    AgentClaims, AuthClaims, CnfError, ResourceClaims, TYP_AGENT, TYP_AUTH, TYP_RESOURCE,
+};
 
 use crate::jwks::{JwksError, JwksResolver};
 use crate::time_source::TimeSource;
@@ -42,6 +44,8 @@ pub enum TokenError {
     MissingClaim(&'static str),
     #[error("invalid claim: {0}")]
     InvalidClaim(&'static str),
+    #[error("cnf.jwk is not a valid public confirmation key: {0}")]
+    ConfirmationKeyNotPublic(#[source] CnfError),
 }
 
 #[derive(Debug, Clone)]
@@ -113,6 +117,8 @@ pub enum RequestContextError {
     /// not match the key that signed the HTTP request.
     #[error("cnf.jwk does not match the request signing key")]
     ConfirmationKeyMismatch,
+    #[error("cnf.jwk is not a valid public confirmation key: {0}")]
+    ConfirmationKeyNotPublic(#[source] CnfError),
     /// Rule 8: `act.agent` is not a syntactically valid AAuth agent
     /// identifier.
     #[error("act chain is invalid: {0}")]
@@ -175,6 +181,10 @@ impl<R: JwksResolver, C: TimeSource> TokenVerifier<R, C> {
             .await?;
         let claims: AgentClaims =
             serde_json::from_value(claims_raw.clone()).map_err(|_| TokenError::MissingClaim("agent claims"))?;
+        claims
+            .cnf
+            .reject_if_not_public()
+            .map_err(TokenError::ConfirmationKeyNotPublic)?;
         let jkt = crate::jkt::jwk_thumbprint(claims.cnf.jwk()).map_err(|e| {
             TokenError::InvalidClaim(match e {
                 crate::jkt::JktError::MissingKty => "cnf.jwk.kty",
@@ -216,6 +226,10 @@ impl<R: JwksResolver, C: TimeSource> TokenVerifier<R, C> {
             .await?;
         let claims: AuthClaims =
             serde_json::from_value(claims_raw).map_err(|_| TokenError::MissingClaim("auth claims"))?;
+        if let Some(cnf) = claims.cnf.as_ref() {
+            cnf.reject_if_not_public()
+                .map_err(TokenError::ConfirmationKeyNotPublic)?;
+        }
         self.assert_freshness(claims.iat, claims.exp)?;
         Ok(VerifiedAuth {
             claims,
@@ -267,6 +281,8 @@ impl<R: JwksResolver, C: TimeSource> TokenVerifier<R, C> {
         // is rejected distinctly from key material that is structurally
         // complete but fails to decode as a supported public key.
         let cnf = claims.cnf.as_ref().ok_or(RequestContextError::MissingConfirmationKey)?;
+        cnf.reject_if_not_public()
+            .map_err(RequestContextError::ConfirmationKeyNotPublic)?;
         // `jwk_thumbprint` fails on exactly the shapes rule 7 calls
         // "structurally incomplete": missing `kty`, missing a member the
         // key's `kty` requires, or a `kty` this crate doesn't recognize.

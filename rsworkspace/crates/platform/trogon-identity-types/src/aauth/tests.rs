@@ -373,6 +373,46 @@ fn cnf_still_deserializes_a_peer_supplied_confirmation_claim() {
 }
 
 #[test]
+fn reject_if_not_public_rejects_a_peer_cnf_carrying_private_key_material() {
+    // A peer's own cnf deserializes leniently (see the test above), but the
+    // verification path must still refuse to trust it once `d` is present.
+    let raw = r#"{"jwk":{"kty":"EC","crv":"P-256","x":"AAA","y":"BBB","d":"THEIRS"}}"#;
+    let cnf: Cnf = serde_json::from_str(raw).expect("inbound cnf parses");
+    assert_eq!(
+        cnf.reject_if_not_public().unwrap_err(),
+        CnfError::PrivateKeyMaterial { member: "d" }
+    );
+}
+
+#[test]
+fn reject_if_not_public_rejects_a_peer_cnf_naming_a_symmetric_key() {
+    let raw = r#"{"jwk":{"kty":"oct","k":"THEIRS"}}"#;
+    let cnf: Cnf = serde_json::from_str(raw).expect("inbound cnf parses");
+    assert_eq!(cnf.reject_if_not_public().unwrap_err(), CnfError::SymmetricKey);
+}
+
+#[test]
+fn reject_if_not_public_rejects_a_peer_cnf_whose_jwk_is_not_an_object() {
+    for raw in [r#"{"jwk":"not-a-jwk"}"#, r#"{"jwk":null}"#, r#"{"jwk":[{"kty":"EC"}]}"#] {
+        let cnf: Cnf = serde_json::from_str(raw).expect("inbound cnf parses");
+        assert_eq!(cnf.reject_if_not_public().unwrap_err(), CnfError::NotAnObject);
+    }
+}
+
+#[test]
+fn reject_if_not_public_accepts_valid_public_ec_okp_and_rsa_keys() {
+    for raw in [
+        r#"{"jwk":{"kty":"EC","crv":"P-256","x":"AAA","y":"BBB"}}"#,
+        r#"{"jwk":{"kty":"OKP","crv":"Ed25519","x":"AAA"}}"#,
+        r#"{"jwk":{"kty":"RSA","n":"AAA","e":"AQAB"}}"#,
+    ] {
+        let cnf: Cnf = serde_json::from_str(raw).expect("inbound cnf parses");
+        cnf.reject_if_not_public()
+            .unwrap_or_else(|e| panic!("{raw} must be accepted, got {e}"));
+    }
+}
+
+#[test]
 fn cnf_debug_does_not_print_the_key_it_holds() {
     // Reached through the lenient inbound path, so `d` is present: this is
     // exactly the shape whose Debug output must stay clean.
