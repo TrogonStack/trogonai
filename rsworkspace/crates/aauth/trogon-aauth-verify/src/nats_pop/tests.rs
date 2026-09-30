@@ -172,6 +172,14 @@ fn verify_signature_with_jwk_accepts_ed25519_key() {
 }
 
 #[test]
+fn verify_signature_with_jwk_rejects_signature_over_different_base() {
+    let fixture = crate::test_support::ed25519_fixture("agent-ed");
+    let sig = fixture.sign_pop_base(b"canonical-base");
+    let err = verify_signature_with_jwk(&fixture.jwk_json, b"tampered-base", &sig).unwrap_err();
+    assert!(matches!(err, NatsPopError::BadSignature), "got {err:?}");
+}
+
+#[test]
 fn invalid_confirmation_key_unsupported_alg_surfaces() {
     let jwk = serde_json::json!({"kty": "oct", "k": "AA"});
     let err = verify_signature_with_jwk(&jwk, b"base", "sig").unwrap_err();
