@@ -1,5 +1,7 @@
 //! JWT token verification for the AAuth typ values.
 
+use std::fmt;
+
 use jsonwebtoken::{
     Algorithm, DecodingKey, Validation, decode, decode_header,
     jwk::{
@@ -48,17 +50,37 @@ pub enum TokenError {
     ConfirmationKeyNotPublic(#[source] CnfError),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct VerifiedAgent {
     pub claims: AgentClaims,
     pub jkt: String,
     pub raw_jwt: String,
 }
 
-#[derive(Debug, Clone)]
+/// `raw_jwt` is a bearer credential (RFC 9700 4.9.3) and must not be logged.
+impl fmt::Debug for VerifiedAgent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VerifiedAgent")
+            .field("claims", &self.claims)
+            .field("jkt", &self.jkt)
+            .field("raw_jwt", &"<redacted>")
+            .finish()
+    }
+}
+
+#[derive(Clone)]
 pub struct VerifiedAuth {
     pub claims: AuthClaims,
     pub raw_jwt: String,
+}
+
+impl fmt::Debug for VerifiedAuth {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VerifiedAuth")
+            .field("claims", &self.claims)
+            .field("raw_jwt", &"<redacted>")
+            .finish()
+    }
 }
 
 /// The request-signing context a resource observed for an inbound request:
@@ -144,10 +166,19 @@ pub enum InvalidKeyMaterialSourceError {
     DecodingKey(#[source] jsonwebtoken::errors::Error),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct VerifiedResource {
     pub claims: ResourceClaims,
     pub raw_jwt: String,
+}
+
+impl fmt::Debug for VerifiedResource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VerifiedResource")
+            .field("claims", &self.claims)
+            .field("raw_jwt", &"<redacted>")
+            .finish()
+    }
 }
 
 /// Verifier for AAuth JWTs. Pluggable JWKS resolver + clock; no global state.

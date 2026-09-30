@@ -23,3 +23,15 @@ fn login_outcome_carries_resource_token_and_optional_redirect() {
     assert_eq!(outcome.resource_token, "eyJ...");
     assert_eq!(outcome.redirect_back_to.as_deref(), Some("/projects/tokyo-trip"));
 }
+
+#[test]
+fn login_outcome_debug_redacts_resource_token() {
+    let outcome = LoginOutcome {
+        resource_token: "eyJ...".to_string(),
+        redirect_back_to: Some("/projects/tokyo-trip".to_string()),
+    };
+    let debug_output = format!("{outcome:?}");
+    assert!(!debug_output.contains("eyJ..."));
+    assert!(debug_output.contains("/projects/tokyo-trip"));
+    assert!(debug_output.contains("<redacted>"));
+}

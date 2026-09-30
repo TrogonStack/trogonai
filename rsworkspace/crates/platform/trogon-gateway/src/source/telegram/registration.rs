@@ -1,3 +1,5 @@
+use std::fmt;
+
 use reqwest::StatusCode;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -33,11 +35,21 @@ struct TelegramResponse {
     description: Option<String>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 struct SetWebhook {
     bot_token: String,
     public_webhook_url: String,
     webhook_secret: String,
+}
+
+impl fmt::Debug for SetWebhook {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SetWebhook")
+            .field("bot_token", &"<redacted>")
+            .field("public_webhook_url", &self.public_webhook_url)
+            .field("webhook_secret", &"<redacted>")
+            .finish()
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]

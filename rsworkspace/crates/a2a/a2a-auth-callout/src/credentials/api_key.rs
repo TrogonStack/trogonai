@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::Arc;
 
 use hmac::{Hmac, KeyInit, Mac};
@@ -47,8 +48,14 @@ impl From<ApiKeyError> for AuthCalloutError {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct ApiKey(String);
+
+impl fmt::Debug for ApiKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("ApiKey").field(&"<redacted>").finish()
+    }
+}
 
 impl ApiKey {
     pub fn new(key: impl Into<String>) -> Result<Self, ApiKeyError> {

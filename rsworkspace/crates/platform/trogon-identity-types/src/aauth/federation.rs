@@ -4,10 +4,12 @@
 //! (no additional wire shapes beyond the token endpoint and requirement responses
 //! already modeled), so it is not separately typed here.
 
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 
 /// PS-to-AS token request body, per "PS-to-AS Token Request".
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AsTokenRequest {
     pub resource_token: String,
     pub agent_token: String,
@@ -17,13 +19,33 @@ pub struct AsTokenRequest {
     pub upstream_token: Option<String>,
 }
 
+impl fmt::Debug for AsTokenRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AsTokenRequest")
+            .field("resource_token", &"<redacted>")
+            .field("agent_token", &"<redacted>")
+            .field("subagent_token", &self.subagent_token.as_ref().map(|_| "<redacted>"))
+            .field("upstream_token", &self.upstream_token.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
+}
+
 /// AS direct grant response (`200`), per "AS Response". Identical shape to the PS's
 /// [`super::person_server::TokenGrantResponse`]; kept as a distinct type since the
 /// two endpoints are independently versionable per the draft's role separation.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AsTokenResponse {
     pub auth_token: String,
     pub expires_in: i64,
+}
+
+impl fmt::Debug for AsTokenResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AsTokenResponse")
+            .field("auth_token", &"<redacted>")
+            .field("expires_in", &self.expires_in)
+            .finish()
+    }
 }
 
 /// Claims submission POSTed to the `Location` URL in response to
