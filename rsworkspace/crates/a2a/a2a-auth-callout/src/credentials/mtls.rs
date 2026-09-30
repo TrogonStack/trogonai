@@ -7,7 +7,7 @@ use x509_parser::time::ASN1Time;
 
 use crate::error::{AuthCalloutError, CredentialError};
 use crate::jwt::{
-    AudienceAccount, ExternalSubject, UserJwtClaims, derive_caller_id, external_subject_from_der,
+    AudienceAccount, CallerNamespace, ExternalSubject, UserJwtClaims, derive_caller_id, external_subject_from_der,
     spicedb_bundle_for_opaque,
 };
 
@@ -195,7 +195,7 @@ impl X509MtlsVerifier {
         let data = spicedb_bundle_for_opaque(
             serde_json::to_value(principal).map_err(CredentialError::PrincipalSerialization)?,
         );
-        let caller_id = derive_caller_id(sub.as_str(), account)
+        let caller_id = derive_caller_id(CallerNamespace::Mtls, sub.as_str(), account)
             .map_err(|e| CredentialError::InvalidCredentials(format!("caller_id derivation failed: {e}")))?;
 
         let nats_permissions = crate::permissions::IssuedPermissions::default_for_caller(&caller_id);

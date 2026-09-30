@@ -13,6 +13,7 @@ pub use nats_permission_claims::{NatsPermissionClaims, NatsSubjectPermission};
 pub use nats_user_jwt::decode_nats_user_payload;
 pub use user_jwt_subject::UserJwtSubject;
 
+use crate::credentials::oidc::OidcIssuerUrl;
 use crate::error::AuthCalloutError;
 use crate::permissions::IssuedPermissions;
 use crate::signing_key_source::{KeyVersion, MintingMaterial, SigningKeyHandle, SigningKeySource};
@@ -423,12 +424,42 @@ pub fn caller_id_from_minted_jwt(token: &str) -> Result<CallerId, JwtError> {
     CallerId::new(caller_id)
 }
 
+/// RFC 7519 and OIDC Core key a principal on (iss, sub); a `sub` alone is
+/// only unique within the issuer or credential source that asserted it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CallerNamespace<'a> {
+    Oidc { issuer: &'a OidcIssuerUrl },
+    Mtls,
+    ApiKey,
+}
+
+impl CallerNamespace<'_> {
+    fn segments(&self) -> Vec<&[u8]> {
+        match self {
+            Self::Oidc { issuer } => vec![b"oidc", issuer.as_str().as_bytes()],
+            Self::Mtls => vec![b"mtls"],
+            Self::ApiKey => vec![b"api_key"],
+        }
+    }
+}
+
+fn hash_length_prefixed(hasher: &mut Sha256, segment: &[u8]) {
+    hasher.update((segment.len() as u64).to_le_bytes());
+    hasher.update(segment);
+}
+
 #[allow(dead_code)]
-pub(crate) fn derive_caller_id(external_sub: &str, tenant: &AccountName) -> Result<CallerId, JwtError> {
+pub(crate) fn derive_caller_id(
+    namespace: CallerNamespace<'_>,
+    external_sub: &str,
+    tenant: &AccountName,
+) -> Result<CallerId, JwtError> {
     let mut hasher = Sha256::new();
-    hasher.update(external_sub.as_bytes());
-    hasher.update(b"|");
-    hasher.update(tenant.as_str().as_bytes());
+    for segment in namespace.segments() {
+        hash_length_prefixed(&mut hasher, segment);
+    }
+    hash_length_prefixed(&mut hasher, external_sub.as_bytes());
+    hash_length_prefixed(&mut hasher, tenant.as_str().as_bytes());
     let digest = hasher.finalize();
     CallerId::new(hex::encode(&digest[..16]))
 }

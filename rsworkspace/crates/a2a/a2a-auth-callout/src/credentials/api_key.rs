@@ -6,7 +6,9 @@ use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 
 use crate::error::AuthCalloutError;
-use crate::jwt::{AudienceAccount, ExternalSubject, JwtError, SpiceDbPrincipal, UserJwtClaims, derive_caller_id};
+use crate::jwt::{
+    AudienceAccount, CallerNamespace, ExternalSubject, JwtError, SpiceDbPrincipal, UserJwtClaims, derive_caller_id,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ApiKeyError {
@@ -164,8 +166,12 @@ impl ApiKeyVerifier for HmacApiKeyVerifier {
             }
             .into());
         }
-        let caller_id = derive_caller_id(entry.external_subject.as_str(), &entry.audience)
-            .map_err(ApiKeyError::CallerIdDerivation)?;
+        let caller_id = derive_caller_id(
+            CallerNamespace::ApiKey,
+            entry.external_subject.as_str(),
+            &entry.audience,
+        )
+        .map_err(ApiKeyError::CallerIdDerivation)?;
         let nats_permissions = crate::permissions::IssuedPermissions::default_for_caller(&caller_id);
         Ok(UserJwtClaims {
             kid: crate::signing_key_source::unminted_placeholder(),
