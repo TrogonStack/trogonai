@@ -3,6 +3,9 @@
 Sources we lean on most for research. One deduplicated list across all
 corpora. Entries are public repositories unless the line says otherwise.
 
+- [xAI documentation](https://docs.x.ai): high-priority primary reference to
+  consult and lean on when researching provider APIs, agent capabilities, and
+  tool integrations.
 - [anthropics/claude-agent-sdk-python](https://github.com/anthropics/claude-agent-sdk-python) / [claude-agent-sdk-typescript](https://github.com/anthropics/claude-agent-sdk-typescript)
 - [openai/codex](https://github.com/openai/codex)
 - [openai/openai-agents-python](https://github.com/openai/openai-agents-python)
