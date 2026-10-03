@@ -1,0 +1,113 @@
+edition = "2024";
+
+package trogonai.workflows.definitions.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+
+// Admission intersects requested limits with live authorization and runtime
+// capability. A run records effective limits; no requested bound grants access.
+message RunPolicy {
+  option (buf.validate.message).cel = {
+    id: "run_policy.concurrency"
+    message: "concurrency must not exceed the total invocation bound"
+    expression: "this.max_concurrent_invocations <= this.max_invocations"
+  };
+
+  google.protobuf.Duration max_duration = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).duration.gt = {}
+  ];
+  uint32 max_concurrent_invocations = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32.gt = 0
+  ];
+  uint64 max_invocations = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  uint32 max_control_depth = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32.gt = 0
+  ];
+  uint32 max_value_depth = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32.gt = 0
+  ];
+}
+
+// Retry attempts repeat one occurrence after a typed execution failure. Business
+// review verdicts never consume retry attempts; RepeatNode owns those iterations.
+// Backoff multiplies the initial delay by multiplier per retry, capped at max_delay.
+message RetryPolicy {
+  option (buf.validate.message).cel = {
+    id: "retry_policy.delay_bounds"
+    message: "max_delay must be at least initial_delay"
+    expression: "this.max_delay >= this.initial_delay"
+  };
+  option (buf.validate.message).cel = {
+    id: "retry_policy.retry_classes"
+    message: "retryable classes are required exactly when multiple attempts are permitted"
+    expression: "(this.max_attempts > 1u) == (this.retry_on.size() > 0)"
+  };
+
+  uint32 max_attempts = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32.gt = 0
+  ];
+  google.protobuf.Duration initial_delay = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).duration.gte = {}
+  ];
+  google.protobuf.Duration max_delay = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).duration.gte = {}
+  ];
+  double multiplier = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).double = {
+      finite: true
+      gte: 1
+    }
+  ];
+  repeated RetryClass retry_on = 5 [(buf.validate.field).repeated = {
+    unique: true
+    items: {
+      enum: {
+        defined_only: true
+        not_in: [0]
+      }
+    }
+  }];
+}
+
+enum RetryClass {
+  RETRY_CLASS_UNSPECIFIED = 0;
+  RETRY_CLASS_TRANSIENT = 1;
+  RETRY_CLASS_RESOURCE_UNAVAILABLE = 2;
+  RETRY_CLASS_INVALID_OUTPUT = 3;
+  RETRY_CLASS_TIMEOUT = 4;
+}
+
+enum JoinPolicy {
+  JOIN_POLICY_UNSPECIFIED = 0;
+  JOIN_POLICY_ALL = 1;
+  JOIN_POLICY_ALL_SETTLED = 2;
+  JOIN_POLICY_FIRST_SUCCESS = 3;
+}
+
+// A join decision alone cannot orphan active work. WAIT keeps siblings running;
+// CANCEL requests cancellation. Both await terminal evidence for every sibling
+// before proceeding. Indeterminate side effects block success until reconciled.
+enum SiblingDisposition {
+  SIBLING_DISPOSITION_UNSPECIFIED = 0;
+  SIBLING_DISPOSITION_WAIT = 1;
+  SIBLING_DISPOSITION_CANCEL = 2;
+}
+
+enum IterationLimitPolicy {
+  ITERATION_LIMIT_POLICY_UNSPECIFIED = 0;
+  ITERATION_LIMIT_POLICY_FAIL = 1;
+  ITERATION_LIMIT_POLICY_ACCEPT_LAST = 2;
+  ITERATION_LIMIT_POLICY_REQUEST_INPUT = 3;
+}

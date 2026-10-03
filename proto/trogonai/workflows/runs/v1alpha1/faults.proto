@@ -1,0 +1,199 @@
+edition = "2024";
+
+package trogonai.workflows.runs.v1alpha1;
+
+import "trogon/error/v1alpha1/options.proto";
+
+// Schema-only module rejection templates under ADR#0057. These are never
+// encoded; google.rpc.Status carries domain and reason. Authentication, live
+// authorization, Session admission, and source verification retain their owners.
+
+message RunCommandInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "workflows.runs"
+    reason: "RUN_COMMAND_INVALID"
+    message: "The command violates the workflow run contract."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message RunMissingError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "workflows.runs"
+    reason: "RUN_MISSING"
+    message: "The workflow run has not been started."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message RunAlreadyStartedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "workflows.runs"
+    reason: "RUN_ALREADY_STARTED"
+    message: "The workflow run has already been started."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message RunIdentityMismatchError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "workflows.runs"
+    reason: "RUN_IDENTITY_MISMATCH"
+    message: "The command names a different workflow run from this stream."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message RunTerminalError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "workflows.runs"
+    reason: "RUN_TERMINAL"
+    message: "The terminal generation cannot accept this transition."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message OccurrenceConflictError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "workflows.runs"
+    reason: "OCCURRENCE_CONFLICT"
+    message: "The node occurrence conflicts with retained execution state."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message InvocationConflictError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "workflows.runs"
+    reason: "INVOCATION_CONFLICT"
+    message: "The invocation conflicts with its occurrence or dispatch identity."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message OutcomeConflictError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "workflows.runs"
+    reason: "OUTCOME_CONFLICT"
+    message: "The invocation already has an incompatible outcome."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ControlDecisionInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "workflows.runs"
+    reason: "CONTROL_DECISION_INVALID"
+    message: "The control decision does not follow the pinned execution state."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message InputAlreadyResolvedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "workflows.runs"
+    reason: "INPUT_ALREADY_RESOLVED"
+    message: "The input request already has its immutable resolution."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message InputResponderMismatchError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "workflows.runs"
+    reason: "INPUT_RESPONDER_MISMATCH"
+    message: "The responding actor is outside the admitted request audience."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ExternalCursorConflictError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "workflows.runs"
+    reason: "EXTERNAL_CURSOR_CONFLICT"
+    message: "The external cursor differs from the retained source progress."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ExternalActivityConflictError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "workflows.runs"
+    reason: "EXTERNAL_ACTIVITY_CONFLICT"
+    message: "The external activity identity has already been consumed."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ExternalSubscriptionConflictError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "workflows.runs"
+    reason: "EXTERNAL_SUBSCRIPTION_CONFLICT"
+    message: "The subscription receipt conflicts with retained activation state."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message PauseBoundaryUnsafeError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "workflows.runs"
+    reason: "PAUSE_BOUNDARY_UNSAFE"
+    message: "Dispatched work has not reached a safe pause boundary."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message PlanRevisionConflictError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "workflows.runs"
+    reason: "PLAN_REVISION_CONFLICT"
+    message: "The remaining-plan revision conflicts with current lineage or frozen work."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message RetryDisallowedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "workflows.runs"
+    reason: "RETRY_DISALLOWED"
+    message: "The invocation is not eligible for the requested retry."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message RecoveryFrontierInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "workflows.runs"
+    reason: "RECOVERY_FRONTIER_INVALID"
+    message: "The failed-work recovery does not preserve the failed frontier and retained completions."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message RunLimitReachedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "workflows.runs"
+    reason: "RUN_LIMIT_REACHED"
+    message: "The transition would exceed the admitted workflow run limits."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}

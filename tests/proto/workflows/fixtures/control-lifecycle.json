@@ -1,0 +1,1065 @@
+{
+  "templates": {
+    "completion-success": {
+      "type": "trogonai.workflows.runs.v1alpha1.NodeCompletion",
+      "payload": {
+        "completionId": "completion-example",
+        "occurrenceId": "occurrence-example",
+        "evidence": [
+          {
+            "invocationReceiptId": "receipt-example"
+          }
+        ],
+        "completionCondition": {
+          "evaluationId": "evaluation-positive",
+          "condition": {
+            "always": {}
+          },
+          "inputs": [],
+          "result": true
+        },
+        "succeeded": {
+          "outputs": []
+        }
+      }
+    },
+    "completion-business-rejection": {
+      "type": "trogonai.workflows.runs.v1alpha1.NodeCompletion",
+      "payload": {
+        "completionId": "completion-rejected",
+        "occurrenceId": "occurrence-example",
+        "evidence": [
+          {
+            "invocationReceiptId": "receipt-example"
+          }
+        ],
+        "rejected": {
+          "outputs": [
+            {
+              "name": "verdict",
+              "value": {
+                "symbolValue": {
+                  "typeName": "review.verdict",
+                  "value": "changes_requested"
+                }
+              }
+            }
+          ],
+          "acceptance": {
+            "evaluationId": "evaluation-negative",
+            "condition": {
+              "compare": {
+                "left": {
+                  "literal": {
+                    "boolValue": false
+                  }
+                },
+                "operator": "COMPARISON_OPERATOR_EQUAL",
+                "right": {
+                  "literal": {
+                    "boolValue": true
+                  }
+                }
+              }
+            },
+            "inputs": [],
+            "result": false
+          }
+        }
+      }
+    },
+    "sequence-advance-after-completed-child": {
+      "type": "trogonai.workflows.runs.v1alpha1.SequenceDecision",
+      "payload": {
+        "completedOccurrenceIds": [
+          "occurrence-previous"
+        ],
+        "advance": {
+          "nextNode": {
+            "nodeId": "review"
+          },
+          "nextPosition": 1
+        }
+      }
+    },
+    "join-completed": {
+      "type": "trogonai.workflows.runs.v1alpha1.JoinDecision",
+      "payload": {
+        "branches": [
+          {
+            "occurrenceId": "branch-first",
+            "completionId": "completion-first"
+          },
+          {
+            "occurrenceId": "branch-second",
+            "completionId": "completion-second"
+          }
+        ],
+        "acceptance": {
+          "evaluationId": "evaluation-positive",
+          "condition": {
+            "always": {}
+          },
+          "inputs": [],
+          "result": true
+        },
+        "completed": {
+          "outputs": []
+        }
+      }
+    },
+    "repeat-continue-next-iteration": {
+      "type": "trogonai.workflows.runs.v1alpha1.RepeatDecision",
+      "payload": {
+        "iteration": "2",
+        "bodyOccurrenceId": "occurrence-body",
+        "untilCondition": {
+          "evaluationId": "evaluation-negative",
+          "condition": {
+            "compare": {
+              "left": {
+                "literal": {
+                  "boolValue": false
+                }
+              },
+              "operator": "COMPARISON_OPERATOR_EQUAL",
+              "right": {
+                "literal": {
+                  "boolValue": true
+                }
+              }
+            }
+          },
+          "inputs": [],
+          "result": false
+        },
+        "continueWith": {
+          "nextIteration": "3",
+          "inputs": [
+            {
+              "name": "task",
+              "value": {
+                "stringValue": "Review the result."
+              },
+              "sources": [
+                {
+                  "runInputName": "task"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "repeat-accepted": {
+      "type": "trogonai.workflows.runs.v1alpha1.RepeatDecision",
+      "payload": {
+        "iteration": "2",
+        "bodyOccurrenceId": "occurrence-body",
+        "untilCondition": {
+          "evaluationId": "evaluation-positive",
+          "condition": {
+            "always": {}
+          },
+          "inputs": [],
+          "result": true
+        },
+        "completed": {
+          "outputs": []
+        }
+      }
+    },
+    "repeat-limit-reached": {
+      "type": "trogonai.workflows.runs.v1alpha1.RepeatDecision",
+      "payload": {
+        "iteration": "4",
+        "bodyOccurrenceId": "occurrence-body",
+        "untilCondition": {
+          "evaluationId": "evaluation-negative",
+          "condition": {
+            "compare": {
+              "left": {
+                "literal": {
+                  "boolValue": false
+                }
+              },
+              "operator": "COMPARISON_OPERATOR_EQUAL",
+              "right": {
+                "literal": {
+                  "boolValue": true
+                }
+              }
+            }
+          },
+          "inputs": [],
+          "result": false
+        },
+        "limitReached": {
+          "iterations": {
+            "bound": "4",
+            "observed": "4"
+          }
+        }
+      }
+    },
+    "deadline-reached-at-boundary": {
+      "type": "trogonai.workflows.runs.v1alpha1.DeadlineReached",
+      "payload": {
+        "deadline": "2026-01-01T00:01:00Z",
+        "observedAt": "2026-01-01T00:01:00Z"
+      }
+    },
+    "pause-intent": {
+      "type": "trogonai.workflows.runs.v1alpha1.PauseRequest",
+      "payload": {
+        "pauseId": "pause-example",
+        "requestedBy": {
+          "principalId": "user-example"
+        },
+        "reason": "Inspect remaining work."
+      }
+    },
+    "pause-applied-boundary": {
+      "type": "trogonai.workflows.runs.v1alpha1.PauseBoundary",
+      "payload": {
+        "pauseId": "pause-example",
+        "settledInvocationIds": [
+          "invocation-first"
+        ],
+        "parkedWaitIds": [
+          "wait-example"
+        ],
+        "parkedRequestIds": [
+          "input-example"
+        ]
+      }
+    },
+    "resume-applied-pause": {
+      "type": "trogonai.workflows.runs.v1alpha1.RunResumption",
+      "payload": {
+        "resumptionId": "resume-example",
+        "pauseId": "pause-example",
+        "resumedBy": {
+          "principalId": "user-example"
+        },
+        "appliedPause": {}
+      }
+    },
+    "resume-pending-pause-intent": {
+      "type": "trogonai.workflows.runs.v1alpha1.RunResumption",
+      "payload": {
+        "resumptionId": "resume-pending",
+        "pauseId": "pause-example",
+        "resumedBy": {
+          "principalId": "user-example"
+        },
+        "pendingPauseIntent": {}
+      }
+    },
+    "cancellation-run-intent": {
+      "type": "trogonai.workflows.runs.v1alpha1.CancellationRequest",
+      "payload": {
+        "cancellationId": "cancellation-example",
+        "requestedBy": {
+          "principalId": "user-example"
+        },
+        "run": {}
+      }
+    },
+    "cancellation-invocation-intent": {
+      "type": "trogonai.workflows.runs.v1alpha1.CancellationRequest",
+      "payload": {
+        "cancellationId": "cancellation-invocation",
+        "requestedBy": {
+          "principalId": "user-example"
+        },
+        "invocationId": "invocation-first"
+      }
+    },
+    "cancellation-acknowledgement-indeterminate": {
+      "type": "trogonai.workflows.runs.v1alpha1.CancellationAcknowledgement",
+      "payload": {
+        "cancellationId": "cancellation-example",
+        "invocationId": "invocation-first",
+        "indeterminate": {
+          "detail": "Awaiting external settlement."
+        }
+      }
+    },
+    "remaining-plan-revision-at-pause": {
+      "type": "trogonai.workflows.runs.v1alpha1.RemainingPlanRevision",
+      "payload": {
+        "expectedPlanRevisionId": "plan-initial",
+        "plan": {
+          "planRevisionId": "plan-revised",
+          "previousPlanRevisionId": "plan-initial",
+          "definitionBytes": "AQ==",
+          "digest": {
+            "algorithm": "sha256",
+            "value": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          }
+        },
+        "pauseId": "pause-example",
+        "frozenOccurrenceIds": [
+          "occurrence-completed"
+        ],
+        "continuations": [
+          {
+            "boundaryOccurrenceId": "occurrence-container",
+            "nextNode": {
+              "nodeId": "remaining-work"
+            },
+            "inputs": []
+          }
+        ],
+        "revisedBy": {
+          "principalId": "user-example"
+        }
+      }
+    },
+    "termination-success-with-receipts": {
+      "type": "trogonai.workflows.runs.v1alpha1.RunTermination",
+      "payload": {
+        "terminationId": "termination-example",
+        "effects": [
+          {
+            "invocationId": "invocation-first",
+            "receiptId": "receipt-example"
+          }
+        ],
+        "succeeded": {
+          "rootCompletionId": "completion-example",
+          "outputs": [],
+          "completionCondition": {
+            "evaluationId": "evaluation-positive",
+            "condition": {
+              "always": {}
+            },
+            "inputs": [],
+            "result": true
+          }
+        }
+      }
+    },
+    "termination-failure-preserves-indeterminate-effects": {
+      "type": "trogonai.workflows.runs.v1alpha1.RunTermination",
+      "payload": {
+        "terminationId": "termination-failed",
+        "effects": [
+          {
+            "invocationId": "invocation-first",
+            "unreconciled": {
+              "detail": "Outcome remains unknown."
+            }
+          }
+        ],
+        "failed": {
+          "failure": {
+            "reason": "FAILURE_REASON_EXECUTION_ERROR"
+          },
+          "evidence": [
+            {
+              "invocationReceiptId": "receipt-example"
+            }
+          ]
+        }
+      }
+    },
+    "recovery-failed-frontier-with-retained-work": {
+      "type": "trogonai.workflows.runs.v1alpha1.FailedWorkRecovery",
+      "payload": {
+        "recoveryId": "recovery-example",
+        "recoveryNumber": "1",
+        "priorTerminationId": "termination-failed",
+        "frontier": [
+          {
+            "previousOccurrenceId": "occurrence-original",
+            "replacement": {
+              "occurrence": {
+                "occurrenceId": "occurrence-recovered",
+                "node": {
+                  "nodeId": "review-loop"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": []
+              },
+              "inputs": []
+            }
+          }
+        ],
+        "retainedCompletions": [
+          {
+            "completionId": "completion-retained",
+            "parentOccurrenceId": "occurrence-recovered"
+          }
+        ],
+        "rootOccurrenceId": "occurrence-recovered",
+        "limits": {
+          "deadline": "2026-01-01T00:02:00Z",
+          "maxInvocations": "100",
+          "maxActiveSessions": 4,
+          "maxControlDepth": 16,
+          "maxValueDepth": 16
+        },
+        "authority": {
+          "requestedBy": {
+            "principalId": "user-example"
+          },
+          "authorizationId": "authorization-example",
+          "policyRevision": "policy-1"
+        }
+      }
+    },
+    "input-request-choice": {
+      "type": "trogonai.workflows.runs.v1alpha1.InputRequest",
+      "payload": {
+        "requestId": "input-example",
+        "occurrenceId": "occurrence-example",
+        "requestedBy": {
+          "serviceId": "coordinator-example"
+        },
+        "question": "Approve the result?",
+        "answerSchema": {
+          "maxEncodedBytes": "128",
+          "scalar": "SCALAR_TYPE_BOOL"
+        },
+        "choices": [
+          {
+            "choiceId": "approve",
+            "value": {
+              "boolValue": true
+            },
+            "displayName": "Approve"
+          },
+          {
+            "choiceId": "decline",
+            "value": {
+              "boolValue": false
+            },
+            "displayName": "Decline"
+          }
+        ],
+        "allowedResponders": [
+          {
+            "principalId": "user-example"
+          }
+        ],
+        "deadline": "2026-01-01T00:02:00Z"
+      }
+    },
+    "input-response-answer": {
+      "type": "trogonai.workflows.runs.v1alpha1.InputResponse",
+      "payload": {
+        "responseId": "response-example",
+        "requestId": "input-example",
+        "respondedBy": {
+          "principalId": "user-example"
+        },
+        "respondedAt": "2026-01-01T00:01:00Z",
+        "answered": {
+          "boolValue": false
+        },
+        "selectedChoiceId": "decline"
+      }
+    },
+    "input-response-expired": {
+      "type": "trogonai.workflows.runs.v1alpha1.InputResponse",
+      "payload": {
+        "responseId": "response-expired",
+        "requestId": "input-example",
+        "respondedBy": {
+          "serviceId": "timeout-service"
+        },
+        "respondedAt": "2026-01-01T00:02:00Z",
+        "expired": {
+          "deadline": "2026-01-01T00:02:00Z",
+          "observedAt": "2026-01-01T00:02:00Z"
+        }
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "completion-success",
+      "template": "completion-success"
+    },
+    {
+      "name": "completion-rejects-false-success-condition",
+      "template": "completion-success",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/completionCondition",
+          "value": {
+            "evaluationId": "evaluation-negative",
+            "condition": {
+              "compare": {
+                "left": {
+                  "literal": {
+                    "boolValue": false
+                  }
+                },
+                "operator": "COMPARISON_OPERATOR_EQUAL",
+                "right": {
+                  "literal": {
+                    "boolValue": true
+                  }
+                }
+              }
+            },
+            "inputs": [],
+            "result": false
+          }
+        }
+      ],
+      "violations": [
+        "a successful node must satisfy its recorded completion condition"
+      ]
+    },
+    {
+      "name": "completion-requires-evidence",
+      "template": "completion-success",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/evidence",
+          "value": []
+        }
+      ],
+      "violations": [
+        "must contain at least 1 item(s)"
+      ]
+    },
+    {
+      "name": "completion-business-rejection",
+      "template": "completion-business-rejection"
+    },
+    {
+      "name": "completion-rejects-true-rejection-condition",
+      "template": "completion-business-rejection",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/rejected/acceptance",
+          "value": {
+            "evaluationId": "evaluation-positive",
+            "condition": {
+              "always": {}
+            },
+            "inputs": [],
+            "result": true
+          }
+        }
+      ],
+      "violations": [
+        "business rejection requires a false acceptance condition"
+      ]
+    },
+    {
+      "name": "sequence-advance-after-completed-child",
+      "template": "sequence-advance-after-completed-child"
+    },
+    {
+      "name": "sequence-decision-rejects-duplicate-history",
+      "template": "sequence-advance-after-completed-child",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/completedOccurrenceIds",
+          "value": [
+            "occurrence-previous",
+            "occurrence-previous"
+          ]
+        }
+      ],
+      "violations": [
+        "must contain unique items"
+      ]
+    },
+    {
+      "name": "join-completed",
+      "template": "join-completed"
+    },
+    {
+      "name": "join-rejects-duplicate-branch-receipts",
+      "template": "join-completed",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/branches/1/occurrenceId",
+          "value": "branch-first"
+        }
+      ],
+      "violations": [
+        "join branch occurrences must be unique"
+      ]
+    },
+    {
+      "name": "repeat-continue-next-iteration",
+      "template": "repeat-continue-next-iteration"
+    },
+    {
+      "name": "repeat-rejects-skipped-iteration",
+      "template": "repeat-continue-next-iteration",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/continueWith/nextIteration",
+          "value": "4"
+        }
+      ],
+      "violations": [
+        "repeat continuation advances exactly one iteration while its condition is false"
+      ]
+    },
+    {
+      "name": "repeat-rejects-continuation-after-true-condition",
+      "template": "repeat-continue-next-iteration",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/untilCondition",
+          "value": {
+            "evaluationId": "evaluation-positive",
+            "condition": {
+              "always": {}
+            },
+            "inputs": [],
+            "result": true
+          }
+        }
+      ],
+      "violations": [
+        "repeat continuation advances exactly one iteration while its condition is false"
+      ]
+    },
+    {
+      "name": "repeat-accepted",
+      "template": "repeat-accepted"
+    },
+    {
+      "name": "repeat-rejects-completion-with-false-condition",
+      "template": "repeat-accepted",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/untilCondition",
+          "value": {
+            "evaluationId": "evaluation-negative",
+            "condition": {
+              "compare": {
+                "left": {
+                  "literal": {
+                    "boolValue": false
+                  }
+                },
+                "operator": "COMPARISON_OPERATOR_EQUAL",
+                "right": {
+                  "literal": {
+                    "boolValue": true
+                  }
+                }
+              }
+            },
+            "inputs": [],
+            "result": false
+          }
+        }
+      ],
+      "violations": [
+        "repeat completion requires its condition to be true"
+      ]
+    },
+    {
+      "name": "repeat-limit-reached",
+      "template": "repeat-limit-reached"
+    },
+    {
+      "name": "repeat-rejects-limit-after-satisfied-condition",
+      "template": "repeat-limit-reached",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/untilCondition",
+          "value": {
+            "evaluationId": "evaluation-positive",
+            "condition": {
+              "always": {}
+            },
+            "inputs": [],
+            "result": true
+          }
+        }
+      ],
+      "violations": [
+        "a limit ends an unsatisfied repeat"
+      ]
+    },
+    {
+      "name": "repeat-rejects-unreached-limit",
+      "template": "repeat-limit-reached",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/limitReached/iterations/observed",
+          "value": "3"
+        }
+      ],
+      "violations": [
+        "observed usage must reach the bound"
+      ]
+    },
+    {
+      "name": "deadline-reached-at-boundary",
+      "template": "deadline-reached-at-boundary"
+    },
+    {
+      "name": "deadline-rejects-premature-timeout",
+      "template": "deadline-reached-at-boundary",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/observedAt",
+          "value": "2026-01-01T00:00:00Z"
+        }
+      ],
+      "violations": [
+        "deadline evidence must be at or after the deadline"
+      ]
+    },
+    {
+      "name": "pause-intent",
+      "template": "pause-intent"
+    },
+    {
+      "name": "pause-applied-boundary",
+      "template": "pause-applied-boundary"
+    },
+    {
+      "name": "pause-boundary-rejects-duplicate-settlements",
+      "template": "pause-applied-boundary",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/settledInvocationIds",
+          "value": [
+            "invocation-first",
+            "invocation-first"
+          ]
+        }
+      ],
+      "violations": [
+        "must contain unique items"
+      ]
+    },
+    {
+      "name": "resume-applied-pause",
+      "template": "resume-applied-pause"
+    },
+    {
+      "name": "resume-pending-pause-intent",
+      "template": "resume-pending-pause-intent"
+    },
+    {
+      "name": "resume-requires-explicit-pause-state",
+      "template": "resume-applied-pause",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/appliedPause"
+        }
+      ],
+      "violations": [
+        "previous_state: exactly one field is required in oneof"
+      ]
+    },
+    {
+      "name": "cancellation-run-intent",
+      "template": "cancellation-run-intent"
+    },
+    {
+      "name": "cancellation-invocation-intent",
+      "template": "cancellation-invocation-intent"
+    },
+    {
+      "name": "cancellation-requires-target",
+      "template": "cancellation-run-intent",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/run"
+        }
+      ],
+      "violations": [
+        "target: exactly one field is required in oneof"
+      ]
+    },
+    {
+      "name": "cancellation-acknowledgement-indeterminate",
+      "template": "cancellation-acknowledgement-indeterminate"
+    },
+    {
+      "name": "cancellation-acknowledgement-requires-outcome",
+      "template": "cancellation-acknowledgement-indeterminate",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/indeterminate"
+        }
+      ],
+      "violations": [
+        "outcome: exactly one field is required in oneof"
+      ]
+    },
+    {
+      "name": "remaining-plan-revision-at-pause",
+      "template": "remaining-plan-revision-at-pause"
+    },
+    {
+      "name": "remaining-plan-rejects-wrong-predecessor",
+      "template": "remaining-plan-revision-at-pause",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/plan/previousPlanRevisionId",
+          "value": "plan-other"
+        }
+      ],
+      "violations": [
+        "the replacement plan must descend from the expected current plan"
+      ]
+    },
+    {
+      "name": "remaining-plan-rejects-duplicate-boundary",
+      "template": "remaining-plan-revision-at-pause",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/continuations/-",
+          "value": {
+            "boundaryOccurrenceId": "occurrence-container",
+            "nextNode": {
+              "nodeId": "remaining-work"
+            },
+            "inputs": []
+          }
+        }
+      ],
+      "violations": [
+        "continuation boundaries must be unique"
+      ]
+    },
+    {
+      "name": "remaining-plan-rejects-duplicate-frozen-occurrence",
+      "template": "remaining-plan-revision-at-pause",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/frozenOccurrenceIds",
+          "value": [
+            "occurrence-completed",
+            "occurrence-completed"
+          ]
+        }
+      ],
+      "violations": [
+        "must contain unique items"
+      ]
+    },
+    {
+      "name": "termination-success-with-receipts",
+      "template": "termination-success-with-receipts"
+    },
+    {
+      "name": "termination-rejects-unreconciled-success",
+      "template": "termination-success-with-receipts",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/effects/0",
+          "value": {
+            "invocationId": "invocation-first",
+            "unreconciled": {
+              "detail": "Outcome remains unknown."
+            }
+          }
+        }
+      ],
+      "violations": [
+        "accepted and rejected completion require determinate effects"
+      ]
+    },
+    {
+      "name": "termination-rejects-duplicate-settlement",
+      "template": "termination-success-with-receipts",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/effects/-",
+          "value": {
+            "invocationId": "invocation-first",
+            "receiptId": "receipt-example"
+          }
+        }
+      ],
+      "violations": [
+        "each invocation and subscription activation or unactivated intent has one termination settlement"
+      ]
+    },
+    {
+      "name": "termination-rejects-false-success-condition",
+      "template": "termination-success-with-receipts",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/succeeded/completionCondition",
+          "value": {
+            "evaluationId": "evaluation-negative",
+            "condition": {
+              "compare": {
+                "left": {
+                  "literal": {
+                    "boolValue": false
+                  }
+                },
+                "operator": "COMPARISON_OPERATOR_EQUAL",
+                "right": {
+                  "literal": {
+                    "boolValue": true
+                  }
+                }
+              }
+            },
+            "inputs": [],
+            "result": false
+          }
+        }
+      ],
+      "violations": [
+        "recorded run completion conditions must be true"
+      ]
+    },
+    {
+      "name": "termination-failure-preserves-indeterminate-effects",
+      "template": "termination-failure-preserves-indeterminate-effects"
+    },
+    {
+      "name": "recovery-failed-frontier-with-retained-work",
+      "template": "recovery-failed-frontier-with-retained-work"
+    },
+    {
+      "name": "recovery-rejects-reused-occurrence-identity",
+      "template": "recovery-failed-frontier-with-retained-work",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/frontier/0/previousOccurrenceId",
+          "value": "occurrence-recovered"
+        }
+      ],
+      "violations": [
+        "recovery creates a new occurrence identity"
+      ]
+    },
+    {
+      "name": "recovery-rejects-missing-root-replacement",
+      "template": "recovery-failed-frontier-with-retained-work",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/rootOccurrenceId",
+          "value": "occurrence-other"
+        }
+      ],
+      "violations": [
+        "the recovered root must be one replacement with no parent"
+      ]
+    },
+    {
+      "name": "recovery-rejects-retained-completion-with-wrong-parent",
+      "template": "recovery-failed-frontier-with-retained-work",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/retainedCompletions/0/parentOccurrenceId",
+          "value": "occurrence-original"
+        }
+      ],
+      "violations": [
+        "retained completions must bind to replacement parents"
+      ]
+    },
+    {
+      "name": "recovery-first-generation-rejects-predecessor",
+      "template": "recovery-failed-frontier-with-retained-work",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/previousRecoveryId",
+          "value": "recovery-before"
+        }
+      ],
+      "violations": [
+        "only later recoveries name a preceding recovery"
+      ]
+    },
+    {
+      "name": "input-request-choice",
+      "template": "input-request-choice"
+    },
+    {
+      "name": "input-request-rejects-duplicate-choice",
+      "template": "input-request-choice",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/choices/1/choiceId",
+          "value": "approve"
+        }
+      ],
+      "violations": [
+        "input choice identities must be unique"
+      ]
+    },
+    {
+      "name": "input-response-answer",
+      "template": "input-response-answer"
+    },
+    {
+      "name": "input-response-rejects-choice-on-decline",
+      "template": "input-response-answer",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/answered"
+        },
+        {
+          "op": "add",
+          "path": "/declined",
+          "value": {}
+        }
+      ],
+      "violations": [
+        "a selected choice requires an answered response"
+      ]
+    },
+    {
+      "name": "input-response-expired",
+      "template": "input-response-expired"
+    },
+    {
+      "name": "input-response-rejects-mismatched-expiry-instant",
+      "template": "input-response-expired",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/expired/observedAt",
+          "value": "2026-01-01T00:01:00Z"
+        }
+      ],
+      "violations": [
+        "an expiry receipt must record the same observed response instant"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,116 @@
+edition = "2024";
+
+package trogonai.workflows.runs.queries.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/workflows/runs/queries/v1alpha1/contract.proto";
+import "trogonai/workflows/runs/queries/v1alpha1/queries.proto";
+import "trogonai/workflows/runs/queries/v1alpha1/view.proto";
+
+// Clients return exact server-minted bytes. Authentication covers the format
+// version and payload bytes before decoding; re-encoding can change those bytes.
+message CursorEnvelope {
+  uint32 format_version = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32.const = 1
+  ];
+  bytes payload = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.min_len = 1
+  ];
+  bytes mac = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.min_len = 1
+  ];
+}
+
+// Every continuation rechecks live authorization. The opaque caller binding
+// prevents a token from silently changing ownership or authorization scope.
+message CursorValidity {
+  ContractVersion rendered_contract = 1 [features.field_presence = LEGACY_REQUIRED];
+  string projection_generation = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  bytes caller_binding = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.min_len = 1
+  ];
+  google.protobuf.Timestamp expires_at = 4 [features.field_presence = LEGACY_REQUIRED];
+  ReadConsistency consistency = 5;
+}
+
+// Runs are ordered by started_at descending, then run_id ascending at the
+// retained checkpoint. The position includes skipped rows, so an empty page
+// still advances rather than looping over an unreadable row.
+message RunListCursor {
+  CursorValidity validity = 1 [features.field_presence = LEGACY_REQUIRED];
+  string workspace_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string workflow_id = 3;
+  string coordinating_session_id = 4;
+  repeated RunLifecycle lifecycles = 5 [(buf.validate.field).repeated = {
+    unique: true
+    items: {
+      enum: {
+        defined_only: true
+        not_in: [0]
+      }
+    }
+  }];
+  bytes pinned_checkpoint = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.min_len = 1
+  ];
+  google.protobuf.Timestamp last_scanned_started_at = 7 [features.field_presence = LEGACY_REQUIRED];
+  string last_scanned_run_id = 8 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// Nodes and interactions use entry ordinal then stable item identity ascending.
+// History direction applies only to history. The pinned boundary cannot move
+// across pages; a stricter consistency requirement requires a fresh scan.
+message RunScopedCursor {
+  option (buf.validate.message).cel = {
+    id: "workflow_run_cursor.position"
+    message: "the cursor position must not exceed its pinned run ordinal"
+    expression: "this.last_scanned_ordinal <= this.pinned_ordinal"
+  };
+  option (buf.validate.message).cel = {
+    id: "workflow_run_cursor.consistency_scope"
+    message: "the consistency position must belong to the cursor run"
+    expression: "!has(this.validity.consistency) || !has(this.validity.consistency.at_least) || this.validity.consistency.at_least.run_id == this.run_id"
+  };
+  CursorValidity validity = 1 [features.field_presence = LEGACY_REQUIRED];
+  string run_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  uint64 pinned_ordinal = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  uint64 last_scanned_ordinal = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  string last_scanned_item_id = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  oneof query {
+    option (buf.validate.oneof).required = true;
+    google.protobuf.Empty nodes = 6;
+    bool unresolved_interactions_only = 7;
+    HistoryDirection history_direction = 8 [(buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }];
+  }
+}

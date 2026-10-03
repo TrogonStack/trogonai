@@ -1,0 +1,52 @@
+edition = "2024";
+
+package trogonai.workflows.definitions.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "trogonai/workflows/definitions/v1alpha1/value.proto";
+
+// Evaluation uses captured typed values, not model text or a mutable file read.
+// Admission proves operand types and scope; unresolved required operands reject
+// evaluation instead of silently becoming false. Runs retain resolved operands.
+message Condition {
+  oneof condition {
+    option (buf.validate.oneof).required = true;
+
+    google.protobuf.Empty always = 1;
+    ValueComparison compare = 2;
+    ConditionGroup all = 3;
+    ConditionGroup any = 4;
+    Condition negate = 5;
+    ValueReference present = 6;
+  }
+}
+
+message ConditionGroup {
+  repeated Condition conditions = 1 [(buf.validate.field).repeated.min_items = 1];
+}
+
+// Equality requires identical schema types. Ordering accepts integer, decimal,
+// timestamp, or duration operands of the same type. Symbols compare by schema
+// identity and member; artifact equality includes Session and content identity.
+message ValueComparison {
+  ValueExpression left = 1 [features.field_presence = LEGACY_REQUIRED];
+  ComparisonOperator operator = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  ValueExpression right = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+enum ComparisonOperator {
+  COMPARISON_OPERATOR_UNSPECIFIED = 0;
+  COMPARISON_OPERATOR_EQUAL = 1;
+  COMPARISON_OPERATOR_NOT_EQUAL = 2;
+  COMPARISON_OPERATOR_LESS = 3;
+  COMPARISON_OPERATOR_LESS_OR_EQUAL = 4;
+  COMPARISON_OPERATOR_GREATER = 5;
+  COMPARISON_OPERATOR_GREATER_OR_EQUAL = 6;
+}

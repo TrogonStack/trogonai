@@ -1,0 +1,143 @@
+edition = "2024";
+
+package trogonai.workflows.runs.queries.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/workflows/runs/queries/v1alpha1/contract.proto";
+import "trogonai/workflows/runs/queries/v1alpha1/history.proto";
+import "trogonai/workflows/runs/queries/v1alpha1/view.proto";
+
+message GetWorkflowRunRequest {
+  option (buf.validate.message).cel = {
+    id: "workflow_get_run.consistency_scope"
+    message: "the consistency position must belong to the requested run"
+    expression: "!has(this.consistency) || !has(this.consistency.at_least) || this.consistency.at_least.run_id == this.run_id"
+  };
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ContractVersion accepted_contract = 2 [features.field_presence = LEGACY_REQUIRED];
+  ReadConsistency consistency = 3;
+}
+
+message GetWorkflowRunResponse {
+  ContractNegotiation contract = 1 [features.field_presence = LEGACY_REQUIRED];
+  WorkflowRunView run = 2 [features.field_presence = LEGACY_REQUIRED];
+  ProjectionFreshness freshness = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ListWorkflowRunsRequest {
+  ContractVersion accepted_contract = 1 [features.field_presence = LEGACY_REQUIRED];
+  string workspace_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string workflow_id = 3;
+  string coordinating_session_id = 4;
+  repeated RunLifecycle lifecycles = 5 [(buf.validate.field).repeated = {
+    unique: true
+    items: {
+      enum: {
+        defined_only: true
+        not_in: [0]
+      }
+    }
+  }];
+  uint32 page_size = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32.gt = 0
+  ];
+  bytes page_token = 7 [(buf.validate.field).bytes.min_len = 1];
+  ReadConsistency consistency = 8;
+}
+
+message ListWorkflowRunsResponse {
+  ContractNegotiation contract = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated WorkflowRunSummary runs = 2;
+  bytes next_page_token = 3 [(buf.validate.field).bytes.min_len = 1];
+  uint32 skipped_count = 4 [features.field_presence = LEGACY_REQUIRED];
+  ProjectionFreshness freshness = 5 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message RunPageRequest {
+  option (buf.validate.message).cel = {
+    id: "workflow_run_page.consistency_scope"
+    message: "the consistency position must belong to the requested run"
+    expression: "!has(this.consistency) || !has(this.consistency.at_least) || this.consistency.at_least.run_id == this.run_id"
+  };
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ContractVersion accepted_contract = 2 [features.field_presence = LEGACY_REQUIRED];
+  uint32 page_size = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32.gt = 0
+  ];
+  bytes page_token = 4 [(buf.validate.field).bytes.min_len = 1];
+  ReadConsistency consistency = 5;
+}
+
+message ListWorkflowRunNodesRequest {
+  RunPageRequest page = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ListWorkflowRunNodesResponse {
+  ContractNegotiation contract = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated NodeOccurrenceView nodes = 2;
+  bytes next_page_token = 3 [(buf.validate.field).bytes.min_len = 1];
+  uint64 pinned_ordinal = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  uint32 skipped_count = 5 [features.field_presence = LEGACY_REQUIRED];
+  ProjectionFreshness freshness = 6 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ListWorkflowRunInteractionsRequest {
+  RunPageRequest page = 1 [features.field_presence = LEGACY_REQUIRED];
+  bool unresolved_only = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ListWorkflowRunInteractionsResponse {
+  ContractNegotiation contract = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated InteractionView interactions = 2;
+  bytes next_page_token = 3 [(buf.validate.field).bytes.min_len = 1];
+  uint64 pinned_ordinal = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  uint32 withheld_count = 5 [features.field_presence = LEGACY_REQUIRED];
+  ProjectionFreshness freshness = 6 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message GetWorkflowRunHistoryRequest {
+  RunPageRequest page = 1 [features.field_presence = LEGACY_REQUIRED];
+  HistoryDirection direction = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+enum HistoryDirection {
+  HISTORY_DIRECTION_UNSPECIFIED = 0;
+  HISTORY_DIRECTION_FORWARD = 1;
+  HISTORY_DIRECTION_REVERSE = 2;
+}
+
+message GetWorkflowRunHistoryResponse {
+  ContractNegotiation contract = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated HistoryItem items = 2;
+  bytes next_page_token = 3 [(buf.validate.field).bytes.min_len = 1];
+  uint64 pinned_ordinal = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  uint32 contract_clamped_count = 5 [features.field_presence = LEGACY_REQUIRED];
+  uint32 withheld_count = 6 [features.field_presence = LEGACY_REQUIRED];
+  ProjectionFreshness freshness = 7 [features.field_presence = LEGACY_REQUIRED];
+}

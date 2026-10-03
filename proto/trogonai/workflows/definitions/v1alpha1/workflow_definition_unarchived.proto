@@ -1,0 +1,9 @@
+edition = "2024";
+
+package trogonai.workflows.definitions.v1alpha1;
+
+import "trogonai/workflows/definitions/v1alpha1/workflow_definition.proto";
+
+message WorkflowDefinitionUnarchived {
+  WorkflowDefinitionRef definition = 1 [features.field_presence = LEGACY_REQUIRED];
+}

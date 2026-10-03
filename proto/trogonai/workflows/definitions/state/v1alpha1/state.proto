@@ -1,0 +1,51 @@
+edition = "2024";
+
+package trogonai.workflows.definitions.state.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "trogonai/workflows/definitions/v1alpha1/workflow_definition.proto";
+
+// Fold rejects digest or decoded-contract corruption, unknown events, mismatched
+// identities, noncontiguous revisions, stale exact bases, and illegal lifecycle
+// transitions. Revisions remain immutable through archive/unarchive. Presentation
+// and current hierarchy placement belong to query projections.
+message State {
+  oneof state {
+    option (buf.validate.oneof).required = true;
+
+    google.protobuf.Empty missing = 1;
+    ProvisionedWorkflowDefinition present = 2;
+  }
+}
+
+message ProvisionedWorkflowDefinition {
+  option (buf.validate.message).cel = {
+    id: "provisioned_workflow_definition.revision_identity"
+    message: "every retained revision must match its map key and workflow identity"
+    expression: "this.revisions.all(number, this.revisions[number].reference.workflow_id == this.workflow_id && this.revisions[number].reference.revision == number)"
+  };
+  option (buf.validate.message).cel = {
+    id: "provisioned_workflow_definition.contiguous_revisions"
+    message: "revisions must cover every number from 1 through the latest revision"
+    expression: "this.revisions.all(number, number > 0u && number <= uint(this.revisions.size()))"
+  };
+  option (buf.validate.message).cel = {
+    id: "provisioned_workflow_definition.changed_revisions"
+    message: "consecutive retained revisions must have different definition digests"
+    expression: "this.revisions.all(number, number == 1u || (number - 1u in this.revisions && this.revisions[number].reference.digest != this.revisions[number - 1u].reference.digest))"
+  };
+
+  string workflow_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  trogonai.workflows.definitions.v1alpha1.WorkflowDefinitionLifecycle lifecycle = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  map<uint64, trogonai.workflows.definitions.v1alpha1.StoredWorkflowDefinition> revisions = 3 [(buf.validate.field).map.min_pairs = 1];
+}

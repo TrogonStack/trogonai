@@ -1,0 +1,359 @@
+{
+  "templates": {
+    "definition-query-latest-revision": {
+      "type": "trogonai.workflows.definitions.queries.v1alpha1.GetWorkflowDefinitionRequest",
+      "payload": {
+        "workflowId": "workflow-example",
+        "acceptedContract": {
+          "major": 1,
+          "minor": 1
+        },
+        "latest": {},
+        "consistency": {
+          "atLeast": {
+            "workflowId": "workflow-example",
+            "ordinal": "4"
+          },
+          "maxWait": "5s"
+        }
+      }
+    },
+    "definition-query-selected-revision": {
+      "type": "trogonai.workflows.definitions.queries.v1alpha1.GetWorkflowDefinitionRequest",
+      "payload": {
+        "workflowId": "workflow-example",
+        "acceptedContract": {
+          "major": 1,
+          "minor": 1
+        },
+        "revision": "1"
+      }
+    },
+    "definition-query-latest-artifact": {
+      "type": "trogonai.workflows.definitions.queries.v1alpha1.GetWorkflowDefinitionResponse",
+      "payload": {
+        "contract": {
+          "rendered": {
+            "major": 1,
+            "minor": 1
+          },
+          "serverMax": {
+            "major": 1,
+            "minor": 2
+          }
+        },
+        "summary": {
+          "latestRevision": {
+            "workflowId": "workflow-example",
+            "revision": "2",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            }
+          },
+          "displayName": "Example workflow",
+          "parent": "projects/example",
+          "lifecycle": "DEFINITION_LIFECYCLE_ACTIVE",
+          "updatedAt": "2026-01-01T00:01:00Z",
+          "appliedOrdinal": "4"
+        },
+        "definition": {
+          "reference": {
+            "workflowId": "workflow-example",
+            "revision": "2",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            }
+          },
+          "definitionBytes": "AQ==",
+          "definitionContractVersion": 1
+        },
+        "freshness": {
+          "generation": "projection-example",
+          "checkpoint": "AQ==",
+          "observedAt": "2026-01-01T00:01:00Z",
+          "applied": [
+            {
+              "workflowId": "workflow-example",
+              "ordinal": "4"
+            }
+          ],
+          "condition": "FRESHNESS_CONDITION_CURRENT",
+          "consistencySatisfied": true
+        }
+      }
+    },
+    "definition-query-historical-artifact-with-current-summary": {
+      "type": "trogonai.workflows.definitions.queries.v1alpha1.GetWorkflowDefinitionResponse",
+      "payload": {
+        "contract": {
+          "rendered": {
+            "major": 1,
+            "minor": 1
+          },
+          "serverMax": {
+            "major": 1,
+            "minor": 2
+          }
+        },
+        "summary": {
+          "latestRevision": {
+            "workflowId": "workflow-example",
+            "revision": "2",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            }
+          },
+          "displayName": "Example workflow",
+          "parent": "projects/example",
+          "lifecycle": "DEFINITION_LIFECYCLE_ACTIVE",
+          "updatedAt": "2026-01-01T00:01:00Z",
+          "appliedOrdinal": "4"
+        },
+        "definition": {
+          "reference": {
+            "workflowId": "workflow-example",
+            "revision": "1",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            }
+          },
+          "definitionBytes": "AQ==",
+          "definitionContractVersion": 1
+        },
+        "freshness": {
+          "generation": "projection-example",
+          "checkpoint": "AQ==",
+          "observedAt": "2026-01-01T00:01:00Z",
+          "applied": [
+            {
+              "workflowId": "workflow-example",
+              "ordinal": "4"
+            }
+          ],
+          "condition": "FRESHNESS_CONDITION_CURRENT",
+          "consistencySatisfied": true
+        }
+      }
+    },
+    "definition-query-freshness": {
+      "type": "trogonai.workflows.definitions.queries.v1alpha1.ProjectionFreshness",
+      "payload": {
+        "generation": "projection-example",
+        "checkpoint": "AQ==",
+        "observedAt": "2026-01-01T00:01:00Z",
+        "applied": [
+          {
+            "workflowId": "workflow-example",
+            "ordinal": "4"
+          }
+        ],
+        "condition": "FRESHNESS_CONDITION_CURRENT",
+        "consistencySatisfied": true
+      }
+    },
+    "definition-query-list": {
+      "type": "trogonai.workflows.definitions.queries.v1alpha1.ListWorkflowDefinitionsRequest",
+      "payload": {
+        "acceptedContract": {
+          "major": 1,
+          "minor": 1
+        },
+        "filter": {
+          "parent": "projects/example",
+          "archived": "ARCHIVED_FILTER_EXCLUDE"
+        },
+        "pageSize": 50,
+        "pageToken": "AQ=="
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "definition-query-latest-revision",
+      "template": "definition-query-latest-revision"
+    },
+    {
+      "name": "definition-query-requires-selection",
+      "template": "definition-query-latest-revision",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/latest"
+        }
+      ],
+      "violations": [
+        "selection: exactly one field is required in oneof"
+      ]
+    },
+    {
+      "name": "definition-query-rejects-wrong-workflow-consistency",
+      "template": "definition-query-latest-revision",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/consistency/atLeast/workflowId",
+          "value": "workflow-other"
+        }
+      ],
+      "violations": [
+        "the consistency position must belong to the requested workflow"
+      ]
+    },
+    {
+      "name": "definition-query-selected-revision",
+      "template": "definition-query-selected-revision"
+    },
+    {
+      "name": "definition-query-rejects-zero-revision",
+      "template": "definition-query-selected-revision",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/revision",
+          "value": "0"
+        }
+      ],
+      "violations": [
+        "must be greater than 0"
+      ]
+    },
+    {
+      "name": "definition-query-latest-artifact",
+      "template": "definition-query-latest-artifact"
+    },
+    {
+      "name": "definition-query-rejects-another-workflow-artifact",
+      "template": "definition-query-latest-artifact",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/reference/workflowId",
+          "value": "workflow-other"
+        }
+      ],
+      "violations": [
+        "the artifact must belong to the summary and not exceed its latest revision"
+      ]
+    },
+    {
+      "name": "definition-query-rejects-future-artifact-revision",
+      "template": "definition-query-latest-artifact",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/reference/revision",
+          "value": "3"
+        }
+      ],
+      "violations": [
+        "the artifact must belong to the summary and not exceed its latest revision"
+      ]
+    },
+    {
+      "name": "definition-query-rejects-mismatched-latest-digest",
+      "template": "definition-query-latest-artifact",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/reference/digest",
+          "value": {
+            "algorithm": "sha256",
+            "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          }
+        }
+      ],
+      "violations": [
+        "the latest artifact must match the summary's exact reference"
+      ]
+    },
+    {
+      "name": "definition-query-rejects-unknown-artifact-contract",
+      "template": "definition-query-latest-artifact",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/definitionContractVersion",
+          "value": 2
+        }
+      ],
+      "violations": [
+        "must equal 1"
+      ]
+    },
+    {
+      "name": "definition-query-historical-artifact-with-current-summary",
+      "template": "definition-query-historical-artifact-with-current-summary"
+    },
+    {
+      "name": "definition-query-freshness",
+      "template": "definition-query-freshness"
+    },
+    {
+      "name": "definition-query-rejects-duplicate-applied-position",
+      "template": "definition-query-freshness",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/applied/-",
+          "value": {
+            "workflowId": "workflow-example",
+            "ordinal": "4"
+          }
+        }
+      ],
+      "violations": [
+        "applied workflow positions must be unique"
+      ]
+    },
+    {
+      "name": "definition-query-rejects-unsatisfied-success",
+      "template": "definition-query-freshness",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/consistencySatisfied",
+          "value": false
+        }
+      ],
+      "violations": [
+        "must equal true"
+      ]
+    },
+    {
+      "name": "definition-query-list",
+      "template": "definition-query-list"
+    },
+    {
+      "name": "definition-query-list-rejects-empty-present-cursor",
+      "template": "definition-query-list",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/pageToken",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "must be at least 1 bytes"
+      ]
+    },
+    {
+      "name": "definition-query-list-rejects-zero-page-size",
+      "template": "definition-query-list",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/pageSize",
+          "value": 0
+        }
+      ],
+      "violations": [
+        "must be greater than 0"
+      ]
+    }
+  ]
+}

@@ -83,6 +83,7 @@ export default async () => {
               text: "Usage Settlement Ledger",
               link: "/architecture/usage-settlement-ledger",
             },
+            { text: "Workflows", link: "/architecture/workflows" },
           ],
         },
         {

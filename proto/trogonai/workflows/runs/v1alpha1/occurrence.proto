@@ -1,0 +1,156 @@
+edition = "2024";
+
+package trogonai.workflows.runs.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/agents/agents/v1alpha1/agent_revision.proto";
+import "trogonai/session/sessions/v1alpha1/create_child_session.proto";
+import "trogonai/session/sessions/v1alpha1/create_session.proto";
+import "trogonai/workflows/definitions/v1alpha1/digest.proto";
+import "trogonai/workflows/definitions/v1alpha1/node_ref.proto";
+import "trogonai/workflows/runs/v1alpha1/run.proto";
+
+message RepeatIteration {
+  trogonai.workflows.definitions.v1alpha1.NodeRef repeat_node = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint64 iteration = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+}
+
+// A definition node can occur repeatedly. The outermost-to-innermost path is
+// fixed at entry; a retry keeps this occurrence and adds an invocation.
+message NodeOccurrence {
+  option (buf.validate.message).cel = {
+    id: "node_occurrence.parent"
+    message: "an occurrence cannot be its own parent"
+    expression: "!has(this.parent_occurrence_id) || this.parent_occurrence_id != this.occurrence_id"
+  };
+  option (buf.validate.message).cel = {
+    id: "node_occurrence.unique_repeat_path"
+    message: "a repeat node appears at most once in the nested iteration path"
+    expression: "this.iteration_path.map(frame, frame.repeat_node.node_id).unique()"
+  };
+
+  string occurrence_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  trogonai.workflows.definitions.v1alpha1.NodeRef node = 2 [features.field_presence = LEGACY_REQUIRED];
+  string plan_revision_id = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  repeated RepeatIteration iteration_path = 4;
+  string parent_occurrence_id = 5 [(buf.validate.field).string.min_len = 1];
+}
+
+message OccurrenceEntry {
+  option (buf.validate.message).cel = {
+    id: "occurrence_entry.unique_inputs"
+    message: "resolved input names must be unique"
+    expression: "this.inputs.map(value, value.name).unique()"
+  };
+
+  NodeOccurrence occurrence = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated ResolvedValue inputs = 2;
+}
+
+message LaunchAdmission {
+  option (buf.validate.message).cel = {
+    id: "launch_admission.interval"
+    message: "admission validity must end after admission"
+    expression: "this.valid_until > this.admitted_at"
+  };
+
+  trogonai.agents.agents.v1alpha1.AgentRevisionRef agent_revision = 1 [features.field_presence = LEGACY_REQUIRED];
+  RunAuthority authority = 2 [features.field_presence = LEGACY_REQUIRED];
+  string admission_id = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  trogonai.workflows.definitions.v1alpha1.Digest execution_plan_digest = 4 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp admitted_at = 5 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp valid_until = 6 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// The dispatch fact retains the whole immutable Session command and its
+// Decider command_id. Repair uses these fields, not a newly generated plan.
+// Parent-linked creation follows an already-appended DelegationDispatched;
+// independent creation is available when the run has no coordinating Session.
+message ChildSessionLaunch {
+  option (buf.validate.message).cel = {
+    id: "child_session_launch.distinct_child"
+    message: "the dispatched child Session must differ from its parent"
+    expression: "!has(this.create_child_session) || this.create_child_session.session_id != this.create_child_session.parent_session_id"
+  };
+  option (buf.validate.message).cel = {
+    id: "child_session_launch.parent_evidence"
+    message: "parent-linked launches require matching parent dispatch evidence"
+    expression: "has(this.create_child_session) == has(this.parent_dispatch) && (!has(this.create_child_session) || (this.parent_dispatch.session.session_id == this.create_child_session.parent_session_id && this.parent_dispatch.ordinal == this.create_child_session.parent_dispatched_at))"
+  };
+  option (buf.validate.message).cel = {
+    id: "child_session_launch.admitted_plan"
+    message: "the launch must preserve the exact admitted Session plan digest"
+    expression: "has(this.create_child_session) ? (this.create_child_session.execution_plan.plan_digest.algorithm == this.admission.execution_plan_digest.algorithm && this.create_child_session.execution_plan.plan_digest.value == this.admission.execution_plan_digest.value) : (has(this.create_session) && this.create_session.execution_plan.plan_digest.algorithm == this.admission.execution_plan_digest.algorithm && this.create_session.execution_plan.plan_digest.value == this.admission.execution_plan_digest.value)"
+  };
+
+  string command_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  oneof command {
+    option (buf.validate.oneof).required = true;
+
+    trogonai.session.sessions.v1alpha1.CreateChildSession create_child_session = 2;
+    trogonai.session.sessions.v1alpha1.CreateSession create_session = 3;
+  }
+  LaunchAdmission admission = 4 [features.field_presence = LEGACY_REQUIRED];
+  SessionEventRef parent_dispatch = 5;
+}
+
+message NodeInvocation {
+  option (buf.validate.message).cel = {
+    id: "node_invocation.attempt_predecessor"
+    message: "only a retry has an immediately preceding invocation"
+    expression: "this.attempt_number == 1u ? (!has(this.previous_invocation_id) && !has(this.retry_authorization_id)) : (has(this.previous_invocation_id) && has(this.retry_authorization_id) && this.previous_invocation_id != this.invocation_id)"
+  };
+  option (buf.validate.message).cel = {
+    id: "node_invocation.unique_inputs"
+    message: "resolved input names must be unique"
+    expression: "this.inputs.map(value, value.name).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "node_invocation.deadline"
+    message: "the invocation deadline must follow admission"
+    expression: "this.deadline > this.launch.admission.admitted_at"
+  };
+  option (buf.validate.message).cel = {
+    id: "node_invocation.operation"
+    message: "parent-linked dispatch must use the invocation operation identity"
+    expression: "!has(this.launch.create_child_session) || this.launch.create_child_session.operation_id == this.operation_id"
+  };
+
+  string invocation_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string occurrence_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  uint64 attempt_number = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  string previous_invocation_id = 4 [(buf.validate.field).string.min_len = 1];
+  string operation_id = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  repeated ResolvedValue inputs = 6;
+  ChildSessionLaunch launch = 7 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp deadline = 8 [features.field_presence = LEGACY_REQUIRED];
+  string retry_authorization_id = 9 [(buf.validate.field).string.min_len = 1];
+}

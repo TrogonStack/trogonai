@@ -1,0 +1,178 @@
+edition = "2024";
+
+package trogonai.workflows.runs.queries.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+message DefinitionViewRef {
+  string workflow_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  uint64 revision = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+}
+
+message WorkflowRunSummary {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string display_name = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  RunLifecycle lifecycle = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  string plan_revision_id = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  DefinitionViewRef saved_definition = 5;
+  string workspace_id = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string coordinating_session_id = 7;
+  google.protobuf.Timestamp started_at = 8 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp updated_at = 9 [features.field_presence = LEGACY_REQUIRED];
+  uint64 applied_ordinal = 10 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  bool has_unsettled_work = 11 [features.field_presence = LEGACY_REQUIRED];
+}
+
+enum RunLifecycle {
+  RUN_LIFECYCLE_UNSPECIFIED = 0;
+  RUN_LIFECYCLE_RUNNING = 1;
+  RUN_LIFECYCLE_PAUSING = 2;
+  RUN_LIFECYCLE_PAUSED = 3;
+  RUN_LIFECYCLE_WAITING = 4;
+  RUN_LIFECYCLE_CANCELLING = 5;
+  RUN_LIFECYCLE_SUCCEEDED = 6;
+  RUN_LIFECYCLE_FAILED = 7;
+  RUN_LIFECYCLE_CANCELLED = 8;
+  RUN_LIFECYCLE_REJECTED = 9;
+}
+
+message WorkflowRunView {
+  WorkflowRunSummary summary = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint64 pending_occurrences = 2 [features.field_presence = LEGACY_REQUIRED];
+  uint64 active_invocations = 3 [features.field_presence = LEGACY_REQUIRED];
+  uint64 completed_occurrences = 4 [features.field_presence = LEGACY_REQUIRED];
+  uint64 failed_occurrences = 5 [features.field_presence = LEGACY_REQUIRED];
+  uint64 open_input_requests = 6 [features.field_presence = LEGACY_REQUIRED];
+  uint64 active_watches = 7 [features.field_presence = LEGACY_REQUIRED];
+  uint64 invocations_started = 8 [features.field_presence = LEGACY_REQUIRED];
+  uint64 invocation_limit = 9 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  google.protobuf.Timestamp deadline = 10 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Occurrence identity survives a retry; an iteration creates a new occurrence.
+// Read-side types are local so changing the fold does not change this contract.
+message OccurrenceViewRef {
+  string occurrence_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string node_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string plan_revision_id = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+message NodeOccurrenceView {
+  OccurrenceViewRef occurrence = 1 [features.field_presence = LEGACY_REQUIRED];
+  NodeLifecycle lifecycle = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  string parent_occurrence_id = 3;
+  string invocation_id = 4;
+  uint32 attempt_number = 5;
+  string child_session_id = 6;
+  string outcome_summary = 7;
+  uint64 applied_ordinal = 8 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  bool has_unsettled_work = 9 [features.field_presence = LEGACY_REQUIRED];
+}
+
+enum NodeLifecycle {
+  NODE_LIFECYCLE_UNSPECIFIED = 0;
+  NODE_LIFECYCLE_PENDING = 1;
+  NODE_LIFECYCLE_RUNNING = 2;
+  NODE_LIFECYCLE_WAITING = 3;
+  NODE_LIFECYCLE_SUCCEEDED = 4;
+  NODE_LIFECYCLE_FAILED = 5;
+  NODE_LIFECYCLE_CANCELLED = 6;
+  NODE_LIFECYCLE_INDETERMINATE = 7;
+  NODE_LIFECYCLE_REJECTED = 8;
+}
+
+message InteractionView {
+  string interaction_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  OccurrenceViewRef occurrence = 2 [features.field_presence = LEGACY_REQUIRED];
+  InteractionKind kind = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  InteractionLifecycle lifecycle = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  string prompt = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string target_session_id = 6;
+  google.protobuf.Timestamp deadline = 7;
+  bytes response_schema_bytes = 8 [(buf.validate.field).bytes.min_len = 1];
+  string reply_id = 9;
+  bool sensitive_content_withheld = 10 [features.field_presence = LEGACY_REQUIRED];
+}
+
+enum InteractionKind {
+  INTERACTION_KIND_UNSPECIFIED = 0;
+  INTERACTION_KIND_INPUT = 1;
+  INTERACTION_KIND_GUIDANCE = 2;
+  INTERACTION_KIND_WATCH = 3;
+}
+
+enum InteractionLifecycle {
+  INTERACTION_LIFECYCLE_UNSPECIFIED = 0;
+  INTERACTION_LIFECYCLE_PENDING = 1;
+  INTERACTION_LIFECYCLE_ACTIVE = 2;
+  INTERACTION_LIFECYCLE_RESOLVED = 3;
+  INTERACTION_LIFECYCLE_EXPIRED = 4;
+  INTERACTION_LIFECYCLE_CANCELLED = 5;
+}

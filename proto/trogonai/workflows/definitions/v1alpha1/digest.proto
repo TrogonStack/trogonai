@@ -1,0 +1,17 @@
+edition = "2024";
+
+package trogonai.workflows.definitions.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// Commits to exact immutable bytes. Verifying decoded re-encodings is invalid.
+message Digest {
+  string algorithm = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.const = "sha256"
+  ];
+  bytes value = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.len = 32
+  ];
+}

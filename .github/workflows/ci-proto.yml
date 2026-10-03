@@ -12,6 +12,7 @@ on:
       - 'buf.lock'
       - '.mise.toml'
       - '.config/mise/tasks/**'
+      - 'tests/proto/**'
       - 'rsworkspace/crates/platform/trogonai-proto/src/gen/**'
       - '.github/workflows/ci-proto.yml'
 
@@ -88,6 +89,22 @@ jobs:
 
       - name: Check for breaking changes against main
         run: buf breaking . --against ".git#branch=origin/main"
+
+  workflow-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install contract validation tools via mise
+        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        with:
+          install_args: buf python
+
+      - name: Validate workflow contract fixtures
+        run: mise run --skip-tools proto:validate-workflows
 
   generate:
     runs-on: ubuntu-latest

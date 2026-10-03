@@ -1,0 +1,22 @@
+edition = "2024";
+
+package trogonai.workflows.definitions.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/workflows/definitions/v1alpha1/workflow_definition_archived.proto";
+import "trogonai/workflows/definitions/v1alpha1/workflow_definition_provisioned.proto";
+import "trogonai/workflows/definitions/v1alpha1/workflow_definition_revised.proto";
+import "trogonai/workflows/definitions/v1alpha1/workflow_definition_unarchived.proto";
+
+// Unknown or unset events reject replay instead of silently losing a revision
+// or archival gate. Domain faults use the existing DeciderService error channel.
+message WorkflowDefinitionEvent {
+  oneof event {
+    option (buf.validate.oneof).required = true;
+
+    WorkflowDefinitionProvisioned workflow_definition_provisioned = 1;
+    WorkflowDefinitionRevised workflow_definition_revised = 2;
+    WorkflowDefinitionArchived workflow_definition_archived = 3;
+    WorkflowDefinitionUnarchived workflow_definition_unarchived = 4;
+  }
+}

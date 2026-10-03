@@ -1,0 +1,297 @@
+edition = "2024";
+
+package trogonai.workflows.runs.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/workflows/definitions/v1alpha1/condition.proto";
+import "trogonai/workflows/definitions/v1alpha1/node_ref.proto";
+import "trogonai/workflows/definitions/v1alpha1/value.proto";
+import "trogonai/workflows/runs/v1alpha1/receipt.proto";
+import "trogonai/workflows/runs/v1alpha1/run.proto";
+
+// The exact expression and resolved operands preserve why execution advanced.
+// Dispatch checks the expression against the occurrence's pinned definition.
+message ConditionEvaluation {
+  option (buf.validate.message).cel = {
+    id: "condition_evaluation.unique_inputs"
+    message: "evaluation input names must be unique"
+    expression: "this.inputs.map(value, value.name).unique()"
+  };
+
+  string evaluation_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  trogonai.workflows.definitions.v1alpha1.Condition condition = 2 [features.field_presence = LEGACY_REQUIRED];
+  repeated ResolvedValue inputs = 3;
+  bool result = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message NodeSucceeded {
+  option (buf.validate.message).cel = {
+    id: "node_succeeded.unique_outputs"
+    message: "node output names must be unique"
+    expression: "this.outputs.map(value, value.name).unique()"
+  };
+
+  repeated trogonai.workflows.definitions.v1alpha1.NamedValue outputs = 1;
+}
+
+message NodeCancelled {
+  string cancellation_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+message NodeRejected {
+  option (buf.validate.message).cel = {
+    id: "node_rejected.acceptance"
+    message: "business rejection requires a false acceptance condition"
+    expression: "!this.acceptance.result"
+  };
+  option (buf.validate.message).cel = {
+    id: "node_rejected.unique_outputs"
+    message: "rejected output names must be unique"
+    expression: "this.outputs.map(value, value.name).unique()"
+  };
+
+  repeated trogonai.workflows.definitions.v1alpha1.NamedValue outputs = 1;
+  ConditionEvaluation acceptance = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message CompletionSource {
+  oneof source {
+    option (buf.validate.oneof).required = true;
+
+    string invocation_receipt_id = 1 [(buf.validate.field).string.min_len = 1];
+    string decision_id = 2 [(buf.validate.field).string.min_len = 1];
+    string wait_resolution_id = 3 [(buf.validate.field).string.min_len = 1];
+    InputResponseSource input_response = 4;
+    string child_completion_id = 5 [(buf.validate.field).string.min_len = 1];
+    string cancellation_id = 6 [(buf.validate.field).string.min_len = 1];
+    string plan_revision_id = 7 [(buf.validate.field).string.min_len = 1];
+    string timer_resolution_id = 8 [(buf.validate.field).string.min_len = 1];
+  }
+}
+
+message NodeCompletion {
+  option (buf.validate.message).cel = {
+    id: "node_completion.success_condition"
+    message: "a successful node must satisfy its recorded completion condition"
+    expression: "!has(this.succeeded) || !has(this.completion_condition) || this.completion_condition.result"
+  };
+
+  string completion_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string occurrence_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  repeated CompletionSource evidence = 3 [(buf.validate.field).repeated.min_items = 1];
+  ConditionEvaluation completion_condition = 4;
+  oneof outcome {
+    option (buf.validate.oneof).required = true;
+
+    NodeSucceeded succeeded = 5;
+    Failure failed = 6;
+    NodeCancelled cancelled = 7;
+    NodeRejected rejected = 9;
+  }
+  reserved 8;
+  reserved skipped;
+}
+
+message SequenceAdvance {
+  trogonai.workflows.definitions.v1alpha1.NodeRef next_node = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint32 next_position = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32.gt = 0
+  ];
+}
+
+message SequenceDecision {
+  repeated string completed_occurrence_ids = 1 [
+    (buf.validate.field).repeated.unique = true,
+    (buf.validate.field).repeated.items.string.min_len = 1
+  ];
+  oneof outcome {
+    option (buf.validate.oneof).required = true;
+
+    SequenceAdvance advance = 2;
+    NodeSucceeded completed = 3;
+    Failure failed = 4;
+    NodeRejected rejected = 5;
+  }
+}
+
+message BranchReceipt {
+  string occurrence_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  oneof status {
+    option (buf.validate.oneof).required = true;
+
+    string completion_id = 2 [(buf.validate.field).string.min_len = 1];
+    google.protobuf.Empty pending = 3;
+  }
+}
+
+// Pending siblings remain tracked after an early join. Stopping them requires
+// separately recorded cancellation, and their later receipts remain admissible.
+message JoinDecision {
+  option (buf.validate.message).cel = {
+    id: "join_decision.acceptance"
+    message: "accepted join completion cannot retain a false acceptance decision"
+    expression: "!has(this.completed) || !has(this.acceptance) || this.acceptance.result"
+  };
+  option (buf.validate.message).cel = {
+    id: "join_decision.unique_branches"
+    message: "join branch occurrences must be unique"
+    expression: "this.branches.map(branch, branch.occurrence_id).unique()"
+  };
+
+  repeated BranchReceipt branches = 1 [(buf.validate.field).repeated.min_items = 1];
+  ConditionEvaluation acceptance = 2;
+  oneof outcome {
+    option (buf.validate.oneof).required = true;
+
+    NodeSucceeded completed = 3;
+    Failure failed = 4;
+    NodeRejected rejected = 5;
+  }
+}
+
+message RepeatContinue {
+  option (buf.validate.message).cel = {
+    id: "repeat_continue.unique_inputs"
+    message: "next iteration input names must be unique"
+    expression: "this.inputs.map(value, value.name).unique()"
+  };
+
+  uint64 next_iteration = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  repeated ResolvedValue inputs = 2;
+}
+
+message RepeatIterationSnapshot {
+  option (buf.validate.message).cel = {
+    id: "repeat_iteration_snapshot.predecessor"
+    message: "only subsequent iterations require a continuation decision"
+    expression: "this.iteration == 1u ? !has(this.continuation_decision_id) : has(this.continuation_decision_id)"
+  };
+  option (buf.validate.message).cel = {
+    id: "repeat_iteration_snapshot.unique_variables"
+    message: "repeat variable names must be unique"
+    expression: "this.variables.map(value, value.name).unique()"
+  };
+
+  string repeat_occurrence_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  uint64 iteration = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  repeated ResolvedValue variables = 3;
+  string continuation_decision_id = 4 [(buf.validate.field).string.min_len = 1];
+}
+
+message CountLimitReached {
+  option (buf.validate.message).cel = {
+    id: "count_limit_reached.bound"
+    message: "observed usage must reach the bound"
+    expression: "this.observed >= this.bound"
+  };
+
+  uint64 bound = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  uint64 observed = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+}
+
+message DeadlineReached {
+  option (buf.validate.message).cel = {
+    id: "deadline_reached.elapsed"
+    message: "deadline evidence must be at or after the deadline"
+    expression: "this.observed_at >= this.deadline"
+  };
+
+  google.protobuf.Timestamp deadline = 1 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp observed_at = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message LimitReached {
+  oneof limit {
+    option (buf.validate.oneof).required = true;
+
+    CountLimitReached iterations = 1;
+    CountLimitReached invocations = 2;
+    DeadlineReached deadline = 3;
+  }
+}
+
+message RepeatDecision {
+  option (buf.validate.message).cel = {
+    id: "repeat_decision.progress"
+    message: "repeat continuation advances exactly one iteration while its condition is false"
+    expression: "!has(this.continue_with) || (!this.until_condition.result && this.continue_with.next_iteration == this.iteration + 1u)"
+  };
+  option (buf.validate.message).cel = {
+    id: "repeat_decision.completion"
+    message: "repeat completion requires its condition to be true"
+    expression: "!has(this.completed) || this.until_condition.result"
+  };
+  option (buf.validate.message).cel = {
+    id: "repeat_decision.limit"
+    message: "a limit ends an unsatisfied repeat"
+    expression: "!has(this.limit_reached) || !this.until_condition.result"
+  };
+
+  uint64 iteration = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  string body_occurrence_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ConditionEvaluation until_condition = 3 [features.field_presence = LEGACY_REQUIRED];
+  oneof outcome {
+    option (buf.validate.oneof).required = true;
+
+    RepeatContinue continue_with = 4;
+    NodeSucceeded completed = 5;
+    LimitReached limit_reached = 6;
+  }
+}
+
+message ControlDecision {
+  string decision_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string occurrence_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  oneof decision {
+    option (buf.validate.oneof).required = true;
+
+    SequenceDecision sequence = 3;
+    JoinDecision join = 4;
+    RepeatDecision repeat = 5;
+  }
+}

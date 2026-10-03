@@ -1,0 +1,1257 @@
+{
+  "templates": {
+    "command-provision-definition": {
+      "type": "trogonai.workflows.definitions.v1alpha1.ProvisionWorkflowDefinition",
+      "payload": {
+        "workflowId": "workflow-example",
+        "displayName": "Example workflow",
+        "parent": "projects/example",
+        "definitionBytes": "AA==",
+        "digest": {
+          "algorithm": "sha256",
+          "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        }
+      }
+    },
+    "event-definition-provisioned": {
+      "type": "trogonai.workflows.definitions.v1alpha1.WorkflowDefinitionEvent",
+      "payload": {
+        "workflowDefinitionProvisioned": {
+          "definition": {
+            "reference": {
+              "workflowId": "workflow-example",
+              "revision": "1",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            },
+            "definitionBytes": "AA=="
+          },
+          "displayName": "Example workflow",
+          "parent": "projects/example"
+        }
+      }
+    },
+    "event-definition-revised": {
+      "type": "trogonai.workflows.definitions.v1alpha1.WorkflowDefinitionEvent",
+      "payload": {
+        "workflowDefinitionRevised": {
+          "previousRevision": {
+            "workflowId": "workflow-example",
+            "revision": "1",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            }
+          },
+          "definition": {
+            "reference": {
+              "workflowId": "workflow-example",
+              "revision": "2",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            },
+            "definitionBytes": "AQ=="
+          }
+        }
+      }
+    },
+    "command-start-run": {
+      "type": "trogonai.workflows.runs.v1alpha1.StartRun",
+      "payload": {
+        "configuration": {
+          "runId": "run-example",
+          "plan": {
+            "planRevisionId": "plan-initial",
+            "definitionBytes": "AA==",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            },
+            "savedDefinition": {
+              "workflowId": "workflow-example",
+              "revision": "1",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            }
+          },
+          "inputs": [
+            {
+              "name": "task",
+              "value": {
+                "stringValue": "Review the result."
+              }
+            }
+          ],
+          "workspace": {
+            "workspaceId": "workspace-example",
+            "uri": "https://example.com/workspace"
+          },
+          "limits": {
+            "deadline": "2026-01-01T00:02:00Z",
+            "maxInvocations": "100",
+            "maxActiveSessions": 4,
+            "maxControlDepth": 16,
+            "maxValueDepth": 16
+          },
+          "authority": {
+            "requestedBy": {
+              "principalId": "user-example"
+            },
+            "authorizationId": "authorization-example",
+            "policyRevision": "policy-1"
+          }
+        }
+      }
+    },
+    "event-run-started": {
+      "type": "trogonai.workflows.runs.v1alpha1.RunEvent",
+      "payload": {
+        "runStarted": {
+          "configuration": {
+            "runId": "run-example",
+            "plan": {
+              "planRevisionId": "plan-initial",
+              "definitionBytes": "AA==",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              },
+              "savedDefinition": {
+                "workflowId": "workflow-example",
+                "revision": "1",
+                "digest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                }
+              }
+            },
+            "inputs": [
+              {
+                "name": "task",
+                "value": {
+                  "stringValue": "Review the result."
+                }
+              }
+            ],
+            "workspace": {
+              "workspaceId": "workspace-example",
+              "uri": "https://example.com/workspace"
+            },
+            "limits": {
+              "deadline": "2026-01-01T00:02:00Z",
+              "maxInvocations": "100",
+              "maxActiveSessions": 4,
+              "maxControlDepth": 16,
+              "maxValueDepth": 16
+            },
+            "authority": {
+              "requestedBy": {
+                "principalId": "user-example"
+              },
+              "authorizationId": "authorization-example",
+              "policyRevision": "policy-1"
+            }
+          }
+        }
+      }
+    },
+    "command-dispatch-node": {
+      "type": "trogonai.workflows.runs.v1alpha1.DispatchNode",
+      "payload": {
+        "runId": "run-example",
+        "invocation": {
+          "invocationId": "invocation-first",
+          "occurrenceId": "occurrence-example",
+          "attemptNumber": "1",
+          "operationId": "operation-example",
+          "inputs": [
+            {
+              "name": "task",
+              "value": {
+                "stringValue": "Review the result."
+              },
+              "sources": [
+                {
+                  "runInputName": "task"
+                }
+              ]
+            }
+          ],
+          "launch": {
+            "commandId": "launch-example",
+            "createSession": {
+              "sessionId": "session-example",
+              "executionPlan": {
+                "planBytes": "AA==",
+                "planDigest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                }
+              },
+              "workspace": {
+                "workspaceId": "workspace-example",
+                "uri": "https://example.com/workspace"
+              }
+            },
+            "admission": {
+              "agentRevision": {
+                "agentId": "agent-example",
+                "revisionNumber": "1",
+                "configuration": {
+                  "configurationDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                }
+              },
+              "authority": {
+                "requestedBy": {
+                  "principalId": "user-example"
+                },
+                "authorizationId": "authorization-example",
+                "policyRevision": "policy-1"
+              },
+              "admissionId": "admission-example",
+              "executionPlanDigest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              },
+              "admittedAt": "2026-01-01T00:00:00Z",
+              "validUntil": "2026-01-01T00:01:00Z"
+            }
+          },
+          "deadline": "2026-01-01T00:02:00Z"
+        }
+      }
+    },
+    "event-node-dispatched": {
+      "type": "trogonai.workflows.runs.v1alpha1.RunEvent",
+      "payload": {
+        "nodeDispatched": {
+          "runId": "run-example",
+          "invocation": {
+            "invocationId": "invocation-first",
+            "occurrenceId": "occurrence-example",
+            "attemptNumber": "1",
+            "operationId": "operation-example",
+            "inputs": [
+              {
+                "name": "task",
+                "value": {
+                  "stringValue": "Review the result."
+                },
+                "sources": [
+                  {
+                    "runInputName": "task"
+                  }
+                ]
+              }
+            ],
+            "launch": {
+              "commandId": "launch-example",
+              "createSession": {
+                "sessionId": "session-example",
+                "executionPlan": {
+                  "planBytes": "AA==",
+                  "planDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "workspace": {
+                  "workspaceId": "workspace-example",
+                  "uri": "https://example.com/workspace"
+                }
+              },
+              "admission": {
+                "agentRevision": {
+                  "agentId": "agent-example",
+                  "revisionNumber": "1",
+                  "configuration": {
+                    "configurationDigest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  }
+                },
+                "authority": {
+                  "requestedBy": {
+                    "principalId": "user-example"
+                  },
+                  "authorizationId": "authorization-example",
+                  "policyRevision": "policy-1"
+                },
+                "admissionId": "admission-example",
+                "executionPlanDigest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "admittedAt": "2026-01-01T00:00:00Z",
+                "validUntil": "2026-01-01T00:01:00Z"
+              }
+            },
+            "deadline": "2026-01-01T00:02:00Z"
+          }
+        }
+      }
+    },
+    "event-business-rejected-completion": {
+      "type": "trogonai.workflows.runs.v1alpha1.RunEvent",
+      "payload": {
+        "nodeCompleted": {
+          "runId": "run-example",
+          "completion": {
+            "completionId": "completion-rejected",
+            "occurrenceId": "occurrence-example",
+            "evidence": [
+              {
+                "invocationReceiptId": "receipt-example"
+              }
+            ],
+            "rejected": {
+              "outputs": [
+                {
+                  "name": "verdict",
+                  "value": {
+                    "symbolValue": {
+                      "typeName": "review.verdict",
+                      "value": "changes_requested"
+                    }
+                  }
+                }
+              ],
+              "acceptance": {
+                "evaluationId": "evaluation-negative",
+                "condition": {
+                  "compare": {
+                    "left": {
+                      "literal": {
+                        "boolValue": false
+                      }
+                    },
+                    "operator": "COMPARISON_OPERATOR_EQUAL",
+                    "right": {
+                      "literal": {
+                        "boolValue": true
+                      }
+                    }
+                  }
+                },
+                "inputs": [],
+                "result": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "event-paused-after-settlement": {
+      "type": "trogonai.workflows.runs.v1alpha1.RunEvent",
+      "payload": {
+        "pauseApplied": {
+          "runId": "run-example",
+          "boundary": {
+            "pauseId": "pause-example",
+            "settledInvocationIds": [
+              "invocation-first"
+            ],
+            "parkedWaitIds": [
+              "wait-example"
+            ],
+            "parkedRequestIds": [
+              "input-example"
+            ]
+          }
+        }
+      }
+    },
+    "event-run-terminated": {
+      "type": "trogonai.workflows.runs.v1alpha1.RunEvent",
+      "payload": {
+        "runTerminated": {
+          "runId": "run-example",
+          "termination": {
+            "terminationId": "termination-example",
+            "effects": [
+              {
+                "invocationId": "invocation-first",
+                "receiptId": "receipt-example"
+              }
+            ],
+            "succeeded": {
+              "rootCompletionId": "completion-example",
+              "outputs": [],
+              "completionCondition": {
+                "evaluationId": "evaluation-positive",
+                "condition": {
+                  "always": {}
+                },
+                "inputs": [],
+                "result": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "event-failed-work-retried": {
+      "type": "trogonai.workflows.runs.v1alpha1.RunEvent",
+      "payload": {
+        "failedWorkflowWorkRetried": {
+          "runId": "run-example",
+          "recovery": {
+            "recoveryId": "recovery-example",
+            "recoveryNumber": "1",
+            "priorTerminationId": "termination-failed",
+            "frontier": [
+              {
+                "previousOccurrenceId": "occurrence-original",
+                "replacement": {
+                  "occurrence": {
+                    "occurrenceId": "occurrence-recovered",
+                    "node": {
+                      "nodeId": "review-loop"
+                    },
+                    "planRevisionId": "plan-initial",
+                    "iterationPath": []
+                  },
+                  "inputs": []
+                }
+              }
+            ],
+            "retainedCompletions": [
+              {
+                "completionId": "completion-retained",
+                "parentOccurrenceId": "occurrence-recovered"
+              }
+            ],
+            "rootOccurrenceId": "occurrence-recovered",
+            "limits": {
+              "deadline": "2026-01-01T00:02:00Z",
+              "maxInvocations": "100",
+              "maxActiveSessions": 4,
+              "maxControlDepth": 16,
+              "maxValueDepth": 16
+            },
+            "authority": {
+              "requestedBy": {
+                "principalId": "user-example"
+              },
+              "authorizationId": "authorization-example",
+              "policyRevision": "policy-1"
+            }
+          }
+        }
+      }
+    },
+    "snapshot-repeat-first-iteration": {
+      "type": "trogonai.workflows.runs.v1alpha1.RepeatIterationSnapshot",
+      "payload": {
+        "repeatOccurrenceId": "occurrence-repeat",
+        "iteration": "1",
+        "variables": [
+          {
+            "name": "task",
+            "value": {
+              "stringValue": "Review the result."
+            },
+            "sources": [
+              {
+                "runInputName": "task"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "snapshot-repeat-subsequent-iteration": {
+      "type": "trogonai.workflows.runs.v1alpha1.RepeatIterationSnapshot",
+      "payload": {
+        "repeatOccurrenceId": "occurrence-repeat",
+        "iteration": "2",
+        "variables": [
+          {
+            "name": "task",
+            "value": {
+              "stringValue": "Review the result."
+            },
+            "sources": [
+              {
+                "runInputName": "task"
+              }
+            ]
+          }
+        ],
+        "continuationDecisionId": "decision-continue"
+      }
+    },
+    "join-with-true-acceptance": {
+      "type": "trogonai.workflows.runs.v1alpha1.JoinDecision",
+      "payload": {
+        "branches": [
+          {
+            "occurrenceId": "branch-first",
+            "completionId": "completion-first"
+          },
+          {
+            "occurrenceId": "branch-second",
+            "completionId": "completion-second"
+          }
+        ],
+        "acceptance": {
+          "evaluationId": "evaluation-positive",
+          "condition": {
+            "always": {}
+          },
+          "inputs": [],
+          "result": true
+        },
+        "completed": {
+          "outputs": []
+        }
+      }
+    },
+    "launch-with-distinct-parent-and-child": {
+      "type": "trogonai.workflows.runs.v1alpha1.ChildSessionLaunch",
+      "payload": {
+        "commandId": "launch-child",
+        "createChildSession": {
+          "sessionId": "session-example",
+          "executionPlan": {
+            "planBytes": "AA==",
+            "planDigest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            }
+          },
+          "workspace": {
+            "workspaceId": "workspace-example",
+            "uri": "https://example.com/workspace"
+          },
+          "parentSessionId": "session-parent",
+          "parentDispatchedAt": {
+            "value": "4"
+          },
+          "cascadePolicy": "CASCADE_POLICY_CASCADE_ON_PARENT_TERMINAL",
+          "operationId": "operation-example"
+        },
+        "admission": {
+          "agentRevision": {
+            "agentId": "agent-example",
+            "revisionNumber": "1",
+            "configuration": {
+              "configurationDigest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            }
+          },
+          "authority": {
+            "requestedBy": {
+              "principalId": "user-example"
+            },
+            "authorizationId": "authorization-example",
+            "policyRevision": "policy-1"
+          },
+          "admissionId": "admission-example",
+          "executionPlanDigest": {
+            "algorithm": "sha256",
+            "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          },
+          "admittedAt": "2026-01-01T00:00:00Z",
+          "validUntil": "2026-01-01T00:01:00Z"
+        },
+        "parentDispatch": {
+          "session": {
+            "sessionId": "session-parent"
+          },
+          "ordinal": {
+            "value": "4"
+          },
+          "eventId": "event-example",
+          "eventDigest": {
+            "algorithm": "sha256",
+            "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          }
+        }
+      }
+    },
+    "run-state-launch-attached-to-main-session": {
+      "type": "trogonai.workflows.runs.state.v1alpha1.PresentRun",
+      "payload": {
+        "configuration": {
+          "runId": "run-example",
+          "plan": {
+            "planRevisionId": "plan-initial",
+            "definitionBytes": "AA==",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            },
+            "savedDefinition": {
+              "workflowId": "workflow-example",
+              "revision": "1",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            }
+          },
+          "inputs": [
+            {
+              "name": "task",
+              "value": {
+                "stringValue": "Review the result."
+              }
+            }
+          ],
+          "workspace": {
+            "workspaceId": "workspace-example",
+            "uri": "https://example.com/workspace"
+          },
+          "limits": {
+            "deadline": "2026-01-01T00:02:00Z",
+            "maxInvocations": "100",
+            "maxActiveSessions": 4,
+            "maxControlDepth": 16,
+            "maxValueDepth": 16
+          },
+          "authority": {
+            "requestedBy": {
+              "principalId": "user-example"
+            },
+            "authorizationId": "authorization-example",
+            "policyRevision": "policy-1"
+          },
+          "mainSession": {
+            "sessionId": "session-parent"
+          }
+        },
+        "status": "RUN_STATUS_ACTIVE",
+        "currentPlanRevisionId": "plan-initial",
+        "effectiveLimits": {
+          "deadline": "2026-01-01T00:02:00Z",
+          "maxInvocations": "100",
+          "maxActiveSessions": 4,
+          "maxControlDepth": 16,
+          "maxValueDepth": 16
+        },
+        "planRevisions": [],
+        "occurrences": [
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-example",
+                "node": {
+                  "nodeId": "review-loop"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": []
+              },
+              "inputs": []
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "invocation": {
+              "invocationId": "invocation-first",
+              "occurrenceId": "occurrence-example",
+              "attemptNumber": "1",
+              "operationId": "operation-example",
+              "inputs": [
+                {
+                  "name": "task",
+                  "value": {
+                    "stringValue": "Review the result."
+                  },
+                  "sources": [
+                    {
+                      "runInputName": "task"
+                    }
+                  ]
+                }
+              ],
+              "launch": {
+                "commandId": "launch-child",
+                "createChildSession": {
+                  "sessionId": "session-example",
+                  "executionPlan": {
+                    "planBytes": "AA==",
+                    "planDigest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "workspace": {
+                    "workspaceId": "workspace-example",
+                    "uri": "https://example.com/workspace"
+                  },
+                  "parentSessionId": "session-parent",
+                  "parentDispatchedAt": {
+                    "value": "4"
+                  },
+                  "cascadePolicy": "CASCADE_POLICY_CASCADE_ON_PARENT_TERMINAL",
+                  "operationId": "operation-example"
+                },
+                "admission": {
+                  "agentRevision": {
+                    "agentId": "agent-example",
+                    "revisionNumber": "1",
+                    "configuration": {
+                      "configurationDigest": {
+                        "algorithm": "sha256",
+                        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      }
+                    }
+                  },
+                  "authority": {
+                    "requestedBy": {
+                      "principalId": "user-example"
+                    },
+                    "authorizationId": "authorization-example",
+                    "policyRevision": "policy-1"
+                  },
+                  "admissionId": "admission-example",
+                  "executionPlanDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "admittedAt": "2026-01-01T00:00:00Z",
+                  "validUntil": "2026-01-01T00:01:00Z"
+                },
+                "parentDispatch": {
+                  "session": {
+                    "sessionId": "session-parent"
+                  },
+                  "ordinal": {
+                    "value": "4"
+                  },
+                  "eventId": "event-example",
+                  "eventDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                }
+              },
+              "deadline": "2026-01-01T00:02:00Z"
+            },
+            "receipts": [
+              {
+                "receiptId": "receipt-example",
+                "invocationId": "invocation-first",
+                "executionPlanDigest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "sessionEvent": {
+                  "session": {
+                    "sessionId": "session-example"
+                  },
+                  "ordinal": {
+                    "value": "1"
+                  },
+                  "eventId": "event-example",
+                  "eventDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "succeeded": {
+                  "outputs": [
+                    {
+                      "name": "verdict",
+                      "value": {
+                        "symbolValue": {
+                          "typeName": "review.verdict",
+                          "value": "changes_requested"
+                        }
+                      }
+                    }
+                  ],
+                  "artifacts": []
+                },
+                "receivedAt": "2026-01-01T00:01:00Z"
+              }
+            ],
+            "currentReceiptId": "receipt-example"
+          }
+        ],
+        "repeatIterations": [],
+        "decisions": [],
+        "inputs": [],
+        "guidance": [],
+        "externalWaits": [],
+        "timers": [],
+        "pauses": [],
+        "cancellations": [],
+        "retryAuthorizations": [],
+        "terminations": [],
+        "recoveries": [],
+        "currentRootOccurrenceId": "occurrence-example"
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "command-provision-definition",
+      "template": "command-provision-definition"
+    },
+    {
+      "name": "command-provision-rejects-empty-definition",
+      "template": "command-provision-definition",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definitionBytes",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "must be at least 1 bytes"
+      ]
+    },
+    {
+      "name": "event-definition-provisioned",
+      "template": "event-definition-provisioned"
+    },
+    {
+      "name": "event-provisioning-rejects-nongenesis-revision",
+      "template": "event-definition-provisioned",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/workflowDefinitionProvisioned/definition/reference/revision",
+          "value": "2"
+        }
+      ],
+      "violations": [
+        "provisioning must mint revision 1"
+      ]
+    },
+    {
+      "name": "event-definition-requires-known-arm",
+      "template": "event-definition-provisioned",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/workflowDefinitionProvisioned"
+        }
+      ],
+      "violations": [
+        "event: exactly one field is required in oneof"
+      ]
+    },
+    {
+      "name": "event-definition-revised",
+      "template": "event-definition-revised"
+    },
+    {
+      "name": "event-revision-rejects-changed-identity",
+      "template": "event-definition-revised",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/workflowDefinitionRevised/definition/reference/workflowId",
+          "value": "workflow-other"
+        }
+      ],
+      "violations": [
+        "a revision must preserve workflow identity"
+      ]
+    },
+    {
+      "name": "event-revision-rejects-noncontiguous-revision",
+      "template": "event-definition-revised",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/workflowDefinitionRevised/definition/reference/revision",
+          "value": "3"
+        }
+      ],
+      "violations": [
+        "a revision must advance the previous revision by one without wrapping"
+      ]
+    },
+    {
+      "name": "event-revision-rejects-unchanged-digest",
+      "template": "event-definition-revised",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/workflowDefinitionRevised/definition/reference/digest",
+          "value": {
+            "algorithm": "sha256",
+            "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          }
+        }
+      ],
+      "violations": [
+        "a revision must change the exact definition artifact"
+      ]
+    },
+    {
+      "name": "event-revision-rejects-uint64-wrap",
+      "template": "event-definition-revised",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/workflowDefinitionRevised/previousRevision/revision",
+          "value": "18446744073709551615"
+        },
+        {
+          "op": "replace",
+          "path": "/workflowDefinitionRevised/definition/reference/revision",
+          "value": "18446744073709551615"
+        }
+      ],
+      "violations": [
+        "a revision must advance the previous revision by one without wrapping"
+      ]
+    },
+    {
+      "name": "command-start-run",
+      "template": "command-start-run"
+    },
+    {
+      "name": "event-run-started",
+      "template": "event-run-started"
+    },
+    {
+      "name": "event-run-start-rejects-duplicate-input",
+      "template": "event-run-started",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/runStarted/configuration/inputs/-",
+          "value": {
+            "name": "task",
+            "value": {
+              "stringValue": "Review the result."
+            }
+          }
+        }
+      ],
+      "violations": [
+        "run input names must be unique"
+      ]
+    },
+    {
+      "name": "event-run-requires-known-arm",
+      "template": "event-run-started",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/runStarted"
+        }
+      ],
+      "violations": [
+        "event: exactly one field is required in oneof"
+      ]
+    },
+    {
+      "name": "command-dispatch-node",
+      "template": "command-dispatch-node"
+    },
+    {
+      "name": "event-node-dispatched",
+      "template": "event-node-dispatched"
+    },
+    {
+      "name": "event-dispatch-rejects-pre-admission-deadline",
+      "template": "event-node-dispatched",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodeDispatched/invocation/deadline",
+          "value": "2026-01-01T00:00:00Z"
+        }
+      ],
+      "violations": [
+        "the invocation deadline must follow admission"
+      ]
+    },
+    {
+      "name": "event-business-rejected-completion",
+      "template": "event-business-rejected-completion"
+    },
+    {
+      "name": "event-rejection-rejects-true-acceptance",
+      "template": "event-business-rejected-completion",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodeCompleted/completion/rejected/acceptance",
+          "value": {
+            "evaluationId": "evaluation-positive",
+            "condition": {
+              "always": {}
+            },
+            "inputs": [],
+            "result": true
+          }
+        }
+      ],
+      "violations": [
+        "business rejection requires a false acceptance condition"
+      ]
+    },
+    {
+      "name": "event-paused-after-settlement",
+      "template": "event-paused-after-settlement"
+    },
+    {
+      "name": "event-pause-rejects-duplicate-settled-invocation",
+      "template": "event-paused-after-settlement",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/pauseApplied/boundary/settledInvocationIds",
+          "value": [
+            "invocation-first",
+            "invocation-first"
+          ]
+        }
+      ],
+      "violations": [
+        "must contain unique items"
+      ]
+    },
+    {
+      "name": "event-run-terminated",
+      "template": "event-run-terminated"
+    },
+    {
+      "name": "event-termination-rejects-unreconciled-success",
+      "template": "event-run-terminated",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/runTerminated/termination/effects/0",
+          "value": {
+            "invocationId": "invocation-first",
+            "unreconciled": {
+              "detail": "Awaiting evidence."
+            }
+          }
+        }
+      ],
+      "violations": [
+        "accepted and rejected completion require determinate effects"
+      ]
+    },
+    {
+      "name": "event-failed-work-retried",
+      "template": "event-failed-work-retried"
+    },
+    {
+      "name": "event-recovery-rejects-unretained-root",
+      "template": "event-failed-work-retried",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/failedWorkflowWorkRetried/recovery/rootOccurrenceId",
+          "value": "occurrence-other"
+        }
+      ],
+      "violations": [
+        "the recovered root must be one replacement with no parent"
+      ]
+    },
+    {
+      "name": "snapshot-repeat-first-iteration",
+      "template": "snapshot-repeat-first-iteration"
+    },
+    {
+      "name": "snapshot-first-iteration-rejects-continuation",
+      "template": "snapshot-repeat-first-iteration",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/continuationDecisionId",
+          "value": "decision-before"
+        }
+      ],
+      "violations": [
+        "only subsequent iterations require a continuation decision"
+      ]
+    },
+    {
+      "name": "snapshot-repeat-subsequent-iteration",
+      "template": "snapshot-repeat-subsequent-iteration"
+    },
+    {
+      "name": "snapshot-subsequent-iteration-requires-continuation",
+      "template": "snapshot-repeat-subsequent-iteration",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/continuationDecisionId"
+        }
+      ],
+      "violations": [
+        "only subsequent iterations require a continuation decision"
+      ]
+    },
+    {
+      "name": "snapshot-repeat-rejects-duplicate-variable",
+      "template": "snapshot-repeat-first-iteration",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/variables/-",
+          "value": {
+            "name": "task",
+            "value": {
+              "stringValue": "Review the result."
+            },
+            "sources": [
+              {
+                "runInputName": "task"
+              }
+            ]
+          }
+        }
+      ],
+      "violations": [
+        "repeat variable names must be unique"
+      ]
+    },
+    {
+      "name": "join-with-true-acceptance",
+      "template": "join-with-true-acceptance"
+    },
+    {
+      "name": "join-rejects-false-accepted-condition",
+      "template": "join-with-true-acceptance",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/acceptance",
+          "value": {
+            "evaluationId": "evaluation-negative",
+            "condition": {
+              "compare": {
+                "left": {
+                  "literal": {
+                    "boolValue": false
+                  }
+                },
+                "operator": "COMPARISON_OPERATOR_EQUAL",
+                "right": {
+                  "literal": {
+                    "boolValue": true
+                  }
+                }
+              }
+            },
+            "inputs": [],
+            "result": false
+          }
+        }
+      ],
+      "violations": [
+        "accepted join completion cannot retain a false acceptance decision"
+      ]
+    },
+    {
+      "name": "launch-with-distinct-parent-and-child",
+      "template": "launch-with-distinct-parent-and-child"
+    },
+    {
+      "name": "launch-rejects-same-parent-and-child",
+      "template": "launch-with-distinct-parent-and-child",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/createChildSession/sessionId",
+          "value": "session-parent"
+        }
+      ],
+      "violations": [
+        "the dispatched child Session must differ from its parent"
+      ]
+    },
+    {
+      "name": "run-state-launch-attached-to-main-session",
+      "template": "run-state-launch-attached-to-main-session"
+    },
+    {
+      "name": "run-state-rejects-launch-attached-to-other-main-session",
+      "template": "run-state-launch-attached-to-main-session",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/configuration/mainSession/sessionId",
+          "value": "session-other"
+        }
+      ],
+      "violations": [
+        "parent-linked launches must use the coordinating Session; unattached runs create independent Sessions"
+      ]
+    },
+    {
+      "name": "run-state-rejects-independent-launch-under-main-session",
+      "template": "run-state-launch-attached-to-main-session",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/invocations/0/invocation/launch",
+          "value": {
+            "commandId": "launch-example",
+            "createSession": {
+              "sessionId": "session-example",
+              "executionPlan": {
+                "planBytes": "AA==",
+                "planDigest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                }
+              },
+              "workspace": {
+                "workspaceId": "workspace-example",
+                "uri": "https://example.com/workspace"
+              }
+            },
+            "admission": {
+              "agentRevision": {
+                "agentId": "agent-example",
+                "revisionNumber": "1",
+                "configuration": {
+                  "configurationDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                }
+              },
+              "authority": {
+                "requestedBy": {
+                  "principalId": "user-example"
+                },
+                "authorizationId": "authorization-example",
+                "policyRevision": "policy-1"
+              },
+              "admissionId": "admission-example",
+              "executionPlanDigest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              },
+              "admittedAt": "2026-01-01T00:00:00Z",
+              "validUntil": "2026-01-01T00:01:00Z"
+            }
+          }
+        }
+      ],
+      "violations": [
+        "parent-linked launches must use the coordinating Session; unattached runs create independent Sessions"
+      ]
+    }
+  ]
+}

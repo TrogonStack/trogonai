@@ -16,6 +16,7 @@ inputs:
       - proto/trogonai/policy
       - proto/trogonai/session
       - proto/trogonai/usage
+      - proto/trogonai/workflows
 plugins:
   - local: protoc-gen-buffa
     out: rsworkspace/crates/platform/trogonai-proto/src/gen

@@ -1,0 +1,74 @@
+edition = "2024";
+
+package trogonai.workflows.runs.queries.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "trogonai/workflows/runs/queries/v1alpha1/contract.proto";
+import "trogonai/workflows/runs/queries/v1alpha1/view.proto";
+
+message PlanDigest {
+  string algorithm = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.const = "sha256"
+  ];
+  bytes value = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.len = 32
+  ];
+}
+
+// Ad hoc and revised plans need an inspection surface even when no saved
+// definition exists. These are exact admitted bytes, never a query re-encoding.
+// Verify the digest before interpreting the declared definition contract.
+message RunPlanArtifact {
+  option (buf.validate.message).cel = {
+    id: "workflow_run_plan.lineage"
+    message: "a plan artifact cannot name itself as predecessor"
+    expression: "!has(this.previous_plan_revision_id) || this.previous_plan_revision_id != this.plan_revision_id"
+  };
+  string plan_revision_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  bytes definition_bytes = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.min_len = 1
+  ];
+  PlanDigest digest = 3 [features.field_presence = LEGACY_REQUIRED];
+  DefinitionViewRef saved_definition = 4;
+  string previous_plan_revision_id = 5 [(buf.validate.field).string.min_len = 1];
+  uint32 definition_contract_version = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32.const = 1
+  ];
+}
+
+message GetWorkflowRunPlanRequest {
+  option (buf.validate.message).cel = {
+    id: "workflow_get_run_plan.consistency_scope"
+    message: "the consistency position must belong to the requested run"
+    expression: "!has(this.consistency) || !has(this.consistency.at_least) || this.consistency.at_least.run_id == this.run_id"
+  };
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ContractVersion accepted_contract = 2 [features.field_presence = LEGACY_REQUIRED];
+  ReadConsistency consistency = 3;
+  oneof selection {
+    option (buf.validate.oneof).required = true;
+    google.protobuf.Empty current = 4;
+    string plan_revision_id = 5 [(buf.validate.field).string.min_len = 1];
+  }
+}
+
+message GetWorkflowRunPlanResponse {
+  ContractNegotiation contract = 1 [features.field_presence = LEGACY_REQUIRED];
+  string run_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  RunPlanArtifact plan = 3 [features.field_presence = LEGACY_REQUIRED];
+  ProjectionFreshness freshness = 4 [features.field_presence = LEGACY_REQUIRED];
+}

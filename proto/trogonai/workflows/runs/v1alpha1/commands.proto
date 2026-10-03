@@ -1,0 +1,244 @@
+edition = "2024";
+
+package trogonai.workflows.runs.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/workflows/runs/v1alpha1/control.proto";
+import "trogonai/workflows/runs/v1alpha1/interaction.proto";
+import "trogonai/workflows/runs/v1alpha1/lifecycle.proto";
+import "trogonai/workflows/runs/v1alpha1/occurrence.proto";
+import "trogonai/workflows/runs/v1alpha1/receipt.proto";
+import "trogonai/workflows/runs/v1alpha1/run.proto";
+import "trogonai/workflows/runs/v1alpha1/wait.proto";
+
+// Commands use DeciderService.Decide. Start requires NoStream; all later
+// transitions use At with command_id and expected_revision. Authentication,
+// live authorization, byte/digest verification, and referenced Session evidence
+// are ingress/admission obligations, not consequences of valid protobuf shape.
+message StartRun {
+  RunConfiguration configuration = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message EnterNode {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  OccurrenceEntry entry = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message BeginRepeatIteration {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  RepeatIterationSnapshot iteration = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message DispatchNode {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  NodeInvocation invocation = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message AuthorizeRetry {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  RetryAuthorization authorization = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message RecordInvocationResult {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  InvocationResultReceipt receipt = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message CompleteNode {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  NodeCompletion completion = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message RecordControlDecision {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ControlDecision decision = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message RequestInput {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  InputRequest request = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ProvideInput {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  InputResponse response = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message SendGuidance {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  Guidance guidance = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message RecordGuidanceDelivery {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  GuidanceDelivery delivery = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message RegisterExternalWait {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ExternalWaitRegistration registration = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message RecordExternalWaitActivation {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ExternalWaitActivation activation = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message RenewExternalSubscription {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ExternalSubscriptionLease lease = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message RecordExternalActivity {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ExternalActivityReceipt activity = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message AdvanceExternalCursor {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ExternalCursorAdvance advancement = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ResolveExternalWait {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ExternalWaitResolution resolution = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message RecordExternalSubscriptionCleanup {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ExternalSubscriptionCleanup cleanup = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message RegisterTimerWait {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  TimerWaitRegistration registration = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ResolveTimerWait {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  TimerWaitResolution resolution = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message RequestPause {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  PauseRequest request = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ApplyPause {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  PauseBoundary boundary = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ResumeRun {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  RunResumption resumption = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message RequestCancellation {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  CancellationRequest request = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message RecordCancellationAcknowledgement {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  CancellationAcknowledgement acknowledgement = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ReviseRemainingPlan {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  RemainingPlanRevision revision = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message TerminateRun {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  RunTermination termination = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message RetryFailedWorkflowWork {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  FailedWorkRecovery recovery = 2 [features.field_presence = LEGACY_REQUIRED];
+}

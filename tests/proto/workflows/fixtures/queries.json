@@ -1,0 +1,474 @@
+{
+  "templates": {
+    "query-contract-negotiation": {
+      "type": "trogonai.workflows.runs.queries.v1alpha1.ContractNegotiation",
+      "payload": {
+        "rendered": {
+          "major": 1,
+          "minor": 1
+        },
+        "serverMax": {
+          "major": 1,
+          "minor": 2
+        }
+      }
+    },
+    "query-read-consistency": {
+      "type": "trogonai.workflows.runs.queries.v1alpha1.ReadConsistency",
+      "payload": {
+        "atLeast": {
+          "runId": "run-example",
+          "ordinal": "8"
+        },
+        "maxWait": "5s"
+      }
+    },
+    "query-get-run": {
+      "type": "trogonai.workflows.runs.queries.v1alpha1.GetWorkflowRunRequest",
+      "payload": {
+        "runId": "run-example",
+        "acceptedContract": {
+          "major": 1,
+          "minor": 2
+        },
+        "consistency": {
+          "atLeast": {
+            "runId": "run-example",
+            "ordinal": "8"
+          },
+          "maxWait": "5s"
+        }
+      }
+    },
+    "query-run-page": {
+      "type": "trogonai.workflows.runs.queries.v1alpha1.RunPageRequest",
+      "payload": {
+        "runId": "run-example",
+        "acceptedContract": {
+          "major": 1,
+          "minor": 2
+        },
+        "pageSize": 50,
+        "pageToken": "AQ==",
+        "consistency": {
+          "atLeast": {
+            "runId": "run-example",
+            "ordinal": "8"
+          },
+          "maxWait": "5s"
+        }
+      }
+    },
+    "query-list-runs": {
+      "type": "trogonai.workflows.runs.queries.v1alpha1.ListWorkflowRunsRequest",
+      "payload": {
+        "acceptedContract": {
+          "major": 1,
+          "minor": 2
+        },
+        "workspaceId": "workspace-example",
+        "lifecycles": [
+          "RUN_LIFECYCLE_RUNNING",
+          "RUN_LIFECYCLE_WAITING"
+        ],
+        "pageSize": 50
+      }
+    },
+    "query-history-dispatch": {
+      "type": "trogonai.workflows.runs.queries.v1alpha1.HistoryItem",
+      "payload": {
+        "itemId": "history-example",
+        "ordinal": "4",
+        "occurredAt": "2026-01-01T00:00:00Z",
+        "invocationDispatched": {
+          "occurrence": {
+            "occurrenceId": "occurrence-example",
+            "nodeId": "review",
+            "planRevisionId": "plan-initial"
+          },
+          "invocationId": "invocation-first",
+          "attemptNumber": 1,
+          "childSessionId": "session-example"
+        }
+      }
+    },
+    "query-history-plan-change": {
+      "type": "trogonai.workflows.runs.queries.v1alpha1.PlanChanged",
+      "payload": {
+        "previousRevisionId": "plan-initial",
+        "revisionId": "plan-revised",
+        "reason": "Update remaining work."
+      }
+    },
+    "query-interaction-with-schema": {
+      "type": "trogonai.workflows.runs.queries.v1alpha1.InteractionView",
+      "payload": {
+        "interactionId": "input-example",
+        "occurrence": {
+          "occurrenceId": "occurrence-example",
+          "nodeId": "review",
+          "planRevisionId": "plan-initial"
+        },
+        "kind": "INTERACTION_KIND_INPUT",
+        "lifecycle": "INTERACTION_LIFECYCLE_PENDING",
+        "prompt": "Approve the result?",
+        "deadline": "2026-01-01T00:02:00Z",
+        "responseSchemaBytes": "AQ==",
+        "sensitiveContentWithheld": false
+      }
+    },
+    "query-history-session-result": {
+      "type": "trogonai.workflows.runs.queries.v1alpha1.HistoryItem",
+      "payload": {
+        "itemId": "history-session-result",
+        "ordinal": "5",
+        "occurredAt": "2026-01-01T00:01:00Z",
+        "invocationResultRecorded": {
+          "invocationId": "invocation-first",
+          "receiptId": "receipt-example",
+          "outcome": "INVOCATION_OUTCOME_SUCCEEDED",
+          "sessionEvent": {
+            "childSessionId": "session-example",
+            "childSessionOrdinal": "3"
+          }
+        }
+      }
+    },
+    "query-history-launch-rejection-without-session": {
+      "type": "trogonai.workflows.runs.queries.v1alpha1.HistoryItem",
+      "payload": {
+        "itemId": "history-launch-rejection",
+        "ordinal": "5",
+        "occurredAt": "2026-01-01T00:01:00Z",
+        "invocationResultRecorded": {
+          "invocationId": "invocation-first",
+          "receiptId": "receipt-example",
+          "outcome": "INVOCATION_OUTCOME_FAILED",
+          "launchRejection": {
+            "admissionId": "admission-example",
+            "rejectedAt": "2026-01-01T00:01:00Z"
+          }
+        }
+      }
+    },
+    "query-error-reports-reached-lag-without-success": {
+      "type": "trogonai.workflows.runs.queries.v1alpha1.QueryError",
+      "payload": {
+        "code": "QUERY_ERROR_CODE_PROJECTION_UNAVAILABLE",
+        "message": "Requested position has not reached the projection.",
+        "reachedProgress": {
+          "generation": "projection-example",
+          "checkpoint": "AA==",
+          "observedAt": "2026-01-01T00:01:00Z",
+          "applied": [
+            {
+              "runId": "run-example",
+              "ordinal": "4"
+            }
+          ],
+          "condition": "FRESHNESS_CONDITION_LAGGING"
+        }
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "query-contract-negotiation",
+      "template": "query-contract-negotiation"
+    },
+    {
+      "name": "query-rejects-contract-major-mismatch",
+      "template": "query-contract-negotiation",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/rendered/major",
+          "value": 2
+        }
+      ],
+      "violations": [
+        "rendered must have the server major and no greater minor"
+      ]
+    },
+    {
+      "name": "query-rejects-contract-minor-above-server",
+      "template": "query-contract-negotiation",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/rendered/minor",
+          "value": 3
+        }
+      ],
+      "violations": [
+        "rendered must have the server major and no greater minor"
+      ]
+    },
+    {
+      "name": "query-read-consistency",
+      "template": "query-read-consistency"
+    },
+    {
+      "name": "query-rejects-wait-without-position",
+      "template": "query-read-consistency",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/atLeast"
+        }
+      ],
+      "violations": [
+        "max_wait requires an at_least position"
+      ]
+    },
+    {
+      "name": "query-rejects-negative-wait",
+      "template": "query-read-consistency",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/maxWait",
+          "value": "-1s"
+        }
+      ],
+      "violations": [
+        "must be greater than or equal to 0s"
+      ]
+    },
+    {
+      "name": "query-get-run",
+      "template": "query-get-run"
+    },
+    {
+      "name": "query-get-rejects-another-run-position",
+      "template": "query-get-run",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/consistency/atLeast/runId",
+          "value": "run-other"
+        }
+      ],
+      "violations": [
+        "the consistency position must belong to the requested run"
+      ]
+    },
+    {
+      "name": "query-run-page",
+      "template": "query-run-page"
+    },
+    {
+      "name": "query-page-rejects-another-run-position",
+      "template": "query-run-page",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/consistency/atLeast/runId",
+          "value": "run-other"
+        }
+      ],
+      "violations": [
+        "the consistency position must belong to the requested run"
+      ]
+    },
+    {
+      "name": "query-page-rejects-zero-size",
+      "template": "query-run-page",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/pageSize",
+          "value": 0
+        }
+      ],
+      "violations": [
+        "must be greater than 0"
+      ]
+    },
+    {
+      "name": "query-page-rejects-empty-present-cursor",
+      "template": "query-run-page",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/pageToken",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "must be at least 1 bytes"
+      ]
+    },
+    {
+      "name": "query-list-runs",
+      "template": "query-list-runs"
+    },
+    {
+      "name": "query-list-rejects-duplicate-lifecycle-filter",
+      "template": "query-list-runs",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/lifecycles",
+          "value": [
+            "RUN_LIFECYCLE_RUNNING",
+            "RUN_LIFECYCLE_RUNNING"
+          ]
+        }
+      ],
+      "violations": [
+        "must contain unique items"
+      ]
+    },
+    {
+      "name": "query-list-rejects-unknown-lifecycle-filter",
+      "template": "query-list-runs",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/lifecycles",
+          "value": [
+            99
+          ]
+        }
+      ],
+      "violations": [
+        "must be one of the defined enum values"
+      ]
+    },
+    {
+      "name": "query-history-dispatch",
+      "template": "query-history-dispatch"
+    },
+    {
+      "name": "query-history-requires-detail",
+      "template": "query-history-dispatch",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/invocationDispatched"
+        }
+      ],
+      "violations": [
+        "detail: exactly one field is required in oneof"
+      ]
+    },
+    {
+      "name": "query-history-rejects-zero-attempt",
+      "template": "query-history-dispatch",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/invocationDispatched/attemptNumber",
+          "value": 0
+        }
+      ],
+      "violations": [
+        "must be greater than 0"
+      ]
+    },
+    {
+      "name": "query-history-session-result",
+      "template": "query-history-session-result"
+    },
+    {
+      "name": "query-history-rejects-unspecified-terminal-outcome",
+      "template": "query-history-session-result",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/invocationResultRecorded/outcome",
+          "value": "INVOCATION_OUTCOME_UNSPECIFIED"
+        }
+      ],
+      "violations": [
+        "must not be in list"
+      ]
+    },
+    {
+      "name": "query-history-rejects-unknown-terminal-outcome",
+      "template": "query-history-session-result",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/invocationResultRecorded/outcome",
+          "value": 99
+        }
+      ],
+      "violations": [
+        "must be one of the defined enum values"
+      ]
+    },
+    {
+      "name": "query-history-plan-change",
+      "template": "query-history-plan-change"
+    },
+    {
+      "name": "query-history-rejects-unchanged-plan",
+      "template": "query-history-plan-change",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/revisionId",
+          "value": "plan-initial"
+        }
+      ],
+      "violations": [
+        "a plan change must name a different revision"
+      ]
+    },
+    {
+      "name": "query-interaction-with-schema",
+      "template": "query-interaction-with-schema"
+    },
+    {
+      "name": "query-interaction-rejects-empty-present-schema",
+      "template": "query-interaction-with-schema",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/responseSchemaBytes",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "must be at least 1 bytes"
+      ]
+    },
+    {
+      "name": "query-history-launch-rejection-without-session",
+      "template": "query-history-launch-rejection-without-session"
+    },
+    {
+      "name": "query-history-rejects-successful-launch-rejection",
+      "template": "query-history-launch-rejection-without-session",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/invocationResultRecorded/outcome",
+          "value": "INVOCATION_OUTCOME_SUCCEEDED"
+        }
+      ],
+      "violations": [
+        "launch rejection must record a failed invocation outcome"
+      ]
+    },
+    {
+      "name": "query-history-rejects-unattributed-result",
+      "template": "query-history-session-result",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/invocationResultRecorded/sessionEvent"
+        }
+      ],
+      "violations": [
+        "source: exactly one field is required in oneof"
+      ]
+    },
+    {
+      "name": "query-error-reports-reached-lag-without-success",
+      "template": "query-error-reports-reached-lag-without-success"
+    }
+  ]
+}

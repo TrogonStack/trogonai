@@ -1,0 +1,164 @@
+{
+  "templates": {
+    "query-plan-artifact-ad-hoc": {
+      "type": "trogonai.workflows.runs.queries.v1alpha1.RunPlanArtifact",
+      "payload": {
+        "planRevisionId": "plan-ad-hoc",
+        "definitionBytes": "AA==",
+        "digest": {
+          "algorithm": "sha256",
+          "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        },
+        "definitionContractVersion": 1
+      }
+    },
+    "query-plan-artifact-revised": {
+      "type": "trogonai.workflows.runs.queries.v1alpha1.RunPlanArtifact",
+      "payload": {
+        "planRevisionId": "plan-revised",
+        "definitionBytes": "AA==",
+        "digest": {
+          "algorithm": "sha256",
+          "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        },
+        "definitionContractVersion": 1,
+        "previousPlanRevisionId": "plan-ad-hoc"
+      }
+    },
+    "query-get-current-plan": {
+      "type": "trogonai.workflows.runs.queries.v1alpha1.GetWorkflowRunPlanRequest",
+      "payload": {
+        "runId": "run-example",
+        "acceptedContract": {
+          "major": 1,
+          "minor": 0
+        },
+        "consistency": {
+          "atLeast": {
+            "runId": "run-example",
+            "ordinal": "5"
+          }
+        },
+        "current": {}
+      }
+    },
+    "query-get-named-plan": {
+      "type": "trogonai.workflows.runs.queries.v1alpha1.GetWorkflowRunPlanRequest",
+      "payload": {
+        "runId": "run-example",
+        "acceptedContract": {
+          "major": 1,
+          "minor": 0
+        },
+        "consistency": {
+          "atLeast": {
+            "runId": "run-example",
+            "ordinal": "5"
+          }
+        },
+        "planRevisionId": "plan-initial"
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "query-plan-artifact-ad-hoc",
+      "template": "query-plan-artifact-ad-hoc"
+    },
+    {
+      "name": "query-plan-artifact-revised",
+      "template": "query-plan-artifact-revised"
+    },
+    {
+      "name": "query-plan-rejects-self-predecessor",
+      "template": "query-plan-artifact-revised",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/previousPlanRevisionId",
+          "value": "plan-revised"
+        }
+      ],
+      "violations": [
+        "a plan artifact cannot name itself as predecessor"
+      ]
+    },
+    {
+      "name": "query-plan-rejects-unknown-definition-version",
+      "template": "query-plan-artifact-ad-hoc",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definitionContractVersion",
+          "value": 2
+        }
+      ],
+      "violations": [
+        "must equal 1"
+      ]
+    },
+    {
+      "name": "query-plan-rejects-empty-exact-bytes",
+      "template": "query-plan-artifact-ad-hoc",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definitionBytes",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "must be at least 1 bytes"
+      ]
+    },
+    {
+      "name": "query-get-current-plan",
+      "template": "query-get-current-plan"
+    },
+    {
+      "name": "query-get-named-plan",
+      "template": "query-get-named-plan"
+    },
+    {
+      "name": "query-get-plan-rejects-missing-selection",
+      "template": "query-get-current-plan",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/current"
+        }
+      ],
+      "violations": [
+        "selection: exactly one field is required in oneof"
+      ]
+    },
+    {
+      "name": "query-get-plan-rejects-other-run-consistency",
+      "template": "query-get-current-plan",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/consistency/atLeast/runId",
+          "value": "run-other"
+        }
+      ],
+      "violations": [
+        "the consistency position must belong to the requested run"
+      ]
+    },
+    {
+      "name": "query-get-plan-rejects-empty-revision",
+      "template": "query-get-named-plan",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/planRevisionId",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "must be at least 1 characters"
+      ]
+    }
+  ]
+}
