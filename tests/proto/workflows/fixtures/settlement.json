@@ -965,7 +965,7 @@
       ]
     },
     {
-      "name": "subscription-reconciliation-rejects-reused-activation-across-waits",
+      "name": "subscription-reconciliation-retains-reused-activation-across-waits",
       "template": "termination-with-subscription-settlement",
       "patch": [
         {
@@ -975,6 +975,156 @@
             "waitId": "wait-another",
             "activationId": "activation-example",
             "cleanupId": "cleanup-another"
+          }
+        }
+      ]
+    },
+    {
+      "name": "scoped-subscription-retains-local-activation-and-cleanup-identities-across-waits",
+      "template": "termination-with-subscription-settlement",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/subscriptions/-",
+          "value": {
+            "waitId": "wait-another",
+            "activationId": "activation-example",
+            "cleanupId": "cleanup-example"
+          }
+        }
+      ]
+    },
+    {
+      "name": "scoped-subscription-retains-independent-registration-intents-with-shared-cleanup",
+      "template": "termination-with-never-activated-intent-settlement",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/subscriptions/-",
+          "value": {
+            "waitId": "wait-another",
+            "registrationIntent": {},
+            "cleanupId": "cleanup-unactivated"
+          }
+        }
+      ]
+    },
+    {
+      "name": "scoped-subscription-retains-structurally-distinct-wait-and-activation-identities",
+      "template": "termination-with-subscription-settlement",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/subscriptions",
+          "value": [
+            {
+              "waitId": "wait:a",
+              "activationId": "b",
+              "cleanupId": "cleanup-first"
+            },
+            {
+              "waitId": "wait",
+              "activationId": "a:b",
+              "cleanupId": "cleanup-second"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "scoped-subscription-rejects-same-wait-activation-with-distinct-cleanups",
+      "template": "termination-with-subscription-settlement",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/subscriptions/-",
+          "value": {
+            "waitId": "wait-example",
+            "activationId": "activation-example",
+            "cleanupId": "cleanup-another"
+          }
+        }
+      ],
+      "violations": [
+        "each invocation and subscription activation or unactivated intent has one termination settlement"
+      ]
+    },
+    {
+      "name": "scoped-subscription-rejects-same-wait-registration-intent-with-distinct-cleanups",
+      "template": "termination-with-never-activated-intent-settlement",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/subscriptions/-",
+          "value": {
+            "waitId": "wait-example",
+            "registrationIntent": {},
+            "cleanupId": "cleanup-another"
+          }
+        }
+      ],
+      "violations": [
+        "each invocation and subscription activation or unactivated intent has one termination settlement"
+      ]
+    },
+    {
+      "name": "scoped-subscription-rejects-mixed-targets-within-one-wait",
+      "template": "termination-with-subscription-settlement",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/subscriptions/-",
+          "value": {
+            "waitId": "wait-example",
+            "registrationIntent": {},
+            "cleanupId": "cleanup-unactivated"
+          }
+        }
+      ],
+      "violations": [
+        "a wait cannot settle both its registration intent and known activations"
+      ]
+    },
+    {
+      "name": "scoped-subscription-retains-distinct-activations-of-one-wait",
+      "template": "termination-with-subscription-settlement",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/subscriptions/-",
+          "value": {
+            "waitId": "wait-example",
+            "activationId": "activation-another",
+            "cleanupId": "cleanup-another"
+          }
+        }
+      ]
+    },
+    {
+      "name": "scoped-subscription-retains-independent-registration-and-activation-targets-with-shared-cleanup",
+      "template": "termination-with-subscription-settlement",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/subscriptions/-",
+          "value": {
+            "waitId": "wait-another",
+            "registrationIntent": {},
+            "cleanupId": "cleanup-example"
+          }
+        }
+      ]
+    },
+    {
+      "name": "scoped-subscription-rejects-duplicate-invocation-settlement",
+      "template": "termination-with-subscription-settlement",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/effects/-",
+          "value": {
+            "invocationId": "invocation-first",
+            "receiptId": "receipt-another"
           }
         }
       ],

@@ -7187,6 +7187,709 @@
         "recoveries": [],
         "currentRootOccurrenceId": "occurrence-example"
       }
+    },
+    "scoped-subscription-state-complete-with-reused-local-identities": {
+      "type": "trogonai.workflows.runs.state.v1alpha1.PresentRun",
+      "payload": {
+        "configuration": {
+          "runId": "run-example",
+          "plan": {
+            "planRevisionId": "plan-initial",
+            "definitionBytes": "AA==",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            },
+            "savedDefinition": {
+              "workflowId": "workflow-example",
+              "revision": "1",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            }
+          },
+          "inputs": [
+            {
+              "name": "task",
+              "value": {
+                "stringValue": "Review the result."
+              }
+            }
+          ],
+          "workspace": {
+            "workspaceId": "workspace-example",
+            "uri": "https://example.com/workspace"
+          },
+          "limits": {
+            "deadline": "2026-01-01T00:02:00Z",
+            "maxInvocations": "100",
+            "maxActiveSessions": 4,
+            "maxControlDepth": 16,
+            "maxValueDepth": 16
+          },
+          "authority": {
+            "requestedBy": {
+              "principalId": "user-example"
+            },
+            "authorizationId": "authorization-example",
+            "policyRevision": "policy-1"
+          }
+        },
+        "status": "RUN_STATUS_SUCCEEDED",
+        "currentPlanRevisionId": "plan-initial",
+        "effectiveLimits": {
+          "deadline": "2026-01-01T00:02:00Z",
+          "maxInvocations": "100",
+          "maxActiveSessions": 4,
+          "maxControlDepth": 16,
+          "maxValueDepth": 16
+        },
+        "planRevisions": [],
+        "occurrences": [
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-example",
+                "node": {
+                  "nodeId": "review-loop"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": []
+              },
+              "inputs": []
+            },
+            "completion": {
+              "completionId": "completion-example",
+              "occurrenceId": "occurrence-example",
+              "evidence": [
+                {
+                  "invocationReceiptId": "receipt-example"
+                }
+              ],
+              "completionCondition": {
+                "evaluationId": "evaluation-positive",
+                "condition": {
+                  "always": {}
+                },
+                "inputs": [],
+                "result": true
+              },
+              "succeeded": {
+                "outputs": []
+              }
+            }
+          },
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-second-paid",
+                "node": {
+                  "nodeId": "second-review"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": [],
+                "parentOccurrenceId": "occurrence-example"
+              },
+              "inputs": []
+            },
+            "completion": {
+              "completionId": "completion-second-paid",
+              "occurrenceId": "occurrence-second-paid",
+              "evidence": [
+                {
+                  "invocationReceiptId": "receipt-invocation-second-paid"
+                }
+              ],
+              "succeeded": {
+                "outputs": [
+                  {
+                    "name": "verdict",
+                    "value": {
+                      "symbolValue": {
+                        "typeName": "review.verdict",
+                        "value": "changes_requested"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "invocation": {
+              "invocationId": "invocation-first",
+              "occurrenceId": "occurrence-example",
+              "attemptNumber": "1",
+              "operationId": "operation-example",
+              "inputs": [
+                {
+                  "name": "task",
+                  "value": {
+                    "stringValue": "Review the result."
+                  },
+                  "sources": [
+                    {
+                      "runInputName": "task"
+                    }
+                  ]
+                }
+              ],
+              "launch": {
+                "commandId": "launch-example",
+                "createSession": {
+                  "sessionId": "session-example",
+                  "executionPlan": {
+                    "planBytes": "AA==",
+                    "planDigest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "workspace": {
+                    "workspaceId": "workspace-example",
+                    "uri": "https://example.com/workspace"
+                  }
+                },
+                "admission": {
+                  "agentRevision": {
+                    "agentId": "agent-example",
+                    "revisionNumber": "1",
+                    "configuration": {
+                      "configurationDigest": {
+                        "algorithm": "sha256",
+                        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      }
+                    }
+                  },
+                  "authority": {
+                    "requestedBy": {
+                      "principalId": "user-example"
+                    },
+                    "authorizationId": "authorization-example",
+                    "policyRevision": "policy-1"
+                  },
+                  "admissionId": "admission-example",
+                  "executionPlanDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "admittedAt": "2026-01-01T00:00:00Z",
+                  "validUntil": "2026-01-01T00:01:00Z"
+                }
+              },
+              "deadline": "2026-01-01T00:02:00Z"
+            },
+            "receipts": [
+              {
+                "receiptId": "receipt-example",
+                "invocationId": "invocation-first",
+                "executionPlanDigest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "sessionEvent": {
+                  "session": {
+                    "sessionId": "session-example"
+                  },
+                  "ordinal": {
+                    "value": "1"
+                  },
+                  "eventId": "event-example",
+                  "eventDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "succeeded": {
+                  "outputs": [
+                    {
+                      "name": "verdict",
+                      "value": {
+                        "symbolValue": {
+                          "typeName": "review.verdict",
+                          "value": "changes_requested"
+                        }
+                      }
+                    }
+                  ],
+                  "artifacts": []
+                },
+                "receivedAt": "2026-01-01T00:01:00Z"
+              }
+            ],
+            "currentReceiptId": "receipt-example"
+          },
+          {
+            "invocation": {
+              "invocationId": "invocation-second-paid",
+              "occurrenceId": "occurrence-second-paid",
+              "attemptNumber": "1",
+              "operationId": "operation-invocation-second-paid",
+              "inputs": [
+                {
+                  "name": "task",
+                  "value": {
+                    "stringValue": "Review the result."
+                  },
+                  "sources": [
+                    {
+                      "runInputName": "task"
+                    }
+                  ]
+                }
+              ],
+              "launch": {
+                "commandId": "launch-invocation-second-paid",
+                "createSession": {
+                  "sessionId": "session-second-paid",
+                  "executionPlan": {
+                    "planBytes": "AA==",
+                    "planDigest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "workspace": {
+                    "workspaceId": "workspace-example",
+                    "uri": "https://example.com/workspace"
+                  }
+                },
+                "admission": {
+                  "agentRevision": {
+                    "agentId": "agent-example",
+                    "revisionNumber": "1",
+                    "configuration": {
+                      "configurationDigest": {
+                        "algorithm": "sha256",
+                        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      }
+                    }
+                  },
+                  "authority": {
+                    "requestedBy": {
+                      "principalId": "user-example"
+                    },
+                    "authorizationId": "authorization-example",
+                    "policyRevision": "policy-1"
+                  },
+                  "admissionId": "admission-invocation-second-paid",
+                  "executionPlanDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "admittedAt": "2026-01-01T00:00:00Z",
+                  "validUntil": "2026-01-01T00:01:00Z"
+                }
+              },
+              "deadline": "2026-01-01T00:02:00Z"
+            },
+            "receipts": [
+              {
+                "receiptId": "receipt-invocation-second-paid",
+                "invocationId": "invocation-second-paid",
+                "executionPlanDigest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "sessionEvent": {
+                  "session": {
+                    "sessionId": "session-second-paid"
+                  },
+                  "ordinal": {
+                    "value": "1"
+                  },
+                  "eventId": "event-invocation-second-paid",
+                  "eventDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "succeeded": {
+                  "outputs": [
+                    {
+                      "name": "verdict",
+                      "value": {
+                        "symbolValue": {
+                          "typeName": "review.verdict",
+                          "value": "changes_requested"
+                        }
+                      }
+                    }
+                  ],
+                  "artifacts": []
+                },
+                "receivedAt": "2026-01-01T00:01:00Z"
+              }
+            ],
+            "currentReceiptId": "receipt-invocation-second-paid"
+          }
+        ],
+        "repeatIterations": [],
+        "decisions": [],
+        "inputs": [],
+        "guidance": [],
+        "externalWaits": [
+          {
+            "registration": {
+              "waitId": "wait-example",
+              "occurrenceId": "occurrence-example",
+              "sourceId": "source-example",
+              "resource": {
+                "resourceType": "example-resource",
+                "resourceId": "resource-example"
+              },
+              "watcher": {
+                "contract": {
+                  "contractId": "example.observation",
+                  "version": "1",
+                  "digest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+                },
+                "payload": ""
+              },
+              "parameters": [
+                {
+                  "name": "task",
+                  "value": {
+                    "stringValue": "Review the result."
+                  },
+                  "sources": [
+                    {
+                      "runInputName": "task"
+                    }
+                  ]
+                }
+              ],
+              "initialCursor": {
+                "cursorBytes": "AA==",
+                "digest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                }
+              },
+              "deadline": "2026-01-01T00:02:00Z",
+              "observationContract": {
+                "contractId": "example.observation",
+                "version": "1",
+                "digest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+              }
+            },
+            "currentCursor": {
+              "cursorBytes": "AQ==",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            },
+            "progress": [
+              {
+                "activity": {
+                  "activityId": "activity-example",
+                  "waitId": "wait-example",
+                  "sourceId": "source-example",
+                  "sourceEventId": "source-event-example",
+                  "event": {
+                    "contract": {
+                      "contractId": "example.observation",
+                      "version": "1",
+                      "digest": {
+                        "algorithm": "sha256",
+                        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      },
+                      "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+                    },
+                    "payload": ""
+                  },
+                  "eventDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "cursorBefore": {
+                    "cursorBytes": "AA==",
+                    "digest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "cursorAfter": {
+                    "cursorBytes": "AQ==",
+                    "digest": {
+                      "algorithm": "sha256",
+                      "value": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "observedAt": "2026-01-01T00:01:00Z",
+                  "outputs": [
+                    {
+                      "name": "observed",
+                      "value": {
+                        "boolValue": true
+                      }
+                    }
+                  ]
+                }
+              }
+            ],
+            "activations": [
+              {
+                "activationId": "activation-example",
+                "waitId": "wait-example",
+                "subscriptionId": "subscription-example",
+                "acceptedCursor": {
+                  "cursorBytes": "AA==",
+                  "digest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "activatedAt": "2026-01-01T00:00:00Z",
+                "leaseExpiresAt": "2026-01-01T00:02:00Z"
+              }
+            ],
+            "leases": [],
+            "cleanups": [
+              {
+                "cleanupId": "cleanup-released",
+                "waitId": "wait-example",
+                "activationId": "activation-example",
+                "released": {
+                  "releasedAt": "2026-01-01T00:02:00Z"
+                }
+              }
+            ],
+            "currentActivationId": "activation-example",
+            "resolution": {
+              "resolutionId": "resolution-example",
+              "waitId": "wait-example",
+              "satisfied": {
+                "completionCondition": {
+                  "evaluationId": "evaluation-positive",
+                  "condition": {
+                    "always": {}
+                  },
+                  "inputs": [],
+                  "result": true
+                },
+                "activityIds": [
+                  "activity-example"
+                ],
+                "outputs": []
+              }
+            }
+          },
+          {
+            "registration": {
+              "waitId": "wait-second",
+              "occurrenceId": "occurrence-second-paid",
+              "sourceId": "source-second",
+              "resource": {
+                "resourceType": "example-resource",
+                "resourceId": "resource-second"
+              },
+              "watcher": {
+                "contract": {
+                  "contractId": "example.observation",
+                  "version": "1",
+                  "digest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+                },
+                "payload": ""
+              },
+              "parameters": [
+                {
+                  "name": "task",
+                  "value": {
+                    "stringValue": "Review the result."
+                  },
+                  "sources": [
+                    {
+                      "runInputName": "task"
+                    }
+                  ]
+                }
+              ],
+              "initialCursor": {
+                "cursorBytes": "AA==",
+                "digest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                }
+              },
+              "deadline": "2026-01-01T00:02:00Z",
+              "observationContract": {
+                "contractId": "example.observation",
+                "version": "1",
+                "digest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+              }
+            },
+            "currentCursor": {
+              "cursorBytes": "AQ==",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            },
+            "progress": [
+              {
+                "activity": {
+                  "activityId": "activity-second",
+                  "waitId": "wait-second",
+                  "sourceId": "source-second",
+                  "sourceEventId": "source-event-second",
+                  "event": {
+                    "contract": {
+                      "contractId": "example.observation",
+                      "version": "1",
+                      "digest": {
+                        "algorithm": "sha256",
+                        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      },
+                      "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+                    },
+                    "payload": ""
+                  },
+                  "eventDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "cursorBefore": {
+                    "cursorBytes": "AA==",
+                    "digest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "cursorAfter": {
+                    "cursorBytes": "AQ==",
+                    "digest": {
+                      "algorithm": "sha256",
+                      "value": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "observedAt": "2026-01-01T00:01:00Z",
+                  "outputs": [
+                    {
+                      "name": "observed",
+                      "value": {
+                        "boolValue": true
+                      }
+                    }
+                  ]
+                }
+              }
+            ],
+            "activations": [
+              {
+                "activationId": "activation-example",
+                "waitId": "wait-second",
+                "subscriptionId": "subscription-second",
+                "acceptedCursor": {
+                  "cursorBytes": "AA==",
+                  "digest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "activatedAt": "2026-01-01T00:00:00Z",
+                "leaseExpiresAt": "2026-01-01T00:02:00Z"
+              }
+            ],
+            "leases": [],
+            "cleanups": [
+              {
+                "cleanupId": "cleanup-released",
+                "waitId": "wait-second",
+                "activationId": "activation-example",
+                "released": {
+                  "releasedAt": "2026-01-01T00:02:00Z"
+                }
+              }
+            ],
+            "currentActivationId": "activation-example",
+            "resolution": {
+              "resolutionId": "resolution-second",
+              "waitId": "wait-second",
+              "satisfied": {
+                "completionCondition": {
+                  "evaluationId": "evaluation-positive",
+                  "condition": {
+                    "always": {}
+                  },
+                  "inputs": [],
+                  "result": true
+                },
+                "activityIds": [
+                  "activity-second"
+                ],
+                "outputs": []
+              }
+            }
+          }
+        ],
+        "timers": [],
+        "pauses": [],
+        "cancellations": [],
+        "retryAuthorizations": [],
+        "terminations": [
+          {
+            "terminationId": "termination-example",
+            "effects": [
+              {
+                "invocationId": "invocation-first",
+                "receiptId": "receipt-example"
+              },
+              {
+                "invocationId": "invocation-second-paid",
+                "receiptId": "receipt-invocation-second-paid"
+              }
+            ],
+            "succeeded": {
+              "rootCompletionId": "completion-example",
+              "outputs": [],
+              "completionCondition": {
+                "evaluationId": "evaluation-positive",
+                "condition": {
+                  "always": {}
+                },
+                "inputs": [],
+                "result": true
+              }
+            },
+            "subscriptions": [
+              {
+                "waitId": "wait-example",
+                "activationId": "activation-example",
+                "cleanupId": "cleanup-released"
+              },
+              {
+                "waitId": "wait-second",
+                "activationId": "activation-example",
+                "cleanupId": "cleanup-released"
+              }
+            ]
+          }
+        ],
+        "recoveries": [],
+        "currentRootOccurrenceId": "occurrence-example",
+        "currentTerminationId": "termination-example"
+      }
     }
   },
   "cases": [
@@ -9655,6 +10358,199 @@
       ],
       "violations": [
         "a join winner must reference a retained successful occurrence completion"
+      ]
+    },
+    {
+      "name": "scoped-subscription-state-accepts-local-identities-reused-across-waits",
+      "template": "scoped-subscription-state-complete-with-reused-local-identities"
+    },
+    {
+      "name": "scoped-subscription-state-rejection-accepts-local-identities-reused-across-waits",
+      "template": "scoped-subscription-state-complete-with-reused-local-identities",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/status",
+          "value": "RUN_STATUS_REJECTED"
+        },
+        {
+          "op": "replace",
+          "path": "/occurrences/0/completion",
+          "value": {
+            "completionId": "completion-rejected",
+            "occurrenceId": "occurrence-example",
+            "evidence": [
+              {
+                "invocationReceiptId": "receipt-example"
+              }
+            ],
+            "rejected": {
+              "outputs": [
+                {
+                  "name": "verdict",
+                  "value": {
+                    "symbolValue": {
+                      "typeName": "review.verdict",
+                      "value": "changes_requested"
+                    }
+                  }
+                }
+              ],
+              "acceptance": {
+                "evaluationId": "evaluation-negative",
+                "condition": {
+                  "compare": {
+                    "left": {
+                      "literal": {
+                        "boolValue": false
+                      }
+                    },
+                    "operator": "COMPARISON_OPERATOR_EQUAL",
+                    "right": {
+                      "literal": {
+                        "boolValue": true
+                      }
+                    }
+                  }
+                },
+                "inputs": [],
+                "result": false
+              }
+            }
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/terminations/0/succeeded"
+        },
+        {
+          "op": "add",
+          "path": "/terminations/0/rejected",
+          "value": {
+            "rootCompletionId": "completion-rejected",
+            "result": {
+              "outputs": [
+                {
+                  "name": "verdict",
+                  "value": {
+                    "symbolValue": {
+                      "typeName": "review.verdict",
+                      "value": "changes_requested"
+                    }
+                  }
+                }
+              ],
+              "acceptance": {
+                "evaluationId": "evaluation-negative",
+                "condition": {
+                  "compare": {
+                    "left": {
+                      "literal": {
+                        "boolValue": false
+                      }
+                    },
+                    "operator": "COMPARISON_OPERATOR_EQUAL",
+                    "right": {
+                      "literal": {
+                        "boolValue": true
+                      }
+                    }
+                  }
+                },
+                "inputs": [],
+                "result": false
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "scoped-subscription-state-rejects-duplicate-activation-target-with-retained-cleanups",
+      "template": "scoped-subscription-state-complete-with-reused-local-identities",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/externalWaits/0/cleanups/-",
+          "value": {
+            "cleanupId": "cleanup-another",
+            "waitId": "wait-example",
+            "activationId": "activation-example",
+            "released": {
+              "releasedAt": "2026-01-01T00:02:00Z"
+            }
+          }
+        },
+        {
+          "op": "add",
+          "path": "/terminations/0/subscriptions/-",
+          "value": {
+            "waitId": "wait-example",
+            "activationId": "activation-example",
+            "cleanupId": "cleanup-another"
+          }
+        }
+      ],
+      "violations": [
+        "each invocation and subscription activation or unactivated intent has one termination settlement"
+      ]
+    },
+    {
+      "name": "scoped-subscription-state-rejects-activation-owned-by-another-wait",
+      "template": "scoped-subscription-state-complete-with-reused-local-identities",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/externalWaits/1/activations/0/activationId",
+          "value": "activation-second"
+        },
+        {
+          "op": "replace",
+          "path": "/externalWaits/1/currentActivationId",
+          "value": "activation-second"
+        },
+        {
+          "op": "replace",
+          "path": "/externalWaits/1/cleanups/0/activationId",
+          "value": "activation-second"
+        },
+        {
+          "op": "replace",
+          "path": "/terminations/0/subscriptions/1/activationId",
+          "value": "activation-second"
+        },
+        {
+          "op": "replace",
+          "path": "/terminations/0/subscriptions/0/activationId",
+          "value": "activation-second"
+        }
+      ],
+      "violations": [
+        "selected accepted or rejected termination must reference released activation or never-activated registration cleanup"
+      ]
+    },
+    {
+      "name": "scoped-subscription-state-rejects-cleanup-owned-by-another-wait",
+      "template": "scoped-subscription-state-complete-with-reused-local-identities",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/externalWaits/1/cleanups/0/cleanupId",
+          "value": "cleanup-second"
+        },
+        {
+          "op": "replace",
+          "path": "/terminations/0/subscriptions/1/cleanupId",
+          "value": "cleanup-second"
+        },
+        {
+          "op": "replace",
+          "path": "/terminations/0/subscriptions/0/cleanupId",
+          "value": "cleanup-second"
+        }
+      ],
+      "violations": [
+        "selected accepted or rejected termination must reference released activation or never-activated registration cleanup"
       ]
     }
   ]
