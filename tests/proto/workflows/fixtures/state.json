@@ -6289,6 +6289,904 @@
         "currentRecoveryId": "recovery-second",
         "currentTerminationId": "termination-recovered-success"
       }
+    },
+    "state-join-winner-retains-explicit-successful-candidate": {
+      "type": "trogonai.workflows.runs.state.v1alpha1.PresentRun",
+      "payload": {
+        "configuration": {
+          "runId": "run-example",
+          "plan": {
+            "planRevisionId": "plan-initial",
+            "definitionBytes": "AA==",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            },
+            "savedDefinition": {
+              "workflowId": "workflow-example",
+              "revision": "1",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            }
+          },
+          "inputs": [
+            {
+              "name": "task",
+              "value": {
+                "stringValue": "Review the result."
+              }
+            }
+          ],
+          "workspace": {
+            "workspaceId": "workspace-example",
+            "uri": "https://example.com/workspace"
+          },
+          "limits": {
+            "deadline": "2026-01-01T00:02:00Z",
+            "maxInvocations": "100",
+            "maxActiveSessions": 4,
+            "maxControlDepth": 16,
+            "maxValueDepth": 16
+          },
+          "authority": {
+            "requestedBy": {
+              "principalId": "user-example"
+            },
+            "authorizationId": "authorization-example",
+            "policyRevision": "policy-1"
+          }
+        },
+        "status": "RUN_STATUS_ACTIVE",
+        "currentPlanRevisionId": "plan-initial",
+        "effectiveLimits": {
+          "deadline": "2026-01-01T00:02:00Z",
+          "maxInvocations": "100",
+          "maxActiveSessions": 4,
+          "maxControlDepth": 16,
+          "maxValueDepth": 16
+        },
+        "planRevisions": [],
+        "occurrences": [
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-example",
+                "node": {
+                  "nodeId": "review-loop"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": []
+              },
+              "inputs": []
+            }
+          },
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-parallel",
+                "node": {
+                  "nodeId": "parallel-review"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": [],
+                "parentOccurrenceId": "occurrence-example"
+              },
+              "inputs": []
+            },
+            "completion": {
+              "completionId": "completion-parallel",
+              "occurrenceId": "occurrence-parallel",
+              "evidence": [
+                {
+                  "decisionId": "decision-parallel"
+                }
+              ],
+              "succeeded": {
+                "outputs": []
+              }
+            }
+          },
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-branch-first",
+                "node": {
+                  "nodeId": "first-review"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": [],
+                "parentOccurrenceId": "occurrence-parallel"
+              },
+              "inputs": []
+            },
+            "completion": {
+              "completionId": "completion-branch-first",
+              "occurrenceId": "occurrence-branch-first",
+              "evidence": [
+                {
+                  "invocationReceiptId": "receipt-example"
+                }
+              ],
+              "succeeded": {
+                "outputs": [
+                  {
+                    "name": "verdict",
+                    "value": {
+                      "symbolValue": {
+                        "typeName": "review.verdict",
+                        "value": "approved"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-branch-second",
+                "node": {
+                  "nodeId": "second-review"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": [],
+                "parentOccurrenceId": "occurrence-parallel"
+              },
+              "inputs": []
+            },
+            "completion": {
+              "completionId": "completion-branch-second",
+              "occurrenceId": "occurrence-branch-second",
+              "evidence": [
+                {
+                  "invocationReceiptId": "receipt-invocation-second-paid"
+                }
+              ],
+              "succeeded": {
+                "outputs": [
+                  {
+                    "name": "verdict",
+                    "value": {
+                      "symbolValue": {
+                        "typeName": "review.verdict",
+                        "value": "approved"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "invocation": {
+              "invocationId": "invocation-first",
+              "occurrenceId": "occurrence-branch-first",
+              "attemptNumber": "1",
+              "operationId": "operation-example",
+              "inputs": [
+                {
+                  "name": "task",
+                  "value": {
+                    "stringValue": "Review the result."
+                  },
+                  "sources": [
+                    {
+                      "runInputName": "task"
+                    }
+                  ]
+                }
+              ],
+              "launch": {
+                "commandId": "launch-example",
+                "createSession": {
+                  "sessionId": "session-example",
+                  "executionPlan": {
+                    "planBytes": "AA==",
+                    "planDigest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "workspace": {
+                    "workspaceId": "workspace-example",
+                    "uri": "https://example.com/workspace"
+                  }
+                },
+                "admission": {
+                  "agentRevision": {
+                    "agentId": "agent-example",
+                    "revisionNumber": "1",
+                    "configuration": {
+                      "configurationDigest": {
+                        "algorithm": "sha256",
+                        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      }
+                    }
+                  },
+                  "authority": {
+                    "requestedBy": {
+                      "principalId": "user-example"
+                    },
+                    "authorizationId": "authorization-example",
+                    "policyRevision": "policy-1"
+                  },
+                  "admissionId": "admission-example",
+                  "executionPlanDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "admittedAt": "2026-01-01T00:00:00Z",
+                  "validUntil": "2026-01-01T00:01:00Z"
+                }
+              },
+              "deadline": "2026-01-01T00:02:00Z"
+            },
+            "receipts": [
+              {
+                "receiptId": "receipt-example",
+                "invocationId": "invocation-first",
+                "executionPlanDigest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "sessionEvent": {
+                  "session": {
+                    "sessionId": "session-example"
+                  },
+                  "ordinal": {
+                    "value": "1"
+                  },
+                  "eventId": "event-example",
+                  "eventDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "succeeded": {
+                  "outputs": [
+                    {
+                      "name": "verdict",
+                      "value": {
+                        "symbolValue": {
+                          "typeName": "review.verdict",
+                          "value": "approved"
+                        }
+                      }
+                    }
+                  ],
+                  "artifacts": []
+                },
+                "receivedAt": "2026-01-01T00:01:00Z"
+              }
+            ],
+            "currentReceiptId": "receipt-example"
+          },
+          {
+            "invocation": {
+              "invocationId": "invocation-second-paid",
+              "occurrenceId": "occurrence-branch-second",
+              "attemptNumber": "1",
+              "operationId": "operation-invocation-second-paid",
+              "inputs": [
+                {
+                  "name": "task",
+                  "value": {
+                    "stringValue": "Review the result."
+                  },
+                  "sources": [
+                    {
+                      "runInputName": "task"
+                    }
+                  ]
+                }
+              ],
+              "launch": {
+                "commandId": "launch-invocation-second-paid",
+                "createSession": {
+                  "sessionId": "session-second-paid",
+                  "executionPlan": {
+                    "planBytes": "AA==",
+                    "planDigest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "workspace": {
+                    "workspaceId": "workspace-example",
+                    "uri": "https://example.com/workspace"
+                  }
+                },
+                "admission": {
+                  "agentRevision": {
+                    "agentId": "agent-example",
+                    "revisionNumber": "1",
+                    "configuration": {
+                      "configurationDigest": {
+                        "algorithm": "sha256",
+                        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      }
+                    }
+                  },
+                  "authority": {
+                    "requestedBy": {
+                      "principalId": "user-example"
+                    },
+                    "authorizationId": "authorization-example",
+                    "policyRevision": "policy-1"
+                  },
+                  "admissionId": "admission-invocation-second-paid",
+                  "executionPlanDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "admittedAt": "2026-01-01T00:00:00Z",
+                  "validUntil": "2026-01-01T00:01:00Z"
+                }
+              },
+              "deadline": "2026-01-01T00:02:00Z"
+            },
+            "receipts": [
+              {
+                "receiptId": "receipt-invocation-second-paid",
+                "invocationId": "invocation-second-paid",
+                "executionPlanDigest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "sessionEvent": {
+                  "session": {
+                    "sessionId": "session-second-paid"
+                  },
+                  "ordinal": {
+                    "value": "1"
+                  },
+                  "eventId": "event-invocation-second-paid",
+                  "eventDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "succeeded": {
+                  "outputs": [
+                    {
+                      "name": "verdict",
+                      "value": {
+                        "symbolValue": {
+                          "typeName": "review.verdict",
+                          "value": "approved"
+                        }
+                      }
+                    }
+                  ],
+                  "artifacts": []
+                },
+                "receivedAt": "2026-01-01T00:01:00Z"
+              }
+            ],
+            "currentReceiptId": "receipt-invocation-second-paid"
+          }
+        ],
+        "repeatIterations": [],
+        "decisions": [
+          {
+            "decisionId": "decision-parallel",
+            "occurrenceId": "occurrence-parallel",
+            "join": {
+              "branches": [
+                {
+                  "occurrenceId": "occurrence-branch-first",
+                  "completionId": "completion-branch-first"
+                },
+                {
+                  "occurrenceId": "occurrence-branch-second",
+                  "completionId": "completion-branch-second"
+                }
+              ],
+              "completed": {
+                "outputs": []
+              },
+              "winningBranch": {
+                "occurrenceId": "occurrence-branch-second",
+                "completionId": "completion-branch-second"
+              }
+            }
+          }
+        ],
+        "inputs": [],
+        "guidance": [],
+        "externalWaits": [],
+        "timers": [],
+        "pauses": [],
+        "cancellations": [],
+        "retryAuthorizations": [],
+        "terminations": [],
+        "recoveries": [],
+        "currentRootOccurrenceId": "occurrence-example"
+      }
+    },
+    "state-join-winner-retains-successful-candidate-under-business-rejected-parent": {
+      "type": "trogonai.workflows.runs.state.v1alpha1.PresentRun",
+      "payload": {
+        "configuration": {
+          "runId": "run-example",
+          "plan": {
+            "planRevisionId": "plan-initial",
+            "definitionBytes": "AA==",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            },
+            "savedDefinition": {
+              "workflowId": "workflow-example",
+              "revision": "1",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            }
+          },
+          "inputs": [
+            {
+              "name": "task",
+              "value": {
+                "stringValue": "Review the result."
+              }
+            }
+          ],
+          "workspace": {
+            "workspaceId": "workspace-example",
+            "uri": "https://example.com/workspace"
+          },
+          "limits": {
+            "deadline": "2026-01-01T00:02:00Z",
+            "maxInvocations": "100",
+            "maxActiveSessions": 4,
+            "maxControlDepth": 16,
+            "maxValueDepth": 16
+          },
+          "authority": {
+            "requestedBy": {
+              "principalId": "user-example"
+            },
+            "authorizationId": "authorization-example",
+            "policyRevision": "policy-1"
+          }
+        },
+        "status": "RUN_STATUS_ACTIVE",
+        "currentPlanRevisionId": "plan-initial",
+        "effectiveLimits": {
+          "deadline": "2026-01-01T00:02:00Z",
+          "maxInvocations": "100",
+          "maxActiveSessions": 4,
+          "maxControlDepth": 16,
+          "maxValueDepth": 16
+        },
+        "planRevisions": [],
+        "occurrences": [
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-example",
+                "node": {
+                  "nodeId": "review-loop"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": []
+              },
+              "inputs": []
+            }
+          },
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-parallel",
+                "node": {
+                  "nodeId": "parallel-review"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": [],
+                "parentOccurrenceId": "occurrence-example"
+              },
+              "inputs": []
+            },
+            "completion": {
+              "completionId": "completion-parallel-rejected",
+              "occurrenceId": "occurrence-parallel",
+              "evidence": [
+                {
+                  "decisionId": "decision-parallel"
+                }
+              ],
+              "rejected": {
+                "outputs": [
+                  {
+                    "name": "verdict",
+                    "value": {
+                      "symbolValue": {
+                        "typeName": "review.verdict",
+                        "value": "changes_requested"
+                      }
+                    }
+                  }
+                ],
+                "acceptance": {
+                  "evaluationId": "evaluation-negative",
+                  "condition": {
+                    "compare": {
+                      "left": {
+                        "literal": {
+                          "boolValue": false
+                        }
+                      },
+                      "operator": "COMPARISON_OPERATOR_EQUAL",
+                      "right": {
+                        "literal": {
+                          "boolValue": true
+                        }
+                      }
+                    }
+                  },
+                  "inputs": [],
+                  "result": false
+                }
+              }
+            }
+          },
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-branch-first",
+                "node": {
+                  "nodeId": "first-review"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": [],
+                "parentOccurrenceId": "occurrence-parallel"
+              },
+              "inputs": []
+            },
+            "completion": {
+              "completionId": "completion-branch-first",
+              "occurrenceId": "occurrence-branch-first",
+              "evidence": [
+                {
+                  "invocationReceiptId": "receipt-example"
+                }
+              ],
+              "succeeded": {
+                "outputs": [
+                  {
+                    "name": "verdict",
+                    "value": {
+                      "symbolValue": {
+                        "typeName": "review.verdict",
+                        "value": "approved"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-branch-second",
+                "node": {
+                  "nodeId": "second-review"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": [],
+                "parentOccurrenceId": "occurrence-parallel"
+              },
+              "inputs": []
+            },
+            "completion": {
+              "completionId": "completion-branch-second",
+              "occurrenceId": "occurrence-branch-second",
+              "evidence": [
+                {
+                  "invocationReceiptId": "receipt-invocation-second-paid"
+                }
+              ],
+              "succeeded": {
+                "outputs": [
+                  {
+                    "name": "verdict",
+                    "value": {
+                      "symbolValue": {
+                        "typeName": "review.verdict",
+                        "value": "approved"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "invocation": {
+              "invocationId": "invocation-first",
+              "occurrenceId": "occurrence-branch-first",
+              "attemptNumber": "1",
+              "operationId": "operation-example",
+              "inputs": [
+                {
+                  "name": "task",
+                  "value": {
+                    "stringValue": "Review the result."
+                  },
+                  "sources": [
+                    {
+                      "runInputName": "task"
+                    }
+                  ]
+                }
+              ],
+              "launch": {
+                "commandId": "launch-example",
+                "createSession": {
+                  "sessionId": "session-example",
+                  "executionPlan": {
+                    "planBytes": "AA==",
+                    "planDigest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "workspace": {
+                    "workspaceId": "workspace-example",
+                    "uri": "https://example.com/workspace"
+                  }
+                },
+                "admission": {
+                  "agentRevision": {
+                    "agentId": "agent-example",
+                    "revisionNumber": "1",
+                    "configuration": {
+                      "configurationDigest": {
+                        "algorithm": "sha256",
+                        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      }
+                    }
+                  },
+                  "authority": {
+                    "requestedBy": {
+                      "principalId": "user-example"
+                    },
+                    "authorizationId": "authorization-example",
+                    "policyRevision": "policy-1"
+                  },
+                  "admissionId": "admission-example",
+                  "executionPlanDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "admittedAt": "2026-01-01T00:00:00Z",
+                  "validUntil": "2026-01-01T00:01:00Z"
+                }
+              },
+              "deadline": "2026-01-01T00:02:00Z"
+            },
+            "receipts": [
+              {
+                "receiptId": "receipt-example",
+                "invocationId": "invocation-first",
+                "executionPlanDigest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "sessionEvent": {
+                  "session": {
+                    "sessionId": "session-example"
+                  },
+                  "ordinal": {
+                    "value": "1"
+                  },
+                  "eventId": "event-example",
+                  "eventDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "succeeded": {
+                  "outputs": [
+                    {
+                      "name": "verdict",
+                      "value": {
+                        "symbolValue": {
+                          "typeName": "review.verdict",
+                          "value": "approved"
+                        }
+                      }
+                    }
+                  ],
+                  "artifacts": []
+                },
+                "receivedAt": "2026-01-01T00:01:00Z"
+              }
+            ],
+            "currentReceiptId": "receipt-example"
+          },
+          {
+            "invocation": {
+              "invocationId": "invocation-second-paid",
+              "occurrenceId": "occurrence-branch-second",
+              "attemptNumber": "1",
+              "operationId": "operation-invocation-second-paid",
+              "inputs": [
+                {
+                  "name": "task",
+                  "value": {
+                    "stringValue": "Review the result."
+                  },
+                  "sources": [
+                    {
+                      "runInputName": "task"
+                    }
+                  ]
+                }
+              ],
+              "launch": {
+                "commandId": "launch-invocation-second-paid",
+                "createSession": {
+                  "sessionId": "session-second-paid",
+                  "executionPlan": {
+                    "planBytes": "AA==",
+                    "planDigest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "workspace": {
+                    "workspaceId": "workspace-example",
+                    "uri": "https://example.com/workspace"
+                  }
+                },
+                "admission": {
+                  "agentRevision": {
+                    "agentId": "agent-example",
+                    "revisionNumber": "1",
+                    "configuration": {
+                      "configurationDigest": {
+                        "algorithm": "sha256",
+                        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      }
+                    }
+                  },
+                  "authority": {
+                    "requestedBy": {
+                      "principalId": "user-example"
+                    },
+                    "authorizationId": "authorization-example",
+                    "policyRevision": "policy-1"
+                  },
+                  "admissionId": "admission-invocation-second-paid",
+                  "executionPlanDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "admittedAt": "2026-01-01T00:00:00Z",
+                  "validUntil": "2026-01-01T00:01:00Z"
+                }
+              },
+              "deadline": "2026-01-01T00:02:00Z"
+            },
+            "receipts": [
+              {
+                "receiptId": "receipt-invocation-second-paid",
+                "invocationId": "invocation-second-paid",
+                "executionPlanDigest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "sessionEvent": {
+                  "session": {
+                    "sessionId": "session-second-paid"
+                  },
+                  "ordinal": {
+                    "value": "1"
+                  },
+                  "eventId": "event-invocation-second-paid",
+                  "eventDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "succeeded": {
+                  "outputs": [
+                    {
+                      "name": "verdict",
+                      "value": {
+                        "symbolValue": {
+                          "typeName": "review.verdict",
+                          "value": "approved"
+                        }
+                      }
+                    }
+                  ],
+                  "artifacts": []
+                },
+                "receivedAt": "2026-01-01T00:01:00Z"
+              }
+            ],
+            "currentReceiptId": "receipt-invocation-second-paid"
+          }
+        ],
+        "repeatIterations": [],
+        "decisions": [
+          {
+            "decisionId": "decision-parallel",
+            "occurrenceId": "occurrence-parallel",
+            "join": {
+              "branches": [
+                {
+                  "occurrenceId": "occurrence-branch-first",
+                  "completionId": "completion-branch-first"
+                },
+                {
+                  "occurrenceId": "occurrence-branch-second",
+                  "completionId": "completion-branch-second"
+                }
+              ],
+              "winningBranch": {
+                "occurrenceId": "occurrence-branch-second",
+                "completionId": "completion-branch-second"
+              },
+              "rejected": {
+                "outputs": [
+                  {
+                    "name": "verdict",
+                    "value": {
+                      "symbolValue": {
+                        "typeName": "review.verdict",
+                        "value": "changes_requested"
+                      }
+                    }
+                  }
+                ],
+                "acceptance": {
+                  "evaluationId": "evaluation-negative",
+                  "condition": {
+                    "compare": {
+                      "left": {
+                        "literal": {
+                          "boolValue": false
+                        }
+                      },
+                      "operator": "COMPARISON_OPERATOR_EQUAL",
+                      "right": {
+                        "literal": {
+                          "boolValue": true
+                        }
+                      }
+                    }
+                  },
+                  "inputs": [],
+                  "result": false
+                }
+              }
+            }
+          }
+        ],
+        "inputs": [],
+        "guidance": [],
+        "externalWaits": [],
+        "timers": [],
+        "pauses": [],
+        "cancellations": [],
+        "retryAuthorizations": [],
+        "terminations": [],
+        "recoveries": [],
+        "currentRootOccurrenceId": "occurrence-example"
+      }
     }
   },
   "cases": [
@@ -7714,6 +8612,1049 @@
             }
           }
         }
+      ]
+    },
+    {
+      "name": "state-admission-retains-activated-activity-and-satisfaction",
+      "template": "external-wait-state-captured-progress"
+    },
+    {
+      "name": "state-admission-retains-activated-cursor-progress",
+      "template": "external-wait-state-captured-progress",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/progress",
+          "value": [
+            {
+              "cursorAdvance": {
+                "advancementId": "cursor-advance-example",
+                "waitId": "wait-example",
+                "cursorBefore": {
+                  "cursorBytes": "AA==",
+                  "digest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "cursorAfter": {
+                  "cursorBytes": "AQ==",
+                  "digest": {
+                    "algorithm": "sha256",
+                    "value": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "observedAt": "2026-01-01T00:01:00Z"
+              }
+            }
+          ]
+        },
+        {
+          "op": "remove",
+          "path": "/resolution"
+        }
+      ]
+    },
+    {
+      "name": "state-admission-retains-released-activation-without-current-pointer",
+      "template": "external-wait-state-captured-progress",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/currentActivationId"
+        },
+        {
+          "op": "add",
+          "path": "/cleanups/-",
+          "value": {
+            "cleanupId": "cleanup-released",
+            "waitId": "wait-example",
+            "activationId": "activation-example",
+            "released": {
+              "releasedAt": "2026-01-01T00:02:00Z"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "state-admission-retains-registration-before-attachment",
+      "template": "wait-state-retains-never-activated-registration-cleanup",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/cleanups",
+          "value": []
+        }
+      ]
+    },
+    {
+      "name": "state-admission-retains-cancellation-before-attachment",
+      "template": "wait-state-retains-never-activated-registration-cleanup",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/resolution",
+          "value": {
+            "resolutionId": "resolution-cancelled",
+            "waitId": "wait-example",
+            "cancelled": {
+              "cancellationId": "cancellation-example"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "state-admission-retains-timeout-before-attachment",
+      "template": "wait-state-retains-never-activated-registration-cleanup",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/resolution",
+          "value": {
+            "resolutionId": "resolution-timeout",
+            "waitId": "wait-example",
+            "timedOut": {
+              "deadline": "2026-01-01T00:02:00Z",
+              "observedAt": "2026-01-01T00:02:00Z"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "state-admission-retains-unreconciled-registration-without-activation",
+      "template": "wait-state-late-activation-after-indeterminate-cleanup",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/activations",
+          "value": []
+        },
+        {
+          "op": "remove",
+          "path": "/currentActivationId"
+        },
+        {
+          "op": "replace",
+          "path": "/registrationCleanupReconciliations",
+          "value": []
+        }
+      ]
+    },
+    {
+      "name": "state-admission-retains-progress-after-verified-late-attachment",
+      "template": "wait-state-late-activation-after-indeterminate-cleanup",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/currentCursor",
+          "value": {
+            "cursorBytes": "AQ==",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            }
+          }
+        },
+        {
+          "op": "replace",
+          "path": "/progress",
+          "value": [
+            {
+              "activity": {
+                "activityId": "activity-example",
+                "waitId": "wait-example",
+                "sourceId": "source-example",
+                "sourceEventId": "source-event-example",
+                "event": {
+                  "contract": {
+                    "contractId": "example.observation",
+                    "version": "1",
+                    "digest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    },
+                    "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+                  },
+                  "payload": ""
+                },
+                "eventDigest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "cursorBefore": {
+                  "cursorBytes": "AA==",
+                  "digest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "cursorAfter": {
+                  "cursorBytes": "AQ==",
+                  "digest": {
+                    "algorithm": "sha256",
+                    "value": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "observedAt": "2026-01-01T00:01:00Z",
+                "outputs": [
+                  {
+                    "name": "observed",
+                    "value": {
+                      "boolValue": true
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "op": "add",
+          "path": "/resolution",
+          "value": {
+            "resolutionId": "resolution-example",
+            "waitId": "wait-example",
+            "satisfied": {
+              "completionCondition": {
+                "evaluationId": "evaluation-positive",
+                "condition": {
+                  "always": {}
+                },
+                "inputs": [],
+                "result": true
+              },
+              "activityIds": [
+                "activity-example"
+              ],
+              "outputs": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "state-admission-rejects-activity-before-activation",
+      "template": "external-wait-state-captured-progress",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/activations",
+          "value": []
+        },
+        {
+          "op": "remove",
+          "path": "/currentActivationId"
+        },
+        {
+          "op": "remove",
+          "path": "/resolution"
+        }
+      ],
+      "violations": [
+        "observed progress and satisfied waits require retained activation evidence"
+      ]
+    },
+    {
+      "name": "state-admission-rejects-cursor-progress-before-activation",
+      "template": "external-wait-state-captured-progress",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/activations",
+          "value": []
+        },
+        {
+          "op": "remove",
+          "path": "/currentActivationId"
+        },
+        {
+          "op": "replace",
+          "path": "/progress",
+          "value": [
+            {
+              "cursorAdvance": {
+                "advancementId": "cursor-advance-example",
+                "waitId": "wait-example",
+                "cursorBefore": {
+                  "cursorBytes": "AA==",
+                  "digest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "cursorAfter": {
+                  "cursorBytes": "AQ==",
+                  "digest": {
+                    "algorithm": "sha256",
+                    "value": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "observedAt": "2026-01-01T00:01:00Z"
+              }
+            }
+          ]
+        },
+        {
+          "op": "remove",
+          "path": "/resolution"
+        }
+      ],
+      "violations": [
+        "observed progress and satisfied waits require retained activation evidence"
+      ]
+    },
+    {
+      "name": "state-admission-rejects-satisfaction-without-activation",
+      "template": "external-wait-state-captured-progress",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/activations",
+          "value": []
+        },
+        {
+          "op": "remove",
+          "path": "/currentActivationId"
+        }
+      ],
+      "violations": [
+        "observed progress and satisfied waits require retained activation evidence"
+      ]
+    },
+    {
+      "name": "state-admission-rejects-never-activated-wait-with-observed-progress",
+      "template": "wait-state-retains-never-activated-registration-cleanup",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/currentCursor",
+          "value": {
+            "cursorBytes": "AQ==",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            }
+          }
+        },
+        {
+          "op": "replace",
+          "path": "/progress",
+          "value": [
+            {
+              "activity": {
+                "activityId": "activity-example",
+                "waitId": "wait-example",
+                "sourceId": "source-example",
+                "sourceEventId": "source-event-example",
+                "event": {
+                  "contract": {
+                    "contractId": "example.observation",
+                    "version": "1",
+                    "digest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    },
+                    "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+                  },
+                  "payload": ""
+                },
+                "eventDigest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "cursorBefore": {
+                  "cursorBytes": "AA==",
+                  "digest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "cursorAfter": {
+                  "cursorBytes": "AQ==",
+                  "digest": {
+                    "algorithm": "sha256",
+                    "value": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "observedAt": "2026-01-01T00:01:00Z",
+                "outputs": [
+                  {
+                    "name": "observed",
+                    "value": {
+                      "boolValue": true
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "op": "add",
+          "path": "/resolution",
+          "value": {
+            "resolutionId": "resolution-example",
+            "waitId": "wait-example",
+            "satisfied": {
+              "completionCondition": {
+                "evaluationId": "evaluation-positive",
+                "condition": {
+                  "always": {}
+                },
+                "inputs": [],
+                "result": true
+              },
+              "activityIds": [
+                "activity-example"
+              ],
+              "outputs": []
+            }
+          }
+        }
+      ],
+      "violations": [
+        "observed progress and satisfied waits require retained activation evidence"
+      ]
+    },
+    {
+      "name": "state-admission-rejects-selected-success-observation-under-never-activated-settlement",
+      "template": "state-regression-selected-success-covers-retained-paid-work-and-waits",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/externalWaits/1/currentCursor",
+          "value": {
+            "cursorBytes": "AQ==",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            }
+          }
+        },
+        {
+          "op": "replace",
+          "path": "/externalWaits/1/progress",
+          "value": [
+            {
+              "activity": {
+                "activityId": "activity-unactivated",
+                "waitId": "wait-unactivated",
+                "sourceId": "source-example",
+                "sourceEventId": "source-event-unactivated",
+                "event": {
+                  "contract": {
+                    "contractId": "example.observation",
+                    "version": "1",
+                    "digest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    },
+                    "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+                  },
+                  "payload": ""
+                },
+                "eventDigest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "cursorBefore": {
+                  "cursorBytes": "AA==",
+                  "digest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "cursorAfter": {
+                  "cursorBytes": "AQ==",
+                  "digest": {
+                    "algorithm": "sha256",
+                    "value": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "observedAt": "2026-01-01T00:01:00Z",
+                "outputs": [
+                  {
+                    "name": "observed",
+                    "value": {
+                      "boolValue": true
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "op": "add",
+          "path": "/externalWaits/1/resolution",
+          "value": {
+            "resolutionId": "resolution-unactivated",
+            "waitId": "wait-unactivated",
+            "satisfied": {
+              "completionCondition": {
+                "evaluationId": "evaluation-positive",
+                "condition": {
+                  "always": {}
+                },
+                "inputs": [],
+                "result": true
+              },
+              "activityIds": [
+                "activity-unactivated"
+              ],
+              "outputs": []
+            }
+          }
+        }
+      ],
+      "violations": [
+        "observed progress and satisfied waits require retained activation evidence"
+      ]
+    },
+    {
+      "name": "state-admission-retains-refreshed-recovery-deadline",
+      "template": "state-regression-recovery-retains-paid-completion-and-prior-failure",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recoveries/0/limits/deadline",
+          "value": "2026-01-01T00:05:00Z"
+        },
+        {
+          "op": "replace",
+          "path": "/effectiveLimits/deadline",
+          "value": "2026-01-01T00:05:00Z"
+        }
+      ]
+    },
+    {
+      "name": "state-admission-retains-tightened-recovery-budgets",
+      "template": "state-regression-recovery-retains-paid-completion-and-prior-failure",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recoveries/0/limits",
+          "value": {
+            "deadline": "2026-01-01T00:05:00Z",
+            "maxInvocations": "80",
+            "maxActiveSessions": 3,
+            "maxControlDepth": 12,
+            "maxValueDepth": 12
+          }
+        },
+        {
+          "op": "replace",
+          "path": "/effectiveLimits",
+          "value": {
+            "deadline": "2026-01-01T00:05:00Z",
+            "maxInvocations": "80",
+            "maxActiveSessions": 3,
+            "maxControlDepth": 12,
+            "maxValueDepth": 12
+          }
+        }
+      ]
+    },
+    {
+      "name": "state-admission-retains-further-tightening-with-deadline-refresh",
+      "template": "state-regression-recovery-retains-historical-partial-termination",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recoveries/0/limits",
+          "value": {
+            "deadline": "2026-01-01T00:05:00Z",
+            "maxInvocations": "80",
+            "maxActiveSessions": 3,
+            "maxControlDepth": 12,
+            "maxValueDepth": 12
+          }
+        },
+        {
+          "op": "replace",
+          "path": "/recoveries/1/limits",
+          "value": {
+            "deadline": "2026-01-01T00:06:00Z",
+            "maxInvocations": "60",
+            "maxActiveSessions": 2,
+            "maxControlDepth": 8,
+            "maxValueDepth": 8
+          }
+        },
+        {
+          "op": "replace",
+          "path": "/effectiveLimits",
+          "value": {
+            "deadline": "2026-01-01T00:06:00Z",
+            "maxInvocations": "60",
+            "maxActiveSessions": 2,
+            "maxControlDepth": 8,
+            "maxValueDepth": 8
+          }
+        }
+      ]
+    },
+    {
+      "name": "state-admission-retains-tightened-budgets-across-deadline-refresh",
+      "template": "state-regression-recovery-retains-historical-partial-termination",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recoveries/0/limits",
+          "value": {
+            "deadline": "2026-01-01T00:05:00Z",
+            "maxInvocations": "80",
+            "maxActiveSessions": 3,
+            "maxControlDepth": 12,
+            "maxValueDepth": 12
+          }
+        },
+        {
+          "op": "replace",
+          "path": "/recoveries/1/limits",
+          "value": {
+            "deadline": "2026-01-01T00:06:00Z",
+            "maxInvocations": "80",
+            "maxActiveSessions": 3,
+            "maxControlDepth": 12,
+            "maxValueDepth": 12
+          }
+        },
+        {
+          "op": "replace",
+          "path": "/effectiveLimits",
+          "value": {
+            "deadline": "2026-01-01T00:06:00Z",
+            "maxInvocations": "80",
+            "maxActiveSessions": 3,
+            "maxControlDepth": 12,
+            "maxValueDepth": 12
+          }
+        }
+      ]
+    },
+    {
+      "name": "state-admission-rejects-recovery-invocation-count-above-admission",
+      "template": "state-regression-recovery-retains-paid-completion-and-prior-failure",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recoveries/0/limits/maxInvocations",
+          "value": "101"
+        },
+        {
+          "op": "replace",
+          "path": "/effectiveLimits/maxInvocations",
+          "value": "101"
+        }
+      ],
+      "violations": [
+        "recovery count and depth limits cannot exceed admission or earlier recovery limits"
+      ]
+    },
+    {
+      "name": "state-admission-rejects-earlier-recovery-invocation-count-above-admission",
+      "template": "state-regression-recovery-retains-historical-partial-termination",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recoveries/0/limits/maxInvocations",
+          "value": "101"
+        }
+      ],
+      "violations": [
+        "recovery count and depth limits cannot exceed admission or earlier recovery limits"
+      ]
+    },
+    {
+      "name": "state-admission-rejects-restored-recovery-invocation-count-after-tightening",
+      "template": "state-regression-recovery-retains-historical-partial-termination",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recoveries/0/limits/maxInvocations",
+          "value": "40"
+        },
+        {
+          "op": "replace",
+          "path": "/recoveries/1/limits/maxInvocations",
+          "value": "80"
+        },
+        {
+          "op": "replace",
+          "path": "/effectiveLimits/maxInvocations",
+          "value": "80"
+        }
+      ],
+      "violations": [
+        "recovery count and depth limits cannot exceed admission or earlier recovery limits"
+      ]
+    },
+    {
+      "name": "state-admission-rejects-recovery-active-session-count-above-admission",
+      "template": "state-regression-recovery-retains-paid-completion-and-prior-failure",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recoveries/0/limits/maxActiveSessions",
+          "value": 5
+        },
+        {
+          "op": "replace",
+          "path": "/effectiveLimits/maxActiveSessions",
+          "value": 5
+        }
+      ],
+      "violations": [
+        "recovery count and depth limits cannot exceed admission or earlier recovery limits"
+      ]
+    },
+    {
+      "name": "state-admission-rejects-earlier-recovery-active-session-count-above-admission",
+      "template": "state-regression-recovery-retains-historical-partial-termination",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recoveries/0/limits/maxActiveSessions",
+          "value": 5
+        }
+      ],
+      "violations": [
+        "recovery count and depth limits cannot exceed admission or earlier recovery limits"
+      ]
+    },
+    {
+      "name": "state-admission-rejects-restored-recovery-active-session-count-after-tightening",
+      "template": "state-regression-recovery-retains-historical-partial-termination",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recoveries/0/limits/maxActiveSessions",
+          "value": 2
+        },
+        {
+          "op": "replace",
+          "path": "/recoveries/1/limits/maxActiveSessions",
+          "value": 3
+        },
+        {
+          "op": "replace",
+          "path": "/effectiveLimits/maxActiveSessions",
+          "value": 3
+        }
+      ],
+      "violations": [
+        "recovery count and depth limits cannot exceed admission or earlier recovery limits"
+      ]
+    },
+    {
+      "name": "state-admission-rejects-recovery-control-depth-above-admission",
+      "template": "state-regression-recovery-retains-paid-completion-and-prior-failure",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recoveries/0/limits/maxControlDepth",
+          "value": 17
+        },
+        {
+          "op": "replace",
+          "path": "/effectiveLimits/maxControlDepth",
+          "value": 17
+        }
+      ],
+      "violations": [
+        "recovery count and depth limits cannot exceed admission or earlier recovery limits"
+      ]
+    },
+    {
+      "name": "state-admission-rejects-earlier-recovery-control-depth-above-admission",
+      "template": "state-regression-recovery-retains-historical-partial-termination",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recoveries/0/limits/maxControlDepth",
+          "value": 17
+        }
+      ],
+      "violations": [
+        "recovery count and depth limits cannot exceed admission or earlier recovery limits"
+      ]
+    },
+    {
+      "name": "state-admission-rejects-restored-recovery-control-depth-after-tightening",
+      "template": "state-regression-recovery-retains-historical-partial-termination",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recoveries/0/limits/maxControlDepth",
+          "value": 8
+        },
+        {
+          "op": "replace",
+          "path": "/recoveries/1/limits/maxControlDepth",
+          "value": 12
+        },
+        {
+          "op": "replace",
+          "path": "/effectiveLimits/maxControlDepth",
+          "value": 12
+        }
+      ],
+      "violations": [
+        "recovery count and depth limits cannot exceed admission or earlier recovery limits"
+      ]
+    },
+    {
+      "name": "state-admission-rejects-recovery-value-depth-above-admission",
+      "template": "state-regression-recovery-retains-paid-completion-and-prior-failure",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recoveries/0/limits/maxValueDepth",
+          "value": 17
+        },
+        {
+          "op": "replace",
+          "path": "/effectiveLimits/maxValueDepth",
+          "value": 17
+        }
+      ],
+      "violations": [
+        "recovery count and depth limits cannot exceed admission or earlier recovery limits"
+      ]
+    },
+    {
+      "name": "state-admission-rejects-earlier-recovery-value-depth-above-admission",
+      "template": "state-regression-recovery-retains-historical-partial-termination",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recoveries/0/limits/maxValueDepth",
+          "value": 17
+        }
+      ],
+      "violations": [
+        "recovery count and depth limits cannot exceed admission or earlier recovery limits"
+      ]
+    },
+    {
+      "name": "state-admission-rejects-restored-recovery-value-depth-after-tightening",
+      "template": "state-regression-recovery-retains-historical-partial-termination",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recoveries/0/limits/maxValueDepth",
+          "value": 8
+        },
+        {
+          "op": "replace",
+          "path": "/recoveries/1/limits/maxValueDepth",
+          "value": 12
+        },
+        {
+          "op": "replace",
+          "path": "/effectiveLimits/maxValueDepth",
+          "value": 12
+        }
+      ],
+      "violations": [
+        "recovery count and depth limits cannot exceed admission or earlier recovery limits"
+      ]
+    },
+    {
+      "name": "state-join-winner-retains-explicit-successful-candidate",
+      "template": "state-join-winner-retains-explicit-successful-candidate"
+    },
+    {
+      "name": "state-join-winner-retains-successful-candidate-under-business-rejected-parent",
+      "template": "state-join-winner-retains-successful-candidate-under-business-rejected-parent"
+    },
+    {
+      "name": "state-join-winner-retains-join-without-optional-winner",
+      "template": "state-join-winner-retains-explicit-successful-candidate",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/decisions/0/join/winningBranch"
+        }
+      ]
+    },
+    {
+      "name": "state-join-winner-retains-first-candidate-selection",
+      "template": "state-join-winner-retains-explicit-successful-candidate",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/decisions/0/join/winningBranch",
+          "value": {
+            "occurrenceId": "occurrence-branch-first",
+            "completionId": "completion-branch-first"
+          }
+        }
+      ]
+    },
+    {
+      "name": "state-join-winner-rejects-unretained-occurrence",
+      "template": "state-join-winner-retains-explicit-successful-candidate",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/decisions/0/join/branches/1/occurrenceId",
+          "value": "occurrence-unretained"
+        },
+        {
+          "op": "replace",
+          "path": "/decisions/0/join/winningBranch/occurrenceId",
+          "value": "occurrence-unretained"
+        }
+      ],
+      "violations": [
+        "a join winner must reference a retained successful occurrence completion"
+      ]
+    },
+    {
+      "name": "state-join-winner-rejects-absent-retained-completion",
+      "template": "state-join-winner-retains-explicit-successful-candidate",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/occurrences/3/completion"
+        }
+      ],
+      "violations": [
+        "a join winner must reference a retained successful occurrence completion"
+      ]
+    },
+    {
+      "name": "state-join-winner-rejects-unknown-completion",
+      "template": "state-join-winner-retains-explicit-successful-candidate",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/decisions/0/join/branches/1/completionId",
+          "value": "completion-unknown"
+        },
+        {
+          "op": "replace",
+          "path": "/decisions/0/join/winningBranch/completionId",
+          "value": "completion-unknown"
+        }
+      ],
+      "violations": [
+        "a join winner must reference a retained successful occurrence completion"
+      ]
+    },
+    {
+      "name": "state-join-winner-rejects-other-occurrence-completion",
+      "template": "state-join-winner-retains-explicit-successful-candidate",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/decisions/0/join/branches/0/completionId",
+          "value": "completion-branch-second"
+        },
+        {
+          "op": "replace",
+          "path": "/decisions/0/join/branches/1/completionId",
+          "value": "completion-branch-first"
+        },
+        {
+          "op": "replace",
+          "path": "/decisions/0/join/winningBranch/completionId",
+          "value": "completion-branch-first"
+        }
+      ],
+      "violations": [
+        "a join winner must reference a retained successful occurrence completion"
+      ]
+    },
+    {
+      "name": "state-join-winner-rejects-failed-child-completion",
+      "template": "state-join-winner-retains-explicit-successful-candidate",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/occurrences/3/completion/succeeded"
+        },
+        {
+          "op": "add",
+          "path": "/occurrences/3/completion/failed",
+          "value": {
+            "reason": "FAILURE_REASON_EXECUTION_ERROR"
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/invocations/1/receipts/0/succeeded"
+        },
+        {
+          "op": "add",
+          "path": "/invocations/1/receipts/0/failed",
+          "value": {
+            "reason": "FAILURE_REASON_EXECUTION_ERROR"
+          }
+        }
+      ],
+      "violations": [
+        "a join winner must reference a retained successful occurrence completion"
+      ]
+    },
+    {
+      "name": "state-join-winner-rejects-business-rejected-child-completion",
+      "template": "state-join-winner-retains-explicit-successful-candidate",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/occurrences/3/completion/succeeded"
+        },
+        {
+          "op": "add",
+          "path": "/occurrences/3/completion/rejected",
+          "value": {
+            "outputs": [
+              {
+                "name": "verdict",
+                "value": {
+                  "symbolValue": {
+                    "typeName": "review.verdict",
+                    "value": "changes_requested"
+                  }
+                }
+              }
+            ],
+            "acceptance": {
+              "evaluationId": "evaluation-negative",
+              "condition": {
+                "compare": {
+                  "left": {
+                    "literal": {
+                      "boolValue": false
+                    }
+                  },
+                  "operator": "COMPARISON_OPERATOR_EQUAL",
+                  "right": {
+                    "literal": {
+                      "boolValue": true
+                    }
+                  }
+                }
+              },
+              "inputs": [],
+              "result": false
+            }
+          }
+        },
+        {
+          "op": "replace",
+          "path": "/invocations/1/receipts/0/succeeded/outputs/0/value/symbolValue/value",
+          "value": "changes_requested"
+        }
+      ],
+      "violations": [
+        "a join winner must reference a retained successful occurrence completion"
       ]
     }
   ]

@@ -71,6 +71,12 @@ the first successful branch. The run records the evidence and any winning
 occurrence. A decision to cancel remaining siblings still requires recording
 what those siblings eventually did.
 
+A first-success join retains the chosen branch occurrence and its successful
+completion, even when other branches have already completed. This selection
+also stays visible if the join's acceptance condition rejects the chosen
+outputs. Admission matches the selection to the pinned definition and verifies
+its output contract before downstream work becomes eligible.
+
 A Session that successfully runs a review may return a negative review verdict.
 That is a valid result for a repeat condition to evaluate. Treating it as an
 execution failure would trigger the wrong retry behavior and discard the reason
@@ -121,8 +127,10 @@ ancestors, and binds retained successful completions into those replacement
 parents. The old receipts and completions stay immutable. Admission rejects
 recovery of successful, cancelled, or business-rejected runs and refuses to
 repeat indeterminate effects. Invocation budgets remain global; refreshing a
-deadline requires live admission. Recovery therefore preserves successful
-reviews or other siblings rather than dispatching them again.
+deadline requires live admission. Recovery can tighten invocation, concurrency,
+and depth bounds while preserving every earlier tighter bound. Recovery
+therefore preserves successful reviews or other siblings rather than
+dispatching them again.
 
 Pause and cancellation record intent separately from application. Pause stops
 new scheduling at a durable boundary; already-dispatched work remains tracked.
@@ -145,7 +153,9 @@ different effects on eligibility and are recorded separately.
 
 External waits pin a registered watcher and observation contract. The run
 retains the resolved subscription, cursor, activity identity, deadline,
-captured values, and condition decision. Polling schedules carry an explicit
+captured values, and condition decision. Activity, cursor progress, and a
+satisfied resolution require retained activation evidence, including after
+subscription release. Polling schedules carry an explicit
 interval; event subscriptions can wait without polling. A stable source and
 source event identity deduplicate redelivery across repeated waits. Each wait
 occurrence has its own identity and continuation cursor, so a new iteration

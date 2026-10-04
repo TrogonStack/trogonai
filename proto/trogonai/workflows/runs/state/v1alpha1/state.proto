@@ -137,6 +137,11 @@ message RegistrationCleanupReconciliation {
 
 message ExternalWaitState {
   option (buf.validate.message).cel = {
+    id: "external_wait_state.activation_evidence"
+    message: "observed progress and satisfied waits require retained activation evidence"
+    expression: "this.activations.size() > 0 || (this.progress.size() == 0 && (!has(this.resolution) || !has(this.resolution.satisfied)))"
+  };
+  option (buf.validate.message).cel = {
     id: "external_wait_state.registration_cleanup_reconciliation"
     message: "registration cleanups with known activations require exact reconciliation"
     expression: "this.registration_cleanup_reconciliations.map(item, item.cleanup_id).unique() && this.registration_cleanup_reconciliations.all(item, this.cleanups.exists(cleanup, cleanup.cleanup_id == item.cleanup_id && has(cleanup.registration_intent) && has(cleanup.indeterminate)) && this.activations.exists(activation, activation.activation_id == item.activation_id)) && (this.activations.size() == 0 || this.cleanups.filter(cleanup, has(cleanup.registration_intent)).all(cleanup, this.registration_cleanup_reconciliations.exists(item, item.cleanup_id == cleanup.cleanup_id)))"
@@ -274,6 +279,11 @@ message PresentRun {
     expression: "this.decisions.map(item, item.decision_id).unique() && this.decisions.all(item, this.occurrences.exists(occurrence, occurrence.entry.occurrence.occurrence_id == item.occurrence_id)) && this.repeat_iterations.all(item, this.occurrences.exists(occurrence, occurrence.entry.occurrence.occurrence_id == item.repeat_occurrence_id))"
   };
   option (buf.validate.message).cel = {
+    id: "present_run.join_winner_evidence"
+    message: "a join winner must reference a retained successful occurrence completion"
+    expression: "this.decisions.all(item, !has(item.join) || !has(item.join.winning_branch) || this.occurrences.exists(occurrence, occurrence.entry.occurrence.occurrence_id == item.join.winning_branch.occurrence_id && has(occurrence.completion) && occurrence.completion.completion_id == item.join.winning_branch.completion_id && has(occurrence.completion.succeeded)))"
+  };
+  option (buf.validate.message).cel = {
     id: "present_run.terminal_status"
     message: "terminal status must match the selected retained termination"
     expression: "has(this.current_termination_id) == (this.status >= 5 && this.status <= 8) && (!has(this.current_termination_id) || this.terminations.exists(item, item.termination_id == this.current_termination_id && ((this.status == 5 && has(item.succeeded)) || (this.status == 6 && has(item.failed)) || (this.status == 7 && has(item.cancelled)) || (this.status == 8 && has(item.rejected)))))"
@@ -287,6 +297,11 @@ message PresentRun {
     id: "present_run.recovery_limits"
     message: "effective limits must match the current recovery or initial admission"
     expression: "this.recoveries.size() == 0 ? (!has(this.current_recovery_id) && this.effective_limits == this.configuration.limits) : (has(this.current_recovery_id) && this.current_recovery_id == this.recoveries[this.recoveries.size() - 1].recovery_id && this.effective_limits == this.recoveries[this.recoveries.size() - 1].limits)"
+  };
+  option (buf.validate.message).cel = {
+    id: "present_run.recovery_budgets"
+    message: "recovery count and depth limits cannot exceed admission or earlier recovery limits"
+    expression: "this.recoveries.all(item, item.limits.max_invocations <= this.configuration.limits.max_invocations && item.limits.max_active_sessions <= this.configuration.limits.max_active_sessions && item.limits.max_control_depth <= this.configuration.limits.max_control_depth && item.limits.max_value_depth <= this.configuration.limits.max_value_depth && this.recoveries.filter(previous, previous.recovery_number < item.recovery_number).all(previous, item.limits.max_invocations <= previous.limits.max_invocations && item.limits.max_active_sessions <= previous.limits.max_active_sessions && item.limits.max_control_depth <= previous.limits.max_control_depth && item.limits.max_value_depth <= previous.limits.max_value_depth))"
   };
 
   trogonai.workflows.runs.v1alpha1.RunConfiguration configuration = 1 [features.field_presence = LEGACY_REQUIRED];

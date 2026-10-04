@@ -144,6 +144,9 @@ message BranchReceipt {
 
 // Pending siblings remain tracked after an early join. Stopping them requires
 // separately recorded cancellation, and their later receipts remain admissible.
+// FIRST_SUCCESS completed and rejected joins require winning_branch; other
+// policies omit it. Deciders check the pinned policy, the winner's succeeded
+// completion, and the provenance of output bindings.
 message JoinDecision {
   option (buf.validate.message).cel = {
     id: "join_decision.acceptance"
@@ -155,6 +158,21 @@ message JoinDecision {
     message: "join branch occurrences must be unique"
     expression: "this.branches.map(branch, branch.occurrence_id).unique()"
   };
+  option (buf.validate.message).cel = {
+    id: "join_decision.winning_branch_outcome"
+    message: "a winning branch requires a completed or business-rejected join"
+    expression: "!has(this.winning_branch) || has(this.completed) || has(this.rejected)"
+  };
+  option (buf.validate.message).cel = {
+    id: "join_decision.winning_branch_completion"
+    message: "a winning branch must reference a branch completion"
+    expression: "!has(this.winning_branch) || has(this.winning_branch.completion_id)"
+  };
+  option (buf.validate.message).cel = {
+    id: "join_decision.winning_branch_membership"
+    message: "a winning branch must match a retained completed branch receipt"
+    expression: "!has(this.winning_branch) || this.branches.exists(branch, has(branch.completion_id) && branch == this.winning_branch)"
+  };
 
   repeated BranchReceipt branches = 1 [(buf.validate.field).repeated.min_items = 1];
   ConditionEvaluation acceptance = 2;
@@ -165,6 +183,7 @@ message JoinDecision {
     Failure failed = 4;
     NodeRejected rejected = 5;
   }
+  BranchReceipt winning_branch = 6;
 }
 
 message RepeatContinue {

@@ -476,6 +476,35 @@
           "observedAt": "2026-01-01T00:02:00Z"
         }
       }
+    },
+    "join-first-success-with-wait-winner": {
+      "type": "trogonai.workflows.runs.v1alpha1.JoinDecision",
+      "payload": {
+        "branches": [
+          {
+            "occurrenceId": "branch-first",
+            "completionId": "completion-first"
+          },
+          {
+            "occurrenceId": "branch-second",
+            "completionId": "completion-second"
+          }
+        ],
+        "completed": {
+          "outputs": [
+            {
+              "name": "proposal",
+              "value": {
+                "stringValue": "Selected proposal."
+              }
+            }
+          ]
+        },
+        "winningBranch": {
+          "occurrenceId": "branch-first",
+          "completionId": "completion-first"
+        }
+      }
     }
   },
   "cases": [
@@ -1059,6 +1088,202 @@
       ],
       "violations": [
         "an expiry receipt must record the same observed response instant"
+      ]
+    },
+    {
+      "name": "join-first-success-with-wait-winner",
+      "template": "join-first-success-with-wait-winner"
+    },
+    {
+      "name": "join-first-success-keeps-pending-sibling",
+      "template": "join-first-success-with-wait-winner",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/branches/1/completionId"
+        },
+        {
+          "op": "add",
+          "path": "/branches/1/pending",
+          "value": {}
+        }
+      ]
+    },
+    {
+      "name": "join-business-rejection-retains-winning-branch",
+      "template": "join-first-success-with-wait-winner",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/completed"
+        },
+        {
+          "op": "add",
+          "path": "/rejected",
+          "value": {
+            "outputs": [
+              {
+                "name": "proposal",
+                "value": {
+                  "stringValue": "Selected proposal."
+                }
+              }
+            ],
+            "acceptance": {
+              "evaluationId": "evaluation-negative",
+              "condition": {
+                "compare": {
+                  "left": {
+                    "literal": {
+                      "boolValue": false
+                    }
+                  },
+                  "operator": "COMPARISON_OPERATOR_EQUAL",
+                  "right": {
+                    "literal": {
+                      "boolValue": true
+                    }
+                  }
+                }
+              },
+              "inputs": [],
+              "result": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "join-failed-without-winning-branch",
+      "template": "join-first-success-with-wait-winner",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/winningBranch"
+        },
+        {
+          "op": "remove",
+          "path": "/completed"
+        },
+        {
+          "op": "add",
+          "path": "/failed",
+          "value": {
+            "reason": "FAILURE_REASON_EXECUTION_ERROR"
+          }
+        }
+      ]
+    },
+    {
+      "name": "join-rejects-pending-winning-branch",
+      "template": "join-first-success-with-wait-winner",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/winningBranch",
+          "value": {
+            "occurrenceId": "branch-first",
+            "pending": {}
+          }
+        }
+      ],
+      "violations": [
+        "a winning branch must reference a branch completion",
+        "a winning branch must match a retained completed branch receipt"
+      ]
+    },
+    {
+      "name": "join-rejects-winning-branch-for-pending-receipt",
+      "template": "join-first-success-with-wait-winner",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/branches/0/completionId"
+        },
+        {
+          "op": "add",
+          "path": "/branches/0/pending",
+          "value": {}
+        }
+      ],
+      "violations": [
+        "a winning branch must match a retained completed branch receipt"
+      ]
+    },
+    {
+      "name": "join-rejects-winning-branch-outside-retained-branches",
+      "template": "join-first-success-with-wait-winner",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/winningBranch/occurrenceId",
+          "value": "branch-unretained"
+        }
+      ],
+      "violations": [
+        "a winning branch must match a retained completed branch receipt"
+      ]
+    },
+    {
+      "name": "join-rejects-winning-branch-with-mismatched-completion",
+      "template": "join-first-success-with-wait-winner",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/winningBranch/completionId",
+          "value": "completion-other"
+        }
+      ],
+      "violations": [
+        "a winning branch must match a retained completed branch receipt"
+      ]
+    },
+    {
+      "name": "join-rejects-winning-branch-on-failure",
+      "template": "join-first-success-with-wait-winner",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/completed"
+        },
+        {
+          "op": "add",
+          "path": "/failed",
+          "value": {
+            "reason": "FAILURE_REASON_EXECUTION_ERROR"
+          }
+        }
+      ],
+      "violations": [
+        "a winning branch requires a completed or business-rejected join"
+      ]
+    },
+    {
+      "name": "join-rejects-empty-winning-occurrence",
+      "template": "join-first-success-with-wait-winner",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/winningBranch/occurrenceId",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "winning_branch.occurrence_id: must be at least 1 characters"
+      ]
+    },
+    {
+      "name": "join-rejects-empty-winning-completion",
+      "template": "join-first-success-with-wait-winner",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/winningBranch/completionId",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "winning_branch.completion_id: must be at least 1 characters"
       ]
     }
   ]
