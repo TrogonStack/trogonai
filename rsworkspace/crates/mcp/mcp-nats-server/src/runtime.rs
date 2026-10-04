@@ -19,7 +19,7 @@ use rmcp::model::{
     GetTaskResult, InitializeRequestParams, InitializeResult, ListPromptsResult, ListResourceTemplatesResult,
     ListResourcesResult, ListToolsResult, Notification, NotificationMetaObject, NotificationNoParam,
     PaginatedRequestParams, ProgressNotificationParam, ReadResourceRequestParams, ReadResourceResponse, Request,
-    RequestMetaObject, RequestNoParam, RequestOptionalParam, ServerInfo, ServerRequest, ServerResult,
+    RequestMetaObject, RequestNoParam, RequestOptionalParam, ServerConfig, ServerRequest, ServerResult,
     SubscribeRequestParams, UnsubscribeRequestParams, UpdateTaskParams,
 };
 use rmcp::service::{NotificationContext, Peer, RequestContext, RoleClient, RoleServer, ServiceError};
@@ -107,7 +107,7 @@ where
 {
     command_tx: mpsc::Sender<ProxyCommand>,
     operation_timeout: Duration,
-    server_info: Arc<RwLock<ServerInfo>>,
+    server_info: Arc<RwLock<ServerConfig>>,
     _nats: std::marker::PhantomData<N>,
 }
 
@@ -126,7 +126,7 @@ where
         Self {
             command_tx,
             operation_timeout,
-            server_info: Arc::new(RwLock::new(ServerInfo::default())),
+            server_info: Arc::new(RwLock::new(ServerConfig::default())),
             _nats: std::marker::PhantomData,
         }
     }
@@ -136,7 +136,7 @@ impl<N> McpNatsProxyService<N>
 where
     N: SubscribeClient + RequestClient + PublishClient + FlushClient,
 {
-    fn remember_server_info(&self, result: &ServerInfo) {
+    fn remember_server_info(&self, result: &ServerConfig) {
         let mut server_info = self
             .server_info
             .write()
@@ -540,7 +540,7 @@ where
         }
     }
 
-    fn get_info(&self) -> ServerInfo {
+    fn get_info(&self) -> ServerConfig {
         self.server_info
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())

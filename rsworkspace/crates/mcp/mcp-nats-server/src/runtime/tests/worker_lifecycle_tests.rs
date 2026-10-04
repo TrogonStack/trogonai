@@ -161,8 +161,11 @@ async fn server_callbacks_preserve_reply_inboxes_and_http_client_outcomes() {
     let (client_io, server_io) = tokio::io::duplex(16384);
     let server = rmcp::service::serve_directly(NoopServerHandler, server_io, None);
     let (events_tx, mut events) = mpsc::unbounded_channel();
-    let client =
-        rmcp::service::serve_directly(CallbackClient(events_tx), client_io, Some(ServerInfo::default().into()));
+    let client = rmcp::service::serve_directly(
+        CallbackClient(events_tx),
+        client_io,
+        Some(ServerConfig::default().into()),
+    );
     service
         .ping(RequestContext::new(RequestId::Number(1), server.peer().clone()))
         .await

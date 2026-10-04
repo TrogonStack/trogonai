@@ -5,7 +5,7 @@ use axum::Router;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use rmcp::model::{
-    ClientCapabilities, ClientInfo, ClientRequest, Implementation, InitializeRequest, InitializeRequestParams,
+    ClientCapabilities, ClientConfig, ClientRequest, Implementation, InitializeRequest, InitializeRequestParams,
     InitializeResult, JsonRpcMessage, NumberOrString, ServerCapabilities, ServerResult,
 };
 use rmcp::service::RoleServer;
@@ -453,7 +453,7 @@ async fn service_info_is_available_before_remote_initialize() {
         McpPeerId::new("default").unwrap(),
     );
 
-    let info: ServerInfo = service.get_info();
+    let info: ServerConfig = service.get_info();
 
     assert!(!info.server_info.name.is_empty());
 }
@@ -472,13 +472,13 @@ async fn remembered_server_info_replaces_the_placeholder() {
 
     service.remember_server_info(&remote);
 
-    let info: ServerInfo = service.get_info();
+    let info: ServerConfig = service.get_info();
     assert_eq!(info.server_info.name, "remote-server");
     assert_eq!(info.server_info.version, "9.9.9");
 }
 
 #[test]
-fn initialize_request_uses_client_info_type() {
+fn initialize_request_uses_client_config_type() {
     let message = initialize_request();
 
     let JsonRpcMessage::Request(request) = message else {
@@ -487,7 +487,7 @@ fn initialize_request_uses_client_info_type() {
     let ClientRequest::InitializeRequest(InitializeRequest { params, .. }) = request.request else {
         panic!("expected initialize method");
     };
-    let _: ClientInfo = params;
+    let _: ClientConfig = params;
 }
 
 #[test]
