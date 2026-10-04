@@ -109,6 +109,12 @@ Indeterminate effects block automatic retry until reconciliation establishes
 what happened. A late verified receipt can settle that uncertainty after a
 terminal run marker without restarting downstream work.
 
+A late verified activation can identify a subscription after an indeterminate
+registration cleanup. Replay retains that cleanup receipt and binds it to the
+activation. Subsequent settlement targets the known activation. A termination
+snapshot cannot settle the same wait through both its registration intent and
+an activation.
+
 Recovery from a failed run is an explicit new generation. It identifies the
 prior failure, replaces failed occurrences and their failed controlling
 ancestors, and binds retained successful completions into those replacement
@@ -244,6 +250,12 @@ pattern and draft
 Requests declare the contract version the caller can decode. Responses clamp
 to that version and report contract elisions and withheld content rather than
 silently dropping history.
+
+Run summaries preserve the absence of a display name. Interaction views target
+the run or an affected occurrence; an invocation-targeted input request names
+its owning occurrence in this read model. Guidance and watches remain scoped
+to an occurrence. Run-level input questions remain visible in interaction
+pages and history.
 
 `GetWorkflowRunPlan` retrieves exact admitted plan bytes, their digest, and their
 definition contract version for the current or a named plan revision. This is

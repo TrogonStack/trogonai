@@ -1320,6 +1320,26 @@
           }
         }
       }
+    },
+    "definition-state-single-genesis": {
+      "type": "trogonai.workflows.definitions.state.v1alpha1.ProvisionedWorkflowDefinition",
+      "payload": {
+        "workflowId": "workflow-example",
+        "lifecycle": "WORKFLOW_DEFINITION_LIFECYCLE_ACTIVE",
+        "revisions": {
+          "1": {
+            "reference": {
+              "workflowId": "workflow-example",
+              "revision": "1",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            },
+            "definitionBytes": "AA=="
+          }
+        }
+      }
     }
   },
   "cases": [
@@ -2169,6 +2189,36 @@
       ],
       "violations": [
         "an input wait must declare its single required response output with the exact response schema"
+      ]
+    },
+    {
+      "name": "definition-state-single-genesis",
+      "template": "definition-state-single-genesis"
+    },
+    {
+      "name": "definition-state-rejects-zero-revision-key",
+      "template": "definition-state-single-genesis",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/revisions",
+          "value": {
+            "0": {
+              "reference": {
+                "workflowId": "workflow-example",
+                "revision": "0",
+                "digest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                }
+              },
+              "definitionBytes": "AA=="
+            }
+          }
+        }
+      ],
+      "violations": [
+        "revisions must cover every number from 1 through the latest revision"
       ]
     },
     {

@@ -247,6 +247,11 @@ message RunRejected {
 
 message RunTermination {
   option (buf.validate.message).cel = {
+    id: "run_termination.subscription_target"
+    message: "a wait cannot settle both its registration intent and known activations"
+    expression: "this.subscriptions.all(item, !has(item.registration_intent) || !this.subscriptions.exists(other, other.wait_id == item.wait_id && has(other.activation_id)))"
+  };
+  option (buf.validate.message).cel = {
     id: "run_termination.unique_effects"
     message: "each invocation and subscription activation or unactivated intent has one termination settlement"
     expression: "this.effects.map(effect, effect.invocation_id).unique() && this.subscriptions.all(item, this.subscriptions.filter(other, (has(item.activation_id) && has(other.activation_id) && item.activation_id == other.activation_id) || (has(item.registration_intent) && has(other.registration_intent) && item.wait_id == other.wait_id)).size() == 1)"

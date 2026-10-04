@@ -121,7 +121,26 @@ message ExternalProgress {
   }
 }
 
+// Late attachment identifies the effect targeted by an earlier indeterminate
+// registration cleanup. Its historical receipt remains retained while the
+// known activation is the current settlement target.
+message RegistrationCleanupReconciliation {
+  string cleanup_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string activation_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
 message ExternalWaitState {
+  option (buf.validate.message).cel = {
+    id: "external_wait_state.registration_cleanup_reconciliation"
+    message: "registration cleanups with known activations require exact reconciliation"
+    expression: "this.registration_cleanup_reconciliations.map(item, item.cleanup_id).unique() && this.registration_cleanup_reconciliations.all(item, this.cleanups.exists(cleanup, cleanup.cleanup_id == item.cleanup_id && has(cleanup.registration_intent) && has(cleanup.indeterminate)) && this.activations.exists(activation, activation.activation_id == item.activation_id)) && (this.activations.size() == 0 || this.cleanups.filter(cleanup, has(cleanup.registration_intent)).all(cleanup, this.registration_cleanup_reconciliations.exists(item, item.cleanup_id == cleanup.cleanup_id)))"
+  };
   option (buf.validate.message).cel = {
     id: "external_wait_state.progress_identity"
     message: "progress must belong to the admitted wait, source, and event contract"
@@ -156,6 +175,7 @@ message ExternalWaitState {
   repeated trogonai.workflows.runs.v1alpha1.ExternalSubscriptionCleanup cleanups = 6;
   string current_activation_id = 7 [(buf.validate.field).string.min_len = 1];
   trogonai.workflows.runs.v1alpha1.ExternalWaitResolution resolution = 8;
+  repeated RegistrationCleanupReconciliation registration_cleanup_reconciliations = 9;
 }
 
 message TimerWaitState {

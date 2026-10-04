@@ -169,6 +169,298 @@
           "condition": "FRESHNESS_CONDITION_LAGGING"
         }
       }
+    },
+    "query-read-dto-unnamed-run-summary": {
+      "type": "trogonai.workflows.runs.queries.v1alpha1.WorkflowRunSummary",
+      "payload": {
+        "runId": "run-example",
+        "lifecycle": "RUN_LIFECYCLE_RUNNING",
+        "planRevisionId": "plan-initial",
+        "workspaceId": "workspace-example",
+        "startedAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:01:00Z",
+        "appliedOrdinal": "8",
+        "hasUnsettledWork": false
+      }
+    },
+    "query-read-dto-named-run-summary": {
+      "type": "trogonai.workflows.runs.queries.v1alpha1.WorkflowRunSummary",
+      "payload": {
+        "runId": "run-example",
+        "lifecycle": "RUN_LIFECYCLE_RUNNING",
+        "planRevisionId": "plan-initial",
+        "workspaceId": "workspace-example",
+        "startedAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:01:00Z",
+        "appliedOrdinal": "8",
+        "hasUnsettledWork": false,
+        "displayName": "Review workflow"
+      }
+    },
+    "query-read-dto-unnamed-get-run-response": {
+      "type": "trogonai.workflows.runs.queries.v1alpha1.GetWorkflowRunResponse",
+      "payload": {
+        "contract": {
+          "rendered": {
+            "major": 1,
+            "minor": 0
+          },
+          "serverMax": {
+            "major": 1,
+            "minor": 0
+          }
+        },
+        "run": {
+          "summary": {
+            "runId": "run-example",
+            "lifecycle": "RUN_LIFECYCLE_RUNNING",
+            "planRevisionId": "plan-initial",
+            "workspaceId": "workspace-example",
+            "startedAt": "2026-01-01T00:00:00Z",
+            "updatedAt": "2026-01-01T00:01:00Z",
+            "appliedOrdinal": "8",
+            "hasUnsettledWork": false
+          },
+          "pendingOccurrences": "1",
+          "activeInvocations": "0",
+          "completedOccurrences": "0",
+          "failedOccurrences": "0",
+          "openInputRequests": "1",
+          "activeWatches": "0",
+          "invocationsStarted": "0",
+          "invocationLimit": "100",
+          "deadline": "2026-01-01T00:02:00Z"
+        },
+        "freshness": {
+          "generation": "projection-example",
+          "checkpoint": "AA==",
+          "observedAt": "2026-01-01T00:01:00Z",
+          "applied": [
+            {
+              "runId": "run-example",
+              "ordinal": "8"
+            }
+          ],
+          "condition": "FRESHNESS_CONDITION_CURRENT",
+          "consistencySatisfied": true
+        }
+      }
+    },
+    "query-read-dto-unnamed-list-runs-response": {
+      "type": "trogonai.workflows.runs.queries.v1alpha1.ListWorkflowRunsResponse",
+      "payload": {
+        "contract": {
+          "rendered": {
+            "major": 1,
+            "minor": 0
+          },
+          "serverMax": {
+            "major": 1,
+            "minor": 0
+          }
+        },
+        "runs": [
+          {
+            "runId": "run-example",
+            "lifecycle": "RUN_LIFECYCLE_RUNNING",
+            "planRevisionId": "plan-initial",
+            "workspaceId": "workspace-example",
+            "startedAt": "2026-01-01T00:00:00Z",
+            "updatedAt": "2026-01-01T00:01:00Z",
+            "appliedOrdinal": "8",
+            "hasUnsettledWork": false
+          }
+        ],
+        "skippedCount": 0,
+        "freshness": {
+          "generation": "projection-example",
+          "checkpoint": "AA==",
+          "observedAt": "2026-01-01T00:01:00Z",
+          "applied": [
+            {
+              "runId": "run-example",
+              "ordinal": "8"
+            }
+          ],
+          "condition": "FRESHNESS_CONDITION_CURRENT",
+          "consistencySatisfied": true
+        }
+      }
+    },
+    "query-read-dto-source-run-level-input-request": {
+      "type": "trogonai.workflows.runs.v1alpha1.InputRequest",
+      "payload": {
+        "requestId": "input-example",
+        "run": {},
+        "requestedBy": {
+          "principalId": "user-example"
+        },
+        "question": "Approve the result?",
+        "answerSchema": {
+          "maxEncodedBytes": "16",
+          "scalar": "SCALAR_TYPE_BOOL"
+        },
+        "allowedResponders": [
+          {
+            "principalId": "user-example"
+          }
+        ],
+        "deadline": "2026-01-01T00:02:00Z"
+      }
+    },
+    "query-read-dto-run-level-input-request-view": {
+      "type": "trogonai.workflows.runs.queries.v1alpha1.InteractionView",
+      "payload": {
+        "interactionId": "input-example",
+        "kind": "INTERACTION_KIND_INPUT",
+        "lifecycle": "INTERACTION_LIFECYCLE_PENDING",
+        "prompt": "Approve the result?",
+        "deadline": "2026-01-01T00:02:00Z",
+        "responseSchemaBytes": "AQ==",
+        "sensitiveContentWithheld": false,
+        "run": {}
+      }
+    },
+    "query-read-dto-run-level-interactions-page": {
+      "type": "trogonai.workflows.runs.queries.v1alpha1.ListWorkflowRunInteractionsResponse",
+      "payload": {
+        "contract": {
+          "rendered": {
+            "major": 1,
+            "minor": 0
+          },
+          "serverMax": {
+            "major": 1,
+            "minor": 0
+          }
+        },
+        "interactions": [
+          {
+            "interactionId": "input-example",
+            "kind": "INTERACTION_KIND_INPUT",
+            "lifecycle": "INTERACTION_LIFECYCLE_PENDING",
+            "prompt": "Approve the result?",
+            "deadline": "2026-01-01T00:02:00Z",
+            "responseSchemaBytes": "AQ==",
+            "sensitiveContentWithheld": false,
+            "run": {}
+          }
+        ],
+        "pinnedOrdinal": "8",
+        "withheldCount": 0,
+        "freshness": {
+          "generation": "projection-example",
+          "checkpoint": "AA==",
+          "observedAt": "2026-01-01T00:01:00Z",
+          "applied": [
+            {
+              "runId": "run-example",
+              "ordinal": "8"
+            }
+          ],
+          "condition": "FRESHNESS_CONDITION_CURRENT",
+          "consistencySatisfied": true
+        }
+      }
+    },
+    "query-read-dto-run-level-input-history-item": {
+      "type": "trogonai.workflows.runs.queries.v1alpha1.HistoryItem",
+      "payload": {
+        "itemId": "history-input-example",
+        "ordinal": "8",
+        "occurredAt": "2026-01-01T00:01:00Z",
+        "interactionChanged": {
+          "interactionId": "input-example",
+          "kind": "INTERACTION_KIND_INPUT",
+          "lifecycle": "INTERACTION_LIFECYCLE_PENDING",
+          "prompt": "Approve the result?",
+          "deadline": "2026-01-01T00:02:00Z",
+          "responseSchemaBytes": "AQ==",
+          "sensitiveContentWithheld": false,
+          "run": {}
+        }
+      }
+    },
+    "query-read-dto-run-level-input-history-page": {
+      "type": "trogonai.workflows.runs.queries.v1alpha1.GetWorkflowRunHistoryResponse",
+      "payload": {
+        "contract": {
+          "rendered": {
+            "major": 1,
+            "minor": 0
+          },
+          "serverMax": {
+            "major": 1,
+            "minor": 0
+          }
+        },
+        "items": [
+          {
+            "itemId": "history-input-example",
+            "ordinal": "8",
+            "occurredAt": "2026-01-01T00:01:00Z",
+            "interactionChanged": {
+              "interactionId": "input-example",
+              "kind": "INTERACTION_KIND_INPUT",
+              "lifecycle": "INTERACTION_LIFECYCLE_PENDING",
+              "prompt": "Approve the result?",
+              "deadline": "2026-01-01T00:02:00Z",
+              "responseSchemaBytes": "AQ==",
+              "sensitiveContentWithheld": false,
+              "run": {}
+            }
+          }
+        ],
+        "pinnedOrdinal": "8",
+        "contractClampedCount": 0,
+        "withheldCount": 0,
+        "freshness": {
+          "generation": "projection-example",
+          "checkpoint": "AA==",
+          "observedAt": "2026-01-01T00:01:00Z",
+          "applied": [
+            {
+              "runId": "run-example",
+              "ordinal": "8"
+            }
+          ],
+          "condition": "FRESHNESS_CONDITION_CURRENT",
+          "consistencySatisfied": true
+        }
+      }
+    },
+    "query-read-dto-step-guidance-occurrence": {
+      "type": "trogonai.workflows.runs.queries.v1alpha1.InteractionView",
+      "payload": {
+        "interactionId": "guidance-example",
+        "occurrence": {
+          "occurrenceId": "occurrence-example",
+          "nodeId": "review",
+          "planRevisionId": "plan-initial"
+        },
+        "kind": "INTERACTION_KIND_GUIDANCE",
+        "lifecycle": "INTERACTION_LIFECYCLE_ACTIVE",
+        "prompt": "Keep the review focused on the acceptance criteria.",
+        "deadline": "2026-01-01T00:02:00Z",
+        "sensitiveContentWithheld": false,
+        "targetSessionId": "session-example"
+      }
+    },
+    "query-read-dto-watcher-occurrence": {
+      "type": "trogonai.workflows.runs.queries.v1alpha1.InteractionView",
+      "payload": {
+        "interactionId": "watch-example",
+        "occurrence": {
+          "occurrenceId": "occurrence-example",
+          "nodeId": "review",
+          "planRevisionId": "plan-initial"
+        },
+        "kind": "INTERACTION_KIND_WATCH",
+        "lifecycle": "INTERACTION_LIFECYCLE_ACTIVE",
+        "prompt": "Wait for resource activity.",
+        "deadline": "2026-01-01T00:02:00Z",
+        "sensitiveContentWithheld": false
+      }
     }
   },
   "cases": [
@@ -469,6 +761,118 @@
     {
       "name": "query-error-reports-reached-lag-without-success",
       "template": "query-error-reports-reached-lag-without-success"
+    },
+    {
+      "name": "query-read-dto-unnamed-run-summary",
+      "template": "query-read-dto-unnamed-run-summary"
+    },
+    {
+      "name": "query-read-dto-named-run-summary",
+      "template": "query-read-dto-named-run-summary"
+    },
+    {
+      "name": "query-read-dto-unnamed-get-run-response",
+      "template": "query-read-dto-unnamed-get-run-response"
+    },
+    {
+      "name": "query-read-dto-unnamed-list-runs-response",
+      "template": "query-read-dto-unnamed-list-runs-response"
+    },
+    {
+      "name": "query-read-dto-source-run-level-input-request",
+      "template": "query-read-dto-source-run-level-input-request"
+    },
+    {
+      "name": "query-read-dto-run-level-input-request-view",
+      "template": "query-read-dto-run-level-input-request-view"
+    },
+    {
+      "name": "query-read-dto-run-level-interactions-page",
+      "template": "query-read-dto-run-level-interactions-page"
+    },
+    {
+      "name": "query-read-dto-run-level-input-history-item",
+      "template": "query-read-dto-run-level-input-history-item"
+    },
+    {
+      "name": "query-read-dto-run-level-input-history-page",
+      "template": "query-read-dto-run-level-input-history-page"
+    },
+    {
+      "name": "query-read-dto-step-guidance-occurrence",
+      "template": "query-read-dto-step-guidance-occurrence"
+    },
+    {
+      "name": "query-read-dto-watcher-occurrence",
+      "template": "query-read-dto-watcher-occurrence"
+    },
+    {
+      "name": "query-read-dto-rejects-present-empty-display-name",
+      "template": "query-read-dto-unnamed-run-summary",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/displayName",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "must be at least 1 characters"
+      ]
+    },
+    {
+      "name": "query-read-dto-rejects-no-interaction-target",
+      "template": "query-interaction-with-schema",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/occurrence"
+        }
+      ],
+      "violations": [
+        "target: exactly one field is required in oneof"
+      ]
+    },
+    {
+      "name": "query-read-dto-rejects-history-interaction-without-target",
+      "template": "query-read-dto-run-level-input-history-item",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/interactionChanged/run"
+        }
+      ],
+      "violations": [
+        "target: exactly one field is required in oneof"
+      ]
+    },
+    {
+      "name": "query-read-dto-rejects-guidance-run-target",
+      "template": "query-read-dto-run-level-input-request-view",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/kind",
+          "value": "INTERACTION_KIND_GUIDANCE"
+        }
+      ],
+      "violations": [
+        "only input requests can target the whole run"
+      ]
+    },
+    {
+      "name": "query-read-dto-rejects-watcher-run-target",
+      "template": "query-read-dto-run-level-input-request-view",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/kind",
+          "value": "INTERACTION_KIND_WATCH"
+        }
+      ],
+      "violations": [
+        "only input requests can target the whole run"
+      ]
     }
   ]
 }

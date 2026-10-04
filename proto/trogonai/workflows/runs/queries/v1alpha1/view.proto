@@ -3,6 +3,7 @@ edition = "2024";
 package trogonai.workflows.runs.queries.v1alpha1;
 
 import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 
 message DefinitionViewRef {
@@ -21,10 +22,7 @@ message WorkflowRunSummary {
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1
   ];
-  string display_name = 2 [
-    features.field_presence = LEGACY_REQUIRED,
-    (buf.validate.field).string.min_len = 1
-  ];
+  string display_name = 2 [(buf.validate.field).string.min_len = 1];
   RunLifecycle lifecycle = 3 [
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).enum = {
@@ -131,11 +129,22 @@ enum NodeLifecycle {
 }
 
 message InteractionView {
+  option (buf.validate.message).cel = {
+    id: "interaction_view.target_kind"
+    message: "only input requests can target the whole run"
+    expression: "!has(this.run) || this.kind == 1"
+  };
+
   string interaction_id = 1 [
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1
   ];
-  OccurrenceViewRef occurrence = 2 [features.field_presence = LEGACY_REQUIRED];
+  oneof target {
+    option (buf.validate.oneof).required = true;
+
+    OccurrenceViewRef occurrence = 2;
+    google.protobuf.Empty run = 11;
+  }
   InteractionKind kind = 3 [
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).enum = {

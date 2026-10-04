@@ -1690,6 +1690,104 @@
             }
           }
         ],
+        "currentActivationId": "activation-example",
+        "registrationCleanupReconciliations": [
+          {
+            "cleanupId": "cleanup-pending",
+            "activationId": "activation-example"
+          }
+        ]
+      }
+    },
+    "wait-state-unmapped-registration-cleanup-after-activation": {
+      "type": "trogonai.workflows.runs.state.v1alpha1.ExternalWaitState",
+      "payload": {
+        "registration": {
+          "waitId": "wait-example",
+          "occurrenceId": "occurrence-example",
+          "sourceId": "source-example",
+          "resource": {
+            "resourceType": "example-resource",
+            "resourceId": "resource-example"
+          },
+          "watcher": {
+            "contract": {
+              "contractId": "example.observation",
+              "version": "1",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              },
+              "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+            },
+            "payload": ""
+          },
+          "parameters": [
+            {
+              "name": "task",
+              "value": {
+                "stringValue": "Review the result."
+              },
+              "sources": [
+                {
+                  "runInputName": "task"
+                }
+              ]
+            }
+          ],
+          "initialCursor": {
+            "cursorBytes": "AA==",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            }
+          },
+          "deadline": "2026-01-01T00:02:00Z",
+          "observationContract": {
+            "contractId": "example.observation",
+            "version": "1",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            },
+            "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+          }
+        },
+        "currentCursor": {
+          "cursorBytes": "AA==",
+          "digest": {
+            "algorithm": "sha256",
+            "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          }
+        },
+        "progress": [],
+        "activations": [
+          {
+            "activationId": "activation-example",
+            "waitId": "wait-example",
+            "subscriptionId": "subscription-example",
+            "acceptedCursor": {
+              "cursorBytes": "AA==",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            },
+            "activatedAt": "2026-01-01T00:00:00Z",
+            "leaseExpiresAt": "2026-01-01T00:02:00Z"
+          }
+        ],
+        "leases": [],
+        "cleanups": [
+          {
+            "cleanupId": "cleanup-pending",
+            "waitId": "wait-example",
+            "registrationIntent": {},
+            "indeterminate": {
+              "detail": "Awaiting subscription attachment evidence."
+            }
+          }
+        ],
         "currentActivationId": "activation-example"
       }
     }
@@ -2364,6 +2462,185 @@
     {
       "name": "wait-state-late-activation-after-indeterminate-cleanup",
       "template": "wait-state-late-activation-after-indeterminate-cleanup"
+    },
+    {
+      "name": "subscription-reconciliation-rejects-unmapped-registration-cleanup-after-activation",
+      "template": "wait-state-unmapped-registration-cleanup-after-activation",
+      "violations": [
+        "registration cleanups with known activations require exact reconciliation"
+      ]
+    },
+    {
+      "name": "subscription-reconciliation-retains-indeterminate-intent-before-activation",
+      "template": "wait-state-unmapped-registration-cleanup-after-activation",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/activations",
+          "value": []
+        },
+        {
+          "op": "remove",
+          "path": "/currentActivationId"
+        }
+      ]
+    },
+    {
+      "name": "subscription-reconciliation-retains-explicit-late-attach-binding",
+      "template": "wait-state-late-activation-after-indeterminate-cleanup",
+      "patch": []
+    },
+    {
+      "name": "subscription-reconciliation-rejects-unknown-cleanup-binding",
+      "template": "wait-state-late-activation-after-indeterminate-cleanup",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/registrationCleanupReconciliations/0/cleanupId",
+          "value": "cleanup-other"
+        }
+      ],
+      "violations": [
+        "registration cleanups with known activations require exact reconciliation"
+      ]
+    },
+    {
+      "name": "subscription-reconciliation-rejects-unknown-activation-binding",
+      "template": "wait-state-late-activation-after-indeterminate-cleanup",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/registrationCleanupReconciliations/0/activationId",
+          "value": "activation-other"
+        }
+      ],
+      "violations": [
+        "registration cleanups with known activations require exact reconciliation"
+      ]
+    },
+    {
+      "name": "subscription-reconciliation-rejects-duplicate-cleanup-binding",
+      "template": "wait-state-late-activation-after-indeterminate-cleanup",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/registrationCleanupReconciliations/-",
+          "value": {
+            "cleanupId": "cleanup-pending",
+            "activationId": "activation-example"
+          }
+        }
+      ],
+      "violations": [
+        "registration cleanups with known activations require exact reconciliation"
+      ]
+    },
+    {
+      "name": "subscription-reconciliation-rejects-binding-of-activation-cleanup",
+      "template": "wait-state-late-activation-after-indeterminate-cleanup",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/cleanups/0/registrationIntent"
+        },
+        {
+          "op": "add",
+          "path": "/cleanups/0/activationId",
+          "value": "activation-example"
+        }
+      ],
+      "violations": [
+        "registration cleanups with known activations require exact reconciliation"
+      ]
+    },
+    {
+      "name": "subscription-reconciliation-rejects-binding-of-never-activated-cleanup",
+      "template": "wait-state-retains-never-activated-registration-cleanup",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/registrationCleanupReconciliations",
+          "value": [
+            {
+              "cleanupId": "cleanup-unactivated",
+              "activationId": "activation-example"
+            }
+          ]
+        }
+      ],
+      "violations": [
+        "registration cleanups with known activations require exact reconciliation"
+      ]
+    },
+    {
+      "name": "subscription-reconciliation-rejects-binding-to-unrelated-cleanup",
+      "template": "wait-state-late-activation-after-indeterminate-cleanup",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/cleanups/-",
+          "value": {
+            "cleanupId": "cleanup-other",
+            "waitId": "wait-example",
+            "activationId": "activation-example",
+            "indeterminate": {
+              "detail": "Awaiting release evidence."
+            }
+          }
+        },
+        {
+          "op": "replace",
+          "path": "/registrationCleanupReconciliations/0/cleanupId",
+          "value": "cleanup-other"
+        }
+      ],
+      "violations": [
+        "registration cleanups with known activations require exact reconciliation"
+      ]
+    },
+    {
+      "name": "subscription-reconciliation-retains-independent-registration-receipts",
+      "template": "wait-state-late-activation-after-indeterminate-cleanup",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/cleanups/-",
+          "value": {
+            "cleanupId": "cleanup-another",
+            "waitId": "wait-example",
+            "registrationIntent": {},
+            "indeterminate": {
+              "detail": "Awaiting subscription attachment evidence."
+            }
+          }
+        },
+        {
+          "op": "add",
+          "path": "/registrationCleanupReconciliations/-",
+          "value": {
+            "cleanupId": "cleanup-another",
+            "activationId": "activation-example"
+          }
+        }
+      ]
+    },
+    {
+      "name": "subscription-reconciliation-retains-independent-activation-cleanup",
+      "template": "wait-state-late-activation-after-indeterminate-cleanup",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/cleanups/-",
+          "value": {
+            "cleanupId": "cleanup-release",
+            "waitId": "wait-example",
+            "activationId": "activation-example",
+            "indeterminate": {
+              "detail": "Awaiting release evidence."
+            }
+          }
+        }
+      ]
     }
   ]
 }

@@ -890,6 +890,97 @@
       "violations": [
         "accepted and rejected completion require determinate effects"
       ]
+    },
+    {
+      "name": "subscription-reconciliation-rejects-mixed-targets-after-activation",
+      "template": "termination-with-subscription-settlement",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/subscriptions/-",
+          "value": {
+            "waitId": "wait-example",
+            "registrationIntent": {},
+            "cleanupId": "cleanup-unactivated"
+          }
+        }
+      ],
+      "violations": [
+        "a wait cannot settle both its registration intent and known activations"
+      ]
+    },
+    {
+      "name": "subscription-reconciliation-rejects-mixed-targets-before-activation",
+      "template": "termination-with-subscription-settlement",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/subscriptions",
+          "value": [
+            {
+              "waitId": "wait-example",
+              "registrationIntent": {},
+              "cleanupId": "cleanup-unactivated"
+            },
+            {
+              "waitId": "wait-example",
+              "activationId": "activation-example",
+              "cleanupId": "cleanup-example"
+            }
+          ]
+        }
+      ],
+      "violations": [
+        "a wait cannot settle both its registration intent and known activations"
+      ]
+    },
+    {
+      "name": "subscription-reconciliation-retains-distinct-activations-of-one-wait",
+      "template": "termination-with-subscription-settlement",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/subscriptions/-",
+          "value": {
+            "waitId": "wait-example",
+            "activationId": "activation-another",
+            "cleanupId": "cleanup-another"
+          }
+        }
+      ]
+    },
+    {
+      "name": "subscription-reconciliation-retains-independent-registration-intent",
+      "template": "termination-with-subscription-settlement",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/subscriptions/-",
+          "value": {
+            "waitId": "wait-another",
+            "registrationIntent": {},
+            "cleanupId": "cleanup-unactivated"
+          }
+        }
+      ]
+    },
+    {
+      "name": "subscription-reconciliation-rejects-reused-activation-across-waits",
+      "template": "termination-with-subscription-settlement",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/subscriptions/-",
+          "value": {
+            "waitId": "wait-another",
+            "activationId": "activation-example",
+            "cleanupId": "cleanup-another"
+          }
+        }
+      ],
+      "violations": [
+        "each invocation and subscription activation or unactivated intent has one termination settlement"
+      ]
     }
   ]
 }

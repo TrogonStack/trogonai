@@ -33,7 +33,7 @@ message ProvisionedWorkflowDefinition {
   option (buf.validate.message).cel = {
     id: "provisioned_workflow_definition.changed_revisions"
     message: "consecutive retained revisions must have different definition digests"
-    expression: "this.revisions.all(number, number == 1u || (number - 1u in this.revisions && this.revisions[number].reference.digest != this.revisions[number - 1u].reference.digest))"
+    expression: "this.revisions.all(number, number <= 1u || (number - 1u in this.revisions && this.revisions[number].reference.digest != this.revisions[number - 1u].reference.digest))"
   };
 
   string workflow_id = 1 [
