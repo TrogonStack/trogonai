@@ -83,6 +83,11 @@ message NodeCompletion {
     message: "a successful node must satisfy its recorded completion condition"
     expression: "!has(this.succeeded) || !has(this.completion_condition) || this.completion_condition.result"
   };
+  option (buf.validate.message).cel = {
+    id: "node_completion.failure_condition"
+    message: "failed or business-rejected nodes cannot retain a true completion condition"
+    expression: "(!has(this.failed) && !has(this.rejected)) || !has(this.completion_condition) || !this.completion_condition.result"
+  };
 
   string completion_id = 1 [
     features.field_presence = LEGACY_REQUIRED,
@@ -152,6 +157,11 @@ message JoinDecision {
     id: "join_decision.acceptance"
     message: "accepted join completion cannot retain a false acceptance decision"
     expression: "!has(this.completed) || !has(this.acceptance) || this.acceptance.result"
+  };
+  option (buf.validate.message).cel = {
+    id: "join_decision.failure_acceptance"
+    message: "failed or business-rejected joins cannot retain a true acceptance decision"
+    expression: "(!has(this.failed) && !has(this.rejected)) || !has(this.acceptance) || !this.acceptance.result"
   };
   option (buf.validate.message).cel = {
     id: "join_decision.unique_branches"

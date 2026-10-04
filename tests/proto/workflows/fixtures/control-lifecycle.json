@@ -505,6 +505,137 @@
           "completionId": "completion-first"
         }
       }
+    },
+    "condition-outcome-node-failed": {
+      "type": "trogonai.workflows.runs.v1alpha1.NodeCompletion",
+      "payload": {
+        "completionId": "completion-example",
+        "occurrenceId": "occurrence-example",
+        "evidence": [
+          {
+            "invocationReceiptId": "receipt-example"
+          }
+        ],
+        "completionCondition": {
+          "evaluationId": "evaluation-negative",
+          "condition": {
+            "compare": {
+              "left": {
+                "literal": {
+                  "boolValue": false
+                }
+              },
+              "operator": "COMPARISON_OPERATOR_EQUAL",
+              "right": {
+                "literal": {
+                  "boolValue": true
+                }
+              }
+            }
+          },
+          "inputs": [],
+          "result": false
+        },
+        "failed": {
+          "reason": "FAILURE_REASON_EXECUTION_ERROR"
+        }
+      }
+    },
+    "condition-outcome-join-failed": {
+      "type": "trogonai.workflows.runs.v1alpha1.JoinDecision",
+      "payload": {
+        "branches": [
+          {
+            "occurrenceId": "branch-first",
+            "completionId": "completion-first"
+          },
+          {
+            "occurrenceId": "branch-second",
+            "completionId": "completion-second"
+          }
+        ],
+        "acceptance": {
+          "evaluationId": "evaluation-negative",
+          "condition": {
+            "compare": {
+              "left": {
+                "literal": {
+                  "boolValue": false
+                }
+              },
+              "operator": "COMPARISON_OPERATOR_EQUAL",
+              "right": {
+                "literal": {
+                  "boolValue": true
+                }
+              }
+            }
+          },
+          "inputs": [],
+          "result": false
+        },
+        "failed": {
+          "reason": "FAILURE_REASON_DEPENDENCY_FAILED"
+        }
+      }
+    },
+    "condition-outcome-join-rejected": {
+      "type": "trogonai.workflows.runs.v1alpha1.JoinDecision",
+      "payload": {
+        "branches": [
+          {
+            "occurrenceId": "branch-first",
+            "completionId": "completion-first"
+          },
+          {
+            "occurrenceId": "branch-second",
+            "completionId": "completion-second"
+          }
+        ],
+        "acceptance": {
+          "evaluationId": "evaluation-negative",
+          "condition": {
+            "compare": {
+              "left": {
+                "literal": {
+                  "boolValue": false
+                }
+              },
+              "operator": "COMPARISON_OPERATOR_EQUAL",
+              "right": {
+                "literal": {
+                  "boolValue": true
+                }
+              }
+            }
+          },
+          "inputs": [],
+          "result": false
+        },
+        "rejected": {
+          "outputs": [],
+          "acceptance": {
+            "evaluationId": "evaluation-negative",
+            "condition": {
+              "compare": {
+                "left": {
+                  "literal": {
+                    "boolValue": false
+                  }
+                },
+                "operator": "COMPARISON_OPERATOR_EQUAL",
+                "right": {
+                  "literal": {
+                    "boolValue": true
+                  }
+                }
+              }
+            },
+            "inputs": [],
+            "result": false
+          }
+        }
+      }
     }
   },
   "cases": [
@@ -1284,6 +1415,203 @@
       ],
       "violations": [
         "winning_branch.completion_id: must be at least 1 characters"
+      ]
+    },
+    {
+      "name": "condition-outcome-node-rejects-true-failed-condition",
+      "template": "condition-outcome-node-failed",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/completionCondition",
+          "value": {
+            "evaluationId": "evaluation-positive",
+            "condition": {
+              "always": {}
+            },
+            "inputs": [],
+            "result": true
+          }
+        }
+      ],
+      "violations": [
+        "failed or business-rejected nodes cannot retain a true completion condition"
+      ]
+    },
+    {
+      "name": "condition-outcome-node-rejects-true-rejection-condition",
+      "template": "completion-business-rejection",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/completionCondition",
+          "value": {
+            "evaluationId": "evaluation-positive",
+            "condition": {
+              "always": {}
+            },
+            "inputs": [],
+            "result": true
+          }
+        }
+      ],
+      "violations": [
+        "failed or business-rejected nodes cannot retain a true completion condition"
+      ]
+    },
+    {
+      "name": "condition-outcome-join-rejects-true-failed-acceptance",
+      "template": "condition-outcome-join-failed",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/acceptance",
+          "value": {
+            "evaluationId": "evaluation-positive",
+            "condition": {
+              "always": {}
+            },
+            "inputs": [],
+            "result": true
+          }
+        }
+      ],
+      "violations": [
+        "failed or business-rejected joins cannot retain a true acceptance decision"
+      ]
+    },
+    {
+      "name": "condition-outcome-join-rejects-true-rejected-acceptance",
+      "template": "condition-outcome-join-rejected",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/acceptance",
+          "value": {
+            "evaluationId": "evaluation-positive",
+            "condition": {
+              "always": {}
+            },
+            "inputs": [],
+            "result": true
+          }
+        }
+      ],
+      "violations": [
+        "failed or business-rejected joins cannot retain a true acceptance decision"
+      ]
+    },
+    {
+      "name": "condition-outcome-node-success-without-condition",
+      "template": "completion-success",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/completionCondition"
+        }
+      ]
+    },
+    {
+      "name": "condition-outcome-node-failure-without-condition",
+      "template": "condition-outcome-node-failed",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/completionCondition"
+        }
+      ]
+    },
+    {
+      "name": "condition-outcome-node-failure-with-false-condition",
+      "template": "condition-outcome-node-failed"
+    },
+    {
+      "name": "condition-outcome-node-rejection-without-condition",
+      "template": "completion-business-rejection"
+    },
+    {
+      "name": "condition-outcome-node-rejection-with-false-condition",
+      "template": "completion-business-rejection",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/completionCondition",
+          "value": {
+            "evaluationId": "evaluation-negative",
+            "condition": {
+              "compare": {
+                "left": {
+                  "literal": {
+                    "boolValue": false
+                  }
+                },
+                "operator": "COMPARISON_OPERATOR_EQUAL",
+                "right": {
+                  "literal": {
+                    "boolValue": true
+                  }
+                }
+              }
+            },
+            "inputs": [],
+            "result": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "condition-outcome-join-success-without-acceptance",
+      "template": "join-completed",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/acceptance"
+        }
+      ]
+    },
+    {
+      "name": "condition-outcome-join-failure-without-acceptance",
+      "template": "condition-outcome-join-failed",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/acceptance"
+        }
+      ]
+    },
+    {
+      "name": "condition-outcome-join-failure-with-false-acceptance",
+      "template": "condition-outcome-join-failed"
+    },
+    {
+      "name": "condition-outcome-join-rejection-without-acceptance",
+      "template": "condition-outcome-join-rejected",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/acceptance"
+        }
+      ]
+    },
+    {
+      "name": "condition-outcome-join-rejection-with-false-acceptance",
+      "template": "condition-outcome-join-rejected"
+    },
+    {
+      "name": "condition-outcome-node-cancellation-retains-condition",
+      "template": "completion-success",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/succeeded"
+        },
+        {
+          "op": "add",
+          "path": "/cancelled",
+          "value": {
+            "cancellationId": "cancellation-example"
+          }
+        }
       ]
     }
   ]
