@@ -103,6 +103,35 @@ message QueryError {
   string message = 2 [features.field_presence = LEGACY_REQUIRED];
   string field_path = 3;
   ContractVersion supported_contract = 4;
+  ProjectionProgress reached_progress = 5;
+}
+
+// Failed consistency waits can report progress without asserting that the
+// requested consistency bound was satisfied.
+message ProjectionProgress {
+  option (buf.validate.message).cel = {
+    id: "definition_projection_progress.unique_positions"
+    message: "applied workflow positions must be unique"
+    expression: "this.applied.map(position, position.workflow_id).unique()"
+  };
+
+  string generation = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  bytes checkpoint = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.min_len = 1
+  ];
+  google.protobuf.Timestamp observed_at = 3 [features.field_presence = LEGACY_REQUIRED];
+  repeated DefinitionPosition applied = 4;
+  FreshnessCondition condition = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
 }
 
 enum QueryErrorCode {

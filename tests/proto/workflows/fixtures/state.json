@@ -1790,6 +1790,4505 @@
         ],
         "currentActivationId": "activation-example"
       }
+    },
+    "state-regression-retains-one-retry-authorization": {
+      "type": "trogonai.workflows.runs.state.v1alpha1.PresentRun",
+      "payload": {
+        "configuration": {
+          "runId": "run-example",
+          "plan": {
+            "planRevisionId": "plan-initial",
+            "definitionBytes": "AA==",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            },
+            "savedDefinition": {
+              "workflowId": "workflow-example",
+              "revision": "1",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            }
+          },
+          "inputs": [
+            {
+              "name": "task",
+              "value": {
+                "stringValue": "Review the result."
+              }
+            }
+          ],
+          "workspace": {
+            "workspaceId": "workspace-example",
+            "uri": "https://example.com/workspace"
+          },
+          "limits": {
+            "deadline": "2026-01-01T00:02:00Z",
+            "maxInvocations": "100",
+            "maxActiveSessions": 4,
+            "maxControlDepth": 16,
+            "maxValueDepth": 16
+          },
+          "authority": {
+            "requestedBy": {
+              "principalId": "user-example"
+            },
+            "authorizationId": "authorization-example",
+            "policyRevision": "policy-1"
+          }
+        },
+        "status": "RUN_STATUS_ACTIVE",
+        "currentPlanRevisionId": "plan-initial",
+        "effectiveLimits": {
+          "deadline": "2026-01-01T00:02:00Z",
+          "maxInvocations": "100",
+          "maxActiveSessions": 4,
+          "maxControlDepth": 16,
+          "maxValueDepth": 16
+        },
+        "planRevisions": [],
+        "occurrences": [
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-example",
+                "node": {
+                  "nodeId": "review-loop"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": []
+              },
+              "inputs": []
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "invocation": {
+              "invocationId": "invocation-first",
+              "occurrenceId": "occurrence-example",
+              "attemptNumber": "1",
+              "operationId": "operation-example",
+              "inputs": [
+                {
+                  "name": "task",
+                  "value": {
+                    "stringValue": "Review the result."
+                  },
+                  "sources": [
+                    {
+                      "runInputName": "task"
+                    }
+                  ]
+                }
+              ],
+              "launch": {
+                "commandId": "launch-example",
+                "createSession": {
+                  "sessionId": "session-example",
+                  "executionPlan": {
+                    "planBytes": "AA==",
+                    "planDigest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "workspace": {
+                    "workspaceId": "workspace-example",
+                    "uri": "https://example.com/workspace"
+                  }
+                },
+                "admission": {
+                  "agentRevision": {
+                    "agentId": "agent-example",
+                    "revisionNumber": "1",
+                    "configuration": {
+                      "configurationDigest": {
+                        "algorithm": "sha256",
+                        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      }
+                    }
+                  },
+                  "authority": {
+                    "requestedBy": {
+                      "principalId": "user-example"
+                    },
+                    "authorizationId": "authorization-example",
+                    "policyRevision": "policy-1"
+                  },
+                  "admissionId": "admission-example",
+                  "executionPlanDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "admittedAt": "2026-01-01T00:00:00Z",
+                  "validUntil": "2026-01-01T00:01:00Z"
+                }
+              },
+              "deadline": "2026-01-01T00:02:00Z"
+            },
+            "receipts": [
+              {
+                "receiptId": "receipt-example",
+                "invocationId": "invocation-first",
+                "executionPlanDigest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "sessionEvent": {
+                  "session": {
+                    "sessionId": "session-example"
+                  },
+                  "ordinal": {
+                    "value": "1"
+                  },
+                  "eventId": "event-example",
+                  "eventDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "succeeded": {
+                  "outputs": [
+                    {
+                      "name": "verdict",
+                      "value": {
+                        "symbolValue": {
+                          "typeName": "review.verdict",
+                          "value": "changes_requested"
+                        }
+                      }
+                    }
+                  ],
+                  "artifacts": []
+                },
+                "receivedAt": "2026-01-01T00:01:00Z"
+              }
+            ],
+            "currentReceiptId": "receipt-example"
+          }
+        ],
+        "repeatIterations": [],
+        "decisions": [],
+        "inputs": [],
+        "guidance": [],
+        "externalWaits": [],
+        "timers": [],
+        "pauses": [],
+        "cancellations": [],
+        "retryAuthorizations": [
+          {
+            "retryAuthorizationId": "retry-example",
+            "occurrenceId": "occurrence-example",
+            "previousInvocationId": "invocation-first",
+            "automaticPolicy": {},
+            "notBefore": "2026-01-01T00:01:00Z"
+          }
+        ],
+        "terminations": [],
+        "recoveries": [],
+        "currentRootOccurrenceId": "occurrence-example"
+      }
+    },
+    "state-regression-retains-unique-revised-plan": {
+      "type": "trogonai.workflows.runs.state.v1alpha1.PresentRun",
+      "payload": {
+        "configuration": {
+          "runId": "run-example",
+          "plan": {
+            "planRevisionId": "plan-initial",
+            "definitionBytes": "AA==",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            },
+            "savedDefinition": {
+              "workflowId": "workflow-example",
+              "revision": "1",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            }
+          },
+          "inputs": [
+            {
+              "name": "task",
+              "value": {
+                "stringValue": "Review the result."
+              }
+            }
+          ],
+          "workspace": {
+            "workspaceId": "workspace-example",
+            "uri": "https://example.com/workspace"
+          },
+          "limits": {
+            "deadline": "2026-01-01T00:02:00Z",
+            "maxInvocations": "100",
+            "maxActiveSessions": 4,
+            "maxControlDepth": 16,
+            "maxValueDepth": 16
+          },
+          "authority": {
+            "requestedBy": {
+              "principalId": "user-example"
+            },
+            "authorizationId": "authorization-example",
+            "policyRevision": "policy-1"
+          }
+        },
+        "status": "RUN_STATUS_PAUSED",
+        "currentPlanRevisionId": "plan-revised",
+        "effectiveLimits": {
+          "deadline": "2026-01-01T00:02:00Z",
+          "maxInvocations": "100",
+          "maxActiveSessions": 4,
+          "maxControlDepth": 16,
+          "maxValueDepth": 16
+        },
+        "planRevisions": [
+          {
+            "expectedPlanRevisionId": "plan-initial",
+            "plan": {
+              "planRevisionId": "plan-revised",
+              "previousPlanRevisionId": "plan-initial",
+              "definitionBytes": "AQ==",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            },
+            "pauseId": "pause-example",
+            "frozenOccurrenceIds": [
+              "occurrence-completed"
+            ],
+            "continuations": [
+              {
+                "boundaryOccurrenceId": "occurrence-container",
+                "nextNode": {
+                  "nodeId": "remaining-work"
+                },
+                "inputs": []
+              }
+            ],
+            "revisedBy": {
+              "principalId": "user-example"
+            }
+          }
+        ],
+        "occurrences": [
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-example",
+                "node": {
+                  "nodeId": "review-loop"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": []
+              },
+              "inputs": []
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "invocation": {
+              "invocationId": "invocation-first",
+              "occurrenceId": "occurrence-example",
+              "attemptNumber": "1",
+              "operationId": "operation-example",
+              "inputs": [
+                {
+                  "name": "task",
+                  "value": {
+                    "stringValue": "Review the result."
+                  },
+                  "sources": [
+                    {
+                      "runInputName": "task"
+                    }
+                  ]
+                }
+              ],
+              "launch": {
+                "commandId": "launch-example",
+                "createSession": {
+                  "sessionId": "session-example",
+                  "executionPlan": {
+                    "planBytes": "AA==",
+                    "planDigest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "workspace": {
+                    "workspaceId": "workspace-example",
+                    "uri": "https://example.com/workspace"
+                  }
+                },
+                "admission": {
+                  "agentRevision": {
+                    "agentId": "agent-example",
+                    "revisionNumber": "1",
+                    "configuration": {
+                      "configurationDigest": {
+                        "algorithm": "sha256",
+                        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      }
+                    }
+                  },
+                  "authority": {
+                    "requestedBy": {
+                      "principalId": "user-example"
+                    },
+                    "authorizationId": "authorization-example",
+                    "policyRevision": "policy-1"
+                  },
+                  "admissionId": "admission-example",
+                  "executionPlanDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "admittedAt": "2026-01-01T00:00:00Z",
+                  "validUntil": "2026-01-01T00:01:00Z"
+                }
+              },
+              "deadline": "2026-01-01T00:02:00Z"
+            },
+            "receipts": [
+              {
+                "receiptId": "receipt-example",
+                "invocationId": "invocation-first",
+                "executionPlanDigest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "sessionEvent": {
+                  "session": {
+                    "sessionId": "session-example"
+                  },
+                  "ordinal": {
+                    "value": "1"
+                  },
+                  "eventId": "event-example",
+                  "eventDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "succeeded": {
+                  "outputs": [
+                    {
+                      "name": "verdict",
+                      "value": {
+                        "symbolValue": {
+                          "typeName": "review.verdict",
+                          "value": "changes_requested"
+                        }
+                      }
+                    }
+                  ],
+                  "artifacts": []
+                },
+                "receivedAt": "2026-01-01T00:01:00Z"
+              }
+            ],
+            "currentReceiptId": "receipt-example"
+          }
+        ],
+        "repeatIterations": [],
+        "decisions": [],
+        "inputs": [
+          {
+            "request": {
+              "requestId": "input-example",
+              "occurrenceId": "occurrence-example",
+              "requestedBy": {
+                "serviceId": "coordinator-example"
+              },
+              "question": "Approve the result?",
+              "answerSchema": {
+                "maxEncodedBytes": "128",
+                "scalar": "SCALAR_TYPE_BOOL"
+              },
+              "choices": [
+                {
+                  "choiceId": "approve",
+                  "value": {
+                    "boolValue": true
+                  },
+                  "displayName": "Approve"
+                },
+                {
+                  "choiceId": "decline",
+                  "value": {
+                    "boolValue": false
+                  },
+                  "displayName": "Decline"
+                }
+              ],
+              "allowedResponders": [
+                {
+                  "principalId": "user-example"
+                }
+              ],
+              "deadline": "2026-01-01T00:02:00Z"
+            },
+            "response": {
+              "responseId": "response-example",
+              "requestId": "input-example",
+              "respondedBy": {
+                "principalId": "user-example"
+              },
+              "respondedAt": "2026-01-01T00:01:00Z",
+              "answered": {
+                "boolValue": false
+              },
+              "selectedChoiceId": "decline"
+            }
+          }
+        ],
+        "guidance": [],
+        "externalWaits": [],
+        "timers": [],
+        "pauses": [
+          {
+            "request": {
+              "pauseId": "pause-example",
+              "requestedBy": {
+                "principalId": "user-example"
+              },
+              "reason": "Inspect remaining work."
+            },
+            "boundary": {
+              "pauseId": "pause-example",
+              "settledInvocationIds": [
+                "invocation-first"
+              ],
+              "parkedWaitIds": [
+                "wait-example"
+              ],
+              "parkedRequestIds": [
+                "input-example"
+              ]
+            }
+          }
+        ],
+        "cancellations": [],
+        "retryAuthorizations": [],
+        "terminations": [],
+        "recoveries": [],
+        "currentRootOccurrenceId": "occurrence-example",
+        "currentPauseId": "pause-example"
+      }
+    },
+    "state-regression-independent-repeat-occurrences-share-iteration-index": {
+      "type": "trogonai.workflows.runs.state.v1alpha1.PresentRun",
+      "payload": {
+        "configuration": {
+          "runId": "run-example",
+          "plan": {
+            "planRevisionId": "plan-initial",
+            "definitionBytes": "AA==",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            },
+            "savedDefinition": {
+              "workflowId": "workflow-example",
+              "revision": "1",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            }
+          },
+          "inputs": [
+            {
+              "name": "task",
+              "value": {
+                "stringValue": "Review the result."
+              }
+            }
+          ],
+          "workspace": {
+            "workspaceId": "workspace-example",
+            "uri": "https://example.com/workspace"
+          },
+          "limits": {
+            "deadline": "2026-01-01T00:02:00Z",
+            "maxInvocations": "100",
+            "maxActiveSessions": 4,
+            "maxControlDepth": 16,
+            "maxValueDepth": 16
+          },
+          "authority": {
+            "requestedBy": {
+              "principalId": "user-example"
+            },
+            "authorizationId": "authorization-example",
+            "policyRevision": "policy-1"
+          }
+        },
+        "status": "RUN_STATUS_ACTIVE",
+        "currentPlanRevisionId": "plan-initial",
+        "effectiveLimits": {
+          "deadline": "2026-01-01T00:02:00Z",
+          "maxInvocations": "100",
+          "maxActiveSessions": 4,
+          "maxControlDepth": 16,
+          "maxValueDepth": 16
+        },
+        "planRevisions": [],
+        "occurrences": [
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-example",
+                "node": {
+                  "nodeId": "review-loop"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": []
+              },
+              "inputs": []
+            }
+          },
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-second-repeat",
+                "node": {
+                  "nodeId": "secondary-review-loop"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": [],
+                "parentOccurrenceId": "occurrence-example"
+              },
+              "inputs": []
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "invocation": {
+              "invocationId": "invocation-first",
+              "occurrenceId": "occurrence-example",
+              "attemptNumber": "1",
+              "operationId": "operation-example",
+              "inputs": [
+                {
+                  "name": "task",
+                  "value": {
+                    "stringValue": "Review the result."
+                  },
+                  "sources": [
+                    {
+                      "runInputName": "task"
+                    }
+                  ]
+                }
+              ],
+              "launch": {
+                "commandId": "launch-example",
+                "createSession": {
+                  "sessionId": "session-example",
+                  "executionPlan": {
+                    "planBytes": "AA==",
+                    "planDigest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "workspace": {
+                    "workspaceId": "workspace-example",
+                    "uri": "https://example.com/workspace"
+                  }
+                },
+                "admission": {
+                  "agentRevision": {
+                    "agentId": "agent-example",
+                    "revisionNumber": "1",
+                    "configuration": {
+                      "configurationDigest": {
+                        "algorithm": "sha256",
+                        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      }
+                    }
+                  },
+                  "authority": {
+                    "requestedBy": {
+                      "principalId": "user-example"
+                    },
+                    "authorizationId": "authorization-example",
+                    "policyRevision": "policy-1"
+                  },
+                  "admissionId": "admission-example",
+                  "executionPlanDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "admittedAt": "2026-01-01T00:00:00Z",
+                  "validUntil": "2026-01-01T00:01:00Z"
+                }
+              },
+              "deadline": "2026-01-01T00:02:00Z"
+            },
+            "receipts": [
+              {
+                "receiptId": "receipt-example",
+                "invocationId": "invocation-first",
+                "executionPlanDigest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "sessionEvent": {
+                  "session": {
+                    "sessionId": "session-example"
+                  },
+                  "ordinal": {
+                    "value": "1"
+                  },
+                  "eventId": "event-example",
+                  "eventDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "succeeded": {
+                  "outputs": [
+                    {
+                      "name": "verdict",
+                      "value": {
+                        "symbolValue": {
+                          "typeName": "review.verdict",
+                          "value": "changes_requested"
+                        }
+                      }
+                    }
+                  ],
+                  "artifacts": []
+                },
+                "receivedAt": "2026-01-01T00:01:00Z"
+              }
+            ],
+            "currentReceiptId": "receipt-example"
+          }
+        ],
+        "repeatIterations": [
+          {
+            "repeatOccurrenceId": "occurrence-example",
+            "iteration": "1",
+            "variables": [
+              {
+                "name": "task",
+                "value": {
+                  "stringValue": "Review the result."
+                },
+                "sources": [
+                  {
+                    "runInputName": "task"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "repeatOccurrenceId": "occurrence-second-repeat",
+            "iteration": "1",
+            "variables": [
+              {
+                "name": "task",
+                "value": {
+                  "stringValue": "Review the result."
+                },
+                "sources": [
+                  {
+                    "runInputName": "task"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "decisions": [],
+        "inputs": [],
+        "guidance": [],
+        "externalWaits": [],
+        "timers": [],
+        "pauses": [],
+        "cancellations": [],
+        "retryAuthorizations": [],
+        "terminations": [],
+        "recoveries": [],
+        "currentRootOccurrenceId": "occurrence-example"
+      }
+    },
+    "state-regression-repeat-owner-has-distinct-iteration-indices": {
+      "type": "trogonai.workflows.runs.state.v1alpha1.PresentRun",
+      "payload": {
+        "configuration": {
+          "runId": "run-example",
+          "plan": {
+            "planRevisionId": "plan-initial",
+            "definitionBytes": "AA==",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            },
+            "savedDefinition": {
+              "workflowId": "workflow-example",
+              "revision": "1",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            }
+          },
+          "inputs": [
+            {
+              "name": "task",
+              "value": {
+                "stringValue": "Review the result."
+              }
+            }
+          ],
+          "workspace": {
+            "workspaceId": "workspace-example",
+            "uri": "https://example.com/workspace"
+          },
+          "limits": {
+            "deadline": "2026-01-01T00:02:00Z",
+            "maxInvocations": "100",
+            "maxActiveSessions": 4,
+            "maxControlDepth": 16,
+            "maxValueDepth": 16
+          },
+          "authority": {
+            "requestedBy": {
+              "principalId": "user-example"
+            },
+            "authorizationId": "authorization-example",
+            "policyRevision": "policy-1"
+          }
+        },
+        "status": "RUN_STATUS_ACTIVE",
+        "currentPlanRevisionId": "plan-initial",
+        "effectiveLimits": {
+          "deadline": "2026-01-01T00:02:00Z",
+          "maxInvocations": "100",
+          "maxActiveSessions": 4,
+          "maxControlDepth": 16,
+          "maxValueDepth": 16
+        },
+        "planRevisions": [],
+        "occurrences": [
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-example",
+                "node": {
+                  "nodeId": "review-loop"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": []
+              },
+              "inputs": []
+            }
+          },
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-second-repeat",
+                "node": {
+                  "nodeId": "secondary-review-loop"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": [],
+                "parentOccurrenceId": "occurrence-example"
+              },
+              "inputs": []
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "invocation": {
+              "invocationId": "invocation-first",
+              "occurrenceId": "occurrence-example",
+              "attemptNumber": "1",
+              "operationId": "operation-example",
+              "inputs": [
+                {
+                  "name": "task",
+                  "value": {
+                    "stringValue": "Review the result."
+                  },
+                  "sources": [
+                    {
+                      "runInputName": "task"
+                    }
+                  ]
+                }
+              ],
+              "launch": {
+                "commandId": "launch-example",
+                "createSession": {
+                  "sessionId": "session-example",
+                  "executionPlan": {
+                    "planBytes": "AA==",
+                    "planDigest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "workspace": {
+                    "workspaceId": "workspace-example",
+                    "uri": "https://example.com/workspace"
+                  }
+                },
+                "admission": {
+                  "agentRevision": {
+                    "agentId": "agent-example",
+                    "revisionNumber": "1",
+                    "configuration": {
+                      "configurationDigest": {
+                        "algorithm": "sha256",
+                        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      }
+                    }
+                  },
+                  "authority": {
+                    "requestedBy": {
+                      "principalId": "user-example"
+                    },
+                    "authorizationId": "authorization-example",
+                    "policyRevision": "policy-1"
+                  },
+                  "admissionId": "admission-example",
+                  "executionPlanDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "admittedAt": "2026-01-01T00:00:00Z",
+                  "validUntil": "2026-01-01T00:01:00Z"
+                }
+              },
+              "deadline": "2026-01-01T00:02:00Z"
+            },
+            "receipts": [
+              {
+                "receiptId": "receipt-example",
+                "invocationId": "invocation-first",
+                "executionPlanDigest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "sessionEvent": {
+                  "session": {
+                    "sessionId": "session-example"
+                  },
+                  "ordinal": {
+                    "value": "1"
+                  },
+                  "eventId": "event-example",
+                  "eventDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "succeeded": {
+                  "outputs": [
+                    {
+                      "name": "verdict",
+                      "value": {
+                        "symbolValue": {
+                          "typeName": "review.verdict",
+                          "value": "changes_requested"
+                        }
+                      }
+                    }
+                  ],
+                  "artifacts": []
+                },
+                "receivedAt": "2026-01-01T00:01:00Z"
+              }
+            ],
+            "currentReceiptId": "receipt-example"
+          }
+        ],
+        "repeatIterations": [
+          {
+            "repeatOccurrenceId": "occurrence-example",
+            "iteration": "1",
+            "variables": [
+              {
+                "name": "task",
+                "value": {
+                  "stringValue": "Review the result."
+                },
+                "sources": [
+                  {
+                    "runInputName": "task"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "repeatOccurrenceId": "occurrence-example",
+            "iteration": "2",
+            "variables": [
+              {
+                "name": "task",
+                "value": {
+                  "stringValue": "Review the result."
+                },
+                "sources": [
+                  {
+                    "runInputName": "task"
+                  }
+                ]
+              }
+            ],
+            "continuationDecisionId": "decision-continue"
+          },
+          {
+            "repeatOccurrenceId": "occurrence-second-repeat",
+            "iteration": "1",
+            "variables": [
+              {
+                "name": "task",
+                "value": {
+                  "stringValue": "Review the result."
+                },
+                "sources": [
+                  {
+                    "runInputName": "task"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "decisions": [],
+        "inputs": [],
+        "guidance": [],
+        "externalWaits": [],
+        "timers": [],
+        "pauses": [],
+        "cancellations": [],
+        "retryAuthorizations": [],
+        "terminations": [],
+        "recoveries": [],
+        "currentRootOccurrenceId": "occurrence-example"
+      }
+    },
+    "state-regression-recovery-retains-paid-completion-and-prior-failure": {
+      "type": "trogonai.workflows.runs.state.v1alpha1.PresentRun",
+      "payload": {
+        "configuration": {
+          "runId": "run-example",
+          "plan": {
+            "planRevisionId": "plan-initial",
+            "definitionBytes": "AA==",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            },
+            "savedDefinition": {
+              "workflowId": "workflow-example",
+              "revision": "1",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            }
+          },
+          "inputs": [
+            {
+              "name": "task",
+              "value": {
+                "stringValue": "Review the result."
+              }
+            }
+          ],
+          "workspace": {
+            "workspaceId": "workspace-example",
+            "uri": "https://example.com/workspace"
+          },
+          "limits": {
+            "deadline": "2026-01-01T00:02:00Z",
+            "maxInvocations": "100",
+            "maxActiveSessions": 4,
+            "maxControlDepth": 16,
+            "maxValueDepth": 16
+          },
+          "authority": {
+            "requestedBy": {
+              "principalId": "user-example"
+            },
+            "authorizationId": "authorization-example",
+            "policyRevision": "policy-1"
+          }
+        },
+        "status": "RUN_STATUS_ACTIVE",
+        "currentPlanRevisionId": "plan-initial",
+        "effectiveLimits": {
+          "deadline": "2026-01-01T00:02:00Z",
+          "maxInvocations": "100",
+          "maxActiveSessions": 4,
+          "maxControlDepth": 16,
+          "maxValueDepth": 16
+        },
+        "planRevisions": [],
+        "occurrences": [
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-example",
+                "node": {
+                  "nodeId": "review-loop"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": []
+              },
+              "inputs": []
+            },
+            "completion": {
+              "completionId": "completion-original-root",
+              "occurrenceId": "occurrence-example",
+              "evidence": [
+                {
+                  "childCompletionId": "completion-failed"
+                }
+              ],
+              "failed": {
+                "reason": "FAILURE_REASON_EXECUTION_ERROR"
+              }
+            }
+          },
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-paid",
+                "node": {
+                  "nodeId": "review"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": [],
+                "parentOccurrenceId": "occurrence-example"
+              },
+              "inputs": []
+            },
+            "completion": {
+              "completionId": "completion-retained",
+              "occurrenceId": "occurrence-paid",
+              "evidence": [
+                {
+                  "invocationReceiptId": "receipt-example"
+                }
+              ],
+              "succeeded": {
+                "outputs": [
+                  {
+                    "name": "verdict",
+                    "value": {
+                      "symbolValue": {
+                        "typeName": "review.verdict",
+                        "value": "changes_requested"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-failed",
+                "node": {
+                  "nodeId": "implement"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": [],
+                "parentOccurrenceId": "occurrence-example"
+              },
+              "inputs": []
+            },
+            "completion": {
+              "completionId": "completion-failed",
+              "occurrenceId": "occurrence-failed",
+              "evidence": [
+                {
+                  "invocationReceiptId": "receipt-invocation-failed"
+                }
+              ],
+              "failed": {
+                "reason": "FAILURE_REASON_EXECUTION_ERROR"
+              }
+            }
+          },
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-recovered-root",
+                "node": {
+                  "nodeId": "review-loop"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": []
+              },
+              "inputs": []
+            }
+          },
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-recovered-failed",
+                "node": {
+                  "nodeId": "implement"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": [],
+                "parentOccurrenceId": "occurrence-recovered-root"
+              },
+              "inputs": []
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "invocation": {
+              "invocationId": "invocation-first",
+              "occurrenceId": "occurrence-paid",
+              "attemptNumber": "1",
+              "operationId": "operation-example",
+              "inputs": [
+                {
+                  "name": "task",
+                  "value": {
+                    "stringValue": "Review the result."
+                  },
+                  "sources": [
+                    {
+                      "runInputName": "task"
+                    }
+                  ]
+                }
+              ],
+              "launch": {
+                "commandId": "launch-example",
+                "createSession": {
+                  "sessionId": "session-example",
+                  "executionPlan": {
+                    "planBytes": "AA==",
+                    "planDigest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "workspace": {
+                    "workspaceId": "workspace-example",
+                    "uri": "https://example.com/workspace"
+                  }
+                },
+                "admission": {
+                  "agentRevision": {
+                    "agentId": "agent-example",
+                    "revisionNumber": "1",
+                    "configuration": {
+                      "configurationDigest": {
+                        "algorithm": "sha256",
+                        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      }
+                    }
+                  },
+                  "authority": {
+                    "requestedBy": {
+                      "principalId": "user-example"
+                    },
+                    "authorizationId": "authorization-example",
+                    "policyRevision": "policy-1"
+                  },
+                  "admissionId": "admission-example",
+                  "executionPlanDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "admittedAt": "2026-01-01T00:00:00Z",
+                  "validUntil": "2026-01-01T00:01:00Z"
+                }
+              },
+              "deadline": "2026-01-01T00:02:00Z"
+            },
+            "receipts": [
+              {
+                "receiptId": "receipt-example",
+                "invocationId": "invocation-first",
+                "executionPlanDigest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "sessionEvent": {
+                  "session": {
+                    "sessionId": "session-example"
+                  },
+                  "ordinal": {
+                    "value": "1"
+                  },
+                  "eventId": "event-example",
+                  "eventDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "succeeded": {
+                  "outputs": [
+                    {
+                      "name": "verdict",
+                      "value": {
+                        "symbolValue": {
+                          "typeName": "review.verdict",
+                          "value": "changes_requested"
+                        }
+                      }
+                    }
+                  ],
+                  "artifacts": []
+                },
+                "receivedAt": "2026-01-01T00:01:00Z"
+              }
+            ],
+            "currentReceiptId": "receipt-example"
+          },
+          {
+            "invocation": {
+              "invocationId": "invocation-failed",
+              "occurrenceId": "occurrence-failed",
+              "attemptNumber": "1",
+              "operationId": "operation-invocation-failed",
+              "inputs": [
+                {
+                  "name": "task",
+                  "value": {
+                    "stringValue": "Review the result."
+                  },
+                  "sources": [
+                    {
+                      "runInputName": "task"
+                    }
+                  ]
+                }
+              ],
+              "launch": {
+                "commandId": "launch-invocation-failed",
+                "createSession": {
+                  "sessionId": "session-failed",
+                  "executionPlan": {
+                    "planBytes": "AA==",
+                    "planDigest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "workspace": {
+                    "workspaceId": "workspace-example",
+                    "uri": "https://example.com/workspace"
+                  }
+                },
+                "admission": {
+                  "agentRevision": {
+                    "agentId": "agent-example",
+                    "revisionNumber": "1",
+                    "configuration": {
+                      "configurationDigest": {
+                        "algorithm": "sha256",
+                        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      }
+                    }
+                  },
+                  "authority": {
+                    "requestedBy": {
+                      "principalId": "user-example"
+                    },
+                    "authorizationId": "authorization-example",
+                    "policyRevision": "policy-1"
+                  },
+                  "admissionId": "admission-invocation-failed",
+                  "executionPlanDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "admittedAt": "2026-01-01T00:00:00Z",
+                  "validUntil": "2026-01-01T00:01:00Z"
+                }
+              },
+              "deadline": "2026-01-01T00:02:00Z"
+            },
+            "receipts": [
+              {
+                "receiptId": "receipt-invocation-failed",
+                "invocationId": "invocation-failed",
+                "executionPlanDigest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "sessionEvent": {
+                  "session": {
+                    "sessionId": "session-failed"
+                  },
+                  "ordinal": {
+                    "value": "1"
+                  },
+                  "eventId": "event-invocation-failed",
+                  "eventDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "receivedAt": "2026-01-01T00:01:00Z",
+                "failed": {
+                  "reason": "FAILURE_REASON_EXECUTION_ERROR"
+                }
+              }
+            ],
+            "currentReceiptId": "receipt-invocation-failed"
+          }
+        ],
+        "repeatIterations": [],
+        "decisions": [],
+        "inputs": [],
+        "guidance": [],
+        "externalWaits": [],
+        "timers": [],
+        "pauses": [],
+        "cancellations": [],
+        "retryAuthorizations": [],
+        "terminations": [
+          {
+            "terminationId": "termination-failed",
+            "effects": [
+              {
+                "invocationId": "invocation-first",
+                "receiptId": "receipt-example"
+              },
+              {
+                "invocationId": "invocation-failed",
+                "receiptId": "receipt-invocation-failed"
+              }
+            ],
+            "failed": {
+              "failure": {
+                "reason": "FAILURE_REASON_EXECUTION_ERROR"
+              },
+              "evidence": [
+                {
+                  "childCompletionId": "completion-original-root"
+                }
+              ]
+            }
+          }
+        ],
+        "recoveries": [
+          {
+            "recoveryId": "recovery-first",
+            "recoveryNumber": "1",
+            "priorTerminationId": "termination-failed",
+            "frontier": [
+              {
+                "previousOccurrenceId": "occurrence-example",
+                "replacement": {
+                  "occurrence": {
+                    "occurrenceId": "occurrence-recovered-root",
+                    "node": {
+                      "nodeId": "review-loop"
+                    },
+                    "planRevisionId": "plan-initial",
+                    "iterationPath": []
+                  },
+                  "inputs": []
+                }
+              },
+              {
+                "previousOccurrenceId": "occurrence-failed",
+                "replacement": {
+                  "occurrence": {
+                    "occurrenceId": "occurrence-recovered-failed",
+                    "node": {
+                      "nodeId": "implement"
+                    },
+                    "planRevisionId": "plan-initial",
+                    "iterationPath": [],
+                    "parentOccurrenceId": "occurrence-recovered-root"
+                  },
+                  "inputs": []
+                }
+              }
+            ],
+            "retainedCompletions": [
+              {
+                "completionId": "completion-retained",
+                "parentOccurrenceId": "occurrence-recovered-root"
+              }
+            ],
+            "rootOccurrenceId": "occurrence-recovered-root",
+            "limits": {
+              "deadline": "2026-01-01T00:02:00Z",
+              "maxInvocations": "100",
+              "maxActiveSessions": 4,
+              "maxControlDepth": 16,
+              "maxValueDepth": 16
+            },
+            "authority": {
+              "requestedBy": {
+                "principalId": "user-example"
+              },
+              "authorizationId": "authorization-example",
+              "policyRevision": "policy-1"
+            }
+          }
+        ],
+        "currentRootOccurrenceId": "occurrence-recovered-root",
+        "currentRecoveryId": "recovery-first"
+      }
+    },
+    "state-regression-recovery-retains-historical-partial-termination": {
+      "type": "trogonai.workflows.runs.state.v1alpha1.PresentRun",
+      "payload": {
+        "configuration": {
+          "runId": "run-example",
+          "plan": {
+            "planRevisionId": "plan-initial",
+            "definitionBytes": "AA==",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            },
+            "savedDefinition": {
+              "workflowId": "workflow-example",
+              "revision": "1",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            }
+          },
+          "inputs": [
+            {
+              "name": "task",
+              "value": {
+                "stringValue": "Review the result."
+              }
+            }
+          ],
+          "workspace": {
+            "workspaceId": "workspace-example",
+            "uri": "https://example.com/workspace"
+          },
+          "limits": {
+            "deadline": "2026-01-01T00:02:00Z",
+            "maxInvocations": "100",
+            "maxActiveSessions": 4,
+            "maxControlDepth": 16,
+            "maxValueDepth": 16
+          },
+          "authority": {
+            "requestedBy": {
+              "principalId": "user-example"
+            },
+            "authorizationId": "authorization-example",
+            "policyRevision": "policy-1"
+          }
+        },
+        "status": "RUN_STATUS_ACTIVE",
+        "currentPlanRevisionId": "plan-initial",
+        "effectiveLimits": {
+          "deadline": "2026-01-01T00:02:00Z",
+          "maxInvocations": "100",
+          "maxActiveSessions": 4,
+          "maxControlDepth": 16,
+          "maxValueDepth": 16
+        },
+        "planRevisions": [],
+        "occurrences": [
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-example",
+                "node": {
+                  "nodeId": "review-loop"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": []
+              },
+              "inputs": []
+            },
+            "completion": {
+              "completionId": "completion-original-root",
+              "occurrenceId": "occurrence-example",
+              "evidence": [
+                {
+                  "childCompletionId": "completion-failed"
+                }
+              ],
+              "failed": {
+                "reason": "FAILURE_REASON_EXECUTION_ERROR"
+              }
+            }
+          },
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-paid",
+                "node": {
+                  "nodeId": "review"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": [],
+                "parentOccurrenceId": "occurrence-example"
+              },
+              "inputs": []
+            },
+            "completion": {
+              "completionId": "completion-retained",
+              "occurrenceId": "occurrence-paid",
+              "evidence": [
+                {
+                  "invocationReceiptId": "receipt-example"
+                }
+              ],
+              "succeeded": {
+                "outputs": [
+                  {
+                    "name": "verdict",
+                    "value": {
+                      "symbolValue": {
+                        "typeName": "review.verdict",
+                        "value": "changes_requested"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-failed",
+                "node": {
+                  "nodeId": "implement"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": [],
+                "parentOccurrenceId": "occurrence-example"
+              },
+              "inputs": []
+            },
+            "completion": {
+              "completionId": "completion-failed",
+              "occurrenceId": "occurrence-failed",
+              "evidence": [
+                {
+                  "invocationReceiptId": "receipt-invocation-failed"
+                }
+              ],
+              "failed": {
+                "reason": "FAILURE_REASON_EXECUTION_ERROR"
+              }
+            }
+          },
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-recovered-root",
+                "node": {
+                  "nodeId": "review-loop"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": []
+              },
+              "inputs": []
+            },
+            "completion": {
+              "completionId": "completion-recovered-root",
+              "occurrenceId": "occurrence-recovered-root",
+              "evidence": [
+                {
+                  "childCompletionId": "completion-recovered-failed"
+                }
+              ],
+              "failed": {
+                "reason": "FAILURE_REASON_EXECUTION_ERROR"
+              }
+            }
+          },
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-recovered-failed",
+                "node": {
+                  "nodeId": "implement"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": [],
+                "parentOccurrenceId": "occurrence-recovered-root"
+              },
+              "inputs": []
+            },
+            "completion": {
+              "completionId": "completion-recovered-failed",
+              "occurrenceId": "occurrence-recovered-failed",
+              "evidence": [
+                {
+                  "invocationReceiptId": "receipt-invocation-recovered-failed"
+                }
+              ],
+              "failed": {
+                "reason": "FAILURE_REASON_EXECUTION_ERROR"
+              }
+            }
+          },
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-second-root",
+                "node": {
+                  "nodeId": "review-loop"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": []
+              },
+              "inputs": []
+            }
+          },
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-second-failed",
+                "node": {
+                  "nodeId": "implement"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": [],
+                "parentOccurrenceId": "occurrence-second-root"
+              },
+              "inputs": []
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "invocation": {
+              "invocationId": "invocation-first",
+              "occurrenceId": "occurrence-paid",
+              "attemptNumber": "1",
+              "operationId": "operation-example",
+              "inputs": [
+                {
+                  "name": "task",
+                  "value": {
+                    "stringValue": "Review the result."
+                  },
+                  "sources": [
+                    {
+                      "runInputName": "task"
+                    }
+                  ]
+                }
+              ],
+              "launch": {
+                "commandId": "launch-example",
+                "createSession": {
+                  "sessionId": "session-example",
+                  "executionPlan": {
+                    "planBytes": "AA==",
+                    "planDigest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "workspace": {
+                    "workspaceId": "workspace-example",
+                    "uri": "https://example.com/workspace"
+                  }
+                },
+                "admission": {
+                  "agentRevision": {
+                    "agentId": "agent-example",
+                    "revisionNumber": "1",
+                    "configuration": {
+                      "configurationDigest": {
+                        "algorithm": "sha256",
+                        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      }
+                    }
+                  },
+                  "authority": {
+                    "requestedBy": {
+                      "principalId": "user-example"
+                    },
+                    "authorizationId": "authorization-example",
+                    "policyRevision": "policy-1"
+                  },
+                  "admissionId": "admission-example",
+                  "executionPlanDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "admittedAt": "2026-01-01T00:00:00Z",
+                  "validUntil": "2026-01-01T00:01:00Z"
+                }
+              },
+              "deadline": "2026-01-01T00:02:00Z"
+            },
+            "receipts": [
+              {
+                "receiptId": "receipt-example",
+                "invocationId": "invocation-first",
+                "executionPlanDigest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "sessionEvent": {
+                  "session": {
+                    "sessionId": "session-example"
+                  },
+                  "ordinal": {
+                    "value": "1"
+                  },
+                  "eventId": "event-example",
+                  "eventDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "succeeded": {
+                  "outputs": [
+                    {
+                      "name": "verdict",
+                      "value": {
+                        "symbolValue": {
+                          "typeName": "review.verdict",
+                          "value": "changes_requested"
+                        }
+                      }
+                    }
+                  ],
+                  "artifacts": []
+                },
+                "receivedAt": "2026-01-01T00:01:00Z"
+              }
+            ],
+            "currentReceiptId": "receipt-example"
+          },
+          {
+            "invocation": {
+              "invocationId": "invocation-failed",
+              "occurrenceId": "occurrence-failed",
+              "attemptNumber": "1",
+              "operationId": "operation-invocation-failed",
+              "inputs": [
+                {
+                  "name": "task",
+                  "value": {
+                    "stringValue": "Review the result."
+                  },
+                  "sources": [
+                    {
+                      "runInputName": "task"
+                    }
+                  ]
+                }
+              ],
+              "launch": {
+                "commandId": "launch-invocation-failed",
+                "createSession": {
+                  "sessionId": "session-failed",
+                  "executionPlan": {
+                    "planBytes": "AA==",
+                    "planDigest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "workspace": {
+                    "workspaceId": "workspace-example",
+                    "uri": "https://example.com/workspace"
+                  }
+                },
+                "admission": {
+                  "agentRevision": {
+                    "agentId": "agent-example",
+                    "revisionNumber": "1",
+                    "configuration": {
+                      "configurationDigest": {
+                        "algorithm": "sha256",
+                        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      }
+                    }
+                  },
+                  "authority": {
+                    "requestedBy": {
+                      "principalId": "user-example"
+                    },
+                    "authorizationId": "authorization-example",
+                    "policyRevision": "policy-1"
+                  },
+                  "admissionId": "admission-invocation-failed",
+                  "executionPlanDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "admittedAt": "2026-01-01T00:00:00Z",
+                  "validUntil": "2026-01-01T00:01:00Z"
+                }
+              },
+              "deadline": "2026-01-01T00:02:00Z"
+            },
+            "receipts": [
+              {
+                "receiptId": "receipt-invocation-failed",
+                "invocationId": "invocation-failed",
+                "executionPlanDigest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "sessionEvent": {
+                  "session": {
+                    "sessionId": "session-failed"
+                  },
+                  "ordinal": {
+                    "value": "1"
+                  },
+                  "eventId": "event-invocation-failed",
+                  "eventDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "receivedAt": "2026-01-01T00:01:00Z",
+                "failed": {
+                  "reason": "FAILURE_REASON_EXECUTION_ERROR"
+                }
+              }
+            ],
+            "currentReceiptId": "receipt-invocation-failed"
+          },
+          {
+            "invocation": {
+              "invocationId": "invocation-recovered-failed",
+              "occurrenceId": "occurrence-recovered-failed",
+              "attemptNumber": "1",
+              "operationId": "operation-invocation-recovered-failed",
+              "inputs": [
+                {
+                  "name": "task",
+                  "value": {
+                    "stringValue": "Review the result."
+                  },
+                  "sources": [
+                    {
+                      "runInputName": "task"
+                    }
+                  ]
+                }
+              ],
+              "launch": {
+                "commandId": "launch-invocation-recovered-failed",
+                "createSession": {
+                  "sessionId": "session-recovered-failed",
+                  "executionPlan": {
+                    "planBytes": "AA==",
+                    "planDigest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "workspace": {
+                    "workspaceId": "workspace-example",
+                    "uri": "https://example.com/workspace"
+                  }
+                },
+                "admission": {
+                  "agentRevision": {
+                    "agentId": "agent-example",
+                    "revisionNumber": "1",
+                    "configuration": {
+                      "configurationDigest": {
+                        "algorithm": "sha256",
+                        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      }
+                    }
+                  },
+                  "authority": {
+                    "requestedBy": {
+                      "principalId": "user-example"
+                    },
+                    "authorizationId": "authorization-example",
+                    "policyRevision": "policy-1"
+                  },
+                  "admissionId": "admission-invocation-recovered-failed",
+                  "executionPlanDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "admittedAt": "2026-01-01T00:01:00Z",
+                  "validUntil": "2026-01-01T00:01:20Z"
+                }
+              },
+              "deadline": "2026-01-01T00:02:00Z"
+            },
+            "receipts": [
+              {
+                "receiptId": "receipt-invocation-recovered-failed",
+                "invocationId": "invocation-recovered-failed",
+                "executionPlanDigest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "sessionEvent": {
+                  "session": {
+                    "sessionId": "session-recovered-failed"
+                  },
+                  "ordinal": {
+                    "value": "1"
+                  },
+                  "eventId": "event-invocation-recovered-failed",
+                  "eventDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "receivedAt": "2026-01-01T00:01:30Z",
+                "failed": {
+                  "reason": "FAILURE_REASON_EXECUTION_ERROR"
+                }
+              }
+            ],
+            "currentReceiptId": "receipt-invocation-recovered-failed"
+          }
+        ],
+        "repeatIterations": [],
+        "decisions": [],
+        "inputs": [],
+        "guidance": [],
+        "externalWaits": [],
+        "timers": [],
+        "pauses": [],
+        "cancellations": [],
+        "retryAuthorizations": [],
+        "terminations": [
+          {
+            "terminationId": "termination-failed",
+            "effects": [
+              {
+                "invocationId": "invocation-first",
+                "receiptId": "receipt-example"
+              },
+              {
+                "invocationId": "invocation-failed",
+                "receiptId": "receipt-invocation-failed"
+              }
+            ],
+            "failed": {
+              "failure": {
+                "reason": "FAILURE_REASON_EXECUTION_ERROR"
+              },
+              "evidence": [
+                {
+                  "childCompletionId": "completion-original-root"
+                }
+              ]
+            }
+          },
+          {
+            "terminationId": "termination-second-failed",
+            "effects": [
+              {
+                "invocationId": "invocation-first",
+                "receiptId": "receipt-example"
+              },
+              {
+                "invocationId": "invocation-failed",
+                "receiptId": "receipt-invocation-failed"
+              },
+              {
+                "invocationId": "invocation-recovered-failed",
+                "receiptId": "receipt-invocation-recovered-failed"
+              }
+            ],
+            "failed": {
+              "failure": {
+                "reason": "FAILURE_REASON_EXECUTION_ERROR"
+              },
+              "evidence": [
+                {
+                  "childCompletionId": "completion-recovered-root"
+                }
+              ]
+            }
+          }
+        ],
+        "recoveries": [
+          {
+            "recoveryId": "recovery-first",
+            "recoveryNumber": "1",
+            "priorTerminationId": "termination-failed",
+            "frontier": [
+              {
+                "previousOccurrenceId": "occurrence-example",
+                "replacement": {
+                  "occurrence": {
+                    "occurrenceId": "occurrence-recovered-root",
+                    "node": {
+                      "nodeId": "review-loop"
+                    },
+                    "planRevisionId": "plan-initial",
+                    "iterationPath": []
+                  },
+                  "inputs": []
+                }
+              },
+              {
+                "previousOccurrenceId": "occurrence-failed",
+                "replacement": {
+                  "occurrence": {
+                    "occurrenceId": "occurrence-recovered-failed",
+                    "node": {
+                      "nodeId": "implement"
+                    },
+                    "planRevisionId": "plan-initial",
+                    "iterationPath": [],
+                    "parentOccurrenceId": "occurrence-recovered-root"
+                  },
+                  "inputs": []
+                }
+              }
+            ],
+            "retainedCompletions": [
+              {
+                "completionId": "completion-retained",
+                "parentOccurrenceId": "occurrence-recovered-root"
+              }
+            ],
+            "rootOccurrenceId": "occurrence-recovered-root",
+            "limits": {
+              "deadline": "2026-01-01T00:02:00Z",
+              "maxInvocations": "100",
+              "maxActiveSessions": 4,
+              "maxControlDepth": 16,
+              "maxValueDepth": 16
+            },
+            "authority": {
+              "requestedBy": {
+                "principalId": "user-example"
+              },
+              "authorizationId": "authorization-example",
+              "policyRevision": "policy-1"
+            }
+          },
+          {
+            "recoveryId": "recovery-second",
+            "recoveryNumber": "2",
+            "priorTerminationId": "termination-second-failed",
+            "frontier": [
+              {
+                "previousOccurrenceId": "occurrence-recovered-root",
+                "replacement": {
+                  "occurrence": {
+                    "occurrenceId": "occurrence-second-root",
+                    "node": {
+                      "nodeId": "review-loop"
+                    },
+                    "planRevisionId": "plan-initial",
+                    "iterationPath": []
+                  },
+                  "inputs": []
+                }
+              },
+              {
+                "previousOccurrenceId": "occurrence-recovered-failed",
+                "replacement": {
+                  "occurrence": {
+                    "occurrenceId": "occurrence-second-failed",
+                    "node": {
+                      "nodeId": "implement"
+                    },
+                    "planRevisionId": "plan-initial",
+                    "iterationPath": [],
+                    "parentOccurrenceId": "occurrence-second-root"
+                  },
+                  "inputs": []
+                }
+              }
+            ],
+            "retainedCompletions": [
+              {
+                "completionId": "completion-retained",
+                "parentOccurrenceId": "occurrence-second-root"
+              }
+            ],
+            "rootOccurrenceId": "occurrence-second-root",
+            "limits": {
+              "deadline": "2026-01-01T00:02:00Z",
+              "maxInvocations": "100",
+              "maxActiveSessions": 4,
+              "maxControlDepth": 16,
+              "maxValueDepth": 16
+            },
+            "authority": {
+              "requestedBy": {
+                "principalId": "user-example"
+              },
+              "authorizationId": "authorization-example",
+              "policyRevision": "policy-1"
+            },
+            "previousRecoveryId": "recovery-first"
+          }
+        ],
+        "currentRootOccurrenceId": "occurrence-second-root",
+        "currentRecoveryId": "recovery-second"
+      }
+    },
+    "state-regression-selected-success-covers-retained-paid-work-and-waits": {
+      "type": "trogonai.workflows.runs.state.v1alpha1.PresentRun",
+      "payload": {
+        "configuration": {
+          "runId": "run-example",
+          "plan": {
+            "planRevisionId": "plan-initial",
+            "definitionBytes": "AA==",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            },
+            "savedDefinition": {
+              "workflowId": "workflow-example",
+              "revision": "1",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            }
+          },
+          "inputs": [
+            {
+              "name": "task",
+              "value": {
+                "stringValue": "Review the result."
+              }
+            }
+          ],
+          "workspace": {
+            "workspaceId": "workspace-example",
+            "uri": "https://example.com/workspace"
+          },
+          "limits": {
+            "deadline": "2026-01-01T00:02:00Z",
+            "maxInvocations": "100",
+            "maxActiveSessions": 4,
+            "maxControlDepth": 16,
+            "maxValueDepth": 16
+          },
+          "authority": {
+            "requestedBy": {
+              "principalId": "user-example"
+            },
+            "authorizationId": "authorization-example",
+            "policyRevision": "policy-1"
+          }
+        },
+        "status": "RUN_STATUS_SUCCEEDED",
+        "currentPlanRevisionId": "plan-initial",
+        "effectiveLimits": {
+          "deadline": "2026-01-01T00:02:00Z",
+          "maxInvocations": "100",
+          "maxActiveSessions": 4,
+          "maxControlDepth": 16,
+          "maxValueDepth": 16
+        },
+        "planRevisions": [],
+        "occurrences": [
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-example",
+                "node": {
+                  "nodeId": "review-loop"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": []
+              },
+              "inputs": []
+            },
+            "completion": {
+              "completionId": "completion-example",
+              "occurrenceId": "occurrence-example",
+              "evidence": [
+                {
+                  "invocationReceiptId": "receipt-example"
+                }
+              ],
+              "completionCondition": {
+                "evaluationId": "evaluation-positive",
+                "condition": {
+                  "always": {}
+                },
+                "inputs": [],
+                "result": true
+              },
+              "succeeded": {
+                "outputs": []
+              }
+            }
+          },
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-second-paid",
+                "node": {
+                  "nodeId": "second-review"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": [],
+                "parentOccurrenceId": "occurrence-example"
+              },
+              "inputs": []
+            },
+            "completion": {
+              "completionId": "completion-second-paid",
+              "occurrenceId": "occurrence-second-paid",
+              "evidence": [
+                {
+                  "invocationReceiptId": "receipt-invocation-second-paid"
+                }
+              ],
+              "succeeded": {
+                "outputs": [
+                  {
+                    "name": "verdict",
+                    "value": {
+                      "symbolValue": {
+                        "typeName": "review.verdict",
+                        "value": "changes_requested"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "invocation": {
+              "invocationId": "invocation-first",
+              "occurrenceId": "occurrence-example",
+              "attemptNumber": "1",
+              "operationId": "operation-example",
+              "inputs": [
+                {
+                  "name": "task",
+                  "value": {
+                    "stringValue": "Review the result."
+                  },
+                  "sources": [
+                    {
+                      "runInputName": "task"
+                    }
+                  ]
+                }
+              ],
+              "launch": {
+                "commandId": "launch-example",
+                "createSession": {
+                  "sessionId": "session-example",
+                  "executionPlan": {
+                    "planBytes": "AA==",
+                    "planDigest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "workspace": {
+                    "workspaceId": "workspace-example",
+                    "uri": "https://example.com/workspace"
+                  }
+                },
+                "admission": {
+                  "agentRevision": {
+                    "agentId": "agent-example",
+                    "revisionNumber": "1",
+                    "configuration": {
+                      "configurationDigest": {
+                        "algorithm": "sha256",
+                        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      }
+                    }
+                  },
+                  "authority": {
+                    "requestedBy": {
+                      "principalId": "user-example"
+                    },
+                    "authorizationId": "authorization-example",
+                    "policyRevision": "policy-1"
+                  },
+                  "admissionId": "admission-example",
+                  "executionPlanDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "admittedAt": "2026-01-01T00:00:00Z",
+                  "validUntil": "2026-01-01T00:01:00Z"
+                }
+              },
+              "deadline": "2026-01-01T00:02:00Z"
+            },
+            "receipts": [
+              {
+                "receiptId": "receipt-example",
+                "invocationId": "invocation-first",
+                "executionPlanDigest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "sessionEvent": {
+                  "session": {
+                    "sessionId": "session-example"
+                  },
+                  "ordinal": {
+                    "value": "1"
+                  },
+                  "eventId": "event-example",
+                  "eventDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "succeeded": {
+                  "outputs": [
+                    {
+                      "name": "verdict",
+                      "value": {
+                        "symbolValue": {
+                          "typeName": "review.verdict",
+                          "value": "changes_requested"
+                        }
+                      }
+                    }
+                  ],
+                  "artifacts": []
+                },
+                "receivedAt": "2026-01-01T00:01:00Z"
+              }
+            ],
+            "currentReceiptId": "receipt-example"
+          },
+          {
+            "invocation": {
+              "invocationId": "invocation-second-paid",
+              "occurrenceId": "occurrence-second-paid",
+              "attemptNumber": "1",
+              "operationId": "operation-invocation-second-paid",
+              "inputs": [
+                {
+                  "name": "task",
+                  "value": {
+                    "stringValue": "Review the result."
+                  },
+                  "sources": [
+                    {
+                      "runInputName": "task"
+                    }
+                  ]
+                }
+              ],
+              "launch": {
+                "commandId": "launch-invocation-second-paid",
+                "createSession": {
+                  "sessionId": "session-second-paid",
+                  "executionPlan": {
+                    "planBytes": "AA==",
+                    "planDigest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "workspace": {
+                    "workspaceId": "workspace-example",
+                    "uri": "https://example.com/workspace"
+                  }
+                },
+                "admission": {
+                  "agentRevision": {
+                    "agentId": "agent-example",
+                    "revisionNumber": "1",
+                    "configuration": {
+                      "configurationDigest": {
+                        "algorithm": "sha256",
+                        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      }
+                    }
+                  },
+                  "authority": {
+                    "requestedBy": {
+                      "principalId": "user-example"
+                    },
+                    "authorizationId": "authorization-example",
+                    "policyRevision": "policy-1"
+                  },
+                  "admissionId": "admission-invocation-second-paid",
+                  "executionPlanDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "admittedAt": "2026-01-01T00:00:00Z",
+                  "validUntil": "2026-01-01T00:01:00Z"
+                }
+              },
+              "deadline": "2026-01-01T00:02:00Z"
+            },
+            "receipts": [
+              {
+                "receiptId": "receipt-invocation-second-paid",
+                "invocationId": "invocation-second-paid",
+                "executionPlanDigest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "sessionEvent": {
+                  "session": {
+                    "sessionId": "session-second-paid"
+                  },
+                  "ordinal": {
+                    "value": "1"
+                  },
+                  "eventId": "event-invocation-second-paid",
+                  "eventDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "succeeded": {
+                  "outputs": [
+                    {
+                      "name": "verdict",
+                      "value": {
+                        "symbolValue": {
+                          "typeName": "review.verdict",
+                          "value": "changes_requested"
+                        }
+                      }
+                    }
+                  ],
+                  "artifacts": []
+                },
+                "receivedAt": "2026-01-01T00:01:00Z"
+              }
+            ],
+            "currentReceiptId": "receipt-invocation-second-paid"
+          }
+        ],
+        "repeatIterations": [],
+        "decisions": [],
+        "inputs": [],
+        "guidance": [],
+        "externalWaits": [
+          {
+            "registration": {
+              "waitId": "wait-example",
+              "occurrenceId": "occurrence-example",
+              "sourceId": "source-example",
+              "resource": {
+                "resourceType": "example-resource",
+                "resourceId": "resource-example"
+              },
+              "watcher": {
+                "contract": {
+                  "contractId": "example.observation",
+                  "version": "1",
+                  "digest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+                },
+                "payload": ""
+              },
+              "parameters": [
+                {
+                  "name": "task",
+                  "value": {
+                    "stringValue": "Review the result."
+                  },
+                  "sources": [
+                    {
+                      "runInputName": "task"
+                    }
+                  ]
+                }
+              ],
+              "initialCursor": {
+                "cursorBytes": "AA==",
+                "digest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                }
+              },
+              "deadline": "2026-01-01T00:02:00Z",
+              "observationContract": {
+                "contractId": "example.observation",
+                "version": "1",
+                "digest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+              }
+            },
+            "currentCursor": {
+              "cursorBytes": "AQ==",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            },
+            "progress": [
+              {
+                "activity": {
+                  "activityId": "activity-example",
+                  "waitId": "wait-example",
+                  "sourceId": "source-example",
+                  "sourceEventId": "source-event-example",
+                  "event": {
+                    "contract": {
+                      "contractId": "example.observation",
+                      "version": "1",
+                      "digest": {
+                        "algorithm": "sha256",
+                        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      },
+                      "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+                    },
+                    "payload": ""
+                  },
+                  "eventDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "cursorBefore": {
+                    "cursorBytes": "AA==",
+                    "digest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "cursorAfter": {
+                    "cursorBytes": "AQ==",
+                    "digest": {
+                      "algorithm": "sha256",
+                      "value": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "observedAt": "2026-01-01T00:01:00Z",
+                  "outputs": [
+                    {
+                      "name": "observed",
+                      "value": {
+                        "boolValue": true
+                      }
+                    }
+                  ]
+                }
+              }
+            ],
+            "activations": [
+              {
+                "activationId": "activation-example",
+                "waitId": "wait-example",
+                "subscriptionId": "subscription-example",
+                "acceptedCursor": {
+                  "cursorBytes": "AA==",
+                  "digest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "activatedAt": "2026-01-01T00:00:00Z",
+                "leaseExpiresAt": "2026-01-01T00:02:00Z"
+              }
+            ],
+            "leases": [],
+            "cleanups": [
+              {
+                "cleanupId": "cleanup-released",
+                "waitId": "wait-example",
+                "activationId": "activation-example",
+                "released": {
+                  "releasedAt": "2026-01-01T00:02:00Z"
+                }
+              }
+            ],
+            "currentActivationId": "activation-example",
+            "resolution": {
+              "resolutionId": "resolution-example",
+              "waitId": "wait-example",
+              "satisfied": {
+                "completionCondition": {
+                  "evaluationId": "evaluation-positive",
+                  "condition": {
+                    "always": {}
+                  },
+                  "inputs": [],
+                  "result": true
+                },
+                "activityIds": [
+                  "activity-example"
+                ],
+                "outputs": []
+              }
+            }
+          },
+          {
+            "registration": {
+              "waitId": "wait-unactivated",
+              "occurrenceId": "occurrence-example",
+              "sourceId": "source-example",
+              "resource": {
+                "resourceType": "example-resource",
+                "resourceId": "resource-example"
+              },
+              "watcher": {
+                "contract": {
+                  "contractId": "example.observation",
+                  "version": "1",
+                  "digest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+                },
+                "payload": ""
+              },
+              "parameters": [
+                {
+                  "name": "task",
+                  "value": {
+                    "stringValue": "Review the result."
+                  },
+                  "sources": [
+                    {
+                      "runInputName": "task"
+                    }
+                  ]
+                }
+              ],
+              "initialCursor": {
+                "cursorBytes": "AA==",
+                "digest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                }
+              },
+              "deadline": "2026-01-01T00:02:00Z",
+              "observationContract": {
+                "contractId": "example.observation",
+                "version": "1",
+                "digest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+              }
+            },
+            "currentCursor": {
+              "cursorBytes": "AA==",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            },
+            "progress": [],
+            "activations": [],
+            "leases": [],
+            "cleanups": [
+              {
+                "cleanupId": "cleanup-unactivated",
+                "waitId": "wait-unactivated",
+                "registrationIntent": {},
+                "neverActivated": {
+                  "verificationId": "verification-example",
+                  "verifiedBy": {
+                    "principalId": "user-example"
+                  },
+                  "verifiedAt": "2026-01-01T00:02:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "timers": [],
+        "pauses": [],
+        "cancellations": [],
+        "retryAuthorizations": [],
+        "terminations": [
+          {
+            "terminationId": "termination-example",
+            "effects": [
+              {
+                "invocationId": "invocation-first",
+                "receiptId": "receipt-example"
+              },
+              {
+                "invocationId": "invocation-second-paid",
+                "receiptId": "receipt-invocation-second-paid"
+              }
+            ],
+            "succeeded": {
+              "rootCompletionId": "completion-example",
+              "outputs": [],
+              "completionCondition": {
+                "evaluationId": "evaluation-positive",
+                "condition": {
+                  "always": {}
+                },
+                "inputs": [],
+                "result": true
+              }
+            },
+            "subscriptions": [
+              {
+                "waitId": "wait-example",
+                "activationId": "activation-example",
+                "cleanupId": "cleanup-released"
+              },
+              {
+                "waitId": "wait-unactivated",
+                "registrationIntent": {},
+                "cleanupId": "cleanup-unactivated"
+              }
+            ]
+          }
+        ],
+        "recoveries": [],
+        "currentRootOccurrenceId": "occurrence-example",
+        "currentTerminationId": "termination-example"
+      }
+    },
+    "state-regression-selected-rejection-covers-retained-paid-work-and-waits": {
+      "type": "trogonai.workflows.runs.state.v1alpha1.PresentRun",
+      "payload": {
+        "configuration": {
+          "runId": "run-example",
+          "plan": {
+            "planRevisionId": "plan-initial",
+            "definitionBytes": "AA==",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            },
+            "savedDefinition": {
+              "workflowId": "workflow-example",
+              "revision": "1",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            }
+          },
+          "inputs": [
+            {
+              "name": "task",
+              "value": {
+                "stringValue": "Review the result."
+              }
+            }
+          ],
+          "workspace": {
+            "workspaceId": "workspace-example",
+            "uri": "https://example.com/workspace"
+          },
+          "limits": {
+            "deadline": "2026-01-01T00:02:00Z",
+            "maxInvocations": "100",
+            "maxActiveSessions": 4,
+            "maxControlDepth": 16,
+            "maxValueDepth": 16
+          },
+          "authority": {
+            "requestedBy": {
+              "principalId": "user-example"
+            },
+            "authorizationId": "authorization-example",
+            "policyRevision": "policy-1"
+          }
+        },
+        "status": "RUN_STATUS_REJECTED",
+        "currentPlanRevisionId": "plan-initial",
+        "effectiveLimits": {
+          "deadline": "2026-01-01T00:02:00Z",
+          "maxInvocations": "100",
+          "maxActiveSessions": 4,
+          "maxControlDepth": 16,
+          "maxValueDepth": 16
+        },
+        "planRevisions": [],
+        "occurrences": [
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-example",
+                "node": {
+                  "nodeId": "review-loop"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": []
+              },
+              "inputs": []
+            },
+            "completion": {
+              "completionId": "completion-rejected",
+              "occurrenceId": "occurrence-example",
+              "evidence": [
+                {
+                  "invocationReceiptId": "receipt-example"
+                }
+              ],
+              "rejected": {
+                "outputs": [
+                  {
+                    "name": "verdict",
+                    "value": {
+                      "symbolValue": {
+                        "typeName": "review.verdict",
+                        "value": "changes_requested"
+                      }
+                    }
+                  }
+                ],
+                "acceptance": {
+                  "evaluationId": "evaluation-negative",
+                  "condition": {
+                    "compare": {
+                      "left": {
+                        "literal": {
+                          "boolValue": false
+                        }
+                      },
+                      "operator": "COMPARISON_OPERATOR_EQUAL",
+                      "right": {
+                        "literal": {
+                          "boolValue": true
+                        }
+                      }
+                    }
+                  },
+                  "inputs": [],
+                  "result": false
+                }
+              }
+            }
+          },
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-second-paid",
+                "node": {
+                  "nodeId": "second-review"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": [],
+                "parentOccurrenceId": "occurrence-example"
+              },
+              "inputs": []
+            },
+            "completion": {
+              "completionId": "completion-second-paid",
+              "occurrenceId": "occurrence-second-paid",
+              "evidence": [
+                {
+                  "invocationReceiptId": "receipt-invocation-second-paid"
+                }
+              ],
+              "succeeded": {
+                "outputs": [
+                  {
+                    "name": "verdict",
+                    "value": {
+                      "symbolValue": {
+                        "typeName": "review.verdict",
+                        "value": "changes_requested"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "invocation": {
+              "invocationId": "invocation-first",
+              "occurrenceId": "occurrence-example",
+              "attemptNumber": "1",
+              "operationId": "operation-example",
+              "inputs": [
+                {
+                  "name": "task",
+                  "value": {
+                    "stringValue": "Review the result."
+                  },
+                  "sources": [
+                    {
+                      "runInputName": "task"
+                    }
+                  ]
+                }
+              ],
+              "launch": {
+                "commandId": "launch-example",
+                "createSession": {
+                  "sessionId": "session-example",
+                  "executionPlan": {
+                    "planBytes": "AA==",
+                    "planDigest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "workspace": {
+                    "workspaceId": "workspace-example",
+                    "uri": "https://example.com/workspace"
+                  }
+                },
+                "admission": {
+                  "agentRevision": {
+                    "agentId": "agent-example",
+                    "revisionNumber": "1",
+                    "configuration": {
+                      "configurationDigest": {
+                        "algorithm": "sha256",
+                        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      }
+                    }
+                  },
+                  "authority": {
+                    "requestedBy": {
+                      "principalId": "user-example"
+                    },
+                    "authorizationId": "authorization-example",
+                    "policyRevision": "policy-1"
+                  },
+                  "admissionId": "admission-example",
+                  "executionPlanDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "admittedAt": "2026-01-01T00:00:00Z",
+                  "validUntil": "2026-01-01T00:01:00Z"
+                }
+              },
+              "deadline": "2026-01-01T00:02:00Z"
+            },
+            "receipts": [
+              {
+                "receiptId": "receipt-example",
+                "invocationId": "invocation-first",
+                "executionPlanDigest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "sessionEvent": {
+                  "session": {
+                    "sessionId": "session-example"
+                  },
+                  "ordinal": {
+                    "value": "1"
+                  },
+                  "eventId": "event-example",
+                  "eventDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "succeeded": {
+                  "outputs": [
+                    {
+                      "name": "verdict",
+                      "value": {
+                        "symbolValue": {
+                          "typeName": "review.verdict",
+                          "value": "changes_requested"
+                        }
+                      }
+                    }
+                  ],
+                  "artifacts": []
+                },
+                "receivedAt": "2026-01-01T00:01:00Z"
+              }
+            ],
+            "currentReceiptId": "receipt-example"
+          },
+          {
+            "invocation": {
+              "invocationId": "invocation-second-paid",
+              "occurrenceId": "occurrence-second-paid",
+              "attemptNumber": "1",
+              "operationId": "operation-invocation-second-paid",
+              "inputs": [
+                {
+                  "name": "task",
+                  "value": {
+                    "stringValue": "Review the result."
+                  },
+                  "sources": [
+                    {
+                      "runInputName": "task"
+                    }
+                  ]
+                }
+              ],
+              "launch": {
+                "commandId": "launch-invocation-second-paid",
+                "createSession": {
+                  "sessionId": "session-second-paid",
+                  "executionPlan": {
+                    "planBytes": "AA==",
+                    "planDigest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "workspace": {
+                    "workspaceId": "workspace-example",
+                    "uri": "https://example.com/workspace"
+                  }
+                },
+                "admission": {
+                  "agentRevision": {
+                    "agentId": "agent-example",
+                    "revisionNumber": "1",
+                    "configuration": {
+                      "configurationDigest": {
+                        "algorithm": "sha256",
+                        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      }
+                    }
+                  },
+                  "authority": {
+                    "requestedBy": {
+                      "principalId": "user-example"
+                    },
+                    "authorizationId": "authorization-example",
+                    "policyRevision": "policy-1"
+                  },
+                  "admissionId": "admission-invocation-second-paid",
+                  "executionPlanDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "admittedAt": "2026-01-01T00:00:00Z",
+                  "validUntil": "2026-01-01T00:01:00Z"
+                }
+              },
+              "deadline": "2026-01-01T00:02:00Z"
+            },
+            "receipts": [
+              {
+                "receiptId": "receipt-invocation-second-paid",
+                "invocationId": "invocation-second-paid",
+                "executionPlanDigest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "sessionEvent": {
+                  "session": {
+                    "sessionId": "session-second-paid"
+                  },
+                  "ordinal": {
+                    "value": "1"
+                  },
+                  "eventId": "event-invocation-second-paid",
+                  "eventDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "succeeded": {
+                  "outputs": [
+                    {
+                      "name": "verdict",
+                      "value": {
+                        "symbolValue": {
+                          "typeName": "review.verdict",
+                          "value": "changes_requested"
+                        }
+                      }
+                    }
+                  ],
+                  "artifacts": []
+                },
+                "receivedAt": "2026-01-01T00:01:00Z"
+              }
+            ],
+            "currentReceiptId": "receipt-invocation-second-paid"
+          }
+        ],
+        "repeatIterations": [],
+        "decisions": [],
+        "inputs": [],
+        "guidance": [],
+        "externalWaits": [
+          {
+            "registration": {
+              "waitId": "wait-example",
+              "occurrenceId": "occurrence-example",
+              "sourceId": "source-example",
+              "resource": {
+                "resourceType": "example-resource",
+                "resourceId": "resource-example"
+              },
+              "watcher": {
+                "contract": {
+                  "contractId": "example.observation",
+                  "version": "1",
+                  "digest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+                },
+                "payload": ""
+              },
+              "parameters": [
+                {
+                  "name": "task",
+                  "value": {
+                    "stringValue": "Review the result."
+                  },
+                  "sources": [
+                    {
+                      "runInputName": "task"
+                    }
+                  ]
+                }
+              ],
+              "initialCursor": {
+                "cursorBytes": "AA==",
+                "digest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                }
+              },
+              "deadline": "2026-01-01T00:02:00Z",
+              "observationContract": {
+                "contractId": "example.observation",
+                "version": "1",
+                "digest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+              }
+            },
+            "currentCursor": {
+              "cursorBytes": "AQ==",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            },
+            "progress": [
+              {
+                "activity": {
+                  "activityId": "activity-example",
+                  "waitId": "wait-example",
+                  "sourceId": "source-example",
+                  "sourceEventId": "source-event-example",
+                  "event": {
+                    "contract": {
+                      "contractId": "example.observation",
+                      "version": "1",
+                      "digest": {
+                        "algorithm": "sha256",
+                        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      },
+                      "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+                    },
+                    "payload": ""
+                  },
+                  "eventDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "cursorBefore": {
+                    "cursorBytes": "AA==",
+                    "digest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "cursorAfter": {
+                    "cursorBytes": "AQ==",
+                    "digest": {
+                      "algorithm": "sha256",
+                      "value": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "observedAt": "2026-01-01T00:01:00Z",
+                  "outputs": [
+                    {
+                      "name": "observed",
+                      "value": {
+                        "boolValue": true
+                      }
+                    }
+                  ]
+                }
+              }
+            ],
+            "activations": [
+              {
+                "activationId": "activation-example",
+                "waitId": "wait-example",
+                "subscriptionId": "subscription-example",
+                "acceptedCursor": {
+                  "cursorBytes": "AA==",
+                  "digest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "activatedAt": "2026-01-01T00:00:00Z",
+                "leaseExpiresAt": "2026-01-01T00:02:00Z"
+              }
+            ],
+            "leases": [],
+            "cleanups": [
+              {
+                "cleanupId": "cleanup-released",
+                "waitId": "wait-example",
+                "activationId": "activation-example",
+                "released": {
+                  "releasedAt": "2026-01-01T00:02:00Z"
+                }
+              }
+            ],
+            "currentActivationId": "activation-example",
+            "resolution": {
+              "resolutionId": "resolution-example",
+              "waitId": "wait-example",
+              "satisfied": {
+                "completionCondition": {
+                  "evaluationId": "evaluation-positive",
+                  "condition": {
+                    "always": {}
+                  },
+                  "inputs": [],
+                  "result": true
+                },
+                "activityIds": [
+                  "activity-example"
+                ],
+                "outputs": []
+              }
+            }
+          },
+          {
+            "registration": {
+              "waitId": "wait-unactivated",
+              "occurrenceId": "occurrence-example",
+              "sourceId": "source-example",
+              "resource": {
+                "resourceType": "example-resource",
+                "resourceId": "resource-example"
+              },
+              "watcher": {
+                "contract": {
+                  "contractId": "example.observation",
+                  "version": "1",
+                  "digest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+                },
+                "payload": ""
+              },
+              "parameters": [
+                {
+                  "name": "task",
+                  "value": {
+                    "stringValue": "Review the result."
+                  },
+                  "sources": [
+                    {
+                      "runInputName": "task"
+                    }
+                  ]
+                }
+              ],
+              "initialCursor": {
+                "cursorBytes": "AA==",
+                "digest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                }
+              },
+              "deadline": "2026-01-01T00:02:00Z",
+              "observationContract": {
+                "contractId": "example.observation",
+                "version": "1",
+                "digest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+              }
+            },
+            "currentCursor": {
+              "cursorBytes": "AA==",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            },
+            "progress": [],
+            "activations": [],
+            "leases": [],
+            "cleanups": [
+              {
+                "cleanupId": "cleanup-unactivated",
+                "waitId": "wait-unactivated",
+                "registrationIntent": {},
+                "neverActivated": {
+                  "verificationId": "verification-example",
+                  "verifiedBy": {
+                    "principalId": "user-example"
+                  },
+                  "verifiedAt": "2026-01-01T00:02:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "timers": [],
+        "pauses": [],
+        "cancellations": [],
+        "retryAuthorizations": [],
+        "terminations": [
+          {
+            "terminationId": "termination-example",
+            "effects": [
+              {
+                "invocationId": "invocation-first",
+                "receiptId": "receipt-example"
+              },
+              {
+                "invocationId": "invocation-second-paid",
+                "receiptId": "receipt-invocation-second-paid"
+              }
+            ],
+            "subscriptions": [
+              {
+                "waitId": "wait-example",
+                "activationId": "activation-example",
+                "cleanupId": "cleanup-released"
+              },
+              {
+                "waitId": "wait-unactivated",
+                "registrationIntent": {},
+                "cleanupId": "cleanup-unactivated"
+              }
+            ],
+            "rejected": {
+              "rootCompletionId": "completion-rejected",
+              "result": {
+                "outputs": [
+                  {
+                    "name": "verdict",
+                    "value": {
+                      "symbolValue": {
+                        "typeName": "review.verdict",
+                        "value": "changes_requested"
+                      }
+                    }
+                  }
+                ],
+                "acceptance": {
+                  "evaluationId": "evaluation-negative",
+                  "condition": {
+                    "compare": {
+                      "left": {
+                        "literal": {
+                          "boolValue": false
+                        }
+                      },
+                      "operator": "COMPARISON_OPERATOR_EQUAL",
+                      "right": {
+                        "literal": {
+                          "boolValue": true
+                        }
+                      }
+                    }
+                  },
+                  "inputs": [],
+                  "result": false
+                }
+              }
+            }
+          }
+        ],
+        "recoveries": [],
+        "currentRootOccurrenceId": "occurrence-example",
+        "currentTerminationId": "termination-example"
+      }
+    },
+    "state-regression-selected-recovered-success-retains-earlier-partial-failures": {
+      "type": "trogonai.workflows.runs.state.v1alpha1.PresentRun",
+      "payload": {
+        "configuration": {
+          "runId": "run-example",
+          "plan": {
+            "planRevisionId": "plan-initial",
+            "definitionBytes": "AA==",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            },
+            "savedDefinition": {
+              "workflowId": "workflow-example",
+              "revision": "1",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            }
+          },
+          "inputs": [
+            {
+              "name": "task",
+              "value": {
+                "stringValue": "Review the result."
+              }
+            }
+          ],
+          "workspace": {
+            "workspaceId": "workspace-example",
+            "uri": "https://example.com/workspace"
+          },
+          "limits": {
+            "deadline": "2026-01-01T00:02:00Z",
+            "maxInvocations": "100",
+            "maxActiveSessions": 4,
+            "maxControlDepth": 16,
+            "maxValueDepth": 16
+          },
+          "authority": {
+            "requestedBy": {
+              "principalId": "user-example"
+            },
+            "authorizationId": "authorization-example",
+            "policyRevision": "policy-1"
+          }
+        },
+        "status": "RUN_STATUS_SUCCEEDED",
+        "currentPlanRevisionId": "plan-initial",
+        "effectiveLimits": {
+          "deadline": "2026-01-01T00:02:00Z",
+          "maxInvocations": "100",
+          "maxActiveSessions": 4,
+          "maxControlDepth": 16,
+          "maxValueDepth": 16
+        },
+        "planRevisions": [],
+        "occurrences": [
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-example",
+                "node": {
+                  "nodeId": "review-loop"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": []
+              },
+              "inputs": []
+            },
+            "completion": {
+              "completionId": "completion-original-root",
+              "occurrenceId": "occurrence-example",
+              "evidence": [
+                {
+                  "childCompletionId": "completion-failed"
+                }
+              ],
+              "failed": {
+                "reason": "FAILURE_REASON_EXECUTION_ERROR"
+              }
+            }
+          },
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-paid",
+                "node": {
+                  "nodeId": "review"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": [],
+                "parentOccurrenceId": "occurrence-example"
+              },
+              "inputs": []
+            },
+            "completion": {
+              "completionId": "completion-retained",
+              "occurrenceId": "occurrence-paid",
+              "evidence": [
+                {
+                  "invocationReceiptId": "receipt-example"
+                }
+              ],
+              "succeeded": {
+                "outputs": [
+                  {
+                    "name": "verdict",
+                    "value": {
+                      "symbolValue": {
+                        "typeName": "review.verdict",
+                        "value": "changes_requested"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-failed",
+                "node": {
+                  "nodeId": "implement"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": [],
+                "parentOccurrenceId": "occurrence-example"
+              },
+              "inputs": []
+            },
+            "completion": {
+              "completionId": "completion-failed",
+              "occurrenceId": "occurrence-failed",
+              "evidence": [
+                {
+                  "invocationReceiptId": "receipt-invocation-failed"
+                }
+              ],
+              "failed": {
+                "reason": "FAILURE_REASON_EXECUTION_ERROR"
+              }
+            }
+          },
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-recovered-root",
+                "node": {
+                  "nodeId": "review-loop"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": []
+              },
+              "inputs": []
+            },
+            "completion": {
+              "completionId": "completion-recovered-root",
+              "occurrenceId": "occurrence-recovered-root",
+              "evidence": [
+                {
+                  "childCompletionId": "completion-recovered-failed"
+                }
+              ],
+              "failed": {
+                "reason": "FAILURE_REASON_EXECUTION_ERROR"
+              }
+            }
+          },
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-recovered-failed",
+                "node": {
+                  "nodeId": "implement"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": [],
+                "parentOccurrenceId": "occurrence-recovered-root"
+              },
+              "inputs": []
+            },
+            "completion": {
+              "completionId": "completion-recovered-failed",
+              "occurrenceId": "occurrence-recovered-failed",
+              "evidence": [
+                {
+                  "invocationReceiptId": "receipt-invocation-recovered-failed"
+                }
+              ],
+              "failed": {
+                "reason": "FAILURE_REASON_EXECUTION_ERROR"
+              }
+            }
+          },
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-second-root",
+                "node": {
+                  "nodeId": "review-loop"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": []
+              },
+              "inputs": []
+            },
+            "completion": {
+              "completionId": "completion-final-root",
+              "occurrenceId": "occurrence-second-root",
+              "evidence": [
+                {
+                  "childCompletionId": "completion-retained"
+                },
+                {
+                  "childCompletionId": "completion-recovery-paid"
+                }
+              ],
+              "succeeded": {
+                "outputs": []
+              }
+            }
+          },
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-second-failed",
+                "node": {
+                  "nodeId": "implement"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": [],
+                "parentOccurrenceId": "occurrence-second-root"
+              },
+              "inputs": []
+            },
+            "completion": {
+              "completionId": "completion-recovery-paid",
+              "occurrenceId": "occurrence-second-failed",
+              "evidence": [
+                {
+                  "invocationReceiptId": "receipt-invocation-recovery-paid"
+                }
+              ],
+              "succeeded": {
+                "outputs": [
+                  {
+                    "name": "verdict",
+                    "value": {
+                      "symbolValue": {
+                        "typeName": "review.verdict",
+                        "value": "changes_requested"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "invocation": {
+              "invocationId": "invocation-first",
+              "occurrenceId": "occurrence-paid",
+              "attemptNumber": "1",
+              "operationId": "operation-example",
+              "inputs": [
+                {
+                  "name": "task",
+                  "value": {
+                    "stringValue": "Review the result."
+                  },
+                  "sources": [
+                    {
+                      "runInputName": "task"
+                    }
+                  ]
+                }
+              ],
+              "launch": {
+                "commandId": "launch-example",
+                "createSession": {
+                  "sessionId": "session-example",
+                  "executionPlan": {
+                    "planBytes": "AA==",
+                    "planDigest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "workspace": {
+                    "workspaceId": "workspace-example",
+                    "uri": "https://example.com/workspace"
+                  }
+                },
+                "admission": {
+                  "agentRevision": {
+                    "agentId": "agent-example",
+                    "revisionNumber": "1",
+                    "configuration": {
+                      "configurationDigest": {
+                        "algorithm": "sha256",
+                        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      }
+                    }
+                  },
+                  "authority": {
+                    "requestedBy": {
+                      "principalId": "user-example"
+                    },
+                    "authorizationId": "authorization-example",
+                    "policyRevision": "policy-1"
+                  },
+                  "admissionId": "admission-example",
+                  "executionPlanDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "admittedAt": "2026-01-01T00:00:00Z",
+                  "validUntil": "2026-01-01T00:01:00Z"
+                }
+              },
+              "deadline": "2026-01-01T00:02:00Z"
+            },
+            "receipts": [
+              {
+                "receiptId": "receipt-example",
+                "invocationId": "invocation-first",
+                "executionPlanDigest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "sessionEvent": {
+                  "session": {
+                    "sessionId": "session-example"
+                  },
+                  "ordinal": {
+                    "value": "1"
+                  },
+                  "eventId": "event-example",
+                  "eventDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "succeeded": {
+                  "outputs": [
+                    {
+                      "name": "verdict",
+                      "value": {
+                        "symbolValue": {
+                          "typeName": "review.verdict",
+                          "value": "changes_requested"
+                        }
+                      }
+                    }
+                  ],
+                  "artifacts": []
+                },
+                "receivedAt": "2026-01-01T00:01:00Z"
+              }
+            ],
+            "currentReceiptId": "receipt-example"
+          },
+          {
+            "invocation": {
+              "invocationId": "invocation-failed",
+              "occurrenceId": "occurrence-failed",
+              "attemptNumber": "1",
+              "operationId": "operation-invocation-failed",
+              "inputs": [
+                {
+                  "name": "task",
+                  "value": {
+                    "stringValue": "Review the result."
+                  },
+                  "sources": [
+                    {
+                      "runInputName": "task"
+                    }
+                  ]
+                }
+              ],
+              "launch": {
+                "commandId": "launch-invocation-failed",
+                "createSession": {
+                  "sessionId": "session-failed",
+                  "executionPlan": {
+                    "planBytes": "AA==",
+                    "planDigest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "workspace": {
+                    "workspaceId": "workspace-example",
+                    "uri": "https://example.com/workspace"
+                  }
+                },
+                "admission": {
+                  "agentRevision": {
+                    "agentId": "agent-example",
+                    "revisionNumber": "1",
+                    "configuration": {
+                      "configurationDigest": {
+                        "algorithm": "sha256",
+                        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      }
+                    }
+                  },
+                  "authority": {
+                    "requestedBy": {
+                      "principalId": "user-example"
+                    },
+                    "authorizationId": "authorization-example",
+                    "policyRevision": "policy-1"
+                  },
+                  "admissionId": "admission-invocation-failed",
+                  "executionPlanDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "admittedAt": "2026-01-01T00:00:00Z",
+                  "validUntil": "2026-01-01T00:01:00Z"
+                }
+              },
+              "deadline": "2026-01-01T00:02:00Z"
+            },
+            "receipts": [
+              {
+                "receiptId": "receipt-invocation-failed",
+                "invocationId": "invocation-failed",
+                "executionPlanDigest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "sessionEvent": {
+                  "session": {
+                    "sessionId": "session-failed"
+                  },
+                  "ordinal": {
+                    "value": "1"
+                  },
+                  "eventId": "event-invocation-failed",
+                  "eventDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "receivedAt": "2026-01-01T00:01:00Z",
+                "failed": {
+                  "reason": "FAILURE_REASON_EXECUTION_ERROR"
+                }
+              }
+            ],
+            "currentReceiptId": "receipt-invocation-failed"
+          },
+          {
+            "invocation": {
+              "invocationId": "invocation-recovered-failed",
+              "occurrenceId": "occurrence-recovered-failed",
+              "attemptNumber": "1",
+              "operationId": "operation-invocation-recovered-failed",
+              "inputs": [
+                {
+                  "name": "task",
+                  "value": {
+                    "stringValue": "Review the result."
+                  },
+                  "sources": [
+                    {
+                      "runInputName": "task"
+                    }
+                  ]
+                }
+              ],
+              "launch": {
+                "commandId": "launch-invocation-recovered-failed",
+                "createSession": {
+                  "sessionId": "session-recovered-failed",
+                  "executionPlan": {
+                    "planBytes": "AA==",
+                    "planDigest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "workspace": {
+                    "workspaceId": "workspace-example",
+                    "uri": "https://example.com/workspace"
+                  }
+                },
+                "admission": {
+                  "agentRevision": {
+                    "agentId": "agent-example",
+                    "revisionNumber": "1",
+                    "configuration": {
+                      "configurationDigest": {
+                        "algorithm": "sha256",
+                        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      }
+                    }
+                  },
+                  "authority": {
+                    "requestedBy": {
+                      "principalId": "user-example"
+                    },
+                    "authorizationId": "authorization-example",
+                    "policyRevision": "policy-1"
+                  },
+                  "admissionId": "admission-invocation-recovered-failed",
+                  "executionPlanDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "admittedAt": "2026-01-01T00:01:00Z",
+                  "validUntil": "2026-01-01T00:01:20Z"
+                }
+              },
+              "deadline": "2026-01-01T00:02:00Z"
+            },
+            "receipts": [
+              {
+                "receiptId": "receipt-invocation-recovered-failed",
+                "invocationId": "invocation-recovered-failed",
+                "executionPlanDigest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "sessionEvent": {
+                  "session": {
+                    "sessionId": "session-recovered-failed"
+                  },
+                  "ordinal": {
+                    "value": "1"
+                  },
+                  "eventId": "event-invocation-recovered-failed",
+                  "eventDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "receivedAt": "2026-01-01T00:01:30Z",
+                "failed": {
+                  "reason": "FAILURE_REASON_EXECUTION_ERROR"
+                }
+              }
+            ],
+            "currentReceiptId": "receipt-invocation-recovered-failed"
+          },
+          {
+            "invocation": {
+              "invocationId": "invocation-recovery-paid",
+              "occurrenceId": "occurrence-second-failed",
+              "attemptNumber": "1",
+              "operationId": "operation-invocation-recovery-paid",
+              "inputs": [
+                {
+                  "name": "task",
+                  "value": {
+                    "stringValue": "Review the result."
+                  },
+                  "sources": [
+                    {
+                      "runInputName": "task"
+                    }
+                  ]
+                }
+              ],
+              "launch": {
+                "commandId": "launch-invocation-recovery-paid",
+                "createSession": {
+                  "sessionId": "session-recovery-paid",
+                  "executionPlan": {
+                    "planBytes": "AA==",
+                    "planDigest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "workspace": {
+                    "workspaceId": "workspace-example",
+                    "uri": "https://example.com/workspace"
+                  }
+                },
+                "admission": {
+                  "agentRevision": {
+                    "agentId": "agent-example",
+                    "revisionNumber": "1",
+                    "configuration": {
+                      "configurationDigest": {
+                        "algorithm": "sha256",
+                        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      }
+                    }
+                  },
+                  "authority": {
+                    "requestedBy": {
+                      "principalId": "user-example"
+                    },
+                    "authorizationId": "authorization-example",
+                    "policyRevision": "policy-1"
+                  },
+                  "admissionId": "admission-invocation-recovery-paid",
+                  "executionPlanDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "admittedAt": "2026-01-01T00:01:35Z",
+                  "validUntil": "2026-01-01T00:01:50Z"
+                }
+              },
+              "deadline": "2026-01-01T00:02:00Z"
+            },
+            "receipts": [
+              {
+                "receiptId": "receipt-invocation-recovery-paid",
+                "invocationId": "invocation-recovery-paid",
+                "executionPlanDigest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "sessionEvent": {
+                  "session": {
+                    "sessionId": "session-recovery-paid"
+                  },
+                  "ordinal": {
+                    "value": "1"
+                  },
+                  "eventId": "event-invocation-recovery-paid",
+                  "eventDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "succeeded": {
+                  "outputs": [
+                    {
+                      "name": "verdict",
+                      "value": {
+                        "symbolValue": {
+                          "typeName": "review.verdict",
+                          "value": "changes_requested"
+                        }
+                      }
+                    }
+                  ],
+                  "artifacts": []
+                },
+                "receivedAt": "2026-01-01T00:01:55Z"
+              }
+            ],
+            "currentReceiptId": "receipt-invocation-recovery-paid"
+          }
+        ],
+        "repeatIterations": [],
+        "decisions": [],
+        "inputs": [],
+        "guidance": [],
+        "externalWaits": [
+          {
+            "registration": {
+              "waitId": "wait-example",
+              "occurrenceId": "occurrence-second-root",
+              "sourceId": "source-example",
+              "resource": {
+                "resourceType": "example-resource",
+                "resourceId": "resource-example"
+              },
+              "watcher": {
+                "contract": {
+                  "contractId": "example.observation",
+                  "version": "1",
+                  "digest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+                },
+                "payload": ""
+              },
+              "parameters": [
+                {
+                  "name": "task",
+                  "value": {
+                    "stringValue": "Review the result."
+                  },
+                  "sources": [
+                    {
+                      "runInputName": "task"
+                    }
+                  ]
+                }
+              ],
+              "initialCursor": {
+                "cursorBytes": "AA==",
+                "digest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                }
+              },
+              "deadline": "2026-01-01T00:02:00Z",
+              "observationContract": {
+                "contractId": "example.observation",
+                "version": "1",
+                "digest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+              }
+            },
+            "currentCursor": {
+              "cursorBytes": "AQ==",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            },
+            "progress": [
+              {
+                "activity": {
+                  "activityId": "activity-example",
+                  "waitId": "wait-example",
+                  "sourceId": "source-example",
+                  "sourceEventId": "source-event-example",
+                  "event": {
+                    "contract": {
+                      "contractId": "example.observation",
+                      "version": "1",
+                      "digest": {
+                        "algorithm": "sha256",
+                        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      },
+                      "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+                    },
+                    "payload": ""
+                  },
+                  "eventDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "cursorBefore": {
+                    "cursorBytes": "AA==",
+                    "digest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "cursorAfter": {
+                    "cursorBytes": "AQ==",
+                    "digest": {
+                      "algorithm": "sha256",
+                      "value": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "observedAt": "2026-01-01T00:01:00Z",
+                  "outputs": [
+                    {
+                      "name": "observed",
+                      "value": {
+                        "boolValue": true
+                      }
+                    }
+                  ]
+                }
+              }
+            ],
+            "activations": [
+              {
+                "activationId": "activation-example",
+                "waitId": "wait-example",
+                "subscriptionId": "subscription-example",
+                "acceptedCursor": {
+                  "cursorBytes": "AA==",
+                  "digest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "activatedAt": "2026-01-01T00:00:00Z",
+                "leaseExpiresAt": "2026-01-01T00:02:00Z"
+              }
+            ],
+            "leases": [],
+            "cleanups": [
+              {
+                "cleanupId": "cleanup-released",
+                "waitId": "wait-example",
+                "activationId": "activation-example",
+                "released": {
+                  "releasedAt": "2026-01-01T00:02:00Z"
+                }
+              }
+            ],
+            "currentActivationId": "activation-example",
+            "resolution": {
+              "resolutionId": "resolution-example",
+              "waitId": "wait-example",
+              "satisfied": {
+                "completionCondition": {
+                  "evaluationId": "evaluation-positive",
+                  "condition": {
+                    "always": {}
+                  },
+                  "inputs": [],
+                  "result": true
+                },
+                "activityIds": [
+                  "activity-example"
+                ],
+                "outputs": []
+              }
+            }
+          }
+        ],
+        "timers": [],
+        "pauses": [],
+        "cancellations": [],
+        "retryAuthorizations": [],
+        "terminations": [
+          {
+            "terminationId": "termination-failed",
+            "effects": [
+              {
+                "invocationId": "invocation-first",
+                "receiptId": "receipt-example"
+              },
+              {
+                "invocationId": "invocation-failed",
+                "receiptId": "receipt-invocation-failed"
+              }
+            ],
+            "failed": {
+              "failure": {
+                "reason": "FAILURE_REASON_EXECUTION_ERROR"
+              },
+              "evidence": [
+                {
+                  "childCompletionId": "completion-original-root"
+                }
+              ]
+            }
+          },
+          {
+            "terminationId": "termination-second-failed",
+            "effects": [
+              {
+                "invocationId": "invocation-first",
+                "receiptId": "receipt-example"
+              },
+              {
+                "invocationId": "invocation-failed",
+                "receiptId": "receipt-invocation-failed"
+              },
+              {
+                "invocationId": "invocation-recovered-failed",
+                "receiptId": "receipt-invocation-recovered-failed"
+              }
+            ],
+            "failed": {
+              "failure": {
+                "reason": "FAILURE_REASON_EXECUTION_ERROR"
+              },
+              "evidence": [
+                {
+                  "childCompletionId": "completion-recovered-root"
+                }
+              ]
+            }
+          },
+          {
+            "terminationId": "termination-recovered-success",
+            "effects": [
+              {
+                "invocationId": "invocation-first",
+                "receiptId": "receipt-example"
+              },
+              {
+                "invocationId": "invocation-failed",
+                "receiptId": "receipt-invocation-failed"
+              },
+              {
+                "invocationId": "invocation-recovered-failed",
+                "receiptId": "receipt-invocation-recovered-failed"
+              },
+              {
+                "invocationId": "invocation-recovery-paid",
+                "receiptId": "receipt-invocation-recovery-paid"
+              }
+            ],
+            "succeeded": {
+              "rootCompletionId": "completion-final-root",
+              "outputs": [],
+              "completionCondition": {
+                "evaluationId": "evaluation-positive",
+                "condition": {
+                  "always": {}
+                },
+                "inputs": [],
+                "result": true
+              }
+            },
+            "subscriptions": [
+              {
+                "waitId": "wait-example",
+                "activationId": "activation-example",
+                "cleanupId": "cleanup-released"
+              }
+            ]
+          }
+        ],
+        "recoveries": [
+          {
+            "recoveryId": "recovery-first",
+            "recoveryNumber": "1",
+            "priorTerminationId": "termination-failed",
+            "frontier": [
+              {
+                "previousOccurrenceId": "occurrence-example",
+                "replacement": {
+                  "occurrence": {
+                    "occurrenceId": "occurrence-recovered-root",
+                    "node": {
+                      "nodeId": "review-loop"
+                    },
+                    "planRevisionId": "plan-initial",
+                    "iterationPath": []
+                  },
+                  "inputs": []
+                }
+              },
+              {
+                "previousOccurrenceId": "occurrence-failed",
+                "replacement": {
+                  "occurrence": {
+                    "occurrenceId": "occurrence-recovered-failed",
+                    "node": {
+                      "nodeId": "implement"
+                    },
+                    "planRevisionId": "plan-initial",
+                    "iterationPath": [],
+                    "parentOccurrenceId": "occurrence-recovered-root"
+                  },
+                  "inputs": []
+                }
+              }
+            ],
+            "retainedCompletions": [
+              {
+                "completionId": "completion-retained",
+                "parentOccurrenceId": "occurrence-recovered-root"
+              }
+            ],
+            "rootOccurrenceId": "occurrence-recovered-root",
+            "limits": {
+              "deadline": "2026-01-01T00:02:00Z",
+              "maxInvocations": "100",
+              "maxActiveSessions": 4,
+              "maxControlDepth": 16,
+              "maxValueDepth": 16
+            },
+            "authority": {
+              "requestedBy": {
+                "principalId": "user-example"
+              },
+              "authorizationId": "authorization-example",
+              "policyRevision": "policy-1"
+            }
+          },
+          {
+            "recoveryId": "recovery-second",
+            "recoveryNumber": "2",
+            "priorTerminationId": "termination-second-failed",
+            "frontier": [
+              {
+                "previousOccurrenceId": "occurrence-recovered-root",
+                "replacement": {
+                  "occurrence": {
+                    "occurrenceId": "occurrence-second-root",
+                    "node": {
+                      "nodeId": "review-loop"
+                    },
+                    "planRevisionId": "plan-initial",
+                    "iterationPath": []
+                  },
+                  "inputs": []
+                }
+              },
+              {
+                "previousOccurrenceId": "occurrence-recovered-failed",
+                "replacement": {
+                  "occurrence": {
+                    "occurrenceId": "occurrence-second-failed",
+                    "node": {
+                      "nodeId": "implement"
+                    },
+                    "planRevisionId": "plan-initial",
+                    "iterationPath": [],
+                    "parentOccurrenceId": "occurrence-second-root"
+                  },
+                  "inputs": []
+                }
+              }
+            ],
+            "retainedCompletions": [
+              {
+                "completionId": "completion-retained",
+                "parentOccurrenceId": "occurrence-second-root"
+              }
+            ],
+            "rootOccurrenceId": "occurrence-second-root",
+            "limits": {
+              "deadline": "2026-01-01T00:02:00Z",
+              "maxInvocations": "100",
+              "maxActiveSessions": 4,
+              "maxControlDepth": 16,
+              "maxValueDepth": 16
+            },
+            "authority": {
+              "requestedBy": {
+                "principalId": "user-example"
+              },
+              "authorizationId": "authorization-example",
+              "policyRevision": "policy-1"
+            },
+            "previousRecoveryId": "recovery-first"
+          }
+        ],
+        "currentRootOccurrenceId": "occurrence-second-root",
+        "currentRecoveryId": "recovery-second",
+        "currentTerminationId": "termination-recovered-success"
+      }
     }
   },
   "cases": [
@@ -2637,6 +7136,581 @@
             "activationId": "activation-example",
             "indeterminate": {
               "detail": "Awaiting release evidence."
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "state-regression-retains-one-retry-authorization",
+      "template": "state-regression-retains-one-retry-authorization"
+    },
+    {
+      "name": "state-regression-rejects-duplicate-retry-identity",
+      "template": "state-regression-retains-one-retry-authorization",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/retryAuthorizations/-",
+          "value": {
+            "retryAuthorizationId": "retry-example",
+            "occurrenceId": "occurrence-example",
+            "previousInvocationId": "invocation-first",
+            "automaticPolicy": {},
+            "notBefore": "2026-01-01T00:01:00Z"
+          }
+        }
+      ],
+      "violations": [
+        "retry, recovery, plan revision, and scoped repeat iteration identities must be unique"
+      ]
+    },
+    {
+      "name": "state-regression-retains-unique-revised-plan",
+      "template": "state-regression-retains-unique-revised-plan"
+    },
+    {
+      "name": "state-regression-rejects-duplicate-revised-plan-identity",
+      "template": "state-regression-retains-unique-revised-plan",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/planRevisions/-",
+          "value": {
+            "expectedPlanRevisionId": "plan-initial",
+            "plan": {
+              "planRevisionId": "plan-revised",
+              "previousPlanRevisionId": "plan-initial",
+              "definitionBytes": "AQ==",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            },
+            "pauseId": "pause-example",
+            "frozenOccurrenceIds": [
+              "occurrence-completed"
+            ],
+            "continuations": [
+              {
+                "boundaryOccurrenceId": "occurrence-container",
+                "nextNode": {
+                  "nodeId": "remaining-work"
+                },
+                "inputs": []
+              }
+            ],
+            "revisedBy": {
+              "principalId": "user-example"
+            }
+          }
+        }
+      ],
+      "violations": [
+        "retry, recovery, plan revision, and scoped repeat iteration identities must be unique"
+      ]
+    },
+    {
+      "name": "state-regression-rejects-revised-plan-reusing-initial-identity",
+      "template": "state-regression-retains-unique-revised-plan",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/planRevisions/-",
+          "value": {
+            "expectedPlanRevisionId": "plan-revised",
+            "plan": {
+              "planRevisionId": "plan-initial",
+              "previousPlanRevisionId": "plan-revised",
+              "definitionBytes": "AA==",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            },
+            "pauseId": "pause-example",
+            "frozenOccurrenceIds": [
+              "occurrence-completed"
+            ],
+            "continuations": [
+              {
+                "boundaryOccurrenceId": "occurrence-container",
+                "nextNode": {
+                  "nodeId": "remaining-work"
+                },
+                "inputs": []
+              }
+            ],
+            "revisedBy": {
+              "principalId": "user-example"
+            }
+          }
+        },
+        {
+          "op": "replace",
+          "path": "/currentPlanRevisionId",
+          "value": "plan-initial"
+        }
+      ],
+      "violations": [
+        "retry, recovery, plan revision, and scoped repeat iteration identities must be unique"
+      ]
+    },
+    {
+      "name": "state-regression-independent-repeat-occurrences-share-iteration-index",
+      "template": "state-regression-independent-repeat-occurrences-share-iteration-index"
+    },
+    {
+      "name": "state-regression-rejects-duplicate-scoped-repeat-iteration",
+      "template": "state-regression-independent-repeat-occurrences-share-iteration-index",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/repeatIterations/-",
+          "value": {
+            "repeatOccurrenceId": "occurrence-example",
+            "iteration": "1",
+            "variables": [
+              {
+                "name": "task",
+                "value": {
+                  "stringValue": "Review the result."
+                },
+                "sources": [
+                  {
+                    "runInputName": "task"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "violations": [
+        "retry, recovery, plan revision, and scoped repeat iteration identities must be unique"
+      ]
+    },
+    {
+      "name": "state-regression-repeat-owner-has-distinct-iteration-indices",
+      "template": "state-regression-repeat-owner-has-distinct-iteration-indices"
+    },
+    {
+      "name": "state-regression-recovery-retains-paid-completion-and-prior-failure",
+      "template": "state-regression-recovery-retains-paid-completion-and-prior-failure"
+    },
+    {
+      "name": "state-regression-recovery-retains-historical-partial-termination",
+      "template": "state-regression-recovery-retains-historical-partial-termination"
+    },
+    {
+      "name": "state-regression-rejects-duplicate-recovery-number",
+      "template": "state-regression-recovery-retains-historical-partial-termination",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recoveries/1/recoveryNumber",
+          "value": "1"
+        },
+        {
+          "op": "remove",
+          "path": "/recoveries/1/previousRecoveryId"
+        }
+      ],
+      "violations": [
+        "retry, recovery, plan revision, and scoped repeat iteration identities must be unique"
+      ]
+    },
+    {
+      "name": "state-regression-rejects-reused-recovery-identity",
+      "template": "state-regression-recovery-retains-historical-partial-termination",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/recoveries/-",
+          "value": {
+            "recoveryId": "recovery-first",
+            "recoveryNumber": "3",
+            "priorTerminationId": "termination-second-failed",
+            "frontier": [
+              {
+                "previousOccurrenceId": "occurrence-second-root",
+                "replacement": {
+                  "occurrence": {
+                    "occurrenceId": "occurrence-third-root",
+                    "node": {
+                      "nodeId": "review-loop"
+                    },
+                    "planRevisionId": "plan-initial",
+                    "iterationPath": []
+                  },
+                  "inputs": []
+                }
+              },
+              {
+                "previousOccurrenceId": "occurrence-second-failed",
+                "replacement": {
+                  "occurrence": {
+                    "occurrenceId": "occurrence-third-failed",
+                    "node": {
+                      "nodeId": "implement"
+                    },
+                    "planRevisionId": "plan-initial",
+                    "iterationPath": [],
+                    "parentOccurrenceId": "occurrence-third-root"
+                  },
+                  "inputs": []
+                }
+              }
+            ],
+            "retainedCompletions": [
+              {
+                "completionId": "completion-retained",
+                "parentOccurrenceId": "occurrence-third-root"
+              }
+            ],
+            "rootOccurrenceId": "occurrence-third-root",
+            "limits": {
+              "deadline": "2026-01-01T00:02:00Z",
+              "maxInvocations": "100",
+              "maxActiveSessions": 4,
+              "maxControlDepth": 16,
+              "maxValueDepth": 16
+            },
+            "authority": {
+              "requestedBy": {
+                "principalId": "user-example"
+              },
+              "authorizationId": "authorization-example",
+              "policyRevision": "policy-1"
+            },
+            "previousRecoveryId": "recovery-second"
+          }
+        },
+        {
+          "op": "add",
+          "path": "/occurrences/-",
+          "value": {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-third-root",
+                "node": {
+                  "nodeId": "review-loop"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": []
+              },
+              "inputs": []
+            }
+          }
+        },
+        {
+          "op": "add",
+          "path": "/occurrences/-",
+          "value": {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-third-failed",
+                "node": {
+                  "nodeId": "implement"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": [],
+                "parentOccurrenceId": "occurrence-third-root"
+              },
+              "inputs": []
+            }
+          }
+        },
+        {
+          "op": "replace",
+          "path": "/currentRootOccurrenceId",
+          "value": "occurrence-third-root"
+        },
+        {
+          "op": "replace",
+          "path": "/currentRecoveryId",
+          "value": "recovery-first"
+        }
+      ],
+      "violations": [
+        "retry, recovery, plan revision, and scoped repeat iteration identities must be unique"
+      ]
+    },
+    {
+      "name": "state-regression-selected-success-covers-retained-paid-work-and-waits",
+      "template": "state-regression-selected-success-covers-retained-paid-work-and-waits"
+    },
+    {
+      "name": "state-regression-selected-rejection-covers-retained-paid-work-and-waits",
+      "template": "state-regression-selected-rejection-covers-retained-paid-work-and-waits"
+    },
+    {
+      "name": "state-regression-rejects-selected-success-missing-invocation",
+      "template": "state-regression-selected-success-covers-retained-paid-work-and-waits",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/terminations/0/effects/1"
+        }
+      ],
+      "violations": [
+        "selected accepted or rejected termination must cover every retained invocation"
+      ]
+    },
+    {
+      "name": "state-regression-rejects-selected-success-missing-activation",
+      "template": "state-regression-selected-success-covers-retained-paid-work-and-waits",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/terminations/0/subscriptions/0"
+        }
+      ],
+      "violations": [
+        "selected accepted or rejected termination must cover known activations or unactivated wait registrations"
+      ]
+    },
+    {
+      "name": "state-regression-rejects-selected-success-missing-unactivated-wait",
+      "template": "state-regression-selected-success-covers-retained-paid-work-and-waits",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/terminations/0/subscriptions/1"
+        }
+      ],
+      "violations": [
+        "selected accepted or rejected termination must cover known activations or unactivated wait registrations"
+      ]
+    },
+    {
+      "name": "state-regression-rejects-selected-rejection-missing-invocation",
+      "template": "state-regression-selected-rejection-covers-retained-paid-work-and-waits",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/terminations/0/effects/1"
+        }
+      ],
+      "violations": [
+        "selected accepted or rejected termination must cover every retained invocation"
+      ]
+    },
+    {
+      "name": "state-regression-rejects-selected-rejection-missing-activation",
+      "template": "state-regression-selected-rejection-covers-retained-paid-work-and-waits",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/terminations/0/subscriptions/0"
+        }
+      ],
+      "violations": [
+        "selected accepted or rejected termination must cover known activations or unactivated wait registrations"
+      ]
+    },
+    {
+      "name": "state-regression-rejects-selected-rejection-missing-unactivated-wait",
+      "template": "state-regression-selected-rejection-covers-retained-paid-work-and-waits",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/terminations/0/subscriptions/1"
+        }
+      ],
+      "violations": [
+        "selected accepted or rejected termination must cover known activations or unactivated wait registrations"
+      ]
+    },
+    {
+      "name": "state-regression-rejects-selected-success-unknown-invocation-receipt",
+      "template": "state-regression-selected-success-covers-retained-paid-work-and-waits",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/terminations/0/effects/0/receiptId",
+          "value": "receipt-unknown"
+        }
+      ],
+      "violations": [
+        "selected accepted or rejected termination must reference retained determinate invocation receipts"
+      ]
+    },
+    {
+      "name": "state-regression-rejects-selected-success-other-invocation-receipt",
+      "template": "state-regression-selected-success-covers-retained-paid-work-and-waits",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/terminations/0/effects/0/receiptId",
+          "value": "receipt-invocation-second-paid"
+        }
+      ],
+      "violations": [
+        "selected accepted or rejected termination must reference retained determinate invocation receipts"
+      ]
+    },
+    {
+      "name": "state-regression-rejects-selected-success-superseded-indeterminate-receipt",
+      "template": "state-regression-selected-success-covers-retained-paid-work-and-waits",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/invocations/0/receipts/0",
+          "value": {
+            "receiptId": "receipt-indeterminate",
+            "invocationId": "invocation-first",
+            "executionPlanDigest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            },
+            "sessionEvent": {
+              "session": {
+                "sessionId": "session-example"
+              },
+              "ordinal": {
+                "value": "1"
+              },
+              "eventId": "event-example",
+              "eventDigest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            },
+            "receivedAt": "2026-01-01T00:01:00Z",
+            "indeterminate": {
+              "detail": "The initial outcome was not known."
+            }
+          }
+        },
+        {
+          "op": "replace",
+          "path": "/terminations/0/effects/0/receiptId",
+          "value": "receipt-indeterminate"
+        }
+      ],
+      "violations": [
+        "selected accepted or rejected termination must reference retained determinate invocation receipts"
+      ]
+    },
+    {
+      "name": "state-regression-rejects-selected-success-unretained-invocation",
+      "template": "state-regression-selected-success-covers-retained-paid-work-and-waits",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/terminations/0/effects/-",
+          "value": {
+            "invocationId": "invocation-unretained",
+            "receiptId": "receipt-unretained"
+          }
+        }
+      ],
+      "violations": [
+        "selected accepted or rejected termination must reference retained determinate invocation receipts"
+      ]
+    },
+    {
+      "name": "state-regression-rejects-selected-success-unknown-cleanup",
+      "template": "state-regression-selected-success-covers-retained-paid-work-and-waits",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/terminations/0/subscriptions/0/cleanupId",
+          "value": "cleanup-unknown"
+        }
+      ],
+      "violations": [
+        "selected accepted or rejected termination must reference released activation or never-activated registration cleanup"
+      ]
+    },
+    {
+      "name": "state-regression-rejects-selected-success-other-wait-cleanup",
+      "template": "state-regression-selected-success-covers-retained-paid-work-and-waits",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/terminations/0/subscriptions/0/cleanupId",
+          "value": "cleanup-unactivated"
+        }
+      ],
+      "violations": [
+        "selected accepted or rejected termination must reference released activation or never-activated registration cleanup"
+      ]
+    },
+    {
+      "name": "state-regression-rejects-selected-success-indeterminate-activation-cleanup",
+      "template": "state-regression-selected-success-covers-retained-paid-work-and-waits",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/externalWaits/0/cleanups/0/released"
+        },
+        {
+          "op": "add",
+          "path": "/externalWaits/0/cleanups/0/indeterminate",
+          "value": {
+            "detail": "The release is not verified."
+          }
+        }
+      ],
+      "violations": [
+        "selected accepted or rejected termination must reference released activation or never-activated registration cleanup"
+      ]
+    },
+    {
+      "name": "state-regression-rejects-selected-success-unproven-registration-cleanup",
+      "template": "state-regression-selected-success-covers-retained-paid-work-and-waits",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/externalWaits/1/cleanups/0/neverActivated"
+        },
+        {
+          "op": "add",
+          "path": "/externalWaits/1/cleanups/0/indeterminate",
+          "value": {
+            "detail": "The registration outcome is not verified."
+          }
+        }
+      ],
+      "violations": [
+        "selected accepted or rejected termination must reference released activation or never-activated registration cleanup"
+      ]
+    },
+    {
+      "name": "state-regression-rejects-selected-success-unretained-subscription",
+      "template": "state-regression-selected-success-covers-retained-paid-work-and-waits",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/terminations/0/subscriptions/-",
+          "value": {
+            "waitId": "wait-unretained",
+            "activationId": "activation-unretained",
+            "cleanupId": "cleanup-unretained"
+          }
+        }
+      ],
+      "violations": [
+        "selected accepted or rejected termination must reference released activation or never-activated registration cleanup"
+      ]
+    },
+    {
+      "name": "state-regression-selected-recovered-success-retains-earlier-partial-failures",
+      "template": "state-regression-selected-recovered-success-retains-earlier-partial-failures"
+    },
+    {
+      "name": "state-regression-selected-success-retains-historical-unreconciled-receipt",
+      "template": "state-regression-selected-recovered-success-retains-earlier-partial-failures",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/terminations/0/effects/0",
+          "value": {
+            "invocationId": "invocation-first",
+            "unreconciled": {
+              "detail": "The paid work result was not yet verified at the prior failure boundary."
             }
           }
         }

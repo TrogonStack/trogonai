@@ -214,6 +214,31 @@ message CancellationState {
 
 message PresentRun {
   option (buf.validate.message).cel = {
+    id: "present_run.unique_execution_identity"
+    message: "retry, recovery, plan revision, and scoped repeat iteration identities must be unique"
+    expression: "this.retry_authorizations.map(item, item.retry_authorization_id).unique() && this.recoveries.map(item, item.recovery_id).unique() && this.recoveries.map(item, item.recovery_number).unique() && this.plan_revisions.map(item, item.plan.plan_revision_id).unique() && this.plan_revisions.all(item, item.plan.plan_revision_id != this.configuration.plan.plan_revision_id) && this.repeat_iterations.all(item, this.repeat_iterations.filter(other, other.repeat_occurrence_id == item.repeat_occurrence_id && other.iteration == item.iteration).size() == 1)"
+  };
+  option (buf.validate.message).cel = {
+    id: "present_run.terminal_invocation_coverage"
+    message: "selected accepted or rejected termination must cover every retained invocation"
+    expression: "!has(this.current_termination_id) || this.terminations.filter(termination, termination.termination_id == this.current_termination_id && (has(termination.succeeded) || has(termination.rejected))).all(termination, this.invocations.all(invocation, termination.effects.exists(effect, effect.invocation_id == invocation.invocation.invocation_id)))"
+  };
+  option (buf.validate.message).cel = {
+    id: "present_run.terminal_invocation_evidence"
+    message: "selected accepted or rejected termination must reference retained determinate invocation receipts"
+    expression: "!has(this.current_termination_id) || this.terminations.filter(termination, termination.termination_id == this.current_termination_id && (has(termination.succeeded) || has(termination.rejected))).all(termination, termination.effects.all(effect, has(effect.receipt_id) && this.invocations.exists(invocation, invocation.invocation.invocation_id == effect.invocation_id && invocation.receipts.exists(receipt, receipt.receipt_id == effect.receipt_id && !has(receipt.indeterminate)))))"
+  };
+  option (buf.validate.message).cel = {
+    id: "present_run.terminal_subscription_coverage"
+    message: "selected accepted or rejected termination must cover known activations or unactivated wait registrations"
+    expression: "!has(this.current_termination_id) || this.terminations.filter(termination, termination.termination_id == this.current_termination_id && (has(termination.succeeded) || has(termination.rejected))).all(termination, this.external_waits.all(wait, wait.activations.size() == 0 ? termination.subscriptions.exists(settlement, settlement.wait_id == wait.registration.wait_id && has(settlement.registration_intent)) : wait.activations.all(activation, termination.subscriptions.exists(settlement, settlement.wait_id == wait.registration.wait_id && has(settlement.activation_id) && settlement.activation_id == activation.activation_id))))"
+  };
+  option (buf.validate.message).cel = {
+    id: "present_run.terminal_subscription_evidence"
+    message: "selected accepted or rejected termination must reference released activation or never-activated registration cleanup"
+    expression: "!has(this.current_termination_id) || this.terminations.filter(termination, termination.termination_id == this.current_termination_id && (has(termination.succeeded) || has(termination.rejected))).all(termination, termination.subscriptions.all(settlement, has(settlement.cleanup_id) && this.external_waits.exists(wait, wait.registration.wait_id == settlement.wait_id && (has(settlement.activation_id) ? (wait.activations.exists(activation, activation.activation_id == settlement.activation_id) && wait.cleanups.exists(cleanup, cleanup.cleanup_id == settlement.cleanup_id && has(cleanup.activation_id) && cleanup.activation_id == settlement.activation_id && has(cleanup.released))) : (wait.activations.size() == 0 && has(settlement.registration_intent) && wait.cleanups.exists(cleanup, cleanup.cleanup_id == settlement.cleanup_id && has(cleanup.registration_intent) && has(cleanup.never_activated)))))))"
+  };
+  option (buf.validate.message).cel = {
     id: "present_run.launch_parent"
     message: "parent-linked launches must use the coordinating Session; unattached runs create independent Sessions"
     expression: "this.invocations.all(item, has(this.configuration.main_session) ? (has(item.invocation.launch.create_child_session) && item.invocation.launch.create_child_session.parent_session_id == this.configuration.main_session.session_id) : has(item.invocation.launch.create_session))"

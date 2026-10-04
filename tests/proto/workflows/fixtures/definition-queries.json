@@ -169,6 +169,48 @@
         "pageSize": 50,
         "pageToken": "AQ=="
       }
+    },
+    "definition-query-get-wait-error-progress": {
+      "type": "trogonai.workflows.definitions.queries.v1alpha1.QueryError",
+      "payload": {
+        "code": "QUERY_ERROR_CODE_PROJECTION_UNAVAILABLE",
+        "message": "The definition read did not reach the requested ordinal before the wait budget expired.",
+        "reachedProgress": {
+          "generation": "projection-example",
+          "checkpoint": "AQ==",
+          "observedAt": "2026-01-01T00:01:00Z",
+          "applied": [
+            {
+              "workflowId": "workflow-example",
+              "ordinal": "2"
+            }
+          ],
+          "condition": "FRESHNESS_CONDITION_LAGGING"
+        }
+      }
+    },
+    "definition-query-list-wait-error-progress": {
+      "type": "trogonai.workflows.definitions.queries.v1alpha1.QueryError",
+      "payload": {
+        "code": "QUERY_ERROR_CODE_PROJECTION_UNAVAILABLE",
+        "message": "The definition list did not reach the requested position before the wait budget expired.",
+        "reachedProgress": {
+          "generation": "projection-example",
+          "checkpoint": "AQ==",
+          "observedAt": "2026-01-01T00:01:00Z",
+          "applied": [
+            {
+              "workflowId": "workflow-example",
+              "ordinal": "2"
+            },
+            {
+              "workflowId": "workflow-other",
+              "ordinal": "7"
+            }
+          ],
+          "condition": "FRESHNESS_CONDITION_LAGGING"
+        }
+      }
     }
   },
   "cases": [
@@ -339,6 +381,150 @@
       ],
       "violations": [
         "must be at least 1 bytes"
+      ]
+    },
+    {
+      "name": "definition-query-list-with-consistency-wait",
+      "template": "definition-query-list",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/consistency",
+          "value": {
+            "atLeast": {
+              "workflowId": "workflow-example",
+              "ordinal": "4"
+            },
+            "maxWait": "5s"
+          }
+        }
+      ]
+    },
+    {
+      "name": "definition-query-get-wait-error-progress",
+      "template": "definition-query-get-wait-error-progress"
+    },
+    {
+      "name": "definition-query-list-wait-error-progress",
+      "template": "definition-query-list-wait-error-progress"
+    },
+    {
+      "name": "definition-query-wait-error-without-progress",
+      "template": "definition-query-get-wait-error-progress",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/reachedProgress"
+        }
+      ]
+    },
+    {
+      "name": "definition-query-wait-error-before-any-applied-position",
+      "template": "definition-query-get-wait-error-progress",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/reachedProgress/applied",
+          "value": []
+        }
+      ]
+    },
+    {
+      "name": "definition-query-wait-error-rejects-empty-generation",
+      "template": "definition-query-get-wait-error-progress",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/reachedProgress/generation",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "generation: must be at least 1 characters"
+      ]
+    },
+    {
+      "name": "definition-query-wait-error-rejects-empty-checkpoint",
+      "template": "definition-query-get-wait-error-progress",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/reachedProgress/checkpoint",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "checkpoint: must be at least 1 bytes"
+      ]
+    },
+    {
+      "name": "definition-query-wait-error-rejects-empty-workflow-position",
+      "template": "definition-query-get-wait-error-progress",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/reachedProgress/applied/0/workflowId",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "workflow_id: must be at least 1 characters"
+      ]
+    },
+    {
+      "name": "definition-query-wait-error-rejects-zero-position-ordinal",
+      "template": "definition-query-get-wait-error-progress",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/reachedProgress/applied/0/ordinal",
+          "value": "0"
+        }
+      ],
+      "violations": [
+        "ordinal: must be greater than 0"
+      ]
+    },
+    {
+      "name": "definition-query-wait-error-rejects-conflicting-workflow-positions",
+      "template": "definition-query-list-wait-error-progress",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/reachedProgress/applied/1/workflowId",
+          "value": "workflow-example"
+        }
+      ],
+      "violations": [
+        "applied workflow positions must be unique"
+      ]
+    },
+    {
+      "name": "definition-query-wait-error-rejects-unspecified-condition",
+      "template": "definition-query-get-wait-error-progress",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/reachedProgress/condition",
+          "value": "FRESHNESS_CONDITION_UNSPECIFIED"
+        }
+      ],
+      "violations": [
+        "condition: must not be in list [0]"
+      ]
+    },
+    {
+      "name": "definition-query-wait-error-rejects-unknown-condition",
+      "template": "definition-query-get-wait-error-progress",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/reachedProgress/condition",
+          "value": 99
+        }
+      ],
+      "violations": [
+        "condition: value must be one of the defined enum values"
       ]
     },
     {

@@ -241,6 +241,13 @@ business-rejected completion require determinate Session effects and verified
 subscription release or absence. Missing activation evidence alone proves
 neither.
 
+The selected accepted or business-rejected termination accounts for every
+retained invocation and known activation, or for the registration intent of a
+wait with no activation. Its settlement references must resolve to retained
+determinate results, released subscriptions, or verified never-activated
+registrations. Historical failure markers remain snapshots of their generation;
+recovery and late reconciliation can add work and evidence after those markers.
+
 ## Reads are bounded and disclose freshness
 
 The run query package defines detail, list, node, interaction, and history body
@@ -274,9 +281,10 @@ checkpoint because ordinals on independent streams cannot be compared as a
 global position. A read that cannot satisfy its requested position fails on the
 transport error channel rather than returning a stale success.
 
-An unsatisfied consistency wait can report reached projection progress on the
-error channel without asserting success. History also distinguishes verified
-Session results from rejected launches that never created a Session.
+An unsatisfied definition or run consistency wait can report reached projection
+progress on the error channel without asserting success. History also
+distinguishes verified Session results from rejected launches that never created
+a Session.
 
 Page tokens are opaque authenticated continuations. A server binds them to the
 caller, filters, ordering, contract version, projection generation, and pinned
