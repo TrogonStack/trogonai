@@ -6,7 +6,7 @@ use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use rmcp::model::{
     ClientCapabilities, ClientConfig, ClientRequest, Implementation, InitializeRequest, InitializeRequestParams,
-    InitializeResult, JsonRpcMessage, NumberOrString, ServerCapabilities, ServerResult,
+    InitializeResult, JsonRpcMessage, NumberOrString, ProtocolVersion, ServerCapabilities, ServerResult,
 };
 use rmcp::service::RoleServer;
 use tower::ServiceExt;
@@ -115,10 +115,13 @@ fn mcp_config() -> Config {
 
 fn initialize_request() -> ClientJsonRpcMessage {
     ClientJsonRpcMessage::request(
-        ClientRequest::InitializeRequest(InitializeRequest::new(InitializeRequestParams::new(
-            ClientCapabilities::default(),
-            Implementation::new("test-client", "1.0.0"),
-        ))),
+        ClientRequest::InitializeRequest(InitializeRequest::new(
+            InitializeRequestParams::new(
+                ClientCapabilities::default(),
+                Implementation::new("test-client", "1.0.0"),
+            )
+            .with_protocol_version(ProtocolVersion::V_2025_11_25),
+        )),
         NumberOrString::Number(1),
     )
 }
@@ -127,6 +130,7 @@ fn initialize_response() -> ServerJsonRpcMessage {
     ServerJsonRpcMessage::response(
         ServerResult::InitializeResult(
             InitializeResult::new(ServerCapabilities::default())
+                .with_protocol_version(ProtocolVersion::V_2025_11_25)
                 .with_server_info(Implementation::new("remote-server", "1.0.0")),
         ),
         NumberOrString::Number(1),
