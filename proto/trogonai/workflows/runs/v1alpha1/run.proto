@@ -1,0 +1,213 @@
+edition = "2024";
+
+package trogonai.workflows.runs.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/session/sessions/v1alpha1/artifact.proto";
+import "trogonai/session/sessions/v1alpha1/session_ordinal.proto";
+import "trogonai/session/sessions/v1alpha1/workspace.proto";
+import "trogonai/workflows/definitions/v1alpha1/digest.proto";
+import "trogonai/workflows/definitions/v1alpha1/value.proto";
+import "trogonai/workflows/definitions/v1alpha1/workflow_definition.proto";
+
+// Readers verify the exact bytes before decoding WorkflowDefinition. A saved
+// definition is provenance; ad hoc plans require no registry identity.
+message RunPlan {
+  option (buf.validate.message).cel = {
+    id: "run_plan.saved_digest"
+    message: "saved definition and plan digests must agree"
+    expression: "!has(this.saved_definition) || this.saved_definition.digest == this.digest"
+  };
+  option (buf.validate.message).cel = {
+    id: "run_plan.lineage"
+    message: "a plan revision cannot be its own predecessor"
+    expression: "!has(this.previous_plan_revision_id) || this.previous_plan_revision_id != this.plan_revision_id"
+  };
+
+  string plan_revision_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  bytes definition_bytes = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.min_len = 1
+  ];
+  trogonai.workflows.definitions.v1alpha1.Digest digest = 3 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.workflows.definitions.v1alpha1.WorkflowDefinitionRef saved_definition = 4;
+  string previous_plan_revision_id = 5 [(buf.validate.field).string.min_len = 1];
+}
+
+message ActorRef {
+  oneof actor {
+    option (buf.validate.oneof).required = true;
+
+    string principal_id = 1 [(buf.validate.field).string.min_len = 1];
+    string service_id = 2 [(buf.validate.field).string.min_len = 1];
+    string session_id = 3 [(buf.validate.field).string.min_len = 1];
+  }
+}
+
+message SessionRef {
+  string session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// An ordinal addresses an appended fact on the Session's logical stream.
+// Admission verifies identity, type, digest, and ownership against that stream.
+message SessionEventRef {
+  SessionRef session = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.session.sessions.v1alpha1.SessionOrdinal ordinal = 2 [features.field_presence = LEGACY_REQUIRED];
+  string event_id = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  trogonai.workflows.definitions.v1alpha1.Digest event_digest = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ContextArtifact {
+  SessionEventRef recorded_at = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.session.sessions.v1alpha1.ArtifactRef artifact = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Authorization references contain no credentials. Dispatch must still pass
+// live policy and Agent lifecycle admission; this snapshot never grants it.
+message RunAuthority {
+  ActorRef requested_by = 1 [features.field_presence = LEGACY_REQUIRED];
+  string authorization_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string policy_revision = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+message RunLimits {
+  option (buf.validate.message).cel = {
+    id: "run_limits.concurrency"
+    message: "active Sessions cannot exceed the total invocation bound"
+    expression: "uint(this.max_active_sessions) <= this.max_invocations"
+  };
+
+  google.protobuf.Timestamp deadline = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint64 max_invocations = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  uint32 max_active_sessions = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32.gt = 0
+  ];
+  uint32 max_control_depth = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32.gt = 0
+  ];
+  uint32 max_value_depth = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32.gt = 0
+  ];
+}
+
+message RunConfiguration {
+  option (buf.validate.message).cel = {
+    id: "run_configuration.initial_plan"
+    message: "the initial plan has no predecessor"
+    expression: "!has(this.plan.previous_plan_revision_id)"
+  };
+  option (buf.validate.message).cel = {
+    id: "run_configuration.unique_inputs"
+    message: "run input names must be unique"
+    expression: "this.inputs.map(value, value.name).unique()"
+  };
+
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  RunPlan plan = 2 [features.field_presence = LEGACY_REQUIRED];
+  repeated trogonai.workflows.definitions.v1alpha1.NamedValue inputs = 3;
+  // When present this is the coordinating Session, not a replacement owner
+  // for its messages, operations, model settings, or usage history.
+  SessionRef main_session = 4;
+  repeated ContextArtifact context = 5;
+  trogonai.session.sessions.v1alpha1.WorkspaceRef workspace = 6 [features.field_presence = LEGACY_REQUIRED];
+  RunLimits limits = 7 [features.field_presence = LEGACY_REQUIRED];
+  RunAuthority authority = 8 [features.field_presence = LEGACY_REQUIRED];
+  string display_name = 9 [(buf.validate.field).string.min_len = 1];
+}
+
+message InvocationOutputSource {
+  string invocation_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string output_name = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+message InputResponseSource {
+  string request_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string response_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+message ExternalActivitySource {
+  string wait_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string activity_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+message RepeatVariableSource {
+  string repeat_occurrence_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  uint64 iteration = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  string variable_name = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+message ValueSource {
+  oneof source {
+    option (buf.validate.oneof).required = true;
+
+    string run_input_name = 1 [(buf.validate.field).string.min_len = 1];
+    InvocationOutputSource invocation_output = 2;
+    InputResponseSource input_response = 3;
+    ExternalActivitySource external_activity = 4;
+    ContextArtifact artifact = 5;
+    string node_completion_id = 6 [(buf.validate.field).string.min_len = 1];
+    string plan_revision_id = 7 [(buf.validate.field).string.min_len = 1];
+    RepeatVariableSource repeat_variable = 8;
+  }
+}
+
+message ResolvedValue {
+  string name = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  trogonai.workflows.definitions.v1alpha1.WorkflowValue value = 2 [features.field_presence = LEGACY_REQUIRED];
+  repeated ValueSource sources = 3 [(buf.validate.field).repeated.min_items = 1];
+}

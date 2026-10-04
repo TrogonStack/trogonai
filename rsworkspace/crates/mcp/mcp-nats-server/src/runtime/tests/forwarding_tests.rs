@@ -14,7 +14,7 @@ pub(super) fn proxy_endpoint() -> (
         McpNatsProxyService {
             command_tx,
             operation_timeout: Duration::from_millis(100),
-            server_info: Arc::new(RwLock::new(ServerInfo::default())),
+            server_info: Arc::new(RwLock::new(ServerConfig::default())),
             _nats: PhantomData,
         },
         command_rx,
@@ -245,8 +245,10 @@ async fn proxy_request_wait_is_bounded_by_the_operation_timeout() {
 async fn discovery_preserves_supported_versions_and_capabilities() {
     let (_client, server) = tokio::io::duplex(1024);
     let running = rmcp::service::serve_directly(NoopServerHandler, server, None);
-    let expected =
-        DiscoverResult::from_server_info(vec![rmcp::model::ProtocolVersion::V_2026_07_28], ServerInfo::default());
+    let expected = DiscoverResult::from_server_info(
+        vec![rmcp::model::ProtocolVersion::V_2026_07_28],
+        ServerConfig::default(),
+    );
     for reply in [
         Ok(ServerResult::DiscoverResult(expected.clone())),
         Ok(ServerResult::empty(())),

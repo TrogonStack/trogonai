@@ -1,0 +1,325 @@
+edition = "2024";
+
+package trogonai.workflows.definitions.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/empty.proto";
+import "trogonai/agents/agents/v1alpha1/agent_revision.proto";
+import "trogonai/workflows/definitions/v1alpha1/condition.proto";
+import "trogonai/workflows/definitions/v1alpha1/digest.proto";
+import "trogonai/workflows/definitions/v1alpha1/node_ref.proto";
+import "trogonai/workflows/definitions/v1alpha1/policy.proto";
+import "trogonai/workflows/definitions/v1alpha1/value.proto";
+
+message WorkflowDefinitionRef {
+  string workflow_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  uint64 revision = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  Digest digest = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Bytes encode WorkflowDefinition and are the sole source of the decoded plan.
+// Admission and replay verify the digest before decoding, then validate every
+// local constraint and the complete control-flow and dependency contract.
+message StoredWorkflowDefinition {
+  WorkflowDefinitionRef reference = 1 [features.field_presence = LEGACY_REQUIRED];
+  bytes definition_bytes = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.min_len = 1
+  ];
+}
+
+// Saved recipes and ad hoc plans share this payload. Admission proves a rooted,
+// reachable, acyclic, single-owner control tree within max_control_depth; loops
+// repeat their body rather than introduce graph cycles. It also proves lexical
+// input/output scope, declared type compatibility, producer ordering, repeat
+// feedback validity, schema depth, pinned Agent availability, and exact registered
+// contract support. Parallel siblings cannot consume each other's outputs.
+// Unsupported versions, unknown fields, and unknown behavior reject admission
+// and replay; preserving opaque bytes alone does not make unknown behavior safe.
+// The constraints below prove local shape, not those admission guarantees.
+message WorkflowDefinition {
+  option (buf.validate.message).cel = {
+    id: "workflow_definition.unique_nodes"
+    message: "node ids must be unique"
+    expression: "this.nodes.map(node, node.reference.node_id).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "workflow_definition.root_exists"
+    message: "the root must name a declared node"
+    expression: "this.nodes.exists(node, node.reference == this.root)"
+  };
+  option (buf.validate.message).cel = {
+    id: "workflow_definition.children_exist"
+    message: "control children must name another declared node"
+    expression: "this.nodes.all(node, (!has(node.sequence) || node.sequence.children.all(child, child != node.reference && this.nodes.exists(target, target.reference == child))) && (!has(node.parallel) || node.parallel.branches.all(child, child != node.reference && this.nodes.exists(target, target.reference == child))) && (!has(node.repeat) || (node.repeat.body != node.reference && this.nodes.exists(target, target.reference == node.repeat.body))))"
+  };
+  option (buf.validate.message).cel = {
+    id: "workflow_definition.single_owner"
+    message: "the root must have no parent and every other node must have exactly one parent"
+    expression: "this.nodes.all(child, this.nodes.filter(parent, (has(parent.sequence) && parent.sequence.children.exists(ref, ref == child.reference)) || (has(parent.parallel) && parent.parallel.branches.exists(ref, ref == child.reference)) || (has(parent.repeat) && parent.repeat.body == child.reference)).size() == (child.reference == this.root ? 0 : 1))"
+  };
+  option (buf.validate.message).cel = {
+    id: "workflow_definition.unique_ports"
+    message: "workflow input and output names must be unique in their respective scopes"
+    expression: "this.inputs.map(input, input.name).unique() && this.outputs.map(output, output.name).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "workflow_definition.output_bindings"
+    message: "output binding targets must be unique declared outputs and cover required outputs"
+    expression: "this.output_bindings.map(binding, binding.target_name).unique() && this.output_bindings.all(binding, this.outputs.exists(output, output.name == binding.target_name)) && this.outputs.filter(output, output.required).all(output, this.output_bindings.exists(binding, binding.target_name == output.name))"
+  };
+
+  NodeRef root = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated WorkflowNode nodes = 2 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 4096
+  }];
+  repeated ValueDeclaration inputs = 3;
+  repeated ValueDeclaration outputs = 4;
+  repeated ValueBinding output_bindings = 5;
+  RunPolicy policy = 6 [features.field_presence = LEGACY_REQUIRED];
+  uint32 contract_version = 7 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32.const = 1
+  ];
+}
+
+message WorkflowNode {
+  option (buf.validate.message).cel = {
+    id: "workflow_node.unique_ports"
+    message: "node input and output names must be unique in their respective scopes"
+    expression: "this.inputs.map(input, input.name).unique() && this.outputs.map(output, output.name).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "workflow_node.input_bindings"
+    message: "input binding targets must be unique declared inputs and cover required inputs"
+    expression: "this.input_bindings.map(binding, binding.target_name).unique() && this.input_bindings.all(binding, this.inputs.exists(input, input.name == binding.target_name)) && this.inputs.filter(input, input.required).all(input, this.input_bindings.exists(binding, binding.target_name == input.name))"
+  };
+  option (buf.validate.message).cel = {
+    id: "workflow_node.output_bindings"
+    message: "output binding targets must be unique declared outputs"
+    expression: "this.output_bindings.map(binding, binding.target_name).unique() && this.output_bindings.all(binding, this.outputs.exists(output, output.name == binding.target_name))"
+  };
+  option (buf.validate.message).cel = {
+    id: "workflow_node.composite_outputs"
+    message: "composite nodes must bind their required outputs; leaf nodes capture outputs directly"
+    expression: "(has(this.agent_step) || has(this.wait)) ? this.output_bindings.size() == 0 : this.outputs.filter(output, output.required).all(output, this.output_bindings.exists(binding, binding.target_name == output.name))"
+  };
+  option (buf.validate.message).cel = {
+    id: "workflow_node.agent_capture"
+    message: "an agent step declaring outputs requires an exact result capture contract"
+    expression: "!has(this.agent_step) || this.outputs.size() == 0 || has(this.agent_step.result_capture)"
+  };
+  option (buf.validate.message).cel = {
+    id: "workflow_node.delay_outputs"
+    message: "a delay wait cannot declare captured outputs"
+    expression: "!has(this.wait) || !has(this.wait.delay) || this.outputs.size() == 0"
+  };
+  option (buf.validate.message).cel = {
+    id: "workflow_node.input_wait_output"
+    message: "an input wait must declare its single required response output with the exact response schema"
+    expression: "!has(this.wait) || !has(this.wait.input) || (this.outputs.size() == 1 && this.outputs[0].name == this.wait.input.output_name && this.outputs[0].required && this.outputs[0].schema == this.wait.input.response_schema)"
+  };
+  option (buf.validate.message).cel = {
+    id: "workflow_node.delay_timeout"
+    message: "a delay wait duration must not exceed its node timeout"
+    expression: "!has(this.wait) || !has(this.wait.delay) || this.wait.delay.duration <= this.timeout"
+  };
+
+  NodeRef reference = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated ValueDeclaration inputs = 2;
+  repeated ValueDeclaration outputs = 3;
+  repeated ValueBinding input_bindings = 4;
+  repeated ValueBinding output_bindings = 5;
+  google.protobuf.Duration timeout = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).duration.gt = {}
+  ];
+  oneof kind {
+    option (buf.validate.oneof).required = true;
+
+    AgentStep agent_step = 7;
+    SequenceNode sequence = 8;
+    ParallelNode parallel = 9;
+    RepeatNode repeat = 10;
+    WaitNode wait = 11;
+  }
+}
+
+// Each occurrence starts an independent Session with the pinned Agent revision.
+// Native model and effort settings remain Agent runtime-owned. A registered
+// capture validates the Session result into declared outputs before completion.
+// Completion conditions may reject business output without claiming a Session
+// execution failure. Absent acceptance means schema-valid completion is accepted.
+// acceptance reads that current result through captured_output; node_output is
+// unavailable until the node has settled.
+message AgentStep {
+  trogonai.agents.agents.v1alpha1.AgentRevisionRef agent_revision = 1 [features.field_presence = LEGACY_REQUIRED];
+  PromptTemplate prompt = 2 [features.field_presence = LEGACY_REQUIRED];
+  RetryPolicy retry = 3 [features.field_presence = LEGACY_REQUIRED];
+  RegisteredValue result_capture = 4;
+  Condition acceptance = 5;
+}
+
+// Children start in declaration order after the previous child is accepted.
+// Rejection or failure stops the sequence; later children acquire no occurrences.
+// A rejection preserves the child's validated outputs and remains a business
+// result, permitting a containing repeat to evaluate or start another iteration.
+message SequenceNode {
+  option (buf.validate.message).cel = {
+    id: "sequence_node.unique_children"
+    message: "sequence children must be unique"
+    expression: "this.children.map(child, child.node_id).unique()"
+  };
+
+  repeated NodeRef children = 1 [(buf.validate.field).repeated.min_items = 1];
+}
+
+// ALL accepts only when every branch succeeds; one failure decides failure.
+// ALL_SETTLED accepts after every branch terminates and exposes typed outcomes.
+// FIRST_SUCCESS accepts the first accepted branch, failing if none succeeds.
+// Branch order remains stable; winning occurrence identity is recorded by runs.
+message ParallelNode {
+  option (buf.validate.message).cel = {
+    id: "parallel_node.unique_branches"
+    message: "parallel branches must be unique"
+    expression: "this.branches.map(branch, branch.node_id).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "parallel_node.concurrency"
+    message: "parallel concurrency must not exceed the branch count"
+    expression: "this.max_concurrency <= uint(this.branches.size())"
+  };
+  option (buf.validate.message).cel = {
+    id: "parallel_node.all_settled_waits"
+    message: "an all-settled join must wait for siblings without cancelling them"
+    expression: "this.join != 2 || this.siblings == 1"
+  };
+
+  repeated NodeRef branches = 1 [(buf.validate.field).repeated.min_items = 1];
+  JoinPolicy join = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  SiblingDisposition siblings = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  uint32 max_concurrency = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32.gt = 0
+  ];
+}
+
+// Accepted or rejected body completion precedes until evaluation; execution
+// failure follows its failure policy instead. Rejected body outputs are usable
+// only when all required bindings resolve. Iteration numbers begin at 1; retries
+// preserve the number. All next variable values resolve against one previous
+// snapshot and completed body before atomic advance.
+message RepeatNode {
+  option (buf.validate.message).cel = {
+    id: "repeat_node.unique_variables"
+    message: "repeat variable names must be unique"
+    expression: "this.variables.map(variable, variable.declaration.name).unique()"
+  };
+
+  NodeRef body = 1 [features.field_presence = LEGACY_REQUIRED];
+  Condition until = 2 [features.field_presence = LEGACY_REQUIRED];
+  uint32 max_iterations = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32.gt = 0
+  ];
+  IterationLimitPolicy on_limit = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  repeated RepeatVariable variables = 5;
+}
+
+message RepeatVariable {
+  ValueDeclaration declaration = 1 [features.field_presence = LEGACY_REQUIRED];
+  ValueExpression initial = 2 [features.field_presence = LEGACY_REQUIRED];
+  ValueExpression next = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message WaitNode {
+  oneof trigger {
+    option (buf.validate.oneof).required = true;
+
+    ExternalEventWait external_event = 1;
+    InputWait input = 2;
+    DelayWait delay = 3;
+  }
+}
+
+// Watcher configuration is not a URL or an executable script. The registered
+// watcher resolves authorized resources at admission and emits only the pinned
+// observation contract. Runs preserve resolved subscriptions, cursors, event
+// identities, captured values, deadlines, and the satisfied condition evidence.
+// Each observation is validated against this node's declared output schemas;
+// until reads it through captured_output, before any outputs become settled.
+message ExternalEventWait {
+  RegisteredValue watcher = 1 [features.field_presence = LEGACY_REQUIRED];
+  RegisteredContractRef observation_contract = 2 [features.field_presence = LEGACY_REQUIRED];
+  Condition until = 3 [features.field_presence = LEGACY_REQUIRED];
+  oneof delivery {
+    option (buf.validate.oneof).required = true;
+
+    google.protobuf.Empty subscribed = 4;
+    google.protobuf.Duration poll_interval = 5 [(buf.validate.field).duration.gt = {}];
+  }
+}
+
+// A response is a typed value validated against response_schema. Routing to a
+// parent Session does not itself authorize that Session to answer for a user.
+message InputWait {
+  PromptTemplate question = 1 [features.field_presence = LEGACY_REQUIRED];
+  ValueSchema response_schema = 2 [features.field_presence = LEGACY_REQUIRED];
+  InputAudience audience = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  string output_name = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+enum InputAudience {
+  INPUT_AUDIENCE_UNSPECIFIED = 0;
+  INPUT_AUDIENCE_USER = 1;
+  INPUT_AUDIENCE_PARENT_SESSION = 2;
+  INPUT_AUDIENCE_USER_OR_PARENT_SESSION = 3;
+}
+
+message DelayWait {
+  google.protobuf.Duration duration = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).duration.gt = {}
+  ];
+}
+
+enum WorkflowDefinitionLifecycle {
+  WORKFLOW_DEFINITION_LIFECYCLE_UNSPECIFIED = 0;
+  WORKFLOW_DEFINITION_LIFECYCLE_ACTIVE = 1;
+  WORKFLOW_DEFINITION_LIFECYCLE_ARCHIVED = 2;
+}

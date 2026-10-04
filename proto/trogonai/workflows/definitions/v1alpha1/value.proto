@@ -1,0 +1,318 @@
+edition = "2024";
+
+package trogonai.workflows.definitions.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/session/sessions/v1alpha1/artifact.proto";
+import "trogonai/workflows/definitions/v1alpha1/digest.proto";
+import "trogonai/workflows/definitions/v1alpha1/node_ref.proto";
+
+// A registered contract resolves to one immutable implementation and complete
+// payload descriptor. Admission rejects unknown contracts and validates payloads;
+// possessing this reference grants no execution or resource access.
+message RegisteredContractRef {
+  string contract_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string version = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  Digest digest = 3 [features.field_presence = LEGACY_REQUIRED];
+  string payload_type_url = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+message RegisteredValue {
+  RegisteredContractRef contract = 1 [features.field_presence = LEGACY_REQUIRED];
+  bytes payload = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Artifact ids are Session-local. A cross-step handoff keeps the Session identity
+// and exact stored artifact claim-check instead of observing a mutable path.
+message ArtifactValue {
+  string session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  trogonai.session.sessions.v1alpha1.ArtifactRef artifact = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Symbols are members of a declared SymbolSchema, including review verdicts.
+// They cannot substitute for transport failures or invocation lifecycle states.
+message SymbolValue {
+  string type_name = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string value = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+message WorkflowValue {
+  oneof value {
+    option (buf.validate.oneof).required = true;
+
+    string string_value = 1;
+    bool bool_value = 2;
+    sint64 integer_value = 3;
+    double decimal_value = 4 [(buf.validate.field).double.finite = true];
+    bytes bytes_value = 5;
+    google.protobuf.Empty null_value = 6;
+    ArtifactValue artifact_value = 7;
+    ValueList list_value = 8;
+    ValueObject object_value = 9;
+    SymbolValue symbol_value = 10;
+    RegisteredValue registered_value = 11;
+    google.protobuf.Timestamp timestamp_value = 12;
+    google.protobuf.Duration duration_value = 13;
+    NodeResult node_result_value = 14 [(buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }];
+  }
+}
+
+message ValueList {
+  repeated WorkflowValue values = 1;
+}
+
+message ValueObject {
+  map<string, WorkflowValue> fields = 1 [(buf.validate.field).map.keys.string.min_len = 1];
+}
+
+message NamedValue {
+  string name = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  WorkflowValue value = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Schema compatibility, registered payloads, recursion depth, and actual encoded
+// size require the admitted contract validator. Unsupported schema arms reject.
+message ValueSchema {
+  uint64 max_encoded_bytes = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  oneof kind {
+    option (buf.validate.oneof).required = true;
+
+    ScalarType scalar = 2 [(buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }];
+    ListSchema list = 3;
+    ObjectSchema object = 4;
+    SymbolSchema symbol = 5;
+    RegisteredContractRef registered = 6;
+    google.protobuf.Empty artifact = 7;
+    google.protobuf.Empty node_result = 8;
+  }
+}
+
+enum ScalarType {
+  SCALAR_TYPE_UNSPECIFIED = 0;
+  SCALAR_TYPE_STRING = 1;
+  SCALAR_TYPE_BOOL = 2;
+  SCALAR_TYPE_INTEGER = 3;
+  SCALAR_TYPE_DECIMAL = 4;
+  SCALAR_TYPE_BYTES = 5;
+  SCALAR_TYPE_NULL = 6;
+  SCALAR_TYPE_TIMESTAMP = 7;
+  SCALAR_TYPE_DURATION = 8;
+}
+
+message ListSchema {
+  option (buf.validate.message).cel = {
+    id: "list_schema.item_bounds"
+    message: "min_items must not exceed max_items"
+    expression: "this.min_items <= this.max_items"
+  };
+
+  ValueSchema item = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint32 min_items = 2 [features.field_presence = LEGACY_REQUIRED];
+  uint32 max_items = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ObjectSchema {
+  option (buf.validate.message).cel = {
+    id: "object_schema.unique_fields"
+    message: "object field names must be unique"
+    expression: "this.fields.map(field, field.name).unique()"
+  };
+
+  repeated ValueDeclaration fields = 1;
+}
+
+message SymbolSchema {
+  string type_name = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  repeated string values = 2 [(buf.validate.field).repeated = {
+    min_items: 1
+    unique: true
+    items: {
+      string: {min_len: 1}
+    }
+  }];
+}
+
+// These names are scoped contract keys, not display labels. Objects are closed:
+// undeclared fields and schema-incompatible values reject admission or capture.
+message ValueDeclaration {
+  string name = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ValueSchema schema = 2 [features.field_presence = LEGACY_REQUIRED];
+  bool required = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message NodeOutputRef {
+  option (buf.validate.message).cel = {
+    id: "node_output_ref.previous_iteration_scope"
+    message: "a previous-iteration reference must name exactly the repeat frame it selects"
+    expression: "has(this.repeat_node) == (this.selection == 2)"
+  };
+
+  NodeRef node = 1 [features.field_presence = LEGACY_REQUIRED];
+  string output_name = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  OutputSelection selection = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  NodeRef repeat_node = 4;
+}
+
+enum OutputSelection {
+  OUTPUT_SELECTION_UNSPECIFIED = 0;
+  OUTPUT_SELECTION_CURRENT_ITERATION = 1;
+  OUTPUT_SELECTION_PREVIOUS_ITERATION = 2;
+}
+
+// A settled branch has a typed result even when it produced no usable outputs.
+// Detailed failure and cancellation evidence remains run-owned.
+enum NodeResult {
+  NODE_RESULT_UNSPECIFIED = 0;
+  NODE_RESULT_ACCEPTED = 1;
+  NODE_RESULT_REJECTED = 2;
+  NODE_RESULT_FAILED = 3;
+  NODE_RESULT_CANCELLED = 4;
+  NODE_RESULT_INDETERMINATE = 5;
+}
+
+message NodeResultRef {
+  option (buf.validate.message).cel = {
+    id: "node_result_ref.previous_iteration_scope"
+    message: "a previous-iteration result must name exactly the repeat frame it selects"
+    expression: "has(this.repeat_node) == (this.selection == 2)"
+  };
+
+  NodeRef node = 1 [features.field_presence = LEGACY_REQUIRED];
+  OutputSelection selection = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  NodeRef repeat_node = 3;
+}
+
+message RepeatVariableRef {
+  NodeRef repeat_node = 1 [features.field_presence = LEGACY_REQUIRED];
+  string variable_name = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// Admission proves lexical scope and execution order. CURRENT_ITERATION resolves
+// only a completed producer in the same enclosing iteration frames; outside a
+// repeat it resolves that run's sole occurrence. PREVIOUS_ITERATION requires an
+// named enclosing repeat and its completed previous iteration. Missing is not null.
+// A fallback applies only when the selected value is absent, never on type errors.
+// captured_output resolves this leaf's current schema-validated result or watcher
+// observation before settlement. It is legal only within AgentStep.acceptance or
+// ExternalEventWait.until, never a prompt, another node, or a later condition.
+message ValueReference {
+  oneof source {
+    option (buf.validate.oneof).required = true;
+
+    string workflow_input = 1 [(buf.validate.field).string.min_len = 1];
+    string node_input = 2 [(buf.validate.field).string.min_len = 1];
+    NodeOutputRef node_output = 3;
+    RepeatVariableRef repeat_variable = 4;
+    NodeResultRef node_result = 6;
+    string captured_output = 7 [(buf.validate.field).string.min_len = 1];
+  }
+  WorkflowValue fallback = 5;
+}
+
+message ValueExpression {
+  oneof expression {
+    option (buf.validate.oneof).required = true;
+
+    WorkflowValue literal = 1;
+    ValueReference reference = 2;
+    PromptTemplate template = 3;
+  }
+}
+
+message ValueBinding {
+  string target_name = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ValueExpression expression = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Templates are data, never an evaluated scripting language. TEXT accepts only
+// string values; PROTO_JSON renders canonical protobuf JSON for the typed value.
+// Artifact handoffs remain typed inputs, rather than implicit path substitutions.
+message PromptTemplate {
+  repeated TemplatePart parts = 1 [(buf.validate.field).repeated.min_items = 1];
+}
+
+message TemplatePart {
+  oneof part {
+    option (buf.validate.oneof).required = true;
+
+    string literal = 1;
+    RenderedValue value = 2;
+  }
+}
+
+message RenderedValue {
+  ValueReference reference = 1 [features.field_presence = LEGACY_REQUIRED];
+  ValueRendering rendering = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+enum ValueRendering {
+  VALUE_RENDERING_UNSPECIFIED = 0;
+  VALUE_RENDERING_TEXT = 1;
+  VALUE_RENDERING_PROTO_JSON = 2;
+}

@@ -106,7 +106,7 @@ async fn client_notifications_preserve_parameters_and_metadata_through_sdk_conte
     let (client_io, server_io) = tokio::io::duplex(16384);
     let (proxy, mut commands) = proxy_endpoint();
     let server = rmcp::service::serve_directly(proxy, server_io, None);
-    let client = rmcp::service::serve_directly((), client_io, Some(ServerInfo::default().into()));
+    let client = rmcp::service::serve_directly((), client_io, Some(ServerConfig::default().into()));
     for notification in [
         json!({"method": "notifications/progress", "params": {"progressToken": "work", "progress": 2.0, "total": 4.0}}),
         json!({"method": "notifications/initialized"}),

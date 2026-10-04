@@ -1,0 +1,588 @@
+{
+  "templates": {
+    "wait-registration-intent": {
+      "type": "trogonai.workflows.runs.v1alpha1.ExternalWaitRegistration",
+      "payload": {
+        "waitId": "wait-example",
+        "occurrenceId": "occurrence-example",
+        "sourceId": "source-example",
+        "resource": {
+          "resourceType": "example-resource",
+          "resourceId": "resource-example"
+        },
+        "watcher": {
+          "contract": {
+            "contractId": "example.observation",
+            "version": "1",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            },
+            "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+          },
+          "payload": ""
+        },
+        "parameters": [
+          {
+            "name": "task",
+            "value": {
+              "stringValue": "Review the result."
+            },
+            "sources": [
+              {
+                "runInputName": "task"
+              }
+            ]
+          }
+        ],
+        "initialCursor": {
+          "cursorBytes": "AA==",
+          "digest": {
+            "algorithm": "sha256",
+            "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          }
+        },
+        "deadline": "2026-01-01T00:02:00Z",
+        "observationContract": {
+          "contractId": "example.observation",
+          "version": "1",
+          "digest": {
+            "algorithm": "sha256",
+            "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          },
+          "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+        }
+      }
+    },
+    "wait-activity-and-cursor-receipt": {
+      "type": "trogonai.workflows.runs.v1alpha1.ExternalActivityReceipt",
+      "payload": {
+        "activityId": "activity-example",
+        "waitId": "wait-example",
+        "sourceId": "source-example",
+        "sourceEventId": "source-event-example",
+        "event": {
+          "contract": {
+            "contractId": "example.observation",
+            "version": "1",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            },
+            "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+          },
+          "payload": ""
+        },
+        "eventDigest": {
+          "algorithm": "sha256",
+          "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        },
+        "cursorBefore": {
+          "cursorBytes": "AA==",
+          "digest": {
+            "algorithm": "sha256",
+            "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          }
+        },
+        "cursorAfter": {
+          "cursorBytes": "AQ==",
+          "digest": {
+            "algorithm": "sha256",
+            "value": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          }
+        },
+        "observedAt": "2026-01-01T00:01:00Z",
+        "outputs": [
+          {
+            "name": "observed",
+            "value": {
+              "boolValue": true
+            }
+          }
+        ]
+      }
+    },
+    "wait-cursor-progress-without-activity": {
+      "type": "trogonai.workflows.runs.v1alpha1.ExternalCursorAdvance",
+      "payload": {
+        "advancementId": "cursor-advance-example",
+        "waitId": "wait-example",
+        "cursorBefore": {
+          "cursorBytes": "AA==",
+          "digest": {
+            "algorithm": "sha256",
+            "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          }
+        },
+        "cursorAfter": {
+          "cursorBytes": "AQ==",
+          "digest": {
+            "algorithm": "sha256",
+            "value": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          }
+        },
+        "observedAt": "2026-01-01T00:01:00Z"
+      }
+    },
+    "wait-resolution-satisfied": {
+      "type": "trogonai.workflows.runs.v1alpha1.ExternalWaitResolution",
+      "payload": {
+        "resolutionId": "resolution-example",
+        "waitId": "wait-example",
+        "satisfied": {
+          "completionCondition": {
+            "evaluationId": "evaluation-positive",
+            "condition": {
+              "always": {}
+            },
+            "inputs": [],
+            "result": true
+          },
+          "activityIds": [
+            "activity-example"
+          ],
+          "outputs": []
+        }
+      }
+    },
+    "wait-activation-receipt": {
+      "type": "trogonai.workflows.runs.v1alpha1.ExternalWaitActivation",
+      "payload": {
+        "activationId": "activation-example",
+        "waitId": "wait-example",
+        "subscriptionId": "subscription-example",
+        "acceptedCursor": {
+          "cursorBytes": "AA==",
+          "digest": {
+            "algorithm": "sha256",
+            "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          }
+        },
+        "activatedAt": "2026-01-01T00:00:00Z",
+        "leaseExpiresAt": "2026-01-01T00:02:00Z"
+      }
+    },
+    "wait-renewed-subscription-lease": {
+      "type": "trogonai.workflows.runs.v1alpha1.ExternalSubscriptionLease",
+      "payload": {
+        "leaseId": "lease-example",
+        "waitId": "wait-example",
+        "activationId": "activation-example",
+        "renewedAt": "2026-01-01T00:01:00Z",
+        "leaseExpiresAt": "2026-01-01T00:02:00Z"
+      }
+    },
+    "wait-subscription-cleanup-released": {
+      "type": "trogonai.workflows.runs.v1alpha1.ExternalSubscriptionCleanup",
+      "payload": {
+        "cleanupId": "cleanup-example",
+        "waitId": "wait-example",
+        "activationId": "activation-example",
+        "released": {
+          "releasedAt": "2026-01-01T00:02:00Z"
+        }
+      }
+    },
+    "wait-subscription-cleanup-indeterminate": {
+      "type": "trogonai.workflows.runs.v1alpha1.ExternalSubscriptionCleanup",
+      "payload": {
+        "cleanupId": "cleanup-unknown",
+        "waitId": "wait-example",
+        "activationId": "activation-example",
+        "indeterminate": {
+          "detail": "Awaiting cleanup evidence."
+        }
+      }
+    },
+    "timer-registration": {
+      "type": "trogonai.workflows.runs.v1alpha1.TimerWaitRegistration",
+      "payload": {
+        "timerId": "timer-example",
+        "occurrenceId": "occurrence-example",
+        "dueAt": "2026-01-01T00:01:00Z",
+        "deadline": "2026-01-01T00:02:00Z"
+      }
+    },
+    "timer-resolution-fired": {
+      "type": "trogonai.workflows.runs.v1alpha1.TimerWaitResolution",
+      "payload": {
+        "resolutionId": "timer-resolution-example",
+        "timerId": "timer-example",
+        "fired": {
+          "dueAt": "2026-01-01T00:01:00Z",
+          "observedAt": "2026-01-01T00:01:00Z"
+        }
+      }
+    },
+    "wait-registration-intent-proven-never-activated": {
+      "type": "trogonai.workflows.runs.v1alpha1.ExternalSubscriptionCleanup",
+      "payload": {
+        "cleanupId": "cleanup-unactivated",
+        "waitId": "wait-example",
+        "registrationIntent": {},
+        "neverActivated": {
+          "verificationId": "verification-example",
+          "verifiedBy": {
+            "principalId": "user-example"
+          },
+          "verifiedAt": "2026-01-01T00:02:00Z"
+        }
+      }
+    },
+    "wait-registration-intent-cleanup-awaits-evidence": {
+      "type": "trogonai.workflows.runs.v1alpha1.ExternalSubscriptionCleanup",
+      "payload": {
+        "cleanupId": "cleanup-pending",
+        "waitId": "wait-example",
+        "registrationIntent": {},
+        "indeterminate": {
+          "detail": "Awaiting subscription attachment evidence."
+        }
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "wait-registration-intent",
+      "template": "wait-registration-intent"
+    },
+    {
+      "name": "wait-registration-rejects-self-predecessor",
+      "template": "wait-registration-intent",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/previousWaitId",
+          "value": "wait-example"
+        }
+      ],
+      "violations": [
+        "a wait cannot resume from itself"
+      ]
+    },
+    {
+      "name": "wait-registration-rejects-duplicate-parameters",
+      "template": "wait-registration-intent",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/parameters/-",
+          "value": {
+            "name": "task",
+            "value": {
+              "stringValue": "Review the result."
+            },
+            "sources": [
+              {
+                "runInputName": "task"
+              }
+            ]
+          }
+        }
+      ],
+      "violations": [
+        "wait parameter names must be unique"
+      ]
+    },
+    {
+      "name": "wait-activity-and-cursor-receipt",
+      "template": "wait-activity-and-cursor-receipt"
+    },
+    {
+      "name": "wait-activity-rejects-unchanged-cursor",
+      "template": "wait-activity-and-cursor-receipt",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/cursorAfter",
+          "value": {
+            "cursorBytes": "AA==",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            }
+          }
+        }
+      ],
+      "violations": [
+        "an accepted activity advances the exact cursor"
+      ]
+    },
+    {
+      "name": "wait-activity-rejects-identical-bytes-with-changed-digest",
+      "template": "wait-activity-and-cursor-receipt",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/cursorAfter/cursorBytes",
+          "value": "AA=="
+        }
+      ],
+      "violations": [
+        "an accepted activity advances the exact cursor"
+      ]
+    },
+    {
+      "name": "wait-activity-rejects-duplicate-output",
+      "template": "wait-activity-and-cursor-receipt",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/outputs/-",
+          "value": {
+            "name": "observed",
+            "value": {
+              "boolValue": true
+            }
+          }
+        }
+      ],
+      "violations": [
+        "captured activity output names must be unique"
+      ]
+    },
+    {
+      "name": "wait-cursor-progress-without-activity",
+      "template": "wait-cursor-progress-without-activity"
+    },
+    {
+      "name": "wait-cursor-rejects-unchanged-position",
+      "template": "wait-cursor-progress-without-activity",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/cursorAfter",
+          "value": {
+            "cursorBytes": "AA==",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            }
+          }
+        }
+      ],
+      "violations": [
+        "cursor advancement must change the cursor"
+      ]
+    },
+    {
+      "name": "wait-cursor-rejects-identical-bytes-with-changed-digest",
+      "template": "wait-cursor-progress-without-activity",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/cursorAfter/cursorBytes",
+          "value": "AA=="
+        }
+      ],
+      "violations": [
+        "cursor advancement must change the cursor"
+      ]
+    },
+    {
+      "name": "wait-resolution-satisfied",
+      "template": "wait-resolution-satisfied"
+    },
+    {
+      "name": "wait-satisfaction-rejects-false-condition",
+      "template": "wait-resolution-satisfied",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/satisfied/completionCondition",
+          "value": {
+            "evaluationId": "evaluation-negative",
+            "condition": {
+              "compare": {
+                "left": {
+                  "literal": {
+                    "boolValue": false
+                  }
+                },
+                "operator": "COMPARISON_OPERATOR_EQUAL",
+                "right": {
+                  "literal": {
+                    "boolValue": true
+                  }
+                }
+              }
+            },
+            "inputs": [],
+            "result": false
+          }
+        }
+      ],
+      "violations": [
+        "wait satisfaction requires a true completion condition"
+      ]
+    },
+    {
+      "name": "wait-satisfaction-rejects-missing-activity-evidence",
+      "template": "wait-resolution-satisfied",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/satisfied/activityIds",
+          "value": []
+        }
+      ],
+      "violations": [
+        "must contain at least 1 item(s)"
+      ]
+    },
+    {
+      "name": "wait-satisfaction-rejects-duplicate-activity-evidence",
+      "template": "wait-resolution-satisfied",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/satisfied/activityIds",
+          "value": [
+            "activity-example",
+            "activity-example"
+          ]
+        }
+      ],
+      "violations": [
+        "must contain unique items"
+      ]
+    },
+    {
+      "name": "wait-activation-receipt",
+      "template": "wait-activation-receipt"
+    },
+    {
+      "name": "wait-activation-rejects-expired-lease",
+      "template": "wait-activation-receipt",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/leaseExpiresAt",
+          "value": "2026-01-01T00:00:00Z"
+        }
+      ],
+      "violations": [
+        "a subscription lease must end after activation"
+      ]
+    },
+    {
+      "name": "wait-renewed-subscription-lease",
+      "template": "wait-renewed-subscription-lease"
+    },
+    {
+      "name": "wait-renewal-rejects-expired-lease",
+      "template": "wait-renewed-subscription-lease",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/leaseExpiresAt",
+          "value": "2026-01-01T00:01:00Z"
+        }
+      ],
+      "violations": [
+        "a renewed lease must end after renewal"
+      ]
+    },
+    {
+      "name": "wait-subscription-cleanup-released",
+      "template": "wait-subscription-cleanup-released"
+    },
+    {
+      "name": "wait-subscription-cleanup-indeterminate",
+      "template": "wait-subscription-cleanup-indeterminate"
+    },
+    {
+      "name": "wait-cleanup-requires-outcome",
+      "template": "wait-subscription-cleanup-released",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/released"
+        }
+      ],
+      "violations": [
+        "outcome: exactly one field is required in oneof"
+      ]
+    },
+    {
+      "name": "timer-registration",
+      "template": "timer-registration"
+    },
+    {
+      "name": "timer-registration-rejects-due-after-deadline",
+      "template": "timer-registration",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/dueAt",
+          "value": "2026-01-01T00:03:00Z"
+        }
+      ],
+      "violations": [
+        "the timer must be due no later than its occurrence deadline"
+      ]
+    },
+    {
+      "name": "timer-resolution-fired",
+      "template": "timer-resolution-fired"
+    },
+    {
+      "name": "timer-rejects-fire-before-due",
+      "template": "timer-resolution-fired",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/fired/observedAt",
+          "value": "2026-01-01T00:00:00Z"
+        }
+      ],
+      "violations": [
+        "a timer cannot fire before its scheduled instant"
+      ]
+    },
+    {
+      "name": "wait-registration-intent-proven-never-activated",
+      "template": "wait-registration-intent-proven-never-activated"
+    },
+    {
+      "name": "wait-cleanup-rejects-never-activated-for-activation",
+      "template": "wait-registration-intent-proven-never-activated",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/registrationIntent"
+        },
+        {
+          "op": "add",
+          "path": "/activationId",
+          "value": "activation-example"
+        }
+      ],
+      "violations": [
+        "release requires an activation; never-activated evidence requires registration intent"
+      ]
+    },
+    {
+      "name": "wait-cleanup-rejects-released-registration-intent",
+      "template": "wait-subscription-cleanup-released",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/activationId"
+        },
+        {
+          "op": "add",
+          "path": "/registrationIntent",
+          "value": {}
+        }
+      ],
+      "violations": [
+        "release requires an activation; never-activated evidence requires registration intent"
+      ]
+    },
+    {
+      "name": "wait-registration-intent-cleanup-awaits-evidence",
+      "template": "wait-registration-intent-cleanup-awaits-evidence"
+    }
+  ]
+}

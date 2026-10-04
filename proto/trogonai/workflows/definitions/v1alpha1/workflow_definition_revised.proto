@@ -1,0 +1,27 @@
+edition = "2024";
+
+package trogonai.workflows.definitions.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/workflows/definitions/v1alpha1/workflow_definition.proto";
+
+message WorkflowDefinitionRevised {
+  option (buf.validate.message).cel = {
+    id: "workflow_definition_revised.identity"
+    message: "a revision must preserve workflow identity"
+    expression: "this.previous_revision.workflow_id == this.definition.reference.workflow_id"
+  };
+  option (buf.validate.message).cel = {
+    id: "workflow_definition_revised.next_revision"
+    message: "a revision must advance the previous revision by one without wrapping"
+    expression: "this.previous_revision.revision < 18446744073709551615u && this.definition.reference.revision == this.previous_revision.revision + 1u"
+  };
+  option (buf.validate.message).cel = {
+    id: "workflow_definition_revised.changed_digest"
+    message: "a revision must change the exact definition artifact"
+    expression: "this.previous_revision.digest != this.definition.reference.digest"
+  };
+
+  WorkflowDefinitionRef previous_revision = 1 [features.field_presence = LEGACY_REQUIRED];
+  StoredWorkflowDefinition definition = 2 [features.field_presence = LEGACY_REQUIRED];
+}

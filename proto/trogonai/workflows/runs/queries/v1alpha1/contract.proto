@@ -1,0 +1,145 @@
+edition = "2024";
+
+package trogonai.workflows.runs.queries.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+message ContractVersion {
+  uint32 major = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32.gt = 0
+  ];
+  uint32 minor = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ContractNegotiation {
+  option (buf.validate.message).cel = {
+    id: "workflow_contract.negotiation"
+    message: "rendered must have the server major and no greater minor"
+    expression: "this.rendered.major == this.server_max.major && this.rendered.minor <= this.server_max.minor"
+  };
+  ContractVersion rendered = 1 [features.field_presence = LEGACY_REQUIRED];
+  ContractVersion server_max = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message RunPosition {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  uint64 ordinal = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+}
+
+message ReadConsistency {
+  option (buf.validate.message).cel = {
+    id: "workflow_read_consistency.wait_requires_position"
+    message: "max_wait requires an at_least position"
+    expression: "!has(this.max_wait) || has(this.at_least)"
+  };
+  RunPosition at_least = 1;
+  google.protobuf.Duration max_wait = 2 [(buf.validate.field).duration.gte = {}];
+}
+
+// A list checkpoint is distinct from a run ordinal: its projection consumes
+// independent run streams and cannot compare their positions numerically.
+message ProjectionFreshness {
+  option (buf.validate.message).cel = {
+    id: "workflow_projection_freshness.unique_positions"
+    message: "applied run positions must be unique"
+    expression: "this.applied.map(position, position.run_id).unique()"
+  };
+  string generation = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  bytes checkpoint = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.min_len = 1
+  ];
+  google.protobuf.Timestamp observed_at = 3 [features.field_presence = LEGACY_REQUIRED];
+  repeated RunPosition applied = 4;
+  FreshnessCondition condition = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  bool consistency_satisfied = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bool.const = true
+  ];
+}
+
+enum FreshnessCondition {
+  FRESHNESS_CONDITION_UNSPECIFIED = 0;
+  FRESHNESS_CONDITION_CURRENT = 1;
+  FRESHNESS_CONDITION_LAGGING = 2;
+  FRESHNESS_CONDITION_INDETERMINATE = 3;
+}
+
+// This payload rides on the transport error channel, so a failed read cannot
+// be mistaken for an empty successful page. Numeric transport codes are not
+// reserved by these schemas.
+message QueryError {
+  QueryErrorCode code = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  string message = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string field_path = 3;
+  ContractVersion supported_contract = 4;
+  ProjectionProgress reached_progress = 5;
+}
+
+// A failed consistency wait can report how far it reached without carrying the
+// success-only assertion in ProjectionFreshness.
+message ProjectionProgress {
+  option (buf.validate.message).cel = {
+    id: "workflow_projection_progress.unique_positions"
+    message: "applied run positions must be unique"
+    expression: "this.applied.map(position, position.run_id).unique()"
+  };
+  string generation = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  bytes checkpoint = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.min_len = 1
+  ];
+  google.protobuf.Timestamp observed_at = 3 [features.field_presence = LEGACY_REQUIRED];
+  repeated RunPosition applied = 4;
+  FreshnessCondition condition = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+enum QueryErrorCode {
+  QUERY_ERROR_CODE_UNSPECIFIED = 0;
+  QUERY_ERROR_CODE_RUN_NOT_FOUND = 1;
+  QUERY_ERROR_CODE_INVALID_ARGUMENT = 2;
+  QUERY_ERROR_CODE_UNSUPPORTED_CONTRACT = 3;
+  QUERY_ERROR_CODE_STALE_CURSOR = 4;
+  QUERY_ERROR_CODE_MALFORMED_CURSOR = 5;
+  QUERY_ERROR_CODE_PROJECTION_UNAVAILABLE = 6;
+  QUERY_ERROR_CODE_PERMISSION_DENIED = 7;
+  QUERY_ERROR_CODE_RESOURCE_EXHAUSTED = 8;
+  QUERY_ERROR_CODE_INTERNAL = 9;
+  QUERY_ERROR_CODE_PLAN_REVISION_NOT_FOUND = 10;
+}

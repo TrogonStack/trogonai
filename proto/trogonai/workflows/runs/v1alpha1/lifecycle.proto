@@ -1,0 +1,354 @@
+edition = "2024";
+
+package trogonai.workflows.runs.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/workflows/definitions/v1alpha1/node_ref.proto";
+import "trogonai/workflows/definitions/v1alpha1/value.proto";
+import "trogonai/workflows/runs/v1alpha1/control.proto";
+import "trogonai/workflows/runs/v1alpha1/occurrence.proto";
+import "trogonai/workflows/runs/v1alpha1/receipt.proto";
+import "trogonai/workflows/runs/v1alpha1/run.proto";
+
+// Intent stops new dispatch immediately. Applying it waits for dispatched
+// invocations to settle; external waits and input requests remain durable.
+message PauseRequest {
+  string pause_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ActorRef requested_by = 2 [features.field_presence = LEGACY_REQUIRED];
+  string reason = 3;
+}
+
+message PauseBoundary {
+  string pause_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  repeated string settled_invocation_ids = 2 [
+    (buf.validate.field).repeated.unique = true,
+    (buf.validate.field).repeated.items.string.min_len = 1
+  ];
+  repeated string parked_wait_ids = 3 [
+    (buf.validate.field).repeated.unique = true,
+    (buf.validate.field).repeated.items.string.min_len = 1
+  ];
+  repeated string parked_request_ids = 4 [
+    (buf.validate.field).repeated.unique = true,
+    (buf.validate.field).repeated.items.string.min_len = 1
+  ];
+}
+
+message RunResumption {
+  string resumption_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string pause_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ActorRef resumed_by = 3 [features.field_presence = LEGACY_REQUIRED];
+  oneof previous_state {
+    option (buf.validate.oneof).required = true;
+
+    google.protobuf.Empty applied_pause = 4;
+    google.protobuf.Empty pending_pause_intent = 5;
+  }
+}
+
+message CancellationRequest {
+  string cancellation_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ActorRef requested_by = 2 [features.field_presence = LEGACY_REQUIRED];
+  oneof target {
+    option (buf.validate.oneof).required = true;
+
+    google.protobuf.Empty run = 3;
+    string occurrence_id = 4 [(buf.validate.field).string.min_len = 1];
+    string invocation_id = 5 [(buf.validate.field).string.min_len = 1];
+  }
+  string reason = 6;
+}
+
+message CancellationAcknowledgement {
+  string cancellation_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string invocation_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  oneof outcome {
+    option (buf.validate.oneof).required = true;
+
+    string determinate_receipt_id = 3 [(buf.validate.field).string.min_len = 1];
+    InvocationIndeterminate indeterminate = 4;
+  }
+}
+
+message RetryAuthorization {
+  string retry_authorization_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string occurrence_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string previous_invocation_id = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  oneof requested_by {
+    option (buf.validate.oneof).required = true;
+
+    google.protobuf.Empty automatic_policy = 4;
+    ActorRef operator = 5;
+  }
+  google.protobuf.Timestamp not_before = 6 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Boundaries are open sequence/repeat containers at an applied pause. Each
+// binding replaces only that container's unentered continuation. Existing
+// occurrence identities, inputs, plans, invocations, and completions stay fixed.
+message ContinuationBinding {
+  option (buf.validate.message).cel = {
+    id: "continuation_binding.unique_inputs"
+    message: "continuation input names must be unique"
+    expression: "this.inputs.map(value, value.name).unique()"
+  };
+
+  string boundary_occurrence_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  trogonai.workflows.definitions.v1alpha1.NodeRef next_node = 2 [features.field_presence = LEGACY_REQUIRED];
+  repeated ResolvedValue inputs = 3;
+}
+
+message RemainingPlanRevision {
+  option (buf.validate.message).cel = {
+    id: "remaining_plan_revision.predecessor"
+    message: "the replacement plan must descend from the expected current plan"
+    expression: "has(this.plan.previous_plan_revision_id) && this.plan.previous_plan_revision_id == this.expected_plan_revision_id"
+  };
+  option (buf.validate.message).cel = {
+    id: "remaining_plan_revision.unique_boundaries"
+    message: "continuation boundaries must be unique"
+    expression: "this.continuations.map(binding, binding.boundary_occurrence_id).unique()"
+  };
+
+  string expected_plan_revision_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  RunPlan plan = 2 [features.field_presence = LEGACY_REQUIRED];
+  string pause_id = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  repeated string frozen_occurrence_ids = 4 [
+    (buf.validate.field).repeated.unique = true,
+    (buf.validate.field).repeated.items.string.min_len = 1
+  ];
+  repeated ContinuationBinding continuations = 5 [(buf.validate.field).repeated.min_items = 1];
+  ActorRef revised_by = 6 [features.field_presence = LEGACY_REQUIRED];
+  string reason = 7;
+}
+
+message UnreconciledEffect {
+  string detail = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// Every dispatch is accounted for at termination. Failure/cancellation may
+// explicitly retain unresolved effects; success may not. A terminal marker
+// never retracts already completed work or prevents later verified receipts.
+message EffectSettlement {
+  string invocation_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  oneof settlement {
+    option (buf.validate.oneof).required = true;
+
+    string receipt_id = 2 [(buf.validate.field).string.min_len = 1];
+    UnreconciledEffect unreconciled = 3;
+  }
+}
+
+message SubscriptionSettlement {
+  string wait_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  oneof target {
+    option (buf.validate.oneof).required = true;
+
+    string activation_id = 2 [(buf.validate.field).string.min_len = 1];
+    google.protobuf.Empty registration_intent = 5;
+  }
+  oneof settlement {
+    option (buf.validate.oneof).required = true;
+
+    string cleanup_id = 3 [(buf.validate.field).string.min_len = 1];
+    UnreconciledEffect unreconciled = 4;
+  }
+}
+
+message RunSucceeded {
+  option (buf.validate.message).cel = {
+    id: "run_succeeded.unique_outputs"
+    message: "run output names must be unique"
+    expression: "this.outputs.map(value, value.name).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "run_succeeded.condition"
+    message: "recorded run completion conditions must be true"
+    expression: "!has(this.completion_condition) || this.completion_condition.result"
+  };
+
+  string root_completion_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  repeated trogonai.workflows.definitions.v1alpha1.NamedValue outputs = 2;
+  ConditionEvaluation completion_condition = 3;
+}
+
+message RunFailed {
+  Failure failure = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated CompletionSource evidence = 2 [(buf.validate.field).repeated.min_items = 1];
+}
+
+message RunCancelled {
+  string cancellation_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+message RunRejected {
+  string root_completion_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  NodeRejected result = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message RunTermination {
+  option (buf.validate.message).cel = {
+    id: "run_termination.subscription_target"
+    message: "a wait cannot settle both its registration intent and known activations"
+    expression: "this.subscriptions.all(item, !has(item.registration_intent) || !this.subscriptions.exists(other, other.wait_id == item.wait_id && has(other.activation_id)))"
+  };
+  option (buf.validate.message).cel = {
+    id: "run_termination.unique_effects"
+    message: "each invocation and subscription activation or unactivated intent has one termination settlement"
+    expression: "this.effects.map(effect, effect.invocation_id).unique() && this.subscriptions.all(item, this.subscriptions.filter(other, (has(item.activation_id) && has(other.activation_id) && item.wait_id == other.wait_id && item.activation_id == other.activation_id) || (has(item.registration_intent) && has(other.registration_intent) && item.wait_id == other.wait_id)).size() == 1)"
+  };
+  option (buf.validate.message).cel = {
+    id: "run_termination.success_settled"
+    message: "accepted and rejected completion require determinate effects"
+    expression: "(!has(this.succeeded) && !has(this.rejected)) || (this.effects.all(effect, has(effect.receipt_id)) && this.subscriptions.all(item, has(item.cleanup_id)))"
+  };
+
+  string termination_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  repeated EffectSettlement effects = 2;
+  oneof outcome {
+    option (buf.validate.oneof).required = true;
+
+    RunSucceeded succeeded = 3;
+    RunFailed failed = 4;
+    RunCancelled cancelled = 5;
+    RunRejected rejected = 6;
+  }
+  repeated SubscriptionSettlement subscriptions = 7;
+}
+
+message RecoveryOccurrence {
+  option (buf.validate.message).cel = {
+    id: "recovery_occurrence.new_identity"
+    message: "recovery creates a new occurrence identity"
+    expression: "this.previous_occurrence_id != this.replacement.occurrence.occurrence_id"
+  };
+
+  string previous_occurrence_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  OccurrenceEntry replacement = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message RetainedCompletionBinding {
+  string completion_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string parent_occurrence_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// Only a failed terminal generation can recover. Admission proves the exact
+// failed frontier, its failed ancestors, and retained successful siblings.
+// New occurrences preserve the original pinned definitions and iteration paths.
+// No indeterminate side effect can be repeated. Invocation budgets stay global;
+// live admission may refresh the deadline without raising count/depth limits.
+message FailedWorkRecovery {
+  option (buf.validate.message).cel = {
+    id: "failed_work_recovery.lineage"
+    message: "only later recoveries name a preceding recovery"
+    expression: "this.recovery_number == 1u ? !has(this.previous_recovery_id) : (has(this.previous_recovery_id) && this.previous_recovery_id != this.recovery_id)"
+  };
+  option (buf.validate.message).cel = {
+    id: "failed_work_recovery.unique_frontier"
+    message: "prior and replacement occurrence identities must be unique"
+    expression: "this.frontier.map(item, item.previous_occurrence_id).unique() && this.frontier.map(item, item.replacement.occurrence.occurrence_id).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "failed_work_recovery.root"
+    message: "the recovered root must be one replacement with no parent"
+    expression: "this.frontier.exists(item, item.replacement.occurrence.occurrence_id == this.root_occurrence_id && !has(item.replacement.occurrence.parent_occurrence_id))"
+  };
+  option (buf.validate.message).cel = {
+    id: "failed_work_recovery.retained_parents"
+    message: "retained completions must bind to replacement parents"
+    expression: "this.retained_completions.all(binding, this.frontier.exists(item, item.replacement.occurrence.occurrence_id == binding.parent_occurrence_id))"
+  };
+
+  string recovery_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  uint64 recovery_number = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  string previous_recovery_id = 3 [(buf.validate.field).string.min_len = 1];
+  string prior_termination_id = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  repeated RecoveryOccurrence frontier = 5 [(buf.validate.field).repeated.min_items = 1];
+  repeated RetainedCompletionBinding retained_completions = 6;
+  string root_occurrence_id = 7 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  RunLimits limits = 8 [features.field_presence = LEGACY_REQUIRED];
+  RunAuthority authority = 9 [features.field_presence = LEGACY_REQUIRED];
+}

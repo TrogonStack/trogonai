@@ -1,0 +1,55 @@
+edition = "2024";
+
+package trogonai.workflows.definitions.queries.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/workflows/definitions/queries/v1alpha1/contract.proto";
+import "trogonai/workflows/definitions/queries/v1alpha1/view.proto";
+
+// Server-minted tokens remain opaque to clients. Authentication covers the format
+// version and exact payload bytes; verification never re-encodes a decoded cursor.
+// A token grants no access. Unknown format or tampering is MALFORMED_CURSOR;
+// expiry, projection replacement, or lost checkpoint retention is STALE_CURSOR.
+message CursorEnvelope {
+  uint32 format_version = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32.const = 1
+  ];
+  bytes payload = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.min_len = 1
+  ];
+  bytes mac = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.min_len = 1
+  ];
+}
+
+// The position is the last examined row, including any skipped rendering. This
+// permits an empty page to continue without repeating undecodable rows. It is an
+// identity, never an offset into a list that moves during updates. The projection
+// retains this checkpoint until expiry.
+// Filters and rendered contract must match the continued request exactly.
+message DefinitionListCursor {
+  ContractVersion rendered_contract = 1 [features.field_presence = LEGACY_REQUIRED];
+  DefinitionListFilter filter = 2 [features.field_presence = LEGACY_REQUIRED];
+  string projection_generation = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  bytes pinned_checkpoint = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.min_len = 1
+  ];
+  string last_scanned_workflow_id = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  google.protobuf.Timestamp expires_at = 6 [features.field_presence = LEGACY_REQUIRED];
+  ReadConsistency consistency = 7;
+  bytes caller_binding = 8 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.min_len = 1
+  ];
+}

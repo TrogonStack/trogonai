@@ -1,0 +1,108 @@
+edition = "2024";
+
+package trogonai.workflows.definitions.v1alpha1;
+
+import "trogon/error/v1alpha1/options.proto";
+
+// Schema-only templates on DeciderService's google.rpc.Status channel. A module
+// claiming these commands declares namespace workflows.definitions. Transport,
+// authentication, authorization, and registered adapter errors keep their owners.
+message WorkflowDefinitionInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "workflows.definitions"
+    reason: "WORKFLOW_DEFINITION_INVALID"
+    message: "The definition violates the admitted workflow contract."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message WorkflowDefinitionMissingError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "workflows.definitions"
+    reason: "WORKFLOW_DEFINITION_MISSING"
+    message: "The workflow definition has not been provisioned."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message WorkflowDefinitionAlreadyProvisionedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "workflows.definitions"
+    reason: "WORKFLOW_DEFINITION_ALREADY_PROVISIONED"
+    message: "The workflow definition has already been provisioned."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message WorkflowDefinitionIdentityMismatchError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "workflows.definitions"
+    reason: "WORKFLOW_DEFINITION_IDENTITY_MISMATCH"
+    message: "The command names a different workflow definition from this stream."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message WorkflowDefinitionArchivedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "workflows.definitions"
+    reason: "WORKFLOW_DEFINITION_ARCHIVED"
+    message: "The archived workflow definition cannot accept new work or revisions."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message WorkflowDefinitionAlreadyArchivedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "workflows.definitions"
+    reason: "WORKFLOW_DEFINITION_ALREADY_ARCHIVED"
+    message: "The workflow definition is already archived."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message WorkflowDefinitionNotArchivedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "workflows.definitions"
+    reason: "WORKFLOW_DEFINITION_NOT_ARCHIVED"
+    message: "Only an archived workflow definition can be unarchived."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message WorkflowDefinitionStaleBaseError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "workflows.definitions"
+    reason: "WORKFLOW_DEFINITION_STALE_BASE"
+    message: "The exact base reference does not match the latest definition revision."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message WorkflowDefinitionRevisionExhaustedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "workflows.definitions"
+    reason: "WORKFLOW_DEFINITION_REVISION_EXHAUSTED"
+    message: "The definition revision sequence cannot advance."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message WorkflowDefinitionUnchangedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "workflows.definitions"
+    reason: "WORKFLOW_DEFINITION_UNCHANGED"
+    message: "The candidate is the same exact definition artifact."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}

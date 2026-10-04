@@ -1,0 +1,1136 @@
+{
+  "templates": {
+    "receipt-matching-artifact-source": {
+      "type": "trogonai.workflows.runs.v1alpha1.InvocationResultReceipt",
+      "payload": {
+        "receiptId": "receipt-example",
+        "invocationId": "invocation-first",
+        "executionPlanDigest": {
+          "algorithm": "sha256",
+          "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        },
+        "sessionEvent": {
+          "session": {
+            "sessionId": "session-example"
+          },
+          "ordinal": {
+            "value": "1"
+          },
+          "eventId": "event-example",
+          "eventDigest": {
+            "algorithm": "sha256",
+            "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          }
+        },
+        "succeeded": {
+          "outputs": [
+            {
+              "name": "verdict",
+              "value": {
+                "symbolValue": {
+                  "typeName": "review.verdict",
+                  "value": "changes_requested"
+                }
+              }
+            }
+          ],
+          "artifacts": [
+            {
+              "outputName": "report",
+              "artifact": {
+                "artifactId": "artifact-example",
+                "digest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "sizeBytes": "16",
+                "mime": "text/plain"
+              },
+              "recordedAt": {
+                "session": {
+                  "sessionId": "session-example"
+                },
+                "ordinal": {
+                  "value": "1"
+                },
+                "eventId": "event-example",
+                "eventDigest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                }
+              }
+            }
+          ]
+        },
+        "receivedAt": "2026-01-01T00:01:00Z"
+      }
+    },
+    "termination-with-subscription-settlement": {
+      "type": "trogonai.workflows.runs.v1alpha1.RunTermination",
+      "payload": {
+        "terminationId": "termination-example",
+        "effects": [
+          {
+            "invocationId": "invocation-first",
+            "receiptId": "receipt-example"
+          }
+        ],
+        "succeeded": {
+          "rootCompletionId": "completion-example",
+          "outputs": [],
+          "completionCondition": {
+            "evaluationId": "evaluation-positive",
+            "condition": {
+              "always": {}
+            },
+            "inputs": [],
+            "result": true
+          }
+        },
+        "subscriptions": [
+          {
+            "waitId": "wait-example",
+            "activationId": "activation-example",
+            "cleanupId": "cleanup-example"
+          }
+        ]
+      }
+    },
+    "input-request-unique-responder-audience": {
+      "type": "trogonai.workflows.runs.v1alpha1.InputRequest",
+      "payload": {
+        "requestId": "input-example",
+        "occurrenceId": "occurrence-example",
+        "requestedBy": {
+          "serviceId": "coordinator-example"
+        },
+        "question": "Approve the result?",
+        "answerSchema": {
+          "maxEncodedBytes": "128",
+          "scalar": "SCALAR_TYPE_BOOL"
+        },
+        "choices": [
+          {
+            "choiceId": "approve",
+            "value": {
+              "boolValue": true
+            },
+            "displayName": "Approve"
+          },
+          {
+            "choiceId": "decline",
+            "value": {
+              "boolValue": false
+            },
+            "displayName": "Decline"
+          }
+        ],
+        "allowedResponders": [
+          {
+            "principalId": "user-example"
+          }
+        ],
+        "deadline": "2026-01-01T00:02:00Z"
+      }
+    },
+    "run-state-cancellation-intent": {
+      "type": "trogonai.workflows.runs.state.v1alpha1.PresentRun",
+      "payload": {
+        "configuration": {
+          "runId": "run-example",
+          "plan": {
+            "planRevisionId": "plan-initial",
+            "definitionBytes": "AA==",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            },
+            "savedDefinition": {
+              "workflowId": "workflow-example",
+              "revision": "1",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            }
+          },
+          "inputs": [
+            {
+              "name": "task",
+              "value": {
+                "stringValue": "Review the result."
+              }
+            }
+          ],
+          "workspace": {
+            "workspaceId": "workspace-example",
+            "uri": "https://example.com/workspace"
+          },
+          "limits": {
+            "deadline": "2026-01-01T00:02:00Z",
+            "maxInvocations": "100",
+            "maxActiveSessions": 4,
+            "maxControlDepth": 16,
+            "maxValueDepth": 16
+          },
+          "authority": {
+            "requestedBy": {
+              "principalId": "user-example"
+            },
+            "authorizationId": "authorization-example",
+            "policyRevision": "policy-1"
+          }
+        },
+        "status": "RUN_STATUS_CANCELLATION_REQUESTED",
+        "currentPlanRevisionId": "plan-initial",
+        "effectiveLimits": {
+          "deadline": "2026-01-01T00:02:00Z",
+          "maxInvocations": "100",
+          "maxActiveSessions": 4,
+          "maxControlDepth": 16,
+          "maxValueDepth": 16
+        },
+        "planRevisions": [],
+        "occurrences": [
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-example",
+                "node": {
+                  "nodeId": "review-loop"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": []
+              },
+              "inputs": []
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "invocation": {
+              "invocationId": "invocation-first",
+              "occurrenceId": "occurrence-example",
+              "attemptNumber": "1",
+              "operationId": "operation-example",
+              "inputs": [
+                {
+                  "name": "task",
+                  "value": {
+                    "stringValue": "Review the result."
+                  },
+                  "sources": [
+                    {
+                      "runInputName": "task"
+                    }
+                  ]
+                }
+              ],
+              "launch": {
+                "commandId": "launch-example",
+                "createSession": {
+                  "sessionId": "session-example",
+                  "executionPlan": {
+                    "planBytes": "AA==",
+                    "planDigest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "workspace": {
+                    "workspaceId": "workspace-example",
+                    "uri": "https://example.com/workspace"
+                  }
+                },
+                "admission": {
+                  "agentRevision": {
+                    "agentId": "agent-example",
+                    "revisionNumber": "1",
+                    "configuration": {
+                      "configurationDigest": {
+                        "algorithm": "sha256",
+                        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      }
+                    }
+                  },
+                  "authority": {
+                    "requestedBy": {
+                      "principalId": "user-example"
+                    },
+                    "authorizationId": "authorization-example",
+                    "policyRevision": "policy-1"
+                  },
+                  "admissionId": "admission-example",
+                  "executionPlanDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "admittedAt": "2026-01-01T00:00:00Z",
+                  "validUntil": "2026-01-01T00:01:00Z"
+                }
+              },
+              "deadline": "2026-01-01T00:02:00Z"
+            },
+            "receipts": [
+              {
+                "receiptId": "receipt-example",
+                "invocationId": "invocation-first",
+                "executionPlanDigest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "sessionEvent": {
+                  "session": {
+                    "sessionId": "session-example"
+                  },
+                  "ordinal": {
+                    "value": "1"
+                  },
+                  "eventId": "event-example",
+                  "eventDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "succeeded": {
+                  "outputs": [
+                    {
+                      "name": "verdict",
+                      "value": {
+                        "symbolValue": {
+                          "typeName": "review.verdict",
+                          "value": "changes_requested"
+                        }
+                      }
+                    }
+                  ],
+                  "artifacts": []
+                },
+                "receivedAt": "2026-01-01T00:01:00Z"
+              }
+            ],
+            "currentReceiptId": "receipt-example"
+          }
+        ],
+        "repeatIterations": [],
+        "decisions": [],
+        "inputs": [],
+        "guidance": [],
+        "externalWaits": [],
+        "timers": [],
+        "pauses": [],
+        "cancellations": [
+          {
+            "request": {
+              "cancellationId": "cancellation-example",
+              "requestedBy": {
+                "principalId": "user-example"
+              },
+              "run": {}
+            },
+            "acknowledgements": [
+              {
+                "cancellationId": "cancellation-example",
+                "invocationId": "invocation-first",
+                "indeterminate": {
+                  "detail": "Awaiting external settlement."
+                }
+              }
+            ]
+          }
+        ],
+        "retryAuthorizations": [],
+        "terminations": [],
+        "recoveries": [],
+        "currentRootOccurrenceId": "occurrence-example"
+      }
+    },
+    "cancellation-state-reconciled-indeterminate-ack": {
+      "type": "trogonai.workflows.runs.state.v1alpha1.CancellationState",
+      "payload": {
+        "request": {
+          "cancellationId": "cancellation-example",
+          "requestedBy": {
+            "principalId": "user-example"
+          },
+          "run": {}
+        },
+        "acknowledgements": [
+          {
+            "cancellationId": "cancellation-example",
+            "invocationId": "invocation-first",
+            "indeterminate": {
+              "detail": "Awaiting external settlement."
+            }
+          },
+          {
+            "cancellationId": "cancellation-example",
+            "invocationId": "invocation-first",
+            "determinateReceiptId": "receipt-example"
+          }
+        ]
+      }
+    },
+    "run-state-distinct-dispatch-identities": {
+      "type": "trogonai.workflows.runs.state.v1alpha1.PresentRun",
+      "payload": {
+        "configuration": {
+          "runId": "run-example",
+          "plan": {
+            "planRevisionId": "plan-initial",
+            "definitionBytes": "AA==",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            },
+            "savedDefinition": {
+              "workflowId": "workflow-example",
+              "revision": "1",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            }
+          },
+          "inputs": [
+            {
+              "name": "task",
+              "value": {
+                "stringValue": "Review the result."
+              }
+            }
+          ],
+          "workspace": {
+            "workspaceId": "workspace-example",
+            "uri": "https://example.com/workspace"
+          },
+          "limits": {
+            "deadline": "2026-01-01T00:02:00Z",
+            "maxInvocations": "100",
+            "maxActiveSessions": 4,
+            "maxControlDepth": 16,
+            "maxValueDepth": 16
+          },
+          "authority": {
+            "requestedBy": {
+              "principalId": "user-example"
+            },
+            "authorizationId": "authorization-example",
+            "policyRevision": "policy-1"
+          }
+        },
+        "status": "RUN_STATUS_ACTIVE",
+        "currentPlanRevisionId": "plan-initial",
+        "effectiveLimits": {
+          "deadline": "2026-01-01T00:02:00Z",
+          "maxInvocations": "100",
+          "maxActiveSessions": 4,
+          "maxControlDepth": 16,
+          "maxValueDepth": 16
+        },
+        "planRevisions": [],
+        "occurrences": [
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-example",
+                "node": {
+                  "nodeId": "review-loop"
+                },
+                "planRevisionId": "plan-initial",
+                "iterationPath": []
+              },
+              "inputs": []
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "invocation": {
+              "invocationId": "invocation-first",
+              "occurrenceId": "occurrence-example",
+              "attemptNumber": "1",
+              "operationId": "operation-example",
+              "inputs": [
+                {
+                  "name": "task",
+                  "value": {
+                    "stringValue": "Review the result."
+                  },
+                  "sources": [
+                    {
+                      "runInputName": "task"
+                    }
+                  ]
+                }
+              ],
+              "launch": {
+                "commandId": "launch-example",
+                "createSession": {
+                  "sessionId": "session-example",
+                  "executionPlan": {
+                    "planBytes": "AA==",
+                    "planDigest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "workspace": {
+                    "workspaceId": "workspace-example",
+                    "uri": "https://example.com/workspace"
+                  }
+                },
+                "admission": {
+                  "agentRevision": {
+                    "agentId": "agent-example",
+                    "revisionNumber": "1",
+                    "configuration": {
+                      "configurationDigest": {
+                        "algorithm": "sha256",
+                        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      }
+                    }
+                  },
+                  "authority": {
+                    "requestedBy": {
+                      "principalId": "user-example"
+                    },
+                    "authorizationId": "authorization-example",
+                    "policyRevision": "policy-1"
+                  },
+                  "admissionId": "admission-example",
+                  "executionPlanDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "admittedAt": "2026-01-01T00:00:00Z",
+                  "validUntil": "2026-01-01T00:01:00Z"
+                }
+              },
+              "deadline": "2026-01-01T00:02:00Z"
+            },
+            "receipts": [
+              {
+                "receiptId": "receipt-example",
+                "invocationId": "invocation-first",
+                "executionPlanDigest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                },
+                "sessionEvent": {
+                  "session": {
+                    "sessionId": "session-example"
+                  },
+                  "ordinal": {
+                    "value": "1"
+                  },
+                  "eventId": "event-example",
+                  "eventDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "succeeded": {
+                  "outputs": [
+                    {
+                      "name": "verdict",
+                      "value": {
+                        "symbolValue": {
+                          "typeName": "review.verdict",
+                          "value": "changes_requested"
+                        }
+                      }
+                    }
+                  ],
+                  "artifacts": []
+                },
+                "receivedAt": "2026-01-01T00:01:00Z"
+              }
+            ],
+            "currentReceiptId": "receipt-example"
+          },
+          {
+            "invocation": {
+              "invocationId": "invocation-another",
+              "occurrenceId": "occurrence-example",
+              "attemptNumber": "1",
+              "operationId": "operation-another",
+              "inputs": [
+                {
+                  "name": "task",
+                  "value": {
+                    "stringValue": "Review the result."
+                  },
+                  "sources": [
+                    {
+                      "runInputName": "task"
+                    }
+                  ]
+                }
+              ],
+              "launch": {
+                "commandId": "launch-another",
+                "createSession": {
+                  "sessionId": "session-another",
+                  "executionPlan": {
+                    "planBytes": "AA==",
+                    "planDigest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "workspace": {
+                    "workspaceId": "workspace-example",
+                    "uri": "https://example.com/workspace"
+                  }
+                },
+                "admission": {
+                  "agentRevision": {
+                    "agentId": "agent-example",
+                    "revisionNumber": "1",
+                    "configuration": {
+                      "configurationDigest": {
+                        "algorithm": "sha256",
+                        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      }
+                    }
+                  },
+                  "authority": {
+                    "requestedBy": {
+                      "principalId": "user-example"
+                    },
+                    "authorizationId": "authorization-example",
+                    "policyRevision": "policy-1"
+                  },
+                  "admissionId": "admission-example",
+                  "executionPlanDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "admittedAt": "2026-01-01T00:00:00Z",
+                  "validUntil": "2026-01-01T00:01:00Z"
+                }
+              },
+              "deadline": "2026-01-01T00:02:00Z"
+            },
+            "receipts": []
+          }
+        ],
+        "repeatIterations": [],
+        "decisions": [],
+        "inputs": [],
+        "guidance": [],
+        "externalWaits": [],
+        "timers": [],
+        "pauses": [],
+        "cancellations": [],
+        "retryAuthorizations": [],
+        "terminations": [],
+        "recoveries": [],
+        "currentRootOccurrenceId": "occurrence-example"
+      }
+    },
+    "termination-with-never-activated-intent-settlement": {
+      "type": "trogonai.workflows.runs.v1alpha1.RunTermination",
+      "payload": {
+        "terminationId": "termination-example",
+        "effects": [
+          {
+            "invocationId": "invocation-first",
+            "receiptId": "receipt-example"
+          }
+        ],
+        "succeeded": {
+          "rootCompletionId": "completion-example",
+          "outputs": [],
+          "completionCondition": {
+            "evaluationId": "evaluation-positive",
+            "condition": {
+              "always": {}
+            },
+            "inputs": [],
+            "result": true
+          }
+        },
+        "subscriptions": [
+          {
+            "waitId": "wait-example",
+            "registrationIntent": {},
+            "cleanupId": "cleanup-unactivated"
+          }
+        ]
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "receipt-matching-artifact-source",
+      "template": "receipt-matching-artifact-source"
+    },
+    {
+      "name": "receipt-rejects-artifact-from-another-session",
+      "template": "receipt-matching-artifact-source",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/succeeded/artifacts/0/recordedAt/session/sessionId",
+          "value": "session-other"
+        }
+      ],
+      "violations": [
+        "successful artifact receipts must come from the producing Session"
+      ]
+    },
+    {
+      "name": "termination-with-subscription-settlement",
+      "template": "termination-with-subscription-settlement"
+    },
+    {
+      "name": "termination-rejects-unreconciled-subscription-success",
+      "template": "termination-with-subscription-settlement",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/subscriptions/0",
+          "value": {
+            "waitId": "wait-example",
+            "activationId": "activation-example",
+            "unreconciled": {
+              "detail": "Awaiting cleanup evidence."
+            }
+          }
+        }
+      ],
+      "violations": [
+        "accepted and rejected completion require determinate effects"
+      ]
+    },
+    {
+      "name": "termination-rejects-duplicate-subscription-settlement",
+      "template": "termination-with-subscription-settlement",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/subscriptions/-",
+          "value": {
+            "waitId": "wait-example",
+            "activationId": "activation-example",
+            "cleanupId": "cleanup-example"
+          }
+        }
+      ],
+      "violations": [
+        "each invocation and subscription activation or unactivated intent has one termination settlement"
+      ]
+    },
+    {
+      "name": "input-request-unique-responder-audience",
+      "template": "input-request-unique-responder-audience"
+    },
+    {
+      "name": "input-request-rejects-duplicate-responder",
+      "template": "input-request-unique-responder-audience",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/allowedResponders/-",
+          "value": {
+            "principalId": "user-example"
+          }
+        }
+      ],
+      "violations": [
+        "the admitted responder identities must be unique"
+      ]
+    },
+    {
+      "name": "run-state-cancellation-intent",
+      "template": "run-state-cancellation-intent"
+    },
+    {
+      "name": "run-state-rejects-cancellation-status-without-intent",
+      "template": "run-state-cancellation-intent",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/cancellations",
+          "value": []
+        }
+      ],
+      "violations": [
+        "cancellation-requested status requires retained intent targeting the whole run"
+      ]
+    },
+    {
+      "name": "run-state-rejects-cancellation-status-with-invocation-only-intent",
+      "template": "run-state-cancellation-intent",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/cancellations/0/request",
+          "value": {
+            "cancellationId": "cancellation-example",
+            "requestedBy": {
+              "principalId": "user-example"
+            },
+            "invocationId": "invocation-first"
+          }
+        }
+      ],
+      "violations": [
+        "cancellation-requested status requires retained intent targeting the whole run"
+      ]
+    },
+    {
+      "name": "cancellation-state-reconciled-indeterminate-ack",
+      "template": "cancellation-state-reconciled-indeterminate-ack"
+    },
+    {
+      "name": "cancellation-state-rejects-third-ack-for-one-invocation",
+      "template": "cancellation-state-reconciled-indeterminate-ack",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/acknowledgements/-",
+          "value": {
+            "cancellationId": "cancellation-example",
+            "invocationId": "invocation-first",
+            "determinateReceiptId": "receipt-example"
+          }
+        }
+      ],
+      "violations": [
+        "acknowledgements match the intent; only indeterminate acknowledgement may be settled once"
+      ]
+    },
+    {
+      "name": "run-state-distinct-dispatch-identities",
+      "template": "run-state-distinct-dispatch-identities"
+    },
+    {
+      "name": "run-state-rejects-reused-operation-identity",
+      "template": "run-state-distinct-dispatch-identities",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/invocations/1/invocation/operationId",
+          "value": "operation-example"
+        }
+      ],
+      "violations": [
+        "operation, child Session, and launch command identities must be unique"
+      ]
+    },
+    {
+      "name": "run-state-rejects-reused-launch-command",
+      "template": "run-state-distinct-dispatch-identities",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/invocations/1/invocation/launch/commandId",
+          "value": "launch-example"
+        }
+      ],
+      "violations": [
+        "operation, child Session, and launch command identities must be unique"
+      ]
+    },
+    {
+      "name": "run-state-rejects-reused-child-session",
+      "template": "run-state-distinct-dispatch-identities",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/invocations/1/invocation/launch/createSession/sessionId",
+          "value": "session-example"
+        }
+      ],
+      "violations": [
+        "operation, child Session, and launch command identities must be unique"
+      ]
+    },
+    {
+      "name": "termination-with-never-activated-intent-settlement",
+      "template": "termination-with-never-activated-intent-settlement"
+    },
+    {
+      "name": "termination-rejects-duplicate-registration-intent-settlement",
+      "template": "termination-with-never-activated-intent-settlement",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/subscriptions/-",
+          "value": {
+            "waitId": "wait-example",
+            "registrationIntent": {},
+            "cleanupId": "cleanup-unactivated"
+          }
+        }
+      ],
+      "violations": [
+        "each invocation and subscription activation or unactivated intent has one termination settlement"
+      ]
+    },
+    {
+      "name": "termination-rejects-success-with-unresolved-registration-intent",
+      "template": "termination-with-never-activated-intent-settlement",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/subscriptions/0/cleanupId"
+        },
+        {
+          "op": "add",
+          "path": "/subscriptions/0/unreconciled",
+          "value": {
+            "detail": "Awaiting subscription attachment evidence."
+          }
+        }
+      ],
+      "violations": [
+        "accepted and rejected completion require determinate effects"
+      ]
+    },
+    {
+      "name": "subscription-reconciliation-rejects-mixed-targets-after-activation",
+      "template": "termination-with-subscription-settlement",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/subscriptions/-",
+          "value": {
+            "waitId": "wait-example",
+            "registrationIntent": {},
+            "cleanupId": "cleanup-unactivated"
+          }
+        }
+      ],
+      "violations": [
+        "a wait cannot settle both its registration intent and known activations"
+      ]
+    },
+    {
+      "name": "subscription-reconciliation-rejects-mixed-targets-before-activation",
+      "template": "termination-with-subscription-settlement",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/subscriptions",
+          "value": [
+            {
+              "waitId": "wait-example",
+              "registrationIntent": {},
+              "cleanupId": "cleanup-unactivated"
+            },
+            {
+              "waitId": "wait-example",
+              "activationId": "activation-example",
+              "cleanupId": "cleanup-example"
+            }
+          ]
+        }
+      ],
+      "violations": [
+        "a wait cannot settle both its registration intent and known activations"
+      ]
+    },
+    {
+      "name": "subscription-reconciliation-retains-distinct-activations-of-one-wait",
+      "template": "termination-with-subscription-settlement",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/subscriptions/-",
+          "value": {
+            "waitId": "wait-example",
+            "activationId": "activation-another",
+            "cleanupId": "cleanup-another"
+          }
+        }
+      ]
+    },
+    {
+      "name": "subscription-reconciliation-retains-independent-registration-intent",
+      "template": "termination-with-subscription-settlement",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/subscriptions/-",
+          "value": {
+            "waitId": "wait-another",
+            "registrationIntent": {},
+            "cleanupId": "cleanup-unactivated"
+          }
+        }
+      ]
+    },
+    {
+      "name": "subscription-reconciliation-retains-reused-activation-across-waits",
+      "template": "termination-with-subscription-settlement",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/subscriptions/-",
+          "value": {
+            "waitId": "wait-another",
+            "activationId": "activation-example",
+            "cleanupId": "cleanup-another"
+          }
+        }
+      ]
+    },
+    {
+      "name": "scoped-subscription-retains-local-activation-and-cleanup-identities-across-waits",
+      "template": "termination-with-subscription-settlement",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/subscriptions/-",
+          "value": {
+            "waitId": "wait-another",
+            "activationId": "activation-example",
+            "cleanupId": "cleanup-example"
+          }
+        }
+      ]
+    },
+    {
+      "name": "scoped-subscription-retains-independent-registration-intents-with-shared-cleanup",
+      "template": "termination-with-never-activated-intent-settlement",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/subscriptions/-",
+          "value": {
+            "waitId": "wait-another",
+            "registrationIntent": {},
+            "cleanupId": "cleanup-unactivated"
+          }
+        }
+      ]
+    },
+    {
+      "name": "scoped-subscription-retains-structurally-distinct-wait-and-activation-identities",
+      "template": "termination-with-subscription-settlement",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/subscriptions",
+          "value": [
+            {
+              "waitId": "wait:a",
+              "activationId": "b",
+              "cleanupId": "cleanup-first"
+            },
+            {
+              "waitId": "wait",
+              "activationId": "a:b",
+              "cleanupId": "cleanup-second"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "scoped-subscription-rejects-same-wait-activation-with-distinct-cleanups",
+      "template": "termination-with-subscription-settlement",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/subscriptions/-",
+          "value": {
+            "waitId": "wait-example",
+            "activationId": "activation-example",
+            "cleanupId": "cleanup-another"
+          }
+        }
+      ],
+      "violations": [
+        "each invocation and subscription activation or unactivated intent has one termination settlement"
+      ]
+    },
+    {
+      "name": "scoped-subscription-rejects-same-wait-registration-intent-with-distinct-cleanups",
+      "template": "termination-with-never-activated-intent-settlement",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/subscriptions/-",
+          "value": {
+            "waitId": "wait-example",
+            "registrationIntent": {},
+            "cleanupId": "cleanup-another"
+          }
+        }
+      ],
+      "violations": [
+        "each invocation and subscription activation or unactivated intent has one termination settlement"
+      ]
+    },
+    {
+      "name": "scoped-subscription-rejects-mixed-targets-within-one-wait",
+      "template": "termination-with-subscription-settlement",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/subscriptions/-",
+          "value": {
+            "waitId": "wait-example",
+            "registrationIntent": {},
+            "cleanupId": "cleanup-unactivated"
+          }
+        }
+      ],
+      "violations": [
+        "a wait cannot settle both its registration intent and known activations"
+      ]
+    },
+    {
+      "name": "scoped-subscription-retains-distinct-activations-of-one-wait",
+      "template": "termination-with-subscription-settlement",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/subscriptions/-",
+          "value": {
+            "waitId": "wait-example",
+            "activationId": "activation-another",
+            "cleanupId": "cleanup-another"
+          }
+        }
+      ]
+    },
+    {
+      "name": "scoped-subscription-retains-independent-registration-and-activation-targets-with-shared-cleanup",
+      "template": "termination-with-subscription-settlement",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/subscriptions/-",
+          "value": {
+            "waitId": "wait-another",
+            "registrationIntent": {},
+            "cleanupId": "cleanup-example"
+          }
+        }
+      ]
+    },
+    {
+      "name": "scoped-subscription-rejects-duplicate-invocation-settlement",
+      "template": "termination-with-subscription-settlement",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/effects/-",
+          "value": {
+            "invocationId": "invocation-first",
+            "receiptId": "receipt-another"
+          }
+        }
+      ],
+      "violations": [
+        "each invocation and subscription activation or unactivated intent has one termination settlement"
+      ]
+    }
+  ]
+}

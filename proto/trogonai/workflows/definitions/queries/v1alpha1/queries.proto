@@ -1,0 +1,74 @@
+edition = "2024";
+
+package trogonai.workflows.definitions.queries.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "trogonai/workflows/definitions/queries/v1alpha1/contract.proto";
+import "trogonai/workflows/definitions/queries/v1alpha1/view.proto";
+
+message GetWorkflowDefinitionRequest {
+  option (buf.validate.message).cel = {
+    id: "get_workflow_definition.consistency_scope"
+    message: "the consistency position must belong to the requested workflow"
+    expression: "!has(this.consistency) || !has(this.consistency.at_least) || this.consistency.at_least.workflow_id == this.workflow_id"
+  };
+
+  string workflow_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ContractVersion accepted_contract = 2 [features.field_presence = LEGACY_REQUIRED];
+  ReadConsistency consistency = 3;
+  oneof selection {
+    option (buf.validate.oneof).required = true;
+
+    google.protobuf.Empty latest = 4;
+    uint64 revision = 5 [(buf.validate.field).uint64.gt = 0];
+  }
+}
+
+// summary reports current metadata at freshness; definition is the requested
+// immutable revision, which may be older than summary.latest_revision.
+message GetWorkflowDefinitionResponse {
+  option (buf.validate.message).cel = {
+    id: "get_workflow_definition.artifact_scope"
+    message: "the artifact must belong to the summary and not exceed its latest revision"
+    expression: "this.definition.reference.workflow_id == this.summary.latest_revision.workflow_id && this.definition.reference.revision <= this.summary.latest_revision.revision"
+  };
+  option (buf.validate.message).cel = {
+    id: "get_workflow_definition.latest_digest"
+    message: "the latest artifact must match the summary's exact reference"
+    expression: "this.definition.reference.revision != this.summary.latest_revision.revision || this.definition.reference == this.summary.latest_revision"
+  };
+
+  ContractNegotiation contract = 1 [features.field_presence = LEGACY_REQUIRED];
+  WorkflowDefinitionSummary summary = 2 [features.field_presence = LEGACY_REQUIRED];
+  WorkflowDefinitionArtifact definition = 3 [features.field_presence = LEGACY_REQUIRED];
+  ProjectionFreshness freshness = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Lists visible definitions in workflow_id order at one pinned checkpoint.
+// Continuations preserve filter, rendered contract, and consistency requirement;
+// stricter consistency starts a new scan. Every page is independently authorized.
+message ListWorkflowDefinitionsRequest {
+  ContractVersion accepted_contract = 1 [features.field_presence = LEGACY_REQUIRED];
+  DefinitionListFilter filter = 2 [features.field_presence = LEGACY_REQUIRED];
+  uint32 page_size = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32.gt = 0
+  ];
+  bytes page_token = 4 [(buf.validate.field).bytes.min_len = 1];
+  ReadConsistency consistency = 5;
+}
+
+// An empty page does not terminate a scan; absent next_page_token does.
+// skipped_count discloses rows that could not be rendered, preventing an
+// incomplete page from claiming exhaustive inventory.
+message ListWorkflowDefinitionsResponse {
+  ContractNegotiation contract = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated WorkflowDefinitionSummary definitions = 2;
+  bytes next_page_token = 3 [(buf.validate.field).bytes.min_len = 1];
+  uint32 skipped_count = 4 [features.field_presence = LEGACY_REQUIRED];
+  ProjectionFreshness freshness = 5 [features.field_presence = LEGACY_REQUIRED];
+}

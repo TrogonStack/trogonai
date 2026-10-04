@@ -1,0 +1,296 @@
+{
+  "templates": {
+    "cursor-run-nodes": {
+      "type": "trogonai.workflows.runs.queries.v1alpha1.RunScopedCursor",
+      "payload": {
+        "validity": {
+          "renderedContract": {
+            "major": 1,
+            "minor": 1
+          },
+          "projectionGeneration": "projection-example",
+          "callerBinding": "AQ==",
+          "expiresAt": "2026-01-01T00:02:00Z",
+          "consistency": {
+            "atLeast": {
+              "runId": "run-example",
+              "ordinal": "8"
+            },
+            "maxWait": "5s"
+          }
+        },
+        "runId": "run-example",
+        "pinnedOrdinal": "8",
+        "lastScannedOrdinal": "4",
+        "lastScannedItemId": "item-example",
+        "nodes": {}
+      }
+    },
+    "cursor-run-history": {
+      "type": "trogonai.workflows.runs.queries.v1alpha1.RunScopedCursor",
+      "payload": {
+        "validity": {
+          "renderedContract": {
+            "major": 1,
+            "minor": 1
+          },
+          "projectionGeneration": "projection-example",
+          "callerBinding": "AQ==",
+          "expiresAt": "2026-01-01T00:02:00Z",
+          "consistency": {
+            "atLeast": {
+              "runId": "run-example",
+              "ordinal": "8"
+            },
+            "maxWait": "5s"
+          }
+        },
+        "runId": "run-example",
+        "pinnedOrdinal": "8",
+        "lastScannedOrdinal": "4",
+        "lastScannedItemId": "item-example",
+        "historyDirection": "HISTORY_DIRECTION_REVERSE"
+      }
+    },
+    "cursor-run-interactions-false-filter": {
+      "type": "trogonai.workflows.runs.queries.v1alpha1.RunScopedCursor",
+      "payload": {
+        "validity": {
+          "renderedContract": {
+            "major": 1,
+            "minor": 1
+          },
+          "projectionGeneration": "projection-example",
+          "callerBinding": "AQ==",
+          "expiresAt": "2026-01-01T00:02:00Z",
+          "consistency": {
+            "atLeast": {
+              "runId": "run-example",
+              "ordinal": "8"
+            },
+            "maxWait": "5s"
+          }
+        },
+        "runId": "run-example",
+        "pinnedOrdinal": "8",
+        "lastScannedOrdinal": "4",
+        "lastScannedItemId": "item-example",
+        "unresolvedInteractionsOnly": false
+      }
+    },
+    "cursor-run-list": {
+      "type": "trogonai.workflows.runs.queries.v1alpha1.RunListCursor",
+      "payload": {
+        "validity": {
+          "renderedContract": {
+            "major": 1,
+            "minor": 1
+          },
+          "projectionGeneration": "projection-example",
+          "callerBinding": "AQ==",
+          "expiresAt": "2026-01-01T00:02:00Z",
+          "consistency": {
+            "atLeast": {
+              "runId": "run-example",
+              "ordinal": "8"
+            },
+            "maxWait": "5s"
+          }
+        },
+        "workspaceId": "workspace-example",
+        "lifecycles": [
+          "RUN_LIFECYCLE_RUNNING"
+        ],
+        "pinnedCheckpoint": "AQ==",
+        "lastScannedStartedAt": "2026-01-01T00:00:00Z",
+        "lastScannedRunId": "run-example"
+      }
+    },
+    "cursor-authenticated-envelope": {
+      "type": "trogonai.workflows.runs.queries.v1alpha1.CursorEnvelope",
+      "payload": {
+        "formatVersion": 1,
+        "payload": "AQ==",
+        "mac": "AQ=="
+      }
+    },
+    "query-run-freshness": {
+      "type": "trogonai.workflows.runs.queries.v1alpha1.ProjectionFreshness",
+      "payload": {
+        "generation": "projection-example",
+        "checkpoint": "AQ==",
+        "observedAt": "2026-01-01T00:01:00Z",
+        "applied": [
+          {
+            "runId": "run-example",
+            "ordinal": "8"
+          }
+        ],
+        "condition": "FRESHNESS_CONDITION_CURRENT",
+        "consistencySatisfied": true
+      }
+    },
+    "cursor-definition-list": {
+      "type": "trogonai.workflows.definitions.queries.v1alpha1.DefinitionListCursor",
+      "payload": {
+        "renderedContract": {
+          "major": 1,
+          "minor": 1
+        },
+        "filter": {
+          "parent": "projects/example",
+          "archived": "ARCHIVED_FILTER_EXCLUDE"
+        },
+        "projectionGeneration": "projection-example",
+        "pinnedCheckpoint": "AQ==",
+        "lastScannedWorkflowId": "workflow-example",
+        "expiresAt": "2026-01-01T00:02:00Z",
+        "callerBinding": "AQ=="
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "cursor-run-nodes",
+      "template": "cursor-run-nodes"
+    },
+    {
+      "name": "cursor-rejects-position-beyond-pinned-ordinal",
+      "template": "cursor-run-nodes",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/lastScannedOrdinal",
+          "value": "9"
+        }
+      ],
+      "violations": [
+        "the cursor position must not exceed its pinned run ordinal"
+      ]
+    },
+    {
+      "name": "cursor-rejects-another-run-consistency",
+      "template": "cursor-run-nodes",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/validity/consistency/atLeast/runId",
+          "value": "run-other"
+        }
+      ],
+      "violations": [
+        "the consistency position must belong to the cursor run"
+      ]
+    },
+    {
+      "name": "cursor-requires-query-discriminator",
+      "template": "cursor-run-nodes",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/nodes"
+        }
+      ],
+      "violations": [
+        "query: exactly one field is required in oneof"
+      ]
+    },
+    {
+      "name": "cursor-requires-nonempty-caller-binding",
+      "template": "cursor-run-nodes",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/validity/callerBinding",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "must be at least 1 bytes"
+      ]
+    },
+    {
+      "name": "cursor-run-history",
+      "template": "cursor-run-history"
+    },
+    {
+      "name": "cursor-run-interactions-false-filter",
+      "template": "cursor-run-interactions-false-filter"
+    },
+    {
+      "name": "cursor-run-list",
+      "template": "cursor-run-list"
+    },
+    {
+      "name": "cursor-authenticated-envelope",
+      "template": "cursor-authenticated-envelope"
+    },
+    {
+      "name": "cursor-rejects-unsupported-format",
+      "template": "cursor-authenticated-envelope",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/formatVersion",
+          "value": 2
+        }
+      ],
+      "violations": [
+        "must equal 1"
+      ]
+    },
+    {
+      "name": "query-run-freshness",
+      "template": "query-run-freshness"
+    },
+    {
+      "name": "query-run-freshness-rejects-unsatisfied-success",
+      "template": "query-run-freshness",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/consistencySatisfied",
+          "value": false
+        }
+      ],
+      "violations": [
+        "must equal true"
+      ]
+    },
+    {
+      "name": "query-run-freshness-rejects-duplicate-run-positions",
+      "template": "query-run-freshness",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/applied/-",
+          "value": {
+            "runId": "run-example",
+            "ordinal": "8"
+          }
+        }
+      ],
+      "violations": [
+        "applied run positions must be unique"
+      ]
+    },
+    {
+      "name": "cursor-definition-list",
+      "template": "cursor-definition-list"
+    },
+    {
+      "name": "cursor-definition-rejects-empty-caller-binding",
+      "template": "cursor-definition-list",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/callerBinding",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "must be at least 1 bytes"
+      ]
+    }
+  ]
+}

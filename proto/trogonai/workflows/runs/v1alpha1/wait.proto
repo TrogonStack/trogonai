@@ -1,0 +1,318 @@
+edition = "2024";
+
+package trogonai.workflows.runs.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/workflows/definitions/v1alpha1/digest.proto";
+import "trogonai/workflows/definitions/v1alpha1/value.proto";
+import "trogonai/workflows/runs/v1alpha1/control.proto";
+import "trogonai/workflows/runs/v1alpha1/receipt.proto";
+import "trogonai/workflows/runs/v1alpha1/run.proto";
+
+message ExternalResourceRef {
+  string resource_type = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string resource_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// Cursor encoding and ordering belong to the pinned handler. The exact bytes
+// survive restart; the handler verifies their digest before interpreting them.
+message ExternalCursor {
+  bytes cursor_bytes = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.min_len = 1
+  ];
+  trogonai.workflows.definitions.v1alpha1.Digest digest = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ExternalWaitRegistration {
+  option (buf.validate.message).cel = {
+    id: "external_wait_registration.predecessor"
+    message: "a wait cannot resume from itself"
+    expression: "!has(this.previous_wait_id) || this.previous_wait_id != this.wait_id"
+  };
+  option (buf.validate.message).cel = {
+    id: "external_wait_registration.unique_inputs"
+    message: "wait parameter names must be unique"
+    expression: "this.parameters.map(value, value.name).unique()"
+  };
+
+  string wait_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string occurrence_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  // Stable across repeated entries for the same source and handler. The fold
+  // deduplicates source event identities across those entries, not per poll.
+  string source_id = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ExternalResourceRef resource = 4 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.workflows.definitions.v1alpha1.RegisteredValue watcher = 5 [features.field_presence = LEGACY_REQUIRED];
+  repeated ResolvedValue parameters = 6;
+  ExternalCursor initial_cursor = 7 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp deadline = 8 [features.field_presence = LEGACY_REQUIRED];
+  string previous_wait_id = 9 [(buf.validate.field).string.min_len = 1];
+  trogonai.workflows.definitions.v1alpha1.RegisteredContractRef observation_contract = 10 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Cursor advancement and activity receipt append atomically. Source event id
+// plus source id deduplicates transport redelivery and repeated wait entries.
+message ExternalActivityReceipt {
+  option (buf.validate.message).cel = {
+    id: "external_activity_receipt.cursor_progress"
+    message: "an accepted activity advances the exact cursor"
+    expression: "this.cursor_before.cursor_bytes != this.cursor_after.cursor_bytes"
+  };
+  option (buf.validate.message).cel = {
+    id: "external_activity_receipt.unique_outputs"
+    message: "captured activity output names must be unique"
+    expression: "this.outputs.map(value, value.name).unique()"
+  };
+
+  string activity_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string wait_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string source_id = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string source_event_id = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  trogonai.workflows.definitions.v1alpha1.RegisteredValue event = 5 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.workflows.definitions.v1alpha1.Digest event_digest = 6 [features.field_presence = LEGACY_REQUIRED];
+  ExternalCursor cursor_before = 7 [features.field_presence = LEGACY_REQUIRED];
+  ExternalCursor cursor_after = 8 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp observed_at = 9 [features.field_presence = LEGACY_REQUIRED];
+  repeated trogonai.workflows.definitions.v1alpha1.NamedValue outputs = 10;
+}
+
+// A poll with no accepted activity can still make durable progress. It names
+// the exact previous cursor so concurrent watchers cannot silently skip work.
+message ExternalCursorAdvance {
+  option (buf.validate.message).cel = {
+    id: "external_cursor_advance.progress"
+    message: "cursor advancement must change the cursor"
+    expression: "this.cursor_before.cursor_bytes != this.cursor_after.cursor_bytes"
+  };
+
+  string advancement_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string wait_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ExternalCursor cursor_before = 3 [features.field_presence = LEGACY_REQUIRED];
+  ExternalCursor cursor_after = 4 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp observed_at = 5 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message WaitSatisfied {
+  option (buf.validate.message).cel = {
+    id: "wait_satisfied.condition"
+    message: "wait satisfaction requires a true completion condition"
+    expression: "this.completion_condition.result"
+  };
+  option (buf.validate.message).cel = {
+    id: "wait_satisfied.unique_outputs"
+    message: "wait output names must be unique"
+    expression: "this.outputs.map(value, value.name).unique()"
+  };
+
+  ConditionEvaluation completion_condition = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated string activity_ids = 2 [
+    (buf.validate.field).repeated.min_items = 1,
+    (buf.validate.field).repeated.unique = true,
+    (buf.validate.field).repeated.items.string.min_len = 1
+  ];
+  repeated trogonai.workflows.definitions.v1alpha1.NamedValue outputs = 3;
+}
+
+message WaitCancelled {
+  string cancellation_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+message ExternalWaitResolution {
+  string resolution_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string wait_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  oneof outcome {
+    option (buf.validate.oneof).required = true;
+
+    WaitSatisfied satisfied = 3;
+    DeadlineReached timed_out = 4;
+    Failure failed = 5;
+    WaitCancelled cancelled = 6;
+  }
+}
+
+// Registration is intent. Only verified activation permits polling. A repair
+// reuses the wait id; uncertain subscription creation is reconciled before a
+// second attach, just as an indeterminate Session dispatch is not auto-retried.
+message ExternalWaitActivation {
+  option (buf.validate.message).cel = {
+    id: "external_wait_activation.lease"
+    message: "a subscription lease must end after activation"
+    expression: "this.lease_expires_at > this.activated_at"
+  };
+
+  string activation_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string wait_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string subscription_id = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ExternalCursor accepted_cursor = 4 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp activated_at = 5 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp lease_expires_at = 6 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ExternalSubscriptionLease {
+  option (buf.validate.message).cel = {
+    id: "external_subscription_lease.interval"
+    message: "a renewed lease must end after renewal"
+    expression: "this.lease_expires_at > this.renewed_at"
+  };
+
+  string lease_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string wait_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string activation_id = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  google.protobuf.Timestamp renewed_at = 4 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp lease_expires_at = 5 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message SubscriptionReleased {
+  google.protobuf.Timestamp released_at = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// The handler verifies the idempotent registration never created a subscription;
+// absence of an activation receipt alone is not this evidence.
+message SubscriptionNeverActivated {
+  string verification_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ActorRef verified_by = 2 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp verified_at = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ExternalSubscriptionCleanup {
+  option (buf.validate.message).cel = {
+    id: "external_subscription_cleanup.target"
+    message: "release requires an activation; never-activated evidence requires registration intent"
+    expression: "(!has(this.released) || has(this.activation_id)) && (!has(this.never_activated) || has(this.registration_intent))"
+  };
+
+  string cleanup_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string wait_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  oneof target {
+    option (buf.validate.oneof).required = true;
+
+    string activation_id = 3 [(buf.validate.field).string.min_len = 1];
+    google.protobuf.Empty registration_intent = 6;
+  }
+  oneof outcome {
+    option (buf.validate.oneof).required = true;
+
+    SubscriptionReleased released = 4;
+    InvocationIndeterminate indeterminate = 5;
+    SubscriptionNeverActivated never_activated = 7;
+  }
+}
+
+message TimerWaitRegistration {
+  option (buf.validate.message).cel = {
+    id: "timer_wait_registration.bounds"
+    message: "the timer must be due no later than its occurrence deadline"
+    expression: "this.due_at <= this.deadline"
+  };
+
+  string timer_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string occurrence_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  google.protobuf.Timestamp due_at = 3 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp deadline = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message TimerFired {
+  option (buf.validate.message).cel = {
+    id: "timer_fired.due"
+    message: "a timer cannot fire before its scheduled instant"
+    expression: "this.observed_at >= this.due_at"
+  };
+
+  google.protobuf.Timestamp due_at = 1 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp observed_at = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message TimerWaitResolution {
+  string resolution_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string timer_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  oneof outcome {
+    option (buf.validate.oneof).required = true;
+
+    TimerFired fired = 3;
+    WaitCancelled cancelled = 4;
+    DeadlineReached timed_out = 5;
+  }
+}

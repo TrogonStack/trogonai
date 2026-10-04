@@ -1,0 +1,135 @@
+edition = "2024";
+
+package trogonai.workflows.runs.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/session/sessions/v1alpha1/artifact.proto";
+import "trogonai/workflows/definitions/v1alpha1/digest.proto";
+import "trogonai/workflows/definitions/v1alpha1/policy.proto";
+import "trogonai/workflows/definitions/v1alpha1/value.proto";
+import "trogonai/workflows/runs/v1alpha1/run.proto";
+
+enum FailureReason {
+  FAILURE_REASON_UNSPECIFIED = 0;
+  FAILURE_REASON_EXECUTION_ERROR = 1;
+  FAILURE_REASON_ADMISSION_REJECTED = 2;
+  FAILURE_REASON_DEADLINE_EXCEEDED = 3;
+  FAILURE_REASON_OUTPUT_CONTRACT_VIOLATED = 4;
+  FAILURE_REASON_DEPENDENCY_FAILED = 5;
+  FAILURE_REASON_LIMIT_REACHED = 6;
+  FAILURE_REASON_EXTERNAL_SOURCE_ERROR = 7;
+}
+
+message Failure {
+  FailureReason reason = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  string detail = 2;
+  repeated ContextArtifact evidence = 3;
+  // Absence means the failure is not retryable. Human detail never classifies it.
+  trogonai.workflows.definitions.v1alpha1.RetryClass retry_class = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+message ArtifactReceipt {
+  string output_name = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  trogonai.session.sessions.v1alpha1.ArtifactRef artifact = 2 [features.field_presence = LEGACY_REQUIRED];
+  SessionEventRef recorded_at = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// A business verdict is a schema-bound output. A successfully executed review
+// returning a negative verdict still uses InvocationSucceeded.
+message InvocationSucceeded {
+  option (buf.validate.message).cel = {
+    id: "invocation_succeeded.unique_outputs"
+    message: "captured output names must be unique"
+    expression: "this.outputs.map(value, value.name).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "invocation_succeeded.unique_artifacts"
+    message: "artifact output names must be unique"
+    expression: "this.artifacts.map(value, value.output_name).unique()"
+  };
+
+  repeated trogonai.workflows.definitions.v1alpha1.NamedValue outputs = 1;
+  repeated ArtifactReceipt artifacts = 2;
+}
+
+message InvocationCancelled {
+  string cancellation_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ActorRef cancelled_by = 2 [features.field_presence = LEGACY_REQUIRED];
+  string detail = 3;
+}
+
+// An indeterminate result blocks automatic retry. It may be superseded once
+// by verified determinate evidence, including after the run terminates.
+message InvocationIndeterminate {
+  string detail = 1;
+}
+
+message LaunchRejectedEvidence {
+  string admission_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string policy_revision = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ActorRef rejected_by = 3 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp rejected_at = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// The source Session event must belong to the exact dispatched Session and
+// match its outcome. Bytes, ordinal, and type are verified before acceptance.
+// The receipt id deduplicates delivery; a determinate outcome is immutable.
+message InvocationResultReceipt {
+  option (buf.validate.message).cel = {
+    id: "invocation_result_receipt.artifact_source"
+    message: "successful artifact receipts must come from the producing Session"
+    expression: "!has(this.succeeded) || (has(this.session_event) && this.succeeded.artifacts.all(artifact, artifact.recorded_at.session == this.session_event.session))"
+  };
+  option (buf.validate.message).cel = {
+    id: "invocation_result_receipt.launch_rejection"
+    message: "a launch rejection must be an admission failure"
+    expression: "!has(this.launch_rejection) || (has(this.failed) && this.failed.reason == 2)"
+  };
+
+  string receipt_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string invocation_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  trogonai.workflows.definitions.v1alpha1.Digest execution_plan_digest = 3 [features.field_presence = LEGACY_REQUIRED];
+  oneof source {
+    option (buf.validate.oneof).required = true;
+
+    SessionEventRef session_event = 4;
+    LaunchRejectedEvidence launch_rejection = 5;
+  }
+  oneof outcome {
+    option (buf.validate.oneof).required = true;
+
+    InvocationSucceeded succeeded = 6;
+    Failure failed = 7;
+    InvocationCancelled cancelled = 8;
+    InvocationIndeterminate indeterminate = 9;
+  }
+  google.protobuf.Timestamp received_at = 10 [features.field_presence = LEGACY_REQUIRED];
+}

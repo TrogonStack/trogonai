@@ -1,0 +1,137 @@
+edition = "2024";
+
+package trogonai.workflows.runs.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/workflows/definitions/v1alpha1/value.proto";
+import "trogonai/workflows/runs/v1alpha1/control.proto";
+import "trogonai/workflows/runs/v1alpha1/receipt.proto";
+import "trogonai/workflows/runs/v1alpha1/run.proto";
+
+message InputChoice {
+  string choice_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string display_name = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  trogonai.workflows.definitions.v1alpha1.WorkflowValue value = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message InputRequest {
+  option (buf.validate.message).cel = {
+    id: "input_request.unique_responders"
+    message: "the admitted responder identities must be unique"
+    expression: "this.allowed_responders.all(actor, this.allowed_responders.filter(other, other == actor).size() == 1)"
+  };
+  option (buf.validate.message).cel = {
+    id: "input_request.unique_choices"
+    message: "input choice identities must be unique"
+    expression: "this.choices.map(choice, choice.choice_id).unique()"
+  };
+
+  string request_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  oneof target {
+    option (buf.validate.oneof).required = true;
+
+    google.protobuf.Empty run = 2;
+    string occurrence_id = 3 [(buf.validate.field).string.min_len = 1];
+    string invocation_id = 4 [(buf.validate.field).string.min_len = 1];
+  }
+  ActorRef requested_by = 5 [features.field_presence = LEGACY_REQUIRED];
+  string question = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  trogonai.workflows.definitions.v1alpha1.ValueSchema answer_schema = 7 [features.field_presence = LEGACY_REQUIRED];
+  repeated InputChoice choices = 8;
+  repeated ActorRef allowed_responders = 9 [(buf.validate.field).repeated.min_items = 1];
+  google.protobuf.Timestamp deadline = 10 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message InputDeclined {
+  string detail = 1;
+}
+
+// Actor identity is authenticated at ingress. The fold matches request,
+// audience, schema, and deadline before admitting a response exactly once.
+message InputResponse {
+  option (buf.validate.message).cel = {
+    id: "input_response.choice_answer"
+    message: "a selected choice requires an answered response"
+    expression: "!has(this.selected_choice_id) || has(this.answered)"
+  };
+  option (buf.validate.message).cel = {
+    id: "input_response.expiry_time"
+    message: "an expiry receipt must record the same observed response instant"
+    expression: "!has(this.expired) || this.expired.observed_at == this.responded_at"
+  };
+
+  string response_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string request_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ActorRef responded_by = 3 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp responded_at = 4 [features.field_presence = LEGACY_REQUIRED];
+  oneof outcome {
+    option (buf.validate.oneof).required = true;
+
+    trogonai.workflows.definitions.v1alpha1.WorkflowValue answered = 5;
+    InputDeclined declined = 6;
+    DeadlineReached expired = 7;
+  }
+  string selected_choice_id = 8 [(buf.validate.field).string.min_len = 1];
+}
+
+message StepGuidanceTarget {
+  string invocation_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// Guidance carries task direction only. Pause, cancellation, answers, and
+// definition revision use their own invariant-bearing commands and events.
+message Guidance {
+  string guidance_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ActorRef sent_by = 2 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp sent_at = 3 [features.field_presence = LEGACY_REQUIRED];
+  oneof direction {
+    option (buf.validate.oneof).required = true;
+
+    StepGuidanceTarget main_to_step = 4;
+    StepGuidanceTarget step_to_main = 5;
+  }
+  string message = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  repeated ContextArtifact context = 7;
+}
+
+message GuidanceDelivery {
+  string guidance_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  oneof outcome {
+    option (buf.validate.oneof).required = true;
+
+    SessionEventRef delivered = 2;
+    Failure undeliverable = 3;
+  }
+}
