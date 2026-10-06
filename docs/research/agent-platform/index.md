@@ -44,6 +44,9 @@ and evidence rules behind each product dossier remain reproducible.
   the dossier findings read back against `proto/trogonai/agents/agents/v1alpha1`
   and `proto/trogonai/session/sessions/v1alpha1`. Analysis only; every
   proposed change is gated on an ADR.
+- [Adoption candidates: Omnara](./adoption-candidates-omnara.md), patterns
+  from an open-source managed-agents control plane worth carrying over, and
+  the ones to avoid. Analysis only; every proposed change is gated on an ADR.
 
 ## Synthesis
 
