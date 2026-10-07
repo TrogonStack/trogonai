@@ -4,8 +4,10 @@ Part of MCP Gateway Research.
 Evidence snapshot retrieved 2026-10-07 from the Uber Engineering post
 [Designing MCP Gateway](https://www.uber.com/us/en/blog/designing-mcp-gateway/),
 published 2026-10-01 by Alok Srivastava, Deepanshu Mehndiratta, and Gaurav
-Gill. The post is prose with diagrams and names no public repository, so every
-claim below is either a quotation or an inference marked as ours. Quotations
+Gill. The post is prose with diagrams and names no public repository, so the
+post itself is the only evidence. Text in quotation marks is verbatim from the
+post; unquoted prose paraphrases it; anything that goes beyond what the post
+says is labelled as our inference or listed under open questions. Quotations
 that contain typographic dashes in the original are shortened to the clause
 that carries the claim.
 
@@ -51,8 +53,8 @@ explicitly reviewed and enabled by the owning team."
 
 "Autocrawler is a Cadence-powered distributed workflow system subscribed to
 Uber's IDL registry and internal service signals." A scheduled job triggers
-workflows that scan for new services, APIs, and schema changes. Three sources
-feed it.
+workflows that scan for new services, APIs, and schema changes. It derives
+servers from the IDL registry and from native-server heartbeats.
 
 - IDL-backed services (protobuf and Thrift). The crawler creates or updates a
   virtual MCP server for the service, parses the IDL for method names,
@@ -64,10 +66,16 @@ feed it.
   servers, emit heartbeat metrics that signal presence and readiness. The
   crawler watches those metrics, calls `tools/list`, and creates a virtual
   proxy server holding every discovered tool, disabled.
-- Third-party servers such as Jira and Google. The gateway relays the caller's
-  user token downstream while enforcing authorization, rate limiting, and
-  sensitive-data redaction; a separate third-party service exchanges internal
-  user tokens for the external provider's tokens before dispatch.
+
+### Third-party MCP servers
+
+Servers such as Jira and Google are provisioned through a separate flow
+rather than crawled. The gateway "relays the caller's user token downstream
+while enforcing essential gateway capabilities, including authorization, rate
+limiting, and sensitive data redaction", and a Third-Party MCP Service
+"exchanges the internal user token for a corresponding third-party
+authentication token before dispatching the request to the external MCP
+server."
 
 ### Ownership and change control
 

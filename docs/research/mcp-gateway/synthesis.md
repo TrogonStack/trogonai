@@ -52,14 +52,14 @@ in the [ADR index](../../adr/index.md), the ADR is authoritative.
    humans, services, and agents; AgentCore attaches Cedar policies at the
    gateway; the repository's CommandPrincipal already distinguishes the same
    kinds ([ADR#0026](../../adr/0026-command-authorization-principal.md)).
-   Convergence stops at the edge, though: ADR#0026 rejects "authorize only at
+   Convergence stops at the edge, though: [ADR#0026](../../adr/0026-command-authorization-principal.md) rejects "authorize only at
    the gateway, trust everything past it", so for trogonai the edge is the
    first checkpoint, not the only one.
 
 4. Tool definitions change through an owner-approved, reversible step. Uber
    gates every description change behind an owner-approved diff with
    rollback. The repository already has the shape for agent definitions
-   (proposal, revision, revert minting a new revision in ADR#0025) and no
+   (proposal, revision, revert minting a new revision in [ADR#0025](../../adr/0025-agent-definition-data-ownership.md)) and no
    equivalent for tool definitions, which today exist only as whatever the
    backend returns from `tools/list`.
 
@@ -82,7 +82,7 @@ B. Who owns the tool schema. Uber's registry owns a generated, owner-edited
    copy; AgentCore reads it from the target at configuration time; OpenAI and
    xAI never store it. The repository's stated rule is that the gateway must
    not own externally owned tool schemas and that an agent definition never
-   copies a tool's schema; versions resolve at session start (ADR#0025). The
+   copies a tool's schema; versions resolve at session start ([ADR#0025](../../adr/0025-agent-definition-data-ownership.md)). The
    open question is whether a registry record that owns a schema contradicts
    that rule or satisfies it by being the external owner.
 
@@ -103,7 +103,7 @@ D. Third-party user identity. Uber exchanges an internal user token for the
 
 E. Transport and session state. Uber's edge is HTTP per virtual server with
    mesh delegation underneath and no stated session model. The repository's
-   edge is NATS subjects with per-process MCP session state, and ADR#0055
+   edge is NATS subjects with per-process MCP session state, and [ADR#0055](../../adr/0055-nats-subject-design-jsonrpc-bindings.md)
    reserves queue-group semantics that the current mcp-nats transport does
    not use. The two are not comparable on reliability until the repository
    decides how session state survives a replica change.
@@ -115,17 +115,17 @@ expect it to take. None of these is decided here.
 
 | Decision | Constrained by | Expected shape |
 | --- | --- | --- |
-| Tool registry as the control plane for MCP servers and tool definitions | ADR#0012, ADR#0025, agent platform architecture (registries deferred) | ADR: servers and tool definitions are owned, versioned records; the ARD catalog becomes a derived projection, not the source |
-| Tool-level exposure, separate from authorization | ADR#0025 (admission), ADR#0026 (principal) | Exposure state on the registry record, owner-controlled, with discovery never implying it |
-| MCP invocation authorization by principal kind with server and tool tiers | ADR#0026 (not gateway-only), a2a-gateway policy resolver | ADR mirroring the A2A per-skill resolver for MCP; override versus ceiling semantics decided explicitly; the term "charter" is already taken by `AGENT_CHANGE_CLASS_CHARTER` and must not be reused |
-| Versioned tool definitions with owner-approved diffs and rollback | ADR#0025 (proposal lifecycle, revert mints a revision), digest-pinned `ExactToolVersionPin` | Reuse the proposal lifecycle; a running session keeps its pinned digest when `tools/list_changed` arrives |
-| Proto services and decider commands as MCP tools | ADR#0016 (FileDescriptorSet transcoding), ADR#0057 (`Decide(Any)`) | Eligibility declared by a typed method option and explicit allowlists; never expose the raw decide entrypoint |
-| Third-party user-token exchange | ADR#0053, ADR#0063 Decision 5 | Define the session-scoped grant and the connection resource for non-model providers that ADR#0063 leaves open; Uber and AgentCore both supply evidence |
-| Response projection and MCP redaction | ADR#0039 (provenance), session `resource_observation` extents | Decide whether projection is request metadata or part of the agent-visible interface; fix the order authorize, invoke, redact, project, record |
-| Lazy tool discovery at the edge | ADR#0025 (pinned set at session start) | Meta-tools that load only from the admitted pinned set |
-| Replicated MCP sessions over NATS | ADR#0055 (queue groups), mcp-nats transport | Decide where session state lives before enabling queue groups; the subscribe call today has none |
-| Catalog refresh and session consistency | ADR#0025 (versions resolve at session start) | Explanation page describing what a live registry change means for an in-flight session |
-| MCP telemetry attributes | ADR#0008, `otel/semconv/registry/mcp.yaml` | Attributes for server, tool, principal kind, exposure decision, and projection applied |
+| Tool registry as the control plane for MCP servers and tool definitions | [ADR#0012](../../adr/0012-ard-compatible-discovery-catalog.md), [ADR#0025](../../adr/0025-agent-definition-data-ownership.md), agent platform architecture (registries deferred) | ADR: servers and tool definitions are owned, versioned records; the ARD catalog becomes a derived projection, not the source |
+| Tool-level exposure, separate from authorization | [ADR#0025](../../adr/0025-agent-definition-data-ownership.md) (admission), [ADR#0026](../../adr/0026-command-authorization-principal.md) (principal) | Exposure state on the registry record, owner-controlled, with discovery never implying it |
+| MCP invocation authorization by principal kind with server and tool tiers | [ADR#0026](../../adr/0026-command-authorization-principal.md) (not gateway-only), a2a-gateway policy resolver | ADR mirroring the A2A per-skill resolver for MCP; override versus ceiling semantics decided explicitly; the term "charter" is already taken by `AGENT_CHANGE_CLASS_CHARTER` and must not be reused |
+| Versioned tool definitions with owner-approved diffs and rollback | [ADR#0025](../../adr/0025-agent-definition-data-ownership.md) (proposal lifecycle, revert mints a revision), digest-pinned `ExactToolVersionPin` | Reuse the proposal lifecycle; a running session keeps its pinned digest when `tools/list_changed` arrives |
+| Proto services and decider commands as MCP tools | [ADR#0016](../../adr/0016-protobuf-rpc-over-nats-micro-binding.md) (FileDescriptorSet transcoding), [ADR#0057](../../adr/0057-decider-command-nats-binding.md) (`Decide(Any)`) | Eligibility declared by a typed method option and explicit allowlists; never expose the raw decide entrypoint |
+| Third-party user-token exchange | [ADR#0053](../../adr/0053-external-oidc-federation-surface.md), [ADR#0063](../../adr/0063-agent-connection-declarations.md) Decision 5 | Define the session-scoped grant and the connection resource for non-model providers that [ADR#0063](../../adr/0063-agent-connection-declarations.md) leaves open; Uber and AgentCore both supply evidence |
+| Response projection and MCP redaction | [ADR#0039](../../adr/0039-self-authenticating-event-provenance.md) (provenance), session `resource_observation` extents | Decide whether projection is request metadata or part of the agent-visible interface; fix the order authorize, invoke, redact, project, record |
+| Lazy tool discovery at the edge | [ADR#0025](../../adr/0025-agent-definition-data-ownership.md) (pinned set at session start) | Meta-tools that load only from the admitted pinned set |
+| Replicated MCP sessions over NATS | [ADR#0055](../../adr/0055-nats-subject-design-jsonrpc-bindings.md) (queue groups), mcp-nats transport | Decide where session state lives before enabling queue groups; the subscribe call today has none |
+| Catalog refresh and session consistency | [ADR#0025](../../adr/0025-agent-definition-data-ownership.md) (versions resolve at session start) | Explanation page describing what a live registry change means for an in-flight session |
+| MCP telemetry attributes | [ADR#0008](../../adr/0008-opentelemetry-observability.md), `otel/semconv/registry/mcp.yaml` | Attributes for server, tool, principal kind, exposure decision, and projection applied |
 | Glossary entries | existing glossary | ToolDefinition, tool exposure, invocation policy, `server_id`; disambiguate gateway, registry, and charter |
 
 ## What the repository already has that the dossiers do not
@@ -141,9 +141,9 @@ These are not gaps; they are commitments the gateway work must preserve.
   ([ADR#0036](../../adr/0036-agent-self-certifying-identity.md),
   [ADR#0039](../../adr/0039-self-authenticating-event-provenance.md)).
 - Digest-pinned tool versions per session, with authorization evaluated live
-  and never pinned (ADR#0025). Uber's live refresh has no stated pin, which
+  and never pinned ([ADR#0025](../../adr/0025-agent-definition-data-ownership.md)). Uber's live refresh has no stated pin, which
   is the mid-task drift case the repository already guards against.
-- Revert as a new revision rather than a restore (ADR#0025), so rollback
+- Revert as a new revision rather than a restore ([ADR#0025](../../adr/0025-agent-definition-data-ownership.md)), so rollback
   leaves a trail.
 - Canonical, body-covered security over NATS
   ([ADR#0041](../../adr/0041-canonical-mcp-jsonrpc-bodies-over-nats.md),
