@@ -40,3 +40,5 @@ corpora. Entries are public repositories unless the line says otherwise.
 - [Guild](https://guild.ai): no public repo, studied through its
   [docs](https://docs.guild.ai) and [`llms.txt`](https://docs.guild.ai/llms.txt)
   index
+- [Uber Engineering, Designing MCP Gateway](https://www.uber.com/us/en/blog/designing-mcp-gateway/):
+  no public repo, studied through the engineering post
