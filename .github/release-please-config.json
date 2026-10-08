@@ -23,6 +23,7 @@
     },
     {
       "type": "cargo-workspace",
+      "cargoWorkspacePath": "rsworkspace",
       "merge": false
     }
   ],
