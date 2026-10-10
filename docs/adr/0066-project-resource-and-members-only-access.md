@@ -1,7 +1,7 @@
 ---
 number: "0066"
 slug: project-resource-and-members-only-access
-status: draft
+status: accepted
 date: 2026-10-10
 ---
 
