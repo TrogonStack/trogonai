@@ -685,7 +685,7 @@ no termination. Parsing an exit status back out of result text is not a
 projection this store asks readers to write.
 
 **Checkout, settings, change shape, and usage completeness.**
-`SessionStarted.checkout` is a required `CheckoutRef` (`checkout_id`, `uri`,
+`SessionStarted.checkout_ref` is a required `CheckoutRef` (`checkout_id`, `uri`,
 optional `revision`), so the ground a session's file facts refer to is recorded
 with the session rather than inferred from paths.
 `AssistantMessageStarted.settings` carries the `ModelSettings` a completion was

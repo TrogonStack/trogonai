@@ -65,7 +65,7 @@ state, and fault layout of the Agent and Proposal modules. It owns:
 
 A project is never a node. It has fields and behavior; nodes are bare
 identifiers. Work that belongs to a project later, such as tasks, references
-the project by kinship (`ProjectId project`), not by hierarchy position.
+the project by kinship (`ProjectId project_id`), not by hierarchy position.
 
 ### 2. `parent` is a `trogon.hierarchy.v1alpha1.NodeId` at a workspace or below
 

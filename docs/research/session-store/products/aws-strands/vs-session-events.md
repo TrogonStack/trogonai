@@ -99,7 +99,7 @@ positional counters, deletion) that still needed one.
 | `Snapshot` (`types/_snapshot.py`, `agent.take_snapshot`/`load_snapshot`): opt-in, in-memory, versioned copy-plus-restore, entirely outside `SessionManager`/`SessionRepository`, no lineage metadata anywhere (dossier: [Rewind, checkpoints, and fork](./index.md#rewind-checkpoints-and-fork)) | `SessionForked`, an atomic `[SessionStarted, SessionForked]` in-stream creation batch recording `source_session_id` and `context_prefix_boundary` (`proto/trogonai/session/sessions/v1alpha1/session_forked.proto:7-27`, `docs/adr/0035-session-store-decider-aggregate.md:669-721`) | Ours, decisively -- fork is a first-class, in-band, lineage-recording domain event; Strands' nearest analogue is entirely out-of-band and unversioned in the store |
 | `multi_agents/multi_agent_<id>/multi_agent.json`, a single whole-blob orchestrator state keyed by `node_results` (dossier: [Subagents and nested sessions](./index.md#subagents-and-nested-sessions)) | No second denormalized blob; the parent-child graph folds from `DelegationDispatched`/`ParentLinked` facts across streams, and the audit trail folds from the child's own message/tool events | Ours, decisively -- no second copy of "what a node did" that can drift from the node's own real session |
 | Command exit status not distinguished from any other tool outcome anywhere in the dossier | `CommandTermination{exit_code \| signal}` on `ToolCallCompleted.termination`, deliberately kept out of the provider-visible result (`proto/trogonai/session/sessions/v1alpha1/command_termination.proto:5-22`, `.../tool_call_completed.proto:16-35`) | Ours, decisively -- also independently confirmed closed by fx's item 2 |
-| Required `CheckoutRef`-equivalent: none. `Session` carries only `session_id`, `session_type`, `created_at`, `updated_at`; no cwd/origin field of any kind (dossier: [Keying and identity](./index.md#keying-and-identity)) | `SessionStarted.checkout`, a required `CheckoutRef{checkout_id, uri, revision}` (`proto/trogonai/session/sessions/v1alpha1/session_started.proto:16-24`, `.../checkout.proto:13-22`) | Ours, decisively |
+| Required `CheckoutRef`-equivalent: none. `Session` carries only `session_id`, `session_type`, `created_at`, `updated_at`; no cwd/origin field of any kind (dossier: [Keying and identity](./index.md#keying-and-identity)) | `SessionStarted.checkout_ref`, a required `CheckoutRef{checkout_id, uri, revision}` (`proto/trogonai/session/sessions/v1alpha1/session_started.proto:16-24`, `.../checkout.proto:13-22`) | Ours, decisively |
 
 ## What we should consider changing
 
@@ -280,7 +280,7 @@ gap in the tiering job's design.
   (`docs/adr/0035-session-store-decider-aggregate.md:729-756`). Strands
   forbids a node's own `Agent` from holding a session manager at all
   (the dossier's [Subagents and nested sessions](./index.md#subagents-and-nested-sessions) section) -- see Subagent cascade below.
-- **A required, recorded workspace binding.** `SessionStarted.checkout` is a
+- **A required, recorded workspace binding.** `SessionStarted.checkout_ref` is a
   required `CheckoutRef`
   (`proto/trogonai/session/sessions/v1alpha1/session_started.proto:16-24`).
   Strands' `Session` dataclass has no cwd/origin field of any kind

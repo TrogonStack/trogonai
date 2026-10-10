@@ -41,7 +41,7 @@ the problems we modelled are real.
 
 | Concern | Agents API | Ours |
 | --- | --- | --- |
-| Usage accounting | "best-effort... may change as accounting arrives... not a final bill", nullable | `TokenUsage.completeness` (FINAL/PARTIAL, "never summed with one") plus `Cost.amount_micros` and `rate_ref` |
+| Usage accounting | "best-effort... may change as accounting arrives... not a final bill", nullable | `TokenUsage.completeness` (FINAL/PARTIAL, "never summed with one") plus `Cost.amount_micros` and `rate_id` |
 | Output truncation | "Command-output truncation is not reported" | `TextToolResult.truncated`, `ArtifactRef.truncated`, `ArtifactRef.untruncated_size_bytes` |
 | Compaction provenance | automatic and opaque | `Compacted.covered_input_digest`, `CompactionProducer`, `CompactionContextRoot`, `CompactionTrigger` |
 | Child lifetime on parent death | undocumented | `CascadePolicy`, explicitly "closes the industry-wide silent-orphan gap" |
@@ -65,8 +65,8 @@ ID and needs a separate executor."
 
 - `CheckoutRef` (`checkout.proto`), which is *where files are*, immutable
   for the session's life, carrying `checkout_id`, `uri`, `revision`.
-- `ExecutionAttemptStarted.isolation_placement` and `.host_artifact_ref`
-  (opaque strings), which are *where this attempt ran*.
+- `ExecutionAttemptStarted.isolation_placement` (an opaque string) and
+  `.host_artifact_ref` (a `ClaimCheck`), which are *where this attempt ran*.
 
 Neither is a compute identity that survives across attempts. In our model a
 restart mints a new attempt and "reconnect to the same environment" cannot

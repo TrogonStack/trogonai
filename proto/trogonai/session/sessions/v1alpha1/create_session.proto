@@ -22,5 +22,5 @@ message CreateSession {
     (buf.validate.field).string.min_len = 1
   ];
   StoredSessionExecutionPlan execution_plan = 2 [features.field_presence = LEGACY_REQUIRED];
-  CheckoutRef checkout = 3 [features.field_presence = LEGACY_REQUIRED];
+  CheckoutRef checkout_ref = 3 [features.field_presence = LEGACY_REQUIRED];
 }

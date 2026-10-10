@@ -56,7 +56,7 @@ appears in `proto/trogonai/session` and `proto/trogonai/workflows`:
 - `workspace.proto` is renamed to `checkout.proto`.
 - `WorkspaceRef` is renamed to `CheckoutRef`, keeping its three fields
   (`checkout_id`, `uri`, `revision`) and their field numbers.
-- Fields of type `CheckoutRef` are renamed from `workspace` to `checkout`
+- Fields of type `CheckoutRef` are renamed from `workspace` to `checkout_ref`
   (`CreateSession`, `ForkSession`, `RecoverSession`, `CreateChildSession`,
   `SessionStarted`, `RunConfiguration`), field numbers unchanged.
 - Fields that carry a checkout's id as a plain string are renamed from

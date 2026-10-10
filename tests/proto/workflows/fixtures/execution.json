@@ -38,7 +38,7 @@
               "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
             }
           },
-          "checkout": {
+          "checkoutRef": {
             "checkoutId": "checkout-example",
             "uri": "https://example.com/checkout"
           }
@@ -84,7 +84,7 @@
               "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
             }
           },
-          "checkout": {
+          "checkoutRef": {
             "checkoutId": "checkout-example",
             "uri": "https://example.com/checkout"
           },
@@ -196,7 +196,7 @@
                 "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
               }
             },
-            "checkout": {
+            "checkoutRef": {
               "checkoutId": "checkout-example",
               "uri": "https://example.com/checkout"
             }
@@ -262,7 +262,7 @@
                 "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
               }
             },
-            "checkout": {
+            "checkoutRef": {
               "checkoutId": "checkout-example",
               "uri": "https://example.com/checkout"
             }
@@ -330,7 +330,7 @@
                 "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
               }
             },
-            "checkout": {
+            "checkoutRef": {
               "checkoutId": "checkout-example",
               "uri": "https://example.com/checkout"
             },
@@ -582,7 +582,7 @@
             }
           }
         ],
-        "checkout": {
+        "checkoutRef": {
           "checkoutId": "checkout-example",
           "uri": "https://example.com/checkout"
         },

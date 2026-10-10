@@ -148,7 +148,7 @@ written the `.ok()`-shaped code this is meant to forbid.
 ### 2. Ratify workspace-binding immutability as an explicit Non-Goal, not an implicit proto comment
 
 **The change.** `CheckoutRef` (`checkout.proto`) and its comment on
-`SessionStarted.checkout` (`session_started.proto:19-23`) already state "the
+`SessionStarted.checkout_ref` (`session_started.proto:19-23`) already state "the
 plan's working directory is immutable for the life of the session... changing
 it requires a new session or a fork," but this lives only as a proto-file
 comment, not as a decision the ADR's Non-Goals section names, unlike, for
@@ -465,7 +465,7 @@ weakest of its four maturity axes.
    failure, following recommendation 1 above, and Amazon Q's `.ok()`
    anti-pattern as the concrete cost of leaving it unsaid?
 2. Should workspace-binding immutability (already implied by
-   `CheckoutRef`'s comment on `SessionStarted.checkout`) be promoted to a
+   `CheckoutRef`'s comment on `SessionStarted.checkout_ref`) be promoted to a
    named Non-Goal, so a future relocation-reconciliation feature has to be
    proposed against a recorded decision rather than an implicit default?
 3. Does a lightweight, non-forking divergence/"tangent" marker belong in the

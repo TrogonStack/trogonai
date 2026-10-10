@@ -73,3 +73,4 @@ future implementation work.
 - [ADR#0065: Generation Settings, Usage, and Citations Grow to the Provider-Neutral Superset of Anthropic, OpenAI, and Gemini (Draft)](./0065-generation-settings-usage-and-citations-provider-superset.md)
 - [ADR#0066: A Project Is Work Attached Below a Workspace, and Its Initial Access Is Recorded at Creation](./0066-project-resource-and-members-only-access.md)
 - [ADR#0067: A Session Binds to a Checkout, Not a Workspace (Draft)](./0067-session-checkout-not-workspace.md)
+- [ADR#0068: A Reference Field Says It Is a Reference in Both Its Name and Its Type (Draft)](./0068-reference-fields-say-they-are-references.md)

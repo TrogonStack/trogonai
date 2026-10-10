@@ -48,7 +48,7 @@ answer; no store to grow means no retention question the product has ever
 had to face. Our own design draws the boundary the opposite way: the
 conversation, tool calls, and delegation graph are the durably owned record
 ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decisions 1-6), and the workspace is a referenced, versioned fact
-(`SessionStarted.checkout`, a `CheckoutRef`) rather than the thing that
+(`SessionStarted.checkout_ref`, a `CheckoutRef`) rather than the thing that
 *is* durable. Aider is the cleanest evidence in the corpus that these two
 durability concerns can be fully decoupled, because it is the one product
 that chose to durably keep only one of them.
@@ -93,7 +93,7 @@ matters here: it is not a weaker version of the pattern we are building, it
 is a deliberate decision not to build the pattern at all. The one point
 Aider makes with real force, that workspace durability and conversation
 durability are separable concerns, is already reflected in our design
-(`SessionStarted.checkout` as a referenced fact, not the authoritative
+(`SessionStarted.checkout_ref` as a referenced fact, not the authoritative
 record; `FileChanged` records facts about the workspace without owning
 it) and was already raised as a recommendation from the fx comparison
 (`docs/research/session-store/products/fx/vs-session-events.md`,
