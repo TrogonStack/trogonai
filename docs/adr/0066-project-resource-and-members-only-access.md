@@ -25,7 +25,8 @@ platform builds on fix most of the vocabulary already:
 - [Organization, workspace, folder, and project](https://github.com/straw-hat-team/adr/blob/main/src/adrs/1917971986/README.md)
   names the tenant root Organization, its direct children Workspaces, and
   deeper nodes Folders. Work attaches at a workspace or below, never at the
-  root, and "everyone in" names a workspace.
+  root, and any level may widen its visibility to a wider audience or narrow
+  it to invited members, with ancestors' limits capping descendants.
 - [ADR#0025](./0025-agent-definition-data-ownership.md) already settles who
   owns what for Agents: the registry records `parent` at birth, the hierarchy
   owns moves, current placement, derived scope, and visibility, and the policy
@@ -58,7 +59,7 @@ state, and fault layout of the Agent and Proposal modules. It owns:
 | `goal` (what are you trying to achieve) | Project | Restating the goal |
 | Lifecycle (active, archived) | Project | Archive, unarchive |
 | Creation placement (`parent` at birth) | Project | Immutable fact |
-| Initial access (at birth) | Project | Immutable fact |
+| Initial access preset (at birth) | Project | Immutable fact |
 | Current placement and moves | Hierarchy | Hierarchy operation |
 | Current access, members, grants | Policy plane | Policy operation |
 
@@ -79,19 +80,32 @@ the live hierarchy. It is an admission-time rule checked before dispatch, in
 the sense of [ADR#0064](./0064-schema-constraints-as-documentation.md)
 section 6, and the Project fold does not read hierarchy facts.
 
-### 3. Access has exactly two modes, and neither is a grant
+### 3. The access choice is a preset, not the access model
+
+Visibility is per audience and per capability, held as bindings in the
+policy plane. What a person picks when creating a project is a preset over
+those bindings, and the Project records only which preset was picked:
 
 ```text
-ProjectAccess
-  INHERITED     everyone the workspace's policy reaches, by inheritance
-  MEMBERS_ONLY  a ceiling: inherited work permissions stop at the project;
-                only principals holding a project membership pass
+ProjectAccessPreset
+  INHERITED     whoever the parent level lets in; the default
+  MEMBERS_ONLY  a limit at the project: inherited work permissions stop
+                here, and only principals holding a project membership pass
 ```
 
 `MEMBERS_ONLY` is a limit attached at the project, in the downward-bounding
 mood the hierarchy decision gives limits. It removes nothing from the
-workspace and grants nothing to anyone; membership is a separate policy
+parent and grants nothing to anyone; membership is a separate policy
 binding. Unspecified and unknown values reject.
+
+The enum starts with the presets the product offers today and is expected to
+grow. Organization-wide and public presets are widening grants, which the
+hierarchy decision lets accumulate downward, and adding them is a new enum
+value, not a reshape. A preset is capped by its ancestors' limits at
+admission: a project inside an invited-members folder cannot be created as
+organization-wide or public. Finer distinctions, such as an audience that
+may discover a project without reading it, live in policy bindings and never
+in this enum.
 
 The ceiling bounds work permissions only. Governance held at the tenant root,
 audit and the ability to reassign or delete abandoned work, still reaches a
@@ -100,8 +114,8 @@ project no one can recover when its last member leaves.
 
 ### 4. Initial access is a creation fact, and discovery fails closed
 
-`ProjectCreated` records `initial_access` beside `parent`, for the same reason
-ADR#0025 records `parent` at birth: the creation request is the only moment
+`ProjectCreated` records `initial_access_preset` beside `parent`, for the same
+reason ADR#0025 records `parent` at birth: the creation request is the only moment
 the creator's intent exists, and it must survive in the stream even though a
 different plane owns every later change.
 
@@ -142,7 +156,7 @@ Project's to change.
 ## Consequences
 
 - The project surface maps one to one onto the contract: the name and goal
-  are Project facts, and the visibility choice is the initial access fact.
+  are Project facts, and the visibility choice is the initial access preset.
 - Choosing "only invited members" leaves no discoverable window, because
   discovery waits for the policy plane's first binding and defaults to
   members-only.
@@ -159,6 +173,12 @@ Project's to change.
   memberships. This ADR fixes their semantics, not their storage or engine.
 
 ## Alternatives Considered
+
+### A complete access model on the Project
+
+Rejected. Encoding audiences and capabilities on the Project would freeze a
+model that the policy plane must be free to grow, and it would duplicate
+bindings that already govern folders and workspaces.
 
 ### Access as a mutable field on the Project
 
