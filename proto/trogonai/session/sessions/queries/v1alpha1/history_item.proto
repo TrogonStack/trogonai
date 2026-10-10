@@ -152,7 +152,7 @@ enum ToolCallOutcome {
   TOOL_CALL_OUTCOME_FAILED = 6;
 }
 
-// FileChangeItem is one workspace file change attributed to a tool call.
+// FileChangeItem is one checkout file change attributed to a tool call.
 message FileChangeItem {
   option (buf.validate.message).cel = {
     id: "file_change_item.previous_path_set_for_renamed"
@@ -170,7 +170,7 @@ message FileChangeItem {
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1
   ];
-  // Workspace-relative, forward slashes, no leading slash.
+  // Checkout-relative, forward slashes, no leading slash.
   string path = 3 [features.field_presence = LEGACY_REQUIRED];
   FileChangeKindView change_kind = 4 [features.field_presence = LEGACY_REQUIRED];
   // Set only for a rename.

@@ -4,9 +4,9 @@ package trogonai.session.sessions.v1alpha1;
 
 import "buf/validate/validate.proto";
 import "trogonai/session/sessions/v1alpha1/cascade_policy.proto";
+import "trogonai/session/sessions/v1alpha1/checkout.proto";
 import "trogonai/session/sessions/v1alpha1/execution_plan.proto";
 import "trogonai/session/sessions/v1alpha1/session_ordinal.proto";
-import "trogonai/session/sessions/v1alpha1/workspace.proto";
 
 // CreateChildSession is the delegation saga's second step: it opens the
 // delegated child's stream, recording [SessionStarted, ParentLinked] as one
@@ -25,7 +25,7 @@ message CreateChildSession {
     (buf.validate.field).string.min_len = 1
   ];
   StoredSessionExecutionPlan execution_plan = 2 [features.field_presence = LEGACY_REQUIRED];
-  WorkspaceRef workspace = 3 [features.field_presence = LEGACY_REQUIRED];
+  CheckoutRef checkout = 3 [features.field_presence = LEGACY_REQUIRED];
   string parent_session_id = 4 [
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1

@@ -81,7 +81,7 @@ not map together. Physical SQLite packing adds no logical facts.
 | Header `version` | Concrete protobuf type name plus `v1alpha1` package policy in `proto/trogonai/session/sessions/v1alpha1/events.proto` | Semantic mismatch. We have no per-session format integer; promotion requires a written compatibility policy. |
 | Header `id` | `session_id` and the session subject | Equivalent opaque identity. |
 | Header `createdAt` | No payload equivalent in `proto/trogonai/session/sessions/v1alpha1/session_started.proto` | Gap. Stream append time is not the same occurrence fact. |
-| Header `cwd` | `SessionStarted.workspace` as `WorkspaceRef` | Ours is typed and portable rather than a raw local path. |
+| Header `cwd` | `SessionStarted.checkout` as `CheckoutRef` | Ours is typed and portable rather than a raw local path. |
 | Header `parentSession` | `ParentLinked.parent_session_id` for delegation, or `SessionForked.source_session_id` for branching | Semantic mismatch. DeepSeek overloads one header field; we distinguish delegation from fork ancestry. |
 | Header `seedLength` | `SessionForked.context_prefix_boundary` | Semantic mismatch. DeepSeek counts copied child events; ours addresses an immutable source prefix by reference. |
 | Header `origin` | Presence of `ParentLinked` | Ours derives the classification from a durable relationship. |

@@ -84,7 +84,7 @@ they solve different problems and share almost nothing but the English word.
 | Rewind: `jumpToCheckpointBeforeMessageIdx` moves a pointer only; the *next* user message calls `thread.messages.slice(0, checkpointIdx + 1)` and persists the truncated array (`src/vs/workbench/contrib/void/browser/chatThreadService.ts:1080`, `:1272-1290`) | `SessionRewound{keep_through}`, a pure marker (`proto/trogonai/session/sessions/v1alpha1/session_rewound.proto:16-22`); nothing is ever sliced or deleted ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2) | Ours, decisively: this is the calibration point below |
 | Versioning: rename `THREAD_STORAGE_KEY`, no migration code, old data under the old key becomes inaccessible (`src/vs/workbench/contrib/void/common/storageKeys.ts:14-19`; see the dossier's [Entry/message structure and versioning](./index.md#entrymessage-structure-and-versioning) section for the migration-code absence) | Schema evolution is additive only: new optional fields, reserved retired numbers, never a per-event version branch ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 3) | Ours, decisively: this is the other calibration point below |
 | `currentThreadId` explicitly not persisted; no "resume where you left off" (`src/vs/workbench/contrib/void/browser/chatThreadService.ts:308`, `:1628-1648`) | No equivalent: which session a client last had open is a client/UI concern, not a store fact | Neither, out of scope for both, noted for completeness |
-| Listing is global across every workspace ever opened, `StorageScope.APPLICATION` (`src/vs/workbench/contrib/void/browser/chatThreadService.ts:406`, `:420`, `src/vs/platform/storage/common/storage.ts:225-228`) | `SessionStarted.workspace`, a required `WorkspaceRef` (`proto/trogonai/session/sessions/v1alpha1/session_started.proto:19-23`, `workspace.proto`) | Trade-off, not a plain gap: see below |
+| Listing is global across every workspace ever opened, `StorageScope.APPLICATION` (`src/vs/workbench/contrib/void/browser/chatThreadService.ts:406`, `:420`, `src/vs/platform/storage/common/storage.ts:225-228`) | `SessionStarted.checkout`, a required `CheckoutRef` (`proto/trogonai/session/sessions/v1alpha1/session_started.proto:19-23`, `checkout.proto`) | Trade-off, not a plain gap: see below |
 | No subagent/child-session concept anywhere; tool calls are ordinary entries in the same thread (see the dossier's [Subagents and nested sessions](./index.md#subagents-and-nested-sessions) section) | `DelegationDispatched`/`ParentLinked`/`CascadePolicy` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6) | Ours; see "Subagent cascade" below, this is not evidence either way, it is absence |
 | No retention, no TTL, no growth bound; every thread and message accumulates forever, re-serialized whole on every mutation (see the dossier's [Retention, deletion, and multi-host](./index.md#retention-deletion-and-multi-host) section) | Keep-forever log with snapshot-bounded replay, `SessionHidden`/`RedactionApplied`/`ArtifactErased` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 7) | Ours; see "Retention" below |
 
@@ -169,7 +169,7 @@ does better (below) or as a pattern to explicitly reject (also below).
 - **Workspace binding as a recorded fact vs. no binding at all.** Void's
   threads carry no path/cwd component and are listed globally regardless of
   which folder is open (`src/vs/workbench/contrib/void/browser/chatThreadService.ts:406`, `:420`,
-  `:114-144`). `SessionStarted.workspace` is a required `WorkspaceRef`
+  `:114-144`). `SessionStarted.checkout` is a required `CheckoutRef`
   (`session_started.proto:19-23`).
 
 ## Trade-offs, not gaps
@@ -182,7 +182,7 @@ does better (below) or as a pattern to explicitly reject (also below).
   a deliberate product choice, "see every chat you've ever had, regardless
   of which repo you have open," not an oversight; the dossier does not
   establish intent either way. Our design requires every session to carry a
-  `WorkspaceRef` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 1), which buys workspace-scoped audit and
+  `CheckoutRef` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 1), which buys workspace-scoped audit and
   a queryable binding at the cost of making "all my chats across every
   project" a cross-workspace query rather than one map iteration. Neither
   side is wrong; they are answering different questions about what a

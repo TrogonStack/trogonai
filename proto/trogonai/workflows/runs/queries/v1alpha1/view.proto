@@ -35,7 +35,7 @@ message WorkflowRunSummary {
     (buf.validate.field).string.min_len = 1
   ];
   DefinitionViewRef saved_definition = 5;
-  string workspace_id = 6 [
+  string checkout_id = 6 [
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1
   ];

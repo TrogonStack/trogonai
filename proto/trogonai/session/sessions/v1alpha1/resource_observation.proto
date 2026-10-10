@@ -31,8 +31,8 @@ message ResourceObservation {
     expression: "!has(this.absent) || !has(this.range)"
   };
 
-  // Resource location, in the same URI form as WorkspaceRef.uri. For a
-  // resource inside the workspace this is workspace.uri + "/" +
+  // Resource location, in the same URI form as CheckoutRef.uri. For a
+  // resource inside the checkout this is checkout.uri + "/" +
   // FileChanged.path, which is the join a projection uses to attribute or
   // exclude a later digest change against that path; a resource with no such
   // join (a fetched URL, an MCP resource) can only ever appear here, never as

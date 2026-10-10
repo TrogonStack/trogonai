@@ -27,16 +27,16 @@ message FileChanged {
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1
   ];
-  // Workspace-relative path to the changed file (forward slashes, no leading
+  // Checkout-relative path to the changed file (forward slashes, no leading
   // slash). A projection joins this to ResourceObservation.uri by resolving
-  // workspace.uri + "/" + path against the session's WorkspaceRef.uri
+  // checkout.uri + "/" + path against the session's CheckoutRef.uri
   // (ADR#0035): that is how it tells whether a later digest change for the
-  // same resource was session-authored. A resource with no workspace path --
+  // same resource was session-authored. A resource with no checkout path --
   // a fetched URL, an MCP resource -- is only ever a ResourceObservation,
   // with no FileChanged to join against.
   string path = 2 [features.field_presence = LEGACY_REQUIRED];
   FileChangeKind change_kind = 3 [features.field_presence = LEGACY_REQUIRED];
-  // Where a renamed file used to be, in the same workspace-relative form as
+  // Where a renamed file used to be, in the same checkout-relative form as
   // path. Rename only: a copy sets copied_from instead, because a previous path
   // asserts the file is no longer there.
   string previous_path = 4;

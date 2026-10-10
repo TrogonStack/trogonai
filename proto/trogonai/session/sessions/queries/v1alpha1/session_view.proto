@@ -65,7 +65,7 @@ message SessionSummary {
     (buf.validate.field).string.min_len = 1
   ];
   TitleSource title_source = 5 [features.field_presence = LEGACY_REQUIRED];
-  string workspace_id = 6 [
+  string checkout_id = 6 [
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1
   ];

@@ -148,7 +148,7 @@ one once per *any* observable mutation of the whole thread.
 | `acp_thread::UserMessage.checkpoint: Option<Checkpoint>` wrapping a `GitStoreCheckpoint` (git commit sha), client-side rendering type only, not persisted to either database | `Checkpoint{reference, checkpoint_type, digest, implementation_version, checkpoint_id, producing_execution_attempt_id, covers_through: SessionOrdinal, session_execution_plan_digest, capture_attestation_ref, capture_attestation_digest, effective_history_digest}`, embedded in `CheckpointProduced`/`ExecutionAttemptStarted.restored_checkpoint`, digest-verified and durable | Ours, decisively -- different "checkpoint" concepts, see [Semantic mismatches](#semantic-mismatches) |
 | `sqlez::Domain` migration ratchet on `ThreadMetadataDb` (stored SQL text, hard-fail on drift) | `LEGACY_REQUIRED` field presence + `reserved` retired field numbers on the envelope/event registration (e.g. `execution_attempt_started.proto:29-30`, `reserved 7; reserved resume_cursor;`) | Trade-off, currently a convention on our side, not an enforced ratchet -- see [recommendation 2](#2-add-an-automated-drift-ratchet-for-the-sessionevent-envelope-and-oneof-registration) |
 | `ThreadsDatabase`'s swallowed-error `ALTER TABLE ADD COLUMN`, `#[serde(default)]` fields, `DbThread::VERSION` sniffing plus `upgrade_from_agent_1` legacy bridge | Additive optional fields, no per-event version branch ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 3) | Ours is stricter at the boundary (validated, typed, rejected on malformed shape) but has not yet proven it tolerates an *old reader* against a *newer* log the way this axis implicitly tests -- see [recommendation 4](#4-add-forward-compatibility-regression-tests-for-additive-only-replay) |
-| `PathList`, set-based path identity (`path_list.rs:27-39`), live-only relocation reconciliation (`sidebar.rs:992-1012`, `agent_panel.rs:4113`), admitted no offline-reconciliation path found | `WorkspaceRef{workspace_id, uri, revision}` on `SessionStarted.workspace`; `workspace_id` is "assigned by the platform and independent of location" (`workspace.proto:14`), binding immutable for session life | Ours, decisively -- identity is decoupled from location structurally, not reconciled after the fact; see [Open questions](#open-questions-for-the-adr) for the residual question this still leaves |
+| `PathList`, set-based path identity (`path_list.rs:27-39`), live-only relocation reconciliation (`sidebar.rs:992-1012`, `agent_panel.rs:4113`), admitted no offline-reconciliation path found | `CheckoutRef{checkout_id, uri, revision}` on `SessionStarted.checkout`; `checkout_id` is "assigned by the platform and independent of location" (`checkout.proto:14`), binding immutable for session life | Ours, decisively -- identity is decoupled from location structurally, not reconciled after the fact; see [Open questions](#open-questions-for-the-adr) for the residual question this still leaves |
 | `RemoteConnectionIdentity`, normalized SSH/WSL/Docker host/user/port matching, scopes which local threads a remote project shows | No equivalent; multi-host/multi-writer correctness is a substrate property (any JetStream replica may append) rather than a client-side scoping filter | Trade-off -- different problems, not comparable; see [Trade-offs](#trade-offs-not-gaps) |
 | `ArchivedGitWorktree{worktree_path, main_repo_path, staged_commit_hash, unstaged_commit_hash, original_commit_hash}` | No equivalent; `SessionArchived`/`SessionUnarchived` are pure reversible listing-visibility facts | Gap, deliberate -- git-worktree space reclamation is a workspace-lifecycle concern, not a session-log concern; see [Open questions](#open-questions-for-the-adr) |
 | Release-channel isolation (`{db_dir}/0-{scope_name}/db.sqlite`), `ZED_STATELESS` in-memory fallback | No equivalent concept | N/A -- a per-deployment/local-install concern, not a per-session one |
@@ -481,8 +481,8 @@ parent is (`crates/agent/src/db.rs:671-716`), a single hardcoded behavior with n
 `INDEPENDENT`.
 
 **Workspace identity is decoupled from location by construction, not
-reconciled after the fact.** `WorkspaceRef.workspace_id`
-(`proto/trogonai/session/sessions/v1alpha1/workspace.proto:14-15`) is "assigned
+reconciled after the fact.** `CheckoutRef.checkout_id`
+(`proto/trogonai/session/sessions/v1alpha1/checkout.proto:14-15`) is "assigned
 by the platform and independent of location," carried inline on
 `SessionStarted` so "every session for this workspace" never requires decoding
 plan bytes. Zed's `PathList` compares only the literal set of absolute paths
@@ -512,7 +512,7 @@ code into our codebase, because the code text itself carries that license;
 only `PathList`'s own implementation (`crates/util/src/path_list.rs`,
 Apache-2.0) would be license-safe to port verbatim, and this document does not
 recommend porting it (see the identity-decoupling point above -- our
-`workspace_id` design is already ahead of `PathList`'s approach).
+`checkout_id` design is already ahead of `PathList`'s approach).
 
 - **Reactive whole-document overwrite on every observable mutation.**
   `cx.observe(&thread_handle, ...)` → `save_thread` on essentially every GPUI
@@ -667,9 +667,9 @@ decision 7's boundary.
   such a mechanism is buildable and has caught real drift in a shipped
   product, while our own additive-only rule is currently convention-enforced
   only?
-- Is workspace-identity resolution (mapping a stable `WorkspaceRef.workspace_id`
+- Is workspace-identity resolution (mapping a stable `CheckoutRef.checkout_id`
   back to its possibly-relocated `uri`) ever a session-store concern, or is it
-  entirely external, given `WorkspaceRef` is immutable for a session's life
+  entirely external, given `CheckoutRef` is immutable for a session's life
   and a location change requires a new session or fork? Zed's live-only path
   reconciliation and admitted no-offline-reconciliation gap (dossier Open
   Questions, [Open questions](./index.md#open-questions)) is a caution about what happens when this kind

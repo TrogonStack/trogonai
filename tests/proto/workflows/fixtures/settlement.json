@@ -162,9 +162,9 @@
               }
             }
           ],
-          "workspace": {
-            "workspaceId": "workspace-example",
-            "uri": "https://example.com/workspace"
+          "checkout": {
+            "checkoutId": "checkout-example",
+            "uri": "https://example.com/checkout"
           },
           "limits": {
             "deadline": "2026-01-01T00:02:00Z",
@@ -237,9 +237,9 @@
                       "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
                     }
                   },
-                  "workspace": {
-                    "workspaceId": "workspace-example",
-                    "uri": "https://example.com/workspace"
+                  "checkout": {
+                    "checkoutId": "checkout-example",
+                    "uri": "https://example.com/checkout"
                   }
                 },
                 "admission": {
@@ -400,9 +400,9 @@
               }
             }
           ],
-          "workspace": {
-            "workspaceId": "workspace-example",
-            "uri": "https://example.com/workspace"
+          "checkout": {
+            "checkoutId": "checkout-example",
+            "uri": "https://example.com/checkout"
           },
           "limits": {
             "deadline": "2026-01-01T00:02:00Z",
@@ -475,9 +475,9 @@
                       "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
                     }
                   },
-                  "workspace": {
-                    "workspaceId": "workspace-example",
-                    "uri": "https://example.com/workspace"
+                  "checkout": {
+                    "checkoutId": "checkout-example",
+                    "uri": "https://example.com/checkout"
                   }
                 },
                 "admission": {
@@ -579,9 +579,9 @@
                       "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
                     }
                   },
-                  "workspace": {
-                    "workspaceId": "workspace-example",
-                    "uri": "https://example.com/workspace"
+                  "checkout": {
+                    "checkoutId": "checkout-example",
+                    "uri": "https://example.com/checkout"
                   }
                 },
                 "admission": {

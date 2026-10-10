@@ -11,17 +11,17 @@ import "trogonai/session/sessions/queries/v1alpha1/session_view.proto";
 // ListSessionsRequest enumerates sessions in a scope, newest first.
 message ListSessionsRequest {
   option (buf.validate.message).cel = {
-    id: "list_sessions_request.workspace_id_required_for_scope"
-    message: "workspace_id is required for LIST_SESSIONS_SCOPE_WORKSPACE"
+    id: "list_sessions_request.checkout_id_required_for_scope"
+    message: "checkout_id is required for LIST_SESSIONS_SCOPE_CHECKOUT"
     expression:
-      "this.scope != trogonai.session.sessions.queries.v1alpha1.ListSessionsScope.LIST_SESSIONS_SCOPE_WORKSPACE "
-      "|| this.workspace_id != ''"
+      "this.scope != trogonai.session.sessions.queries.v1alpha1.ListSessionsScope.LIST_SESSIONS_SCOPE_CHECKOUT "
+      "|| this.checkout_id != ''"
   };
 
   ContractVersion accepted_contract = 1 [features.field_presence = LEGACY_REQUIRED];
   ListSessionsScope scope = 2 [features.field_presence = LEGACY_REQUIRED];
-  // Required for SCOPE_WORKSPACE, ignored otherwise.
-  string workspace_id = 3;
+  // Required for SCOPE_CHECKOUT, ignored otherwise.
+  string checkout_id = 3;
   ArchivedFilter archived = 4 [features.field_presence = LEGACY_REQUIRED];
   // Maximum rows to return. The server may return fewer. A value above the
   // configured admission limit is refused with
@@ -32,7 +32,7 @@ message ListSessionsRequest {
   // Unset starts a new scan. The caller must treat this as bytes and never
   // construct, parse, or edit one.
   //
-  // A continuation still carries the scope, workspace, and archived filter, and
+  // A continuation still carries the scope, checkout, and archived filter, and
   // they must match what the cursor was minted with. The server refuses a
   // disagreement rather than re-scoping the scan in flight.
   bytes page_token = 6;
@@ -49,9 +49,9 @@ message ListSessionsRequest {
 // ListSessionsScope is which sessions are in range.
 enum ListSessionsScope {
   LIST_SESSIONS_SCOPE_UNSPECIFIED = 0;
-  // Sessions bound to one workspace.
-  LIST_SESSIONS_SCOPE_WORKSPACE = 1;
-  // Every session the caller may see, across workspaces.
+  // Sessions bound to one checkout.
+  LIST_SESSIONS_SCOPE_CHECKOUT = 1;
+  // Every session the caller may see, across checkouts.
   LIST_SESSIONS_SCOPE_ALL = 2;
 }
 

@@ -106,7 +106,7 @@ choice, not an independent difference:
 | `session.service.Delete`: real transactional SQL `DELETE` of the session's own `messages`/`files`, no walk of children (`internal/session/session.go:138-169`) | `SessionHidden` (visibility tombstone only) + `RedactionApplied` + `ArtifactErased`; the log itself is never truncated | Semantic mismatch, not a strict ranking either way (see Retention gap section) |
 | Provider-specific fields folded directly into the canonical struct: `ReasoningContent.ThoughtSignature // Used for google`, `ReasoningContent.ToolID // Used for openrouter google models` (`internal/message/content.go:55-146`) | `ProviderBlock` (write-verbatim, read-never) and `ThinkingBlock.signature` as a contained escape hatch | Ours (see What not to copy) |
 | `messages.model`, `messages.provider` only; no temperature/effort/thinking-budget recorded anywhere | `ModelSettings{max_output_tokens, temperature, top_p, thinking_budget_tokens, stop_sequences, raw_settings}` on `AssistantMessageStarted` | Ours, decisively |
-| Project scope = one `crush.db` per project directory, resolved via `fsext.LookupClosestBounded` (`internal/config/load.go:556-559`); no `workspace_id` column exists | `WorkspaceRef` inline on `SessionStarted` inside one shared store | Trade-off (see below) |
+| Project scope = one `crush.db` per project directory, resolved via `fsext.LookupClosestBounded` (`internal/config/load.go:556-559`); no `checkout_id` column exists | `CheckoutRef` inline on `SessionStarted` inside one shared store | Trade-off (see below) |
 | `crush.lock` OS advisory flock plus a `dataDirOwnerInfo` JSON crash-liveness payload (informational only; `internal/db/datadirlock.go:26-33, 73-78, 88-98`) | Server-enforced `WRITE_PRECONDITION`, no client-side lock file at all | Ours |
 
 ## What we should consider changing
@@ -334,11 +334,11 @@ answer closer to what it needs, provided Crush's cascade gap were fixed.
 
 **Database-file-per-project isolation, versus a queryable shared store.**
 Crush's project boundary is the `.crush/crush.db` file boundary itself; there
-is no `workspace_id` column anywhere, so cross-project leakage is
+is no `checkout_id` column anywhere, so cross-project leakage is
 structurally impossible by construction, not by access-control code. The
 cost is visible in `crush stats` (`internal/cmd/stats.go:243-388`), a
 bolted-on, read-only, migration-skipping filesystem crawl needed just to
-aggregate across projects. Our `WorkspaceRef` on `SessionStarted` makes the
+aggregate across projects. Our `CheckoutRef` on `SessionStarted` makes the
 workspace binding queryable inside one shared store, at the cost of workspace
 isolation being an access-control and projection concern enforced in code,
 not guaranteed by an OS file boundary.

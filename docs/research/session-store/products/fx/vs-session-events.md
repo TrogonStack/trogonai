@@ -76,7 +76,7 @@ information that our catalog does not model.
 | `usage.billing`, `*_complete` flags | `TokenUsage.completeness` | Closed in `v1alpha1` |
 | `usage.pending[]`, `settled_through_sequence` | Not in the session stream | Ours, deliberately |
 | `preferences{model, effort, fast_mode}` + `preferences_changed` | `AssistantMessageStarted.settings` (`ModelSettings`) | Closed in `v1alpha1` (per-completion; a change is two adjacent facts) |
-| `workspace_root`, `origin_workspace_root`, `workspace_rebound` | `SessionStarted.workspace` (`WorkspaceRef`) | Closed in `v1alpha1`; rebinding is out of scope (new session or fork) |
+| `workspace_root`, `origin_workspace_root`, `workspace_rebound` | `SessionStarted.checkout` (`CheckoutRef`) | Closed in `v1alpha1`; rebinding is out of scope (new session or fork) |
 | `conversation_language` | No equivalent | Gap, minor |
 | `display.json{title, preview}` | `SessionRenamed` + read model | Equivalent |
 | subagent relationship pages, channel families | `DelegationDispatched`, `ParentLinked`, `CascadePolicy` | Ours, decisively |

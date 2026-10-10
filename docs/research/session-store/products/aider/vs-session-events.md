@@ -48,7 +48,7 @@ answer; no store to grow means no retention question the product has ever
 had to face. Our own design draws the boundary the opposite way: the
 conversation, tool calls, and delegation graph are the durably owned record
 ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decisions 1-6), and the workspace is a referenced, versioned fact
-(`SessionStarted.workspace`, a `WorkspaceRef`) rather than the thing that
+(`SessionStarted.checkout`, a `CheckoutRef`) rather than the thing that
 *is* durable. Aider is the cleanest evidence in the corpus that these two
 durability concerns can be fully decoupled, because it is the one product
 that chose to durably keep only one of them.
@@ -58,7 +58,7 @@ that chose to durably keep only one of them.
 | Aider | Ours | Verdict |
 | --- | --- | --- |
 | `.aider.chat.history.md`, appended per UI event, write-mostly (`aider/io.py:1117-1136`, `:789`, `:795`, `:905`, `:923`, `:960`, `:970`, `:973`, `:999`) | `UserMessageRecorded`, `AssistantMessageStarted`/`Completed`, typed and always folded into the model-visible context ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 8) | Ours, decisively: theirs is not even read back on a normal run |
-| Chat-started marker, `"\n# aider chat started at {current_time}\n\n"` (`aider/io.py:336`) | `SessionStarted{session_id, execution_plan, workspace}` (`proto/trogonai/session/sessions/v1alpha1/session_started.proto:16-24`) | Semantic mismatch: theirs is a human-readable timestamp string with no identifier at all; ours is a typed creation fact carrying an opaque `session_id` and the immutable plan/workspace binding |
+| Chat-started marker, `"\n# aider chat started at {current_time}\n\n"` (`aider/io.py:336`) | `SessionStarted{session_id, execution_plan, checkout}` (`proto/trogonai/session/sessions/v1alpha1/session_started.proto:16-24`) | Semantic mismatch: theirs is a human-readable timestamp string with no identifier at all; ours is a typed creation fact carrying an opaque `session_id` and the immutable plan/workspace binding |
 | No session id; identity is the working directory / git root expressed as fixed file names (`aider/args.py:271-276`) | Opaque `SessionId`, one logical stream per session on `session.sessions.events.<session_id>` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 1) | Gap, deliberate on Aider's part: there is nothing to list, resume by id, or reference from outside the one shared file |
 | `self.aider_commit_hashes = set()`, in-process only, gates `/undo` (`aider/coders/base_coder.py:349`) | `FileChanged{before_ref, after_ref, tool_call_id, turn_id}` folded from the durable log (`proto/trogonai/session/sessions/v1alpha1/file_changed.proto:17-43`) | Ours, decisively: Aider's record of "which commits did this session make" evaporates on process restart, which is exactly why `/undo` explicitly refuses a prior process's commits (`aider/commands.py:574`) |
 | `/undo`, a git `reset`-equivalent on the working tree (`aider/commands.py:560-618`) | `SessionRewound{keep_through}` (`proto/trogonai/session/sessions/v1alpha1/session_rewound.proto:13-19`), a durable, replay-time reinterpretation of the conversation log | Semantic mismatch: "rewind" means "revert git-tracked files for commits this same process made" in Aider, and "mark events after a boundary invalid at replay" in ours; neither is a superset of the other, and ours has no effect on workspace file contents at all |
@@ -69,7 +69,7 @@ that chose to durably keep only one of them.
 | `.aider.tags.cache.v{3,4}/`, a rebuildable code-search cache keyed by file identity (`aider/repomap.py:43`, `:186-224`) | Not a session concept on either side; closest conceptual analog is a rebuildable projection ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8), but keyed by conversation, not source file | Not comparable: different problem (code search vs. conversation state), noted for completeness only |
 | `/save` / `/load`, file-context macros that replay a command script (`aider/commands.py:1497-1522`, `:1465-1493`) | No equivalent; this is not a session fact in our model either | Neither side models this; the naming collision is called out under **What not to copy** |
 | `--restore-chat-history`, default `False`, full-file eager read with no cursor when enabled (`aider/args.py:289-294`; `aider/coders/base_coder.py:519-523`) | Runtime resumes the aggregate from the newest snapshot and replays only the tail after it ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8) | Ours, decisively: Aider's opt-in restore is O(whole file) every time it is used, with nothing bounding that cost |
-| `WorkspaceRef.revision` recorded on `SessionStarted` (`proto/trogonai/session/sessions/v1alpha1/workspace.proto:16-21`) | No equivalent; Aider records nothing about the repository's state at conversation start beyond whatever HEAD happened to be | Ours: we already durably record the source-control revision a session began at, something Aider's own in-memory commit tracking never attempts |
+| `CheckoutRef.revision` recorded on `SessionStarted` (`proto/trogonai/session/sessions/v1alpha1/checkout.proto:16-21`) | No equivalent; Aider records nothing about the repository's state at conversation start beyond whatever HEAD happened to be | Ours: we already durably record the source-control revision a session began at, something Aider's own in-memory commit tracking never attempts |
 | No lock, no fsync, no torn-write handling; concurrent writers interleave undetected (`aider/io.py:1131-1136`) | Every write path carries an explicit `WRITE_PRECONDITION` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2), enforced by JetStream at the broker | Ours, decisively |
 
 ## What we should consider changing
@@ -93,7 +93,7 @@ matters here: it is not a weaker version of the pattern we are building, it
 is a deliberate decision not to build the pattern at all. The one point
 Aider makes with real force, that workspace durability and conversation
 durability are separable concerns, is already reflected in our design
-(`SessionStarted.workspace` as a referenced fact, not the authoritative
+(`SessionStarted.checkout` as a referenced fact, not the authoritative
 record; `FileChanged` records facts about the workspace without owning
 it) and was already raised as a recommendation from the fx comparison
 (`docs/research/session-store/products/fx/vs-session-events.md`,
