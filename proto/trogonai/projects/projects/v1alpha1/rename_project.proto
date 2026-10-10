@@ -1,0 +1,15 @@
+edition = "2024";
+
+package trogonai.projects.projects.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/projects/projects/v1alpha1/identity.proto";
+
+// Only an active Project accepts a rename. Dispatch requires
+// DecideRequest.expected_revision; retrying preserves the original stream
+// revision and command id, so a stale rename cannot silently overwrite a
+// later one.
+message RenameProject {
+  ProjectId project_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string display_name = 2 [features.field_presence = LEGACY_REQUIRED];
+}

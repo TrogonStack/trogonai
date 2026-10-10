@@ -1,0 +1,13 @@
+edition = "2024";
+
+package trogonai.projects.projects.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/projects/projects/v1alpha1/identity.proto";
+
+// ProjectGoalRestated replaces goal. It changes what the project is trying to
+// achieve, never its name, placement, or access.
+message ProjectGoalRestated {
+  ProjectId project_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string goal = 2 [features.field_presence = LEGACY_REQUIRED];
+}

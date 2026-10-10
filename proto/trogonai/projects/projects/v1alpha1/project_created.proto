@@ -1,0 +1,36 @@
+edition = "2024";
+
+package trogonai.projects.projects.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogon/hierarchy/v1alpha1/node.proto";
+import "trogonai/projects/projects/v1alpha1/access_preset.proto";
+import "trogonai/projects/projects/v1alpha1/identity.proto";
+
+// ProjectCreated is the Project stream's genesis event. The policy plane
+// applies initial_access_preset as its first binding for the project; for
+// MEMBERS_ONLY that binding is the ceiling plus a membership for creator, so
+// the creator is never locked out of their own project. No projection lists
+// the project to anyone other than creator until that binding is recorded.
+message ProjectCreated {
+  ProjectId project_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string display_name = 2 [features.field_presence = LEGACY_REQUIRED];
+  string goal = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Creation placement the project is attached under. Hierarchy owns
+  // subsequent moves and projects current placement; this stream records no
+  // relocation event.
+  trogon.hierarchy.v1alpha1.NodeId parent = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Immutable creation fact. Later access changes are policy operations and
+  // never produce a second event here.
+  ProjectAccessPreset initial_access_preset = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // The authenticated principal that issued the creating command, human or
+  // agent. Provenance, not ownership: who answers for the project resolves
+  // from its node, never from this field.
+  string creator = 6 [features.field_presence = LEGACY_REQUIRED];
+}

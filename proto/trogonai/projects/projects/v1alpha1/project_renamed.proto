@@ -1,0 +1,13 @@
+edition = "2024";
+
+package trogonai.projects.projects.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/projects/projects/v1alpha1/identity.proto";
+
+// ProjectRenamed replaces display_name. It changes what the project is
+// called, never its goal, placement, or access.
+message ProjectRenamed {
+  ProjectId project_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string display_name = 2 [features.field_presence = LEGACY_REQUIRED];
+}
