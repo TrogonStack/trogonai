@@ -88,7 +88,7 @@ those bindings, and the Project records only which preset was picked:
 
 ```text
 ProjectAccessPreset
-  INHERITED     whoever the parent level lets in; the default
+  INHERITED     whoever the parent level lets in
   MEMBERS_ONLY  a limit at the project: inherited work permissions stop
                 here, and only principals holding a project membership pass
 ```
@@ -97,6 +97,12 @@ ProjectAccessPreset
 mood the hierarchy decision gives limits. It removes nothing from the
 parent and grants nothing to anyone; membership is a separate policy
 binding. Unspecified and unknown values reject.
+
+`INHERITED` is what a product preselects when it asks the question, not
+what the contract assumes when the answer is missing. Clients send the
+preset explicitly; an omitted preset is rejected rather than resolved to
+`INHERITED`, because silently inheriting would widen the audience of a
+project whose creator may have meant to keep it private.
 
 The enum starts with the presets the product offers today and is expected to
 grow. Organization-wide and public presets are widening grants, which the
