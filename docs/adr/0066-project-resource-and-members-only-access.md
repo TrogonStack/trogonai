@@ -5,7 +5,7 @@ status: draft
 date: 2026-10-10
 ---
 
-# ADR#0066: A Project Is Work Attached Below a Workspace, and Members-Only Access Is a Policy Ceiling Fixed at Creation
+# ADR#0066: A Project Is Work Attached Below a Workspace, and Its Initial Access Is Recorded at Creation
 
 ## Context
 
@@ -115,9 +115,10 @@ project no one can recover when its last member leaves.
 ### 4. Initial access is a creation fact, and discovery fails closed
 
 `ProjectCreated` records `initial_access_preset` beside `parent`, for the same
-reason ADR#0025 records `parent` at birth: the creation request is the only moment
-the creator's intent exists, and it must survive in the stream even though a
-different plane owns every later change.
+reason [ADR#0025](./0025-agent-definition-data-ownership.md) records
+`parent` at birth: the creation request is the only moment the creator's
+intent exists, and it must survive in the stream even though a different
+plane owns every later change.
 
 The policy plane applies the creation fact as its first binding for the
 project. For `MEMBERS_ONLY`, that binding is the ceiling plus a membership for
@@ -183,8 +184,9 @@ bindings that already govern folders and workspaces.
 ### Access as a mutable field on the Project
 
 Rejected. It would make the Project stream a second owner of visibility,
-which ADR#0025 assigns to the hierarchy and policy planes, and the two copies
-would diverge on the first policy change made outside the Project.
+which [ADR#0025](./0025-agent-definition-data-ownership.md) assigns to
+the hierarchy and policy planes, and the two copies would diverge on the
+first policy change made outside the Project.
 
 ### Private projects as their own hierarchy node
 
