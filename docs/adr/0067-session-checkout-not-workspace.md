@@ -70,8 +70,9 @@ Nothing about the hierarchy Workspace, the monorepo workspace, or
 `rsworkspace/` changes. "Workspace" remains the correct word for both of
 those; it is only retired from the session's vocabulary.
 
-This is a breaking change to `v1alpha1` session and workflow messages at the
-wire level (renamed message, field names, and JSON names). It ships as a
+This breaks source and JSON compatibility for `v1alpha1` session and workflow
+messages (renamed message, field names, and JSON names). Field numbers and
+wire types are unchanged, so binary payloads still decode. It ships as a
 rename rather than field-number-additive deprecation because no generated
 code or caller exists yet to break, and carrying the collision forward into
 code generation would be more expensive to unwind than renaming now.
