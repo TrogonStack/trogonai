@@ -22,7 +22,7 @@ platform builds on fix most of the vocabulary already:
   gives each tenant one tree of untyped nodes. Words such as "project" are not
   node kinds the platform interprets. Permissions accumulate downward and
   limits bound downward.
-- [Organization, workspace, and folder name hierarchy positions](https://github.com/straw-hat-team/adr/blob/main/src/adrs/1917971986/README.md)
+- [Organization, workspace, folder, and project](https://github.com/straw-hat-team/adr/blob/main/src/adrs/1917971986/README.md)
   names the tenant root Organization, its direct children Workspaces, and
   deeper nodes Folders. Work attaches at a workspace or below, never at the
   root, and "everyone in" names a workspace.
@@ -182,7 +182,7 @@ the whole workspace can discover a project its creator meant to keep private.
 
 - [Resource hierarchy via untyped recursive nodes](https://github.com/straw-hat-team/adr/blob/main/src/adrs/4761776210/README.md)
 - [Hierarchy position is referenced by a bare parent field](https://github.com/straw-hat-team/adr/blob/main/src/adrs/6310044131/README.md)
-- [Organization, workspace, and folder name hierarchy positions](https://github.com/straw-hat-team/adr/blob/main/src/adrs/1917971986/README.md)
+- [Organization, workspace, folder, and project](https://github.com/straw-hat-team/adr/blob/main/src/adrs/1917971986/README.md)
 - [Actor and Authority Taxonomy for Managed Systems](https://github.com/straw-hat-team/adr/blob/main/src/adrs/8779742261/README.md)
 - [`trogon.hierarchy.v1alpha1.NodeId`](https://github.com/TrogonStack/trogon-proto/blob/main/proto/trogon/hierarchy/v1alpha1/node.proto)
 - [ADR#0014: Command and Query Naming](./0014-command-and-query-naming.md)
