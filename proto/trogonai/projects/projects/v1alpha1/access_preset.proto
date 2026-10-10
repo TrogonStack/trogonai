@@ -1,0 +1,23 @@
+edition = "2024";
+
+package trogonai.projects.projects.v1alpha1;
+
+// ProjectAccessPreset is the audience choice recorded at creation. It is a
+// preset over bindings the policy plane holds, never the access model itself;
+// later access changes are policy operations and never reach this stream.
+//
+// Clients send the preset explicitly. An omitted preset is rejected rather
+// than resolved to INHERITED, because silently inheriting would widen the
+// audience of a project its creator may have meant to keep private. Unknown
+// and unspecified values reject the same way.
+enum ProjectAccessPreset {
+  PROJECT_ACCESS_PRESET_UNSPECIFIED = 0;
+  // Whoever the parent level lets in. What a product preselects when it asks
+  // the question, never what the contract assumes when the answer is missing.
+  PROJECT_ACCESS_PRESET_INHERITED = 1;
+  // A limit attached at the project: inherited work permissions stop here, and
+  // only principals holding a project membership pass. It removes nothing
+  // from the parent and grants nothing by itself; membership is a separate
+  // policy binding.
+  PROJECT_ACCESS_PRESET_MEMBERS_ONLY = 2;
+}

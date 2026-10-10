@@ -1,0 +1,12 @@
+edition = "2024";
+
+package trogonai.projects.projects.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/projects/projects/v1alpha1/identity.proto";
+
+// ProjectUnarchived transitions an archived project back to active without
+// changing its name, goal, creation placement, or initial access preset.
+message ProjectUnarchived {
+  ProjectId project_id = 1 [features.field_presence = LEGACY_REQUIRED];
+}

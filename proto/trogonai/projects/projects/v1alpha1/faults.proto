@@ -1,0 +1,59 @@
+edition = "2024";
+
+package trogonai.projects.projects.v1alpha1;
+
+import "trogon/error/v1alpha1/options.proto";
+
+// Schema-only rejection templates for the projects.projects module's
+// DeciderService error channel. These messages are never encoded. Admission
+// and the policy plane's own bindings keep their own failure contracts; this
+// fold owns only Project identity, name, goal, and lifecycle, per ADR#0066.
+message ProjectCommandInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "projects.projects"
+    reason: "PROJECT_COMMAND_INVALID"
+    message: "The command violates the Project contract."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ProjectAlreadyExistsError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "projects.projects"
+    reason: "PROJECT_ALREADY_EXISTS"
+    message: "The Project identity has already been created."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ProjectNotFoundError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "projects.projects"
+    reason: "PROJECT_NOT_FOUND"
+    message: "The Project has not been created."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ProjectArchivedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "projects.projects"
+    reason: "PROJECT_ARCHIVED"
+    message: "The command requires an active Project, but the Project is archived."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ProjectNotArchivedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "projects.projects"
+    reason: "PROJECT_NOT_ARCHIVED"
+    message: "The Project must be archived before it can be unarchived."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}

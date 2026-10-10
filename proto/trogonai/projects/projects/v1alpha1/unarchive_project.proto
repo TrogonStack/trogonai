@@ -1,0 +1,15 @@
+edition = "2024";
+
+package trogonai.projects.projects.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/projects/projects/v1alpha1/identity.proto";
+
+// Unarchiving restores an archived project for rename and goal restatement.
+// Only an archived Project accepts this command.
+// Dispatch requires DecideRequest.expected_revision; retrying preserves the
+// original stream revision and command id, so delivery after a later archive
+// cannot silently undo that archive.
+message UnarchiveProject {
+  ProjectId project_id = 1 [features.field_presence = LEGACY_REQUIRED];
+}
