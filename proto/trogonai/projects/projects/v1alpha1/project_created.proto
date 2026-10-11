@@ -9,9 +9,10 @@ import "trogonai/projects/projects/v1alpha1/identity.proto";
 
 // ProjectCreated is the Project stream's genesis event. The policy plane
 // applies initial_access_preset as its first binding for the project; for
-// MEMBERS_ONLY that binding is the ceiling plus a membership for creator, so
-// the creator is never locked out of their own project. No projection lists
-// the project to anyone other than creator until that binding is recorded.
+// MEMBERS_ONLY that binding is the ceiling plus a membership for the
+// principal in this event's provenance headers (ADR#0039), so the creator is
+// never locked out of their own project. No projection lists the project to
+// anyone other than that principal until the binding is recorded.
 message ProjectCreated {
   ProjectId project_id = 1 [features.field_presence = LEGACY_REQUIRED];
   string display_name = 2 [features.field_presence = LEGACY_REQUIRED];
@@ -29,8 +30,4 @@ message ProjectCreated {
       not_in: [0]
     }
   ];
-  // The authenticated principal that issued the creating command, human or
-  // agent. Provenance, not ownership: who answers for the project resolves
-  // from its node, never from this field.
-  string creator = 6 [features.field_presence = LEGACY_REQUIRED];
 }

@@ -137,10 +137,17 @@ Later changes to access are policy operations. The Project stream records no
 access-changed event, and a projection of current access reads the policy
 plane, not the stream.
 
-### 5. The creator is a recorded principal, not an owner
+### 5. The creator is provenance, not a payload field or an owner
 
-`ProjectCreated.creator` is the authenticated opaque principal that issued the
-command, a human or an agent, recorded the way a proposal records its author.
+Who created the project is the authenticated principal that issued
+`CreateProject`, a human or an agent. Neither the command nor `ProjectCreated`
+carries it as a field: the runtime records that principal as the event's
+provenance headers, never as payload
+([ADR#0039](./0039-self-authenticating-event-provenance.md)). A caller-supplied
+creator field would let the issuer claim to be someone else, and a copy in the
+event would duplicate the envelope. The policy plane reads the creating
+principal from those headers when it records the first binding.
+
 It is provenance, not ownership. Per the hierarchy decision, who answers for
 the project resolves from its node, and an `owner` field would be a stale copy
 of that answer.
@@ -215,4 +222,5 @@ the whole workspace can discover a project its creator meant to keep private.
 - [`trogon.hierarchy.v1alpha1.NodeId`](https://github.com/TrogonStack/trogon-proto/blob/main/proto/trogon/hierarchy/v1alpha1/node.proto)
 - [ADR#0014: Command and Query Naming](./0014-command-and-query-naming.md)
 - [ADR#0025: Agent Definition Data Ownership](./0025-agent-definition-data-ownership.md)
+- [ADR#0039: Self-Authenticating Event Provenance](./0039-self-authenticating-event-provenance.md)
 - [ADR#0064: Invariants Are Declared in the Schema Before Anything Enforces Them](./0064-schema-constraints-as-documentation.md)
