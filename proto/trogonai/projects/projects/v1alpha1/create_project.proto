@@ -27,8 +27,4 @@ message CreateProject {
       not_in: [0]
     }
   ];
-  // The authenticated principal that issued this command, human or agent.
-  // Provenance, not ownership: who answers for the project resolves from its
-  // node, never from this field.
-  string creator = 6 [features.field_presence = LEGACY_REQUIRED];
 }

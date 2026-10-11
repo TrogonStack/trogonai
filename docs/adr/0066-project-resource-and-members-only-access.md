@@ -137,10 +137,22 @@ Later changes to access are policy operations. The Project stream records no
 access-changed event, and a projection of current access reads the policy
 plane, not the stream.
 
-### 5. The creator is a recorded principal, not an owner
+### 5. The creator is provenance, not a payload field or an owner
 
-`ProjectCreated.creator` is the authenticated opaque principal that issued the
-command, a human or an agent, recorded the way a proposal records its author.
+Who created the project is the authenticated principal that issued
+`CreateProject`, a human or an agent. Neither the command nor `ProjectCreated`
+carries it as a field: a caller-supplied creator would let the issuer claim to
+be someone else, and a copy in the event would duplicate the envelope. The
+envelope records the actor that caused each event
+([ADR#0069](./0069-event-envelope-records-issuer-and-times.md)),
+and the policy plane reads the creator from there when it records the first
+binding.
+
+The platform does not record the actor yet. Until [ADR#0069](./0069-event-envelope-records-issuer-and-times.md) is implemented,
+`ProjectCreated` has no record of its creator, so the policy plane cannot grant
+the creator's membership and no project may be created in a deployment that
+relies on it.
+
 It is provenance, not ownership. Per the hierarchy decision, who answers for
 the project resolves from its node, and an `owner` field would be a stale copy
 of that answer.
@@ -215,4 +227,5 @@ the whole workspace can discover a project its creator meant to keep private.
 - [`trogon.hierarchy.v1alpha1.NodeId`](https://github.com/TrogonStack/trogon-proto/blob/main/proto/trogon/hierarchy/v1alpha1/node.proto)
 - [ADR#0014: Command and Query Naming](./0014-command-and-query-naming.md)
 - [ADR#0025: Agent Definition Data Ownership](./0025-agent-definition-data-ownership.md)
+- [ADR#0069: Every Event Envelope Records Who Caused It and When Each Step Happened](./0069-event-envelope-records-issuer-and-times.md)
 - [ADR#0064: Invariants Are Declared in the Schema Before Anything Enforces Them](./0064-schema-constraints-as-documentation.md)

@@ -16,6 +16,26 @@ This keeps metadata policy close to the caller that knows why the metadata is
 mandatory, while the runtime stays responsible for execution and storage
 adapters stay responsible for persisting event envelopes.
 
+## Provenance
+
+[ADR#0069 (Draft)](../adr/0069-event-envelope-records-issuer-and-times.md)
+requires every event envelope to record the actor that caused it and a time for
+each step, durably, so contracts stop modeling them in payloads. Where each
+value lives is specific to this platform, so check this table before leaving
+provenance out of a payload.
+
+| Envelope value | Where it lives today                                                                 | Gap against the ADR                                                                                              |
+| -------------- | ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| Actor          | Not recorded. `CommandPrincipal` reaches the authorizer and is dropped after it.     | Nothing persists it, and system processes have no identity of their own.                                          |
+| `issued_at`    | Not recorded.                                                                        | Needs stamping where the platform accepts the request.                                                            |
+| `produced_at`  | Not recorded. `decide` has no clock; hosts pass time into commands when a domain needs it. | Needs stamping by the runtime when it produces events.                                                     |
+| `recorded_at`  | `StreamEvent::recorded_at`, read from the JetStream message timestamp.               | Reflects the latest write, so re-append, restore, and stream rebuild reset it. Needs the first-recorded value carried forward. |
+| Occurrence time | Not in the envelope. A few payloads carry it under [ADR#0035](../adr/0035-session-store-decider-aggregate.md)'s event-time exception. | Needs an envelope value the producer sets and the platform keeps distinct from its own times. |
+
+Until a row has no gap, a payload field is the only durable record of that
+value. Keep it, and make the trusted ingress stamp it from the authenticated
+identity or its own clock, overwriting anything the requester sent.
+
 Trace context is one class of operational event metadata. See
 [OpenTelemetry Transport Context](./opentelemetry-transport-context.md) for the
 logical and physical carrier mappings and their current implementation status.
