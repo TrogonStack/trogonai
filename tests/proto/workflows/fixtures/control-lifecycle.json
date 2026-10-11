@@ -213,9 +213,6 @@
       "type": "trogonai.workflows.runs.v1alpha1.PauseRequest",
       "payload": {
         "pauseId": "pause-example",
-        "requestedBy": {
-          "principalId": "user-example"
-        },
         "reason": "Inspect remaining work."
       }
     },
@@ -239,9 +236,6 @@
       "payload": {
         "resumptionId": "resume-example",
         "pauseId": "pause-example",
-        "resumedBy": {
-          "principalId": "user-example"
-        },
         "appliedPause": {}
       }
     },
@@ -250,9 +244,6 @@
       "payload": {
         "resumptionId": "resume-pending",
         "pauseId": "pause-example",
-        "resumedBy": {
-          "principalId": "user-example"
-        },
         "pendingPauseIntent": {}
       }
     },
@@ -260,9 +251,6 @@
       "type": "trogonai.workflows.runs.v1alpha1.CancellationRequest",
       "payload": {
         "cancellationId": "cancellation-example",
-        "requestedBy": {
-          "principalId": "user-example"
-        },
         "run": {}
       }
     },
@@ -270,9 +258,6 @@
       "type": "trogonai.workflows.runs.v1alpha1.CancellationRequest",
       "payload": {
         "cancellationId": "cancellation-invocation",
-        "requestedBy": {
-          "principalId": "user-example"
-        },
         "invocationId": "invocation-first"
       }
     },
@@ -311,10 +296,7 @@
             },
             "inputs": []
           }
-        ],
-        "revisedBy": {
-          "principalId": "user-example"
-        }
+        ]
       }
     },
     "termination-success-with-receipts": {
@@ -415,9 +397,6 @@
       "payload": {
         "requestId": "input-example",
         "occurrenceId": "occurrence-example",
-        "requestedBy": {
-          "serviceId": "coordinator-example"
-        },
         "question": "Approve the result?",
         "answerSchema": {
           "maxEncodedBytes": "128",
@@ -452,10 +431,6 @@
       "payload": {
         "responseId": "response-example",
         "requestId": "input-example",
-        "respondedBy": {
-          "principalId": "user-example"
-        },
-        "respondedAt": "2026-01-01T00:01:00Z",
         "answered": {
           "boolValue": false
         },
@@ -467,10 +442,6 @@
       "payload": {
         "responseId": "response-expired",
         "requestId": "input-example",
-        "respondedBy": {
-          "serviceId": "timeout-service"
-        },
-        "respondedAt": "2026-01-01T00:02:00Z",
         "expired": {
           "deadline": "2026-01-01T00:02:00Z",
           "observedAt": "2026-01-01T00:02:00Z"
@@ -1206,20 +1177,6 @@
     {
       "name": "input-response-expired",
       "template": "input-response-expired"
-    },
-    {
-      "name": "input-response-rejects-mismatched-expiry-instant",
-      "template": "input-response-expired",
-      "patch": [
-        {
-          "op": "replace",
-          "path": "/expired/observedAt",
-          "value": "2026-01-01T00:01:00Z"
-        }
-      ],
-      "violations": [
-        "an expiry receipt must record the same observed response instant"
-      ]
     },
     {
       "name": "join-first-success-with-wait-winner",

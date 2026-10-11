@@ -75,6 +75,8 @@ message ContextArtifact {
 // Authorization references contain no credentials. Dispatch must still pass
 // live policy and Agent lifecycle admission; this snapshot never grants it.
 message RunAuthority {
+  // Delegated authority this run carries forward to every invocation it
+  // dispatches, not provenance of the command that created this snapshot.
   ActorRef requested_by = 1 [features.field_presence = LEGACY_REQUIRED];
   string authorization_id = 2 [
     features.field_presence = LEGACY_REQUIRED,

@@ -137,8 +137,7 @@
                 }
               ],
               "artifacts": []
-            },
-            "receivedAt": "2026-01-01T00:01:00Z"
+            }
           }
         ],
         "currentReceiptId": "receipt-example"
@@ -231,7 +230,6 @@
                 "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
               }
             },
-            "receivedAt": "2026-01-01T00:01:00Z",
             "indeterminate": {
               "detail": "Awaiting reconciliation."
             }
@@ -269,8 +267,7 @@
                 }
               ],
               "artifacts": []
-            },
-            "receivedAt": "2026-01-01T00:01:00Z"
+            }
           }
         ],
         "currentReceiptId": "receipt-example"
@@ -282,9 +279,6 @@
         "request": {
           "requestId": "input-example",
           "occurrenceId": "occurrence-example",
-          "requestedBy": {
-            "serviceId": "coordinator-example"
-          },
           "question": "Approve the result?",
           "answerSchema": {
             "maxEncodedBytes": "128",
@@ -316,10 +310,6 @@
         "response": {
           "responseId": "response-example",
           "requestId": "input-example",
-          "respondedBy": {
-            "principalId": "user-example"
-          },
-          "respondedAt": "2026-01-01T00:01:00Z",
           "answered": {
             "boolValue": false
           },
@@ -481,9 +471,6 @@
       "payload": {
         "request": {
           "pauseId": "pause-example",
-          "requestedBy": {
-            "principalId": "user-example"
-          },
           "reason": "Inspect remaining work."
         },
         "boundary": {
@@ -505,9 +492,6 @@
       "payload": {
         "request": {
           "pauseId": "pause-example",
-          "requestedBy": {
-            "principalId": "user-example"
-          },
           "reason": "Inspect remaining work."
         },
         "boundary": {
@@ -525,9 +509,6 @@
         "resumption": {
           "resumptionId": "resume-example",
           "pauseId": "pause-example",
-          "resumedBy": {
-            "principalId": "user-example"
-          },
           "appliedPause": {}
         }
       }
@@ -537,9 +518,6 @@
       "payload": {
         "request": {
           "cancellationId": "cancellation-example",
-          "requestedBy": {
-            "principalId": "user-example"
-          },
           "run": {}
         },
         "acknowledgements": [
@@ -725,8 +703,7 @@
                     }
                   ],
                   "artifacts": []
-                },
-                "receivedAt": "2026-01-01T00:01:00Z"
+                }
               }
             ],
             "currentReceiptId": "receipt-example"
@@ -918,8 +895,7 @@
                     }
                   ],
                   "artifacts": []
-                },
-                "receivedAt": "2026-01-01T00:01:00Z"
+                }
               }
             ],
             "currentReceiptId": "receipt-example"
@@ -932,9 +908,6 @@
             "request": {
               "requestId": "input-example",
               "occurrenceId": "occurrence-example",
-              "requestedBy": {
-                "serviceId": "coordinator-example"
-              },
               "question": "Approve the result?",
               "answerSchema": {
                 "maxEncodedBytes": "128",
@@ -966,10 +939,6 @@
             "response": {
               "responseId": "response-example",
               "requestId": "input-example",
-              "respondedBy": {
-                "principalId": "user-example"
-              },
-              "respondedAt": "2026-01-01T00:01:00Z",
               "answered": {
                 "boolValue": false
               },
@@ -984,9 +953,6 @@
           {
             "request": {
               "pauseId": "pause-example",
-              "requestedBy": {
-                "principalId": "user-example"
-              },
               "reason": "Inspect remaining work."
             },
             "boundary": {
@@ -1092,10 +1058,7 @@
                 },
                 "inputs": []
               }
-            ],
-            "revisedBy": {
-              "principalId": "user-example"
-            }
+            ]
           }
         ],
         "occurrences": [
@@ -1212,8 +1175,7 @@
                     }
                   ],
                   "artifacts": []
-                },
-                "receivedAt": "2026-01-01T00:01:00Z"
+                }
               }
             ],
             "currentReceiptId": "receipt-example"
@@ -1226,9 +1188,6 @@
             "request": {
               "requestId": "input-example",
               "occurrenceId": "occurrence-example",
-              "requestedBy": {
-                "serviceId": "coordinator-example"
-              },
               "question": "Approve the result?",
               "answerSchema": {
                 "maxEncodedBytes": "128",
@@ -1260,10 +1219,6 @@
             "response": {
               "responseId": "response-example",
               "requestId": "input-example",
-              "respondedBy": {
-                "principalId": "user-example"
-              },
-              "respondedAt": "2026-01-01T00:01:00Z",
               "answered": {
                 "boolValue": false
               },
@@ -1278,9 +1233,6 @@
           {
             "request": {
               "pauseId": "pause-example",
-              "requestedBy": {
-                "principalId": "user-example"
-              },
               "reason": "Inspect remaining work."
             },
             "boundary": {
@@ -1477,8 +1429,7 @@
                     }
                   ],
                   "artifacts": []
-                },
-                "receivedAt": "2026-01-01T00:01:00Z"
+                }
               }
             ],
             "currentReceiptId": "receipt-example"
@@ -1963,8 +1914,7 @@
                     }
                   ],
                   "artifacts": []
-                },
-                "receivedAt": "2026-01-01T00:01:00Z"
+                }
               }
             ],
             "currentReceiptId": "receipt-example"
@@ -2073,10 +2023,7 @@
                 },
                 "inputs": []
               }
-            ],
-            "revisedBy": {
-              "principalId": "user-example"
-            }
+            ]
           }
         ],
         "occurrences": [
@@ -2193,8 +2140,7 @@
                     }
                   ],
                   "artifacts": []
-                },
-                "receivedAt": "2026-01-01T00:01:00Z"
+                }
               }
             ],
             "currentReceiptId": "receipt-example"
@@ -2207,9 +2153,6 @@
             "request": {
               "requestId": "input-example",
               "occurrenceId": "occurrence-example",
-              "requestedBy": {
-                "serviceId": "coordinator-example"
-              },
               "question": "Approve the result?",
               "answerSchema": {
                 "maxEncodedBytes": "128",
@@ -2241,10 +2184,6 @@
             "response": {
               "responseId": "response-example",
               "requestId": "input-example",
-              "respondedBy": {
-                "principalId": "user-example"
-              },
-              "respondedAt": "2026-01-01T00:01:00Z",
               "answered": {
                 "boolValue": false
               },
@@ -2259,9 +2198,6 @@
           {
             "request": {
               "pauseId": "pause-example",
-              "requestedBy": {
-                "principalId": "user-example"
-              },
               "reason": "Inspect remaining work."
             },
             "boundary": {
@@ -2472,8 +2408,7 @@
                     }
                   ],
                   "artifacts": []
-                },
-                "receivedAt": "2026-01-01T00:01:00Z"
+                }
               }
             ],
             "currentReceiptId": "receipt-example"
@@ -2714,8 +2649,7 @@
                     }
                   ],
                   "artifacts": []
-                },
-                "receivedAt": "2026-01-01T00:01:00Z"
+                }
               }
             ],
             "currentReceiptId": "receipt-example"
@@ -3061,8 +2995,7 @@
                     }
                   ],
                   "artifacts": []
-                },
-                "receivedAt": "2026-01-01T00:01:00Z"
+                }
               }
             ],
             "currentReceiptId": "receipt-example"
@@ -3152,7 +3085,6 @@
                     "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
                   }
                 },
-                "receivedAt": "2026-01-01T00:01:00Z",
                 "failed": {
                   "reason": "FAILURE_REASON_EXECUTION_ERROR"
                 }
@@ -3582,8 +3514,7 @@
                     }
                   ],
                   "artifacts": []
-                },
-                "receivedAt": "2026-01-01T00:01:00Z"
+                }
               }
             ],
             "currentReceiptId": "receipt-example"
@@ -3673,7 +3604,6 @@
                     "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
                   }
                 },
-                "receivedAt": "2026-01-01T00:01:00Z",
                 "failed": {
                   "reason": "FAILURE_REASON_EXECUTION_ERROR"
                 }
@@ -3766,7 +3696,6 @@
                     "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
                   }
                 },
-                "receivedAt": "2026-01-01T00:01:30Z",
                 "failed": {
                   "reason": "FAILURE_REASON_EXECUTION_ERROR"
                 }
@@ -4185,8 +4114,7 @@
                     }
                   ],
                   "artifacts": []
-                },
-                "receivedAt": "2026-01-01T00:01:00Z"
+                }
               }
             ],
             "currentReceiptId": "receipt-example"
@@ -4289,8 +4217,7 @@
                     }
                   ],
                   "artifacts": []
-                },
-                "receivedAt": "2026-01-01T00:01:00Z"
+                }
               }
             ],
             "currentReceiptId": "receipt-invocation-second-paid"
@@ -4431,9 +4358,7 @@
                 "cleanupId": "cleanup-released",
                 "waitId": "wait-example",
                 "activationId": "activation-example",
-                "released": {
-                  "releasedAt": "2026-01-01T00:02:00Z"
-                }
+                "released": {}
               }
             ],
             "currentActivationId": "activation-example",
@@ -4832,8 +4757,7 @@
                     }
                   ],
                   "artifacts": []
-                },
-                "receivedAt": "2026-01-01T00:01:00Z"
+                }
               }
             ],
             "currentReceiptId": "receipt-example"
@@ -4936,8 +4860,7 @@
                     }
                   ],
                   "artifacts": []
-                },
-                "receivedAt": "2026-01-01T00:01:00Z"
+                }
               }
             ],
             "currentReceiptId": "receipt-invocation-second-paid"
@@ -5078,9 +5001,7 @@
                 "cleanupId": "cleanup-released",
                 "waitId": "wait-example",
                 "activationId": "activation-example",
-                "released": {
-                  "releasedAt": "2026-01-01T00:02:00Z"
-                }
+                "released": {}
               }
             ],
             "currentActivationId": "activation-example",
@@ -5614,8 +5535,7 @@
                     }
                   ],
                   "artifacts": []
-                },
-                "receivedAt": "2026-01-01T00:01:00Z"
+                }
               }
             ],
             "currentReceiptId": "receipt-example"
@@ -5705,7 +5625,6 @@
                     "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
                   }
                 },
-                "receivedAt": "2026-01-01T00:01:00Z",
                 "failed": {
                   "reason": "FAILURE_REASON_EXECUTION_ERROR"
                 }
@@ -5798,7 +5717,6 @@
                     "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
                   }
                 },
-                "receivedAt": "2026-01-01T00:01:30Z",
                 "failed": {
                   "reason": "FAILURE_REASON_EXECUTION_ERROR"
                 }
@@ -5904,8 +5822,7 @@
                     }
                   ],
                   "artifacts": []
-                },
-                "receivedAt": "2026-01-01T00:01:55Z"
+                }
               }
             ],
             "currentReceiptId": "receipt-invocation-recovery-paid"
@@ -6046,9 +5963,7 @@
                 "cleanupId": "cleanup-released",
                 "waitId": "wait-example",
                 "activationId": "activation-example",
-                "released": {
-                  "releasedAt": "2026-01-01T00:02:00Z"
-                }
+                "released": {}
               }
             ],
             "currentActivationId": "activation-example",
@@ -6560,8 +6475,7 @@
                     }
                   ],
                   "artifacts": []
-                },
-                "receivedAt": "2026-01-01T00:01:00Z"
+                }
               }
             ],
             "currentReceiptId": "receipt-example"
@@ -6664,8 +6578,7 @@
                     }
                   ],
                   "artifacts": []
-                },
-                "receivedAt": "2026-01-01T00:01:00Z"
+                }
               }
             ],
             "currentReceiptId": "receipt-invocation-second-paid"
@@ -7009,8 +6922,7 @@
                     }
                   ],
                   "artifacts": []
-                },
-                "receivedAt": "2026-01-01T00:01:00Z"
+                }
               }
             ],
             "currentReceiptId": "receipt-example"
@@ -7113,8 +7025,7 @@
                     }
                   ],
                   "artifacts": []
-                },
-                "receivedAt": "2026-01-01T00:01:00Z"
+                }
               }
             ],
             "currentReceiptId": "receipt-invocation-second-paid"
@@ -7416,8 +7327,7 @@
                     }
                   ],
                   "artifacts": []
-                },
-                "receivedAt": "2026-01-01T00:01:00Z"
+                }
               }
             ],
             "currentReceiptId": "receipt-example"
@@ -7520,8 +7430,7 @@
                     }
                   ],
                   "artifacts": []
-                },
-                "receivedAt": "2026-01-01T00:01:00Z"
+                }
               }
             ],
             "currentReceiptId": "receipt-invocation-second-paid"
@@ -7662,9 +7571,7 @@
                 "cleanupId": "cleanup-released",
                 "waitId": "wait-example",
                 "activationId": "activation-example",
-                "released": {
-                  "releasedAt": "2026-01-01T00:02:00Z"
-                }
+                "released": {}
               }
             ],
             "currentActivationId": "activation-example",
@@ -7817,9 +7724,7 @@
                 "cleanupId": "cleanup-released",
                 "waitId": "wait-second",
                 "activationId": "activation-example",
-                "released": {
-                  "releasedAt": "2026-01-01T00:02:00Z"
-                }
+                "released": {}
               }
             ],
             "currentActivationId": "activation-example",
@@ -8079,8 +7984,7 @@
                 }
               ],
               "artifacts": []
-            },
-            "receivedAt": "2026-01-01T00:01:00Z"
+            }
           }
         }
       ],
@@ -8115,7 +8019,6 @@
                 "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
               }
             },
-            "receivedAt": "2026-01-01T00:01:00Z",
             "indeterminate": {
               "detail": "Awaiting reconciliation."
             }
@@ -8147,36 +8050,6 @@
       ],
       "violations": [
         "the response must belong to the request"
-      ]
-    },
-    {
-      "name": "input-state-rejects-answer-at-deadline",
-      "template": "input-state-admitted-answer",
-      "patch": [
-        {
-          "op": "replace",
-          "path": "/response/respondedAt",
-          "value": "2026-01-01T00:02:00Z"
-        }
-      ],
-      "violations": [
-        "answers and declines precede the deadline; expiry uses its exact bound"
-      ]
-    },
-    {
-      "name": "input-state-rejects-unadmitted-actor",
-      "template": "input-state-admitted-answer",
-      "patch": [
-        {
-          "op": "replace",
-          "path": "/response/respondedBy",
-          "value": {
-            "principalId": "user-other"
-          }
-        }
-      ],
-      "violations": [
-        "a non-expiry responder must be in the admitted audience"
       ]
     },
     {
@@ -8300,9 +8173,7 @@
             "cleanupId": "cleanup-example",
             "waitId": "wait-example",
             "activationId": "activation-other",
-            "released": {
-              "releasedAt": "2026-01-01T00:02:00Z"
-            }
+            "released": {}
           }
         }
       ],
@@ -8800,10 +8671,7 @@
                 },
                 "inputs": []
               }
-            ],
-            "revisedBy": {
-              "principalId": "user-example"
-            }
+            ]
           }
         }
       ],
@@ -8841,10 +8709,7 @@
                 },
                 "inputs": []
               }
-            ],
-            "revisedBy": {
-              "principalId": "user-example"
-            }
+            ]
           }
         },
         {
@@ -9178,7 +9043,6 @@
                 "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
               }
             },
-            "receivedAt": "2026-01-01T00:01:00Z",
             "indeterminate": {
               "detail": "The initial outcome was not known."
             }
@@ -9373,9 +9237,7 @@
             "cleanupId": "cleanup-released",
             "waitId": "wait-example",
             "activationId": "activation-example",
-            "released": {
-              "releasedAt": "2026-01-01T00:02:00Z"
-            }
+            "released": {}
           }
         }
       ]
@@ -10476,9 +10338,7 @@
             "cleanupId": "cleanup-another",
             "waitId": "wait-example",
             "activationId": "activation-example",
-            "released": {
-              "releasedAt": "2026-01-01T00:02:00Z"
-            }
+            "released": {}
           }
         },
         {

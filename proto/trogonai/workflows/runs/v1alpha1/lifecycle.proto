@@ -19,7 +19,6 @@ message PauseRequest {
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1
   ];
-  ActorRef requested_by = 2 [features.field_presence = LEGACY_REQUIRED];
   string reason = 3;
 }
 
@@ -51,7 +50,6 @@ message RunResumption {
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1
   ];
-  ActorRef resumed_by = 3 [features.field_presence = LEGACY_REQUIRED];
   oneof previous_state {
     option (buf.validate.oneof).required = true;
 
@@ -65,7 +63,6 @@ message CancellationRequest {
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1
   ];
-  ActorRef requested_by = 2 [features.field_presence = LEGACY_REQUIRED];
   oneof target {
     option (buf.validate.oneof).required = true;
 
@@ -93,6 +90,9 @@ message CancellationAcknowledgement {
   }
 }
 
+// requested_by records why the retry is authorized, not who caused this
+// event: an operator override is a business decision distinct from automatic
+// policy, even when the operator also submits the command.
 message RetryAuthorization {
   string retry_authorization_id = 1 [
     features.field_presence = LEGACY_REQUIRED,
@@ -159,7 +159,6 @@ message RemainingPlanRevision {
     (buf.validate.field).repeated.items.string.min_len = 1
   ];
   repeated ContinuationBinding continuations = 5 [(buf.validate.field).repeated.min_items = 1];
-  ActorRef revised_by = 6 [features.field_presence = LEGACY_REQUIRED];
   string reason = 7;
 }
 

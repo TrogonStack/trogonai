@@ -202,12 +202,6 @@ message ExternalWaitActivation {
 }
 
 message ExternalSubscriptionLease {
-  option (buf.validate.message).cel = {
-    id: "external_subscription_lease.interval"
-    message: "a renewed lease must end after renewal"
-    expression: "this.lease_expires_at > this.renewed_at"
-  };
-
   string lease_id = 1 [
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1
@@ -220,12 +214,7 @@ message ExternalSubscriptionLease {
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1
   ];
-  google.protobuf.Timestamp renewed_at = 4 [features.field_presence = LEGACY_REQUIRED];
   google.protobuf.Timestamp lease_expires_at = 5 [features.field_presence = LEGACY_REQUIRED];
-}
-
-message SubscriptionReleased {
-  google.protobuf.Timestamp released_at = 1 [features.field_presence = LEGACY_REQUIRED];
 }
 
 // The handler verifies the idempotent registration never created a subscription;
@@ -263,7 +252,7 @@ message ExternalSubscriptionCleanup {
   oneof outcome {
     option (buf.validate.oneof).required = true;
 
-    SubscriptionReleased released = 4;
+    google.protobuf.Empty released = 4;
     InvocationIndeterminate indeterminate = 5;
     SubscriptionNeverActivated never_activated = 7;
   }

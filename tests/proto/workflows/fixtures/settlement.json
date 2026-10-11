@@ -61,8 +61,7 @@
               }
             }
           ]
-        },
-        "receivedAt": "2026-01-01T00:01:00Z"
+        }
       }
     },
     "termination-with-subscription-settlement": {
@@ -101,9 +100,6 @@
       "payload": {
         "requestId": "input-example",
         "occurrenceId": "occurrence-example",
-        "requestedBy": {
-          "serviceId": "coordinator-example"
-        },
         "question": "Approve the result?",
         "answerSchema": {
           "maxEncodedBytes": "128",
@@ -305,8 +301,7 @@
                     }
                   ],
                   "artifacts": []
-                },
-                "receivedAt": "2026-01-01T00:01:00Z"
+                }
               }
             ],
             "currentReceiptId": "receipt-example"
@@ -323,9 +318,6 @@
           {
             "request": {
               "cancellationId": "cancellation-example",
-              "requestedBy": {
-                "principalId": "user-example"
-              },
               "run": {}
             },
             "acknowledgements": [
@@ -350,9 +342,6 @@
       "payload": {
         "request": {
           "cancellationId": "cancellation-example",
-          "requestedBy": {
-            "principalId": "user-example"
-          },
           "run": {}
         },
         "acknowledgements": [
@@ -543,8 +532,7 @@
                     }
                   ],
                   "artifacts": []
-                },
-                "receivedAt": "2026-01-01T00:01:00Z"
+                }
               }
             ],
             "currentReceiptId": "receipt-example"
@@ -770,9 +758,6 @@
           "path": "/cancellations/0/request",
           "value": {
             "cancellationId": "cancellation-example",
-            "requestedBy": {
-              "principalId": "user-example"
-            },
             "invocationId": "invocation-first"
           }
         }

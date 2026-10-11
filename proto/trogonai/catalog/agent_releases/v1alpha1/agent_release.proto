@@ -58,14 +58,6 @@ message AgentRelease {
   trogonai.agents.agents.v1alpha1.AgentRevisionRef revision = 3 [features.field_presence = LEGACY_REQUIRED];
   trogonai.agents.validations.v1alpha1.ValidationResultRef validation = 4 [features.field_presence = LEGACY_REQUIRED];
   ReleasePolicyRef policy = 5 [features.field_presence = LEGACY_REQUIRED];
-  string publisher_id = 6 [
-    features.field_presence = LEGACY_REQUIRED,
-    (buf.validate.field).cel = {
-      id: "agent_release.publisher_id_nonblank"
-      message: "publisher_id must contain a non-whitespace character"
-      expression: "this.trim() != ''"
-    }
-  ];
   string label = 7 [(buf.validate.field).cel = {
     id: "agent_release.label_nonblank"
     message: "a supplied label must contain a non-whitespace character"
@@ -74,14 +66,6 @@ message AgentRelease {
 }
 
 message AgentReleaseWithdrawal {
-  string withdrawn_by = 1 [
-    features.field_presence = LEGACY_REQUIRED,
-    (buf.validate.field).cel = {
-      id: "agent_release_withdrawal.withdrawn_by_nonblank"
-      message: "withdrawn_by must contain a non-whitespace character"
-      expression: "this.trim() != ''"
-    }
-  ];
   string reason = 2 [features.field_presence = LEGACY_REQUIRED];
 }
 

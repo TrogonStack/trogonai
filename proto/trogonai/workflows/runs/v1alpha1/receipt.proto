@@ -70,7 +70,6 @@ message InvocationCancelled {
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1
   ];
-  ActorRef cancelled_by = 2 [features.field_presence = LEGACY_REQUIRED];
   string detail = 3;
 }
 
@@ -80,6 +79,8 @@ message InvocationIndeterminate {
   string detail = 1;
 }
 
+// rejected_by/rejected_at are the admission authority's own decision, a
+// different actor and moment than whoever later records this evidence here.
 message LaunchRejectedEvidence {
   string admission_id = 1 [
     features.field_presence = LEGACY_REQUIRED,
@@ -131,5 +132,4 @@ message InvocationResultReceipt {
     InvocationCancelled cancelled = 8;
     InvocationIndeterminate indeterminate = 9;
   }
-  google.protobuf.Timestamp received_at = 10 [features.field_presence = LEGACY_REQUIRED];
 }

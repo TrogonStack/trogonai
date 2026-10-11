@@ -83,13 +83,8 @@ message InputState {
   };
   option (buf.validate.message).cel = {
     id: "input_state.deadline"
-    message: "answers and declines precede the deadline; expiry uses its exact bound"
-    expression: "!has(this.response) || (has(this.response.expired) ? (this.response.expired.deadline == this.request.deadline && this.response.responded_at >= this.request.deadline) : this.response.responded_at < this.request.deadline)"
-  };
-  option (buf.validate.message).cel = {
-    id: "input_state.answer_actor"
-    message: "a non-expiry responder must be in the admitted audience"
-    expression: "!has(this.response) || has(this.response.expired) || this.request.allowed_responders.exists(actor, actor == this.response.responded_by)"
+    message: "expiry uses the request's exact deadline"
+    expression: "!has(this.response) || !has(this.response.expired) || this.response.expired.deadline == this.request.deadline"
   };
   option (buf.validate.message).cel = {
     id: "input_state.choice"
