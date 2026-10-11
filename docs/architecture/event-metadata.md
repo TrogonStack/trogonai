@@ -35,6 +35,10 @@ provenance out of a payload.
 Rebuilding state is a reader under [ADR#0069](../adr/0069-event-envelope-records-issuer-and-times.md), but `evolve` receives only the
 decoded payload today, so a rule that compares the current actor with an
 earlier one has no envelope value to read until the runtime passes it in.
+Contracts that already leave provenance to the envelope, such as the agents,
+catalog, and workflows packages, keep the actors and deadlines their state
+needs in the fold's output, so none of them can be implemented until the
+runtime persists the envelope values and passes them into `evolve`.
 
 Until a row has no gap, a payload field is the only durable record of that
 value. Keep it, and make the trusted ingress stamp it from the authenticated

@@ -59,9 +59,10 @@ message InputDeclined {
   string detail = 1;
 }
 
-// The responding actor comes from the event envelope (ADR#0069). The fold
-// matches request, audience, schema, and deadline before admitting a
-// response exactly once.
+// The responding actor and response time come from the event envelope
+// (ADR#0069). The fold matches request, audience, schema, and deadline before
+// admitting a response exactly once, so it needs the envelope's actor and
+// times, which the runtime does not yet pass into evolve.
 message InputResponse {
   option (buf.validate.message).cel = {
     id: "input_response.choice_answer"
