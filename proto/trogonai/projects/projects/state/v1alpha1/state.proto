@@ -1,0 +1,48 @@
+edition = "2024";
+
+package trogonai.projects.projects.state.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "trogon/hierarchy/v1alpha1/node.proto";
+import "trogonai/projects/projects/v1alpha1/access_preset.proto";
+import "trogonai/projects/projects/v1alpha1/identity.proto";
+import "trogonai/projects/projects/v1alpha1/lifecycle.proto";
+
+// Fold state belongs to the Project stream, not a joined read model. Missing is
+// the explicit initial state. Replay rejects unknown events and mutations
+// before creation. Current placement and current access are never derived
+// here; they live in the hierarchy and policy planes.
+message State {
+  oneof state {
+    option (buf.validate.oneof).required = true;
+
+    google.protobuf.Empty missing = 1;
+    CreatedProject present = 2;
+  }
+}
+
+// ACTIVE accepts rename, goal restatement, and archive. ARCHIVED accepts only
+// unarchive. parent and initial_access_preset are immutable genesis
+// facts retained for provenance; this fold never updates them and never
+// consults them to decide a later command.
+message CreatedProject {
+  trogonai.projects.projects.v1alpha1.ProjectId project_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string display_name = 2 [features.field_presence = LEGACY_REQUIRED];
+  string goal = 3 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.projects.projects.v1alpha1.ProjectLifecycle lifecycle = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  trogon.hierarchy.v1alpha1.NodeId parent = 5 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.projects.projects.v1alpha1.ProjectAccessPreset initial_access_preset = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}

@@ -1,0 +1,12 @@
+edition = "2024";
+
+package trogonai.projects.projects.v1alpha1;
+
+import "trogonai/projects/projects/v1alpha1/identity.proto";
+
+// ProjectArchived transitions an active project to archived. Current access
+// and membership are policy facts and are untouched; archival only stops the
+// project from accepting rename and goal restatement until unarchived.
+message ProjectArchived {
+  ProjectId project_id = 1 [features.field_presence = LEGACY_REQUIRED];
+}

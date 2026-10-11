@@ -1,0 +1,14 @@
+edition = "2024";
+
+package trogonai.projects.projects.v1alpha1;
+
+import "trogonai/projects/projects/v1alpha1/identity.proto";
+
+// Archival blocks rename and goal restatement without deleting the project.
+// Only an active Project accepts this command.
+// Dispatch requires DecideRequest.expected_revision; retrying preserves the
+// original stream revision and command id, so delayed delivery cannot archive
+// a project again after an intervening unarchive.
+message ArchiveProject {
+  ProjectId project_id = 1 [features.field_presence = LEGACY_REQUIRED];
+}

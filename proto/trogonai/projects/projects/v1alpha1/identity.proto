@@ -1,0 +1,18 @@
+edition = "2024";
+
+package trogonai.projects.projects.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// ProjectId identifies one Project.
+//
+// The value is compared as a whole and never parsed; it carries no embedded
+// parent, workspace, or tenant segment. A Project's position in the hierarchy
+// is a separate fact, recorded once at creation and owned by the hierarchy
+// domain afterward, never encoded into this identifier.
+message ProjectId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
