@@ -1,7 +1,7 @@
 ---
 number: "0068"
 slug: reference-fields-say-they-are-references
-status: draft
+status: accepted
 date: 2026-10-10
 ---
 
