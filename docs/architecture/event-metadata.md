@@ -24,13 +24,13 @@ each step, durably, so contracts stop modeling them in payloads. Where each
 value lives is specific to this platform, so check this table before leaving
 provenance out of a payload.
 
-| Envelope value | Where it lives today                                                                 | Gap against ADR#0069                                                                                              |
+| Envelope value | Where it lives today                                                                 | Gap against the ADR                                                                                              |
 | -------------- | ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
 | Actor          | Not recorded. `CommandPrincipal` reaches the authorizer and is dropped after it.     | Nothing persists it, and system processes have no identity of their own.                                          |
 | `issued_at`    | Not recorded.                                                                        | Needs stamping where the platform accepts the request.                                                            |
 | `produced_at`  | Not recorded. `decide` has no clock; hosts pass time into commands when a domain needs it. | Needs stamping by the runtime when it produces events.                                                     |
 | `recorded_at`  | `StreamEvent::recorded_at`, read from the JetStream message timestamp.               | Reflects the latest write, so re-append, restore, and stream rebuild reset it. Needs the first-recorded value carried forward. |
-| Occurrence time | Not in the envelope. A few payloads carry it under ADR#0035's event-time exception. | Needs an envelope value the producer sets and the platform keeps distinct from its own times. |
+| Occurrence time | Not in the envelope. A few payloads carry it under [ADR#0035](../adr/0035-session-store-decider-aggregate.md)'s event-time exception. | Needs an envelope value the producer sets and the platform keeps distinct from its own times. |
 
 Until a row has no gap, a payload field is the only durable record of that
 value. Keep it, and make the trusted ingress stamp it from the authenticated

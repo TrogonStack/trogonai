@@ -148,7 +148,7 @@ envelope records the actor that caused each event
 and the policy plane reads the creator from there when it records the first
 binding.
 
-The platform does not record the actor yet. Until ADR#0069 is implemented,
+The platform does not record the actor yet. Until [ADR#0069](./0069-event-envelope-records-issuer-and-times.md) is implemented,
 `ProjectCreated` has no record of its creator, so the policy plane cannot grant
 the creator's membership and no project may be created in a deployment that
 relies on it.
