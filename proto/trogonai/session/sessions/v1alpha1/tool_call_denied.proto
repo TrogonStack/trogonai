@@ -25,8 +25,6 @@ message ToolCallDenied {
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1
   ];
-  // Principal, policy, or hook that refused the call.
-  string denied_by = 4 [features.field_presence = LEGACY_REQUIRED];
   // Human-readable reason for the refusal; empty when none.
   string reason = 5;
   // Turn the denied call belongs to (see UserMessageRecorded.turn_id). Optional
