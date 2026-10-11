@@ -55,7 +55,13 @@ one worth knowing. The envelope records each step separately:
 - `produced_at`: when the event was produced from that request.
 - `recorded_at`: when the event was first written to storage.
 
-The gaps between them are diagnostics in their own right: waiting between
+The envelope also carries the occurrence time: when the producer says the
+event happened. It differs from the other times for a device that synced hours
+later, an import of historical facts, or an outside system reporting its own
+timestamp. Every event has one, so it is event context, recorded as the
+producer's claim and never confused with a time the platform observed.
+
+The gaps between the platform's times are diagnostics in their own right: waiting between
 acceptance and production, retries and contention between production and
 storage. Each time is stamped by the part of the platform that observed that
 step, never by the requester and never copied from the payload.
@@ -83,12 +89,13 @@ because they are domain facts rather than provenance:
 
 - An actor other than the one that caused the event, such as an approver
   named in a request a system process makes on their behalf.
-- A time from the domain itself, such as when a scheduled occurrence was due
-  or when an outside system says something happened.
+- A time that is part of the business fact, such as when a scheduled
+  occurrence was due, when a change takes effect, or when a measurement was
+  taken.
 
-A domain time is named for what it means (`due_at`, `observed_at`,
-`effective_at`), never with a generic name a reader would mistake for an
-envelope time.
+A domain time is named for what it means (`due_at`, `effective_at`,
+`measured_at`), never with a generic name a reader would mistake for an
+envelope or occurrence time.
 
 ## Consequences
 
@@ -105,6 +112,10 @@ envelope time.
 - Signed provenance ([ADR#0039](./0039-self-authenticating-event-provenance.md))
   builds on the recorded actor rather than replacing it: a signature proves
   the actor, the envelope says who it is.
+- [ADR#0035](./0035-session-store-decider-aggregate.md)'s event-time policy
+  keeps occurrence timestamps in a few payloads because the envelope has no
+  occurrence time today. Once it does, each of those is either a domain time
+  under its own name or moves to the envelope.
 - Causation and tenancy are also cross-cutting metadata, and each needs its
   own decision.
 
