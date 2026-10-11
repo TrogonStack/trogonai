@@ -87,9 +87,15 @@ jobs:
         with:
           install_args: buf
 
+      - name: Read pinned buf version
+        id: buf
+        run: echo "version=$(buf --version)" >> "$GITHUB_OUTPUT"
+
       - name: Check for breaking changes against the pull request base
         uses: bufbuild/buf-action@85aebf73123b5c15fd5528aaecbf9129cddf7fa7 # v1.6.0
         with:
+          version: ${{ steps.buf.outputs.version }}
+          breaking: ${{ !contains(github.event.pull_request.labels.*.name, 'buf skip breaking') && !contains(github.event.pull_request.labels.*.name, 'buf:skip:breaking') }}
           lint: false
           format: false
           pr_comment: false
