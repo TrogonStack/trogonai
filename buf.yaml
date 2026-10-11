@@ -33,4 +33,4 @@ lint:
 
 breaking:
   use:
-    - WIRE_JSON
+    - FILE

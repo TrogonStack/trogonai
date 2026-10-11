@@ -1,7 +1,7 @@
 ---
 number: "0067"
 slug: session-checkout-not-workspace
-status: draft
+status: accepted
 date: 2026-10-10
 ---
 
