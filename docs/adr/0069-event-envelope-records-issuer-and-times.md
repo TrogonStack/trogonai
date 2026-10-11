@@ -81,6 +81,13 @@ whatever stored the event. No consumer reaches into storage-specific metadata
 to recover them, and how a given storage system encodes them is its own
 concern, documented alongside it.
 
+Rebuilding state from events is a reader too. A rule that depends on who acted
+before, such as only the author may withdraw or a reviewer must differ from the
+author, reads that actor from the envelopes of the earlier events, not from a
+copy in their payloads. A reader that could see only payloads would force every
+such rule to copy provenance back into them, which is the duplication this
+decision removes.
+
 ### 6. Payloads keep domain facts, not provenance
 
 With provenance on every envelope, a payload does not repeat who caused the

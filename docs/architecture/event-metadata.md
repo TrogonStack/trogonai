@@ -32,6 +32,14 @@ provenance out of a payload.
 | `recorded_at`  | `StreamEvent::recorded_at`, read from the JetStream message timestamp.               | Reflects the latest write, so re-append, restore, and stream rebuild reset it. Needs the first-recorded value carried forward. |
 | Occurrence time | Not in the envelope. A few payloads carry it under [ADR#0035](../adr/0035-session-store-decider-aggregate.md)'s event-time exception. | Needs an envelope value the producer sets and the platform keeps distinct from its own times. |
 
+Rebuilding state is a reader under [ADR#0069](../adr/0069-event-envelope-records-issuer-and-times.md), but `evolve` receives only the
+decoded payload today, so a rule that compares the current actor with an
+earlier one has no envelope value to read until the runtime passes it in.
+Contracts that already leave provenance to the envelope, such as the agents,
+catalog, and workflows packages, keep the actors and deadlines their state
+needs in the fold's output, so none of them can be implemented until the
+runtime persists the envelope values and passes them into `evolve`.
+
 Until a row has no gap, a payload field is the only durable record of that
 value. Keep it, and make the trusted ingress stamp it from the authenticated
 identity or its own clock, overwriting anything the requester sent.

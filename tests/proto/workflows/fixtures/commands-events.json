@@ -776,8 +776,7 @@
                     }
                   ],
                   "artifacts": []
-                },
-                "receivedAt": "2026-01-01T00:01:00Z"
+                }
               }
             ],
             "currentReceiptId": "receipt-example"

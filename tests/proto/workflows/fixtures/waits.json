@@ -168,7 +168,6 @@
         "leaseId": "lease-example",
         "waitId": "wait-example",
         "activationId": "activation-example",
-        "renewedAt": "2026-01-01T00:01:00Z",
         "leaseExpiresAt": "2026-01-01T00:02:00Z"
       }
     },
@@ -178,9 +177,7 @@
         "cleanupId": "cleanup-example",
         "waitId": "wait-example",
         "activationId": "activation-example",
-        "released": {
-          "releasedAt": "2026-01-01T00:02:00Z"
-        }
+        "released": {}
       }
     },
     "wait-subscription-cleanup-indeterminate": {
@@ -468,20 +465,6 @@
     {
       "name": "wait-renewed-subscription-lease",
       "template": "wait-renewed-subscription-lease"
-    },
-    {
-      "name": "wait-renewal-rejects-expired-lease",
-      "template": "wait-renewed-subscription-lease",
-      "patch": [
-        {
-          "op": "replace",
-          "path": "/leaseExpiresAt",
-          "value": "2026-01-01T00:01:00Z"
-        }
-      ],
-      "violations": [
-        "a renewed lease must end after renewal"
-      ]
     },
     {
       "name": "wait-subscription-cleanup-released",

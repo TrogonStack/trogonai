@@ -292,9 +292,6 @@
       "payload": {
         "requestId": "input-example",
         "run": {},
-        "requestedBy": {
-          "principalId": "user-example"
-        },
         "question": "Approve the result?",
         "answerSchema": {
           "maxEncodedBytes": "16",

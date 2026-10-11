@@ -12,7 +12,8 @@ import "trogonai/agents/validations/v1alpha1/validation.proto";
 // registered validator's exact definition are dispatch preconditions.
 // Dispatch verifies the persisted snapshot and its retained bytes/digest;
 // changing a draft afterward cannot change the source of this run.
-// requested_by equals the authenticated caller. Requests reject existing runs.
+// The requester is the actor the event envelope records (ADR#0069). Requests
+// reject existing runs.
 message RequestAgentValidation {
   AgentValidationRequest request = 1 [features.field_presence = LEGACY_REQUIRED];
 }

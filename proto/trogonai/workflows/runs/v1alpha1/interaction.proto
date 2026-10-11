@@ -45,7 +45,6 @@ message InputRequest {
     string occurrence_id = 3 [(buf.validate.field).string.min_len = 1];
     string invocation_id = 4 [(buf.validate.field).string.min_len = 1];
   }
-  ActorRef requested_by = 5 [features.field_presence = LEGACY_REQUIRED];
   string question = 6 [
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1
@@ -60,18 +59,15 @@ message InputDeclined {
   string detail = 1;
 }
 
-// Actor identity is authenticated at ingress. The fold matches request,
-// audience, schema, and deadline before admitting a response exactly once.
+// The responding actor and response time come from the event envelope
+// (ADR#0069). The fold matches request, audience, schema, and deadline before
+// admitting a response exactly once, so it needs the envelope's actor and
+// times, which the runtime does not yet pass into evolve.
 message InputResponse {
   option (buf.validate.message).cel = {
     id: "input_response.choice_answer"
     message: "a selected choice requires an answered response"
     expression: "!has(this.selected_choice_id) || has(this.answered)"
-  };
-  option (buf.validate.message).cel = {
-    id: "input_response.expiry_time"
-    message: "an expiry receipt must record the same observed response instant"
-    expression: "!has(this.expired) || this.expired.observed_at == this.responded_at"
   };
 
   string response_id = 1 [
@@ -82,8 +78,6 @@ message InputResponse {
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1
   ];
-  ActorRef responded_by = 3 [features.field_presence = LEGACY_REQUIRED];
-  google.protobuf.Timestamp responded_at = 4 [features.field_presence = LEGACY_REQUIRED];
   oneof outcome {
     option (buf.validate.oneof).required = true;
 
@@ -108,8 +102,6 @@ message Guidance {
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1
   ];
-  ActorRef sent_by = 2 [features.field_presence = LEGACY_REQUIRED];
-  google.protobuf.Timestamp sent_at = 3 [features.field_presence = LEGACY_REQUIRED];
   oneof direction {
     option (buf.validate.oneof).required = true;
 

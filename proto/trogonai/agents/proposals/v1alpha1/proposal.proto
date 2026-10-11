@@ -34,21 +34,12 @@ message ProposalDefinition {
 
   trogonai.agents.agents.v1alpha1.AgentRevisionRef base_revision = 1 [features.field_presence = LEGACY_REQUIRED];
   VerifiedConfigurationDifference difference = 2 [features.field_presence = LEGACY_REQUIRED];
-  // Authenticated opaque identity; principal kind remains outside this domain.
-  string author_id = 3 [
-    features.field_presence = LEGACY_REQUIRED,
-    (buf.validate.field).string.min_len = 1
-  ];
   repeated ProposalEvidenceRef evidence = 4;
   // Supersession does not close another stream; its author withdraws it separately.
   string supersedes_proposal_id = 5 [(buf.validate.field).string.min_len = 1];
 }
 
 message ProposalJudgment {
-  string verifier_id = 1 [
-    features.field_presence = LEGACY_REQUIRED,
-    (buf.validate.field).string.min_len = 1
-  ];
   string rationale = 2 [features.field_presence = LEGACY_REQUIRED];
   repeated EvaluationResultRef evaluation_results = 3;
 }

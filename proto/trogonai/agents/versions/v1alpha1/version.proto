@@ -68,14 +68,6 @@ message AgentVersionCreation {
   };
 
   AgentVersionSnapshot snapshot = 1 [features.field_presence = LEGACY_REQUIRED];
-  string creator_id = 2 [
-    features.field_presence = LEGACY_REQUIRED,
-    (buf.validate.field).cel = {
-      id: "agent_version.identity_nonblank"
-      message: "identity must contain a non-whitespace character"
-      expression: "this.trim() != ''"
-    }
-  ];
   AgentVersionRetention retention = 3 [features.field_presence = LEGACY_REQUIRED];
   AgentVersionBase base = 4;
 }
@@ -85,14 +77,6 @@ message AgentVersionCreation {
 message AgentVersionCommit {
   trogonai.agents.agents.v1alpha1.AgentVersionSnapshotRef snapshot = 1 [features.field_presence = LEGACY_REQUIRED];
   string summary = 2 [features.field_presence = LEGACY_REQUIRED];
-  string author_id = 3 [
-    features.field_presence = LEGACY_REQUIRED,
-    (buf.validate.field).cel = {
-      id: "agent_version.identity_nonblank"
-      message: "identity must contain a non-whitespace character"
-      expression: "this.trim() != ''"
-    }
-  ];
   GitCommitReference git_commit = 4;
 }
 
@@ -110,26 +94,10 @@ message AgentVersionEdit {
 
   trogonai.agents.agents.v1alpha1.AgentVersionSnapshotRef previous = 1 [features.field_presence = LEGACY_REQUIRED];
   AgentVersionSnapshot snapshot = 2 [features.field_presence = LEGACY_REQUIRED];
-  string editor_id = 3 [
-    features.field_presence = LEGACY_REQUIRED,
-    (buf.validate.field).cel = {
-      id: "agent_version.identity_nonblank"
-      message: "identity must contain a non-whitespace character"
-      expression: "this.trim() != ''"
-    }
-  ];
 }
 
 message AgentVersionDiscard {
   trogonai.agents.agents.v1alpha1.AgentVersionSnapshotRef snapshot = 1 [features.field_presence = LEGACY_REQUIRED];
-  string discarded_by = 2 [
-    features.field_presence = LEGACY_REQUIRED,
-    (buf.validate.field).cel = {
-      id: "agent_version.identity_nonblank"
-      message: "identity must contain a non-whitespace character"
-      expression: "this.trim() != ''"
-    }
-  ];
 }
 
 enum AgentVersionStatus {

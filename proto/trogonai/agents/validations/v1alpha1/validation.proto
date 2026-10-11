@@ -112,16 +112,6 @@ message ValidationResult {
     expression: "!has(this.invalid) || this.invalid.diagnostics.exists(d, d.severity == 3)"
   };
 
-  // Authenticated execution principal, bound to this registered validator by
-  // dispatch. A caller-supplied identity or success claim is not proof.
-  string validator_principal_id = 1 [
-    features.field_presence = LEGACY_REQUIRED,
-    (buf.validate.field).cel = {
-      id: "validation_result.validator_principal_id_nonblank"
-      message: "validator_principal_id must contain a non-whitespace character"
-      expression: "this.trim() != ''"
-    }
-  ];
   oneof outcome {
     option (buf.validate.oneof).required = true;
 
@@ -133,14 +123,6 @@ message ValidationResult {
 
 message AgentValidationRequest {
   ValidationResultRef reference = 1 [features.field_presence = LEGACY_REQUIRED];
-  string requested_by = 2 [
-    features.field_presence = LEGACY_REQUIRED,
-    (buf.validate.field).cel = {
-      id: "agent_validation_request.requested_by_nonblank"
-      message: "requested_by must contain a non-whitespace character"
-      expression: "this.trim() != ''"
-    }
-  ];
 }
 
 enum AgentValidationStatus {

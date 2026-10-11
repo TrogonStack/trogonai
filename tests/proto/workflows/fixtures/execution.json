@@ -419,8 +419,7 @@
             }
           ],
           "artifacts": []
-        },
-        "receivedAt": "2026-01-01T00:01:00Z"
+        }
       }
     },
     "receipt-execution-failure": {
@@ -445,7 +444,6 @@
             "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
           }
         },
-        "receivedAt": "2026-01-01T00:01:00Z",
         "failed": {
           "reason": "FAILURE_REASON_EXECUTION_ERROR",
           "detail": "Execution failed."
@@ -474,12 +472,8 @@
             "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
           }
         },
-        "receivedAt": "2026-01-01T00:01:00Z",
         "cancelled": {
-          "cancellationId": "cancellation-example",
-          "cancelledBy": {
-            "principalId": "user-example"
-          }
+          "cancellationId": "cancellation-example"
         }
       }
     },
@@ -505,7 +499,6 @@
             "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
           }
         },
-        "receivedAt": "2026-01-01T00:01:00Z",
         "indeterminate": {
           "detail": "Outcome awaits reconciliation."
         }
@@ -520,7 +513,6 @@
           "algorithm": "sha256",
           "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
         },
-        "receivedAt": "2026-01-01T00:01:00Z",
         "failed": {
           "reason": "FAILURE_REASON_ADMISSION_REJECTED",
           "detail": "Execution failed."
