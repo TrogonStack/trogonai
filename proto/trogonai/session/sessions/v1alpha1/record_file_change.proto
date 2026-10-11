@@ -7,7 +7,7 @@ import "trogonai/session/sessions/v1alpha1/artifact.proto";
 import "trogonai/session/sessions/v1alpha1/diff_summary.proto";
 import "trogonai/session/sessions/v1alpha1/file_change.proto";
 
-// RecordFileChange attributes a workspace file change to the tool call that
+// RecordFileChange attributes a checkout file change to the tool call that
 // caused it, recording [FileChanged]. A change with no proximate call is not
 // this command: it surfaces as a ResourceObservation whose digest moved,
 // meaning something outside the session touched the file.
@@ -18,7 +18,7 @@ message RecordFileChange {
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1
   ];
-  // Workspace-relative, forward slashes, no leading slash.
+  // Checkout-relative, forward slashes, no leading slash.
   string path = 2 [features.field_presence = LEGACY_REQUIRED];
   FileChangeKind change_kind = 3 [features.field_presence = LEGACY_REQUIRED];
   string previous_path = 4;

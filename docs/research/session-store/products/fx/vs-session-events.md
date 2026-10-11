@@ -72,11 +72,11 @@ information that our catalog does not model.
 | `CommittedFilePresentation.lifecycle_id{turn_id, call_id}` | `FileChanged.turn_id` + `tool_call_id` | Closed in `v1alpha1` |
 | `execution.files[].action = read` (of 9 action values) | `ToolCallCompleted.observed` (`ResourceObservation`) | Closed in `v1alpha1` for content reads; no list/search/copy taxonomy |
 | `execution.files[].stale`, `model_view_covers_full_file` | `ResourceObservation.complete` + `range` for coverage; freshness stays in the fold | Coverage closed in `v1alpha1`; `stale` deliberately not copied |
-| `UsageSnapshot` counters | `TokenUsage` + `Cost{amount_micros, rate_ref}` | Ours |
+| `UsageSnapshot` counters | `TokenUsage` + `Cost{amount_micros, rate_id}` | Ours |
 | `usage.billing`, `*_complete` flags | `TokenUsage.completeness` | Closed in `v1alpha1` |
 | `usage.pending[]`, `settled_through_sequence` | Not in the session stream | Ours, deliberately |
 | `preferences{model, effort, fast_mode}` + `preferences_changed` | `AssistantMessageStarted.settings` (`ModelSettings`) | Closed in `v1alpha1` (per-completion; a change is two adjacent facts) |
-| `workspace_root`, `origin_workspace_root`, `workspace_rebound` | `SessionStarted.workspace` (`WorkspaceRef`) | Closed in `v1alpha1`; rebinding is out of scope (new session or fork) |
+| `workspace_root`, `origin_workspace_root`, `workspace_rebound` | `SessionStarted.checkout_ref` (`CheckoutRef`) | Closed in `v1alpha1`; rebinding is out of scope (new session or fork) |
 | `conversation_language` | No equivalent | Gap, minor |
 | `display.json{title, preview}` | `SessionRenamed` + read model | Equivalent |
 | subagent relationship pages, channel families | `DelegationDispatched`, `ParentLinked`, `CascadePolicy` | Ours, decisively |

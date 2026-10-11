@@ -4,7 +4,7 @@ package trogonai.session.sessions.v1alpha1;
 
 import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
-import "trogonai/session/sessions/v1alpha1/digest.proto";
+import "trogonai/session/sessions/v1alpha1/claim_check.proto";
 
 // MarkExecutionAttemptReady publishes an attempt's ready attestation, recording
 // [ExecutionAttemptReady].
@@ -20,7 +20,9 @@ message MarkExecutionAttemptReady {
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1
   ];
-  string ready_attestation_ref = 3 [features.field_presence = LEGACY_REQUIRED];
-  Digest ready_attestation_digest = 4 [features.field_presence = LEGACY_REQUIRED];
+  reserved 3;
+  reserved 4;
+  reserved ready_attestation_digest;
   google.protobuf.Timestamp ready_at = 5 [features.field_presence = LEGACY_REQUIRED];
+  ClaimCheck ready_attestation_ref = 6 [features.field_presence = LEGACY_REQUIRED];
 }

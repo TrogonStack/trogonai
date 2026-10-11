@@ -41,7 +41,7 @@ the problems we modelled are real.
 
 | Concern | Agents API | Ours |
 | --- | --- | --- |
-| Usage accounting | "best-effort... may change as accounting arrives... not a final bill", nullable | `TokenUsage.completeness` (FINAL/PARTIAL, "never summed with one") plus `Cost.amount_micros` and `rate_ref` |
+| Usage accounting | "best-effort... may change as accounting arrives... not a final bill", nullable | `TokenUsage.completeness` (FINAL/PARTIAL, "never summed with one") plus `Cost.amount_micros` and `rate_id` |
 | Output truncation | "Command-output truncation is not reported" | `TextToolResult.truncated`, `ArtifactRef.truncated`, `ArtifactRef.untruncated_size_bytes` |
 | Compaction provenance | automatic and opaque | `Compacted.covered_input_digest`, `CompactionProducer`, `CompactionContextRoot`, `CompactionTrigger` |
 | Child lifetime on parent death | undocumented | `CascadePolicy`, explicitly "closes the industry-wide silent-orphan gap" |
@@ -63,10 +63,10 @@ ID and needs a separate executor."
 
 **Ours.** There is no environment. Two things stand partly in for it:
 
-- `WorkspaceRef` (`workspace.proto`), which is *where files are*, immutable
-  for the session's life, carrying `workspace_id`, `uri`, `revision`.
-- `ExecutionAttemptStarted.isolation_placement` and `.host_artifact_ref`
-  (opaque strings), which are *where this attempt ran*.
+- `CheckoutRef` (`checkout.proto`), which is *where files are*, immutable
+  for the session's life, carrying `checkout_id`, `uri`, `revision`.
+- `ExecutionAttemptStarted.isolation_placement` (an opaque string) and
+  `.host_artifact_ref` (a `ClaimCheck`), which are *where this attempt ran*.
 
 Neither is a compute identity that survives across attempts. In our model a
 restart mints a new attempt and "reconnect to the same environment" cannot
@@ -185,9 +185,9 @@ environment." Function tools are unavailable to subagents.
 
 **Ours.** `DelegationDispatched` plus `ParentLinked` mint a child *session*,
 with its own stream, its own `StoredSessionExecutionPlan`, and its own
-`WorkspaceRef`.
+`CheckoutRef`.
 
-**The gap.** Our `WorkspaceRef` can carry the same `workspace_id` and `uri`
+**The gap.** Our `CheckoutRef` can carry the same `checkout_id` and `uri`
 on parent and child, but nothing in the contract distinguishes "same repo,
 separate checkout" from "the same live filesystem, concurrently written by
 both". Those have opposite safety properties, and OpenAI's own guidance
@@ -197,7 +197,7 @@ evidence that the shared case is the dangerous one.
 **Recommendation.** Two questions for an ADR, in order:
 
 1. Is shared-live-filesystem delegation a shape we support? If yes, it needs
-   a discriminator, on `WorkspaceRef` or on `DelegationDispatched`, and
+   a discriminator, on `CheckoutRef` or on `DelegationDispatched`, and
    `CreateChildSession` must reject the ambiguous case rather than let two
    sessions silently share a working tree.
 2. Do we need an in-session actor dimension at all, or is child-session our

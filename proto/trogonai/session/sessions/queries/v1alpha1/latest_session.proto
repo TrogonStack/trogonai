@@ -12,7 +12,7 @@ import "trogonai/session/sessions/queries/v1alpha1/session_view.proto";
 //
 // A resume command wants a single session, and getting it by listing a page and
 // taking the first row is wrong in a way that only shows up under load: the
-// list is ordered by recency but filtered afterwards, so a workspace whose most
+// list is ordered by recency but filtered afterwards, so a checkout whose most
 // recent forty sessions are all ineligible returns a page with no answer in it
 // and no indication that a longer page would have found one. Selection has to
 // happen in the index, not in the caller.
@@ -22,7 +22,7 @@ import "trogonai/session/sessions/queries/v1alpha1/session_view.proto";
 // latest-pointer is the one answer the caller acts on, so the whole error lands
 // on the session that gets opened.
 message GetLatestSessionRequest {
-  string workspace_id = 1 [
+  string checkout_id = 1 [
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1
   ];
@@ -44,9 +44,9 @@ message GetLatestSessionRequest {
 // GetLatestSessionResponse is the single newest matching session, or nothing.
 message GetLatestSessionResponse {
   ContractNegotiation contract = 1 [features.field_presence = LEGACY_REQUIRED];
-  // Unset when nothing in the workspace matched. Absence is the answer, not an
-  // error: a workspace with no resumable session is a normal state, and
-  // reporting it as a failure would make a first-run workspace look broken.
+  // Unset when nothing in the checkout matched. Absence is the answer, not an
+  // error: a checkout with no resumable session is a normal state, and
+  // reporting it as a failure would make a first-run checkout look broken.
   SessionSummary session = 2;
   // What the selector rejected on the way to that answer. Always present,
   // including when a session was found.
@@ -59,7 +59,7 @@ message GetLatestSessionResponse {
   ProjectionFreshness freshness = 4 [features.field_presence = LEGACY_REQUIRED];
 }
 
-// SessionSelector is which session in a workspace counts as the answer.
+// SessionSelector is which session in a checkout counts as the answer.
 //
 // An enum rather than a set of filter booleans. Booleans let a caller ask for a
 // session that is both currently active and not currently active, and the
@@ -109,12 +109,12 @@ enum RecencyBasis {
 //
 // A session removed by more than one rule is counted once, under the first rule
 // that removed it, in the order the fields are declared. Counting it under
-// every matching rule would produce totals that exceed the workspace, and the
+// every matching rule would produce totals that exceed the checkout, and the
 // number a caller wants is how many sessions there were, not how many
 // judgements were made.
 message ExclusionCounts {
-  // Sessions in the workspace the caller may see. The denominator; zero here
-  // means an empty workspace rather than an over-strict selector.
+  // Sessions in the checkout the caller may see. The denominator; zero here
+  // means an empty checkout rather than an over-strict selector.
   uint32 considered = 1 [features.field_presence = LEGACY_REQUIRED];
   uint32 archived = 2 [features.field_presence = LEGACY_REQUIRED];
   // Excluded because something is currently driving them.

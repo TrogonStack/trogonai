@@ -17,7 +17,7 @@ import "trogonai/session/sessions/v1alpha1/digest.proto";
 // copy the source still exists, unchanged, and anything that treated the two the
 // same would report a file as moved that is still sitting there.
 message CopySource {
-  // Workspace-relative path the content was copied from, in the same form as
+  // Checkout-relative path the content was copied from, in the same form as
   // FileChanged.path.
   string path = 1 [features.field_presence = LEGACY_REQUIRED];
   // What the source hashed to at the moment of the copy.

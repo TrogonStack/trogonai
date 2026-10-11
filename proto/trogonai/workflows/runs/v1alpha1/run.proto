@@ -5,8 +5,8 @@ package trogonai.workflows.runs.v1alpha1;
 import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 import "trogonai/session/sessions/v1alpha1/artifact.proto";
+import "trogonai/session/sessions/v1alpha1/checkout.proto";
 import "trogonai/session/sessions/v1alpha1/session_ordinal.proto";
-import "trogonai/session/sessions/v1alpha1/workspace.proto";
 import "trogonai/workflows/definitions/v1alpha1/digest.proto";
 import "trogonai/workflows/definitions/v1alpha1/value.proto";
 import "trogonai/workflows/definitions/v1alpha1/workflow_definition.proto";
@@ -134,7 +134,7 @@ message RunConfiguration {
   // for its messages, operations, model settings, or usage history.
   SessionRef main_session = 4;
   repeated ContextArtifact context = 5;
-  trogonai.session.sessions.v1alpha1.WorkspaceRef workspace = 6 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.session.sessions.v1alpha1.CheckoutRef checkout_ref = 6 [features.field_presence = LEGACY_REQUIRED];
   RunLimits limits = 7 [features.field_presence = LEGACY_REQUIRED];
   RunAuthority authority = 8 [features.field_presence = LEGACY_REQUIRED];
   string display_name = 9 [(buf.validate.field).string.min_len = 1];

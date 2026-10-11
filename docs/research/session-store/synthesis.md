@@ -657,7 +657,7 @@ against regressions we have not committed to (Cline on deterministic child ids,
 Letta on relaxing optimistic concurrency for an `At` transition, OpenHands on a
 second non-replayable authoritative store, Zed on a pre-session draft keyspace),
 three are conditional on which answer we pick (Crush on a parent-cost rollup,
-Pi on `SessionForked` crossing a `WorkspaceRef`, Cline on a claim-check
+Pi on `SessionForked` crossing a `CheckoutRef`, Cline on a claim-check
 threshold), and exactly one asks for a change that breaks something today:
 adopt an explicit schema-version marker and a written back-compat policy at the
 `v1alpha1` to `v1` promotion (Google ADK, 10/12, with AWS Strands at 6/12

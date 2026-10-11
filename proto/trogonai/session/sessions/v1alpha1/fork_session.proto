@@ -3,17 +3,17 @@ edition = "2024";
 package trogonai.session.sessions.v1alpha1;
 
 import "buf/validate/validate.proto";
+import "trogonai/session/sessions/v1alpha1/checkout.proto";
 import "trogonai/session/sessions/v1alpha1/execution_plan.proto";
 import "trogonai/session/sessions/v1alpha1/session_forked.proto";
 import "trogonai/session/sessions/v1alpha1/session_ordinal.proto";
-import "trogonai/session/sessions/v1alpha1/workspace.proto";
 
 // ForkSession opens a child stream that inherits a prefix of another session's
 // context, recording [SessionStarted, SessionForked] as one batch.
 //
 // Write precondition NoStream on the new stream. The source's existence is
 // checked at the command boundary, not by the fold: the source is a different
-// aggregate and this decider never reads it. The plan and workspace are carried
+// aggregate and this decider never reads it. The plan and checkout are carried
 // rather than inherited for the same reason.
 // Agent-backed fork admission requires the target registry's current ACTIVE
 // lifecycle and live policy; an existing source Session never bypasses pending
@@ -25,7 +25,7 @@ message ForkSession {
     (buf.validate.field).string.min_len = 1
   ];
   StoredSessionExecutionPlan execution_plan = 2 [features.field_presence = LEGACY_REQUIRED];
-  WorkspaceRef workspace = 3 [features.field_presence = LEGACY_REQUIRED];
+  CheckoutRef checkout_ref = 3 [features.field_presence = LEGACY_REQUIRED];
   string source_session_id = 4 [
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1

@@ -47,7 +47,7 @@ message CursorValidity {
 // still advances rather than looping over an unreadable row.
 message RunListCursor {
   CursorValidity validity = 1 [features.field_presence = LEGACY_REQUIRED];
-  string workspace_id = 2 [
+  string checkout_id = 2 [
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1
   ];

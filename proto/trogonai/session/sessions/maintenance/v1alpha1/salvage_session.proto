@@ -27,10 +27,10 @@ message SalvageSessionRequest {
   string reason = 4 [features.field_presence = LEGACY_REQUIRED];
   // Unset is PLAN_ONLY.
   SalvageMode mode = 5;
-  // Workspace for the salvaged session. Needed only when the source's own
-  // workspace could not be read, which is exactly the case a damaged source
+  // Checkout for the salvaged session. Needed only when the source's own
+  // checkout could not be read, which is exactly the case a damaged source
   // makes likely.
-  string workspace_id = 6;
+  string checkout_id = 6;
   SalvageLimits limits = 7;
 }
 

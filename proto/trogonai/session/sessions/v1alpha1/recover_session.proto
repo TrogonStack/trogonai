@@ -3,11 +3,11 @@ edition = "2024";
 package trogonai.session.sessions.v1alpha1;
 
 import "buf/validate/validate.proto";
+import "trogonai/session/sessions/v1alpha1/checkout.proto";
 import "trogonai/session/sessions/v1alpha1/digest.proto";
 import "trogonai/session/sessions/v1alpha1/execution_plan.proto";
 import "trogonai/session/sessions/v1alpha1/session_ordinal.proto";
 import "trogonai/session/sessions/v1alpha1/session_recovered.proto";
-import "trogonai/session/sessions/v1alpha1/workspace.proto";
 
 // RecoverSession opens a session carrying what a salvage could read from a
 // damaged source, recording [SessionStarted, SessionRecovered] as one batch.
@@ -29,7 +29,7 @@ message RecoverSession {
     (buf.validate.field).string.min_len = 1
   ];
   StoredSessionExecutionPlan execution_plan = 2 [features.field_presence = LEGACY_REQUIRED];
-  WorkspaceRef workspace = 3 [features.field_presence = LEGACY_REQUIRED];
+  CheckoutRef checkout_ref = 3 [features.field_presence = LEGACY_REQUIRED];
   string source_session_id = 4 [
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1

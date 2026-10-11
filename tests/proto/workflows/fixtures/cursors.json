@@ -97,7 +97,7 @@
             "maxWait": "5s"
           }
         },
-        "workspaceId": "workspace-example",
+        "checkoutId": "checkout-example",
         "lifecycles": [
           "RUN_LIFECYCLE_RUNNING"
         ],
