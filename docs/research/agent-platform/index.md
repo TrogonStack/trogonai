@@ -31,6 +31,7 @@ and evidence rules behind each product dossier remain reproducible.
 - [LangChain Deep Agents](./products/deep-agents.md)
 - [LangGraph Platform](./products/langgraph-platform.md)
 - [LangSmith Managed Deep Agents](./products/managed-deep-agents.md)
+- [LiteLLM](./products/litellm.md)
 - [Netclaw](./products/netclaw.md)
 - [OpenAI Agents API](./products/openai-agents-api.md)
 - [OpenAI Agents SDK](./products/openai-agents-sdk.md)

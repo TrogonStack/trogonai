@@ -17,6 +17,7 @@ already captured in other corpora is linked rather than restated.
 ## Product dossiers
 
 - [Uber MCP Gateway](./products/uber-mcp-gateway.md)
+- [LiteLLM MCP Gateway](./products/litellm-mcp-gateway.md)
 
 Gateway evidence held in neighbouring corpora:
 

@@ -9,6 +9,11 @@ owes, with the records that already constrain each one. This synthesis is
 decision-time input: where a conclusion here differs from an accepted record
 in the [ADR index](../../adr/index.md), the ADR is authoritative.
 
+Note, 2026-10-13: the [LiteLLM MCP Gateway](./products/litellm-mcp-gateway.md)
+dossier was added after this synthesis was written. The prose below does not
+draw on it; its evidence appears only in the evidence base and in table rows
+marked "(added post-synthesis)".
+
 ## Evidence base
 
 - [Uber MCP Gateway](./products/uber-mcp-gateway.md), the primary dossier of
@@ -25,6 +30,10 @@ in the [ADR index](../../adr/index.md), the ADR is authoritative.
   token and the provider stores no server definition.
 - [Guild](../agent-platform/products/guild.md), progressive disclosure of
   skills activated on demand.
+- [LiteLLM MCP Gateway](./products/litellm-mcp-gateway.md) (added
+  post-synthesis), an MCP edge governed by virtual keys and teams, with
+  admin-pinned tool snapshots, per-caller and per-server rate limits, and a
+  spectrum of upstream credential modes.
 
 ## Convergence
 
@@ -127,6 +136,9 @@ expect it to take. None of these is decided here.
 | Catalog refresh and session consistency | [ADR#0025](../../adr/0025-agent-definition-data-ownership.md) (versions resolve at session start) | Explanation page describing what a live registry change means for an in-flight session |
 | MCP telemetry attributes | [ADR#0008](../../adr/0008-opentelemetry-observability.md), `otel/semconv/registry/mcp.yaml` | Attributes for server, tool, principal kind, exposure decision, and projection applied |
 | Glossary entries | existing glossary | ToolDefinition, tool exposure, invocation policy, `server_id`; disambiguate gateway, registry, and charter |
+| Per-caller and per-server MCP rate limits (added post-synthesis) | [ADR#0026](../../adr/0026-command-authorization-principal.md) (principal), [ADR#0055](../../adr/0055-nats-subject-design-jsonrpc-bindings.md) (queue groups) | Limits keyed by principal and by server, with a shared counter across replicas and override versus ceiling chosen explicitly; LiteLLM supplies evidence |
+| Upstream credential modes the edge may present (added post-synthesis) | [ADR#0023](../../adr/0023-secret-management-and-key-custody-direction.md) (SecretRef custody), [ADR#0053](../../adr/0053-external-oidc-federation-surface.md) Decision 6, [ADR#0063](../../adr/0063-agent-connection-declarations.md) Decision 5 | Enumerate static, client-supplied, per-user stored and exchanged credentials as grant kinds resolved through SecretRefs; LiteLLM supplies evidence |
+| Drift detection between a pinned tool definition and the live upstream (added post-synthesis) | [ADR#0025](../../adr/0025-agent-definition-data-ownership.md) (sessions keep their pin) | Detect and alert on upstream drift from the pinned digest without changing in-flight sessions; LiteLLM supplies evidence |
 
 ## What the repository already has that the dossiers do not
 
