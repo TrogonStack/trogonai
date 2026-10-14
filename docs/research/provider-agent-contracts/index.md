@@ -24,8 +24,13 @@ convergence rather than an artifact of the order they were written in.
 - [OpenAI Agents API](./products/openai-agents-api.md)
 - [OpenComputer Serverless Agents](./products/opencomputer-serverless-agents.md)
 - [xAI platform](./products/xai-platform.md)
+- [LiteLLM proxy](./products/litellm-proxy.md), a gateway that normalises
+  many providers behind one contract rather than a provider itself. It was
+  added after the combined proposal, against an evidence snapshot dated
+  2026-10-13, and closes with what its findings would change or confirm in
+  that proposal.
 
-Three of the four providers also have dossiers in the
+Three of the four agent providers also have dossiers in the
 [agent platform corpus](../agent-platform/index.md), written against a
 different question and frozen before this study ran:
 [Claude Managed Agents](../agent-platform/products/claude-managed-agents.md),
@@ -47,7 +52,8 @@ about.
 
 ## Status
 
-The four dossiers are complete for the evidence snapshot dated 2026-09-11. The
+The four provider dossiers are complete for the evidence snapshot dated
+2026-09-11; the LiteLLM dossier is a later 2026-10-13 snapshot. The
 combined proposal is a draft proposal, not a decision: it closes some questions
 that were open (egress substitution now has four independent implementations,
 so it is no longer a live design choice) and opens others that each want their

@@ -37,6 +37,10 @@ corpora. Entries are public repositories unless the line says otherwise.
 - [zed-industries/zed](https://github.com/zed-industries/zed)
 - [agentclientprotocol/agent-client-protocol](https://github.com/agentclientprotocol/agent-client-protocol)
 - [cline/cline](https://github.com/cline/cline)
+- [BerriAI/litellm](https://github.com/BerriAI/litellm), studied through its
+  [docs](https://docs.litellm.ai) and
+  [`llms.txt`](https://docs.litellm.ai/llms.txt) index, which now live in
+  [BerriAI/litellm-docs](https://github.com/BerriAI/litellm-docs)
 - [Guild](https://guild.ai): no public repo, studied through its
   [docs](https://docs.guild.ai) and [`llms.txt`](https://docs.guild.ai/llms.txt)
   index
