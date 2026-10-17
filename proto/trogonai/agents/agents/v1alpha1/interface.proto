@@ -51,26 +51,19 @@ message OfferedSkill {
     message: "a skill example must contain a non-whitespace character"
     expression: "this.trim() != ''"
   }];
-  // Optional per-skill overrides of the interface defaults. An empty list
-  // inherits the corresponding AgentInterface default.
+  // Optional per-skill overrides of the interface defaults, in the same
+  // type/subtype form. An empty list inherits the corresponding AgentInterface
+  // default.
   repeated string input_media_types = 6 [(buf.validate.field).repeated = {
     unique: true
     items: {
-      cel: {
-        id: "offered_skill.input_media_types_nonblank"
-        message: "a media type must contain a non-whitespace character"
-        expression: "this.trim() != ''"
-      }
+      string: {pattern: "^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}$"}
     }
   }];
   repeated string output_media_types = 7 [(buf.validate.field).repeated = {
     unique: true
     items: {
-      cel: {
-        id: "offered_skill.output_media_types_nonblank"
-        message: "a media type must contain a non-whitespace character"
-        expression: "this.trim() != ''"
-      }
+      string: {pattern: "^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}$"}
     }
   }];
 }
@@ -98,28 +91,21 @@ message AgentInterface {
   };
 
   repeated OfferedSkill offered_skills = 1;
-  // Media types in RFC 6838 form, such as text/plain or application/json. At
-  // least one input and one output media type is required.
+  // Media types in RFC 6838 type/subtype form without parameters, such as
+  // text/plain or application/json. At least one input and one output media
+  // type is required.
   repeated string default_input_media_types = 2 [(buf.validate.field).repeated = {
     min_items: 1
     unique: true
     items: {
-      cel: {
-        id: "agent_interface.default_input_media_types_nonblank"
-        message: "a media type must contain a non-whitespace character"
-        expression: "this.trim() != ''"
-      }
+      string: {pattern: "^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}$"}
     }
   }];
   repeated string default_output_media_types = 3 [(buf.validate.field).repeated = {
     min_items: 1
     unique: true
     items: {
-      cel: {
-        id: "agent_interface.default_output_media_types_nonblank"
-        message: "a media type must contain a non-whitespace character"
-        expression: "this.trim() != ''"
-      }
+      string: {pattern: "^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}$"}
     }
   }];
   InteractionCapabilities interaction = 4 [features.field_presence = LEGACY_REQUIRED];
