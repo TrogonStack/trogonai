@@ -59,9 +59,11 @@ record extends.
 `AgentConfiguration` gains `AgentInterface interface`. An `AgentInterface`
 carries:
 
-- `offered_skills`, each an `OfferedSkill` with a stable `skill_key`, a `name`,
-  a `description`, `tags`, `examples`, and optional per-skill input and output
-  media type overrides that otherwise inherit the interface defaults;
+- `offered_skills`, each an `OfferedSkill` with a stable `skill_key`, a
+  `display_name` that nothing resolves per
+  [ADR#0040](./0040-contract-field-vocabulary.md), a `description`, `tags`,
+  `examples`, and optional per-skill input and output media type overrides
+  that otherwise inherit the interface defaults;
 - `default_input_media_types` and `default_output_media_types`; and
 - `InteractionCapabilities`, with `streaming`, `push_notifications`, and
   `state_transition_history`.

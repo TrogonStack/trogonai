@@ -18,11 +18,13 @@ message OfferedSkill {
       expression: "this.trim() != ''"
     }
   ];
-  string name = 2 [
+  // A label for humans and catalogs. Nothing resolves it; skill_key is the
+  // stable handle.
+  string display_name = 2 [
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).cel = {
-      id: "offered_skill.name_nonblank"
-      message: "a skill name must contain a non-whitespace character"
+      id: "offered_skill.display_name_nonblank"
+      message: "a skill display name must contain a non-whitespace character"
       expression: "this.trim() != ''"
     }
   ];
