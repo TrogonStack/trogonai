@@ -1,0 +1,23 @@
+edition = "2024";
+
+package trogonai.policy.agent_rate_limits.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/policy/agent_rate_limits/v1alpha1/rate_limit_policy.proto";
+
+// Genesis fixes the Agent identity for this history. Reinitializing after a
+// clear cannot reset a counter or open a fresh window. The admitted origin and
+// exact initial policy remain immutable receipt evidence after replacements and
+// clears, independent of the current policy projection.
+message AgentRateLimitInitialized {
+  string agent_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  AgentRateLimitPolicy policy = 2 [features.field_presence = LEGACY_REQUIRED];
+  string provisioning_id = 3 [(buf.validate.field).cel = {
+    id: "agent_rate_limit_initialized.provisioning_id_nonblank"
+    message: "a supplied provisioning_id must contain a non-whitespace character"
+    expression: "this.trim() != ''"
+  }];
+}
