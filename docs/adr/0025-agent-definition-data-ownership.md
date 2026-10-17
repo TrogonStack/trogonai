@@ -153,6 +153,9 @@ AgentConfiguration
   required_memory_declarations + optional_memory_declarations
     (selectors by kind, never an instance reference)
   selectable_labels
+  interface
+    (advertised skills, default media types, interaction capabilities)
+  execution_subject
 
 Proposal
   proposal_id

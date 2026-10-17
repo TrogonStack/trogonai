@@ -6,6 +6,7 @@ import "buf/validate/validate.proto";
 import "google/protobuf/any.proto";
 import "trogonai/agents/agents/v1alpha1/dependencies.proto";
 import "trogonai/agents/agents/v1alpha1/implementation.proto";
+import "trogonai/agents/agents/v1alpha1/interface.proto";
 import "trogonai/agents/agents/v1alpha1/variables.proto";
 
 // AgentConfiguration owns immutable behavior and dependency declarations.
@@ -39,4 +40,10 @@ message AgentConfiguration {
   // Selection consumes the labels of the pinned revision. Annotation changes
   // cannot change this set or which declarations a session starts with.
   map<string, string> selectable_labels = 7;
+  // Absent means the Agent offers no external interface and cannot be exported
+  // as a callable catalog entry. Sessions validate parts against it.
+  AgentInterface interface = 8;
+  // Absent means AGENT_ONLY. Session admission enforces the declared subject;
+  // the declaration itself grants no authority over any principal.
+  ExecutionSubject execution_subject = 9 [(buf.validate.field).enum.defined_only = true];
 }

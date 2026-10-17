@@ -1,0 +1,140 @@
+edition = "2024";
+
+package trogonai.agents.agents.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// One ability this Agent advertises to callers and catalogs. This is the
+// opposite direction from SkillDeclaration, which pins content the Agent
+// consumes. Advertising grants no authority and resolves no dependency.
+message OfferedSkill {
+  // Stable within this Agent across revisions. Keys are case-sensitive and
+  // validation does not trim or normalize them.
+  string skill_key = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).cel = {
+      id: "offered_skill.skill_key_nonblank"
+      message: "a skill key must contain a non-whitespace character"
+      expression: "this.trim() != ''"
+    }
+  ];
+  string name = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).cel = {
+      id: "offered_skill.name_nonblank"
+      message: "a skill name must contain a non-whitespace character"
+      expression: "this.trim() != ''"
+    }
+  ];
+  string description = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).cel = {
+      id: "offered_skill.description_nonblank"
+      message: "a skill description must contain a non-whitespace character"
+      expression: "this.trim() != ''"
+    }
+  ];
+  // Values are exact, case-sensitive, and unique. Search may index these tags,
+  // but runtime selectors never consume them.
+  repeated string tags = 4 [(buf.validate.field).repeated = {
+    unique: true
+    items: {
+      cel: {
+        id: "offered_skill.tags_nonblank"
+        message: "a skill tag must contain a non-whitespace character"
+        expression: "this.trim() != ''"
+      }
+    }
+  }];
+  repeated string examples = 5 [(buf.validate.field).repeated.items.cel = {
+    id: "offered_skill.examples_nonblank"
+    message: "a skill example must contain a non-whitespace character"
+    expression: "this.trim() != ''"
+  }];
+  // Optional per-skill overrides of the interface defaults. An empty list
+  // inherits the corresponding AgentInterface default.
+  repeated string input_media_types = 6 [(buf.validate.field).repeated = {
+    unique: true
+    items: {
+      cel: {
+        id: "offered_skill.input_media_types_nonblank"
+        message: "a media type must contain a non-whitespace character"
+        expression: "this.trim() != ''"
+      }
+    }
+  }];
+  repeated string output_media_types = 7 [(buf.validate.field).repeated = {
+    unique: true
+    items: {
+      cel: {
+        id: "offered_skill.output_media_types_nonblank"
+        message: "a media type must contain a non-whitespace character"
+        expression: "this.trim() != ''"
+      }
+    }
+  }];
+}
+
+// Interaction behaviors the Agent commits to for every session pinned to the
+// revision. Presence of this message is the declaration; each flag is a
+// behavior the runtime or adapter must support, otherwise admission rejects.
+message InteractionCapabilities {
+  bool streaming = 1;
+  bool push_notifications = 2;
+  bool state_transition_history = 3;
+}
+
+// What the Agent offers to callers: the external, protocol-neutral surface a
+// catalog exports, for example as an A2A card under ADR#0012, and a session
+// validates inbound and outbound parts against. It is revision-owned: changing
+// it invalidates behavioral verification and requires a new revision. It is
+// not an endpoint, a transport, a security scheme, or a grant; those bind on
+// other planes (ADR#0016, ADR#0017).
+message AgentInterface {
+  option (buf.validate.message).cel = {
+    id: "agent_interface.skill_keys_unique"
+    message: "offered skill keys must be unique"
+    expression: "this.offered_skills.map(s, s.skill_key).unique()"
+  };
+
+  repeated OfferedSkill offered_skills = 1;
+  // Media types in RFC 6838 form, such as text/plain or application/json. At
+  // least one input and one output media type is required.
+  repeated string default_input_media_types = 2 [(buf.validate.field).repeated = {
+    min_items: 1
+    unique: true
+    items: {
+      cel: {
+        id: "agent_interface.default_input_media_types_nonblank"
+        message: "a media type must contain a non-whitespace character"
+        expression: "this.trim() != ''"
+      }
+    }
+  }];
+  repeated string default_output_media_types = 3 [(buf.validate.field).repeated = {
+    min_items: 1
+    unique: true
+    items: {
+      cel: {
+        id: "agent_interface.default_output_media_types_nonblank"
+        message: "a media type must contain a non-whitespace character"
+        expression: "this.trim() != ''"
+      }
+    }
+  }];
+  InteractionCapabilities interaction = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Whose authority a session carries. Unspecified and unknown values are
+// invalid. Absent on AgentConfiguration means AGENT_ONLY.
+enum ExecutionSubject {
+  EXECUTION_SUBJECT_UNSPECIFIED = 0;
+  // Sessions act as the Agent itself and never carry a delegating principal.
+  EXECUTION_SUBJECT_AGENT_ONLY = 1;
+  // Every session acts on behalf of an authenticated principal and must carry
+  // one.
+  EXECUTION_SUBJECT_DELEGATED_PRINCIPAL_ONLY = 2;
+  // Each session is admitted in either mode; the session records which mode
+  // applied.
+  EXECUTION_SUBJECT_AGENT_OR_DELEGATED_PRINCIPAL = 3;
+}

@@ -14,5 +14,7 @@ declarations, such as skill pins and memory dependencies, whose use requires
 support from the selected runtime or adapter. The configuration digest commits
 to all three: the runtime binding, including its implementation release and
 definition digest; the settings payload; and every revision-owned platform
-declaration. See draft
+declaration. The configuration also carries the offered interface (advertised
+skills, default media types, and interaction capabilities) and the execution
+subject, both revision-owned. See draft
 [ADR#0062](../adr/0062-runtime-owned-settings-and-platform-declarations.md).

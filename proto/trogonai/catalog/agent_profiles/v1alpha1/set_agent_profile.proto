@@ -5,7 +5,7 @@ package trogonai.catalog.agent_profiles.v1alpha1;
 import "trogonai/catalog/agent_profiles/v1alpha1/profile.proto";
 
 // Replaces an initialized profile without changing its Agent identity. Absent
-// avatar/category and empty tags clear those values. Dispatch authorizes the
+// avatar/category and empty tags or documentation URL clear those values. Dispatch authorizes the
 // writer, applies initialization's content checks, and requires authoritative
 // current ACTIVE lifecycle plus DecideRequest.command_id and expected_revision.
 // Pending setup cannot be replaced through this normal mutation path; cancelled

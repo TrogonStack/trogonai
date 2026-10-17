@@ -1,0 +1,49 @@
+edition = "2024";
+
+package trogonai.policy.agent_rate_limits.v1alpha1;
+
+import "trogon/error/v1alpha1/options.proto";
+
+// Schema-only templates for the policy.agent_rate_limits module's
+// DeciderService refusals. These messages are never encoded. Administration
+// authorization and request admission keep their own failure contracts; this
+// fold only owns policy mutations, not reservation or counting outcomes.
+message AgentRateLimitCommandInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "policy.agent_rate_limits"
+    reason: "AGENT_RATE_LIMIT_COMMAND_INVALID"
+    message: "The command violates the Agent rate limit policy contract."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentRateLimitNotInitializedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "policy.agent_rate_limits"
+    reason: "AGENT_RATE_LIMIT_NOT_INITIALIZED"
+    message: "The Agent rate limit history must be initialized before this command."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentRateLimitAlreadyInitializedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "policy.agent_rate_limits"
+    reason: "AGENT_RATE_LIMIT_ALREADY_INITIALIZED"
+    message: "The Agent rate limit history has already been initialized."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentRateLimitIdentityMismatchError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "policy.agent_rate_limits"
+    reason: "AGENT_RATE_LIMIT_IDENTITY_MISMATCH"
+    message: "The command names a different Agent from this rate limit history."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}

@@ -30,4 +30,11 @@ message AgentProfile {
   Avatar avatar = 2;
   CategoryReference category = 3;
   repeated DiscoveryTag discovery_tags = 4;
+  // Where callers read about this Agent. Presentation only; absent or empty
+  // means none. Only credential-free absolute HTTPS URLs are durable profile
+  // data, under the same admission rule as Avatar.https_url.
+  string documentation_url = 5 [(buf.validate.field).string = {
+    uri: true
+    pattern: "(?i)^https://(?:\\[[0-9a-f:.]+\\]|[^:/?#@\\[\\]]+)(?::[0-9]+)?(?:[/?#].*)?$"
+  }];
 }

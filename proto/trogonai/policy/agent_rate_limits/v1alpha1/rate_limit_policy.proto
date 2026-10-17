@@ -1,0 +1,96 @@
+edition = "2024";
+
+package trogonai.policy.agent_rate_limits.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+
+// Which counter the ceiling applies to. Unknown and unspecified values reject.
+enum AgentRateLimitScope {
+  AGENT_RATE_LIMIT_SCOPE_UNSPECIFIED = 0;
+  // All Sessions of this Agent together.
+  AGENT_RATE_LIMIT_SCOPE_AGENT = 1;
+  // Each Session independently, with descendant Sessions counted with their
+  // root.
+  AGENT_RATE_LIMIT_SCOPE_SESSION = 2;
+}
+
+// What is counted. Unknown and unspecified values reject.
+enum AgentRateLimitMeter {
+  AGENT_RATE_LIMIT_METER_UNSPECIFIED = 0;
+  // Prompt plus completion tokens of model requests the Agent makes.
+  AGENT_RATE_LIMIT_METER_TOKENS = 1;
+  // Model requests the Agent makes.
+  AGENT_RATE_LIMIT_METER_MODEL_REQUESTS = 2;
+}
+
+message AgentRateLimit {
+  AgentRateLimitScope scope = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  AgentRateLimitMeter meter = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // Exact count admitted inside one window. Zero forbids new requests.
+  uint64 maximum = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Fixed window length of at most one day. Admission attributes a request to
+  // the window open when it is authorized, not when it completes.
+  google.protobuf.Duration window = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).duration = {
+      gt: {}
+      lte: {seconds: 86400}
+    }
+  ];
+}
+
+// Total model requests one Session may make across its lifetime, including
+// requests it delegates to descendant Sessions. A ceiling against unbounded
+// agentic loops; it is not a window.
+message AgentSessionCallLimit {
+  uint32 maximum_model_requests = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32.gt = 0
+  ];
+}
+
+// Limits are an unordered conjunction: every configured limit and the session
+// call limit must admit a new request. An absent policy removes only this
+// Agent-specific ceiling, never another scope's limit or an authorization
+// check. It does not mean a zero cap. Absence cannot satisfy rate-limit setup
+// requested by a provisioning operation.
+//
+// Delegated requests retain ancestor Agent rate-limit scopes in their
+// authorization provenance, including scopes without a configured policy at
+// dispatch. Detach does not remove inherited scopes. One request counts once
+// against each applicable scope, never again merely because several scopes
+// constrain it.
+//
+// Counters belong to the authoritative accounting history, not this policy
+// stream. Setting, clearing, restoring, archiving, changing Agent revisions, or
+// replaying cannot reset them. Requests made while a policy is absent still
+// count when it returns. A window boundary never refunds an in-flight
+// reservation.
+message AgentRateLimitPolicy {
+  option (buf.validate.message).cel = {
+    id: "agent_rate_limit_policy.limits_unique"
+    message: "each scope and meter pair may appear at most once"
+    expression: "this.limits.map(limit, string(limit.scope) + '/' + string(limit.meter)).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "agent_rate_limit_policy.nonempty"
+    message: "the policy must configure a limit or a session call limit"
+    expression: "this.limits.size() > 0 || has(this.session_call_limit)"
+  };
+
+  repeated AgentRateLimit limits = 1;
+  AgentSessionCallLimit session_call_limit = 2;
+}

@@ -75,3 +75,4 @@ future implementation work.
 - [ADR#0067: A Session Binds to a Checkout, Not a Workspace](./0067-session-checkout-not-workspace.md)
 - [ADR#0068: A Reference Field Says It Is a Reference in Both Its Name and Its Type](./0068-reference-fields-say-they-are-references.md)
 - [ADR#0069: Every Event Envelope Records Who Caused It and When Each Step Happened (Draft)](./0069-event-envelope-records-issuer-and-times.md)
+- [ADR#0070: An Agent Declares What It Offers and Whose Authority It Carries; Throughput Ceilings Stay on the Policy Plane (Draft)](./0070-agent-offered-interface-and-throughput-limits.md)
