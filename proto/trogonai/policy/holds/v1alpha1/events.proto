@@ -1,0 +1,18 @@
+edition = "2024";
+
+package trogonai.policy.holds.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/policy/holds/v1alpha1/hold_placed.proto";
+import "trogonai/policy/holds/v1alpha1/hold_released.proto";
+
+// An unset or unknown event rejects replay; skipping a hold change could admit
+// work under a stop that is still in force, or refuse work after its release.
+message HoldEvent {
+  oneof event {
+    option (buf.validate.oneof).required = true;
+
+    HoldPlaced hold_placed = 1;
+    HoldReleased hold_released = 2;
+  }
+}

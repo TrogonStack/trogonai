@@ -1,0 +1,21 @@
+edition = "2024";
+
+package trogonai.policy.holds.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/policy/holds/v1alpha1/hold.proto";
+import "trogonai/policy/subjects/v1alpha1/subject.proto";
+
+// Records a name held at a scope. A repeat of the same name replaces only that
+// name's scope.
+message HoldPlaced {
+  trogonai.policy.subjects.v1alpha1.PolicySubject subject = 1 [features.field_presence = LEGACY_REQUIRED];
+  HoldName name = 2 [features.field_presence = LEGACY_REQUIRED];
+  HoldScope scope = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}

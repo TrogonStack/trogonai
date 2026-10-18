@@ -1,0 +1,39 @@
+edition = "2024";
+
+package trogonai.policy.holds.v1alpha1;
+
+import "trogon/error/v1alpha1/options.proto";
+
+// Schema-only templates for the policy.holds module's DeciderService refusals.
+// These messages are never encoded. Administration authorization and the
+// admission refusals a hold causes keep their own failure contracts; this fold
+// only owns hold mutations.
+message HoldCommandInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "policy.holds"
+    reason: "HOLD_COMMAND_INVALID"
+    message: "The command violates the hold contract."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message HoldNotPlacedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "policy.holds"
+    reason: "HOLD_NOT_PLACED"
+    message: "The named hold is not placed on this subject."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message HoldSubjectMismatchError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "policy.holds"
+    reason: "HOLD_SUBJECT_MISMATCH"
+    message: "The command names a different subject from this hold history."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}

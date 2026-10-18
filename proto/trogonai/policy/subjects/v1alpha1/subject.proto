@@ -1,0 +1,22 @@
+edition = "2024";
+
+package trogonai.policy.subjects.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogon/hierarchy/v1alpha1/node.proto";
+import "trogonai/agents/agents/v1alpha1/identity.proto";
+
+// PolicySubject is what a policy-plane binding attaches to: one Agent, or one
+// hierarchy node so that every Agent placed at or below it is covered. A binding
+// at a node is how a project, workspace, or tenant is frozen or capped in one
+// command. Subjects are exact identities, never names, labels, or patterns, so a
+// relabel can never move a binding onto a different Agent (ADR#0025, ADR#0040).
+// Unset or unknown arms reject.
+message PolicySubject {
+  oneof subject {
+    option (buf.validate.oneof).required = true;
+
+    trogonai.agents.agents.v1alpha1.AgentId agent_id = 1;
+    trogon.hierarchy.v1alpha1.NodeId node = 2;
+  }
+}

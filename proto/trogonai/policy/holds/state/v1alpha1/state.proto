@@ -1,0 +1,31 @@
+edition = "2024";
+
+package trogonai.policy.holds.state.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "trogonai/policy/holds/v1alpha1/hold.proto";
+import "trogonai/policy/subjects/v1alpha1/subject.proto";
+
+// Policy fold only. Replay rejects unknown events, a subject change, and a
+// release of a name that is not held. A release retains the history.
+message State {
+  oneof state {
+    option (buf.validate.oneof).required = true;
+
+    google.protobuf.Empty missing = 1;
+    SubjectHolds holds = 2;
+  }
+}
+
+message SubjectHolds {
+  option (buf.validate.message).cel = {
+    id: "subject_holds.names_unique"
+    message: "each hold name may appear at most once"
+    expression: "this.holds.map(h, h.name.value).unique()"
+  };
+
+  trogonai.policy.subjects.v1alpha1.PolicySubject subject = 1 [features.field_presence = LEGACY_REQUIRED];
+  // An empty list after releases is a history with no hold, not a missing history.
+  repeated trogonai.policy.holds.v1alpha1.Hold holds = 2;
+}

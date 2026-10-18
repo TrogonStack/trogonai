@@ -76,3 +76,4 @@ future implementation work.
 - [ADR#0068: A Reference Field Says It Is a Reference in Both Its Name and Its Type](./0068-reference-fields-say-they-are-references.md)
 - [ADR#0069: Every Event Envelope Records Who Caused It and When Each Step Happened (Draft)](./0069-event-envelope-records-issuer-and-times.md)
 - [ADR#0070: An Agent Declares What It Offers and Whose Authority It Carries; Throughput Ceilings Stay on the Policy Plane (Draft)](./0070-agent-offered-interface-and-throughput-limits.md)
+- [ADR#0071: What an Agent May Reach, How Far It May Go, and Whether It May Run at All Are Policy Bindings on a Subject (Draft)](./0071-policy-bindings-on-a-subject-entitlements-ceilings-and-holds.md)

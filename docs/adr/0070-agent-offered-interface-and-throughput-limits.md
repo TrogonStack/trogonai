@@ -177,9 +177,13 @@ updating it must not require a proposal.
 
 - **Guardrail bindings.** No guardrail resource exists for a binding to
   reference. A binding without a target is an unverifiable string.
+  [ADR#0071](./0071-policy-bindings-on-a-subject-entitlements-ceilings-and-holds.md)
+  records the trigger and the shape such a binding will take.
 - **A paused but not archived lifecycle state.** Pausing changes the registry
   lifecycle, which is a separate lifecycle decision rather than an interface or
   limit decision.
+  [ADR#0071](./0071-policy-bindings-on-a-subject-entitlements-ceilings-and-holds.md)
+  meets the need with a hold on the policy plane instead of a lifecycle state.
 - **An operational kill-switch webhook.** Stopping a running Agent belongs to a
   runtime or session plane, and an outbound webhook only matters when the
   platform proxies an externally hosted Agent.
