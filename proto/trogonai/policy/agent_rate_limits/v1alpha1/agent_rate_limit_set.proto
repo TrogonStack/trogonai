@@ -1,0 +1,15 @@
+edition = "2024";
+
+package trogonai.policy.agent_rate_limits.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/policy/agent_rate_limits/v1alpha1/rate_limit_policy.proto";
+
+// Replaces policy without replacing its accounting history.
+message AgentRateLimitSet {
+  string agent_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  AgentRateLimitPolicy policy = 2 [features.field_presence = LEGACY_REQUIRED];
+}

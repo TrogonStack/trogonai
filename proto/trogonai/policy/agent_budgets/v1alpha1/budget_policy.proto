@@ -14,6 +14,10 @@ enum AgentBudgetPeriod {
   AGENT_BUDGET_PERIOD_CALENDAR_MONTH_UTC = 1;
   // All spending attributable to this Agent, including before policy creation.
   AGENT_BUDGET_PERIOD_LIFETIME = 2;
+  // All spending attributable to one Session from its start through its
+  // terminal state, including spending it delegates to descendant Sessions.
+  // Each Session's counter starts at zero; it is never shared across Sessions.
+  AGENT_BUDGET_PERIOD_SESSION = 3;
 }
 
 message AgentBudgetLimit {
@@ -48,6 +52,10 @@ message AgentBudgetLimit {
 // Absence cannot satisfy budget setup requested by a provisioning operation.
 // Authoritative registry readiness gates execution and new spending while setup
 // is pending or cancelled; an absent policy is never a shortcut around that gate.
+//
+// A session period caps each Session independently. Admission evaluates it
+// alongside the calendar and lifetime periods as one conjunction; it neither
+// resets nor replaces their counters.
 //
 // Hard-cap admission atomically accounts for incurred spend, remaining reserved
 // liability, and the new operation's maximum liability in every applicable

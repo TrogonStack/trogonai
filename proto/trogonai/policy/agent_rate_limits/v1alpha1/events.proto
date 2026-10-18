@@ -1,0 +1,20 @@
+edition = "2024";
+
+package trogonai.policy.agent_rate_limits.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/policy/agent_rate_limits/v1alpha1/agent_rate_limit_cleared.proto";
+import "trogonai/policy/agent_rate_limits/v1alpha1/agent_rate_limit_initialized.proto";
+import "trogonai/policy/agent_rate_limits/v1alpha1/agent_rate_limit_set.proto";
+
+// An unset or unknown event rejects replay; skipping a policy change could
+// admit requests against a ceiling that no longer applies.
+message AgentRateLimitEvent {
+  oneof event {
+    option (buf.validate.oneof).required = true;
+
+    AgentRateLimitInitialized agent_rate_limit_initialized = 1;
+    AgentRateLimitSet agent_rate_limit_set = 2;
+    AgentRateLimitCleared agent_rate_limit_cleared = 3;
+  }
+}
