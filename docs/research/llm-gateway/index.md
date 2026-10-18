@@ -58,11 +58,11 @@ Evidence on the same product held in neighbouring corpora:
 
 ## Open questions
 
-- Budget and rate policy. ADR#0032 places enforcement at the model access
+- Budget and rate policy. [ADR#0032](../../adr/0032-model-route-and-credential-binding.md) places enforcement at the model access
   service and leaves the product policy open. Which budget scopes, windows,
   and fail-closed behaviours that service owes is undecided.
 - Gateway as route executor. Whether an off-the-shelf gateway can run behind
-  ADR#0032 with substitution features disabled, and how that configuration
+  [ADR#0032](../../adr/0032-model-route-and-credential-binding.md) with substitution features disabled, and how that configuration
   would be verified, is open.
 - Caller-supplied attribution. Which request fields, if any, the model access
   path should accept as labelled claims for spend, caching, and tracing is

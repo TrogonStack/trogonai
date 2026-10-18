@@ -641,7 +641,7 @@ Where LiteLLM's model and this repository's ADRs differ, the ADR is
 authoritative. Draft ADRs are named as drafts; they record a proposed
 direction, not an accepted one.
 
-### Route and credential binding (ADR#0032, draft)
+### Route and credential binding ([ADR#0032](../../../adr/0032-model-route-and-credential-binding.md), draft)
 
 [ADR#0032](../../../adr/0032-model-route-and-credential-binding.md) resolves
 every managed-model route before a Session becomes runnable and holds it
@@ -667,12 +667,12 @@ the ADR excludes:
   without checking the caller's access to the target.
 - A caller can set `num_retries` and `fallbacks` on the request.
 
-We infer that LiteLLM could only sit behind ADR#0032 as a route executor if it
+We infer that LiteLLM could only sit behind [ADR#0032](../../../adr/0032-model-route-and-credential-binding.md) as a route executor if it
 were configured with one deployment per model group, no aliases or wildcards,
 no fallbacks, and caller retry overrides disabled. Whether that configuration
 is supported and verifiable is listed under [Open questions](#open-questions).
 
-What does align: ADR#0032 places budget and rate enforcement at the model
+What does align: [ADR#0032](../../../adr/0032-model-route-and-credential-binding.md) places budget and rate enforcement at the model
 access service, the one component that calls providers, and leaves product
 policy for that enforcement outside the ADR. LiteLLM's budget reservation
 before the provider call and its explicit fail-closed switches for Redis
@@ -681,7 +681,7 @@ fail-open defaults (DB-less budgets, per-instance rate counters, Redis counter
 trusted on the hot path) are the defaults this repository would need to
 invert.
 
-### Who the caller is (ADR#0069 draft, ADR#0050, ADR#0026)
+### Who the caller is ([ADR#0069](../../../adr/0069-event-envelope-records-issuer-and-times.md) draft, [ADR#0050](../../../adr/0050-signed-first-caller-authentication.md), [ADR#0026](../../../adr/0026-command-authorization-principal.md))
 
 [ADR#0069](../../../adr/0069-event-envelope-records-issuer-and-times.md)
 records the actor from the identity the platform authenticated and treats any
@@ -694,7 +694,7 @@ ids, OpenTelemetry parents from request `metadata`, request `priority`, and
 `overwrite_user_with_key_hash`, `reject_clientside_metadata_tags`) are
 opt-in. The exception is fallback bookkeeping, where the proxy overwrites
 client-supplied `attempted_fallbacks` and `original_model_group`. Our
-inference: under ADR#0069 these fields could be carried as labelled claims,
+inference: under [ADR#0069](../../../adr/0069-event-envelope-records-issuer-and-times.md) these fields could be carried as labelled claims,
 never as the attribution record.
 
 Virtual keys are bearer tokens. [ADR#0050](../../../adr/0050-signed-first-caller-authentication.md)
@@ -705,7 +705,7 @@ authorization principal explicit on command execution. LiteLLM's rule that a
 key's management rights follow the owning user's role, not the key, is the
 kind of implicit delegation an explicit principal is meant to surface.
 
-### Tenancy and quota ownership (ADR#0046)
+### Tenancy and quota ownership ([ADR#0046](../../../adr/0046-project-anchored-resource-hierarchy.md))
 
 [ADR#0046](../../../adr/0046-project-anchored-resource-hierarchy.md) fixes a
 two-level hierarchy, organization over project, with the project owning
@@ -715,7 +715,7 @@ owned by users, teams, or both. Our inference: a LiteLLM team is closest to a
 project, and LiteLLM's per-user and per-key budgets have no direct counterpart
 in the accepted hierarchy.
 
-### Configuration authority (ADR#0007)
+### Configuration authority ([ADR#0007](../../../adr/0007-configuration-sources.md))
 
 [ADR#0007](../../../adr/0007-configuration-sources.md) resolves configuration
 as built-in defaults, then TOML, then environment variables, then CLI
@@ -724,17 +724,17 @@ arguments, with higher sources overriding lower ones. LiteLLM with
 for whole settings sections, and adds database models alongside file models.
 The ADR has no database overlay layer; where they differ, the ADR governs.
 
-### Secret custody (ADR#0023, ADR#0032)
+### Secret custody ([ADR#0023](../../../adr/0023-secret-management-and-key-custody-direction.md), [ADR#0032](../../../adr/0032-model-route-and-credential-binding.md))
 
 [ADR#0023](../../../adr/0023-secret-management-and-key-custody-direction.md)
-puts secrets in OpenBao behind a platform secrets service, and ADR#0032 keeps
+puts secrets in OpenBao behind a platform secrets service, and [ADR#0032](../../../adr/0032-model-route-and-credential-binding.md) keeps
 that service the only OpenBao client. LiteLLM stores database-managed provider
 credentials in Postgres, encrypted with a single `LITELLM_SALT_KEY` that can
 never change once models exist, and resolves `os.environ/` references in
 `config.yaml`. Our inference: the salt key is a non-rotatable root secret,
 which the custody ADRs are written to avoid.
 
-### Pass-through (ADR#0021, by analogy)
+### Pass-through ([ADR#0021](../../../adr/0021-typed-decode-over-passthrough-forwarding.md), by analogy)
 
 [ADR#0021](../../../adr/0021-typed-decode-over-passthrough-forwarding.md)
 decides typed decode over lossless passthrough for the ACP-over-NATS bridge,
@@ -743,7 +743,7 @@ analogy only, LiteLLM's pass-through endpoints are the opposite trade:
 provider-native payloads are forwarded unvalidated, with guardrails off unless
 enabled.
 
-### Admission and tracing (ADR#0028, ADR#0008, ADR#0042 draft)
+### Admission and tracing ([ADR#0028](../../../adr/0028-decider-admission-control-and-backpressure.md), [ADR#0008](../../../adr/0008-opentelemetry-observability.md), [ADR#0042](../../../adr/0042-nats-trace-context-and-message-path-tracing.md) draft)
 
 [ADR#0028](../../../adr/0028-decider-admission-control-and-backpressure.md)
 adds a bounded admission hook at command execution. LiteLLM's
@@ -754,7 +754,7 @@ platform to OpenTelemetry, and
 [ADR#0042](../../../adr/0042-nats-trace-context-and-message-path-tracing.md)
 covers trace context on NATS. LiteLLM honours W3C `traceparent`, so its spans
 can join a platform trace; the caller-settable parent in request `metadata`
-is the part that ADR#0069 would treat as a claim.
+is the part that [ADR#0069](../../../adr/0069-event-envelope-records-issuer-and-times.md) would treat as a claim.
 
 ### Usage settlement
 

@@ -726,7 +726,7 @@ by analogy on the tool and channel connections that §5 identifies as the gap.
   architecture commitment and documents its own blast radius only partially
   (encryption at rest does not cover guardrail `litellm_params` or the
   settings sections).
-- **ADR#0032, attempt-scoped model route grant.** Per-team and per-project
+- **[ADR#0032](../../../adr/0032-model-route-and-credential-binding.md), attempt-scoped model route grant.** Per-team and per-project
   credential routing (`model_config.defaultconfig` and per-model overrides) is
   working prior art for binding a model route to a credential by tenant
   without duplicating the route.
@@ -742,12 +742,12 @@ by analogy on the tool and channel connections that §5 identifies as the gap.
   rather than changing it.
 - **§6.2 and V2, encryption key as a non-rotatable root.** LiteLLM's
   `LITELLM_SALT_KEY` "must not change after you have added a model". The
-  proposal's custody tiers (ADR#0033) should state how the key that protects
+  proposal's custody tiers ([ADR#0033](../../../adr/0033-two-tier-key-custody-product-model.md)) should state how the key that protects
   stored credentials rotates, since a gateway that cannot rotate it is the
   documented failure mode.
 - **A session pin that is not a pin.** The proposal pins at admission.
   LiteLLM's nearest equivalent pins a **deployment** per session id in a
-  cache with an idle TTL, and keeps the pin through cooldowns. If ADR#0032's
+  cache with an idle TTL, and keeps the pin through cooldowns. If [ADR#0032](../../../adr/0032-model-route-and-credential-binding.md)'s
   grant is attempt-scoped, the proposal should say whether an attempt inside
   one session may land on a different deployment than the previous attempt;
   LiteLLM's encrypted-reasoning rules show that the answer has
