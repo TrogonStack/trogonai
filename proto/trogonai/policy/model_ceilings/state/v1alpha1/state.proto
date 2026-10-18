@@ -1,0 +1,25 @@
+edition = "2024";
+
+package trogonai.policy.model_ceilings.state.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "trogonai/policy/model_ceilings/v1alpha1/ceiling_policy.proto";
+import "trogonai/policy/subjects/v1alpha1/subject.proto";
+
+// Policy fold only. Replay rejects unknown events and a subject change. Clear
+// retains the history.
+message State {
+  oneof state {
+    option (buf.validate.oneof).required = true;
+
+    google.protobuf.Empty missing = 1;
+    ModelCeilingHistory history = 2;
+  }
+}
+
+message ModelCeilingHistory {
+  trogonai.policy.subjects.v1alpha1.PolicySubject subject = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Absence means cleared, not a zero cap.
+  trogonai.policy.model_ceilings.v1alpha1.ModelCeilingPolicy policy = 2;
+}

@@ -1,0 +1,14 @@
+edition = "2024";
+
+package trogonai.policy.model_ceilings.v1alpha1;
+
+import "trogonai/policy/subjects/v1alpha1/subject.proto";
+
+// Removes only this subject's ceiling; ceilings elsewhere on a Session's chain
+// still apply. Clearing a missing history rejects with ModelCeilingNotSet. An
+// already cleared history succeeds without an event after the concurrency
+// check. Dispatch requires live administration authority and a nonempty Decider
+// command_id plus the original positive expected_revision; retries preserve both.
+message ClearModelCeiling {
+  trogonai.policy.subjects.v1alpha1.PolicySubject subject = 1 [features.field_presence = LEGACY_REQUIRED];
+}
