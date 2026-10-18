@@ -1,0 +1,12 @@
+edition = "2024";
+
+package trogonai.policy.delegation_permissions.v1alpha1;
+
+import "trogonai/policy/delegation_permissions/v1alpha1/permission_policy.proto";
+import "trogonai/policy/subjects/v1alpha1/subject.proto";
+
+// Replaces the permission in force without replacing the history's identity.
+message DelegationPermissionSet {
+  trogonai.policy.subjects.v1alpha1.PolicySubject subject = 1 [features.field_presence = LEGACY_REQUIRED];
+  DelegationPermissionPolicy policy = 2 [features.field_presence = LEGACY_REQUIRED];
+}

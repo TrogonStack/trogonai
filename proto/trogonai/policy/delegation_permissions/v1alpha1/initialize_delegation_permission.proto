@@ -1,0 +1,28 @@
+edition = "2024";
+
+package trogonai.policy.delegation_permissions.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/policy/delegation_permissions/v1alpha1/permission_policy.proto";
+import "trogonai/policy/subjects/v1alpha1/subject.proto";
+
+// Exists for the same reason as budget initialization: with absence meaning
+// deny, an Agent provisioned with a REQUIRED delegate declaration would fail its
+// first Session unless the provisioning operation can install its permission.
+// provisioning_id is valid only for an Agent subject. Dispatch verifies the
+// subject exists and live administration authority. During PROVISIONING only the
+// owning operation may initialize, and dispatch verifies registry origin rather
+// than trusting caller-supplied provenance; PROVISIONING_CANCELLED and unknown
+// lifecycle reject. NoStream creation requires a nonempty Decider command_id and
+// no expected_revision; retries preserve the id. An already-initialized
+// rejection is not success; recovery verifies the durable genesis receipt's
+// subject, provisioning origin, and exact policy.
+message InitializeDelegationPermission {
+  trogonai.policy.subjects.v1alpha1.PolicySubject subject = 1 [features.field_presence = LEGACY_REQUIRED];
+  DelegationPermissionPolicy policy = 2 [features.field_presence = LEGACY_REQUIRED];
+  string provisioning_id = 3 [(buf.validate.field).cel = {
+    id: "initialize_delegation_permission.provisioning_id_nonblank"
+    message: "a supplied provisioning_id must contain a non-whitespace character"
+    expression: "this.trim() != ''"
+  }];
+}

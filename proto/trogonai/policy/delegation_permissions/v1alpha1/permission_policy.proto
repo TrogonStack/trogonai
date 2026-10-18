@@ -1,0 +1,47 @@
+edition = "2024";
+
+package trogonai.policy.delegation_permissions.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogon/hierarchy/v1alpha1/node.proto";
+import "trogonai/agents/agents/v1alpha1/identity.proto";
+
+// One thing a dispatching Agent may delegate to: an exact Agent, or every Agent
+// placed at or below a node. Both are identities, never selectors, so a relabel
+// cannot widen a permission.
+message DelegationTarget {
+  oneof target {
+    option (buf.validate.oneof).required = true;
+
+    trogonai.agents.agents.v1alpha1.AgentId agent_id = 1;
+    trogon.hierarchy.v1alpha1.NodeId agents_under = 2;
+  }
+}
+
+// A permission widens; it is the grant that lets a Session of the subject
+// dispatch a delegation to a target Agent. Absence is deny: an Agent with no
+// permission on itself or any ancestor node may not delegate at all, and a
+// DelegateDeclaration in its configuration grants nothing (ADR#0025, ADR#0063
+// Decision 5).
+//
+// Permits accumulate downward: the effective set for an Agent is the union of
+// its own permission and every ancestor node's. A dispatch is admitted when the
+// resolved target Agent is named exactly or is placed at or below a permitted
+// node. Permits do not follow the delegation lineage: each dispatch is checked
+// against the dispatching Agent's own chain, so a permit to reach one Agent
+// never lets that Agent reach a third.
+//
+// The selector resolves first over the Session's hierarchy scope, ambiguity
+// fails there, and the permission check then runs on the single resolved Agent.
+// Policy may deny a resolution but never changes which Agent it resolves to.
+//
+// An empty policy is invalid; clear the permission to withdraw it.
+message DelegationPermissionPolicy {
+  option (buf.validate.message).cel = {
+    id: "delegation_permission_policy.targets_unique"
+    message: "each delegation target may appear at most once"
+    expression: "this.permitted.map(t, has(t.agent_id) ? 'agent:' + t.agent_id.value : 'node:' + t.agents_under.value).unique()"
+  };
+
+  repeated DelegationTarget permitted = 1 [(buf.validate.field).repeated.min_items = 1];
+}
