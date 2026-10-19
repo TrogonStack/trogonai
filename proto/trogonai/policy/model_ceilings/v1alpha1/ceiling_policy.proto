@@ -1,0 +1,41 @@
+edition = "2024";
+
+package trogonai.policy.model_ceilings.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// Exact match on the catalog model identifier of ModelVersionRef, any version of
+// it. A version arm is an additive change for when a ceiling needs to pin
+// releases. Names, families, and patterns are not arms because a late-bound name
+// would widen a ceiling without a policy change.
+message ModelMatcher {
+  oneof matcher {
+    option (buf.validate.oneof).required = true;
+
+    string model_id = 1 [(buf.validate.field).string.min_len = 1];
+  }
+}
+
+// A ceiling bounds which catalog models the subject's Sessions may select,
+// including auxiliary roles. A Session's every model selection must match some
+// matcher. An empty ceiling is invalid: use ClearModelCeiling to remove the
+// ceiling and a hold to stop work.
+//
+// Absence means no ceiling from this subject, never a zero cap, and never
+// bypasses connection-level model authorization under ADR#0032: the
+// connection's allowed models authorize, and a ceiling only narrows. Policy
+// never substitutes a model; a selection outside the ceiling fails admission
+// (ADR#0032 Decision 6).
+//
+// Ceilings follow the delegation lineage downward exactly like holds and
+// budgets, so an Agent limited to one model cannot reach another by delegating.
+// Evaluation is a conjunction over every ceiling on the chain.
+message ModelCeilingPolicy {
+  option (buf.validate.message).cel = {
+    id: "model_ceiling_policy.models_unique"
+    message: "each model identifier may appear at most once"
+    expression: "this.within.map(m, m.model_id).unique()"
+  };
+
+  repeated ModelMatcher within = 1 [(buf.validate.field).repeated.min_items = 1];
+}

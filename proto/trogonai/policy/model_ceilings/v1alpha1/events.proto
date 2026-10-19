@@ -1,0 +1,18 @@
+edition = "2024";
+
+package trogonai.policy.model_ceilings.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/policy/model_ceilings/v1alpha1/model_ceiling_cleared.proto";
+import "trogonai/policy/model_ceilings/v1alpha1/model_ceiling_set.proto";
+
+// An unset or unknown event rejects replay; skipping a ceiling change could
+// admit a model selection the current ceiling forbids, or refuse one it allows.
+message ModelCeilingEvent {
+  oneof event {
+    option (buf.validate.oneof).required = true;
+
+    ModelCeilingSet model_ceiling_set = 1;
+    ModelCeilingCleared model_ceiling_cleared = 2;
+  }
+}
