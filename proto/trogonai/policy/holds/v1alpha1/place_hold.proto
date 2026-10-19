@@ -1,0 +1,39 @@
+edition = "2024";
+
+package trogonai.policy.holds.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/policy/holds/v1alpha1/hold.proto";
+import "trogonai/policy/subjects/v1alpha1/subject.proto";
+
+// Places a bound-downward stop on a subject without touching the registry
+// lifecycle. The lifecycle belongs to the author, and changing it mid-incident
+// would rebind the budget and rate-limit dispatch gates. Archiving is no
+// substitute: it blocks new work but also blocks revisions, whereas a held Agent
+// can still be fixed forward and released.
+// Dispatch verifies the subject exists and live hold-administration authority.
+// A subject's hold history is keyed by the subject. The first PlaceHold creates
+// the stream: NoStream requires a nonempty Decider command_id and no
+// expected_revision. Later commands carry the original positive
+// expected_revision; retries preserve both. Every registry lifecycle admits a
+// hold, including PROVISIONING, since a hold must be placeable before an Agent
+// first runs. Placing a name that is already held with the same scope succeeds
+// without an event after the concurrency check; placing it with a different
+// scope records HoldPlaced again, replacing the scope of that one name and no
+// other.
+// Holds follow the delegation lineage downward: a hold on any Agent in a
+// Session's delegation chain, or on any ancestor node of such an Agent, applies
+// to that Session, the same lineage rule as AgentBudgetPolicy. No reason text is
+// carried: the stream is immutable and free text invites personal data. The
+// actor comes from the event envelope (ADR#0069).
+message PlaceHold {
+  trogonai.policy.subjects.v1alpha1.PolicySubject subject = 1 [features.field_presence = LEGACY_REQUIRED];
+  HoldName name = 2 [features.field_presence = LEGACY_REQUIRED];
+  HoldScope scope = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}

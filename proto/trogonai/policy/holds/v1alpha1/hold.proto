@@ -1,0 +1,43 @@
+edition = "2024";
+
+package trogonai.policy.holds.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// HoldName is a coordination handle chosen by whoever places the hold, such as
+// "security-review" or "oncall". Release resolves it, so it is a name in the
+// ADR#0040 sense, not a label. Independent parties hold the same subject under
+// different names, which is why releasing one party's hold never releases
+// another's.
+message HoldName {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.pattern = "^[a-z0-9][a-z0-9._-]{0,62}$"
+  ];
+}
+
+// How much a hold stops. Unknown and unspecified scopes reject.
+enum HoldScope {
+  HOLD_SCOPE_UNSPECIFIED = 0;
+  // Refuses new Sessions of the subject and new delegations into it, while
+  // Sessions already running finish on their own terms.
+  HOLD_SCOPE_NEW_WORK = 1;
+  // Everything NEW_WORK refuses, and every running Session under the hold
+  // fails closed at its next protected action: a model request, a tool call,
+  // or a delegation dispatch. Nothing is suspended for later resumption; the
+  // Session records the refusal and ends the way any refused action ends.
+  HOLD_SCOPE_ALL_PROTECTED_ACTIONS = 2;
+}
+
+// One named stop on a subject. A hold refuses and never cancels: interrupting
+// running work stays with the session plane's CancelSession.
+message Hold {
+  HoldName name = 1 [features.field_presence = LEGACY_REQUIRED];
+  HoldScope scope = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
