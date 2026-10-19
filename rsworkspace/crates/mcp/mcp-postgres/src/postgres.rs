@@ -6,7 +6,7 @@ use futures_util::TryStreamExt;
 use serde::Serialize;
 use sqlx::{
     AssertSqlSafe, Column as _, Connection, Executor, PgConnection, PgPool, Row, SqlSafeStr, Statement, TypeInfo,
-    postgres::{PgPoolOptions, PgRow},
+    postgres::{PgPoolOptions, PgRow, types::Oid},
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -125,17 +125,12 @@ impl QueryService {
         if unsafe_role {
             return Err(Error::UnsupportedObject);
         }
-        tx.execute("SELECT pg_catalog.pg_advisory_xact_lock_shared(1879445091,1347635021)")
-            .await?;
-        let guard: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_event_trigger e JOIN pg_catalog.pg_proc p ON p.oid=e.evtfoid JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace WHERE e.evtname='mcp_postgres_ddl_guard' AND e.evtevent='ddl_command_start' AND e.evtenabled='A' AND e.evttags IS NULL AND n.nspname='mcp_postgres_guard' AND p.proname='lock_ddl' AND p.prosecdef AND p.proconfig = ARRAY['search_path=pg_catalog']::text[] AND p.pronargs=0 AND p.prorettype='pg_catalog.event_trigger'::regtype AND p.prolang=(SELECT oid FROM pg_catalog.pg_language WHERE lanname='plpgsql') AND p.proowner=n.nspowner AND EXISTS (SELECT 1 FROM pg_catalog.pg_roles r WHERE r.oid=p.proowner AND r.rolsuper) AND NOT EXISTS (SELECT 1 FROM pg_catalog.aclexplode(COALESCE(n.nspacl,pg_catalog.acldefault('n',n.nspowner))) a WHERE a.privilege_type='CREATE' AND a.grantee<>n.nspowner) AND p.prosrc=$1)").bind("BEGIN\n    PERFORM pg_catalog.pg_advisory_xact_lock(1879445091, 1347635021);\nEND;").fetch_one(&mut *tx).await?;
-        if !guard {
-            return Err(Error::UnsupportedObject);
-        }
         let database: i64 =
             sqlx::query_scalar("SELECT oid::bigint FROM pg_catalog.pg_database WHERE datname=current_database()")
                 .fetch_one(&mut *tx)
                 .await?;
         let mut catalog = Vec::new();
+        let mut relations = Vec::new();
         let mut resources = BTreeSet::new();
         resources.insert(Resource {
             kind: "sql_connection",
@@ -148,9 +143,10 @@ impl QueryService {
                 table.name.quoted()
             );
             sqlx::query(AssertSqlSafe(lock)).execute(&mut *tx).await?;
-            let relation = sqlx::query("SELECT c.oid::bigint AS oid FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace JOIN pg_catalog.pg_am a ON a.oid=c.relam WHERE n.nspname=$1 AND c.relname=$2 AND c.relkind='r' AND a.amname='heap' AND a.oid=2 AND NOT c.relrowsecurity AND NOT c.relforcerowsecurity AND NOT c.relhasrules AND NOT c.relispartition AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_inherits i WHERE i.inhrelid=c.oid OR i.inhparent=c.oid) AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_index i WHERE i.indrelid=c.oid AND (i.indexprs IS NOT NULL OR i.indpred IS NOT NULL)) AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_index i JOIN pg_catalog.pg_class ic ON ic.oid=i.indexrelid JOIN pg_catalog.pg_am ia ON ia.oid=ic.relam WHERE i.indrelid=c.oid AND ia.amname NOT IN ('btree','hash')) AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_index i, unnest(i.indcollation) co WHERE i.indrelid=c.oid AND co<>0 AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_collation cl WHERE cl.oid=co AND cl.collnamespace='pg_catalog'::regnamespace)) AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_index i, unnest(i.indclass) op WHERE i.indrelid=c.oid AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_opclass oc WHERE oc.oid=op AND oc.opcnamespace='pg_catalog'::regnamespace))")
+            let relation = sqlx::query("SELECT c.oid::bigint AS oid FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace JOIN pg_catalog.pg_am a ON a.oid=c.relam WHERE n.nspname=$1 AND c.relname=$2 AND EXISTS (SELECT 1 FROM pg_catalog.pg_locks l WHERE l.pid=pg_catalog.pg_backend_pid() AND l.locktype='relation' AND l.relation=c.oid AND l.mode='AccessShareLock' AND l.granted) AND c.relkind='r' AND a.amname='heap' AND a.oid=2 AND NOT c.relrowsecurity AND NOT c.relforcerowsecurity AND NOT c.relhasrules AND NOT c.relispartition AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_inherits i WHERE i.inhrelid=c.oid OR i.inhparent=c.oid) AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_index i WHERE i.indrelid=c.oid AND (i.indexprs IS NOT NULL OR i.indpred IS NOT NULL)) AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_index i JOIN pg_catalog.pg_class ic ON ic.oid=i.indexrelid JOIN pg_catalog.pg_am ia ON ia.oid=ic.relam WHERE i.indrelid=c.oid AND ia.amname NOT IN ('btree','hash')) AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_index i, unnest(i.indcollation) co WHERE i.indrelid=c.oid AND co<>0 AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_collation cl WHERE cl.oid=co AND cl.collnamespace='pg_catalog'::regnamespace)) AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_index i, unnest(i.indclass) op WHERE i.indrelid=c.oid AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_opclass oc WHERE oc.oid=op AND oc.opcnamespace='pg_catalog'::regnamespace))")
                 .bind(table.schema.as_str()).bind(table.name.as_str()).fetch_optional(&mut *tx).await?.ok_or(Error::UnsupportedObject)?;
             let oid: i64 = relation.try_get("oid")?;
+            relations.push(Oid(u32::try_from(oid).map_err(|_| Error::UnsupportedObject)?));
             let table_id = format!("{}/{database}/{oid}", connection_id.as_str());
             resources.insert(Resource {
                 kind: "sql_table",
@@ -216,7 +212,7 @@ impl QueryService {
             orders.push(format!("{} {direction}", resolve(column, &query, &catalog, &mut used)?));
         }
         for (table, attnum) in used {
-            let relation_oid: i64 = sqlx::query_scalar("SELECT c.oid::bigint FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=$1 AND c.relname=$2").bind(query.tables[table].schema.as_str()).bind(query.tables[table].name.as_str()).fetch_one(&mut *tx).await?;
+            let relation_oid = relations[table].0;
             resources.insert(Resource {
                 kind: "sql_column",
                 id: ObjectId::new(format!("{}/{database}/{relation_oid}/{attnum}", connection_id.as_str()))?,
@@ -231,9 +227,16 @@ impl QueryService {
             .into_iter()
             .map(|(value, label)| format!("CASE WHEN ({overflow}) THEN NULL ELSE {value} END AS {label}"))
             .collect::<Vec<_>>();
+        let markers = query
+            .tables
+            .iter()
+            .enumerate()
+            .map(|(index, table)| format!("{}.tableoid AS __mcp_relation_{index}", table.alias.quoted()))
+            .collect::<Vec<_>>();
         let mut statement = format!(
-            "SELECT ({overflow}) AS __mcp_overflow, {} FROM {}",
+            "SELECT ({overflow}) AS __mcp_overflow, {}, {} FROM {}",
             projections.join(", "),
+            markers.join(", "),
             query.from
         );
         if !predicates.is_empty() {
@@ -243,9 +246,30 @@ impl QueryService {
             statement.push_str(&format!(" ORDER BY {}", orders.join(", ")));
         }
         statement.push_str(&format!(" LIMIT {}", query.limit.statement_count()));
-        let prepared = (&mut *tx as &mut PgConnection)
-            .prepare(AssertSqlSafe(statement).into_sql_str())
+        let mut declaration = sqlx::query(AssertSqlSafe(format!(
+            "DECLARE mcp_query NO SCROLL CURSOR WITHOUT HOLD FOR {statement}"
+        )));
+        for parameter in parameters {
+            declaration = match parameter.value() {
+                crate::parameter::ParameterValue::Boolean(v) => declaration.bind(*v),
+                crate::parameter::ParameterValue::Integer(v) => declaration.bind(*v),
+                crate::parameter::ParameterValue::Text(v) => declaration.bind(v),
+            };
+        }
+        declaration.execute(&mut *tx).await?;
+        // A cursor retains its bound plan even if a schema name changes during authorization.
+        let metadata = (&mut *tx as &mut PgConnection)
+            .prepare("FETCH FORWARD 0 FROM mcp_query".into_sql_str())
             .await?;
+        let visible_columns = query.select.len();
+        if metadata.columns().len() != 1 + visible_columns + relations.len() {
+            return Err(Error::UnsupportedObject);
+        }
+        for (column, relation) in metadata.columns().iter().skip(1 + visible_columns).zip(&relations) {
+            if column.relation_id() != Some(*relation) || column.relation_attribute_no() != Some(-6) {
+                return Err(Error::UnsupportedObject);
+            }
+        }
         crate::telemetry::references(&resources, &self.user, &self.client, connection_id);
         let requests = resources
             .into_iter()
@@ -265,16 +289,14 @@ impl QueryService {
             })
             .collect::<Vec<_>>();
         self.permissions.check_all(&requests).await?;
-        let mut bound = prepared.query();
-        for parameter in parameters {
-            bound = match parameter.value() {
-                crate::parameter::ParameterValue::Boolean(v) => bound.bind(*v),
-                crate::parameter::ParameterValue::Integer(v) => bound.bind(*v),
-                crate::parameter::ParameterValue::Text(v) => bound.bind(v),
-            };
-        }
-        let columns = prepared.columns().iter().skip(1).map(|c| c.name().to_owned()).collect();
-        let mut stream = bound.fetch(&mut *tx);
+        let columns = metadata
+            .columns()
+            .iter()
+            .skip(1)
+            .take(visible_columns)
+            .map(|c| c.name().to_owned())
+            .collect();
+        let mut stream = sqlx::query("FETCH FORWARD ALL FROM mcp_query").fetch(&mut *tx);
         let mut result = QueryResult {
             columns,
             rows: Vec::new(),
@@ -288,7 +310,7 @@ impl QueryService {
                 return Err(Error::Limit);
             }
 
-            let values = decode(&row)?;
+            let values = decode(&row, visible_columns)?;
             bytes += serde_json::to_vec(&values).map_err(|_| Error::Limit)?.len() + 1;
             if bytes > MAX_BYTES {
                 return Err(Error::Limit);
@@ -363,11 +385,12 @@ fn render_expr(
         )),
     }
 }
-fn decode(row: &PgRow) -> Result<Vec<serde_json::Value>, Error> {
+fn decode(row: &PgRow, visible_columns: usize) -> Result<Vec<serde_json::Value>, Error> {
     row.columns()
         .iter()
         .enumerate()
         .skip(1)
+        .take(visible_columns)
         .map(|(index, column)| {
             match column.type_info().name() {
                 "BOOL" => serde_json::to_value(row.try_get::<Option<bool>, _>(index)?),

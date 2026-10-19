@@ -3,15 +3,16 @@
 //! Named connections and user/client identities come exclusively from runtime configuration.
 //! The bounded SELECT grammar rejects unsupported syntax and catalog features.
 //! Every referenced column needs an explicit grant for both identities in one SpiceDB snapshot.
-//! The required administrator-installed DDL guard fences catalog changes until the query ends.
+//! Transactional relation locks and cursor metadata bind authorization to the executed relations.
 //! Production access and deployment are outside this crate's local implementation contract.
 //!
 //! The launcher and database administrators are trusted. Callers must not control the configuration
 //! or credentials, and the query role must have only the required SELECT privileges.
-//! Install `sql/install-ddl-guard.sql` in each registered database. Migrations must take the session
-//! advisory lock `pg_advisory_lock(1879445091, 1347635021)` before touching relations and retain it
-//! through all transactions. This is essential for concurrent index operations, guard maintenance,
-//! and shared-object changes that the event trigger cannot fence on its own.
+//! The service installs no database objects and requires no migration coordination. A read-only
+//! transaction locks supported base tables, verifies cursor relation identities, and authorizes
+//! before fetching any rows. Database administrators, server hooks, and catalog integrity remain
+//! trusted; concurrent privileged changes to executable objects, indexes, or shared objects are
+//! outside this boundary.
 //! Replacing or restoring a database target requires a new connection ID when catalog IDs can repeat.
 //! Permissions are checked at admission; revocation does not retroactively cancel an admitted query.
 

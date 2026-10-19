@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::collections::BTreeSet;
+use std::io;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -28,6 +29,10 @@ use testcontainers_modules::testcontainers::{
     runners::AsyncRunner,
 };
 use tokio::sync::Notify;
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::{TcpListener, TcpStream},
+};
 
 #[derive(Default)]
 struct Permissions {
@@ -70,6 +75,7 @@ impl Fixture {
             .unwrap();
         sqlx::raw_sql(
             "CREATE ROLE query_role LOGIN PASSWORD 'query-only';
+            REVOKE TEMPORARY ON DATABASE postgres FROM PUBLIC;
             CREATE TABLE public.customers (id integer, email text, active boolean);
             INSERT INTO public.customers VALUES (1, 'one@example.test', true), (2, 'two@example.test', false);
             CREATE TABLE public.orders (id integer, customer_id integer, note text);
@@ -88,18 +94,15 @@ impl Fixture {
         }
     }
 
-    async fn install_guard(&self) {
-        sqlx::raw_sql(include_str!("../sql/install-ddl-guard.sql"))
-            .execute(&self.admin)
-            .await
-            .unwrap();
+    async fn service(&self, permissions: Arc<dyn PermissionCheck>) -> QueryService {
+        self.service_with_dsn(permissions, &self.dsn).await
     }
 
-    async fn service(&self, permissions: Arc<dyn PermissionCheck>) -> QueryService {
+    async fn service_with_dsn(&self, permissions: Arc<dyn PermissionCheck>, dsn: &str) -> QueryService {
         let input: ConfigInput = toml::from_str(include_str!("../examples/config.toml")).unwrap();
         let config = RuntimeConfig::from_input(input, |key| match key {
             "MCP_POSTGRES_SPICEDB_TOKEN" => Some("test-only-token".into()),
-            "MCP_POSTGRES_ANALYTICS_DSN" => Some(self.dsn.clone()),
+            "MCP_POSTGRES_ANALYTICS_DSN" => Some(dsn.to_owned()),
             _ => None,
         })
         .unwrap();
@@ -114,9 +117,38 @@ impl Fixture {
 }
 
 #[tokio::test]
+async fn ordinary_readonly_database_requires_no_installed_objects() {
+    let fixture = Fixture::new().await;
+    let service = fixture.service(Arc::new(Permissions::default())).await;
+    let result = service
+        .query(
+            "analytics-readonly",
+            "SELECT id FROM public.customers ORDER BY id LIMIT 1",
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.rows, vec![vec![json!(1)]]);
+    let installed: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM pg_catalog.pg_namespace WHERE nspname='mcp_postgres_guard'")
+            .fetch_one(&fixture.admin)
+            .await
+            .unwrap();
+    assert_eq!(installed, 0);
+    let triggers: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM pg_catalog.pg_event_trigger WHERE evtname LIKE 'mcp_postgres%'")
+            .fetch_one(&fixture.admin)
+            .await
+            .unwrap();
+    assert_eq!(triggers, 0);
+    let reader = PgPool::connect(&fixture.dsn).await.unwrap();
+    let can_install: bool = sqlx::query_scalar("SELECT pg_catalog.has_schema_privilege(current_user,'public','CREATE') OR pg_catalog.has_database_privilege(current_user,current_database(),'CREATE') OR pg_catalog.has_database_privilege(current_user,current_database(),'TEMP')")
+        .fetch_one(&reader).await.unwrap();
+    assert!(!can_install);
+}
+
+#[tokio::test]
 async fn actual_postgres_returns_authorized_results_and_preserves_limits() {
     let fixture = Fixture::new().await;
-    fixture.install_guard().await;
     let permissions = Arc::new(Permissions::default());
     let service = fixture.service(permissions.clone()).await;
     let result = service
@@ -148,6 +180,16 @@ async fn actual_postgres_returns_authorized_results_and_preserves_limits() {
         .await
         .unwrap();
     assert_eq!(joined.rows, vec![vec![json!(1), json!(9)]]);
+    let self_join = service.query("analytics-readonly", "SELECT c.id, other.id FROM public.customers c INNER JOIN public.customers other ON c.id = other.id ORDER BY c.id").await.unwrap();
+    assert_eq!(self_join.rows, vec![vec![json!(1), json!(1)], vec![json!(2), json!(2)]]);
+    let unused_join = service
+        .query(
+            "analytics-readonly",
+            "SELECT c.id FROM public.customers c INNER JOIN public.orders o ON true ORDER BY c.id",
+        )
+        .await
+        .unwrap();
+    assert_eq!(unused_join.rows, vec![vec![json!(1)], vec![json!(2)]]);
     let checks = permissions.checked.lock().unwrap();
     for kind in ["sql_connection", "sql_table", "sql_column"] {
         for subject in ["example-user", "example-client"] {
@@ -159,7 +201,6 @@ async fn actual_postgres_returns_authorized_results_and_preserves_limits() {
 #[tokio::test]
 async fn forbidden_columns_block_projections_predicates_joins_and_ordering_for_either_subject() {
     let fixture = Fixture::new().await;
-    fixture.install_guard().await;
     let permissions = Arc::new(Permissions::default());
     let email = fixture.column_id("customers", "email").await;
     let service = fixture.service(permissions.clone()).await;
@@ -191,41 +232,8 @@ async fn forbidden_columns_block_projections_predicates_joins_and_ordering_for_e
 }
 
 #[tokio::test]
-async fn missing_disabled_or_replaced_guard_fails_closed() {
-    let fixture = Fixture::new().await;
-    let service = fixture.service(Arc::new(Permissions::default())).await;
-    let query = "SELECT id FROM public.customers";
-    assert!(matches!(
-        service.query("analytics-readonly", query).await,
-        Err(Error::UnsupportedObject)
-    ));
-    fixture.install_guard().await;
-    assert!(service.query("analytics-readonly", query).await.is_ok());
-    fixture
-        .admin
-        .execute("ALTER EVENT TRIGGER mcp_postgres_ddl_guard DISABLE")
-        .await
-        .unwrap();
-    assert!(matches!(
-        service.query("analytics-readonly", query).await,
-        Err(Error::UnsupportedObject)
-    ));
-    fixture
-        .admin
-        .execute("ALTER EVENT TRIGGER mcp_postgres_ddl_guard ENABLE ALWAYS")
-        .await
-        .unwrap();
-    fixture.admin.execute("CREATE OR REPLACE FUNCTION mcp_postgres_guard.lock_ddl() RETURNS event_trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS 'BEGIN RETURN; END;'").await.unwrap();
-    assert!(matches!(
-        service.query("analytics-readonly", query).await,
-        Err(Error::UnsupportedObject)
-    ));
-}
-
-#[tokio::test]
 async fn catalog_features_and_unsupported_sql_cannot_expose_hidden_dependencies() {
     let fixture = Fixture::new().await;
-    fixture.install_guard().await;
     sqlx::raw_sql("CREATE TABLE public.rls_table (id integer); ALTER TABLE public.rls_table ENABLE ROW LEVEL SECURITY;
         CREATE TABLE public.generated_table (id integer, generated integer GENERATED ALWAYS AS (id+1) STORED);
         CREATE TABLE public.parent_table (id integer); CREATE TABLE public.child_table () INHERITS (public.parent_table);
@@ -293,9 +301,163 @@ impl PermissionCheck for PausingPermissions {
 }
 
 #[tokio::test]
-async fn ddl_guard_blocks_schema_rename_through_authorization_and_execution() {
+async fn namespace_replacement_during_authorization_cannot_redirect_the_bound_query() {
     let fixture = Fixture::new().await;
-    fixture.install_guard().await;
+    let gate = Arc::new(PausingPermissions {
+        entered: Notify::new(),
+        release: Notify::new(),
+    });
+    let service = Arc::new(fixture.service(gate.clone()).await);
+    let task = tokio::spawn({
+        let service = service.clone();
+        async move {
+            service
+                .query("analytics-readonly", "SELECT id FROM public.customers")
+                .await
+        }
+    });
+    tokio::time::timeout(Duration::from_secs(3), gate.entered.notified())
+        .await
+        .unwrap();
+    let mut migration = fixture.admin.acquire().await.unwrap();
+    migration.execute("SET lock_timeout='150ms'").await.unwrap();
+    migration.execute("ALTER SCHEMA public RENAME TO moved").await.unwrap();
+    sqlx::raw_sql(
+        "CREATE SCHEMA public;
+        CREATE TABLE public.customers (id integer, email text, active boolean);
+        INSERT INTO public.customers VALUES (999, 'replacement@example.test', true);
+        GRANT USAGE ON SCHEMA public TO query_role;
+        GRANT SELECT ON public.customers TO query_role;",
+    )
+    .execute(&mut *migration)
+    .await
+    .unwrap();
+    gate.release.notify_one();
+    tokio::time::timeout(Duration::from_secs(3), gate.entered.notified())
+        .await
+        .unwrap();
+    gate.release.notify_one();
+    assert_eq!(task.await.unwrap().unwrap().rows, vec![vec![json!(1)], vec![json!(2)]]);
+}
+
+#[tokio::test]
+async fn namespace_replacement_before_binding_is_rejected_before_column_authorization() {
+    let fixture = Fixture::new().await;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let upstream_url = url::Url::parse(&fixture.dsn).unwrap();
+    let upstream = format!("{}:{}", upstream_url.host_str().unwrap(), upstream_url.port().unwrap());
+    let reached = Arc::new(Notify::new());
+    let proceed = Arc::new(Notify::new());
+    let proxy = tokio::spawn({
+        let reached = reached.clone();
+        let proceed = proceed.clone();
+        async move {
+            while let Ok((client, _)) = listener.accept().await {
+                let upstream = upstream.clone();
+                let reached = reached.clone();
+                let proceed = proceed.clone();
+                tokio::spawn(async move {
+                    let _ = intercept_cursor_parse(client, &upstream, &reached, &proceed).await;
+                });
+            }
+        }
+    });
+    let permissions = Arc::new(Permissions::default());
+    let service = Arc::new(
+        fixture
+            .service_with_dsn(
+                permissions.clone(),
+                &format!("postgres://query_role:query-only@127.0.0.1:{port}/postgres?sslmode=disable"),
+            )
+            .await,
+    );
+    let query = tokio::spawn({
+        let service = service.clone();
+        async move {
+            service
+                .query("analytics-readonly", "SELECT id FROM public.customers LIMIT 1")
+                .await
+        }
+    });
+    tokio::time::timeout(Duration::from_secs(3), reached.notified())
+        .await
+        .unwrap();
+    sqlx::raw_sql(
+        "ALTER SCHEMA public RENAME TO moved;
+        CREATE SCHEMA public;
+        CREATE TABLE public.customers (id integer, email text, active boolean);
+        INSERT INTO public.customers VALUES (999, 'replacement@example.test', true);
+        GRANT USAGE ON SCHEMA public TO query_role;
+        GRANT SELECT ON public.customers TO query_role;",
+    )
+    .execute(&fixture.admin)
+    .await
+    .unwrap();
+    proceed.notify_one();
+    assert!(matches!(query.await.unwrap(), Err(Error::UnsupportedObject)));
+    assert!(
+        !permissions
+            .checked
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(kind, _, _)| kind == "sql_column")
+    );
+    proxy.abort();
+    let _ = proxy.await;
+}
+
+async fn intercept_cursor_parse(
+    client: TcpStream,
+    upstream: &str,
+    reached: &Notify,
+    proceed: &Notify,
+) -> io::Result<()> {
+    let server = TcpStream::connect(upstream).await?;
+    let (mut client_read, mut client_write) = client.into_split();
+    let (mut server_read, mut server_write) = server.into_split();
+    let responses = async { tokio::io::copy(&mut server_read, &mut client_write).await.map(|_| ()) };
+    let requests = async {
+        let startup_length = client_read.read_u32().await?;
+        let mut startup = vec![0; startup_length as usize - 4];
+        client_read.read_exact(&mut startup).await?;
+        server_write.write_u32(startup_length).await?;
+        server_write.write_all(&startup).await?;
+        server_write.flush().await?;
+        loop {
+            let tag = match client_read.read_u8().await {
+                Ok(tag) => tag,
+                Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => {
+                    server_write.shutdown().await?;
+                    return Ok(());
+                }
+                Err(error) => return Err(error),
+            };
+            let length = client_read.read_u32().await?;
+            let mut body = vec![0; length as usize - 4];
+            client_read.read_exact(&mut body).await?;
+            if tag == b'P'
+                && body
+                    .windows(b"DECLARE mcp_query".len())
+                    .any(|bytes| bytes == b"DECLARE mcp_query")
+            {
+                reached.notify_one();
+                proceed.notified().await;
+            }
+            server_write.write_u8(tag).await?;
+            server_write.write_u32(length).await?;
+            server_write.write_all(&body).await?;
+            server_write.flush().await?;
+        }
+    };
+    tokio::try_join!(requests, responses)?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn column_ddl_waits_for_the_bound_query_without_a_database_guard() {
+    let fixture = Fixture::new().await;
     let gate = Arc::new(PausingPermissions {
         entered: Notify::new(),
         release: Notify::new(),
@@ -315,7 +477,7 @@ async fn ddl_guard_blocks_schema_rename_through_authorization_and_execution() {
     let mut migration = fixture.admin.acquire().await.unwrap();
     migration.execute("SET lock_timeout='150ms'").await.unwrap();
     let error = migration
-        .execute("ALTER SCHEMA public RENAME TO moved")
+        .execute("ALTER TABLE public.customers RENAME COLUMN id TO renamed_id")
         .await
         .unwrap_err();
     assert_eq!(
@@ -328,13 +490,15 @@ async fn ddl_guard_blocks_schema_rename_through_authorization_and_execution() {
         .unwrap();
     gate.release.notify_one();
     assert_eq!(task.await.unwrap().unwrap().rows.len(), 2);
-    migration.execute("ALTER SCHEMA public RENAME TO moved").await.unwrap();
+    migration
+        .execute("ALTER TABLE public.customers RENAME COLUMN id TO renamed_id")
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
 async fn resource_limits_abort_without_returning_partial_results() {
     let fixture = Fixture::new().await;
-    fixture.install_guard().await;
     sqlx::raw_sql(
         "CREATE TABLE public.many_rows (id integer); INSERT INTO public.many_rows SELECT generate_series(1,1001);
         CREATE TABLE public.large_rows (content text); INSERT INTO public.large_rows VALUES (repeat('x',1048577));",
@@ -369,7 +533,6 @@ async fn resource_limits_abort_without_returning_partial_results() {
 #[tokio::test]
 async fn bound_parameters_keep_sql_looking_text_as_data_and_handle_integer_widths() {
     let fixture = Fixture::new().await;
-    fixture.install_guard().await;
     fixture
         .admin
         .execute("CREATE TABLE public.widths (small smallint, regular integer, large bigint)")
@@ -424,7 +587,6 @@ async fn bound_parameters_keep_sql_looking_text_as_data_and_handle_integer_width
 #[tokio::test]
 async fn mcp_client_initializes_discovers_queries_and_cannot_spoof_identity() {
     let fixture = Fixture::new().await;
-    fixture.install_guard().await;
     let service = fixture.service(Arc::new(Permissions::default())).await;
     let (client_io, server_io) = tokio::io::duplex(65536);
     let server_task = tokio::spawn(async move {
@@ -475,9 +637,8 @@ async fn mcp_client_initializes_discovers_queries_and_cannot_spoof_identity() {
 }
 
 #[tokio::test]
-async fn cancelling_an_mcp_request_releases_its_database_guard() {
+async fn cancelling_an_mcp_request_releases_its_relation_locks() {
     let fixture = Fixture::new().await;
-    fixture.install_guard().await;
     let gate = Arc::new(PausingPermissions {
         entered: Notify::new(),
         release: Notify::new(),
@@ -511,20 +672,25 @@ async fn cancelling_an_mcp_request_releases_its_database_guard() {
     tokio::time::timeout(Duration::from_secs(3), gate.entered.notified())
         .await
         .unwrap();
-    let unlocked: bool = sqlx::query_scalar("SELECT pg_catalog.pg_try_advisory_xact_lock(1879445091,1347635021)")
-        .fetch_one(&fixture.admin)
+    let mut probe = fixture.admin.begin().await.unwrap();
+    let blocked = probe
+        .execute("LOCK TABLE public.customers IN ACCESS EXCLUSIVE MODE NOWAIT")
         .await
-        .unwrap();
-    assert!(!unlocked);
+        .unwrap_err();
+    assert_eq!(
+        blocked.as_database_error().and_then(|e| e.code()).as_deref(),
+        Some("55P03")
+    );
+    probe.rollback().await.unwrap();
     pending.cancel(Some("test cancellation".into())).await.unwrap();
     tokio::time::timeout(Duration::from_secs(2), async {
         loop {
-            let unlocked: bool =
-                sqlx::query_scalar("SELECT pg_catalog.pg_try_advisory_xact_lock(1879445091,1347635021)")
-                    .fetch_one(&fixture.admin)
-                    .await
-                    .unwrap();
-            if unlocked {
+            let mut probe = fixture.admin.begin().await.unwrap();
+            let result = probe
+                .execute("LOCK TABLE public.customers IN ACCESS EXCLUSIVE MODE NOWAIT")
+                .await;
+            probe.rollback().await.unwrap();
+            if result.is_ok() {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
@@ -550,7 +716,6 @@ fn spice_request<T>(value: T) -> tonic::Request<T> {
 #[tokio::test]
 async fn mcp_spicedb_and_postgres_enforce_hard_column_denial_together() {
     let fixture = Fixture::new().await;
-    fixture.install_guard().await;
     let spice = GenericImage::new("authzed/spicedb", "v1.53.0")
         .with_exposed_port(50051.tcp())
         .with_wait_for(WaitFor::message_on_either_std("grpc server started serving"))
