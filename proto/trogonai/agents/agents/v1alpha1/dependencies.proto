@@ -132,7 +132,10 @@ message DelegateDeclaration {
   ];
   // Exactly one known arm is required. Selectors match each Agent's latest
   // minted revision's configuration-owned labels. Display names and annotations
-  // never participate. Session admission pins the selected revision.
+  // never participate. Session admission pins the selected revision. Resolution
+  // runs over the Session's hierarchy scope first; the resolved Agent is then
+  // checked against the dispatching Agent's delegation permissions, which may
+  // refuse it but never substitute another (ADR#0071).
   oneof selection {
     option (buf.validate.oneof).required = true;
 

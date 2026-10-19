@@ -1,0 +1,49 @@
+edition = "2024";
+
+package trogonai.policy.delegation_permissions.v1alpha1;
+
+import "trogon/error/v1alpha1/options.proto";
+
+// Schema-only templates for the policy.delegation_permissions module's
+// DeciderService refusals. These messages are never encoded. Administration
+// authorization and delegation dispatch admission keep their own failure
+// contracts; this fold only owns permission mutations.
+message DelegationPermissionCommandInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "policy.delegation_permissions"
+    reason: "DELEGATION_PERMISSION_COMMAND_INVALID"
+    message: "The command violates the delegation permission policy contract."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message DelegationPermissionNotInitializedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "policy.delegation_permissions"
+    reason: "DELEGATION_PERMISSION_NOT_INITIALIZED"
+    message: "The delegation permission history must be initialized before this command."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message DelegationPermissionAlreadyInitializedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "policy.delegation_permissions"
+    reason: "DELEGATION_PERMISSION_ALREADY_INITIALIZED"
+    message: "The delegation permission history has already been initialized."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message DelegationPermissionSubjectMismatchError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "policy.delegation_permissions"
+    reason: "DELEGATION_PERMISSION_SUBJECT_MISMATCH"
+    message: "The command names a different subject from this delegation permission history."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}

@@ -1,0 +1,32 @@
+edition = "2024";
+
+package trogonai.policy.delegation_permissions.state.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "trogonai/policy/delegation_permissions/v1alpha1/permission_policy.proto";
+import "trogonai/policy/subjects/v1alpha1/subject.proto";
+
+// Policy fold only. Replay rejects unknown events, a subject change, repeated
+// genesis, and mutations before initialization. Clear retains initialized state.
+// Provisioning origin is copied from genesis and never cleared or replaced.
+message State {
+  oneof state {
+    option (buf.validate.oneof).required = true;
+
+    google.protobuf.Empty missing = 1;
+    InitializedDelegationPermission initialized = 2;
+  }
+}
+
+message InitializedDelegationPermission {
+  trogonai.policy.subjects.v1alpha1.PolicySubject subject = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Absence means cleared, which is deny rather than a permit of nothing in
+  // particular. Restoring targets consults the same history.
+  trogonai.policy.delegation_permissions.v1alpha1.DelegationPermissionPolicy policy = 2;
+  string provisioning_id = 3 [(buf.validate.field).cel = {
+    id: "initialized_delegation_permission.provisioning_id_nonblank"
+    message: "a supplied provisioning_id must contain a non-whitespace character"
+    expression: "this.trim() != ''"
+  }];
+}
