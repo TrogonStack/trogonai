@@ -5,8 +5,8 @@ pub struct ObjectId(String);
 impl ObjectId {
     pub fn new(value: String) -> Result<Self, Error> {
         if value.is_empty()
-            || value.len() > 200
-            || !value.bytes().all(|c| c.is_ascii_alphanumeric() || b"_-./".contains(&c))
+            || value.len() > crate::constants::MAX_OBJECT_ID_BYTES
+            || !value.bytes().all(|c| c.is_ascii_alphanumeric() || b"_-/".contains(&c))
         {
             return Err(Error::ObjectId);
         }
