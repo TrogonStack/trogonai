@@ -44,7 +44,7 @@ impl QueryService {
                 .acquire_timeout(Duration::from_secs(2))
                 .connect_with(connection.options.into_inner())
                 .await?;
-            connections.insert(name, (connection.id, pool));
+            connections.insert(name, (connection.id.into_object_id(), pool));
         }
         Ok(Self {
             user: config.user,

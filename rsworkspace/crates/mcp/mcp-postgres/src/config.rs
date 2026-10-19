@@ -1,4 +1,4 @@
-use crate::{Error, ObjectId};
+use crate::{ConnectionId, Error, ObjectId};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
@@ -19,7 +19,7 @@ pub struct ConnectionInput {
     pub dsn_env: String,
 }
 pub struct RegisteredConnection {
-    pub(crate) id: ObjectId,
+    pub(crate) id: ConnectionId,
     pub(crate) options: crate::DatabaseOptions,
 }
 pub struct RuntimeConfig {
@@ -34,7 +34,7 @@ impl RuntimeConfig {
         let mut connections = BTreeMap::new();
         let mut ids = std::collections::BTreeSet::new();
         for connection in input.connections {
-            let id = ObjectId::new(connection.id)?;
+            let id = ConnectionId::new(connection.id)?;
             if !ids.insert(id.clone()) {
                 return Err(Error::Configuration);
             }

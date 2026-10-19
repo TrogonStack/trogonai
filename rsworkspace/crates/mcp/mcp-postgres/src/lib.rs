@@ -17,6 +17,7 @@
 //! Permissions are checked at admission; revocation does not retroactively cancel an admitted query.
 
 mod config;
+mod connection_id;
 mod constants;
 mod database_options;
 mod environment_variable;
@@ -33,6 +34,7 @@ mod spicedb_endpoint;
 mod telemetry;
 
 pub use config::{ConfigInput, RegisteredConnection, RuntimeConfig};
+pub use connection_id::ConnectionId;
 pub use database_options::DatabaseOptions;
 pub use environment_variable::EnvironmentVariable;
 pub use error::Error;
