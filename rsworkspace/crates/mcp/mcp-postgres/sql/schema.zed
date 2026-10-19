@@ -1,0 +1,20 @@
+definition sql_user {}
+definition sql_client {}
+
+definition sql_connection {
+    relation reader: sql_user | sql_client
+    relation forbidden: sql_user | sql_user:* | sql_client | sql_client:*
+    permission query = reader - forbidden
+}
+
+definition sql_table {
+    relation reader: sql_user | sql_client
+    relation forbidden: sql_user | sql_user:* | sql_client | sql_client:*
+    permission query = reader - forbidden
+}
+
+definition sql_column {
+    relation reader: sql_user | sql_client
+    relation forbidden: sql_user | sql_user:* | sql_client | sql_client:*
+    permission query = reader - forbidden
+}

@@ -1,0 +1,9 @@
+user = "example-user"
+client = "example-client"
+spicedb_endpoint = "http://127.0.0.1:50051"
+spicedb_token_env = "MCP_POSTGRES_SPICEDB_TOKEN"
+
+[[connections]]
+name = "analytics-readonly"
+id = "analytics-local-v1"
+dsn_env = "MCP_POSTGRES_ANALYTICS_DSN"
