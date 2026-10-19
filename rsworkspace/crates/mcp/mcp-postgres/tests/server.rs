@@ -117,6 +117,10 @@ async fn mcp_errors_are_safe_and_audits_exclude_sql_parameters_and_rows() {
     client.cancel().await.unwrap();
     server.await.unwrap();
     let output = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+    assert_audit_output(&output, &["SELECT", "private-row@example.test", "private-token", &dsn]);
+}
+
+fn assert_audit_output(output: &str, forbidden: &[&str]) {
     for expected in [
         "sql_query_admission",
         "sql_query_completion",
@@ -127,9 +131,30 @@ async fn mcp_errors_are_safe_and_audits_exclude_sql_parameters_and_rows() {
         "example-user",
         "example-client",
     ] {
-        assert!(output.contains(expected), "missing {expected}: {output}");
+        assert!(output.contains(expected), "audit metadata is missing");
     }
-    for secret in ["SELECT", "private-row@example.test", "private-token", &dsn] {
-        assert!(!output.contains(secret), "audit leaked {secret}");
+    for secret in forbidden {
+        assert!(!output.contains(secret), "audit contains a forbidden value");
+    }
+}
+
+#[test]
+fn audit_assertion_failures_do_not_disclose_captured_output_or_forbidden_values() {
+    let canary = "audit-privacy-regression-canary";
+    let complete_metadata = "sql_query_admission sql_query_completion sql_query_reference Timeout Unavailable resource_id example-user example-client";
+    let failures = [canary.to_owned(), format!("{complete_metadata} {canary}")]
+        .map(|output| std::panic::catch_unwind(|| assert_audit_output(&output, &[canary])));
+    for failure in failures {
+        let payload = failure.expect_err("audit assertion accepted invalid output");
+        let message = payload
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| payload.downcast_ref::<&str>().copied())
+            .expect("audit assertion did not provide a text diagnostic");
+        assert!(!message.contains(canary), "audit assertion disclosed a forbidden value");
+        assert!(
+            !message.contains(complete_metadata),
+            "audit assertion disclosed captured output"
+        );
     }
 }
