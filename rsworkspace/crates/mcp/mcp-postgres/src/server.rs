@@ -71,10 +71,7 @@ impl ServerHandler for PostgresMcp {
             outcome = self.service.query_with_parameters(&args.connection,&args.sql,&parameters) => outcome,
         };
         let result = match outcome {
-            Ok(result) => CallToolResult::success(vec![ContentBlock::text(
-                serde_json::to_string(&result)
-                    .map_err(|_| ErrorData::internal_error("result encoding failed", None))?,
-            )]),
+            Ok(result) => CallToolResult::success(vec![ContentBlock::text(result.into_json().to_string())]),
             Err(error) => {
                 let message = match error {
                     crate::Error::Denied => "access denied",

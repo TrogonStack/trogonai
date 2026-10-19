@@ -50,7 +50,10 @@ impl Query {
         let NodeEnum::SelectStmt(stmt) = node(statement)? else {
             return Err(Error::UnsupportedSql);
         };
-        let mut normalized = stmt.as_ref().clone();
+        Self::from_statement(stmt)
+    }
+    fn from_statement(stmt: &protobuf::SelectStmt) -> Result<Self, Error> {
+        let mut normalized = stmt.clone();
         normalized.target_list.clear();
         normalized.from_clause.clear();
         normalized.where_clause = None;
@@ -291,3 +294,7 @@ fn check_join_scope(expr: &Expr, tables: &[Table]) -> Result<(), Error> {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "parser_tests.rs"]
+mod tests;
