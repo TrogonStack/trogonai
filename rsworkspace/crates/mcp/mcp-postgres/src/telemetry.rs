@@ -21,12 +21,12 @@ pub(crate) struct QueryAudit<'a> {
 }
 impl<'a> QueryAudit<'a> {
     pub(crate) fn start(user: &'a ObjectId, client: &'a ObjectId, connection: Option<&'a ObjectId>) -> Self {
-        tracing::info!(
-            event = "sql_query_admission",
-            user = user.as_str(),
-            client = client.as_str(),
-            connection = connection.map(ObjectId::as_str)
-        );
+        {
+            let user = user.as_str();
+            let client = client.as_str();
+            let connection = connection.map(ObjectId::as_str);
+            tracing::info!(event = "sql_query_admission", user, client, connection);
+        }
         Self {
             user,
             client,
@@ -54,18 +54,27 @@ impl<'a> QueryAudit<'a> {
 }
 impl Drop for QueryAudit<'_> {
     fn drop(&mut self) {
-        tracing::info!(event="sql_query_completion",user=self.user.as_str(),client=self.client.as_str(),connection=self.connection.map(ObjectId::as_str),outcome=?self.outcome,elapsed_ms=self.started.elapsed().as_millis() as u64);
+        let user = self.user.as_str();
+        let client = self.client.as_str();
+        let connection = self.connection.map(ObjectId::as_str);
+        let elapsed_ms = self.started.elapsed().as_millis() as u64;
+        tracing::info!(event = "sql_query_completion", user, client, connection, outcome = ?self.outcome, elapsed_ms);
     }
 }
 pub(crate) fn references(resources: &BTreeSet<Resource>, user: &ObjectId, client: &ObjectId, connection: &ObjectId) {
+    let user = user.as_str();
+    let client = client.as_str();
+    let connection = connection.as_str();
     for resource in resources {
+        let resource_kind = resource.kind;
+        let resource_id = resource.id.as_str();
         tracing::info!(
             event = "sql_query_reference",
-            user = user.as_str(),
-            client = client.as_str(),
-            connection = connection.as_str(),
-            resource_kind = resource.kind,
-            resource_id = resource.id.as_str()
+            user,
+            client,
+            connection,
+            resource_kind,
+            resource_id
         );
     }
 }

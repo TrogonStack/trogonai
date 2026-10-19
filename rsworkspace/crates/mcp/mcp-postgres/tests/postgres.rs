@@ -531,6 +531,56 @@ async fn resource_limits_abort_without_returning_partial_results() {
 }
 
 #[tokio::test]
+async fn admission_rejects_privileged_roles_and_excess_parameters() {
+    let fixture = Fixture::new().await;
+    let service = fixture.service(Arc::new(Permissions::default())).await;
+    let parameters = vec![Parameter::try_from(ParameterInput::Boolean(true)).unwrap(); 33];
+    assert!(matches!(
+        service
+            .query_with_parameters("analytics-readonly", "SELECT id FROM public.customers", &parameters)
+            .await,
+        Err(Error::Limit)
+    ));
+    fixture.admin.execute("ALTER ROLE query_role SUPERUSER").await.unwrap();
+    assert!(matches!(
+        service
+            .query("analytics-readonly", "SELECT id FROM public.customers")
+            .await,
+        Err(Error::UnsupportedObject)
+    ));
+}
+
+#[tokio::test]
+async fn boolean_predicates_alias_rejection_and_aggregate_byte_budget() {
+    let fixture = Fixture::new().await;
+    let service = fixture.service(Arc::new(Permissions::default())).await;
+    let result = service
+        .query(
+            "analytics-readonly",
+            "SELECT id FROM public.customers WHERE (id = 1 OR id = 2) AND active = true ORDER BY id",
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.rows, vec![vec![json!(1)]]);
+    assert!(matches!(
+        service
+            .query(
+                "analytics-readonly",
+                "SELECT id AS renamed FROM public.customers ORDER BY renamed"
+            )
+            .await,
+        Err(Error::UnsupportedSql)
+    ));
+    sqlx::raw_sql("CREATE TABLE public.aggregate_large (content text); INSERT INTO public.aggregate_large SELECT repeat('x',100000) FROM generate_series(1,11); GRANT SELECT ON public.aggregate_large TO query_role;").execute(&fixture.admin).await.unwrap();
+    assert!(matches!(
+        service
+            .query("analytics-readonly", "SELECT content FROM public.aggregate_large")
+            .await,
+        Err(Error::Limit)
+    ));
+}
+
+#[tokio::test]
 async fn bound_parameters_keep_sql_looking_text_as_data_and_handle_integer_widths() {
     let fixture = Fixture::new().await;
     fixture

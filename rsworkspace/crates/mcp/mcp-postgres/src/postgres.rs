@@ -6,7 +6,7 @@ use futures_util::TryStreamExt;
 use serde::Serialize;
 use sqlx::{
     AssertSqlSafe, Column as _, Connection, Executor, PgConnection, PgPool, Row, SqlSafeStr, Statement, TypeInfo,
-    postgres::{PgPoolOptions, PgRow, types::Oid},
+    postgres::{PgColumn, PgPoolOptions, PgRow, types::Oid},
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -20,6 +20,27 @@ use crate::constants::MAX_BYTES;
 pub struct QueryResult {
     pub columns: Vec<String>,
     pub rows: Vec<Vec<serde_json::Value>>,
+}
+impl QueryResult {
+    pub(crate) fn into_json(self) -> serde_json::Value {
+        serde_json::Value::Object(serde_json::Map::from_iter([
+            (
+                "columns".into(),
+                serde_json::Value::Array(self.columns.into_iter().map(serde_json::Value::String).collect()),
+            ),
+            (
+                "rows".into(),
+                serde_json::Value::Array(self.rows.into_iter().map(serde_json::Value::Array).collect()),
+            ),
+        ]))
+    }
+
+    fn check_size(&self) -> Result<(), Error> {
+        if serde_json::to_vec(self).map_err(|_| Error::Limit)?.len() > MAX_BYTES {
+            return Err(Error::Limit);
+        }
+        Ok(())
+    }
 }
 pub struct QueryService {
     user: ObjectId,
@@ -262,14 +283,7 @@ impl QueryService {
             .prepare("FETCH FORWARD 0 FROM mcp_query".into_sql_str())
             .await?;
         let visible_columns = query.select.len();
-        if metadata.columns().len() != 1 + visible_columns + relations.len() {
-            return Err(Error::UnsupportedObject);
-        }
-        for (column, relation) in metadata.columns().iter().skip(1 + visible_columns).zip(&relations) {
-            if column.relation_id() != Some(*relation) || column.relation_attribute_no() != Some(-6) {
-                return Err(Error::UnsupportedObject);
-            }
-        }
+        verify_bindings(metadata.columns(), visible_columns, &relations)?;
         crate::telemetry::references(&resources, &self.user, &self.client, connection_id);
         let requests = resources
             .into_iter()
@@ -319,12 +333,26 @@ impl QueryService {
         }
         drop(stream);
         tx.rollback().await?;
-        if serde_json::to_vec(&result).map_err(|_| Error::Limit)?.len() > MAX_BYTES {
-            return Err(Error::Limit);
-        }
+        result.check_size()?;
         Ok(result)
     }
 }
+
+#[cfg(test)]
+#[path = "postgres_tests.rs"]
+mod tests;
+fn verify_bindings(columns: &[PgColumn], visible_columns: usize, relations: &[Oid]) -> Result<(), Error> {
+    if columns.len() != 1 + visible_columns + relations.len() {
+        return Err(Error::UnsupportedObject);
+    }
+    for (column, relation) in columns.iter().skip(1 + visible_columns).zip(relations) {
+        if column.relation_id() != Some(*relation) || column.relation_attribute_no() != Some(-6) {
+            return Err(Error::UnsupportedObject);
+        }
+    }
+    Ok(())
+}
+
 fn resolve(
     column: &Column,
     query: &Query,

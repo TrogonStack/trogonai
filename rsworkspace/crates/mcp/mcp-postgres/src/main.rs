@@ -1,3 +1,5 @@
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 use mcp_postgres::{ConfigInput, PostgresMcp, QueryService, RuntimeConfig, SpiceDb};
 use rmcp::ServiceExt;
 use std::{process::ExitCode, sync::Arc};
@@ -5,6 +7,7 @@ use tracing_subscriber::{Layer, layer::SubscriberExt, util::SubscriberInitExt};
 use trogon_std::env::{ReadEnv, SystemEnv};
 
 #[tokio::main]
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn main() -> ExitCode {
     let audit = tracing_subscriber::fmt::layer()
         .json()

@@ -1,5 +1,6 @@
 use mcp_postgres::{
-    ConfigInput, ConnectionId, DatabaseOptions, EnvironmentVariable, ObjectId, RuntimeConfig, SpiceDbEndpoint,
+    ConfigInput, ConnectionId, DatabaseOptions, EnvironmentVariable, Error, Identifier, ObjectId, Parameter,
+    ParameterInput, RuntimeConfig, SpiceDbEndpoint,
 };
 #[test]
 fn rejects_duplicate_connection_names_and_ids() -> Result<(), Box<dyn std::error::Error>> {
@@ -94,4 +95,62 @@ fn config_environment(key: &str) -> Option<String> {
         }
         .into(),
     )
+}
+
+#[test]
+fn runtime_configuration_requires_connections_and_nonempty_secrets() -> Result<(), Box<dyn std::error::Error>> {
+    let valid = include_str!("../examples/config.toml");
+    let config = RuntimeConfig::from_input(toml::from_str(valid)?, config_environment)?;
+    assert_eq!(config.spicedb_endpoint(), "http://127.0.0.1:50051");
+    assert_eq!(config.spicedb_token(), "token");
+
+    let mut empty: ConfigInput = toml::from_str(valid)?;
+    empty.connections.clear();
+    assert!(matches!(
+        RuntimeConfig::from_input(empty, config_environment),
+        Err(Error::Configuration)
+    ));
+    for missing_token in [false, true] {
+        let input: ConfigInput = toml::from_str(valid)?;
+        let token_key = input.spicedb_token_env.clone();
+        assert!(matches!(
+            RuntimeConfig::from_input(input, |key| {
+                if key == token_key {
+                    if missing_token { None } else { Some(String::new()) }
+                } else {
+                    config_environment(key)
+                }
+            }),
+            Err(Error::Configuration)
+        ));
+    }
+    assert!(matches!(
+        RuntimeConfig::from_input(toml::from_str(valid)?, |_| Some(String::new())),
+        Err(Error::Configuration)
+    ));
+    Ok(())
+}
+
+#[test]
+fn identifiers_and_parameters_enforce_postgres_and_request_boundaries() -> Result<(), Box<dyn std::error::Error>> {
+    for invalid in [String::new(), "x".repeat(64), "contains\0nul".into(), "é".repeat(32)] {
+        assert!(matches!(Identifier::new(invalid), Err(Error::Identifier)));
+    }
+    assert_eq!(Identifier::new("x".repeat(63))?.as_str().len(), 63);
+    assert_eq!(Identifier::new("odd\"name".into())?.quoted(), "\"odd\"\"name\"");
+    for input in [
+        ParameterInput::Boolean(false),
+        ParameterInput::Integer(i64::MIN),
+        ParameterInput::Text("x".repeat(16_384)),
+    ] {
+        Parameter::try_from(input)?;
+    }
+    for input in [
+        ParameterInput::Text("x".repeat(16_385)),
+        ParameterInput::Text("a\0b".into()),
+        ParameterInput::Text("é".repeat(8193)),
+    ] {
+        assert!(matches!(Parameter::try_from(input), Err(Error::Limit)));
+    }
+    Ok(())
 }
