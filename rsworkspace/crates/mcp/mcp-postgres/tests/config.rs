@@ -33,6 +33,45 @@ fn unknown_settings_fail_closed() {
 }
 
 #[test]
+fn remote_postgres_connections_require_full_certificate_verification() {
+    for mode in [
+        "",
+        "?sslmode=disable",
+        "?sslmode=allow",
+        "?sslmode=prefer",
+        "?sslmode=require",
+        "?sslmode=verify-ca",
+    ] {
+        assert!(
+            matches!(
+                DatabaseOptions::new(&format!("postgres://reader@db.example.test/example{mode}")),
+                Err(Error::Configuration)
+            ),
+            "rejected TLS mode: {mode}"
+        );
+    }
+    assert!(DatabaseOptions::new("postgres://reader@db.example.test/example?sslmode=verify-full").is_ok());
+}
+
+#[test]
+fn loopback_postgres_connections_allow_local_plaintext_fixtures() {
+    for host in ["localhost", "127.0.0.1", "[::1]"] {
+        for mode in ["", "?sslmode=disable", "?sslmode=verify-full"] {
+            assert!(
+                DatabaseOptions::new(&format!("postgres://reader@{host}/example{mode}")).is_ok(),
+                "host={host}, mode={mode}"
+            );
+        }
+    }
+    for host in ["localhost.example.test", "127.0.0.2", "db.example.test"] {
+        assert!(matches!(
+            DatabaseOptions::new(&format!("postgres://reader@{host}/example?sslmode=disable")),
+            Err(Error::Configuration)
+        ));
+    }
+}
+
+#[test]
 fn secrets_and_remote_transport_settings_are_validated_at_the_boundary() -> Result<(), Box<dyn std::error::Error>> {
     assert!(DatabaseOptions::new("postgres://reader@localhost/example").is_ok());
     assert!(DatabaseOptions::new("postgres://reader@db.example.test/example?sslmode=verify-full").is_ok());

@@ -26,4 +26,7 @@ tonic = { workspace = true, features = ["tls-aws-lc", "tls-native-roots"] }
 url = { workspace = true }
 
 [dev-dependencies]
+rcgen = "=0.14.8"
+rustls = { workspace = true }
+tempfile = { workspace = true }
 testcontainers-modules = { workspace = true, features = ["postgres"] }
