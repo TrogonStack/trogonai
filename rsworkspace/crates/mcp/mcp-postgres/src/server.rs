@@ -1,4 +1,4 @@
-use crate::QueryService;
+use crate::{QueryService, RequestIdentity};
 use rmcp::schemars;
 use rmcp::{
     ErrorData, ServerHandler,
@@ -31,13 +31,14 @@ struct QueryRequest {
 }
 impl ServerHandler for PostgresMcp {
     fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_instructions("Queries use registered connections and the launcher's trusted identity. Only the documented bounded SELECT subset is supported.")
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_instructions("Queries use registered connections and the authenticated request identity. Only the documented bounded SELECT subset is supported.")
     }
     async fn list_tools(
         &self,
         _request: Option<PaginatedRequestParams>,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
+        request_identity(&context)?;
         let input_schema = rmcp::handler::server::common::schema_for_type::<QueryRequest>();
         Ok(ListToolsResult {
             tools: vec![Tool::new(
@@ -53,6 +54,7 @@ impl ServerHandler for PostgresMcp {
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
+        let identity = request_identity(&context)?;
         if request.name != "query" {
             return Err(ErrorData::invalid_params("unknown tool", None));
         }
@@ -68,7 +70,7 @@ impl ServerHandler for PostgresMcp {
         let outcome = tokio::select! {
             biased;
             _ = context.ct.cancelled() => return Err(ErrorData::internal_error("request cancelled",None)),
-            outcome = self.service.query_with_parameters(&args.connection,&args.sql,&parameters) => outcome,
+            outcome = self.service.query_with_parameters(&identity,&args.connection,&args.sql,&parameters) => outcome,
         };
         let result = match outcome {
             Ok(result) => CallToolResult::success(vec![ContentBlock::text(result.into_json().to_string())]),
@@ -88,4 +90,13 @@ impl ServerHandler for PostgresMcp {
         };
         Ok(CallToolResponse::Complete(result))
     }
+}
+
+fn request_identity(context: &RequestContext<RoleServer>) -> Result<RequestIdentity, ErrorData> {
+    context
+        .extensions
+        .get::<axum::http::request::Parts>()
+        .and_then(|parts| parts.extensions.get::<RequestIdentity>())
+        .cloned()
+        .ok_or_else(|| ErrorData::internal_error("authenticated request context unavailable", None))
 }

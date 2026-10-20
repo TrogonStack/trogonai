@@ -1,5 +1,5 @@
 use crate::{
-    Error, ObjectId, PermissionCheck, Query, Resource, RuntimeConfig,
+    Error, ObjectId, PermissionCheck, Query, RequestIdentity, Resource, RuntimeConfig,
     parser::{Column, Expr},
 };
 use futures_util::TryStreamExt;
@@ -43,8 +43,6 @@ impl QueryResult {
     }
 }
 pub struct QueryService {
-    user: ObjectId,
-    client: ObjectId,
     connections: BTreeMap<String, (ObjectId, PgPool)>,
     permissions: Arc<dyn PermissionCheck>,
     permits: Semaphore,
@@ -68,27 +66,23 @@ impl QueryService {
             connections.insert(name, (connection.id.into_object_id(), pool));
         }
         Ok(Self {
-            user: config.user,
-            client: config.client,
             connections,
             permissions,
             permits: Semaphore::new(4),
         })
     }
-    pub async fn query(&self, connection: &str, sql: &str) -> Result<QueryResult, Error> {
-        self.query_with_parameters(connection, sql, &[]).await
+    pub async fn query(&self, identity: &RequestIdentity, connection: &str, sql: &str) -> Result<QueryResult, Error> {
+        self.query_with_parameters(identity, connection, sql, &[]).await
     }
     pub async fn query_with_parameters(
         &self,
+        identity: &RequestIdentity,
         connection: &str,
         sql: &str,
         parameters: &[crate::Parameter],
     ) -> Result<QueryResult, Error> {
-        let mut audit = crate::telemetry::QueryAudit::start(
-            &self.user,
-            &self.client,
-            self.connections.get(connection).map(|(id, _)| id),
-        );
+        let mut audit =
+            crate::telemetry::QueryAudit::start(identity, self.connections.get(connection).map(|(id, _)| id));
         let result = async {
             if parameters.len() > 32 {
                 return Err(Error::Limit);
@@ -96,7 +90,7 @@ impl QueryService {
             let _permit = self.permits.try_acquire().map_err(|_| Error::Limit)?;
             tokio::time::timeout(
                 Duration::from_secs(10),
-                self.execute(connection, Query::parse(sql)?, parameters),
+                self.execute(identity, connection, Query::parse(sql)?, parameters),
             )
             .await
             .map_err(|_| Error::Timeout)?
@@ -105,21 +99,25 @@ impl QueryService {
         audit.complete(&result);
         result
     }
-    async fn authorize(&self, resource: &Resource) -> Result<(), Error> {
-        self.permissions.check(resource, "sql_user", &self.user).await?;
-        self.permissions.check(resource, "sql_client", &self.client).await
+    async fn authorize(&self, identity: &RequestIdentity, resource: &Resource) -> Result<(), Error> {
+        self.permissions.check(resource, "sql_user", identity.user()).await?;
+        self.permissions.check(resource, "sql_client", identity.client()).await
     }
     async fn execute(
         &self,
+        identity: &RequestIdentity,
         connection: &str,
         query: Query,
         parameters: &[crate::Parameter],
     ) -> Result<QueryResult, Error> {
         let (connection_id, pool) = self.connections.get(connection).ok_or(Error::UnknownConnection)?;
-        self.authorize(&Resource {
-            kind: "sql_connection",
-            id: connection_id.clone(),
-        })
+        self.authorize(
+            identity,
+            &Resource {
+                kind: "sql_connection",
+                id: connection_id.clone(),
+            },
+        )
         .await?;
         let mut connection = pool.acquire().await?;
         connection.close_on_drop();
@@ -284,7 +282,7 @@ impl QueryService {
             .await?;
         let visible_columns = query.select.len();
         verify_bindings(metadata.columns(), visible_columns, &relations)?;
-        crate::telemetry::references(&resources, &self.user, &self.client, connection_id);
+        crate::telemetry::references(&resources, identity.user(), identity.client(), connection_id);
         let requests = resources
             .into_iter()
             .flat_map(|resource| {
@@ -292,12 +290,12 @@ impl QueryService {
                     crate::PermissionRequest {
                         resource: resource.clone(),
                         subject_kind: "sql_user",
-                        subject: self.user.clone(),
+                        subject: identity.user().clone(),
                     },
                     crate::PermissionRequest {
                         resource,
                         subject_kind: "sql_client",
-                        subject: self.client.clone(),
+                        subject: identity.client().clone(),
                     },
                 ]
             })

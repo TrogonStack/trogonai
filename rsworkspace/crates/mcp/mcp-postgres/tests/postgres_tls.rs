@@ -145,7 +145,7 @@ async fn trusted_ca_and_matching_hostname_protect_the_query_connection() {
     .unwrap();
     assert!(encrypted);
     let result = service
-        .query("analytics-readonly", "SELECT id FROM public.customers")
+        .query(&identity(), "analytics-readonly", "SELECT id FROM public.customers")
         .await
         .unwrap();
     assert_eq!(result.rows, vec![vec![json!(1)]]);
@@ -180,4 +180,12 @@ async fn verify_full_refuses_a_server_without_tls() {
         service(&format!("{dsn}?sslmode=verify-full")).await,
         Err(Error::Database(sqlx::Error::Tls(_)))
     ));
+}
+
+fn identity() -> mcp_postgres::RequestIdentity {
+    mcp_postgres::RequestIdentity::new(
+        mcp_postgres::ObjectId::new("example-user".into()).unwrap(),
+        mcp_postgres::ObjectId::new("example-client".into()).unwrap(),
+        Vec::new(),
+    )
 }

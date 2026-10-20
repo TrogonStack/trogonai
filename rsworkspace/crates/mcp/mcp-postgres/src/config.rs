@@ -5,8 +5,10 @@ use std::collections::BTreeMap;
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConfigInput {
-    pub user: String,
-    pub client: String,
+    #[serde(default)]
+    pub http: Option<crate::HttpTransportConfigInput>,
+    #[serde(default)]
+    pub authentication: Option<crate::AuthenticationConfigInput>,
     pub spicedb_endpoint: String,
     pub spicedb_token_env: String,
     pub connections: Vec<ConnectionInput>,
@@ -23,8 +25,6 @@ pub struct RegisteredConnection {
     pub(crate) options: crate::DatabaseOptions,
 }
 pub struct RuntimeConfig {
-    pub(crate) user: ObjectId,
-    pub(crate) client: ObjectId,
     pub(crate) connections: BTreeMap<String, RegisteredConnection>,
     pub(crate) spicedb_endpoint: crate::SpiceDbEndpoint,
     pub(crate) spicedb_token: String,
@@ -59,8 +59,6 @@ impl RuntimeConfig {
             return Err(Error::Configuration);
         }
         Ok(Self {
-            user: ObjectId::new(input.user)?,
-            client: ObjectId::new(input.client)?,
             connections,
             spicedb_endpoint: crate::SpiceDbEndpoint::new(input.spicedb_endpoint)?,
             spicedb_token: env(crate::EnvironmentVariable::new(input.spicedb_token_env)?.as_str())

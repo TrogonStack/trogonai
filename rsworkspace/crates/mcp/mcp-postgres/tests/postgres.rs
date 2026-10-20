@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod common;
 
 use std::collections::BTreeSet;
 use std::io;
@@ -12,11 +13,9 @@ use authzed::v1::{
     schema_service_client::SchemaServiceClient,
 };
 use mcp_postgres::{
-    ConfigInput, Error, Parameter, ParameterInput, PermissionCheck, PermissionRequest, PostgresMcp, QueryService,
-    RuntimeConfig,
+    ConfigInput, Error, Parameter, ParameterInput, PermissionCheck, PermissionRequest, QueryService, RuntimeConfig,
 };
 use rmcp::{
-    ServiceExt,
     model::{CallToolRequest, CallToolRequestParams, ClientRequest},
     service::PeerRequestOptions,
 };
@@ -122,6 +121,7 @@ async fn ordinary_readonly_database_requires_no_installed_objects() {
     let service = fixture.service(Arc::new(Permissions::default())).await;
     let result = service
         .query(
+            &identity(),
             "analytics-readonly",
             "SELECT id FROM public.customers ORDER BY id LIMIT 1",
         )
@@ -153,6 +153,7 @@ async fn actual_postgres_returns_authorized_results_and_preserves_limits() {
     let service = fixture.service(permissions.clone()).await;
     let result = service
         .query(
+            &identity(),
             "analytics-readonly",
             "SELECT c.id, c.active FROM public.customers c ORDER BY c.id LIMIT 1",
         )
@@ -161,29 +162,39 @@ async fn actual_postgres_returns_authorized_results_and_preserves_limits() {
     assert_eq!(result.columns, ["id", "active"]);
     assert_eq!(result.rows, vec![vec![json!(1), json!(true)]]);
     let empty = service
-        .query("analytics-readonly", "SELECT id FROM public.customers LIMIT 0")
+        .query(
+            &identity(),
+            "analytics-readonly",
+            "SELECT id FROM public.customers LIMIT 0",
+        )
         .await
         .unwrap();
     assert_eq!(empty.columns, ["id"]);
     assert!(empty.rows.is_empty());
     let absent = service
-        .query("analytics-readonly", "SELECT id FROM public.customers WHERE id = 999")
+        .query(
+            &identity(),
+            "analytics-readonly",
+            "SELECT id FROM public.customers WHERE id = 999",
+        )
         .await
         .unwrap();
     assert_eq!(absent.columns, ["id"]);
     assert!(absent.rows.is_empty());
     let joined = service
         .query(
+            &identity(),
             "analytics-readonly",
             "SELECT c.id, o.id AS order_id FROM public.customers c INNER JOIN public.orders o ON c.id = o.customer_id",
         )
         .await
         .unwrap();
     assert_eq!(joined.rows, vec![vec![json!(1), json!(9)]]);
-    let self_join = service.query("analytics-readonly", "SELECT c.id, other.id FROM public.customers c INNER JOIN public.customers other ON c.id = other.id ORDER BY c.id").await.unwrap();
+    let self_join = service.query(&identity(), "analytics-readonly", "SELECT c.id, other.id FROM public.customers c INNER JOIN public.customers other ON c.id = other.id ORDER BY c.id").await.unwrap();
     assert_eq!(self_join.rows, vec![vec![json!(1), json!(1)], vec![json!(2), json!(2)]]);
     let unused_join = service
         .query(
+            &identity(),
             "analytics-readonly",
             "SELECT c.id FROM public.customers c INNER JOIN public.orders o ON true ORDER BY c.id",
         )
@@ -218,13 +229,16 @@ async fn forbidden_columns_block_projections_predicates_joins_and_ordering_for_e
             "SELECT id FROM public.customers ORDER BY email",
         ] {
             assert!(
-                matches!(service.query("analytics-readonly", sql).await, Err(Error::Denied)),
+                matches!(
+                    service.query(&identity(), "analytics-readonly", sql).await,
+                    Err(Error::Denied)
+                ),
                 "{sql}"
             );
         }
         assert!(
             service
-                .query("analytics-readonly", "SELECT id FROM public.customers")
+                .query(&identity(), "analytics-readonly", "SELECT id FROM public.customers")
                 .await
                 .is_ok()
         );
@@ -257,7 +271,11 @@ async fn catalog_features_and_unsupported_sql_cannot_expose_hidden_dependencies(
     ] {
         assert!(
             service
-                .query("analytics-readonly", &format!("SELECT id FROM public.{table}"))
+                .query(
+                    &identity(),
+                    "analytics-readonly",
+                    &format!("SELECT id FROM public.{table}")
+                )
                 .await
                 .is_err(),
             "{table}"
@@ -278,7 +296,10 @@ async fn catalog_features_and_unsupported_sql_cannot_expose_hidden_dependencies(
         "SELECT id FROM public.customers; SELECT email FROM public.customers",
         "SELECT id FROM public.customers WHERE id IN (SELECT id FROM public.orders)",
     ] {
-        assert!(service.query("analytics-readonly", sql).await.is_err(), "{sql}");
+        assert!(
+            service.query(&identity(), "analytics-readonly", sql).await.is_err(),
+            "{sql}"
+        );
     }
 }
 
@@ -312,7 +333,7 @@ async fn namespace_replacement_during_authorization_cannot_redirect_the_bound_qu
         let service = service.clone();
         async move {
             service
-                .query("analytics-readonly", "SELECT id FROM public.customers")
+                .query(&identity(), "analytics-readonly", "SELECT id FROM public.customers")
                 .await
         }
     });
@@ -376,7 +397,11 @@ async fn namespace_replacement_before_binding_is_rejected_before_column_authoriz
         let service = service.clone();
         async move {
             service
-                .query("analytics-readonly", "SELECT id FROM public.customers LIMIT 1")
+                .query(
+                    &identity(),
+                    "analytics-readonly",
+                    "SELECT id FROM public.customers LIMIT 1",
+                )
                 .await
         }
     });
@@ -467,7 +492,7 @@ async fn column_ddl_waits_for_the_bound_query_without_a_database_guard() {
         let service = service.clone();
         async move {
             service
-                .query("analytics-readonly", "SELECT id FROM public.customers")
+                .query(&identity(), "analytics-readonly", "SELECT id FROM public.customers")
                 .await
         }
     });
@@ -509,19 +534,27 @@ async fn resource_limits_abort_without_returning_partial_results() {
     let service = fixture.service(Arc::new(Permissions::default())).await;
     assert!(matches!(
         service
-            .query("analytics-readonly", "SELECT id FROM public.many_rows")
+            .query(&identity(), "analytics-readonly", "SELECT id FROM public.many_rows")
             .await,
         Err(Error::Limit)
     ));
     assert!(matches!(
         service
-            .query("analytics-readonly", "SELECT content FROM public.large_rows")
+            .query(
+                &identity(),
+                "analytics-readonly",
+                "SELECT content FROM public.large_rows"
+            )
             .await,
         Err(Error::Limit)
     ));
     assert_eq!(
         service
-            .query("analytics-readonly", "SELECT id FROM public.customers LIMIT 1")
+            .query(
+                &identity(),
+                "analytics-readonly",
+                "SELECT id FROM public.customers LIMIT 1"
+            )
             .await
             .unwrap()
             .rows
@@ -537,14 +570,19 @@ async fn admission_rejects_privileged_roles_and_excess_parameters() {
     let parameters = vec![Parameter::try_from(ParameterInput::Boolean(true)).unwrap(); 33];
     assert!(matches!(
         service
-            .query_with_parameters("analytics-readonly", "SELECT id FROM public.customers", &parameters)
+            .query_with_parameters(
+                &identity(),
+                "analytics-readonly",
+                "SELECT id FROM public.customers",
+                &parameters
+            )
             .await,
         Err(Error::Limit)
     ));
     fixture.admin.execute("ALTER ROLE query_role SUPERUSER").await.unwrap();
     assert!(matches!(
         service
-            .query("analytics-readonly", "SELECT id FROM public.customers")
+            .query(&identity(), "analytics-readonly", "SELECT id FROM public.customers")
             .await,
         Err(Error::UnsupportedObject)
     ));
@@ -556,6 +594,7 @@ async fn boolean_predicates_alias_rejection_and_aggregate_byte_budget() {
     let service = fixture.service(Arc::new(Permissions::default())).await;
     let result = service
         .query(
+            &identity(),
             "analytics-readonly",
             "SELECT id FROM public.customers WHERE (id = 1 OR id = 2) AND active = true ORDER BY id",
         )
@@ -565,6 +604,7 @@ async fn boolean_predicates_alias_rejection_and_aggregate_byte_budget() {
     assert!(matches!(
         service
             .query(
+                &identity(),
                 "analytics-readonly",
                 "SELECT id AS renamed FROM public.customers ORDER BY renamed"
             )
@@ -574,7 +614,11 @@ async fn boolean_predicates_alias_rejection_and_aggregate_byte_budget() {
     sqlx::raw_sql("CREATE TABLE public.aggregate_large (content text); INSERT INTO public.aggregate_large SELECT repeat('x',100000) FROM generate_series(1,11); GRANT SELECT ON public.aggregate_large TO query_role;").execute(&fixture.admin).await.unwrap();
     assert!(matches!(
         service
-            .query("analytics-readonly", "SELECT content FROM public.aggregate_large")
+            .query(
+                &identity(),
+                "analytics-readonly",
+                "SELECT content FROM public.aggregate_large"
+            )
             .await,
         Err(Error::Limit)
     ));
@@ -598,6 +642,7 @@ async fn bound_parameters_keep_sql_looking_text_as_data_and_handle_integer_width
         let parameters = [Parameter::try_from(ParameterInput::Integer(7)).unwrap()];
         let result = service
             .query_with_parameters(
+                &identity(),
                 "analytics-readonly",
                 &format!("SELECT {column} FROM public.widths WHERE {column} = $1"),
                 &parameters,
@@ -609,6 +654,7 @@ async fn bound_parameters_keep_sql_looking_text_as_data_and_handle_integer_width
     let parameters = [Parameter::try_from(ParameterInput::Text("' OR true --".into())).unwrap()];
     let result = service
         .query_with_parameters(
+            &identity(),
             "analytics-readonly",
             "SELECT id FROM public.customers WHERE email = $1",
             &parameters,
@@ -619,6 +665,7 @@ async fn bound_parameters_keep_sql_looking_text_as_data_and_handle_integer_width
     let parameters = [Parameter::try_from(ParameterInput::Boolean(true)).unwrap()];
     let result = service
         .query_with_parameters(
+            &identity(),
             "analytics-readonly",
             "SELECT id FROM public.customers WHERE active = $1",
             &parameters,
@@ -628,7 +675,11 @@ async fn bound_parameters_keep_sql_looking_text_as_data_and_handle_integer_width
     assert_eq!(result.rows, vec![vec![json!(1)]]);
     assert!(
         service
-            .query("analytics-readonly", "SELECT id FROM public.customers WHERE id = $1")
+            .query(
+                &identity(),
+                "analytics-readonly",
+                "SELECT id FROM public.customers WHERE id = $1"
+            )
             .await
             .is_err()
     );
@@ -638,17 +689,8 @@ async fn bound_parameters_keep_sql_looking_text_as_data_and_handle_integer_width
 async fn mcp_client_initializes_discovers_queries_and_cannot_spoof_identity() {
     let fixture = Fixture::new().await;
     let service = fixture.service(Arc::new(Permissions::default())).await;
-    let (client_io, server_io) = tokio::io::duplex(65536);
-    let server_task = tokio::spawn(async move {
-        PostgresMcp::new(service)
-            .serve(server_io)
-            .await
-            .unwrap()
-            .waiting()
-            .await
-            .unwrap();
-    });
-    let client = ().serve(client_io).await.unwrap();
+    let http = common::HttpFixture::new(service).await;
+    let client = http.client().await;
     let tools = client.list_tools(None).await.unwrap();
     assert_eq!(tools.tools.len(), 1);
     assert_eq!(tools.tools[0].name, "query");
@@ -680,10 +722,6 @@ async fn mcp_client_initializes_discovers_queries_and_cannot_spoof_identity() {
     assert_eq!(invalid.is_error, Some(true));
     assert!(!serde_json::to_string(&invalid).unwrap().contains("secret-marker-839"));
     client.cancel().await.unwrap();
-    tokio::time::timeout(Duration::from_secs(3), server_task)
-        .await
-        .unwrap()
-        .unwrap();
 }
 
 #[tokio::test]
@@ -694,17 +732,8 @@ async fn cancelling_an_mcp_request_releases_its_relation_locks() {
         release: Notify::new(),
     });
     let service = fixture.service(gate.clone()).await;
-    let (client_io, server_io) = tokio::io::duplex(65536);
-    let server = tokio::spawn(async move {
-        PostgresMcp::new(service)
-            .serve(server_io)
-            .await
-            .unwrap()
-            .waiting()
-            .await
-            .unwrap();
-    });
-    let client = ().serve(client_io).await.unwrap();
+    let http = common::HttpFixture::new(service).await;
+    let client = http.client().await;
     let params = CallToolRequestParams::new("query").with_arguments(
         json!({"connection":"analytics-readonly","sql":"SELECT id FROM public.customers"})
             .as_object()
@@ -749,10 +778,6 @@ async fn cancelling_an_mcp_request_releases_its_relation_locks() {
     .await
     .unwrap();
     client.cancel().await.unwrap();
-    tokio::time::timeout(Duration::from_secs(3), server)
-        .await
-        .unwrap()
-        .unwrap();
 }
 
 fn spice_request<T>(value: T) -> tonic::Request<T> {
@@ -841,17 +866,8 @@ async fn mcp_spicedb_and_postgres_enforce_hard_column_denial_together() {
             .unwrap(),
     );
     let service = fixture.service(adapter).await;
-    let (client_io, server_io) = tokio::io::duplex(65536);
-    let server = tokio::spawn(async move {
-        PostgresMcp::new(service)
-            .serve(server_io)
-            .await
-            .unwrap()
-            .waiting()
-            .await
-            .unwrap();
-    });
-    let client = ().serve(client_io).await.unwrap();
+    let http = common::HttpFixture::new(service).await;
+    let client = http.client().await;
     let query = |sql: &str| {
         CallToolRequestParams::new("query").with_arguments(
             json!({"connection":"analytics-readonly","sql":sql})
@@ -891,8 +907,100 @@ async fn mcp_spicedb_and_postgres_enforce_hard_column_denial_together() {
         .unwrap();
     assert_ne!(still_allowed.is_error, Some(true));
     client.cancel().await.unwrap();
-    tokio::time::timeout(Duration::from_secs(3), server)
-        .await
-        .unwrap()
-        .unwrap();
+}
+
+fn identity() -> mcp_postgres::RequestIdentity {
+    mcp_postgres::RequestIdentity::new(
+        mcp_postgres::ObjectId::new("example-user".into()).unwrap(),
+        mcp_postgres::ObjectId::new("example-client".into()).unwrap(),
+        Vec::new(),
+    )
+}
+
+struct IsolatedPermissions {
+    concurrent_admissions: tokio::sync::Barrier,
+    admitted: Mutex<BTreeSet<(String, String)>>,
+}
+
+#[async_trait]
+impl PermissionCheck for IsolatedPermissions {
+    async fn check_all(&self, requests: &[PermissionRequest]) -> Result<(), Error> {
+        for request in requests {
+            let allowed = match request.subject_kind {
+                "sql_user" => matches!(request.subject.as_str(), "alice" | "bob"),
+                "sql_client" => matches!(request.subject.as_str(), "desktop-a" | "desktop-b"),
+                _ => false,
+            };
+            if !allowed {
+                return Err(Error::Denied);
+            }
+        }
+        if requests.len() > 1 {
+            let subjects = |kind| {
+                requests
+                    .iter()
+                    .filter(|request| request.subject_kind == kind)
+                    .map(|request| request.subject.as_str())
+                    .collect::<BTreeSet<_>>()
+            };
+            let users = subjects("sql_user");
+            let clients = subjects("sql_client");
+            assert_eq!(users.len(), 1);
+            assert_eq!(clients.len(), 1);
+            let pair = (
+                (*users.first().unwrap()).to_owned(),
+                (*clients.first().unwrap()).to_owned(),
+            );
+            if !matches!(
+                (pair.0.as_str(), pair.1.as_str()),
+                ("alice", "desktop-a") | ("bob", "desktop-b")
+            ) {
+                return Err(Error::Denied);
+            }
+            self.concurrent_admissions.wait().await;
+            self.admitted.lock().unwrap().insert(pair);
+        }
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn shared_service_isolates_concurrent_request_identities_and_denies_ungranted_subjects() {
+    let fixture = Fixture::new().await;
+    let permissions = Arc::new(IsolatedPermissions {
+        concurrent_admissions: tokio::sync::Barrier::new(2),
+        admitted: Mutex::new(BTreeSet::new()),
+    });
+    let service = fixture.service(permissions.clone()).await;
+    let principal = |user: &str, client: &str| {
+        mcp_postgres::RequestIdentity::new(
+            mcp_postgres::ObjectId::new(user.into()).unwrap(),
+            mcp_postgres::ObjectId::new(client.into()).unwrap(),
+            vec![mcp_postgres::ObjectId::new("prior-actor".into()).unwrap()],
+        )
+    };
+    let alice = principal("alice", "desktop-a");
+    let bob = principal("bob", "desktop-b");
+    assert_eq!(alice.delegation()[0].as_str(), "prior-actor");
+    let sql = "SELECT id FROM public.customers ORDER BY id LIMIT 1";
+    let (alice_result, bob_result) = tokio::join!(
+        service.query(&alice, "analytics-readonly", sql),
+        service.query(&bob, "analytics-readonly", sql),
+    );
+    assert_eq!(alice_result.unwrap().rows, vec![vec![json!(1)]]);
+    assert_eq!(bob_result.unwrap().rows, vec![vec![json!(1)]]);
+    assert_eq!(
+        *permissions.admitted.lock().unwrap(),
+        BTreeSet::from([("alice".into(), "desktop-a".into()), ("bob".into(), "desktop-b".into())])
+    );
+    for denied in [
+        principal("eve", "desktop-a"),
+        principal("alice", "ungranted-client"),
+        principal("alice", "desktop-b"),
+    ] {
+        assert!(matches!(
+            service.query(&denied, "analytics-readonly", sql).await,
+            Err(Error::Denied)
+        ));
+    }
 }
