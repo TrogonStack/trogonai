@@ -1,5 +1,3 @@
-user = "example-user"
-client = "example-client"
 spicedb_endpoint = "http://127.0.0.1:50051"
 spicedb_token_env = "MCP_POSTGRES_SPICEDB_TOKEN"
 
@@ -7,3 +5,24 @@ spicedb_token_env = "MCP_POSTGRES_SPICEDB_TOKEN"
 name = "analytics-readonly"
 id = "analytics-local-v1"
 dsn_env = "MCP_POSTGRES_ANALYTICS_DSN"
+
+[http]
+bind = "0.0.0.0:8080"
+resource_url = "https://sql.example.com/mcp"
+allowed_origins = ["https://admin.example.com"]
+
+[[authentication.issuers]]
+issuer = "https://identity.example.com"
+jwks_uri = "https://identity.example.com/.well-known/jwks.json"
+audience = "https://sql.example.com/mcp"
+user_claim = "sub"
+client_claim = "client_id"
+scope_claim = "scope"
+required_scopes = ["sql:query"]
+delegation = "optional"
+
+[authentication.issuers.users]
+"external-user-id" = "example-user"
+
+[authentication.issuers.clients]
+"external-client-id" = "example-client"

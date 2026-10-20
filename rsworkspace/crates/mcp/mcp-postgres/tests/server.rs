@@ -1,7 +1,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod common;
 use async_trait::async_trait;
-use mcp_postgres::{ConfigInput, Error, PermissionCheck, PermissionRequest, PostgresMcp, QueryService, RuntimeConfig};
-use rmcp::{ServiceExt, model::CallToolRequestParams};
+use mcp_postgres::{ConfigInput, Error, PermissionCheck, PermissionRequest, QueryService, RuntimeConfig};
+use rmcp::model::CallToolRequestParams;
 use serde_json::json;
 use std::sync::{Arc, Mutex};
 use testcontainers_modules::{
@@ -76,17 +77,134 @@ async fn mcp_errors_are_safe_and_audits_exclude_sql_parameters_and_rows() {
             .with_filter(tracing_subscriber::filter::Targets::new().with_target("mcp_postgres", tracing::Level::INFO)),
     );
     let _guard = tracing::subscriber::set_default(subscriber);
-    let (client_io, server_io) = tokio::io::duplex(65536);
-    let server = tokio::spawn(async move {
-        PostgresMcp::new(service)
-            .serve(server_io)
-            .await
+    let http = common::HttpFixture::with_origins(service, &["https://portal.example.test"]).await;
+    let http_client = reqwest::Client::new();
+    let preflight = http_client
+        .request(reqwest::Method::OPTIONS, &http.url)
+        .header("Origin", "https://portal.example.test")
+        .header("Access-Control-Request-Method", "POST")
+        .header(
+            "Access-Control-Request-Headers",
+            "authorization,content-type,mcp-protocol-version",
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(preflight.status(), reqwest::StatusCode::OK);
+    assert_eq!(
+        preflight.headers()["access-control-allow-origin"],
+        "https://portal.example.test"
+    );
+    assert!(
+        preflight.headers()["access-control-allow-headers"]
+            .to_str()
             .unwrap()
-            .waiting()
+            .contains("authorization")
+    );
+    let allowed_origin = http_client
+        .post(&http.url)
+        .header("Origin", "https://portal.example.test")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(allowed_origin.status(), reqwest::StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        allowed_origin.headers()["access-control-allow-origin"],
+        "https://portal.example.test"
+    );
+    assert!(
+        allowed_origin.headers()["access-control-expose-headers"]
+            .to_str()
+            .unwrap()
+            .contains("www-authenticate")
+    );
+    let missing = http_client.post(&http.url).send().await.unwrap();
+    assert_eq!(missing.status(), reqwest::StatusCode::UNAUTHORIZED);
+    assert!(
+        missing.headers()["www-authenticate"]
+            .to_str()
+            .unwrap()
+            .contains("/.well-known/oauth-protected-resource/mcp")
+    );
+    for authorization in ["Basic example", "Bearer", "Bearer bad token", "Bearer invalid"] {
+        let denied = http_client
+            .post(&http.url)
+            .header("Authorization", authorization)
+            .send()
             .await
             .unwrap();
-    });
-    let client = ().serve(client_io).await.unwrap();
+        assert_eq!(denied.status(), reqwest::StatusCode::UNAUTHORIZED);
+    }
+    let duplicate = http_client
+        .post(&http.url)
+        .header("Authorization", format!("Bearer {}", http.issuer.token()))
+        .header("Authorization", format!("Bearer {}", http.issuer.token()))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(duplicate.status(), reqwest::StatusCode::UNAUTHORIZED);
+    let mut claims = http.issuer.claims();
+    claims["scope"] = json!("unrelated");
+    let insufficient = http_client
+        .post(&http.url)
+        .bearer_auth(http.issuer.token_with_claims(claims))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(insufficient.status(), reqwest::StatusCode::FORBIDDEN);
+    assert!(
+        insufficient.headers()["www-authenticate"]
+            .to_str()
+            .unwrap()
+            .contains("error=\"insufficient_scope\"")
+    );
+    let blocked_origin = http_client
+        .post(&http.url)
+        .bearer_auth(http.issuer.token())
+        .header("Origin", "https://untrusted.example.test")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(blocked_origin.status(), reqwest::StatusCode::FORBIDDEN);
+    let blocked_port = http_client
+        .post(&http.url)
+        .bearer_auth(http.issuer.token())
+        .header("Origin", "https://portal.example.test:8443")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(blocked_port.status(), reqwest::StatusCode::FORBIDDEN);
+    let blocked_host = http_client
+        .post(&http.url)
+        .bearer_auth(http.issuer.token())
+        .header("Host", "untrusted.example.test")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(blocked_host.status(), reqwest::StatusCode::FORBIDDEN);
+    let oversized = http_client
+        .post(&http.url)
+        .bearer_auth(http.issuer.token())
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json, text/event-stream")
+        .body("x".repeat(131_073))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(oversized.status(), reqwest::StatusCode::PAYLOAD_TOO_LARGE);
+    let metadata_url = http.url.replace("/mcp", "/.well-known/oauth-protected-resource/mcp");
+    let metadata: serde_json::Value = http_client
+        .get(metadata_url)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(metadata["resource"], http.url);
+    assert_eq!(metadata["authorization_servers"], json!([http.issuer.issuer]));
+    assert_eq!(metadata["bearer_methods_supported"], json!(["header"]));
+    let client = http.client().await;
     assert!(client.call_tool(CallToolRequestParams::new("missing")).await.is_err());
     for (connection, failure, expected) in [
         ("missing", None, "unknown connection"),
@@ -115,9 +233,28 @@ async fn mcp_errors_are_safe_and_audits_exclude_sql_parameters_and_rows() {
     assert_eq!(result["columns"], json!(["email"]));
     assert_eq!(result["rows"], json!([["private-row@example.test"]]));
     client.cancel().await.unwrap();
-    server.await.unwrap();
+    let bearer_token = http.token.clone();
+    http.issuer.stop().await;
+    let unavailable_token = http.issuer.token_with_key_id(http.issuer.claims(), "rotated-key");
+    let unavailable = http_client
+        .post(&http.url)
+        .bearer_auth(unavailable_token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(unavailable.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+    assert!(unavailable.headers().get("www-authenticate").is_none());
     let output = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
-    assert_audit_output(&output, &["SELECT", "private-row@example.test", "private-token", &dsn]);
+    assert_audit_output(
+        &output,
+        &[
+            "SELECT",
+            "private-row@example.test",
+            "private-token",
+            &dsn,
+            &bearer_token,
+        ],
+    );
 }
 
 fn assert_audit_output(output: &str, forbidden: &[&str]) {

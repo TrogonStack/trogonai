@@ -1,4 +1,4 @@
-use crate::{Error, ObjectId, Resource};
+use crate::{Error, ObjectId, RequestIdentity, Resource};
 use std::{collections::BTreeSet, time::Instant};
 
 #[derive(Debug)]
@@ -20,12 +20,15 @@ pub(crate) struct QueryAudit<'a> {
     outcome: QueryOutcome,
 }
 impl<'a> QueryAudit<'a> {
-    pub(crate) fn start(user: &'a ObjectId, client: &'a ObjectId, connection: Option<&'a ObjectId>) -> Self {
+    pub(crate) fn start(identity: &'a RequestIdentity, connection: Option<&'a ObjectId>) -> Self {
+        let user = identity.user();
+        let client = identity.client();
         {
             let user = user.as_str();
             let client = client.as_str();
             let connection = connection.map(ObjectId::as_str);
-            tracing::info!(event = "sql_query_admission", user, client, connection);
+            let delegation: Vec<_> = identity.delegation().iter().map(ObjectId::as_str).collect();
+            tracing::info!(event = "sql_query_admission", user, client, connection, delegation = ?delegation);
         }
         Self {
             user,

@@ -9,7 +9,7 @@ fn rejects_duplicate_connection_names_and_ids() -> Result<(), Box<dyn std::error
         "[{name='a',id='one',dsn_env='DSN'},{name='b',id='one',dsn_env='DSN'}]",
     ] {
         let input: ConfigInput = toml::from_str(&format!(
-            "user='alice'\nclient='desktop'\nspicedb_endpoint='http://localhost:50051'\nspicedb_token_env='TOKEN'\nconnections={connections}"
+            "spicedb_endpoint='http://localhost:50051'\nspicedb_token_env='TOKEN'\nconnections={connections}"
         ))?;
         assert!(
             RuntimeConfig::from_input(input, |key| Some(
@@ -29,6 +29,9 @@ fn rejects_duplicate_connection_names_and_ids() -> Result<(), Box<dyn std::error
 fn unknown_settings_fail_closed() {
     let valid = include_str!("../examples/config.toml");
     assert!(toml::from_str::<ConfigInput>(valid).is_ok());
+    for field in ["user", "client"] {
+        assert!(toml::from_str::<ConfigInput>(&format!("{field}=\"legacy-identity\"\n{valid}")).is_err());
+    }
     assert!(toml::from_str::<ConfigInput>(&format!("permissions_disabled=true\n{valid}")).is_err());
 }
 
@@ -93,15 +96,9 @@ fn secrets_and_remote_transport_settings_are_validated_at_the_boundary() -> Resu
 #[test]
 fn authorization_ids_reject_dots_at_configuration_boundary() -> Result<(), Box<dyn std::error::Error>> {
     assert!(ObjectId::new("invalid.id".into()).is_err());
-    for field in ["user", "client", "connection"] {
-        let mut input: ConfigInput = toml::from_str(include_str!("../examples/config.toml"))?;
-        match field {
-            "user" => input.user = "invalid.id".into(),
-            "client" => input.client = "invalid.id".into(),
-            _ => input.connections[0].id = "invalid.id".into(),
-        }
-        assert!(RuntimeConfig::from_input(input, config_environment).is_err(), "{field}");
-    }
+    let mut input: ConfigInput = toml::from_str(include_str!("../examples/config.toml"))?;
+    input.connections[0].id = "invalid.id".into();
+    assert!(RuntimeConfig::from_input(input, config_environment).is_err());
     Ok(())
 }
 

@@ -1,7 +1,8 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
-use mcp_postgres::{ConfigInput, PostgresMcp, QueryService, RuntimeConfig, SpiceDb};
-use rmcp::ServiceExt;
+use mcp_postgres::{
+    Authenticator, ConfigInput, HttpTransportConfig, QueryService, RuntimeConfig, SpiceDb, http_router,
+};
 use std::{process::ExitCode, sync::Arc};
 use tracing_subscriber::{Layer, layer::SubscriberExt, util::SubscriberInitExt};
 use trogon_std::env::{ReadEnv, SystemEnv};
@@ -29,12 +30,30 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     if args.next().is_some() {
         return Err(mcp_postgres::Error::Configuration.into());
     }
-    let input: ConfigInput = toml::from_str(&std::fs::read_to_string(path)?)?;
+    let mut input: ConfigInput = toml::from_str(&std::fs::read_to_string(path)?)?;
+    let http = HttpTransportConfig::new(input.http.take().ok_or(mcp_postgres::Error::Configuration)?)?;
+    let authentication =
+        Arc::new(Authenticator::new(input.authentication.take().ok_or(mcp_postgres::Error::Configuration)?).await?);
+    let address = http.bind();
     let config = RuntimeConfig::from_input(input, |key| SystemEnv.var(key).ok())?;
     let permissions =
         Arc::new(SpiceDb::connect(config.spicedb_endpoint().into(), config.spicedb_token().into()).await?);
     let service = QueryService::connect(config, permissions).await?;
-    let server = PostgresMcp::new(service).serve(rmcp::transport::stdio()).await?;
-    server.waiting().await?;
+    let app = http_router(service, authentication, http);
+    #[cfg(unix)]
+    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    #[cfg(unix)]
+    let shutdown = async move {
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {},
+            _ = terminate.recv() => {},
+        }
+    };
+    #[cfg(not(unix))]
+    let shutdown = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    let listener = tokio::net::TcpListener::bind(address).await?;
+    axum::serve(listener, app).with_graceful_shutdown(shutdown).await?;
     Ok(())
 }
