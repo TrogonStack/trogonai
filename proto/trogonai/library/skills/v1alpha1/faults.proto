@@ -1,0 +1,58 @@
+edition = "2024";
+
+package trogonai.library.skills.v1alpha1;
+
+import "trogon/error/v1alpha1/options.proto";
+
+// Schema-only templates for the library.skills module's DeciderService
+// refusals. These messages are never encoded.
+
+message SkillCommandInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "library.skills"
+    reason: "SKILL_COMMAND_INVALID"
+    message: "The command violates the skill contract."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message SkillNotRegisteredError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "library.skills"
+    reason: "SKILL_NOT_REGISTERED"
+    message: "The skill must be registered before this command."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message SkillAlreadyRegisteredError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "library.skills"
+    reason: "SKILL_ALREADY_REGISTERED"
+    message: "The skill has already been registered."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message SkillVersionAlreadyExistsError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "library.skills"
+    reason: "SKILL_VERSION_ALREADY_EXISTS"
+    message: "The skill already has this version."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message SkillArchivedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "library.skills"
+    reason: "SKILL_ARCHIVED"
+    message: "The skill is archived and accepts no new versions."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}

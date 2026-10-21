@@ -1,0 +1,38 @@
+edition = "2024";
+
+package trogonai.evaluation.rubrics.v1alpha1;
+
+import "trogon/error/v1alpha1/options.proto";
+
+// Schema-only templates for the evaluation.rubrics module's DeciderService
+// refusals. These messages are never encoded.
+
+message RubricCommandInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "evaluation.rubrics"
+    reason: "RUBRIC_COMMAND_INVALID"
+    message: "The command violates the rubric contract."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message RubricAlreadyRegisteredError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "evaluation.rubrics"
+    reason: "RUBRIC_ALREADY_REGISTERED"
+    message: "The rubric has already been registered."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message RubricNotFoundError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "evaluation.rubrics"
+    reason: "RUBRIC_NOT_FOUND"
+    message: "The rubric has not been registered."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}

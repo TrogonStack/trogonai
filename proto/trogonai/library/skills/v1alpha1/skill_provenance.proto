@@ -1,0 +1,18 @@
+edition = "2024";
+
+package trogonai.library.skills.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/agents/agents/v1alpha1/identity.proto";
+
+// Origin fields are references, never copied configuration.
+message SkillProvenance {
+  oneof origin {
+    option (buf.validate.oneof).required = true;
+
+    // Proposal that promoted this version.
+    string promoted_by_proposal_id = 1 [(buf.validate.field).string.min_len = 1];
+    // Agent that authored this version directly.
+    trogonai.agents.agents.v1alpha1.AgentId authored_by = 2;
+  }
+}

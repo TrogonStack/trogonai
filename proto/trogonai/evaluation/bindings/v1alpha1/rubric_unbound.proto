@@ -1,0 +1,14 @@
+edition = "2024";
+
+package trogonai.evaluation.bindings.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// Results recorded before the unbind remain valid evidence. An already unbound
+// history emits no second unbind.
+message RubricUnbound {
+  string binding_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}

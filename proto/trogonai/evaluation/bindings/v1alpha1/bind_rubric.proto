@@ -1,0 +1,13 @@
+edition = "2024";
+
+package trogonai.evaluation.bindings.v1alpha1;
+
+import "trogonai/evaluation/bindings/v1alpha1/binding.proto";
+
+// Dispatch verifies the rubric is registered and that the judge differs from
+// the subject. NoStream creation requires a nonempty Decider command_id and no
+// expected_revision; retries preserve the id. An already-bound binding_id is
+// rejected, never replaced.
+message BindRubric {
+  EvaluationBinding binding = 1 [features.field_presence = LEGACY_REQUIRED];
+}

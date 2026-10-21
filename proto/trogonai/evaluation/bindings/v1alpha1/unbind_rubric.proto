@@ -1,0 +1,15 @@
+edition = "2024";
+
+package trogonai.evaluation.bindings.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// Ends the binding without erasing recorded results. Dispatch requires the
+// original positive expected_revision; an already unbound binding succeeds
+// without an event after that concurrency check.
+message UnbindRubric {
+  string binding_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}

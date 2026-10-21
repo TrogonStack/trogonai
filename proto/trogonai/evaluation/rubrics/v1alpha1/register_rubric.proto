@@ -1,0 +1,12 @@
+edition = "2024";
+
+package trogonai.evaluation.rubrics.v1alpha1;
+
+import "trogonai/evaluation/rubrics/v1alpha1/rubric.proto";
+
+// Registers an immutable rubric. NoStream creation requires a nonempty Decider
+// command_id and no expected_revision; retries preserve the id. An
+// already-registered rubric is rejected, never overwritten.
+message RegisterRubric {
+  Rubric rubric = 1 [features.field_presence = LEGACY_REQUIRED];
+}

@@ -1,0 +1,26 @@
+edition = "2024";
+
+package trogonai.library.memories.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// Marks an entry as replaced by another entry of the same scope and kind.
+// Dispatch requires the original positive expected_revision; an entry already
+// superseded by the same successor succeeds without an event after that
+// concurrency check.
+message SupersedeMemory {
+  option (buf.validate.message).cel = {
+    id: "supersede_memory.successor_distinct"
+    message: "an entry cannot supersede itself"
+    expression: "this.memory_id != this.superseded_by"
+  };
+
+  string memory_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string superseded_by = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}

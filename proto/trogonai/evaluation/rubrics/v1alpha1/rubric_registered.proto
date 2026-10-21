@@ -1,0 +1,11 @@
+edition = "2024";
+
+package trogonai.evaluation.rubrics.v1alpha1;
+
+import "trogonai/evaluation/rubrics/v1alpha1/rubric.proto";
+
+// The rubric and its criteria digest are immutable receipt evidence; a changed
+// rubric is a new rubric_id.
+message RubricRegistered {
+  Rubric rubric = 1 [features.field_presence = LEGACY_REQUIRED];
+}

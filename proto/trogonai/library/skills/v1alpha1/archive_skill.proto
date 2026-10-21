@@ -1,0 +1,15 @@
+edition = "2024";
+
+package trogonai.library.skills.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// Archiving stops new pins; revisions that already pin a version keep resolving
+// it. Dispatch requires the original positive expected_revision; an already
+// archived skill succeeds without an event after that concurrency check.
+message ArchiveSkill {
+  string skill_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}

@@ -1,0 +1,48 @@
+edition = "2024";
+
+package trogonai.session.sessions.queries.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/session/sessions/queries/v1alpha1/contract_version.proto";
+import "trogonai/session/sessions/queries/v1alpha1/projection_freshness.proto";
+import "trogonai/session/sessions/queries/v1alpha1/read_consistency.proto";
+import "trogonai/session/sessions/queries/v1alpha1/run_history_item.proto";
+
+// GetRunHistoryRequest reads one page of the run histories of a comparison.
+//
+// A comparison groups candidate runs for one reader. Labels are assigned per
+// comparison, so the same candidate carries different labels in different
+// comparisons and a label reveals nothing about overlay identity or origin.
+// The label-to-session mapping is not exposed by this query.
+message GetRunHistoryRequest {
+  string comparison_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ContractVersion accepted_contract = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Unset reads every candidate in the comparison.
+  string candidate = 3 [(buf.validate.field).string.min_len = 1];
+  uint32 page_size = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Opaque continuation from a prior response, a serialized CursorEnvelope.
+  // Unset starts a new scan.
+  bytes page_token = 5;
+  // Freshness the caller requires. Honored when the scan opens and ignored on
+  // a continuation.
+  ReadConsistency consistency = 6;
+}
+
+// GetRunHistoryResponse is one page of run history items.
+message GetRunHistoryResponse {
+  ContractNegotiation contract = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated RunHistoryItem items = 2;
+  // Unset when the scan is exhausted. Presence, not an empty `items` list, is
+  // the end signal.
+  bytes next_page_token = 3;
+  // Items rendered as RUN_HISTORY_ITEM_KIND_ELIDED because they need a variant
+  // newer than the caller's contract minor.
+  uint32 contract_clamped_count = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Items whose content was withheld by redaction or authorization.
+  uint32 withheld_count = 5 [features.field_presence = LEGACY_REQUIRED];
+  // How current the read model was when the scan opened. Equal on every page.
+  ProjectionFreshness freshness = 6 [features.field_presence = LEGACY_REQUIRED];
+}

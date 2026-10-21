@@ -1,0 +1,25 @@
+edition = "2024";
+
+package trogonai.library.memories.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogon/hierarchy/v1alpha1/node.proto";
+import "trogonai/library/memories/v1alpha1/claim_check.proto";
+import "trogonai/library/memories/v1alpha1/memory_kind.proto";
+import "trogonai/library/memories/v1alpha1/memory_provenance.proto";
+
+// Writes never mint agent revisions (ADR#0025). Entries are appended and
+// superseded, never edited. Entries are keyed by scope node plus kind.
+// Resolution order across an agent's node and its ancestors is a runtime
+// decision, not defined here. NoStream creation requires a nonempty Decider
+// command_id and no expected_revision; retries preserve the id.
+message WriteMemory {
+  string memory_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  trogon.hierarchy.v1alpha1.NodeId scope = 2 [features.field_presence = LEGACY_REQUIRED];
+  MemoryKind kind = 3 [features.field_presence = LEGACY_REQUIRED];
+  ClaimCheck content = 4 [features.field_presence = LEGACY_REQUIRED];
+  MemoryProvenance provenance = 5 [features.field_presence = LEGACY_REQUIRED];
+}

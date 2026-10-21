@@ -5,6 +5,7 @@ package trogonai.agents.agents.v1alpha1;
 import "buf/validate/validate.proto";
 import "google/protobuf/any.proto";
 import "trogonai/agents/agents/v1alpha1/digest.proto";
+import "trogonai/agents/agents/v1alpha1/editable_surface.proto";
 import "trogonai/agents/agents/v1alpha1/model_selection.proto";
 
 message PlatformHarnessVersionRef {
@@ -70,4 +71,7 @@ message AgentImplementation {
     RegisteredExtensionVersionRef registered_extension = 2;
   }
   Digest definition_digest = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Absent means nothing is editable by a session-scoped overlay. Committed by
+  // definition_digest.
+  EditableSurface editable_surface = 4;
 }

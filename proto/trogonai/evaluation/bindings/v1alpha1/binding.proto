@@ -1,0 +1,25 @@
+edition = "2024";
+
+package trogonai.evaluation.bindings.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/agents/agents/v1alpha1/identity.proto";
+import "trogonai/policy/subjects/v1alpha1/subject.proto";
+
+// Attaches a rubric to a subject for evaluation purposes. The judge is a
+// distinct principal from every agent it evaluates: a judge that is the subject
+// Agent, or an Agent under the subject node, is rejected (ADR#0024). Bindings
+// never enter agent or proposal streams, and are never readable through agent
+// or session queries.
+message EvaluationBinding {
+  string binding_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string rubric_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  trogonai.policy.subjects.v1alpha1.PolicySubject subject = 3 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.agents.v1alpha1.AgentId judge = 4 [features.field_presence = LEGACY_REQUIRED];
+}

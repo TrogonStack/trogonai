@@ -13,6 +13,8 @@ inputs:
     exclude_paths:
       - proto/trogonai/agents
       - proto/trogonai/catalog
+      - proto/trogonai/evaluation
+      - proto/trogonai/library
       - proto/trogonai/policy
       - proto/trogonai/projects
       - proto/trogonai/session

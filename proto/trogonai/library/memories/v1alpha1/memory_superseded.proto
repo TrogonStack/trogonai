@@ -1,0 +1,18 @@
+edition = "2024";
+
+package trogonai.library.memories.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// The superseded entry stays in history; resolution simply prefers its
+// successor. An already superseded entry emits no second supersession.
+message MemorySuperseded {
+  string memory_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string superseded_by = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}

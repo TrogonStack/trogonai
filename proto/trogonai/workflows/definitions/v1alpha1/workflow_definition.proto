@@ -166,6 +166,10 @@ message AgentStep {
   RetryPolicy retry = 3 [features.field_presence = LEGACY_REQUIRED];
   RegisteredValue result_capture = 4;
   Condition acceptance = 5;
+  // Present means the step runs the base revision with this overlay applied.
+  // The reference must resolve to a registered value whose contract is
+  // CandidateOverlay, and the overlay's base_revision must equal agent_revision.
+  ValueReference candidate_overlay = 6;
 }
 
 // Children start in declaration order after the previous child is accepted.
