@@ -1,0 +1,16 @@
+edition = "2024";
+
+package trogonai.agents.candidates.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/agents/candidates/v1alpha1/candidate_recorded.proto";
+
+// An unset or unknown event rejects replay; skipping a recording could let a
+// pinned CandidateRef resolve to nothing.
+message CandidateEvent {
+  oneof event {
+    option (buf.validate.oneof).required = true;
+
+    CandidateRecorded candidate_recorded = 1;
+  }
+}

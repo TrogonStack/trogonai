@@ -2,9 +2,9 @@ edition = "2024";
 
 package trogonai.library.memories.v1alpha1;
 
-import "buf/validate/validate.proto";
 import "trogon/hierarchy/v1alpha1/node.proto";
 import "trogonai/library/memories/v1alpha1/claim_check.proto";
+import "trogonai/library/memories/v1alpha1/memory_id.proto";
 import "trogonai/library/memories/v1alpha1/memory_kind.proto";
 import "trogonai/library/memories/v1alpha1/memory_provenance.proto";
 
@@ -14,12 +14,9 @@ import "trogonai/library/memories/v1alpha1/memory_provenance.proto";
 // decision, not defined here. NoStream creation requires a nonempty Decider
 // command_id and no expected_revision; retries preserve the id.
 message WriteMemory {
-  string memory_id = 1 [
-    features.field_presence = LEGACY_REQUIRED,
-    (buf.validate.field).string.min_len = 1
-  ];
+  MemoryId memory_id = 1 [features.field_presence = LEGACY_REQUIRED];
   trogon.hierarchy.v1alpha1.NodeId scope = 2 [features.field_presence = LEGACY_REQUIRED];
   MemoryKind kind = 3 [features.field_presence = LEGACY_REQUIRED];
-  ClaimCheck content = 4 [features.field_presence = LEGACY_REQUIRED];
+  ClaimCheck content_ref = 4 [features.field_presence = LEGACY_REQUIRED];
   MemoryProvenance provenance = 5 [features.field_presence = LEGACY_REQUIRED];
 }

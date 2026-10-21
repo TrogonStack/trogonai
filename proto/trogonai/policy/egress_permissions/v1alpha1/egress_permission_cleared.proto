@@ -1,0 +1,11 @@
+edition = "2024";
+
+package trogonai.policy.egress_permissions.v1alpha1;
+
+import "trogonai/policy/subjects/v1alpha1/subject.proto";
+
+// Removes the permission, never the identity. An already cleared history emits
+// no second clear.
+message EgressPermissionCleared {
+  trogonai.policy.subjects.v1alpha1.PolicySubject subject = 1 [features.field_presence = LEGACY_REQUIRED];
+}

@@ -1,0 +1,20 @@
+edition = "2024";
+
+package trogonai.policy.egress_permissions.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/policy/egress_permissions/v1alpha1/egress_permission_cleared.proto";
+import "trogonai/policy/egress_permissions/v1alpha1/egress_permission_initialized.proto";
+import "trogonai/policy/egress_permissions/v1alpha1/egress_permission_set.proto";
+
+// An unset or unknown event rejects replay; skipping a permission change could
+// admit a connection the current permission forbids, or refuse one it allows.
+message EgressPermissionEvent {
+  oneof event {
+    option (buf.validate.oneof).required = true;
+
+    EgressPermissionInitialized egress_permission_initialized = 1;
+    EgressPermissionSet egress_permission_set = 2;
+    EgressPermissionCleared egress_permission_cleared = 3;
+  }
+}

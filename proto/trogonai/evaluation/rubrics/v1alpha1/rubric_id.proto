@@ -1,0 +1,13 @@
+edition = "2024";
+
+package trogonai.evaluation.rubrics.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// RubricId is the identity of one rubric stream.
+message RubricId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}

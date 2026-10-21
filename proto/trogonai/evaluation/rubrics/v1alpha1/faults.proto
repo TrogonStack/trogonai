@@ -36,3 +36,23 @@ message RubricNotFoundError {
     visibility: VISIBILITY_PUBLIC
   };
 }
+
+message RubricVersionAlreadyExistsError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "evaluation.rubrics"
+    reason: "RUBRIC_VERSION_ALREADY_EXISTS"
+    message: "The rubric already has this version."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message RubricRetiredError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "evaluation.rubrics"
+    reason: "RUBRIC_RETIRED"
+    message: "The rubric is retired and accepts no new versions."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}

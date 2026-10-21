@@ -3,18 +3,16 @@ edition = "2024";
 package trogonai.session.sessions.queries.v1alpha1;
 
 import "buf/validate/validate.proto";
+import "trogonai/session/sessions/queries/v1alpha1/candidate_label.proto";
 import "trogonai/session/sessions/queries/v1alpha1/history_item.proto";
 
 // RunHistoryItem is one entry of a run history, redefined rather than shared
 // with HistoryItem. It carries no score, rubric, verdict, evaluation result,
-// overlay identity or session id. Artifacts are referenced by id so large
+// candidate identity or session id. Artifacts are referenced by id so large
 // traces are fetched on demand.
 message RunHistoryItem {
   // The label assigned within one comparison.
-  string candidate = 1 [
-    features.field_presence = LEGACY_REQUIRED,
-    (buf.validate.field).string.min_len = 1
-  ];
+  CandidateLabel candidate_label = 1 [features.field_presence = LEGACY_REQUIRED];
   // The run's own 1-indexed position for this item.
   uint64 ordinal = 2 [
     features.field_presence = LEGACY_REQUIRED,

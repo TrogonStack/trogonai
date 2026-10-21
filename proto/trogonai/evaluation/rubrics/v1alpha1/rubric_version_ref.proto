@@ -1,0 +1,16 @@
+edition = "2024";
+
+package trogonai.evaluation.rubrics.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/evaluation/rubrics/v1alpha1/rubric_id.proto";
+
+// A typed pointer to one immutable version of a rubric. The version is an exact
+// identifier: empty values and moving aliases are invalid.
+message RubricVersionRef {
+  RubricId rubric_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string version = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}

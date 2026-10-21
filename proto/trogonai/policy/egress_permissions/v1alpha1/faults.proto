@@ -1,0 +1,49 @@
+edition = "2024";
+
+package trogonai.policy.egress_permissions.v1alpha1;
+
+import "trogon/error/v1alpha1/options.proto";
+
+// Schema-only templates for the policy.egress_permissions module's
+// DeciderService refusals. These messages are never encoded. Administration
+// authorization and egress admission keep their own failure
+// contracts; this fold only owns permission mutations.
+message EgressPermissionCommandInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "policy.egress_permissions"
+    reason: "EGRESS_PERMISSION_COMMAND_INVALID"
+    message: "The command violates the egress permission policy contract."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message EgressPermissionNotInitializedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "policy.egress_permissions"
+    reason: "EGRESS_PERMISSION_NOT_INITIALIZED"
+    message: "The egress permission history must be initialized before this command."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message EgressPermissionAlreadyInitializedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "policy.egress_permissions"
+    reason: "EGRESS_PERMISSION_ALREADY_INITIALIZED"
+    message: "The egress permission history has already been initialized."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message EgressPermissionSubjectMismatchError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "policy.egress_permissions"
+    reason: "EGRESS_PERMISSION_SUBJECT_MISMATCH"
+    message: "The command names a different subject from this egress permission history."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}

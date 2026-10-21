@@ -3,9 +3,9 @@ edition = "2024";
 package trogonai.session.sessions.v1alpha1;
 
 import "buf/validate/validate.proto";
+import "trogonai/session/sessions/v1alpha1/candidate_ref.proto";
 import "trogonai/session/sessions/v1alpha1/checkout.proto";
 import "trogonai/session/sessions/v1alpha1/execution_plan.proto";
-import "trogonai/session/sessions/v1alpha1/overlay_attestation.proto";
 
 // SessionStarted is the creation fact for a session's logical stream and stores
 // the immutable StoredSessionExecutionPlan exactly once (ADR#0031 §6). The
@@ -26,6 +26,9 @@ message SessionStarted {
   // directory; this field is the projection surface, the plan stays
   // authoritative.
   CheckoutRef checkout_ref = 3 [features.field_presence = LEGACY_REQUIRED];
-  // Absent means the session ran the registered revision unchanged.
-  OverlayAttestation overlay = 4;
+  // Candidate this session ran, carried inline so candidate-scoped reads never
+  // decode plan_bytes. It must agree with the candidate pinned in the plan;
+  // this field is the projection surface, the plan stays authoritative. Absent
+  // means the registered revision ran unchanged.
+  CandidateRef candidate_ref = 4;
 }

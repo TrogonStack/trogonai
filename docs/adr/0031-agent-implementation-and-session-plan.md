@@ -217,6 +217,7 @@ Before a Session becomes runnable, create one SessionExecutionPlan:
     SessionExecutionPlan
       session_id
       agent_revision_ref
+      candidate_ref, when the Session runs a recorded candidate (ADR#0072)
       agent_configuration_ref + configuration_digest
       agent_implementation_version_ref + definition_digest
       runtime_settings_type + runtime_settings_digest
@@ -816,6 +817,7 @@ configuration does not establish support for every execution mode.
 | Runtime model settings and derived managed-model selections | No within a revision | Proposal and new revision |
 | AgentImplementationVersion definition | No | Publish another version |
 | SessionExecutionPlan | No | Start another Session |
+| Candidate | No | Record another candidate |
 | Implementation availability or revocation | Yes | Live policy with no fallback |
 | Provider credential behind a stable SecretRef | Yes | Rotate or revoke under [ADR#0023](./0023-secret-management-and-key-custody-direction.md) |
 | Authorization, grants, and budgets | Yes | Evaluate live without changing pins |

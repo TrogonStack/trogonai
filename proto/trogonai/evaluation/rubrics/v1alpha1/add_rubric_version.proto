@@ -1,0 +1,16 @@
+edition = "2024";
+
+package trogonai.evaluation.rubrics.v1alpha1;
+
+import "trogonai/evaluation/rubrics/v1alpha1/claim_check.proto";
+import "trogonai/evaluation/rubrics/v1alpha1/rubric_version_ref.proto";
+
+// Appends an immutable version; a version is never edited. Criteria are opaque
+// to the agent under evaluation and are held out of line by claim check, whose
+// digest is what a score is later read against. A repeated version is rejected.
+// Dispatch requires the original positive expected_revision and a rubric that
+// is registered and not retired.
+message AddRubricVersion {
+  RubricVersionRef version_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  ClaimCheck criteria_ref = 2 [features.field_presence = LEGACY_REQUIRED];
+}

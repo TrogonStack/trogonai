@@ -4,6 +4,8 @@ package trogonai.library.skills.v1alpha1;
 
 import "buf/validate/validate.proto";
 import "trogonai/agents/agents/v1alpha1/identity.proto";
+import "trogonai/agents/candidates/v1alpha1/candidate_ref.proto";
+import "trogonai/agents/proposals/v1alpha1/proposal_id.proto";
 
 // Origin fields are references, never copied configuration.
 message SkillProvenance {
@@ -11,8 +13,15 @@ message SkillProvenance {
     option (buf.validate.oneof).required = true;
 
     // Proposal that promoted this version.
-    string promoted_by_proposal_id = 1 [(buf.validate.field).string.min_len = 1];
+    SkillPromotion promoted = 1;
     // Agent that authored this version directly.
     trogonai.agents.agents.v1alpha1.AgentId authored_by = 2;
   }
+}
+
+// A promotion points back at the proposal that judged it and, when the content
+// was measured as a candidate, at that exact candidate.
+message SkillPromotion {
+  trogonai.agents.proposals.v1alpha1.ProposalId promoted_by_proposal_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.candidates.v1alpha1.CandidateRef origin_candidate_ref = 2;
 }

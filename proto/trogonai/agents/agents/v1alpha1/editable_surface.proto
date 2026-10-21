@@ -4,13 +4,13 @@ package trogonai.agents.agents.v1alpha1;
 
 import "buf/validate/validate.proto";
 
-// What a session-scoped overlay may change for one implementation version.
+// What a candidate may change for one implementation version.
 // Anything not listed is not editable. The set is committed by the
 // implementation definition digest, so the surface cannot change under a
-// pinned revision. Absent on an implementation means it opts out of overlays.
+// pinned revision. Absent on an implementation means it opts out of candidates.
 message EditableSurface {
   repeated EditableSettingsPath settings_paths = 1;
-  // Each PlatformEdit change case corresponds to one PlatformComponent value.
+  // Each PlatformEdit change case of a candidate corresponds to one PlatformComponent value.
   repeated PlatformComponent platform_components = 2 [(buf.validate.field).repeated = {
     unique: true
     items: {
@@ -44,5 +44,5 @@ enum PlatformComponent {
 message EditCaps {
   uint32 max_staged_skills = 1 [features.field_presence = LEGACY_REQUIRED];
   uint32 max_staged_skill_bytes = 2 [features.field_presence = LEGACY_REQUIRED];
-  uint32 max_overlay_bytes = 3 [features.field_presence = LEGACY_REQUIRED];
+  uint32 max_candidate_bytes = 3 [features.field_presence = LEGACY_REQUIRED];
 }

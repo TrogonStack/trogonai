@@ -1,0 +1,49 @@
+edition = "2024";
+
+package trogonai.policy.verdict_authorities.v1alpha1;
+
+import "trogon/error/v1alpha1/options.proto";
+
+// Schema-only templates for the policy.verdict_authorities module's
+// DeciderService refusals. These messages are never encoded. Administration
+// authorization and verdict admission keep their own failure
+// contracts; this fold only owns authority mutations.
+message VerdictAuthorityCommandInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "policy.verdict_authorities"
+    reason: "VERDICT_AUTHORITY_COMMAND_INVALID"
+    message: "The command violates the verdict authority policy contract."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message VerdictAuthorityNotInitializedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "policy.verdict_authorities"
+    reason: "VERDICT_AUTHORITY_NOT_INITIALIZED"
+    message: "The verdict authority history must be initialized before this command."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message VerdictAuthorityAlreadyInitializedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "policy.verdict_authorities"
+    reason: "VERDICT_AUTHORITY_ALREADY_INITIALIZED"
+    message: "The verdict authority history has already been initialized."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message VerdictAuthoritySubjectMismatchError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "policy.verdict_authorities"
+    reason: "VERDICT_AUTHORITY_SUBJECT_MISMATCH"
+    message: "The command names a different subject from this verdict authority history."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}

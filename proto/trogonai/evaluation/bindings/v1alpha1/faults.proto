@@ -37,11 +37,11 @@ message EvaluationBindingNotFoundError {
   };
 }
 
-message EvaluationBindingRubricNotFoundError {
+message EvaluationBindingRubricVersionNotFoundError {
   option (trogon.error.v1alpha1.message).template = {
     domain: "evaluation.bindings"
-    reason: "EVALUATION_BINDING_RUBRIC_NOT_FOUND"
-    message: "The rubric named by the binding is not registered."
+    reason: "EVALUATION_BINDING_RUBRIC_VERSION_NOT_FOUND"
+    message: "The rubric version named by the binding does not exist or its rubric is retired."
     code: FAILED_PRECONDITION
     visibility: VISIBILITY_PUBLIC
   };

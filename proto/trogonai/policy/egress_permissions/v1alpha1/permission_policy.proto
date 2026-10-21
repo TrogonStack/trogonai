@@ -1,0 +1,68 @@
+edition = "2024";
+
+package trogonai.policy.egress_permissions.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// EgressHost is one exact network destination: a host name or address and a
+// port. It is an identity, never a pattern, so a wildcard, a suffix, or a CIDR
+// range is invalid and a relabel or a new subdomain cannot widen a permission.
+message EgressHost {
+  option (buf.validate.message).cel = {
+    id: "egress_host.host_is_exact"
+    message: "a host must be an exact name or address, never a pattern"
+    expression: "!this.host.contains('*') && !this.host.contains('/') && !this.host.contains(' ')"
+  };
+
+  string host = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  uint32 port = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32 = {
+      gte: 1
+      lte: 65535
+    }
+  ];
+}
+
+// One thing a Session of the subject may open a network connection to. No
+// declared-connection identifier exists in the agents contracts today (a
+// ConnectionDeclaration names a requirement class, ADR#0063), so the exact host
+// is the only arm; an arm naming a declared connection is an additive change
+// when one exists.
+message EgressDestination {
+  oneof destination {
+    option (buf.validate.oneof).required = true;
+
+    EgressHost host = 1;
+  }
+}
+
+// A permission widens; it is the grant that lets a Session of the subject open
+// a network connection to a destination. Absence is deny: a Session whose Agent
+// has no permission on itself or any ancestor node has no network egress, and a
+// ConnectionDeclaration in its configuration grants nothing (ADR#0025,
+// ADR#0063 Decision 5).
+//
+// Permits accumulate downward: the effective set for an Agent is the union of
+// its own permission and every ancestor node's. A connection is admitted when
+// its destination equals a permitted destination exactly. Evaluation runs live
+// on each connection attempt (ADR#0031 §8 authorization row); the history of
+// what was permitted when is the stream.
+//
+// Evaluation storage and rubric storage are never permitted destinations for a
+// Session under evaluation, whatever the effective set says, so a candidate run
+// cannot reach the yardstick it is measured against (ADR#0072).
+//
+// An empty policy is invalid; clear the permission to withdraw it.
+message EgressPermissionPolicy {
+  option (buf.validate.message).cel = {
+    id: "egress_permission_policy.destinations_unique"
+    message: "each egress destination may appear at most once"
+    expression: "this.permitted.map(d, d.host.host + ':' + string(d.host.port)).unique()"
+  };
+
+  repeated EgressDestination permitted = 1 [(buf.validate.field).repeated.min_items = 1];
+}

@@ -3,6 +3,8 @@ edition = "2024";
 package trogonai.session.sessions.queries.v1alpha1;
 
 import "buf/validate/validate.proto";
+import "trogonai/session/sessions/queries/v1alpha1/candidate_label.proto";
+import "trogonai/session/sessions/queries/v1alpha1/comparison_id.proto";
 import "trogonai/session/sessions/queries/v1alpha1/contract_version.proto";
 import "trogonai/session/sessions/queries/v1alpha1/projection_freshness.proto";
 import "trogonai/session/sessions/queries/v1alpha1/read_consistency.proto";
@@ -12,16 +14,15 @@ import "trogonai/session/sessions/queries/v1alpha1/run_history_item.proto";
 //
 // A comparison groups candidate runs for one reader. Labels are assigned per
 // comparison, so the same candidate carries different labels in different
-// comparisons and a label reveals nothing about overlay identity or origin.
-// The label-to-session mapping is not exposed by this query.
+// comparisons and a label reveals nothing about candidate identity or origin.
+// The label-to-session mapping lives only in the comparison stream and is not
+// exposed by this query; the server resolves labels through it. The query is
+// score-free.
 message GetRunHistoryRequest {
-  string comparison_id = 1 [
-    features.field_presence = LEGACY_REQUIRED,
-    (buf.validate.field).string.min_len = 1
-  ];
+  ComparisonId comparison_id = 1 [features.field_presence = LEGACY_REQUIRED];
   ContractVersion accepted_contract = 2 [features.field_presence = LEGACY_REQUIRED];
   // Unset reads every candidate in the comparison.
-  string candidate = 3 [(buf.validate.field).string.min_len = 1];
+  CandidateLabel candidate_label = 3;
   uint32 page_size = 4 [features.field_presence = LEGACY_REQUIRED];
   // Opaque continuation from a prior response, a serialized CursorEnvelope.
   // Unset starts a new scan.

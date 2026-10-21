@@ -3,7 +3,7 @@ edition = "2024";
 package trogonai.session.sessions.v1alpha1;
 
 import "buf/validate/validate.proto";
-import "trogonai/session/sessions/v1alpha1/overlay_attestation.proto";
+import "trogonai/session/sessions/v1alpha1/candidate_ref.proto";
 import "trogonai/session/sessions/v1alpha1/session_ordinal.proto";
 
 // SessionForked is the second event in the atomic [SessionStarted, SessionForked]
@@ -32,7 +32,10 @@ message SessionForked {
   // Why the fork happened; a command-time input not derivable from the rest of
   // the log.
   ForkReason reason = 4 [features.field_presence = LEGACY_REQUIRED];
-  OverlayAttestation overlay = 5;
+  // Projection surface of the candidate pinned in the plan, as on
+  // SessionStarted; the plan stays authoritative. Absent means the registered
+  // revision ran unchanged.
+  CandidateRef candidate_ref = 5;
 }
 
 // ForkReason is why a session was forked.

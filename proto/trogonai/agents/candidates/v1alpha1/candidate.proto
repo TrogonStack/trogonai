@@ -1,27 +1,27 @@
 edition = "2024";
 
-package trogonai.agents.agents.v1alpha1;
+package trogonai.agents.candidates.v1alpha1;
 
 import "buf/validate/validate.proto";
 import "google/protobuf/any.proto";
 import "google/protobuf/field_mask.proto";
 import "trogonai/agents/agents/v1alpha1/agent_revision.proto";
-import "trogonai/agents/agents/v1alpha1/digest.proto";
+import "trogonai/agents/candidates/v1alpha1/claim_check.proto";
 
-// Session-scoped delta over a base revision. This is the one sanctioned
-// Session-scoped override of admitted values. It is never stored as a revision
-// and never activated; it only exists inside the admitted plan of the sessions
-// that run it. Every edit must fall inside the EditableSurface of the base
-// revision's implementation; edits outside it are rejected at admission.
-// Omitted means inherited from the base revision.
-message CandidateOverlay {
+// The content of a candidate: a delta over a base revision, recorded as an
+// immutable fact and never stored as a revision or activated. A session that
+// runs it pins a CandidateRef in its admitted plan. Every edit must fall inside
+// the EditableSurface of the base revision's implementation; edits outside it
+// are rejected when the candidate is recorded. Omitted means inherited from the
+// base revision.
+message Candidate {
   option (buf.validate.message).cel = {
-    id: "candidate_overlay.has_edit"
-    message: "overlay must carry at least one edit"
+    id: "candidate.has_edit"
+    message: "a candidate must carry at least one edit"
     expression: "has(this.settings_edit) || size(this.platform_edits) > 0 || size(this.staged_skills) > 0"
   };
 
-  AgentRevisionRef base_revision = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.agents.v1alpha1.AgentRevisionRef base_revision_ref = 1 [features.field_presence = LEGACY_REQUIRED];
   SettingsEdit settings_edit = 2;
   repeated PlatformEdit platform_edits = 3;
   repeated StagedSkill staged_skills = 4;
@@ -53,13 +53,13 @@ message MemoryKindReplacement {
   repeated string kinds = 1 [(buf.validate.field).repeated.unique = true];
 }
 
-// Skill content staged for this overlay only. It has no stream identity until
-// the overlay is promoted.
+// Skill content staged for this candidate only. It has no stream identity until
+// a promotion registers it in the library. The bytes are held out of line; the
+// claim check's digest is what a later SkillDeclaration must match.
 message StagedSkill {
   string binding_name = 1 [
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1
   ];
-  bytes content = 2 [features.field_presence = LEGACY_REQUIRED];
-  Digest content_digest = 3 [features.field_presence = LEGACY_REQUIRED];
+  ClaimCheck content_ref = 2 [features.field_presence = LEGACY_REQUIRED];
 }

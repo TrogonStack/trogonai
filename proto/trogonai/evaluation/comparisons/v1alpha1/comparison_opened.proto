@@ -1,0 +1,14 @@
+edition = "2024";
+
+package trogonai.evaluation.comparisons.v1alpha1;
+
+import "trogonai/agents/agents/v1alpha1/agent_revision.proto";
+import "trogonai/evaluation/comparisons/v1alpha1/claim_check.proto";
+import "trogonai/evaluation/comparisons/v1alpha1/comparison_id.proto";
+
+// Genesis fixes the base revision and the task for this history.
+message ComparisonOpened {
+  ComparisonId comparison_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.agents.v1alpha1.AgentRevisionRef base_revision_ref = 2 [features.field_presence = LEGACY_REQUIRED];
+  ClaimCheck task_ref = 3 [features.field_presence = LEGACY_REQUIRED];
+}

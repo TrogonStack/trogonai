@@ -1,0 +1,22 @@
+edition = "2024";
+
+package trogonai.evaluation.comparisons.v1alpha1;
+
+import "trogonai/agents/candidates/v1alpha1/candidate_ref.proto";
+import "trogonai/evaluation/comparisons/v1alpha1/candidate_label.proto";
+import "trogonai/evaluation/comparisons/v1alpha1/comparison_id.proto";
+import "trogonai/session/sessions/v1alpha1/session_id.proto";
+
+// Enrolls one session as a run of the comparison under a label. The label is
+// assigned once and is immutable, and it is unique within the comparison. This
+// stream is the only place the label-to-session mapping lives; it is never
+// exposed to the improver, and run-history queries resolve labels through it.
+// candidate_ref, when present, names the recorded candidate the session ran;
+// absent means the registered base revision ran unchanged. Dispatch requires the
+// original positive expected_revision and an open comparison.
+message EnrollComparisonRun {
+  ComparisonId comparison_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  CandidateLabel label = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.session.sessions.v1alpha1.SessionId session_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.candidates.v1alpha1.CandidateRef candidate_ref = 4;
+}
