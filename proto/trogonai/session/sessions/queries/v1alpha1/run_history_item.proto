@@ -41,6 +41,11 @@ enum RunHistoryItemKind {
 
 // RunMessage is a message exchanged during the run.
 message RunMessage {
+  option (buf.validate.message).cel = {
+    id: "run_message.generation_outcome_iff_assistant"
+    message: "generation_outcome must be set for assistant messages and only for them"
+    expression: "(this.role == 2) == has(this.generation_outcome)"
+  };
   string turn_id = 1 [
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1
@@ -50,6 +55,12 @@ message RunMessage {
   // The text was shortened for transport. The full content is not recoverable
   // from this response.
   bool truncated = 4 [features.field_presence = LEGACY_REQUIRED];
+  // How the assistant generation ended, so interrupted or in-flight work never
+  // reads as finished output. Unset for user messages.
+  AssistantMessageOutcome generation_outcome = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
 }
 
 enum RunMessageRole {
@@ -80,6 +91,9 @@ message RunToolCall {
   // Input or result was shortened for transport. The full content is not
   // recoverable from this response.
   bool truncated = 7 [features.field_presence = LEGACY_REQUIRED];
+  // True when the call started and no terminal outcome was ever recorded, as on
+  // ToolCallItem.
+  bool unreconciled = 8 [features.field_presence = LEGACY_REQUIRED];
 }
 
 // RunArtifact names an artifact produced during the run. Its content is not
