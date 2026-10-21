@@ -61,11 +61,21 @@ message PlatformEdit {
 }
 
 message SkillSetReplacement {
-  repeated string binding_names = 1 [(buf.validate.field).repeated.unique = true];
+  repeated string binding_names = 1 [(buf.validate.field).repeated = {
+    unique: true
+    items: {
+      string: {min_len: 1}
+    }
+  }];
 }
 
 message MemoryKindReplacement {
-  repeated string kinds = 1 [(buf.validate.field).repeated.unique = true];
+  repeated string kinds = 1 [(buf.validate.field).repeated = {
+    unique: true
+    items: {
+      string: {min_len: 1}
+    }
+  }];
 }
 
 // Skill content staged for this candidate only. It has no stream identity until
