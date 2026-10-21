@@ -20,6 +20,16 @@ message Candidate {
     message: "a candidate must carry at least one edit"
     expression: "has(this.settings_edit) || size(this.platform_edits) > 0 || size(this.staged_skills) > 0"
   };
+  option (buf.validate.message).cel = {
+    id: "candidate.platform_components_unique"
+    message: "each platform component may be edited at most once"
+    expression: "this.platform_edits.filter(e, has(e.skill_set)).size() <= 1 && this.platform_edits.filter(e, has(e.memory_kinds)).size() <= 1"
+  };
+  option (buf.validate.message).cel = {
+    id: "candidate.staged_skill_bindings_unique"
+    message: "each skill binding name may be staged at most once"
+    expression: "this.staged_skills.map(s, s.binding_name).unique()"
+  };
 
   trogonai.agents.agents.v1alpha1.AgentRevisionRef base_revision_ref = 1 [features.field_presence = LEGACY_REQUIRED];
   SettingsEdit settings_edit = 2;
@@ -31,6 +41,11 @@ message Candidate {
 // Only the paths in `paths` are replaced, wholesale per path. Repeated and map
 // fields are replaced as a unit, never merged element by element.
 message SettingsEdit {
+  option (buf.validate.message).cel = {
+    id: "settings_edit.has_paths"
+    message: "a settings edit must replace at least one path"
+    expression: "size(this.paths.paths) > 0"
+  };
   google.protobuf.Any partial_settings = 1 [features.field_presence = LEGACY_REQUIRED];
   google.protobuf.FieldMask paths = 2 [features.field_presence = LEGACY_REQUIRED];
 }

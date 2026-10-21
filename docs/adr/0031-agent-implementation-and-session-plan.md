@@ -217,7 +217,7 @@ Before a Session becomes runnable, create one SessionExecutionPlan:
     SessionExecutionPlan
       session_id
       agent_revision_ref
-      candidate_ref, when the Session runs a recorded candidate (ADR#0072)
+      candidate_ref, when the Session runs a recorded candidate ([ADR#0072](0072-agents-improve-through-recorded-candidates.md))
       agent_configuration_ref + configuration_digest
       agent_implementation_version_ref + definition_digest
       runtime_settings_type + runtime_settings_digest

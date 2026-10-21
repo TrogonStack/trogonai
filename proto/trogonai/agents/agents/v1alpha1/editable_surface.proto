@@ -9,6 +9,11 @@ import "buf/validate/validate.proto";
 // implementation definition digest, so the surface cannot change under a
 // pinned revision. Absent on an implementation means it opts out of candidates.
 message EditableSurface {
+  option (buf.validate.message).cel = {
+    id: "editable_surface.settings_paths_unique"
+    message: "each settings path may be listed at most once"
+    expression: "this.settings_paths.map(p, p.path).unique()"
+  };
   repeated EditableSettingsPath settings_paths = 1;
   // Each PlatformEdit change case of a candidate corresponds to one PlatformComponent value.
   repeated PlatformComponent platform_components = 2 [(buf.validate.field).repeated = {

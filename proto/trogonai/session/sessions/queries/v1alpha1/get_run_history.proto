@@ -46,4 +46,15 @@ message GetRunHistoryResponse {
   uint32 withheld_count = 5 [features.field_presence = LEGACY_REQUIRED];
   // How current the read model was when the scan opened. Equal on every page.
   ProjectionFreshness freshness = 6 [features.field_presence = LEGACY_REQUIRED];
+  // One scan anchor per run in the scan, equal on every page. Turns appended
+  // after the scan opened are above the anchor and are not in it; should a
+  // run's effective boundary move, the continuation fails with STALE_CURSOR.
+  repeated RunScanAnchor anchors = 7;
+}
+
+// RunScanAnchor is the effective history boundary of one run, after rewind
+// masking, as a SessionOrdinal.
+message RunScanAnchor {
+  CandidateLabel candidate_label = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint64 effective_through = 2 [features.field_presence = LEGACY_REQUIRED];
 }
