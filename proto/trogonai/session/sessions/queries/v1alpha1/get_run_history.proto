@@ -24,8 +24,8 @@ message GetRunHistoryRequest {
   // Unset reads every candidate in the comparison.
   CandidateLabel candidate_label = 3;
   uint32 page_size = 4 [features.field_presence = LEGACY_REQUIRED];
-  // Opaque continuation from a prior response, a serialized CursorEnvelope.
-  // Unset starts a new scan.
+  // Opaque continuation from a prior response, a serialized CursorEnvelope
+  // whose PageCursor holds the run_history arm. Unset starts a new scan.
   bytes page_token = 5;
   // Freshness the caller requires. Honored when the scan opens and ignored on
   // a continuation.
