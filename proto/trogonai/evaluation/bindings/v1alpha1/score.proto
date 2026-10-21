@@ -11,7 +11,10 @@ message CriterionScore {
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1
   ];
-  double value = 2 [(buf.validate.field).double.finite = true];
+  double value = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).double.finite = true
+  ];
 }
 
 message ScoreVector {
