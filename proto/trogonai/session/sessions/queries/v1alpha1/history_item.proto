@@ -78,6 +78,9 @@ enum ElisionReason {
   ELISION_REASON_REDACTED = 2;
   // The caller is not authorized to see this item's content.
   ELISION_REASON_NOT_AUTHORIZED = 3;
+  // The item contains vocabulary a screening rubric withholds from the judged.
+  // Says only that a screen matched, never which term or which rubric.
+  ELISION_REASON_WITHHELD_VOCABULARY = 4;
 }
 
 // UserMessageItem is a message from the user.

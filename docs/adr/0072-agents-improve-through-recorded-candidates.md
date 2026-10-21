@@ -120,7 +120,9 @@ verdict field names its own author.
 
 - `evaluation/rubrics`: `RegisterRubric` fixes an identity and display name;
   `AddRubricVersion` appends an immutable version whose criteria are a
-  `ClaimCheck criteria_ref` and rejects a repeated exact version string;
+  `ClaimCheck criteria_ref`, plus an optional `ClaimCheck
+  withheld_vocabulary_ref` naming terms that would reveal how a run is scored,
+  and rejects a repeated exact version string;
   `RetireRubric` stops new versions and bindings. A pinned reference is
   `RubricVersionRef { rubric_id, version }`.
 - `evaluation/bindings`: an `EvaluationBinding` pins a `RubricVersionRef` and is
@@ -136,7 +138,11 @@ verdict field names its own author.
   session and optionally a `CandidateRef`; `CloseComparison` ends enrollment. A
   label is assigned once, is immutable, and is unique within its comparison.
   The label-to-session mapping lives only in this stream and is never exposed
-  to the improver.
+  to the improver. `screening_rubric_refs` pins the rubric versions whose
+  withheld vocabulary screens the task and every rendered run item: admission
+  refuses a matching task, and a matching item renders as
+  `ELISION_REASON_WITHHELD_VOCABULARY`, which never says which term or rubric
+  matched.
 - The session run-history query takes a `ComparisonId` and a `CandidateLabel`,
   defined locally in the queries package so the session package imports no
   evaluation type. It carries no score, rubric, verdict, candidate identity, or
@@ -191,6 +197,16 @@ authoring Agent. A memory's provenance names the author, the
 `AgentRevisionRef produced_by_revision_ref`, and the `ProposalId`.
 `SupersedeMemory` carries `memory_id` and `superseded_by_id`.
 
+### 9. Improver and selector instructions are ordinary agent configuration
+
+The agents that propose and select candidates are ordinary Agents. Their
+instructions are `PlatformHarnessConfiguration.instructions`, so changing them
+is an Agent revision like any other, and they reach the platform only through
+`RecordCandidate`, `OpenProposal`, and `RecordProposalVerdict` under policy.
+Instruction text adapted from third-party work carries `InstructionSource {
+source_uri, spdx_license_id, attribution_notice }` in the same configuration, so
+the license obligation is pinned by the same digest as the text it covers.
+
 ## Alternatives Rejected
 
 ### A Session-scoped override of admitted values
@@ -237,6 +253,9 @@ charter.
   surface and verify every edit against it and its caps.
 - Dispatch of `BindRubric` verifies the rubric version exists on a rubric that
   is not retired and that the judge differs from the subject.
+- Rendering a run history must resolve the comparison's screening rubric
+  versions and elide matching items before they reach the reader, and
+  `OpenComparison` dispatch must screen the task.
 - Library skill and memory content move out of line. Resolution fetches the
   bytes through the claim check and verifies the digest before use.
 - `buf breaking` against `main` reports the type changes on

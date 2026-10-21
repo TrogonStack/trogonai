@@ -2,17 +2,31 @@ edition = "2024";
 
 package trogonai.evaluation.comparisons.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "trogonai/agents/agents/v1alpha1/agent_revision.proto";
 import "trogonai/evaluation/comparisons/v1alpha1/claim_check.proto";
 import "trogonai/evaluation/comparisons/v1alpha1/comparison_id.proto";
+import "trogonai/evaluation/rubrics/v1alpha1/rubric_version_ref.proto";
 
 // Opens a comparison: a group of runs over the same task against the same base
 // revision. NoStream creation requires a nonempty Decider command_id and no
 // expected_revision; retries preserve the id. An already-opened comparison is
 // rejected, never replaced.
 message OpenComparison {
+  option (buf.validate.message).cel = {
+    id: "open_comparison.screening_rubric_refs_unique"
+    message: "each rubric version may screen a comparison at most once"
+    expression: "this.screening_rubric_refs.all(a, this.screening_rubric_refs.filter(b, b.rubric_id.value == a.rubric_id.value && b.version == a.version).size() == 1)"
+  };
+
   ComparisonId comparison_id = 1 [features.field_presence = LEGACY_REQUIRED];
   trogonai.agents.agents.v1alpha1.AgentRevisionRef base_revision_ref = 2 [features.field_presence = LEGACY_REQUIRED];
   // The shared task every run in the comparison was given, held out of line.
   ClaimCheck task_ref = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Rubric versions whose withheld vocabulary the task and every rendered run
+  // item are screened against. Admission refuses a task that matches; a run
+  // item that matches is rendered as ELISION_REASON_WITHHELD_VOCABULARY. Pinned
+  // by exact version, so the screen a comparison applied stays reproducible.
+  // Evaluation-side only: never readable through a session or run query.
+  repeated trogonai.evaluation.rubrics.v1alpha1.RubricVersionRef screening_rubric_refs = 4;
 }

@@ -13,4 +13,8 @@ import "trogonai/evaluation/rubrics/v1alpha1/rubric_version_ref.proto";
 message AddRubricVersion {
   RubricVersionRef version_ref = 1 [features.field_presence = LEGACY_REQUIRED];
   ClaimCheck criteria_ref = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Terms the judged must never see: words that would reveal how a run is
+  // scored. Held out of line like the criteria and never readable outside the
+  // evaluation streams. Absent means the version withholds no vocabulary.
+  ClaimCheck withheld_vocabulary_ref = 3;
 }

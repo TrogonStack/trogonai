@@ -57,6 +57,16 @@ message ComparisonLabelAlreadyAssignedError {
   };
 }
 
+message ComparisonTaskWithheldVocabularyError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "evaluation.comparisons"
+    reason: "COMPARISON_TASK_WITHHELD_VOCABULARY"
+    message: "The task contains vocabulary a screening rubric withholds."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
 message ComparisonSessionAlreadyEnrolledError {
   option (trogon.error.v1alpha1.message).template = {
     domain: "evaluation.comparisons"
