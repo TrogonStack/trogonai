@@ -19,9 +19,11 @@ import "trogonai/session/sessions/queries/v1alpha1/run_history_item.proto";
 // exposed by this query; the server resolves labels through it. The query is
 // score-free.
 message GetRunHistoryRequest {
+  // An unknown comparison is QUERY_ERROR_CODE_COMPARISON_NOT_FOUND.
   ComparisonId comparison_id = 1 [features.field_presence = LEGACY_REQUIRED];
   ContractVersion accepted_contract = 2 [features.field_presence = LEGACY_REQUIRED];
-  // Unset reads every candidate in the comparison.
+  // Unset reads every candidate in the comparison. A label the comparison does
+  // not assign is QUERY_ERROR_CODE_CANDIDATE_LABEL_NOT_FOUND.
   CandidateLabel candidate_label = 3;
   uint32 page_size = 4 [features.field_presence = LEGACY_REQUIRED];
   // Opaque continuation from a prior response, a serialized CursorEnvelope

@@ -50,7 +50,13 @@ message RunMessage {
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1
   ];
-  RunMessageRole role = 2 [features.field_presence = LEGACY_REQUIRED];
+  RunMessageRole role = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
   string text = 3 [features.field_presence = LEGACY_REQUIRED];
   // The text was shortened for transport. The full content is not recoverable
   // from this response.

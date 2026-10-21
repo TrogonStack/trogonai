@@ -46,7 +46,10 @@ message SettingsEdit {
     message: "a settings edit must replace at least one path"
     expression: "size(this.paths.paths) > 0"
   };
-  google.protobuf.Any partial_settings = 1 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Any partial_settings = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).any.not_in = ""
+  ];
   google.protobuf.FieldMask paths = 2 [features.field_presence = LEGACY_REQUIRED];
 }
 
