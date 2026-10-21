@@ -159,13 +159,12 @@ string: `CandidateId`, `RubricId`, `EvaluationBindingId`, `EvaluationResultId`,
 `session_id` and `proposal_id` strings on existing messages are not migrated;
 only new fields use the new types.
 
-Two existing fields change type, so each takes a new number and reserves the
-old one:
+Two existing fields change type in place, keeping their field numbers. These
+contracts are excluded from codegen and have no deployed readers, so the break
+is taken directly rather than reserving the old numbers:
 
-- `EvaluationResultRef.evaluation_result_id` becomes an `EvaluationResultId` at
-  field 3; field 1 is reserved.
-- `SkillVersionRef.skill_id` becomes a `SkillId` at field 3; field 1 is
-  reserved.
+- `EvaluationResultRef.evaluation_result_id` becomes an `EvaluationResultId`.
+- `SkillVersionRef.skill_id` becomes a `SkillId`.
 
 `SkillId` lives in a leaf package that imports nothing from agents or from the
 skills module, because the agents `SkillVersionRef` uses it while the skills
@@ -240,7 +239,7 @@ charter.
   is not retired and that the judge differs from the subject.
 - Library skill and memory content move out of line. Resolution fetches the
   bytes through the claim check and verifies the digest before use.
-- `buf breaking` against `main` reports the reserved fields on
+- `buf breaking` against `main` reports the type changes on
   `EvaluationResultRef` and `SkillVersionRef`. This is expected while
   `proto/trogonai/agents`, `proto/trogonai/evaluation`, and
   `proto/trogonai/library` remain excluded from codegen in `buf.gen.yaml`; no

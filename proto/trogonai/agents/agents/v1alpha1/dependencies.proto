@@ -55,9 +55,7 @@ message SkillDeclaration {
 }
 
 message SkillVersionRef {
-  reserved 1;
-
-  trogonai.library.skills.ids.v1alpha1.SkillId skill_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.library.skills.ids.v1alpha1.SkillId skill_id = 1 [features.field_presence = LEGACY_REQUIRED];
   // Exact immutable version identifier. Empty values and moving aliases are invalid.
   string version = 2 [
     features.field_presence = LEGACY_REQUIRED,

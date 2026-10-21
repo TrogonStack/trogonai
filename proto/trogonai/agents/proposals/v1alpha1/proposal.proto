@@ -20,9 +20,7 @@ message ProposalEvidenceRef {
 // Points at one immutable evaluation result. The score itself never leaves the
 // evaluation stream.
 message EvaluationResultRef {
-  reserved 1;
-
-  trogonai.evaluation.bindings.v1alpha1.EvaluationResultId evaluation_result_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.evaluation.bindings.v1alpha1.EvaluationResultId evaluation_result_id = 1 [features.field_presence = LEGACY_REQUIRED];
   trogonai.agents.agents.v1alpha1.Digest content_digest = 2 [features.field_presence = LEGACY_REQUIRED];
 }
 
