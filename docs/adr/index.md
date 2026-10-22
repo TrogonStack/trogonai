@@ -77,3 +77,4 @@ future implementation work.
 - [ADR#0069: Every Event Envelope Records Who Caused It and When Each Step Happened (Draft)](./0069-event-envelope-records-issuer-and-times.md)
 - [ADR#0070: An Agent Declares What It Offers and Whose Authority It Carries; Throughput Ceilings Stay on the Policy Plane (Draft)](./0070-agent-offered-interface-and-throughput-limits.md)
 - [ADR#0071: What an Agent May Reach, How Far It May Go, and Whether It May Run at All Are Policy Bindings on a Subject (Draft)](./0071-policy-bindings-on-a-subject-entitlements-ceilings-and-holds.md)
+- [ADR#0072: Agents Improve by Running Recorded Candidates, Scored Blind, and Promoted Only Through Proposals (Draft)](./0072-agents-improve-through-recorded-candidates.md)

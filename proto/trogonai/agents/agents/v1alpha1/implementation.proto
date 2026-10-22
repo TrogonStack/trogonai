@@ -5,6 +5,7 @@ package trogonai.agents.agents.v1alpha1;
 import "buf/validate/validate.proto";
 import "google/protobuf/any.proto";
 import "trogonai/agents/agents/v1alpha1/digest.proto";
+import "trogonai/agents/agents/v1alpha1/editable_surface.proto";
 import "trogonai/agents/agents/v1alpha1/model_selection.proto";
 
 message PlatformHarnessVersionRef {
@@ -52,6 +53,29 @@ message PlatformHarnessConfiguration {
   // interactions must not be independently configured again as tool dependencies.
   // Capability changes are charter-class, including when instructions also change.
   repeated google.protobuf.Any capabilities = 3 [(buf.validate.field).repeated.items.any.not_in = ""];
+  // Where adapted parts of `instructions` came from, so the license obligations
+  // travel with the exact text they cover. Behavior-neutral: the harness never
+  // reads them, and they change only with the instructions they describe.
+  repeated InstructionSource instruction_sources = 4;
+}
+
+// InstructionSource attributes adapted third-party instruction text.
+message InstructionSource {
+  // A stable locator of the upstream work, pinned to a release or commit.
+  string source_uri = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.uri = true
+  ];
+  // SPDX license identifier of the upstream work, such as Apache-2.0.
+  string spdx_license_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  // The attribution or NOTICE text the license requires to be retained.
+  string attribution_notice = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
 }
 
 // The definition commits transitively to every behavior-significant artifact,
@@ -70,4 +94,7 @@ message AgentImplementation {
     RegisteredExtensionVersionRef registered_extension = 2;
   }
   Digest definition_digest = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Absent means nothing is editable by a candidate. Committed by
+  // definition_digest.
+  EditableSurface editable_surface = 4;
 }

@@ -3,6 +3,7 @@ edition = "2024";
 package trogonai.session.sessions.v1alpha1;
 
 import "buf/validate/validate.proto";
+import "trogonai/session/sessions/v1alpha1/candidate_ref.proto";
 import "trogonai/session/sessions/v1alpha1/cascade_policy.proto";
 import "trogonai/session/sessions/v1alpha1/checkout.proto";
 import "trogonai/session/sessions/v1alpha1/execution_plan.proto";
@@ -38,4 +39,8 @@ message CreateChildSession {
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1
   ];
+  // Projection surface of the candidate pinned in the plan, as on
+  // SessionStarted; the plan stays authoritative. Absent means the registered
+  // revision ran unchanged.
+  CandidateRef candidate_ref = 8;
 }

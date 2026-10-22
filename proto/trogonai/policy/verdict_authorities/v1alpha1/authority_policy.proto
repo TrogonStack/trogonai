@@ -1,0 +1,64 @@
+edition = "2024";
+
+package trogonai.policy.verdict_authorities.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/agents/proposals/v1alpha1/configuration_difference.proto";
+
+// Who may record a proposal verdict. The issuer is read from the event envelope
+// (ADR#0069); nothing in a verdict names its own author.
+enum VerdictAuthority {
+  VERDICT_AUTHORITY_UNSPECIFIED = 0;
+  // Only a human member of the project may record the verdict.
+  VERDICT_AUTHORITY_HUMAN_MEMBER = 1;
+  // A human member, or an Agent registered in the registry, may record it.
+  VERDICT_AUTHORITY_HUMAN_MEMBER_OR_REGISTERED_AGENT = 2;
+}
+
+message ClassVerdictAuthority {
+  trogonai.agents.proposals.v1alpha1.AgentChangeClass change_class = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  VerdictAuthority required_authority = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+// Per change class, the authority required to record a verdict on a proposal
+// for the subject. Absence means human member for every class, so an Agent with
+// no policy on itself or any ancestor node can never have its change judged by
+// an agent (fail closed). A rule can only relax a class; a policy never
+// removes the requirement that a verdict exists.
+//
+// For a proposal, the effective requirement for a class is the one named by the
+// nearest binding that lists that class: the proposal's Agent first, then each
+// ancestor node toward the root. No binding listing the class means human
+// member. Evaluation runs live when the verdict is dispatched (ADR#0031 §8
+// authorization row); the history of what was required when is the stream.
+//
+// The charter class may never be relaxed below human member. The enum values
+// are AGENT_CHANGE_CLASS_CHARTER = 2 and VERDICT_AUTHORITY_HUMAN_MEMBER = 1.
+//
+// An empty policy is invalid; clear the authority to withdraw it.
+message VerdictAuthorityPolicy {
+  option (buf.validate.message).cel = {
+    id: "verdict_authority_policy.classes_unique"
+    message: "each change class may appear at most once"
+    expression: "this.rules.map(r, r.change_class).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "verdict_authority_policy.charter_stays_human"
+    message: "the charter class may never be relaxed below human member"
+    expression: "this.rules.all(r, r.change_class != 2 || r.required_authority == 1)"
+  };
+
+  repeated ClassVerdictAuthority rules = 1 [(buf.validate.field).repeated.min_items = 1];
+}

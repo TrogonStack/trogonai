@@ -1,0 +1,20 @@
+edition = "2024";
+
+package trogonai.evaluation.comparisons.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/evaluation/comparisons/v1alpha1/comparison_closed.proto";
+import "trogonai/evaluation/comparisons/v1alpha1/comparison_opened.proto";
+import "trogonai/evaluation/comparisons/v1alpha1/comparison_run_enrolled.proto";
+
+// An unset or unknown event rejects replay; skipping an enrollment could make a
+// run history resolve a label to the wrong session.
+message ComparisonEvent {
+  oneof event {
+    option (buf.validate.oneof).required = true;
+
+    ComparisonOpened comparison_opened = 1;
+    ComparisonRunEnrolled comparison_run_enrolled = 2;
+    ComparisonClosed comparison_closed = 3;
+  }
+}

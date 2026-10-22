@@ -72,6 +72,11 @@ enum QueryErrorCode {
   QUERY_ERROR_CODE_RESOURCE_EXHAUSTED = 8;
   // An unexpected server-side failure. Carries no detail on purpose.
   QUERY_ERROR_CODE_INTERNAL = 9;
+  // The comparison id resolves to no stream. Like SESSION_NOT_FOUND, a
+  // comparison the caller may not see is QUERY_ERROR_CODE_PERMISSION_DENIED.
+  QUERY_ERROR_CODE_COMPARISON_NOT_FOUND = 10;
+  // The comparison exists but assigns no run to the requested candidate label.
+  QUERY_ERROR_CODE_CANDIDATE_LABEL_NOT_FOUND = 11;
 }
 
 // UnsupportedContractVersionDetail tells the caller what it would have to

@@ -3,6 +3,7 @@ edition = "2024";
 package trogonai.session.sessions.v1alpha1;
 
 import "buf/validate/validate.proto";
+import "trogonai/session/sessions/v1alpha1/candidate_ref.proto";
 import "trogonai/session/sessions/v1alpha1/checkout.proto";
 import "trogonai/session/sessions/v1alpha1/digest.proto";
 import "trogonai/session/sessions/v1alpha1/execution_plan.proto";
@@ -40,4 +41,8 @@ message RecoverSession {
   string salvage_key = 7 [features.field_presence = LEGACY_REQUIRED];
   RecoveryCompleteness completeness = 8 [features.field_presence = LEGACY_REQUIRED];
   uint32 omitted_count = 9 [features.field_presence = LEGACY_REQUIRED];
+  // Projection surface of the candidate pinned in the plan, as on
+  // SessionStarted; the plan stays authoritative. Absent means the registered
+  // revision ran unchanged.
+  CandidateRef candidate_ref = 10;
 }

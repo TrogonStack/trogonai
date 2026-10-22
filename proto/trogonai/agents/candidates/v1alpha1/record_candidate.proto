@@ -1,0 +1,18 @@
+edition = "2024";
+
+package trogonai.agents.candidates.v1alpha1;
+
+import "trogonai/agents/candidates/v1alpha1/candidate.proto";
+import "trogonai/agents/candidates/v1alpha1/candidate_id.proto";
+
+// Records one candidate as an immutable fact. NoStream creation requires a
+// nonempty Decider command_id and no expected_revision; retries preserve the id.
+// An already-recorded candidate_id is rejected, never replaced: a different edit
+// is a new candidate. Dispatch verifies the base revision exists, that every
+// edit falls inside the EditableSurface of the base revision's implementation
+// and within its caps, and computes the content digest over the exact encoded
+// Candidate bytes.
+message RecordCandidate {
+  CandidateId candidate_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  Candidate candidate = 2 [features.field_presence = LEGACY_REQUIRED];
+}

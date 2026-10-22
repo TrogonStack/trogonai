@@ -1,0 +1,20 @@
+edition = "2024";
+
+package trogonai.evaluation.bindings.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/evaluation/bindings/v1alpha1/evaluation_result_recorded.proto";
+import "trogonai/evaluation/bindings/v1alpha1/rubric_bound.proto";
+import "trogonai/evaluation/bindings/v1alpha1/rubric_unbound.proto";
+
+// An unset or unknown event rejects replay; skipping a result could change which
+// candidate a later verdict is judged to have beaten.
+message EvaluationBindingEvent {
+  oneof event {
+    option (buf.validate.oneof).required = true;
+
+    RubricBound rubric_bound = 1;
+    RubricUnbound rubric_unbound = 2;
+    EvaluationResultRecorded evaluation_result_recorded = 3;
+  }
+}

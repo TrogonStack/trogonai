@@ -1,0 +1,62 @@
+edition = "2024";
+
+package trogonai.session.sessions.queries.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/session/sessions/queries/v1alpha1/candidate_label.proto";
+import "trogonai/session/sessions/queries/v1alpha1/comparison_id.proto";
+import "trogonai/session/sessions/queries/v1alpha1/contract_version.proto";
+import "trogonai/session/sessions/queries/v1alpha1/projection_freshness.proto";
+import "trogonai/session/sessions/queries/v1alpha1/read_consistency.proto";
+import "trogonai/session/sessions/queries/v1alpha1/run_history_item.proto";
+
+// GetRunHistoryRequest reads one page of the run histories of a comparison.
+//
+// A comparison groups candidate runs for one reader. Labels are assigned per
+// comparison, so the same candidate carries different labels in different
+// comparisons and a label reveals nothing about candidate identity or origin.
+// The label-to-session mapping lives only in the comparison stream and is not
+// exposed by this query; the server resolves labels through it. The query is
+// score-free.
+message GetRunHistoryRequest {
+  // An unknown comparison is QUERY_ERROR_CODE_COMPARISON_NOT_FOUND.
+  ComparisonId comparison_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ContractVersion accepted_contract = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Unset reads every candidate in the comparison. A label the comparison does
+  // not assign is QUERY_ERROR_CODE_CANDIDATE_LABEL_NOT_FOUND.
+  CandidateLabel candidate_label = 3;
+  uint32 page_size = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Opaque continuation from a prior response, a serialized CursorEnvelope
+  // whose PageCursor holds the run_history arm. Unset starts a new scan.
+  bytes page_token = 5;
+  // Freshness the caller requires. Honored when the scan opens and ignored on
+  // a continuation.
+  ReadConsistency consistency = 6;
+}
+
+// GetRunHistoryResponse is one page of run history items.
+message GetRunHistoryResponse {
+  ContractNegotiation contract = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated RunHistoryItem items = 2;
+  // Unset when the scan is exhausted. Presence, not an empty `items` list, is
+  // the end signal.
+  bytes next_page_token = 3;
+  // Items rendered as RUN_HISTORY_ITEM_KIND_ELIDED because they need a variant
+  // newer than the caller's contract minor.
+  uint32 contract_clamped_count = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Items whose content was withheld by redaction or authorization.
+  uint32 withheld_count = 5 [features.field_presence = LEGACY_REQUIRED];
+  // How current the read model was when the scan opened. Equal on every page.
+  ProjectionFreshness freshness = 6 [features.field_presence = LEGACY_REQUIRED];
+  // One scan anchor per run in the scan, equal on every page. Turns appended
+  // after the scan opened are above the anchor and are not in it; should a
+  // run's effective boundary move, the continuation fails with STALE_CURSOR.
+  repeated RunScanAnchor anchors = 7;
+}
+
+// RunScanAnchor is the effective history boundary of one run, after rewind
+// masking, as a SessionOrdinal.
+message RunScanAnchor {
+  CandidateLabel candidate_label = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint64 effective_through = 2 [features.field_presence = LEGACY_REQUIRED];
+}

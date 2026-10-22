@@ -1,0 +1,68 @@
+edition = "2024";
+
+package trogonai.evaluation.bindings.v1alpha1;
+
+import "trogon/error/v1alpha1/options.proto";
+
+// Schema-only templates for the evaluation.bindings module's DeciderService
+// refusals. These messages are never encoded.
+
+message EvaluationBindingCommandInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "evaluation.bindings"
+    reason: "EVALUATION_BINDING_COMMAND_INVALID"
+    message: "The command violates the evaluation binding contract."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message EvaluationBindingAlreadyExistsError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "evaluation.bindings"
+    reason: "EVALUATION_BINDING_ALREADY_EXISTS"
+    message: "The evaluation binding already exists."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message EvaluationBindingNotFoundError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "evaluation.bindings"
+    reason: "EVALUATION_BINDING_NOT_FOUND"
+    message: "The evaluation binding does not exist or is unbound."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message EvaluationBindingRubricVersionNotFoundError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "evaluation.bindings"
+    reason: "EVALUATION_BINDING_RUBRIC_VERSION_NOT_FOUND"
+    message: "The rubric version named by the binding does not exist or its rubric is retired."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message EvaluationBindingJudgeMatchesSubjectError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "evaluation.bindings"
+    reason: "EVALUATION_BINDING_JUDGE_MATCHES_SUBJECT"
+    message: "The judge must be distinct from every agent it evaluates."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message EvaluationResultAlreadyRecordedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "evaluation.bindings"
+    reason: "EVALUATION_RESULT_ALREADY_RECORDED"
+    message: "The evaluation result has already been recorded."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}

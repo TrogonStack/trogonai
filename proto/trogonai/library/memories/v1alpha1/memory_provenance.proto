@@ -1,0 +1,16 @@
+edition = "2024";
+
+package trogonai.library.memories.v1alpha1;
+
+import "trogonai/agents/agents/v1alpha1/agent_revision.proto";
+import "trogonai/agents/agents/v1alpha1/identity.proto";
+import "trogonai/agents/proposals/v1alpha1/proposal_id.proto";
+
+// Origin fields are references, never copied configuration.
+// produced_by_revision_ref is the revision that produced the entry; the
+// revision already holds its configuration immutably.
+message MemoryProvenance {
+  trogonai.agents.agents.v1alpha1.AgentId author = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.agents.v1alpha1.AgentRevisionRef produced_by_revision_ref = 2;
+  trogonai.agents.proposals.v1alpha1.ProposalId promoted_by_proposal_id = 3;
+}

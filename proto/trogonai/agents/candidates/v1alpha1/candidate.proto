@@ -1,0 +1,93 @@
+edition = "2024";
+
+package trogonai.agents.candidates.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/any.proto";
+import "google/protobuf/field_mask.proto";
+import "trogonai/agents/agents/v1alpha1/agent_revision.proto";
+import "trogonai/agents/candidates/v1alpha1/claim_check.proto";
+
+// The content of a candidate: a delta over a base revision, recorded as an
+// immutable fact and never stored as a revision or activated. A session that
+// runs it pins a CandidateRef in its admitted plan. Every edit must fall inside
+// the EditableSurface of the base revision's implementation; edits outside it
+// are rejected when the candidate is recorded. Omitted means inherited from the
+// base revision.
+message Candidate {
+  option (buf.validate.message).cel = {
+    id: "candidate.has_edit"
+    message: "a candidate must carry at least one edit"
+    expression: "has(this.settings_edit) || size(this.platform_edits) > 0 || size(this.staged_skills) > 0"
+  };
+  option (buf.validate.message).cel = {
+    id: "candidate.platform_components_unique"
+    message: "each platform component may be edited at most once"
+    expression: "this.platform_edits.filter(e, has(e.skill_set)).size() <= 1 && this.platform_edits.filter(e, has(e.memory_kinds)).size() <= 1"
+  };
+  option (buf.validate.message).cel = {
+    id: "candidate.staged_skill_bindings_unique"
+    message: "each skill binding name may be staged at most once"
+    expression: "this.staged_skills.map(s, s.binding_name).unique()"
+  };
+
+  trogonai.agents.agents.v1alpha1.AgentRevisionRef base_revision_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  SettingsEdit settings_edit = 2;
+  repeated PlatformEdit platform_edits = 3;
+  repeated StagedSkill staged_skills = 4;
+}
+
+// Partial runtime settings of the same message type as the base settings.
+// Only the paths in `paths` are replaced, wholesale per path. Repeated and map
+// fields are replaced as a unit, never merged element by element.
+message SettingsEdit {
+  option (buf.validate.message).cel = {
+    id: "settings_edit.has_paths"
+    message: "a settings edit must replace at least one path"
+    expression: "size(this.paths.paths) > 0"
+  };
+  google.protobuf.Any partial_settings = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).any.not_in = ""
+  ];
+  google.protobuf.FieldMask paths = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// The change case is the component being edited.
+message PlatformEdit {
+  oneof change {
+    option (buf.validate.oneof).required = true;
+
+    SkillSetReplacement skill_set = 1;
+    MemoryKindReplacement memory_kinds = 2;
+  }
+}
+
+message SkillSetReplacement {
+  repeated string binding_names = 1 [(buf.validate.field).repeated = {
+    unique: true
+    items: {
+      string: {min_len: 1}
+    }
+  }];
+}
+
+message MemoryKindReplacement {
+  repeated string kinds = 1 [(buf.validate.field).repeated = {
+    unique: true
+    items: {
+      string: {min_len: 1}
+    }
+  }];
+}
+
+// Skill content staged for this candidate only. It has no stream identity until
+// a promotion registers it in the library. The bytes are held out of line; the
+// claim check's digest is what a later SkillDeclaration must match.
+message StagedSkill {
+  string binding_name = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ClaimCheck content_ref = 2 [features.field_presence = LEGACY_REQUIRED];
+}

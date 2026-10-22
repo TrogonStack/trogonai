@@ -1,0 +1,16 @@
+edition = "2024";
+
+package trogonai.library.skills.ids.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// SkillId is the identity of one skill stream. It lives in a leaf package that
+// imports nothing from agents or from the skills module, because agents
+// SkillVersionRef uses it while the skills module imports agents, and a package
+// shared by both directions would be an import cycle.
+message SkillId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}

@@ -1,0 +1,10 @@
+edition = "2024";
+
+package trogonai.evaluation.comparisons.v1alpha1;
+
+import "trogonai/evaluation/comparisons/v1alpha1/comparison_id.proto";
+
+// An already closed history emits no second close.
+message ComparisonClosed {
+  ComparisonId comparison_id = 1 [features.field_presence = LEGACY_REQUIRED];
+}

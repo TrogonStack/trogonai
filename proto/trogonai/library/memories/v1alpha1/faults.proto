@@ -1,0 +1,48 @@
+edition = "2024";
+
+package trogonai.library.memories.v1alpha1;
+
+import "trogon/error/v1alpha1/options.proto";
+
+// Schema-only templates for the library.memories module's DeciderService
+// refusals. These messages are never encoded.
+
+message MemoryCommandInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "library.memories"
+    reason: "MEMORY_COMMAND_INVALID"
+    message: "The command violates the memory contract."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message MemoryNotFoundError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "library.memories"
+    reason: "MEMORY_NOT_FOUND"
+    message: "The memory entry has not been written."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message MemoryAlreadyWrittenError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "library.memories"
+    reason: "MEMORY_ALREADY_WRITTEN"
+    message: "The memory entry has already been written."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message MemorySuccessorMismatchError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "library.memories"
+    reason: "MEMORY_SUCCESSOR_MISMATCH"
+    message: "The successor must exist with the same scope and kind."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}

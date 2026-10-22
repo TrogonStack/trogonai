@@ -1,0 +1,12 @@
+edition = "2024";
+
+package trogonai.policy.verdict_authorities.v1alpha1;
+
+import "trogonai/policy/subjects/v1alpha1/subject.proto";
+import "trogonai/policy/verdict_authorities/v1alpha1/authority_policy.proto";
+
+// Replaces the authority policy in force without replacing the history's identity.
+message VerdictAuthoritySet {
+  trogonai.policy.subjects.v1alpha1.PolicySubject subject = 1 [features.field_presence = LEGACY_REQUIRED];
+  VerdictAuthorityPolicy policy = 2 [features.field_presence = LEGACY_REQUIRED];
+}

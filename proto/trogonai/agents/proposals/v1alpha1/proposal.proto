@@ -5,7 +5,9 @@ package trogonai.agents.proposals.v1alpha1;
 import "buf/validate/validate.proto";
 import "trogonai/agents/agents/v1alpha1/agent_revision.proto";
 import "trogonai/agents/agents/v1alpha1/digest.proto";
+import "trogonai/agents/candidates/v1alpha1/candidate_ref.proto";
 import "trogonai/agents/proposals/v1alpha1/configuration_difference.proto";
+import "trogonai/evaluation/bindings/v1alpha1/evaluation_result_id.proto";
 
 message ProposalEvidenceRef {
   string evidence_id = 1 [
@@ -15,11 +17,10 @@ message ProposalEvidenceRef {
   trogonai.agents.agents.v1alpha1.Digest content_digest = 2 [features.field_presence = LEGACY_REQUIRED];
 }
 
+// Points at one immutable evaluation result. The score itself never leaves the
+// evaluation stream.
 message EvaluationResultRef {
-  string evaluation_result_id = 1 [
-    features.field_presence = LEGACY_REQUIRED,
-    (buf.validate.field).string.min_len = 1
-  ];
+  trogonai.evaluation.bindings.v1alpha1.EvaluationResultId evaluation_result_id = 1 [features.field_presence = LEGACY_REQUIRED];
   trogonai.agents.agents.v1alpha1.Digest content_digest = 2 [features.field_presence = LEGACY_REQUIRED];
 }
 
@@ -37,6 +38,9 @@ message ProposalDefinition {
   repeated ProposalEvidenceRef evidence = 4;
   // Supersession does not close another stream; its author withdraws it separately.
   string supersedes_proposal_id = 5 [(buf.validate.field).string.min_len = 1];
+  // The recorded candidate whose measured run this proposal promotes, so the
+  // promotion points back at what was measured.
+  trogonai.agents.candidates.v1alpha1.CandidateRef origin_candidate_ref = 6;
 }
 
 message ProposalJudgment {

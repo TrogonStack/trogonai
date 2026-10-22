@@ -1,0 +1,48 @@
+edition = "2024";
+
+package trogonai.agents.candidates.v1alpha1;
+
+import "trogon/error/v1alpha1/options.proto";
+
+// Schema-only templates for the agents.candidates module's DeciderService
+// refusals. These messages are never encoded.
+
+message CandidateCommandInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.candidates"
+    reason: "CANDIDATE_COMMAND_INVALID"
+    message: "The command violates the candidate contract."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message CandidateAlreadyRecordedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.candidates"
+    reason: "CANDIDATE_ALREADY_RECORDED"
+    message: "The candidate has already been recorded."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message CandidateEditOutsideEditableSurfaceError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.candidates"
+    reason: "CANDIDATE_EDIT_OUTSIDE_EDITABLE_SURFACE"
+    message: "The candidate edits something the base revision's editable surface does not list."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message CandidateBaseRevisionNotFoundError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.candidates"
+    reason: "CANDIDATE_BASE_REVISION_NOT_FOUND"
+    message: "The base revision named by the candidate does not exist."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
