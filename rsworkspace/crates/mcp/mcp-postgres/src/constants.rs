@@ -1,0 +1,9 @@
+pub(crate) const MAX_BYTES: usize = 1_048_576;
+pub(crate) const MAX_OBJECT_ID_BYTES: usize = 200;
+pub(crate) const MAX_CONNECTION_ID_BYTES: usize = MAX_OBJECT_ID_BYTES - "/4294967295/4294967295/32767".len();
+pub(crate) const MAX_TOKEN_BYTES: usize = 16_384;
+pub(crate) const MAX_JWKS_BYTES: usize = 262_144;
+pub(crate) const MAX_DELEGATION_DEPTH: usize = 8;
+pub(crate) const JWKS_CACHE_SECONDS: u64 = 300;
+pub(crate) const JWKS_REFRESH_SECONDS: u64 = 30;
+pub(crate) const MCP_MAX_REQUEST_BODY_BYTES: usize = 131_072;
