@@ -22,3 +22,7 @@ pub const CONTENT_TYPE_FORM: &str = "application/x-www-form-urlencoded";
 pub const APPS_CONNECTIONS_OPEN_URL: &str = "https://slack.com/api/apps.connections.open";
 pub const RECONNECT_INITIAL_DELAY: Duration = Duration::from_secs(1);
 pub const RECONNECT_MAX_DELAY: Duration = Duration::from_secs(30);
+
+pub const SLACK_ACK_DEADLINE: Duration = Duration::from_secs(3);
+pub const ACK_RESPONSE_MARGIN: Duration = Duration::from_millis(500);
+pub const ACK_LIMIT_MAX: Duration = SLACK_ACK_DEADLINE.saturating_sub(ACK_RESPONSE_MARGIN);
