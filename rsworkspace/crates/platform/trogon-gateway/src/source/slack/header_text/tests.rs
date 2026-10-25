@@ -17,6 +17,26 @@ fn rejects_carriage_return() {
 }
 
 #[test]
+fn or_unknown_keeps_valid_text_and_replaces_unsafe_text() {
+    let headers = DeliveryHeaders::new()
+        .with("Valid", &HeaderText::or_unknown("T01ABC"))
+        .with("Unsafe", &HeaderText::or_unknown("T01\r\nX: 1"))
+        .into_inner();
+
+    assert_eq!(headers.get("Valid").map(|v| v.as_str()), Some("T01ABC"));
+    assert_eq!(headers.get("Unsafe").map(|v| v.as_str()), Some("unknown"));
+}
+
+#[test]
+fn digest_renders_the_prefix_and_lowercase_hex() {
+    let headers = DeliveryHeaders::new()
+        .with("Digest", &HeaderText::digest("id-", &[0x0a, 0xff]))
+        .into_inner();
+
+    assert_eq!(headers.get("Digest").map(|v| v.as_str()), Some("id-0aff"));
+}
+
+#[test]
 fn delivery_headers_carry_validated_and_static_values() {
     let headers = DeliveryHeaders::new()
         .with("X-Slack-Team-Id", &HeaderText::new("T01ABC").unwrap())

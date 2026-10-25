@@ -455,6 +455,90 @@ async fn socket_slash_command_missing_trigger_publishes_unroutable_without_ack()
     );
 }
 
+#[tokio::test]
+async fn unknown_frame_is_not_acked_when_the_unroutable_publish_fails() {
+    let publisher = MockJetStreamPublisher::new();
+    publisher.fail_next_js_publish();
+    let envelope = serde_json::json!({
+        "type": "unsupported",
+        "envelope_id": "env-unsupported",
+        "payload": { "value": true }
+    });
+
+    let (reconnect, ack) = handle_text_frame(&bridge(publisher.clone()), &envelope.to_string())
+        .await
+        .unwrap();
+
+    assert!(!reconnect);
+    assert_eq!(ack, None);
+    assert!(publisher.published_messages().is_empty());
+}
+
+#[tokio::test]
+async fn socket_unroutable_carries_message_id_team_and_transport_headers() {
+    let publisher = MockJetStreamPublisher::new();
+    let envelope = serde_json::json!({
+        "type": "events_api",
+        "envelope_id": "env-5",
+        "payload": {
+            "type": "event_callback",
+            "team_id": "T01ABC",
+            "event": { "type": "message" }
+        }
+    });
+
+    handle_text_frame(&bridge(publisher.clone()), &envelope.to_string())
+        .await
+        .unwrap();
+
+    let messages = publisher.published_messages();
+    let headers = &messages[0].headers;
+    assert_eq!(
+        headers
+            .get(super::super::constants::NATS_HEADER_TEAM_ID)
+            .map(|v| v.as_str()),
+        Some("T01ABC"),
+    );
+    assert_eq!(
+        headers
+            .get(super::super::constants::NATS_HEADER_TRANSPORT)
+            .map(|v| v.as_str()),
+        Some("socket_mode"),
+    );
+    assert!(
+        headers
+            .get("Nats-Msg-Id")
+            .is_some_and(|id| id.as_str().starts_with("unroutable-"))
+    );
+}
+
+#[tokio::test]
+async fn socket_routable_event_is_tagged_with_its_transport() {
+    let publisher = MockJetStreamPublisher::new();
+    let envelope = serde_json::json!({
+        "type": "events_api",
+        "envelope_id": "env-1",
+        "payload": {
+            "type": "event_callback",
+            "event_id": "Ev01ABC123",
+            "team_id": "T01ABC",
+            "event": { "type": "message" }
+        }
+    });
+
+    handle_text_frame(&bridge(publisher.clone()), &envelope.to_string())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        publisher.published_messages()[0]
+            .headers
+            .get(super::super::constants::NATS_HEADER_TRANSPORT)
+            .map(|v| v.as_str()),
+        Some("socket_mode"),
+    );
+}
+
 #[derive(Clone)]
 struct OpenState {
     ws_url: String,

@@ -747,6 +747,128 @@ async fn interaction_missing_type_publishes_unroutable() {
     assert_unroutable(&publisher, "missing_interaction_type");
 }
 
+fn header<'a>(headers: &'a async_nats::HeaderMap, name: &str) -> Option<&'a str> {
+    headers.get(name).map(|v| v.as_str())
+}
+
+#[tokio::test]
+async fn failed_unroutable_publish_turns_a_400_into_a_500() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    publisher.fail_next_js_publish();
+    let app = mock_app(publisher.clone());
+    let body = b"not json at all";
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, body);
+
+    let resp = app.oneshot(webhook_request(body, &ts, Some(&sig))).await.unwrap();
+
+    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+#[tokio::test]
+async fn failed_unroutable_publish_turns_a_200_into_a_500() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    publisher.fail_next_js_publish();
+    let app = mock_app(publisher.clone());
+    let body = serde_json::to_vec(&serde_json::json!({ "type": "app_rate_limited" })).unwrap();
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, &body);
+
+    let resp = app.oneshot(webhook_request(&body, &ts, Some(&sig))).await.unwrap();
+
+    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+#[tokio::test]
+async fn unroutable_message_carries_the_same_envelope_headers_as_routable_ones() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = mock_app(publisher.clone());
+    let body = serde_json::to_vec(&serde_json::json!({
+        "type": "event_callback",
+        "event_id": "Ev01ABC123",
+        "team_id": "T01ABC",
+        "event": {}
+    }))
+    .unwrap();
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, &body);
+
+    app.oneshot(webhook_request(&body, &ts, Some(&sig))).await.unwrap();
+
+    let messages = publisher.published_messages();
+    assert_eq!(header(&messages[0].headers, NATS_HEADER_TEAM_ID), Some("T01ABC"));
+    assert_eq!(header(&messages[0].headers, NATS_HEADER_TRANSPORT), Some("webhook"));
+    assert!(
+        header(&messages[0].headers, "Nats-Msg-Id")
+            .unwrap()
+            .starts_with("unroutable-")
+    );
+    assert_eq!(messages[0].payload.as_ref(), body.as_slice());
+}
+
+#[tokio::test]
+async fn replayed_unroutable_body_gets_the_same_message_id() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let ts = current_timestamp();
+    let body = b"not json at all";
+    let sig = compute_sig(TEST_SECRET, &ts, body);
+
+    for _ in 0..2 {
+        mock_app(publisher.clone())
+            .oneshot(webhook_request(body, &ts, Some(&sig)))
+            .await
+            .unwrap();
+    }
+
+    let messages = publisher.published_messages();
+    assert_eq!(messages.len(), 2);
+    assert_eq!(
+        header(&messages[0].headers, "Nats-Msg-Id"),
+        header(&messages[1].headers, "Nats-Msg-Id")
+    );
+    assert_eq!(header(&messages[0].headers, NATS_HEADER_TEAM_ID), Some("unknown"));
+}
+
+#[tokio::test]
+async fn unroutable_message_falls_back_to_unknown_when_the_team_id_is_not_header_safe() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = mock_app(publisher.clone());
+    let body = serde_json::to_vec(&serde_json::json!({
+        "type": "event_callback",
+        "event_id": "Ev01ABC123",
+        "team_id": "T01\r\nX-Injected: 1",
+        "event": { "type": "message" }
+    }))
+    .unwrap();
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, &body);
+
+    app.oneshot(webhook_request(&body, &ts, Some(&sig))).await.unwrap();
+
+    let messages = publisher.published_messages();
+    assert_eq!(header(&messages[0].headers, NATS_HEADER_TEAM_ID), Some("unknown"));
+}
+
+#[tokio::test]
+async fn routable_event_is_tagged_with_its_transport() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = mock_app(publisher.clone());
+    let body = event_callback_body("message");
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, &body);
+
+    app.oneshot(webhook_request(&body, &ts, Some(&sig))).await.unwrap();
+
+    let messages = publisher.published_messages();
+    assert_eq!(header(&messages[0].headers, NATS_HEADER_TRANSPORT), Some("webhook"));
+}
+
 #[tokio::test]
 async fn event_with_line_break_in_team_id_returns_400_and_is_kept_as_unroutable() {
     let _guard = tracing_guard();

@@ -71,6 +71,21 @@ pub enum SlackTransportConfig {
     SocketMode(SlackSocketModeConfig),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlackTransport {
+    Webhook,
+    SocketMode,
+}
+
+impl SlackTransport {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Webhook => "webhook",
+            Self::SocketMode => "socket_mode",
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct SlackConfig {
     pub subject_prefix: NatsToken,
@@ -81,6 +96,13 @@ pub struct SlackConfig {
 }
 
 impl SlackConfig {
+    pub fn transport_kind(&self) -> SlackTransport {
+        match &self.transport {
+            SlackTransportConfig::Webhook(_) => SlackTransport::Webhook,
+            SlackTransportConfig::SocketMode(_) => SlackTransport::SocketMode,
+        }
+    }
+
     pub fn webhook(&self) -> Option<&SlackWebhookConfig> {
         match &self.transport {
             SlackTransportConfig::Webhook(config) => Some(config),
