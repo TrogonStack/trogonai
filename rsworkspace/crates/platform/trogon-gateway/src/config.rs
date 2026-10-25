@@ -22,6 +22,7 @@ use crate::source::twitter::config::TwitterConsumerSecret;
 use crate::source_integration_id::{SourceIntegrationId, SourceIntegrationIdError};
 use axum::http::HeaderName;
 use confique::Config;
+use trogon_config_value::{ConfigValue, ConfigValueError};
 #[cfg(test)]
 use trogon_nats::NatsAuth;
 use trogon_nats::jetstream::StreamMaxAge;
@@ -68,8 +69,8 @@ enum SecretInput {
 
 impl SecretInput {
     fn resolve(self, env: &impl ReadEnv) -> Result<String, SecretInputError> {
-        match self {
-            Self::Literal(value) => Ok(value),
+        let raw = match self {
+            Self::Literal(value) => value,
             Self::Env { env: var_name } => {
                 let name = var_name.trim();
                 if name.is_empty() {
@@ -78,9 +79,12 @@ impl SecretInput {
                 env.var(name).map_err(|error| match error {
                     std::env::VarError::NotPresent => SecretInputError::MissingEnv { name: name.to_string() },
                     std::env::VarError::NotUnicode(_) => SecretInputError::InvalidUnicodeEnv { name: name.to_string() },
-                })
+                })?
             }
-        }
+        };
+        ConfigValue::parse(raw)
+            .map(ConfigValue::into_string)
+            .map_err(SecretInputError::InvalidValue)
     }
 }
 
@@ -92,6 +96,8 @@ enum SecretInputError {
     MissingEnv { name: String },
     #[error("env var '{name}' is not valid unicode")]
     InvalidUnicodeEnv { name: String },
+    #[error(transparent)]
+    InvalidValue(ConfigValueError),
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

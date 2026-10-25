@@ -71,6 +71,25 @@ Values referenced with `{ env = "..." }` are read from the gateway process
 environment. With Docker Compose, put those variables in `.env`; the
 `trogon-gateway` service loads that file.
 
+Secret values follow
+[Base64-encoded configuration values](https://github.com/straw-hat-team/adr/blob/main/src/adrs/4689777057/README.md)
+and
+[Secret Value Syntax](https://github.com/straw-hat-team/adr/blob/main/src/adrs/3610135900/README.md).
+A value marked as `secret:<nid>:<nss>:<value>` is used without its marker,
+and a value that starts with `base64:` is decoded once at startup:
+
+```sh
+GOOGLE_PUBSUB_PRIMARY_CREDENTIALS="secret:gcp:service-account:base64:$(base64 < key.json)"
+```
+
+Encode only values the carrier cannot hold unchanged, such as multi-line JSON
+or PEM in a `.env` file. Single-line values like API tokens or `whsec_`
+secrets, and values delivered by a Kubernetes Secret, are used as they are.
+Keep the `secret:` marker outside the encoding so scanners still see it. Line
+breaks inside the base64 are ignored. A value that is not valid base64, or
+does not decode to UTF-8, fails startup with an error naming the integration
+and field but never the value.
+
 ## Discord gateway
 
 Configure `[sources.discord]` in `devops/docker/compose/services/trogon-gateway/gateway.toml` from the repository root. For

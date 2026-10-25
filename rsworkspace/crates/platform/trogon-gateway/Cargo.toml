@@ -39,6 +39,7 @@ twilight-model = { workspace = true }
 trogon-nats = { workspace = true }
 trogon-semconv = { workspace = true }
 trogon-service-config = { workspace = true }
+trogon-config-value = { workspace = true }
 trogon-std = { workspace = true, features = ["clap", "signal", "telemetry-http", "tls"] }
 url = "2.5"
 

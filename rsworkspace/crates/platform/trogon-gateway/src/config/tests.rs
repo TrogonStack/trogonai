@@ -254,6 +254,62 @@ webhook_secret = { env = "" }
 }
 
 #[test]
+fn secret_marker_with_base64_value_is_decoded_from_env() {
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set(
+        "SECRET",
+        "secret:gcp:service-account:base64:eyJ0eXBlIjoic2VydmljZV9hY2NvdW50In0=",
+    );
+    let value = SecretInput::Env {
+        env: "SECRET".to_string(),
+    }
+    .resolve(&env)
+    .expect("marked base64 secret should resolve");
+
+    assert_eq!(value, "{\"type\":\"service_account\"}");
+}
+
+#[test]
+fn secret_with_base64_prefix_is_decoded_from_env() {
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set("SECRET", "base64:eyJsaW5lIjoiYVxuYiJ9Cm11bHRpCmxpbmUK");
+    let value = SecretInput::Env {
+        env: "SECRET".to_string(),
+    }
+    .resolve(&env)
+    .expect("base64 secret should resolve");
+
+    assert_eq!(value, "{\"line\":\"a\\nb\"}\nmulti\nline\n");
+}
+
+#[test]
+fn secret_with_invalid_base64_is_rejected_without_echoing_value() {
+    let env = trogon_std::env::InMemoryEnv::new();
+    let error = SecretInput::Literal("base64:not*base64".to_string())
+        .resolve(&env)
+        .expect_err("invalid base64 should fail");
+
+    assert!(matches!(
+        error,
+        SecretInputError::InvalidValue(ConfigValueError::InvalidBase64)
+    ));
+}
+
+#[test]
+fn webhook_secret_invalid_base64_is_reported_per_integration() {
+    let toml = r#"
+[sources.github.integrations.primary.webhook]
+webhook_secret = "base64:%%%"
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("github/primary: invalid webhook_secret: value with 'base64:' prefix is not valid standard base64")))
+    );
+}
+
+#[test]
 fn github_webhook_integrations_resolve_with_integration_routing() {
     let toml = r#"
 [sources.github.integrations.acme-main.webhook]

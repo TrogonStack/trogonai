@@ -110,7 +110,7 @@ Source-specific extras:
 
 ## Config file shape
 
-Source configuration lives in TOML. Secret fields can reference environment variables explicitly:
+Source configuration lives in TOML. Secret fields can reference environment variables explicitly. A secret value marked as `secret:<nid>:<nss>:<value>` is used without its marker, and a value starting with `base64:` is decoded once at startup, so multi-line or JSON secrets can be stored as a single line such as `secret:gcp:service-account:base64:...`:
 
 ```toml
 [http_server]
