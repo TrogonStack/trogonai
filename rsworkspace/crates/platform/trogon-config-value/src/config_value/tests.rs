@@ -6,10 +6,10 @@ fn parse(raw: &str) -> Result<String, ConfigValueError> {
 
 #[test]
 fn value_without_prefix_is_used_verbatim() {
-    assert_eq!(
-        ConfigValue::parse("whsec_dGVzdC1zZWNyZXQ=").unwrap(),
-        ConfigValue::Plain("whsec_dGVzdC1zZWNyZXQ=".to_string())
-    );
+    let value = ConfigValue::parse("whsec_dGVzdC1zZWNyZXQ=").unwrap();
+
+    assert_eq!(value.as_str(), "whsec_dGVzdC1zZWNyZXQ=");
+    assert_eq!(value.secret_marker(), None);
 }
 
 #[test]
@@ -44,20 +44,20 @@ fn value_not_matching_secret_marker_syntax_is_used_verbatim() {
         "secret:gcp",
         "secret:gcp_x:key:value",
     ] {
-        assert_eq!(ConfigValue::parse(raw).unwrap(), ConfigValue::Plain(raw.to_string()));
+        let value = ConfigValue::parse(raw).unwrap();
+
+        assert_eq!(value.as_str(), raw);
+        assert_eq!(value.secret_marker(), None);
     }
 }
 
 #[test]
 fn decoded_value_is_not_parsed_again() {
     // base64 of "secret:a:b:base64:aGk="
-    assert_eq!(
-        ConfigValue::parse("secret:x:y:base64:c2VjcmV0OmE6YjpiYXNlNjQ6YUdrPQ==").unwrap(),
-        ConfigValue::Secret {
-            marker: SecretMarker::new("x", "y").unwrap(),
-            value: "secret:a:b:base64:aGk=".to_string(),
-        }
-    );
+    let value = ConfigValue::parse("secret:x:y:base64:c2VjcmV0OmE6YjpiYXNlNjQ6YUdrPQ==").unwrap();
+
+    assert_eq!(value.secret_marker(), Some(&SecretMarker::new("x", "y").unwrap()));
+    assert_eq!(value.as_str(), "secret:a:b:base64:aGk=");
 }
 
 #[test]

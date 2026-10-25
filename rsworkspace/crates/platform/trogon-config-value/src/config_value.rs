@@ -15,53 +15,47 @@ pub enum ConfigValueError {
 }
 
 #[derive(Clone, PartialEq, Eq)]
-pub enum ConfigValue {
-    Plain(String),
-    Secret { marker: SecretMarker, value: String },
+pub struct ConfigValue {
+    value: String,
+    secret_marker: Option<SecretMarker>,
 }
 
 impl ConfigValue {
     pub fn parse(raw: impl Into<String>) -> Result<Self, ConfigValueError> {
         let raw = raw.into();
         match SecretMarker::split(&raw) {
-            Some((marker, value)) => Ok(Self::Secret {
+            Some((marker, value)) => Ok(Self {
                 value: decode(value)?.unwrap_or_else(|| value.to_string()),
-                marker,
+                secret_marker: Some(marker),
             }),
-            None => Ok(Self::Plain(decode(&raw)?.unwrap_or(raw))),
+            None => Ok(Self {
+                value: decode(&raw)?.unwrap_or(raw),
+                secret_marker: None,
+            }),
         }
     }
 
     pub fn as_str(&self) -> &str {
-        match self {
-            Self::Plain(value) | Self::Secret { value, .. } => value,
-        }
+        &self.value
     }
 
     pub fn into_string(self) -> String {
-        match self {
-            Self::Plain(value) | Self::Secret { value, .. } => value,
-        }
+        self.value
     }
 
     pub fn secret_marker(&self) -> Option<&SecretMarker> {
-        match self {
-            Self::Plain(_) => None,
-            Self::Secret { marker, .. } => Some(marker),
-        }
+        self.secret_marker.as_ref()
     }
 }
 
 impl fmt::Debug for ConfigValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Plain(value) => f.debug_tuple("Plain").field(value).finish(),
-            Self::Secret { marker, .. } => f
-                .debug_struct("Secret")
-                .field("marker", marker)
-                .field("value", &"[REDACTED]")
-                .finish(),
+        let mut debug = f.debug_struct("ConfigValue");
+        match &self.secret_marker {
+            Some(marker) => debug.field("value", &"[REDACTED]").field("secret_marker", marker),
+            None => debug.field("value", &self.value),
         }
+        .finish()
     }
 }
 
