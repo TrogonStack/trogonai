@@ -1,0 +1,82 @@
+edition = "2024";
+
+package trogonai.model_access.provider_connections.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/model_access/provider_connections/v1alpha1/authentication.proto";
+import "trogonai/model_access/provider_connections/v1alpha1/identity.proto";
+import "trogonai/model_access/provider_connections/v1alpha1/lifecycle.proto";
+import "trogonai/model_access/provider_connections/v1alpha1/profile.proto";
+import "trogonai/model_access/provider_connections/v1alpha1/registration.proto";
+
+// Replay rejects unset/unknown events and invalid transitions. Actor identity
+// and occurrence time come from the event envelope. These events record safe
+// configuration and lifecycle facts, never auth headers or provider responses.
+message ProviderConnectionEvent {
+  oneof event {
+    option (buf.validate.oneof).required = true;
+    ProviderConnectionRegistered registered = 1;
+    ProviderConnectionActivated activated = 2;
+    CredentialBindingReplaced binding_replaced = 3;
+    CredentialBindingRevoked binding_revoked = 4;
+    ProviderConnectionRevoked revoked = 5;
+    ProviderConnectionProfileSet profile_set = 6;
+    ProviderRoutingPolicySet routing_policy_set = 7;
+  }
+}
+
+message ProviderConnectionRegistered {
+  ProviderConnectionRegistration registration = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ProviderConnectionActivated {
+  ProviderConnectionId connection_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  CredentialBindingId binding_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  ProviderValidationRef validation = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// One atomic transition. DRAIN means previous binding becomes DRAINING;
+// FAIL_IF_IN_USE means it becomes REVOKED. Replacement becomes ACTIVE.
+// Fold verifies scope/endpoint compatibility against immutable connection
+// configuration, exact previous active ID, and never-used replacement ID.
+message CredentialBindingReplaced {
+  option (buf.validate.message).cel = {
+    id: "binding_replaced.new_identity"
+    message: "replacement must have a different identity from the previous binding"
+    expression: "this.previous_binding_id.value != this.replacement.id.value"
+  };
+
+  ProviderConnectionId connection_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  CredentialBindingId previous_binding_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  CredentialBinding replacement = 3 [features.field_presence = LEGACY_REQUIRED];
+  BindingReplacementMode mode = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  ProviderValidationRef validation = 5 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Only from ACTIVE connection and ACTIVE or DRAINING binding. Revoking pending
+// genesis instead requires ProviderConnectionRevoked so replay stays coherent.
+message CredentialBindingRevoked {
+  ProviderConnectionId connection_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  CredentialBindingId binding_id = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Revokes all retained bindings as well as the connection.
+message ProviderConnectionRevoked {
+  ProviderConnectionId connection_id = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ProviderConnectionProfileSet {
+  ProviderConnectionId connection_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ProviderConnectionProfile profile = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ProviderRoutingPolicySet {
+  ProviderConnectionId connection_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ProviderRoutingPolicy routing_policy = 2 [features.field_presence = LEGACY_REQUIRED];
+}

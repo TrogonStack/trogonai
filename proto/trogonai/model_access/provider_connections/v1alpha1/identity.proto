@@ -1,0 +1,58 @@
+edition = "2024";
+
+package trogonai.model_access.provider_connections.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// Identities are nonempty, opaque, compared whole, and never reused.
+message ProviderConnectionId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+message CredentialBindingId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// Stable secrets-service reference, not a backend path, version, or credential.
+// Resolution and validated same-subject material rotation belong to that service.
+message SecretRef {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// Identifies the provider security and billing boundary's implementation.
+// The UI's Provider ID is the connection instance key (ProviderConnectionId),
+// not this implementation identity. Preset names and brands never infer either
+// identity; admission resolves the explicit provider through trusted authority.
+message ProviderId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// Provider-native model values are nonempty and preserved exactly, including
+// case, punctuation, namespaces, and aliases. They are never catalog keys.
+message ProviderModelIdentifier {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// Safe, opaque continuity anchor established by trusted provider validation.
+// Never a raw account locator, credential hash, or tenant authorization claim.
+message ProviderSubjectFingerprint {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
