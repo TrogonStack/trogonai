@@ -37,6 +37,7 @@
 
 pub mod config;
 pub mod constants;
+pub mod header_text;
 pub mod server;
 pub mod signature;
 pub mod socket_mode;

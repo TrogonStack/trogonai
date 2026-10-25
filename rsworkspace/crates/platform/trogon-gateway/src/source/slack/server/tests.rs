@@ -746,3 +746,89 @@ async fn interaction_missing_type_publishes_unroutable() {
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     assert_unroutable(&publisher, "missing_interaction_type");
 }
+
+#[tokio::test]
+async fn event_with_line_break_in_team_id_returns_400_and_is_kept_as_unroutable() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = mock_app(publisher.clone());
+    let body = serde_json::to_vec(&serde_json::json!({
+        "type": "event_callback",
+        "event_id": "Ev01ABC123",
+        "team_id": "T01\r\nX-Injected: 1",
+        "event": { "type": "message" }
+    }))
+    .unwrap();
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, &body);
+
+    let resp = app.oneshot(webhook_request(&body, &ts, Some(&sig))).await.unwrap();
+
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    assert_unroutable(&publisher, "invalid_header_value");
+}
+
+#[tokio::test]
+async fn event_with_line_break_in_event_id_returns_400() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = mock_app(publisher.clone());
+    let body = serde_json::to_vec(&serde_json::json!({
+        "type": "event_callback",
+        "event_id": "Ev01\nABC",
+        "team_id": "T01ABC",
+        "event": { "type": "message" }
+    }))
+    .unwrap();
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, &body);
+
+    let resp = app.oneshot(webhook_request(&body, &ts, Some(&sig))).await.unwrap();
+
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    assert_unroutable(&publisher, "invalid_header_value");
+}
+
+#[tokio::test]
+async fn interaction_with_line_break_in_trigger_id_returns_400() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = mock_app(publisher.clone());
+    let interaction_payload = serde_json::json!({
+        "type": "block_actions",
+        "trigger_id": "trigger\r\n123",
+        "team": { "id": "T01ABC" }
+    });
+    let form_body = format!(
+        "payload={}",
+        form_urlencoded::byte_serialize(interaction_payload.to_string().as_bytes()).collect::<String>()
+    );
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, form_body.as_bytes());
+
+    let resp = app
+        .oneshot(form_request(form_body.as_bytes(), &ts, &sig))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    assert_unroutable(&publisher, "invalid_header_value");
+}
+
+#[tokio::test]
+async fn slash_command_with_line_break_in_team_id_returns_400() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = mock_app(publisher.clone());
+    let form_body = "command=%2Ftrogon&team_id=T01%0D%0AX-Injected%3A+1&trigger_id=cmd789";
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, form_body.as_bytes());
+
+    let resp = app
+        .oneshot(form_request(form_body.as_bytes(), &ts, &sig))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    assert_unroutable(&publisher, "invalid_header_value");
+}
