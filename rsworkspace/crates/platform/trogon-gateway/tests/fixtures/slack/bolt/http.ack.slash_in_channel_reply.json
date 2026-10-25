@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "id": "http.ack.slash_in_channel_reply",
+  "kind": "command",
+  "transport": "http",
+  "provenance": {
+    "bolt_version": "5.1.0",
+    "bolt_commit": "3f8823c93f5639e99f05a2df9c7dc692da5cc184",
+    "node_slack_sdk_commit": "d02afdfd5c87f896dc9994dfe2b55472758fbcf4",
+    "payload_source": "test/unit/helpers/events.ts:createDummyCommandMiddlewareArgs plus ack body: immediate response shape from the slash commands guide",
+    "wire_source": "https://docs.slack.dev/interactivity/implementing-slash-commands",
+    "ack_source": "https://docs.slack.dev/interactivity/implementing-slash-commands"
+  },
+  "not_representable": null,
+  "input": {
+    "headers": {
+      "content-type": "application/x-www-form-urlencoded",
+      "x-slack-request-timestamp": "1700000000",
+      "x-slack-signature": "v0=b59d5f62401a7bc340069a0a2be8b999866f5a28502a12c1205612d782486848"
+    },
+    "body": "token=xoxb-1234&command=%2Fslash&text=yo&response_url=https%3A%2F%2Fslack.com&trigger_id=1234.56&user_id=U1234&user_name=filmaj&team_id=T1234&team_domain=slack.com&channel_id=C1234&channel_name=%23random&api_app_id=A1234"
+  },
+  "bolt": {
+    "outcome": "dispatched",
+    "status": 200,
+    "body": "{\"response_type\":\"in_channel\",\"text\":\"It is 80 degrees right now.\"}",
+    "content_type": "application/json",
+    "reason": null,
+    "dispatch": {
+      "incoming_type": "Command",
+      "conversation_id": "C1234",
+      "retry_num": null,
+      "retry_reason": null,
+      "is_enterprise_install": false,
+      "team_id": "T1234",
+      "enterprise_id": null,
+      "user_id": "U1234"
+    }
+  },
+  "expected": {
+    "outcome": "publish",
+    "nats": {
+      "subject_suffix": "command.slash",
+      "dedup_id": "1234.56",
+      "payload": "token=xoxb-1234&command=%2Fslash&text=yo&response_url=https%3A%2F%2Fslack.com&trigger_id=1234.56&user_id=U1234&user_name=filmaj&team_id=T1234&team_domain=slack.com&channel_id=C1234&channel_name=%23random&api_app_id=A1234",
+      "payload_fill": null,
+      "headers": {
+        "X-Slack-Event-Type": "/slash",
+        "X-Slack-Team-Id": "T1234",
+        "X-Slack-Payload-Kind": "command",
+        "X-Slack-Is-Enterprise-Install": "false",
+        "X-Slack-Api-App-Id": "A1234",
+        "X-Slack-Transport": "webhook",
+        "X-Slack-Request-Timestamp": "1700000000"
+      }
+    },
+    "http": {
+      "status": 200,
+      "body": "{\"response_type\":\"in_channel\",\"text\":\"It is 80 degrees right now.\"}",
+      "challenge": null
+    },
+    "socket_ack": null
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "id": "socket.interaction.view_closed",
+  "kind": "interaction",
+  "transport": "socket_mode",
+  "provenance": {
+    "bolt_version": "5.1.0",
+    "bolt_commit": "3f8823c93f5639e99f05a2df9c7dc692da5cc184",
+    "node_slack_sdk_commit": "d02afdfd5c87f896dc9994dfe2b55472758fbcf4",
+    "payload_source": "test/unit/helpers/events.ts:createDummyViewClosedMiddlewareArgs",
+    "wire_source": "https://docs.slack.dev/apis/events-api/using-socket-mode",
+    "ack_source": null
+  },
+  "not_representable": null,
+  "input": {
+    "frame": "{\"payload\":{\"type\":\"view_closed\",\"team\":{\"id\":\"T1234\",\"domain\":\"slack.com\"},\"user\":{\"id\":\"U1234\",\"name\":\"filmaj\"},\"view\":{\"type\":\"view\",\"id\":\"V1234\",\"callback_id\":\"Cb1234\",\"team_id\":\"T1234\",\"app_id\":\"A1234\",\"bot_id\":\"B1234\",\"title\":{\"type\":\"plain_text\",\"text\":\"hi\"},\"blocks\":[],\"close\":null,\"submit\":null,\"hash\":\"1234.56\",\"state\":{\"values\":{}},\"private_metadata\":\"\",\"root_view_id\":null,\"previous_view_id\":null,\"clear_on_close\":false,\"notify_on_close\":false},\"api_app_id\":\"A1234\",\"token\":\"xoxb-1234\",\"is_cleared\":false},\"envelope_id\":\"dbdd0ef3-1543-4f94-bfb4-133d0e6c1545\",\"type\":\"interactive\",\"accepts_response_payload\":false}"
+  },
+  "bolt": {
+    "outcome": "dispatched",
+    "ack": {
+      "envelope_id": "dbdd0ef3-1543-4f94-bfb4-133d0e6c1545",
+      "payload": {}
+    },
+    "dispatch": {
+      "incoming_type": "ViewAction",
+      "conversation_id": null,
+      "retry_num": null,
+      "retry_reason": null,
+      "is_enterprise_install": false,
+      "team_id": "T1234",
+      "enterprise_id": null,
+      "user_id": "U1234"
+    }
+  },
+  "expected": {
+    "outcome": "publish",
+    "nats": {
+      "subject_suffix": "interaction.view_closed",
+      "dedup_id": "view_closed-V1234",
+      "payload": "{\"type\":\"view_closed\",\"team\":{\"id\":\"T1234\",\"domain\":\"slack.com\"},\"user\":{\"id\":\"U1234\",\"name\":\"filmaj\"},\"view\":{\"type\":\"view\",\"id\":\"V1234\",\"callback_id\":\"Cb1234\",\"team_id\":\"T1234\",\"app_id\":\"A1234\",\"bot_id\":\"B1234\",\"title\":{\"type\":\"plain_text\",\"text\":\"hi\"},\"blocks\":[],\"close\":null,\"submit\":null,\"hash\":\"1234.56\",\"state\":{\"values\":{}},\"private_metadata\":\"\",\"root_view_id\":null,\"previous_view_id\":null,\"clear_on_close\":false,\"notify_on_close\":false},\"api_app_id\":\"A1234\",\"token\":\"xoxb-1234\",\"is_cleared\":false}",
+      "payload_fill": null,
+      "headers": {
+        "X-Slack-Event-Type": "view_closed",
+        "X-Slack-Team-Id": "T1234",
+        "X-Slack-Payload-Kind": "interaction",
+        "X-Slack-Is-Enterprise-Install": "false",
+        "X-Slack-Api-App-Id": "A1234",
+        "X-Slack-Transport": "socket_mode",
+        "X-Slack-Envelope-Id": "dbdd0ef3-1543-4f94-bfb4-133d0e6c1545"
+      }
+    },
+    "http": null,
+    "socket_ack": {
+      "envelope_id": "dbdd0ef3-1543-4f94-bfb4-133d0e6c1545",
+      "payload": null
+    }
+  }
+}

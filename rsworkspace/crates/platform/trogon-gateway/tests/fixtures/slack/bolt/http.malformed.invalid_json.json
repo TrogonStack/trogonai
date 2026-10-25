@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "id": "http.malformed.invalid_json",
+  "kind": "malformed",
+  "transport": "http",
+  "provenance": {
+    "bolt_version": "5.1.0",
+    "bolt_commit": "3f8823c93f5639e99f05a2df9c7dc692da5cc184",
+    "node_slack_sdk_commit": "d02afdfd5c87f896dc9994dfe2b55472758fbcf4",
+    "payload_source": "hand written truncated JSON body; test/unit/receivers/HTTPModuleFunctions.spec.ts and verify-request.spec.ts request verification vectors",
+    "wire_source": "https://docs.slack.dev/apis/events-api/",
+    "ack_source": null
+  },
+  "not_representable": null,
+  "input": {
+    "headers": {
+      "content-type": "application/json",
+      "x-slack-request-timestamp": "1700000000",
+      "x-slack-signature": "v0=4995080720ea21eb44ffbdee8e6df7e2cdb3527a3a3eec3dc22fc237f7435a9a"
+    },
+    "body": "{\"type\":\"event_callback\",\"event\":"
+  },
+  "bolt": {
+    "outcome": "rejected",
+    "status": 400,
+    "body": null,
+    "content_type": null,
+    "reason": "Malformed request body: Unexpected end of JSON input",
+    "dispatch": null
+  },
+  "expected": {
+    "outcome": "reject",
+    "nats": null,
+    "http": {
+      "status": 400,
+      "body": null,
+      "challenge": null
+    },
+    "socket_ack": null
+  }
+}

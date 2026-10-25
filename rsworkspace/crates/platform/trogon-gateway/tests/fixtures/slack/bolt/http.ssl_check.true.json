@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "id": "http.ssl_check.true",
+  "kind": "ssl_check",
+  "transport": "http",
+  "provenance": {
+    "bolt_version": "5.1.0",
+    "bolt_commit": "3f8823c93f5639e99f05a2df9c7dc692da5cc184",
+    "node_slack_sdk_commit": "d02afdfd5c87f896dc9994dfe2b55472758fbcf4",
+    "payload_source": "test/unit/receivers/HTTPModuleFunctions.spec.ts: should not bypass signature verification when ssl_check=true",
+    "wire_source": "https://docs.slack.dev/authentication/verifying-requests-from-slack",
+    "ack_source": null
+  },
+  "not_representable": null,
+  "input": {
+    "headers": {
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    "body": "ssl_check=true&token=legacy-fixed-verification-token"
+  },
+  "bolt": {
+    "outcome": "rejected",
+    "status": 401,
+    "body": null,
+    "content_type": null,
+    "reason": "Failed to parse and verify the request data: Failed to verify authenticity: header x-slack-signature did not have the expected type (received undefined, expected string)",
+    "dispatch": null
+  },
+  "expected": {
+    "outcome": "reject",
+    "nats": null,
+    "http": {
+      "status": 401,
+      "body": null,
+      "challenge": null
+    },
+    "socket_ack": null
+  }
+}

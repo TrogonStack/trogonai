@@ -561,7 +561,7 @@ pub fn router<P: JetStreamPublisher, S: ObjectStorePut>(
     router_with_clock(publisher, config, webhook, SystemClock)
 }
 
-fn router_with_clock<P: JetStreamPublisher, S: ObjectStorePut, C: EpochClock>(
+pub(super) fn router_with_clock<P: JetStreamPublisher, S: ObjectStorePut, C: EpochClock>(
     publisher: ClaimCheckPublisher<P, S>,
     config: &SlackConfig,
     webhook: &SlackWebhookConfig,

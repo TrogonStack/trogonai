@@ -201,7 +201,7 @@ async fn open_socket_url(
     ))
 }
 
-async fn handle_text_frame<P: JetStreamPublisher, S: ObjectStorePut>(
+pub(super) async fn handle_text_frame<P: JetStreamPublisher, S: ObjectStorePut>(
     bridge: &SlackBridge<P, S>,
     text: &str,
 ) -> Result<(bool, Option<String>), SocketModeError> {

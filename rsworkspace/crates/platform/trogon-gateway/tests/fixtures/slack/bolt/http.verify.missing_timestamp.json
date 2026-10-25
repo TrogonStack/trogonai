@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "id": "http.verify.missing_timestamp",
+  "kind": "event",
+  "transport": "http",
+  "provenance": {
+    "bolt_version": "5.1.0",
+    "bolt_commit": "3f8823c93f5639e99f05a2df9c7dc692da5cc184",
+    "node_slack_sdk_commit": "d02afdfd5c87f896dc9994dfe2b55472758fbcf4",
+    "payload_source": "test/unit/helpers/events.ts:createDummyMessageEventMiddlewareArgs (no timestamp header); test/unit/receivers/HTTPModuleFunctions.spec.ts and verify-request.spec.ts request verification vectors",
+    "wire_source": "https://docs.slack.dev/authentication/verifying-requests-from-slack",
+    "ack_source": null
+  },
+  "not_representable": null,
+  "input": {
+    "headers": {
+      "content-type": "application/json",
+      "x-slack-signature": "v0=ac3371c0ff46107a6c455e76012cf3557ac7171de063cb71959d359a1a35be93"
+    },
+    "body": "{\"token\":\"xoxb-1234\",\"team_id\":\"T1234\",\"api_app_id\":\"A1234\",\"event\":{\"type\":\"message\",\"event_ts\":\"1234.56\",\"channel\":\"C1234\",\"channel_type\":\"channel\",\"user\":\"U1234\",\"ts\":\"1234.56\",\"text\":\"hi\",\"blocks\":[]},\"type\":\"event_callback\",\"event_id\":\"1234\",\"event_time\":1234}"
+  },
+  "bolt": {
+    "outcome": "rejected",
+    "status": 401,
+    "body": null,
+    "content_type": null,
+    "reason": "Failed to parse and verify the request data: Failed to verify authenticity: header x-slack-request-timestamp did not have the expected type (received undefined, expected string)",
+    "dispatch": null
+  },
+  "expected": {
+    "outcome": "reject",
+    "nats": null,
+    "http": {
+      "status": 401,
+      "body": null,
+      "challenge": null
+    },
+    "socket_ack": null
+  }
+}

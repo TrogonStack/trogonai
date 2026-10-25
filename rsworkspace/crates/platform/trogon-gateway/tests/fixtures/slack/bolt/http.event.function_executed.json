@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "id": "http.event.function_executed",
+  "kind": "event",
+  "transport": "http",
+  "provenance": {
+    "bolt_version": "5.1.0",
+    "bolt_commit": "3f8823c93f5639e99f05a2df9c7dc692da5cc184",
+    "node_slack_sdk_commit": "d02afdfd5c87f896dc9994dfe2b55472758fbcf4",
+    "payload_source": "test/unit/helpers/events.ts:createDummyCustomFunctionMiddlewareArgs",
+    "wire_source": "https://docs.slack.dev/apis/events-api/",
+    "ack_source": null
+  },
+  "not_representable": null,
+  "input": {
+    "headers": {
+      "content-type": "application/json",
+      "x-slack-request-timestamp": "1700000000",
+      "x-slack-signature": "v0=ca00cdd7a94740f8a472748897b90a9c09d9742338ea2c6dc4dcc67b4f3713d0"
+    },
+    "body": "{\"token\":\"verification_token\",\"team_id\":\"T111\",\"api_app_id\":\"A111\",\"event\":{\"type\":\"function_executed\",\"function\":{\"id\":\"Fn111\",\"callback_id\":\"reverse\",\"title\":\"reverse\",\"description\":\"Takes a string and reverses it\",\"type\":\"app\",\"input_parameters\":[{\"type\":\"string\",\"name\":\"stringToReverse\",\"description\":\"The string to reverse\",\"title\":\"String To Reverse\",\"is_required\":true}],\"output_parameters\":[{\"type\":\"string\",\"name\":\"reverseString\",\"description\":\"The string in reverse\",\"title\":\"Reverse String\",\"is_required\":true}],\"app_id\":\"A111\",\"date_updated\":1659054991,\"date_deleted\":0,\"date_created\":1725987754},\"inputs\":{\"stringToReverse\":\"hello\"},\"function_execution_id\":\"Fx111\",\"workflow_execution_id\":\"Wf111\",\"event_ts\":\"1659055013.509853\",\"bot_access_token\":\"xwfp-valid\"},\"event_id\":\"Ev111\",\"event_time\":1659055013,\"type\":\"event_callback\"}"
+  },
+  "bolt": {
+    "outcome": "dispatched",
+    "status": 200,
+    "body": null,
+    "content_type": null,
+    "reason": null,
+    "dispatch": {
+      "incoming_type": "Event",
+      "conversation_id": null,
+      "retry_num": null,
+      "retry_reason": null,
+      "is_enterprise_install": false,
+      "team_id": "T111",
+      "enterprise_id": null,
+      "user_id": null
+    }
+  },
+  "expected": {
+    "outcome": "publish",
+    "nats": {
+      "subject_suffix": "event.function_executed",
+      "dedup_id": "Ev111",
+      "payload": "{\"token\":\"verification_token\",\"team_id\":\"T111\",\"api_app_id\":\"A111\",\"event\":{\"type\":\"function_executed\",\"function\":{\"id\":\"Fn111\",\"callback_id\":\"reverse\",\"title\":\"reverse\",\"description\":\"Takes a string and reverses it\",\"type\":\"app\",\"input_parameters\":[{\"type\":\"string\",\"name\":\"stringToReverse\",\"description\":\"The string to reverse\",\"title\":\"String To Reverse\",\"is_required\":true}],\"output_parameters\":[{\"type\":\"string\",\"name\":\"reverseString\",\"description\":\"The string in reverse\",\"title\":\"Reverse String\",\"is_required\":true}],\"app_id\":\"A111\",\"date_updated\":1659054991,\"date_deleted\":0,\"date_created\":1725987754},\"inputs\":{\"stringToReverse\":\"hello\"},\"function_execution_id\":\"Fx111\",\"workflow_execution_id\":\"Wf111\",\"event_ts\":\"1659055013.509853\",\"bot_access_token\":\"xwfp-valid\"},\"event_id\":\"Ev111\",\"event_time\":1659055013,\"type\":\"event_callback\"}",
+      "payload_fill": null,
+      "headers": {
+        "X-Slack-Event-Type": "function_executed",
+        "X-Slack-Event-Id": "Ev111",
+        "X-Slack-Team-Id": "T111",
+        "X-Slack-Payload-Kind": "event",
+        "X-Slack-Is-Enterprise-Install": "false",
+        "X-Slack-Api-App-Id": "A111",
+        "X-Slack-Transport": "webhook",
+        "X-Slack-Request-Timestamp": "1700000000"
+      }
+    },
+    "http": {
+      "status": 200,
+      "body": null,
+      "challenge": null
+    },
+    "socket_ack": null
+  }
+}

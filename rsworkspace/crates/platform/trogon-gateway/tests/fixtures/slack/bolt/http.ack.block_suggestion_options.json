@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "id": "http.ack.block_suggestion_options",
+  "kind": "interaction",
+  "transport": "http",
+  "provenance": {
+    "bolt_version": "5.1.0",
+    "bolt_commit": "3f8823c93f5639e99f05a2df9c7dc692da5cc184",
+    "node_slack_sdk_commit": "d02afdfd5c87f896dc9994dfe2b55472758fbcf4",
+    "payload_source": "test/unit/helpers/events.ts:createDummyBlockSuggestionsMiddlewareArgs plus ack body: options shape from the external select reference; the option text and value are chosen by the exporter",
+    "wire_source": "https://docs.slack.dev/interactivity/handling-user-interaction",
+    "ack_source": "https://docs.slack.dev/reference/block-kit/block-elements/multi-select-menu-element"
+  },
+  "not_representable": null,
+  "input": {
+    "headers": {
+      "content-type": "application/x-www-form-urlencoded",
+      "x-slack-request-timestamp": "1700000000",
+      "x-slack-signature": "v0=ebcff5590341869dd9b979358e8fe16db85cc07e822abbb69a9a8f896fea030a"
+    },
+    "body": "payload=%7B%22type%22%3A%22block_suggestion%22%2C%22action_id%22%3A%22action_id%22%2C%22block_id%22%3A%22block_id%22%2C%22value%22%3A%22value%22%2C%22action_ts%22%3A%221234.56%22%2C%22api_app_id%22%3A%22A1234%22%2C%22team%22%3A%7B%22id%22%3A%22T1234%22%2C%22domain%22%3A%22slack.com%22%7D%2C%22user%22%3A%7B%22id%22%3A%22U1234%22%2C%22name%22%3A%22filmaj%22%7D%2C%22token%22%3A%22xoxb-1234%22%2C%22container%22%3A%7B%7D%7D"
+  },
+  "bolt": {
+    "outcome": "dispatched",
+    "status": 200,
+    "body": "{\"options\":[{\"text\":{\"type\":\"plain_text\",\"text\":\"First option\"},\"value\":\"first\"}]}",
+    "content_type": "application/json",
+    "reason": null,
+    "dispatch": {
+      "incoming_type": "Options",
+      "conversation_id": null,
+      "retry_num": null,
+      "retry_reason": null,
+      "is_enterprise_install": false,
+      "team_id": "T1234",
+      "enterprise_id": null,
+      "user_id": "U1234"
+    }
+  },
+  "expected": {
+    "outcome": "publish",
+    "nats": {
+      "subject_suffix": "interaction.block_suggestion",
+      "dedup_id": "interaction-b760a57cc2c43caf3ebf41c26cb517fe72a6090cd3abe708a95c3b0a8039ff50",
+      "payload": "{\"type\":\"block_suggestion\",\"action_id\":\"action_id\",\"block_id\":\"block_id\",\"value\":\"value\",\"action_ts\":\"1234.56\",\"api_app_id\":\"A1234\",\"team\":{\"id\":\"T1234\",\"domain\":\"slack.com\"},\"user\":{\"id\":\"U1234\",\"name\":\"filmaj\"},\"token\":\"xoxb-1234\",\"container\":{}}",
+      "payload_fill": null,
+      "headers": {
+        "X-Slack-Event-Type": "block_suggestion",
+        "X-Slack-Team-Id": "T1234",
+        "X-Slack-Payload-Kind": "interaction",
+        "X-Slack-Is-Enterprise-Install": "false",
+        "X-Slack-Api-App-Id": "A1234",
+        "X-Slack-Transport": "webhook",
+        "X-Slack-Request-Timestamp": "1700000000"
+      }
+    },
+    "http": {
+      "status": 200,
+      "body": "{\"options\":[{\"text\":{\"type\":\"plain_text\",\"text\":\"First option\"},\"value\":\"first\"}]}",
+      "challenge": null
+    },
+    "socket_ack": null
+  }
+}
