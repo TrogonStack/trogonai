@@ -10,11 +10,14 @@ mod source_integration_id;
 mod source_plugin;
 mod source_status;
 mod streams;
+mod supervision;
 
 use std::io::Write;
 use std::net::SocketAddr;
 
-use crate::constants::{CLAIM_CHECK_TTL_GRACE, NATS_CONNECT_TIMEOUT, NATS_SERVER_INFO_POLL_INTERVAL};
+use crate::constants::{
+    CLAIM_CHECK_TTL_GRACE, NATS_CONNECT_TIMEOUT, NATS_SERVER_INFO_POLL_INTERVAL, SLACK_RESTART_BACKOFF,
+};
 use anyhow::Context;
 use futures_util::FutureExt;
 use tokio::task::JoinSet;
@@ -249,10 +252,10 @@ fn spawn_slack_socket_modes<P, S, Shutdown, Run, Running>(
         tasks.spawn(async move {
             let result = tokio::select! {
                 () = shutdown => Ok(()),
-                result = async {
+                result = supervision::supervise("slack-socket-mode", SLACK_RESTART_BACKOFF, move || {
                     let connector = source::slack::socket_mode::HttpSocketConnector::slack();
-                    run(publisher, config, connector).await
-                } => result.context("slack socket mode"),
+                    run.clone()(publisher.clone(), config.clone(), connector)
+                }) => result.context("slack socket mode"),
             };
             ("slack-socket-mode", result)
         });

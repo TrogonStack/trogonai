@@ -2,6 +2,8 @@ use std::time::Duration;
 
 use trogon_std::NonZeroDuration;
 
+use crate::supervision::RestartBackoff;
+
 pub const NATS_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 pub const NATS_SERVER_INFO_POLL_INTERVAL: Duration = Duration::from_millis(50);
 /// Grace window added to the longest configured stream retention when sizing the
@@ -19,3 +21,5 @@ pub const DEFAULT_INCIDENTIO_TIMESTAMP_TOLERANCE_SECS: u64 = 300;
 pub const SENTRY_MAX_ACK_TIMEOUT_SECS: u64 = 1;
 
 pub const MAX_INTEGRATION_ID_LEN: usize = 64;
+
+pub const SLACK_RESTART_BACKOFF: RestartBackoff = RestartBackoff::new(Duration::from_secs(1), Duration::from_secs(30));
