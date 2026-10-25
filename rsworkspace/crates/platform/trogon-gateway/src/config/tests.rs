@@ -1,4 +1,5 @@
 use super::*;
+use crate::source::google_pubsub::credentials::fixtures::FAKE_EXTERNAL_ACCOUNT;
 use std::error::Error;
 use std::io::Write;
 
@@ -2505,5 +2506,414 @@ fn longest_stream_max_age_lets_no_expiry_dominate_in_either_position() {
     assert_eq!(
         longest_stream_max_age([StreamMaxAge::NoExpiry, bounded].into_iter()),
         Some(StreamMaxAge::NoExpiry)
+    );
+}
+
+const PUBSUB_CREDENTIALS_FIELD: &str = r#"credentials = '{"type":"service_account","project_id":"fake","private_key_id":"fake","private_key":"fake","client_email":"fake@example.invalid"}'"#;
+
+fn google_pubsub_toml(subscription: &str) -> String {
+    format!(
+        r#"
+[sources.google_pubsub.integrations.primary.streaming_pull]
+subscription = "{subscription}"
+{PUBSUB_CREDENTIALS_FIELD}
+"#
+    )
+}
+
+fn validation_errors(result: Result<ResolvedConfig, ConfigError>) -> AggregateValidationError {
+    match result {
+        Err(ConfigError::Validation(errors)) => errors,
+        Err(other) => panic!("expected validation errors, got {other}"),
+        Ok(_) => panic!("expected validation errors, config loaded"),
+    }
+}
+
+#[test]
+fn google_pubsub_resolves_with_defaults() {
+    let f = write_toml(&google_pubsub_toml("projects/p/subscriptions/sub"));
+    let cfg = load(Some(f.path())).expect("load failed");
+
+    assert!(cfg.has_any_source());
+    assert_eq!(cfg.google_pubsub.len(), 1);
+    let integration = &cfg.google_pubsub[0];
+    assert_eq!(integration.id.as_str(), "primary");
+    assert_eq!(integration.config.subject_prefix.as_str(), "google-pubsub-primary");
+    assert_eq!(integration.config.stream_name.as_str(), "GOOGLE_PUBSUB_PRIMARY");
+    assert_eq!(
+        std::time::Duration::from(integration.config.nats_ack_timeout).as_secs(),
+        DEFAULT_NATS_ACK_TIMEOUT_SECS
+    );
+    let GooglePubSubTransportConfig::StreamingPull(streaming_pull) = &integration.config.transport;
+    assert_eq!(streaming_pull.subscription.as_str(), "projects/p/subscriptions/sub");
+    assert_eq!(streaming_pull.max_outstanding_messages, None);
+}
+
+#[test]
+fn google_pubsub_resolves_explicit_fields() {
+    let toml = r#"
+[sources.google_pubsub.integrations.primary]
+subject_prefix = "pubsub-events"
+stream_name = "PUBSUB_EVENTS"
+stream_max_age_secs = 7200
+nats_ack_timeout_secs = 3
+
+[sources.google_pubsub.integrations.primary.streaming_pull]
+subscription = "projects/p/subscriptions/sub"
+credentials = '{"type":"service_account","project_id":"fake","private_key_id":"fake","private_key":"fake","client_email":"fake@example.invalid"}'
+max_outstanding_messages = 50
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+
+    let integration = &cfg.google_pubsub[0];
+    assert_eq!(integration.config.subject_prefix.as_str(), "pubsub-events");
+    assert_eq!(integration.config.stream_name.as_str(), "PUBSUB_EVENTS");
+    assert_eq!(
+        cfg.max_stream_max_age(),
+        Some(StreamMaxAge::from_secs(7200).expect("non-zero"))
+    );
+    assert_eq!(
+        std::time::Duration::from(integration.config.nats_ack_timeout).as_secs(),
+        3
+    );
+    let GooglePubSubTransportConfig::StreamingPull(streaming_pull) = &integration.config.transport;
+    assert_eq!(
+        streaming_pull.max_outstanding_messages.map(MaxOutstandingMessages::get),
+        Some(50)
+    );
+}
+
+#[test]
+fn google_pubsub_disabled_source_is_skipped() {
+    let toml = r#"
+[sources.google_pubsub]
+status = "disabled"
+
+[sources.google_pubsub.integrations.primary.streaming_pull]
+subscription = "projects/p/subscriptions/sub"
+credentials = '{"type":"service_account","project_id":"fake","private_key_id":"fake","private_key":"fake","client_email":"fake@example.invalid"}'
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+
+    assert!(cfg.google_pubsub.is_empty());
+    assert!(!cfg.has_any_source());
+}
+
+#[test]
+fn google_pubsub_disabled_integration_is_skipped() {
+    let toml = r#"
+[sources.google_pubsub.integrations.primary]
+status = "disabled"
+
+[sources.google_pubsub.integrations.primary.streaming_pull]
+subscription = "projects/p/subscriptions/sub"
+credentials = '{"type":"service_account","project_id":"fake","private_key_id":"fake","private_key":"fake","client_email":"fake@example.invalid"}'
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+
+    assert!(cfg.google_pubsub.is_empty());
+}
+
+#[test]
+fn google_pubsub_invalid_integration_id_is_invalid() {
+    let toml = r#"
+[sources.google_pubsub.integrations."bad/id".streaming_pull]
+subscription = "projects/p/subscriptions/sub"
+credentials = '{"type":"service_account","project_id":"fake","private_key_id":"fake","private_key":"fake","client_email":"fake@example.invalid"}'
+"#;
+    let f = write_toml(toml);
+
+    let errors = validation_errors(load(Some(f.path())));
+
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("google_pubsub/bad/id: invalid integration id"))
+    );
+}
+
+#[test]
+fn google_pubsub_without_transport_is_invalid() {
+    let toml = r#"
+[sources.google_pubsub.integrations.primary]
+status = "enabled"
+"#;
+    let f = write_toml(toml);
+
+    let errors = validation_errors(load(Some(f.path())));
+
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("google_pubsub/primary: missing transport"))
+    );
+}
+
+#[test]
+fn google_pubsub_without_subscription_is_invalid() {
+    let toml = r#"
+[sources.google_pubsub.integrations.primary.streaming_pull]
+max_outstanding_messages = 10
+credentials = '{"type":"service_account","project_id":"fake","private_key_id":"fake","private_key":"fake","client_email":"fake@example.invalid"}'
+"#;
+    let f = write_toml(toml);
+
+    let errors = validation_errors(load(Some(f.path())));
+
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("google_pubsub/primary: missing subscription"))
+    );
+}
+
+#[test]
+fn google_pubsub_malformed_subscription_is_invalid() {
+    let f = write_toml(&google_pubsub_toml("my-subscription"));
+
+    let errors = validation_errors(load(Some(f.path())));
+
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("google_pubsub/primary: invalid subscription"))
+    );
+}
+
+#[test]
+fn google_pubsub_zero_max_outstanding_messages_is_invalid() {
+    let toml = r#"
+[sources.google_pubsub.integrations.primary.streaming_pull]
+subscription = "projects/p/subscriptions/sub"
+credentials = '{"type":"service_account","project_id":"fake","private_key_id":"fake","private_key":"fake","client_email":"fake@example.invalid"}'
+max_outstanding_messages = 0
+"#;
+    let f = write_toml(toml);
+
+    let errors = validation_errors(load(Some(f.path())));
+
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("google_pubsub/primary: invalid max_outstanding_messages"))
+    );
+}
+
+#[test]
+fn google_pubsub_zero_nats_ack_timeout_is_error() {
+    let toml = r#"
+[sources.google_pubsub.integrations.primary]
+nats_ack_timeout_secs = 0
+
+[sources.google_pubsub.integrations.primary.streaming_pull]
+subscription = "projects/p/subscriptions/sub"
+credentials = '{"type":"service_account","project_id":"fake","private_key_id":"fake","private_key":"fake","client_email":"fake@example.invalid"}'
+"#;
+    let f = write_toml(toml);
+
+    let errors = validation_errors(load(Some(f.path())));
+
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("google_pubsub/primary: nats_ack_timeout_secs must not be zero"))
+    );
+}
+
+#[test]
+fn google_pubsub_zero_stream_max_age_is_error() {
+    let toml = r#"
+[sources.google_pubsub.integrations.primary]
+stream_max_age_secs = 0
+
+[sources.google_pubsub.integrations.primary.streaming_pull]
+subscription = "projects/p/subscriptions/sub"
+credentials = '{"type":"service_account","project_id":"fake","private_key_id":"fake","private_key":"fake","client_email":"fake@example.invalid"}'
+"#;
+    let f = write_toml(toml);
+
+    let errors = validation_errors(load(Some(f.path())));
+
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("google_pubsub/primary: stream_max_age_secs must not be zero"))
+    );
+}
+
+#[test]
+fn google_pubsub_invalid_subject_prefix_is_error() {
+    let toml = r#"
+[sources.google_pubsub.integrations.primary]
+subject_prefix = "bad.prefix"
+
+[sources.google_pubsub.integrations.primary.streaming_pull]
+subscription = "projects/p/subscriptions/sub"
+credentials = '{"type":"service_account","project_id":"fake","private_key_id":"fake","private_key":"fake","client_email":"fake@example.invalid"}'
+"#;
+    let f = write_toml(toml);
+
+    let errors = validation_errors(load(Some(f.path())));
+
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("google_pubsub/primary: invalid subject_prefix"))
+    );
+}
+
+#[test]
+fn google_pubsub_rejects_unknown_transport_keys() {
+    let toml = r#"
+[sources.google_pubsub.integrations.primary.streaming_pull]
+subscription = "projects/p/subscriptions/sub"
+credentials = '{"type":"service_account","project_id":"fake","private_key_id":"fake","private_key":"fake","client_email":"fake@example.invalid"}'
+push_endpoint = "https://example.invalid"
+"#;
+    let f = write_toml(toml);
+
+    assert!(matches!(load(Some(f.path())), Err(ConfigError::Load(_))));
+}
+
+#[test]
+fn google_pubsub_rejects_unknown_integration_keys() {
+    let toml = r#"
+[sources.google_pubsub.integrations.primary]
+push = true
+
+[sources.google_pubsub.integrations.primary.streaming_pull]
+subscription = "projects/p/subscriptions/sub"
+credentials = '{"type":"service_account","project_id":"fake","private_key_id":"fake","private_key":"fake","client_email":"fake@example.invalid"}'
+"#;
+    let f = write_toml(toml);
+
+    assert!(matches!(load(Some(f.path())), Err(ConfigError::Load(_))));
+}
+
+fn google_pubsub_credentials_toml(credentials_line: &str) -> String {
+    format!(
+        r#"
+[sources.google_pubsub.integrations.primary.streaming_pull]
+subscription = "projects/p/subscriptions/sub"
+{credentials_line}
+"#
+    )
+}
+
+#[test]
+fn google_pubsub_resolves_service_account_credentials() {
+    let f = write_toml(&google_pubsub_toml("projects/p/subscriptions/sub"));
+    let cfg = load(Some(f.path())).expect("load failed");
+
+    let GooglePubSubTransportConfig::StreamingPull(streaming_pull) = &cfg.google_pubsub[0].config.transport;
+    assert_eq!(
+        streaming_pull.credentials.kind(),
+        crate::source::google_pubsub::credentials::GoogleCredentialsKind::ServiceAccount
+    );
+}
+
+#[test]
+fn google_pubsub_resolves_external_account_credentials() {
+    let f = write_toml(&google_pubsub_credentials_toml(&format!(
+        "credentials = '{FAKE_EXTERNAL_ACCOUNT}'"
+    )));
+    let cfg = load(Some(f.path())).expect("load failed");
+
+    let GooglePubSubTransportConfig::StreamingPull(streaming_pull) = &cfg.google_pubsub[0].config.transport;
+    assert_eq!(
+        streaming_pull.credentials.kind(),
+        crate::source::google_pubsub::credentials::GoogleCredentialsKind::ExternalAccount
+    );
+}
+
+#[test]
+fn google_pubsub_credentials_debug_is_redacted() {
+    let f = write_toml(&google_pubsub_toml("projects/p/subscriptions/sub"));
+    let cfg = load(Some(f.path())).expect("load failed");
+
+    let rendered = format!("{:?}", cfg.google_pubsub[0].config);
+    assert!(rendered.contains("GoogleCredentials(service_account, ****)"));
+    assert!(!rendered.contains("fake@example.invalid"));
+}
+
+#[test]
+fn google_pubsub_without_credentials_is_invalid() {
+    let toml = r#"
+[sources.google_pubsub.integrations.primary.streaming_pull]
+subscription = "projects/p/subscriptions/sub"
+"#;
+    let f = write_toml(toml);
+
+    let errors = validation_errors(load(Some(f.path())));
+
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("google_pubsub/primary: missing credentials"))
+    );
+}
+
+#[test]
+fn google_pubsub_credentials_from_unset_env_is_invalid() {
+    let f = write_toml(&google_pubsub_credentials_toml(
+        r#"credentials = { env = "TROGON_GATEWAY_TEST_PUBSUB_CREDENTIALS_NOT_SET" }"#,
+    ));
+
+    let errors = validation_errors(load(Some(f.path())));
+
+    assert!(errors.iter().any(|e| {
+        e.contains("google_pubsub/primary: invalid credentials")
+            && e.contains("TROGON_GATEWAY_TEST_PUBSUB_CREDENTIALS_NOT_SET")
+    }));
+}
+
+#[test]
+fn google_pubsub_credentials_that_are_not_json_are_invalid_without_echoing_them() {
+    let f = write_toml(&google_pubsub_credentials_toml(
+        r#"credentials = "leaky-marker-not-json""#,
+    ));
+
+    let errors = validation_errors(load(Some(f.path())));
+
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("google_pubsub/primary: invalid credentials"))
+    );
+    assert!(!errors.iter().any(|e| e.contains("leaky-marker-not-json")));
+}
+
+#[test]
+fn google_pubsub_unsupported_credentials_type_is_invalid() {
+    let f = write_toml(&google_pubsub_credentials_toml(
+        r#"credentials = '{"type":"authorized_user","refresh_token":"leaky-refresh-marker"}'"#,
+    ));
+
+    let errors = validation_errors(load(Some(f.path())));
+
+    assert!(errors.iter().any(
+        |e| e.contains("google_pubsub/primary: invalid credentials") && e.contains("unsupported credentials type")
+    ));
+    assert!(!errors.iter().any(|e| e.contains("leaky-refresh-marker")));
+}
+
+#[test]
+fn google_pubsub_reports_credentials_and_subscription_errors_together() {
+    let f = write_toml(&google_pubsub_credentials_toml("").replace("projects/p/subscriptions/sub", "bad"));
+
+    let errors = validation_errors(load(Some(f.path())));
+
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("google_pubsub/primary: invalid subscription"))
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("google_pubsub/primary: missing credentials"))
     );
 }

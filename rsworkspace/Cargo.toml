@@ -140,6 +140,9 @@ tracing = "=0.1.44"
 tracing-opentelemetry = "=0.34.0"
 tracing-subscriber = "=0.3.23"
 
+# Google Cloud Pub/Sub
+google-cloud-auth = { version = "=1.18.0", default-features = false }
+
 # Discord
 twilight-gateway = { version = "=0.17.1", default-features = false, features = ["rustls-native-roots"] }
 twilight-model = "=0.17.1"
