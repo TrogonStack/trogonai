@@ -80,6 +80,10 @@ export default async () => {
             { text: "Session Title and Preview", link: "/architecture/session-title-and-preview" },
             { text: "Session Tool Effects", link: "/architecture/session-tool-effects" },
             {
+              text: "Slack Acknowledgement Responses",
+              link: "/architecture/slack-acknowledgement-responses",
+            },
+            {
               text: "Usage Settlement Ledger",
               link: "/architecture/usage-settlement-ledger",
             },
