@@ -991,3 +991,61 @@ async fn disconnect_frame_defaults_missing_reason_without_ack() {
     assert!(reconnect);
     assert_eq!(ack, None);
 }
+
+#[tokio::test]
+async fn socket_payloads_with_unsafe_subject_tokens_are_unroutable_and_not_acked() {
+    let cases = [
+        (
+            "events_api",
+            serde_json::json!({
+                "type": "event_callback",
+                "event_id": "Ev01ABC123",
+                "team_id": "T01ABC",
+                "event": { "type": "a.b" }
+            }),
+        ),
+        (
+            "interactive",
+            serde_json::json!({
+                "type": "block*actions",
+                "trigger_id": "trigger123",
+                "team": { "id": "T01ABC" }
+            }),
+        ),
+        (
+            "slash_commands",
+            serde_json::json!({
+                "command": "/a b",
+                "team_id": "T01ABC",
+                "trigger_id": "trigger123"
+            }),
+        ),
+    ];
+
+    for (kind, payload) in cases {
+        let publisher = MockJetStreamPublisher::new();
+        let envelope = serde_json::json!({
+            "type": kind,
+            "envelope_id": "env-bad-token",
+            "payload": payload
+        });
+
+        let (reconnect, ack) = handle_text_frame(&bridge(publisher.clone()), &envelope.to_string())
+            .await
+            .unwrap();
+
+        assert!(!reconnect);
+        assert_eq!(ack, None, "{kind}");
+        let messages = publisher.published_messages();
+        assert_eq!(messages.len(), 1, "{kind}");
+        assert_eq!(messages[0].subject, "slack.unroutable", "{kind}");
+        assert_eq!(
+            messages[0]
+                .headers
+                .get(super::super::constants::NATS_HEADER_REJECT_REASON)
+                .map(|v| v.as_str()),
+            Some("invalid_subject_token"),
+            "{kind}"
+        );
+    }
+}

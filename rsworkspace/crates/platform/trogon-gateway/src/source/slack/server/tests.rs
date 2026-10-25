@@ -954,3 +954,87 @@ async fn slash_command_with_line_break_in_team_id_returns_400() {
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     assert_unroutable(&publisher, "invalid_header_value");
 }
+
+#[tokio::test]
+async fn event_type_with_subject_wildcard_is_kept_as_unroutable() {
+    let _guard = tracing_guard();
+    for bad in ["a.b", "a*", ">", "a b", "caf\u{e9}"] {
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+        let body = event_callback_body(bad);
+        let ts = current_timestamp();
+        let sig = compute_sig(TEST_SECRET, &ts, &body);
+
+        let resp = app.oneshot(webhook_request(&body, &ts, Some(&sig))).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "{bad:?}");
+        assert_unroutable(&publisher, "invalid_subject_token");
+        assert_eq!(publisher.published_messages()[0].payload.as_ref(), body.as_slice());
+    }
+}
+
+#[tokio::test]
+async fn interaction_type_with_subject_separator_is_kept_as_unroutable() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = mock_app(publisher.clone());
+    let interaction_payload = serde_json::json!({
+        "type": "block.actions",
+        "trigger_id": "trigger123",
+        "team": { "id": "T01ABC" }
+    });
+    let form_body = format!(
+        "payload={}",
+        form_urlencoded::byte_serialize(interaction_payload.to_string().as_bytes()).collect::<String>()
+    );
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, form_body.as_bytes());
+
+    let resp = app
+        .oneshot(form_request(form_body.as_bytes(), &ts, &sig))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    assert_unroutable(&publisher, "invalid_subject_token");
+}
+
+#[tokio::test]
+async fn command_name_with_subject_separator_is_kept_as_unroutable() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = mock_app(publisher.clone());
+    let form_body = "command=%2Fa.b&team_id=T01ABC&trigger_id=cmd789";
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, form_body.as_bytes());
+
+    let resp = app
+        .oneshot(form_request(form_body.as_bytes(), &ts, &sig))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    assert_unroutable(&publisher, "invalid_subject_token");
+}
+
+#[tokio::test]
+async fn empty_command_is_rejected_as_missing_command() {
+    let _guard = tracing_guard();
+    for form_body in [
+        "command=&team_id=T01ABC&trigger_id=cmd789",
+        "command=%2F&team_id=T01ABC&trigger_id=cmd789",
+    ] {
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+        let ts = current_timestamp();
+        let sig = compute_sig(TEST_SECRET, &ts, form_body.as_bytes());
+
+        let resp = app
+            .oneshot(form_request(form_body.as_bytes(), &ts, &sig))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "{form_body}");
+        assert_unroutable(&publisher, "missing_command");
+    }
+}

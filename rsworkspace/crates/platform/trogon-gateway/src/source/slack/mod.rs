@@ -41,6 +41,7 @@ pub mod header_text;
 pub mod server;
 pub mod signature;
 pub mod socket_mode;
+pub mod subject;
 pub mod unroutable;
 
 pub use config::SlackConfig;
