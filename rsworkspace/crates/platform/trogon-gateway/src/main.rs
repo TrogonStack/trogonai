@@ -10,6 +10,7 @@ mod source_integration_id;
 mod source_plugin;
 mod source_status;
 mod streams;
+mod supervision;
 
 use std::io::Write;
 use std::net::SocketAddr;
@@ -29,6 +30,9 @@ use trogon_std::env::SystemEnv;
 use trogon_std::fs::SystemFs;
 
 type SourceResult = (&'static str, anyhow::Result<()>);
+
+const SLACK_RESTART_BACKOFF: supervision::RestartBackoff =
+    supervision::RestartBackoff::new(std::time::Duration::from_secs(1), std::time::Duration::from_secs(30));
 
 #[tokio::main]
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -239,10 +243,10 @@ fn spawn_slack_socket_modes<P, S, Shutdown, Run, Running>(
         tasks.spawn(async move {
             let result = tokio::select! {
                 () = shutdown => Ok(()),
-                result = async {
+                result = supervision::supervise("slack-socket-mode", SLACK_RESTART_BACKOFF, move || {
                     let connector = source::slack::socket_mode::HttpSocketConnector::slack();
-                    run(publisher, config, connector).await
-                } => result.context("slack socket mode"),
+                    run.clone()(publisher.clone(), config.clone(), connector)
+                }) => result.context("slack socket mode"),
             };
             ("slack-socket-mode", result)
         });

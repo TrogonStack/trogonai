@@ -8,6 +8,7 @@ use super::constants::{
     CONTENT_TYPE_FORM, HEADER_SIGNATURE, HEADER_TIMESTAMP, HTTP_BODY_SIZE_MAX, NATS_HEADER_EVENT_ID,
     NATS_HEADER_EVENT_TYPE, NATS_HEADER_PAYLOAD_KIND, NATS_HEADER_REJECT_REASON, NATS_HEADER_TEAM_ID,
 };
+use super::header_text::{DeliveryHeaders, HeaderText, InvalidHeaderText};
 use super::signature;
 use trogon_std::NonZeroDuration;
 use trogon_std::SystemClock;
@@ -34,6 +35,25 @@ fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode 
         outcome.log_on_error("slack");
         StatusCode::INTERNAL_SERVER_ERROR
     }
+}
+
+fn delivery_headers(
+    kind: &'static str,
+    message_id: &str,
+    event_type: &str,
+    event_id: Option<&str>,
+    team_id: &str,
+) -> Result<async_nats::HeaderMap, InvalidHeaderText> {
+    let headers = DeliveryHeaders::new()
+        .with(async_nats::header::NATS_MESSAGE_ID, &HeaderText::new(message_id)?)
+        .with(NATS_HEADER_EVENT_TYPE, &HeaderText::new(event_type)?)
+        .with(NATS_HEADER_TEAM_ID, &HeaderText::new(team_id)?)
+        .with_static(NATS_HEADER_PAYLOAD_KIND, kind);
+    let headers = match event_id {
+        Some(event_id) => headers.with(NATS_HEADER_EVENT_ID, &HeaderText::new(event_id)?),
+        None => headers,
+    };
+    Ok(headers.into_inner())
 }
 
 #[derive(Clone)]
@@ -156,12 +176,11 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
         span.record(trogon_semconv::attribute::EVENT_ID, &event_id);
         span.record(trogon_semconv::attribute::SUBJECT, &subject);
 
-        let mut nats_headers = async_nats::HeaderMap::new();
-        nats_headers.insert(async_nats::header::NATS_MESSAGE_ID, event_id.as_str());
-        nats_headers.insert(NATS_HEADER_EVENT_TYPE, event_type.as_str());
-        nats_headers.insert(NATS_HEADER_EVENT_ID, event_id.as_str());
-        nats_headers.insert(NATS_HEADER_TEAM_ID, team_id.as_str());
-        nats_headers.insert(NATS_HEADER_PAYLOAD_KIND, "event");
+        let Ok(nats_headers) = delivery_headers("event", &event_id, &event_type, Some(&event_id), &team_id) else {
+            warn!("Event metadata is not valid header text");
+            self.publish_unroutable("invalid_header_value", body.clone()).await;
+            return (StatusCode::BAD_REQUEST, String::new());
+        };
 
         let outcome = self
             .publisher
@@ -244,11 +263,11 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
 
         info!(interaction_type, "Received Slack interaction");
 
-        let mut nats_headers = async_nats::HeaderMap::new();
-        nats_headers.insert(async_nats::header::NATS_MESSAGE_ID, trigger_id.as_str());
-        nats_headers.insert(NATS_HEADER_EVENT_TYPE, interaction_type.as_str());
-        nats_headers.insert(NATS_HEADER_TEAM_ID, team_id.as_str());
-        nats_headers.insert(NATS_HEADER_PAYLOAD_KIND, "interaction");
+        let Ok(nats_headers) = delivery_headers("interaction", &trigger_id, &interaction_type, None, &team_id) else {
+            warn!("Interaction metadata is not valid header text");
+            self.publish_unroutable("invalid_header_value", body).await;
+            return StatusCode::BAD_REQUEST;
+        };
 
         let outcome = self
             .publisher
@@ -308,11 +327,11 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
 
         info!(command, "Received Slack slash command");
 
-        let mut nats_headers = async_nats::HeaderMap::new();
-        nats_headers.insert(async_nats::header::NATS_MESSAGE_ID, trigger_id);
-        nats_headers.insert(NATS_HEADER_EVENT_TYPE, command);
-        nats_headers.insert(NATS_HEADER_TEAM_ID, team_id);
-        nats_headers.insert(NATS_HEADER_PAYLOAD_KIND, "command");
+        let Ok(nats_headers) = delivery_headers("command", trigger_id, command, None, team_id) else {
+            warn!("Slash command metadata is not valid header text");
+            self.publish_unroutable("invalid_header_value", raw_body).await;
+            return StatusCode::BAD_REQUEST;
+        };
 
         let outcome = self
             .publisher

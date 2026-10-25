@@ -258,6 +258,41 @@ async fn slack_shutdown_drops_a_started_pending_runner() {
     assert_eq!(dropped.load(Ordering::SeqCst), 1);
 }
 
+#[tokio::test(start_paused = true)]
+async fn slack_runner_that_panics_is_restarted_instead_of_ending_the_source() {
+    let runs = Arc::new(AtomicUsize::new(0));
+    let (started, mut observed) = tokio::sync::mpsc::channel(1);
+    let (shutdown, signal) = tokio::sync::oneshot::channel();
+    let mut tasks = JoinSet::new();
+    let runner_runs = runs.clone();
+    spawn_slack_socket_modes(
+        &mut tasks,
+        &slack_integrations(),
+        publisher(),
+        async { signal.await.unwrap() }.shared(),
+        move |_, _, _| {
+            let started = started.clone();
+            let runs = runner_runs.clone();
+            async move {
+                if runs.fetch_add(1, Ordering::SeqCst) == 0 {
+                    panic!("socket mode runner crashed");
+                }
+                started.send(()).await.unwrap();
+                std::future::pending().await
+            }
+        },
+    );
+    tokio::time::timeout(Duration::from_secs(5), observed.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(runs.load(Ordering::SeqCst), 2);
+    shutdown.send(()).unwrap();
+    let (name, result) = tasks.join_next().await.unwrap().unwrap();
+    assert_eq!(name, "slack-socket-mode");
+    result.unwrap();
+}
+
 #[tokio::test]
 async fn telemetry_shutdown_failure_does_not_reclassify_a_successful_source() {
     let events = trogon_std::log_capture::CapturedEvents::new();
