@@ -142,6 +142,7 @@ tracing-subscriber = "=0.3.23"
 
 # Google Cloud Pub/Sub
 google-cloud-auth = { version = "=1.18.0", default-features = false }
+google-cloud-pubsub = "=1.7.0"
 
 # Discord
 twilight-gateway = { version = "=0.17.1", default-features = false, features = ["rustls-native-roots"] }

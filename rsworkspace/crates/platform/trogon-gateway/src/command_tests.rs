@@ -163,6 +163,52 @@ app_token = "xapp-fixture-token"
 }
 
 #[tokio::test]
+async fn serve_provisions_and_stops_google_pubsub_on_the_shared_shutdown() {
+    let server = JetStreamTestServer::start().await;
+    let mut file = tempfile::Builder::new().suffix(".toml").tempfile().unwrap();
+    file.write_all(
+        br#"
+[sources.google_pubsub.integrations.primary.streaming_pull]
+subscription = "projects/p/subscriptions/sub"
+credentials = '{"type":"service_account","project_id":"fake","private_key_id":"fake","private_key":"fake","client_email":"fake@example.invalid"}'
+"#
+    )
+    .unwrap();
+    let mut resolved = config::load(Some(file.path())).unwrap();
+    resolved.http_server.port = 0;
+    resolved.nats = trogon_nats::NatsConfig::from_url(server.address());
+    tokio::time::timeout(Duration::from_secs(10), serve(resolved, std::future::ready(())))
+        .await
+        .unwrap()
+        .unwrap();
+    let js = server.jetstream().await;
+    js.get_stream("GOOGLE_PUBSUB_PRIMARY").await.unwrap();
+}
+
+#[tokio::test]
+async fn serve_fails_fast_naming_the_integration_whose_credentials_cannot_be_built() {
+    let mut file = tempfile::Builder::new().suffix(".toml").tempfile().unwrap();
+    file.write_all(
+        br#"
+[sources.google_pubsub.integrations.orders.streaming_pull]
+subscription = "projects/p/subscriptions/orders"
+credentials = '{"type":"service_account","client_email":"leaky-marker@example.invalid"}'
+"#,
+    )
+    .unwrap();
+    let resolved = config::load(Some(file.path())).unwrap();
+
+    let error = tokio::time::timeout(Duration::from_secs(5), serve(resolved, std::future::pending()))
+        .await
+        .unwrap()
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("google_pubsub/orders"));
+    assert!(!error.contains("leaky-marker"));
+}
+
+#[tokio::test]
 async fn serve_propagates_connection_errors() {
     let directory = tempfile::tempdir().unwrap();
     let mut resolved = resolved_config();

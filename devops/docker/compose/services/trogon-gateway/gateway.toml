@@ -133,3 +133,19 @@ webhook_secret = { env = "TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET" }
 #
 # [sources.slack.integrations.primary.socket_mode]
 # app_token = { env = "SLACK_PRIMARY_APP_TOKEN" }
+#
+# Google Cloud Pub/Sub is consumed over an outbound StreamingPull connection. It
+# needs no public URL. Each integration supplies its own Google credentials JSON
+# document, either a service_account key or an external_account (workload
+# identity federation) configuration. Other types are rejected.
+#
+# [sources.google_pubsub.integrations.primary]
+# subject_prefix = "google-pubsub-primary"
+# stream_name = "GOOGLE_PUBSUB_PRIMARY"
+# stream_max_age_secs = 604800
+# nats_ack_timeout_secs = 10
+#
+# [sources.google_pubsub.integrations.primary.streaming_pull]
+# subscription = "projects/my-project/subscriptions/my-subscription"
+# max_outstanding_messages = 1000
+# credentials = { env = "GOOGLE_PUBSUB_PRIMARY_CREDENTIALS" }
