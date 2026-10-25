@@ -1050,3 +1050,27 @@ async fn socket_payloads_with_unsafe_subject_tokens_are_unroutable_and_not_acked
         );
     }
 }
+
+#[tokio::test]
+async fn socket_interaction_without_trigger_id_is_published_and_acked() {
+    let publisher = MockJetStreamPublisher::new();
+    let envelope = serde_json::json!({
+        "type": "interactive",
+        "envelope_id": "env-view-closed",
+        "payload": {
+            "type": "view_closed",
+            "team": { "id": "T01ABC" },
+            "view": { "id": "V01" }
+        }
+    });
+
+    let (reconnect, ack) = handle_text_frame(&bridge(publisher.clone()), &envelope.to_string())
+        .await
+        .unwrap();
+
+    assert!(!reconnect);
+    assert_eq!(ack, Some(r#"{"envelope_id":"env-view-closed"}"#.to_string()));
+    let messages = publisher.published_messages();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].subject, "slack.interaction.view_closed");
+}
