@@ -1,7 +1,7 @@
 ---
 number: "0061"
 slug: credential-platform-extraction-boundary
-status: proposed
+status: draft
 date: 2026-08-15
 ---
 
@@ -80,7 +80,7 @@ survives the relocation unchanged. They live in
 
 Each of them changes the shape of the secrets-service boundary, so
 answering them during the move means rebuilding the boundary mid-flight.
-They are the reason this ADR is `proposed` rather than `accepted`.
+They are the reason this ADR remains `draft`.
 
 ## Open Questions Blocking Acceptance
 

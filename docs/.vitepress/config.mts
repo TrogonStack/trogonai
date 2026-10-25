@@ -53,6 +53,7 @@ export default async () => {
               link: "/architecture/opentelemetry-transport-context",
             },
             { text: "Secret Management", link: "/architecture/secret-management" },
+            { text: "Provider Credential Custody", link: "/architecture/provider-credential-custody" },
             { text: "Session Aggregate", link: "/architecture/session-aggregate" },
             { text: "Session Artifacts", link: "/architecture/session-artifacts" },
             { text: "Session Crash Boundaries", link: "/architecture/session-crash-boundaries" },
@@ -83,6 +84,12 @@ export default async () => {
               text: "Usage Settlement Ledger",
               link: "/architecture/usage-settlement-ledger",
             },
+          ],
+        },
+        {
+          text: "Reference",
+          items: [
+            { text: "Supplied Credential Material", link: "/reference/supplied-credential-material" },
           ],
         },
         {

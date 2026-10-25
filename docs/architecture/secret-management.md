@@ -5,13 +5,20 @@ This page describes the intended design recorded in
 (accepted) and
 [ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) and
 [ADR#0033](../adr/0033-two-tier-key-custody-product-model.md) (both draft).
-None of it is implemented yet. It is the model the implementation must
-satisfy, not current behavior. [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) records that the write model below
-was validated end to end by a prototype embedded in `trogon-gateway`, and
-that adopting the ADR means extracting that prototype's mechanics into the
-secrets service, not rebuilding them (Decision 4). That prototype's code is
-not present in this repository, so this page restates only what the ADR
-itself fixes.
+The standalone secrets-service topology is a target, not a claim of deployed
+behavior. The gateway contains an embedded prototype under
+`rsworkspace/crates/platform/trogon-gateway/src/credential` and its secret-store
+adapter. [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md)
+records that the write model was validated by that prototype and requires
+extracting its mechanics into the secrets service. Proposed
+[ADR#0061](../adr/0061-credential-platform-extraction-boundary.md) leaves that
+extraction unfinished. Source presence does not establish standalone-service
+readiness.
+
+[Provider Credential Custody](./provider-credential-custody.md) explains the
+reference-only boundary for provider configuration. The proposed
+[Supplied Credential Material](../reference/supplied-credential-material.md)
+contract keeps secret-bearing inputs separate from persisted metadata.
 
 ## Scope
 
@@ -215,3 +222,5 @@ which means this behavior must be answered before adoption, not assumed.
 - [Key Management](./key-management.md)
 - [Key Custody](./key-custody.md)
 - [Key States](./key-states.md)
+- [Provider Credential Custody](./provider-credential-custody.md)
+- [Supplied Credential Material](../reference/supplied-credential-material.md)
