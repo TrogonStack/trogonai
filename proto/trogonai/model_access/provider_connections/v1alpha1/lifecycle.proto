@@ -1,0 +1,27 @@
+edition = "2024";
+
+package trogonai.model_access.provider_connections.v1alpha1;
+
+// All lifecycle and replacement enums reject unspecified and unknown values.
+enum ProviderConnectionLifecycle {
+  PROVIDER_CONNECTION_LIFECYCLE_UNSPECIFIED = 0;
+  PROVIDER_CONNECTION_LIFECYCLE_PENDING = 1;
+  PROVIDER_CONNECTION_LIFECYCLE_ACTIVE = 2;
+  PROVIDER_CONNECTION_LIFECYCLE_REVOKED = 3;
+}
+
+enum CredentialBindingLifecycle {
+  CREDENTIAL_BINDING_LIFECYCLE_UNSPECIFIED = 0;
+  CREDENTIAL_BINDING_LIFECYCLE_PENDING = 1;
+  CREDENTIAL_BINDING_LIFECYCLE_ACTIVE = 2;
+  CREDENTIAL_BINDING_LIFECYCLE_DRAINING = 3;
+  CREDENTIAL_BINDING_LIFECYCLE_REVOKED = 4;
+}
+
+// Drain requires explicit policy permission for bounded credential overlap.
+// FailIfInUse rejects atomically if any live Session pins the old binding.
+enum BindingReplacementMode {
+  BINDING_REPLACEMENT_MODE_UNSPECIFIED = 0;
+  BINDING_REPLACEMENT_MODE_DRAIN = 1;
+  BINDING_REPLACEMENT_MODE_FAIL_IF_IN_USE = 2;
+}

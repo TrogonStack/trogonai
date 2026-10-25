@@ -1,0 +1,54 @@
+edition = "2024";
+
+package trogonai.model_access.provider_connections.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/agents/agents/v1alpha1/digest.proto";
+import "trogonai/model_access/provider_connections/v1alpha1/authentication.proto";
+import "trogonai/model_access/provider_connections/v1alpha1/configuration.proto";
+import "trogonai/model_access/provider_connections/v1alpha1/identity.proto";
+import "trogonai/model_access/provider_connections/v1alpha1/profile.proto";
+
+// Genesis facts only, not proof of successful provider validation. Managed
+// scope forbids gateway auth; no credential requires deployment-local endpoint.
+// Gateway scope requires gateway auth and forbids managed-binding variants.
+// configuration_bytes is the authoritative exact binary encoding of
+// ProviderConnectionConfiguration. Verify configuration_digest before decoding,
+// reject unknown fields/behavior, and require configuration to equal its fully
+// validated typed projection. Alternate encodings are distinct artifacts;
+// never recreate identity by re-encoding. Retain these nonsecret bytes through
+// revoked history and while any durable route references them. They contain
+// only the typed configuration, never credential material or backend locators.
+message ProviderConnectionRegistration {
+  option (buf.validate.message).cel = {
+    id: "registration.binding_scope"
+    message: "binding authentication must match connection access scope and endpoint"
+    expression: "this.configuration.access_scope == 1 ? (has(this.initial_binding.configuration.stored_api_key) || (has(this.initial_binding.configuration.deployment_no_credential) && has(this.configuration.endpoint.deployment_local))) : has(this.initial_binding.configuration.gateway)"
+  };
+
+  ProviderConnectionId id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ProviderConnectionConfiguration configuration = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Trusted admission computes and verifies this digest over the immutable
+  // configuration, excluding profile, policy, and binding lifecycle.
+  trogonai.agents.agents.v1alpha1.Digest configuration_digest = 3 [features.field_presence = LEGACY_REQUIRED];
+  CredentialBinding initial_binding = 4 [features.field_presence = LEGACY_REQUIRED];
+  ProviderConnectionProfile profile = 5 [features.field_presence = LEGACY_REQUIRED];
+  ProviderRoutingPolicy routing_policy = 6 [features.field_presence = LEGACY_REQUIRED];
+  bytes configuration_bytes = 7 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.min_len = 1
+  ];
+}
+
+// Opaque authority-issued validation receipt identity, not a client assertion.
+// Dispatch resolves and verifies its trusted immutable record against the exact
+// connection and binding IDs/digests, endpoint, subject/billing continuity,
+// purpose, supported auth/translation, and exact model offerings. Missing,
+// stale, mismatched, or untrusted evidence rejects. External probes and secret
+// resolution never occur in the pure decider. No receipt grants future access.
+message ProviderValidationRef {
+  string validation_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}

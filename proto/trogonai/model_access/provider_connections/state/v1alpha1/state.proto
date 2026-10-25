@@ -1,0 +1,88 @@
+edition = "2024";
+
+package trogonai.model_access.provider_connections.state.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "trogonai/agents/agents/v1alpha1/digest.proto";
+import "trogonai/model_access/provider_connections/v1alpha1/authentication.proto";
+import "trogonai/model_access/provider_connections/v1alpha1/configuration.proto";
+import "trogonai/model_access/provider_connections/v1alpha1/identity.proto";
+import "trogonai/model_access/provider_connections/v1alpha1/lifecycle.proto";
+import "trogonai/model_access/provider_connections/v1alpha1/profile.proto";
+
+// One fold per connection, not a joined projection. Unknown events and invalid
+// transitions reject replay. Missing is the explicit initial state.
+message State {
+  oneof state {
+    option (buf.validate.oneof).required = true;
+    google.protobuf.Empty missing = 1;
+    ProviderConnection present = 2;
+  }
+}
+
+// Every binding is retained, including revoked history, so IDs cannot be reused.
+// At most one binding is active. Multiple draining bindings are legal after
+// successive replacements. An active connection with no active binding cannot
+// admit a new route. Revocation is terminal, never a transition back to active.
+// Pending has exactly its original pending binding; other connection states
+// have no pending bindings. A revoked connection has only revoked bindings.
+// Binding authentication must match scope and deployment endpoint restrictions.
+// Retain exact configuration_bytes from registration, never a re-encoding;
+// verify the digest and typed projection under the registration contract.
+message ProviderConnection {
+  option (buf.validate.message).cel = {
+    id: "connection_state.binding_ids_unique"
+    message: "binding identities must be unique, including revoked history"
+    expression: "this.bindings.map(b, b.binding.id.value).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_state.one_active_binding"
+    message: "at most one binding may be active"
+    expression: "this.bindings.filter(b, b.lifecycle == 2).size() <= 1"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_state.pending"
+    message: "pending connection has only its original pending binding"
+    expression: "this.lifecycle == 1 ? (this.bindings.size() == 1 && this.bindings.all(b, b.lifecycle == 1)) : this.bindings.all(b, b.lifecycle != 1)"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_state.revoked"
+    message: "revoked connection has only revoked bindings"
+    expression: "this.lifecycle != 3 || this.bindings.all(b, b.lifecycle == 4)"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_state.binding_scope"
+    message: "every retained binding must match connection scope and endpoint"
+    expression: "this.bindings.all(b, this.configuration.access_scope == 1 ? (has(b.binding.configuration.stored_api_key) || (has(b.binding.configuration.deployment_no_credential) && has(this.configuration.endpoint.deployment_local))) : has(b.binding.configuration.gateway))"
+  };
+
+  trogonai.model_access.provider_connections.v1alpha1.ProviderConnectionId id = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.model_access.provider_connections.v1alpha1.ProviderConnectionConfiguration configuration = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.agents.v1alpha1.Digest configuration_digest = 3 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.model_access.provider_connections.v1alpha1.ProviderConnectionProfile profile = 4 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.model_access.provider_connections.v1alpha1.ProviderRoutingPolicy routing_policy = 5 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.model_access.provider_connections.v1alpha1.ProviderConnectionLifecycle lifecycle = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  repeated BindingState bindings = 7 [(buf.validate.field).repeated.min_items = 1];
+  bytes configuration_bytes = 8 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.min_len = 1
+  ];
+}
+
+message BindingState {
+  trogonai.model_access.provider_connections.v1alpha1.CredentialBinding binding = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.model_access.provider_connections.v1alpha1.CredentialBindingLifecycle lifecycle = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
