@@ -39,6 +39,11 @@ run = "pnpm build"
 dir = "tsworkspace"
 run = "pnpm fmt:check && pnpm lint && pnpm typecheck"
 
+[tasks."fixtures:slack-bolt"]
+description = "Regenerate Slack Bolt conformance fixtures from local bolt-js and node-slack-sdk checkouts (set BOLT_JS_PATH and NODE_SLACK_SDK_PATH to absolute paths)"
+dir = "tsworkspace"
+run = "pnpm --filter @trogonai/slack-bolt-fixtures export --bolt-path \"$BOLT_JS_PATH\" --sdk-path \"$NODE_SLACK_SDK_PATH\" --out \"{{config_root}}/rsworkspace/crates/platform/trogon-gateway/tests/fixtures/slack/bolt\""
+
 [tasks."build:rust"]
 dir = "rsworkspace"
 run = "cargo build"
