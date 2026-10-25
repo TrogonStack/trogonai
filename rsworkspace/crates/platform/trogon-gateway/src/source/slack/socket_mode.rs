@@ -11,6 +11,7 @@ use super::config::{SlackConfig, SlackSocketModeConfig};
 use super::constants::RECONNECT_MAX_DELAY;
 use super::constants::{APPS_CONNECTIONS_OPEN_URL, RECONNECT_INITIAL_DELAY};
 use super::server::SlackBridge;
+use super::unroutable::UnroutableReason;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SocketModeError {
@@ -220,10 +221,14 @@ async fn handle_text_frame<P: JetStreamPublisher, S: ObjectStorePut>(
             .map(|ack| (false, ack)),
         other => {
             warn!(kind = other, "Unhandled Slack Socket Mode envelope type");
-            bridge
-                .publish_socket_unroutable("unhandled_socket_mode_type", Bytes::copy_from_slice(text.as_bytes()))
+            let stored = bridge
+                .publish_socket_unroutable(
+                    UnroutableReason::UnhandledSocketModeType,
+                    Bytes::copy_from_slice(text.as_bytes()),
+                )
                 .await;
-            Ok((false, envelope.envelope_id.map(ack_frame)))
+            let ack = envelope.envelope_id.filter(|_| stored.is_success()).map(ack_frame);
+            Ok((false, ack))
         }
     }
 }
@@ -236,7 +241,10 @@ async fn handle_payload_envelope<P: JetStreamPublisher, S: ObjectStorePut>(
     let Some(envelope_id) = envelope.envelope_id else {
         warn!(kind = envelope.kind, "Missing Slack Socket Mode envelope_id");
         bridge
-            .publish_socket_unroutable("missing_envelope_id", Bytes::copy_from_slice(raw_text.as_bytes()))
+            .publish_socket_unroutable(
+                UnroutableReason::MissingEnvelopeId,
+                Bytes::copy_from_slice(raw_text.as_bytes()),
+            )
             .await;
         return Ok(None);
     };
@@ -245,7 +253,7 @@ async fn handle_payload_envelope<P: JetStreamPublisher, S: ObjectStorePut>(
         warn!(kind = envelope.kind, "Missing Slack Socket Mode payload");
         bridge
             .publish_socket_unroutable(
-                "missing_socket_mode_payload",
+                UnroutableReason::MissingSocketModePayload,
                 Bytes::copy_from_slice(raw_text.as_bytes()),
             )
             .await;
@@ -263,7 +271,7 @@ async fn handle_payload_envelope<P: JetStreamPublisher, S: ObjectStorePut>(
             warn!(kind = other, "Unhandled Slack Socket Mode payload envelope type");
             bridge
                 .publish_socket_unroutable(
-                    "unhandled_socket_mode_type",
+                    UnroutableReason::UnhandledSocketModeType,
                     Bytes::copy_from_slice(raw_text.as_bytes()),
                 )
                 .await;
