@@ -13,6 +13,7 @@ use super::constants::{
 use super::header_text::{DeliveryHeaders, HeaderText, InvalidHeaderTextError};
 use super::interaction_key::InteractionKey;
 use super::signature;
+use super::ssl_check::SslCheck;
 use super::subject::SlackSubject;
 use super::unroutable::{UnroutableMessageId, UnroutableReason};
 use trogon_std::NonZeroDuration;
@@ -601,6 +602,12 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut, C: Epoch
     headers: HeaderMap,
     body: Bytes,
 ) -> (StatusCode, String) {
+    let content_type = headers.get("content-type").and_then(|v| v.to_str().ok());
+    if SslCheck::detect(content_type, &body) == SslCheck::Requested {
+        info!("Responding to Slack ssl_check");
+        return (StatusCode::OK, String::new());
+    }
+
     let Some(timestamp) = headers.get(HEADER_TIMESTAMP).and_then(|v| v.to_str().ok()) else {
         warn!("Missing X-Slack-Request-Timestamp header");
         return (StatusCode::UNAUTHORIZED, String::new());
