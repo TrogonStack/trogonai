@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use trogon_std::{ByteSize, HttpBodySizeMax};
 
-pub const HTTP_BODY_SIZE_MAX: HttpBodySizeMax = HttpBodySizeMax::new(ByteSize::mib(1)).unwrap();
+pub const DEFAULT_HTTP_BODY_SIZE_MAX: HttpBodySizeMax = HttpBodySizeMax::new(ByteSize::mib(4)).unwrap();
 
 pub const HEADER_SIGNATURE: &str = "x-slack-signature";
 pub const HEADER_TIMESTAMP: &str = "x-slack-request-timestamp";

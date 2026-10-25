@@ -6,9 +6,8 @@ use super::config::SlackSigningSecret;
 use super::config::SlackTransport;
 use super::config::SlackWebhookConfig;
 use super::constants::{
-    CONTENT_TYPE_FORM, HEADER_SIGNATURE, HEADER_TIMESTAMP, HTTP_BODY_SIZE_MAX, NATS_HEADER_EVENT_ID,
-    NATS_HEADER_EVENT_TYPE, NATS_HEADER_PAYLOAD_KIND, NATS_HEADER_REJECT_REASON, NATS_HEADER_TEAM_ID,
-    NATS_HEADER_TRANSPORT, UNKNOWN_TEAM_ID,
+    CONTENT_TYPE_FORM, HEADER_SIGNATURE, HEADER_TIMESTAMP, NATS_HEADER_EVENT_ID, NATS_HEADER_EVENT_TYPE,
+    NATS_HEADER_PAYLOAD_KIND, NATS_HEADER_REJECT_REASON, NATS_HEADER_TEAM_ID, NATS_HEADER_TRANSPORT, UNKNOWN_TEAM_ID,
 };
 use super::header_text::{DeliveryHeaders, HeaderText, InvalidHeaderTextError};
 use super::signature;
@@ -583,7 +582,7 @@ fn router_with_clock<P: JetStreamPublisher, S: ObjectStorePut, C: EpochClock>(
 
     Router::new()
         .route("/webhook", post(handle_webhook::<P, S, C>))
-        .layer(DefaultBodyLimit::max(HTTP_BODY_SIZE_MAX.as_usize()))
+        .layer(DefaultBodyLimit::max(webhook.max_body_size.as_usize()))
         .with_state(state)
 }
 

@@ -50,6 +50,7 @@ fn test_config() -> SlackConfig {
         transport: super::super::config::SlackTransportConfig::Webhook(SlackWebhookConfig {
             signing_secret: SlackSigningSecret::new(TEST_SECRET).unwrap(),
             timestamp_max_drift: NonZeroDuration::from_secs(300).unwrap(),
+            max_body_size: super::super::constants::DEFAULT_HTTP_BODY_SIZE_MAX,
         }),
     }
 }
@@ -353,6 +354,7 @@ async fn subject_uses_configured_prefix() {
         transport: super::super::config::SlackTransportConfig::Webhook(SlackWebhookConfig {
             signing_secret: SlackSigningSecret::new(TEST_SECRET).unwrap(),
             timestamp_max_drift: NonZeroDuration::from_secs(300).unwrap(),
+            max_body_size: super::super::constants::DEFAULT_HTTP_BODY_SIZE_MAX,
         }),
     };
 
@@ -474,6 +476,7 @@ async fn ack_timeout_returns_500() {
         transport: super::super::config::SlackTransportConfig::Webhook(SlackWebhookConfig {
             signing_secret: SlackSigningSecret::new(TEST_SECRET).unwrap(),
             timestamp_max_drift: NonZeroDuration::from_secs(300).unwrap(),
+            max_body_size: super::super::constants::DEFAULT_HTTP_BODY_SIZE_MAX,
         }),
     };
 
@@ -1037,4 +1040,60 @@ async fn empty_command_is_rejected_as_missing_command() {
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "{form_body}");
         assert_unroutable(&publisher, "missing_command");
     }
+}
+
+fn app_with_body_limit(publisher: MockJetStreamPublisher, limit: usize) -> Router {
+    let config = test_config();
+    let mut webhook = config.webhook().unwrap().clone();
+    webhook.max_body_size = trogon_std::HttpBodySizeMax::new(trogon_std::ByteSize::b(limit as u64)).unwrap();
+    router_with_clock(
+        wrap_publisher(publisher),
+        &config,
+        &webhook,
+        FixedEpochClock::from_secs(TEST_NOW),
+    )
+}
+
+#[tokio::test]
+async fn configured_body_limit_rejects_larger_requests_and_admits_smaller_ones() {
+    let _guard = tracing_guard();
+    let body = event_callback_body("message");
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, &body);
+
+    let publisher = MockJetStreamPublisher::new();
+    let too_small = app_with_body_limit(publisher.clone(), body.len() - 1);
+    let resp = too_small
+        .oneshot(webhook_request(&body, &ts, Some(&sig)))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    assert!(publisher.published_messages().is_empty());
+
+    let publisher = MockJetStreamPublisher::new();
+    let exact = app_with_body_limit(publisher.clone(), body.len());
+    let resp = exact.oneshot(webhook_request(&body, &ts, Some(&sig))).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(publisher.published_messages().len(), 1);
+}
+
+#[tokio::test]
+async fn default_body_limit_admits_payloads_above_the_old_one_mebibyte_cap() {
+    let _guard = tracing_guard();
+    let filler = "x".repeat(2 * 1024 * 1024);
+    let body = serde_json::to_vec(&serde_json::json!({
+        "type": "event_callback",
+        "event_id": "Ev01ABC123",
+        "team_id": "T01ABC",
+        "event": { "type": "message", "text": filler }
+    }))
+    .unwrap();
+    let publisher = MockJetStreamPublisher::new();
+    let app = mock_app(publisher.clone());
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, &body);
+
+    let resp = app.oneshot(webhook_request(&body, &ts, Some(&sig))).await.unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
 }

@@ -2,7 +2,7 @@ use std::fmt;
 
 use trogon_nats::NatsToken;
 use trogon_nats::jetstream::StreamMaxAge;
-use trogon_std::{EmptySecretError, NonZeroDuration, SecretString};
+use trogon_std::{EmptySecretError, HttpBodySizeMax, NonZeroDuration, SecretString};
 
 #[derive(Clone)]
 pub struct SlackSigningSecret(SecretString);
@@ -58,6 +58,7 @@ impl fmt::Debug for SlackAppToken {
 pub struct SlackWebhookConfig {
     pub signing_secret: SlackSigningSecret,
     pub timestamp_max_drift: NonZeroDuration,
+    pub max_body_size: HttpBodySizeMax,
 }
 
 #[derive(Clone)]
