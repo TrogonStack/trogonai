@@ -285,6 +285,18 @@ async fn build_options_rejects_unsupported_client_certificate_scheme() {
 }
 
 #[tokio::test]
+async fn resolve_jwt_drops_surrounding_whitespace() {
+    let env = InMemoryEnv::new();
+    env.set("USER_JWT", "eyJ0eXAi.payload.sig\n");
+
+    let from_env = resolve_jwt(&value("env://USER_JWT"), &env).await.unwrap();
+    let literal = resolve_jwt(&value("eyJ0eXAi.payload.sig\n"), &env).await.unwrap();
+
+    assert_eq!(from_env, "eyJ0eXAi.payload.sig");
+    assert_eq!(literal, "eyJ0eXAi.payload.sig");
+}
+
+#[tokio::test]
 async fn jwt_signer_signs_the_nonce_with_the_seed() {
     let key_pair = Arc::new(KeyPair::new_user());
     let signer = jwt_signer(Arc::clone(&key_pair));

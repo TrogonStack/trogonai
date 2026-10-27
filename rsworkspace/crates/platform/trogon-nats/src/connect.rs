@@ -3,7 +3,7 @@ use crate::constants::{
     ENV_NATS_CA, ENV_NATS_CERT, ENV_NATS_CREDS, ENV_NATS_JWT, ENV_NATS_KEY, ENV_NATS_NKEY, ENV_NATS_PASSWORD,
     ENV_NATS_SEED, ENV_NATS_TOKEN, MAX_RECONNECT_DELAY,
 };
-use crate::credential_value::SettingError;
+use crate::credential_value::{CredentialValue, SettingError};
 use crate::tls::NatsTls;
 use async_nats::{AuthError, Client, ConnectOptions, Event};
 use nkeys::KeyPair;
@@ -86,7 +86,7 @@ async fn apply_auth<E: ReadEnv>(
             Ok(opts.user_and_password(user.clone(), password))
         }
         NatsAuth::Jwt { jwt, seed } => {
-            let jwt = jwt.resolve(env).await.map_err(invalid_setting(ENV_NATS_JWT))?;
+            let jwt = resolve_jwt(jwt, env).await?;
             match seed {
                 Some(seed) => {
                     let seed = seed.resolve(env).await.map_err(invalid_setting(ENV_NATS_SEED))?;
@@ -105,6 +105,11 @@ async fn apply_auth<E: ReadEnv>(
         }
         NatsAuth::None => Ok(opts),
     }
+}
+
+async fn resolve_jwt<E: ReadEnv>(jwt: &CredentialValue, env: &E) -> Result<String, ConnectError> {
+    let jwt = jwt.resolve(env).await.map_err(invalid_setting(ENV_NATS_JWT))?;
+    Ok(jwt.trim().to_owned())
 }
 
 fn jwt_signer(
