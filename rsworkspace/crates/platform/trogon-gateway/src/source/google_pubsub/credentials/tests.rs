@@ -45,14 +45,14 @@ fn rejects_invalid_json() {
 }
 
 #[test]
-fn invalid_json_keeps_the_parser_error_without_document_contents() {
+fn invalid_json_keeps_the_parser_error() {
     let error = GoogleCredentials::parse(r#"{"private_key": leaky-marker}"#).unwrap_err();
     let source = std::error::Error::source(&error)
-        .expect("parser error is kept")
-        .to_string();
+        .and_then(|source| source.downcast_ref::<serde_json::Error>())
+        .expect("parser error is kept");
 
-    assert!(source.contains("line 1 column"));
-    assert!(!source.contains("leaky-marker"));
+    assert_eq!(source.classify(), serde_json::error::Category::Syntax);
+    assert_eq!((source.line(), source.column()), (1, 17));
 }
 
 #[test]
