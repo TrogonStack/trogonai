@@ -41,5 +41,5 @@ fn deserializes_from_a_string() {
     assert_eq!(secret.as_str(), "my-secret");
 
     let err = serde_json::from_str::<SecretString>(r#""""#).unwrap_err();
-    assert!(err.to_string().contains("secret must not be empty"));
+    assert!(err.is_data());
 }

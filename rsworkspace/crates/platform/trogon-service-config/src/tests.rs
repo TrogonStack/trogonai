@@ -1,4 +1,5 @@
 use super::*;
+use clap::Parser;
 
 fn secret(value: &str) -> SecretString {
     SecretString::new(value).unwrap()
@@ -276,7 +277,7 @@ fn load_config_reads_nats_secrets_from_file() {
     assert_eq!(loaded.nats.token.unwrap().as_str(), "file-token");
 }
 
-#[derive(clap::Parser)]
+#[derive(Parser)]
 struct NatsCli {
     #[command(flatten)]
     nats: NatsArgs,
@@ -284,8 +285,6 @@ struct NatsCli {
 
 #[test]
 fn nats_args_parse_secrets_from_flags() {
-    use clap::Parser;
-
     let cli = NatsCli::try_parse_from(["cli", "--nats-token", "flag-token", "--nats-seed", "flag-seed"]).unwrap();
 
     assert_eq!(cli.nats.nats_token.unwrap().as_str(), "flag-token");
