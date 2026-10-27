@@ -8,7 +8,7 @@ describe('project id', () => {
     expect(parseProjectId('customer-portal-2')).toBe('customer-portal-2');
   });
 
-  it.each(['', 'Portal', '1portal', 'my portal', 'my_portal', 'x'.repeat(MAX_PROJECT_ID_LENGTH + 1)])(
+  it.each(['', 'new', 'Portal', '1portal', 'my portal', 'my_portal', 'x'.repeat(MAX_PROJECT_ID_LENGTH + 1)])(
     'rejects %j',
     (value) => {
       expect(projectIdProblem(value)).toBeDefined();

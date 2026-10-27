@@ -11,11 +11,15 @@ export const MAX_PROJECT_ID_LENGTH = 40;
 
 const PROJECT_ID_PATTERN = /^[a-z][a-z0-9-]*$/;
 
+const ROUTE_RESERVED_PROJECT_IDS: ReadonlySet<string> = new Set(['new']);
+
 export function projectIdProblem(value: string): string | undefined {
   if (value.length === 0) return 'A project id is required.';
   if (value.length > MAX_PROJECT_ID_LENGTH) return `A project id is at most ${MAX_PROJECT_ID_LENGTH} characters.`;
   if (!/^[a-z]/.test(value)) return 'A project id starts with a lowercase letter.';
   if (!PROJECT_ID_PATTERN.test(value)) return 'A project id uses only lowercase letters, digits and hyphens.';
+  if (ROUTE_RESERVED_PROJECT_IDS.has(value))
+    return `A project id cannot be "${value}", because that address opens the create form.`;
   return undefined;
 }
 
