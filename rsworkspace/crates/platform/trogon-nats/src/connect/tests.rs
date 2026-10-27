@@ -1,6 +1,8 @@
 use async_nats::{ClientError, ServerError};
 
 use super::*;
+use crate::credential_value::{CredentialValue, Location};
+use trogon_std::env::InMemoryEnv;
 
 #[test]
 fn test_reconnect_delay_starts_at_one_second() {
@@ -71,7 +73,7 @@ fn connect_error_source_invalid_credentials() {
 async fn connect_with_missing_credentials_file_returns_invalid_credentials() {
     let config = NatsConfig::new(
         vec!["nats://127.0.0.1:4222".to_string()],
-        NatsAuth::Credentials("/nonexistent/path/to/creds.nk".into()),
+        NatsAuth::Credentials(Location::Path("/nonexistent/path/to/creds.nk".into())),
     );
 
     let err = connect(&config, Duration::from_millis(100))
@@ -79,4 +81,164 @@ async fn connect_with_missing_credentials_file_returns_invalid_credentials() {
         .expect_err("expected an error for missing credentials file");
 
     assert!(matches!(err, ConnectError::InvalidCredentials(_)));
+}
+
+fn config_with(auth: NatsAuth) -> NatsConfig {
+    NatsConfig::new(vec!["nats://127.0.0.1:4222".to_string()], auth)
+}
+
+fn value(raw: &str) -> CredentialValue {
+    CredentialValue::parse(raw).unwrap()
+}
+
+#[tokio::test]
+async fn build_options_accepts_every_auth_method() {
+    let seed = nkeys::KeyPair::new_user().seed().unwrap();
+    let seed_file = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(seed_file.path(), format!("{seed}\n")).unwrap();
+    let env = InMemoryEnv::new();
+    env.set("JWT_SEED", &seed);
+
+    let methods = [
+        NatsAuth::None,
+        NatsAuth::UserPassword {
+            user: "u".into(),
+            password: value("p"),
+        },
+        NatsAuth::NKey(Location::parse(&format!("file://{}", seed_file.path().display())).unwrap()),
+        NatsAuth::Jwt {
+            jwt: value("jwt"),
+            seed: Some(value("env://JWT_SEED")),
+        },
+        NatsAuth::Jwt {
+            jwt: value("jwt"),
+            seed: None,
+        },
+    ];
+
+    for auth in methods {
+        build_options(&config_with(auth), &env).await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn build_options_applies_token_with_another_method() {
+    let config = config_with(NatsAuth::UserPassword {
+        user: "u".into(),
+        password: value("p"),
+    })
+    .with_token(value("tok"));
+
+    build_options(&config, &InMemoryEnv::new()).await.unwrap();
+}
+
+#[tokio::test]
+async fn build_options_rejects_unsupported_creds_scheme() {
+    let config = config_with(NatsAuth::Credentials(Location::parse("nsc://op/acct/user").unwrap()));
+
+    let err = build_options(&config, &InMemoryEnv::new()).await.unwrap_err();
+
+    assert!(matches!(
+        err,
+        ConnectError::InvalidSetting {
+            setting: "NATS_CREDS",
+            error: SettingError::UnsupportedScheme(_)
+        }
+    ));
+}
+
+#[tokio::test]
+async fn build_options_rejects_missing_nkey_file() {
+    let config = config_with(NatsAuth::NKey(Location::parse("/nonexistent/seed.nk").unwrap()));
+
+    let err = build_options(&config, &InMemoryEnv::new()).await.unwrap_err();
+
+    assert!(matches!(
+        err,
+        ConnectError::InvalidSetting {
+            setting: "NATS_NKEY",
+            error: SettingError::Read { .. }
+        }
+    ));
+}
+
+#[tokio::test]
+async fn build_options_rejects_invalid_seed() {
+    let config = config_with(NatsAuth::Jwt {
+        jwt: value("jwt"),
+        seed: Some(value("not-a-seed")),
+    });
+
+    let err = build_options(&config, &InMemoryEnv::new()).await.unwrap_err();
+
+    assert!(matches!(
+        err,
+        ConnectError::InvalidSetting {
+            setting: "NATS_SEED",
+            error: SettingError::InvalidSeed(_)
+        }
+    ));
+}
+
+#[tokio::test]
+async fn build_options_rejects_unsupported_secret_scheme() {
+    let config = config_with(NatsAuth::None).with_token(value("op://vault/item/field"));
+
+    let err = build_options(&config, &InMemoryEnv::new()).await.unwrap_err();
+
+    assert!(matches!(
+        err,
+        ConnectError::InvalidSetting {
+            setting: "NATS_TOKEN",
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn build_options_rejects_unset_env_reference() {
+    let config = config_with(NatsAuth::None).with_token(value("env://MISSING_TOKEN"));
+
+    let err = build_options(&config, &InMemoryEnv::new()).await.unwrap_err();
+
+    assert!(matches!(
+        err,
+        ConnectError::InvalidSetting {
+            setting: "NATS_TOKEN",
+            error: SettingError::EnvUnset(_)
+        }
+    ));
+}
+
+#[tokio::test]
+async fn build_options_applies_tls_paths() {
+    let tls = NatsTls::new(
+        Location::parse("/c.pem"),
+        Location::parse("file:///k.pem"),
+        Location::parse("/ca.pem"),
+    );
+
+    build_options(&config_with(NatsAuth::None).with_tls(tls), &InMemoryEnv::new())
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn build_options_rejects_unsupported_tls_scheme() {
+    let tls = NatsTls::new(None, None, Location::parse("op://vault/ca"));
+
+    let err = build_options(&config_with(NatsAuth::None).with_tls(tls), &InMemoryEnv::new())
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, ConnectError::InvalidSetting { setting: "NATS_CA", .. }));
+}
+
+#[test]
+fn connect_error_display_invalid_setting() {
+    let err = ConnectError::InvalidSetting {
+        setting: "NATS_TOKEN",
+        error: SettingError::UnsupportedScheme("op".into()),
+    };
+    assert_eq!(err.to_string(), "Invalid NATS_TOKEN: scheme `op` is not supported");
 }

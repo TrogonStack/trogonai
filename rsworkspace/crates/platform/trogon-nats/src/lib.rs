@@ -45,16 +45,19 @@ pub mod auth;
 pub mod client;
 pub mod connect;
 pub mod constants;
+pub mod credential_value;
 pub mod jetstream;
 pub mod lease;
 pub mod messaging;
 pub mod nats_token;
 pub mod server_info;
+pub mod settings;
 pub mod subject_conformance;
 pub mod subject_token_violation;
 pub(crate) mod telemetry;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
+pub mod tls;
 pub(crate) mod token;
 
 #[cfg(any(test, feature = "test-support"))]
@@ -65,6 +68,7 @@ pub use auth::{NatsAuth, NatsConfig};
 pub use client::{FlushClient, PublishClient, RequestClient, SubscribeClient};
 pub use connect::{ConnectError, connect};
 pub use constants::{MAX_SUBJECT_BYTES, MAX_SUBJECT_TOKENS, REQ_ID_HEADER};
+pub use credential_value::{CredentialValue, Location, SettingError};
 pub use lease::{
     EnsureLeaderError, IncompatibleLeaseBucketConfigError, LeaderElection, LeaseBucket, LeaseConfigError, LeaseError,
     LeaseKey, LeaseProvisionError, LeaseRenewInterval, LeaseRenewIntervalError, LeaseTiming, LeaseTtl, LeaseTtlError,
@@ -76,11 +80,13 @@ pub use messaging::{
 };
 pub use nats_token::{DottedNatsToken, NatsToken};
 pub use server_info::{ServerInfoSource, ServerInfoTimeoutError, wait_for_server_info};
+pub use settings::NatsSettings;
 pub use subject_conformance::{
     SubjectViolationError, looks_like_request_id, validate_binding_version, validate_no_request_id_tokens,
     validate_published_subject, validate_subject_pattern,
 };
 pub use subject_token_violation::SubjectTokenViolationError;
+pub use tls::{ClientCertificate, NatsTls};
 
 #[cfg(any(test, feature = "test-support"))]
 pub use mocks::{AdvancedMockNatsClient, MockNatsClient};

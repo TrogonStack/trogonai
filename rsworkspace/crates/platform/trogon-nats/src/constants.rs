@@ -6,6 +6,11 @@ pub const ENV_NATS_NKEY: &str = "NATS_NKEY";
 pub const ENV_NATS_USER: &str = "NATS_USER";
 pub const ENV_NATS_PASSWORD: &str = "NATS_PASSWORD";
 pub const ENV_NATS_TOKEN: &str = "NATS_TOKEN";
+pub const ENV_NATS_JWT: &str = "NATS_JWT";
+pub const ENV_NATS_SEED: &str = "NATS_SEED";
+pub const ENV_NATS_CERT: &str = "NATS_CERT";
+pub const ENV_NATS_KEY: &str = "NATS_KEY";
+pub const ENV_NATS_CA: &str = "NATS_CA";
 pub const DEFAULT_NATS_URL: &str = "localhost:4222";
 
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);

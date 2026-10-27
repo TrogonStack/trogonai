@@ -48,10 +48,7 @@ async fn run_bridge_shuts_down_on_signal() {
     let _sub = mock.inject_messages();
     let config = acp_nats::Config::new(
         acp_nats::AcpPrefix::new("acp").unwrap(),
-        acp_nats::NatsConfig {
-            servers: vec!["localhost:4222".to_string()],
-            auth: trogon_nats::NatsAuth::None,
-        },
+        acp_nats::NatsConfig::new(vec!["localhost:4222".to_string()], trogon_nats::NatsAuth::None),
     );
 
     let (reader, _writer) = tokio::io::duplex(1024);
@@ -70,10 +67,7 @@ async fn run_bridge_exits_on_io_close() {
     let _sub = mock.inject_messages();
     let config = acp_nats::Config::new(
         acp_nats::AcpPrefix::new("acp").unwrap(),
-        acp_nats::NatsConfig {
-            servers: vec!["localhost:4222".to_string()],
-            auth: trogon_nats::NatsAuth::None,
-        },
+        acp_nats::NatsConfig::new(vec!["localhost:4222".to_string()], trogon_nats::NatsAuth::None),
     );
 
     let (reader, writer) = tokio::io::duplex(1024);

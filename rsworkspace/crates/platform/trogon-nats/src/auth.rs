@@ -1,40 +1,43 @@
 use std::fmt;
-use std::path::PathBuf;
 use trogon_std::env::ReadEnv;
 
-use crate::constants::{
-    DEFAULT_NATS_URL, ENV_NATS_CREDS, ENV_NATS_NKEY, ENV_NATS_PASSWORD, ENV_NATS_TOKEN, ENV_NATS_URL, ENV_NATS_USER,
-};
+use crate::credential_value::{CredentialValue, Location};
+use crate::settings::NatsSettings;
+use crate::tls::NatsTls;
 
-/// NATS authentication method.
+/// NATS authentication method, chosen exclusively.
 ///
-/// When resolved from environment variables, priority order is:
-/// 1. Credentials file (`NATS_CREDS`)
-/// 2. NKey (`NATS_NKEY`)
-/// 3. User/Password (`NATS_USER` + `NATS_PASSWORD`)
-/// 4. Token (`NATS_TOKEN`)
-/// 5. No auth
+/// `NATS_USER` + `NATS_PASSWORD`, then `NATS_CREDS`, then `NATS_NKEY`, then
+/// `NATS_JWT` (with an optional `NATS_SEED`) decide the method; see
+/// [`NatsSettings`]. A token travels separately on [`NatsConfig::token`]
+/// because it is applied on top of the chosen method.
 #[derive(Clone)]
 pub enum NatsAuth {
-    Credentials(PathBuf),
-    NKey(String),
-    UserPassword { user: String, password: String },
-    Token(String),
+    Credentials(Location),
+    NKey(Location),
+    UserPassword {
+        user: String,
+        password: CredentialValue,
+    },
+    Jwt {
+        jwt: CredentialValue,
+        seed: Option<CredentialValue>,
+    },
     None,
 }
 
-/// `NKey`, `password`, and `Token` are bearer credentials and must not be logged.
+/// Secret-bearing values are redacted by [`CredentialValue`]'s own `Debug`.
 impl fmt::Debug for NatsAuth {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Credentials(path) => f.debug_tuple("Credentials").field(path).finish(),
-            Self::NKey(_) => f.debug_tuple("NKey").field(&"<redacted>").finish(),
-            Self::UserPassword { user, .. } => f
+            Self::Credentials(location) => f.debug_tuple("Credentials").field(location).finish(),
+            Self::NKey(location) => f.debug_tuple("NKey").field(location).finish(),
+            Self::UserPassword { user, password } => f
                 .debug_struct("UserPassword")
                 .field("user", user)
-                .field("password", &"<redacted>")
+                .field("password", password)
                 .finish(),
-            Self::Token(_) => f.debug_tuple("Token").field(&"<redacted>").finish(),
+            Self::Jwt { jwt, seed } => f.debug_struct("Jwt").field("jwt", jwt).field("seed", seed).finish(),
             Self::None => f.write_str("None"),
         }
     }
@@ -46,7 +49,8 @@ impl NatsAuth {
             Self::Credentials(_) => "credentials file",
             Self::NKey(_) => "NKey",
             Self::UserPassword { .. } => "user/password",
-            Self::Token(_) => "token",
+            Self::Jwt { seed: Some(_), .. } => "JWT",
+            Self::Jwt { seed: None, .. } => "JWT without signature",
             Self::None => "none",
         }
     }
@@ -56,54 +60,39 @@ impl NatsAuth {
 pub struct NatsConfig {
     pub servers: Vec<String>,
     pub auth: NatsAuth,
+    pub token: Option<CredentialValue>,
+    pub tls: NatsTls,
 }
 
 impl NatsConfig {
     pub fn new(servers: Vec<String>, auth: NatsAuth) -> Self {
-        Self { servers, auth }
+        Self {
+            servers,
+            auth,
+            token: None,
+            tls: NatsTls::default(),
+        }
     }
 
     pub fn from_url(url: impl Into<String>) -> Self {
-        Self {
-            servers: vec![url.into()],
-            auth: NatsAuth::None,
-        }
+        Self::new(vec![url.into()], NatsAuth::None)
     }
 
-    /// Build config from environment variables.
-    ///
-    /// - `NATS_URL`: comma-separated server list (default: `localhost:4222`)
-    /// - Auth resolved via `NATS_CREDS` > `NATS_NKEY` > `NATS_USER`+`NATS_PASSWORD` > `NATS_TOKEN` > none
+    pub fn with_token(mut self, token: CredentialValue) -> Self {
+        self.token = Some(token);
+        self
+    }
+
+    pub fn with_tls(mut self, tls: NatsTls) -> Self {
+        self.tls = tls;
+        self
+    }
+
+    /// Build config from the same environment variables the `nats` CLI reads.
+    /// See [`NatsSettings`] for the precedence rules.
     pub fn from_env<E: ReadEnv>(env: &E) -> Self {
-        Self {
-            servers: servers_from_env(env),
-            auth: auth_from_env(env),
-        }
+        NatsSettings::from_env(env).resolve()
     }
-}
-
-fn servers_from_env<E: ReadEnv>(env: &E) -> Vec<String> {
-    let raw = env.var(ENV_NATS_URL).unwrap_or_else(|_| DEFAULT_NATS_URL.to_string());
-    raw.split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect()
-}
-
-fn auth_from_env<E: ReadEnv>(env: &E) -> NatsAuth {
-    if let Ok(creds_path) = env.var(ENV_NATS_CREDS) {
-        return NatsAuth::Credentials(PathBuf::from(creds_path));
-    }
-    if let Ok(nkey) = env.var(ENV_NATS_NKEY) {
-        return NatsAuth::NKey(nkey);
-    }
-    if let (Ok(user), Ok(password)) = (env.var(ENV_NATS_USER), env.var(ENV_NATS_PASSWORD)) {
-        return NatsAuth::UserPassword { user, password };
-    }
-    if let Ok(token) = env.var(ENV_NATS_TOKEN) {
-        return NatsAuth::Token(token);
-    }
-    NatsAuth::None
 }
 
 #[cfg(test)]

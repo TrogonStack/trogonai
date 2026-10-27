@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use clap::Args;
 use confique::Config;
-use trogon_nats::{NatsAuth, NatsConfig};
+use trogon_nats::{NatsConfig, NatsSettings};
 
 #[derive(Args, Clone, Debug, Default)]
 pub struct RuntimeConfigArgs {
@@ -30,6 +30,16 @@ pub struct NatsArgs {
     pub nats_password: Option<String>,
     #[arg(long, global = true)]
     pub nats_token: Option<String>,
+    #[arg(long, global = true)]
+    pub nats_jwt: Option<String>,
+    #[arg(long, global = true)]
+    pub nats_seed: Option<String>,
+    #[arg(long, global = true)]
+    pub nats_tls_cert: Option<String>,
+    #[arg(long, global = true)]
+    pub nats_tls_key: Option<String>,
+    #[arg(long, global = true)]
+    pub nats_tls_ca: Option<String>,
 }
 
 impl fmt::Debug for NatsArgs {
@@ -41,6 +51,11 @@ impl fmt::Debug for NatsArgs {
             .field("nats_user", &self.nats_user)
             .field("nats_password", &self.nats_password.as_ref().map(|_| "<redacted>"))
             .field("nats_token", &self.nats_token.as_ref().map(|_| "<redacted>"))
+            .field("nats_jwt", &self.nats_jwt.as_ref().map(|_| "<redacted>"))
+            .field("nats_seed", &self.nats_seed.as_ref().map(|_| "<redacted>"))
+            .field("nats_tls_cert", &self.nats_tls_cert)
+            .field("nats_tls_key", &self.nats_tls_key)
+            .field("nats_tls_ca", &self.nats_tls_ca)
             .finish()
     }
 }
@@ -59,6 +74,16 @@ pub struct NatsConfigSection {
     pub password: Option<String>,
     #[config(env = "NATS_TOKEN")]
     pub token: Option<String>,
+    #[config(env = "NATS_JWT")]
+    pub jwt: Option<String>,
+    #[config(env = "NATS_SEED")]
+    pub seed: Option<String>,
+    #[config(env = "NATS_CERT")]
+    pub tls_cert: Option<String>,
+    #[config(env = "NATS_KEY")]
+    pub tls_key: Option<String>,
+    #[config(env = "NATS_CA")]
+    pub tls_ca: Option<String>,
 }
 
 impl fmt::Debug for NatsConfigSection {
@@ -70,6 +95,11 @@ impl fmt::Debug for NatsConfigSection {
             .field("user", &self.user)
             .field("password", &self.password.as_ref().map(|_| "<redacted>"))
             .field("token", &self.token.as_ref().map(|_| "<redacted>"))
+            .field("jwt", &self.jwt.as_ref().map(|_| "<redacted>"))
+            .field("seed", &self.seed.as_ref().map(|_| "<redacted>"))
+            .field("tls_cert", &self.tls_cert)
+            .field("tls_key", &self.tls_key)
+            .field("tls_ca", &self.tls_ca)
             .finish()
     }
 }
@@ -83,36 +113,24 @@ pub fn load_config<T: Config>(config_path: Option<&Path>) -> Result<T, confique:
 }
 
 pub fn resolve_nats(section: &NatsConfigSection, overrides: &NatsArgs) -> NatsConfig {
-    let auth = if let Some(creds) = first_non_empty(overrides.nats_creds.as_ref(), section.creds.as_ref()) {
-        NatsAuth::Credentials(creds.clone().into())
-    } else if let Some(nkey) = first_non_empty(overrides.nats_nkey.as_ref(), section.nkey.as_ref()) {
-        NatsAuth::NKey(nkey.clone())
-    } else if let (Some(user), Some(password)) = (
-        first_non_empty(overrides.nats_user.as_ref(), section.user.as_ref()),
-        first_non_empty(overrides.nats_password.as_ref(), section.password.as_ref()),
-    ) {
-        NatsAuth::UserPassword {
-            user: user.clone(),
-            password: password.clone(),
-        }
-    } else if let Some(token) = first_non_empty(overrides.nats_token.as_ref(), section.token.as_ref()) {
-        NatsAuth::Token(token.clone())
-    } else {
-        NatsAuth::None
+    let pick = |primary: &Option<String>, fallback: &Option<String>| {
+        first_non_empty(primary.as_ref(), fallback.as_ref()).cloned()
     };
 
-    let raw_url = first_non_empty(overrides.nats_url.as_ref(), Some(&section.url))
-        .map(|value| value.as_str())
-        .unwrap_or("localhost:4222");
-
-    let servers = raw_url
-        .split(',')
-        .map(str::trim)
-        .filter(|server| !server.is_empty())
-        .map(ToOwned::to_owned)
-        .collect();
-
-    NatsConfig::new(servers, auth)
+    NatsSettings {
+        url: pick(&overrides.nats_url, &Some(section.url.clone())),
+        user: pick(&overrides.nats_user, &section.user),
+        password: pick(&overrides.nats_password, &section.password),
+        token: pick(&overrides.nats_token, &section.token),
+        creds: pick(&overrides.nats_creds, &section.creds),
+        nkey: pick(&overrides.nats_nkey, &section.nkey),
+        jwt: pick(&overrides.nats_jwt, &section.jwt),
+        seed: pick(&overrides.nats_seed, &section.seed),
+        cert: pick(&overrides.nats_tls_cert, &section.tls_cert),
+        key: pick(&overrides.nats_tls_key, &section.tls_key),
+        ca: pick(&overrides.nats_tls_ca, &section.tls_ca),
+    }
+    .resolve()
 }
 
 fn first_non_empty<'a>(primary: Option<&'a String>, fallback: Option<&'a String>) -> Option<&'a String> {

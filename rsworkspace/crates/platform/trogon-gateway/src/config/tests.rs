@@ -1462,7 +1462,7 @@ fn nats_credentials_auth() {
 
 #[test]
 fn nats_nkey_auth() {
-    let f = write_toml(&nats_toml_with_nkey("SUAIBDPBAUTW"));
+    let f = write_toml(&nats_toml_with_nkey("/path/to/seed.nk"));
     let cfg = load(Some(f.path())).expect("load failed");
     assert!(matches!(cfg.nats.auth, NatsAuth::NKey(_)));
 }
@@ -1478,7 +1478,8 @@ fn nats_user_password_auth() {
 fn nats_token_auth() {
     let f = write_toml(&nats_toml_with_token("mytoken"));
     let cfg = load(Some(f.path())).expect("load failed");
-    assert!(matches!(cfg.nats.auth, NatsAuth::Token(_)));
+    assert!(matches!(cfg.nats.auth, NatsAuth::None));
+    assert!(cfg.nats.token.is_some());
 }
 
 #[test]
@@ -1494,16 +1495,16 @@ token = "mytoken"
 }
 
 #[test]
-fn nats_nkey_takes_priority_over_user_password() {
+fn nats_user_password_takes_priority_over_nkey() {
     let toml = r#"
 [nats]
-nkey = "SUAIBDPBAUTW"
+nkey = "/path/to/seed.nk"
 user = "myuser"
 password = "mypass"
 "#;
     let f = write_toml(toml);
     let cfg = load(Some(f.path())).expect("load failed");
-    assert!(matches!(cfg.nats.auth, NatsAuth::NKey(_)));
+    assert!(matches!(cfg.nats.auth, NatsAuth::UserPassword { .. }));
 }
 
 #[test]
@@ -1517,6 +1518,7 @@ token = "mytoken"
     let f = write_toml(toml);
     let cfg = load(Some(f.path())).expect("load failed");
     assert!(matches!(cfg.nats.auth, NatsAuth::UserPassword { .. }));
+    assert!(cfg.nats.token.is_some());
 }
 
 #[test]
@@ -1528,7 +1530,8 @@ token = "mytoken"
 "#;
     let f = write_toml(toml);
     let cfg = load(Some(f.path())).expect("load failed");
-    assert!(matches!(cfg.nats.auth, NatsAuth::Token(_)));
+    assert!(matches!(cfg.nats.auth, NatsAuth::None));
+    assert!(cfg.nats.token.is_some());
 }
 
 #[test]
@@ -1543,7 +1546,7 @@ url = "host1:4222, host2:4222, host3:4222"
 }
 
 #[test]
-fn nats_user_without_password_falls_through() {
+fn nats_user_without_password_becomes_token_over_token() {
     let toml = r#"
 [nats]
 user = "myuser"
@@ -1551,7 +1554,10 @@ token = "mytoken"
 "#;
     let f = write_toml(toml);
     let cfg = load(Some(f.path())).expect("load failed");
-    assert!(matches!(cfg.nats.auth, NatsAuth::Token(_)));
+    assert!(matches!(
+        cfg.nats.token,
+        Some(trogon_nats::CredentialValue::Literal(ref token)) if token.as_str() == "myuser"
+    ));
 }
 
 #[test]
@@ -1573,7 +1579,10 @@ token = "file-token"
     .expect("load failed");
 
     assert_eq!(cfg.nats.servers, vec!["override:4222"]);
-    assert!(matches!(cfg.nats.auth, NatsAuth::Token(ref token) if token == "override-token"));
+    assert!(matches!(
+        cfg.nats.token,
+        Some(trogon_nats::CredentialValue::Literal(ref token)) if token.as_str() == "override-token"
+    ));
 }
 
 #[test]
@@ -1594,7 +1603,7 @@ token = "file-token"
     .expect("load failed");
 
     assert!(
-        matches!(cfg.nats.auth, NatsAuth::Credentials(ref path) if path == std::path::Path::new("/path/to/override.creds"))
+        matches!(cfg.nats.auth, NatsAuth::Credentials(trogon_nats::Location::Path(ref path)) if path == std::path::Path::new("/path/to/override.creds"))
     );
 }
 

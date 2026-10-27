@@ -48,16 +48,30 @@ CLI flag `--acp-prefix` overrides `ACP_PREFIX`.
 
 ### NATS Authentication
 
-Resolved in priority order — the first match wins:
+These variables match the `nats` CLI. One method is chosen, first match wins:
 
 | Priority | Variable(s) | Method |
 |----------|-------------|--------|
-| 1 | `NATS_CREDS` | Credentials file path |
-| 2 | `NATS_NKEY` | NKey seed |
-| 3 | `NATS_USER` + `NATS_PASSWORD` | Username/password |
-| 4 | `NATS_TOKEN` | Token |
+| 1 | `NATS_USER` + `NATS_PASSWORD` | Username/password |
+| 2 | `NATS_CREDS` | Credentials file, a path or `file://path` |
+| 3 | `NATS_NKEY` | NKey seed file or `.creds` file, a path or `file://path` |
+| 4 | `NATS_JWT` + `NATS_SEED` | User JWT signed with the seed |
+| 5 | `NATS_JWT` | User JWT with an empty signature |
+
+A token is applied on top of the chosen method. It is `NATS_USER` when that is set without `NATS_PASSWORD` (overriding `NATS_TOKEN`), otherwise `NATS_TOKEN`.
+
+`NATS_JWT`, `NATS_SEED`, `NATS_PASSWORD` and `NATS_TOKEN` are literals unless they start with `file://path` (file contents, trailing newlines trimmed) or `env://NAME` (value of another variable). The `op`, `nsc` and `data` schemes are rejected at connect time.
 
 If none are set, the connection is unauthenticated.
+
+### NATS TLS
+
+| Variable | Description |
+|----------|-------------|
+| `NATS_CERT` + `NATS_KEY` | Client certificate and key, paths or `file://path`. Both are required. |
+| `NATS_CA` | Root CA certificate, a path or `file://path` |
+
+Setting any of them requires TLS.
 
 ### Observability
 
