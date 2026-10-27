@@ -17,6 +17,12 @@ def main() -> None:
         parser.error("image must be a lowercase name containing letters, numbers and hyphens")
 
     root = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
+    status = subprocess.check_output(
+        ["git", "status", "--porcelain", "--untracked-files=normal"], cwd=root, text=True
+    )
+    if status:
+        parser.error("Build from a clean worktree so the image revision identifies its source")
+
     image_dir = root / "devops" / "docker" / "images" / args.image
     dockerfile = image_dir / "Dockerfile"
     if not dockerfile.is_file():

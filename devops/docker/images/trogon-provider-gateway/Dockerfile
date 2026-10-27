@@ -11,11 +11,12 @@ ENV CARGO_INCREMENTAL=0 \
     CARGO_TARGET_DIR=/cargo-target
 WORKDIR /src
 
-RUN --mount=type=bind,source=rsworkspace,target=/src \
+RUN --mount=type=bind,source=rsworkspace,target=/src,rw \
     --mount=type=cache,id=trogonai-rust-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=trogonai-rust-git,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,id=trogonai-rust-1.96.0-${TARGETARCH},target=/cargo-target,sharing=locked \
-    cargo build --locked --release --package trogon-provider-gateway --bin trogon-provider-gateway \
+    find . -type f -exec touch {} + \
+    && cargo build --locked --release --package trogon-provider-gateway --bin trogon-provider-gateway \
     && install -D /cargo-target/release/trogon-provider-gateway /out/trogon-provider-gateway
 
 FROM debian:bookworm-20260518-slim AS runtime

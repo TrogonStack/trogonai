@@ -73,14 +73,18 @@ mise run images:build trogon-provider-gateway
 
 An optional final argument supplies a local image tag. The default is
 `trogon-provider-gateway:<commit>`. This command builds locally without publishing.
+It requires a clean worktree so the tag and revision identify the built source.
 The Dockerfile is in `devops/docker/images/trogon-provider-gateway/`.
 
 The container runs as UID/GID `10001:10001` and binds `0.0.0.0:8317` by default.
 Its entrypoint accepts the same CLI flags as the native binary. Deployments own
 readiness and liveness probe configuration and must target the effective bind
 address and port. The image declares no Docker health check because CLI overrides
-can change the listener, including an IPv6-only address or an ephemeral port. `SIGTERM` initiates graceful shutdown. BuildKit stores compiler output in
-a cache mount, with incremental compilation disabled. Share that cache per
+can change the listener, including an IPv6-only address or an ephemeral port.
+`SIGTERM` initiates graceful shutdown. BuildKit refreshes workspace file timestamps
+inside its disposable build mount before compiling, without changing host files,
+so older source timestamps cannot reuse stale workspace artifacts. It stores
+compiler output in a cache mount, with incremental compilation disabled. Share that cache per
 platform and remove it after verification; prune it before it exceeds 40 GB.
 
 ## Architecture references
