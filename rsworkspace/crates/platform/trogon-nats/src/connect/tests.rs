@@ -215,6 +215,15 @@ async fn build_options_applies_tls_paths() {
 }
 
 #[tokio::test]
+async fn build_options_applies_client_certificate_without_ca() {
+    let tls = NatsTls::new(Location::parse("/c.pem"), Location::parse("/k.pem"), None);
+
+    build_options(&config_with(NatsAuth::None).with_tls(tls), &InMemoryEnv::new())
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
 async fn build_options_rejects_unsupported_tls_scheme() {
     let tls = NatsTls::new(None, None, Location::parse("op://vault/ca"));
 
