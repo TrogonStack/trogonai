@@ -79,6 +79,41 @@ impl Location {
     }
 }
 
+/// An NKey seed given either inline or as a seed file location. A value that
+/// parses as a seed is used inline; anything else is a bare or `file://` path,
+/// which is how the `nats` CLI reads `NATS_NKEY`.
+#[derive(Clone)]
+pub enum NKeySeed {
+    Inline(SecretString),
+    File(Location),
+}
+
+impl NKeySeed {
+    pub fn parse(raw: &str) -> Option<Self> {
+        let trimmed = raw.trim();
+        if nkeys::KeyPair::from_seed(trimmed).is_ok() {
+            return SecretString::new(trimmed).ok().map(Self::Inline);
+        }
+        Location::parse(raw).map(Self::File)
+    }
+
+    pub async fn resolve(&self) -> Result<String, SettingError> {
+        match self {
+            Self::Inline(seed) => Ok(seed.as_str().to_owned()),
+            Self::File(location) => location.read_seed().await,
+        }
+    }
+}
+
+impl fmt::Debug for NKeySeed {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Inline(_) => f.debug_tuple("Inline").field(&"<redacted>").finish(),
+            Self::File(location) => f.debug_tuple("File").field(location).finish(),
+        }
+    }
+}
+
 /// A configured value that is either a literal or a reference to where the
 /// value lives (`file://path`, `env://NAME`).
 #[derive(Clone)]

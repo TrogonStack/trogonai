@@ -1,5 +1,5 @@
 use super::*;
-use crate::credential_value::CredentialValue;
+use crate::credential_value::{CredentialValue, NKeySeed};
 use trogon_std::env::InMemoryEnv;
 
 fn literal_text(value: &CredentialValue) -> Option<&str> {
@@ -27,7 +27,6 @@ fn defaults_to_localhost_without_auth() {
 
     assert_eq!(config.servers, vec!["localhost:4222"]);
     assert!(matches!(config.auth, NatsAuth::None));
-    assert!(config.token.is_none());
     assert!(!config.tls.is_configured());
 }
 
@@ -43,29 +42,21 @@ fn empty_url_falls_back_to_default() {
     assert_eq!(config(&[("NATS_URL", "")]).servers, vec!["localhost:4222"]);
 }
 
-#[test]
-fn user_password_wins_over_everything() {
-    let config = config(&[
-        ("NATS_USER", "alice"),
-        ("NATS_PASSWORD", "pw"),
-        ("NATS_CREDS", "/c.creds"),
-        ("NATS_NKEY", "/n.seed"),
-        ("NATS_JWT", "jwt"),
-        ("NATS_SEED", "seed"),
-    ]);
-
-    assert!(matches!(
-        config.auth,
-        NatsAuth::UserPassword { ref user, ref password } if user == "alice" && literal_text(password) == Some("pw")
-    ));
-    assert!(config.token.is_none());
+fn token_text(config: &NatsConfig) -> Option<&str> {
+    match &config.auth {
+        NatsAuth::Token(token) => literal_text(token),
+        _ => None,
+    }
 }
 
 #[test]
-fn creds_win_over_nkey_and_jwt() {
+fn creds_win_over_everything() {
     let config = config(&[
         ("NATS_CREDS", "/c.creds"),
         ("NATS_NKEY", "/n.seed"),
+        ("NATS_USER", "alice"),
+        ("NATS_PASSWORD", "pw"),
+        ("NATS_TOKEN", "tok"),
         ("NATS_JWT", "jwt"),
     ]);
 
@@ -84,10 +75,59 @@ fn creds_accept_file_scheme() {
 }
 
 #[test]
-fn nkey_is_a_seed_file_location_and_beats_jwt() {
-    let config = config(&[("NATS_NKEY", "/n.seed"), ("NATS_JWT", "jwt"), ("NATS_SEED", "seed")]);
+fn nkey_wins_over_user_password_token_and_jwt() {
+    let config = config(&[
+        ("NATS_NKEY", "/n.seed"),
+        ("NATS_USER", "alice"),
+        ("NATS_PASSWORD", "pw"),
+        ("NATS_TOKEN", "tok"),
+        ("NATS_JWT", "jwt"),
+    ]);
 
-    assert!(matches!(config.auth, NatsAuth::NKey(Location::Path(ref p)) if p == std::path::Path::new("/n.seed")));
+    assert!(matches!(
+        config.auth,
+        NatsAuth::NKey(NKeySeed::File(Location::Path(ref p))) if p == std::path::Path::new("/n.seed")
+    ));
+}
+
+#[test]
+fn nkey_accepts_an_inline_seed() {
+    let seed = nkeys::KeyPair::new_user().seed().unwrap();
+    let config = config(&[("NATS_NKEY", &seed)]);
+
+    assert!(matches!(config.auth, NatsAuth::NKey(NKeySeed::Inline(ref s)) if s.as_str() == seed));
+}
+
+#[test]
+fn nkey_accepts_a_seed_file_location() {
+    let config = config(&[("NATS_NKEY", "file:///n.seed")]);
+
+    assert!(matches!(
+        config.auth,
+        NatsAuth::NKey(NKeySeed::File(Location::Path(ref p))) if p == std::path::Path::new("/n.seed")
+    ));
+}
+
+#[test]
+fn user_password_wins_over_token_and_jwt() {
+    let config = config(&[
+        ("NATS_USER", "alice"),
+        ("NATS_PASSWORD", "pw"),
+        ("NATS_TOKEN", "tok"),
+        ("NATS_JWT", "jwt"),
+    ]);
+
+    assert!(matches!(
+        config.auth,
+        NatsAuth::UserPassword { ref user, ref password } if user == "alice" && literal_text(password) == Some("pw")
+    ));
+}
+
+#[test]
+fn token_wins_over_jwt() {
+    let config = config(&[("NATS_TOKEN", "tok"), ("NATS_JWT", "jwt"), ("NATS_SEED", "seed")]);
+
+    assert_eq!(token_text(&config), Some("tok"));
 }
 
 #[test]
@@ -115,57 +155,31 @@ fn seed_alone_is_ignored() {
 
 #[test]
 fn password_alone_is_ignored() {
-    let config = config(&[("NATS_PASSWORD", "pw")]);
-
-    assert!(matches!(config.auth, NatsAuth::None));
-    assert!(config.token.is_none());
+    assert!(matches!(config(&[("NATS_PASSWORD", "pw")]).auth, NatsAuth::None));
 }
 
 #[test]
 fn user_without_password_becomes_token() {
-    let config = config(&[("NATS_USER", "tok")]);
-
-    assert!(matches!(config.auth, NatsAuth::None));
-    assert!(config.token.as_ref().and_then(literal_text) == Some("tok"));
+    assert_eq!(token_text(&config(&[("NATS_USER", "tok")])), Some("tok"));
 }
 
 #[test]
-fn user_as_token_overrides_token_variable() {
+fn token_variable_wins_over_user_without_password() {
     let config = config(&[("NATS_USER", "from-user"), ("NATS_TOKEN", "from-token")]);
 
-    assert!(config.token.as_ref().and_then(literal_text) == Some("from-user"));
+    assert_eq!(token_text(&config), Some("from-token"));
 }
 
 #[test]
 fn empty_password_makes_user_a_token() {
     let config = config(&[("NATS_USER", "tok"), ("NATS_PASSWORD", "")]);
 
-    assert!(matches!(config.auth, NatsAuth::None));
-    assert!(config.token.as_ref().and_then(literal_text) == Some("tok"));
+    assert_eq!(token_text(&config), Some("tok"));
 }
 
 #[test]
 fn token_variable_applies_alone() {
-    let config = config(&[("NATS_TOKEN", "my-token")]);
-
-    assert!(matches!(config.auth, NatsAuth::None));
-    assert!(config.token.as_ref().and_then(literal_text) == Some("my-token"));
-}
-
-#[test]
-fn token_applies_on_top_of_another_method() {
-    let config = config(&[("NATS_CREDS", "/c.creds"), ("NATS_TOKEN", "my-token")]);
-
-    assert!(matches!(config.auth, NatsAuth::Credentials(_)));
-    assert!(config.token.as_ref().and_then(literal_text) == Some("my-token"));
-}
-
-#[test]
-fn token_applies_on_top_of_user_password() {
-    let config = config(&[("NATS_USER", "u"), ("NATS_PASSWORD", "p"), ("NATS_TOKEN", "t")]);
-
-    assert!(matches!(config.auth, NatsAuth::UserPassword { .. }));
-    assert!(config.token.as_ref().and_then(literal_text) == Some("t"));
+    assert_eq!(token_text(&config(&[("NATS_TOKEN", "my-token")])), Some("my-token"));
 }
 
 #[test]
@@ -180,14 +194,17 @@ fn secret_values_may_reference_files_and_variables() {
         config.auth,
         NatsAuth::UserPassword { password: CredentialValue::Env(ref name), .. } if name == "PW"
     ));
-    assert!(matches!(config.token, Some(CredentialValue::File(_))));
+    assert!(matches!(
+        settings(&[("NATS_TOKEN", "file:///run/token")]).resolve().auth,
+        NatsAuth::Token(CredentialValue::File(_))
+    ));
 }
 
 #[test]
 fn unsupported_value_scheme_is_kept_for_connect_time() {
     let config = config(&[("NATS_TOKEN", "op://vault/item/field")]);
 
-    assert!(matches!(config.token, Some(CredentialValue::Unsupported(ref scheme)) if scheme == "op"));
+    assert!(matches!(config.auth, NatsAuth::Token(CredentialValue::Unsupported(ref scheme)) if scheme == "op"));
 }
 
 #[test]

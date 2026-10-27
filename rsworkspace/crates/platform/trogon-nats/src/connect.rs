@@ -74,8 +74,8 @@ async fn apply_auth<E: ReadEnv>(
                 ConnectError::InvalidCredentials(e)
             })
         }
-        NatsAuth::NKey(location) => {
-            let seed = location.read_seed().await.map_err(invalid_setting(ENV_NATS_NKEY))?;
+        NatsAuth::NKey(seed) => {
+            let seed = seed.resolve().await.map_err(invalid_setting(ENV_NATS_NKEY))?;
             Ok(opts.nkey(seed))
         }
         NatsAuth::UserPassword { user, password } => {
@@ -101,6 +101,10 @@ async fn apply_auth<E: ReadEnv>(
                 None => Ok(opts.jwt(jwt, |_| std::future::ready(Ok(Vec::new())))),
             }
         }
+        NatsAuth::Token(token) => {
+            let token = token.resolve(env).await.map_err(invalid_setting(ENV_NATS_TOKEN))?;
+            Ok(opts.token(token))
+        }
         NatsAuth::None => Ok(opts),
     }
 }
@@ -123,11 +127,7 @@ fn apply_tls(opts: ConnectOptions, tls: &NatsTls) -> Result<ConnectOptions, Conn
 }
 
 async fn build_options<E: ReadEnv>(config: &NatsConfig, env: &E) -> Result<ConnectOptions, ConnectError> {
-    let mut opts = apply_auth(ConnectOptions::new(), &config.auth, env).await?;
-    if let Some(token) = &config.token {
-        let token = token.resolve(env).await.map_err(invalid_setting(ENV_NATS_TOKEN))?;
-        opts = opts.token(token);
-    }
+    let opts = apply_auth(ConnectOptions::new(), &config.auth, env).await?;
     apply_tls(opts, &config.tls)
 }
 
@@ -140,7 +140,6 @@ pub async fn connect(config: &NatsConfig, connection_timeout: Duration) -> Resul
     info!(
         servers = ?config.servers,
         auth = %config.auth.description(),
-        token = config.token.is_some(),
         tls = config.tls.is_configured(),
         "Connecting to NATS"
     );

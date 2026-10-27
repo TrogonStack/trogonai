@@ -78,7 +78,7 @@ fn reads_nats_config_from_env_provider() {
 
     assert_eq!(config.mcp.nats().servers, vec!["host1:4222", "host2:4222"]);
     assert!(
-        matches!(&config.mcp.nats().token, Some(mcp_nats::CredentialValue::Literal(t)) if t.as_str() == "my-token")
+        matches!(&config.mcp.nats().auth, mcp_nats::NatsAuth::Token(mcp_nats::CredentialValue::Literal(t)) if t.as_str() == "my-token")
     );
 }
 

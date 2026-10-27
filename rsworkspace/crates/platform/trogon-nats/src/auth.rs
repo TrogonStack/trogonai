@@ -1,20 +1,16 @@
 use std::fmt;
 use trogon_std::env::ReadEnv;
 
-use crate::credential_value::{CredentialValue, Location};
+use crate::credential_value::{CredentialValue, Location, NKeySeed};
 use crate::settings::NatsSettings;
 use crate::tls::NatsTls;
 
-/// NATS authentication method, chosen exclusively.
-///
-/// `NATS_USER` + `NATS_PASSWORD`, then `NATS_CREDS`, then `NATS_NKEY`, then
-/// `NATS_JWT` (with an optional `NATS_SEED`) decide the method; see
-/// [`NatsSettings`]. A token travels separately on [`NatsConfig::token`]
-/// because it is applied on top of the chosen method.
+/// NATS authentication method, chosen exclusively; see [`NatsSettings`] for
+/// the precedence.
 #[derive(Clone)]
 pub enum NatsAuth {
     Credentials(Location),
-    NKey(Location),
+    NKey(NKeySeed),
     UserPassword {
         user: String,
         password: CredentialValue,
@@ -23,10 +19,11 @@ pub enum NatsAuth {
         jwt: CredentialValue,
         seed: Option<CredentialValue>,
     },
+    Token(CredentialValue),
     None,
 }
 
-/// Secret-bearing values are redacted by [`CredentialValue`]'s own `Debug`.
+/// Secret-bearing values are redacted by their own `Debug`.
 impl fmt::Debug for NatsAuth {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -38,6 +35,7 @@ impl fmt::Debug for NatsAuth {
                 .field("password", password)
                 .finish(),
             Self::Jwt { jwt, seed } => f.debug_struct("Jwt").field("jwt", jwt).field("seed", seed).finish(),
+            Self::Token(token) => f.debug_tuple("Token").field(token).finish(),
             Self::None => f.write_str("None"),
         }
     }
@@ -51,6 +49,7 @@ impl NatsAuth {
             Self::UserPassword { .. } => "user/password",
             Self::Jwt { seed: Some(_), .. } => "JWT",
             Self::Jwt { seed: None, .. } => "JWT without signature",
+            Self::Token(_) => "token",
             Self::None => "none",
         }
     }
@@ -60,7 +59,6 @@ impl NatsAuth {
 pub struct NatsConfig {
     pub servers: Vec<String>,
     pub auth: NatsAuth,
-    pub token: Option<CredentialValue>,
     pub tls: NatsTls,
 }
 
@@ -69,18 +67,12 @@ impl NatsConfig {
         Self {
             servers,
             auth,
-            token: None,
             tls: NatsTls::default(),
         }
     }
 
     pub fn from_url(url: impl Into<String>) -> Self {
         Self::new(vec![url.into()], NatsAuth::None)
-    }
-
-    pub fn with_token(mut self, token: CredentialValue) -> Self {
-        self.token = Some(token);
-        self
     }
 
     pub fn with_tls(mut self, tls: NatsTls) -> Self {

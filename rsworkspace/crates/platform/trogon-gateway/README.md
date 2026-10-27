@@ -80,14 +80,13 @@ Gateway-level settings:
 - `TROGON_GATEWAY_PORT` (default: `8080`)
 - `NATS_URL` (default: `localhost:4222`, comma-separated supported)
 
-NATS auth follows the `nats` CLI. One method is chosen in this priority order:
+NATS auth accepts the same values as the `nats` CLI. One method is chosen in this priority order:
 
-1. `NATS_USER` + `NATS_PASSWORD`
-2. `NATS_CREDS` (path or `file://path`)
-3. `NATS_NKEY` (path or `file://path` to an NKey seed file)
-4. `NATS_JWT` + `NATS_SEED`, or `NATS_JWT` alone with an empty signature
-
-A token is applied on top of the chosen method. It is `NATS_USER` when that is set without `NATS_PASSWORD` (overriding `NATS_TOKEN`), otherwise `NATS_TOKEN`.
+1. `NATS_CREDS` (path or `file://path`)
+2. `NATS_NKEY` (an NKey seed, or a seed file as a path or `file://path`)
+3. `NATS_USER` + `NATS_PASSWORD`
+4. `NATS_TOKEN`, or `NATS_USER` set without `NATS_PASSWORD`
+5. `NATS_JWT` + `NATS_SEED`, or `NATS_JWT` alone with an empty signature
 
 `NATS_JWT`, `NATS_SEED`, `NATS_PASSWORD` and `NATS_TOKEN` accept `file://path` and `env://NAME` references. The `op`, `nsc` and `data` schemes are rejected at connect time.
 
@@ -127,7 +126,7 @@ port = 8080
 [nats]
 url = "localhost:4222"
 # creds = "/path/to/nats.creds"
-# nkey = "/path/to/user.nk"
+# nkey = "SU..." # or "/path/to/user.nk"
 # user = "my-user"
 # password = "my-pass"
 # token = "my-token"

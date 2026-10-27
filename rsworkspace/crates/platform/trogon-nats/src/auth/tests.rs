@@ -17,7 +17,6 @@ fn from_env_delegates_to_settings() {
 
     assert_eq!(config.servers, vec!["a:4222", "b:4222"]);
     assert!(matches!(config.auth, NatsAuth::Credentials(_)));
-    assert!(config.token.is_some());
 }
 
 #[test]
@@ -26,18 +25,14 @@ fn from_url_convenience() {
 
     assert_eq!(config.servers, vec!["nats://custom:4222"]);
     assert!(matches!(config.auth, NatsAuth::None));
-    assert!(config.token.is_none());
     assert!(!config.tls.is_configured());
 }
 
 #[test]
-fn builders_attach_token_and_tls() {
+fn with_tls_attaches_tls() {
     let tls = NatsTls::new(None, None, Location::parse("/ca.pem"));
-    let config = NatsConfig::from_url("nats://x:4222")
-        .with_token(value("tok"))
-        .with_tls(tls.clone());
+    let config = NatsConfig::from_url("nats://x:4222").with_tls(tls.clone());
 
-    assert!(config.token.is_some());
     assert_eq!(config.tls, tls);
 }
 
@@ -47,7 +42,11 @@ fn description_matches_variant() {
         NatsAuth::Credentials(Location::Path("/a".into())).description(),
         "credentials file"
     );
-    assert_eq!(NatsAuth::NKey(Location::Path("/k".into())).description(), "NKey");
+    assert_eq!(
+        NatsAuth::NKey(NKeySeed::File(Location::Path("/k".into()))).description(),
+        "NKey"
+    );
+    assert_eq!(NatsAuth::Token(value("t")).description(), "token");
     assert_eq!(
         NatsAuth::UserPassword {
             user: "u".into(),
@@ -98,11 +97,12 @@ fn debug_redacts_secrets() {
     assert!(!jwt.contains("super-secret-jwt"));
     assert!(!jwt.contains("super-secret-seed"));
 
-    let config = format!(
-        "{:?}",
-        NatsConfig::from_url("x:1").with_token(value("super-secret-token"))
-    );
-    assert!(!config.contains("super-secret-token"));
+    let token = format!("{:?}", NatsAuth::Token(value("super-secret-token")));
+    assert!(!token.contains("super-secret-token"));
+
+    let seed = nkeys::KeyPair::new_user().seed().unwrap();
+    let nkey = format!("{:?}", NatsAuth::NKey(NKeySeed::parse(&seed).unwrap()));
+    assert!(!nkey.contains(&seed));
 }
 
 #[test]

@@ -7,22 +7,21 @@ use crate::constants::{
     DEFAULT_NATS_URL, ENV_NATS_CA, ENV_NATS_CERT, ENV_NATS_CREDS, ENV_NATS_JWT, ENV_NATS_KEY, ENV_NATS_NKEY,
     ENV_NATS_PASSWORD, ENV_NATS_SEED, ENV_NATS_TOKEN, ENV_NATS_URL, ENV_NATS_USER,
 };
-use crate::credential_value::{CredentialValue, Location};
+use crate::credential_value::{CredentialValue, Location, NKeySeed};
 use crate::tls::NatsTls;
 
 /// Raw, unparsed connection inputs. Every source (environment, CLI flags,
 /// config files) fills this in, and [`resolve`](Self::resolve) is the single
 /// place that decides which authentication method wins.
 ///
-/// Precedence, matching the `nats` CLI:
-/// 1. `user` + `password`
-/// 2. `creds`
-/// 3. `nkey`
-/// 4. `jwt` (signed with `seed` when present)
+/// Values are read the way the `nats` CLI reads them, and the precedence is:
+/// 1. `creds`
+/// 2. `nkey`
+/// 3. `user` + `password`
+/// 4. `token`, or `user` when it is set without a `password`
+/// 5. `jwt` (signed with `seed` when present)
 ///
-/// A token is applied on top of whichever method was chosen. It is `user` when
-/// `user` is set without a `password`, otherwise `token`. Empty values count as
-/// unset.
+/// Empty values count as unset.
 #[derive(Clone, Default)]
 pub struct NatsSettings {
     pub url: Option<String>,
@@ -83,20 +82,24 @@ impl NatsSettings {
         let user = non_empty(&self.user);
         let password = non_empty(&self.password);
 
-        let auth = user
-            .zip(password)
-            .and_then(|(user, password)| {
-                CredentialValue::parse(password).map(|password| NatsAuth::UserPassword {
-                    user: user.to_owned(),
-                    password,
+        let auth = non_empty(&self.creds)
+            .and_then(Location::parse)
+            .map(NatsAuth::Credentials)
+            .or_else(|| non_empty(&self.nkey).and_then(NKeySeed::parse).map(NatsAuth::NKey))
+            .or_else(|| {
+                user.zip(password).and_then(|(user, password)| {
+                    CredentialValue::parse(password).map(|password| NatsAuth::UserPassword {
+                        user: user.to_owned(),
+                        password,
+                    })
                 })
             })
             .or_else(|| {
-                non_empty(&self.creds)
-                    .and_then(Location::parse)
-                    .map(NatsAuth::Credentials)
+                non_empty(&self.token)
+                    .or(user.filter(|_| password.is_none()))
+                    .and_then(CredentialValue::parse)
+                    .map(NatsAuth::Token)
             })
-            .or_else(|| non_empty(&self.nkey).and_then(Location::parse).map(NatsAuth::NKey))
             .or_else(|| {
                 non_empty(&self.jwt)
                     .and_then(CredentialValue::parse)
@@ -107,18 +110,12 @@ impl NatsSettings {
             })
             .unwrap_or(NatsAuth::None);
 
-        let token = match (user, password) {
-            (Some(user), None) => CredentialValue::parse(user),
-            _ => non_empty(&self.token).and_then(CredentialValue::parse),
-        };
-
         let location = |value: &Option<String>| non_empty(value).and_then(Location::parse);
         let tls = NatsTls::new(location(&self.cert), location(&self.key), location(&self.ca));
 
         NatsConfig {
             servers: self.servers(),
             auth,
-            token,
             tls,
         }
     }

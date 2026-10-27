@@ -1,7 +1,7 @@
 use async_nats::{ClientError, ServerError};
 
 use super::*;
-use crate::credential_value::{CredentialValue, Location};
+use crate::credential_value::{CredentialValue, Location, NKeySeed};
 use trogon_std::env::InMemoryEnv;
 
 #[test]
@@ -105,7 +105,9 @@ async fn build_options_accepts_every_auth_method() {
             user: "u".into(),
             password: value("p"),
         },
-        NatsAuth::NKey(Location::parse(&format!("file://{}", seed_file.path().display())).unwrap()),
+        NatsAuth::NKey(NKeySeed::parse(&format!("file://{}", seed_file.path().display())).unwrap()),
+        NatsAuth::NKey(NKeySeed::parse(&seed).unwrap()),
+        NatsAuth::Token(value("tok")),
         NatsAuth::Jwt {
             jwt: value("jwt"),
             seed: Some(value("env://JWT_SEED")),
@@ -119,17 +121,6 @@ async fn build_options_accepts_every_auth_method() {
     for auth in methods {
         build_options(&config_with(auth), &env).await.unwrap();
     }
-}
-
-#[tokio::test]
-async fn build_options_applies_token_with_another_method() {
-    let config = config_with(NatsAuth::UserPassword {
-        user: "u".into(),
-        password: value("p"),
-    })
-    .with_token(value("tok"));
-
-    build_options(&config, &InMemoryEnv::new()).await.unwrap();
 }
 
 #[tokio::test]
@@ -149,7 +140,7 @@ async fn build_options_rejects_unsupported_creds_scheme() {
 
 #[tokio::test]
 async fn build_options_rejects_missing_nkey_file() {
-    let config = config_with(NatsAuth::NKey(Location::parse("/nonexistent/seed.nk").unwrap()));
+    let config = config_with(NatsAuth::NKey(NKeySeed::parse("/nonexistent/seed.nk").unwrap()));
 
     let err = build_options(&config, &InMemoryEnv::new()).await.unwrap_err();
 
@@ -182,7 +173,7 @@ async fn build_options_rejects_invalid_seed() {
 
 #[tokio::test]
 async fn build_options_rejects_unsupported_secret_scheme() {
-    let config = config_with(NatsAuth::None).with_token(value("op://vault/item/field"));
+    let config = config_with(NatsAuth::Token(value("op://vault/item/field")));
 
     let err = build_options(&config, &InMemoryEnv::new()).await.unwrap_err();
 
@@ -197,7 +188,7 @@ async fn build_options_rejects_unsupported_secret_scheme() {
 
 #[tokio::test]
 async fn build_options_rejects_unset_env_reference() {
-    let config = config_with(NatsAuth::None).with_token(value("env://MISSING_TOKEN"));
+    let config = config_with(NatsAuth::Token(value("env://MISSING_TOKEN")));
 
     let err = build_options(&config, &InMemoryEnv::new()).await.unwrap_err();
 

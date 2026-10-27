@@ -68,7 +68,7 @@ pub use auth::{NatsAuth, NatsConfig};
 pub use client::{FlushClient, PublishClient, RequestClient, SubscribeClient};
 pub use connect::{ConnectError, connect};
 pub use constants::{MAX_SUBJECT_BYTES, MAX_SUBJECT_TOKENS, REQ_ID_HEADER};
-pub use credential_value::{CredentialValue, Location, SettingError};
+pub use credential_value::{CredentialValue, Location, NKeySeed, SettingError};
 pub use lease::{
     EnsureLeaderError, IncompatibleLeaseBucketConfigError, LeaderElection, LeaseBucket, LeaseConfigError, LeaseError,
     LeaseKey, LeaseProvisionError, LeaseRenewInterval, LeaseRenewIntervalError, LeaseTiming, LeaseTtl, LeaseTtlError,
