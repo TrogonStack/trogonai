@@ -1,9 +1,10 @@
 import { ProjectAccessPreset, ProjectLifecycle } from '@trogonai/proto';
 import { describe, expect, it } from 'vitest';
 
+import { mintNodeId } from '@/features/hierarchy/domain/node-id';
+
 import { projectCommands, type ProjectCommand } from './commands';
 import { decide, evolve, fold, initialState, presentProject, ReplayFault, MAX_DISPLAY_NAME_LENGTH } from './decider';
-import { mintNodeId } from './node-id';
 import { mintProjectId } from './project-id';
 
 const id = mintProjectId('portal');

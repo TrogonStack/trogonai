@@ -1,13 +1,18 @@
 import { ProjectAccessPreset, ProjectLifecycle } from '@trogonai/proto';
 import { describe, expect, it } from 'vitest';
 
+import { mintNodeId } from '@/features/hierarchy/domain/node-id';
+import { createFakeHierarchyClient } from '@/features/hierarchy/fake';
+import { seedNodeIds } from '@/features/hierarchy/fake/seed';
+import { workspaceNodeDirectory } from '@/features/hierarchy/fake/workspace-nodes';
+
 import { projectCommands } from '../domain/commands';
 import { ProjectFault } from '../domain/faults';
-import { mintNodeId } from '../domain/node-id';
 import { mintProjectId } from '../domain/project-id';
 import { createFakeProjectsClient } from './index';
-import { seedNodeDirectory, seedNodeIds } from './nodes';
 import { seedProjectIds } from './seed';
+
+const seedNodeDirectory = () => workspaceNodeDirectory(createFakeHierarchyClient());
 
 const fresh = mintProjectId('fresh');
 
@@ -47,20 +52,20 @@ describe('in-memory projects client', () => {
   });
 
   it('creates a project at revision one without an expected revision', async () => {
-    const client = createFakeProjectsClient({ seeded: false, nodes: seedNodeDirectory });
+    const client = createFakeProjectsClient({ seeded: false, nodes: seedNodeDirectory() });
     const record = await client.dispatch(newProject());
     expect(record.revision).toBe(1);
     expect(record.project.initialAccessPreset).toBe(ProjectAccessPreset.MEMBERS_ONLY);
   });
 
   it('rejects a duplicate id', async () => {
-    const client = createFakeProjectsClient({ seeded: false, nodes: seedNodeDirectory });
+    const client = createFakeProjectsClient({ seeded: false, nodes: seedNodeDirectory() });
     await client.dispatch(newProject());
     expect((await rejection(client.dispatch(newProject()))).reason).toBe('PROJECT_ALREADY_EXISTS');
   });
 
   it('rejects a parent outside the workspace, including the tenant root', async () => {
-    const client = createFakeProjectsClient({ seeded: false, nodes: seedNodeDirectory });
+    const client = createFakeProjectsClient({ seeded: false, nodes: seedNodeDirectory() });
     const command = (parent: string) =>
       projectCommands.create({
         projectId: fresh,
@@ -74,7 +79,7 @@ describe('in-memory projects client', () => {
   });
 
   it('requires and checks the expected revision on later commands', async () => {
-    const client = createFakeProjectsClient({ seeded: false, nodes: seedNodeDirectory });
+    const client = createFakeProjectsClient({ seeded: false, nodes: seedNodeDirectory() });
     await client.dispatch(newProject());
     const rename = projectCommands.rename(fresh, 'Renamed');
     expect((await rejection(client.dispatch(rename))).reason).toBe('EXPECTED_REVISION_REQUIRED');
@@ -85,7 +90,7 @@ describe('in-memory projects client', () => {
   });
 
   it('applies a command id once', async () => {
-    const client = createFakeProjectsClient({ seeded: false, nodes: seedNodeDirectory });
+    const client = createFakeProjectsClient({ seeded: false, nodes: seedNodeDirectory() });
     await client.dispatch(newProject());
     const archive = projectCommands.archive(fresh);
     const first = await client.dispatch(archive, { expectedRevision: 1, commandId: 'cmd-1' });
@@ -106,9 +111,16 @@ describe('in-memory projects client', () => {
   });
 
   it('lists parent candidates without the tenant root', async () => {
-    const client = createFakeProjectsClient({ nodes: seedNodeDirectory });
+    const client = createFakeProjectsClient({ nodes: seedNodeDirectory() });
     const nodes = await client.parentCandidates();
     expect(nodes.map((node) => node.nodeId)).not.toContain(seedNodeIds.tenantRoot);
     expect(nodes.length).toBeGreaterThan(0);
+  });
+
+  it('counts every project attached to a node, archived ones included', async () => {
+    const client = createFakeProjectsClient();
+    expect(await client.attachedTo(seedNodeIds.research)).toBe(1);
+    expect(await client.attachedTo(seedNodeIds.platform)).toBe(1);
+    expect(await client.attachedTo(seedNodeIds.payments)).toBe(0);
   });
 });

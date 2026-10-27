@@ -88,8 +88,12 @@ describe('project scoping', () => {
     await waitFor(() => expect(router.state.location.pathname).toBe('/environments'));
     expect(router.state.location.search).toMatchObject({ project: 'proj-beacon' });
 
-    await user.click(within(nav).getByRole('link', { name: /^Workspace|Projects/ }));
+    await user.click(within(nav).getByRole('link', { name: /Projects/ }));
     await waitFor(() => expect(router.state.location.pathname).toBe('/projects'));
+    expect(router.state.location.search).toMatchObject({ project: 'proj-beacon' });
+
+    await user.click(within(nav).getByRole('link', { name: /Workspaces/ }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/workspaces'));
     expect(router.state.location.search).toMatchObject({ project: 'proj-beacon' });
 
     await user.click(within(nav).getByRole('link', { name: /Secrets/ }));

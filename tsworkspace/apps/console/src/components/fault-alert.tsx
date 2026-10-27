@@ -1,6 +1,7 @@
 import { TriangleAlertIcon } from 'lucide-react';
 
 import { EnvironmentFault } from '@/features/environments/domain/faults';
+import { HierarchyFault } from '@/features/hierarchy/domain/faults';
 import { ProjectFault } from '@/features/projects/domain/faults';
 import { ConcurrencyFault, ProviderConnectionFault } from '@/features/provider-connections/domain/faults';
 import { SecretFault } from '@/features/secrets/domain/faults';
@@ -13,7 +14,8 @@ export function FaultAlert({ error, title = 'The command was rejected' }: { erro
     error instanceof ConcurrencyFault ||
     error instanceof SecretFault ||
     error instanceof EnvironmentFault ||
-    error instanceof ProjectFault
+    error instanceof ProjectFault ||
+    error instanceof HierarchyFault
       ? error.reason
       : undefined;
   const violations = error instanceof ProviderConnectionFault ? error.violations : [];

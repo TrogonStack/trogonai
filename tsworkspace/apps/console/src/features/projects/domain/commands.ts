@@ -13,7 +13,8 @@ import {
   type UnarchiveProject,
 } from '@trogonai/proto';
 
-import { nodeIdMessage, type NodeId } from './node-id';
+import { nodeIdMessage, type NodeId } from '@/features/hierarchy/domain/node-id';
+
 import { projectIdMessage, type ProjectId } from './project-id';
 
 export type ProjectCommand =

@@ -1,5 +1,7 @@
 import type { ProjectState } from '@trogonai/proto';
 
+import { nodeIdOf, type NodeId } from '@/features/hierarchy/domain/node-id';
+
 import type {
   DispatchOptions,
   ProjectRecord,
@@ -13,7 +15,6 @@ import type {
 import { commandProjectId, type ProjectCommand } from '../domain/commands';
 import { decide, fold, initialState, presentProject } from '../domain/decider';
 import { invalidProject, ProjectFault } from '../domain/faults';
-import { nodeIdOf } from '../domain/node-id';
 import { parseProjectId, type ProjectId } from '../domain/project-id';
 
 const ACTOR = 'console-operator';
@@ -81,6 +82,11 @@ export class InMemoryProjectsClient implements ProjectsClient {
   async parentCandidates(): Promise<readonly WorkspaceNode[]> {
     await this.pause();
     return (await this.nodes?.workspaceNodes()) ?? [];
+  }
+
+  async attachedTo(nodeId: NodeId): Promise<number> {
+    await this.pause();
+    return [...this.streams.keys()].filter((id) => this.record(id)?.project.parent?.value === nodeId).length;
   }
 
   async resources(projectId: ProjectId): Promise<ProjectResourceSummary> {

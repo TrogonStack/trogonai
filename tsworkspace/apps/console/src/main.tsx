@@ -4,6 +4,7 @@ import ReactDOM from 'react-dom/client';
 
 import { createFakeBackend } from './fake-backend';
 import { EnvironmentsClientProvider } from './features/environments/context';
+import { HierarchyClientProvider } from './features/hierarchy/context';
 import { ProjectsClientProvider } from './features/projects/context';
 import { ProviderConnectionsClientProvider } from './features/provider-connections/context';
 import { SecretsClientProvider } from './features/secrets/context';
@@ -20,13 +21,15 @@ if (!rootElement.innerHTML) {
   root.render(
     <QueryClientProvider client={queryClient}>
       <ProviderConnectionsClientProvider client={backend.providerConnections}>
-        <ProjectsClientProvider client={backend.projects}>
-          <EnvironmentsClientProvider clients={backend.environments}>
-            <SecretsClientProvider clients={backend.secrets}>
-              <RouterProvider router={router} />
-            </SecretsClientProvider>
-          </EnvironmentsClientProvider>
-        </ProjectsClientProvider>
+        <HierarchyClientProvider client={backend.hierarchy}>
+          <ProjectsClientProvider client={backend.projects}>
+            <EnvironmentsClientProvider clients={backend.environments}>
+              <SecretsClientProvider clients={backend.secrets}>
+                <RouterProvider router={router} />
+              </SecretsClientProvider>
+            </EnvironmentsClientProvider>
+          </ProjectsClientProvider>
+        </HierarchyClientProvider>
       </ProviderConnectionsClientProvider>
     </QueryClientProvider>,
   );

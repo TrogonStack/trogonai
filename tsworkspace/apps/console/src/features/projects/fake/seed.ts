@@ -1,9 +1,10 @@
 import { ProjectAccessPreset } from '@trogonai/proto';
 
+import { seedNodeIds } from '@/features/hierarchy/fake/seed';
+
 import { projectCommands } from '../domain/commands';
 import { mintProjectId } from '../domain/project-id';
 import type { ProjectSeedWriter } from './in-memory-client';
-import { seedNodeIds } from './nodes';
 
 const DAY = 86_400_000;
 

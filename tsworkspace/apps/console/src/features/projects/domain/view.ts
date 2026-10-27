@@ -1,7 +1,8 @@
 import { ProjectLifecycle, type ProjectAccessPreset } from '@trogonai/proto';
 
+import { nodeIdOf, type NodeId } from '@/features/hierarchy/domain/node-id';
+
 import type { ProjectRecord } from '../client';
-import { nodeIdOf, type NodeId } from './node-id';
 import { projectIdOf, type ProjectId } from './project-id';
 
 export interface ActionAvailability {
