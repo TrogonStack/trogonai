@@ -60,10 +60,13 @@ impl RequestRecord {
         let _entered = self.span.enter();
         let _context = self.span.context().attach();
         duration.record(elapsed, &self.attributes);
+        let method = self.method.as_str();
+        let status_code = self.status.map(|status| status.as_u16());
+        let error_type = error_type.as_deref();
         tracing::info!(
-            method = self.method.as_str(),
-            status_code = self.status.map(|status| status.as_u16()),
-            error_type = error_type.as_deref(),
+            method,
+            status_code,
+            error_type,
             duration_secs = elapsed,
             "HTTP request completed"
         );

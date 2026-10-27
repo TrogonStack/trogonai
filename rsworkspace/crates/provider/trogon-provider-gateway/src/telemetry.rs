@@ -80,14 +80,15 @@ async fn observe(State(telemetry): State<HttpTelemetry>, request: Request, next:
 }
 
 fn protocol_version(version: Version) -> Option<&'static str> {
-    match version {
-        Version::HTTP_09 => Some("0.9"),
-        Version::HTTP_10 => Some("1.0"),
-        Version::HTTP_11 => Some("1.1"),
-        Version::HTTP_2 => Some("2"),
-        Version::HTTP_3 => Some("3"),
-        _ => None,
-    }
+    [
+        (Version::HTTP_09, "0.9"),
+        (Version::HTTP_10, "1.0"),
+        (Version::HTTP_11, "1.1"),
+        (Version::HTTP_2, "2"),
+        (Version::HTTP_3, "3"),
+    ]
+    .into_iter()
+    .find_map(|(known, label)| (version == known).then_some(label))
 }
 
 #[cfg(test)]

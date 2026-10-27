@@ -4,17 +4,19 @@ mod test_telemetry;
 use axum::{
     Router,
     body::{Body, to_bytes},
-    http::{Request, StatusCode},
+    http::{HeaderMap, HeaderValue, Request, StatusCode, Version},
     routing::get,
 };
 use opentelemetry::{
     KeyValue,
     baggage::BaggageExt,
+    propagation::Extractor,
     trace::{SpanKind, Status},
 };
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use trogon_semconv::attribute;
 
+use super::header_extractor::HeaderExtractor;
 use test_body::TestBody;
 use test_telemetry::TestTelemetry;
 
@@ -175,8 +177,12 @@ async fn completes_streaming_request_after_body_not_response_headers() {
     let response = telemetry.request(router, Request::new(Body::empty())).await;
     assert!(telemetry.spans().is_empty());
     assert!(telemetry.duration_points().is_empty());
+    let mut consume = std::pin::pin!(telemetry.consume(response));
+    assert!(futures_util::poll!(consume.as_mut()).is_pending());
+    assert!(telemetry.spans().is_empty());
+    assert!(telemetry.duration_points().is_empty());
     release.send(()).unwrap();
-    telemetry.consume(response).await;
+    consume.await;
     let spans = telemetry.spans();
     assert_eq!(spans.len(), 1);
     assert_eq!(spans[0].status, Status::Unset);
@@ -220,4 +226,101 @@ async fn abandoned_response_finishes_span_and_records_cancelled_request_once() {
         attribute_value(&points[0].attributes, attribute::ERROR_TYPE).as_deref(),
         Some("request_cancelled")
     );
+}
+
+#[tokio::test]
+async fn known_methods_reach_spans_metrics_and_completion_logs() {
+    for method in [
+        "GET", "POST", "HEAD", "PUT", "DELETE", "CONNECT", "OPTIONS", "TRACE", "PATCH",
+    ] {
+        let telemetry = TestTelemetry::new();
+        let request = Request::builder()
+            .method(method)
+            .uri("/missing")
+            .body(Body::empty())
+            .unwrap();
+        let response = telemetry.request(Router::new(), request).await;
+        telemetry.consume(response).await;
+        let spans = telemetry.spans();
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].name.as_ref(), method);
+        assert_eq!(
+            attribute_value(&spans[0].attributes, attribute::HTTP_REQUEST_METHOD).as_deref(),
+            Some(method)
+        );
+        let points = telemetry.duration_points();
+        assert_eq!(
+            attribute_value(&points[0].attributes, attribute::HTTP_REQUEST_METHOD).as_deref(),
+            Some(method)
+        );
+        let events = telemetry.events();
+        let event = events
+            .iter()
+            .find(|event| event.message() == Some("HTTP request completed"))
+            .unwrap();
+        assert_eq!(event.field("method"), Some(method));
+        assert_eq!(event.field("status_code"), Some("404"));
+        assert_eq!(event.field("error_type"), None);
+        assert!(event.field("duration_secs").unwrap().parse::<f64>().unwrap() >= 0.0);
+    }
+}
+
+#[tokio::test]
+async fn protocol_versions_are_preserved_in_spans_and_metrics() {
+    for (version, expected) in [
+        (Version::HTTP_09, "0.9"),
+        (Version::HTTP_10, "1.0"),
+        (Version::HTTP_11, "1.1"),
+        (Version::HTTP_2, "2"),
+        (Version::HTTP_3, "3"),
+    ] {
+        let telemetry = TestTelemetry::new();
+        let request = Request::builder()
+            .version(version)
+            .uri("/missing")
+            .body(Body::empty())
+            .unwrap();
+        let response = telemetry.request(Router::new(), request).await;
+        telemetry.consume(response).await;
+        let spans = telemetry.spans();
+        assert_eq!(
+            attribute_value(&spans[0].attributes, attribute::NETWORK_PROTOCOL_VERSION).as_deref(),
+            Some(expected)
+        );
+        let points = telemetry.duration_points();
+        assert_eq!(
+            attribute_value(&points[0].attributes, attribute::NETWORK_PROTOCOL_VERSION).as_deref(),
+            Some(expected)
+        );
+    }
+}
+
+#[tokio::test]
+async fn failed_requests_keep_their_status_and_error_in_completion_log_fields() {
+    let telemetry = TestTelemetry::new();
+    let router = Router::new().fallback(|| async { StatusCode::SERVICE_UNAVAILABLE });
+    let response = telemetry.request(router, Request::new(Body::empty())).await;
+    telemetry.consume(response).await;
+    let events = telemetry.events();
+    let event = events
+        .iter()
+        .find(|event| event.message() == Some("HTTP request completed"))
+        .unwrap();
+    assert_eq!(event.field("method"), Some("GET"));
+    assert_eq!(event.field("status_code"), Some("503"));
+    assert_eq!(event.field("error_type"), Some("503"));
+}
+
+#[test]
+fn header_carrier_exposes_keys_and_rejects_non_text_values() {
+    let mut headers = HeaderMap::new();
+    headers.insert("traceparent", HeaderValue::from_static("opaque-context"));
+    headers.insert("authorization", HeaderValue::from_bytes(&[0xff]).unwrap());
+    let carrier = HeaderExtractor(&headers);
+    let mut keys = carrier.keys();
+    keys.sort_unstable();
+    assert_eq!(keys, ["authorization", "traceparent"]);
+    assert_eq!(carrier.get("traceparent"), Some("opaque-context"));
+    assert_eq!(carrier.get("authorization"), None);
+    assert_eq!(carrier.get("missing"), None);
 }

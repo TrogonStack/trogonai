@@ -17,6 +17,7 @@ use opentelemetry_sdk::{
 use tower::ServiceExt;
 use tracing::instrument::WithSubscriber;
 use tracing_subscriber::prelude::*;
+use trogon_std::{CapturedEvent, CapturedEvents};
 
 use super::super::HttpTelemetry;
 
@@ -29,6 +30,7 @@ pub(super) struct DurationPoint {
 
 pub(super) struct TestTelemetry {
     telemetry: HttpTelemetry,
+    logs: CapturedEvents,
     subscriber: tracing::Dispatch,
     traces: SdkTracerProvider,
     spans: InMemorySpanExporter,
@@ -43,9 +45,11 @@ impl TestTelemetry {
             .with_simple_exporter(spans.clone())
             .with_sampler(Sampler::ParentBased(Box::new(Sampler::AlwaysOn)))
             .build();
+        let logs = CapturedEvents::new();
         let subscriber = tracing::Dispatch::new(
             tracing_subscriber::registry()
-                .with(tracing_opentelemetry::layer().with_tracer(traces.tracer("gateway-http-test"))),
+                .with(tracing_opentelemetry::layer().with_tracer(traces.tracer("gateway-http-test")))
+                .with(logs.clone()),
         );
         let metrics = InMemoryMetricExporter::default();
         let reader = PeriodicReader::builder(metrics.clone())
@@ -55,6 +59,7 @@ impl TestTelemetry {
         let telemetry = HttpTelemetry::new(meters.meter("gateway-http-test"));
         Self {
             telemetry,
+            logs,
             subscriber,
             traces,
             spans,
@@ -77,6 +82,10 @@ impl TestTelemetry {
             .with_subscriber(self.subscriber.clone())
             .await
             .unwrap();
+    }
+
+    pub(super) fn events(&self) -> Vec<CapturedEvent> {
+        self.logs.events()
     }
 
     pub(super) fn spans(&self) -> Vec<SpanData> {
