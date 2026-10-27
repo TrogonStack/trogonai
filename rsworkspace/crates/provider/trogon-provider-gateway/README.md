@@ -63,6 +63,24 @@ override it. `RUST_LOG` controls filtering and `TROGON_LOG_DIR` selects file log
 Future application routers must receive instrumentation separately from the
 operational router.
 
+## Container image
+
+From the repository root:
+
+```sh
+mise run images:build trogon-provider-gateway
+```
+
+An optional final argument supplies a local image tag. The default is
+`trogon-provider-gateway:<commit>`. This command builds locally without publishing.
+The Dockerfile is in `devops/docker/images/trogon-provider-gateway/`.
+
+The container runs as UID/GID `10001:10001`, binds `0.0.0.0:8317` by default, and
+checks `/-/readiness`. Its entrypoint accepts the same CLI flags as the native
+binary. `SIGTERM` initiates graceful shutdown. BuildKit stores compiler output in
+a cache mount, with incremental compilation disabled. Share that cache per
+platform and remove it after verification; prune it before it exceeds 40 GB.
+
 ## Architecture references
 
 - [Service audiences, listeners, health checks and telemetry](https://straw-hat-team.github.io/adr/adrs/1008684393/README.html)
