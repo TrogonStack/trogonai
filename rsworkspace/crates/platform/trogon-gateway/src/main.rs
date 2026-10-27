@@ -66,6 +66,8 @@ async fn serve(
 
     info!("trogon-gateway starting");
 
+    let google_pubsub_sources = prepare_google_pubsub_sources(&resolved.google_pubsub)?;
+
     let nats = connect(&resolved.nats, NATS_CONNECT_TIMEOUT).await?;
     let server_max_payload = wait_for_server_info(&nats, NATS_CONNECT_TIMEOUT, NATS_SERVER_INFO_POLL_INTERVAL)
         .await?
@@ -112,6 +114,14 @@ async fn serve(
         publisher.clone(),
         shutdown.clone(),
         crate::source::slack::socket_mode::run,
+    );
+
+    spawn_google_pubsub_streaming_pulls(
+        &mut join_set,
+        google_pubsub_sources,
+        publisher.clone(),
+        shutdown.clone(),
+        crate::source::google_pubsub::streaming_pull::run,
     );
 
     let app = trogon_std::telemetry::http::instrument_router(http::mount_sources(resolved, publisher));
@@ -247,6 +257,65 @@ fn spawn_slack_socket_modes<P, S, Shutdown, Run, Running>(
             ("slack-socket-mode", result)
         });
         info!(source = "slack", integration = %integration.id, "socket mode runner spawned");
+    }
+}
+
+struct PreparedGooglePubSub<'a> {
+    integration: &'a config::SourceIntegration<source::google_pubsub::GooglePubSubConfig>,
+    source: source::google_pubsub::GooglePubSubSource,
+}
+
+fn prepare_google_pubsub_sources(
+    integrations: &[config::SourceIntegration<source::google_pubsub::GooglePubSubConfig>],
+) -> anyhow::Result<Vec<PreparedGooglePubSub<'_>>> {
+    integrations
+        .iter()
+        .map(|integration| {
+            let source::google_pubsub::config::GooglePubSubTransportConfig::StreamingPull(streaming_pull) =
+                &integration.config.transport;
+            let credentials = streaming_pull
+                .credentials
+                .build()
+                .map_err(|error| anyhow::anyhow!("google_pubsub/{}: invalid credentials: {error}", integration.id))?;
+            Ok(PreparedGooglePubSub {
+                integration,
+                source: source::google_pubsub::GooglePubSubSource::new(credentials),
+            })
+        })
+        .collect()
+}
+
+fn spawn_google_pubsub_streaming_pulls<P, S, Shutdown, Run, Running>(
+    tasks: &mut JoinSet<SourceResult>,
+    prepared: Vec<PreparedGooglePubSub<'_>>,
+    publisher: ClaimCheckPublisher<P, S>,
+    shutdown: Shutdown,
+    run: Run,
+) where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    Shutdown: std::future::Future<Output = ()> + Clone + Send + 'static,
+    Run: FnOnce(
+            ClaimCheckPublisher<P, S>,
+            source::google_pubsub::GooglePubSubConfig,
+            source::google_pubsub::GooglePubSubSource,
+            Shutdown,
+        ) -> Running
+        + Clone
+        + Send
+        + 'static,
+    Running: std::future::Future<Output = ()> + Send + 'static,
+{
+    for PreparedGooglePubSub { integration, source } in prepared {
+        let publisher = publisher.clone();
+        let config = integration.config.clone();
+        let shutdown = shutdown.clone();
+        let run = run.clone();
+        tasks.spawn(async move {
+            run(publisher, config, source, shutdown).await;
+            ("google-pubsub-streaming-pull", Ok(()))
+        });
+        info!(source = "google_pubsub", integration = %integration.id, "streaming pull runner spawned");
     }
 }
 

@@ -258,6 +258,9 @@ impl GuestPhase {
 /// MCP servers configured for a new ACP session
 pub const MCP_SERVERS: &str = "mcp_servers";
 
+/// Google Cloud Pub/Sub message identifier
+pub const MESSAGE_ID: &str = "message_id";
+
 /// Operation method. OVERLOADED today: the listed values are the ACP request methods on acp.requests / acp.request.duration; the same `method` key is also emitted with free-form values by acp.ext / acp.ext.notification and with HTTP methods by http.server.request
 pub const METHOD: &str = "method";
 

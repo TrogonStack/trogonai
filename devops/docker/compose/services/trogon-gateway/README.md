@@ -2,7 +2,8 @@
 
 `trogon-gateway` is the unified inbound pipe for platform events into NATS
 JetStream. It runs all configured sources in a single process behind a single
-HTTP server, plus the optional Discord gateway runner.
+HTTP server, plus the optional outbound runners (Discord gateway, Slack Socket
+Mode, Google Cloud Pub/Sub StreamingPull).
 
 All webhook sources share one port (default `8080`). Webhooks are configured as
 named TOML integrations, each with its own literal or env-backed secret.
@@ -191,6 +192,76 @@ For subscriptions that include resource data, the gateway preserves Graph's
 collection payload, including `validationTokens`. Downstream consumers remain
 responsible for validating those tokens, decrypting `encryptedContent`, and
 splitting individual notifications when they need per-resource routing.
+
+## Google Cloud Pub/Sub
+
+This source pulls messages from an existing Pub/Sub subscription and publishes
+each one to NATS JetStream. It is generic: the gateway does not look inside the
+message body, so any publisher that writes to the topic behind the
+subscription can feed it.
+
+```toml
+[sources.google_pubsub.integrations.primary]
+subject_prefix = "google-pubsub-primary"
+stream_name = "GOOGLE_PUBSUB_PRIMARY"
+
+[sources.google_pubsub.integrations.primary.streaming_pull]
+subscription = "projects/my-project/subscriptions/my-subscription"
+credentials = { env = "GOOGLE_PUBSUB_PRIMARY_CREDENTIALS" }
+```
+
+StreamingPull is an outbound gRPC connection from the gateway to Google, so it
+does not use the HTTP ingress, a public URL, or ngrok. The subscription must
+already exist. The optional `max_outstanding_messages` bounds how many
+unacknowledged messages the client holds at once.
+
+Every integration carries its own `credentials`: a Google credentials JSON
+document, given either as a literal string or as `{ env = "..." }`. Prefer the
+`env` form so the document stays out of `gateway.toml`, and use a
+`secret:gcp:service-account:base64:...` value when the JSON must fit on one
+line. The gateway never falls
+back to any credentials it did not receive through this field, so integrations
+for different projects or accounts can run side by side in one gateway. Two
+document types are accepted, selected by the `type` field inside the JSON:
+
+- `service_account`: a service account key.
+- `external_account`: a workload identity federation configuration, which
+  exchanges a token from your identity provider for Google access and needs no
+  long-lived key.
+
+Any other type, including `authorized_user`, is rejected when the configuration
+loads, and so is a document that is not a JSON object. A document whose fields
+are missing or malformed stops the gateway at startup with an error naming the
+integration. Error messages never include the document. The identity needs the `roles/pubsub.subscriber` role on the
+subscription.
+
+Each message is published to `{subject_prefix}.message`. When the Pub/Sub
+`data` fits within the NATS server's payload limit, it is the body unchanged.
+Larger data is stored in the gateway's claim-check object store instead, and
+the message carries an empty body with `Trogon-Claim-Check`,
+`Trogon-Claim-Bucket`, and `Trogon-Claim-Key` headers. Consumers must resolve
+those headers against the object store, for example with `ClaimResolver` from
+`trogon-nats`, to recover the original data. The Pub/Sub message ID is used as
+the `Nats-Msg-Id`, so redeliveries are deduplicated inside the stream's
+duplicate window. These headers accompany every message:
+
+| Header | Value |
+|---|---|
+| `X-PubSub-Message-Id` | Pub/Sub message ID |
+| `X-PubSub-Publish-Time` | Publish time as an RFC 3339 timestamp |
+| `X-PubSub-Ordering-Key` | Ordering key, only when the message has one |
+| `X-PubSub-Subscription` | Full subscription name |
+| `X-PubSub-Attribute-{key}` | One header per message attribute |
+
+Attributes whose key is not a valid header name, or whose value contains a line
+break, are skipped with a warning.
+
+The gateway acknowledges a message to Pub/Sub only after JetStream has
+confirmed the publish. If storing a claim-check payload or the publish fails or
+times out, the message is
+negatively acknowledged and Pub/Sub redelivers it. When the stream breaks, the
+gateway logs the error, backs off, and subscribes again. On shutdown it stops
+pulling and returns messages it has not handled to Pub/Sub.
 
 ## Exposing webhooks with ngrok
 

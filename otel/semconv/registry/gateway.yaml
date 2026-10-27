@@ -58,6 +58,10 @@ groups:
         type: int
         stability: development
         brief: Microsoft Graph notification batch count.
+      - id: message_id
+        type: string
+        stability: development
+        brief: Google Cloud Pub/Sub message identifier.
 
   - id: span.sentry.webhook
     type: span
@@ -156,6 +160,14 @@ groups:
     brief: Microsoft Graph webhook ingestion.
     attributes:
       - ref: notification_count
+      - ref: subject
+  - id: span.google_pubsub.message
+    type: span
+    span_kind: consumer
+    stability: development
+    brief: Google Cloud Pub/Sub message pulled and published to JetStream.
+    attributes:
+      - ref: message_id
       - ref: subject
   - id: span.datadog.webhook
     type: span

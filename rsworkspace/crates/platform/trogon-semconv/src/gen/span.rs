@@ -171,6 +171,9 @@ pub const GITHUB_WEBHOOK: &str = "github.webhook";
 /// GitLab webhook ingestion
 pub const GITLAB_WEBHOOK: &str = "gitlab.webhook";
 
+/// Google Cloud Pub/Sub message pulled and published to JetStream
+pub const GOOGLE_PUBSUB_MESSAGE: &str = "google_pubsub.message";
+
 /// Inbound HTTP request span. Emits both raw fields (`method`, `path`) and the standard OTel attributes below; `method` collides with the ACP `method` key
 pub const HTTP_SERVER_REQUEST: &str = "http.server.request";
 

@@ -258,6 +258,137 @@ async fn slack_shutdown_drops_a_started_pending_runner() {
     assert_eq!(dropped.load(Ordering::SeqCst), 1);
 }
 
+fn google_pubsub_integrations() -> Vec<config::SourceIntegration<source::google_pubsub::GooglePubSubConfig>> {
+    configuration(
+        r#"
+[sources.google_pubsub.integrations.orders.streaming_pull]
+subscription = "projects/p/subscriptions/orders"
+credentials = '{"type":"service_account","project_id":"fake","private_key_id":"fake","private_key":"fake","client_email":"fake@example.invalid"}'
+[sources.google_pubsub.integrations.billing.streaming_pull]
+subscription = "projects/p/subscriptions/billing"
+credentials = '{"type":"service_account","project_id":"fake","private_key_id":"fake","private_key":"fake","client_email":"fake@example.invalid"}'
+"#,
+    )
+    .google_pubsub
+}
+
+#[tokio::test]
+async fn google_pubsub_spawns_one_runner_per_integration_with_its_own_config() {
+    let google_pubsub_integrations = google_pubsub_integrations();
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut tasks = JoinSet::new();
+    let runner_seen = seen.clone();
+    spawn_google_pubsub_streaming_pulls(
+        &mut tasks,
+        prepare_google_pubsub_sources(&google_pubsub_integrations).unwrap(),
+        publisher(),
+        std::future::pending::<()>().shared(),
+        move |_, config, _, _| {
+            let seen = runner_seen.clone();
+            async move {
+                let source::google_pubsub::config::GooglePubSubTransportConfig::StreamingPull(streaming_pull) =
+                    config.transport;
+                seen.lock().unwrap().push(streaming_pull.subscription.to_string());
+            }
+        },
+    );
+    assert_eq!(tasks.len(), 2);
+    while let Some(result) = tasks.join_next().await {
+        let (name, result) = result.unwrap();
+        assert_eq!(name, "google-pubsub-streaming-pull");
+        result.unwrap();
+    }
+    let mut subscriptions = seen.lock().unwrap().clone();
+    subscriptions.sort();
+    assert_eq!(
+        subscriptions,
+        vec![
+            "projects/p/subscriptions/billing".to_string(),
+            "projects/p/subscriptions/orders".to_string()
+        ]
+    );
+}
+
+#[tokio::test]
+async fn google_pubsub_preparation_names_the_integration_whose_credentials_fail_to_build() {
+    let integrations = configuration(
+        r#"
+[sources.google_pubsub.integrations.orders.streaming_pull]
+subscription = "projects/p/subscriptions/orders"
+credentials = '{"type":"service_account","client_email":"leaky-marker@example.invalid"}'
+"#,
+    )
+    .google_pubsub;
+
+    let error = prepare_google_pubsub_sources(&integrations).err().unwrap().to_string();
+
+    assert!(error.contains("google_pubsub/orders"));
+    assert!(error.contains("service_account credentials are malformed"));
+    assert!(!error.contains("leaky-marker"));
+}
+
+#[tokio::test]
+async fn google_pubsub_preparation_reports_the_first_failing_integration_among_valid_ones() {
+    let integrations = configuration(
+        r#"
+[sources.google_pubsub.integrations.billing.streaming_pull]
+subscription = "projects/p/subscriptions/billing"
+credentials = '{"type":"external_account","audience":"a"}'
+[sources.google_pubsub.integrations.orders.streaming_pull]
+subscription = "projects/p/subscriptions/orders"
+credentials = '{"type":"service_account","project_id":"fake","private_key_id":"fake","private_key":"fake","client_email":"fake@example.invalid"}'
+"#,
+    )
+    .google_pubsub;
+
+    let error = prepare_google_pubsub_sources(&integrations).err().unwrap().to_string();
+
+    assert!(error.contains("google_pubsub/billing"));
+    assert!(error.contains("external_account credentials are malformed"));
+}
+
+#[tokio::test]
+async fn google_pubsub_without_integrations_spawns_nothing() {
+    let mut tasks = JoinSet::new();
+    spawn_google_pubsub_streaming_pulls(
+        &mut tasks,
+        Vec::new(),
+        publisher(),
+        std::future::pending::<()>().shared(),
+        async |_, _, _, _| unreachable!("no integration is configured"),
+    );
+    assert!(tasks.is_empty());
+}
+
+#[tokio::test]
+async fn google_pubsub_runners_receive_the_shared_shutdown_signal() {
+    let google_pubsub_integrations = google_pubsub_integrations();
+    let (shutdown, signal) = tokio::sync::oneshot::channel();
+    let mut tasks = JoinSet::new();
+    spawn_google_pubsub_streaming_pulls(
+        &mut tasks,
+        prepare_google_pubsub_sources(&google_pubsub_integrations).unwrap(),
+        publisher(),
+        async { signal.await.unwrap() }.shared(),
+        async |_, _, _, shutdown| shutdown.await,
+    );
+    assert_eq!(tasks.len(), 2);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), tasks.join_next())
+            .await
+            .is_err()
+    );
+    shutdown.send(()).unwrap();
+    while let Some(result) = tokio::time::timeout(Duration::from_secs(5), tasks.join_next())
+        .await
+        .unwrap()
+    {
+        let (name, result) = result.unwrap();
+        assert_eq!(name, "google-pubsub-streaming-pull");
+        result.unwrap();
+    }
+}
+
 #[tokio::test]
 async fn telemetry_shutdown_failure_does_not_reclassify_a_successful_source() {
     let events = trogon_std::log_capture::CapturedEvents::new();

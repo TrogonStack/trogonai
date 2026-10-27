@@ -8,6 +8,7 @@ How to run the unified ingress gateway that receives source events and publishes
 
 - One HTTP server for webhook-based sources
 - Optional Discord Gateway (WebSocket) runner when Discord is enabled
+- Optional Google Cloud Pub/Sub StreamingPull runner per `google_pubsub` integration
 - JetStream stream provisioning for every enabled source
 - Health probes at `GET /-/liveness` and `GET /-/readiness`
 
