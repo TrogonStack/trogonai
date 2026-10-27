@@ -1,4 +1,8 @@
 use super::*;
+
+fn secret(value: &str) -> SecretString {
+    SecretString::new(value).unwrap()
+}
 use trogon_nats::{CredentialValue, Location, NKeySeed, NatsAuth};
 
 #[derive(Config)]
@@ -15,7 +19,7 @@ fn resolve_nats_uses_section_when_no_overrides() {
         nkey: None,
         user: None,
         password: None,
-        token: Some("section-token".to_string()),
+        token: Some(secret("section-token")),
         jwt: None,
         seed: None,
         tls_cert: None,
@@ -39,7 +43,7 @@ fn resolve_nats_prefers_cli_overrides() {
         nkey: None,
         user: None,
         password: None,
-        token: Some("section-token".to_string()),
+        token: Some(secret("section-token")),
         jwt: None,
         seed: None,
         tls_cert: None,
@@ -48,7 +52,7 @@ fn resolve_nats_prefers_cli_overrides() {
     };
     let overrides = NatsArgs {
         nats_url: Some("override1:4222,override2:4222".to_string()),
-        nats_token: Some("override-token".to_string()),
+        nats_token: Some(secret("override-token")),
         ..Default::default()
     };
 
@@ -68,7 +72,7 @@ fn resolve_nats_keeps_auth_priority_with_overrides() {
         nkey: None,
         user: None,
         password: None,
-        token: Some("section-token".to_string()),
+        token: Some(secret("section-token")),
         jwt: None,
         seed: None,
         tls_cert: None,
@@ -77,7 +81,7 @@ fn resolve_nats_keeps_auth_priority_with_overrides() {
     };
     let overrides = NatsArgs {
         nats_creds: Some("/tmp/nats.creds".to_string()),
-        nats_token: Some("override-token".to_string()),
+        nats_token: Some(secret("override-token")),
         ..Default::default()
     };
 
@@ -91,11 +95,11 @@ fn resolve_nats_keeps_auth_priority_with_overrides() {
 #[test]
 fn nats_args_debug_redacts_secrets() {
     let args = NatsArgs {
-        nats_nkey: Some("super-secret-nkey".to_string()),
-        nats_password: Some("super-secret-password".to_string()),
-        nats_token: Some("super-secret-token".to_string()),
-        nats_jwt: Some("super-secret-jwt".to_string()),
-        nats_seed: Some("super-secret-seed".to_string()),
+        nats_nkey: Some(secret("super-secret-nkey")),
+        nats_password: Some(secret("super-secret-password")),
+        nats_token: Some(secret("super-secret-token")),
+        nats_jwt: Some(secret("super-secret-jwt")),
+        nats_seed: Some(secret("super-secret-seed")),
         ..Default::default()
     };
     let debug_output = format!("{args:?}");
@@ -104,7 +108,7 @@ fn nats_args_debug_redacts_secrets() {
     assert!(!debug_output.contains("super-secret-token"));
     assert!(!debug_output.contains("super-secret-jwt"));
     assert!(!debug_output.contains("super-secret-seed"));
-    assert!(debug_output.contains("<redacted>"));
+    assert!(debug_output.contains("SecretString(***)"));
 }
 
 #[test]
@@ -112,12 +116,12 @@ fn nats_config_section_debug_redacts_secrets() {
     let section = NatsConfigSection {
         url: "localhost:4222".to_string(),
         creds: None,
-        nkey: Some("super-secret-nkey".to_string()),
+        nkey: Some(secret("super-secret-nkey")),
         user: Some("alice".to_string()),
-        password: Some("super-secret-password".to_string()),
-        token: Some("super-secret-token".to_string()),
-        jwt: Some("super-secret-jwt".to_string()),
-        seed: Some("super-secret-seed".to_string()),
+        password: Some(secret("super-secret-password")),
+        token: Some(secret("super-secret-token")),
+        jwt: Some(secret("super-secret-jwt")),
+        seed: Some(secret("super-secret-seed")),
         tls_cert: None,
         tls_key: None,
         tls_ca: None,
@@ -129,7 +133,7 @@ fn nats_config_section_debug_redacts_secrets() {
     assert!(!debug_output.contains("super-secret-jwt"));
     assert!(!debug_output.contains("super-secret-seed"));
     assert!(debug_output.contains("alice"));
-    assert!(debug_output.contains("<redacted>"));
+    assert!(debug_output.contains("SecretString(***)"));
 }
 
 fn empty_section() -> NatsConfigSection {
@@ -151,9 +155,9 @@ fn empty_section() -> NatsConfigSection {
 #[test]
 fn resolve_nats_nkey_beats_user_password() {
     let section = NatsConfigSection {
-        nkey: Some("/seed.nk".to_string()),
+        nkey: Some(secret("/seed.nk")),
         user: Some("alice".to_string()),
-        password: Some("pw".to_string()),
+        password: Some(secret("pw")),
         ..empty_section()
     };
 
@@ -166,7 +170,7 @@ fn resolve_nats_nkey_beats_user_password() {
 fn resolve_nats_token_beats_user_without_password() {
     let section = NatsConfigSection {
         user: Some("as-token".to_string()),
-        token: Some("section-token".to_string()),
+        token: Some(secret("section-token")),
         ..empty_section()
     };
 
@@ -180,7 +184,7 @@ fn resolve_nats_token_beats_user_without_password() {
 #[test]
 fn resolve_nats_nkey_accepts_a_seed_file_location() {
     let overrides = NatsArgs {
-        nats_nkey: Some("file:///seed.nk".to_string()),
+        nats_nkey: Some(secret("file:///seed.nk")),
         ..Default::default()
     };
 
@@ -194,11 +198,11 @@ fn resolve_nats_nkey_accepts_a_seed_file_location() {
 #[test]
 fn resolve_nats_jwt_and_seed_from_section_and_overrides() {
     let section = NatsConfigSection {
-        jwt: Some("section-jwt".to_string()),
+        jwt: Some(secret("section-jwt")),
         ..empty_section()
     };
     let overrides = NatsArgs {
-        nats_seed: Some("override-seed".to_string()),
+        nats_seed: Some(secret("override-seed")),
         ..Default::default()
     };
 
@@ -254,4 +258,36 @@ fn load_config_reads_optional_file() {
     let loaded: DummyConfig = load_config(Some(file.path())).unwrap();
 
     assert_eq!(loaded.value, "from-file");
+}
+
+#[derive(Config)]
+struct NatsOnlyConfig {
+    #[config(nested)]
+    nats: NatsConfigSection,
+}
+
+#[test]
+fn load_config_reads_nats_secrets_from_file() {
+    let file = tempfile::Builder::new().suffix(".toml").tempfile().unwrap();
+    std::fs::write(file.path(), "[nats]\ntoken = 'file-token'\n").unwrap();
+
+    let loaded: NatsOnlyConfig = load_config(Some(file.path())).unwrap();
+
+    assert_eq!(loaded.nats.token.unwrap().as_str(), "file-token");
+}
+
+#[derive(clap::Parser)]
+struct NatsCli {
+    #[command(flatten)]
+    nats: NatsArgs,
+}
+
+#[test]
+fn nats_args_parse_secrets_from_flags() {
+    use clap::Parser;
+
+    let cli = NatsCli::try_parse_from(["cli", "--nats-token", "flag-token", "--nats-seed", "flag-seed"]).unwrap();
+
+    assert_eq!(cli.nats.nats_token.unwrap().as_str(), "flag-token");
+    assert_eq!(cli.nats.nats_seed.unwrap().as_str(), "flag-seed");
 }

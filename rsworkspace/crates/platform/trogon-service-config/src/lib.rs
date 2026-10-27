@@ -1,6 +1,5 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
-use std::fmt;
 use std::path::{Path, PathBuf};
 
 use clap::Args;
@@ -17,24 +16,24 @@ pub struct RuntimeConfigArgs {
     pub nats: NatsArgs,
 }
 
-#[derive(Args, Clone, Default)]
+#[derive(Args, Clone, Debug, Default)]
 pub struct NatsArgs {
     #[arg(long, global = true)]
     pub nats_url: Option<String>,
     #[arg(long, global = true)]
     pub nats_creds: Option<String>,
     #[arg(long, global = true)]
-    pub nats_nkey: Option<String>,
+    pub nats_nkey: Option<SecretString>,
     #[arg(long, global = true)]
     pub nats_user: Option<String>,
     #[arg(long, global = true)]
-    pub nats_password: Option<String>,
+    pub nats_password: Option<SecretString>,
     #[arg(long, global = true)]
-    pub nats_token: Option<String>,
+    pub nats_token: Option<SecretString>,
     #[arg(long, global = true)]
-    pub nats_jwt: Option<String>,
+    pub nats_jwt: Option<SecretString>,
     #[arg(long, global = true)]
-    pub nats_seed: Option<String>,
+    pub nats_seed: Option<SecretString>,
     #[arg(long, global = true)]
     pub nats_tls_cert: Option<String>,
     #[arg(long, global = true)]
@@ -43,66 +42,30 @@ pub struct NatsArgs {
     pub nats_tls_ca: Option<String>,
 }
 
-impl fmt::Debug for NatsArgs {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("NatsArgs")
-            .field("nats_url", &self.nats_url)
-            .field("nats_creds", &self.nats_creds)
-            .field("nats_nkey", &self.nats_nkey.as_ref().map(|_| "<redacted>"))
-            .field("nats_user", &self.nats_user)
-            .field("nats_password", &self.nats_password.as_ref().map(|_| "<redacted>"))
-            .field("nats_token", &self.nats_token.as_ref().map(|_| "<redacted>"))
-            .field("nats_jwt", &self.nats_jwt.as_ref().map(|_| "<redacted>"))
-            .field("nats_seed", &self.nats_seed.as_ref().map(|_| "<redacted>"))
-            .field("nats_tls_cert", &self.nats_tls_cert)
-            .field("nats_tls_key", &self.nats_tls_key)
-            .field("nats_tls_ca", &self.nats_tls_ca)
-            .finish()
-    }
-}
-
-#[derive(Config, Clone)]
+#[derive(Config, Clone, Debug)]
 pub struct NatsConfigSection {
     #[config(env = "NATS_URL", default = "localhost:4222")]
     pub url: String,
     #[config(env = "NATS_CREDS")]
     pub creds: Option<String>,
     #[config(env = "NATS_NKEY")]
-    pub nkey: Option<String>,
+    pub nkey: Option<SecretString>,
     #[config(env = "NATS_USER")]
     pub user: Option<String>,
     #[config(env = "NATS_PASSWORD")]
-    pub password: Option<String>,
+    pub password: Option<SecretString>,
     #[config(env = "NATS_TOKEN")]
-    pub token: Option<String>,
+    pub token: Option<SecretString>,
     #[config(env = "NATS_JWT")]
-    pub jwt: Option<String>,
+    pub jwt: Option<SecretString>,
     #[config(env = "NATS_SEED")]
-    pub seed: Option<String>,
+    pub seed: Option<SecretString>,
     #[config(env = "NATS_CERT")]
     pub tls_cert: Option<String>,
     #[config(env = "NATS_KEY")]
     pub tls_key: Option<String>,
     #[config(env = "NATS_CA")]
     pub tls_ca: Option<String>,
-}
-
-impl fmt::Debug for NatsConfigSection {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("NatsConfigSection")
-            .field("url", &self.url)
-            .field("creds", &self.creds)
-            .field("nkey", &self.nkey.as_ref().map(|_| "<redacted>"))
-            .field("user", &self.user)
-            .field("password", &self.password.as_ref().map(|_| "<redacted>"))
-            .field("token", &self.token.as_ref().map(|_| "<redacted>"))
-            .field("jwt", &self.jwt.as_ref().map(|_| "<redacted>"))
-            .field("seed", &self.seed.as_ref().map(|_| "<redacted>"))
-            .field("tls_cert", &self.tls_cert)
-            .field("tls_key", &self.tls_key)
-            .field("tls_ca", &self.tls_ca)
-            .finish()
-    }
 }
 
 pub fn load_config<T: Config>(config_path: Option<&Path>) -> Result<T, confique::Error> {
@@ -117,8 +80,8 @@ pub fn resolve_nats(section: &NatsConfigSection, overrides: &NatsArgs) -> NatsCo
     let pick = |primary: &Option<String>, fallback: &Option<String>| {
         first_non_empty(primary.as_ref(), fallback.as_ref()).cloned()
     };
-    let pick_secret = |primary: &Option<String>, fallback: &Option<String>| {
-        first_non_empty(primary.as_ref(), fallback.as_ref()).and_then(|value| SecretString::new(value).ok())
+    let pick_secret = |primary: &Option<SecretString>, fallback: &Option<SecretString>| {
+        primary.as_ref().or(fallback.as_ref()).cloned()
     };
 
     NatsSettings {

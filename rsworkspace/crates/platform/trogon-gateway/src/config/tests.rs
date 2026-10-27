@@ -1569,7 +1569,7 @@ token = "file-token"
         Some(f.path()),
         &NatsArgs {
             nats_url: Some("override:4222".to_string()),
-            nats_token: Some("override-token".to_string()),
+            nats_token: "override-token".parse().ok(),
             ..Default::default()
         },
     )
@@ -1593,7 +1593,7 @@ token = "file-token"
         Some(f.path()),
         &NatsArgs {
             nats_creds: Some("/path/to/override.creds".to_string()),
-            nats_token: Some("override-token".to_string()),
+            nats_token: "override-token".parse().ok(),
             ..Default::default()
         },
     )
