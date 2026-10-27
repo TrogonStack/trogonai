@@ -3,8 +3,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
+use google_cloud_auth::build_errors;
 use tokio::sync::Mutex;
 use trogon_nats::jetstream::{ClaimBucketBinding, MockJetStreamPublisher, MockObjectStore};
+
+use crate::source::google_pubsub::credentials::GoogleCredentialsError;
 
 use super::*;
 
@@ -320,11 +323,18 @@ credentials = '{"type":"service_account","client_email":"leaky-marker@example.in
     )
     .google_pubsub;
 
-    let error = prepare_google_pubsub_sources(&integrations).err().unwrap().to_string();
+    let error = prepare_google_pubsub_sources(&integrations).err().unwrap();
 
-    assert!(error.contains("google_pubsub/orders"));
-    assert!(error.contains("service_account credentials are malformed"));
-    assert!(!error.contains("leaky-marker"));
+    assert!(error.to_string().contains("google_pubsub/orders"));
+    assert!(matches!(
+        error.downcast_ref::<GoogleCredentialsError>(),
+        Some(GoogleCredentialsError::MalformedServiceAccount(_))
+    ));
+    assert!(
+        error
+            .chain()
+            .any(|cause| cause.downcast_ref::<build_errors::Error>().is_some())
+    );
 }
 
 #[tokio::test]
@@ -341,10 +351,13 @@ credentials = '{"type":"service_account","project_id":"fake","private_key_id":"f
     )
     .google_pubsub;
 
-    let error = prepare_google_pubsub_sources(&integrations).err().unwrap().to_string();
+    let error = prepare_google_pubsub_sources(&integrations).err().unwrap();
 
-    assert!(error.contains("google_pubsub/billing"));
-    assert!(error.contains("external_account credentials are malformed"));
+    assert!(error.to_string().contains("google_pubsub/billing"));
+    assert!(matches!(
+        error.downcast_ref::<GoogleCredentialsError>(),
+        Some(GoogleCredentialsError::MalformedExternalAccount(_))
+    ));
 }
 
 #[tokio::test]

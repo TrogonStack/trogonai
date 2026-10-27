@@ -276,7 +276,7 @@ fn prepare_google_pubsub_sources(
             let credentials = streaming_pull
                 .credentials
                 .build()
-                .map_err(|error| anyhow::anyhow!("google_pubsub/{}: invalid credentials: {error}", integration.id))?;
+                .with_context(|| format!("google_pubsub/{}: invalid credentials", integration.id))?;
             Ok(PreparedGooglePubSub {
                 integration,
                 source: source::google_pubsub::GooglePubSubSource::new(credentials),

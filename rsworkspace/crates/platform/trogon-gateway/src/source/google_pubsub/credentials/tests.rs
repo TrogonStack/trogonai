@@ -94,7 +94,7 @@ async fn build_rejects_malformed_service_account() {
     let credentials = GoogleCredentials::parse(r#"{"type":"service_account","client_email":"a"}"#).unwrap();
     assert!(matches!(
         credentials.build().unwrap_err(),
-        GoogleCredentialsError::MalformedServiceAccount
+        GoogleCredentialsError::MalformedServiceAccount(_)
     ));
 }
 
@@ -103,15 +103,23 @@ async fn build_rejects_malformed_external_account() {
     let credentials = GoogleCredentials::parse(r#"{"type":"external_account","audience":"a"}"#).unwrap();
     assert!(matches!(
         credentials.build().unwrap_err(),
-        GoogleCredentialsError::MalformedExternalAccount
+        GoogleCredentialsError::MalformedExternalAccount(_)
     ));
 }
 
 #[tokio::test]
-async fn build_errors_carry_no_document_contents() {
-    let document = r#"{"type":"service_account","client_email":"leaky-marker","private_key":7}"#;
-    let error = GoogleCredentials::parse(document).unwrap().build().unwrap_err();
-    assert!(matches!(error, GoogleCredentialsError::MalformedServiceAccount));
+async fn build_errors_keep_the_auth_library_error() {
+    for document in [
+        r#"{"type":"service_account","client_email":"a"}"#,
+        r#"{"type":"external_account","audience":"a"}"#,
+    ] {
+        let error = GoogleCredentials::parse(document).unwrap().build().unwrap_err();
+        let source = std::error::Error::source(&error)
+            .and_then(|source| source.downcast_ref::<build_errors::Error>())
+            .expect("auth library error is kept");
+
+        assert!(source.is_parsing());
+    }
 }
 
 #[test]
