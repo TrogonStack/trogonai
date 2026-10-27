@@ -178,3 +178,11 @@ groups:
       - ref: event_type
       - ref: event_id
       - ref: subject
+  - id: span.zoom.webhook
+    type: span
+    span_kind: server
+    stability: development
+    brief: Zoom webhook ingestion.
+    attributes:
+      - ref: event_type
+      - ref: subject

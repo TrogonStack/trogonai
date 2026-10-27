@@ -22,6 +22,8 @@ use crate::source::telegram::config::{
     TelegramBotToken, TelegramPublicWebhookUrl, TelegramWebhookRegistrationConfig, TelegramWebhookSecret,
 };
 use crate::source::twitter::config::TwitterConsumerSecret;
+use crate::source::zoom::config::ZoomConfig as ZoomSourceConfig;
+use crate::source::zoom::zoom_secret_token::ZoomSecretToken;
 use crate::source_integration_id::{SourceIntegrationId, SourceIntegrationIdError};
 use axum::http::HeaderName;
 use confique::Config;
@@ -37,7 +39,7 @@ use trogon_std::{NonZeroDuration, ZeroDurationError};
 use crate::constants::{
     DEFAULT_GITLAB_TIMESTAMP_TOLERANCE_SECS, DEFAULT_INCIDENTIO_TIMESTAMP_TOLERANCE_SECS,
     DEFAULT_LINEAR_TIMESTAMP_TOLERANCE_SECS, DEFAULT_NATS_ACK_TIMEOUT_SECS, DEFAULT_SLACK_TIMESTAMP_MAX_DRIFT_SECS,
-    DEFAULT_STREAM_MAX_AGE_SECS, SENTRY_MAX_ACK_TIMEOUT_SECS,
+    DEFAULT_STREAM_MAX_AGE_SECS, DEFAULT_ZOOM_TIMESTAMP_TOLERANCE_SECS, SENTRY_MAX_ACK_TIMEOUT_SECS,
 };
 use crate::source_status::SourceStatus;
 
@@ -363,6 +365,8 @@ struct SourcesConfig {
     sentry: SentryConfig,
     #[config(nested)]
     datadog: DatadogConfig,
+    #[config(nested)]
+    zoom: ZoomConfig,
 }
 
 #[derive(Config)]
@@ -475,6 +479,14 @@ struct DatadogConfig {
     status: Option<String>,
     #[config(default = {})]
     integrations: BTreeMap<String, SourceIntegrationInput<DatadogWebhookConfig>>,
+}
+
+#[derive(Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
+struct ZoomConfig {
+    status: Option<String>,
+    #[config(default = {})]
+    integrations: BTreeMap<String, SourceIntegrationInput<ZoomWebhookConfig>>,
 }
 
 #[derive(serde::Deserialize)]
@@ -600,6 +612,13 @@ struct DatadogWebhookConfig {
     timestamp_tolerance_secs: Option<u64>,
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ZoomWebhookConfig {
+    secret_token: Option<SecretInput>,
+    timestamp_tolerance_secs: Option<u64>,
+}
+
 pub struct ResolvedHttpServerConfig {
     pub port: u16,
 }
@@ -631,6 +650,7 @@ pub struct ResolvedConfig {
     pub notion: Vec<SourceIntegration<crate::source::notion::NotionConfig>>,
     pub sentry: Vec<SourceIntegration<crate::source::sentry::SentryConfig>>,
     pub datadog: Vec<SourceIntegration<crate::source::datadog::DatadogConfig>>,
+    pub zoom: Vec<SourceIntegration<crate::source::zoom::ZoomConfig>>,
 }
 
 impl ResolvedConfig {
@@ -659,6 +679,7 @@ impl ResolvedConfig {
             .chain(self.notion.iter().map(|i| i.config.stream_max_age))
             .chain(self.sentry.iter().map(|i| i.config.stream_max_age))
             .chain(self.datadog.iter().map(|i| i.config.stream_max_age))
+            .chain(self.zoom.iter().map(|i| i.config.stream_max_age))
     }
 
     pub fn has_any_source(&self) -> bool {
@@ -675,6 +696,7 @@ impl ResolvedConfig {
             || !self.notion.is_empty()
             || !self.sentry.is_empty()
             || !self.datadog.is_empty()
+            || !self.zoom.is_empty()
     }
 }
 
@@ -720,6 +742,7 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs) -> Result<ResolvedConf
     let notion = resolve_notion_integrations(cfg.sources.notion, &env, &mut errors);
     let sentry = resolve_sentry_integrations(cfg.sources.sentry, &env, &mut errors);
     let datadog = resolve_datadog_integrations(cfg.sources.datadog, &env, &mut errors);
+    let zoom = resolve_zoom_integrations(cfg.sources.zoom, &env, &mut errors);
 
     if !errors.is_empty() {
         return Err(ConfigError::Validation(AggregateValidationError(errors)));
@@ -743,6 +766,7 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs) -> Result<ResolvedConf
         notion,
         sentry,
         datadog,
+        zoom,
     })
 }
 
@@ -1777,6 +1801,93 @@ fn resolve_incidentio_integrations(
             id,
             IncidentioSourceConfig {
                 signing_secret,
+                subject_prefix,
+                stream_name,
+                stream_max_age,
+                nats_ack_timeout,
+                timestamp_tolerance,
+            },
+        ));
+    }
+    integrations
+}
+
+fn resolve_zoom_integrations(
+    section: ZoomConfig,
+    env: &impl ReadEnv,
+    errors: &mut Vec<ConfigValidationError>,
+) -> Vec<SourceIntegration<ZoomSourceConfig>> {
+    let ZoomConfig {
+        status,
+        integrations: configured_integrations,
+    } = section;
+    let mut integrations = Vec::new();
+    if !resolve_source_status("zoom", status.as_deref(), errors) {
+        return integrations;
+    }
+    for (raw_id, integration) in configured_integrations {
+        let Some(id) = resolve_integration_id("zoom", raw_id, errors) else {
+            continue;
+        };
+        if !resolve_integration_source_status("zoom", &id, integration.status.as_deref(), errors) {
+            continue;
+        }
+        let Some(webhook) = integration.webhook else {
+            errors.push(ConfigValidationError::missing_integration("zoom", &id, "webhook"));
+            continue;
+        };
+        let Some(secret) = require_integration_value("zoom", &id, "secret_token", webhook.secret_token, env, errors)
+        else {
+            continue;
+        };
+        let secret_token = match ZoomSecretToken::new(secret) {
+            Ok(secret) => secret,
+            Err(error) => {
+                errors.push(ConfigValidationError::invalid_integration(
+                    "zoom",
+                    &id,
+                    "secret_token",
+                    error,
+                ));
+                continue;
+            }
+        };
+        let Some((subject_prefix, stream_name, stream_max_age, nats_ack_timeout)) = resolve_common_integration_fields(
+            CommonIntegrationFieldsInput {
+                source: "zoom",
+                id: &id,
+                subject_source_prefix: "zoom",
+                stream_source_prefix: "ZOOM",
+                subject_prefix: integration.subject_prefix,
+                stream_name: integration.stream_name,
+                stream_max_age_secs: integration.stream_max_age_secs,
+                nats_ack_timeout_secs: integration.nats_ack_timeout_secs,
+                default_nats_ack_timeout_secs: DEFAULT_NATS_ACK_TIMEOUT_SECS,
+            },
+            errors,
+        ) else {
+            continue;
+        };
+        let timestamp_tolerance = match NonZeroDuration::from_secs(
+            webhook
+                .timestamp_tolerance_secs
+                .unwrap_or(DEFAULT_ZOOM_TIMESTAMP_TOLERANCE_SECS),
+        ) {
+            Ok(duration) => duration,
+            Err(error) => {
+                errors.push(ConfigValidationError::invalid_integration(
+                    "zoom",
+                    &id,
+                    "timestamp_tolerance_secs",
+                    error,
+                ));
+                continue;
+            }
+        };
+        integrations.push(SourceIntegration::new(
+            id,
+            ZoomSourceConfig {
+                secret_token,
                 subject_prefix,
                 stream_name,
                 stream_max_age,

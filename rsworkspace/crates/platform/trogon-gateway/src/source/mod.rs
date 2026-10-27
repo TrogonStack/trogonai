@@ -12,3 +12,4 @@ pub mod slack;
 mod standard_webhooks;
 pub mod telegram;
 pub mod twitter;
+pub mod zoom;

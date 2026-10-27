@@ -54,6 +54,9 @@ client_secret = "sentry-client-secret"
 
 [sources.datadog.integrations.primary.webhook]
 webhook_token = "datadog-webhook-token"
+
+[sources.zoom.integrations.primary.webhook]
+secret_token = "zoom-secret-token"
 "#
     .to_string()
 }
@@ -76,7 +79,7 @@ async fn provision_all_sources_creates_all_streams() {
 
     provision(&js, &cfg).await.expect("provision should succeed");
 
-    assert_eq!(js.created_streams().len(), 13);
+    assert_eq!(js.created_streams().len(), 14);
 }
 
 #[tokio::test]

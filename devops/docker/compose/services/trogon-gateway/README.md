@@ -21,6 +21,7 @@ named TOML integrations, each with its own literal or env-backed secret.
 | Notion | `/sources/notion/{integration}/webhook` | `verification_token` |
 | Sentry | `/sources/sentry/{integration}/webhook` | `client_secret` |
 | Datadog | `/sources/datadog/{integration}/webhook` | `webhook_token` |
+| Zoom | `/sources/zoom/{integration}/webhook` | `secret_token` |
 
 The gateway port is configured via `TROGON_GATEWAY_PORT` (default `8080`).
 Liveness and readiness probes are available at `GET /-/liveness` and `GET /-/readiness`.
