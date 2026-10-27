@@ -2,6 +2,7 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
 use std::net::SocketAddr;
+use std::panic::AssertUnwindSafe;
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -10,6 +11,7 @@ use axum::{
     extract::{Path, State},
     routing::post,
 };
+use futures_util::FutureExt;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
@@ -65,7 +67,10 @@ async fn request(address: SocketAddr, path: &str) {
     } else {
         "404 Not Found"
     };
-    assert!(response.starts_with(&format!("HTTP/1.1 {expected}")), "{response}");
+    assert!(
+        response.starts_with(&format!("HTTP/1.1 {expected}")),
+        "unexpected HTTP status; expected {expected}"
+    );
 }
 
 fn items<'a>(receipts: &'a [Receipt], signal: Signal, scope_key: &str, item_key: &str) -> Vec<&'a Value> {
@@ -223,6 +228,46 @@ async fn binary_exports_correlated_signals_and_flushes_on_sigterm() {
             );
             assert!(!payload.contains("/-/"), "operational request exported");
         }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn unexpected_response_keeps_peer_content_out_of_assertion_diagnostics() {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let peer = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut reader = BufReader::new(&mut socket);
+            let mut headers = String::new();
+            while reader.read_line(&mut headers).await.unwrap() != 0 {
+                if headers.ends_with("\r\n\r\n") {
+                    break;
+                }
+            }
+            drop(reader);
+            socket
+                .write_all(b"HTTP/1.1 503 Unavailable\r\nConnection: close\r\n\r\nFORGED_LOG_ENTRY\r\n")
+                .await
+                .unwrap();
+            socket.shutdown().await.unwrap();
+        });
+        let panic = AssertUnwindSafe(request(address, "/-/liveness"))
+            .catch_unwind()
+            .await
+            .unwrap_err();
+        peer.await.unwrap();
+        let message = panic
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| panic.downcast_ref::<&str>().copied())
+            .unwrap();
+        assert!(
+            !message.contains("FORGED_LOG_ENTRY"),
+            "peer content leaked into assertion output"
+        );
     })
     .await
     .unwrap();
