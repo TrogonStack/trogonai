@@ -30,6 +30,13 @@ async fn request(address: SocketAddr, path: &str) -> String {
     response
 }
 
+fn assert_ok_response(response: &str) {
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "unexpected HTTP status; expected 200 OK"
+    );
+}
+
 #[tokio::test]
 async fn serves_real_tcp_health_requests_and_stops_on_shutdown() {
     timeout(DEADLINE, async {
@@ -44,7 +51,7 @@ async fn serves_real_tcp_health_requests_and_stops_on_shutdown() {
 
         for path in ["/-/liveness", "/-/readiness"] {
             let response = request(address, path).await;
-            assert!(response.starts_with("HTTP/1.1 200 OK\r\n"), "{response}");
+            assert_ok_response(&response);
         }
 
         shutdown_tx.send(()).unwrap();
@@ -111,8 +118,11 @@ async fn graceful_shutdown_drains_an_in_flight_request() {
         release.notify_one();
 
         let response = client.await.unwrap();
-        assert!(response.starts_with("HTTP/1.1 200 OK\r\n"), "{response}");
-        assert!(response.ends_with("drained"), "{response}");
+        assert_ok_response(&response);
+        assert!(
+            response.ends_with("drained"),
+            "in-flight request did not finish with the expected body"
+        );
         server.await.unwrap().unwrap();
     })
     .await
@@ -201,6 +211,48 @@ async fn serves_http2_on_the_same_listener_as_http1() {
         connection.abort();
         shutdown_tx.send(()).unwrap();
         server.await.unwrap().unwrap();
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn peer_content_cannot_forge_response_assertion_diagnostics() {
+    timeout(DEADLINE, async {
+        let listener = bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0))).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let peer = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut reader = tokio::io::BufReader::new(&mut socket);
+            let mut headers = String::new();
+            while tokio::io::AsyncBufReadExt::read_line(&mut reader, &mut headers)
+                .await
+                .unwrap()
+                != 0
+            {
+                if headers.ends_with("\r\n\r\n") {
+                    break;
+                }
+            }
+            drop(reader);
+            socket
+                .write_all(b"HTTP/1.1 503 Unavailable\r\nConnection: close\r\n\r\nFORGED_LOG_ENTRY\r\n")
+                .await
+                .unwrap();
+            socket.shutdown().await.unwrap();
+        });
+        let response = request(address, "/-/liveness").await;
+        peer.await.unwrap();
+        let panic = std::panic::catch_unwind(|| assert_ok_response(&response)).unwrap_err();
+        let message = panic
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| panic.downcast_ref::<&str>().copied())
+            .unwrap();
+        assert!(
+            !message.contains("FORGED_LOG_ENTRY"),
+            "peer content leaked into assertion output"
+        );
     })
     .await
     .unwrap();

@@ -85,7 +85,10 @@ async fn binary_serves_probes_and_exits_cleanly_on_sigterm() {
         assert_ne!(address.port(), 0);
         for path in ["/-/liveness", "/-/readiness"] {
             let response = request(address, path).await;
-            assert!(response.starts_with("HTTP/1.1 200 OK\r\n"), "{response}");
+            assert!(
+                response.starts_with("HTTP/1.1 200 OK\r\n"),
+                "unexpected probe status; expected 200 OK"
+            );
             assert_eq!(response.split_once("\r\n\r\n").unwrap().1, "");
         }
         assert!(
