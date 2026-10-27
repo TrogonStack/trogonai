@@ -76,10 +76,13 @@ Secret values follow
 and
 [Secret Value Syntax](https://github.com/straw-hat-team/adr/blob/main/src/adrs/3610135900/README.md).
 A value marked as `secret:<nid>:<nss>:<value>` is used without its marker,
-and a value that starts with `base64:` is decoded once at startup:
+and a value that starts with `base64:` is decoded once at startup. Compose
+does not run commands inside `.env`, so write the finished single-line value
+into the file:
 
 ```sh
-GOOGLE_PUBSUB_PRIMARY_CREDENTIALS="secret:gcp:service-account:base64:$(base64 < key.json)"
+printf 'GITHUB_ACME_EU_WEBHOOK_SECRET=secret:github:webhook:base64:%s\n' \
+  "$(printf '%s' "$WEBHOOK_SECRET" | base64 | tr -d '\n')" >> .env
 ```
 
 Encode only values the carrier cannot hold unchanged, such as multi-line JSON
@@ -89,6 +92,10 @@ Keep the `secret:` marker outside the encoding so scanners still see it. Line
 breaks inside the base64 are ignored. A value that is not valid base64, or
 does not decode to UTF-8, fails startup with an error naming the integration
 and field but never the value.
+
+When upgrading, a secret whose literal value already starts with `base64:` is
+now decoded. To keep that value unchanged, encode the whole value, prefix
+included, and store the result as `base64:<encoded>`.
 
 ## Discord gateway
 
