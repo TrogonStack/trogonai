@@ -1552,7 +1552,10 @@ token = "mytoken"
 "#;
     let f = write_toml(toml);
     let cfg = load(Some(f.path())).expect("load failed");
-    assert!(matches!(cfg.nats.auth, NatsAuth::Token(_)));
+    assert!(matches!(
+        cfg.nats.auth,
+        NatsAuth::Token(trogon_nats::CredentialValue::Literal(ref token)) if token.as_str() == "mytoken"
+    ));
 }
 
 #[test]
@@ -1567,14 +1570,17 @@ token = "file-token"
         Some(f.path()),
         &NatsArgs {
             nats_url: Some("override:4222".to_string()),
-            nats_token: Some("override-token".to_string()),
+            nats_token: "override-token".parse().ok(),
             ..Default::default()
         },
     )
     .expect("load failed");
 
     assert_eq!(cfg.nats.servers, vec!["override:4222"]);
-    assert!(matches!(cfg.nats.auth, NatsAuth::Token(ref token) if token == "override-token"));
+    assert!(matches!(
+        cfg.nats.auth,
+        NatsAuth::Token(trogon_nats::CredentialValue::Literal(ref token)) if token.as_str() == "override-token"
+    ));
 }
 
 #[test]
@@ -1588,14 +1594,14 @@ token = "file-token"
         Some(f.path()),
         &NatsArgs {
             nats_creds: Some("/path/to/override.creds".to_string()),
-            nats_token: Some("override-token".to_string()),
+            nats_token: "override-token".parse().ok(),
             ..Default::default()
         },
     )
     .expect("load failed");
 
     assert!(
-        matches!(cfg.nats.auth, NatsAuth::Credentials(ref path) if path == std::path::Path::new("/path/to/override.creds"))
+        matches!(cfg.nats.auth, NatsAuth::Credentials(trogon_nats::Location::Path(ref path)) if path == std::path::Path::new("/path/to/override.creds"))
     );
 }
 

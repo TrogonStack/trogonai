@@ -6,10 +6,7 @@ async fn connect_subscribes_to_server_subjects() {
     let _inbound = nats.inject_messages();
     let config = Config::new(
         crate::McpPrefix::new("mcp").unwrap(),
-        trogon_nats::NatsConfig {
-            servers: vec!["localhost:4222".to_string()],
-            auth: trogon_nats::NatsAuth::None,
-        },
+        trogon_nats::NatsConfig::new(vec!["localhost:4222".to_string()], trogon_nats::NatsAuth::None),
     );
 
     let _transport = connect(

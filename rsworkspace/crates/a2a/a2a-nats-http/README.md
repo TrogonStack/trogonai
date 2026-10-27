@@ -17,6 +17,7 @@ cargo run -p a2a-nats-http
 |----------|----------|---------|---------|
 | **`A2A_AGENT_ID`** | **yes** | — | Deployed NATS **`agent_id`** (`{prefix}.agents.{agent_id}.…`). |
 | **`NATS_URL`** | no | _(NATS tooling default)_ | Comma-separated URLs (`trogon_nats::NatsConfig`). |
+| **`NATS_USER`**, **`NATS_PASSWORD`**, **`NATS_TOKEN`**, **`NATS_CREDS`**, **`NATS_NKEY`**, **`NATS_JWT`**, **`NATS_SEED`**, **`NATS_CERT`**, **`NATS_KEY`**, **`NATS_CA`** | no | none | Accept the same values as the `nats` CLI. First match wins: credentials file, then NKey (`NATS_NKEY` is a seed or a seed file path), then user/password, then token (`NATS_USER` without a password counts as the token), then JWT (signed with `NATS_SEED` when set). Secret values accept `file://` and `env://`; TLS needs `NATS_CERT` with `NATS_KEY`, or `NATS_CA`. |
 | **`A2A_PREFIX`** | no | **`a2a`** | Subject prefix. |
 | **`A2A_HTTP_BIND`** | no | **`0.0.0.0:8080`** | TCP listen address. |
 | **`A2A_OPERATION_TIMEOUT_SECS`** | no | _(library)_ | Unary JSON-RPC timeouts (`a2a_nats` constant). |

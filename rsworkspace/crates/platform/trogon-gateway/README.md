@@ -81,12 +81,19 @@ Gateway-level settings:
 - `TROGON_GATEWAY_PORT` (default: `8080`)
 - `NATS_URL` (default: `localhost:4222`, comma-separated supported)
 
-NATS auth is resolved in this priority order:
+NATS auth accepts the same values as the `nats` CLI. One method is chosen in this priority order:
 
-1. `NATS_CREDS`
-2. `NATS_NKEY`
+1. `NATS_CREDS` (path or `file://path`)
+2. `NATS_NKEY` (an NKey seed, or a seed file as a path or `file://path`)
 3. `NATS_USER` + `NATS_PASSWORD`
-4. `NATS_TOKEN`
+4. `NATS_TOKEN`, or `NATS_USER` set without `NATS_PASSWORD`
+5. `NATS_JWT` + `NATS_SEED`, or `NATS_JWT` alone with an empty signature
+
+`NATS_JWT`, `NATS_SEED`, `NATS_PASSWORD` and `NATS_TOKEN` accept `file://path` and `env://NAME` references. The `op`, `nsc` and `data` schemes are rejected at connect time.
+
+TLS is configured with `NATS_CERT` + `NATS_KEY` (setting only one fails the connection) and `NATS_CA`. Setting any of them requires TLS.
+
+The same settings can be given as flags (`--nats-user`, `--nats-password`, `--nats-creds`, `--nats-nkey`, `--nats-jwt`, `--nats-seed`, `--nats-token`, `--nats-tls-cert`, `--nats-tls-key`, `--nats-tls-ca`) or in the `[nats]` TOML section (`tls_cert`, `tls_key`, `tls_ca` for the TLS values).
 
 Discord optional tuning is configured in TOML under `[sources.discord]`:
 
@@ -120,10 +127,15 @@ port = 8080
 [nats]
 url = "localhost:4222"
 # creds = "/path/to/nats.creds"
-# nkey = "SU..."
+# nkey = "SU..." # or "/path/to/user.nk"
 # user = "my-user"
 # password = "my-pass"
 # token = "my-token"
+# jwt = "file:///path/to/user.jwt"
+# seed = "env://NATS_USER_SEED"
+# tls_cert = "/path/to/client.crt"
+# tls_key = "/path/to/client.key"
+# tls_ca = "/path/to/ca.pem"
 
 [sources.github.integrations.acme-main.webhook]
 webhook_secret = { env = "GITHUB_ACME_MAIN_WEBHOOK_SECRET" }

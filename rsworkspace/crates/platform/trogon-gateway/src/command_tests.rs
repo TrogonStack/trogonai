@@ -212,7 +212,8 @@ credentials = '{"type":"service_account","client_email":"leaky-marker@example.in
 async fn serve_propagates_connection_errors() {
     let directory = tempfile::tempdir().unwrap();
     let mut resolved = resolved_config();
-    resolved.nats.auth = trogon_nats::NatsAuth::Credentials(directory.path().join("missing.creds"));
+    resolved.nats.auth =
+        trogon_nats::NatsAuth::Credentials(trogon_nats::Location::Path(directory.path().join("missing.creds")));
     let error = tokio::time::timeout(Duration::from_secs(5), serve(resolved, std::future::pending()))
         .await
         .unwrap()

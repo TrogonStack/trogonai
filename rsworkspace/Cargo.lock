@@ -7555,6 +7555,7 @@ dependencies = [
  "confique",
  "tempfile",
  "trogon-nats",
+ "trogon-std",
 ]
 
 [[package]]
