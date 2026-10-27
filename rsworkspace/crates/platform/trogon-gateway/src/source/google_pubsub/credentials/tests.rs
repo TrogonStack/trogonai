@@ -30,35 +30,46 @@ async fn builds_credentials_inside_a_runtime_for_both_types() {
 
 #[test]
 fn rejects_empty_document() {
-    assert_eq!(
+    assert!(matches!(
         GoogleCredentials::parse("  \n").unwrap_err(),
         GoogleCredentialsError::Empty
-    );
+    ));
 }
 
 #[test]
 fn rejects_invalid_json() {
-    assert_eq!(
+    assert!(matches!(
         GoogleCredentials::parse("{ not json").unwrap_err(),
-        GoogleCredentialsError::InvalidJson
-    );
+        GoogleCredentialsError::InvalidJson(_)
+    ));
+}
+
+#[test]
+fn invalid_json_keeps_the_parser_error_without_document_contents() {
+    let error = GoogleCredentials::parse(r#"{"private_key": leaky-marker}"#).unwrap_err();
+    let source = std::error::Error::source(&error)
+        .expect("parser error is kept")
+        .to_string();
+
+    assert!(source.contains("line 1 column"));
+    assert!(!source.contains("leaky-marker"));
 }
 
 #[test]
 fn rejects_non_object_json() {
-    assert_eq!(
+    assert!(matches!(
         GoogleCredentials::parse("[1, 2]").unwrap_err(),
         GoogleCredentialsError::NotAnObject
-    );
+    ));
 }
 
 #[test]
 fn rejects_missing_or_non_string_type() {
     for document in [r#"{"client_email":"a"}"#, r#"{"type":7}"#] {
-        assert_eq!(
+        assert!(matches!(
             GoogleCredentials::parse(document).unwrap_err(),
             GoogleCredentialsError::MissingType
-        );
+        ));
     }
 }
 
@@ -71,36 +82,36 @@ fn rejects_authorized_user_and_unknown_types() {
         "other",
     ] {
         let document = format!(r#"{{"type":"{kind}","refresh_token":"fake-refresh-token"}}"#);
-        assert_eq!(
+        assert!(matches!(
             GoogleCredentials::parse(document).unwrap_err(),
             GoogleCredentialsError::UnsupportedType
-        );
+        ));
     }
 }
 
 #[tokio::test]
 async fn build_rejects_malformed_service_account() {
     let credentials = GoogleCredentials::parse(r#"{"type":"service_account","client_email":"a"}"#).unwrap();
-    assert_eq!(
+    assert!(matches!(
         credentials.build().unwrap_err(),
         GoogleCredentialsError::MalformedServiceAccount
-    );
+    ));
 }
 
 #[tokio::test]
 async fn build_rejects_malformed_external_account() {
     let credentials = GoogleCredentials::parse(r#"{"type":"external_account","audience":"a"}"#).unwrap();
-    assert_eq!(
+    assert!(matches!(
         credentials.build().unwrap_err(),
         GoogleCredentialsError::MalformedExternalAccount
-    );
+    ));
 }
 
 #[tokio::test]
 async fn build_errors_carry_no_document_contents() {
     let document = r#"{"type":"service_account","client_email":"leaky-marker","private_key":7}"#;
     let error = GoogleCredentials::parse(document).unwrap().build().unwrap_err();
-    assert_eq!(error, GoogleCredentialsError::MalformedServiceAccount);
+    assert!(matches!(error, GoogleCredentialsError::MalformedServiceAccount));
 }
 
 #[test]

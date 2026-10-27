@@ -26,12 +26,12 @@ impl GoogleCredentialsKind {
     }
 }
 
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[derive(Debug, thiserror::Error)]
 pub enum GoogleCredentialsError {
     #[error("must not be empty")]
     Empty,
     #[error("must be a valid JSON document")]
-    InvalidJson,
+    InvalidJson(#[source] serde_json::Error),
     #[error("must be a JSON object")]
     NotAnObject,
     #[error("must declare a string \"type\" field")]
@@ -56,7 +56,7 @@ impl GoogleCredentials {
         if document.is_empty() {
             return Err(GoogleCredentialsError::Empty);
         }
-        let value: Value = serde_json::from_str(document).map_err(|_| GoogleCredentialsError::InvalidJson)?;
+        let value: Value = serde_json::from_str(document).map_err(GoogleCredentialsError::InvalidJson)?;
         let Some(object) = value.as_object() else {
             return Err(GoogleCredentialsError::NotAnObject);
         };
