@@ -3048,3 +3048,30 @@ status = "enabled"
         matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("zoom/primary: missing webhook")))
     );
 }
+
+#[test]
+fn zoom_invalid_integration_id_is_invalid() {
+    let toml = r#"
+[sources.zoom.integrations."bad/id".webhook]
+secret_token = "zoom-token"
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("zoom/bad/id: invalid integration id")))
+    );
+}
+
+#[test]
+fn zoom_integration_disabled_is_skipped() {
+    let toml = r#"
+[sources.zoom.integrations.primary]
+status = "disabled"
+
+[sources.zoom.integrations.primary.webhook]
+secret_token = "zoom-token"
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert!(cfg.zoom.is_empty());
+}

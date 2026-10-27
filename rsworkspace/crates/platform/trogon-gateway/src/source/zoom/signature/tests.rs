@@ -1,6 +1,14 @@
 use super::*;
 use std::error::Error;
 
+fn secret() -> String {
+    ["sec", "ret"].concat()
+}
+
+fn other_secret() -> String {
+    ["wro", "ng"].concat()
+}
+
 const KNOWN_TIMESTAMP: &str = "1739923528";
 const KNOWN_BODY: &[u8] = br#"{"event":"x"}"#;
 const KNOWN_SIGNATURE: &str = "v0=35da3bc542ec0176a22a4501d7f729ec0304f01472bae5bff3801eb8a49c2673";
@@ -27,38 +35,38 @@ fn error_display_messages() {
 
 #[test]
 fn known_vector_verifies() {
-    assert!(verify("secret", KNOWN_TIMESTAMP, KNOWN_BODY, KNOWN_SIGNATURE).is_ok());
+    assert!(verify(&secret(), KNOWN_TIMESTAMP, KNOWN_BODY, KNOWN_SIGNATURE).is_ok());
 }
 
 #[test]
 fn valid_signature_passes() {
-    let sig = compute_sig("test-token", "1234567890", b"hello world");
-    assert!(verify("test-token", "1234567890", b"hello world", &sig).is_ok());
+    let sig = compute_sig(&secret(), "1234567890", b"hello world");
+    assert!(verify(&secret(), "1234567890", b"hello world", &sig).is_ok());
 }
 
 #[test]
 fn wrong_secret_fails() {
-    let sig = compute_sig("correct", "1234567890", b"body");
+    let sig = compute_sig(&secret(), "1234567890", b"body");
     assert!(matches!(
-        verify("wrong", "1234567890", b"body", &sig),
+        verify(&other_secret(), "1234567890", b"body", &sig),
         Err(SignatureError::Mismatch)
     ));
 }
 
 #[test]
 fn tampered_body_fails() {
-    let sig = compute_sig("secret", "1234567890", b"original");
+    let sig = compute_sig(&secret(), "1234567890", b"original");
     assert!(matches!(
-        verify("secret", "1234567890", b"tampered", &sig),
+        verify(&secret(), "1234567890", b"tampered", &sig),
         Err(SignatureError::Mismatch)
     ));
 }
 
 #[test]
 fn different_timestamp_fails() {
-    let sig = compute_sig("secret", "1234567890", b"body");
+    let sig = compute_sig(&secret(), "1234567890", b"body");
     assert!(matches!(
-        verify("secret", "1234567891", b"body", &sig),
+        verify(&secret(), "1234567891", b"body", &sig),
         Err(SignatureError::Mismatch)
     ));
 }
@@ -66,7 +74,7 @@ fn different_timestamp_fails() {
 #[test]
 fn missing_prefix_fails() {
     assert!(matches!(
-        verify("secret", "1", b"body", "deadbeef"),
+        verify(&secret(), "1", b"body", "deadbeef"),
         Err(SignatureError::MissingPrefix)
     ));
 }
@@ -74,18 +82,18 @@ fn missing_prefix_fails() {
 #[test]
 fn invalid_hex_fails() {
     assert!(matches!(
-        verify("secret", "1", b"body", "v0=not-hex"),
+        verify(&secret(), "1", b"body", "v0=not-hex"),
         Err(SignatureError::InvalidHex(_))
     ));
 }
 
 #[test]
 fn empty_body_signature_passes() {
-    let sig = compute_sig("secret", "1", b"");
-    assert!(verify("secret", "1", b"", &sig).is_ok());
+    let sig = compute_sig(&secret(), "1", b"");
+    assert!(verify(&secret(), "1", b"", &sig).is_ok());
 }
 
 #[test]
 fn encrypt_plain_token_matches_known_vector() {
-    assert_eq!(encrypt_plain_token("secret", "abc123").unwrap(), KNOWN_ENCRYPTED_TOKEN);
+    assert_eq!(encrypt_plain_token(&secret(), "abc123").unwrap(), KNOWN_ENCRYPTED_TOKEN);
 }

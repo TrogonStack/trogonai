@@ -11,6 +11,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::post,
 };
+use serde::Serialize;
 use tracing::{info, instrument, warn};
 use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{
@@ -138,21 +139,25 @@ fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     headers.get(name).and_then(|value| value.to_str().ok())
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UrlValidationResponse<'a> {
+    plain_token: &'a str,
+    encrypted_token: String,
+}
+
 fn url_validation_response(secret_token: &ZoomSecretToken, parsed: &serde_json::Value) -> Option<Response> {
     let plain_token = parsed.pointer("/payload/plainToken").and_then(|value| value.as_str())?;
-    match signature::encrypt_plain_token(secret_token.as_str(), plain_token) {
-        Ok(encrypted_token) => Some(
-            Json(serde_json::json!({
-                "plainToken": plain_token,
-                "encryptedToken": encrypted_token,
-            }))
-            .into_response(),
-        ),
-        Err(err) => {
-            warn!(error = %err, "Failed to answer Zoom URL validation");
-            Some(StatusCode::INTERNAL_SERVER_ERROR.into_response())
-        }
-    }
+    let response = signature::encrypt_plain_token(secret_token.as_str(), plain_token)
+        .map(|encrypted_token| {
+            Json(UrlValidationResponse {
+                plain_token,
+                encrypted_token,
+            })
+            .into_response()
+        })
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
+    Some(response)
 }
 
 #[instrument(

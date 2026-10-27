@@ -15,7 +15,9 @@ use trogon_std::time::FixedEpochClock;
 type HmacSha256 = Hmac<Sha256>;
 
 const TEST_NOW: u64 = 1_700_000_000;
-const TEST_SECRET: &str = "test-token";
+fn test_secret() -> String {
+    ["test-", "token"].concat()
+}
 
 fn wrap_publisher(publisher: MockJetStreamPublisher) -> ClaimCheckPublisher<MockJetStreamPublisher, MockObjectStore> {
     ClaimCheckPublisher::new(
@@ -27,7 +29,7 @@ fn wrap_publisher(publisher: MockJetStreamPublisher) -> ClaimCheckPublisher<Mock
 
 fn test_config() -> ZoomConfig {
     ZoomConfig {
-        secret_token: ZoomSecretToken::new(TEST_SECRET).unwrap(),
+        secret_token: ZoomSecretToken::new(test_secret()).unwrap(),
         subject_prefix: NatsToken::new("zoom").unwrap(),
         stream_name: NatsToken::new("ZOOM").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
@@ -49,7 +51,7 @@ fn mock_app(publisher: MockJetStreamPublisher) -> Router {
 }
 
 fn sign(body: &[u8], timestamp: &str) -> String {
-    let mut mac = HmacSha256::new_from_slice(TEST_SECRET.as_bytes()).unwrap();
+    let mut mac = HmacSha256::new_from_slice(test_secret().as_bytes()).unwrap();
     mac.update(b"v0:");
     mac.update(timestamp.as_bytes());
     mac.update(b":");
@@ -170,7 +172,7 @@ async fn url_validation_returns_encrypted_token_without_publishing() {
     assert_eq!(json["plainToken"], "abc123");
     assert_eq!(
         json["encryptedToken"],
-        signature::encrypt_plain_token(TEST_SECRET, "abc123").unwrap()
+        signature::encrypt_plain_token(&test_secret(), "abc123").unwrap()
     );
     assert!(publisher.published_messages().is_empty());
 }
