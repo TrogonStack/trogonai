@@ -6,6 +6,7 @@ mod config;
 mod constants;
 mod error;
 mod server;
+mod telemetry;
 
 use clap::Parser;
 use trogon_std::env::SystemEnv;

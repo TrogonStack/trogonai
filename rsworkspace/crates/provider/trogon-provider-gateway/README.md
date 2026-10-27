@@ -55,13 +55,37 @@ inference and management paths return `404`.
 
 ## Telemetry
 
-The binary uses `trogon-telemetry` for OTLP traces, metrics and logs, with the shared
-Rust service identity policy. `OTEL_EXPORTER_OTLP_ENDPOINT` and
-`OTEL_RESOURCE_ATTRIBUTES` use the shared exporters and resource detector.
-`service.name` is fixed to `trogon-provider-gateway`; `OTEL_SERVICE_NAME` does not
-override it. `RUST_LOG` controls filtering and `TROGON_LOG_DIR` selects file logs.
-Future application routers must receive instrumentation separately from the
-operational router.
+The binary uses the shared `trogon-telemetry` OTLP/HTTP pipeline for traces,
+metrics and structured logs. All signals use the same resource. Service identity
+follows `OTEL_SERVICE_NAME`, then `service.name` in `OTEL_RESOURCE_ATTRIBUTES`,
+then the fallback `trogon-provider-gateway`.
+
+```sh
+OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318 \
+OTEL_EXPORTER_OTLP_PROTOCOL=http/json \
+OTEL_SERVICE_NAME=trogon-provider-gateway \
+OTEL_RESOURCE_ATTRIBUTES=service.namespace=trogonai \
+cargo run -p trogon-provider-gateway
+```
+
+Use a collector address reachable from the process or container. The exporter
+supports signal-specific OTLP endpoint configuration through the standard SDK
+environment variables. `RUST_LOG` controls filtering; keep `info` enabled for
+request spans and completion logs. `TROGON_LOG_DIR` selects file logs. The shared
+metrics reader exports every 30 seconds and flushes during shutdown.
+
+Non-operational requests, including `404` responses, continue incoming W3C
+`traceparent` and `tracestate`. Baggage is not extracted. Server spans and
+`http.server.request.duration` record normalized methods, status, protocol and
+route templates when available. Duration uses seconds and covers response-body
+completion, body failures and cancellation. Completion logs carry the request's
+trace and span identifiers. Raw paths, query strings, request bodies,
+authorization and arbitrary headers are excluded.
+
+Every path under `/-/` bypasses request spans, completion logs and duration
+metrics, including unknown operational paths. The existing endpoint responses
+are unchanged. SIGTERM drains requests before the shared providers flush.
+
 
 ## Container image
 
