@@ -47,6 +47,7 @@ trogon-decider = { path = "crates/decider/trogon-decider" }
 trogon-decider-nats = { path = "crates/decider/trogon-decider-nats" }
 trogon-decider-nats-server = { path = "crates/decider/trogon-decider-nats-server" }
 trogon-decider-wit = { path = "crates/decider/trogon-decider-wit" }
+trogon-config-value = { path = "crates/platform/trogon-config-value" }
 trogon-decider-guest-macros = { path = "crates/decider/trogon-decider-guest-macros" }
 trogon-decider-guest-sdk = { path = "crates/decider/trogon-decider-guest-sdk" }
 trogon-decider-sim = { path = "crates/decider/trogon-decider-sim" }

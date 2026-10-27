@@ -1,0 +1,14 @@
+[package]
+name = "trogon-config-value"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Configuration values that may carry a secret marker and a base64 encoding"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+base64 = { workspace = true }
+thiserror = { workspace = true }
