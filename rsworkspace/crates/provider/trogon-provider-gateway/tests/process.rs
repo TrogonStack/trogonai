@@ -73,6 +73,17 @@ async fn request(address: SocketAddr, path: &str) -> String {
     response
 }
 
+fn assert_probe_response(response: &str) {
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "unexpected probe status; expected 200 OK"
+    );
+    assert!(
+        response.split_once("\r\n\r\n").unwrap().1.is_empty(),
+        "unexpected probe body; expected an empty body"
+    );
+}
+
 #[tokio::test]
 async fn binary_serves_probes_and_exits_cleanly_on_sigterm() {
     timeout(DEADLINE, async {
@@ -85,11 +96,7 @@ async fn binary_serves_probes_and_exits_cleanly_on_sigterm() {
         assert_ne!(address.port(), 0);
         for path in ["/-/liveness", "/-/readiness"] {
             let response = request(address, path).await;
-            assert!(
-                response.starts_with("HTTP/1.1 200 OK\r\n"),
-                "unexpected probe status; expected 200 OK"
-            );
-            assert_eq!(response.split_once("\r\n\r\n").unwrap().1, "");
+            assert_probe_response(&response);
         }
         assert!(
             Command::new("/bin/kill")
@@ -144,6 +151,44 @@ async fn binary_rejects_invalid_configuration_before_serving() {
         assert!(stderr.contains("ParseFile"), "{stderr}");
         assert!(stderr.contains("invalid.toml"), "{stderr}");
         assert!(!stderr.contains("provider gateway listening"), "{stderr}");
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn peer_content_cannot_forge_probe_assertion_diagnostics() {
+    timeout(DEADLINE, async {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let peer = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut reader = BufReader::new(&mut socket);
+            let mut headers = String::new();
+            while reader.read_line(&mut headers).await.unwrap() != 0 {
+                if headers.ends_with("\r\n\r\n") {
+                    break;
+                }
+            }
+            drop(reader);
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nFORGED_LOG_ENTRY\r\n")
+                .await
+                .unwrap();
+            socket.shutdown().await.unwrap();
+        });
+        let response = request(address, "/-/liveness").await;
+        peer.await.unwrap();
+        let panic = std::panic::catch_unwind(|| assert_probe_response(&response)).unwrap_err();
+        let message = panic
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| panic.downcast_ref::<&str>().copied())
+            .unwrap();
+        assert!(
+            !message.contains("FORGED_LOG_ENTRY"),
+            "peer content leaked into assertion output"
+        );
     })
     .await
     .unwrap();
