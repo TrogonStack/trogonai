@@ -1,36 +1,23 @@
-use axum::{Json, Router, http::StatusCode, routing::get};
-use serde::Serialize;
+use axum::{Router, extract::State, http::StatusCode, routing::get};
 
-#[derive(Serialize)]
-struct RootResponse {
-    message: &'static str,
-    endpoints: [&'static str; 2],
-}
+use crate::{Health, Readiness};
 
-#[derive(Serialize)]
-struct HealthResponse {
-    status: &'static str,
-}
-
-pub fn router() -> Router {
+pub fn router(health: Health) -> Router {
     Router::new()
-        .route("/", get(root))
-        .route("/healthz", get(healthz).head(healthz_head))
+        .route("/-/liveness", get(liveness))
+        .route("/-/readiness", get(readiness))
+        .with_state(health)
 }
 
-async fn root() -> Json<RootResponse> {
-    Json(RootResponse {
-        message: "Trogon Provider Gateway",
-        endpoints: ["GET /healthz", "HEAD /healthz"],
-    })
-}
-
-async fn healthz() -> Json<HealthResponse> {
-    Json(HealthResponse { status: "ok" })
-}
-
-async fn healthz_head() -> StatusCode {
+async fn liveness() -> StatusCode {
     StatusCode::OK
+}
+
+async fn readiness(State(health): State<Health>) -> StatusCode {
+    match health.readiness() {
+        Readiness::Ready => StatusCode::OK,
+        Readiness::Draining => StatusCode::SERVICE_UNAVAILABLE,
+    }
 }
 
 #[cfg(test)]

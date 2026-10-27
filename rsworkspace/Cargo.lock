@@ -7477,8 +7477,6 @@ name = "trogon-provider-gateway"
 version = "0.0.1"
 dependencies = [
  "axum",
- "serde",
- "serde_json",
  "tokio",
  "tower",
 ]

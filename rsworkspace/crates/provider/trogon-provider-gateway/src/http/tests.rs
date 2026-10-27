@@ -1,85 +1,72 @@
 use super::*;
 use axum::{
     body::{Body, to_bytes},
-    http::{Method, Request, Response, header},
+    http::{Method, Request, Response},
 };
-use serde_json::{Value, json};
 use tower::ServiceExt;
 
-async fn send(method: Method, uri: &str) -> Response<Body> {
-    router()
-        .oneshot(Request::builder().method(method).uri(uri).body(Body::empty()).unwrap())
+async fn send(app: Router, method: Method, uri: &str) -> Response<Body> {
+    app.oneshot(Request::builder().method(method).uri(uri).body(Body::empty()).unwrap())
         .await
         .unwrap()
 }
 
-async fn body_bytes(response: Response<Body>) -> Vec<u8> {
-    to_bytes(response.into_body(), usize::MAX).await.unwrap().to_vec()
-}
-
-fn content_type(response: &Response<Body>) -> &str {
-    response.headers()[header::CONTENT_TYPE].to_str().unwrap()
+async fn assert_empty(response: Response<Body>) {
+    assert!(to_bytes(response.into_body(), usize::MAX).await.unwrap().is_empty());
 }
 
 #[tokio::test]
-async fn root_describes_the_gateway() {
-    let response = send(Method::GET, "/").await;
-
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(content_type(&response), "application/json");
-    let body: Value = serde_json::from_slice(&body_bytes(response).await).unwrap();
-    assert_eq!(
-        body,
-        json!({
-            "message": "Trogon Provider Gateway",
-            "endpoints": ["GET /healthz", "HEAD /healthz"],
-        })
-    );
+async fn canonical_operational_probes_report_only_status() {
+    let app = router(Health::default());
+    for path in ["/-/liveness", "/-/readiness"] {
+        for method in [Method::GET, Method::HEAD] {
+            let response = send(app.clone(), method, path).await;
+            assert_eq!(response.status(), StatusCode::OK, "{path}");
+            assert_empty(response).await;
+        }
+    }
 }
 
 #[tokio::test]
-async fn healthz_reports_ok() {
-    let response = send(Method::GET, "/healthz").await;
+async fn draining_fails_readiness_while_liveness_keeps_passing() {
+    let health = Health::default();
+    let app = router(health.clone());
+    health.begin_shutdown();
+    health.begin_shutdown();
 
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(content_type(&response), "application/json");
-    let body: Value = serde_json::from_slice(&body_bytes(response).await).unwrap();
-    assert_eq!(body, json!({ "status": "ok" }));
-}
-
-#[tokio::test]
-async fn healthz_head_has_empty_body() {
-    let response = send(Method::HEAD, "/healthz").await;
-
-    assert_eq!(response.status(), StatusCode::OK);
-    assert!(body_bytes(response).await.is_empty());
+    for (path, expected) in [
+        ("/-/readiness", StatusCode::SERVICE_UNAVAILABLE),
+        ("/-/liveness", StatusCode::OK),
+    ] {
+        for method in [Method::GET, Method::HEAD] {
+            let response = send(app.clone(), method, path).await;
+            assert_eq!(response.status(), expected, "{path}");
+            assert_empty(response).await;
+        }
+    }
 }
 
 #[tokio::test]
 async fn wrong_method_is_rejected() {
-    for (method, uri) in [
-        (Method::POST, "/"),
-        (Method::POST, "/healthz"),
-        (Method::DELETE, "/healthz"),
-    ] {
-        let response = send(method, uri).await;
-
+    let app = router(Health::default());
+    for path in ["/-/liveness", "/-/readiness"] {
+        let response = send(app.clone(), Method::POST, path).await;
         assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
     }
 }
 
 #[tokio::test]
-async fn provider_routes_are_absent() {
-    for (method, uri) in [
-        (Method::GET, "/v1/models"),
-        (Method::POST, "/v1/chat/completions"),
-        (Method::POST, "/v1/messages"),
-        (Method::GET, "/management.html"),
-        (Method::GET, "/-/liveness"),
-        (Method::GET, "/-/readiness"),
+async fn application_and_legacy_probe_routes_are_absent() {
+    let app = router(Health::default());
+    for path in [
+        "/",
+        "/healthz",
+        "/v1/models",
+        "/v1/messages",
+        "/management.html",
+        "/-/metrics",
     ] {
-        let response = send(method, uri).await;
-
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let response = send(app.clone(), Method::GET, path).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
     }
 }
