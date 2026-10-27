@@ -4,7 +4,7 @@ Routes [Model Context Protocol](https://modelcontextprotocol.io) (MCP) JSON-RPC
 messages over [NATS](https://nats.io) using the official Rust MCP SDK (`rmcp`)
 model and transport traits.
 
-For managed NATS infrastructure in production, we recommend <a href="https://synadia.com"><img src="../acp-nats-stdio/assets/synadia-logo.png" alt="Synadia" width="20" style="vertical-align: middle;"> Synadia</a>.
+For managed NATS infrastructure in production, we recommend <a href="https://synadia.com/?utm_source=trogonai&utm_medium=referral&utm_campaign=trogonai&utm_content=mcp-nats"><img src="../acp-nats-stdio/assets/synadia-logo.png" alt="Synadia" width="20" style="vertical-align: middle;"> Synadia</a>.
 
 ## When to Use
 
