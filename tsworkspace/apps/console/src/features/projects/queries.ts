@@ -14,6 +14,7 @@ export const projectKeys = {
   list: () => [...root, 'list'] as const,
   detail: (id: string) => [...root, 'detail', id] as const,
   history: (id: string) => [...root, 'history', id] as const,
+  allResources: () => [...root, 'resources'] as const,
   resources: (id: string) => [...root, 'resources', id] as const,
   parents: () => [...root, 'parents'] as const,
 };

@@ -7,8 +7,10 @@ import type {
 } from '@trogonai/proto';
 
 import type { EnvironmentId } from '@/features/environments/domain/environment-id';
+import { environmentKeys } from '@/features/environments/queries';
 import { useCurrentProjectId } from '@/features/projects/current-project';
 import type { ProjectId } from '@/features/projects/domain/project-id';
+import { projectKeys } from '@/features/projects/queries';
 
 import type { CredentialDispatchResult } from './client';
 import { useSecretsClient } from './context';
@@ -111,7 +113,12 @@ function useInvalidatingMutation<TVariables, TResult>(mutationFn: (variables: TV
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn,
-    onSettled: () => queryClient.invalidateQueries({ queryKey: secretKeys.all }),
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: secretKeys.all }),
+        queryClient.invalidateQueries({ queryKey: environmentKeys.all }),
+        queryClient.invalidateQueries({ queryKey: projectKeys.allResources() }),
+      ]),
   });
 }
 

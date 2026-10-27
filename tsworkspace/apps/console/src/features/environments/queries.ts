@@ -3,6 +3,7 @@ import { useMemo } from 'react';
 
 import { useCurrentProjectId } from '@/features/projects/current-project';
 import type { ProjectId } from '@/features/projects/domain/project-id';
+import { projectKeys } from '@/features/projects/queries';
 
 import { useEnvironmentsClient } from './context';
 import { environmentCommands } from './domain/commands';
@@ -60,7 +61,11 @@ function useInvalidatingMutation<TVariables, TResult>(mutationFn: (variables: TV
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn,
-    onSettled: () => queryClient.invalidateQueries({ queryKey: environmentKeys.all }),
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: environmentKeys.all }),
+        queryClient.invalidateQueries({ queryKey: projectKeys.allResources() }),
+      ]),
   });
 }
 

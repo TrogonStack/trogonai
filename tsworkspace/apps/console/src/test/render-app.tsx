@@ -32,6 +32,7 @@ export function renderApp(path: string, backend: FakeBackend = createFakeBackend
     projects: backend.projects,
     secrets: backend.secrets,
     environments: backend.environments,
+    queryClient,
     router,
   };
 }
