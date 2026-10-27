@@ -11,10 +11,18 @@ export const MAX_NODE_ID_LENGTH = 40;
 
 const NEW_NODE_ID_PATTERN = /^[a-z][a-z0-9-]*$/;
 
+const ROUTE_RESERVED_NODE_IDS: ReadonlySet<string> = new Set(['new']);
+
+function reservedNodeIdProblem(value: string): string | undefined {
+  return ROUTE_RESERVED_NODE_IDS.has(value)
+    ? `A node id cannot be "${value}", because that address opens the create form.`
+    : undefined;
+}
+
 export function nodeIdProblem(value: string): string | undefined {
   if (value.length === 0) return 'A parent node is required.';
   if (!/^[A-Za-z0-9_-]+$/.test(value)) return 'A node id is one identifier, never a path.';
-  return undefined;
+  return reservedNodeIdProblem(value);
 }
 
 export function parseNodeId(value: string): NodeId | undefined {
@@ -44,7 +52,7 @@ export function newNodeIdProblem(value: string): string | undefined {
   if (value.length > MAX_NODE_ID_LENGTH) return `An id is at most ${MAX_NODE_ID_LENGTH} characters.`;
   if (!/^[a-z]/.test(value)) return 'An id starts with a lowercase letter.';
   if (!NEW_NODE_ID_PATTERN.test(value)) return 'An id uses only lowercase letters, digits and hyphens.';
-  return undefined;
+  return reservedNodeIdProblem(value);
 }
 
 export function parseNewNodeId(value: string): NodeId | undefined {
