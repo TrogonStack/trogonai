@@ -101,7 +101,7 @@ impl NKeySeed {
         if nkeys::KeyPair::from_seed(trimmed).is_ok() {
             return SecretString::new(trimmed).ok().map(Self::Inline);
         }
-        Location::parse(raw).map(Self::File)
+        Location::parse(trimmed).map(Self::File)
     }
 
     pub async fn resolve(&self) -> Result<String, SettingError> {

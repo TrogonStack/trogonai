@@ -229,3 +229,10 @@ fn missing_companion_names_the_other_setting() {
         "must be set together with NATS_KEY"
     );
 }
+
+#[test]
+fn nkey_seed_path_ignores_surrounding_whitespace() {
+    let seed = NKeySeed::parse(" /run/user.nk\n").unwrap();
+
+    assert!(matches!(seed, NKeySeed::File(Location::Path(ref path)) if path == Path::new("/run/user.nk")));
+}
