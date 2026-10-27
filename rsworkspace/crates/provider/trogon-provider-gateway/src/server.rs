@@ -27,12 +27,16 @@ pub(crate) async fn bind(address: SocketAddr) -> Result<TcpListener, ServerError
 pub(crate) async fn serve(
     listener: TcpListener,
     router: Router,
+    health: trogon_provider_gateway::Health,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), ServerError> {
     let address = listener.local_addr().map_err(ServerError::LocalAddress)?;
     tracing::info!(%address, "provider gateway listening");
 
-    let router = trogon_std::telemetry::http::instrument_router(router);
+    let shutdown = async move {
+        shutdown.await;
+        health.begin_shutdown();
+    };
     axum::serve(listener, router)
         .with_graceful_shutdown(shutdown)
         .await

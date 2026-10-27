@@ -23,11 +23,13 @@ async fn main() -> Result<(), error::Error> {
         &SystemFs,
     );
 
+    let health = trogon_provider_gateway::Health::default();
     let result = match server::bind(config.bind_addr()).await {
         Ok(listener) => {
             server::serve(
                 listener,
-                trogon_provider_gateway::router(),
+                trogon_provider_gateway::router(health.clone()),
+                health,
                 trogon_std::signal::shutdown_signal(),
             )
             .await
