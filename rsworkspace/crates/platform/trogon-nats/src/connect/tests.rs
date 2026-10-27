@@ -148,7 +148,7 @@ async fn build_options_rejects_missing_nkey_file() {
         err,
         ConnectError::InvalidSetting {
             setting: "NATS_NKEY",
-            error: SettingError::Read { .. }
+            error: SettingError::SeedFileRead(_)
         }
     ));
 }

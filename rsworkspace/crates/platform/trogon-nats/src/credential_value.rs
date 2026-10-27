@@ -20,8 +20,10 @@ pub enum SettingError {
     EnvUnset(String),
     #[error("invalid NKey seed: {0}")]
     InvalidSeed(#[source] nkeys::error::Error),
-    #[error("no NKey seed found in {}", .0.display())]
-    NoSeedFound(PathBuf),
+    #[error("cannot read the NKey seed file: {0}")]
+    SeedFileRead(#[source] io::Error),
+    #[error("no NKey seed found in the NKey seed file")]
+    NoSeedFound,
     #[error("must be set together with {0}")]
     MissingCompanion(&'static str),
 }
@@ -67,14 +69,18 @@ impl Location {
 
     /// Reads an NKey seed from a plain or decorated seed file (including a
     /// `.creds` file), taking the first line that starts with a seed prefix.
+    /// Errors never echo the path, because a mistyped inline seed is read as
+    /// a path.
     pub async fn read_seed(&self) -> Result<String, SettingError> {
         let path = self.path()?;
-        let contents = read_file(path).await?;
+        let contents = tokio::fs::read_to_string(path)
+            .await
+            .map_err(SettingError::SeedFileRead)?;
         let seed = contents
             .lines()
             .map(str::trim)
             .find(|line| SEED_PREFIXES.iter().any(|prefix| line.starts_with(prefix)))
-            .ok_or_else(|| SettingError::NoSeedFound(path.to_path_buf()))?;
+            .ok_or(SettingError::NoSeedFound)?;
         nkeys::KeyPair::from_seed(seed).map_err(SettingError::InvalidSeed)?;
         Ok(seed.to_owned())
     }
@@ -110,7 +116,7 @@ impl fmt::Debug for NKeySeed {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Inline(_) => f.debug_tuple("Inline").field(&"<redacted>").finish(),
-            Self::File(location) => f.debug_tuple("File").field(location).finish(),
+            Self::File(_) => f.debug_tuple("File").field(&"<redacted>").finish(),
         }
     }
 }

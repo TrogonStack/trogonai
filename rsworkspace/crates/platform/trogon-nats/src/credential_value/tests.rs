@@ -170,10 +170,17 @@ async fn location_read_seed_accepts_decorated_creds_file() {
 }
 
 #[tokio::test]
+async fn location_read_seed_does_not_carry_the_path_on_read_errors() {
+    let location = Location::parse("/nonexistent/seed.nk").unwrap();
+
+    assert!(matches!(location.read_seed().await, Err(SettingError::SeedFileRead(_))));
+}
+
+#[tokio::test]
 async fn location_read_seed_rejects_file_without_seed() {
     let (_file, location) = seed_file("not a seed\n");
 
-    assert!(matches!(location.read_seed().await, Err(SettingError::NoSeedFound(_))));
+    assert!(matches!(location.read_seed().await, Err(SettingError::NoSeedFound)));
 }
 
 #[tokio::test]
@@ -203,14 +210,16 @@ fn debug_shows_references_by_name() {
 }
 
 #[test]
-fn nkey_seed_debug_redacts_inline_seeds_only() {
+fn nkey_seed_debug_redacts_inline_seeds_and_paths() {
     let seed = nkeys::KeyPair::new_user().seed().unwrap();
+    let mistyped = format!("{seed}X");
     let inline = format!("{:?}", NKeySeed::parse(&seed).unwrap());
-    let file = format!("{:?}", NKeySeed::parse("/run/user.nk").unwrap());
+    let file = format!("{:?}", NKeySeed::parse(&mistyped).unwrap());
 
     assert!(!inline.contains(&seed));
     assert!(inline.contains("<redacted>"));
-    assert!(file.contains("/run/user.nk"));
+    assert!(!file.contains(&seed));
+    assert!(file.contains("<redacted>"));
 }
 
 #[test]
