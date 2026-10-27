@@ -1,5 +1,6 @@
 use std::fmt;
 
+use google_cloud_auth::build_errors;
 use google_cloud_auth::credentials::{Credentials, external_account, service_account};
 use serde_json::Value;
 
@@ -39,9 +40,9 @@ pub enum GoogleCredentialsError {
     #[error("unsupported credentials type, supported types are service_account and external_account")]
     UnsupportedType,
     #[error("service_account credentials are malformed")]
-    MalformedServiceAccount,
+    MalformedServiceAccount(#[source] build_errors::Error),
     #[error("external_account credentials are malformed")]
-    MalformedExternalAccount,
+    MalformedExternalAccount(#[source] build_errors::Error),
 }
 
 #[derive(Clone)]
@@ -81,10 +82,10 @@ impl GoogleCredentials {
         match self.kind {
             GoogleCredentialsKind::ServiceAccount => service_account::Builder::new(document)
                 .build()
-                .map_err(|_| GoogleCredentialsError::MalformedServiceAccount),
+                .map_err(GoogleCredentialsError::MalformedServiceAccount),
             GoogleCredentialsKind::ExternalAccount => external_account::Builder::new(document)
                 .build()
-                .map_err(|_| GoogleCredentialsError::MalformedExternalAccount),
+                .map_err(GoogleCredentialsError::MalformedExternalAccount),
         }
     }
 }
