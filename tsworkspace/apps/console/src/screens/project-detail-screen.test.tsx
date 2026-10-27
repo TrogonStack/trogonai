@@ -80,6 +80,22 @@ describe('project detail', () => {
     );
   });
 
+  it('restores the saved name when the rename dialog is reopened after a cancel', async () => {
+    const user = userEvent.setup();
+    renderApp('/projects/proj-beacon');
+
+    await user.click(await screen.findByRole('button', { name: 'Rename' }));
+    let form = within(await screen.findByRole('form', { name: 'Rename project' }));
+    const original = (form.getByLabelText('Project name') as HTMLInputElement).value;
+    await user.type(form.getByLabelText('Project name'), ' discarded');
+    await user.click(form.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('form', { name: 'Rename project' })).not.toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: 'Rename' }));
+    form = within(await screen.findByRole('form', { name: 'Rename project' }));
+    expect(form.getByLabelText('Project name')).toHaveValue(original);
+  });
+
   it('refuses an empty name without dispatching', async () => {
     const user = userEvent.setup();
     const { projects } = renderApp('/projects/proj-beacon');
@@ -104,6 +120,22 @@ describe('project detail', () => {
     await user.click(form.getByRole('button', { name: 'Save goal' }));
 
     expect(await screen.findByText('Retire the beacon.', { selector: 'p.max-w-prose' })).toBeInTheDocument();
+  });
+
+  it('restores the saved goal when the restate dialog is reopened after a cancel', async () => {
+    const user = userEvent.setup();
+    renderApp('/projects/proj-beacon');
+
+    await user.click(await screen.findByRole('button', { name: 'Restate goal' }));
+    let form = within(await screen.findByRole('form', { name: 'Restate goal' }));
+    const original = (form.getByLabelText('Goal') as HTMLTextAreaElement).value;
+    await user.type(form.getByLabelText('Goal'), ' discarded');
+    await user.click(form.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('form', { name: 'Restate goal' })).not.toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: 'Restate goal' }));
+    form = within(await screen.findByRole('form', { name: 'Restate goal' }));
+    expect(form.getByLabelText('Goal')).toHaveValue(original);
   });
 
   it('archives after confirmation and then offers unarchive', async () => {

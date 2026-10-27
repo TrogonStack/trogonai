@@ -11,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { useOnOpen } from '@/components/use-on-open';
 
 interface RenameDialogProps {
   title: string;
@@ -39,14 +40,15 @@ export function RenameDialog({
 }: RenameDialogProps) {
   const [name, setName] = useState(current);
   const [attempted, setAttempted] = useState(false);
+
+  useOnOpen(open, () => setName(current));
+
   const invalid = attempted && name.trim() === '' ? `${label} is required.` : undefined;
 
   const close = (next: boolean) => {
     if (!next) {
       onReset();
       setAttempted(false);
-    } else {
-      setName(current);
     }
     onOpenChange(next);
   };

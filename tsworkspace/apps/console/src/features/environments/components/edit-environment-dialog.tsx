@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useNotify } from '@/components/ui/toaster';
+import { useOnOpen } from '@/components/use-on-open';
 
 import { MAX_DESCRIPTION_LENGTH, MAX_DISPLAY_NAME_LENGTH } from '../domain/environment';
 import type { EnvironmentView } from '../domain/view';
@@ -31,6 +32,11 @@ export function EditEnvironmentDialog({ environment, open, onOpenChange }: EditE
   const [description, setDescription] = useState(environment.description);
   const [attempted, setAttempted] = useState(false);
 
+  useOnOpen(open, () => {
+    setName(environment.displayName);
+    setDescription(environment.description);
+  });
+
   const nameError =
     attempted && name.trim() === ''
       ? 'An environment name is required.'
@@ -46,9 +52,6 @@ export function EditEnvironmentDialog({ environment, open, onOpenChange }: EditE
     if (!next) {
       update.reset();
       setAttempted(false);
-    } else {
-      setName(environment.displayName);
-      setDescription(environment.description);
     }
     onOpenChange(next);
   };

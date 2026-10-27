@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { useNotify } from '@/components/ui/toaster';
+import { useOnOpen } from '@/components/use-on-open';
 
 import { MAX_GOAL_LENGTH, goalProblem } from '../domain/decider';
 import type { ProjectView } from '../domain/view';
@@ -30,13 +31,13 @@ export function RestateGoalDialog({ project, open, onOpenChange }: RestateGoalDi
   const [goal, setGoal] = useState(project.goal);
   const [attempted, setAttempted] = useState(false);
 
+  useOnOpen(open, () => setGoal(project.goal));
+
   const goalError = attempted ? goalProblem(goal) : undefined;
   const hint = `Up to ${MAX_GOAL_LENGTH} characters.`;
 
   const close = (next: boolean) => {
-    if (next) {
-      setGoal(project.goal);
-    } else {
+    if (!next) {
       restate.reset();
       setAttempted(false);
     }

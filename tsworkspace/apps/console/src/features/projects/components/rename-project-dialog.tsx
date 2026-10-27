@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useNotify } from '@/components/ui/toaster';
+import { useOnOpen } from '@/components/use-on-open';
 
 import { MAX_DISPLAY_NAME_LENGTH, displayNameProblem } from '../domain/decider';
 import type { ProjectView } from '../domain/view';
@@ -29,12 +30,12 @@ export function RenameProjectDialog({ project, open, onOpenChange }: RenameProje
   const [name, setName] = useState(project.displayName);
   const [attempted, setAttempted] = useState(false);
 
+  useOnOpen(open, () => setName(project.displayName));
+
   const nameError = attempted ? displayNameProblem(name) : undefined;
 
   const close = (next: boolean) => {
-    if (next) {
-      setName(project.displayName);
-    } else {
+    if (!next) {
       rename.reset();
       setAttempted(false);
     }

@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 
@@ -21,6 +21,22 @@ describe('vault detail', () => {
     const button = await screen.findByRole('button', { name: 'Schedule destruction' });
     expect(button).toBeDisabled();
     expect(await screen.findByText(/credential/i, { selector: 'p.text-right' })).toBeInTheDocument();
+  });
+
+  it('restores the saved name when the rename dialog is reopened after a cancel', async () => {
+    const user = userEvent.setup();
+    renderApp(`/secrets/vaults/${seedIds.vaults.staging}`);
+
+    await user.click(await screen.findByRole('button', { name: 'Rename' }));
+    let dialog = await screen.findByRole('dialog');
+    const original = (within(dialog).getByLabelText('Vault name') as HTMLInputElement).value;
+    await user.type(within(dialog).getByLabelText('Vault name'), ' discarded');
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: 'Rename' }));
+    dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByLabelText('Vault name')).toHaveValue(original);
   });
 
   it('disables and re-enables a vault', async () => {

@@ -126,6 +126,22 @@ describe('environment detail', () => {
     expect(await screen.findByRole('heading', { name: 'Quality' })).toBeInTheDocument();
   });
 
+  it('restores the saved values when the edit dialog is reopened after a cancel', async () => {
+    const user = userEvent.setup();
+    renderApp('/environments/qa');
+
+    await user.click(await screen.findByRole('button', { name: 'Edit' }));
+    let dialog = await screen.findByRole('dialog');
+    const original = (within(dialog).getByLabelText('Environment name') as HTMLInputElement).value;
+    await user.type(within(dialog).getByLabelText('Environment name'), ' discarded');
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByLabelText('Environment name')).toHaveValue(original);
+  });
+
   it('says so when the environment does not exist', async () => {
     renderApp('/environments/nowhere');
 
