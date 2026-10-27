@@ -46,6 +46,7 @@ configured as a named integration and mounted at its integration path.
 | Notion | `/sources/notion/{integration}/webhook` |
 | Sentry | `/sources/sentry/{integration}/webhook` |
 | Datadog | `/sources/datadog/{integration}/webhook` |
+| Zoom | `/sources/zoom/{integration}/webhook` |
 
 Integration IDs must contain only ASCII letters, numbers, `_`, or `-`. They cannot be empty, contain path
 separators, or exceed 64 characters.
@@ -73,6 +74,7 @@ or explicit environment reference shape.
 | Notion | `verification_token` |
 | Sentry | `client_secret` |
 | Datadog | `webhook_token` |
+| Zoom | `secret_token` |
 
 ## Core configuration
 
@@ -115,6 +117,7 @@ Source-specific extras:
 - Twitter/X `consumer_secret` is used for both CRC responses and `x-twitter-webhooks-signature` validation
 - Datadog webhooks are not signed. `webhook_token` is a shared secret the operator sends as a custom header (configured in the Datadog webhook's *Custom Headers*), verified in constant time. The header name defaults to `X-Datadog-Webhook-Token` and can be overridden per integration with `webhook_token_header`. Routing keys off an `event_type` field in the payload template, falling back to `.unroutable` when it is absent or invalid; an optional `id` field is used as the NATS message ID for deduplication
 - Datadog `timestamp_tolerance_secs` (optional, disabled by default) enables a freshness/anti-replay check. Datadog sends no timestamp header, so the operator must template a `timestamp` field carrying `$DATE_POSIX` (POSIX seconds) into the payload. When enabled, requests whose `timestamp` is outside the window are rejected (`401`), and requests missing/with an unparseable `timestamp` are rejected (`400`). `0` or unset disables the check
+- Zoom `secret_token` is the app's Secret Token. Requests are verified with `x-zm-signature` over `v0:{x-zm-request-timestamp}:{body}`, and `timestamp_tolerance_secs` (default: `300`) bounds how far `x-zm-request-timestamp` may drift from the gateway clock. Zoom provides no stable per-delivery identifier, so no NATS message ID is set and retries are not deduplicated
 
 ## Config file shape
 
@@ -185,6 +188,10 @@ client_secret = "sentry-client-secret"
 webhook_token = { env = "DATADOG_PRIMARY_WEBHOOK_TOKEN" }
 # webhook_token_header = "X-Datadog-Webhook-Token"  # optional; override the custom header name
 # timestamp_tolerance_secs = 300  # optional anti-replay window; requires "timestamp": "$DATE_POSIX" in the payload
+
+[sources.zoom.integrations.primary.webhook]
+secret_token = { env = "ZOOM_PRIMARY_SECRET_TOKEN" }
+# timestamp_tolerance_secs = 300  # optional; max drift of x-zm-request-timestamp
 ```
 
 Configure the matching Datadog webhook (Integrations > Webhooks) with a custom header and a payload template, for example:
@@ -207,6 +214,18 @@ Configure the matching Datadog webhook (Integrations > Webhooks) with a custom h
 ```
 
 `timestamp` is only required when `timestamp_tolerance_secs` is set; `$DATE_POSIX` is POSIX epoch seconds (`$DATE` is epoch milliseconds, which this source does not accept).
+
+## Zoom
+
+Subscribe a Zoom app's Event Subscriptions to `https://<gateway-host>/sources/zoom/{integration}/webhook` and
+set the app's Secret Token as `secret_token`. The gateway verifies the signature and timestamp on every request,
+answers the `endpoint.url_validation` handshake inline with the `plainToken` and its `encryptedToken` (no NATS
+publish), and publishes every other event body unchanged to `{subject_prefix}.{event}`. Dots in Zoom event
+names become subject tokens, so `recording.transcript_completed` lands on
+`zoom-primary.recording.transcript_completed` and `meeting.ended` on `zoom-primary.meeting.ended`. Bodies that
+are not JSON, lack `event`, or carry an event name that is not a valid subject go to `{subject_prefix}.unroutable`
+with an `X-Zoom-Reject-Reason` header. This source does not call the Zoom API; consumers fetch recordings or
+transcripts themselves.
 
 ## Microsoft Graph change notifications
 

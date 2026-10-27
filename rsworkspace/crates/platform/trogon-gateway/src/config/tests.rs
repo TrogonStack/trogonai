@@ -138,6 +138,15 @@ webhook_token = "{token}"
     )
 }
 
+fn zoom_toml(token: &str) -> String {
+    format!(
+        r#"
+[sources.zoom.integrations.primary.webhook]
+secret_token = "{token}"
+"#
+    )
+}
+
 fn incidentio_valid_test_secret() -> String {
     ["whsec_", "dGVzdC1zZWNyZXQ="].concat()
 }
@@ -2921,5 +2930,121 @@ fn google_pubsub_reports_credentials_and_subscription_errors_together() {
         errors
             .iter()
             .any(|e| e.contains("google_pubsub/primary: missing credentials"))
+    );
+}
+
+#[test]
+fn zoom_resolves_with_defaults() {
+    let f = write_toml(&zoom_toml("zoom-token"));
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert_eq!(cfg.zoom.len(), 1);
+    let zoom = &cfg.zoom[0].config;
+    assert_eq!(zoom.subject_prefix.as_str(), "zoom-primary");
+    assert_eq!(zoom.stream_name.as_str(), "ZOOM_PRIMARY");
+    assert_eq!(std::time::Duration::from(zoom.timestamp_tolerance).as_secs(), 300);
+    assert_eq!(zoom.secret_token.as_str(), "zoom-token");
+}
+
+#[test]
+fn zoom_accepts_custom_timestamp_tolerance() {
+    let toml = r#"
+[sources.zoom.integrations.primary.webhook]
+secret_token = "zoom-token"
+timestamp_tolerance_secs = 60
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert_eq!(
+        std::time::Duration::from(cfg.zoom[0].config.timestamp_tolerance).as_secs(),
+        60
+    );
+}
+
+#[test]
+fn zoom_resolves_secret_token_from_env_table() {
+    let toml = r#"
+[sources.zoom.integrations.primary.webhook]
+secret_token = { env = "PATH" }
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert!(!cfg.zoom[0].config.secret_token.as_str().is_empty());
+}
+
+#[test]
+fn zoom_disabled_returns_none() {
+    let toml = r#"
+[sources.zoom]
+status = "disabled"
+
+[sources.zoom.integrations.primary.webhook]
+secret_token = "zoom-token"
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert!(cfg.zoom.is_empty());
+}
+
+#[test]
+fn zoom_empty_secret_token_is_invalid() {
+    let f = write_toml(&zoom_toml(""));
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("zoom/primary: invalid secret_token")))
+    );
+}
+
+#[test]
+fn zoom_missing_secret_token_is_invalid() {
+    let toml = r#"
+[sources.zoom.integrations.primary.webhook]
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("zoom/primary") && e.contains("secret_token")))
+    );
+}
+
+#[test]
+fn zoom_invalid_subject_prefix() {
+    let toml = r#"
+[sources.zoom.integrations.primary]
+subject_prefix = "has.dots"
+
+[sources.zoom.integrations.primary.webhook]
+secret_token = "zoom-token"
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("zoom/primary: invalid subject_prefix")))
+    );
+}
+
+#[test]
+fn zoom_zero_timestamp_tolerance_is_error() {
+    let toml = r#"
+[sources.zoom.integrations.primary.webhook]
+secret_token = "zoom-token"
+timestamp_tolerance_secs = 0
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("zoom/primary: timestamp_tolerance_secs must not be zero")))
+    );
+}
+
+#[test]
+fn zoom_enabled_integration_without_webhook_is_invalid() {
+    let toml = r#"
+[sources.zoom.integrations.primary]
+status = "enabled"
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("zoom/primary: missing webhook")))
     );
 }

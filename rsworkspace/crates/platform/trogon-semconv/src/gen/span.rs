@@ -221,3 +221,6 @@ pub const TWITTER_CRC: &str = "twitter.crc";
 
 /// Twitter webhook ingestion
 pub const TWITTER_WEBHOOK: &str = "twitter.webhook";
+
+/// Zoom webhook ingestion
+pub const ZOOM_WEBHOOK: &str = "zoom.webhook";
