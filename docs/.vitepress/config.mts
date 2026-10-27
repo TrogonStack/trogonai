@@ -99,6 +99,10 @@ export default async () => {
             { text: "Migrate Between Key Backends", link: "/how-to/migrate-key-backends" },
             { text: "Handle Unusable Keys", link: "/how-to/handle-unusable-keys" },
             {
+              text: "Receive Meeting Transcript Notifications",
+              link: "/how-to/receive-meeting-transcript-notifications",
+            },
+            {
               text: "Retire the ACP Notifications Stream",
               link: "/how-to/retire-acp-notifications-stream",
             },
