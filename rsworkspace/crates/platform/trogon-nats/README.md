@@ -12,7 +12,7 @@ These variables accept the same values as the `nats` CLI.
 - `NATS_NKEY`: an NKey seed, or a seed file as a path or `file://path`. A seed file may be plain or decorated (a `.creds` file works); the first line starting with a seed prefix is used, and the file is read at connect time.
 - `NATS_JWT` and `NATS_SEED`: user JWT signed with the seed. `NATS_JWT` alone sends an empty signature.
 - `NATS_TOKEN`: token.
-- `NATS_CERT` and `NATS_KEY`: client certificate and key. Both are required.
+- `NATS_CERT` and `NATS_KEY`: client certificate and key. Setting only one of them fails the connection.
 - `NATS_CA`: root CA certificate.
 
 Authentication resolves in this order: `NATS_CREDS`, `NATS_NKEY`, `NATS_USER` plus `NATS_PASSWORD`, `NATS_TOKEN` (or `NATS_USER` set without `NATS_PASSWORD`), `NATS_JWT` (signed when `NATS_SEED` is set), then no auth.

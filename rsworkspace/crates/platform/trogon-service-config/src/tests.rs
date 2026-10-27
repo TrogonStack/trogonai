@@ -226,7 +226,7 @@ fn resolve_nats_tls_overrides_section() {
     };
 
     let resolved = resolve_nats(&section, &overrides);
-    let client = resolved.tls.client_certificate().unwrap();
+    let client = resolved.tls.client_certificate().unwrap().unwrap();
 
     assert_eq!(client.cert, Location::Path("/override.crt".into()));
     assert_eq!(client.key, Location::Path("/section.key".into()));
@@ -240,11 +240,9 @@ fn resolve_nats_tls_needs_cert_and_key() {
         ..empty_section()
     };
 
-    assert!(
-        resolve_nats(&section, &NatsArgs::default())
-            .tls
-            .client_certificate()
-            .is_none()
+    assert_eq!(
+        resolve_nats(&section, &NatsArgs::default()).tls.client_certificate(),
+        Err(trogon_nats::IncompleteClientCertificate::MissingKey)
     );
 }
 

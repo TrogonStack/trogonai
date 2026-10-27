@@ -47,3 +47,6 @@ pub const MAX_SUBJECT_BYTES: usize = 256;
 /// (`custom.{base64url}`). The token following it is the sole exemption from
 /// lower_snake; the wildcard, token-count, and byte limits still bind it.
 pub const ESCAPE_TOKEN: &str = "custom";
+
+/// Prefixes of operator, account and user NKey seeds.
+pub const SEED_PREFIXES: [&str; 3] = ["SO", "SA", "SU"];

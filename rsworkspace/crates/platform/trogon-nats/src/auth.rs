@@ -1,12 +1,10 @@
 use std::fmt;
-use trogon_std::env::ReadEnv;
 
 use crate::credential_value::{CredentialValue, Location, NKeySeed};
-use crate::settings::NatsSettings;
 use crate::tls::NatsTls;
 
-/// NATS authentication method, chosen exclusively; see [`NatsSettings`] for
-/// the precedence.
+/// NATS authentication method, chosen exclusively; see
+/// [`NatsSettings`](crate::settings::NatsSettings) for the precedence.
 #[derive(Clone)]
 pub enum NatsAuth {
     Credentials(Location),
@@ -78,12 +76,6 @@ impl NatsConfig {
     pub fn with_tls(mut self, tls: NatsTls) -> Self {
         self.tls = tls;
         self
-    }
-
-    /// Build config from the same environment variables the `nats` CLI reads.
-    /// See [`NatsSettings`] for the precedence rules.
-    pub fn from_env<E: ReadEnv>(env: &E) -> Self {
-        NatsSettings::from_env(env).resolve()
     }
 }
 

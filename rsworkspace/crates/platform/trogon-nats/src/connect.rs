@@ -94,9 +94,7 @@ async fn apply_auth<E: ReadEnv>(
                         KeyPair::from_seed(seed.trim())
                             .map_err(|e| invalid_setting(ENV_NATS_SEED)(SettingError::InvalidSeed(e)))?,
                     );
-                    Ok(opts.jwt(jwt, move |nonce| {
-                        std::future::ready(key_pair.sign(&nonce).map_err(AuthError::new))
-                    }))
+                    Ok(opts.jwt(jwt, jwt_signer(key_pair)))
                 }
                 None => Ok(opts.jwt(jwt, |_| std::future::ready(Ok(Vec::new())))),
             }
@@ -109,12 +107,24 @@ async fn apply_auth<E: ReadEnv>(
     }
 }
 
+fn jwt_signer(
+    key_pair: Arc<KeyPair>,
+) -> impl Fn(Vec<u8>) -> std::future::Ready<Result<Vec<u8>, AuthError>> + Send + Sync + 'static {
+    move |nonce| std::future::ready(key_pair.sign(&nonce).map_err(AuthError::new))
+}
+
 fn apply_tls(opts: ConnectOptions, tls: &NatsTls) -> Result<ConnectOptions, ConnectError> {
     if !tls.is_configured() {
         return Ok(opts);
     }
     let mut opts = opts.require_tls(true);
-    if let Some(client) = tls.client_certificate() {
+    let client_certificate = tls
+        .client_certificate()
+        .map_err(|incomplete| ConnectError::InvalidSetting {
+            setting: incomplete.present_setting(),
+            error: SettingError::MissingCompanion(incomplete.missing_setting()),
+        })?;
+    if let Some(client) = client_certificate {
         let cert = client.cert.path().map_err(invalid_setting(ENV_NATS_CERT))?;
         let key = client.key.path().map_err(invalid_setting(ENV_NATS_KEY))?;
         opts = opts.add_client_certificate(cert.to_path_buf(), key.to_path_buf());

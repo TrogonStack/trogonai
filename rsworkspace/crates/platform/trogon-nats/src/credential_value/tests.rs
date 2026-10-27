@@ -192,3 +192,31 @@ fn debug_redacts_literals_only() {
     let file = format!("{:?}", CredentialValue::parse("file:///run/token").unwrap());
     assert!(file.contains("/run/token"));
 }
+
+#[test]
+fn debug_shows_references_by_name() {
+    let env = format!("{:?}", CredentialValue::parse("env://NATS_SECRET").unwrap());
+    let unsupported = format!("{:?}", CredentialValue::parse("op://vault/item").unwrap());
+
+    assert_eq!(env, r#"Env("NATS_SECRET")"#);
+    assert_eq!(unsupported, r#"Unsupported("op")"#);
+}
+
+#[test]
+fn nkey_seed_debug_redacts_inline_seeds_only() {
+    let seed = nkeys::KeyPair::new_user().seed().unwrap();
+    let inline = format!("{:?}", NKeySeed::parse(&seed).unwrap());
+    let file = format!("{:?}", NKeySeed::parse("/run/user.nk").unwrap());
+
+    assert!(!inline.contains(&seed));
+    assert!(inline.contains("<redacted>"));
+    assert!(file.contains("/run/user.nk"));
+}
+
+#[test]
+fn missing_companion_names_the_other_setting() {
+    assert_eq!(
+        SettingError::MissingCompanion("NATS_KEY").to_string(),
+        "must be set together with NATS_KEY"
+    );
+}

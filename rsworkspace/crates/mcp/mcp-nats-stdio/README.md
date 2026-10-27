@@ -74,7 +74,7 @@ If none are set, the connection is unauthenticated.
 
 | Variable | Description |
 |----------|-------------|
-| `NATS_CERT` + `NATS_KEY` | Client certificate and key, paths or `file://path`. Both are required. |
+| `NATS_CERT` + `NATS_KEY` | Client certificate and key, paths or `file://path`. Setting only one of them fails the connection. |
 | `NATS_CA` | Root CA certificate, a path or `file://path` |
 
 Setting any of them requires TLS.

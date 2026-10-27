@@ -1,5 +1,6 @@
 use super::*;
 use crate::credential_value::{CredentialValue, NKeySeed};
+use crate::tls::IncompleteClientCertificate;
 use trogon_std::env::InMemoryEnv;
 
 fn literal_text(value: &CredentialValue) -> Option<&str> {
@@ -209,11 +210,17 @@ fn unsupported_value_scheme_is_kept_for_connect_time() {
 
 #[test]
 fn tls_needs_cert_and_key_together() {
-    assert!(config(&[("NATS_CERT", "/c.pem")]).tls.client_certificate().is_none());
-    assert!(config(&[("NATS_KEY", "/k.pem")]).tls.client_certificate().is_none());
+    assert_eq!(
+        config(&[("NATS_CERT", "/c.pem")]).tls.client_certificate(),
+        Err(IncompleteClientCertificate::MissingKey)
+    );
+    assert_eq!(
+        config(&[("NATS_KEY", "/k.pem")]).tls.client_certificate(),
+        Err(IncompleteClientCertificate::MissingCert)
+    );
 
     let both = config(&[("NATS_CERT", "/c.pem"), ("NATS_KEY", "file:///k.pem")]);
-    assert!(both.tls.client_certificate().is_some());
+    assert!(both.tls.client_certificate().unwrap().is_some());
 }
 
 #[test]
@@ -232,10 +239,11 @@ fn settings_debug_redacts_secrets() {
             ("NATS_TOKEN", "super-secret-token"),
             ("NATS_JWT", "super-secret-jwt"),
             ("NATS_SEED", "super-secret-seed"),
+            ("NATS_NKEY", "super-secret-nkey"),
         ])
     );
 
-    for secret in ["password", "token", "jwt", "seed"] {
+    for secret in ["password", "token", "jwt", "seed", "nkey"] {
         assert!(!debug.contains(&format!("super-secret-{secret}")));
     }
     assert!(debug.contains("<redacted>"));

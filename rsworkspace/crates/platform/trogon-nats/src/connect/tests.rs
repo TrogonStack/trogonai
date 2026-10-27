@@ -225,6 +225,66 @@ async fn build_options_rejects_unsupported_tls_scheme() {
     assert!(matches!(err, ConnectError::InvalidSetting { setting: "NATS_CA", .. }));
 }
 
+#[tokio::test]
+async fn build_options_rejects_cert_without_key() {
+    let tls = NatsTls::new(Location::parse("/c.pem"), None, None);
+
+    let err = build_options(&config_with(NatsAuth::None).with_tls(tls), &InMemoryEnv::new())
+        .await
+        .unwrap_err();
+
+    assert_eq!(err.to_string(), "Invalid NATS_CERT: must be set together with NATS_KEY");
+}
+
+#[tokio::test]
+async fn build_options_rejects_key_without_cert() {
+    let tls = NatsTls::new(None, Location::parse("/k.pem"), Location::parse("/ca.pem"));
+
+    let err = build_options(&config_with(NatsAuth::None).with_tls(tls), &InMemoryEnv::new())
+        .await
+        .unwrap_err();
+
+    assert_eq!(err.to_string(), "Invalid NATS_KEY: must be set together with NATS_CERT");
+}
+
+#[tokio::test]
+async fn build_options_rejects_unsupported_client_certificate_scheme() {
+    let cert = NatsTls::new(Location::parse("op://vault/cert"), Location::parse("/k.pem"), None);
+    let key = NatsTls::new(Location::parse("/c.pem"), Location::parse("op://vault/key"), None);
+
+    let cert_err = build_options(&config_with(NatsAuth::None).with_tls(cert), &InMemoryEnv::new())
+        .await
+        .unwrap_err();
+    let key_err = build_options(&config_with(NatsAuth::None).with_tls(key), &InMemoryEnv::new())
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        cert_err,
+        ConnectError::InvalidSetting {
+            setting: "NATS_CERT",
+            ..
+        }
+    ));
+    assert!(matches!(
+        key_err,
+        ConnectError::InvalidSetting {
+            setting: "NATS_KEY",
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn jwt_signer_signs_the_nonce_with_the_seed() {
+    let key_pair = Arc::new(KeyPair::new_user());
+    let signer = jwt_signer(Arc::clone(&key_pair));
+
+    let signature = signer(b"nonce".to_vec()).await.unwrap();
+
+    key_pair.verify(b"nonce", &signature).unwrap();
+}
+
 #[test]
 fn connect_error_display_invalid_setting() {
     let err = ConnectError::InvalidSetting {

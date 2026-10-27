@@ -90,7 +90,7 @@ NATS auth accepts the same values as the `nats` CLI. One method is chosen in thi
 
 `NATS_JWT`, `NATS_SEED`, `NATS_PASSWORD` and `NATS_TOKEN` accept `file://path` and `env://NAME` references. The `op`, `nsc` and `data` schemes are rejected at connect time.
 
-TLS is configured with `NATS_CERT` + `NATS_KEY` (both required) and `NATS_CA`. Setting any of them requires TLS.
+TLS is configured with `NATS_CERT` + `NATS_KEY` (setting only one fails the connection) and `NATS_CA`. Setting any of them requires TLS.
 
 The same settings can be given as flags (`--nats-user`, `--nats-password`, `--nats-creds`, `--nats-nkey`, `--nats-jwt`, `--nats-seed`, `--nats-token`, `--nats-tls-cert`, `--nats-tls-key`, `--nats-tls-ca`) or in the `[nats]` TOML section (`tls_cert`, `tls_key`, `tls_ca` for the TLS values).
 

@@ -1,3 +1,4 @@
+use crate::constants::SEED_PREFIXES;
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -21,9 +22,9 @@ pub enum SettingError {
     InvalidSeed(#[source] nkeys::error::Error),
     #[error("no NKey seed found in {}", .0.display())]
     NoSeedFound(PathBuf),
+    #[error("must be set together with {0}")]
+    MissingCompanion(&'static str),
 }
-
-const SEED_PREFIXES: [&str; 3] = ["SO", "SA", "SU"];
 
 fn split_scheme(raw: &str) -> Option<(&str, &str)> {
     let end = raw.find(':')?;

@@ -46,7 +46,7 @@ impl fmt::Debug for NatsSettings {
             .field("password", &redacted(&self.password))
             .field("token", &redacted(&self.token))
             .field("creds", &self.creds)
-            .field("nkey", &self.nkey)
+            .field("nkey", &redacted(&self.nkey))
             .field("jwt", &redacted(&self.jwt))
             .field("seed", &redacted(&self.seed))
             .field("cert", &self.cert)
@@ -127,6 +127,14 @@ impl NatsSettings {
             .map(|server| server.trim().to_owned())
             .filter(|server| !server.is_empty())
             .collect()
+    }
+}
+
+impl NatsConfig {
+    /// Build config from the same environment variables the `nats` CLI reads.
+    /// See [`NatsSettings`] for the precedence rules.
+    pub fn from_env<E: ReadEnv>(env: &E) -> Self {
+        NatsSettings::from_env(env).resolve()
     }
 }
 
