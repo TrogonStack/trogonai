@@ -5,6 +5,9 @@ use crate::source::datadog::DatadogWebhookToken;
 use crate::source::discord::config::DiscordBotToken;
 use crate::source::github::config::GitHubWebhookSecret;
 use crate::source::gitlab::GitLabSigningToken;
+use crate::source::google_pubsub::config::{GooglePubSubTransportConfig, StreamingPullConfig};
+use crate::source::google_pubsub::credentials::GoogleCredentials;
+use crate::source::google_pubsub::{MaxOutstandingMessages, PubSubSubscriptionName};
 use crate::source::incidentio::config::IncidentioConfig as IncidentioSourceConfig;
 use crate::source::incidentio::incidentio_signing_secret::IncidentioSigningSecret;
 use crate::source::linear::config::LinearWebhookSecret;
@@ -347,6 +350,8 @@ struct SourcesConfig {
     #[config(nested)]
     gitlab: GitlabConfig,
     #[config(nested)]
+    google_pubsub: GooglePubSubConfigInput,
+    #[config(nested)]
     incidentio: IncidentioConfig,
     #[config(nested)]
     linear: LinearConfig,
@@ -418,6 +423,14 @@ struct GitlabConfig {
 
 #[derive(Config)]
 #[config(layer_attr(serde(deny_unknown_fields)))]
+struct GooglePubSubConfigInput {
+    status: Option<String>,
+    #[config(default = {})]
+    integrations: BTreeMap<String, GooglePubSubIntegrationInput>,
+}
+
+#[derive(Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
 struct LinearConfig {
     status: Option<String>,
     #[config(default = {})]
@@ -485,6 +498,25 @@ struct SlackIntegrationInput {
     nats_ack_timeout_secs: Option<u64>,
     webhook: Option<SlackWebhookConfig>,
     socket_mode: Option<SlackSocketModeConfig>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GooglePubSubIntegrationInput {
+    status: Option<String>,
+    subject_prefix: Option<String>,
+    stream_name: Option<String>,
+    stream_max_age_secs: Option<u64>,
+    nats_ack_timeout_secs: Option<u64>,
+    streaming_pull: Option<GooglePubSubStreamingPullInput>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GooglePubSubStreamingPullInput {
+    subscription: Option<String>,
+    max_outstanding_messages: Option<u32>,
+    credentials: Option<SecretInput>,
 }
 
 #[derive(serde::Deserialize)]
@@ -592,6 +624,7 @@ pub struct ResolvedConfig {
     pub telegram: Vec<SourceIntegration<crate::source::telegram::TelegramSourceConfig>>,
     pub twitter: Vec<SourceIntegration<crate::source::twitter::TwitterConfig>>,
     pub gitlab: Vec<SourceIntegration<crate::source::gitlab::GitlabConfig>>,
+    pub google_pubsub: Vec<SourceIntegration<crate::source::google_pubsub::GooglePubSubConfig>>,
     pub incidentio: Vec<SourceIntegration<crate::source::incidentio::IncidentioConfig>>,
     pub linear: Vec<SourceIntegration<crate::source::linear::LinearConfig>>,
     pub microsoft_graph: Vec<SourceIntegration<crate::source::microsoft_graph::MicrosoftGraphConfig>>,
@@ -619,6 +652,7 @@ impl ResolvedConfig {
             .chain(self.telegram.iter().map(|i| i.config.stream_max_age))
             .chain(self.twitter.iter().map(|i| i.config.stream_max_age))
             .chain(self.gitlab.iter().map(|i| i.config.stream_max_age))
+            .chain(self.google_pubsub.iter().map(|i| i.config.stream_max_age))
             .chain(self.incidentio.iter().map(|i| i.config.stream_max_age))
             .chain(self.linear.iter().map(|i| i.config.stream_max_age))
             .chain(self.microsoft_graph.iter().map(|i| i.config.stream_max_age))
@@ -634,6 +668,7 @@ impl ResolvedConfig {
             || !self.telegram.is_empty()
             || !self.twitter.is_empty()
             || !self.gitlab.is_empty()
+            || !self.google_pubsub.is_empty()
             || !self.incidentio.is_empty()
             || !self.linear.is_empty()
             || !self.microsoft_graph.is_empty()
@@ -678,6 +713,7 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs) -> Result<ResolvedConf
     let telegram = resolve_telegram_integrations(cfg.sources.telegram, &env, &mut errors);
     let twitter = resolve_twitter_integrations(cfg.sources.twitter, &env, &mut errors);
     let gitlab = resolve_gitlab_integrations(cfg.sources.gitlab, &env, &mut errors);
+    let google_pubsub = resolve_google_pubsub_integrations(cfg.sources.google_pubsub, &env, &mut errors);
     let incidentio = resolve_incidentio_integrations(cfg.sources.incidentio, &env, &mut errors);
     let linear = resolve_linear_integrations(cfg.sources.linear, &env, &mut errors);
     let microsoft_graph = resolve_microsoft_graph_integrations(cfg.sources.microsoft_graph, &env, &mut errors);
@@ -700,6 +736,7 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs) -> Result<ResolvedConf
         telegram,
         twitter,
         gitlab,
+        google_pubsub,
         incidentio,
         linear,
         microsoft_graph,
@@ -1442,6 +1479,145 @@ fn resolve_linear_integrations(
         ));
     }
     integrations
+}
+
+fn resolve_google_pubsub_integrations(
+    section: GooglePubSubConfigInput,
+    env: &impl ReadEnv,
+    errors: &mut Vec<ConfigValidationError>,
+) -> Vec<SourceIntegration<crate::source::google_pubsub::GooglePubSubConfig>> {
+    let GooglePubSubConfigInput {
+        status,
+        integrations: configured_integrations,
+    } = section;
+    let mut integrations = Vec::new();
+    if !resolve_source_status("google_pubsub", status.as_deref(), errors) {
+        return integrations;
+    }
+    for (raw_id, integration) in configured_integrations {
+        let Some(id) = resolve_integration_id("google_pubsub", raw_id, errors) else {
+            continue;
+        };
+        if !resolve_integration_source_status("google_pubsub", &id, integration.status.as_deref(), errors) {
+            continue;
+        }
+        let Some((subject_prefix, stream_name, stream_max_age, nats_ack_timeout)) = resolve_common_integration_fields(
+            CommonIntegrationFieldsInput {
+                source: "google_pubsub",
+                id: &id,
+                subject_source_prefix: "google-pubsub",
+                stream_source_prefix: "GOOGLE_PUBSUB",
+                subject_prefix: integration.subject_prefix,
+                stream_name: integration.stream_name,
+                stream_max_age_secs: integration.stream_max_age_secs,
+                nats_ack_timeout_secs: integration.nats_ack_timeout_secs,
+                default_nats_ack_timeout_secs: DEFAULT_NATS_ACK_TIMEOUT_SECS,
+            },
+            errors,
+        ) else {
+            continue;
+        };
+        let Some(transport) = resolve_google_pubsub_transport(&id, integration.streaming_pull, env, errors) else {
+            continue;
+        };
+        integrations.push(SourceIntegration::new(
+            id,
+            crate::source::google_pubsub::GooglePubSubConfig {
+                subject_prefix,
+                stream_name,
+                stream_max_age,
+                nats_ack_timeout,
+                transport,
+            },
+        ));
+    }
+    integrations
+}
+
+fn resolve_google_pubsub_transport(
+    id: &SourceIntegrationId,
+    streaming_pull: Option<GooglePubSubStreamingPullInput>,
+    env: &impl ReadEnv,
+    errors: &mut Vec<ConfigValidationError>,
+) -> Option<GooglePubSubTransportConfig> {
+    let Some(streaming_pull) = streaming_pull else {
+        errors.push(ConfigValidationError::missing_integration(
+            "google_pubsub",
+            id,
+            "transport",
+        ));
+        return None;
+    };
+
+    let subscription = match streaming_pull.subscription {
+        Some(raw) => match PubSubSubscriptionName::new(raw) {
+            Ok(subscription) => Some(subscription),
+            Err(error) => {
+                errors.push(ConfigValidationError::invalid_integration(
+                    "google_pubsub",
+                    id,
+                    "subscription",
+                    error,
+                ));
+                None
+            }
+        },
+        None => {
+            errors.push(ConfigValidationError::missing_integration(
+                "google_pubsub",
+                id,
+                "subscription",
+            ));
+            None
+        }
+    };
+
+    let (max_outstanding_messages, max_outstanding_messages_valid) =
+        match streaming_pull.max_outstanding_messages.map(MaxOutstandingMessages::new) {
+            Some(Ok(max)) => (Some(max), true),
+            Some(Err(error)) => {
+                errors.push(ConfigValidationError::invalid_integration(
+                    "google_pubsub",
+                    id,
+                    "max_outstanding_messages",
+                    error,
+                ));
+                (None, false)
+            }
+            None => (None, true),
+        };
+
+    let credentials = require_integration_value(
+        "google_pubsub",
+        id,
+        "credentials",
+        streaming_pull.credentials,
+        env,
+        errors,
+    )
+    .and_then(|document| match GoogleCredentials::parse(document) {
+        Ok(credentials) => Some(credentials),
+        Err(error) => {
+            errors.push(ConfigValidationError::invalid_integration(
+                "google_pubsub",
+                id,
+                "credentials",
+                error,
+            ));
+            None
+        }
+    });
+
+    let (Some(subscription), Some(credentials), true) = (subscription, credentials, max_outstanding_messages_valid)
+    else {
+        return None;
+    };
+
+    Some(GooglePubSubTransportConfig::StreamingPull(StreamingPullConfig {
+        subscription,
+        max_outstanding_messages,
+        credentials,
+    }))
 }
 
 fn resolve_microsoft_graph_integrations(

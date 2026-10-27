@@ -2,6 +2,8 @@ pub mod datadog;
 pub mod discord;
 pub mod github;
 pub mod gitlab;
+#[allow(dead_code, reason = "read by the StreamingPull runner")]
+pub mod google_pubsub;
 pub mod incidentio;
 pub mod linear;
 pub mod microsoft_graph;
