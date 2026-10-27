@@ -11,6 +11,7 @@ workspace = true
 clap = { workspace = true, features = ["derive"] }
 confique = { workspace = true }
 trogon-nats = { workspace = true }
+trogon-std = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

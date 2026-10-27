@@ -246,5 +246,5 @@ fn settings_debug_redacts_secrets() {
     for secret in ["password", "token", "jwt", "seed", "nkey"] {
         assert!(!debug.contains(&format!("super-secret-{secret}")));
     }
-    assert!(debug.contains("<redacted>"));
+    assert!(debug.contains("SecretString(***)"));
 }

@@ -1,6 +1,5 @@
-use std::fmt;
-
 use trogon_std::env::ReadEnv;
+use trogon_std::secret_string::SecretString;
 
 use crate::auth::{NatsAuth, NatsConfig};
 use crate::constants::{
@@ -22,56 +21,42 @@ use crate::tls::NatsTls;
 /// 5. `jwt` (signed with `seed` when present)
 ///
 /// Empty values count as unset.
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct NatsSettings {
     pub url: Option<String>,
     pub user: Option<String>,
-    pub password: Option<String>,
-    pub token: Option<String>,
+    pub password: Option<SecretString>,
+    pub token: Option<SecretString>,
     pub creds: Option<String>,
-    pub nkey: Option<String>,
-    pub jwt: Option<String>,
-    pub seed: Option<String>,
+    pub nkey: Option<SecretString>,
+    pub jwt: Option<SecretString>,
+    pub seed: Option<SecretString>,
     pub cert: Option<String>,
     pub key: Option<String>,
     pub ca: Option<String>,
-}
-
-impl fmt::Debug for NatsSettings {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let redacted = |value: &Option<String>| value.as_ref().map(|_| "<redacted>");
-        f.debug_struct("NatsSettings")
-            .field("url", &self.url)
-            .field("user", &self.user)
-            .field("password", &redacted(&self.password))
-            .field("token", &redacted(&self.token))
-            .field("creds", &self.creds)
-            .field("nkey", &redacted(&self.nkey))
-            .field("jwt", &redacted(&self.jwt))
-            .field("seed", &redacted(&self.seed))
-            .field("cert", &self.cert)
-            .field("key", &self.key)
-            .field("ca", &self.ca)
-            .finish()
-    }
 }
 
 fn non_empty(value: &Option<String>) -> Option<&str> {
     value.as_deref().filter(|value| !value.is_empty())
 }
 
+fn secret(value: &Option<SecretString>) -> Option<&str> {
+    value.as_ref().map(SecretString::as_str)
+}
+
 impl NatsSettings {
     pub fn from_env<E: ReadEnv>(env: &E) -> Self {
         let read = |name: &str| env.var(name).ok();
+        let read_secret = |name: &str| read(name).and_then(|value| SecretString::new(value).ok());
         Self {
             url: read(ENV_NATS_URL),
             user: read(ENV_NATS_USER),
-            password: read(ENV_NATS_PASSWORD),
-            token: read(ENV_NATS_TOKEN),
+            password: read_secret(ENV_NATS_PASSWORD),
+            token: read_secret(ENV_NATS_TOKEN),
             creds: read(ENV_NATS_CREDS),
-            nkey: read(ENV_NATS_NKEY),
-            jwt: read(ENV_NATS_JWT),
-            seed: read(ENV_NATS_SEED),
+            nkey: read_secret(ENV_NATS_NKEY),
+            jwt: read_secret(ENV_NATS_JWT),
+            seed: read_secret(ENV_NATS_SEED),
             cert: read(ENV_NATS_CERT),
             key: read(ENV_NATS_KEY),
             ca: read(ENV_NATS_CA),
@@ -80,12 +65,12 @@ impl NatsSettings {
 
     pub fn resolve(&self) -> NatsConfig {
         let user = non_empty(&self.user);
-        let password = non_empty(&self.password);
+        let password = secret(&self.password);
 
         let auth = non_empty(&self.creds)
             .and_then(Location::parse)
             .map(NatsAuth::Credentials)
-            .or_else(|| non_empty(&self.nkey).and_then(NKeySeed::parse).map(NatsAuth::NKey))
+            .or_else(|| secret(&self.nkey).and_then(NKeySeed::parse).map(NatsAuth::NKey))
             .or_else(|| {
                 user.zip(password).and_then(|(user, password)| {
                     CredentialValue::parse(password).map(|password| NatsAuth::UserPassword {
@@ -95,17 +80,17 @@ impl NatsSettings {
                 })
             })
             .or_else(|| {
-                non_empty(&self.token)
+                secret(&self.token)
                     .or(user.filter(|_| password.is_none()))
                     .and_then(CredentialValue::parse)
                     .map(NatsAuth::Token)
             })
             .or_else(|| {
-                non_empty(&self.jwt)
+                secret(&self.jwt)
                     .and_then(CredentialValue::parse)
                     .map(|jwt| NatsAuth::Jwt {
                         jwt,
-                        seed: non_empty(&self.seed).and_then(CredentialValue::parse),
+                        seed: secret(&self.seed).and_then(CredentialValue::parse),
                     })
             })
             .unwrap_or(NatsAuth::None);

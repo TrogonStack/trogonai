@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use clap::Args;
 use confique::Config;
 use trogon_nats::{NatsConfig, NatsSettings};
+use trogon_std::secret_string::SecretString;
 
 #[derive(Args, Clone, Debug, Default)]
 pub struct RuntimeConfigArgs {
@@ -116,16 +117,19 @@ pub fn resolve_nats(section: &NatsConfigSection, overrides: &NatsArgs) -> NatsCo
     let pick = |primary: &Option<String>, fallback: &Option<String>| {
         first_non_empty(primary.as_ref(), fallback.as_ref()).cloned()
     };
+    let pick_secret = |primary: &Option<String>, fallback: &Option<String>| {
+        first_non_empty(primary.as_ref(), fallback.as_ref()).and_then(|value| SecretString::new(value).ok())
+    };
 
     NatsSettings {
         url: pick(&overrides.nats_url, &Some(section.url.clone())),
         user: pick(&overrides.nats_user, &section.user),
-        password: pick(&overrides.nats_password, &section.password),
-        token: pick(&overrides.nats_token, &section.token),
+        password: pick_secret(&overrides.nats_password, &section.password),
+        token: pick_secret(&overrides.nats_token, &section.token),
         creds: pick(&overrides.nats_creds, &section.creds),
-        nkey: pick(&overrides.nats_nkey, &section.nkey),
-        jwt: pick(&overrides.nats_jwt, &section.jwt),
-        seed: pick(&overrides.nats_seed, &section.seed),
+        nkey: pick_secret(&overrides.nats_nkey, &section.nkey),
+        jwt: pick_secret(&overrides.nats_jwt, &section.jwt),
+        seed: pick_secret(&overrides.nats_seed, &section.seed),
         cert: pick(&overrides.nats_tls_cert, &section.tls_cert),
         key: pick(&overrides.nats_tls_key, &section.tls_key),
         ca: pick(&overrides.nats_tls_ca, &section.tls_ca),
