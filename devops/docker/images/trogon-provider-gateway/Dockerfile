@@ -26,7 +26,7 @@ LABEL org.opencontainers.image.source="https://github.com/TrogonStack/trogonai" 
     org.opencontainers.image.licenses="Apache-2.0"
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 trogon \
     && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin trogon \
@@ -41,7 +41,6 @@ USER 10001:10001
 EXPOSE 8317
 STOPSIGNAL SIGTERM
 
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl --fail --silent --show-error --max-time 2 "http://127.0.0.1:${TROGON_PROVIDER_GATEWAY_PORT}/-/readiness" || exit 1
+HEALTHCHECK NONE
 
 ENTRYPOINT ["/usr/local/bin/trogon-provider-gateway"]
