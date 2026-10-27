@@ -76,6 +76,21 @@ describe('workspace detail', () => {
     expect(await screen.findByRole('heading', { name: 'Payment rails' })).toBeInTheDocument();
     expect((await hierarchy.tree()).revision).toBe(5);
   });
+
+  it('restores the saved name when the rename dialog is reopened after a cancel', async () => {
+    const user = userEvent.setup();
+    renderApp('/workspaces/node_payments');
+
+    await user.click(await screen.findByRole('button', { name: 'Rename' }));
+    let form = within(await screen.findByRole('form', { name: 'Rename folder' }));
+    await user.type(form.getByLabelText('Name'), ' discarded');
+    await user.click(form.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('form', { name: 'Rename folder' })).not.toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: 'Rename' }));
+    form = within(await screen.findByRole('form', { name: 'Rename folder' }));
+    expect(form.getByLabelText('Name')).toHaveValue('Payments');
+  });
 });
 
 describe('add folder', () => {

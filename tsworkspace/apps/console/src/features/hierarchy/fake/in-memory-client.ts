@@ -45,7 +45,8 @@ export class InMemoryHierarchyClient implements HierarchyClient {
   private readonly clock: () => Date;
   private readonly attachments: NodeAttachments;
   private readonly directory: LabelDirectory;
-  private ready: Promise<void> = Promise.resolve();
+  private seed: () => Promise<void> = () => Promise.resolve();
+  private ready: Promise<void> | undefined;
 
   constructor(options: InMemoryHierarchyOptions = {}) {
     this.latencyMs = options.latencyMs ?? 0;
@@ -55,13 +56,15 @@ export class InMemoryHierarchyClient implements HierarchyClient {
   }
 
   seedWith(populate: (writer: HierarchySeedWriter) => Promise<void>): void {
-    this.ready = populate({
-      hierarchy: (command, at) => this.execute(command, {}, at, true),
-      label: (nodeId, name) => this.directory.set(nodeId, name),
-    });
+    this.seed = () =>
+      populate({
+        hierarchy: (command, at) => this.execute(command, {}, at, true),
+        label: (nodeId, name) => this.directory.set(nodeId, name),
+      });
   }
 
   private async pause(): Promise<void> {
+    this.ready ??= this.seed();
     await this.ready;
     await sleep(this.latencyMs);
   }

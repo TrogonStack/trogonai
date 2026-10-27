@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useNotify } from '@/components/ui/toaster';
+import { useOnOpen } from '@/components/use-on-open';
 
 import { MAX_NODE_NAME_LENGTH, nodeNameProblem, parseNodeName } from '../domain/node-name';
 import { nodeWordLabels } from '../domain/tree';
@@ -30,13 +31,13 @@ export function RenameNodeDialog({ node, open, onOpenChange }: RenameNodeDialogP
   const [name, setName] = useState(node.name);
   const [attempted, setAttempted] = useState(false);
 
+  useOnOpen(open, () => setName(node.name));
+
   const word = nodeWordLabels[node.word].toLowerCase();
   const nameError = attempted ? nodeNameProblem(name) : undefined;
 
   const close = (next: boolean) => {
-    if (next) {
-      setName(node.name);
-    } else {
+    if (!next) {
       rename.reset();
       setAttempted(false);
     }
