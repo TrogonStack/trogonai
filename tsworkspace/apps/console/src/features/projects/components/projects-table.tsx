@@ -21,9 +21,9 @@ import {
   type TextMatcher,
 } from '@/components/filter-bar';
 import { Button } from '@/components/ui/button';
+import type { NodeId } from '@/features/hierarchy/domain/node-id';
 
 import { accessPresetLabels, projectLifecycleLabels } from '../domain/labels';
-import type { NodeId } from '../domain/node-id';
 import type { ProjectView } from '../domain/view';
 import { AccessPresetChip } from './access-preset-chip';
 import { ProjectLifecycleBadge } from './lifecycle-badge';

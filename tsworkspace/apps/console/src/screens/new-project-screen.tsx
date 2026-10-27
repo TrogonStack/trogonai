@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
 import { useNotify } from '@/components/ui/toaster';
+import { parseNodeId } from '@/features/hierarchy/domain/node-id';
 import {
   MAX_GOAL_LENGTH,
   MAX_DISPLAY_NAME_LENGTH,
@@ -20,7 +21,6 @@ import {
   accessPresetLabels,
   selectableAccessPresets,
 } from '@/features/projects/domain/labels';
-import { parseNodeId } from '@/features/projects/domain/node-id';
 import {
   MAX_PROJECT_ID_LENGTH,
   parseProjectId,

@@ -3,11 +3,13 @@ import { VaultLifecycle } from '@trogonai/proto';
 import { createFakeEnvironmentsClient } from './features/environments/fake';
 import type { InMemoryEnvironmentsClient } from './features/environments/fake/in-memory-client';
 import { populateBuiltInEnvironmentSeed } from './features/environments/fake/seed';
+import { createFakeHierarchyClient } from './features/hierarchy/fake';
+import type { InMemoryHierarchyClient } from './features/hierarchy/fake/in-memory-client';
+import { workspaceNodeDirectory } from './features/hierarchy/fake/workspace-nodes';
 import type { ProjectResources, ProjectResourceSummary } from './features/projects/client';
 import type { ProjectId } from './features/projects/domain/project-id';
 import { createFakeProjectsClient } from './features/projects/fake';
 import type { InMemoryProjectsClient } from './features/projects/fake/in-memory-client';
-import { seedNodeDirectory } from './features/projects/fake/nodes';
 import { seedProjectIds } from './features/projects/fake/seed';
 import { createFakeProviderConnectionsClient } from './features/provider-connections/fake';
 import type { InMemoryProviderConnectionsClient } from './features/provider-connections/fake/in-memory-client';
@@ -23,6 +25,7 @@ export interface FakeBackendOptions {
 
 export interface FakeBackend {
   readonly providerConnections: InMemoryProviderConnectionsClient;
+  readonly hierarchy: InMemoryHierarchyClient;
   readonly projects: InMemoryProjectsClient;
   readonly secrets: { forProject(projectId: ProjectId): InMemorySecretsClient };
   readonly environments: { forProject(projectId: ProjectId): InMemoryEnvironmentsClient };
@@ -88,9 +91,20 @@ export function createFakeBackend(options: FakeBackendOptions = {}): FakeBackend
     },
   };
 
+  const registry: { projects?: InMemoryProjectsClient } = {};
+
+  const hierarchy = createFakeHierarchyClient({
+    ...options,
+    attachments: { attachedTo: async (nodeId) => (await registry.projects?.attachedTo(nodeId)) ?? 0 },
+  });
+
+  const projects = createFakeProjectsClient({ ...options, nodes: workspaceNodeDirectory(hierarchy), resources });
+  registry.projects = projects;
+
   return {
     providerConnections: createFakeProviderConnectionsClient(options),
-    projects: createFakeProjectsClient({ ...options, nodes: seedNodeDirectory, resources }),
+    hierarchy,
+    projects,
     secrets: { forProject: (projectId) => workspaceOf(projectId).secrets },
     environments: { forProject: (projectId) => workspaceOf(projectId).environments },
   };

@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { createFakeBackend } from './fake-backend';
 import { environmentCommands } from './features/environments/domain/commands';
 import { mintEnvironmentId } from './features/environments/domain/environment-id';
+import { hierarchyCommands } from './features/hierarchy/domain/commands';
+import { seedNodeIds } from './features/hierarchy/fake/seed';
 import { seedProjectIds } from './features/projects/fake/seed';
 import { vaultCommands } from './features/secrets/domain/commands';
 
@@ -108,5 +110,20 @@ describe('fake backend composition', () => {
       credentials: 2,
       environments: 3,
     });
+  });
+
+  it('lets a node be removed only when it holds no children or projects', async () => {
+    const { hierarchy } = createFakeBackend();
+    const { revision } = await hierarchy.tree();
+    await expect(
+      hierarchy.dispatch(hierarchyCommands.remove(seedNodeIds.research), { expectedRevision: revision }),
+    ).rejects.toMatchObject({ reason: 'NODE_HAS_ATTACHMENTS' });
+    await hierarchy.dispatch(hierarchyCommands.remove(seedNodeIds.payments), { expectedRevision: revision });
+    expect((await hierarchy.tree()).parents.has(seedNodeIds.payments)).toBe(false);
+  });
+
+  it('offers new workspaces and folders as project parents', async () => {
+    const { projects } = createFakeBackend();
+    expect((await projects.parentCandidates()).map((node) => node.nodeId)).toContain(seedNodeIds.payments);
   });
 });

@@ -6,6 +6,7 @@ import {
   LayersIcon,
   MonitorIcon,
   MoonIcon,
+  NetworkIcon,
   PanelLeftIcon,
   PlugZapIcon,
   SunIcon,
@@ -18,6 +19,8 @@ import { Button } from '@/components/ui/button';
 import { Segmented, type SegmentedOption } from '@/components/ui/segmented';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useEnvironmentQuery, useEnvironmentsQuery } from '@/features/environments/queries';
+import type { NodeId } from '@/features/hierarchy/domain/node-id';
+import { useHierarchyView } from '@/features/hierarchy/queries';
 import { ProjectSwitcher } from '@/features/projects/components/project-switcher';
 import { useCurrentProject } from '@/features/projects/current-project';
 import { useProjectQuery, useProjectsQuery } from '@/features/projects/queries';
@@ -97,6 +100,7 @@ function NavCount({ collapsed, count }: { collapsed: boolean; count: number | un
 
 function Sidebar({ collapsed }: { collapsed: boolean }) {
   const projects = useProjectsQuery();
+  const hierarchy = useHierarchyView();
   const connections = useConnectionsQuery();
   const credentials = useCredentialsQuery();
   const environments = useEnvironmentsQuery();
@@ -127,6 +131,19 @@ function Sidebar({ collapsed }: { collapsed: boolean }) {
             <span aria-hidden="true" className="bg-muted-foreground/50 h-px w-2" />
             Workspace
           </p>
+          <Link
+            to="/workspaces"
+            title="Workspaces"
+            className="group/nav text-sidebar-foreground hover:bg-foreground/5 focus-visible:ring-sidebar-ring/70 data-[status=active]:bg-sidebar-accent data-[status=active]:text-sidebar-accent-foreground relative flex h-9 items-center gap-2.5 rounded-md px-2.5 text-[13px] font-medium transition-colors outline-none focus-visible:ring-2"
+          >
+            <span
+              aria-hidden="true"
+              className="bg-primary absolute top-1.5 bottom-1.5 -left-2 w-[3px] rounded-r-full opacity-0 shadow-[0_0_10px_1px_var(--primary)] transition-opacity group-data-[status=active]/nav:opacity-100"
+            />
+            <NetworkIcon className="size-4 shrink-0" aria-hidden="true" />
+            <span className={label}>Workspaces</span>
+            <NavCount collapsed={collapsed} count={hierarchy.view?.workspaces.length} />
+          </Link>
           <Link
             to="/projects"
             title="Projects"
@@ -247,6 +264,18 @@ function ProjectCrumbs({ projectId }: { projectId: string }) {
   return <Breadcrumbs crumbs={[{ label: 'Projects', to: '/projects' }, { label: name }]} />;
 }
 
+function WorkspaceCrumbs({ nodeId, creating }: { nodeId?: string; creating?: boolean }) {
+  const { view } = useHierarchyView();
+  const organization = view?.organization.revealed && view.organization.name ? [{ label: view.organization.name }] : [];
+  const node = nodeId ? view?.byId.get(nodeId as NodeId) : undefined;
+  const crumbs: Crumb[] = creating
+    ? [{ label: 'Workspaces', to: '/workspaces' }, { label: 'New workspace' }]
+    : nodeId
+      ? [{ label: 'Workspaces', to: '/workspaces' }, { label: node?.name ?? nodeId }]
+      : [{ label: 'Workspaces' }];
+  return <Breadcrumbs crumbs={[...organization, ...crumbs]} />;
+}
+
 function ScopedCrumbs({ crumbs }: { crumbs: readonly Crumb[] }) {
   const project = useProjectCrumb();
   return <Breadcrumbs crumbs={[...project, ...crumbs]} />;
@@ -283,7 +312,7 @@ function Breadcrumbs({ crumbs }: { crumbs: readonly Crumb[] }) {
         {crumbs.map((crumb, index) => {
           const last = index === crumbs.length - 1;
           return (
-            <li key={crumb.label} className="flex min-w-0 items-center gap-1.5">
+            <li key={`${index}:${crumb.label}`} className="flex min-w-0 items-center gap-1.5">
               {index > 0 ? (
                 <span aria-hidden="true" className="text-muted-foreground/60 font-mono">
                   /
@@ -315,6 +344,11 @@ function RouteBreadcrumbs() {
       return <Breadcrumbs crumbs={[{ label: 'Projects', to: '/projects' }, { label: 'New project' }]} />;
     }
     return <ProjectCrumbs projectId={decodeURIComponent(segments[1]!)} />;
+  }
+  if (segments[0] === 'workspaces') {
+    if (segments[1] === 'new') return <WorkspaceCrumbs creating />;
+    if (segments[1]) return <WorkspaceCrumbs nodeId={decodeURIComponent(segments[1])} />;
+    return <WorkspaceCrumbs />;
   }
   if (segments[0] === 'secrets') {
     if (segments.length === 1) return <ScopedCrumbs crumbs={[{ label: 'Secrets' }]} />;

@@ -4,6 +4,7 @@ import { render } from '@testing-library/react';
 
 import { createFakeBackend, type FakeBackend } from '@/fake-backend';
 import { EnvironmentsClientProvider } from '@/features/environments/context';
+import { HierarchyClientProvider } from '@/features/hierarchy/context';
 import { ProjectsClientProvider } from '@/features/projects/context';
 import { ProviderConnectionsClientProvider } from '@/features/provider-connections/context';
 import { SecretsClientProvider } from '@/features/secrets/context';
@@ -16,13 +17,15 @@ export function renderApp(path: string, backend: FakeBackend = createFakeBackend
   const view = render(
     <QueryClientProvider client={queryClient}>
       <ProviderConnectionsClientProvider client={backend.providerConnections}>
-        <ProjectsClientProvider client={backend.projects}>
-          <EnvironmentsClientProvider clients={backend.environments}>
-            <SecretsClientProvider clients={backend.secrets}>
-              <RouterProvider router={router} />
-            </SecretsClientProvider>
-          </EnvironmentsClientProvider>
-        </ProjectsClientProvider>
+        <HierarchyClientProvider client={backend.hierarchy}>
+          <ProjectsClientProvider client={backend.projects}>
+            <EnvironmentsClientProvider clients={backend.environments}>
+              <SecretsClientProvider clients={backend.secrets}>
+                <RouterProvider router={router} />
+              </SecretsClientProvider>
+            </EnvironmentsClientProvider>
+          </ProjectsClientProvider>
+        </HierarchyClientProvider>
       </ProviderConnectionsClientProvider>
     </QueryClientProvider>,
   );
@@ -30,6 +33,7 @@ export function renderApp(path: string, backend: FakeBackend = createFakeBackend
     ...view,
     client: backend.providerConnections,
     projects: backend.projects,
+    hierarchy: backend.hierarchy,
     secrets: backend.secrets,
     environments: backend.environments,
     queryClient,

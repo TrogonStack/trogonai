@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { ProjectAccessPreset } from '@trogonai/proto';
 import { describe, expect, it } from 'vitest';
 
-import { seedNodeIds } from '@/features/projects/fake/nodes';
+import { seedNodeIds } from '@/features/hierarchy/fake/seed';
 import { renderApp } from '@/test/render-app';
 
 async function openForm() {
@@ -34,7 +34,7 @@ describe('new project', () => {
     const values = within(parent)
       .getAllByRole('option')
       .map((option) => (option as HTMLOptionElement).value);
-    expect(values).toEqual(['node_workspace', 'node_platform', 'node_research']);
+    expect(values).toEqual(['node_workspace', 'node_platform', 'node_payments', 'node_research']);
     expect(values).not.toContain(seedNodeIds.tenantRoot);
   });
 

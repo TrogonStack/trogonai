@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ProjectAccessPreset } from '@trogonai/proto';
 
+import type { NodeId } from '@/features/hierarchy/domain/node-id';
+
 import { useProjectsClient } from './context';
 import { projectCommands } from './domain/commands';
-import type { NodeId } from './domain/node-id';
 import type { ProjectId } from './domain/project-id';
 import { toProjectView, type ProjectView } from './domain/view';
 

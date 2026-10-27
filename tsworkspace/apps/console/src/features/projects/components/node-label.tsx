@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 
-import type { NodeId } from '../domain/node-id';
+import type { NodeId } from '@/features/hierarchy/domain/node-id';
+
 import { useParentCandidatesQuery } from '../queries';
 
 export function useNodeLabel(): (nodeId: NodeId) => string {

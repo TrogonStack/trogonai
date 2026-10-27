@@ -1,7 +1,8 @@
 import type { CreatedProject, ProjectEvent } from '@trogonai/proto';
 
+import type { NodeId } from '@/features/hierarchy/domain/node-id';
+
 import type { ProjectCommand } from './domain/commands';
-import type { NodeId } from './domain/node-id';
 import type { ProjectId } from './domain/project-id';
 
 export interface ProjectRecord {
@@ -49,6 +50,7 @@ export interface ProjectsClient {
   get(projectId: string): Promise<ProjectRecord | undefined>;
   history(projectId: string): Promise<readonly StoredProjectEvent[]>;
   parentCandidates(): Promise<readonly WorkspaceNode[]>;
+  attachedTo(nodeId: NodeId): Promise<number>;
   resources(projectId: ProjectId): Promise<ProjectResourceSummary>;
   dispatch(command: ProjectCommand, options?: DispatchOptions): Promise<ProjectRecord>;
 }
