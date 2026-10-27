@@ -3,7 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>@trogonai/console</title>
+    <title>TrogonAi Console</title>
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('trogonai-console-theme');
+          var dark =
+            stored === null ||
+            stored === 'dark' ||
+            (stored === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+          if (dark) document.documentElement.classList.add('dark');
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="app"></div>

@@ -2,9 +2,15 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider } from '@tanstack/react-router';
 import ReactDOM from 'react-dom/client';
 
+import { createFakeBackend } from './fake-backend';
+import { EnvironmentsClientProvider } from './features/environments/context';
+import { ProjectsClientProvider } from './features/projects/context';
+import { ProviderConnectionsClientProvider } from './features/provider-connections/context';
+import { SecretsClientProvider } from './features/secrets/context';
 import { getRouter } from './router';
 
 const queryClient = new QueryClient();
+const backend = createFakeBackend({ latencyMs: 250 });
 const router = getRouter(queryClient);
 
 const rootElement = document.getElementById('app')!;
@@ -13,7 +19,15 @@ if (!rootElement.innerHTML) {
   const root = ReactDOM.createRoot(rootElement);
   root.render(
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
+      <ProviderConnectionsClientProvider client={backend.providerConnections}>
+        <ProjectsClientProvider client={backend.projects}>
+          <EnvironmentsClientProvider clients={backend.environments}>
+            <SecretsClientProvider clients={backend.secrets}>
+              <RouterProvider router={router} />
+            </SecretsClientProvider>
+          </EnvironmentsClientProvider>
+        </ProjectsClientProvider>
+      </ProviderConnectionsClientProvider>
     </QueryClientProvider>,
   );
 }
