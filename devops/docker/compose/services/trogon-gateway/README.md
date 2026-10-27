@@ -196,8 +196,8 @@ splitting individual notifications when they need per-resource routing.
 ## Google Cloud Pub/Sub
 
 This source pulls messages from an existing Pub/Sub subscription and publishes
-each one to NATS JetStream unchanged. It is generic: the gateway does not look
-inside the message body, so any publisher that writes to the topic behind the
+each one to NATS JetStream. It is generic: the gateway does not look inside the
+message body, so any publisher that writes to the topic behind the
 subscription can feed it.
 
 ```toml
@@ -235,10 +235,15 @@ are missing or malformed stops the gateway at startup with an error naming the
 integration. Error messages never include the document. The identity needs the `roles/pubsub.subscriber` role on the
 subscription.
 
-Each message is published to `{subject_prefix}.message` with the raw Pub/Sub
-`data` bytes as the body. The Pub/Sub message ID is used as the `Nats-Msg-Id`,
-so redeliveries are deduplicated inside the stream's duplicate window. These
-headers accompany the body:
+Each message is published to `{subject_prefix}.message`. When the Pub/Sub
+`data` fits within the NATS server's payload limit, it is the body unchanged.
+Larger data is stored in the gateway's claim-check object store instead, and
+the message carries an empty body with `Trogon-Claim-Check`,
+`Trogon-Claim-Bucket`, and `Trogon-Claim-Key` headers. Consumers must resolve
+those headers against the object store, for example with `ClaimResolver` from
+`trogon-nats`, to recover the original data. The Pub/Sub message ID is used as
+the `Nats-Msg-Id`, so redeliveries are deduplicated inside the stream's
+duplicate window. These headers accompany every message:
 
 | Header | Value |
 |---|---|
@@ -252,7 +257,8 @@ Attributes whose key is not a valid header name, or whose value contains a line
 break, are skipped with a warning.
 
 The gateway acknowledges a message to Pub/Sub only after JetStream has
-confirmed the publish. If the publish fails or times out, the message is
+confirmed the publish. If storing a claim-check payload or the publish fails or
+times out, the message is
 negatively acknowledged and Pub/Sub redelivers it. When the stream breaks, the
 gateway logs the error, backs off, and subscribes again. On shutdown it stops
 pulling and returns messages it has not handled to Pub/Sub.
