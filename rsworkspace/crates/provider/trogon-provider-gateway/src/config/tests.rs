@@ -2,6 +2,8 @@ use super::{ConfigError, HOST_ENV, PORT_ENV, load};
 use crate::cli::Cli;
 use clap::Parser;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+#[cfg(unix)]
+use std::os::unix::ffi::OsStringExt;
 use trogon_std::env::InMemoryEnv;
 
 fn cli(arguments: &[&str]) -> Cli {
@@ -146,4 +148,37 @@ fn ignores_unrelated_environment_values() {
     let config = load(&cli(&[]), &env).unwrap();
 
     assert_eq!(config.bind_addr().ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
+}
+
+#[cfg(unix)]
+struct NonUnicodeEnv {
+    variable: &'static str,
+}
+
+#[cfg(unix)]
+impl trogon_std::env::ReadEnv for NonUnicodeEnv {
+    fn var(&self, key: &str) -> Result<String, std::env::VarError> {
+        if key == self.variable {
+            Err(std::env::VarError::NotUnicode(std::ffi::OsString::from_vec(vec![0xff])))
+        } else {
+            Err(std::env::VarError::NotPresent)
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn non_unicode_environment_values_keep_the_variable_and_original_error() {
+    for variable in [HOST_ENV, PORT_ENV] {
+        let env = NonUnicodeEnv { variable };
+        assert!(matches!(
+            load(&cli(&[]), &env),
+            Err(ConfigError::Environment {
+                variable: failed_variable,
+                source: std::env::VarError::NotUnicode(value),
+            }) if failed_variable == variable && value.as_encoded_bytes() == [0xff]
+        ));
+        let config = load(&cli(&["--host", "127.0.0.1", "--port", "0"]), &env).unwrap();
+        assert_eq!(config.bind_addr(), SocketAddr::from((Ipv4Addr::LOCALHOST, 0)));
+    }
 }

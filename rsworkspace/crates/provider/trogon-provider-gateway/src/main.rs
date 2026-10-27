@@ -1,3 +1,4 @@
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 mod cli;
@@ -11,6 +12,7 @@ use trogon_std::env::SystemEnv;
 use trogon_std::fs::SystemFs;
 
 #[tokio::main]
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn main() -> Result<(), error::Error> {
     let cli = cli::Cli::parse();
     let config = config::load(&cli, &SystemEnv)?;
