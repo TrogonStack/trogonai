@@ -61,7 +61,8 @@ export class InMemoryProviderConnectionsClient implements ProviderConnectionsCli
   private readonly pins = new Map<string, Map<string, number>>();
   private latencyMs: number;
   private clock: () => Date;
-  private ready: Promise<void> = Promise.resolve();
+  private seed: () => Promise<void> = () => Promise.resolve();
+  private ready: Promise<void> | undefined;
 
   constructor(options: InMemoryClientOptions = {}) {
     this.latencyMs = options.latencyMs ?? 0;
@@ -69,17 +70,19 @@ export class InMemoryProviderConnectionsClient implements ProviderConnectionsCli
   }
 
   seedWith(populate: (writer: SeedWriter) => Promise<void>): void {
-    this.ready = populate({
-      dispatch: (command, options, at) => this.execute(command, options, at),
-      pinSessions: (connectionId, bindingId, count) => {
-        const pins = this.pins.get(connectionId) ?? new Map<string, number>();
-        pins.set(bindingId, count);
-        this.pins.set(connectionId, pins);
-      },
-    });
+    this.seed = () =>
+      populate({
+        dispatch: (command, options, at) => this.execute(command, options, at),
+        pinSessions: (connectionId, bindingId, count) => {
+          const pins = this.pins.get(connectionId) ?? new Map<string, number>();
+          pins.set(bindingId, count);
+          this.pins.set(connectionId, pins);
+        },
+      });
   }
 
   private async pause(): Promise<void> {
+    this.ready ??= this.seed();
     await this.ready;
     await sleep(this.latencyMs);
   }

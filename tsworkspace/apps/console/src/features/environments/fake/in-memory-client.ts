@@ -40,7 +40,8 @@ export class InMemoryEnvironmentsClient implements EnvironmentsClient {
   private readonly clock: () => Date;
   private readonly projectId: string;
   private readonly usage: EnvironmentUsage;
-  private ready: Promise<void> = Promise.resolve();
+  private seed: () => Promise<void> = () => Promise.resolve();
+  private ready: Promise<void> | undefined;
 
   constructor(options: InMemoryEnvironmentsOptions = {}) {
     this.latencyMs = options.latencyMs ?? 0;
@@ -50,10 +51,11 @@ export class InMemoryEnvironmentsClient implements EnvironmentsClient {
   }
 
   seedWith(populate: (writer: EnvironmentSeedWriter) => Promise<void>): void {
-    this.ready = populate({ environment: (command, at) => this.execute(command, {}, at, true) });
+    this.seed = () => populate({ environment: (command, at) => this.execute(command, {}, at, true) });
   }
 
   private async pause(): Promise<void> {
+    this.ready ??= this.seed();
     await this.ready;
     await sleep(this.latencyMs);
   }

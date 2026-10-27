@@ -58,7 +58,8 @@ export class InMemorySecretsClient implements SecretsClient {
   private readonly clock: () => Date;
   private readonly projectId: string;
   private readonly environments: EnvironmentDirectory | undefined;
-  private ready: Promise<void> = Promise.resolve();
+  private seed: () => Promise<void> = () => Promise.resolve();
+  private ready: Promise<void> | undefined;
 
   constructor(options: InMemoryClientOptions = {}) {
     this.latencyMs = options.latencyMs ?? 0;
@@ -68,13 +69,15 @@ export class InMemorySecretsClient implements SecretsClient {
   }
 
   seedWith(populate: (writer: SeedWriter) => Promise<void>): void {
-    this.ready = populate({
-      vault: (command, at) => this.executeVault(command, {}, at, true),
-      credential: (command, at) => this.executeCredential(command, {}, at, true),
-    });
+    this.seed = () =>
+      populate({
+        vault: (command, at) => this.executeVault(command, {}, at, true),
+        credential: (command, at) => this.executeCredential(command, {}, at, true),
+      });
   }
 
   private async pause(): Promise<void> {
+    this.ready ??= this.seed();
     await this.ready;
     await sleep(this.latencyMs);
     this.reapExpiredOverlaps();
