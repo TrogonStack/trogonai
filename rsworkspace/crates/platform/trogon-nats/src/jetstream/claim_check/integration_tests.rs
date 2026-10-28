@@ -432,3 +432,39 @@ async fn published_claim_round_trips_through_a_resolver() {
         .expect("resolve");
     assert_eq!(resolved, body);
 }
+
+#[tokio::test]
+async fn a_retried_message_id_claims_the_same_object_key() {
+    let publisher = MockJetStreamPublisher::new();
+    let store = MockObjectStore::new();
+    let cc = ClaimCheckPublisher::new(
+        publisher.clone(),
+        test_binding(store.clone()),
+        MaxPayload::from_server_limit(1024 + PROTOCOL_OVERHEAD),
+    );
+
+    for _ in 0..2 {
+        let mut headers = HeaderMap::new();
+        headers.insert("Nats-Msg-Id", "Ev123");
+        let outcome = cc
+            .publish_event(
+                "test.subject".to_string(),
+                headers,
+                Bytes::from(vec![0u8; 2048]),
+                Duration::from_secs(5),
+            )
+            .await;
+        assert!(outcome.is_ok());
+    }
+
+    let messages = publisher.published_messages();
+    let keys: Vec<_> = messages
+        .iter()
+        .map(|m| m.headers.get(HEADER_CLAIM_KEY).unwrap().as_str().to_string())
+        .collect();
+    assert_eq!(keys[0], keys[1]);
+    assert!(keys[0].starts_with("test.subject/"));
+    assert_eq!(keys[0].split('/').count(), 3);
+    let names: std::collections::HashSet<_> = store.stored_objects().into_iter().map(|(name, _)| name).collect();
+    assert_eq!(names.len(), 1);
+}

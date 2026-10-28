@@ -33,6 +33,7 @@ pub const DEFAULT_CLAIM_BUCKET: &str = "trogon-claims";
 pub(crate) const CLAIM_CHECK_VERSION: &str = "v1";
 pub(crate) const PROTOCOL_OVERHEAD: usize = 8 * 1024;
 pub(crate) const CLAIM_HEADER_PREFIX: &str = "Trogon-Claim-";
+pub(crate) const HEADER_NATS_MSG_ID: &str = "Nats-Msg-Id";
 
 /// ADR#0055 Limits: at most 16 tokens per subject.
 ///

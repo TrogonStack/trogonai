@@ -36,8 +36,42 @@ fn is_claim_returns_false_for_wrong_version() {
 
 #[test]
 fn claim_object_key_contains_subject() {
-    let key = claim_object_key("github.push");
+    let key = claim_object_key("github.push", &HeaderMap::new(), b"x");
     assert!(key.starts_with("github.push/"));
+}
+
+#[test]
+fn claim_object_key_is_unique_without_a_message_id() {
+    let headers = HeaderMap::new();
+    assert_ne!(
+        claim_object_key("github.push", &headers, b"x"),
+        claim_object_key("github.push", &headers, b"x")
+    );
+}
+
+#[test]
+fn claim_object_key_is_stable_for_the_same_message_id() {
+    let mut headers = HeaderMap::new();
+    headers.insert(HEADER_NATS_MSG_ID, "Ev123");
+    let key = claim_object_key("slack.event", &headers, b"x");
+    let segments: Vec<&str> = key.split('/').collect();
+    assert_eq!(segments.len(), 3);
+    assert_eq!(segments[0], "slack.event");
+    assert!(segments[1..].iter().all(|segment| segment.len() == 64));
+    assert_eq!(
+        claim_object_key("slack.event", &headers, b"x"),
+        claim_object_key("slack.event", &headers, b"x")
+    );
+}
+
+#[test]
+fn claim_object_key_ignores_an_empty_message_id() {
+    let mut headers = HeaderMap::new();
+    headers.insert(HEADER_NATS_MSG_ID, "");
+    assert_ne!(
+        claim_object_key("slack.event", &headers, b"x"),
+        claim_object_key("slack.event", &headers, b"x")
+    );
 }
 
 #[test]
@@ -127,4 +161,23 @@ fn claim_check_publisher_debug_formats() {
     let debug = format!("{publisher:?}");
     assert!(debug.contains("ClaimCheckPublisher"));
     assert!(debug.contains("claims"));
+}
+
+#[test]
+fn claim_object_key_differs_for_different_payloads_under_the_same_message_id() {
+    let mut headers = HeaderMap::new();
+    headers.insert(HEADER_NATS_MSG_ID, "Ev123");
+    assert_ne!(
+        claim_object_key("slack.event", &headers, b"first"),
+        claim_object_key("slack.event", &headers, b"second")
+    );
+}
+
+#[test]
+fn claim_object_key_never_carries_message_id_characters_outside_object_names() {
+    let mut headers = HeaderMap::new();
+    headers.insert(HEADER_NATS_MSG_ID, "team:T1 event#1");
+    let key = claim_object_key("slack.event", &headers, b"x");
+    let suffix = key.strip_prefix("slack.event/").unwrap();
+    assert!(suffix.chars().all(|c| c == '/' || c.is_ascii_hexdigit()));
 }
