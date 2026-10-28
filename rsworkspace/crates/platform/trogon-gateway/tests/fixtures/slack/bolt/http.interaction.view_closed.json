@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "id": "http.interaction.view_closed",
+  "kind": "interaction",
+  "transport": "http",
+  "provenance": {
+    "bolt_version": "5.1.0",
+    "bolt_commit": "3f8823c93f5639e99f05a2df9c7dc692da5cc184",
+    "node_slack_sdk_commit": "d02afdfd5c87f896dc9994dfe2b55472758fbcf4",
+    "payload_source": "test/unit/helpers/events.ts:createDummyViewClosedMiddlewareArgs",
+    "wire_source": "https://docs.slack.dev/interactivity/handling-user-interaction",
+    "ack_source": null
+  },
+  "not_representable": null,
+  "input": {
+    "headers": {
+      "content-type": "application/x-www-form-urlencoded",
+      "x-slack-request-timestamp": "1700000000",
+      "x-slack-signature": "v0=44639c8ec4de4bc85ad465de5ac5c2db40b3f4025583c685fe39a7d16ef9e5ca"
+    },
+    "body": "payload=%7B%22type%22%3A%22view_closed%22%2C%22team%22%3A%7B%22id%22%3A%22T1234%22%2C%22domain%22%3A%22slack.com%22%7D%2C%22user%22%3A%7B%22id%22%3A%22U1234%22%2C%22name%22%3A%22filmaj%22%7D%2C%22view%22%3A%7B%22type%22%3A%22view%22%2C%22id%22%3A%22V1234%22%2C%22callback_id%22%3A%22Cb1234%22%2C%22team_id%22%3A%22T1234%22%2C%22app_id%22%3A%22A1234%22%2C%22bot_id%22%3A%22B1234%22%2C%22title%22%3A%7B%22type%22%3A%22plain_text%22%2C%22text%22%3A%22hi%22%7D%2C%22blocks%22%3A%5B%5D%2C%22close%22%3Anull%2C%22submit%22%3Anull%2C%22hash%22%3A%221234.56%22%2C%22state%22%3A%7B%22values%22%3A%7B%7D%7D%2C%22private_metadata%22%3A%22%22%2C%22root_view_id%22%3Anull%2C%22previous_view_id%22%3Anull%2C%22clear_on_close%22%3Afalse%2C%22notify_on_close%22%3Afalse%7D%2C%22api_app_id%22%3A%22A1234%22%2C%22token%22%3A%22xoxb-1234%22%2C%22is_cleared%22%3Afalse%7D"
+  },
+  "bolt": {
+    "outcome": "dispatched",
+    "status": 200,
+    "body": null,
+    "content_type": null,
+    "reason": null,
+    "dispatch": {
+      "incoming_type": "ViewAction",
+      "conversation_id": null,
+      "retry_num": null,
+      "retry_reason": null,
+      "is_enterprise_install": false,
+      "team_id": "T1234",
+      "enterprise_id": null,
+      "user_id": "U1234"
+    }
+  },
+  "expected": {
+    "outcome": "publish",
+    "nats": {
+      "subject_suffix": "interaction.view_closed",
+      "dedup_id": "view_closed-V1234",
+      "payload": "{\"type\":\"view_closed\",\"team\":{\"id\":\"T1234\",\"domain\":\"slack.com\"},\"user\":{\"id\":\"U1234\",\"name\":\"filmaj\"},\"view\":{\"type\":\"view\",\"id\":\"V1234\",\"callback_id\":\"Cb1234\",\"team_id\":\"T1234\",\"app_id\":\"A1234\",\"bot_id\":\"B1234\",\"title\":{\"type\":\"plain_text\",\"text\":\"hi\"},\"blocks\":[],\"close\":null,\"submit\":null,\"hash\":\"1234.56\",\"state\":{\"values\":{}},\"private_metadata\":\"\",\"root_view_id\":null,\"previous_view_id\":null,\"clear_on_close\":false,\"notify_on_close\":false},\"api_app_id\":\"A1234\",\"token\":\"xoxb-1234\",\"is_cleared\":false}",
+      "payload_fill": null,
+      "headers": {
+        "X-Slack-Event-Type": "view_closed",
+        "X-Slack-Team-Id": "T1234",
+        "X-Slack-Payload-Kind": "interaction",
+        "X-Slack-Is-Enterprise-Install": "false",
+        "X-Slack-Api-App-Id": "A1234",
+        "X-Slack-Transport": "webhook",
+        "X-Slack-Request-Timestamp": "1700000000"
+      }
+    },
+    "http": {
+      "status": 200,
+      "body": null,
+      "challenge": null
+    },
+    "socket_ack": null
+  }
+}

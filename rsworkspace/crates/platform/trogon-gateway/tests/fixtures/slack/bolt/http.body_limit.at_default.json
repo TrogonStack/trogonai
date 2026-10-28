@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "id": "http.body_limit.at_default",
+  "kind": "event",
+  "transport": "http",
+  "provenance": {
+    "bolt_version": "5.1.0",
+    "bolt_commit": "3f8823c93f5639e99f05a2df9c7dc692da5cc184",
+    "node_slack_sdk_commit": "d02afdfd5c87f896dc9994dfe2b55472758fbcf4",
+    "payload_source": "test/unit/receivers/HTTPModuleFunctions.spec.ts: defaultBodyLimit; signed event body of 4194304 bytes, exactly at the shared 4194304 default",
+    "wire_source": "https://docs.slack.dev/apis/events-api/",
+    "ack_source": null
+  },
+  "not_representable": null,
+  "input": {
+    "headers": {
+      "content-type": "application/json",
+      "x-slack-request-timestamp": "1700000000",
+      "x-slack-signature": "v0=ace2dcfa5446e8e8e5d411ed93af8e7ce166b4aeb10ce8e13938271e3235fa16"
+    },
+    "body_fill": {
+      "prefix": "{\"type\":\"event_callback\",\"event_id\":\"Ev0OVERSIZE\",\"team_id\":\"T1234\",\"event\":{\"type\":\"message\",\"text\":\"",
+      "filler": "a",
+      "count": 4194199,
+      "suffix": "\"}}"
+    }
+  },
+  "bolt": {
+    "outcome": "dispatched",
+    "status": 200,
+    "body": null,
+    "content_type": null,
+    "reason": null,
+    "dispatch": {
+      "incoming_type": "Event",
+      "conversation_id": null,
+      "retry_num": null,
+      "retry_reason": null,
+      "is_enterprise_install": false,
+      "team_id": "T1234",
+      "enterprise_id": null,
+      "user_id": null
+    }
+  },
+  "expected": {
+    "outcome": "publish",
+    "nats": {
+      "subject_suffix": "event.message",
+      "dedup_id": "Ev0OVERSIZE",
+      "payload": "",
+      "payload_fill": {
+        "prefix": "{\"type\":\"event_callback\",\"event_id\":\"Ev0OVERSIZE\",\"team_id\":\"T1234\",\"event\":{\"type\":\"message\",\"text\":\"",
+        "filler": "a",
+        "count": 4194199,
+        "suffix": "\"}}"
+      },
+      "headers": {
+        "X-Slack-Event-Type": "message",
+        "X-Slack-Event-Id": "Ev0OVERSIZE",
+        "X-Slack-Team-Id": "T1234",
+        "X-Slack-Payload-Kind": "event",
+        "X-Slack-Is-Enterprise-Install": "false",
+        "X-Slack-Transport": "webhook",
+        "X-Slack-Request-Timestamp": "1700000000"
+      }
+    },
+    "http": {
+      "status": 200,
+      "body": null,
+      "challenge": null
+    },
+    "socket_ack": null
+  }
+}

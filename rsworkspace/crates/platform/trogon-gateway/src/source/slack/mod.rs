@@ -66,5 +66,8 @@ pub mod ssl_check;
 pub mod subject;
 pub mod unroutable;
 
+#[cfg(test)]
+mod bolt_conformance_tests;
+
 pub use config::SlackConfig;
 pub use server::{provision, router};

@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "id": "http.body_limit.above_default",
+  "kind": "event",
+  "transport": "http",
+  "provenance": {
+    "bolt_version": "5.1.0",
+    "bolt_commit": "3f8823c93f5639e99f05a2df9c7dc692da5cc184",
+    "node_slack_sdk_commit": "d02afdfd5c87f896dc9994dfe2b55472758fbcf4",
+    "payload_source": "test/unit/receivers/HTTPModuleFunctions.spec.ts: defaultBodyLimit; signed event body of 4194305 bytes, one byte above the shared 4194304 default",
+    "wire_source": "https://docs.slack.dev/apis/events-api/",
+    "ack_source": null
+  },
+  "not_representable": null,
+  "input": {
+    "headers": {
+      "content-type": "application/json",
+      "x-slack-request-timestamp": "1700000000",
+      "x-slack-signature": "v0=e23b8a0de936dc50792f6d9c70096257a41e6a8c176b4333d7517159e7f8c432"
+    },
+    "body_fill": {
+      "prefix": "{\"type\":\"event_callback\",\"event_id\":\"Ev0OVERSIZE\",\"team_id\":\"T1234\",\"event\":{\"type\":\"message\",\"text\":\"",
+      "filler": "a",
+      "count": 4194200,
+      "suffix": "\"}}"
+    }
+  },
+  "bolt": {
+    "outcome": "rejected",
+    "status": 413,
+    "body": null,
+    "content_type": null,
+    "reason": "Request body exceeded the maximum allowed size (limit: 4194304 bytes)",
+    "dispatch": null
+  },
+  "expected": {
+    "outcome": "reject",
+    "nats": null,
+    "http": {
+      "status": 413,
+      "body": null,
+      "challenge": null
+    },
+    "socket_ack": null
+  }
+}

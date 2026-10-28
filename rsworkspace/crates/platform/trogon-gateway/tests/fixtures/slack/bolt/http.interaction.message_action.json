@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "id": "http.interaction.message_action",
+  "kind": "interaction",
+  "transport": "http",
+  "provenance": {
+    "bolt_version": "5.1.0",
+    "bolt_commit": "3f8823c93f5639e99f05a2df9c7dc692da5cc184",
+    "node_slack_sdk_commit": "d02afdfd5c87f896dc9994dfe2b55472758fbcf4",
+    "payload_source": "test/unit/helpers/events.ts:createDummyMessageShortcutMiddlewareArgs",
+    "wire_source": "https://docs.slack.dev/interactivity/handling-user-interaction",
+    "ack_source": null
+  },
+  "not_representable": null,
+  "input": {
+    "headers": {
+      "content-type": "application/x-www-form-urlencoded",
+      "x-slack-request-timestamp": "1700000000",
+      "x-slack-signature": "v0=c176c6c79b0ced4901b7308fce235af71f4293d594b08aad2c070fa11fc20f74"
+    },
+    "body": "payload=%7B%22type%22%3A%22message_action%22%2C%22callback_id%22%3A%22Cb1234%22%2C%22trigger_id%22%3A%221234.56%22%2C%22message_ts%22%3A%221234.56%22%2C%22response_url%22%3A%22https%3A%2F%2Fslack.com%22%2C%22message%22%3A%7B%22type%22%3A%22message%22%2C%22ts%22%3A%221234.56%22%7D%2C%22user%22%3A%7B%22id%22%3A%22U1234%22%2C%22name%22%3A%22filmaj%22%7D%2C%22channel%22%3A%7B%22id%22%3A%22C1234%22%2C%22name%22%3A%22%23random%22%7D%2C%22team%22%3A%7B%22id%22%3A%22T1234%22%2C%22domain%22%3A%22slack.com%22%7D%2C%22token%22%3A%22xoxb-1234%22%2C%22action_ts%22%3A%221234.56%22%7D"
+  },
+  "bolt": {
+    "outcome": "dispatched",
+    "status": 200,
+    "body": null,
+    "content_type": null,
+    "reason": null,
+    "dispatch": {
+      "incoming_type": "Shortcut",
+      "conversation_id": "C1234",
+      "retry_num": null,
+      "retry_reason": null,
+      "is_enterprise_install": false,
+      "team_id": "T1234",
+      "enterprise_id": null,
+      "user_id": "U1234"
+    }
+  },
+  "expected": {
+    "outcome": "publish",
+    "nats": {
+      "subject_suffix": "interaction.message_action",
+      "dedup_id": "1234.56",
+      "payload": "{\"type\":\"message_action\",\"callback_id\":\"Cb1234\",\"trigger_id\":\"1234.56\",\"message_ts\":\"1234.56\",\"response_url\":\"https://slack.com\",\"message\":{\"type\":\"message\",\"ts\":\"1234.56\"},\"user\":{\"id\":\"U1234\",\"name\":\"filmaj\"},\"channel\":{\"id\":\"C1234\",\"name\":\"#random\"},\"team\":{\"id\":\"T1234\",\"domain\":\"slack.com\"},\"token\":\"xoxb-1234\",\"action_ts\":\"1234.56\"}",
+      "payload_fill": null,
+      "headers": {
+        "X-Slack-Event-Type": "message_action",
+        "X-Slack-Team-Id": "T1234",
+        "X-Slack-Payload-Kind": "interaction",
+        "X-Slack-Is-Enterprise-Install": "false",
+        "X-Slack-Transport": "webhook",
+        "X-Slack-Request-Timestamp": "1700000000"
+      }
+    },
+    "http": {
+      "status": 200,
+      "body": null,
+      "challenge": null
+    },
+    "socket_ack": null
+  }
+}

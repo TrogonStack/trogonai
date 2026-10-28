@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "id": "http.body_limit.above_both",
+  "kind": "event",
+  "transport": "http",
+  "provenance": {
+    "bolt_version": "5.1.0",
+    "bolt_commit": "3f8823c93f5639e99f05a2df9c7dc692da5cc184",
+    "node_slack_sdk_commit": "d02afdfd5c87f896dc9994dfe2b55472758fbcf4",
+    "payload_source": "test/unit/receivers/HTTPModuleFunctions.spec.ts: should reject an oversized request body with a 413 error; signed event body of 5242880 bytes",
+    "wire_source": "https://docs.slack.dev/apis/events-api/",
+    "ack_source": null
+  },
+  "not_representable": null,
+  "input": {
+    "headers": {
+      "content-type": "application/json",
+      "x-slack-request-timestamp": "1700000000",
+      "x-slack-signature": "v0=11b2fb74efc284f391904527a4506c8f3b055dd0bf251e32929b9b280c2bd3bc"
+    },
+    "body_fill": {
+      "prefix": "{\"type\":\"event_callback\",\"event_id\":\"Ev0OVERSIZE\",\"team_id\":\"T1234\",\"event\":{\"type\":\"message\",\"text\":\"",
+      "filler": "a",
+      "count": 5242775,
+      "suffix": "\"}}"
+    }
+  },
+  "bolt": {
+    "outcome": "rejected",
+    "status": 413,
+    "body": null,
+    "content_type": null,
+    "reason": "Request body exceeded the maximum allowed size (limit: 4194304 bytes)",
+    "dispatch": null
+  },
+  "expected": {
+    "outcome": "reject",
+    "nats": null,
+    "http": {
+      "status": 413,
+      "body": null,
+      "challenge": null
+    },
+    "socket_ack": null
+  }
+}

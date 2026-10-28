@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "id": "http.ssl_check.unsigned",
+  "kind": "ssl_check",
+  "transport": "http",
+  "provenance": {
+    "bolt_version": "5.1.0",
+    "bolt_commit": "3f8823c93f5639e99f05a2df9c7dc692da5cc184",
+    "node_slack_sdk_commit": "d02afdfd5c87f896dc9994dfe2b55472758fbcf4",
+    "payload_source": "test/unit/receivers/HTTPModuleFunctions.spec.ts: should parse a ssl_check request body without signature verification",
+    "wire_source": "https://docs.slack.dev/authentication/verifying-requests-from-slack",
+    "ack_source": null
+  },
+  "not_representable": null,
+  "input": {
+    "headers": {
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    "body": "ssl_check=1&token=legacy-fixed-verification-token"
+  },
+  "bolt": {
+    "outcome": "inline",
+    "status": 200,
+    "body": null,
+    "content_type": null,
+    "reason": null,
+    "dispatch": null
+  },
+  "expected": {
+    "outcome": "inline",
+    "nats": null,
+    "http": {
+      "status": 200,
+      "body": null,
+      "challenge": null
+    },
+    "socket_ack": null
+  }
+}
