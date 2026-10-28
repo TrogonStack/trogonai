@@ -274,6 +274,27 @@ pub fn build_decider_wasm_traps(meter: &opentelemetry::metrics::Meter) -> opente
         .build()
 }
 
+/// Duration of HTTP server requests
+///
+/// Instrument: `histogram`. Unit: `s`.
+pub const HTTP_SERVER_REQUEST_DURATION: &str = "http.server.request.duration";
+
+/// Duration of HTTP server requests
+///
+/// Instrument: `histogram`. Unit: `s`.
+pub fn build_http_server_request_duration(
+    meter: &opentelemetry::metrics::Meter,
+) -> opentelemetry::metrics::Histogram<f64> {
+    meter
+        .f64_histogram(HTTP_SERVER_REQUEST_DURATION)
+        .with_description("Duration of HTTP server requests.")
+        .with_unit("s")
+        .with_boundaries(vec![
+            0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0,
+        ])
+        .build()
+}
+
 /// Execution schedule messages published
 ///
 /// Instrument: `counter`. Unit: `{message}`.

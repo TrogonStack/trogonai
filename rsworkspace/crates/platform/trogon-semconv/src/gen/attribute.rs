@@ -51,6 +51,9 @@ pub const HTTP_REQUEST_METHOD: &str = "http.request.method";
 /// Standard OTel http.response.status_code. Emitted by http.server.request
 pub const HTTP_RESPONSE_STATUS_CODE: &str = "http.response.status_code";
 
+/// Matched HTTP route template; never a raw request path
+pub const HTTP_ROUTE: &str = "http.route";
+
 /// Direction of the MCP NATS transport message
 pub const MCP_NATS_DIRECTION: &str = "mcp.nats.direction";
 
@@ -644,6 +647,9 @@ pub const TROGON_CLAIM_CHECK_USED: &str = "trogon.claim_check.used";
 
 /// Standard OTel url.path. Emitted by http.server.request
 pub const URL_PATH: &str = "url.path";
+
+/// URL scheme of the HTTP listener
+pub const URL_SCHEME: &str = "url.scheme";
 
 /// Standard OTel user_agent.original. Emitted by http.server.request
 pub const USER_AGENT_ORIGINAL: &str = "user_agent.original";

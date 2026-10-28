@@ -37,7 +37,8 @@ pub(crate) async fn serve(
         shutdown.await;
         health.begin_shutdown();
     };
-    axum::serve(listener, router)
+    let telemetry = crate::telemetry::HttpTelemetry::new(trogon_telemetry::meter("trogon-provider-gateway"));
+    axum::serve(listener, telemetry.instrument(router))
         .with_graceful_shutdown(shutdown)
         .await
         .map_err(ServerError::Serve)

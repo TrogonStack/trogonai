@@ -7478,7 +7478,12 @@ version = "0.0.1"
 dependencies = [
  "axum",
  "clap",
+ "futures-util",
  "h2",
+ "http-body",
+ "opentelemetry",
+ "opentelemetry_sdk",
+ "pin-project-lite",
  "serde",
  "serde_json",
  "tempfile",
@@ -7487,7 +7492,9 @@ dependencies = [
  "toml 1.1.6+spec-1.1.0",
  "tower",
  "tracing",
+ "tracing-opentelemetry",
  "tracing-subscriber",
+ "trogon-semconv",
  "trogon-std",
  "trogon-telemetry",
 ]

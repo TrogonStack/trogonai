@@ -24,6 +24,7 @@ otel/semconv/
     a2a.yaml         # a2a-nats
     gateway.yaml     # trogon-gateway webhooks
     std.yaml         # trogon-std (HTTP server span)
+    provider.yaml    # trogon-provider-gateway (standard HTTP duration)
   policies/          # Rego policies (metric + attribute naming)
     trogon_naming.rego
   templates/         # Weaver Forge codegen templates, one subtree per target
@@ -58,9 +59,10 @@ gateway spans, and the overloaded `method` key (ACP method vs HTTP method).
 Reused standard OpenTelemetry attributes (`messaging.*`, `http.*`, `server.*`,
 `error.type`) are documented locally so the registry stays self-contained.
 
-Coverage today: `trogon-scheduler`, `acp-nats`, `trogon-nats`, `mcp-nats`,
-`a2a-nats`, `trogon-gateway`, and `trogon-std` (7 metrics, ~55 spans, ~50
-attributes).
+Coverage includes `trogon-scheduler`, `acp-nats`, `trogon-nats`, `mcp-nats`,
+`a2a-nats`, `trogon-gateway`, `trogon-provider-gateway` and `trogon-std`. Standard
+HTTP request duration retains its OpenTelemetry name and seconds-based buckets;
+the naming policy permits that registered standard metric in the HTTP namespace.
 
 Runtime code uses the generated `trogon-semconv` constants for metric names,
 span names, and attribute keys. Regenerate and commit bindings whenever the

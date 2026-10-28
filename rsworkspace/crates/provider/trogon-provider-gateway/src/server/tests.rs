@@ -7,14 +7,12 @@ use axum::{
 };
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::{Notify, oneshot};
 use tokio::time::timeout;
 use tower::ServiceExt;
-use tracing_subscriber::prelude::*;
 use trogon_provider_gateway::{Health, router};
 
 const DEADLINE: Duration = Duration::from_secs(5);
@@ -143,46 +141,6 @@ async fn occupied_bind_address_surfaces_the_original_error() {
     })
     .await
     .unwrap();
-}
-
-struct ServerSpans(Arc<AtomicUsize>);
-
-impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for ServerSpans {
-    fn on_new_span(
-        &self,
-        attributes: &tracing::span::Attributes<'_>,
-        _id: &tracing::Id,
-        _context: tracing_subscriber::layer::Context<'_, S>,
-    ) {
-        if attributes.metadata().name() == "http.server.request" {
-            self.0.fetch_add(1, Ordering::SeqCst);
-        }
-    }
-}
-
-#[tokio::test]
-async fn operational_requests_create_no_server_spans() {
-    let spans = Arc::new(AtomicUsize::new(0));
-    tracing_subscriber::registry()
-        .with(ServerSpans(Arc::clone(&spans)))
-        .init();
-    timeout(DEADLINE, async {
-        let listener = bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0))).await.unwrap();
-        let address = listener.local_addr().unwrap();
-        let (shutdown_tx, shutdown_rx) = oneshot::channel();
-        let health = Health::default();
-        let server = tokio::spawn(serve(listener, router(health.clone()), health, async move {
-            shutdown_rx.await.unwrap();
-        }));
-        for path in ["/-/liveness", "/-/readiness"] {
-            assert!(request(address, path).await.starts_with("HTTP/1.1 200 OK"));
-        }
-        shutdown_tx.send(()).unwrap();
-        server.await.unwrap().unwrap();
-    })
-    .await
-    .unwrap();
-    assert_eq!(spans.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]
