@@ -214,12 +214,15 @@ fn strip_claim_headers(headers: HeaderMap) -> HeaderMap {
         .collect()
 }
 
-fn claim_object_key(subject: &str, headers: &HeaderMap, payload: &[u8]) -> String {
-    let msg_id = headers
+fn message_id(headers: &HeaderMap) -> Option<&str> {
+    headers
         .get(HEADER_NATS_MSG_ID)
         .map(|value| value.as_str())
-        .filter(|value| !value.is_empty());
-    match msg_id {
+        .filter(|value| !value.is_empty())
+}
+
+fn claim_object_key(subject: &str, headers: &HeaderMap, payload: &[u8]) -> String {
+    match message_id(headers) {
         Some(id) => format!(
             "{subject}/{}/{}",
             hex::encode(Sha256::digest(id.as_bytes())),
@@ -271,11 +274,15 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> ClaimCheckPublisher<P, S> {
         );
 
         // Store-then-publish: a failed publish orphans the object until bucket retention expires it.
-        // The key carries the message id and a payload digest, so a deduplicated retry rewrites the same object.
-        let mut cursor = std::io::Cursor::new(payload);
-        if let Err(e) = self.store.put(&key, &mut cursor).await {
-            error!(error = %e, "claim check: failed to store payload in object store");
-            return PublishOutcome::StoreFailed(Box::new(e));
+        // The key carries the message id and a payload digest, so a deduplicated retry finds the object
+        // already stored. Rewriting it would purge the chunks a consumer may be reading.
+        let already_stored = message_id(&headers).is_some() && self.store.contains(&key).await;
+        if !already_stored {
+            let mut cursor = std::io::Cursor::new(payload);
+            if let Err(e) = self.store.put(&key, &mut cursor).await {
+                error!(error = %e, "claim check: failed to store payload in object store");
+                return PublishOutcome::StoreFailed(Box::new(e));
+            }
         }
 
         let mut claim_headers = headers;

@@ -465,6 +465,43 @@ async fn a_retried_message_id_claims_the_same_object_key() {
     assert_eq!(keys[0], keys[1]);
     assert!(keys[0].starts_with("test.subject/"));
     assert_eq!(keys[0].split('/').count(), 3);
-    let names: std::collections::HashSet<_> = store.stored_objects().into_iter().map(|(name, _)| name).collect();
-    assert_eq!(names.len(), 1);
+    assert_eq!(store.stored_objects().len(), 1);
+}
+
+#[tokio::test]
+async fn a_retried_message_id_keeps_the_stored_claim_object() {
+    let publisher = MockJetStreamPublisher::new();
+    let store = MockObjectStore::new();
+    let cc = ClaimCheckPublisher::new(
+        publisher.clone(),
+        test_binding(store.clone()),
+        MaxPayload::from_server_limit(1024 + PROTOCOL_OVERHEAD),
+    );
+
+    let mut first = HeaderMap::new();
+    first.insert("Nats-Msg-Id", "Ev123");
+    let outcome = cc
+        .publish_event(
+            "test.subject".to_string(),
+            first,
+            Bytes::from(vec![0u8; 2048]),
+            Duration::from_secs(5),
+        )
+        .await;
+    assert!(outcome.is_ok());
+
+    store.fail_next_put();
+    let mut retry = HeaderMap::new();
+    retry.insert("Nats-Msg-Id", "Ev123");
+    let outcome = cc
+        .publish_event(
+            "test.subject".to_string(),
+            retry,
+            Bytes::from(vec![0u8; 2048]),
+            Duration::from_secs(5),
+        )
+        .await;
+    assert!(outcome.is_ok());
+    assert_eq!(store.stored_objects().len(), 1);
+    assert_eq!(publisher.published_messages().len(), 2);
 }
