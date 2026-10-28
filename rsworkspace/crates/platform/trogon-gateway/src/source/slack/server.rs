@@ -10,9 +10,10 @@ use super::constants::{
     CONTENT_TYPE_FORM, HEADER_SIGNATURE, HEADER_TIMESTAMP, NATS_HEADER_EVENT_ID, NATS_HEADER_EVENT_TYPE,
     NATS_HEADER_PAYLOAD_KIND, NATS_HEADER_REJECT_REASON, NATS_HEADER_TEAM_ID, NATS_HEADER_TRANSPORT, UNKNOWN_TEAM_ID,
 };
-use super::delivery_metadata::DeliveryContext;
+use super::delivery_metadata::{DeliveryContext, DeliveryMetadata};
 use super::header_text::{DeliveryHeaders, HeaderText, InvalidHeaderTextError};
 use super::interaction_key::InteractionKey;
+use super::payload_metadata::PayloadMetadata;
 use super::signature;
 use super::ssl_check::SslCheck;
 use super::subject::SlackSubject;
@@ -52,7 +53,7 @@ fn delivery_headers(
     event_type: &str,
     event_id: Option<&str>,
     team_id: &str,
-    context: &DeliveryContext,
+    metadata: &DeliveryMetadata,
 ) -> Result<async_nats::HeaderMap, InvalidHeaderTextError> {
     let headers = DeliveryHeaders::new()
         .with(async_nats::header::NATS_MESSAGE_ID, &HeaderText::new(message_id)?)
@@ -61,7 +62,7 @@ fn delivery_headers(
         .with_static(NATS_HEADER_PAYLOAD_KIND, kind)
         .with_static(NATS_HEADER_TRANSPORT, transport.as_str());
     let headers = headers.with_optional(NATS_HEADER_EVENT_ID, event_id)?;
-    Ok(context.apply(headers).into_inner())
+    Ok(metadata.apply(headers)?.into_inner())
 }
 
 fn json_team_id(payload: &serde_json::Value) -> &str {
@@ -286,7 +287,7 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
             &event_type,
             Some(&event_id),
             &team_id,
-            context,
+            &DeliveryMetadata::new(context, PayloadMetadata::event(payload)),
         ) else {
             warn!("Event metadata is not valid header text");
             let status = self
@@ -418,7 +419,7 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
             &interaction_type,
             None,
             &team_id,
-            context,
+            &DeliveryMetadata::new(context, PayloadMetadata::interaction(payload)),
         ) else {
             warn!("Interaction metadata is not valid header text");
             return self
@@ -469,7 +470,8 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
                 .await;
         };
 
-        self.publish_slash_command(command, team_id, trigger_id, raw_body, context)
+        let metadata = DeliveryMetadata::new(context, PayloadMetadata::command_fields(fields));
+        self.publish_slash_command(command, team_id, trigger_id, raw_body, metadata)
             .await
     }
 
@@ -504,7 +506,8 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
                 .await;
         };
 
-        self.publish_slash_command(command, team_id, trigger_id, raw_body, context)
+        let metadata = DeliveryMetadata::new(context, PayloadMetadata::command_value(payload));
+        self.publish_slash_command(command, team_id, trigger_id, raw_body, metadata)
             .await
     }
 
@@ -514,7 +517,7 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
         team_id: &str,
         trigger_id: &str,
         raw_body: Bytes,
-        context: &DeliveryContext,
+        metadata: DeliveryMetadata<'_>,
     ) -> StatusCode {
         let subject = match SlackSubject::command(&self.subject_prefix, command) {
             Ok(subject) => subject,
@@ -535,7 +538,8 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
 
         info!(command, "Received Slack slash command");
 
-        let Ok(nats_headers) = delivery_headers(self.transport, "command", trigger_id, command, None, team_id, context)
+        let Ok(nats_headers) =
+            delivery_headers(self.transport, "command", trigger_id, command, None, team_id, &metadata)
         else {
             warn!("Slash command metadata is not valid header text");
             return self

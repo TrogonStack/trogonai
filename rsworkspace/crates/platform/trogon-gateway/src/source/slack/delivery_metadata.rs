@@ -2,6 +2,7 @@ use axum::http::HeaderMap;
 
 use super::constants::{HEADER_RETRY_NUM, HEADER_RETRY_REASON, NATS_HEADER_RETRY_NUM, NATS_HEADER_RETRY_REASON};
 use super::header_text::{DeliveryHeaders, HeaderText, InvalidHeaderTextError};
+use super::payload_metadata::PayloadMetadata;
 use super::retry_attempt::RetryAttempt;
 use super::retry_reason::RetryReason;
 
@@ -40,6 +41,22 @@ impl DeliveryContext {
                 NATS_HEADER_RETRY_REASON,
                 self.retry_reason.as_ref().map(RetryReason::as_header_text),
             )
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct DeliveryMetadata<'a> {
+    context: &'a DeliveryContext,
+    payload: PayloadMetadata<'a>,
+}
+
+impl<'a> DeliveryMetadata<'a> {
+    pub fn new(context: &'a DeliveryContext, payload: PayloadMetadata<'a>) -> Self {
+        Self { context, payload }
+    }
+
+    pub fn apply(&self, headers: DeliveryHeaders) -> Result<DeliveryHeaders, InvalidHeaderTextError> {
+        self.payload.apply(self.context.apply(headers))
     }
 }
 

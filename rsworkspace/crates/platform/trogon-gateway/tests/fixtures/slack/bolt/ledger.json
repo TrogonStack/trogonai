@@ -3,121 +3,94 @@
   "entries": {
     "http.ack.block_suggestion_options": [
       "G13",
-      "G2",
-      "G7"
+      "G2"
     ],
     "http.ack.slash_in_channel_reply": [
       "G13",
-      "G2",
-      "G7"
+      "G2"
     ],
     "http.ack.view_submission_errors": [
       "G13",
-      "G2",
-      "G7"
+      "G2"
     ],
     "http.body_limit.at_default": [
-      "G13",
-      "G7"
+      "G13"
     ],
     "http.command.slash": [
-      "G13",
-      "G7"
+      "G13"
     ],
     "http.command.slash_nested_name": [
-      "G13",
-      "G7"
+      "G13"
     ],
     "http.command.slash_reserved_characters": [
-      "G13",
-      "G7"
+      "G13"
     ],
     "http.event.app_home_opened": [
-      "G13",
-      "G7"
+      "G13"
     ],
     "http.event.app_mention": [
-      "G13",
-      "G7"
+      "G13"
     ],
     "http.event.assistant_thread_context_changed": [
-      "G13",
-      "G7"
+      "G13"
     ],
     "http.event.assistant_thread_started": [
-      "G13",
-      "G7"
+      "G13"
     ],
     "http.event.assistant_user_message": [
       "G13",
-      "G22",
-      "G7"
+      "G22"
     ],
     "http.event.function_executed": [
-      "G13",
-      "G7"
+      "G13"
     ],
     "http.event.member_joined_channel": [
       "G13",
-      "G22",
-      "G7"
+      "G22"
     ],
     "http.event.member_left_channel": [
       "G13",
-      "G22",
-      "G7"
+      "G22"
     ],
     "http.event.message": [
       "G13",
-      "G22",
-      "G7"
+      "G22"
     ],
     "http.event.message_bot_subtype": [
       "G13",
-      "G22",
-      "G7"
+      "G22"
     ],
     "http.event.message_direct": [
       "G13",
-      "G22",
-      "G7"
+      "G22"
     ],
     "http.event.message_threaded": [
       "G13",
-      "G22",
-      "G7"
+      "G22"
     ],
     "http.event.reaction_added": [
-      "G13",
-      "G7"
+      "G13"
     ],
     "http.interaction.block_actions": [
-      "G13",
-      "G7"
+      "G13"
     ],
     "http.interaction.block_actions_function_scoped": [
-      "G13",
-      "G7"
+      "G13"
     ],
     "http.interaction.block_suggestion": [
-      "G13",
-      "G7"
+      "G13"
     ],
     "http.interaction.message_action": [
-      "G13",
-      "G7"
+      "G13"
     ],
     "http.interaction.shortcut": [
-      "G13",
-      "G7"
+      "G13"
     ],
     "http.interaction.view_closed": [
-      "G13",
-      "G7"
+      "G13"
     ],
     "http.interaction.view_submission": [
-      "G13",
-      "G7"
+      "G13"
     ],
     "http.malformed.invalid_interaction_payload": [
       "G23"
@@ -128,132 +101,103 @@
     "http.not_representable.dummy_receiver_event": "not_representable",
     "http.retry.event_message": [
       "G13",
-      "G22",
-      "G7"
+      "G22"
     ],
     "http.verify.timestamp_at_drift_limit": [
       "G13",
-      "G22",
-      "G7"
+      "G22"
     ],
     "socket.ack.block_suggestion_options": [
       "G13",
-      "G2",
-      "G7"
+      "G2"
     ],
     "socket.ack.slash_in_channel_reply": [
       "G13",
-      "G2",
-      "G7"
+      "G2"
     ],
     "socket.ack.view_submission_errors": [
       "G13",
-      "G2",
-      "G7"
+      "G2"
     ],
     "socket.command.slash": [
-      "G13",
-      "G7"
+      "G13"
     ],
     "socket.command.slash_nested_name": [
-      "G13",
-      "G7"
+      "G13"
     ],
     "socket.command.slash_reserved_characters": [
-      "G13",
-      "G7"
+      "G13"
     ],
     "socket.event.app_home_opened": [
-      "G13",
-      "G7"
+      "G13"
     ],
     "socket.event.app_mention": [
-      "G13",
-      "G7"
+      "G13"
     ],
     "socket.event.assistant_thread_context_changed": [
-      "G13",
-      "G7"
+      "G13"
     ],
     "socket.event.assistant_thread_started": [
-      "G13",
-      "G7"
+      "G13"
     ],
     "socket.event.assistant_user_message": [
       "G13",
-      "G22",
-      "G7"
+      "G22"
     ],
     "socket.event.function_executed": [
-      "G13",
-      "G7"
+      "G13"
     ],
     "socket.event.member_joined_channel": [
       "G13",
-      "G22",
-      "G7"
+      "G22"
     ],
     "socket.event.member_left_channel": [
       "G13",
-      "G22",
-      "G7"
+      "G22"
     ],
     "socket.event.message": [
       "G13",
-      "G22",
-      "G7"
+      "G22"
     ],
     "socket.event.message_bot_subtype": [
       "G13",
-      "G22",
-      "G7"
+      "G22"
     ],
     "socket.event.message_direct": [
       "G13",
-      "G22",
-      "G7"
+      "G22"
     ],
     "socket.event.message_threaded": [
       "G13",
-      "G22",
-      "G7"
+      "G22"
     ],
     "socket.event.reaction_added": [
-      "G13",
-      "G7"
+      "G13"
     ],
     "socket.interaction.block_actions": [
-      "G13",
-      "G7"
+      "G13"
     ],
     "socket.interaction.block_actions_function_scoped": [
-      "G13",
-      "G7"
+      "G13"
     ],
     "socket.interaction.block_suggestion": [
-      "G13",
-      "G7"
+      "G13"
     ],
     "socket.interaction.message_action": [
-      "G13",
-      "G7"
+      "G13"
     ],
     "socket.interaction.shortcut": [
-      "G13",
-      "G7"
+      "G13"
     ],
     "socket.interaction.view_closed": [
-      "G13",
-      "G7"
+      "G13"
     ],
     "socket.interaction.view_submission": [
-      "G13",
-      "G7"
+      "G13"
     ],
     "socket.retry.event_message": [
       "G13",
-      "G22",
-      "G7"
+      "G22"
     ]
   }
 }

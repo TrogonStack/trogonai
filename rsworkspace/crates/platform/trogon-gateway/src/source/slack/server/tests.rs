@@ -1,4 +1,7 @@
-use super::super::constants::{HEADER_RETRY_NUM, HEADER_RETRY_REASON, NATS_HEADER_RETRY_NUM, NATS_HEADER_RETRY_REASON};
+use super::super::constants::{
+    HEADER_RETRY_NUM, HEADER_RETRY_REASON, NATS_HEADER_API_APP_ID, NATS_HEADER_ENTERPRISE_ID,
+    NATS_HEADER_IS_ENTERPRISE_INSTALL, NATS_HEADER_RETRY_NUM, NATS_HEADER_RETRY_REASON,
+};
 use super::*;
 use axum::body::Body;
 use axum::http::Request;
@@ -1438,4 +1441,122 @@ async fn http_interaction_redelivery_carries_retry_headers() {
 
     assert_eq!(resp.status(), StatusCode::OK);
     assert_retry_headers(&publisher, Some(("1", "http_timeout")));
+}
+
+fn enterprise_headers(publisher: &MockJetStreamPublisher) -> (Option<String>, Option<String>, Option<String>) {
+    let messages = publisher.published_messages();
+    assert_eq!(messages.len(), 1);
+    let header = |name: &str| messages[0].headers.get(name).map(|v| v.as_str().to_owned());
+    (
+        header(NATS_HEADER_ENTERPRISE_ID),
+        header(NATS_HEADER_IS_ENTERPRISE_INSTALL),
+        header(NATS_HEADER_API_APP_ID),
+    )
+}
+
+fn expected_enterprise(enterprise: Option<&str>, install: &str) -> (Option<String>, Option<String>, Option<String>) {
+    (
+        enterprise.map(str::to_owned),
+        Some(install.to_owned()),
+        Some("A01APP".to_owned()),
+    )
+}
+
+#[tokio::test]
+async fn http_event_carries_enterprise_and_app_identity() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let body = serde_json::to_vec(&serde_json::json!({
+        "type": "event_callback",
+        "event_id": "Ev01ABC123",
+        "team_id": "T01ABC",
+        "api_app_id": "A01APP",
+        "authorizations": [{ "enterprise_id": "E01ENT", "is_enterprise_install": true }],
+        "event": { "type": "message" }
+    }))
+    .unwrap();
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, &body);
+
+    mock_app(publisher.clone())
+        .oneshot(webhook_request(&body, &ts, Some(&sig)))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        enterprise_headers(&publisher),
+        expected_enterprise(Some("E01ENT"), "true")
+    );
+}
+
+#[tokio::test]
+async fn http_interaction_carries_enterprise_and_app_identity() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let payload = serde_json::json!({
+        "type": "block_actions",
+        "trigger_id": "trigger123",
+        "api_app_id": "A01APP",
+        "team": { "id": "T01ABC", "enterprise_id": "E01ENT" },
+        "is_enterprise_install": false
+    });
+    let body = format!(
+        "payload={}",
+        form_urlencoded::byte_serialize(payload.to_string().as_bytes()).collect::<String>()
+    );
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, body.as_bytes());
+
+    mock_app(publisher.clone())
+        .oneshot(form_request(body.as_bytes(), &ts, &sig))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        enterprise_headers(&publisher),
+        expected_enterprise(Some("E01ENT"), "false")
+    );
+}
+
+#[tokio::test]
+async fn http_slash_command_carries_enterprise_and_app_identity() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let body = b"command=%2Fdeploy&trigger_id=trigger123&team_id=T01ABC&api_app_id=A01APP&enterprise_id=E01ENT&is_enterprise_install=true";
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, body);
+
+    mock_app(publisher.clone())
+        .oneshot(form_request(body, &ts, &sig))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        enterprise_headers(&publisher),
+        expected_enterprise(Some("E01ENT"), "true")
+    );
+}
+
+#[tokio::test]
+async fn http_event_with_line_break_in_app_id_returns_400() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let body = serde_json::to_vec(&serde_json::json!({
+        "type": "event_callback",
+        "event_id": "Ev01ABC123",
+        "team_id": "T01ABC",
+        "api_app_id": "A01\r\nX-Injected: 1",
+        "event": { "type": "message" }
+    }))
+    .unwrap();
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, &body);
+
+    let resp = mock_app(publisher.clone())
+        .oneshot(webhook_request(&body, &ts, Some(&sig)))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    assert_unroutable(&publisher, "invalid_header_value");
 }
