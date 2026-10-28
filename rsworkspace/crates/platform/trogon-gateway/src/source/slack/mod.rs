@@ -1,38 +1,58 @@
-//! # trogon-source-slack
+//! Slack source for `trogon-gateway`.
 //!
-//! Slack Events API receiver that publishes events to NATS JetStream.
+//! Receives Slack Events API deliveries, interactive payloads and slash commands
+//! over either an HTTP webhook or Socket Mode and publishes each one to NATS
+//! JetStream exactly as Slack sent it.
 //!
 //! ## How it works
 //!
-//! 1. Slack delivers payloads by HTTP webhook or Socket Mode, depending on the
-//!    configured integration transport.
-//! 2. HTTP webhooks are validated with HMAC-SHA256 signatures. Socket Mode uses
-//!    Slack's pre-authenticated WebSocket connection and acknowledges envelopes
-//!    after durable NATS publish.
-//! 3. HTTP `url_verification` challenges are answered inline (no NATS publish).
-//! 4. `event_callback` payloads are published to NATS JetStream on
-//!    `slack.{event.type}` subjects (e.g. `slack.message`, `slack.app_mention`).
-//! 5. The JetStream stream (`SLACK` by default, capturing `slack.>`) is created
-//!    automatically on startup if it doesn't exist.
+//! 1. An integration is configured with exactly one transport. The webhook
+//!    transport mounts `/sources/slack/{integration}/webhook`. Socket Mode opens
+//!    Slack's WebSocket with an app-level token.
+//! 2. HTTP requests are checked against the `X-Slack-Request-Timestamp` drift
+//!    window and the HMAC-SHA256 `X-Slack-Signature`. Socket Mode relies on
+//!    Slack's pre-authenticated connection.
+//! 3. `url_verification` challenges and `ssl_check=1` form posts are answered
+//!    inline and never published. `ssl_check` is answered before signature
+//!    verification, as Slack sends it unsigned.
+//! 4. Everything else is published to JetStream. The delivery is acknowledged
+//!    to Slack (HTTP 200, or an envelope ack over Socket Mode) only after the
+//!    publish was stored, within the time Slack allows for an acknowledgement.
+//! 5. A payload that cannot be routed is stored on the unroutable subject with
+//!    the reason in a header and the original bytes as the body. If that store
+//!    fails too, the delivery is not acknowledged so Slack redelivers it.
+//! 6. The JetStream stream is created on startup if it does not exist.
 //!
 //! ## NATS message format
 //!
-//! - **Subject**: `{SLACK_SUBJECT_PREFIX}.{event.type}` (e.g. `slack.message`)
-//! - **Headers**: `X-Slack-Event-Type`, `X-Slack-Event-Id`, `X-Slack-Team-Id`
-//! - **Payload**: raw JSON body from Slack
+//! | Payload | Subject |
+//! |---|---|
+//! | `event_callback` | `{prefix}.event.{event.type}` |
+//! | Interaction | `{prefix}.interaction.{type}` |
+//! | Slash command | `{prefix}.command.{name}` without the leading `/` |
+//! | Unroutable | `{prefix}.unroutable` |
 //!
-//! ## Configuration (env vars)
+//! Event types, interaction types and command names come from the sender, so
+//! one that is not a single valid subject token is treated as unroutable.
 //!
-//! | Variable | Default | Description |
+//! - **Payload**: the bytes Slack sent. Socket Mode publishes the envelope's
+//!   `payload` slice without re-serializing it.
+//! - **Headers**: `Nats-Msg-Id`, `X-Slack-Payload-Kind`, `X-Slack-Event-Type`,
+//!   `X-Slack-Team-Id`, `X-Slack-Transport`, plus `X-Slack-Event-Id` for events
+//!   and `X-Slack-Reject-Reason` for unroutable messages.
+//!
+//! ## Configuration
+//!
+//! Configured in TOML under `[sources.slack.integrations.{id}]`. See the crate
+//! README for the shared fields. Slack specific settings:
+//!
+//! | Key | Default | Description |
 //! |---|---|---|
-//! | `SLACK_SIGNING_SECRET` | **required** | Slack app signing secret |
-//! | `SLACK_WEBHOOK_PORT` | `3000` | HTTP listening port |
-//! | `SLACK_SUBJECT_PREFIX` | `slack` | NATS subject prefix |
-//! | `SLACK_STREAM_NAME` | `SLACK` | JetStream stream name |
-//! | `SLACK_STREAM_MAX_AGE_SECS` | `604800` | Max age of messages in JetStream (seconds, default 7 days) |
-//! | `SLACK_NATS_ACK_TIMEOUT_SECS` | `10` | NATS publish ack timeout in seconds |
-//! | `SLACK_TIMESTAMP_MAX_DRIFT_SECS` | `300` | Max clock drift for request timestamps (default 5 min) |
-//! | `NATS_URL` | `localhost:4222` | NATS server URL(s) |
+//! | `webhook.signing_secret` | required | Slack app signing secret |
+//! | `webhook.timestamp_max_drift_secs` | `300` | Allowed clock drift for request timestamps |
+//! | `webhook.max_body_bytes` | `4194304` | Largest accepted request body |
+//! | `socket_mode.app_token` | required | App-level token, starts with `xapp-` |
+//! | `nats_ack_timeout_secs` | derived from Slack's 3 second deadline | Capped at that budget |
 
 pub mod ack_budget;
 pub mod config;
@@ -42,6 +62,7 @@ pub mod interaction_key;
 pub mod server;
 pub mod signature;
 pub mod socket_mode;
+pub mod ssl_check;
 pub mod subject;
 pub mod unroutable;
 

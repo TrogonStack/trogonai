@@ -1271,3 +1271,82 @@ async fn provision_stays_quiet_when_the_ack_timeout_fits() {
     let text = logs.text();
     assert!(!text.contains("WARN"), "{text}");
 }
+
+fn unsigned_request(content_type: &str, body: &str) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri("/webhook")
+        .header("content-type", content_type)
+        .body(Body::from(body.to_owned()))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn ssl_check_is_answered_before_signature_verification_and_never_published() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = mock_app(publisher.clone());
+
+    let resp = app
+        .oneshot(unsigned_request("application/x-www-form-urlencoded", "ssl_check=1"))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(publisher.published_messages().is_empty());
+}
+
+#[tokio::test]
+async fn ssl_check_ignores_every_other_field() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = mock_app(publisher.clone());
+    let smuggled = "ssl_check=1&command=%2Ftrogon&team_id=T01ABC&trigger_id=cmd789";
+
+    let resp = app
+        .oneshot(unsigned_request("application/x-www-form-urlencoded", smuggled))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(publisher.published_messages().is_empty());
+}
+
+#[tokio::test]
+async fn ssl_check_with_a_valid_signature_is_still_not_published() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = mock_app(publisher.clone());
+    let form_body = "ssl_check=1&command=%2Ftrogon&team_id=T01ABC&trigger_id=cmd789";
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, form_body.as_bytes());
+
+    let resp = app
+        .oneshot(form_request(form_body.as_bytes(), &ts, &sig))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(publisher.published_messages().is_empty());
+}
+
+#[tokio::test]
+async fn requests_that_only_look_like_ssl_checks_still_need_a_signature() {
+    let _guard = tracing_guard();
+    let cases = [
+        ("application/x-www-form-urlencoded", "ssl_check=0"),
+        ("application/x-www-form-urlencoded", "ssl_check=1&ssl_check=1"),
+        ("application/x-www-form-urlencoded", "command=%2Ftrogon"),
+        ("application/x-www-form-urlencoded; charset=utf-8", "ssl_check=1"),
+        ("application/json", "ssl_check=1"),
+    ];
+    for (content_type, body) in cases {
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+
+        let resp = app.oneshot(unsigned_request(content_type, body)).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "{content_type} {body}");
+        assert!(publisher.published_messages().is_empty());
+    }
+}

@@ -113,6 +113,7 @@ Source-specific extras:
 - Microsoft Graph `client_state` must match the `clientState` used when creating Microsoft Graph subscriptions
 - Slack `timestamp_max_drift_secs` (default: `300`)
 - Slack acknowledges within Slack's 3 second deadline, so the publish budget is 2.5 seconds. `nats_ack_timeout_secs` defaults to that budget for Slack and a larger value is lowered to it with a warning at startup
+- Slack webhook requests with `Content-Type: application/x-www-form-urlencoded` and exactly one `ssl_check=1` field are answered `200` before signature verification and are never published, matching Slack's connectivity probe
 - Slack webhook `max_body_bytes` (default: `4194304`) is either an integer or `{ env = "VAR" }` naming an environment variable that holds the byte count. Requests above it are refused with `413`. It does not apply to Socket Mode
 - Telegram `webhook_registration_mode = "startup"` attempts registration on startup and requires `bot_token` plus `public_webhook_url`
 - Linear `timestamp_tolerance_secs` (default: `60`, `0` disables tolerance)
