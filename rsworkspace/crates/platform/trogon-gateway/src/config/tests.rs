@@ -533,6 +533,85 @@ fn slack_resolves_with_valid_secret() {
     assert!(cfg.slack[0].config.socket_mode().is_none());
 }
 
+fn slack_max_body_size(cfg: &ResolvedConfig) -> usize {
+    cfg.slack[0].config.webhook().unwrap().max_body_size.as_usize()
+}
+
+#[test]
+fn slack_body_limit_defaults_to_four_mebibytes() {
+    let f = write_toml(&slack_toml("slack-signing-secret"));
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert_eq!(slack_max_body_size(&cfg), 4 * 1024 * 1024);
+}
+
+#[test]
+fn slack_body_limit_is_configurable_in_toml() {
+    let toml = r#"
+[sources.slack.integrations.primary.webhook]
+signing_secret = "slack-secret"
+max_body_bytes = 8388608
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert_eq!(slack_max_body_size(&cfg), 8 * 1024 * 1024);
+}
+
+#[test]
+fn slack_zero_body_limit_is_error() {
+    let toml = r#"
+[sources.slack.integrations.primary.webhook]
+signing_secret = "slack-secret"
+max_body_bytes = 0
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("slack/primary: invalid max_body_bytes: must not be zero")))
+    );
+}
+
+#[test]
+fn slack_body_limit_from_unset_env_is_error() {
+    let toml = r#"
+[sources.slack.integrations.primary.webhook]
+signing_secret = "slack-secret"
+max_body_bytes = { env = "TROGON_GATEWAY_TEST_SLACK_MAX_BODY_BYTES_NOT_SET" }
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("slack/primary: invalid max_body_bytes")))
+    );
+}
+
+#[test]
+fn byte_count_input_reads_a_whole_number_from_the_environment() {
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set("SLACK_BODY", " 2048 ");
+    let input = ByteCountInput::Env {
+        env: "SLACK_BODY".to_string(),
+    };
+    assert_eq!(input.resolve(&env).unwrap().as_usize(), 2048);
+}
+
+#[test]
+fn byte_count_input_rejects_text_and_zero_from_the_environment() {
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set("SLACK_BODY", "4MiB");
+    env.set("SLACK_BODY_ZERO", "0");
+    let text = ByteCountInput::Env {
+        env: "SLACK_BODY".to_string(),
+    };
+    let zero = ByteCountInput::Env {
+        env: "SLACK_BODY_ZERO".to_string(),
+    };
+    assert!(matches!(
+        text.resolve(&env),
+        Err(ByteCountInputError::NotAWholeNumber { .. })
+    ));
+    assert!(matches!(zero.resolve(&env), Err(ByteCountInputError::Zero)));
+}
+
 #[test]
 fn slack_socket_mode_resolves_with_valid_app_token() {
     let f = write_toml(&slack_socket_mode_toml("xapp-test-token"));

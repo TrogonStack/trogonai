@@ -31,7 +31,6 @@
 //! | `SLACK_STREAM_NAME` | `SLACK` | JetStream stream name |
 //! | `SLACK_STREAM_MAX_AGE_SECS` | `604800` | Max age of messages in JetStream (seconds, default 7 days) |
 //! | `SLACK_NATS_ACK_TIMEOUT_SECS` | `10` | NATS publish ack timeout in seconds |
-//! | `SLACK_MAX_BODY_SIZE` | `1048576` | Maximum webhook body size in bytes (default 1 MB) |
 //! | `SLACK_TIMESTAMP_MAX_DRIFT_SECS` | `300` | Max clock drift for request timestamps (default 5 min) |
 //! | `NATS_URL` | `localhost:4222` | NATS server URL(s) |
 

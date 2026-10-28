@@ -44,6 +44,7 @@ fn webhook_config() -> SlackConfig {
         transport: super::super::config::SlackTransportConfig::Webhook(super::super::config::SlackWebhookConfig {
             signing_secret: super::super::config::SlackSigningSecret::new("slack-secret").unwrap(),
             timestamp_max_drift: NonZeroDuration::from_secs(300).unwrap(),
+            max_body_size: super::super::constants::DEFAULT_HTTP_BODY_SIZE_MAX,
         }),
     }
 }

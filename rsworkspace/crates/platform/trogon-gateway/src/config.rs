@@ -18,6 +18,7 @@ use crate::source::slack::config::{
     SlackAppToken, SlackSigningSecret, SlackSocketModeConfig as SlackSocketModeSourceConfig, SlackTransportConfig,
     SlackWebhookConfig as SlackWebhookSourceConfig,
 };
+use crate::source::slack::constants::DEFAULT_HTTP_BODY_SIZE_MAX;
 use crate::source::telegram::config::{
     TelegramBotToken, TelegramPublicWebhookUrl, TelegramWebhookRegistrationConfig, TelegramWebhookSecret,
 };
@@ -34,7 +35,7 @@ use trogon_nats::jetstream::StreamMaxAge;
 use trogon_nats::{NatsToken, SubjectTokenViolationError};
 use trogon_service_config::{NatsArgs, NatsConfigSection, load_config, resolve_nats};
 use trogon_std::env::{ReadEnv, SystemEnv};
-use trogon_std::{NonZeroDuration, ZeroDurationError};
+use trogon_std::{ByteSize, HttpBodySizeMax, NonZeroDuration, ZeroDurationError};
 
 use crate::constants::{
     DEFAULT_GITLAB_TIMESTAMP_TOLERANCE_SECS, DEFAULT_INCIDENTIO_TIMESTAMP_TOLERANCE_SECS,
@@ -91,6 +92,38 @@ impl SecretInput {
             .map(ConfigValue::into_string)
             .map_err(SecretInputError::InvalidValue)
     }
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(untagged)]
+enum ByteCountInput {
+    Literal(u64),
+    Env { env: String },
+}
+
+impl ByteCountInput {
+    fn resolve(self, env: &impl ReadEnv) -> Result<HttpBodySizeMax, ByteCountInputError> {
+        let bytes = match self {
+            Self::Literal(bytes) => bytes,
+            Self::Env { env: var_name } => {
+                let raw = SecretInput::Env { env: var_name }.resolve(env)?;
+                raw.trim()
+                    .parse::<u64>()
+                    .map_err(|_| ByteCountInputError::NotAWholeNumber { value: raw })?
+            }
+        };
+        HttpBodySizeMax::new(ByteSize::b(bytes)).ok_or(ByteCountInputError::Zero)
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+enum ByteCountInputError {
+    #[error(transparent)]
+    Env(#[from] SecretInputError),
+    #[error("'{value}' is not a whole number of bytes")]
+    NotAWholeNumber { value: String },
+    #[error("must not be zero")]
+    Zero,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -542,6 +575,7 @@ struct GithubWebhookConfig {
 struct SlackWebhookConfig {
     signing_secret: Option<SecretInput>,
     timestamp_max_drift_secs: Option<u64>,
+    max_body_bytes: Option<ByteCountInput>,
 }
 
 #[derive(serde::Deserialize)]
@@ -1056,9 +1090,26 @@ fn resolve_slack_webhook_transport(
         }
     };
 
+    let max_body_size = match webhook.max_body_bytes {
+        Some(input) => match input.resolve(env) {
+            Ok(size) => size,
+            Err(error) => {
+                errors.push(ConfigValidationError::invalid_integration(
+                    "slack",
+                    id,
+                    "max_body_bytes",
+                    error,
+                ));
+                return None;
+            }
+        },
+        None => DEFAULT_HTTP_BODY_SIZE_MAX,
+    };
+
     Some(SlackTransportConfig::Webhook(SlackWebhookSourceConfig {
         signing_secret,
         timestamp_max_drift,
+        max_body_size,
     }))
 }
 
