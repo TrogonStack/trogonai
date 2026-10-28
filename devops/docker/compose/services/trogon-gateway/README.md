@@ -276,7 +276,7 @@ webhook settings (for example, `https://<ngrok-url>/sources/github/acme-main/web
 
 ## OpenBao local secret store
 
-The compose stack starts OpenBao in dev mode at:
+The compose stack runs a local OpenBao at:
 
 ```bash
 http://openbao.trogonai.orb.local:8200
@@ -285,11 +285,12 @@ http://openbao.trogonai.orb.local:8200
 The local dev token is:
 
 ```bash
-dev-only-token
+local-dev-root-token
 ```
 
-This OpenBao instance is in-memory and local-only. Do not use it for production
-or for any secret that matters outside the dev stack.
+This OpenBao instance is local-only, auto-unsealed from a checked-in static
+seal key. Do not use it for production or for any secret that matters outside
+the dev stack.
 
 ### Copy-in and copy-out smoke test
 
@@ -325,7 +326,7 @@ To run the same gateway adapter round trip against this compose service:
 
 ```bash
 cd ../../../rsworkspace
-OPENBAO_ADDR=http://openbao.trogonai.orb.local:8200 OPENBAO_TOKEN=dev-only-token mise exec -- cargo test -p trogon-gateway openbao_dev_server_roundtrips_precise_value -- --ignored --nocapture
+OPENBAO_ADDR=http://openbao.trogonai.orb.local:8200 OPENBAO_TOKEN=local-dev-root-token mise exec -- cargo test -p trogon-gateway openbao_dev_server_roundtrips_precise_value -- --ignored --nocapture
 ```
 
 The adapter tests write `copy-this-value-in-and-out` into OpenBao and read it

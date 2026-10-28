@@ -8,14 +8,16 @@ Bring up an OpenBao a developer or CI job can write credentials to.
 
 ```bash
 cd devops/docker/compose
-docker compose up -d openbao
+docker compose up -d openbao-bootstrap
 ```
 
-The compose service runs `openbao/openbao:2.5.5` in `-dev` mode. Dev mode
-means in-memory storage, a single unseal share held by the server itself,
-and a fixed root token (`OPENBAO_DEV_ROOT_TOKEN`, default `dev-only-token`).
-Everything is lost on restart, which is the point: no dev secret survives
-to be mistaken for a real one.
+The compose service runs a single-node `openbao/openbao:2.6.2` backed by the
+compose `postgres` service and auto-unsealed from a checked-in static seal
+key. The `openbao-bootstrap` service initializes it, installs a fixed root
+token (`OPENBAO_DEV_ROOT_TOKEN`, default `local-dev-root-token`), and mounts
+the transit key and the KV v2 `secret/` store. State survives a restart and
+disappears with `docker compose down -v`; see
+`devops/docker/compose/services/openbao/README.md` for the details.
 
 The gateway service in the same compose file already points at it through
 `OPENBAO_ADDR=http://openbao:8200`. From the host, OrbStack resolves
@@ -27,7 +29,8 @@ The gateway service in the same compose file already points at it through
 docker compose exec openbao bao status -address=http://127.0.0.1:8200
 ```
 
-`Sealed false` and `Storage Type inmem` confirm dev mode.
+`Sealed false` and `Storage Type postgresql` confirm the server is initialized
+and auto-unsealed.
 
 Round-trip a value through the same mount the platform uses:
 
@@ -40,7 +43,7 @@ docker compose exec openbao \
 
 ## Apply the policies
 
-Dev mode gives you a root token, so nothing enforces the role split by
+Bootstrap hands you a root token, so nothing enforces the role split by
 default. To test against the real policies:
 
 ```bash
@@ -72,7 +75,7 @@ The compose stack does this already. For a gateway running outside compose:
 
 ```bash
 export OPENBAO_ADDR=http://openbao.trogonai.orb.local:8200
-export OPENBAO_TOKEN=dev-only-token
+export OPENBAO_TOKEN=local-dev-root-token
 ```
 
 ## Integration tests
@@ -88,7 +91,7 @@ The tests that talk to an already-running server are `#[ignore]` by
 default:
 
 ```bash
-OPENBAO_ADDR=http://openbao.trogonai.orb.local:8200 OPENBAO_TOKEN=dev-only-token \
+OPENBAO_ADDR=http://openbao.trogonai.orb.local:8200 OPENBAO_TOKEN=local-dev-root-token \
   mise exec -- cargo test -p trogon-gateway openbao_dev_server_roundtrips_precise_value -- --ignored --nocapture
 ```
 

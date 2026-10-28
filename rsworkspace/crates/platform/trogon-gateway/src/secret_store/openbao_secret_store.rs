@@ -863,7 +863,7 @@ mod tests {
     #[ignore = "requires dev OpenBao from devops/docker/compose"]
     async fn openbao_dev_server_roundtrips_precise_value() {
         let address = env::var("OPENBAO_ADDR").unwrap_or_else(|_| "http://openbao.trogonai.orb.local:8200".to_string());
-        let token = env::var("OPENBAO_TOKEN").unwrap_or_else(|_| "dev-only-token".to_string());
+        let token = env::var("OPENBAO_TOKEN").unwrap_or_else(|_| "local-dev-root-token".to_string());
         let store = OpenBaoSecretStore::new(address, token).unwrap();
         let credential = assert_roundtrip(&store).await;
         println!(

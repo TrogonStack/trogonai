@@ -17,24 +17,6 @@ services:
       start_period: 5s
       retries: 3
 
-  openbao:
-    image: openbao/openbao:2.5.5
-    command:
-      - "server"
-      - "-dev"
-      - "-dev-root-token-id=${OPENBAO_DEV_ROOT_TOKEN:-dev-only-token}"
-      - "-dev-listen-address=0.0.0.0:8200"
-    environment:
-      BAO_ADDR: "http://127.0.0.1:8200"
-      BAO_TOKEN: "${OPENBAO_DEV_ROOT_TOKEN:-dev-only-token}"
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "bao", "status", "-address=http://127.0.0.1:8200"]
-      interval: 5s
-      timeout: 3s
-      start_period: 5s
-      retries: 5
-
   trogon-gateway:
     build:
       context: ../../../rsworkspace
@@ -49,7 +31,7 @@ services:
       TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET: "${TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET:-local-dev-secret}"
       NATS_URL: "nats://nats:4222"
       OPENBAO_ADDR: "http://openbao:8200"
-      OPENBAO_TOKEN: "${OPENBAO_DEV_ROOT_TOKEN:-dev-only-token}"
+      OPENBAO_TOKEN: "${OPENBAO_DEV_ROOT_TOKEN:-local-dev-root-token}"
       RUST_LOG: "${RUST_LOG:-info}"
       TROGON_GATEWAY_PORT: "${TROGON_GATEWAY_PORT:-8080}"
     volumes:
@@ -59,6 +41,8 @@ services:
         condition: service_healthy
       openbao:
         condition: service_healthy
+      openbao-bootstrap:
+        condition: service_completed_successfully
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:${TROGON_GATEWAY_PORT:-8080}/-/liveness"]
@@ -126,10 +110,10 @@ services:
   # Runs to completion on every `up`: initializes a fresh OpenBao, installs the
   # fixed dev root token, and mounts a transit key. A no-op once initialized.
   #
-  # Nothing depends on this service, so `docker compose up openbao` on its own
-  # leaves the server uninitialized and sealed. Bring the pair up by naming this
-  # service instead: `docker compose up -d openbao-bootstrap` pulls in openbao
-  # and postgres as its dependencies.
+  # Only the gateway depends on this service, so `docker compose up openbao` on
+  # its own leaves the server uninitialized and sealed. Bring the pair up by
+  # naming this service instead: `docker compose up -d openbao-bootstrap` pulls
+  # in openbao and postgres as its dependencies.
   openbao-bootstrap:
     image: openbao/openbao:2.6.2
     entrypoint:
@@ -143,6 +127,7 @@ services:
       OPENBAO_DEV_ROOT_TOKEN: "${OPENBAO_DEV_ROOT_TOKEN:-local-dev-root-token}"
       OPENBAO_DEV_TRANSIT_MOUNT: "${OPENBAO_DEV_TRANSIT_MOUNT:-transit}"
       OPENBAO_DEV_TRANSIT_KEY: "${OPENBAO_DEV_TRANSIT_KEY:-local-dev-kek}"
+      OPENBAO_DEV_KV_MOUNT: "${OPENBAO_DEV_KV_MOUNT:-secret}"
     volumes:
       - ./services/openbao:/bootstrap:ro
     depends_on:
