@@ -10,13 +10,29 @@ publish = false
 name = "trogon_provider_gateway"
 path = "src/lib.rs"
 
+[[bin]]
+name = "trogon-provider-gateway"
+path = "src/main.rs"
+
 [lints]
 workspace = true
 
 [dependencies]
-axum = { workspace = true }
-tokio = { workspace = true, features = ["sync"] }
+axum = { workspace = true, features = ["http2"] }
+clap = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["sync", "rt-multi-thread", "macros", "net", "signal"] }
+toml = { workspace = true }
+tracing = { workspace = true }
+trogon-std = { workspace = true, features = ["signal", "tls"] }
+trogon-telemetry = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["rt", "macros"] }
+serde_json = { workspace = true }
+h2 = "=0.4.14"
+tracing-subscriber = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "sync", "time", "process"] }
 tower = { workspace = true, features = ["util"] }
+trogon-std = { workspace = true, features = ["test-support"] }
