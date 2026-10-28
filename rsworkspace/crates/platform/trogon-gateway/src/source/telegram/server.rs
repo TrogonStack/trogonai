@@ -19,6 +19,11 @@ use trogon_nats::jetstream::{
 use trogon_semconv::span::TELEGRAM_WEBHOOK;
 use trogon_std::NonZeroDuration;
 
+use crate::credential::commands::domain::{CredentialKind, SourceKind};
+use crate::credential_runtime_projection::{RuntimeCredentialError, RuntimeCredentialResolver, RuntimeIntegrationKey};
+use crate::secret_store::{SecretStoreError, SecretStoreGet};
+use crate::source_integration_id::SourceIntegrationId;
+
 fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode {
     if outcome.is_ok() {
         info!("Published Telegram update to NATS");
@@ -33,6 +38,15 @@ fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode 
 struct AppState<P: JetStreamPublisher, S: ObjectStorePut> {
     publisher: ClaimCheckPublisher<P, S>,
     webhook_secret: TelegramWebhookSecret,
+    subject_prefix: NatsToken,
+    nats_ack_timeout: NonZeroDuration,
+}
+
+#[derive(Clone)]
+struct RuntimeAppState<P: JetStreamPublisher, S: ObjectStorePut, G> {
+    publisher: ClaimCheckPublisher<P, S>,
+    credential_resolver: RuntimeCredentialResolver<G>,
+    runtime_key: RuntimeIntegrationKey,
     subject_prefix: NatsToken,
     nats_ack_timeout: NonZeroDuration,
 }
@@ -69,12 +83,50 @@ pub fn router<P: JetStreamPublisher, S: ObjectStorePut>(
         .with_state(state)
 }
 
+pub fn runtime_router<P, S, G>(
+    publisher: ClaimCheckPublisher<P, S>,
+    config: &TelegramSourceConfig,
+    integration_id: SourceIntegrationId,
+    credential_resolver: RuntimeCredentialResolver<G>,
+) -> Router
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    let state = RuntimeAppState {
+        publisher,
+        credential_resolver,
+        runtime_key: RuntimeIntegrationKey::new(SourceKind::Telegram, &integration_id),
+        subject_prefix: config.subject_prefix.clone(),
+        nats_ack_timeout: config.nats_ack_timeout,
+    };
+
+    Router::new()
+        .route("/webhook", post(handle_runtime_webhook::<P, S, G>))
+        .layer(DefaultBodyLimit::max(HTTP_BODY_SIZE_MAX.as_usize()))
+        .with_state(state)
+}
+
 fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
     State(state): State<AppState<P, S>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Pin<Box<dyn Future<Output = StatusCode> + Send>> {
     Box::pin(handle_webhook_inner(state, headers, body))
+}
+
+fn handle_runtime_webhook<P, S, G>(
+    State(state): State<RuntimeAppState<P, S, G>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Pin<Box<dyn Future<Output = StatusCode> + Send>>
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    Box::pin(handle_runtime_webhook_inner(state, headers, body))
 }
 
 /// Extracts the update type by finding the first known field present in the JSON.
@@ -107,6 +159,56 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
         return StatusCode::UNAUTHORIZED;
     }
 
+    publish_verified_update(state.publisher, state.subject_prefix, state.nats_ack_timeout, body).await
+}
+
+#[instrument(
+    name = "telegram.webhook",
+    skip_all,
+    fields(
+        update_type = tracing::field::Empty,
+        update_id = tracing::field::Empty,
+        subject = tracing::field::Empty,
+    )
+)]
+async fn handle_runtime_webhook_inner<P, S, G>(
+    state: RuntimeAppState<P, S, G>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> StatusCode
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    let token = headers.get(HEADER_SECRET_TOKEN).and_then(|v| v.to_str().ok());
+
+    let webhook_secret = match state
+        .credential_resolver
+        .resolve_plaintext(&state.runtime_key, CredentialKind::WebhookSecret)
+        .await
+    {
+        Ok(secret) => secret,
+        Err(error) => {
+            warn!(reason = %error, "Telegram runtime credential resolution failed");
+            return runtime_credential_error_to_status(&error);
+        }
+    };
+
+    if let Err(e) = signature::verify(webhook_secret.as_str(), token) {
+        warn!(reason = %e, "Telegram webhook secret validation failed");
+        return StatusCode::UNAUTHORIZED;
+    }
+
+    publish_verified_update(state.publisher, state.subject_prefix, state.nats_ack_timeout, body).await
+}
+
+async fn publish_verified_update<P: JetStreamPublisher, S: ObjectStorePut>(
+    publisher: ClaimCheckPublisher<P, S>,
+    subject_prefix: NatsToken,
+    nats_ack_timeout: NonZeroDuration,
+    body: Bytes,
+) -> StatusCode {
     let parsed: serde_json::Value = match serde_json::from_slice(&body) {
         Ok(v) => v,
         Err(e) => {
@@ -125,7 +227,7 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
 
     let update_type = extract_update_type(&parsed).unwrap_or("unroutable");
 
-    let subject = format!("{}.{}", state.subject_prefix, update_type);
+    let subject = format!("{}.{}", subject_prefix, update_type);
 
     let span = tracing::Span::current();
     span.record(trogon_semconv::attribute::UPDATE_TYPE, update_type);
@@ -137,12 +239,25 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
     nats_headers.insert(NATS_HEADER_UPDATE_TYPE, update_type);
     nats_headers.insert(NATS_HEADER_UPDATE_ID, update_id.as_str());
 
-    let outcome = state
-        .publisher
-        .publish_event(subject, nats_headers, body, state.nats_ack_timeout.into())
+    let outcome = publisher
+        .publish_event(subject, nats_headers, body, nats_ack_timeout.into())
         .await;
 
     outcome_to_status(outcome)
+}
+
+fn runtime_credential_error_to_status(error: &RuntimeCredentialError) -> StatusCode {
+    match error {
+        RuntimeCredentialError::SecretStore(SecretStoreError::BackendUnavailable { .. }) => {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+        RuntimeCredentialError::SecretStore(_)
+        | RuntimeCredentialError::IntegrationNotFound { .. }
+        | RuntimeCredentialError::IntegrationNotResolvable { .. }
+        | RuntimeCredentialError::CredentialMissing { .. }
+        | RuntimeCredentialError::VerifierOnly { .. }
+        | RuntimeCredentialError::DeliveryDenied { .. } => StatusCode::UNAUTHORIZED,
+    }
 }
 
 #[cfg(test)]

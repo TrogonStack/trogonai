@@ -45,6 +45,11 @@ use trogon_nats::jetstream::{
 use trogon_nats::{NatsToken, SubjectTokenViolationError};
 use trogon_semconv::span::SLACK_WEBHOOK;
 
+use crate::credential::commands::domain::{CredentialKind, SourceKind};
+use crate::credential_runtime_projection::{RuntimeCredentialError, RuntimeCredentialResolver, RuntimeIntegrationKey};
+use crate::secret_store::{SecretStoreError, SecretStoreGet};
+use crate::source_integration_id::SourceIntegrationId;
+
 fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode {
     if outcome.is_ok() {
         info!("Published Slack event to NATS");
@@ -108,6 +113,15 @@ struct AppState<P: JetStreamPublisher, S: ObjectStorePut, R: RequestClient, C: E
     bridge: SlackBridge<P, S, R>,
     clock: C,
     signing_secret: SlackSigningSecret,
+    timestamp_max_drift: NonZeroDuration,
+}
+
+#[derive(Clone)]
+struct RuntimeAppState<P: JetStreamPublisher, S: ObjectStorePut, R: RequestClient, C: EpochClock, G> {
+    bridge: SlackBridge<P, S, R>,
+    clock: C,
+    credential_resolver: RuntimeCredentialResolver<G>,
+    runtime_key: RuntimeIntegrationKey,
     timestamp_max_drift: NonZeroDuration,
 }
 
@@ -795,6 +809,31 @@ pub fn router<P: JetStreamPublisher, S: ObjectStorePut, R: RequestClient>(
     router_with_clock(publisher, requester, config, webhook, SystemClock)
 }
 
+pub fn runtime_router<P, S, R, G>(
+    publisher: ClaimCheckPublisher<P, S>,
+    requester: R,
+    config: &SlackConfig,
+    webhook: &SlackWebhookConfig,
+    integration_id: SourceIntegrationId,
+    credential_resolver: RuntimeCredentialResolver<G>,
+) -> Router
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    R: RequestClient,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    runtime_router_with_clock(
+        publisher,
+        requester,
+        config,
+        webhook,
+        integration_id,
+        credential_resolver,
+        SystemClock,
+    )
+}
+
 pub(super) fn router_with_clock<P: JetStreamPublisher, S: ObjectStorePut, R: RequestClient, C: EpochClock>(
     publisher: ClaimCheckPublisher<P, S>,
     requester: R,
@@ -815,12 +854,57 @@ pub(super) fn router_with_clock<P: JetStreamPublisher, S: ObjectStorePut, R: Req
         .with_state(state)
 }
 
+fn runtime_router_with_clock<P, S, R, C, G>(
+    publisher: ClaimCheckPublisher<P, S>,
+    requester: R,
+    config: &SlackConfig,
+    webhook: &SlackWebhookConfig,
+    integration_id: SourceIntegrationId,
+    credential_resolver: RuntimeCredentialResolver<G>,
+    clock: C,
+) -> Router
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    R: RequestClient,
+    C: EpochClock,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    let state = RuntimeAppState {
+        bridge: SlackBridge::new(publisher, requester, config),
+        clock,
+        credential_resolver,
+        runtime_key: RuntimeIntegrationKey::new(SourceKind::Slack, &integration_id),
+        timestamp_max_drift: webhook.timestamp_max_drift,
+    };
+
+    Router::new()
+        .route("/webhook", post(handle_runtime_webhook::<P, S, R, C, G>))
+        .layer(DefaultBodyLimit::max(webhook.max_body_size.as_usize()))
+        .with_state(state)
+}
+
 fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut, R: RequestClient, C: EpochClock>(
     State(state): State<AppState<P, S, R, C>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Pin<Box<dyn Future<Output = Response> + Send>> {
     Box::pin(handle_webhook_inner(state, headers, body))
+}
+
+fn handle_runtime_webhook<P, S, R, C, G>(
+    State(state): State<RuntimeAppState<P, S, R, C, G>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Pin<Box<dyn Future<Output = Response> + Send>>
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    R: RequestClient,
+    C: EpochClock,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    Box::pin(handle_runtime_webhook_inner(state, headers, body))
 }
 
 #[instrument(
@@ -843,30 +927,7 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut, R: Reque
         return (StatusCode::OK, String::new()).into_response();
     }
 
-    let Some(timestamp) = headers.get(HEADER_TIMESTAMP).and_then(|v| v.to_str().ok()) else {
-        warn!("Missing X-Slack-Request-Timestamp header");
-        return (StatusCode::UNAUTHORIZED, String::new()).into_response();
-    };
-
-    let Ok(ts) = timestamp.parse::<u64>() else {
-        warn!("Invalid X-Slack-Request-Timestamp header");
-        return (StatusCode::UNAUTHORIZED, String::new()).into_response();
-    };
-
-    let now = state
-        .clock
-        .system_time()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let drift = now.abs_diff(ts);
-    if drift > Duration::from(state.timestamp_max_drift).as_secs() {
-        warn!(drift_secs = drift, "Slack request timestamp too old");
-        return (StatusCode::UNAUTHORIZED, String::new()).into_response();
-    }
-
-    let Some(sig) = headers.get(HEADER_SIGNATURE).and_then(|v| v.to_str().ok()) else {
-        warn!("Missing X-Slack-Signature header");
+    let Some((timestamp, sig)) = slack_signature_parts(&state.clock, state.timestamp_max_drift, &headers) else {
         return (StatusCode::UNAUTHORIZED, String::new()).into_response();
     };
 
@@ -886,6 +947,116 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut, R: Reque
         state.bridge.handle_form_payload(&body, &context).await.into_response()
     } else {
         state.bridge.handle_json_body(body, &context).await.into_response()
+    }
+}
+
+#[instrument(
+    name = "slack.webhook",
+    skip_all,
+    fields(
+        event_type = tracing::field::Empty,
+        event_id = tracing::field::Empty,
+        subject = tracing::field::Empty,
+    )
+)]
+async fn handle_runtime_webhook_inner<P, S, R, C, G>(
+    state: RuntimeAppState<P, S, R, C, G>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    R: RequestClient,
+    C: EpochClock,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    let content_type = headers.get("content-type").and_then(|v| v.to_str().ok());
+    if SslCheck::detect(content_type, &body) == SslCheck::Requested {
+        info!("Responding to Slack ssl_check");
+        return (StatusCode::OK, String::new()).into_response();
+    }
+
+    let Some((timestamp, sig)) = slack_signature_parts(&state.clock, state.timestamp_max_drift, &headers) else {
+        return (StatusCode::UNAUTHORIZED, String::new()).into_response();
+    };
+
+    let signing_secret = match state
+        .credential_resolver
+        .resolve_plaintext(&state.runtime_key, CredentialKind::SigningSecret)
+        .await
+    {
+        Ok(secret) => secret,
+        Err(error) => {
+            warn!(reason = %error, "Slack runtime credential resolution failed");
+            return (runtime_credential_error_to_status(&error), String::new()).into_response();
+        }
+    };
+
+    if let Err(e) = signature::verify(signing_secret.as_str(), timestamp, &body, sig) {
+        warn!(reason = %e, "Slack signature validation failed");
+        return (StatusCode::UNAUTHORIZED, String::new()).into_response();
+    }
+
+    let is_form = headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|ct| PayloadEncoding::Form.is_declared_by(ct));
+
+    let context = DeliveryContext::http(&headers);
+
+    if is_form {
+        state.bridge.handle_form_payload(&body, &context).await.into_response()
+    } else {
+        state.bridge.handle_json_body(body, &context).await.into_response()
+    }
+}
+
+fn slack_signature_parts<'a, C: EpochClock>(
+    clock: &C,
+    timestamp_max_drift: NonZeroDuration,
+    headers: &'a HeaderMap,
+) -> Option<(&'a str, &'a str)> {
+    let Some(timestamp) = headers.get(HEADER_TIMESTAMP).and_then(|v| v.to_str().ok()) else {
+        warn!("Missing X-Slack-Request-Timestamp header");
+        return None;
+    };
+
+    let Ok(ts) = timestamp.parse::<u64>() else {
+        warn!("Invalid X-Slack-Request-Timestamp header");
+        return None;
+    };
+
+    let now = clock
+        .system_time()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let drift = now.abs_diff(ts);
+    if drift > Duration::from(timestamp_max_drift).as_secs() {
+        warn!(drift_secs = drift, "Slack request timestamp too old");
+        return None;
+    }
+
+    let Some(sig) = headers.get(HEADER_SIGNATURE).and_then(|v| v.to_str().ok()) else {
+        warn!("Missing X-Slack-Signature header");
+        return None;
+    };
+
+    Some((timestamp, sig))
+}
+
+fn runtime_credential_error_to_status(error: &RuntimeCredentialError) -> StatusCode {
+    match error {
+        RuntimeCredentialError::SecretStore(SecretStoreError::BackendUnavailable { .. }) => {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+        RuntimeCredentialError::SecretStore(_)
+        | RuntimeCredentialError::IntegrationNotFound { .. }
+        | RuntimeCredentialError::IntegrationNotResolvable { .. }
+        | RuntimeCredentialError::CredentialMissing { .. }
+        | RuntimeCredentialError::VerifierOnly { .. }
+        | RuntimeCredentialError::DeliveryDenied { .. } => StatusCode::UNAUTHORIZED,
     }
 }
 

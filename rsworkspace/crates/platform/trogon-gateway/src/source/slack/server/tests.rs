@@ -17,6 +17,10 @@ use trogon_nats::jetstream::{
 };
 use trogon_std::NonZeroDuration;
 
+use crate::credential::commands::domain::{CredentialOwnerId, CredentialScope};
+use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
+use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
+
 type HmacSha256 = Hmac<Sha256>;
 
 fn wrap_publisher(publisher: MockJetStreamPublisher) -> ClaimCheckPublisher<MockJetStreamPublisher, MockObjectStore> {
@@ -87,6 +91,39 @@ fn mock_app_with_requester(publisher: MockJetStreamPublisher, requester: Advance
         requester,
         &config,
         config.webhook().unwrap(),
+        FixedEpochClock::from_secs(TEST_NOW),
+    )
+}
+
+async fn runtime_app(publisher: MockJetStreamPublisher, secret: &str) -> Router {
+    let config = test_config();
+    let store = MockOpenBaoSecretStore::default();
+    let integration_id = SourceIntegrationId::new("primary").unwrap();
+    let credential = store
+        .put(
+            CredentialScope::integration(
+                CredentialOwnerId::new("tenant-1").unwrap(),
+                SourceKind::Slack,
+                integration_id.clone(),
+            ),
+            CredentialKind::SigningSecret,
+            trogon_std::SecretString::new(secret).unwrap(),
+        )
+        .await
+        .unwrap();
+    let registry = RuntimeCredentialRegistry::default();
+    registry
+        .projections()
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1).unwrap())
+        .await;
+
+    runtime_router_with_clock(
+        wrap_publisher(publisher),
+        acknowledging_requester(),
+        &config,
+        config.webhook().unwrap(),
+        integration_id,
+        registry.resolver(store),
         FixedEpochClock::from_secs(TEST_NOW),
     )
 }
@@ -285,6 +322,36 @@ async fn event_callback_publishes_to_nats_and_returns_200() {
         messages[0].headers.get(NATS_HEADER_TEAM_ID).map(|v| v.as_str()),
         Some("T01ABC"),
     );
+}
+
+#[tokio::test]
+async fn event_callback_can_resolve_signing_secret_from_runtime_credentials() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = runtime_app(publisher.clone(), "runtime-secret").await;
+    let body = event_callback_body("message");
+    let ts = current_timestamp();
+    let static_sig = compute_sig(TEST_SECRET, &ts, &body);
+
+    let static_response = app
+        .clone()
+        .oneshot(webhook_request(&body, &ts, Some(&static_sig)))
+        .await
+        .unwrap();
+
+    assert_eq!(static_response.status(), StatusCode::UNAUTHORIZED);
+    assert!(publisher.published_messages().is_empty());
+
+    let runtime_sig = compute_sig("runtime-secret", &ts, &body);
+    let runtime_response = app
+        .oneshot(webhook_request(&body, &ts, Some(&runtime_sig)))
+        .await
+        .unwrap();
+
+    assert_eq!(runtime_response.status(), StatusCode::OK);
+    let messages = publisher.published_messages();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].subject, "slack.event.message");
 }
 
 #[tokio::test]

@@ -921,26 +921,36 @@ fn resolve_discord(
         return None;
     }
 
-    let token_str = match bot_token {
+    let configured = status.is_some()
+        || bot_token.is_some()
+        || gateway_intents.is_some()
+        || subject_prefix != "discord"
+        || stream_name != "DISCORD"
+        || stream_max_age_secs != 604_800
+        || nats_ack_timeout_secs != 10;
+    if !configured {
+        return None;
+    }
+
+    let bot_token = match bot_token {
         Some(input) => match input.resolve(
             static_config_source_scope(SourceKind::Discord),
             CredentialKind::BotToken,
             env,
         ) {
-            Ok(value) => value,
+            Ok(value) => match DiscordBotToken::new(value) {
+                Ok(s) => Some(s),
+                Err(e) => {
+                    errors.push(ConfigValidationError::invalid("discord", "bot_token", e));
+                    return None;
+                }
+            },
             Err(error) => {
                 errors.push(ConfigValidationError::invalid("discord", "bot_token", error));
                 return None;
             }
         },
-        None => return None,
-    };
-    let bot_token = match DiscordBotToken::new(token_str) {
-        Ok(s) => s,
-        Err(e) => {
-            errors.push(ConfigValidationError::invalid("discord", "bot_token", e));
-            return None;
-        }
+        None => None,
     };
 
     let intents = if let Some(s) = gateway_intents.as_deref().filter(|s| !s.is_empty()) {

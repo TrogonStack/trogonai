@@ -167,4 +167,4 @@ pub mod unroutable;
 mod bolt_conformance_tests;
 
 pub use config::SlackConfig;
-pub use server::{provision, router};
+pub use server::{provision, router, runtime_router};

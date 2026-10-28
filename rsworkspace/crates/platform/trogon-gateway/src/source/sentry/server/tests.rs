@@ -17,6 +17,10 @@ use trogon_nats::jetstream::{
     ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore,
 };
 
+use crate::credential::commands::domain::{CredentialOwnerId, CredentialScope};
+use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
+use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
+
 type HmacSha256 = Hmac<Sha256>;
 
 const TEST_SECRET: &str = "test-secret";
@@ -51,6 +55,36 @@ fn tracing_guard() -> tracing::subscriber::DefaultGuard {
 
 fn mock_app(publisher: MockJetStreamPublisher) -> Router {
     router(wrap_publisher(publisher), &test_config())
+}
+
+async fn runtime_app(publisher: MockJetStreamPublisher, secret: &str) -> Router {
+    let config = test_config();
+    let store = MockOpenBaoSecretStore::default();
+    let integration_id = SourceIntegrationId::new("primary").unwrap();
+    let credential = store
+        .put(
+            CredentialScope::integration(
+                CredentialOwnerId::new("tenant-1").unwrap(),
+                SourceKind::Sentry,
+                integration_id.clone(),
+            ),
+            CredentialKind::ClientSecret,
+            trogon_std::SecretString::new(secret).unwrap(),
+        )
+        .await
+        .unwrap();
+    let registry = RuntimeCredentialRegistry::default();
+    registry
+        .projections()
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1).unwrap())
+        .await;
+
+    runtime_router(
+        wrap_publisher(publisher),
+        &config,
+        integration_id,
+        registry.resolver(store),
+    )
 }
 
 fn webhook_request(
@@ -137,6 +171,47 @@ async fn valid_webhook_publishes_to_nats_and_returns_200() {
         messages[0].headers.get(NATS_HEADER_TIMESTAMP).unwrap().as_str(),
         "1711315768"
     );
+}
+
+#[tokio::test]
+async fn runtime_client_secret_publishes_to_nats_and_rejects_static_secret() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = runtime_app(publisher.clone(), "runtime-secret").await;
+    let body = br#"{"action":"created","data":{}}"#;
+    let static_signature = compute_sig(TEST_SECRET, body);
+
+    let static_response = app
+        .clone()
+        .oneshot(webhook_request(
+            body,
+            "issue",
+            "1711315768",
+            "req-1",
+            Some(&static_signature),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(static_response.status(), StatusCode::UNAUTHORIZED);
+    assert!(publisher.published_messages().is_empty());
+
+    let runtime_signature = compute_sig("runtime-secret", body);
+    let runtime_response = app
+        .oneshot(webhook_request(
+            body,
+            "issue",
+            "1711315768",
+            "req-1",
+            Some(&runtime_signature),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(runtime_response.status(), StatusCode::OK);
+    let messages = publisher.published_messages();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].subject, "sentry.issue.created");
 }
 
 #[tokio::test]

@@ -11,6 +11,10 @@ use trogon_nats::jetstream::{
 };
 use trogon_std::NonZeroDuration;
 
+use crate::credential::commands::domain::{CredentialOwnerId, CredentialScope};
+use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
+use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
+
 const TEST_SECRET: &str = "test-secret";
 
 fn test_config() -> TelegramSourceConfig {
@@ -38,6 +42,36 @@ fn tracing_guard() -> tracing::subscriber::DefaultGuard {
 
 fn mock_app(publisher: MockJetStreamPublisher) -> Router {
     router(wrap_publisher(publisher), &test_config())
+}
+
+async fn runtime_app(publisher: MockJetStreamPublisher, secret: &str) -> Router {
+    let config = test_config();
+    let store = MockOpenBaoSecretStore::default();
+    let integration_id = SourceIntegrationId::new("primary").unwrap();
+    let credential = store
+        .put(
+            CredentialScope::integration(
+                CredentialOwnerId::new("tenant-1").unwrap(),
+                SourceKind::Telegram,
+                integration_id.clone(),
+            ),
+            CredentialKind::WebhookSecret,
+            trogon_std::SecretString::new(secret).unwrap(),
+        )
+        .await
+        .unwrap();
+    let registry = RuntimeCredentialRegistry::default();
+    registry
+        .projections()
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1).unwrap())
+        .await;
+
+    runtime_router(
+        wrap_publisher(publisher),
+        &config,
+        integration_id,
+        registry.resolver(store),
+    )
 }
 
 fn webhook_request(body: &[u8], secret: Option<&str>) -> Request<Body> {
@@ -106,6 +140,33 @@ async fn valid_message_update_publishes_to_nats() {
         messages[0].headers.get(NATS_HEADER_UPDATE_ID).map(|v| v.as_str()),
         Some("12345"),
     );
+}
+
+#[tokio::test]
+async fn runtime_webhook_secret_publishes_to_nats_and_rejects_static_secret() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = runtime_app(publisher.clone(), "runtime-secret").await;
+    let body = update_json("message");
+
+    let static_response = app
+        .clone()
+        .oneshot(webhook_request(&body, Some(TEST_SECRET)))
+        .await
+        .unwrap();
+
+    assert_eq!(static_response.status(), StatusCode::UNAUTHORIZED);
+    assert!(publisher.published_messages().is_empty());
+
+    let runtime_response = app
+        .oneshot(webhook_request(&body, Some("runtime-secret")))
+        .await
+        .unwrap();
+
+    assert_eq!(runtime_response.status(), StatusCode::OK);
+    let messages = publisher.published_messages();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].subject, "telegram.message");
 }
 
 #[tokio::test]
@@ -310,7 +371,73 @@ fn extract_update_type_returns_none_for_non_object() {
     assert_eq!(extract_update_type(&val), None);
 }
 
-mod ack_test_support;
+mod ack_test_support {
+    use super::*;
+    use async_nats::jetstream::publish::PublishAck;
+    use std::sync::Arc;
+    use std::sync::Mutex;
+    use trogon_nats::mocks::MockError;
+
+    #[derive(Clone)]
+    enum AckBehavior {
+        Fail,
+        Hang,
+    }
+
+    #[derive(Clone)]
+    pub struct AckFailPublisher {
+        behavior: Arc<Mutex<AckBehavior>>,
+    }
+
+    impl AckFailPublisher {
+        pub fn failing() -> Self {
+            Self {
+                behavior: Arc::new(Mutex::new(AckBehavior::Fail)),
+            }
+        }
+
+        pub fn hanging() -> Self {
+            Self {
+                behavior: Arc::new(Mutex::new(AckBehavior::Hang)),
+            }
+        }
+    }
+
+    pub enum AckFuture {
+        Fail,
+        Hang,
+    }
+
+    impl IntoFuture for AckFuture {
+        type Output = Result<PublishAck, MockError>;
+        type IntoFuture = std::pin::Pin<Box<dyn Future<Output = Self::Output> + Send>>;
+
+        fn into_future(self) -> Self::IntoFuture {
+            match self {
+                AckFuture::Fail => Box::pin(async { Err(MockError("simulated ack failure".to_string())) }),
+                AckFuture::Hang => Box::pin(std::future::pending()),
+            }
+        }
+    }
+
+    impl JetStreamPublisher for AckFailPublisher {
+        type PublishError = MockError;
+        type AckFuture = AckFuture;
+
+        async fn publish_with_headers<S: async_nats::subject::ToSubject + Send>(
+            &self,
+            _subject: S,
+            _headers: async_nats::HeaderMap,
+            _payload: Bytes,
+        ) -> Result<AckFuture, MockError> {
+            let behavior = self.behavior.lock().unwrap().clone();
+            match behavior {
+                AckBehavior::Fail => Ok(AckFuture::Fail),
+                AckBehavior::Hang => Ok(AckFuture::Hang),
+            }
+        }
+    }
+}
 
 use ack_test_support::AckFailPublisher;
 

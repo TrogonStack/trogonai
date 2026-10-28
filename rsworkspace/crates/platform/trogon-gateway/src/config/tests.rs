@@ -434,7 +434,10 @@ fn discord_gateway_resolves_with_valid_token() {
     let f = write_toml(&discord_gateway_toml("Bot my-bot-token"));
     let cfg = load(Some(f.path())).expect("load failed");
     let discord = cfg.discord.as_ref().expect("discord should be Some");
-    assert_eq!(discord.bot_token.as_str(), "Bot my-bot-token");
+    assert_eq!(
+        discord.bot_token.as_ref().expect("bot token should be Some").as_str(),
+        "Bot my-bot-token"
+    );
 }
 
 #[test]
@@ -462,14 +465,15 @@ gateway_intents = "bogus_intent"
 }
 
 #[test]
-fn discord_missing_bot_token_returns_none() {
+fn discord_gateway_can_resolve_without_static_bot_token() {
     let toml = r#"
 [sources.discord]
 gateway_intents = "guilds,guild_messages"
 "#;
     let f = write_toml(toml);
     let cfg = load(Some(f.path())).expect("load failed");
-    assert!(cfg.discord.is_none());
+    let discord = cfg.discord.as_ref().expect("discord should be Some");
+    assert!(discord.bot_token.is_none());
 }
 
 #[test]

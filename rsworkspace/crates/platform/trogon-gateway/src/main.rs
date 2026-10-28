@@ -23,14 +23,18 @@ use std::net::SocketAddr;
 
 use crate::constants::{
     CLAIM_CHECK_TTL_GRACE, CREDENTIAL_MANAGEMENT_ADMIN_TOKEN, CREDENTIAL_RUNTIME_PROJECTION_WORKER_INTERVAL,
-    CREDENTIAL_WORKER_INTERVAL, NATS_CONNECT_TIMEOUT, NATS_SERVER_INFO_POLL_INTERVAL, OPENBAO_ADDR,
-    OPENBAO_ALLOW_PLAINTEXT, OPENBAO_TOKEN, SLACK_RESTART_BACKOFF,
+    CREDENTIAL_WORKER_INTERVAL, ENABLE_RUNTIME_DISCORD_CREDENTIALS, ENABLE_RUNTIME_GITHUB_CREDENTIALS,
+    ENABLE_RUNTIME_GITLAB_CREDENTIALS, ENABLE_RUNTIME_INCIDENTIO_CREDENTIALS, ENABLE_RUNTIME_LINEAR_CREDENTIALS,
+    ENABLE_RUNTIME_MICROSOFT_GRAPH_CREDENTIALS, ENABLE_RUNTIME_NOTION_CREDENTIALS, ENABLE_RUNTIME_SENTRY_CREDENTIALS,
+    ENABLE_RUNTIME_SLACK_CREDENTIALS, ENABLE_RUNTIME_TELEGRAM_CREDENTIALS, ENABLE_RUNTIME_TWITTER_CREDENTIALS,
+    NATS_CONNECT_TIMEOUT, NATS_SERVER_INFO_POLL_INTERVAL, OPENBAO_ADDR, OPENBAO_ALLOW_PLAINTEXT, OPENBAO_TOKEN,
+    SLACK_RESTART_BACKOFF,
 };
 use crate::secret_store::openbao_secret_store::OpenBaoTransport;
 use anyhow::Context;
 use futures_util::FutureExt;
 use tokio::task::JoinSet;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use trogon_decider_runtime::StreamRead;
 use trogon_nats::client::RequestClient;
 use trogon_nats::jetstream::{
@@ -150,12 +154,21 @@ async fn serve_with_env(
         info!("credential runtime projection refresh worker spawned");
     }
 
-    spawn_discord_gateway(
-        &mut join_set,
-        resolved.discord.as_ref(),
-        publisher.clone(),
-        crate::source::discord::gateway_runner::run,
-    );
+    match discord_runtime_credentials_from_env(env, &runtime_credentials)? {
+        Some(discord_runtime_credentials) => spawn_discord_gateway_with_runtime_credentials(
+            &mut join_set,
+            resolved.discord.as_ref(),
+            discord_runtime_credentials,
+            publisher.clone(),
+            crate::source::discord::gateway_runner::run,
+        ),
+        None => spawn_discord_gateway(
+            &mut join_set,
+            resolved.discord.as_ref(),
+            publisher.clone(),
+            crate::source::discord::gateway_runner::run,
+        ),
+    }
 
     spawn_slack_socket_modes(
         &mut join_set,
@@ -174,7 +187,12 @@ async fn serve_with_env(
         crate::source::google_pubsub::streaming_pull::run,
     );
 
-    let app = http::mount_sources(resolved, publisher, &nats);
+    let app = match source_runtime_credentials_from_env(env, &runtime_credentials)? {
+        Some(runtime_credentials) => {
+            http::mount_sources_with_runtime_credentials(resolved, publisher, &nats, runtime_credentials)
+        }
+        None => http::mount_sources(resolved, publisher, &nats),
+    };
     let app = match credential_management_admin_token_from_env(env)? {
         Some(admin_token) => {
             let store = openbao_secret_store_from_env(env, CREDENTIAL_MANAGEMENT_ADMIN_TOKEN)?;
@@ -292,15 +310,67 @@ fn spawn_discord_gateway<P, S, Run, Running>(
         + 'static,
     Running: std::future::Future<Output = ()> + Send + 'static,
 {
+    let static_bot_token = config.and_then(|config| config.bot_token.clone());
+    spawn_discord_gateway_with_bot_token(tasks, config, publisher, run, async move {
+        if static_bot_token.is_none() {
+            warn!("Discord gateway configured without a static bot token");
+        }
+        static_bot_token
+    });
+}
+
+fn spawn_discord_gateway_with_runtime_credentials<P, S, G, Run, Running>(
+    tasks: &mut JoinSet<SourceResult>,
+    config: Option<&source::discord::config::DiscordConfig>,
+    credentials: credential_runtime_projection::RuntimeCredentialResolver<G>,
+    publisher: ClaimCheckPublisher<P, S>,
+    run: Run,
+) where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: secret_store::SecretStoreGet<Error = secret_store::SecretStoreError> + Send + Sync + 'static,
+    Run: FnOnce(ClaimCheckPublisher<P, S>, source::discord::config::DiscordConfig, twilight_gateway::Shard) -> Running
+        + Send
+        + 'static,
+    Running: std::future::Future<Output = ()> + Send + 'static,
+{
+    spawn_discord_gateway_with_bot_token(tasks, config, publisher, run, async move {
+        match source::discord::gateway_runner::resolve_runtime_bot_token(&credentials).await {
+            Ok(bot_token) => Some(bot_token),
+            Err(error) => {
+                warn!(?error, "Discord runtime bot token could not be resolved");
+                None
+            }
+        }
+    });
+}
+
+fn spawn_discord_gateway_with_bot_token<P, S, Run, Running, BotToken>(
+    tasks: &mut JoinSet<SourceResult>,
+    config: Option<&source::discord::config::DiscordConfig>,
+    publisher: ClaimCheckPublisher<P, S>,
+    run: Run,
+    bot_token: BotToken,
+) where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    Run: FnOnce(ClaimCheckPublisher<P, S>, source::discord::config::DiscordConfig, twilight_gateway::Shard) -> Running
+        + Send
+        + 'static,
+    Running: std::future::Future<Output = ()> + Send + 'static,
+    BotToken: std::future::Future<Output = Option<source::discord::config::DiscordBotToken>> + Send + 'static,
+{
     if let Some(config) = config {
         let config = config.clone();
         tasks.spawn(async move {
-            let shard = twilight_gateway::Shard::new(
-                twilight_gateway::ShardId::ONE,
-                config.bot_token.as_str().to_owned(),
-                config.intents,
-            );
-            run(publisher, config, shard).await;
+            if let Some(bot_token) = bot_token.await {
+                let shard = twilight_gateway::Shard::new(
+                    twilight_gateway::ShardId::ONE,
+                    bot_token.as_str().to_owned(),
+                    config.intents,
+                );
+                run(publisher, config, shard).await;
+            }
             ("discord-gateway", Ok(()))
         });
         info!(source = "discord", "gateway runner spawned");
@@ -504,6 +574,129 @@ fn log_projection_refresh(report: &credential_runtime_projection::RuntimeProject
     );
 }
 
+fn source_runtime_credentials_from_env(
+    env: &impl ReadEnv,
+    runtime_credentials: &credential_runtime_projection::RuntimeCredentialRegistry,
+) -> anyhow::Result<
+    Option<source_plugin::RuntimeCredentialMounts<secret_store::openbao_secret_store::OpenBaoSecretStore>>,
+> {
+    let github_enabled = env_flag_enabled(env, ENABLE_RUNTIME_GITHUB_CREDENTIALS);
+    let gitlab_enabled = env_flag_enabled(env, ENABLE_RUNTIME_GITLAB_CREDENTIALS);
+    let incidentio_enabled = env_flag_enabled(env, ENABLE_RUNTIME_INCIDENTIO_CREDENTIALS);
+    let linear_enabled = env_flag_enabled(env, ENABLE_RUNTIME_LINEAR_CREDENTIALS);
+    let microsoft_graph_enabled = env_flag_enabled(env, ENABLE_RUNTIME_MICROSOFT_GRAPH_CREDENTIALS);
+    let notion_enabled = env_flag_enabled(env, ENABLE_RUNTIME_NOTION_CREDENTIALS);
+    let sentry_enabled = env_flag_enabled(env, ENABLE_RUNTIME_SENTRY_CREDENTIALS);
+    let slack_enabled = env_flag_enabled(env, ENABLE_RUNTIME_SLACK_CREDENTIALS);
+    let telegram_enabled = env_flag_enabled(env, ENABLE_RUNTIME_TELEGRAM_CREDENTIALS);
+    let twitter_enabled = env_flag_enabled(env, ENABLE_RUNTIME_TWITTER_CREDENTIALS);
+    if !github_enabled
+        && !gitlab_enabled
+        && !incidentio_enabled
+        && !linear_enabled
+        && !microsoft_graph_enabled
+        && !notion_enabled
+        && !sentry_enabled
+        && !slack_enabled
+        && !telegram_enabled
+        && !twitter_enabled
+    {
+        return Ok(None);
+    }
+
+    let enabled_by = match (
+        github_enabled,
+        gitlab_enabled,
+        incidentio_enabled,
+        linear_enabled,
+        microsoft_graph_enabled,
+        notion_enabled,
+        sentry_enabled,
+        slack_enabled,
+        telegram_enabled,
+        twitter_enabled,
+    ) {
+        (true, false, false, false, false, false, false, false, false, false) => ENABLE_RUNTIME_GITHUB_CREDENTIALS,
+        (false, true, false, false, false, false, false, false, false, false) => ENABLE_RUNTIME_GITLAB_CREDENTIALS,
+        (false, false, true, false, false, false, false, false, false, false) => ENABLE_RUNTIME_INCIDENTIO_CREDENTIALS,
+        (false, false, false, true, false, false, false, false, false, false) => ENABLE_RUNTIME_LINEAR_CREDENTIALS,
+        (false, false, false, false, true, false, false, false, false, false) => {
+            ENABLE_RUNTIME_MICROSOFT_GRAPH_CREDENTIALS
+        }
+        (false, false, false, false, false, true, false, false, false, false) => ENABLE_RUNTIME_NOTION_CREDENTIALS,
+        (false, false, false, false, false, false, true, false, false, false) => ENABLE_RUNTIME_SENTRY_CREDENTIALS,
+        (false, false, false, false, false, false, false, true, false, false) => ENABLE_RUNTIME_SLACK_CREDENTIALS,
+        (false, false, false, false, false, false, false, false, true, false) => ENABLE_RUNTIME_TELEGRAM_CREDENTIALS,
+        (false, false, false, false, false, false, false, false, false, true) => ENABLE_RUNTIME_TWITTER_CREDENTIALS,
+        _ => "runtime source credential flags",
+    };
+    let store = openbao_secret_store_from_env(env, enabled_by)?;
+    let resolver = runtime_credentials.resolver(store);
+
+    if github_enabled {
+        info!("GitHub webhook runtime credentials enabled");
+    }
+    if gitlab_enabled {
+        info!("GitLab webhook runtime credentials enabled");
+    }
+    if incidentio_enabled {
+        info!("Incident.io webhook runtime credentials enabled");
+    }
+    if linear_enabled {
+        info!("Linear webhook runtime credentials enabled");
+    }
+    if microsoft_graph_enabled {
+        info!("Microsoft Graph webhook runtime credentials enabled");
+    }
+    if notion_enabled {
+        info!("Notion webhook runtime credentials enabled");
+    }
+    if sentry_enabled {
+        info!("Sentry webhook runtime credentials enabled");
+    }
+    if slack_enabled {
+        info!("Slack webhook runtime credentials enabled");
+    }
+    if telegram_enabled {
+        info!("Telegram webhook runtime credentials enabled");
+    }
+    if twitter_enabled {
+        info!("Twitter/X webhook runtime credentials enabled");
+    }
+
+    Ok(Some(source_plugin::RuntimeCredentialMounts {
+        github: github_enabled.then(|| resolver.clone()),
+        gitlab: gitlab_enabled.then(|| resolver.clone()),
+        incidentio: incidentio_enabled.then(|| resolver.clone()),
+        linear: linear_enabled.then(|| resolver.clone()),
+        microsoft_graph: microsoft_graph_enabled.then(|| resolver.clone()),
+        notion: notion_enabled.then(|| resolver.clone()),
+        sentry: sentry_enabled.then(|| resolver.clone()),
+        slack: slack_enabled.then(|| resolver.clone()),
+        telegram: telegram_enabled.then(|| resolver.clone()),
+        twitter: twitter_enabled.then_some(resolver),
+    }))
+}
+
+fn discord_runtime_credentials_from_env(
+    env: &impl ReadEnv,
+    runtime_credentials: &credential_runtime_projection::RuntimeCredentialRegistry,
+) -> anyhow::Result<
+    Option<
+        credential_runtime_projection::RuntimeCredentialResolver<
+            secret_store::openbao_secret_store::OpenBaoSecretStore,
+        >,
+    >,
+> {
+    if !env_flag_enabled(env, ENABLE_RUNTIME_DISCORD_CREDENTIALS) {
+        return Ok(None);
+    }
+
+    let store = openbao_secret_store_from_env(env, ENABLE_RUNTIME_DISCORD_CREDENTIALS)?;
+    info!("Discord gateway runtime credentials enabled");
+    Ok(Some(runtime_credentials.resolver(store)))
+}
+
 fn credential_management_admin_token_from_env(env: &impl ReadEnv) -> anyhow::Result<Option<SecretString>> {
     match env.var(CREDENTIAL_MANAGEMENT_ADMIN_TOKEN) {
         Ok(value) => SecretString::new(value)
@@ -537,6 +730,12 @@ fn openbao_transport_from_env(env: &impl ReadEnv) -> anyhow::Result<OpenBaoTrans
         Ok(value) => anyhow::bail!("{OPENBAO_ALLOW_PLAINTEXT} must be true or false, got '{value}'"),
         Err(source) => Err(source).with_context(|| format!("failed to read {OPENBAO_ALLOW_PLAINTEXT}")),
     }
+}
+
+fn env_flag_enabled(env: &impl ReadEnv, name: &str) -> bool {
+    env.var(name)
+        .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false)
 }
 
 #[derive(Debug, thiserror::Error)]
