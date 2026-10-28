@@ -8,6 +8,13 @@ credentials against the platform's API.
 
 Pick the section for the platform your meetings run on.
 
+When an event body is larger than the NATS server's maximum payload, the
+gateway stores it in the claim-check object store and publishes an empty body
+with `Trogon-Claim-Check`, `Trogon-Claim-Bucket`, and `Trogon-Claim-Key`
+headers instead. This applies to every platform below, so resolve the claim,
+for example with `trogon_nats::jetstream::ClaimResolver`, before parsing the
+body.
+
 ## Before you begin
 
 Confirm you have:
@@ -25,11 +32,17 @@ Google Meet delivers transcript events through the Google Workspace Events API
 to a Cloud Pub/Sub topic. The gateway pulls them from a subscription on that
 topic, so it needs no public URL for Meet.
 
-1. Create a Pub/Sub topic and a pull subscription on it.
+1. Create a Pub/Sub topic and a pull subscription on it. Grant
+   `roles/pubsub.publisher` on the topic to
+   `meet-api-event-push@system.gserviceaccount.com`, or Meet cannot deliver
+   events to it.
 2. Create a Workspace Events subscription whose target is the Meet space or
    user you want to watch, whose event types include
    `google.workspace.meet.transcript.v2.fileGenerated`, and whose notification
-   endpoint is the topic from the previous step.
+   endpoint is the topic from the previous step. A user target covers only the
+   meeting spaces that user owns, not meetings the user joins as a
+   participant, so target the space itself to watch a meeting space someone
+   else owns.
 3. Give the gateway a service account that can pull from the subscription, and
    add a dedicated integration so Meet events do not share a subject with other
    Pub/Sub traffic:
@@ -51,6 +64,12 @@ Workspace Events subscriptions expire. Renew them before they lapse, or Meet
 stops sending events without an error the gateway can see.
 
 ## Zoom
+
+Zoom only produces transcripts for meetings recorded to the cloud with audio
+transcription turned on. Confirm the host's account has a license that
+includes cloud recording and that both Cloud recording and Audio transcript
+are enabled; otherwise the steps below succeed but no transcript event is ever
+sent.
 
 1. In a Zoom app, enable Event Subscriptions, subscribe to
    `recording.transcript_completed`, and set the endpoint URL to
@@ -83,14 +102,24 @@ Teams transcripts are announced through Microsoft Graph change notifications.
    client_state = { env = "MICROSOFT_GRAPH_PRIMARY_CLIENT_STATE" }
    ```
 
-2. Create a Graph subscription on the online meeting transcripts resource with
-   `changeType` `created`, `notificationUrl` set to
+2. Create a Graph subscription on an online meeting transcripts resource,
+   such as `communications/onlineMeetings/getAllTranscripts` for the whole
+   tenant or `users/{userId}/onlineMeetings/getAllTranscripts` for one
+   organizer, with `changeType` `created`, `notificationUrl` set to
    `https://<gateway-host>/sources/microsoft-graph/primary/webhook`, and the
    same `clientState`. The gateway answers Graph's validation request when the
    subscription is created.
+
+   If `expirationDateTime` is more than one hour away, Graph also requires
+   `lifecycleNotificationUrl`. Pointing it at the same gateway URL works: the
+   gateway answers its validation request and publishes lifecycle
+   notifications to the same subject, where consumers tell them apart by the
+   `lifecycleEvent` field that transcript notifications do not carry.
 3. Consume `microsoft-graph-primary.change_notification_collection`. Each
    notification names the transcript resource; fetch its content through
    Graph.
 
-Graph subscriptions expire after a short, resource-specific lifetime. Renew
-them on a schedule, or notifications stop.
+Graph only announces a transcript when the subscription already exists before
+transcription starts, and these resources do not cover private channel
+meetings. Graph subscriptions also expire after a short, resource-specific
+lifetime. Renew them on a schedule, or notifications stop.
