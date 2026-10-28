@@ -46,3 +46,23 @@ fn delivery_headers_carry_validated_and_static_values() {
     assert_eq!(headers.get("X-Slack-Team-Id").map(|v| v.as_str()), Some("T01ABC"));
     assert_eq!(headers.get("X-Slack-Payload-Kind").map(|v| v.as_str()), Some("event"));
 }
+
+#[test]
+fn with_optional_sets_present_value_and_skips_absent_one() {
+    let headers = DeliveryHeaders::new()
+        .with_optional("Present", Some("value"))
+        .unwrap()
+        .with_optional("Absent", None)
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(headers.get("Present").map(|v| v.as_str()), Some("value"));
+    assert!(headers.get("Absent").is_none());
+}
+
+#[test]
+fn with_optional_rejects_unsafe_value() {
+    let result = DeliveryHeaders::new().with_optional("Unsafe", Some("a\r\nb"));
+
+    assert_eq!(result.unwrap_err(), InvalidHeaderTextError);
+}

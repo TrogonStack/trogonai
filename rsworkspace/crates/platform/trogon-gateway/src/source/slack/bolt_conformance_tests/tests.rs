@@ -51,27 +51,35 @@ fn gaps(ids: &[GapId]) -> LedgerEntry {
 
 #[test]
 fn a_mismatch_without_a_ledger_entry_fails() {
-    let problems = judge(&fixture(), None, &[header_diff(HEADER_RETRY_NUM)]);
+    let problems = judge(&fixture(), None, &[header_diff(HEADERS_ENTERPRISE_AND_APP[0])]);
     assert_eq!(problems.len(), 1);
     assert!(problems[0].contains("not covered"));
 }
 
 #[test]
 fn a_ledger_entry_that_no_longer_matches_anything_is_stale() {
-    let problems = judge(&fixture(), Some(&gaps(&[GapId::G5])), &[]);
+    let problems = judge(&fixture(), Some(&gaps(&[GapId::G7])), &[]);
     assert_eq!(problems.len(), 1);
     assert!(problems[0].contains("stale"));
 }
 
 #[test]
 fn a_gap_that_explains_a_different_mismatch_is_stale_and_leaves_the_mismatch_uncovered() {
-    let problems = judge(&fixture(), Some(&gaps(&[GapId::G13])), &[header_diff(HEADER_RETRY_NUM)]);
+    let problems = judge(
+        &fixture(),
+        Some(&gaps(&[GapId::G13])),
+        &[header_diff(HEADERS_ENTERPRISE_AND_APP[0])],
+    );
     assert_eq!(problems.len(), 2);
 }
 
 #[test]
 fn a_matching_gap_covers_its_mismatch() {
-    let problems = judge(&fixture(), Some(&gaps(&[GapId::G5])), &[header_diff(HEADER_RETRY_NUM)]);
+    let problems = judge(
+        &fixture(),
+        Some(&gaps(&[GapId::G7])),
+        &[header_diff(HEADERS_ENTERPRISE_AND_APP[0])],
+    );
     assert!(problems.is_empty(), "{problems:?}");
 }
 

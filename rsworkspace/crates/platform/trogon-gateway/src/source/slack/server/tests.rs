@@ -1,3 +1,4 @@
+use super::super::constants::{HEADER_RETRY_NUM, HEADER_RETRY_REASON, NATS_HEADER_RETRY_NUM, NATS_HEADER_RETRY_REASON};
 use super::*;
 use axum::body::Body;
 use axum::http::Request;
@@ -1349,4 +1350,92 @@ async fn requests_that_only_look_like_ssl_checks_still_need_a_signature() {
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "{content_type} {body}");
         assert!(publisher.published_messages().is_empty());
     }
+}
+
+fn with_retry_headers(mut request: Request<Body>) -> Request<Body> {
+    request.headers_mut().insert(HEADER_RETRY_NUM, "1".parse().unwrap());
+    request
+        .headers_mut()
+        .insert(HEADER_RETRY_REASON, "http_timeout".parse().unwrap());
+    request
+}
+
+fn assert_retry_headers(publisher: &MockJetStreamPublisher, expected: Option<(&str, &str)>) {
+    let messages = publisher.published_messages();
+    assert_eq!(messages.len(), 1);
+    let num = messages[0].headers.get(NATS_HEADER_RETRY_NUM).map(|v| v.as_str());
+    let reason = messages[0].headers.get(NATS_HEADER_RETRY_REASON).map(|v| v.as_str());
+    assert_eq!(num.zip(reason), expected);
+}
+
+#[tokio::test]
+async fn http_event_redelivery_carries_retry_headers() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let body = event_callback_body("message");
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, &body);
+
+    let resp = mock_app(publisher.clone())
+        .oneshot(with_retry_headers(webhook_request(&body, &ts, Some(&sig))))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_retry_headers(&publisher, Some(("1", "http_timeout")));
+}
+
+#[tokio::test]
+async fn http_first_delivery_has_no_retry_headers() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let body = event_callback_body("message");
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, &body);
+
+    mock_app(publisher.clone())
+        .oneshot(webhook_request(&body, &ts, Some(&sig)))
+        .await
+        .unwrap();
+
+    assert_retry_headers(&publisher, None);
+}
+
+#[tokio::test]
+async fn http_slash_command_redelivery_carries_retry_headers() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let body = b"command=%2Fdeploy&trigger_id=trigger123&team_id=T01ABC";
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, body);
+
+    let resp = mock_app(publisher.clone())
+        .oneshot(with_retry_headers(form_request(body, &ts, &sig)))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_retry_headers(&publisher, Some(("1", "http_timeout")));
+}
+
+#[tokio::test]
+async fn http_interaction_redelivery_carries_retry_headers() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let payload =
+        serde_json::json!({ "type": "block_actions", "trigger_id": "trigger123", "team": { "id": "T01ABC" } });
+    let body = format!(
+        "payload={}",
+        form_urlencoded::byte_serialize(payload.to_string().as_bytes()).collect::<String>()
+    );
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, body.as_bytes());
+
+    let resp = mock_app(publisher.clone())
+        .oneshot(with_retry_headers(form_request(body.as_bytes(), &ts, &sig)))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_retry_headers(&publisher, Some(("1", "http_timeout")));
 }

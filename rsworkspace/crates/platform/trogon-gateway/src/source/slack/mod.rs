@@ -38,8 +38,10 @@
 //! - **Payload**: the bytes Slack sent. Socket Mode publishes the envelope's
 //!   `payload` slice without re-serializing it.
 //! - **Headers**: `Nats-Msg-Id`, `X-Slack-Payload-Kind`, `X-Slack-Event-Type`,
-//!   `X-Slack-Team-Id`, `X-Slack-Transport`, plus `X-Slack-Event-Id` for events
-//!   and `X-Slack-Reject-Reason` for unroutable messages.
+//!   `X-Slack-Team-Id`, `X-Slack-Transport`, plus `X-Slack-Event-Id` for events,
+//!   `X-Slack-Retry-Num` and `X-Slack-Retry-Reason` when Slack marks the
+//!   delivery as a redelivery, and `X-Slack-Reject-Reason` for unroutable
+//!   messages.
 //!
 //! ## Configuration
 //!
@@ -57,8 +59,11 @@
 pub mod ack_budget;
 pub mod config;
 pub mod constants;
+pub mod delivery_metadata;
 pub mod header_text;
 pub mod interaction_key;
+pub mod retry_attempt;
+pub mod retry_reason;
 pub mod server;
 pub mod signature;
 pub mod socket_mode;

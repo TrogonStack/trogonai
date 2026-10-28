@@ -11,6 +11,7 @@ use trogon_nats::jetstream::{ClaimCheckPublisher, JetStreamPublisher, ObjectStor
 use super::config::{SlackConfig, SlackSocketModeConfig};
 use super::constants::RECONNECT_MAX_DELAY;
 use super::constants::{APPS_CONNECTIONS_OPEN_URL, RECONNECT_INITIAL_DELAY};
+use super::delivery_metadata::DeliveryContext;
 use super::server::SlackBridge;
 use super::unroutable::UnroutableReason;
 
@@ -63,6 +64,10 @@ struct SocketEnvelope {
     payload: Option<Box<RawValue>>,
     #[serde(default)]
     reason: Option<String>,
+    #[serde(default)]
+    retry_attempt: Option<serde_json::Value>,
+    #[serde(default)]
+    retry_reason: Option<String>,
 }
 
 pub trait SocketConnector<P: JetStreamPublisher, S: ObjectStorePut> {
@@ -261,13 +266,30 @@ async fn handle_payload_envelope<P: JetStreamPublisher, S: ObjectStorePut>(
         return Ok(None);
     };
 
+    let Ok(context) = DeliveryContext::socket(
+        envelope.retry_attempt.as_ref().and_then(serde_json::Value::as_i64),
+        envelope.retry_reason.as_deref(),
+    ) else {
+        warn!(
+            kind = envelope.kind,
+            "Slack Socket Mode delivery metadata is not valid header text"
+        );
+        bridge
+            .publish_socket_unroutable(
+                UnroutableReason::InvalidHeaderValue,
+                Bytes::copy_from_slice(payload.get().as_bytes()),
+            )
+            .await;
+        return Ok(None);
+    };
+
     let status = match envelope.kind.as_str() {
         "events_api" => {
             let body = Bytes::copy_from_slice(payload.get().as_bytes());
-            bridge.handle_json_body(body).await.0
+            bridge.handle_json_body(body, &context).await.0
         }
-        "interactive" => bridge.handle_socket_interaction(&payload).await,
-        "slash_commands" => bridge.handle_socket_slash_command(&payload).await,
+        "interactive" => bridge.handle_socket_interaction(&payload, &context).await,
+        "slash_commands" => bridge.handle_socket_slash_command(&payload, &context).await,
         other => {
             warn!(kind = other, "Unhandled Slack Socket Mode payload envelope type");
             bridge

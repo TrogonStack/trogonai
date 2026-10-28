@@ -387,6 +387,8 @@ async fn payload_envelope_with_unexpected_kind_publishes_unroutable_without_ack(
         envelope_id: Some("env-unexpected".to_string()),
         payload: Some(RawValue::from_string("{}".to_string()).unwrap()),
         reason: None,
+        retry_attempt: None,
+        retry_reason: None,
     };
 
     let ack = handle_payload_envelope(&bridge(publisher.clone()), envelope, raw_text)
@@ -1074,4 +1076,146 @@ async fn socket_interaction_without_trigger_id_is_published_and_acked() {
     let messages = publisher.published_messages();
     assert_eq!(messages.len(), 1);
     assert_eq!(messages[0].subject, "slack.interaction.view_closed");
+}
+
+fn retry_envelope(kind: &str, payload: serde_json::Value, retry_reason: &str) -> String {
+    serde_json::json!({
+        "type": kind,
+        "envelope_id": "env-retry",
+        "payload": payload,
+        "retry_attempt": 2,
+        "retry_reason": retry_reason,
+    })
+    .to_string()
+}
+
+fn retry_headers(publisher: &MockJetStreamPublisher) -> (Option<String>, Option<String>) {
+    let messages = publisher.published_messages();
+    assert_eq!(messages.len(), 1);
+    let header = |name: &str| messages[0].headers.get(name).map(|v| v.as_str().to_owned());
+    (
+        header(super::super::constants::NATS_HEADER_RETRY_NUM),
+        header(super::super::constants::NATS_HEADER_RETRY_REASON),
+    )
+}
+
+#[tokio::test]
+async fn socket_event_redelivery_carries_retry_headers() {
+    let publisher = MockJetStreamPublisher::new();
+    let frame = retry_envelope(
+        "events_api",
+        serde_json::json!({
+            "type": "event_callback",
+            "event_id": "Ev01ABC123",
+            "team_id": "T01ABC",
+            "event": { "type": "message" }
+        }),
+        "timeout",
+    );
+
+    let (_, ack) = handle_text_frame(&bridge(publisher.clone()), &frame).await.unwrap();
+
+    assert_eq!(ack, Some(r#"{"envelope_id":"env-retry"}"#.to_string()));
+    assert_eq!(
+        retry_headers(&publisher),
+        (Some("2".to_string()), Some("timeout".to_string()))
+    );
+}
+
+#[tokio::test]
+async fn socket_interaction_redelivery_carries_retry_headers() {
+    let publisher = MockJetStreamPublisher::new();
+    let frame = retry_envelope(
+        "interactive",
+        serde_json::json!({ "type": "block_actions", "trigger_id": "trigger123", "team": { "id": "T01ABC" } }),
+        "timeout",
+    );
+
+    handle_text_frame(&bridge(publisher.clone()), &frame).await.unwrap();
+
+    assert_eq!(
+        retry_headers(&publisher),
+        (Some("2".to_string()), Some("timeout".to_string()))
+    );
+}
+
+#[tokio::test]
+async fn socket_slash_command_redelivery_carries_retry_headers() {
+    let publisher = MockJetStreamPublisher::new();
+    let frame = retry_envelope(
+        "slash_commands",
+        serde_json::json!({ "command": "/deploy", "trigger_id": "trigger123", "team_id": "T01ABC" }),
+        "timeout",
+    );
+
+    handle_text_frame(&bridge(publisher.clone()), &frame).await.unwrap();
+
+    assert_eq!(
+        retry_headers(&publisher),
+        (Some("2".to_string()), Some("timeout".to_string()))
+    );
+}
+
+#[tokio::test]
+async fn socket_first_delivery_has_no_retry_headers() {
+    let publisher = MockJetStreamPublisher::new();
+    let payload = r#"{"type":"event_callback","event_id":"Ev01ABC123","team_id":"T01ABC","event":{"type":"message"}}"#;
+
+    handle_text_frame(&bridge(publisher.clone()), &envelope_text("events_api", payload))
+        .await
+        .unwrap();
+
+    assert_eq!(retry_headers(&publisher), (None, None));
+}
+
+#[tokio::test]
+async fn socket_first_delivery_envelope_with_zero_attempt_and_empty_reason_has_no_retry_headers() {
+    let publisher = MockJetStreamPublisher::new();
+    let frame = serde_json::json!({
+        "type": "events_api",
+        "envelope_id": "env-first",
+        "payload": {
+            "type": "event_callback",
+            "event_id": "Ev01ABC123",
+            "team_id": "T01ABC",
+            "event": { "type": "message" }
+        },
+        "retry_attempt": 0,
+        "retry_reason": "",
+    })
+    .to_string();
+
+    let (_, ack) = handle_text_frame(&bridge(publisher.clone()), &frame).await.unwrap();
+
+    assert_eq!(ack, Some(r#"{"envelope_id":"env-first"}"#.to_string()));
+    assert_eq!(retry_headers(&publisher), (None, None));
+}
+
+#[tokio::test]
+async fn socket_retry_reason_with_line_break_is_unroutable_without_ack() {
+    let publisher = MockJetStreamPublisher::new();
+    let frame = retry_envelope(
+        "events_api",
+        serde_json::json!({
+            "type": "event_callback",
+            "event_id": "Ev01ABC123",
+            "team_id": "T01ABC",
+            "event": { "type": "message" }
+        }),
+        "a\r\nX-Injected: 1",
+    );
+
+    let (_, ack) = handle_text_frame(&bridge(publisher.clone()), &frame).await.unwrap();
+
+    assert_eq!(ack, None);
+    let messages = publisher.published_messages();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].subject, "slack.unroutable");
+    assert_eq!(
+        messages[0]
+            .headers
+            .get(super::super::constants::NATS_HEADER_REJECT_REASON)
+            .map(|v| v.as_str()),
+        Some("invalid_header_value"),
+    );
 }

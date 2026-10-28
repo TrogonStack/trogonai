@@ -6,6 +6,8 @@ pub const DEFAULT_HTTP_BODY_SIZE_MAX: HttpBodySizeMax = HttpBodySizeMax::new(Byt
 
 pub const HEADER_SIGNATURE: &str = "x-slack-signature";
 pub const HEADER_TIMESTAMP: &str = "x-slack-request-timestamp";
+pub const HEADER_RETRY_NUM: &str = "x-slack-retry-num";
+pub const HEADER_RETRY_REASON: &str = "x-slack-retry-reason";
 
 pub const UNKNOWN_TEAM_ID: &str = "unknown";
 
@@ -13,6 +15,8 @@ pub const NATS_HEADER_EVENT_TYPE: &str = "X-Slack-Event-Type";
 pub const NATS_HEADER_TEAM_ID: &str = "X-Slack-Team-Id";
 pub const NATS_HEADER_EVENT_ID: &str = "X-Slack-Event-Id";
 pub const NATS_HEADER_PAYLOAD_KIND: &str = "X-Slack-Payload-Kind";
+pub const NATS_HEADER_RETRY_NUM: &str = "X-Slack-Retry-Num";
+pub const NATS_HEADER_RETRY_REASON: &str = "X-Slack-Retry-Reason";
 
 pub const NATS_HEADER_TRANSPORT: &str = "X-Slack-Transport";
 pub const NATS_HEADER_REJECT_REASON: &str = "X-Slack-Reject-Reason";
