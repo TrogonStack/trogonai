@@ -1,6 +1,9 @@
 use super::super::ack_budget::AckBudget;
-use super::super::constants::DEFAULT_API_BASE_URL;
+use super::super::constants::{
+    CLIENT_PING_INTERVAL, CLIENT_PING_TIMEOUT, DEFAULT_API_BASE_URL, SERVER_PING_TIMEOUT, UNANSWERED_PING_LIMIT,
+};
 use super::*;
+use async_nats::subject::ToSubject;
 use axum::Router;
 use axum::extract::State;
 use axum::extract::ws::{Message as AxumMessage, WebSocketUpgrade};
@@ -17,7 +20,7 @@ use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{MaxPayload, MockJetStreamPublisher, MockObjectStore, StreamMaxAge};
 use trogon_std::NonZeroDuration;
 
-fn wrap_publisher(publisher: MockJetStreamPublisher) -> ClaimCheckPublisher<MockJetStreamPublisher, MockObjectStore> {
+fn wrap_publisher<P: JetStreamPublisher>(publisher: P) -> ClaimCheckPublisher<P, MockObjectStore> {
     ClaimCheckPublisher::new(
         publisher,
         ClaimBucketBinding::for_test(MockObjectStore::new(), ClaimBucket::default()),
@@ -53,7 +56,7 @@ fn webhook_config() -> SlackConfig {
     }
 }
 
-fn bridge(publisher: MockJetStreamPublisher) -> SlackBridge<MockJetStreamPublisher, MockObjectStore> {
+fn bridge<P: JetStreamPublisher>(publisher: P) -> SlackBridge<P, MockObjectStore> {
     SlackBridge::new(wrap_publisher(publisher), &socket_config())
 }
 
@@ -970,9 +973,14 @@ async fn process_socket_messages_returns_when_stream_ends() {
     let mut sender = futures_util::sink::drain::<Message>()
         .sink_map_err(|never: std::convert::Infallible| -> WebSocketError { match never {} });
 
-    process_socket_messages(&bridge(MockJetStreamPublisher::new()), &mut receiver, &mut sender)
-        .await
-        .unwrap();
+    process_socket_messages(
+        &bridge(MockJetStreamPublisher::new()),
+        &mut receiver,
+        &mut sender,
+        SOCKET_LIVENESS,
+    )
+    .await
+    .unwrap();
 }
 
 #[tokio::test]
@@ -1325,4 +1333,305 @@ async fn socket_envelope_id_with_line_break_is_unroutable_without_ack() {
     let messages = publisher.published_messages();
     assert_eq!(messages.len(), 1);
     assert_eq!(messages[0].subject, "slack.unroutable");
+}
+
+type Inbound = mpsc::UnboundedSender<Result<Message, WebSocketError>>;
+type Outbound = mpsc::UnboundedReceiver<Message>;
+
+struct SocketHarness {
+    inbound: Inbound,
+    outbound: Outbound,
+    task: tokio::task::JoinHandle<Result<(), SocketModeError>>,
+    started: tokio::time::Instant,
+}
+
+fn channel_sink(outbound: mpsc::UnboundedSender<Message>) -> impl Sink<Message, Error = WebSocketError> + Unpin {
+    Box::pin(futures_util::sink::unfold(outbound, |outbound, message| async move {
+        outbound.send(message).map_err(|_| WebSocketError::ConnectionClosed)?;
+        Ok(outbound)
+    }))
+}
+
+fn channel_stream(
+    mut receiver: mpsc::UnboundedReceiver<Result<Message, WebSocketError>>,
+) -> impl Stream<Item = Result<Message, WebSocketError>> + Unpin {
+    Box::pin(futures_util::stream::poll_fn(move |cx| receiver.poll_recv(cx)))
+}
+
+fn start_socket() -> SocketHarness {
+    start_socket_with(MockJetStreamPublisher::new())
+}
+
+fn start_socket_with<P: JetStreamPublisher>(publisher: P) -> SocketHarness {
+    let (inbound, receiver) = mpsc::unbounded_channel();
+    let (outbound_tx, outbound) = mpsc::unbounded_channel();
+    let task = tokio::spawn(async move {
+        let mut receiver = channel_stream(receiver);
+        let mut sender = channel_sink(outbound_tx);
+        process_socket_messages(&bridge(publisher), &mut receiver, &mut sender, SOCKET_LIVENESS).await
+    });
+    SocketHarness {
+        inbound,
+        outbound,
+        task,
+        started: tokio::time::Instant::now(),
+    }
+}
+
+fn ping_time(count: u32) -> Duration {
+    let nanos = (SOCKET_LIVENESS.ping_interval() * count).as_nanos();
+    Duration::from_millis(nanos.div_ceil(1_000_000) as u64)
+}
+
+impl SocketHarness {
+    async fn next_client_ping(&mut self) -> Duration {
+        loop {
+            match self.outbound.recv().await {
+                Some(Message::Ping(payload)) => {
+                    assert_eq!(payload.as_ref(), CLIENT_PING_PAYLOAD);
+                    return self.started.elapsed();
+                }
+                Some(_) => {}
+                None => panic!("socket closed before a client ping"),
+            }
+        }
+    }
+
+    fn pong(&self) {
+        let _ = self.inbound.send(Ok(Message::Pong(Bytes::new())));
+    }
+
+    fn server_ping(&self) {
+        self.inbound
+            .send(Ok(Message::Ping(Bytes::from_static(b"server"))))
+            .unwrap();
+    }
+
+    async fn answer_pings_until_closed(&mut self) {
+        while let Some(message) = self.outbound.recv().await {
+            if matches!(message, Message::Ping(_)) {
+                self.pong();
+            }
+        }
+    }
+
+    async fn finish(self) -> Duration {
+        let Self { task, started, .. } = self;
+        task.await.unwrap().unwrap();
+        started.elapsed()
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn client_pings_are_sent_at_the_ping_interval() {
+    let mut socket = start_socket();
+
+    assert_eq!(socket.next_client_ping().await, ping_time(1));
+    socket.pong();
+    assert_eq!(socket.next_client_ping().await, ping_time(2));
+    socket.pong();
+    assert_eq!(socket.next_client_ping().await, ping_time(3));
+    socket.task.abort();
+}
+
+#[tokio::test(start_paused = true)]
+async fn connection_is_dropped_when_pings_never_get_a_pong() {
+    let mut socket = start_socket();
+
+    for count in 1..=4 {
+        assert_eq!(socket.next_client_ping().await, ping_time(count));
+    }
+
+    assert_eq!(socket.finish().await, ping_time(4));
+}
+
+#[tokio::test(start_paused = true)]
+async fn connection_is_dropped_a_timeout_after_a_ping_goes_unanswered() {
+    let mut socket = start_socket();
+
+    assert_eq!(socket.next_client_ping().await, ping_time(1));
+    socket.pong();
+    let unanswered = socket.next_client_ping().await;
+
+    assert_eq!(unanswered, ping_time(2));
+    assert_eq!(socket.finish().await, unanswered + CLIENT_PING_TIMEOUT);
+}
+
+#[derive(Clone)]
+struct SlowPublisher {
+    inner: MockJetStreamPublisher,
+    delay: Duration,
+}
+
+impl JetStreamPublisher for SlowPublisher {
+    type PublishError = <MockJetStreamPublisher as JetStreamPublisher>::PublishError;
+    type AckFuture = <MockJetStreamPublisher as JetStreamPublisher>::AckFuture;
+
+    async fn publish_with_headers<S: ToSubject + Send>(
+        &self,
+        subject: S,
+        headers: async_nats::HeaderMap,
+        payload: Bytes,
+    ) -> Result<Self::AckFuture, Self::PublishError> {
+        tokio::time::sleep(self.delay).await;
+        self.inner.publish_with_headers(subject, headers, payload).await
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn slow_publishes_do_not_make_a_queued_pong_count_as_missing() {
+    let publish_delay = CLIENT_PING_TIMEOUT / 2;
+    let deliveries = 3;
+    let mut socket = start_socket_with(SlowPublisher {
+        inner: MockJetStreamPublisher::new(),
+        delay: publish_delay,
+    });
+    socket.next_client_ping().await;
+    socket.pong();
+    let unanswered = socket.next_client_ping().await;
+    for index in 0..deliveries {
+        socket
+            .inbound
+            .send(Ok(socket_delivery(&format!("env-{index}"), &format!("EvSlow{index}"))))
+            .unwrap();
+    }
+    socket.pong();
+    assert!(publish_delay * deliveries > CLIENT_PING_TIMEOUT);
+
+    let mut acks = 0;
+    while acks < deliveries {
+        match socket.outbound.recv().await {
+            Some(Message::Text(_)) => acks += 1,
+            Some(_) => {}
+            None => panic!("connection closed while a pong was queued"),
+        }
+    }
+
+    assert!(socket.started.elapsed() > unanswered + CLIENT_PING_TIMEOUT);
+    socket.next_client_ping().await;
+    assert!(!socket.task.is_finished());
+    socket.task.abort();
+}
+
+#[tokio::test(start_paused = true)]
+async fn slow_publishes_before_the_first_pong_do_not_make_it_count_as_missing() {
+    let publish_delay = CLIENT_PING_TIMEOUT / 2;
+    let deliveries = 5;
+    let mut socket = start_socket_with(SlowPublisher {
+        inner: MockJetStreamPublisher::new(),
+        delay: publish_delay,
+    });
+    let first = socket.next_client_ping().await;
+    for index in 0..deliveries {
+        socket
+            .inbound
+            .send(Ok(socket_delivery(&format!("env-{index}"), &format!("EvSlow{index}"))))
+            .unwrap();
+    }
+    socket.pong();
+    assert!(publish_delay * deliveries > CLIENT_PING_INTERVAL * UNANSWERED_PING_LIMIT);
+
+    let mut acks = 0;
+    while acks < deliveries {
+        match socket.outbound.recv().await {
+            Some(Message::Text(_)) => acks += 1,
+            Some(_) => {}
+            None => panic!("connection closed while the first pong was queued"),
+        }
+    }
+
+    assert!(socket.started.elapsed() > first + CLIENT_PING_INTERVAL * UNANSWERED_PING_LIMIT);
+    socket.next_client_ping().await;
+    assert!(!socket.task.is_finished());
+    socket.task.abort();
+}
+
+fn socket_delivery(envelope_id: &str, event_id: &str) -> Message {
+    let payload = format!(
+        r#"{{"type":"event_callback","event_id":"{event_id}","team_id":"T01ABC","event":{{"type":"message"}}}}"#
+    );
+    let frame = format!(r#"{{"type":"events_api","envelope_id":"{envelope_id}","payload":{payload}}}"#);
+    Message::Text(frame.into())
+}
+
+#[tokio::test(start_paused = true)]
+async fn answered_pings_keep_the_connection_open() {
+    let mut socket = start_socket();
+
+    for _ in 0..30 {
+        socket.next_client_ping().await;
+        socket.pong();
+    }
+
+    assert!(!socket.task.is_finished());
+    socket.inbound.send(Ok(Message::Close(None))).unwrap();
+    socket.finish().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn missing_server_pings_do_not_stall_while_the_server_answers_pings() {
+    let mut socket = start_socket();
+
+    while socket.started.elapsed() < SERVER_PING_TIMEOUT * 2 {
+        socket.next_client_ping().await;
+        socket.pong();
+    }
+
+    assert!(!socket.task.is_finished());
+    socket.task.abort();
+}
+
+#[tokio::test(start_paused = true)]
+async fn server_ping_is_answered_with_a_pong() {
+    let mut socket = start_socket();
+
+    socket.server_ping();
+
+    assert!(matches!(socket.outbound.recv().await, Some(Message::Pong(payload)) if payload.as_ref() == b"server"));
+    socket.task.abort();
+}
+
+#[tokio::test(start_paused = true)]
+async fn connection_is_dropped_when_server_pings_stop() {
+    let mut socket = start_socket();
+    socket.server_ping();
+
+    socket.answer_pings_until_closed().await;
+
+    assert_eq!(socket.finish().await, SERVER_PING_TIMEOUT);
+}
+
+#[tokio::test(start_paused = true)]
+async fn each_server_ping_restarts_the_server_ping_timeout() {
+    let mut socket = start_socket();
+    socket.server_ping();
+    while socket.started.elapsed() < SERVER_PING_TIMEOUT - CLIENT_PING_TIMEOUT {
+        socket.next_client_ping().await;
+        socket.pong();
+    }
+    let second_ping_at = socket.started.elapsed();
+    socket.server_ping();
+
+    socket.answer_pings_until_closed().await;
+
+    assert_eq!(socket.finish().await, second_ping_at + SERVER_PING_TIMEOUT);
+}
+
+#[tokio::test(start_paused = true)]
+async fn client_ping_send_failure_ends_the_connection() {
+    let SocketHarness {
+        task,
+        outbound,
+        inbound,
+        ..
+    } = start_socket();
+    drop(outbound);
+
+    let error = task.await.unwrap().unwrap_err();
+    drop(inbound);
+
+    assert!(matches!(
+        error,
+        SocketModeError::WebSocket(WebSocketError::ConnectionClosed)
+    ));
 }
