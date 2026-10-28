@@ -65,6 +65,7 @@
 //! | `webhook.timestamp_max_drift_secs` | `300` | Allowed clock drift for request timestamps |
 //! | `webhook.max_body_bytes` | `4194304` | Largest accepted request body |
 //! | `socket_mode.app_token` | required | App-level token, starts with `xapp-` |
+//! | `socket_mode.api_base_url` | `https://slack.com/api/` | Slack Web API base for `apps.connections.open`, for example `https://slack-gov.com/api/` for GovSlack |
 //! | `nats_ack_timeout_secs` | derived from Slack's 3 second deadline | Capped at that budget |
 
 pub mod ack_budget;

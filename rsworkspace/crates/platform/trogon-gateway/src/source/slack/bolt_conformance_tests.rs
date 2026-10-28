@@ -17,7 +17,8 @@ use trogon_std::time::FixedEpochClock;
 
 use super::ack_budget::AckBudget;
 use super::config::{
-    SlackAppToken, SlackConfig, SlackSigningSecret, SlackSocketModeConfig, SlackTransportConfig, SlackWebhookConfig,
+    SlackApiBaseUrl, SlackAppToken, SlackConfig, SlackSigningSecret, SlackSocketModeConfig, SlackTransportConfig,
+    SlackWebhookConfig,
 };
 use super::server::{SlackBridge, router_with_clock};
 use super::socket_mode::handle_text_frame;
@@ -352,6 +353,7 @@ fn webhook_config() -> SlackConfig {
 fn socket_mode_config() -> SlackConfig {
     gateway_config(SlackTransportConfig::SocketMode(SlackSocketModeConfig {
         app_token: SlackAppToken::new("xapp-conformance").expect("valid token"),
+        api_base_url: SlackApiBaseUrl::new(super::constants::DEFAULT_API_BASE_URL).expect("valid url"),
     }))
 }
 

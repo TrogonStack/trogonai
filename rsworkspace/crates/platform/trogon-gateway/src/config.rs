@@ -16,10 +16,10 @@ use crate::source::notion::NotionVerificationToken;
 use crate::source::sentry::SentryClientSecret;
 use crate::source::slack::ack_budget::AckBudget;
 use crate::source::slack::config::{
-    SlackAppToken, SlackSigningSecret, SlackSocketModeConfig as SlackSocketModeSourceConfig, SlackTransportConfig,
-    SlackWebhookConfig as SlackWebhookSourceConfig,
+    SlackApiBaseUrl, SlackAppToken, SlackSigningSecret, SlackSocketModeConfig as SlackSocketModeSourceConfig,
+    SlackTransportConfig, SlackWebhookConfig as SlackWebhookSourceConfig,
 };
-use crate::source::slack::constants::DEFAULT_HTTP_BODY_SIZE_MAX;
+use crate::source::slack::constants::{DEFAULT_API_BASE_URL, DEFAULT_HTTP_BODY_SIZE_MAX};
 use crate::source::telegram::config::{
     TelegramBotToken, TelegramPublicWebhookUrl, TelegramWebhookRegistrationConfig, TelegramWebhookSecret,
 };
@@ -583,6 +583,7 @@ struct SlackWebhookConfig {
 #[serde(deny_unknown_fields)]
 struct SlackSocketModeConfig {
     app_token: Option<SecretInput>,
+    api_base_url: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -1136,8 +1137,22 @@ fn resolve_slack_socket_mode_transport(
         }
     };
 
+    let api_base_url = match SlackApiBaseUrl::new(socket_mode.api_base_url.as_deref().unwrap_or(DEFAULT_API_BASE_URL)) {
+        Ok(url) => url,
+        Err(error) => {
+            errors.push(ConfigValidationError::invalid_integration(
+                "slack",
+                id,
+                "api_base_url",
+                error,
+            ));
+            return None;
+        }
+    };
+
     Some(SlackTransportConfig::SocketMode(SlackSocketModeSourceConfig {
         app_token,
+        api_base_url,
     }))
 }
 

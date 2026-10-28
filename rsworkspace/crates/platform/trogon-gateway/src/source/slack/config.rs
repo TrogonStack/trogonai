@@ -1,6 +1,9 @@
 use std::fmt;
 
+use reqwest::Url;
+
 use super::ack_budget::AckBudget;
+use super::constants::APPS_CONNECTIONS_OPEN_METHOD;
 
 use trogon_nats::NatsToken;
 use trogon_nats::jetstream::StreamMaxAge;
@@ -56,6 +59,40 @@ impl fmt::Debug for SlackAppToken {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum SlackApiBaseUrlError {
+    #[error("invalid Slack API base URL: {0}")]
+    Parse(#[source] url::ParseError),
+    #[error("invalid Slack API base URL: must use http or https")]
+    UnsupportedScheme,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SlackApiBaseUrl {
+    connections_open: Url,
+}
+
+impl SlackApiBaseUrl {
+    pub fn new(s: impl AsRef<str>) -> Result<Self, SlackApiBaseUrlError> {
+        let mut base = Url::parse(s.as_ref()).map_err(SlackApiBaseUrlError::Parse)?;
+        if !matches!(base.scheme(), "http" | "https") {
+            return Err(SlackApiBaseUrlError::UnsupportedScheme);
+        }
+        if !base.path().ends_with('/') {
+            let path = format!("{}/", base.path());
+            base.set_path(&path);
+        }
+        let connections_open = base
+            .join(APPS_CONNECTIONS_OPEN_METHOD)
+            .map_err(SlackApiBaseUrlError::Parse)?;
+        Ok(Self { connections_open })
+    }
+
+    pub fn connections_open_url(&self) -> &Url {
+        &self.connections_open
+    }
+}
+
 #[derive(Clone)]
 pub struct SlackWebhookConfig {
     pub signing_secret: SlackSigningSecret,
@@ -66,6 +103,7 @@ pub struct SlackWebhookConfig {
 #[derive(Clone)]
 pub struct SlackSocketModeConfig {
     pub app_token: SlackAppToken,
+    pub api_base_url: SlackApiBaseUrl,
 }
 
 #[derive(Clone)]

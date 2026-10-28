@@ -9,8 +9,8 @@ use tracing::{info, warn};
 use trogon_nats::jetstream::{ClaimCheckPublisher, JetStreamPublisher, ObjectStorePut};
 
 use super::config::{SlackConfig, SlackSocketModeConfig};
+use super::constants::RECONNECT_INITIAL_DELAY;
 use super::constants::RECONNECT_MAX_DELAY;
-use super::constants::{APPS_CONNECTIONS_OPEN_URL, RECONNECT_INITIAL_DELAY};
 use super::delivery_metadata::DeliveryContext;
 use super::server::SlackBridge;
 use super::unroutable::UnroutableReason;
@@ -89,10 +89,6 @@ impl HttpSocketConnector {
             client: reqwest::Client::new(),
             open_url: open_url.into(),
         }
-    }
-
-    pub fn slack() -> Self {
-        Self::new(APPS_CONNECTIONS_OPEN_URL)
     }
 }
 
