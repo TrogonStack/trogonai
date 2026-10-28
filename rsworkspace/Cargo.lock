@@ -7454,9 +7454,11 @@ dependencies = [
  "async-nats",
  "bytes",
  "futures",
+ "nkeys",
  "opentelemetry",
  "serde",
  "serde_json",
+ "tempfile",
  "testcontainers-modules",
  "thiserror 2.0.21",
  "time",
@@ -7468,6 +7470,15 @@ dependencies = [
  "trogon-semconv",
  "trogon-std",
  "uuid",
+]
+
+[[package]]
+name = "trogon-provider-gateway"
+version = "0.0.1"
+dependencies = [
+ "axum",
+ "tokio",
+ "tower",
 ]
 
 [[package]]
