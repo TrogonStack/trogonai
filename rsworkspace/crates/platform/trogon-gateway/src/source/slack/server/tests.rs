@@ -124,7 +124,10 @@ async fn provision_creates_stream() {
     let streams = js.created_streams();
     assert_eq!(streams.len(), 1);
     assert_eq!(streams[0].name, "SLACK");
-    assert_eq!(streams[0].subjects, vec!["slack.>"]);
+    assert_eq!(
+        streams[0].subjects,
+        SlackSubject::stream_filters(&test_config().subject_prefix)
+    );
     assert_eq!(streams[0].max_age, Duration::from_secs(3600));
     assert_eq!(streams[0].duplicate_window, Duration::from_secs(600));
 }
@@ -162,9 +165,41 @@ async fn provision_widens_the_dedup_window_on_an_already_provisioned_stream() {
     let streams = js.created_streams();
     assert_eq!(streams.len(), 1, "reconciled in place rather than duplicated");
     assert_eq!(streams[0].duplicate_window, Duration::from_secs(600));
-    assert_eq!(streams[0].subjects, vec!["slack.>"]);
+    assert_eq!(
+        streams[0].subjects,
+        SlackSubject::stream_filters(&test_config().subject_prefix)
+    );
     assert_eq!(streams[0].num_replicas, 3, "operator-set replica count survives");
     assert_eq!(streams[0].max_bytes, 1_024, "operator-set limit survives");
+}
+
+#[tokio::test]
+async fn provision_narrows_a_stream_created_on_the_broad_filter() {
+    let _guard = tracing_guard();
+    let js = MockJetStreamContext::new();
+    js.get_or_create_stream(async_nats::jetstream::stream::Config {
+        name: "SLACK".to_owned(),
+        subjects: vec!["slack.>".to_owned()],
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+
+    provision(&js, &test_config()).await.unwrap();
+
+    let streams = js.created_streams();
+    assert_eq!(streams.len(), 1);
+    assert!(
+        streams[0].subjects.iter().all(|subject| subject != "slack.>"),
+        "the broad filter would capture respond subjects"
+    );
+    assert!(
+        !streams[0]
+            .subjects
+            .iter()
+            .any(|subject| subject.starts_with("slack.respond"))
+    );
+    assert_eq!(streams[0].subjects.len(), 5);
 }
 
 #[tokio::test]

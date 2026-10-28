@@ -34,6 +34,13 @@ impl SlackSubject {
         Self(format!("{prefix}.unroutable"))
     }
 
+    pub fn stream_filters(prefix: &NatsToken) -> Vec<String> {
+        ["event.>", "interaction.>", "command.>", "system.>", "unroutable"]
+            .into_iter()
+            .map(|filter| format!("{prefix}.{filter}"))
+            .collect()
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }

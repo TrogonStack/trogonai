@@ -55,3 +55,17 @@ fn command_without_a_name_is_rejected() {
     assert!(SlackSubject::command(&prefix(), "/deploy now").is_err());
     assert!(SlackSubject::command(&prefix(), "/a.b").is_err());
 }
+
+#[test]
+fn the_stream_captures_every_stored_kind_and_nothing_else() {
+    assert_eq!(
+        SlackSubject::stream_filters(&prefix()),
+        vec![
+            "slack.event.>",
+            "slack.interaction.>",
+            "slack.command.>",
+            "slack.system.>",
+            "slack.unroutable",
+        ]
+    );
+}
