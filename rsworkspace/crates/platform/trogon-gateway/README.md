@@ -219,6 +219,19 @@ Configure the matching Datadog webhook (Integrations > Webhooks) with a custom h
 
 `timestamp` is only required when `timestamp_tolerance_secs` is set; `$DATE_POSIX` is POSIX epoch seconds (`$DATE` is epoch milliseconds, which this source does not accept).
 
+## Slack
+
+Slack retries an Events API delivery that was not acknowledged, once almost immediately, again after about a
+minute and again after about five minutes. The gateway keeps the stream `duplicate_window` at ten minutes, or at
+the stream `max_age` when that is shorter, and deduplicates on `Nats-Msg-Id`, so those retries are stored once. The
+window is reconciled on every start, so a stream created before this setting existed picks it up on restart.
+
+- Deduplication covers Slack's standard retry schedule only. A redelivery that arrives after the window, such as a
+  late retry or a Delayed Events style replay, is stored again, and consumers must tolerate duplicates.
+- Payloads are stored exactly as Slack sent them, including the verification `token` field Slack still includes in
+  Events API bodies. The stream `max_age` is therefore also how long those tokens stay readable in NATS, so size
+  it and restrict access to the stream accordingly.
+
 ## Zoom
 
 Subscribe a Zoom app's Event Subscriptions to `https://<gateway-host>/sources/zoom/{integration}/webhook` and

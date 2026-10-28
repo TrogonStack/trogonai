@@ -21,7 +21,9 @@
 //! 5. A payload that cannot be routed is stored on the unroutable subject with
 //!    the reason in a header and the original bytes as the body. If that store
 //!    fails too, the delivery is not acknowledged so Slack redelivers it.
-//! 6. The JetStream stream is created on startup if it does not exist.
+//! 6. The JetStream stream is created on startup if it does not exist. Its
+//!    subjects, `max_age` and dedup window are reconciled on every start, and
+//!    settings an operator changed out of band, such as replicas, are left alone.
 //!
 //! ## NATS message format
 //!
@@ -75,6 +77,7 @@
 pub mod ack_budget;
 pub mod config;
 pub mod constants;
+pub mod dedup_window;
 pub mod delivery_metadata;
 pub mod header_text;
 pub mod interaction_key;
