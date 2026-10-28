@@ -555,6 +555,7 @@ async fn interaction_block_actions_publishes_to_nats() {
     let messages = publisher.published_messages();
     assert_eq!(messages.len(), 1);
     assert_eq!(messages[0].subject, "slack.interaction.block_actions");
+    assert_eq!(header(&messages[0].headers, "Content-Type"), Some("application/json"));
     assert_eq!(
         messages[0].headers.get(NATS_HEADER_PAYLOAD_KIND).map(|v| v.as_str()),
         Some("interaction"),
@@ -682,6 +683,10 @@ async fn slash_command_publishes_to_nats() {
     let messages = publisher.published_messages();
     assert_eq!(messages.len(), 1);
     assert_eq!(messages[0].subject, "slack.command.trogon");
+    assert_eq!(
+        header(&messages[0].headers, "Content-Type"),
+        Some("application/x-www-form-urlencoded")
+    );
     assert_eq!(
         messages[0].headers.get(NATS_HEADER_PAYLOAD_KIND).map(|v| v.as_str()),
         Some("command"),
@@ -1758,4 +1763,42 @@ async fn app_rate_limited_with_unsafe_header_text_is_stored_as_unroutable() {
 
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     assert_unroutable(&publisher, "invalid_header_value");
+}
+
+#[tokio::test]
+async fn events_and_system_notices_are_labelled_as_json() {
+    let _guard = tracing_guard();
+    for body in [event_callback_body("message"), app_rate_limited_body()] {
+        let publisher = MockJetStreamPublisher::new();
+        let ts = current_timestamp();
+        let sig = compute_sig(TEST_SECRET, &ts, &body);
+
+        mock_app(publisher.clone())
+            .oneshot(webhook_request(&body, &ts, Some(&sig)))
+            .await
+            .unwrap();
+
+        let messages = publisher.published_messages();
+        assert_eq!(header(&messages[0].headers, "Content-Type"), Some("application/json"));
+    }
+}
+
+#[tokio::test]
+async fn unroutable_messages_are_labelled_as_opaque_bytes() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let body = b"not json at all";
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, body);
+
+    mock_app(publisher.clone())
+        .oneshot(webhook_request(body, &ts, Some(&sig)))
+        .await
+        .unwrap();
+
+    let messages = publisher.published_messages();
+    assert_eq!(
+        header(&messages[0].headers, "Content-Type"),
+        Some("application/octet-stream")
+    );
 }

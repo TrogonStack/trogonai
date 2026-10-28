@@ -59,6 +59,7 @@
         "X-Slack-Event-Id": "Ev0OVERSIZE",
         "X-Slack-Team-Id": "T1234",
         "X-Slack-Payload-Kind": "event",
+        "Content-Type": "application/json",
         "X-Slack-Is-Enterprise-Install": "false",
         "X-Slack-Transport": "webhook",
         "X-Slack-Request-Timestamp": "1700000000"

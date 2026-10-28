@@ -27,8 +27,11 @@ pub const NATS_HEADER_REQUEST_TIMESTAMP: &str = "X-Slack-Request-Timestamp";
 
 pub const NATS_HEADER_TRANSPORT: &str = "X-Slack-Transport";
 pub const NATS_HEADER_REJECT_REASON: &str = "X-Slack-Reject-Reason";
+pub const NATS_HEADER_CONTENT_TYPE: &str = "Content-Type";
 
 pub const CONTENT_TYPE_FORM: &str = "application/x-www-form-urlencoded";
+pub const CONTENT_TYPE_JSON: &str = "application/json";
+pub const CONTENT_TYPE_UNKNOWN: &str = "application/octet-stream";
 
 pub const DEFAULT_API_BASE_URL: &str = "https://slack.com/api/";
 pub const APPS_CONNECTIONS_OPEN_METHOD: &str = "apps.connections.open";

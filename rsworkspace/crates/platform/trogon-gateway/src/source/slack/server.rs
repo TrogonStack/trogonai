@@ -7,12 +7,15 @@ use super::config::SlackSigningSecret;
 use super::config::SlackTransport;
 use super::config::SlackWebhookConfig;
 use super::constants::{
-    CONTENT_TYPE_FORM, HEADER_SIGNATURE, HEADER_TIMESTAMP, NATS_HEADER_EVENT_ID, NATS_HEADER_EVENT_TYPE,
-    NATS_HEADER_PAYLOAD_KIND, NATS_HEADER_REJECT_REASON, NATS_HEADER_TEAM_ID, NATS_HEADER_TRANSPORT, UNKNOWN_TEAM_ID,
+    CONTENT_TYPE_FORM, CONTENT_TYPE_UNKNOWN, HEADER_SIGNATURE, HEADER_TIMESTAMP, NATS_HEADER_CONTENT_TYPE,
+    NATS_HEADER_EVENT_ID, NATS_HEADER_EVENT_TYPE, NATS_HEADER_PAYLOAD_KIND, NATS_HEADER_REJECT_REASON,
+    NATS_HEADER_TEAM_ID, NATS_HEADER_TRANSPORT, UNKNOWN_TEAM_ID,
 };
 use super::delivery_metadata::{DeliveryContext, DeliveryMetadata};
 use super::header_text::{DeliveryHeaders, HeaderText, InvalidHeaderTextError};
 use super::interaction_key::InteractionKey;
+use super::payload_encoding::PayloadEncoding;
+use super::payload_kind::PayloadKind;
 use super::payload_metadata::PayloadMetadata;
 use super::signature;
 use super::ssl_check::SslCheck;
@@ -49,7 +52,7 @@ fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode 
 
 fn delivery_headers(
     transport: SlackTransport,
-    kind: &'static str,
+    kind: PayloadKind,
     message_id: &str,
     event_type: &str,
     event_id: Option<&str>,
@@ -60,7 +63,8 @@ fn delivery_headers(
         .with(async_nats::header::NATS_MESSAGE_ID, &HeaderText::new(message_id)?)
         .with(NATS_HEADER_EVENT_TYPE, &HeaderText::new(event_type)?)
         .with(NATS_HEADER_TEAM_ID, &HeaderText::new(team_id)?)
-        .with_static(NATS_HEADER_PAYLOAD_KIND, kind)
+        .with_static(NATS_HEADER_PAYLOAD_KIND, kind.as_str())
+        .with_static(NATS_HEADER_CONTENT_TYPE, kind.encoding().content_type())
         .with_static(NATS_HEADER_TRANSPORT, transport.as_str());
     let headers = headers.with_optional(NATS_HEADER_EVENT_ID, event_id)?;
     Ok(metadata.apply(headers)?.into_inner())
@@ -165,6 +169,7 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
             .with(async_nats::header::NATS_MESSAGE_ID, message_id.header())
             .with_static(NATS_HEADER_REJECT_REASON, reason.as_str())
             .with_static(NATS_HEADER_PAYLOAD_KIND, "unroutable")
+            .with_static(NATS_HEADER_CONTENT_TYPE, CONTENT_TYPE_UNKNOWN)
             .with(NATS_HEADER_TEAM_ID, &HeaderText::or_unknown(team_id))
             .with_static(NATS_HEADER_TRANSPORT, self.transport.as_str())
             .into_inner();
@@ -290,7 +295,7 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
 
         let Ok(nats_headers) = delivery_headers(
             self.transport,
-            "event",
+            PayloadKind::Event,
             &event_id,
             &event_type,
             Some(&event_id),
@@ -334,7 +339,7 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
 
         let Ok(nats_headers) = delivery_headers(
             self.transport,
-            "system",
+            PayloadKind::System,
             message_id.as_str(),
             notice_type,
             None,
@@ -465,7 +470,7 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
 
         let Ok(nats_headers) = delivery_headers(
             self.transport,
-            "interaction",
+            PayloadKind::Interaction,
             key.as_str(),
             &interaction_type,
             None,
@@ -522,7 +527,7 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
         };
 
         let metadata = DeliveryMetadata::new(context, PayloadMetadata::command_fields(fields));
-        self.publish_slash_command(command, team_id, trigger_id, raw_body, metadata)
+        self.publish_slash_command(command, team_id, trigger_id, raw_body, PayloadEncoding::Form, metadata)
             .await
     }
 
@@ -558,7 +563,7 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
         };
 
         let metadata = DeliveryMetadata::new(context, PayloadMetadata::command_value(payload));
-        self.publish_slash_command(command, team_id, trigger_id, raw_body, metadata)
+        self.publish_slash_command(command, team_id, trigger_id, raw_body, PayloadEncoding::Json, metadata)
             .await
     }
 
@@ -568,6 +573,7 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
         team_id: &str,
         trigger_id: &str,
         raw_body: Bytes,
+        encoding: PayloadEncoding,
         metadata: DeliveryMetadata<'_>,
     ) -> StatusCode {
         let subject = match SlackSubject::command(&self.subject_prefix, command) {
@@ -589,9 +595,15 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
 
         info!(command, "Received Slack slash command");
 
-        let Ok(nats_headers) =
-            delivery_headers(self.transport, "command", trigger_id, command, None, team_id, &metadata)
-        else {
+        let Ok(nats_headers) = delivery_headers(
+            self.transport,
+            PayloadKind::Command(encoding),
+            trigger_id,
+            command,
+            None,
+            team_id,
+            &metadata,
+        ) else {
             warn!("Slash command metadata is not valid header text");
             return self
                 .reject(
