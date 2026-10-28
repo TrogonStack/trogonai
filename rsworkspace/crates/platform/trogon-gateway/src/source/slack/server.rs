@@ -10,6 +10,7 @@ use super::constants::{
     NATS_HEADER_PAYLOAD_KIND, NATS_HEADER_REJECT_REASON, NATS_HEADER_TEAM_ID, NATS_HEADER_TRANSPORT, UNKNOWN_TEAM_ID,
 };
 use super::header_text::{DeliveryHeaders, HeaderText, InvalidHeaderTextError};
+use super::interaction_key::InteractionKey;
 use super::signature;
 use super::subject::SlackSubject;
 use super::unroutable::{UnroutableMessageId, UnroutableReason};
@@ -371,18 +372,7 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
         };
         let interaction_type = interaction_type.to_owned();
 
-        let Some(trigger_id) = payload.get("trigger_id").and_then(|v| v.as_str()) else {
-            warn!("Missing trigger_id in interaction payload");
-            return self
-                .reject(
-                    UnroutableReason::MissingInteractionTriggerId,
-                    &team_id,
-                    body,
-                    StatusCode::BAD_REQUEST,
-                )
-                .await;
-        };
-        let trigger_id = trigger_id.to_owned();
+        let key = InteractionKey::derive(payload, &interaction_type, &body);
 
         let subject = match SlackSubject::interaction(&self.subject_prefix, &interaction_type) {
             Ok(subject) => subject,
@@ -401,7 +391,7 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
 
         let span = tracing::Span::current();
         span.record(trogon_semconv::attribute::EVENT_TYPE, &interaction_type);
-        span.record(trogon_semconv::attribute::EVENT_ID, &trigger_id);
+        span.record(trogon_semconv::attribute::EVENT_ID, key.as_str());
         span.record(trogon_semconv::attribute::SUBJECT, subject.as_str());
 
         info!(interaction_type, "Received Slack interaction");
@@ -409,7 +399,7 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
         let Ok(nats_headers) = delivery_headers(
             self.transport,
             "interaction",
-            &trigger_id,
+            key.as_str(),
             &interaction_type,
             None,
             &team_id,

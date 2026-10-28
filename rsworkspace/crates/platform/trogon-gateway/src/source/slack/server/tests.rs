@@ -594,7 +594,7 @@ async fn interaction_view_submission_publishes_to_nats() {
 }
 
 #[tokio::test]
-async fn interaction_missing_trigger_id_returns_400() {
+async fn interaction_without_trigger_id_is_published_and_keyed_by_its_view() {
     let _guard = tracing_guard();
     let publisher = MockJetStreamPublisher::new();
     let app = mock_app(publisher.clone());
@@ -602,7 +602,8 @@ async fn interaction_missing_trigger_id_returns_400() {
     let interaction_payload = serde_json::json!({
         "type": "view_closed",
         "team": { "id": "T01ABC" },
-        "user": { "id": "U01ABC" }
+        "user": { "id": "U01ABC" },
+        "view": { "id": "V01" }
     });
     let form_body = format!(
         "payload={}",
@@ -616,8 +617,44 @@ async fn interaction_missing_trigger_id_returns_400() {
         .await
         .unwrap();
 
-    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-    assert_unroutable(&publisher, "missing_interaction_trigger_id");
+    assert_eq!(resp.status(), StatusCode::OK);
+    let messages = publisher.published_messages();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].subject, "slack.interaction.view_closed");
+    assert_eq!(header(&messages[0].headers, "Nats-Msg-Id"), Some("view_closed-V01"));
+}
+
+#[tokio::test]
+async fn interaction_without_any_identifier_is_keyed_by_its_bytes() {
+    let _guard = tracing_guard();
+    let interaction_payload = serde_json::json!({
+        "type": "block_suggestion",
+        "team": { "id": "T01ABC" },
+        "value": "tro"
+    });
+    let form_body = format!(
+        "payload={}",
+        form_urlencoded::byte_serialize(interaction_payload.to_string().as_bytes()).collect::<String>()
+    );
+    let mut ids = Vec::new();
+    for _ in 0..2 {
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+        let ts = current_timestamp();
+        let sig = compute_sig(TEST_SECRET, &ts, form_body.as_bytes());
+
+        let resp = app
+            .oneshot(form_request(form_body.as_bytes(), &ts, &sig))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let messages = publisher.published_messages();
+        assert_eq!(messages[0].subject, "slack.interaction.block_suggestion");
+        ids.push(header(&messages[0].headers, "Nats-Msg-Id").unwrap().to_owned());
+    }
+    assert_eq!(ids[0], ids[1]);
+    assert!(ids[0].starts_with("interaction-"));
 }
 
 #[tokio::test]
