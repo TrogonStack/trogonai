@@ -66,3 +66,8 @@ fn with_optional_rejects_unsafe_value() {
 
     assert_eq!(result.unwrap_err(), InvalidHeaderTextError);
 }
+
+#[test]
+fn value_exposes_the_validated_header_value() {
+    assert_eq!(HeaderText::new("my_modal").unwrap().value().as_str(), "my_modal");
+}

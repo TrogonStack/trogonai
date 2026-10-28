@@ -9,6 +9,7 @@ use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 use tower::ServiceExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use trogon_nats::AdvancedMockNatsClient;
 use trogon_nats::jetstream::StreamMaxAge;
 use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{
@@ -63,10 +64,27 @@ fn tracing_guard() -> tracing::subscriber::DefaultGuard {
     tracing_subscriber::fmt().with_test_writer().set_default()
 }
 
+fn acknowledging_requester() -> AdvancedMockNatsClient {
+    let requester = AdvancedMockNatsClient::new();
+    for subject in [
+        "slack.respond.interaction.view_submission",
+        "slack.respond.command.trogon",
+        "slack.respond.command.deploy",
+    ] {
+        requester.set_response(subject, Bytes::new());
+    }
+    requester
+}
+
 fn mock_app(publisher: MockJetStreamPublisher) -> Router {
+    mock_app_with_requester(publisher, acknowledging_requester())
+}
+
+fn mock_app_with_requester(publisher: MockJetStreamPublisher, requester: AdvancedMockNatsClient) -> Router {
     let config = test_config();
     router_with_clock(
         wrap_publisher(publisher),
+        requester,
         &config,
         config.webhook().unwrap(),
         FixedEpochClock::from_secs(TEST_NOW),
@@ -218,7 +236,12 @@ async fn router_wrapper_mounts_webhook_route() {
     let _guard = tracing_guard();
     let publisher = MockJetStreamPublisher::new();
     let config = test_config();
-    let app = router(wrap_publisher(publisher), &config, config.webhook().unwrap());
+    let app = router(
+        wrap_publisher(publisher),
+        AdvancedMockNatsClient::new(),
+        &config,
+        config.webhook().unwrap(),
+    );
 
     let response = app
         .oneshot(
@@ -437,7 +460,11 @@ async fn subject_uses_configured_prefix() {
     };
 
     let state = AppState {
-        bridge: SlackBridge::new(wrap_publisher(publisher.clone()), &config),
+        bridge: SlackBridge::new(
+            wrap_publisher(publisher.clone()),
+            AdvancedMockNatsClient::new(),
+            &config,
+        ),
         clock: FixedEpochClock::from_secs(TEST_NOW),
         signing_secret: SlackSigningSecret::new(TEST_SECRET).unwrap(),
         timestamp_max_drift: NonZeroDuration::from_secs(300).unwrap(),
@@ -446,7 +473,7 @@ async fn subject_uses_configured_prefix() {
     let app = Router::new()
         .route(
             "/webhook",
-            post(handle_webhook::<MockJetStreamPublisher, MockObjectStore, FixedEpochClock>),
+            post(handle_webhook::<MockJetStreamPublisher, MockObjectStore, AdvancedMockNatsClient, FixedEpochClock>),
         )
         .with_state(state);
 
@@ -519,6 +546,7 @@ async fn ack_failure_returns_500() {
                 ClaimBucketBinding::for_test(MockObjectStore::new(), ClaimBucket::default()),
                 MaxPayload::from_server_limit(usize::MAX),
             ),
+            AdvancedMockNatsClient::new(),
             &config,
         ),
         clock: FixedEpochClock::from_secs(TEST_NOW),
@@ -529,7 +557,7 @@ async fn ack_failure_returns_500() {
     let app = Router::new()
         .route(
             "/webhook",
-            post(handle_webhook::<AckFailPublisher, MockObjectStore, FixedEpochClock>),
+            post(handle_webhook::<AckFailPublisher, MockObjectStore, AdvancedMockNatsClient, FixedEpochClock>),
         )
         .with_state(state);
 
@@ -565,6 +593,7 @@ async fn ack_timeout_returns_500() {
                 ClaimBucketBinding::for_test(MockObjectStore::new(), ClaimBucket::default()),
                 MaxPayload::from_server_limit(usize::MAX),
             ),
+            AdvancedMockNatsClient::new(),
             &config,
         ),
         clock: FixedEpochClock::from_secs(TEST_NOW),
@@ -575,7 +604,7 @@ async fn ack_timeout_returns_500() {
     let app = Router::new()
         .route(
             "/webhook",
-            post(handle_webhook::<AckFailPublisher, MockObjectStore, FixedEpochClock>),
+            post(handle_webhook::<AckFailPublisher, MockObjectStore, AdvancedMockNatsClient, FixedEpochClock>),
         )
         .with_state(state);
 
@@ -1168,6 +1197,7 @@ fn app_with_body_limit(publisher: MockJetStreamPublisher, limit: usize) -> Route
     webhook.max_body_size = trogon_std::HttpBodySizeMax::new(trogon_std::ByteSize::b(limit as u64)).unwrap();
     router_with_clock(
         wrap_publisher(publisher),
+        AdvancedMockNatsClient::new(),
         &config,
         &webhook,
         FixedEpochClock::from_secs(TEST_NOW),
@@ -1231,6 +1261,7 @@ async fn unacknowledged_publish_answers_slack_inside_its_three_second_deadline()
                 ClaimBucketBinding::for_test(MockObjectStore::new(), ClaimBucket::default()),
                 MaxPayload::from_server_limit(usize::MAX),
             ),
+            AdvancedMockNatsClient::new(),
             &config,
         ),
         clock: FixedEpochClock::from_secs(TEST_NOW),
@@ -1240,7 +1271,7 @@ async fn unacknowledged_publish_answers_slack_inside_its_three_second_deadline()
     let app = Router::new()
         .route(
             "/webhook",
-            post(handle_webhook::<AckFailPublisher, MockObjectStore, FixedEpochClock>),
+            post(handle_webhook::<AckFailPublisher, MockObjectStore, AdvancedMockNatsClient, FixedEpochClock>),
         )
         .with_state(state);
     let body = event_callback_body("message");
@@ -1269,6 +1300,7 @@ async fn a_publish_that_never_returns_answers_slack_inside_its_three_second_dead
                 ClaimBucketBinding::for_test(MockObjectStore::new(), ClaimBucket::default()),
                 MaxPayload::from_server_limit(usize::MAX),
             ),
+            AdvancedMockNatsClient::new(),
             &config,
         ),
         clock: FixedEpochClock::from_secs(TEST_NOW),
@@ -1278,7 +1310,7 @@ async fn a_publish_that_never_returns_answers_slack_inside_its_three_second_dead
     let app = Router::new()
         .route(
             "/webhook",
-            post(handle_webhook::<AckFailPublisher, MockObjectStore, FixedEpochClock>),
+            post(handle_webhook::<AckFailPublisher, MockObjectStore, AdvancedMockNatsClient, FixedEpochClock>),
         )
         .with_state(state);
     let body = event_callback_body("message");
@@ -1875,4 +1907,235 @@ async fn unroutable_messages_are_labelled_as_opaque_bytes() {
         header(&messages[0].headers, "Content-Type"),
         Some("application/octet-stream")
     );
+}
+
+fn signed_form(body: &str) -> Request<Body> {
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, body.as_bytes());
+    form_request(body.as_bytes(), &ts, &sig)
+}
+
+fn interaction_form(payload: &serde_json::Value) -> String {
+    format!(
+        "payload={}",
+        form_urlencoded::byte_serialize(payload.to_string().as_bytes()).collect::<String>()
+    )
+}
+
+fn view_submission_payload(callback_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "type": "view_submission",
+        "trigger_id": "trigger456",
+        "team": { "id": "T01ABC" },
+        "user": { "id": "U01ABC" },
+        "view": { "callback_id": callback_id }
+    })
+}
+
+fn reply_headers(content_type: &str) -> async_nats::HeaderMap {
+    let mut headers = async_nats::HeaderMap::new();
+    headers.insert("Content-Type", content_type);
+    headers
+}
+
+async fn response_body(response: axum::response::Response) -> Bytes {
+    axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap()
+}
+
+const SLASH_FORM: &str = "command=%2Ftrogon&text=hello&team_id=T01ABC&trigger_id=cmd789&user_id=U01ABC";
+
+#[tokio::test]
+async fn view_submission_reply_becomes_the_http_body_byte_for_byte() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let requester = AdvancedMockNatsClient::new();
+    let reply = br#"{ "response_action":"errors",  "errors":{"block":"bad"} }"#;
+    requester.set_response_wire(
+        "slack.respond.interaction.view_submission",
+        reply_headers("application/json"),
+        Bytes::from_static(reply),
+    );
+    let app = mock_app_with_requester(publisher.clone(), requester.clone());
+
+    let form = interaction_form(&view_submission_payload("my_modal"));
+    let response = app.oneshot(signed_form(&form)).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("content-type").and_then(|v| v.to_str().ok()),
+        Some("application/json")
+    );
+    assert_eq!(response_body(response).await.as_ref(), reply);
+    assert_eq!(
+        publisher.published_subjects(),
+        vec!["slack.interaction.view_submission"]
+    );
+    let headers = requester.requested_headers();
+    assert_eq!(headers.len(), 1);
+    assert_eq!(header(&headers[0], "X-Slack-Callback-Id"), Some("my_modal"));
+    assert_eq!(header(&headers[0], NATS_HEADER_EVENT_TYPE), Some("view_submission"));
+    assert_eq!(
+        requester.requested_payloads(),
+        vec![Bytes::from(view_submission_payload("my_modal").to_string())]
+    );
+}
+
+#[tokio::test]
+async fn view_submission_without_a_callback_id_sends_no_callback_header() {
+    let _guard = tracing_guard();
+    let requester = acknowledging_requester();
+    let payload = serde_json::json!({
+        "type": "view_submission",
+        "trigger_id": "trigger456",
+        "team": { "id": "T01ABC" },
+        "view": {}
+    });
+    let response = mock_app_with_requester(MockJetStreamPublisher::new(), requester.clone())
+        .oneshot(signed_form(&interaction_form(&payload)))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(header(&requester.requested_headers()[0], "X-Slack-Callback-Id"), None);
+}
+
+#[tokio::test]
+async fn view_submission_with_an_unrepresentable_callback_id_is_unroutable() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let requester = acknowledging_requester();
+    let response = mock_app_with_requester(publisher.clone(), requester.clone())
+        .oneshot(signed_form(&interaction_form(&view_submission_payload("bad\nid"))))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_unroutable(&publisher, "invalid_header_value");
+    assert!(requester.requested_payloads().is_empty());
+}
+
+#[tokio::test]
+async fn an_empty_consumer_reply_is_a_plain_acknowledgement() {
+    let _guard = tracing_guard();
+    let response = mock_app(MockJetStreamPublisher::new())
+        .oneshot(signed_form(&interaction_form(&view_submission_payload("m"))))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(response_body(response).await.is_empty());
+}
+
+#[tokio::test]
+async fn slash_command_reply_keeps_the_consumer_content_type() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let requester = AdvancedMockNatsClient::new();
+    requester.set_response_wire(
+        "slack.respond.command.trogon",
+        reply_headers("text/plain"),
+        Bytes::from_static(b"It is 80 degrees"),
+    );
+    let response = mock_app_with_requester(publisher.clone(), requester.clone())
+        .oneshot(signed_form(SLASH_FORM))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("content-type").and_then(|v| v.to_str().ok()),
+        Some("text/plain")
+    );
+    assert_eq!(response_body(response).await.as_ref(), b"It is 80 degrees");
+    assert_eq!(publisher.published_subjects(), vec!["slack.command.trogon"]);
+    assert_eq!(requester.requested_payloads(), vec![Bytes::from(SLASH_FORM)]);
+    assert_eq!(header(&requester.requested_headers()[0], "X-Slack-Callback-Id"), None);
+}
+
+#[tokio::test]
+async fn a_reply_without_a_content_type_is_json() {
+    let _guard = tracing_guard();
+    let requester = AdvancedMockNatsClient::new();
+    requester.set_response("slack.respond.command.trogon", Bytes::from_static(b"plain"));
+    let response = mock_app_with_requester(MockJetStreamPublisher::new(), requester)
+        .oneshot(signed_form(SLASH_FORM))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("content-type").and_then(|v| v.to_str().ok()),
+        Some("application/json")
+    );
+    assert_eq!(response_body(response).await.as_ref(), b"plain");
+}
+
+#[tokio::test]
+async fn no_consumer_answering_a_slash_command_is_a_404() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let response = mock_app_with_requester(publisher.clone(), AdvancedMockNatsClient::new())
+        .oneshot(signed_form(SLASH_FORM))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(publisher.published_subjects(), vec!["slack.command.trogon"]);
+}
+
+#[tokio::test]
+async fn a_failed_request_to_a_view_submission_consumer_is_a_404() {
+    let _guard = tracing_guard();
+    let requester = acknowledging_requester();
+    requester.fail_next_request();
+    let response = mock_app_with_requester(MockJetStreamPublisher::new(), requester)
+        .oneshot(signed_form(&interaction_form(&view_submission_payload("m"))))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_consumer_that_misses_the_deadline_gets_a_404() {
+    let _guard = tracing_guard();
+    let requester = acknowledging_requester();
+    requester.hang_next_request();
+    let started = tokio::time::Instant::now();
+    let response = mock_app_with_requester(MockJetStreamPublisher::new(), requester)
+        .oneshot(signed_form(SLASH_FORM))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(started.elapsed(), crate::source::slack::constants::ACK_LIMIT_MAX);
+}
+
+#[tokio::test]
+async fn a_failed_publish_skips_the_consumer_request() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    publisher.fail_next_js_publish();
+    let requester = acknowledging_requester();
+    let response = mock_app_with_requester(publisher, requester.clone())
+        .oneshot(signed_form(SLASH_FORM))
+        .await
+        .unwrap();
+
+    assert!(!response.status().is_success());
+    assert!(requester.requested_payloads().is_empty());
+}
+
+#[tokio::test]
+async fn interactions_that_need_no_answer_never_ask_a_consumer() {
+    let _guard = tracing_guard();
+    let requester = AdvancedMockNatsClient::new();
+    let payload = serde_json::json!({ "type": "block_actions", "trigger_id": "t1", "team": { "id": "T01ABC" } });
+    let response = mock_app_with_requester(MockJetStreamPublisher::new(), requester.clone())
+        .oneshot(signed_form(&interaction_form(&payload)))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(requester.requested_payloads().is_empty());
 }

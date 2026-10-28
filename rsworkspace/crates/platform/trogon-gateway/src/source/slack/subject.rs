@@ -26,6 +26,18 @@ impl SlackSubject {
         Ok(Self(format!("{prefix}.command.{}", token(name)?)))
     }
 
+    pub fn respond_interaction(prefix: &NatsToken, interaction_type: &str) -> Result<Self, SubjectTokenViolationError> {
+        Ok(Self(format!(
+            "{prefix}.respond.interaction.{}",
+            token(interaction_type)?
+        )))
+    }
+
+    pub fn respond_command(prefix: &NatsToken, command: &str) -> Result<Self, SubjectTokenViolationError> {
+        let name = command.trim_start_matches('/');
+        Ok(Self(format!("{prefix}.respond.command.{}", token(name)?)))
+    }
+
     pub fn system(prefix: &NatsToken, notice: SystemNoticeType) -> Self {
         Self(format!("{prefix}.system.{}", notice.as_str()))
     }

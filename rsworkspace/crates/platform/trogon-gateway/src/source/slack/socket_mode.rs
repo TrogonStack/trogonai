@@ -9,6 +9,7 @@ use serde_json::value::RawValue;
 use tokio::time::{Instant, MissedTickBehavior};
 use tokio_tungstenite::tungstenite::{Error as WebSocketError, Message};
 use tracing::{error, info, warn};
+use trogon_nats::client::RequestClient;
 use trogon_nats::jetstream::{ClaimCheckPublisher, JetStreamPublisher, ObjectStorePut};
 
 use super::config::{SlackConfig, SlackSocketModeConfig};
@@ -17,7 +18,8 @@ use super::constants::{
     CLIENT_PING_PAYLOAD, DISCONNECT_REASON_LINK_DISABLED, ENVELOPE_CONCURRENCY_LIMIT, RECONNECT_INITIAL_DELAY,
     RECONNECT_MAX_DELAY, SOCKET_LIVENESS,
 };
-use super::delivery_metadata::DeliveryContext;
+use super::delivery_metadata::{DeliveryContext, ReplyAcceptance};
+use super::reply::Acknowledgement;
 use super::server::SlackBridge;
 use super::socket_liveness::{PongWatch, SocketLiveness};
 use super::unroutable::UnroutableReason;
@@ -79,12 +81,14 @@ struct SocketEnvelope {
     retry_attempt: Option<serde_json::Value>,
     #[serde(default)]
     retry_reason: Option<String>,
+    #[serde(default)]
+    accepts_response_payload: Option<bool>,
 }
 
-pub trait SocketConnector<P: JetStreamPublisher, S: ObjectStorePut> {
+pub trait SocketConnector<P: JetStreamPublisher, S: ObjectStorePut, R: RequestClient> {
     fn connect<'a>(
         &'a mut self,
-        bridge: &'a SlackBridge<P, S>,
+        bridge: &'a SlackBridge<P, S, R>,
         config: &'a SlackSocketModeConfig,
     ) -> impl std::future::Future<Output = Result<(), SocketModeError>> + Send + 'a;
 }
@@ -103,26 +107,27 @@ impl HttpSocketConnector {
     }
 }
 
-impl<P: JetStreamPublisher, S: ObjectStorePut> SocketConnector<P, S> for HttpSocketConnector {
+impl<P: JetStreamPublisher, S: ObjectStorePut, R: RequestClient> SocketConnector<P, S, R> for HttpSocketConnector {
     async fn connect<'a>(
         &'a mut self,
-        bridge: &'a SlackBridge<P, S>,
+        bridge: &'a SlackBridge<P, S, R>,
         config: &'a SlackSocketModeConfig,
     ) -> Result<(), SocketModeError> {
         connect_once(&self.client, &self.open_url, bridge, config).await
     }
 }
 
-pub async fn run<P: JetStreamPublisher, S: ObjectStorePut>(
+pub async fn run<P: JetStreamPublisher, S: ObjectStorePut, R: RequestClient>(
     publisher: ClaimCheckPublisher<P, S>,
+    requester: R,
     config: SlackConfig,
-    mut connector: impl SocketConnector<P, S>,
+    mut connector: impl SocketConnector<P, S, R>,
 ) -> Result<(), SocketModeError> {
     let socket_mode = config
         .socket_mode()
         .ok_or(SocketModeError::MissingSocketModeConfig)?
         .clone();
-    let bridge = SlackBridge::new(publisher, &config);
+    let bridge = SlackBridge::new(publisher, requester, &config);
     let mut reconnect_delay = RECONNECT_INITIAL_DELAY;
 
     loop {
@@ -143,10 +148,10 @@ fn next_reconnect_delay(current: Duration) -> Duration {
     current.saturating_mul(2).min(RECONNECT_MAX_DELAY)
 }
 
-async fn connect_once<P: JetStreamPublisher, S: ObjectStorePut>(
+async fn connect_once<P: JetStreamPublisher, S: ObjectStorePut, R: RequestClient>(
     client: &reqwest::Client,
     open_url: &str,
-    bridge: &SlackBridge<P, S>,
+    bridge: &SlackBridge<P, S, R>,
     config: &SlackSocketModeConfig,
 ) -> Result<(), SocketModeError> {
     let websocket_url = open_socket_url(client, open_url, config).await?;
@@ -156,8 +161,8 @@ async fn connect_once<P: JetStreamPublisher, S: ObjectStorePut>(
     process_socket_messages(bridge, &mut receiver, &mut sender, SOCKET_LIVENESS).await
 }
 
-async fn process_socket_messages<P, S, Incoming, Outgoing>(
-    bridge: &SlackBridge<P, S>,
+async fn process_socket_messages<P, S, R, Incoming, Outgoing>(
+    bridge: &SlackBridge<P, S, R>,
     receiver: &mut Incoming,
     sender: &mut Outgoing,
     liveness: SocketLiveness,
@@ -165,6 +170,7 @@ async fn process_socket_messages<P, S, Incoming, Outgoing>(
 where
     P: JetStreamPublisher,
     S: ObjectStorePut,
+    R: RequestClient,
     Incoming: Stream<Item = Result<Message, WebSocketError>> + Unpin,
     Outgoing: Sink<Message, Error = WebSocketError> + Unpin,
 {
@@ -319,8 +325,8 @@ fn inspect_frame(text: &str) -> Result<Frame, SocketModeError> {
     }
 }
 
-async fn deliver_envelope<P: JetStreamPublisher, S: ObjectStorePut>(
-    bridge: &SlackBridge<P, S>,
+async fn deliver_envelope<P: JetStreamPublisher, S: ObjectStorePut, R: RequestClient>(
+    bridge: &SlackBridge<P, S, R>,
     envelope: SocketEnvelope,
     text: &str,
 ) -> Option<String> {
@@ -334,14 +340,17 @@ async fn deliver_envelope<P: JetStreamPublisher, S: ObjectStorePut>(
                     Bytes::copy_from_slice(text.as_bytes()),
                 )
                 .await;
-            envelope.envelope_id.filter(|_| stored.is_success()).map(ack_frame)
+            envelope
+                .envelope_id
+                .filter(|_| stored.is_success())
+                .map(|envelope_id| ack_frame(envelope_id, None))
         }
     }
 }
 
 #[cfg(test)]
-pub(super) async fn handle_text_frame<P: JetStreamPublisher, S: ObjectStorePut>(
-    bridge: &SlackBridge<P, S>,
+pub(super) async fn handle_text_frame<P: JetStreamPublisher, S: ObjectStorePut, R: RequestClient>(
+    bridge: &SlackBridge<P, S, R>,
     text: &str,
 ) -> Result<(bool, Option<String>), SocketModeError> {
     match inspect_frame(text)? {
@@ -351,8 +360,8 @@ pub(super) async fn handle_text_frame<P: JetStreamPublisher, S: ObjectStorePut>(
     }
 }
 
-async fn handle_payload_envelope<P: JetStreamPublisher, S: ObjectStorePut>(
-    bridge: &SlackBridge<P, S>,
+async fn handle_payload_envelope<P: JetStreamPublisher, S: ObjectStorePut, R: RequestClient>(
+    bridge: &SlackBridge<P, S, R>,
     envelope: SocketEnvelope,
     raw_text: &str,
 ) -> Option<String> {
@@ -378,11 +387,16 @@ async fn handle_payload_envelope<P: JetStreamPublisher, S: ObjectStorePut>(
         return None;
     };
 
+    let reply = match envelope.accepts_response_payload {
+        Some(false) => ReplyAcceptance::Refused,
+        _ => ReplyAcceptance::Accepted,
+    };
     let Ok(context) = DeliveryContext::socket(
         &envelope_id,
         envelope.retry_attempt.as_ref().and_then(serde_json::Value::as_i64),
         envelope.retry_reason.as_deref(),
-    ) else {
+    )
+    .map(|context| context.with_reply_acceptance(reply)) else {
         warn!(
             kind = envelope.kind,
             "Slack Socket Mode delivery metadata is not valid header text"
@@ -396,10 +410,10 @@ async fn handle_payload_envelope<P: JetStreamPublisher, S: ObjectStorePut>(
         return None;
     };
 
-    let status = match envelope.kind.as_str() {
+    let acknowledgement = match envelope.kind.as_str() {
         "events_api" => {
             let body = Bytes::copy_from_slice(payload.get().as_bytes());
-            bridge.handle_json_body(body, &context).await.0
+            bridge.handle_json_body(body, &context).await.0.into()
         }
         "interactive" => bridge.handle_socket_interaction(&payload, &context).await,
         "slash_commands" => bridge.handle_socket_slash_command(&payload, &context).await,
@@ -415,10 +429,16 @@ async fn handle_payload_envelope<P: JetStreamPublisher, S: ObjectStorePut>(
         }
     };
 
-    if status.is_success() {
-        Some(ack_frame(envelope_id))
-    } else {
-        None
+    match acknowledgement {
+        Acknowledgement::Status(status) if status.is_success() => Some(ack_frame(envelope_id, None)),
+        Acknowledgement::Status(_) => None,
+        Acknowledgement::Reply(reply) => {
+            let payload = reply.socket_payload();
+            if payload.is_none() {
+                warn!("Consumer reply is not valid JSON, acknowledging without a payload");
+            }
+            Some(ack_frame(envelope_id, payload))
+        }
     }
 }
 
@@ -427,10 +447,12 @@ async fn handle_payload_envelope<P: JetStreamPublisher, S: ObjectStorePut>(
 #[derive(serde::Serialize)]
 struct AckFrame {
     envelope_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    payload: Option<Box<RawValue>>,
 }
 
-fn ack_frame(envelope_id: String) -> String {
-    serde_json::to_string(&AckFrame { envelope_id }).unwrap_or_default()
+fn ack_frame(envelope_id: String, payload: Option<Box<RawValue>>) -> String {
+    serde_json::to_string(&AckFrame { envelope_id, payload }).unwrap_or_default()
 }
 
 #[cfg(test)]

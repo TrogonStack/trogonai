@@ -4,12 +4,6 @@
     "http.ack.block_suggestion_options": [
       "G2"
     ],
-    "http.ack.slash_in_channel_reply": [
-      "G2"
-    ],
-    "http.ack.view_submission_errors": [
-      "G2"
-    ],
     "http.malformed.invalid_interaction_payload": [
       "G23"
     ],
@@ -18,12 +12,6 @@
     ],
     "http.not_representable.dummy_receiver_event": "not_representable",
     "socket.ack.block_suggestion_options": [
-      "G2"
-    ],
-    "socket.ack.slash_in_channel_reply": [
-      "G2"
-    ],
-    "socket.ack.view_submission_errors": [
       "G2"
     ]
   }

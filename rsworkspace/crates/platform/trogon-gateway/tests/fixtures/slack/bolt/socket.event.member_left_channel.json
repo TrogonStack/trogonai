@@ -52,6 +52,7 @@
         "X-Slack-Envelope-Id": "dbdd0ef3-1543-4f94-bfb4-133d0e6c1545"
       }
     },
+    "request": null,
     "http": null,
     "socket_ack": {
       "envelope_id": "dbdd0ef3-1543-4f94-bfb4-133d0e6c1545",

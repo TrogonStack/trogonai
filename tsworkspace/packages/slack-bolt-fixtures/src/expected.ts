@@ -1,6 +1,13 @@
 import { createHash } from 'node:crypto';
 
-import type { DispatchRecord, ExpectedNats, PayloadKind, Transport } from './fixture.ts';
+import type {
+  DispatchRecord,
+  ExpectedNats,
+  ExpectedReply,
+  ExpectedRequest,
+  PayloadKind,
+  Transport,
+} from './fixture.ts';
 import type { JsonObject } from './wire.ts';
 
 export interface ExpectedNatsInput {
@@ -111,4 +118,24 @@ export function expectedNats(input: ExpectedNatsInput): ExpectedNats {
   }
 
   return { subject_suffix: subjectSuffix, dedup_id: dedupId, payload: input.wirePayload, payload_fill: null, headers };
+}
+
+const CALLBACK_ID_HEADER = 'X-Slack-Callback-Id';
+
+export function expectedRequest(
+  kind: ExpectedNatsInput['kind'],
+  body: JsonObject,
+  nats: ExpectedNats,
+  reply: ExpectedReply,
+): ExpectedRequest | null {
+  const awaitsReply = kind === 'command' || nats.subject_suffix === 'interaction.view_submission';
+  if (!awaitsReply || nats.payload_fill !== null) {
+    return null;
+  }
+  const headers: Record<string, string> = { ...nats.headers };
+  const callbackId = text(record(body.view).callback_id);
+  if (kind === 'interaction' && callbackId !== null && callbackId !== '') {
+    headers[CALLBACK_ID_HEADER] = callbackId;
+  }
+  return { subject_suffix: `respond.${nats.subject_suffix}`, headers, payload: nats.payload, reply };
 }

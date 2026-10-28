@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use google_cloud_auth::build_errors;
 use tokio::sync::Mutex;
+use trogon_nats::AdvancedMockNatsClient;
 use trogon_nats::jetstream::{ClaimBucketBinding, MockJetStreamPublisher, MockObjectStore};
 
 use crate::source::google_pubsub::credentials::GoogleCredentialsError;
@@ -199,8 +200,9 @@ async fn slack_task_reports_runner_error_with_context_and_skips_webhook_integrat
         &mut tasks,
         &slack_integrations(),
         publisher(),
+        AdvancedMockNatsClient::new(),
         std::future::pending(),
-        async |_, config, _| {
+        async |_, _, config, _| {
             assert_eq!(config.socket_mode().unwrap().app_token.as_str(), "xapp-fixture-token");
             Err(source::slack::socket_mode::SocketModeError::MissingSocketModeConfig)
         },
@@ -235,8 +237,9 @@ async fn slack_shutdown_drops_a_started_pending_runner() {
         &mut tasks,
         &slack_integrations(),
         publisher(),
+        AdvancedMockNatsClient::new(),
         async { signal.await.unwrap() }.shared(),
-        move |_, _, _| {
+        move |_, _, _, _| {
             let started = started.clone();
             let dropped = runner_dropped.clone();
             async move {
@@ -413,8 +416,9 @@ async fn slack_runner_that_panics_is_restarted_instead_of_ending_the_source() {
         &mut tasks,
         &slack_integrations(),
         publisher(),
+        AdvancedMockNatsClient::new(),
         async { signal.await.unwrap() }.shared(),
-        move |_, _, _| {
+        move |_, _, _, _| {
             let started = started.clone();
             let runs = runner_runs.clone();
             async move {

@@ -69,3 +69,24 @@ fn the_stream_captures_every_stored_kind_and_nothing_else() {
         ]
     );
 }
+
+#[test]
+fn respond_subjects_live_outside_every_stream_filter() {
+    let interaction = SlackSubject::respond_interaction(&prefix(), "view_submission").unwrap();
+    let command = SlackSubject::respond_command(&prefix(), "/deploy").unwrap();
+    assert_eq!(interaction.as_str(), "slack.respond.interaction.view_submission");
+    assert_eq!(command.as_str(), "slack.respond.command.deploy");
+    for subject in [interaction, command] {
+        for filter in SlackSubject::stream_filters(&prefix()) {
+            let stem = filter.trim_end_matches(".>");
+            assert!(!subject.as_str().starts_with(&format!("{stem}.")), "{filter}");
+        }
+    }
+}
+
+#[test]
+fn respond_subjects_reject_tokens_that_would_widen_the_subject() {
+    assert!(SlackSubject::respond_interaction(&prefix(), "a.b").is_err());
+    assert!(SlackSubject::respond_command(&prefix(), "/a b").is_err());
+    assert!(SlackSubject::respond_command(&prefix(), "/").is_err());
+}

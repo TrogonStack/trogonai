@@ -56,3 +56,12 @@ fn only_modal_submissions_await_a_reply_among_interactions() {
         assert_eq!(AckPlan::for_interaction(other), AckPlan::Acknowledge);
     }
 }
+
+#[test]
+fn the_reply_gets_what_the_publish_left_of_the_ack_limit() {
+    assert_eq!(
+        AckBudget::reply_limit(Duration::from_millis(300)),
+        ACK_LIMIT_MAX - Duration::from_millis(300)
+    );
+    assert_eq!(AckBudget::reply_limit(ACK_LIMIT_MAX * 2), Duration::ZERO);
+}

@@ -154,3 +154,14 @@ fn socket_rejects_an_unsafe_envelope_id() {
         InvalidHeaderTextError
     );
 }
+
+#[test]
+fn a_delivery_accepts_replies_unless_the_sender_refused() {
+    let context = http_context(&[]);
+    assert!(context.accepts_reply());
+    assert!(context.with_reply_acceptance(ReplyAcceptance::Accepted).accepts_reply());
+    let refused = http_context(&[]).with_reply_acceptance(ReplyAcceptance::Refused);
+    assert!(!refused.accepts_reply());
+    let payload = serde_json::json!({});
+    assert!(!DeliveryMetadata::new(&refused, PayloadMetadata::system(&payload)).accepts_reply());
+}

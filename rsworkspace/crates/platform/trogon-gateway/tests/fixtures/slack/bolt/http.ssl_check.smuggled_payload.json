@@ -29,9 +29,11 @@
   "expected": {
     "outcome": "inline",
     "nats": null,
+    "request": null,
     "http": {
       "status": 200,
       "body": null,
+      "content_type": null,
       "challenge": null
     },
     "socket_ack": null
