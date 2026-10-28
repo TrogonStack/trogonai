@@ -15,6 +15,18 @@ impl HeaderText {
             .map(Self)
             .map_err(|_| InvalidHeaderTextError)
     }
+
+    pub fn unknown() -> Self {
+        Self(HeaderValue::from("unknown"))
+    }
+
+    pub fn or_unknown(value: &str) -> Self {
+        Self::new(value).unwrap_or_else(|_| Self::unknown())
+    }
+
+    pub fn digest(prefix: &str, digest: &[u8]) -> Self {
+        Self(HeaderValue::from(format!("{prefix}{}", hex::encode(digest))))
+    }
 }
 
 #[derive(Debug, Default)]
