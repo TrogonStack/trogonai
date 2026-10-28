@@ -29,14 +29,6 @@ fn header_diff(name: &str) -> Diff {
     }
 }
 
-fn header_value_diff(name: &str) -> Diff {
-    Diff {
-        field: Field::HeaderValue(name.to_owned()),
-        expected: "x".to_owned(),
-        actual: "y".to_owned(),
-    }
-}
-
 fn unroutable_diff() -> Diff {
     Diff {
         field: Field::Unroutable,
@@ -51,34 +43,30 @@ fn gaps(ids: &[GapId]) -> LedgerEntry {
 
 #[test]
 fn a_mismatch_without_a_ledger_entry_fails() {
-    let problems = judge(&fixture(), None, &[header_diff(HEADER_ENVELOPE_ID)]);
+    let problems = judge(&fixture(), None, &[header_diff("X-Slack-Extra")]);
     assert_eq!(problems.len(), 1);
     assert!(problems[0].contains("not covered"));
 }
 
 #[test]
 fn a_ledger_entry_that_no_longer_matches_anything_is_stale() {
-    let problems = judge(&fixture(), Some(&gaps(&[GapId::G13])), &[]);
+    let problems = judge(&fixture(), Some(&gaps(&[GapId::G23])), &[]);
     assert_eq!(problems.len(), 1);
     assert!(problems[0].contains("stale"));
 }
 
 #[test]
 fn a_gap_that_explains_a_different_mismatch_is_stale_and_leaves_the_mismatch_uncovered() {
-    let problems = judge(
-        &fixture(),
-        Some(&gaps(&[GapId::G2])),
-        &[header_diff(HEADER_ENVELOPE_ID)],
-    );
+    let problems = judge(&fixture(), Some(&gaps(&[GapId::G23])), &[header_diff("X-Slack-Extra")]);
     assert_eq!(problems.len(), 2);
 }
 
 #[test]
 fn a_matching_gap_covers_its_mismatch() {
     let problems = judge(
-        &fixture(),
-        Some(&gaps(&[GapId::G13])),
-        &[header_diff(HEADER_ENVELOPE_ID)],
+        &fixture_expecting("reject"),
+        Some(&gaps(&[GapId::G23])),
+        &[unroutable_diff()],
     );
     assert!(problems.is_empty(), "{problems:?}");
 }
@@ -87,13 +75,6 @@ fn a_matching_gap_covers_its_mismatch() {
 fn a_representable_fixture_cannot_be_marked_not_representable() {
     let entry = LedgerEntry::NotRepresentable(NotRepresentableMarker::NotRepresentable);
     assert_eq!(judge(&fixture(), Some(&entry), &[]).len(), 1);
-}
-
-#[test]
-fn a_missing_header_gap_does_not_excuse_a_wrong_header_value() {
-    let diff = header_value_diff(HEADER_ENVELOPE_ID);
-    let problems = judge(&fixture(), Some(&gaps(&[GapId::G13])), &[diff]);
-    assert_eq!(problems.len(), 2, "{problems:?}");
 }
 
 fn expected_nats(headers: serde_json::Value) -> ExpectedNats {

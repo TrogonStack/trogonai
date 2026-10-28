@@ -267,6 +267,7 @@ async fn handle_payload_envelope<P: JetStreamPublisher, S: ObjectStorePut>(
     };
 
     let Ok(context) = DeliveryContext::socket(
+        &envelope_id,
         envelope.retry_attempt.as_ref().and_then(serde_json::Value::as_i64),
         envelope.retry_reason.as_deref(),
     ) else {
