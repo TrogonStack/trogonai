@@ -161,3 +161,50 @@ fn unsafe_ids_are_rejected() {
 
     assert_eq!(result.unwrap_err(), InvalidHeaderTextError);
 }
+
+#[test]
+fn event_carries_its_subtype_and_channel_type() {
+    let payload = json!({ "event": { "type": "message", "subtype": "bot_message", "channel_type": "im" } });
+
+    let headers = headers_of(PayloadMetadata::event(&payload));
+
+    assert_eq!(header(&headers, NATS_HEADER_EVENT_SUBTYPE), some("bot_message"));
+    assert_eq!(header(&headers, NATS_HEADER_CHANNEL_TYPE), some("im"));
+}
+
+#[test]
+fn event_without_subtype_or_channel_type_carries_neither() {
+    let headers = headers_of(PayloadMetadata::event(
+        &json!({ "event": { "type": "app_home_opened" } }),
+    ));
+
+    assert_eq!(header(&headers, NATS_HEADER_EVENT_SUBTYPE), None);
+    assert_eq!(header(&headers, NATS_HEADER_CHANNEL_TYPE), None);
+}
+
+#[test]
+fn only_events_carry_event_metadata() {
+    let payload =
+        json!({ "type": "block_actions", "event": { "subtype": "x", "channel_type": "im" }, "command": "/x" });
+
+    for metadata in [
+        PayloadMetadata::interaction(&payload),
+        PayloadMetadata::command_value(&payload),
+        PayloadMetadata::command_fields(&[]),
+    ] {
+        let headers = headers_of(metadata);
+        assert_eq!(header(&headers, NATS_HEADER_EVENT_SUBTYPE), None);
+        assert_eq!(header(&headers, NATS_HEADER_CHANNEL_TYPE), None);
+    }
+}
+
+#[test]
+fn unsafe_event_metadata_is_rejected() {
+    for event in [json!({ "subtype": "a\nb" }), json!({ "channel_type": "a\nb" })] {
+        let payload = json!({ "event": event });
+
+        let result = PayloadMetadata::event(&payload).apply(DeliveryHeaders::new());
+
+        assert_eq!(result.unwrap_err(), InvalidHeaderTextError);
+    }
+}

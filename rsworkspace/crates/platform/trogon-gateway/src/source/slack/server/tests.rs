@@ -1560,3 +1560,51 @@ async fn http_event_with_line_break_in_app_id_returns_400() {
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     assert_unroutable(&publisher, "invalid_header_value");
 }
+
+#[tokio::test]
+async fn http_event_carries_subtype_and_channel_type() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let body = serde_json::to_vec(&serde_json::json!({
+        "type": "event_callback",
+        "event_id": "Ev01ABC123",
+        "team_id": "T01ABC",
+        "event": { "type": "message", "subtype": "bot_message", "channel_type": "im" }
+    }))
+    .unwrap();
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, &body);
+
+    mock_app(publisher.clone())
+        .oneshot(webhook_request(&body, &ts, Some(&sig)))
+        .await
+        .unwrap();
+
+    let messages = publisher.published_messages();
+    let header = |name: &str| messages[0].headers.get(name).map(|v| v.as_str());
+    assert_eq!(header("X-Slack-Event-Subtype"), Some("bot_message"));
+    assert_eq!(header("X-Slack-Channel-Type"), Some("im"));
+}
+
+#[tokio::test]
+async fn http_event_with_line_break_in_subtype_returns_400() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let body = serde_json::to_vec(&serde_json::json!({
+        "type": "event_callback",
+        "event_id": "Ev01ABC123",
+        "team_id": "T01ABC",
+        "event": { "type": "message", "subtype": "bot\r\nX-Injected: 1" }
+    }))
+    .unwrap();
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, &body);
+
+    let resp = mock_app(publisher.clone())
+        .oneshot(webhook_request(&body, &ts, Some(&sig)))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    assert_unroutable(&publisher, "invalid_header_value");
+}

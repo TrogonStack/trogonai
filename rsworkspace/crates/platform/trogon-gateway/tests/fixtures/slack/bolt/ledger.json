@@ -38,35 +38,28 @@
       "G13"
     ],
     "http.event.assistant_user_message": [
-      "G13",
-      "G22"
+      "G13"
     ],
     "http.event.function_executed": [
       "G13"
     ],
     "http.event.member_joined_channel": [
-      "G13",
-      "G22"
+      "G13"
     ],
     "http.event.member_left_channel": [
-      "G13",
-      "G22"
+      "G13"
     ],
     "http.event.message": [
-      "G13",
-      "G22"
+      "G13"
     ],
     "http.event.message_bot_subtype": [
-      "G13",
-      "G22"
+      "G13"
     ],
     "http.event.message_direct": [
-      "G13",
-      "G22"
+      "G13"
     ],
     "http.event.message_threaded": [
-      "G13",
-      "G22"
+      "G13"
     ],
     "http.event.reaction_added": [
       "G13"
@@ -100,12 +93,10 @@
     ],
     "http.not_representable.dummy_receiver_event": "not_representable",
     "http.retry.event_message": [
-      "G13",
-      "G22"
+      "G13"
     ],
     "http.verify.timestamp_at_drift_limit": [
-      "G13",
-      "G22"
+      "G13"
     ],
     "socket.ack.block_suggestion_options": [
       "G13",
@@ -141,35 +132,28 @@
       "G13"
     ],
     "socket.event.assistant_user_message": [
-      "G13",
-      "G22"
+      "G13"
     ],
     "socket.event.function_executed": [
       "G13"
     ],
     "socket.event.member_joined_channel": [
-      "G13",
-      "G22"
+      "G13"
     ],
     "socket.event.member_left_channel": [
-      "G13",
-      "G22"
+      "G13"
     ],
     "socket.event.message": [
-      "G13",
-      "G22"
+      "G13"
     ],
     "socket.event.message_bot_subtype": [
-      "G13",
-      "G22"
+      "G13"
     ],
     "socket.event.message_direct": [
-      "G13",
-      "G22"
+      "G13"
     ],
     "socket.event.message_threaded": [
-      "G13",
-      "G22"
+      "G13"
     ],
     "socket.event.reaction_added": [
       "G13"
@@ -196,8 +180,7 @@
       "G13"
     ],
     "socket.retry.event_message": [
-      "G13",
-      "G22"
+      "G13"
     ]
   }
 }

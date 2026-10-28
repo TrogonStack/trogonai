@@ -1,6 +1,9 @@
 use serde_json::Value;
 
-use super::constants::{NATS_HEADER_API_APP_ID, NATS_HEADER_ENTERPRISE_ID, NATS_HEADER_IS_ENTERPRISE_INSTALL};
+use super::constants::{
+    NATS_HEADER_API_APP_ID, NATS_HEADER_CHANNEL_TYPE, NATS_HEADER_ENTERPRISE_ID, NATS_HEADER_EVENT_SUBTYPE,
+    NATS_HEADER_IS_ENTERPRISE_INSTALL,
+};
 use super::header_text::{DeliveryHeaders, InvalidHeaderTextError};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -8,6 +11,8 @@ pub struct PayloadMetadata<'a> {
     enterprise_id: Option<&'a str>,
     is_enterprise_install: bool,
     api_app_id: Option<&'a str>,
+    event_subtype: Option<&'a str>,
+    channel_type: Option<&'a str>,
 }
 
 impl<'a> PayloadMetadata<'a> {
@@ -27,6 +32,8 @@ impl<'a> PayloadMetadata<'a> {
             enterprise_id,
             is_enterprise_install,
             api_app_id: text(payload, "api_app_id"),
+            event_subtype: payload.get("event").and_then(|event| text(event, "subtype")),
+            channel_type: payload.get("event").and_then(|event| text(event, "channel_type")),
         }
     }
 
@@ -42,6 +49,7 @@ impl<'a> PayloadMetadata<'a> {
             enterprise_id,
             is_enterprise_install: install_flag(payload),
             api_app_id: text(payload, "api_app_id"),
+            ..Self::default()
         }
     }
 
@@ -50,6 +58,7 @@ impl<'a> PayloadMetadata<'a> {
             enterprise_id: text(payload, "enterprise_id"),
             is_enterprise_install: install_flag(payload),
             api_app_id: text(payload, "api_app_id"),
+            ..Self::default()
         }
     }
 
@@ -65,6 +74,7 @@ impl<'a> PayloadMetadata<'a> {
             enterprise_id: field("enterprise_id"),
             is_enterprise_install: field("is_enterprise_install") == Some("true"),
             api_app_id: field("api_app_id"),
+            ..Self::default()
         }
     }
 
@@ -73,7 +83,9 @@ impl<'a> PayloadMetadata<'a> {
         headers
             .with_optional(NATS_HEADER_ENTERPRISE_ID, self.enterprise_id)?
             .with_static(NATS_HEADER_IS_ENTERPRISE_INSTALL, install)
-            .with_optional(NATS_HEADER_API_APP_ID, self.api_app_id)
+            .with_optional(NATS_HEADER_API_APP_ID, self.api_app_id)?
+            .with_optional(NATS_HEADER_EVENT_SUBTYPE, self.event_subtype)?
+            .with_optional(NATS_HEADER_CHANNEL_TYPE, self.channel_type)
     }
 }
 

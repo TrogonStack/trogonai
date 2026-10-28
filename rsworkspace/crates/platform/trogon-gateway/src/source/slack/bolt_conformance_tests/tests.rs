@@ -67,7 +67,7 @@ fn a_ledger_entry_that_no_longer_matches_anything_is_stale() {
 fn a_gap_that_explains_a_different_mismatch_is_stale_and_leaves_the_mismatch_uncovered() {
     let problems = judge(
         &fixture(),
-        Some(&gaps(&[GapId::G22])),
+        Some(&gaps(&[GapId::G2])),
         &[header_diff(HEADER_ENVELOPE_ID)],
     );
     assert_eq!(problems.len(), 2);
@@ -94,16 +94,6 @@ fn a_missing_header_gap_does_not_excuse_a_wrong_header_value() {
     let diff = header_value_diff(HEADER_ENVELOPE_ID);
     let problems = judge(&fixture(), Some(&gaps(&[GapId::G13])), &[diff]);
     assert_eq!(problems.len(), 2, "{problems:?}");
-}
-
-#[test]
-fn an_event_metadata_header_is_not_a_delivery_identifier_header() {
-    let diff = header_diff(HEADERS_EVENT_METADATA[0]);
-    assert_eq!(
-        judge(&fixture(), Some(&gaps(&[GapId::G13])), std::slice::from_ref(&diff)).len(),
-        2
-    );
-    assert!(judge(&fixture(), Some(&gaps(&[GapId::G22])), &[diff]).is_empty());
 }
 
 fn expected_nats(headers: serde_json::Value) -> ExpectedNats {
