@@ -208,3 +208,17 @@ fn unsafe_event_metadata_is_rejected() {
         assert_eq!(result.unwrap_err(), InvalidHeaderTextError);
     }
 }
+
+#[test]
+fn system_notices_expose_only_the_app_id() {
+    let payload = json!({ "type": "app_rate_limited", "api_app_id": "A01", "team_id": "T01", "enterprise_id": "E01" });
+
+    let headers = headers_of(PayloadMetadata::system(&payload));
+
+    assert_eq!(header(&headers, "X-Slack-Api-App-Id").as_deref(), Some("A01"));
+    assert_eq!(header(&headers, "X-Slack-Enterprise-Id"), None);
+    assert_eq!(
+        header(&headers, "X-Slack-Is-Enterprise-Install").as_deref(),
+        Some("false")
+    );
+}

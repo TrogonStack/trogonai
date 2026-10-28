@@ -30,6 +30,7 @@
 //! | `event_callback` | `{prefix}.event.{event.type}` |
 //! | Interaction | `{prefix}.interaction.{type}` |
 //! | Slash command | `{prefix}.command.{name}` without the leading `/` |
+//! | System notice | `{prefix}.system.{type}`, today only `app_rate_limited` |
 //! | Unroutable | `{prefix}.unroutable` |
 //!
 //! Event types, interaction types and command names come from the sender, so
@@ -45,7 +46,9 @@
 //!   them, `X-Slack-Event-Subtype` and `X-Slack-Channel-Type` for events that
 //!   carry them, `X-Slack-Envelope-Id` over Socket Mode,
 //!   `X-Slack-Request-Timestamp` over HTTP, and `X-Slack-Reject-Reason` for
-//!   unroutable messages.
+//!   unroutable messages. System notices carry `X-Slack-Payload-Kind: system`
+//!   and the notice type in `X-Slack-Event-Type`, and their `Nats-Msg-Id` is
+//!   `system-` followed by the SHA-256 of the body because they have no event id.
 //! - **Channel type**: `X-Slack-Channel-Type` copies Slack's `channel_type`
 //!   as sent, and its values depend on the event. Message events send names
 //!   such as `channel` or `im`, while membership events send single letter
@@ -78,6 +81,7 @@ pub mod signature;
 pub mod socket_mode;
 pub mod ssl_check;
 pub mod subject;
+pub mod system_notice;
 pub mod unroutable;
 
 #[cfg(test)]

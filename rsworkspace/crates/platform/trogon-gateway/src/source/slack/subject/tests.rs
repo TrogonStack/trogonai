@@ -18,6 +18,10 @@ fn builds_one_subject_per_payload_kind() {
         SlackSubject::command(&prefix(), "/trogon").unwrap().as_str(),
         "slack.command.trogon"
     );
+    assert_eq!(
+        SlackSubject::system(&prefix(), SystemNoticeType::AppRateLimited).as_str(),
+        "slack.system.app_rate_limited"
+    );
     assert_eq!(SlackSubject::unroutable(&prefix()).into_string(), "slack.unroutable");
 }
 
