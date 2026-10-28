@@ -45,6 +45,7 @@ fn every_reason_has_a_distinct_snake_case_name() {
         UnroutableReason::MissingCommand,
         UnroutableReason::MissingCommandTriggerId,
         UnroutableReason::InvalidHeaderValue,
+        UnroutableReason::InvalidSubjectToken,
         UnroutableReason::UnhandledSocketModeType,
         UnroutableReason::MissingEnvelopeId,
         UnroutableReason::MissingSocketModePayload,

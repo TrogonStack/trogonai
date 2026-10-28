@@ -12,6 +12,7 @@ use super::constants::{
 };
 use super::header_text::{DeliveryHeaders, HeaderText, InvalidHeaderTextError};
 use super::signature;
+use super::subject::SlackSubject;
 use super::unroutable::{UnroutableMessageId, UnroutableReason};
 use trogon_std::NonZeroDuration;
 use trogon_std::SystemClock;
@@ -25,10 +26,10 @@ use serde_json::value::RawValue;
 use std::future::Future;
 use std::pin::Pin;
 use tracing::{info, instrument, warn};
-use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
 };
+use trogon_nats::{NatsToken, SubjectTokenViolationError};
 use trogon_semconv::span::SLACK_WEBHOOK;
 
 fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode {
@@ -155,7 +156,7 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
         team_id: &str,
         body: Bytes,
     ) -> PublishOutcome<P::PublishError> {
-        let subject = format!("{}.unroutable", self.subject_prefix);
+        let subject = SlackSubject::unroutable(&self.subject_prefix).into_string();
         let message_id = UnroutableMessageId::new(reason, &body);
         let headers = DeliveryHeaders::new()
             .with(async_nats::header::NATS_MESSAGE_ID, message_id.header())
@@ -240,12 +241,26 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
         };
         let event_id = event_id.to_owned();
 
-        let subject = format!("{}.event.{}", self.subject_prefix, event_type);
+        let subject = match SlackSubject::event(&self.subject_prefix, &event_type) {
+            Ok(subject) => subject,
+            Err(error) => {
+                warn!(%error, "Event type is not a valid subject token");
+                let status = self
+                    .reject(
+                        UnroutableReason::InvalidSubjectToken,
+                        &team_id,
+                        body.clone(),
+                        StatusCode::BAD_REQUEST,
+                    )
+                    .await;
+                return (status, String::new());
+            }
+        };
 
         let span = tracing::Span::current();
         span.record(trogon_semconv::attribute::EVENT_TYPE, &event_type);
         span.record(trogon_semconv::attribute::EVENT_ID, &event_id);
-        span.record(trogon_semconv::attribute::SUBJECT, &subject);
+        span.record(trogon_semconv::attribute::SUBJECT, subject.as_str());
 
         let Ok(nats_headers) = delivery_headers(
             self.transport,
@@ -269,7 +284,12 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
 
         let outcome = self
             .publisher
-            .publish_event(subject, nats_headers, body.clone(), self.nats_ack_timeout.into())
+            .publish_event(
+                subject.into_string(),
+                nats_headers,
+                body.clone(),
+                self.nats_ack_timeout.into(),
+            )
             .await;
 
         (outcome_to_status(outcome), String::new())
@@ -365,12 +385,25 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
         };
         let trigger_id = trigger_id.to_owned();
 
-        let subject = format!("{}.interaction.{}", self.subject_prefix, interaction_type);
+        let subject = match SlackSubject::interaction(&self.subject_prefix, &interaction_type) {
+            Ok(subject) => subject,
+            Err(error) => {
+                warn!(%error, "Interaction type is not a valid subject token");
+                return self
+                    .reject(
+                        UnroutableReason::InvalidSubjectToken,
+                        &team_id,
+                        body,
+                        StatusCode::BAD_REQUEST,
+                    )
+                    .await;
+            }
+        };
 
         let span = tracing::Span::current();
         span.record(trogon_semconv::attribute::EVENT_TYPE, &interaction_type);
         span.record(trogon_semconv::attribute::EVENT_ID, &trigger_id);
-        span.record(trogon_semconv::attribute::SUBJECT, &subject);
+        span.record(trogon_semconv::attribute::SUBJECT, subject.as_str());
 
         info!(interaction_type, "Received Slack interaction");
 
@@ -395,7 +428,7 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
 
         let outcome = self
             .publisher
-            .publish_event(subject, nats_headers, body, self.nats_ack_timeout.into())
+            .publish_event(subject.into_string(), nats_headers, body, self.nats_ack_timeout.into())
             .await;
 
         outcome_to_status(outcome)
@@ -403,6 +436,18 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
 
     async fn handle_slash_command(&self, command: &str, fields: &[(String, String)], raw_body: Bytes) -> StatusCode {
         let team_id = form_field(fields, "team_id").unwrap_or(UNKNOWN_TEAM_ID);
+
+        if command.is_empty() {
+            warn!("Missing command in slash command payload");
+            return self
+                .reject(
+                    UnroutableReason::MissingCommand,
+                    team_id,
+                    raw_body,
+                    StatusCode::BAD_REQUEST,
+                )
+                .await;
+        }
 
         let Some(trigger_id) = form_field(fields, "trigger_id") else {
             warn!(command, "Missing trigger_id in slash command payload");
@@ -455,13 +500,22 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
         trigger_id: &str,
         raw_body: Bytes,
     ) -> StatusCode {
-        let command_name = command.trim_start_matches('/');
-        let subject = format!("{}.command.{}", self.subject_prefix, command_name);
+        let subject = match SlackSubject::command(&self.subject_prefix, command) {
+            Ok(subject) => subject,
+            Err(error) => {
+                warn!(%error, "Command name is not a valid subject token");
+                let reason = match error {
+                    SubjectTokenViolationError::Empty => UnroutableReason::MissingCommand,
+                    _ => UnroutableReason::InvalidSubjectToken,
+                };
+                return self.reject(reason, team_id, raw_body, StatusCode::BAD_REQUEST).await;
+            }
+        };
 
         let span = tracing::Span::current();
         span.record(trogon_semconv::attribute::EVENT_TYPE, command);
         span.record(trogon_semconv::attribute::EVENT_ID, trigger_id);
-        span.record(trogon_semconv::attribute::SUBJECT, &subject);
+        span.record(trogon_semconv::attribute::SUBJECT, subject.as_str());
 
         info!(command, "Received Slack slash command");
 
@@ -479,7 +533,12 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
 
         let outcome = self
             .publisher
-            .publish_event(subject, nats_headers, raw_body, self.nats_ack_timeout.into())
+            .publish_event(
+                subject.into_string(),
+                nats_headers,
+                raw_body,
+                self.nats_ack_timeout.into(),
+            )
             .await;
 
         outcome_to_status(outcome)
