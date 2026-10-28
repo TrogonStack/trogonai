@@ -1,0 +1,17 @@
+edition = "2024";
+
+package trogonai.platform.api_keyspaces.v1;
+
+import "trogonai/platform/api_keyspaces/v1/api_keyspace_policy.proto";
+
+// ApiKeyspacePolicyUpdated carries both sides of the change.
+//
+// The previous policy is recoverable by replaying the stream, so carrying it
+// is redundant for the aggregate. It is carried anyway because the audit fact
+// derived from this event has to answer "what changed" without replaying, and
+// a reader holding one event should not have to reconstruct the other half to
+// interpret it.
+message ApiKeyspacePolicyUpdated {
+  ApiKeyspacePolicy previous_policy = 1 [features.field_presence = LEGACY_REQUIRED];
+  ApiKeyspacePolicy policy = 2 [features.field_presence = LEGACY_REQUIRED];
+}

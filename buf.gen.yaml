@@ -14,8 +14,10 @@ inputs:
       - proto/trogonai/agents
       - proto/trogonai/catalog
       - proto/trogonai/evaluation
+      - proto/trogonai/gateway/credentials
       - proto/trogonai/library
       - proto/trogonai/model_access
+      - proto/trogonai/platform
       - proto/trogonai/policy
       - proto/trogonai/projects
       - proto/trogonai/session

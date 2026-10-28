@@ -1,0 +1,17 @@
+edition = "2024";
+
+package trogonai.platform.api_keyspaces.v1;
+
+import "trogonai/platform/api_keyspaces/v1/api_keyspace_created.proto";
+import "trogonai/platform/api_keyspaces/v1/api_keyspace_deleted.proto";
+import "trogonai/platform/api_keyspaces/v1/api_keyspace_policy_updated.proto";
+
+// ApiKeyspaceEvent is the keyspace aggregate's event stream, keyed by
+// api_keyspace_id.
+message ApiKeyspaceEvent {
+  oneof event {
+    ApiKeyspaceCreated api_keyspace_created = 1;
+    ApiKeyspacePolicyUpdated api_keyspace_policy_updated = 2;
+    ApiKeyspaceDeleted api_keyspace_deleted = 3;
+  }
+}
