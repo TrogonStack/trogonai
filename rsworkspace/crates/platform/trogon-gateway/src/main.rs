@@ -5,6 +5,8 @@ mod cli;
 mod config;
 mod constants;
 mod credential;
+mod credential_management;
+mod credential_management_idempotency;
 mod http;
 mod secret_store;
 mod source;
@@ -14,25 +16,36 @@ mod source_status;
 mod streams;
 mod supervision;
 
+use std::error::Error;
 use std::io::Write;
 use std::net::SocketAddr;
+use std::time::Duration;
 
 use crate::constants::{
     CLAIM_CHECK_TTL_GRACE, NATS_CONNECT_TIMEOUT, NATS_SERVER_INFO_POLL_INTERVAL, SLACK_RESTART_BACKOFF,
 };
 use anyhow::Context;
+use async_nats::jetstream::kv;
 use futures_util::FutureExt;
 use tokio::task::JoinSet;
 use tracing::{error, info};
+use trogon_decider_runtime::StreamRead;
 use trogon_nats::client::RequestClient;
 use trogon_nats::jetstream::{
-    ClaimBucket, ClaimCheckPublisher, ClaimRetention, JetStreamPublisher, MaxPayload, NatsJetStreamClient,
-    NatsObjectStore, ObjectStorePut,
+    ClaimBucket, ClaimCheckPublisher, ClaimRetention, JetStreamGetRawMessage, JetStreamGetStreamInfo,
+    JetStreamPublisher, MaxPayload, NatsJetStreamClient, NatsObjectStore, ObjectStorePut,
 };
 use trogon_nats::{connect, wait_for_server_info};
+use trogon_std::SecretString;
 use trogon_std::args::{CliArgs, ParseArgs};
 use trogon_std::env::SystemEnv;
 use trogon_std::fs::SystemFs;
+
+const CREDENTIAL_MANAGEMENT_ADMIN_TOKEN: &str = "TROGON_GATEWAY_CREDENTIAL_MANAGEMENT_ADMIN_TOKEN";
+const OPENBAO_ADDR: &str = "OPENBAO_ADDR";
+const OPENBAO_TOKEN: &str = "OPENBAO_TOKEN";
+const CREDENTIAL_WORKER_INTERVAL: Duration = Duration::from_secs(30);
+const CREDENTIAL_RUNTIME_PROJECTION_WORKER_INTERVAL: Duration = Duration::from_secs(30);
 
 type SourceResult = (&'static str, anyhow::Result<()>);
 
@@ -94,6 +107,14 @@ async fn serve(
     let client = NatsJetStreamClient::new(js_context);
 
     streams::provision(&client, &resolved).await?;
+    let credential_store = credential::store::open(client.context().clone()).await?;
+    info!(
+        stream = credential::stream::CREDENTIAL_STREAM,
+        snapshot_bucket = credential::store::CREDENTIAL_SNAPSHOT_BUCKET,
+        "credential event store opened"
+    );
+    let (runtime_credentials, _credential_projection_refresh_report, runtime_projection_checkpoints) =
+        refresh_credential_runtime_projection(&credential_store).await?;
     register_telegram_webhooks(
         &resolved.telegram,
         crate::source::telegram::registration::registration_http_client,
@@ -106,6 +127,26 @@ async fn serve(
     let shutdown = shutdown.shared();
 
     let publisher = ClaimCheckPublisher::new(client.clone(), claim_binding, nats.clone());
+    {
+        let projection_runtime_credentials = runtime_credentials.clone();
+        let projection_event_stream = credential_store.events_stream().clone();
+        let projection_event_store = credential_store.clone();
+        let shutdown = shutdown.clone();
+        join_set.spawn(async move {
+            tokio::select! {
+                () = shutdown => {}
+                () = credential::processor::runtime_projection::run_checkpointed_refresh_worker(
+                    projection_runtime_credentials,
+                    projection_event_stream,
+                    projection_event_store,
+                    runtime_projection_checkpoints,
+                    CREDENTIAL_RUNTIME_PROJECTION_WORKER_INTERVAL,
+                ) => {}
+            }
+            ("credential-runtime-projection-worker", Ok(()))
+        });
+        info!("credential runtime projection refresh worker spawned");
+    }
 
     spawn_discord_gateway(
         &mut join_set,
@@ -131,7 +172,56 @@ async fn serve(
         crate::source::google_pubsub::streaming_pull::run,
     );
 
-    let app = trogon_std::telemetry::http::instrument_router(http::mount_sources(resolved, publisher, &nats));
+    let app = http::mount_sources(resolved, publisher, &nats);
+    let app = match credential_management_admin_token_from_env()? {
+        Some(admin_token) => {
+            let store = openbao_secret_store_from_env(CREDENTIAL_MANAGEMENT_ADMIN_TOKEN)?;
+            let idempotency = credential_management_idempotency::open(client.context().clone()).await?;
+            let worker_checkpoints =
+                credential::processor::recovery_worker::open_checkpoint_store(client.context().clone()).await?;
+            let recovery_status_checkpoints = worker_checkpoints.clone();
+            let worker_event_stream = credential_store.events_stream().clone();
+            let worker_event_store = credential_store.clone();
+            let worker_handler_event_store = credential_store.clone();
+            let worker_store = store.clone();
+            let worker_runtime_credentials = runtime_credentials.clone();
+            let worker_shutdown = shutdown.clone();
+            join_set.spawn(async move {
+                let handler = credential::handler::CredentialRuntimeHandler::new(
+                    worker_handler_event_store,
+                    worker_store,
+                    worker_runtime_credentials,
+                );
+                tokio::select! {
+                    () = worker_shutdown => {}
+                    () = credential::processor::recovery_worker::run(
+                        worker_event_stream,
+                        worker_event_store,
+                        handler,
+                        worker_checkpoints,
+                        CREDENTIAL_WORKER_INTERVAL,
+                    ) => {}
+                }
+                ("credential-worker", Ok(()))
+            });
+            info!("credential recovery worker spawned");
+            info!("credential management API enabled");
+            let credential_management_routes = credential_management::router(
+                credential_store.clone(),
+                store,
+                runtime_credentials.clone(),
+                admin_token.clone(),
+                idempotency,
+            )
+            .merge(credential_management::recovery_status_router(
+                admin_token,
+                recovery_status_checkpoints,
+            ));
+            app.nest("/-/credentials", credential_management_routes)
+        }
+        None => app,
+    };
+    let app = trogon_std::telemetry::http::instrument_router(app);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -362,6 +452,83 @@ async fn wait_for_sources_with_shutdown<E: std::error::Error>(
     }
 
     Ok(())
+}
+
+async fn refresh_credential_runtime_projection(
+    event_store: &credential::store::CredentialEventStore,
+) -> anyhow::Result<(
+    credential::processor::runtime_projection::RuntimeCredentialRegistry,
+    credential::processor::runtime_projection::RuntimeProjectionRefreshReport,
+    credential::processor::runtime_projection::RuntimeProjectionKvCheckpointStore<kv::Store>,
+)> {
+    let registry = credential::processor::runtime_projection::RuntimeCredentialRegistry::default();
+    let checkpoints = credential::processor::runtime_projection::open_runtime_projection_checkpoint_store(
+        event_store.as_jetstream().clone(),
+    )
+    .await?;
+    let (registry, report) = refresh_credential_runtime_projection_with_checkpoints(
+        event_store.events_stream(),
+        event_store,
+        &checkpoints,
+        registry,
+    )
+    .await?;
+    Ok((registry, report, checkpoints))
+}
+
+async fn refresh_credential_runtime_projection_with_checkpoints<EventStream, EventStore, Checkpoints>(
+    event_stream: &EventStream,
+    event_store: &EventStore,
+    checkpoints: &Checkpoints,
+    registry: credential::processor::runtime_projection::RuntimeCredentialRegistry,
+) -> anyhow::Result<(
+    credential::processor::runtime_projection::RuntimeCredentialRegistry,
+    credential::processor::runtime_projection::RuntimeProjectionRefreshReport,
+)>
+where
+    EventStream: JetStreamGetStreamInfo + JetStreamGetRawMessage,
+    EventStore: StreamRead<str>,
+    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
+    Checkpoints: credential::processor::runtime_projection::RuntimeProjectionCheckpointStore,
+{
+    let report = registry
+        .refresh_from_credential_stream_checkpointed(event_stream, event_store, checkpoints)
+        .await
+        .context("credential runtime projection refresh")?;
+    info!(
+        scanned_events = report.scanned_events(),
+        decoded_events = report.decoded_events(),
+        skipped_events = report.skipped_events(),
+        changed_credentials = report.changed_credentials(),
+        applied_credentials = report.applied_credentials(),
+        projected_integrations = report.projected_integrations(),
+        checkpoint_loaded_sequence = report.checkpoint_loaded_sequence(),
+        checkpoint_advanced_to = ?report.checkpoint_advanced_to(),
+        "credential runtime projection refreshed"
+    );
+
+    Ok((registry, report))
+}
+
+fn credential_management_admin_token_from_env() -> anyhow::Result<Option<SecretString>> {
+    match std::env::var(CREDENTIAL_MANAGEMENT_ADMIN_TOKEN) {
+        Ok(value) => SecretString::new(value)
+            .map(Some)
+            .with_context(|| format!("{CREDENTIAL_MANAGEMENT_ADMIN_TOKEN} must not be empty")),
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(source) => Err(source).with_context(|| format!("failed to read {CREDENTIAL_MANAGEMENT_ADMIN_TOKEN}")),
+    }
+}
+
+fn openbao_secret_store_from_env(
+    enabled_by: &str,
+) -> anyhow::Result<secret_store::openbao_secret_store::OpenBaoSecretStore> {
+    let address = std::env::var(OPENBAO_ADDR)
+        .with_context(|| format!("{OPENBAO_ADDR} must be set when {enabled_by} is enabled"))?;
+    let token = std::env::var(OPENBAO_TOKEN)
+        .with_context(|| format!("{OPENBAO_TOKEN} must be set when {enabled_by} is enabled"))?;
+    secret_store::openbao_secret_store::OpenBaoSecretStore::new(address, token)
+        .context("OpenBao secret store configuration")
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -1,5 +1,6 @@
 use super::*;
 use crate::config::load;
+use crate::credential::stream::{CREDENTIAL_EVENT_SUBJECT_PREFIX, CREDENTIAL_STREAM};
 use std::io::Write;
 use trogon_nats::jetstream::MockJetStreamContext;
 
@@ -62,13 +63,20 @@ secret_token = "zoom-secret-token"
 }
 
 #[tokio::test]
-async fn provision_no_sources_is_noop() {
+async fn provision_no_sources_creates_credential_stream() {
     let cfg = load(None).expect("load failed");
     let js = MockJetStreamContext::new();
 
     provision(&js, &cfg).await.expect("provision should succeed");
 
-    assert!(js.created_streams().is_empty());
+    let streams = js.created_streams();
+    assert_eq!(streams.len(), 1);
+    assert_eq!(streams[0].name, CREDENTIAL_STREAM);
+    assert_eq!(
+        streams[0].subjects,
+        vec![format!("{CREDENTIAL_EVENT_SUBJECT_PREFIX}.>")]
+    );
+    assert!(streams[0].allow_atomic_publish);
 }
 
 #[tokio::test]
@@ -79,7 +87,7 @@ async fn provision_all_sources_creates_all_streams() {
 
     provision(&js, &cfg).await.expect("provision should succeed");
 
-    assert_eq!(js.created_streams().len(), 14);
+    assert_eq!(js.created_streams().len(), 15);
 }
 
 #[tokio::test]
@@ -98,11 +106,12 @@ webhook_secret = "underscore-secret"
     provision(&js, &cfg).await.expect("provision should succeed");
 
     let streams = js.created_streams();
-    assert_eq!(streams.len(), 2);
-    assert_eq!(streams[0].name, "GITHUB_ACME-MAIN");
-    assert_eq!(streams[0].subjects, vec!["github-acme-main.>"]);
-    assert_eq!(streams[1].name, "GITHUB_ACME_MAIN");
-    assert_eq!(streams[1].subjects, vec!["github-acme_main.>"]);
+    assert_eq!(streams.len(), 3);
+    assert_eq!(streams[0].name, CREDENTIAL_STREAM);
+    assert_eq!(streams[1].name, "GITHUB_ACME-MAIN");
+    assert_eq!(streams[1].subjects, vec!["github-acme-main.>"]);
+    assert_eq!(streams[2].name, "GITHUB_ACME_MAIN");
+    assert_eq!(streams[2].subjects, vec!["github-acme_main.>"]);
 }
 
 #[tokio::test]
@@ -153,7 +162,7 @@ webhook_token = "datadog-webhook-token"
 
     provision(&js, &cfg).await.expect("provision should succeed");
 
-    assert_eq!(js.created_streams().len(), 11);
+    assert_eq!(js.created_streams().len(), 12);
 }
 
 #[tokio::test]
@@ -178,11 +187,12 @@ credentials = '{"type":"service_account","project_id":"fake","private_key_id":"f
     provision(&js, &cfg).await.expect("provision should succeed");
 
     let streams = js.created_streams();
-    assert_eq!(streams.len(), 2);
-    assert_eq!(streams[0].name, "BILLING_EVENTS");
-    assert_eq!(streams[0].subjects, vec!["billing-events.>"]);
-    assert_eq!(streams[1].name, "GOOGLE_PUBSUB_ORDERS");
-    assert_eq!(streams[1].subjects, vec!["google-pubsub-orders.>"]);
+    assert_eq!(streams.len(), 3);
+    assert_eq!(streams[0].name, CREDENTIAL_STREAM);
+    assert_eq!(streams[1].name, "BILLING_EVENTS");
+    assert_eq!(streams[1].subjects, vec!["billing-events.>"]);
+    assert_eq!(streams[2].name, "GOOGLE_PUBSUB_ORDERS");
+    assert_eq!(streams[2].subjects, vec!["google-pubsub-orders.>"]);
 }
 
 #[tokio::test]
