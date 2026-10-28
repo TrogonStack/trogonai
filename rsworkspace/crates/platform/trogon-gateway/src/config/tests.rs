@@ -612,6 +612,54 @@ fn byte_count_input_rejects_text_and_zero_from_the_environment() {
     assert!(matches!(zero.resolve(&env), Err(ByteCountInputError::Zero)));
 }
 
+fn slack_ack_budget(cfg: &ResolvedConfig) -> crate::source::slack::ack_budget::AckBudget {
+    cfg.slack[0].config.ack_budget
+}
+
+#[test]
+fn slack_ack_budget_defaults_to_the_slack_deadline_not_the_generic_timeout() {
+    let f = write_toml(&slack_toml("slack-signing-secret"));
+    let cfg = load(Some(f.path())).expect("load failed");
+    let budget = slack_ack_budget(&cfg);
+    assert_eq!(budget.limit(), std::time::Duration::from_millis(2500));
+    assert_eq!(budget.capped_from(), None);
+}
+
+#[test]
+fn slack_ack_timeout_within_the_deadline_is_kept() {
+    let toml = r#"
+[sources.slack.integrations.primary]
+nats_ack_timeout_secs = 1
+
+[sources.slack.integrations.primary.webhook]
+signing_secret = "slack-secret"
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+    let budget = slack_ack_budget(&cfg);
+    assert_eq!(budget.limit(), std::time::Duration::from_secs(1));
+    assert_eq!(budget.capped_from(), None);
+}
+
+#[test]
+fn slack_ack_timeout_beyond_the_deadline_is_capped_instead_of_rejected() {
+    let toml = r#"
+[sources.slack.integrations.primary]
+nats_ack_timeout_secs = 10
+
+[sources.slack.integrations.primary.socket_mode]
+app_token = "xapp-test-token"
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+    let budget = slack_ack_budget(&cfg);
+    assert_eq!(budget.limit(), std::time::Duration::from_millis(2500));
+    assert_eq!(
+        budget.capped_from().map(std::time::Duration::from),
+        Some(std::time::Duration::from_secs(10))
+    );
+}
+
 #[test]
 fn slack_socket_mode_resolves_with_valid_app_token() {
     let f = write_toml(&slack_socket_mode_toml("xapp-test-token"));

@@ -1,3 +1,4 @@
+use super::super::ack_budget::AckBudget;
 use super::*;
 use axum::Router;
 use axum::extract::State;
@@ -28,7 +29,7 @@ fn socket_config() -> SlackConfig {
         subject_prefix: NatsToken::new("slack").unwrap(),
         stream_name: NatsToken::new("SLACK").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
-        nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
+        ack_budget: AckBudget::default(),
         transport: super::super::config::SlackTransportConfig::SocketMode(SlackSocketModeConfig {
             app_token: super::super::config::SlackAppToken::new("xapp-test-token").unwrap(),
         }),
@@ -40,7 +41,7 @@ fn webhook_config() -> SlackConfig {
         subject_prefix: NatsToken::new("slack").unwrap(),
         stream_name: NatsToken::new("SLACK").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
-        nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
+        ack_budget: AckBudget::default(),
         transport: super::super::config::SlackTransportConfig::Webhook(super::super::config::SlackWebhookConfig {
             signing_secret: super::super::config::SlackSigningSecret::new("slack-secret").unwrap(),
             timestamp_max_drift: NonZeroDuration::from_secs(300).unwrap(),

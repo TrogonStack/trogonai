@@ -46,7 +46,7 @@ fn test_config() -> SlackConfig {
         subject_prefix: NatsToken::new("slack").unwrap(),
         stream_name: NatsToken::new("SLACK").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
-        nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
+        ack_budget: AckBudget::default(),
         transport: super::super::config::SlackTransportConfig::Webhook(SlackWebhookConfig {
             signing_secret: SlackSigningSecret::new(TEST_SECRET).unwrap(),
             timestamp_max_drift: NonZeroDuration::from_secs(300).unwrap(),
@@ -350,7 +350,7 @@ async fn subject_uses_configured_prefix() {
         subject_prefix: NatsToken::new("custom").unwrap(),
         stream_name: NatsToken::new("SLACK").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
-        nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
+        ack_budget: AckBudget::default(),
         transport: super::super::config::SlackTransportConfig::Webhook(SlackWebhookConfig {
             signing_secret: SlackSigningSecret::new(TEST_SECRET).unwrap(),
             timestamp_max_drift: NonZeroDuration::from_secs(300).unwrap(),
@@ -472,7 +472,7 @@ async fn ack_timeout_returns_500() {
         subject_prefix: NatsToken::new("slack").unwrap(),
         stream_name: NatsToken::new("SLACK").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
-        nats_ack_timeout: NonZeroDuration::from_millis(10).unwrap(),
+        ack_budget: AckBudget::new(Some(NonZeroDuration::from_millis(10).unwrap())),
         transport: super::super::config::SlackTransportConfig::Webhook(SlackWebhookConfig {
             signing_secret: SlackSigningSecret::new(TEST_SECRET).unwrap(),
             timestamp_max_drift: NonZeroDuration::from_secs(300).unwrap(),
@@ -1133,4 +1133,141 @@ async fn default_body_limit_admits_payloads_above_the_old_one_mebibyte_cap() {
     let resp = app.oneshot(webhook_request(&body, &ts, Some(&sig))).await.unwrap();
 
     assert_eq!(resp.status(), StatusCode::OK);
+}
+
+#[tokio::test(start_paused = true)]
+async fn unacknowledged_publish_answers_slack_inside_its_three_second_deadline() {
+    let _guard = tracing_guard();
+    let mut config = test_config();
+    config.ack_budget = AckBudget::default();
+
+    let state = AppState {
+        bridge: SlackBridge::new(
+            ClaimCheckPublisher::new(
+                AckFailPublisher::hanging(),
+                ClaimBucketBinding::for_test(MockObjectStore::new(), ClaimBucket::default()),
+                MaxPayload::from_server_limit(usize::MAX),
+            ),
+            &config,
+        ),
+        clock: FixedEpochClock::from_secs(TEST_NOW),
+        signing_secret: SlackSigningSecret::new(TEST_SECRET).unwrap(),
+        timestamp_max_drift: NonZeroDuration::from_secs(300).unwrap(),
+    };
+    let app = Router::new()
+        .route(
+            "/webhook",
+            post(handle_webhook::<AckFailPublisher, MockObjectStore, FixedEpochClock>),
+        )
+        .with_state(state);
+    let body = event_callback_body("message");
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, &body);
+
+    let started = tokio::time::Instant::now();
+    let resp = app.oneshot(webhook_request(&body, &ts, Some(&sig))).await.unwrap();
+    let elapsed = started.elapsed();
+
+    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(elapsed, std::time::Duration::from_millis(2500));
+    assert!(elapsed < super::super::constants::SLACK_ACK_DEADLINE);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_publish_that_never_returns_answers_slack_inside_its_three_second_deadline() {
+    let _guard = tracing_guard();
+    let mut config = test_config();
+    config.ack_budget = AckBudget::default();
+
+    let state = AppState {
+        bridge: SlackBridge::new(
+            ClaimCheckPublisher::new(
+                AckFailPublisher::hanging_publish(),
+                ClaimBucketBinding::for_test(MockObjectStore::new(), ClaimBucket::default()),
+                MaxPayload::from_server_limit(usize::MAX),
+            ),
+            &config,
+        ),
+        clock: FixedEpochClock::from_secs(TEST_NOW),
+        signing_secret: SlackSigningSecret::new(TEST_SECRET).unwrap(),
+        timestamp_max_drift: NonZeroDuration::from_secs(300).unwrap(),
+    };
+    let app = Router::new()
+        .route(
+            "/webhook",
+            post(handle_webhook::<AckFailPublisher, MockObjectStore, FixedEpochClock>),
+        )
+        .with_state(state);
+    let body = event_callback_body("message");
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, &body);
+
+    let started = tokio::time::Instant::now();
+    let resp = app.oneshot(webhook_request(&body, &ts, Some(&sig))).await.unwrap();
+    let elapsed = started.elapsed();
+
+    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(elapsed, std::time::Duration::from_millis(2500));
+    assert!(elapsed < super::super::constants::SLACK_ACK_DEADLINE);
+}
+
+#[derive(Clone, Default)]
+struct CapturedLogs(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for CapturedLogs {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for CapturedLogs {
+    type Writer = CapturedLogs;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        self.clone()
+    }
+}
+
+impl CapturedLogs {
+    fn text(&self) -> String {
+        String::from_utf8(self.0.lock().unwrap().clone()).unwrap()
+    }
+}
+
+fn capture_logs() -> (CapturedLogs, tracing::subscriber::DefaultGuard) {
+    let logs = CapturedLogs::default();
+    let guard = tracing_subscriber::fmt()
+        .with_writer(logs.clone())
+        .with_ansi(false)
+        .set_default();
+    (logs, guard)
+}
+
+#[tokio::test]
+async fn provision_warns_when_the_configured_ack_timeout_was_capped() {
+    let (logs, _guard) = capture_logs();
+    let mut config = test_config();
+    config.ack_budget = AckBudget::new(Some(NonZeroDuration::from_secs(10).unwrap()));
+
+    provision(&MockJetStreamContext::new(), &config).await.unwrap();
+
+    let text = logs.text();
+    assert!(text.contains("WARN"), "{text}");
+    assert!(text.contains("requested_secs=10"), "{text}");
+    assert!(text.contains("effective_millis=2500"), "{text}");
+}
+
+#[tokio::test]
+async fn provision_stays_quiet_when_the_ack_timeout_fits() {
+    let (logs, _guard) = capture_logs();
+
+    provision(&MockJetStreamContext::new(), &test_config()).await.unwrap();
+
+    let text = logs.text();
+    assert!(!text.contains("WARN"), "{text}");
 }

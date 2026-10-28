@@ -34,6 +34,7 @@
 //! | `SLACK_TIMESTAMP_MAX_DRIFT_SECS` | `300` | Max clock drift for request timestamps (default 5 min) |
 //! | `NATS_URL` | `localhost:4222` | NATS server URL(s) |
 
+pub mod ack_budget;
 pub mod config;
 pub mod constants;
 pub mod header_text;

@@ -14,6 +14,7 @@ use crate::source::linear::config::LinearWebhookSecret;
 use crate::source::microsoft_graph::MicrosoftGraphClientState;
 use crate::source::notion::NotionVerificationToken;
 use crate::source::sentry::SentryClientSecret;
+use crate::source::slack::ack_budget::AckBudget;
 use crate::source::slack::config::{
     SlackAppToken, SlackSigningSecret, SlackSocketModeConfig as SlackSocketModeSourceConfig, SlackTransportConfig,
     SlackWebhookConfig as SlackWebhookSourceConfig,
@@ -994,6 +995,7 @@ fn resolve_slack_integrations(
         if !resolve_integration_source_status("slack", &id, integration.status.as_deref(), errors) {
             continue;
         }
+        let requested_nats_ack_timeout = integration.nats_ack_timeout_secs.is_some();
         let Some((subject_prefix, stream_name, stream_max_age, nats_ack_timeout)) = resolve_common_integration_fields(
             CommonIntegrationFieldsInput {
                 source: "slack",
@@ -1014,13 +1016,14 @@ fn resolve_slack_integrations(
             Some(transport) => transport,
             None => continue,
         };
+        let ack_budget = AckBudget::new(requested_nats_ack_timeout.then_some(nats_ack_timeout));
         integrations.push(SourceIntegration::new(
             id,
             crate::source::slack::SlackConfig {
                 subject_prefix,
                 stream_name,
                 stream_max_age,
-                nats_ack_timeout,
+                ack_budget,
                 transport,
             },
         ));

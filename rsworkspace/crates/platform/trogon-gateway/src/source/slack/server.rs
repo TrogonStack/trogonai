@@ -1,6 +1,7 @@
 use std::fmt;
 use std::time::Duration;
 
+use super::ack_budget::AckBudget;
 use super::config::SlackConfig;
 use super::config::SlackSigningSecret;
 use super::config::SlackTransport;
@@ -86,7 +87,7 @@ fn form_field<'a>(fields: &'a [(String, String)], name: &str) -> Option<&'a str>
 pub struct SlackBridge<P: JetStreamPublisher, S: ObjectStorePut> {
     publisher: ClaimCheckPublisher<P, S>,
     subject_prefix: NatsToken,
-    nats_ack_timeout: NonZeroDuration,
+    ack_budget: AckBudget,
     transport: SlackTransport,
 }
 
@@ -103,7 +104,7 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
         Self {
             publisher,
             subject_prefix: config.subject_prefix.clone(),
-            nats_ack_timeout: config.nats_ack_timeout,
+            ack_budget: config.ack_budget,
             transport: config.transport_kind(),
         }
     }
@@ -166,9 +167,20 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
             .with_static(NATS_HEADER_TRANSPORT, self.transport.as_str())
             .into_inner();
 
-        self.publisher
-            .publish_event(subject, headers, body, self.nats_ack_timeout.into())
-            .await
+        self.publish(subject, headers, body).await
+    }
+
+    async fn publish(
+        &self,
+        subject: String,
+        headers: async_nats::HeaderMap,
+        body: Bytes,
+    ) -> PublishOutcome<P::PublishError> {
+        let limit = self.ack_budget.limit();
+        match tokio::time::timeout(limit, self.publisher.publish_event(subject, headers, body, limit)).await {
+            Ok(outcome) => outcome,
+            Err(_) => PublishOutcome::AckTimedOut(limit),
+        }
     }
 
     async fn reject(&self, reason: UnroutableReason, team_id: &str, body: Bytes, stored: StatusCode) -> StatusCode {
@@ -282,15 +294,7 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
             return (status, String::new());
         };
 
-        let outcome = self
-            .publisher
-            .publish_event(
-                subject.into_string(),
-                nats_headers,
-                body.clone(),
-                self.nats_ack_timeout.into(),
-            )
-            .await;
+        let outcome = self.publish(subject.into_string(), nats_headers, body.clone()).await;
 
         (outcome_to_status(outcome), String::new())
     }
@@ -415,10 +419,7 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
                 .await;
         };
 
-        let outcome = self
-            .publisher
-            .publish_event(subject.into_string(), nats_headers, body, self.nats_ack_timeout.into())
-            .await;
+        let outcome = self.publish(subject.into_string(), nats_headers, body).await;
 
         outcome_to_status(outcome)
     }
@@ -520,15 +521,7 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
                 .await;
         };
 
-        let outcome = self
-            .publisher
-            .publish_event(
-                subject.into_string(),
-                nats_headers,
-                raw_body,
-                self.nats_ack_timeout.into(),
-            )
-            .await;
+        let outcome = self.publish(subject.into_string(), nats_headers, raw_body).await;
 
         outcome_to_status(outcome)
     }
@@ -542,6 +535,16 @@ pub async fn provision<C: JetStreamContext>(js: &C, config: &SlackConfig) -> Res
         ..Default::default()
     })
     .await?;
+
+    if let Some(requested) = config.ack_budget.capped_from() {
+        let requested_secs = Duration::from(requested).as_secs();
+        let effective_millis = config.ack_budget.limit().as_millis() as u64;
+        warn!(
+            requested_secs,
+            effective_millis,
+            "nats_ack_timeout_secs exceeds the time Slack allows for an acknowledgement and was lowered"
+        );
+    }
 
     let max_age_secs = Duration::from(config.stream_max_age).as_secs();
     let stream_name = config.stream_name.as_str();
