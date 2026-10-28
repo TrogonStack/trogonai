@@ -10,6 +10,7 @@ use super::constants::{
     CONTENT_TYPE_FORM, HEADER_SIGNATURE, HEADER_TIMESTAMP, NATS_HEADER_EVENT_ID, NATS_HEADER_EVENT_TYPE,
     NATS_HEADER_PAYLOAD_KIND, NATS_HEADER_REJECT_REASON, NATS_HEADER_TEAM_ID, NATS_HEADER_TRANSPORT, UNKNOWN_TEAM_ID,
 };
+use super::delivery_metadata::DeliveryContext;
 use super::header_text::{DeliveryHeaders, HeaderText, InvalidHeaderTextError};
 use super::interaction_key::InteractionKey;
 use super::signature;
@@ -51,6 +52,7 @@ fn delivery_headers(
     event_type: &str,
     event_id: Option<&str>,
     team_id: &str,
+    context: &DeliveryContext,
 ) -> Result<async_nats::HeaderMap, InvalidHeaderTextError> {
     let headers = DeliveryHeaders::new()
         .with(async_nats::header::NATS_MESSAGE_ID, &HeaderText::new(message_id)?)
@@ -58,11 +60,8 @@ fn delivery_headers(
         .with(NATS_HEADER_TEAM_ID, &HeaderText::new(team_id)?)
         .with_static(NATS_HEADER_PAYLOAD_KIND, kind)
         .with_static(NATS_HEADER_TRANSPORT, transport.as_str());
-    let headers = match event_id {
-        Some(event_id) => headers.with(NATS_HEADER_EVENT_ID, &HeaderText::new(event_id)?),
-        None => headers,
-    };
-    Ok(headers.into_inner())
+    let headers = headers.with_optional(NATS_HEADER_EVENT_ID, event_id)?;
+    Ok(context.apply(headers).into_inner())
 }
 
 fn json_team_id(payload: &serde_json::Value) -> &str {
@@ -110,7 +109,7 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
         }
     }
 
-    pub async fn handle_json_body(&self, body: Bytes) -> (StatusCode, String) {
+    pub async fn handle_json_body(&self, body: Bytes, context: &DeliveryContext) -> (StatusCode, String) {
         let Ok(payload) = serde_json::from_slice::<serde_json::Value>(&body) else {
             warn!("Invalid JSON payload");
             let status = self
@@ -124,15 +123,15 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
             return (status, String::new());
         };
 
-        self.handle_json_payload(&body, &payload).await
+        self.handle_json_payload(&body, &payload, context).await
     }
 
-    pub async fn handle_socket_interaction(&self, payload: &RawValue) -> StatusCode {
-        self.handle_interaction(payload.get(), Bytes::copy_from_slice(payload.get().as_bytes()))
+    pub async fn handle_socket_interaction(&self, payload: &RawValue, context: &DeliveryContext) -> StatusCode {
+        self.handle_interaction(payload.get(), Bytes::copy_from_slice(payload.get().as_bytes()), context)
             .await
     }
 
-    pub async fn handle_socket_slash_command(&self, payload: &RawValue) -> StatusCode {
+    pub async fn handle_socket_slash_command(&self, payload: &RawValue, context: &DeliveryContext) -> StatusCode {
         let raw_body = Bytes::copy_from_slice(payload.get().as_bytes());
         let Ok(value) = serde_json::from_str::<serde_json::Value>(payload.get()) else {
             warn!("Invalid JSON in slash command payload");
@@ -145,7 +144,7 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
                 )
                 .await;
         };
-        self.handle_slash_command_value(&value, raw_body).await
+        self.handle_slash_command_value(&value, raw_body, context).await
     }
 
     pub async fn publish_socket_unroutable(&self, reason: UnroutableReason, body: Bytes) -> StatusCode {
@@ -194,7 +193,12 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
         }
     }
 
-    async fn handle_json_payload(&self, body: &Bytes, payload: &serde_json::Value) -> (StatusCode, String) {
+    async fn handle_json_payload(
+        &self,
+        body: &Bytes,
+        payload: &serde_json::Value,
+        context: &DeliveryContext,
+    ) -> (StatusCode, String) {
         let payload_type = payload.get("type").and_then(|v| v.as_str()).unwrap_or_default();
 
         if payload_type == "url_verification" {
@@ -282,6 +286,7 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
             &event_type,
             Some(&event_id),
             &team_id,
+            context,
         ) else {
             warn!("Event metadata is not valid header text");
             let status = self
@@ -300,7 +305,7 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
         (outcome_to_status(outcome), String::new())
     }
 
-    async fn handle_form_payload(&self, body: &Bytes) -> (StatusCode, String) {
+    async fn handle_form_payload(&self, body: &Bytes, context: &DeliveryContext) -> (StatusCode, String) {
         let form_str = match std::str::from_utf8(body) {
             Ok(s) => s,
             Err(_) => {
@@ -322,12 +327,12 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
             .collect();
 
         if let Some(payload_json) = form_field(&fields, "payload") {
-            let status = self.handle_interaction(payload_json, body.clone()).await;
+            let status = self.handle_interaction(payload_json, body.clone(), context).await;
             return (status, String::new());
         }
 
         if let Some(command) = form_field(&fields, "command") {
-            let status = self.handle_slash_command(command, &fields, body.clone()).await;
+            let status = self.handle_slash_command(command, &fields, body.clone(), context).await;
             return (status, String::new());
         }
 
@@ -344,7 +349,7 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
         (status, String::new())
     }
 
-    async fn handle_interaction(&self, payload_json: &str, raw_body: Bytes) -> StatusCode {
+    async fn handle_interaction(&self, payload_json: &str, raw_body: Bytes, context: &DeliveryContext) -> StatusCode {
         let Ok(payload) = serde_json::from_str::<serde_json::Value>(payload_json) else {
             warn!("Invalid JSON in interaction payload field");
             return self
@@ -357,11 +362,16 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
                 .await;
         };
 
-        self.publish_interaction_payload(&payload, Bytes::from(payload_json.to_owned()))
+        self.publish_interaction_payload(&payload, Bytes::from(payload_json.to_owned()), context)
             .await
     }
 
-    async fn publish_interaction_payload(&self, payload: &serde_json::Value, body: Bytes) -> StatusCode {
+    async fn publish_interaction_payload(
+        &self,
+        payload: &serde_json::Value,
+        body: Bytes,
+        context: &DeliveryContext,
+    ) -> StatusCode {
         let team_id = interaction_team_id(payload).to_owned();
 
         let Some(interaction_type) = payload.get("type").and_then(|v| v.as_str()) else {
@@ -408,6 +418,7 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
             &interaction_type,
             None,
             &team_id,
+            context,
         ) else {
             warn!("Interaction metadata is not valid header text");
             return self
@@ -425,7 +436,13 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
         outcome_to_status(outcome)
     }
 
-    async fn handle_slash_command(&self, command: &str, fields: &[(String, String)], raw_body: Bytes) -> StatusCode {
+    async fn handle_slash_command(
+        &self,
+        command: &str,
+        fields: &[(String, String)],
+        raw_body: Bytes,
+        context: &DeliveryContext,
+    ) -> StatusCode {
         let team_id = form_field(fields, "team_id").unwrap_or(UNKNOWN_TEAM_ID);
 
         if command.is_empty() {
@@ -452,10 +469,16 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
                 .await;
         };
 
-        self.publish_slash_command(command, team_id, trigger_id, raw_body).await
+        self.publish_slash_command(command, team_id, trigger_id, raw_body, context)
+            .await
     }
 
-    async fn handle_slash_command_value(&self, payload: &serde_json::Value, raw_body: Bytes) -> StatusCode {
+    async fn handle_slash_command_value(
+        &self,
+        payload: &serde_json::Value,
+        raw_body: Bytes,
+        context: &DeliveryContext,
+    ) -> StatusCode {
         let team_id = json_team_id(payload);
         let command = payload.get("command").and_then(|v| v.as_str()).unwrap_or_default();
         if command.is_empty() {
@@ -481,7 +504,8 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
                 .await;
         };
 
-        self.publish_slash_command(command, team_id, trigger_id, raw_body).await
+        self.publish_slash_command(command, team_id, trigger_id, raw_body, context)
+            .await
     }
 
     async fn publish_slash_command(
@@ -490,6 +514,7 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
         team_id: &str,
         trigger_id: &str,
         raw_body: Bytes,
+        context: &DeliveryContext,
     ) -> StatusCode {
         let subject = match SlackSubject::command(&self.subject_prefix, command) {
             Ok(subject) => subject,
@@ -510,7 +535,8 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
 
         info!(command, "Received Slack slash command");
 
-        let Ok(nats_headers) = delivery_headers(self.transport, "command", trigger_id, command, None, team_id) else {
+        let Ok(nats_headers) = delivery_headers(self.transport, "command", trigger_id, command, None, team_id, context)
+        else {
             warn!("Slash command metadata is not valid header text");
             return self
                 .reject(
@@ -645,10 +671,12 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut, C: Epoch
         .and_then(|v| v.to_str().ok())
         .is_some_and(|ct| ct.starts_with(CONTENT_TYPE_FORM));
 
+    let context = DeliveryContext::http(&headers);
+
     if is_form {
-        state.bridge.handle_form_payload(&body).await
+        state.bridge.handle_form_payload(&body, &context).await
     } else {
-        state.bridge.handle_json_body(body).await
+        state.bridge.handle_json_body(body, &context).await
     }
 }
 

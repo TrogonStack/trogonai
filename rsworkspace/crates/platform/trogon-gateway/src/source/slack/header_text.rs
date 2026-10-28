@@ -16,6 +16,10 @@ impl HeaderText {
             .map_err(|_| InvalidHeaderTextError)
     }
 
+    pub fn integer(value: i64) -> Self {
+        Self(HeaderValue::from(value.to_string()))
+    }
+
     pub fn unknown() -> Self {
         Self(HeaderValue::from("unknown"))
     }
@@ -45,6 +49,20 @@ impl DeliveryHeaders {
     pub fn with_static(mut self, name: impl IntoHeaderName, value: &'static str) -> Self {
         self.0.insert(name, value);
         self
+    }
+
+    pub fn with_optional(self, name: impl IntoHeaderName, value: Option<&str>) -> Result<Self, InvalidHeaderTextError> {
+        match value {
+            Some(value) => Ok(self.with(name, &HeaderText::new(value)?)),
+            None => Ok(self),
+        }
+    }
+
+    pub fn with_optional_text(self, name: impl IntoHeaderName, value: Option<&HeaderText>) -> Self {
+        match value {
+            Some(value) => self.with(name, value),
+            None => self,
+        }
     }
 
     pub fn into_inner(self) -> HeaderMap {

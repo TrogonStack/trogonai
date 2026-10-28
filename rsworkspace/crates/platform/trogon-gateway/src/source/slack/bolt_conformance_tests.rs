@@ -27,8 +27,6 @@ const SIGNING_SECRET: &str = "bolt-conformance-signing-secret";
 const SUBJECT_PREFIX: &str = "slack";
 const UNROUTABLE_SUBJECT: &str = "slack.unroutable";
 const DEDUP_HEADER: &str = "Nats-Msg-Id";
-const HEADER_RETRY_NUM: &str = "X-Slack-Retry-Num";
-const HEADER_RETRY_REASON: &str = "X-Slack-Retry-Reason";
 const HEADER_ENVELOPE_ID: &str = "X-Slack-Envelope-Id";
 const HEADER_REQUEST_TIMESTAMP: &str = "X-Slack-Request-Timestamp";
 const HEADERS_ENTERPRISE_AND_APP: [&str; 3] = [
@@ -55,7 +53,6 @@ enum GapId {
     G2,
     G3,
     G4,
-    G5,
     G6,
     G7,
     G8,
@@ -280,7 +277,6 @@ impl GapId {
         };
         match self {
             GapId::G2 => fixture.expects_ack_body() && matches!(diff.field, Field::ResponseBody | Field::SocketAck),
-            GapId::G5 => missing.is_some_and(|name| name == HEADER_RETRY_NUM || name == HEADER_RETRY_REASON),
             GapId::G7 => missing.is_some_and(|name| HEADERS_ENTERPRISE_AND_APP.contains(&name)),
             GapId::G11 => fixture.transport == Transport::SocketMode && diff.field == Field::PayloadReserialized,
             GapId::G13 => missing.is_some_and(|name| name == HEADER_ENVELOPE_ID || name == HEADER_REQUEST_TIMESTAMP),

@@ -129,7 +129,6 @@
     "http.retry.event_message": [
       "G13",
       "G22",
-      "G5",
       "G7"
     ],
     "http.verify.timestamp_at_drift_limit": [
@@ -254,7 +253,6 @@
     "socket.retry.event_message": [
       "G13",
       "G22",
-      "G5",
       "G7"
     ]
   }
