@@ -13,6 +13,13 @@ impl PayloadEncoding {
             Self::Form => CONTENT_TYPE_FORM,
         }
     }
+
+    pub fn is_declared_by(self, content_type_header: &str) -> bool {
+        let media_type = content_type_header
+            .split_once(';')
+            .map_or(content_type_header, |(media_type, _)| media_type);
+        media_type.trim().eq_ignore_ascii_case(self.content_type())
+    }
 }
 
 #[cfg(test)]

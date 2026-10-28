@@ -7,9 +7,9 @@ use super::config::SlackSigningSecret;
 use super::config::SlackTransport;
 use super::config::SlackWebhookConfig;
 use super::constants::{
-    CONTENT_TYPE_FORM, CONTENT_TYPE_UNKNOWN, HEADER_SIGNATURE, HEADER_TIMESTAMP, NATS_HEADER_CONTENT_TYPE,
-    NATS_HEADER_EVENT_ID, NATS_HEADER_EVENT_TYPE, NATS_HEADER_PAYLOAD_KIND, NATS_HEADER_REJECT_REASON,
-    NATS_HEADER_TEAM_ID, NATS_HEADER_TRANSPORT, UNKNOWN_TEAM_ID,
+    CONTENT_TYPE_UNKNOWN, HEADER_SIGNATURE, HEADER_TIMESTAMP, NATS_HEADER_CONTENT_TYPE, NATS_HEADER_EVENT_ID,
+    NATS_HEADER_EVENT_TYPE, NATS_HEADER_PAYLOAD_KIND, NATS_HEADER_REJECT_REASON, NATS_HEADER_TEAM_ID,
+    NATS_HEADER_TRANSPORT, UNKNOWN_TEAM_ID,
 };
 use super::dedup_window::DedupWindow;
 use super::delivery_metadata::{DeliveryContext, DeliveryMetadata};
@@ -878,7 +878,7 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut, R: Reque
     let is_form = headers
         .get("content-type")
         .and_then(|v| v.to_str().ok())
-        .is_some_and(|ct| ct.starts_with(CONTENT_TYPE_FORM));
+        .is_some_and(|ct| PayloadEncoding::Form.is_declared_by(ct));
 
     let context = DeliveryContext::http(&headers);
 
