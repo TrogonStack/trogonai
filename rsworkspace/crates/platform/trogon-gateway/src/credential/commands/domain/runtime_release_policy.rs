@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use super::{AllowedHosts, AllowedRuntimeServices, InjectionLocation, InjectionLocations, RuntimeServiceId};
 
-/// The delivery policy the runtime projection carries per integration.
+/// The release policy the runtime projection carries per integration.
 ///
 /// A `workspace_id` field is deliberately absent: ADR#0046 collapses
 /// workspace-shaped fields into the project, and the projection's existing
@@ -14,14 +14,14 @@ use super::{AllowedHosts, AllowedRuntimeServices, InjectionLocation, InjectionLo
 /// take every shipped source offline. Once a value *is* set, enforcement is
 /// fail-closed, so the permissive default is confined to the unconfigured case.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct RuntimeDeliveryPolicy {
+pub struct RuntimeReleasePolicy {
     allowed_hosts: AllowedHosts,
     allowed_runtime_services: AllowedRuntimeServices,
     injection_locations: InjectionLocations,
     cache_ttl_override: Option<Duration>,
 }
 
-impl RuntimeDeliveryPolicy {
+impl RuntimeReleasePolicy {
     pub fn with_allowed_hosts(mut self, allowed_hosts: AllowedHosts) -> Self {
         self.allowed_hosts = allowed_hosts;
         self
@@ -37,9 +37,9 @@ impl RuntimeDeliveryPolicy {
         self
     }
 
-    pub fn with_cache_ttl_override(mut self, ttl: Duration) -> Result<Self, RuntimeDeliveryPolicyError> {
+    pub fn with_cache_ttl_override(mut self, ttl: Duration) -> Result<Self, RuntimeReleasePolicyError> {
         if ttl.is_zero() {
-            return Err(RuntimeDeliveryPolicyError::ZeroCacheTtl);
+            return Err(RuntimeReleasePolicyError::ZeroCacheTtl);
         }
         self.cache_ttl_override = Some(ttl);
         Ok(self)
@@ -71,21 +71,21 @@ impl RuntimeDeliveryPolicy {
         }
     }
 
-    pub fn permits(&self, request: &RuntimeDeliveryRequest<'_>) -> Result<(), RuntimeDeliveryDenied> {
+    pub fn permits(&self, request: &RuntimeReleaseRequest<'_>) -> Result<(), RuntimeReleaseDenied> {
         if !self.allowed_runtime_services.permits(request.runtime_service) {
-            return Err(RuntimeDeliveryDenied::RuntimeService {
+            return Err(RuntimeReleaseDenied::RuntimeService {
                 runtime_service: request.runtime_service.cloned(),
             });
         }
         if !self.allowed_hosts.permits(request.host) {
-            return Err(RuntimeDeliveryDenied::Host {
+            return Err(RuntimeReleaseDenied::Host {
                 host: request.host.map(str::to_string),
             });
         }
         if let Some(location) = request.injection_location
             && !self.injection_locations.permits(location)
         {
-            return Err(RuntimeDeliveryDenied::InjectionLocation {
+            return Err(RuntimeReleaseDenied::InjectionLocation {
                 location: location.clone(),
             });
         }
@@ -99,13 +99,13 @@ impl RuntimeDeliveryPolicy {
 /// an outbound target. An absent field is not a wildcard: a configured
 /// restriction denies when the matching field is missing.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct RuntimeDeliveryRequest<'a> {
+pub struct RuntimeReleaseRequest<'a> {
     runtime_service: Option<&'a RuntimeServiceId>,
     host: Option<&'a str>,
     injection_location: Option<&'a InjectionLocation>,
 }
 
-impl<'a> RuntimeDeliveryRequest<'a> {
+impl<'a> RuntimeReleaseRequest<'a> {
     pub fn new() -> Self {
         Self::default()
     }
@@ -127,7 +127,7 @@ impl<'a> RuntimeDeliveryRequest<'a> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
-pub enum RuntimeDeliveryDenied {
+pub enum RuntimeReleaseDenied {
     #[error("runtime service {} is not allowed to resolve this credential", describe_service(.runtime_service.as_ref()))]
     RuntimeService { runtime_service: Option<RuntimeServiceId> },
     #[error("host {} is not in the credential's allowed hosts", describe_host(.host.as_deref()))]
@@ -151,7 +151,7 @@ fn describe_host(host: Option<&str>) -> String {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
-pub enum RuntimeDeliveryPolicyError {
+pub enum RuntimeReleasePolicyError {
     #[error("cache ttl override must be greater than zero")]
     ZeroCacheTtl,
 }
@@ -166,27 +166,27 @@ mod tests {
 
     #[test]
     fn default_policy_permits_an_unqualified_request() {
-        let policy = RuntimeDeliveryPolicy::default();
+        let policy = RuntimeReleasePolicy::default();
 
-        assert_eq!(policy.permits(&RuntimeDeliveryRequest::new()), Ok(()));
+        assert_eq!(policy.permits(&RuntimeReleaseRequest::new()), Ok(()));
     }
 
     #[test]
     fn host_restriction_denies_an_unspecified_host() {
         let policy =
-            RuntimeDeliveryPolicy::default().with_allowed_hosts(AllowedHosts::only(["api.example.com"]).unwrap());
+            RuntimeReleasePolicy::default().with_allowed_hosts(AllowedHosts::only(["api.example.com"]).unwrap());
 
         assert_eq!(
-            policy.permits(&RuntimeDeliveryRequest::new()),
-            Err(RuntimeDeliveryDenied::Host { host: None })
+            policy.permits(&RuntimeReleaseRequest::new()),
+            Err(RuntimeReleaseDenied::Host { host: None })
         );
         assert_eq!(
-            policy.permits(&RuntimeDeliveryRequest::new().to_host("api.example.com")),
+            policy.permits(&RuntimeReleaseRequest::new().to_host("api.example.com")),
             Ok(())
         );
         assert_eq!(
-            policy.permits(&RuntimeDeliveryRequest::new().to_host("evil.example.net")),
-            Err(RuntimeDeliveryDenied::Host {
+            policy.permits(&RuntimeReleaseRequest::new().to_host("evil.example.net")),
+            Err(RuntimeReleaseDenied::Host {
                 host: Some("evil.example.net".to_string())
             })
         );
@@ -194,22 +194,22 @@ mod tests {
 
     #[test]
     fn runtime_service_restriction_denies_an_unidentified_caller() {
-        let policy = RuntimeDeliveryPolicy::default()
+        let policy = RuntimeReleasePolicy::default()
             .with_allowed_runtime_services(AllowedRuntimeServices::only(["trogon-gateway"]).unwrap());
         let allowed = service("trogon-gateway");
         let other = service("some-other-worker");
 
         assert_eq!(
-            policy.permits(&RuntimeDeliveryRequest::new()),
-            Err(RuntimeDeliveryDenied::RuntimeService { runtime_service: None })
+            policy.permits(&RuntimeReleaseRequest::new()),
+            Err(RuntimeReleaseDenied::RuntimeService { runtime_service: None })
         );
         assert_eq!(
-            policy.permits(&RuntimeDeliveryRequest::new().by_runtime_service(&allowed)),
+            policy.permits(&RuntimeReleaseRequest::new().by_runtime_service(&allowed)),
             Ok(())
         );
         assert_eq!(
-            policy.permits(&RuntimeDeliveryRequest::new().by_runtime_service(&other)),
-            Err(RuntimeDeliveryDenied::RuntimeService {
+            policy.permits(&RuntimeReleaseRequest::new().by_runtime_service(&other)),
+            Err(RuntimeReleaseDenied::RuntimeService {
                 runtime_service: Some(other)
             })
         );
@@ -217,13 +217,13 @@ mod tests {
 
     #[test]
     fn service_identity_is_checked_before_the_host() {
-        let policy = RuntimeDeliveryPolicy::default()
+        let policy = RuntimeReleasePolicy::default()
             .with_allowed_hosts(AllowedHosts::only(["api.example.com"]).unwrap())
             .with_allowed_runtime_services(AllowedRuntimeServices::only(["trogon-gateway"]).unwrap());
 
         assert_eq!(
-            policy.permits(&RuntimeDeliveryRequest::new().to_host("api.example.com")),
-            Err(RuntimeDeliveryDenied::RuntimeService { runtime_service: None })
+            policy.permits(&RuntimeReleaseRequest::new().to_host("api.example.com")),
+            Err(RuntimeReleaseDenied::RuntimeService { runtime_service: None })
         );
     }
 
@@ -232,31 +232,31 @@ mod tests {
         let header = InjectionLocation::header("authorization").unwrap();
         let query = InjectionLocation::query_parameter("token").unwrap();
         let policy =
-            RuntimeDeliveryPolicy::default().with_injection_locations(InjectionLocations::new([header.clone()]));
+            RuntimeReleasePolicy::default().with_injection_locations(InjectionLocations::new([header.clone()]));
 
-        assert_eq!(policy.permits(&RuntimeDeliveryRequest::new()), Ok(()));
+        assert_eq!(policy.permits(&RuntimeReleaseRequest::new()), Ok(()));
         assert_eq!(
-            policy.permits(&RuntimeDeliveryRequest::new().at_injection_location(&header)),
+            policy.permits(&RuntimeReleaseRequest::new().at_injection_location(&header)),
             Ok(())
         );
         assert_eq!(
-            policy.permits(&RuntimeDeliveryRequest::new().at_injection_location(&query)),
-            Err(RuntimeDeliveryDenied::InjectionLocation { location: query })
+            policy.permits(&RuntimeReleaseRequest::new().at_injection_location(&query)),
+            Err(RuntimeReleaseDenied::InjectionLocation { location: query })
         );
     }
 
     #[test]
     fn cache_ttl_override_may_only_shorten_the_window() {
         let default_ttl = Duration::from_secs(300);
-        let shorter = RuntimeDeliveryPolicy::default()
+        let shorter = RuntimeReleasePolicy::default()
             .with_cache_ttl_override(Duration::from_secs(60))
             .unwrap();
-        let longer = RuntimeDeliveryPolicy::default()
+        let longer = RuntimeReleasePolicy::default()
             .with_cache_ttl_override(Duration::from_secs(3600))
             .unwrap();
 
         assert_eq!(
-            RuntimeDeliveryPolicy::default().effective_cache_ttl(default_ttl),
+            RuntimeReleasePolicy::default().effective_cache_ttl(default_ttl),
             default_ttl
         );
         assert_eq!(shorter.effective_cache_ttl(default_ttl), Duration::from_secs(60));
@@ -266,8 +266,8 @@ mod tests {
     #[test]
     fn rejects_a_zero_cache_ttl_override() {
         assert_eq!(
-            RuntimeDeliveryPolicy::default().with_cache_ttl_override(Duration::ZERO),
-            Err(RuntimeDeliveryPolicyError::ZeroCacheTtl)
+            RuntimeReleasePolicy::default().with_cache_ttl_override(Duration::ZERO),
+            Err(RuntimeReleasePolicyError::ZeroCacheTtl)
         );
     }
 }

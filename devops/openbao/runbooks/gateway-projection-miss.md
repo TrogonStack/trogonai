@@ -86,7 +86,7 @@ same projection state.
 Two layers, and they fail differently:
 
 **The projection** maps an integration key to credential references and a
-delivery policy. It has no secret material. It is rebuilt from the stream.
+release policy. It has no secret material. It is rebuilt from the stream.
 
 **The cache** maps a credential reference to resolved material, with a 300
 second TTL plus per-credential jitter of up to 30 seconds

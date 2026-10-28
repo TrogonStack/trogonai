@@ -710,13 +710,13 @@ Store provider API keys as decryptable credential material:
 Provider API key
   -> Credential metadata in application DB
   -> raw value in OpenBao
-  -> CredentialDeliveryPolicy controls runtime use
+  -> CredentialReleasePolicy controls runtime use
 ```
 
-Provider API keys should carry delivery policy:
+Provider API keys should carry release policy:
 
 ```text
-CredentialDeliveryPolicy
+CredentialReleasePolicy
   allowed_runtime_services
   allowed_hosts
   injection_locations
@@ -954,7 +954,7 @@ Domain enforcement should happen through these boundaries:
   control plane to write/update operations and restrict the gateway to read only
   the credential paths it is supposed to resolve.
 - **Audit events.** Emit domain events such as `IntegrationCreated`,
-  `CredentialReplaced`, `CredentialRevoked`, and `DeliveryPolicyChanged` instead
+  `CredentialReplaced`, `CredentialRevoked`, and `ReleasePolicyChanged` instead
   of generic "secret written" events.
 
 Important domain rules to enforce:
@@ -962,8 +962,8 @@ Important domain rules to enforce:
 - A credential belongs to exactly one owner scope.
 - A credential kind must be valid for its source.
 - A verifier-only credential must not be returned as plaintext.
-- Production credentials must not be delivered to development or preview unless
-  an explicit delivery policy allows it.
+- Production credentials must not be released to development or preview unless
+  an explicit release policy allows it.
 - A disabled integration must not resolve runtime credential material.
 - A revoked credential version must not be accepted by the gateway.
 - A gateway service identity can read runtime material, but a browser/user API
@@ -977,7 +977,7 @@ If "domain enforcement" also means outbound network domains, model that as part
 of credential delivery:
 
 ```text
-CredentialDeliveryPolicy
+CredentialReleasePolicy
   credential_ref
   allowed_environments
   allowed_sources
@@ -995,7 +995,7 @@ The key rule is:
 ```text
 OpenBao enforces storage access.
 The application domain enforces product meaning.
-Runtime delivery policies enforce where and how material can be used.
+Runtime release policies enforce where and how material can be used.
 ```
 
 ### Secret Touch Points And Consistency
@@ -1032,7 +1032,7 @@ Boundaries that should not see plaintext:
 
 The domain model should pass `SecretString`-like values only through command
 handlers and ports. Domain entities should persist `CredentialRef`,
-`CredentialMetadata`, status, fingerprint, and delivery policy, not raw
+`CredentialMetadata`, status, fingerprint, and release policy, not raw
 credential values.
 
 There is no true distributed transaction between the application database and
@@ -1804,7 +1804,7 @@ Credential
   display_name
   type
   target key
-  delivery policy
+  release policy
   lifecycle state
 ```
 
@@ -1840,7 +1840,7 @@ The useful ideas to copy are:
   This is the network-domain enforcement we should copy for outbound provider
   API calls.
 - **Injection location.** A credential can be allowed in request headers, request
-  body, or both. For Trogonai, this becomes part of `CredentialDeliveryPolicy`.
+  body, or both. For Trogonai, this becomes part of `CredentialReleasePolicy`.
 - **Acknowledgement for shared credentials.** The UI forces the user to
   acknowledge workspace/API-key blast radius before adding the credential.
 - **Runtime re-resolution.** Running sessions can re-resolve credentials after
@@ -1864,11 +1864,11 @@ Credential
   kind
   display_name
   target_key
-  delivery_policy
+  release_policy
   lifecycle_state
   fingerprint
 
-CredentialDeliveryPolicy
+CredentialReleasePolicy
   allowed_environments
   allowed_runtime_services
   allowed_hosts
@@ -2430,7 +2430,7 @@ or spec sections that should exist before implementation is considered complete.
   archived/deleted metadata, and authorization scope.
 - [ ] `Credential` model: vault id, credential ref, kind, source, display name,
   target key, lifecycle state, fingerprint, and metadata.
-- [ ] `CredentialDeliveryPolicy` model: allowed environments, runtime services,
+- [ ] `CredentialReleasePolicy` model: allowed environments, runtime services,
   allowed hosts, injection locations, and provider/source restrictions.
 - [ ] `CredentialRef` path/version semantics and how refs map to OpenBao paths.
 - [ ] Credential state machine: pending, active, previous,
