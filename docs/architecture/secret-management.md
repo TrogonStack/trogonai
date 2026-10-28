@@ -4,14 +4,21 @@ This page describes the intended design recorded in
 [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md)
 (accepted) and
 [ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) and
-[ADR#0033](../adr/0033-two-tier-key-custody-product-model.md) (both draft).
-None of it is implemented yet. It is the model the implementation must
-satisfy, not current behavior. [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) records that the write model below
-was validated end to end by a prototype embedded in `trogon-gateway`, and
-that adopting the ADR means extracting that prototype's mechanics into the
-secrets service, not rebuilding them (Decision 4). That prototype's code is
-not present in this repository, so this page restates only what the ADR
-itself fixes.
+[ADR#0033](../adr/0033-key-custody-product-model.md) (both draft).
+The standalone secrets-service topology is a target, not a claim of deployed
+behavior. The gateway contains an embedded prototype under
+`rsworkspace/crates/platform/trogon-gateway/src/credential` and its secret-store
+adapter. [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md)
+records that the write model was validated by that prototype and requires
+extracting its mechanics into the secrets service. Proposed
+[ADR#0074](../adr/0074-credential-platform-extraction-boundary.md) leaves that
+extraction unfinished. Source presence does not establish standalone-service
+readiness.
+
+[Provider Credential Custody](./provider-credential-custody.md) explains the
+reference-only boundary for provider configuration. The proposed
+[Supplied Credential Material](../reference/supplied-credential-material.md)
+contract keeps secret-bearing inputs separate from persisted metadata.
 
 ## Scope
 
@@ -252,8 +259,11 @@ work-sharing: resolve traffic load-balances across the queue group, but
 every secrets-service replica must observe rotation and revocation
 through its own JetStream consumer, because queue-group delivery would
 evict one replica's cache and leave the others serving a stale or revoked
-credential. A consumer holds a resolved value only for the duration of an
-in-flight operation, never as ambient state ([ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) Decision 6).
+credential. A consumer may hold a resolved value as bounded ambient state
+under that TTL behind fan-out invalidation, which is how
+[ADR#0074](../adr/0074-credential-platform-extraction-boundary.md) Q2 amends
+[ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md)
+Decision 6.
 
 Whether a resolved secret value is held in a single-owner, zeroizing
 wrapper analogous to `KeyManagement`'s `Dek` wrapper, and exactly what
@@ -335,3 +345,5 @@ which means this behavior must be answered before adoption, not assumed.
 - [Key Management](./key-management.md)
 - [Key Custody](./key-custody.md)
 - [Key States](./key-states.md)
+- [Provider Credential Custody](./provider-credential-custody.md)
+- [Supplied Credential Material](../reference/supplied-credential-material.md)

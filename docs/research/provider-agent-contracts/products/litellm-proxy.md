@@ -742,7 +742,7 @@ by analogy on the tool and channel connections that §5 identifies as the gap.
   rather than changing it.
 - **§6.2 and V2, encryption key as a non-rotatable root.** LiteLLM's
   `LITELLM_SALT_KEY` "must not change after you have added a model". The
-  proposal's custody tiers ([ADR#0033](../../../adr/0033-two-tier-key-custody-product-model.md)) should state how the key that protects
+  proposal's custody tiers ([ADR#0033](../../../adr/0033-key-custody-product-model.md)) should state how the key that protects
   stored credentials rotates, since a gateway that cannot rotate it is the
   documented failure mode.
 - **A session pin that is not a pin.** The proposal pins at admission.

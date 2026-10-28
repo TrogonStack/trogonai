@@ -4,7 +4,7 @@ This page describes the intended design recorded in
 [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md)
 (accepted) and
 [ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) and
-[ADR#0033](../adr/0033-two-tier-key-custody-product-model.md) (both draft).
+[ADR#0033](../adr/0033-key-custody-product-model.md) (both draft).
 None of it is implemented yet. It is the model the implementation must
 satisfy, not current behavior.
 
@@ -156,7 +156,7 @@ unlike destruction it is reversible if the customer restores access.
 - [ADR#0023: Secret Management and Key Custody on OpenBao behind a Platform
   Secrets Service](../adr/0023-secret-management-and-key-custody-direction.md)
 - [ADR#0030: Customer-Controlled Key Backend Routing](../adr/0030-customer-controlled-key-backend-routing.md)
-- [ADR#0033: Two-Tier Key Custody Product Model](../adr/0033-two-tier-key-custody-product-model.md)
+- [ADR#0033: Key Custody Product Model](../adr/0033-key-custody-product-model.md)
 - [Key Management](./key-management.md)
 - [Key Custody](./key-custody.md)
 - [Migrate Between Key Backends](../how-to/migrate-key-backends.md)

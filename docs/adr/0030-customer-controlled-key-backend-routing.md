@@ -155,13 +155,21 @@ Deployment configuration declares which built-in adapters the service can
 operate and supplies only their bootstrap identity references. It does not
 provision every tenant backend or decide where every key lives.
 
-A `KeyBackendRegistration` is durable, tenant-scoped product state. It owns
-connection, authentication, and trust configuration, but no key locator. It has
-an opaque `KeyBackendId`, a typed provider variant, ownership, lifecycle status,
-provider access parameters, and a non-secret authentication profile. Raw
-credentials never appear in configuration, events, or the registration.
-Workload identity and short-lived credentials are preferred; an unavoidable
-secret is represented by a `CredentialRef` and remains behind `SecretStore`.
+A `KeyBackendRegistration` is durable product state owned by one tenant or by
+the platform. It owns connection, authentication, and trust configuration, but
+no key locator. It has an opaque `KeyBackendId`, a typed provider variant,
+ownership, lifecycle status, provider access parameters, and a non-secret
+authentication profile. Raw credentials never appear in configuration, events,
+or the registration. Workload identity and short-lived credentials are
+preferred; an unavoidable secret is represented by a `CredentialRef` and
+remains behind `SecretStore`.
+
+Platform-owned registrations back the managed and dedicated tiers of
+[ADR#0033](./0033-key-custody-product-model.md) and are subject to every rule
+in this ADR: conformance, failure taxonomy, immutable binding, and rewrap
+migration. The first implementation enables one platform-owned OpenBao Transit
+registration. A platform-owned AWS KMS or Google Cloud KMS registration uses
+the same adapters a customer registration uses; it is not a separate code path.
 
 `KeyBackendId` identifies an immutable provider account, project, or OpenBao
 security boundary. A credential, trust root, authorization principal, or
