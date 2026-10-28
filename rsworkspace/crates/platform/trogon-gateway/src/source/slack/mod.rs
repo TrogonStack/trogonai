@@ -25,7 +25,13 @@
 //!    Slack every third of the 5 second client ping timeout and reconnects when
 //!    the pong is overdue, and reconnects when Slack's own pings stop for 30
 //!    seconds.
-//! 7. The JetStream stream is created on startup if it does not exist. Its
+//! 7. A Socket Mode frame that is not a valid envelope is logged without its
+//!    body and skipped, and the connection stays open. Failures that retrying
+//!    cannot fix, such as `invalid_auth` from `apps.connections.open` or a
+//!    `link_disabled` disconnect, are logged at error level while the usual
+//!    reconnect backoff continues, because the gateway has no per integration
+//!    health signal.
+//! 8. The JetStream stream is created on startup if it does not exist. Its
 //!    subjects, `max_age` and dedup window are reconciled on every start, and
 //!    settings an operator changed out of band, such as replicas, are left alone.
 //!
@@ -80,6 +86,7 @@
 
 pub mod ack_budget;
 pub mod config;
+pub mod connections_open_error_code;
 pub mod constants;
 pub mod dedup_window;
 pub mod delivery_metadata;

@@ -57,3 +57,13 @@ pub const SOCKET_LIVENESS: SocketLiveness = SocketLiveness::new(
     SERVER_PING_TIMEOUT,
     UNANSWERED_PING_LIMIT,
 );
+
+pub const PERMANENT_CONNECTIONS_OPEN_ERRORS: &[&str] = &[
+    "not_authed",
+    "invalid_auth",
+    "account_inactive",
+    "user_removed_from_team",
+    "team_disabled",
+    "not_allowed_token_type",
+];
+pub const DISCONNECT_REASON_LINK_DISABLED: &str = "link_disabled";

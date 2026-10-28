@@ -1,4 +1,5 @@
 use super::super::ack_budget::AckBudget;
+use super::super::connections_open_error_code::ConnectionsOpenErrorCode;
 use super::super::constants::{
     CLIENT_PING_INTERVAL, CLIENT_PING_TIMEOUT, DEFAULT_API_BASE_URL, SERVER_PING_TIMEOUT, UNANSWERED_PING_LIMIT,
 };
@@ -137,13 +138,6 @@ fn socket_mode_error_sources_are_exposed() {
     assert_eq!(error.to_string(), "slack socket_mode config is missing");
     assert!(error.source().is_none());
 
-    let json_error = serde_json::from_str::<serde_json::Value>("not-json").unwrap_err();
-    let expected_json_error = format!("Slack Socket Mode JSON parsing failed: {json_error}");
-    let error = SocketModeError::from(json_error);
-    assert!(matches!(error, SocketModeError::Json(_)));
-    assert_eq!(error.to_string(), expected_json_error);
-    assert!(error.source().is_some());
-
     let error = SocketModeError::WebSocket(tokio_tungstenite::tungstenite::Error::ConnectionClosed);
     assert_eq!(
         error.to_string(),
@@ -151,7 +145,7 @@ fn socket_mode_error_sources_are_exposed() {
     );
     assert!(error.source().is_some());
 
-    let error = SocketModeError::Api("invalid_auth".to_string());
+    let error = SocketModeError::Api(ConnectionsOpenErrorCode::new("invalid_auth"));
     assert_eq!(error.to_string(), "Slack apps.connections.open failed: invalid_auth");
     assert!(error.source().is_none());
 }
@@ -777,7 +771,7 @@ async fn apps_connections_open_missing_url_is_api_error() {
     .await
     .unwrap_err();
 
-    assert!(matches!(error, SocketModeError::Api(ref message) if message == "missing url"));
+    assert!(matches!(error, SocketModeError::Api(ref code) if *code == ConnectionsOpenErrorCode::new("missing url")));
 }
 
 #[tokio::test]
@@ -800,7 +794,7 @@ async fn apps_connections_open_error_is_api_error() {
     .await
     .unwrap_err();
 
-    assert!(matches!(error, SocketModeError::Api(ref message) if message == "invalid_auth"));
+    assert!(matches!(error, SocketModeError::Api(ref code) if *code == ConnectionsOpenErrorCode::new("invalid_auth")));
 }
 
 #[tokio::test]
@@ -1634,4 +1628,90 @@ async fn client_ping_send_failure_ends_the_connection() {
         error,
         SocketModeError::WebSocket(WebSocketError::ConnectionClosed)
     ));
+}
+
+#[test]
+fn only_credential_and_link_failures_are_permanent() {
+    let api = |code: &str| SocketModeError::Api(ConnectionsOpenErrorCode::new(code));
+
+    assert!(api("invalid_auth").is_permanent());
+    assert!(!api("ratelimited").is_permanent());
+    assert!(SocketModeError::LinkDisabled.is_permanent());
+    assert!(!SocketModeError::MissingSocketModeConfig.is_permanent());
+    assert!(!SocketModeError::WebSocket(WebSocketError::ConnectionClosed).is_permanent());
+    assert_eq!(
+        SocketModeError::LinkDisabled.to_string(),
+        "Slack disabled Socket Mode for this app"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn permanent_open_errors_keep_the_existing_backoff() {
+    let (attempts, mut observed) = mpsc::channel(1);
+    let connector = ScriptedConnector {
+        results: [
+            Err(SocketModeError::Api(ConnectionsOpenErrorCode::new("invalid_auth"))),
+            Err(SocketModeError::LinkDisabled),
+        ]
+        .into(),
+        attempts,
+    };
+    let task = tokio::spawn(run(
+        wrap_publisher(MockJetStreamPublisher::new()),
+        socket_config(),
+        connector,
+    ));
+    let first = observed.recv().await.unwrap();
+    let second = observed.recv().await.unwrap();
+    let third = observed.recv().await.unwrap();
+    assert_eq!(second - first, RECONNECT_INITIAL_DELAY);
+    assert_eq!(third - second, RECONNECT_INITIAL_DELAY * 2);
+    task.abort();
+}
+
+#[tokio::test]
+async fn malformed_frames_are_skipped_without_publishing() {
+    let publisher = MockJetStreamPublisher::new();
+    for frame in ["not json", "{", r#"{"envelope_id":"env-1"}"#, r#"{"type":7}"#, ""] {
+        let (reconnect, ack) = handle_text_frame(&bridge(publisher.clone()), frame).await.unwrap();
+
+        assert!(!reconnect, "{frame}");
+        assert_eq!(ack, None, "{frame}");
+    }
+    assert!(publisher.published_messages().is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_malformed_frame_does_not_close_the_connection() {
+    let publisher = MockJetStreamPublisher::new();
+    let mut socket = start_socket_with(publisher.clone());
+    let envelope = envelope_text(
+        "events_api",
+        r#"{"type":"event_callback","event_id":"EvAfterJunk","team_id":"T01ABC","event":{"type":"message"}}"#,
+    );
+
+    socket.inbound.send(Ok(Message::Text("{not json".into()))).unwrap();
+    socket.inbound.send(Ok(Message::Text(envelope.into()))).unwrap();
+
+    let ack = loop {
+        match socket.outbound.recv().await {
+            Some(Message::Text(ack)) => break ack,
+            Some(_) => {}
+            None => panic!("connection closed after a malformed frame"),
+        }
+    };
+    assert_eq!(ack.as_str(), r#"{"envelope_id":"env-raw"}"#);
+    assert!(!socket.task.is_finished());
+    socket.task.abort();
+}
+
+#[tokio::test]
+async fn link_disabled_disconnect_is_reported_as_a_permanent_failure() {
+    let envelope = serde_json::json!({ "type": "disconnect", "reason": "link_disabled" });
+
+    let error = handle_text_frame(&bridge(MockJetStreamPublisher::new()), &envelope.to_string())
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, SocketModeError::LinkDisabled));
 }

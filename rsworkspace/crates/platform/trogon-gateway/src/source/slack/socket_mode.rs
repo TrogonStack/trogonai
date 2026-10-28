@@ -6,11 +6,14 @@ use serde::Deserialize;
 use serde_json::value::RawValue;
 use tokio::time::{Instant, MissedTickBehavior};
 use tokio_tungstenite::tungstenite::{Error as WebSocketError, Message};
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 use trogon_nats::jetstream::{ClaimCheckPublisher, JetStreamPublisher, ObjectStorePut};
 
 use super::config::{SlackConfig, SlackSocketModeConfig};
-use super::constants::{CLIENT_PING_PAYLOAD, RECONNECT_INITIAL_DELAY, RECONNECT_MAX_DELAY, SOCKET_LIVENESS};
+use super::connections_open_error_code::ConnectionsOpenErrorCode;
+use super::constants::{
+    CLIENT_PING_PAYLOAD, DISCONNECT_REASON_LINK_DISABLED, RECONNECT_INITIAL_DELAY, RECONNECT_MAX_DELAY, SOCKET_LIVENESS,
+};
 use super::delivery_metadata::DeliveryContext;
 use super::server::SlackBridge;
 use super::socket_liveness::{PongWatch, SocketLiveness};
@@ -23,11 +26,11 @@ pub enum SocketModeError {
     #[error("Slack Socket Mode HTTP request failed: {0}")]
     Http(#[source] reqwest::Error),
     #[error("Slack apps.connections.open failed: {0}")]
-    Api(String),
+    Api(ConnectionsOpenErrorCode),
+    #[error("Slack disabled Socket Mode for this app")]
+    LinkDisabled,
     #[error("Slack Socket Mode WebSocket failed: {0}")]
     WebSocket(#[source] tokio_tungstenite::tungstenite::Error),
-    #[error("Slack Socket Mode JSON parsing failed: {0}")]
-    Json(#[source] serde_json::Error),
 }
 
 impl From<reqwest::Error> for SocketModeError {
@@ -42,9 +45,13 @@ impl From<tokio_tungstenite::tungstenite::Error> for SocketModeError {
     }
 }
 
-impl From<serde_json::Error> for SocketModeError {
-    fn from(error: serde_json::Error) -> Self {
-        Self::Json(error)
+impl SocketModeError {
+    pub fn is_permanent(&self) -> bool {
+        match self {
+            Self::Api(code) => code.is_permanent(),
+            Self::LinkDisabled => true,
+            Self::MissingSocketModeConfig | Self::Http(_) | Self::WebSocket(_) => false,
+        }
     }
 }
 
@@ -118,6 +125,9 @@ pub async fn run<P: JetStreamPublisher, S: ObjectStorePut>(
     loop {
         match connector.connect(&bridge, &socket_mode).await {
             Ok(()) => reconnect_delay = RECONNECT_INITIAL_DELAY,
+            Err(error) if error.is_permanent() => {
+                error!(error = %error, "Slack Socket Mode connection can never succeed until the app is fixed");
+            }
             Err(error) => warn!(error = %error, "Slack Socket Mode connection failed"),
         }
 
@@ -230,19 +240,28 @@ async fn open_socket_url(
     if response.ok {
         return response
             .url
-            .ok_or_else(|| SocketModeError::Api("missing url".to_string()));
+            .ok_or_else(|| SocketModeError::Api(ConnectionsOpenErrorCode::new("missing url")));
     }
 
-    Err(SocketModeError::Api(
+    Err(SocketModeError::Api(ConnectionsOpenErrorCode::new(
         response.error.unwrap_or_else(|| "unknown error".to_string()),
-    ))
+    )))
 }
 
 pub(super) async fn handle_text_frame<P: JetStreamPublisher, S: ObjectStorePut>(
     bridge: &SlackBridge<P, S>,
     text: &str,
 ) -> Result<(bool, Option<String>), SocketModeError> {
-    let envelope: SocketEnvelope = serde_json::from_str(text)?;
+    let envelope = match serde_json::from_str::<SocketEnvelope>(text) {
+        Ok(envelope) => envelope,
+        Err(parse_error) => {
+            let category = parse_error.classify();
+            let line = parse_error.line();
+            let column = parse_error.column();
+            warn!(?category, line, column, "Ignoring malformed Slack Socket Mode frame");
+            return Ok((false, None));
+        }
+    };
 
     match envelope.kind.as_str() {
         "hello" => {
@@ -252,6 +271,9 @@ pub(super) async fn handle_text_frame<P: JetStreamPublisher, S: ObjectStorePut>(
         "disconnect" => {
             let reason = envelope.reason.as_deref().unwrap_or("unknown");
             warn!(reason, "Slack Socket Mode disconnect requested");
+            if reason == DISCONNECT_REASON_LINK_DISABLED {
+                return Err(SocketModeError::LinkDisabled);
+            }
             Ok((true, None))
         }
         "events_api" | "interactive" | "slash_commands" => handle_payload_envelope(bridge, envelope, text)
