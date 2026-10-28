@@ -20,10 +20,12 @@ docker compose up -d openbao-bootstrap
 
 Name `openbao-bootstrap`, not `openbao`. The server is uninitialized and sealed
 until bootstrap runs against it, and because the dependency points from
-bootstrap to the server, starting `openbao` alone never triggers it. Bootstrap
+bootstrap to the server, starting `openbao` alone never triggers it (the
+gateway waits for bootstrap to complete, so `trogon-gateway` does). Bootstrap
 pulls in `openbao` and `postgres` as its own dependencies, then runs to
 completion: on a fresh database it initializes the server, installs the fixed
-dev root token, and mounts a transit key. Every step is skipped only when the
+dev root token, mounts a transit key, and mounts the KV v2 store the gateway
+reads. Every step is skipped only when the
 thing it creates is already there, so re-running it reconciles rather than
 duplicates, and a run killed partway finishes on the next `up`. A plain
 `docker compose up` starts the whole stack and needs no special casing.
@@ -48,6 +50,7 @@ The UI is at <http://openbao.trogonai.orb.local:8200/ui>.
 | Root token | `local-dev-root-token` | `OPENBAO_DEV_ROOT_TOKEN` |
 | Transit mount | `transit/` | `OPENBAO_DEV_TRANSIT_MOUNT` |
 | Transit key (`aes256-gcm96`) | `local-dev-kek` | `OPENBAO_DEV_TRANSIT_KEY` |
+| KV v2 mount | `secret/` | `OPENBAO_DEV_KV_MOUNT` |
 
 `aes256-gcm96` is the key type the key-custody design needs, because it is the
 type whose transit `associated_data` carries the platform's authenticated

@@ -15,6 +15,7 @@ export BAO_ADDR
 DEV_ROOT_TOKEN="${OPENBAO_DEV_ROOT_TOKEN:?OPENBAO_DEV_ROOT_TOKEN must be set}"
 TRANSIT_MOUNT="${OPENBAO_DEV_TRANSIT_MOUNT:-transit}"
 TRANSIT_KEY="${OPENBAO_DEV_TRANSIT_KEY:-local-dev-kek}"
+KV_MOUNT="${OPENBAO_DEV_KV_MOUNT:-secret}"
 
 # `bao status` exits 1 while the server is still binding its listener, 2 once it
 # answers but is sealed or uninitialized, and 0 when it is unsealed.
@@ -59,6 +60,11 @@ provision() {
   if ! bao read "${TRANSIT_MOUNT}/keys/${TRANSIT_KEY}" >/dev/null 2>&1; then
     bao write -f "${TRANSIT_MOUNT}/keys/${TRANSIT_KEY}" type=aes256-gcm96 >/dev/null
   fi
+
+  # The gateway's OpenBao secret store defaults to a KV v2 mount named `secret`.
+  if ! bao secrets list -format=json | grep -q "\"${KV_MOUNT}/\""; then
+    bao secrets enable -path="$KV_MOUNT" -version=2 kv >/dev/null
+  fi
 }
 
 wait_for_api
@@ -79,7 +85,7 @@ if bao status -format=json 2>/dev/null | grep -q '"initialized": true'; then
   fi
 
   provision
-  echo "openbao-bootstrap: ready (token: ${DEV_ROOT_TOKEN}, transit key: ${TRANSIT_MOUNT}/${TRANSIT_KEY})"
+  echo "openbao-bootstrap: ready (token: ${DEV_ROOT_TOKEN}, transit key: ${TRANSIT_MOUNT}/${TRANSIT_KEY}, kv mount: ${KV_MOUNT}/)"
   exit 0
 fi
 
@@ -114,4 +120,4 @@ provision
 # The initial root token has served its purpose; the fixed dev token replaces it.
 bao token revoke "$initial_root_token" >/dev/null
 
-echo "openbao-bootstrap: ready (token: ${DEV_ROOT_TOKEN}, transit key: ${TRANSIT_MOUNT}/${TRANSIT_KEY})"
+echo "openbao-bootstrap: ready (token: ${DEV_ROOT_TOKEN}, transit key: ${TRANSIT_MOUNT}/${TRANSIT_KEY}, kv mount: ${KV_MOUNT}/)"
