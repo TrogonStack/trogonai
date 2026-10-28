@@ -621,7 +621,7 @@ fn slack_ack_budget_defaults_to_the_slack_deadline_not_the_generic_timeout() {
     let f = write_toml(&slack_toml("slack-signing-secret"));
     let cfg = load(Some(f.path())).expect("load failed");
     let budget = slack_ack_budget(&cfg);
-    assert_eq!(budget.limit(), std::time::Duration::from_millis(2500));
+    assert_eq!(budget.limit(), std::time::Duration::from_millis(2800));
     assert_eq!(budget.capped_from(), None);
 }
 
@@ -653,7 +653,7 @@ app_token = "xapp-test-token"
     let f = write_toml(toml);
     let cfg = load(Some(f.path())).expect("load failed");
     let budget = slack_ack_budget(&cfg);
-    assert_eq!(budget.limit(), std::time::Duration::from_millis(2500));
+    assert_eq!(budget.limit(), std::time::Duration::from_millis(2800));
     assert_eq!(
         budget.capped_from().map(std::time::Duration::from),
         Some(std::time::Duration::from_secs(10))

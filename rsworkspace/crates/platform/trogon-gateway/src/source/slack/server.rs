@@ -1,7 +1,7 @@
 use std::fmt;
 use std::time::Duration;
 
-use super::ack_budget::AckBudget;
+use super::ack_budget::{AckBudget, AckPlan};
 use super::config::SlackConfig;
 use super::config::SlackSigningSecret;
 use super::config::SlackTransport;
@@ -175,7 +175,7 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
             .with_static(NATS_HEADER_TRANSPORT, self.transport.as_str())
             .into_inner();
 
-        self.publish(subject, headers, body).await
+        self.publish(subject, headers, body, AckPlan::Acknowledge).await
     }
 
     async fn publish(
@@ -183,8 +183,9 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
         subject: String,
         headers: async_nats::HeaderMap,
         body: Bytes,
+        plan: AckPlan,
     ) -> PublishOutcome<P::PublishError> {
-        let limit = self.ack_budget.limit();
+        let limit = self.ack_budget.publish_limit(plan);
         match tokio::time::timeout(limit, self.publisher.publish_event(subject, headers, body, limit)).await {
             Ok(outcome) => outcome,
             Err(_) => PublishOutcome::AckTimedOut(limit),
@@ -315,7 +316,9 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
             return (status, String::new());
         };
 
-        let outcome = self.publish(subject.into_string(), nats_headers, body.clone()).await;
+        let outcome = self
+            .publish(subject.into_string(), nats_headers, body.clone(), AckPlan::Acknowledge)
+            .await;
 
         (outcome_to_status(outcome), String::new())
     }
@@ -358,7 +361,9 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
                 .await;
         };
 
-        let outcome = self.publish(subject.into_string(), nats_headers, body).await;
+        let outcome = self
+            .publish(subject.into_string(), nats_headers, body, AckPlan::Acknowledge)
+            .await;
 
         outcome_to_status(outcome)
     }
@@ -489,7 +494,14 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
                 .await;
         };
 
-        let outcome = self.publish(subject.into_string(), nats_headers, body).await;
+        let outcome = self
+            .publish(
+                subject.into_string(),
+                nats_headers,
+                body,
+                AckPlan::for_interaction(&interaction_type),
+            )
+            .await;
 
         outcome_to_status(outcome)
     }
@@ -616,7 +628,9 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
                 .await;
         };
 
-        let outcome = self.publish(subject.into_string(), nats_headers, raw_body).await;
+        let outcome = self
+            .publish(subject.into_string(), nats_headers, raw_body, AckPlan::AwaitReply)
+            .await;
 
         outcome_to_status(outcome)
     }

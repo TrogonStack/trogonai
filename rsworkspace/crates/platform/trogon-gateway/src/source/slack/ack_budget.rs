@@ -2,12 +2,27 @@ use std::time::Duration;
 
 use trogon_std::NonZeroDuration;
 
-use super::constants::ACK_LIMIT_MAX;
+use super::constants::{ACK_LIMIT_MAX, REPLY_PUBLISH_LIMIT_MAX};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AckPlan {
+    Acknowledge,
+    AwaitReply,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AckBudget {
     limit: Duration,
     capped_from: Option<NonZeroDuration>,
+}
+
+impl AckPlan {
+    pub fn for_interaction(interaction_type: &str) -> Self {
+        match interaction_type {
+            "view_submission" => Self::AwaitReply,
+            _ => Self::Acknowledge,
+        }
+    }
 }
 
 impl AckBudget {
@@ -30,6 +45,13 @@ impl AckBudget {
 
     pub fn limit(self) -> Duration {
         self.limit
+    }
+
+    pub fn publish_limit(self, plan: AckPlan) -> Duration {
+        match plan {
+            AckPlan::Acknowledge => self.limit,
+            AckPlan::AwaitReply => self.limit.min(REPLY_PUBLISH_LIMIT_MAX),
+        }
     }
 
     pub fn capped_from(self) -> Option<NonZeroDuration> {

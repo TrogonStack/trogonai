@@ -112,7 +112,7 @@ Source-specific extras:
 
 - Microsoft Graph `client_state` must match the `clientState` used when creating Microsoft Graph subscriptions
 - Slack `timestamp_max_drift_secs` (default: `300`)
-- Slack acknowledges within Slack's 3 second deadline, so the publish budget is 2.5 seconds. `nats_ack_timeout_secs` defaults to that budget for Slack and a larger value is lowered to it with a warning at startup
+- Slack acknowledges within Slack's 3 second deadline, so the publish budget is 2.8 seconds, or 1 second when the delivery also waits for a consumer reply. `nats_ack_timeout_secs` defaults to that budget for Slack and a larger value is lowered to it with a warning at startup
 - Slack webhook requests with `Content-Type: application/x-www-form-urlencoded` and exactly one `ssl_check=1` field are answered `200` before signature verification and are never published, matching Slack's connectivity probe
 - Slack webhook `max_body_bytes` (default: `4194304`) is either an integer or `{ env = "VAR" }` naming an environment variable that holds the byte count. Requests above it are refused with `413`. It does not apply to Socket Mode
 - Slack Socket Mode `api_base_url` (default: `https://slack.com/api/`) is the Slack Web API base the gateway calls `apps.connections.open` on. Set it to `https://slack-gov.com/api/` for GovSlack. It must be an absolute `http` or `https` URL

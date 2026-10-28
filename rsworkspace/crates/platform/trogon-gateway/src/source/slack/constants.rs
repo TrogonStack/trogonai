@@ -43,7 +43,8 @@ pub const RECONNECT_MAX_DELAY: Duration = Duration::from_secs(30);
 pub const DEDUP_WINDOW: Duration = Duration::from_secs(10 * 60);
 
 pub const SLACK_ACK_DEADLINE: Duration = Duration::from_secs(3);
-pub const ACK_RESPONSE_MARGIN: Duration = Duration::from_millis(500);
+pub const ACK_RESPONSE_MARGIN: Duration = Duration::from_millis(200);
+pub const REPLY_PUBLISH_LIMIT_MAX: Duration = Duration::from_secs(1);
 pub const ACK_LIMIT_MAX: Duration = SLACK_ACK_DEADLINE.saturating_sub(ACK_RESPONSE_MARGIN);
 
 pub const CLIENT_PING_TIMEOUT: Duration = Duration::from_secs(5);

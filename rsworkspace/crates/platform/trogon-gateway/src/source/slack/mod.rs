@@ -95,7 +95,7 @@
 //! | `webhook.max_body_bytes` | `4194304` | Largest accepted request body |
 //! | `socket_mode.app_token` | required | App-level token, starts with `xapp-` |
 //! | `socket_mode.api_base_url` | `https://slack.com/api/` | Slack Web API base for `apps.connections.open`, for example `https://slack-gov.com/api/` for GovSlack |
-//! | `nats_ack_timeout_secs` | derived from Slack's 3 second deadline | Capped at that budget |
+//! | `nats_ack_timeout_secs` | derived from Slack's 3 second deadline | Capped at 2.8 seconds, and at 1 second for deliveries that wait on a consumer reply |
 
 pub mod ack_budget;
 pub mod config;

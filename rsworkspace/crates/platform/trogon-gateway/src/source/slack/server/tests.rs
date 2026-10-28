@@ -1252,7 +1252,7 @@ async fn unacknowledged_publish_answers_slack_inside_its_three_second_deadline()
     let elapsed = started.elapsed();
 
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
-    assert_eq!(elapsed, std::time::Duration::from_millis(2500));
+    assert_eq!(elapsed, std::time::Duration::from_millis(2800));
     assert!(elapsed < super::super::constants::SLACK_ACK_DEADLINE);
 }
 
@@ -1290,7 +1290,7 @@ async fn a_publish_that_never_returns_answers_slack_inside_its_three_second_dead
     let elapsed = started.elapsed();
 
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
-    assert_eq!(elapsed, std::time::Duration::from_millis(2500));
+    assert_eq!(elapsed, std::time::Duration::from_millis(2800));
     assert!(elapsed < super::super::constants::SLACK_ACK_DEADLINE);
 }
 
@@ -1342,7 +1342,7 @@ async fn provision_warns_when_the_configured_ack_timeout_was_capped() {
     let text = logs.text();
     assert!(text.contains("WARN"), "{text}");
     assert!(text.contains("requested_secs=10"), "{text}");
-    assert!(text.contains("effective_millis=2500"), "{text}");
+    assert!(text.contains("effective_millis=2800"), "{text}");
 }
 
 #[tokio::test]
