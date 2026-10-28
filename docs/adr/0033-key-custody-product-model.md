@@ -278,6 +278,19 @@ whichever backend the platform runs. The platform may still choose to
 provision dedicated keys for every tenant on Transit as policy; the tier list
 does not depend on that choice.
 
+### Hardcode the platform's tiers to OpenBao Transit
+
+Rejected, after an earlier draft assumed it. Fixing the managed and dedicated
+tiers to one backend reads as the simpler design, but the assumption breaks the
+day a deployment cannot run that backend, for example a government cloud with
+an approved key service, and the fix at that point is a redesign of the custody
+model rather than a new registration. The registry of
+[ADR#0030](./0030-customer-controlled-key-backend-routing.md) already models
+backends and adapters for customers, so pluggability for the platform's own
+keys costs one more registration owner, not a second mechanism. The first
+implementation still ships one backend; what the platform does not do is let
+that backend's name leak into the tier model.
+
 ### Envelope-encrypt platform state universally
 
 Rejected. Components that must start before the secrets service serves could
