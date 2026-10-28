@@ -1,4 +1,5 @@
 use super::*;
+use crate::source::google_pubsub::credentials::fixtures::FAKE_EXTERNAL_ACCOUNT;
 use std::env;
 use std::error::Error;
 use std::io::Write;
@@ -138,6 +139,15 @@ webhook_token = "{token}"
     )
 }
 
+fn zoom_toml(token: &str) -> String {
+    format!(
+        r#"
+[sources.zoom.integrations.primary.webhook]
+secret_token = "{token}"
+"#
+    )
+}
+
 fn incidentio_valid_test_secret() -> String {
     ["whsec_", "dGVzdC1zZWNyZXQ="].concat()
 }
@@ -251,6 +261,55 @@ webhook_secret = { env = "" }
 
     assert!(
         matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("github/primary: invalid webhook_secret: env var name must not be empty")))
+    );
+}
+
+fn test_scope() -> CredentialScope {
+    static_config_integration_scope(SourceKind::GitHub, &SourceIntegrationId::new("primary").unwrap())
+}
+
+#[test]
+fn secret_marker_with_base64_value_is_decoded() {
+    let value =
+        SecretInput::Literal("secret:gcp:service-account:base64:eyJ0eXBlIjoic2VydmljZV9hY2NvdW50In0=".to_string())
+            .resolve(test_scope(), CredentialKind::WebhookSecret)
+            .expect("marked base64 secret should resolve");
+
+    assert_eq!(value, "{\"type\":\"service_account\"}");
+}
+
+#[test]
+fn secret_with_base64_prefix_is_decoded() {
+    let value = SecretInput::Literal("base64:eyJsaW5lIjoiYVxuYiJ9Cm11bHRpCmxpbmUK".to_string())
+        .resolve(test_scope(), CredentialKind::WebhookSecret)
+        .expect("base64 secret should resolve");
+
+    assert_eq!(value, "{\"line\":\"a\\nb\"}\nmulti\nline\n");
+}
+
+#[test]
+fn secret_with_invalid_base64_is_rejected_without_echoing_value() {
+    let error = SecretInput::Literal("base64:not*base64".to_string())
+        .resolve(test_scope(), CredentialKind::WebhookSecret)
+        .expect_err("invalid base64 should fail");
+
+    assert!(matches!(
+        error,
+        SecretInputError::InvalidValue(ConfigValueError::InvalidBase64)
+    ));
+}
+
+#[test]
+fn webhook_secret_invalid_base64_is_reported_per_integration() {
+    let toml = r#"
+[sources.github.integrations.primary.webhook]
+webhook_secret = "base64:%%%"
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("github/primary: invalid webhook_secret: value with 'base64:' prefix is not valid standard base64")))
     );
 }
 
@@ -470,6 +529,133 @@ fn slack_resolves_with_valid_secret() {
     assert!(!cfg.slack.is_empty());
     assert!(cfg.slack[0].config.webhook().is_some());
     assert!(cfg.slack[0].config.socket_mode().is_none());
+}
+
+fn slack_max_body_size(cfg: &ResolvedConfig) -> usize {
+    cfg.slack[0].config.webhook().unwrap().max_body_size.as_usize()
+}
+
+#[test]
+fn slack_body_limit_defaults_to_four_mebibytes() {
+    let f = write_toml(&slack_toml("slack-signing-secret"));
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert_eq!(slack_max_body_size(&cfg), 4 * 1024 * 1024);
+}
+
+#[test]
+fn slack_body_limit_is_configurable_in_toml() {
+    let toml = r#"
+[sources.slack.integrations.primary.webhook]
+signing_secret = "slack-secret"
+max_body_bytes = 8388608
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert_eq!(slack_max_body_size(&cfg), 8 * 1024 * 1024);
+}
+
+#[test]
+fn slack_zero_body_limit_is_error() {
+    let toml = r#"
+[sources.slack.integrations.primary.webhook]
+signing_secret = "slack-secret"
+max_body_bytes = 0
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("slack/primary: invalid max_body_bytes: must not be zero")))
+    );
+}
+
+#[test]
+fn slack_body_limit_from_unset_env_is_error() {
+    let toml = r#"
+[sources.slack.integrations.primary.webhook]
+signing_secret = "slack-secret"
+max_body_bytes = { env = "TROGON_GATEWAY_TEST_SLACK_MAX_BODY_BYTES_NOT_SET" }
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("slack/primary: invalid max_body_bytes")))
+    );
+}
+
+#[test]
+fn byte_count_input_reads_a_whole_number_from_the_environment() {
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set("SLACK_BODY", " 2048 ");
+    let input = ByteCountInput::Env {
+        env: "SLACK_BODY".to_string(),
+    };
+    assert_eq!(input.resolve(&env).unwrap().as_usize(), 2048);
+}
+
+#[test]
+fn byte_count_input_rejects_text_and_zero_from_the_environment() {
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set("SLACK_BODY", "4MiB");
+    env.set("SLACK_BODY_ZERO", "0");
+    let text = ByteCountInput::Env {
+        env: "SLACK_BODY".to_string(),
+    };
+    let zero = ByteCountInput::Env {
+        env: "SLACK_BODY_ZERO".to_string(),
+    };
+    assert!(matches!(
+        text.resolve(&env),
+        Err(ByteCountInputError::NotAWholeNumber { .. })
+    ));
+    assert!(matches!(zero.resolve(&env), Err(ByteCountInputError::Zero)));
+}
+
+fn slack_ack_budget(cfg: &ResolvedConfig) -> crate::source::slack::ack_budget::AckBudget {
+    cfg.slack[0].config.ack_budget
+}
+
+#[test]
+fn slack_ack_budget_defaults_to_the_slack_deadline_not_the_generic_timeout() {
+    let f = write_toml(&slack_toml("slack-signing-secret"));
+    let cfg = load(Some(f.path())).expect("load failed");
+    let budget = slack_ack_budget(&cfg);
+    assert_eq!(budget.limit(), std::time::Duration::from_millis(2500));
+    assert_eq!(budget.capped_from(), None);
+}
+
+#[test]
+fn slack_ack_timeout_within_the_deadline_is_kept() {
+    let toml = r#"
+[sources.slack.integrations.primary]
+nats_ack_timeout_secs = 1
+
+[sources.slack.integrations.primary.webhook]
+signing_secret = "slack-secret"
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+    let budget = slack_ack_budget(&cfg);
+    assert_eq!(budget.limit(), std::time::Duration::from_secs(1));
+    assert_eq!(budget.capped_from(), None);
+}
+
+#[test]
+fn slack_ack_timeout_beyond_the_deadline_is_capped_instead_of_rejected() {
+    let toml = r#"
+[sources.slack.integrations.primary]
+nats_ack_timeout_secs = 10
+
+[sources.slack.integrations.primary.socket_mode]
+app_token = "xapp-test-token"
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+    let budget = slack_ack_budget(&cfg);
+    assert_eq!(budget.limit(), std::time::Duration::from_millis(2500));
+    assert_eq!(
+        budget.capped_from().map(std::time::Duration::from),
+        Some(std::time::Duration::from_secs(10))
+    );
 }
 
 #[test]
@@ -1500,7 +1686,10 @@ token = "mytoken"
 "#;
     let f = write_toml(toml);
     let cfg = load(Some(f.path())).expect("load failed");
-    assert!(matches!(cfg.nats.auth, NatsAuth::Token(_)));
+    assert!(matches!(
+        cfg.nats.auth,
+        NatsAuth::Token(trogon_nats::CredentialValue::Literal(ref token)) if token.as_str() == "mytoken"
+    ));
 }
 
 #[test]
@@ -1515,14 +1704,17 @@ token = "file-token"
         Some(f.path()),
         &NatsArgs {
             nats_url: Some("override:4222".to_string()),
-            nats_token: Some("override-token".to_string()),
+            nats_token: "override-token".parse().ok(),
             ..Default::default()
         },
     )
     .expect("load failed");
 
     assert_eq!(cfg.nats.servers, vec!["override:4222"]);
-    assert!(matches!(cfg.nats.auth, NatsAuth::Token(ref token) if token == "override-token"));
+    assert!(matches!(
+        cfg.nats.auth,
+        NatsAuth::Token(trogon_nats::CredentialValue::Literal(ref token)) if token.as_str() == "override-token"
+    ));
 }
 
 #[test]
@@ -1536,14 +1728,14 @@ token = "file-token"
         Some(f.path()),
         &NatsArgs {
             nats_creds: Some("/path/to/override.creds".to_string()),
-            nats_token: Some("override-token".to_string()),
+            nats_token: "override-token".parse().ok(),
             ..Default::default()
         },
     )
     .expect("load failed");
 
     assert!(
-        matches!(cfg.nats.auth, NatsAuth::Credentials(ref path) if path == std::path::Path::new("/path/to/override.creds"))
+        matches!(cfg.nats.auth, NatsAuth::Credentials(trogon_nats::Location::Path(ref path)) if path == std::path::Path::new("/path/to/override.creds"))
     );
 }
 
@@ -2455,4 +2647,556 @@ fn longest_stream_max_age_lets_no_expiry_dominate_in_either_position() {
         longest_stream_max_age([StreamMaxAge::NoExpiry, bounded].into_iter()),
         Some(StreamMaxAge::NoExpiry)
     );
+}
+
+const PUBSUB_CREDENTIALS_FIELD: &str = r#"credentials = '{"type":"service_account","project_id":"fake","private_key_id":"fake","private_key":"fake","client_email":"fake@example.invalid"}'"#;
+
+fn google_pubsub_toml(subscription: &str) -> String {
+    format!(
+        r#"
+[sources.google_pubsub.integrations.primary.streaming_pull]
+subscription = "{subscription}"
+{PUBSUB_CREDENTIALS_FIELD}
+"#
+    )
+}
+
+fn validation_errors(result: Result<ResolvedConfig, ConfigError>) -> AggregateValidationError {
+    match result {
+        Err(ConfigError::Validation(errors)) => errors,
+        Err(other) => panic!("expected validation errors, got {other}"),
+        Ok(_) => panic!("expected validation errors, config loaded"),
+    }
+}
+
+#[test]
+fn google_pubsub_resolves_with_defaults() {
+    let f = write_toml(&google_pubsub_toml("projects/p/subscriptions/sub"));
+    let cfg = load(Some(f.path())).expect("load failed");
+
+    assert!(cfg.has_any_source());
+    assert_eq!(cfg.google_pubsub.len(), 1);
+    let integration = &cfg.google_pubsub[0];
+    assert_eq!(integration.id.as_str(), "primary");
+    assert_eq!(integration.config.subject_prefix.as_str(), "google-pubsub-primary");
+    assert_eq!(integration.config.stream_name.as_str(), "GOOGLE_PUBSUB_PRIMARY");
+    assert_eq!(
+        std::time::Duration::from(integration.config.nats_ack_timeout).as_secs(),
+        DEFAULT_NATS_ACK_TIMEOUT_SECS
+    );
+    let GooglePubSubTransportConfig::StreamingPull(streaming_pull) = &integration.config.transport;
+    assert_eq!(streaming_pull.subscription.as_str(), "projects/p/subscriptions/sub");
+    assert_eq!(streaming_pull.max_outstanding_messages, None);
+}
+
+#[test]
+fn google_pubsub_resolves_explicit_fields() {
+    let toml = r#"
+[sources.google_pubsub.integrations.primary]
+subject_prefix = "pubsub-events"
+stream_name = "PUBSUB_EVENTS"
+stream_max_age_secs = 7200
+nats_ack_timeout_secs = 3
+
+[sources.google_pubsub.integrations.primary.streaming_pull]
+subscription = "projects/p/subscriptions/sub"
+credentials = '{"type":"service_account","project_id":"fake","private_key_id":"fake","private_key":"fake","client_email":"fake@example.invalid"}'
+max_outstanding_messages = 50
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+
+    let integration = &cfg.google_pubsub[0];
+    assert_eq!(integration.config.subject_prefix.as_str(), "pubsub-events");
+    assert_eq!(integration.config.stream_name.as_str(), "PUBSUB_EVENTS");
+    assert_eq!(
+        cfg.max_stream_max_age(),
+        Some(StreamMaxAge::from_secs(7200).expect("non-zero"))
+    );
+    assert_eq!(
+        std::time::Duration::from(integration.config.nats_ack_timeout).as_secs(),
+        3
+    );
+    let GooglePubSubTransportConfig::StreamingPull(streaming_pull) = &integration.config.transport;
+    assert_eq!(
+        streaming_pull.max_outstanding_messages.map(MaxOutstandingMessages::get),
+        Some(50)
+    );
+}
+
+#[test]
+fn google_pubsub_disabled_source_is_skipped() {
+    let toml = r#"
+[sources.google_pubsub]
+status = "disabled"
+
+[sources.google_pubsub.integrations.primary.streaming_pull]
+subscription = "projects/p/subscriptions/sub"
+credentials = '{"type":"service_account","project_id":"fake","private_key_id":"fake","private_key":"fake","client_email":"fake@example.invalid"}'
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+
+    assert!(cfg.google_pubsub.is_empty());
+    assert!(!cfg.has_any_source());
+}
+
+#[test]
+fn google_pubsub_disabled_integration_is_skipped() {
+    let toml = r#"
+[sources.google_pubsub.integrations.primary]
+status = "disabled"
+
+[sources.google_pubsub.integrations.primary.streaming_pull]
+subscription = "projects/p/subscriptions/sub"
+credentials = '{"type":"service_account","project_id":"fake","private_key_id":"fake","private_key":"fake","client_email":"fake@example.invalid"}'
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+
+    assert!(cfg.google_pubsub.is_empty());
+}
+
+#[test]
+fn google_pubsub_invalid_integration_id_is_invalid() {
+    let toml = r#"
+[sources.google_pubsub.integrations."bad/id".streaming_pull]
+subscription = "projects/p/subscriptions/sub"
+credentials = '{"type":"service_account","project_id":"fake","private_key_id":"fake","private_key":"fake","client_email":"fake@example.invalid"}'
+"#;
+    let f = write_toml(toml);
+
+    let errors = validation_errors(load(Some(f.path())));
+
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("google_pubsub/bad/id: invalid integration id"))
+    );
+}
+
+#[test]
+fn google_pubsub_without_transport_is_invalid() {
+    let toml = r#"
+[sources.google_pubsub.integrations.primary]
+status = "enabled"
+"#;
+    let f = write_toml(toml);
+
+    let errors = validation_errors(load(Some(f.path())));
+
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("google_pubsub/primary: missing transport"))
+    );
+}
+
+#[test]
+fn google_pubsub_without_subscription_is_invalid() {
+    let toml = r#"
+[sources.google_pubsub.integrations.primary.streaming_pull]
+max_outstanding_messages = 10
+credentials = '{"type":"service_account","project_id":"fake","private_key_id":"fake","private_key":"fake","client_email":"fake@example.invalid"}'
+"#;
+    let f = write_toml(toml);
+
+    let errors = validation_errors(load(Some(f.path())));
+
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("google_pubsub/primary: missing subscription"))
+    );
+}
+
+#[test]
+fn google_pubsub_malformed_subscription_is_invalid() {
+    let f = write_toml(&google_pubsub_toml("my-subscription"));
+
+    let errors = validation_errors(load(Some(f.path())));
+
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("google_pubsub/primary: invalid subscription"))
+    );
+}
+
+#[test]
+fn google_pubsub_zero_max_outstanding_messages_is_invalid() {
+    let toml = r#"
+[sources.google_pubsub.integrations.primary.streaming_pull]
+subscription = "projects/p/subscriptions/sub"
+credentials = '{"type":"service_account","project_id":"fake","private_key_id":"fake","private_key":"fake","client_email":"fake@example.invalid"}'
+max_outstanding_messages = 0
+"#;
+    let f = write_toml(toml);
+
+    let errors = validation_errors(load(Some(f.path())));
+
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("google_pubsub/primary: invalid max_outstanding_messages"))
+    );
+}
+
+#[test]
+fn google_pubsub_zero_nats_ack_timeout_is_error() {
+    let toml = r#"
+[sources.google_pubsub.integrations.primary]
+nats_ack_timeout_secs = 0
+
+[sources.google_pubsub.integrations.primary.streaming_pull]
+subscription = "projects/p/subscriptions/sub"
+credentials = '{"type":"service_account","project_id":"fake","private_key_id":"fake","private_key":"fake","client_email":"fake@example.invalid"}'
+"#;
+    let f = write_toml(toml);
+
+    let errors = validation_errors(load(Some(f.path())));
+
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("google_pubsub/primary: nats_ack_timeout_secs must not be zero"))
+    );
+}
+
+#[test]
+fn google_pubsub_zero_stream_max_age_is_error() {
+    let toml = r#"
+[sources.google_pubsub.integrations.primary]
+stream_max_age_secs = 0
+
+[sources.google_pubsub.integrations.primary.streaming_pull]
+subscription = "projects/p/subscriptions/sub"
+credentials = '{"type":"service_account","project_id":"fake","private_key_id":"fake","private_key":"fake","client_email":"fake@example.invalid"}'
+"#;
+    let f = write_toml(toml);
+
+    let errors = validation_errors(load(Some(f.path())));
+
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("google_pubsub/primary: stream_max_age_secs must not be zero"))
+    );
+}
+
+#[test]
+fn google_pubsub_invalid_subject_prefix_is_error() {
+    let toml = r#"
+[sources.google_pubsub.integrations.primary]
+subject_prefix = "bad.prefix"
+
+[sources.google_pubsub.integrations.primary.streaming_pull]
+subscription = "projects/p/subscriptions/sub"
+credentials = '{"type":"service_account","project_id":"fake","private_key_id":"fake","private_key":"fake","client_email":"fake@example.invalid"}'
+"#;
+    let f = write_toml(toml);
+
+    let errors = validation_errors(load(Some(f.path())));
+
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("google_pubsub/primary: invalid subject_prefix"))
+    );
+}
+
+#[test]
+fn google_pubsub_rejects_unknown_transport_keys() {
+    let toml = r#"
+[sources.google_pubsub.integrations.primary.streaming_pull]
+subscription = "projects/p/subscriptions/sub"
+credentials = '{"type":"service_account","project_id":"fake","private_key_id":"fake","private_key":"fake","client_email":"fake@example.invalid"}'
+push_endpoint = "https://example.invalid"
+"#;
+    let f = write_toml(toml);
+
+    assert!(matches!(load(Some(f.path())), Err(ConfigError::Load(_))));
+}
+
+#[test]
+fn google_pubsub_rejects_unknown_integration_keys() {
+    let toml = r#"
+[sources.google_pubsub.integrations.primary]
+push = true
+
+[sources.google_pubsub.integrations.primary.streaming_pull]
+subscription = "projects/p/subscriptions/sub"
+credentials = '{"type":"service_account","project_id":"fake","private_key_id":"fake","private_key":"fake","client_email":"fake@example.invalid"}'
+"#;
+    let f = write_toml(toml);
+
+    assert!(matches!(load(Some(f.path())), Err(ConfigError::Load(_))));
+}
+
+fn google_pubsub_credentials_toml(credentials_line: &str) -> String {
+    format!(
+        r#"
+[sources.google_pubsub.integrations.primary.streaming_pull]
+subscription = "projects/p/subscriptions/sub"
+{credentials_line}
+"#
+    )
+}
+
+#[test]
+fn google_pubsub_resolves_service_account_credentials() {
+    let f = write_toml(&google_pubsub_toml("projects/p/subscriptions/sub"));
+    let cfg = load(Some(f.path())).expect("load failed");
+
+    let GooglePubSubTransportConfig::StreamingPull(streaming_pull) = &cfg.google_pubsub[0].config.transport;
+    assert_eq!(
+        streaming_pull.credentials.kind(),
+        crate::source::google_pubsub::credentials::GoogleCredentialsKind::ServiceAccount
+    );
+}
+
+#[test]
+fn google_pubsub_resolves_external_account_credentials() {
+    let f = write_toml(&google_pubsub_credentials_toml(&format!(
+        "credentials = '{FAKE_EXTERNAL_ACCOUNT}'"
+    )));
+    let cfg = load(Some(f.path())).expect("load failed");
+
+    let GooglePubSubTransportConfig::StreamingPull(streaming_pull) = &cfg.google_pubsub[0].config.transport;
+    assert_eq!(
+        streaming_pull.credentials.kind(),
+        crate::source::google_pubsub::credentials::GoogleCredentialsKind::ExternalAccount
+    );
+}
+
+#[test]
+fn google_pubsub_credentials_debug_is_redacted() {
+    let f = write_toml(&google_pubsub_toml("projects/p/subscriptions/sub"));
+    let cfg = load(Some(f.path())).expect("load failed");
+
+    let rendered = format!("{:?}", cfg.google_pubsub[0].config);
+    assert!(rendered.contains("GoogleCredentials(service_account, ****)"));
+    assert!(!rendered.contains("fake@example.invalid"));
+}
+
+#[test]
+fn google_pubsub_without_credentials_is_invalid() {
+    let toml = r#"
+[sources.google_pubsub.integrations.primary.streaming_pull]
+subscription = "projects/p/subscriptions/sub"
+"#;
+    let f = write_toml(toml);
+
+    let errors = validation_errors(load(Some(f.path())));
+
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("google_pubsub/primary: missing credentials"))
+    );
+}
+
+#[test]
+fn google_pubsub_credentials_from_unset_env_is_invalid() {
+    let f = write_toml(&google_pubsub_credentials_toml(
+        r#"credentials = { env = "TROGON_GATEWAY_TEST_PUBSUB_CREDENTIALS_NOT_SET" }"#,
+    ));
+
+    let errors = validation_errors(load(Some(f.path())));
+
+    assert!(errors.iter().any(|e| {
+        e.contains("google_pubsub/primary: invalid credentials")
+            && e.contains("TROGON_GATEWAY_TEST_PUBSUB_CREDENTIALS_NOT_SET")
+    }));
+}
+
+#[test]
+fn google_pubsub_credentials_that_are_not_json_are_invalid_without_echoing_them() {
+    let f = write_toml(&google_pubsub_credentials_toml(
+        r#"credentials = "leaky-marker-not-json""#,
+    ));
+
+    let errors = validation_errors(load(Some(f.path())));
+
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("google_pubsub/primary: invalid credentials"))
+    );
+    assert!(!errors.iter().any(|e| e.contains("leaky-marker-not-json")));
+}
+
+#[test]
+fn google_pubsub_unsupported_credentials_type_is_invalid() {
+    let f = write_toml(&google_pubsub_credentials_toml(
+        r#"credentials = '{"type":"authorized_user","refresh_token":"leaky-refresh-marker"}'"#,
+    ));
+
+    let errors = validation_errors(load(Some(f.path())));
+
+    assert!(errors.iter().any(
+        |e| e.contains("google_pubsub/primary: invalid credentials") && e.contains("unsupported credentials type")
+    ));
+    assert!(!errors.iter().any(|e| e.contains("leaky-refresh-marker")));
+}
+
+#[test]
+fn google_pubsub_reports_credentials_and_subscription_errors_together() {
+    let f = write_toml(&google_pubsub_credentials_toml("").replace("projects/p/subscriptions/sub", "bad"));
+
+    let errors = validation_errors(load(Some(f.path())));
+
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("google_pubsub/primary: invalid subscription"))
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("google_pubsub/primary: missing credentials"))
+    );
+}
+
+#[test]
+fn zoom_resolves_with_defaults() {
+    let f = write_toml(&zoom_toml("zoom-token"));
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert_eq!(cfg.zoom.len(), 1);
+    let zoom = &cfg.zoom[0].config;
+    assert_eq!(zoom.subject_prefix.as_str(), "zoom-primary");
+    assert_eq!(zoom.stream_name.as_str(), "ZOOM_PRIMARY");
+    assert_eq!(std::time::Duration::from(zoom.timestamp_tolerance).as_secs(), 300);
+    assert_eq!(zoom.secret_token.as_str(), "zoom-token");
+}
+
+#[test]
+fn zoom_accepts_custom_timestamp_tolerance() {
+    let toml = r#"
+[sources.zoom.integrations.primary.webhook]
+secret_token = "zoom-token"
+timestamp_tolerance_secs = 60
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert_eq!(
+        std::time::Duration::from(cfg.zoom[0].config.timestamp_tolerance).as_secs(),
+        60
+    );
+}
+
+#[test]
+fn zoom_resolves_secret_token_from_env_table() {
+    let toml = r#"
+[sources.zoom.integrations.primary.webhook]
+secret_token = { env = "PATH" }
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert!(!cfg.zoom[0].config.secret_token.as_str().is_empty());
+}
+
+#[test]
+fn zoom_disabled_returns_none() {
+    let toml = r#"
+[sources.zoom]
+status = "disabled"
+
+[sources.zoom.integrations.primary.webhook]
+secret_token = "zoom-token"
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert!(cfg.zoom.is_empty());
+}
+
+#[test]
+fn zoom_empty_secret_token_is_invalid() {
+    let f = write_toml(&zoom_toml(""));
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("zoom/primary: invalid secret_token")))
+    );
+}
+
+#[test]
+fn zoom_missing_secret_token_is_invalid() {
+    let toml = r#"
+[sources.zoom.integrations.primary.webhook]
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("zoom/primary") && e.contains("secret_token")))
+    );
+}
+
+#[test]
+fn zoom_invalid_subject_prefix() {
+    let toml = r#"
+[sources.zoom.integrations.primary]
+subject_prefix = "has.dots"
+
+[sources.zoom.integrations.primary.webhook]
+secret_token = "zoom-token"
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("zoom/primary: invalid subject_prefix")))
+    );
+}
+
+#[test]
+fn zoom_zero_timestamp_tolerance_is_error() {
+    let toml = r#"
+[sources.zoom.integrations.primary.webhook]
+secret_token = "zoom-token"
+timestamp_tolerance_secs = 0
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("zoom/primary: timestamp_tolerance_secs must not be zero")))
+    );
+}
+
+#[test]
+fn zoom_enabled_integration_without_webhook_is_invalid() {
+    let toml = r#"
+[sources.zoom.integrations.primary]
+status = "enabled"
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("zoom/primary: missing webhook")))
+    );
+}
+
+#[test]
+fn zoom_invalid_integration_id_is_invalid() {
+    let toml = r#"
+[sources.zoom.integrations."bad/id".webhook]
+secret_token = "zoom-token"
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("zoom/bad/id: invalid integration id")))
+    );
+}
+
+#[test]
+fn zoom_integration_disabled_is_skipped() {
+    let toml = r#"
+[sources.zoom.integrations.primary]
+status = "disabled"
+
+[sources.zoom.integrations.primary.webhook]
+secret_token = "zoom-token"
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert!(cfg.zoom.is_empty());
 }

@@ -46,6 +46,7 @@ pub struct MicrosoftGraphPlugin;
 pub struct NotionPlugin;
 pub struct SentryPlugin;
 pub struct DatadogPlugin;
+pub struct ZoomPlugin;
 
 pub(crate) struct RuntimeCredentialMounts<G> {
     pub(crate) github: Option<RuntimeCredentialResolver<G>>,
@@ -770,6 +771,31 @@ impl SourcePlugin for DatadogPlugin {
     }
 }
 
+impl SourcePlugin for ZoomPlugin {
+    fn id(&self) -> SourceId {
+        "zoom"
+    }
+
+    async fn provision<C: JetStreamContext>(&self, client: &C, config: &ResolvedConfig) -> Result<(), C::Error> {
+        provision_integrations(&config.zoom, self.id(), client, crate::source::zoom::provision).await
+    }
+
+    fn mount<P, S>(&self, app: Router, publisher: ClaimCheckPublisher<P, S>, config: &ResolvedConfig) -> Router
+    where
+        P: JetStreamPublisher,
+        S: ObjectStorePut,
+    {
+        mount_integrations(
+            &config.zoom,
+            app,
+            publisher,
+            self.id(),
+            &self.path_prefix(),
+            |p, cfg| crate::source::zoom::router(p, cfg),
+        )
+    }
+}
+
 /// Provision JetStream streams for every webhook source. Discord is provisioned separately by the caller.
 pub async fn provision_webhook_sources<C: JetStreamContext>(
     client: &C,
@@ -786,6 +812,7 @@ pub async fn provision_webhook_sources<C: JetStreamContext>(
     NotionPlugin.provision(client, config).await?;
     SentryPlugin.provision(client, config).await?;
     DatadogPlugin.provision(client, config).await?;
+    ZoomPlugin.provision(client, config).await?;
     Ok(())
 }
 
@@ -809,7 +836,8 @@ where
     app = MicrosoftGraphPlugin.mount(app, publisher.clone(), config);
     app = NotionPlugin.mount(app, publisher.clone(), config);
     app = SentryPlugin.mount(app, publisher.clone(), config);
-    DatadogPlugin.mount(app, publisher, config)
+    app = DatadogPlugin.mount(app, publisher.clone(), config);
+    ZoomPlugin.mount(app, publisher, config)
 }
 
 pub(crate) fn mount_webhook_sources_with_runtime_credentials<P, S, G>(

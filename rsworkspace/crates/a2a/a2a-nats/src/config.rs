@@ -99,10 +99,7 @@ impl Config {
 
     #[cfg(test)]
     pub(crate) fn for_test(a2a_prefix: &str) -> Self {
-        let nats = NatsConfig {
-            servers: vec!["localhost:4222".to_string()],
-            auth: trogon_nats::NatsAuth::None,
-        };
+        let nats = NatsConfig::new(vec!["localhost:4222".to_string()], trogon_nats::NatsAuth::None);
         Self::new(A2aPrefix::new(a2a_prefix.to_string()).unwrap(), nats)
             .with_task_timeout(crate::constants::TEST_TASK_TIMEOUT)
     }

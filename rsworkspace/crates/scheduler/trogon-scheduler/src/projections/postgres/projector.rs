@@ -12,8 +12,6 @@
 //! foreign subject, misrouted, an invalid transition) is logged and skipped, never
 //! wedging the projector.
 
-#![cfg_attr(coverage, allow(dead_code, unused_imports))]
-
 use std::collections::{BTreeMap, HashSet};
 
 use async_nats::jetstream;
@@ -22,9 +20,10 @@ use trogon_nats::jetstream::JetStreamGetStream;
 
 use crate::error::SchedulerError;
 use crate::kv::open_events_stream;
+use crate::projections::ordered_event_consumer::OrderedEventConsumer;
 use crate::projections::schedules::{
     ProjectionChange, ScheduleStreamState, apply, decode_recorded_delivery_message, event_message_sequence,
-    event_replay_consumer_config, event_schedule_id, projection_change, schedule_id_from_event_subject,
+    event_replay_consumer_config, event_schedule_id, schedule_id_from_event_subject,
 };
 use crate::queries::ScheduleId;
 use crate::v1;
@@ -57,6 +56,13 @@ impl SchedulesProjector {
         J: JetStreamGetStream<Stream = jetstream::stream::Stream>,
     {
         let stream = open_events_stream(js).await?;
+        self.catch_up_stream(&stream).await
+    }
+
+    pub(in crate::projections) async fn catch_up_stream<S>(&self, stream: &S) -> Result<(), SchedulerError>
+    where
+        S: crate::projections::ordered_event_stream::OrderedEventStream,
+    {
         let info = stream.get_info().await.map_err(|source| {
             SchedulerError::event_source("failed to query events stream info for projector catch-up", source)
         })?;
@@ -73,7 +79,7 @@ impl SchedulesProjector {
         // schedule-event subjects and replays in per-subject order.
         let from_zero = checkpoint == 0;
         let consumer = stream
-            .create_consumer(event_replay_consumer_config(checkpoint.saturating_add(1)))
+            .create_ordered_consumer(event_replay_consumer_config(checkpoint.saturating_add(1)))
             .await
             .map_err(|source| SchedulerError::event_source("failed to create projector catch-up consumer", source))?;
         let mut messages = consumer.messages().await.map_err(|source| {
@@ -124,9 +130,16 @@ impl SchedulesProjector {
         J: JetStreamGetStream<Stream = jetstream::stream::Stream>,
     {
         let stream = open_events_stream(js).await?;
+        self.run_stream(&stream).await
+    }
+
+    pub(in crate::projections) async fn run_stream<S>(&self, stream: &S) -> Result<(), SchedulerError>
+    where
+        S: crate::projections::ordered_event_stream::OrderedEventStream,
+    {
         let start = self.store.read_checkpoint().await?.saturating_add(1);
         let consumer = stream
-            .create_consumer(event_replay_consumer_config(start))
+            .create_ordered_consumer(event_replay_consumer_config(start))
             .await
             .map_err(|source| SchedulerError::event_source("failed to create projector consumer", source))?;
         let mut messages = consumer
@@ -162,18 +175,17 @@ impl SchedulesProjector {
             .get_projection(&routed.id)
             .await?
             .map_or(ScheduleStreamState::Initial, ScheduleStreamState::from);
-        let after = match apply(&routed.schedule_id, before.clone(), &routed.event) {
+        let after = match apply(&routed.schedule_id, before, &routed.event) {
             Ok(after) => after,
             Err(source) => {
                 tracing::warn!(schedule_id = %routed.schedule_id, %source, "skipping invalid schedule transition during projection");
                 return Ok(());
             }
         };
-        match projection_change(&before, &after) {
-            Some(ProjectionChange::Upsert(projection)) => self.store.upsert_projection(&projection).await,
+        match ProjectionChange::from(&after) {
+            ProjectionChange::Upsert(projection) => self.store.upsert_projection(&projection).await,
             // The change always targets this message's schedule, so reuse its id.
-            Some(ProjectionChange::Delete(_)) => self.store.delete_projection(&routed.id).await,
-            None => Ok(()),
+            ProjectionChange::Delete(_) => self.store.delete_projection(&routed.id).await,
         }
     }
 
@@ -194,33 +206,25 @@ impl SchedulesProjector {
             .get(&routed.schedule_id)
             .cloned()
             .unwrap_or(ScheduleStreamState::Initial);
-        let after = match apply(&routed.schedule_id, before.clone(), &routed.event) {
+        let after = match apply(&routed.schedule_id, before, &routed.event) {
             Ok(after) => after,
             Err(source) => {
                 tracing::warn!(schedule_id = %routed.schedule_id, %source, "skipping invalid schedule transition during rebuild");
                 return Ok(());
             }
         };
-        if let Some(change) = projection_change(&before, &after) {
-            match &change {
-                ProjectionChange::Upsert(projection) => {
-                    self.store.upsert_projection(projection).await?;
-                    rebuilt.live.insert(routed.id.clone());
-                }
-                ProjectionChange::Delete(_) => {
-                    self.store.delete_projection(&routed.id).await?;
-                    rebuilt.live.remove(&routed.id);
-                }
+        let change = ProjectionChange::from(&after);
+        match &change {
+            ProjectionChange::Upsert(projection) => {
+                self.store.upsert_projection(projection).await?;
+                rebuilt.live.insert(routed.id.clone());
+            }
+            ProjectionChange::Delete(_) => {
+                self.store.delete_projection(&routed.id).await?;
+                rebuilt.live.remove(&routed.id);
             }
         }
-        match after {
-            ScheduleStreamState::Initial => {
-                rebuilt.states.remove(&routed.schedule_id);
-            }
-            present_or_deleted => {
-                rebuilt.states.insert(routed.schedule_id, present_or_deleted);
-            }
-        }
+        rebuilt.states.insert(routed.schedule_id, after.into());
         Ok(())
     }
 }
@@ -267,28 +271,17 @@ fn route(message: &jetstream::Message) -> Option<RoutedEvent> {
             return None;
         }
     };
-    let Some(schedule_id) = event_schedule_id(&decoded) else {
-        tracing::warn!(%subject_schedule_id, "skipping schedule event without a payload schedule id during projection");
-        return None;
-    };
-    if schedule_id != subject_schedule_id.to_string() {
+    let schedule_id = subject_schedule_id.to_string();
+    let payload_schedule_id = event_schedule_id(&decoded);
+    if payload_schedule_id != Some(schedule_id.as_str()) {
         tracing::warn!(
             %subject_schedule_id,
-            %schedule_id,
+            schedule_id = ?payload_schedule_id,
             "skipping schedule event whose payload id does not route to its subject during projection"
         );
         return None;
     }
-    // The payload id was validated when the command produced the event, so this
-    // parse is defensive; an unexpected failure is skipped like any other anomaly.
-    let id = match ScheduleId::parse(schedule_id) {
-        Ok(id) => id,
-        Err(source) => {
-            tracing::warn!(%schedule_id, %source, "skipping schedule event with an invalid payload id during projection");
-            return None;
-        }
-    };
-    let schedule_id = schedule_id.to_string();
+    let id = ScheduleId::from(subject_schedule_id);
     Some(RoutedEvent {
         schedule_id,
         id,

@@ -1,0 +1,88 @@
+edition = "2024";
+
+package trogonai.agents.versions.v1alpha1;
+
+import "trogon/error/v1alpha1/options.proto";
+
+// Schema-only rejection templates for the agents.versions Decider namespace.
+// Authorization, trusted-time expiry admission, and digest proof remain dispatch
+// concerns. The existing Decider channel owns stream concurrency failures.
+message AgentVersionCommandInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.versions"
+    reason: "AGENT_VERSION_COMMAND_INVALID"
+    message: "The command violates the Agent version contract."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentVersionMissingError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.versions"
+    reason: "AGENT_VERSION_MISSING"
+    message: "The authoring version does not exist."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentVersionAlreadyExistsError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.versions"
+    reason: "AGENT_VERSION_ALREADY_EXISTS"
+    message: "The authoring version already exists."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentVersionIdentityMismatchError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.versions"
+    reason: "AGENT_VERSION_IDENTITY_MISMATCH"
+    message: "The command names a different agent or version from this stream."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentVersionNotDraftError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.versions"
+    reason: "AGENT_VERSION_NOT_DRAFT"
+    message: "The authoring version is terminal and cannot be changed."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentVersionSnapshotMismatchError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.versions"
+    reason: "AGENT_VERSION_SNAPSHOT_MISMATCH"
+    message: "The command does not pin the exact current snapshot."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentVersionSnapshotNumberExhaustedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.versions"
+    reason: "AGENT_VERSION_SNAPSHOT_NUMBER_EXHAUSTED"
+    message: "The authoring version cannot allocate another snapshot number."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentVersionNotEphemeralError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.versions"
+    reason: "AGENT_VERSION_NOT_EPHEMERAL"
+    message: "A durable authoring version cannot expire."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}

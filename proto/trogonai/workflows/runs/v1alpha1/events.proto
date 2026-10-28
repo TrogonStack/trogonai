@@ -1,0 +1,278 @@
+edition = "2024";
+
+package trogonai.workflows.runs.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/workflows/runs/v1alpha1/control.proto";
+import "trogonai/workflows/runs/v1alpha1/interaction.proto";
+import "trogonai/workflows/runs/v1alpha1/lifecycle.proto";
+import "trogonai/workflows/runs/v1alpha1/occurrence.proto";
+import "trogonai/workflows/runs/v1alpha1/receipt.proto";
+import "trogonai/workflows/runs/v1alpha1/run.proto";
+import "trogonai/workflows/runs/v1alpha1/wait.proto";
+
+// Unknown event arms fail replay closed. Logical ordering belongs to the run
+// aggregate; child Session histories retain their independent ownership.
+message RunStarted {
+  RunConfiguration configuration = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message NodeEntered {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  OccurrenceEntry entry = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message RepeatIterationStarted {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  RepeatIterationSnapshot iteration = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message NodeDispatched {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  NodeInvocation invocation = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message RetryAuthorized {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  RetryAuthorization authorization = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message InvocationResultRecorded {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  InvocationResultReceipt receipt = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message NodeCompleted {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  NodeCompletion completion = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ControlDecisionRecorded {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ControlDecision decision = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message InputRequested {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  InputRequest request = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message InputProvided {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  InputResponse response = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message GuidanceSent {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  Guidance guidance = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message GuidanceDeliveryRecorded {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  GuidanceDelivery delivery = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ExternalWaitRegistered {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ExternalWaitRegistration registration = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ExternalWaitActivated {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ExternalWaitActivation activation = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ExternalSubscriptionLeaseRenewed {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ExternalSubscriptionLease lease = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ExternalActivityRecorded {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ExternalActivityReceipt activity = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ExternalCursorAdvanced {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ExternalCursorAdvance advancement = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ExternalWaitResolved {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ExternalWaitResolution resolution = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ExternalSubscriptionCleanupRecorded {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ExternalSubscriptionCleanup cleanup = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message TimerWaitRegistered {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  TimerWaitRegistration registration = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message TimerWaitResolved {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  TimerWaitResolution resolution = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message PauseRequested {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  PauseRequest request = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message PauseApplied {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  PauseBoundary boundary = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message RunResumed {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  RunResumption resumption = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message CancellationRequested {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  CancellationRequest request = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message CancellationAcknowledged {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  CancellationAcknowledgement acknowledgement = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message RemainingPlanRevised {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  RemainingPlanRevision revision = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message RunTerminated {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  RunTermination termination = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message FailedWorkflowWorkRetried {
+  string run_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  FailedWorkRecovery recovery = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message RunEvent {
+  oneof event {
+    option (buf.validate.oneof).required = true;
+
+    RunStarted run_started = 1;
+    NodeEntered node_entered = 2;
+    RepeatIterationStarted repeat_iteration_started = 3;
+    NodeDispatched node_dispatched = 4;
+    RetryAuthorized retry_authorized = 5;
+    InvocationResultRecorded invocation_result_recorded = 6;
+    NodeCompleted node_completed = 7;
+    ControlDecisionRecorded control_decision_recorded = 8;
+    InputRequested input_requested = 9;
+    InputProvided input_provided = 10;
+    GuidanceSent guidance_sent = 11;
+    GuidanceDeliveryRecorded guidance_delivery_recorded = 12;
+    ExternalWaitRegistered external_wait_registered = 13;
+    ExternalWaitActivated external_wait_activated = 14;
+    ExternalSubscriptionLeaseRenewed external_subscription_lease_renewed = 15;
+    ExternalActivityRecorded external_activity_recorded = 16;
+    ExternalCursorAdvanced external_cursor_advanced = 17;
+    ExternalWaitResolved external_wait_resolved = 18;
+    ExternalSubscriptionCleanupRecorded external_subscription_cleanup_recorded = 19;
+    TimerWaitRegistered timer_wait_registered = 20;
+    TimerWaitResolved timer_wait_resolved = 21;
+    PauseRequested pause_requested = 22;
+    PauseApplied pause_applied = 23;
+    RunResumed run_resumed = 24;
+    CancellationRequested cancellation_requested = 25;
+    CancellationAcknowledged cancellation_acknowledged = 26;
+    RemainingPlanRevised remaining_plan_revised = 27;
+    RunTerminated run_terminated = 28;
+    FailedWorkflowWorkRetried failed_workflow_work_retried = 29;
+  }
+}

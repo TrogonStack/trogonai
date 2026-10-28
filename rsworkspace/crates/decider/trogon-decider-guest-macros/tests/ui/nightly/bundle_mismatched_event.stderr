@@ -1,0 +1,424 @@
+error[E0271]: type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:53:1
+   |
+53 | / export_decider!(
+54 | |     CreateSchedule {
+55 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+56 | |         proto = v1::CreateSchedule,
+...  |
+67 | |     },
+68 | | );
+   | |_^ type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
+   |
+note: expected this to be `ScheduleEvent`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:31:18
+   |
+31 |     type Event = WrongEvent;
+   |                  ^^^^^^^^^^
+note: required for `Session` to implement `GuestSession`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:53:1
+   |
+53 | / export_decider!(
+54 | |     CreateSchedule {
+55 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+56 | |         proto = v1::CreateSchedule,
+...  |
+67 | |     },
+68 | | );
+   | |_^
+   = note: associated types for the current `impl` cannot be restricted in `where` clauses
+note: required by a bound in `Guest::Session`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:53:1
+   |
+53 | / export_decider!(
+54 | |     CreateSchedule {
+55 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+56 | |         proto = v1::CreateSchedule,
+...  |
+67 | |     },
+68 | | );
+   | |_^ required by this bound in `Guest::Session`
+   = note: this error originates in the macro `export_decider` which comes from the expansion of the macro `wit_bindgen::generate` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0271]: type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:53:1
+   |
+53 | / export_decider!(
+54 | |     CreateSchedule {
+55 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+56 | |         proto = v1::CreateSchedule,
+...  |
+67 | |     },
+68 | | );
+   | |_^ type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
+   |
+note: expected this to be `ScheduleEvent`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:31:18
+   |
+31 |     type Event = WrongEvent;
+   |                  ^^^^^^^^^^
+   = note: this error originates in the macro `export_decider` (in Nightly builds, run with -Z macro-backtrace for more info)
+help: add `#![feature(trivial_bounds)]` to the crate attributes to enable
+   |
+ 1 + #![feature(trivial_bounds)]
+   |
+
+error[E0271]: type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:61:5
+   |
+61 |     WrongEventCommand {
+   |     ^^^^^^^^^^^^^^^^^ type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
+   |
+note: expected this to be `ScheduleEvent`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:31:18
+   |
+31 |     type Event = WrongEvent;
+   |                  ^^^^^^^^^^
+note: required by a bound in `__assert_bundle_shares_state_event`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:53:1
+   |
+53 | / export_decider!(
+54 | |     CreateSchedule {
+55 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+56 | |         proto = v1::CreateSchedule,
+...  |
+67 | |     },
+68 | | );
+   | |_^ required by this bound in `__assert_bundle_shares_state_event`
+   = note: this error originates in the macro `export_decider` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0271]: type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:53:1
+   |
+53 | / export_decider!(
+54 | |     CreateSchedule {
+55 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+56 | |         proto = v1::CreateSchedule,
+...  |
+67 | |     },
+68 | | );
+   | |_^ type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
+   |
+note: expected this to be `ScheduleEvent`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:31:18
+   |
+31 |     type Event = WrongEvent;
+   |                  ^^^^^^^^^^
+note: required for `Session` to implement `GuestSession`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:53:1
+   |
+53 | / export_decider!(
+54 | |     CreateSchedule {
+55 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+56 | |         proto = v1::CreateSchedule,
+...  |
+67 | |     },
+68 | | );
+   | |_^
+   = note: associated types for the current `impl` cannot be restricted in `where` clauses
+note: required by a bound in `_export_constructor_session_cabi`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:53:1
+   |
+53 | / export_decider!(
+54 | |     CreateSchedule {
+55 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+56 | |         proto = v1::CreateSchedule,
+...  |
+67 | |     },
+68 | | );
+   | |_^ required by this bound in `_export_constructor_session_cabi`
+   = note: this error originates in the macro `export_decider` which comes from the expansion of the macro `wit_bindgen::generate` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0271]: type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:53:1
+   |
+53 | / export_decider!(
+54 | |     CreateSchedule {
+55 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+56 | |         proto = v1::CreateSchedule,
+...  |
+67 | |     },
+68 | | );
+   | |_^ type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
+   |
+note: expected this to be `ScheduleEvent`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:31:18
+   |
+31 |     type Event = WrongEvent;
+   |                  ^^^^^^^^^^
+note: required for `Session` to implement `GuestSession`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:53:1
+   |
+53 | / export_decider!(
+54 | |     CreateSchedule {
+55 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+56 | |         proto = v1::CreateSchedule,
+...  |
+67 | |     },
+68 | | );
+   | |_^
+   = note: associated types for the current `impl` cannot be restricted in `where` clauses
+note: required by a bound in `_export_method_session_evolve_cabi`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:53:1
+   |
+53 | / export_decider!(
+54 | |     CreateSchedule {
+55 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+56 | |         proto = v1::CreateSchedule,
+...  |
+67 | |     },
+68 | | );
+   | |_^ required by this bound in `_export_method_session_evolve_cabi`
+   = note: this error originates in the macro `export_decider` which comes from the expansion of the macro `wit_bindgen::generate` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0271]: type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:53:1
+   |
+53 | / export_decider!(
+54 | |     CreateSchedule {
+55 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+56 | |         proto = v1::CreateSchedule,
+...  |
+67 | |     },
+68 | | );
+   | |_^ type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
+   |
+note: expected this to be `ScheduleEvent`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:31:18
+   |
+31 |     type Event = WrongEvent;
+   |                  ^^^^^^^^^^
+note: required for `Session` to implement `GuestSession`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:53:1
+   |
+53 | / export_decider!(
+54 | |     CreateSchedule {
+55 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+56 | |         proto = v1::CreateSchedule,
+...  |
+67 | |     },
+68 | | );
+   | |_^
+   = note: associated types for the current `impl` cannot be restricted in `where` clauses
+note: required by a bound in `__post_return_method_session_evolve`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:53:1
+   |
+53 | / export_decider!(
+54 | |     CreateSchedule {
+55 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+56 | |         proto = v1::CreateSchedule,
+...  |
+67 | |     },
+68 | | );
+   | |_^ required by this bound in `__post_return_method_session_evolve`
+   = note: this error originates in the macro `export_decider` which comes from the expansion of the macro `wit_bindgen::generate` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0271]: type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:53:1
+   |
+53 | / export_decider!(
+54 | |     CreateSchedule {
+55 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+56 | |         proto = v1::CreateSchedule,
+...  |
+67 | |     },
+68 | | );
+   | |_^ type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
+   |
+note: expected this to be `ScheduleEvent`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:31:18
+   |
+31 |     type Event = WrongEvent;
+   |                  ^^^^^^^^^^
+note: required for `Session` to implement `GuestSession`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:53:1
+   |
+53 | / export_decider!(
+54 | |     CreateSchedule {
+55 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+56 | |         proto = v1::CreateSchedule,
+...  |
+67 | |     },
+68 | | );
+   | |_^
+   = note: associated types for the current `impl` cannot be restricted in `where` clauses
+note: required by a bound in `_export_method_session_decide_cabi`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:53:1
+   |
+53 | / export_decider!(
+54 | |     CreateSchedule {
+55 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+56 | |         proto = v1::CreateSchedule,
+...  |
+67 | |     },
+68 | | );
+   | |_^ required by this bound in `_export_method_session_decide_cabi`
+   = note: this error originates in the macro `export_decider` which comes from the expansion of the macro `wit_bindgen::generate` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0271]: type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:53:1
+   |
+53 | / export_decider!(
+54 | |     CreateSchedule {
+55 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+56 | |         proto = v1::CreateSchedule,
+...  |
+67 | |     },
+68 | | );
+   | |_^ type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
+   |
+note: expected this to be `ScheduleEvent`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:31:18
+   |
+31 |     type Event = WrongEvent;
+   |                  ^^^^^^^^^^
+note: required for `Session` to implement `GuestSession`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:53:1
+   |
+53 | / export_decider!(
+54 | |     CreateSchedule {
+55 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+56 | |         proto = v1::CreateSchedule,
+...  |
+67 | |     },
+68 | | );
+   | |_^
+   = note: associated types for the current `impl` cannot be restricted in `where` clauses
+note: required by a bound in `__post_return_method_session_decide`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:53:1
+   |
+53 | / export_decider!(
+54 | |     CreateSchedule {
+55 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+56 | |         proto = v1::CreateSchedule,
+...  |
+67 | |     },
+68 | | );
+   | |_^ required by this bound in `__post_return_method_session_decide`
+   = note: this error originates in the macro `export_decider` which comes from the expansion of the macro `wit_bindgen::generate` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0271]: type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:53:1
+   |
+53 | / export_decider!(
+54 | |     CreateSchedule {
+55 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+56 | |         proto = v1::CreateSchedule,
+...  |
+67 | |     },
+68 | | );
+   | |_^ type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
+   |
+note: expected this to be `ScheduleEvent`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:31:18
+   |
+31 |     type Event = WrongEvent;
+   |                  ^^^^^^^^^^
+note: required for `Session` to implement `GuestSession`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:53:1
+   |
+53 | / export_decider!(
+54 | |     CreateSchedule {
+55 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+56 | |         proto = v1::CreateSchedule,
+...  |
+67 | |     },
+68 | | );
+   | |_^
+   = note: associated types for the current `impl` cannot be restricted in `where` clauses
+note: required by a bound in `_export_method_session_snapshot_cabi`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:53:1
+   |
+53 | / export_decider!(
+54 | |     CreateSchedule {
+55 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+56 | |         proto = v1::CreateSchedule,
+...  |
+67 | |     },
+68 | | );
+   | |_^ required by this bound in `_export_method_session_snapshot_cabi`
+   = note: this error originates in the macro `export_decider` which comes from the expansion of the macro `wit_bindgen::generate` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0271]: type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:53:1
+   |
+53 | / export_decider!(
+54 | |     CreateSchedule {
+55 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+56 | |         proto = v1::CreateSchedule,
+...  |
+67 | |     },
+68 | | );
+   | |_^ type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
+   |
+note: expected this to be `ScheduleEvent`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:31:18
+   |
+31 |     type Event = WrongEvent;
+   |                  ^^^^^^^^^^
+note: required for `Session` to implement `GuestSession`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:53:1
+   |
+53 | / export_decider!(
+54 | |     CreateSchedule {
+55 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+56 | |         proto = v1::CreateSchedule,
+...  |
+67 | |     },
+68 | | );
+   | |_^
+   = note: associated types for the current `impl` cannot be restricted in `where` clauses
+note: required by a bound in `__post_return_method_session_snapshot`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:53:1
+   |
+53 | / export_decider!(
+54 | |     CreateSchedule {
+55 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+56 | |         proto = v1::CreateSchedule,
+...  |
+67 | |     },
+68 | | );
+   | |_^ required by this bound in `__post_return_method_session_snapshot`
+   = note: this error originates in the macro `export_decider` which comes from the expansion of the macro `wit_bindgen::generate` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0271]: type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:53:1
+   |
+53 | / export_decider!(
+54 | |     CreateSchedule {
+55 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+56 | |         proto = v1::CreateSchedule,
+...  |
+67 | |     },
+68 | | );
+   | |_^ type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
+   |
+note: expected this to be `ScheduleEvent`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:31:18
+   |
+31 |     type Event = WrongEvent;
+   |                  ^^^^^^^^^^
+note: required for `Session` to implement `GuestSession`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:53:1
+   |
+53 | / export_decider!(
+54 | |     CreateSchedule {
+55 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+56 | |         proto = v1::CreateSchedule,
+...  |
+67 | |     },
+68 | | );
+   | |_^
+   = note: associated types for the current `impl` cannot be restricted in `where` clauses
+note: required by a bound in `handler::Session::dtor`
+  --> tests/ui/nightly/bundle_mismatched_event.rs:53:1
+   |
+53 | / export_decider!(
+54 | |     CreateSchedule {
+55 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+56 | |         proto = v1::CreateSchedule,
+...  |
+67 | |     },
+68 | | );
+   | |_^ required by this bound in `Session::dtor`
+   = note: this error originates in the macro `export_decider` which comes from the expansion of the macro `wit_bindgen::generate` (in Nightly builds, run with -Z macro-backtrace for more info)

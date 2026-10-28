@@ -5,11 +5,6 @@ use agent_client_protocol::ErrorCode;
 use agent_client_protocol::schema::v1::InitializeResponse;
 use trogon_channel::AgentPortError;
 
-// `NatsJetStreamClient` is left out of the coverage build, so the bridge built on
-// it and everything that speaks to that bridge is left out with it. What remains
-// is the part with no transport in it: the capability reading and the error
-// classification.
-#[cfg(not(coverage))]
 use {
     acp_nats::AgentHandler,
     agent_client_protocol::schema::v1::{
@@ -25,7 +20,6 @@ use {
     },
 };
 
-#[cfg(not(coverage))]
 pub type AcpBridge =
     acp_nats::Bridge<async_nats::Client, trogon_std::time::SystemClock, trogon_nats::jetstream::NatsJetStreamClient>;
 
@@ -159,14 +153,12 @@ impl std::fmt::Display for SessionMethods {
 /// through the acp-nats Bridge. Streamed agent output does not come back
 /// through this port; it arrives at the bridge's ACP client half
 /// (`TelegramRenderClient`) as session notifications.
-#[cfg(not(coverage))]
 pub struct AcpPort {
     bridge: Arc<AcpBridge>,
     agent_cwd: PathBuf,
     methods: SessionMethods,
 }
 
-#[cfg(not(coverage))]
 impl AcpPort {
     pub fn new(bridge: Arc<AcpBridge>, agent_cwd: PathBuf, methods: SessionMethods) -> Self {
         Self {
@@ -220,7 +212,6 @@ impl AcpPort {
 /// Human-readable context prefix: the only part of the conversational
 /// metadata a non-participating agent is guaranteed to see, since only prompt
 /// text reaches the model.
-#[cfg(not(coverage))]
 fn prompt_text(event: &InboundEvent) -> String {
     let body = event.text.as_deref().unwrap_or_default();
     format!("[telegram message from {}]\n{}", event.sender.display_name, body)
@@ -228,7 +219,6 @@ fn prompt_text(event: &InboundEvent) -> String {
 
 /// The `chat` entry of `_meta`: where the message arrived, who sent it, and
 /// when.
-#[cfg(not(coverage))]
 #[derive(serde::Serialize)]
 struct ChatMeta<'a> {
     channel: &'a str,
@@ -238,7 +228,6 @@ struct ChatMeta<'a> {
     occurred_at: i64,
 }
 
-#[cfg(not(coverage))]
 #[derive(serde::Serialize)]
 struct SenderMeta<'a> {
     platform_user_id: &'a str,
@@ -247,7 +236,6 @@ struct SenderMeta<'a> {
 
 /// Structured twin of the context prefix, for agents that opt into reading
 /// `_meta` (see the architecture doc's `_meta` convention).
-#[cfg(not(coverage))]
 fn prompt_meta(event: &InboundEvent) -> agent_client_protocol::schema::v1::Meta {
     let mut meta = serde_json::Map::new();
     let chat = ChatMeta {
@@ -266,7 +254,6 @@ fn prompt_meta(event: &InboundEvent) -> agent_client_protocol::schema::v1::Meta 
     meta
 }
 
-#[cfg(not(coverage))]
 impl AgentPort for AcpPort {
     type Error = AcpPortError;
 

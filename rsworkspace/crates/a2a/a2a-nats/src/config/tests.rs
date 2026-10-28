@@ -7,10 +7,7 @@ use crate::constants::{
 };
 
 fn default_nats() -> NatsConfig {
-    NatsConfig {
-        servers: vec!["localhost:4222".to_string()],
-        auth: trogon_nats::NatsAuth::None,
-    }
+    NatsConfig::new(vec!["localhost:4222".to_string()], trogon_nats::NatsAuth::None)
 }
 
 fn with_subscriber<F: FnOnce()>(f: F) {

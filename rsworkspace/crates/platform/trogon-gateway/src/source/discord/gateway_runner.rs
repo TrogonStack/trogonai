@@ -1,10 +1,9 @@
-use std::future::poll_fn;
-use std::pin::Pin;
+use std::fmt::Debug;
 
-use futures_core::Stream;
+use futures_util::{Stream, StreamExt};
 use tracing::{info, warn};
 use trogon_std::EmptySecretError;
-use twilight_gateway::{Message, Shard, ShardId};
+use twilight_gateway::Message;
 
 use crate::credential::commands::domain::{CredentialKind, SourceKind};
 use crate::credential::processor::runtime_projection::{
@@ -12,55 +11,27 @@ use crate::credential::processor::runtime_projection::{
 };
 use crate::secret_store::{SecretStoreError, SecretStoreGet};
 
-use super::config::{DiscordBotToken, DiscordConfig};
+use super::config::DiscordBotToken;
 use super::gateway::GatewayBridge;
 
-pub async fn run<P: trogon_nats::jetstream::JetStreamPublisher, S: trogon_nats::jetstream::ObjectStorePut>(
+pub async fn run<P, S, Incoming, E>(
     publisher: trogon_nats::jetstream::ClaimCheckPublisher<P, S>,
-    config: &DiscordConfig,
-) {
-    let Some(bot_token) = config.bot_token.clone() else {
-        warn!("Discord gateway configured without a static bot token");
-        return;
-    };
-    run_with_bot_token(publisher, config, bot_token).await;
-}
-
-pub async fn run_with_runtime_credentials<
-    P: trogon_nats::jetstream::JetStreamPublisher,
-    S: trogon_nats::jetstream::ObjectStorePut,
-    G,
->(
-    publisher: trogon_nats::jetstream::ClaimCheckPublisher<P, S>,
-    config: &DiscordConfig,
-    credentials: RuntimeCredentialResolver<G>,
+    config: super::config::DiscordConfig,
+    mut incoming: Incoming,
 ) where
-    G: SecretStoreGet<Error = SecretStoreError>,
-{
-    match resolve_runtime_bot_token(&credentials).await {
-        Ok(bot_token) => run_with_bot_token(publisher, config, bot_token).await,
-        Err(error) => warn!(?error, "Discord runtime bot token could not be resolved"),
-    }
-}
-
-async fn run_with_bot_token<
     P: trogon_nats::jetstream::JetStreamPublisher,
     S: trogon_nats::jetstream::ObjectStorePut,
->(
-    publisher: trogon_nats::jetstream::ClaimCheckPublisher<P, S>,
-    config: &DiscordConfig,
-    bot_token: DiscordBotToken,
-) {
+    Incoming: Stream<Item = Result<Message, E>> + Unpin,
+    E: Debug,
+{
     info!("mode: gateway");
 
     let bridge = GatewayBridge::new(publisher, config.subject_prefix.clone(), config.nats_ack_timeout.into());
 
-    let mut shard = Shard::new(ShardId::ONE, bot_token.as_str().to_owned(), config.intents);
-
     info!("starting Discord gateway connection");
 
     loop {
-        let msg = poll_fn(|cx| Stream::poll_next(Pin::new(&mut shard), cx)).await;
+        let msg = incoming.next().await;
         match msg {
             Some(Ok(Message::Text(text))) => bridge.dispatch(&text).await,
             Some(Ok(Message::Close(_))) => {
@@ -100,7 +71,7 @@ pub enum DiscordRuntimeCredentialError {
 }
 
 #[cfg(test)]
-mod tests {
+mod runtime_credential_tests {
     use trogon_decider_runtime::StreamPosition;
     use trogon_std::SecretString;
 
@@ -173,3 +144,6 @@ mod tests {
         ));
     }
 }
+
+#[cfg(test)]
+mod tests;

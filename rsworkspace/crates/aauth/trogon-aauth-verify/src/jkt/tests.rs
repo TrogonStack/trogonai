@@ -41,13 +41,17 @@ fn rsa_thumbprint() {
 }
 
 #[test]
-fn oct_thumbprint() {
+fn oct_key_is_rejected() {
+    // A symmetric key's `k` member is the secret itself, so it can never
+    // stand in for a proof-of-possession public key: a peer that put its own
+    // `k` in a `cnf.jwk` would be handing the verifier a value it could
+    // trivially replay, defeating the whole point of the thumbprint binding.
     let jwk = serde_json::json!({
         "kty": "oct",
         "k": "GawgguFyGrWKav7AX4VKUg",
     });
-    let digest = jwk_thumbprint(&jwk).expect("oct thumbprint");
-    assert!(!digest.is_empty() && !digest.contains('='));
+    let err = jwk_thumbprint(&jwk).unwrap_err();
+    assert!(matches!(err, JktError::UnsupportedKty(kty) if kty == "oct"));
 }
 
 #[test]

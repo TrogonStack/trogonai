@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.queries.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "trogonai/session/sessions/queries/v1alpha1/contract_version.proto";
 import "trogonai/session/sessions/queries/v1alpha1/history_item.proto";
 import "trogonai/session/sessions/queries/v1alpha1/projection_freshness.proto";
@@ -13,7 +14,10 @@ import "trogonai/session/sessions/queries/v1alpha1/read_consistency.proto";
 // read that inlined it would have no bound on its response size, and a client
 // would have no way to ask for less.
 message GetSessionHistoryRequest {
-  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   ContractVersion accepted_contract = 2 [features.field_presence = LEGACY_REQUIRED];
   HistoryDirection direction = 3 [features.field_presence = LEGACY_REQUIRED];
   uint32 page_size = 4 [features.field_presence = LEGACY_REQUIRED];

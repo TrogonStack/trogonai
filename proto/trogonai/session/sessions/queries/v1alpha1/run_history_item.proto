@@ -1,0 +1,119 @@
+edition = "2024";
+
+package trogonai.session.sessions.queries.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/session/sessions/queries/v1alpha1/candidate_label.proto";
+import "trogonai/session/sessions/queries/v1alpha1/history_item.proto";
+
+// RunHistoryItem is one entry of a run history, redefined rather than shared
+// with HistoryItem. It carries no score, rubric, verdict, evaluation result,
+// candidate identity or session id. Artifacts are referenced by id so large
+// traces are fetched on demand.
+message RunHistoryItem {
+  // The label assigned within one comparison.
+  CandidateLabel candidate_label = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The run's own 1-indexed position for this item.
+  uint64 ordinal = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  // Set even when the matching `item` arm is absent, so an unknown or withheld
+  // item is still identifiable.
+  RunHistoryItemKind kind = 3 [features.field_presence = LEGACY_REQUIRED];
+  oneof item {
+    RunMessage message = 4;
+    RunToolCall tool_call = 5;
+    RunArtifact artifact = 6;
+    RunElided elided = 7;
+  }
+}
+
+// RunHistoryItemKind is what an item is, readable without decoding the union.
+enum RunHistoryItemKind {
+  RUN_HISTORY_ITEM_KIND_UNSPECIFIED = 0;
+  RUN_HISTORY_ITEM_KIND_MESSAGE = 1;
+  RUN_HISTORY_ITEM_KIND_TOOL_CALL = 2;
+  RUN_HISTORY_ITEM_KIND_ARTIFACT = 3;
+  // The item exists but was not rendered. `elided` says why.
+  RUN_HISTORY_ITEM_KIND_ELIDED = 4;
+}
+
+// RunMessage is a message exchanged during the run.
+message RunMessage {
+  option (buf.validate.message).cel = {
+    id: "run_message.generation_outcome_iff_assistant"
+    message: "generation_outcome must be set for assistant messages and only for them"
+    expression: "(this.role == 2) == has(this.generation_outcome)"
+  };
+  string turn_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  RunMessageRole role = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  string text = 3 [features.field_presence = LEGACY_REQUIRED];
+  // The text was shortened for transport. The full content is not recoverable
+  // from this response.
+  bool truncated = 4 [features.field_presence = LEGACY_REQUIRED];
+  // How the assistant generation ended, so interrupted or in-flight work never
+  // reads as finished output. Unset for user messages.
+  AssistantMessageOutcome generation_outcome = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+enum RunMessageRole {
+  RUN_MESSAGE_ROLE_UNSPECIFIED = 0;
+  RUN_MESSAGE_ROLE_USER = 1;
+  RUN_MESSAGE_ROLE_ASSISTANT = 2;
+}
+
+// RunToolCall is one tool call and where it stopped.
+message RunToolCall {
+  string turn_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string tool_call_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string tool_name = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ToolCallOutcome outcome = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Behavior is read from what the run sent and received, so both are carried.
+  string input_json = 5 [features.field_presence = LEGACY_REQUIRED];
+  // Unset while the call has not produced a result.
+  string result_text = 6;
+  // Input or result was shortened for transport. The full content is not
+  // recoverable from this response.
+  bool truncated = 7 [features.field_presence = LEGACY_REQUIRED];
+  // True when the call started and no terminal outcome was ever recorded, as on
+  // ToolCallItem.
+  bool unreconciled = 8 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// RunArtifact names an artifact produced during the run. Its content is not
+// inlined.
+message RunArtifact {
+  string artifact_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string media_type = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// RunElided is an item the server chose not to render, stated affirmatively so
+// a caller never mistakes a withheld item for a missing one.
+message RunElided {
+  ElisionReason reason = 1 [features.field_presence = LEGACY_REQUIRED];
+}

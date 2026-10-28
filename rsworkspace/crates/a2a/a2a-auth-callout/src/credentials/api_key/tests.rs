@@ -106,3 +106,11 @@ fn digest_is_deterministic() {
     let d2 = ApiKeyDigest::compute(&key, &registry.hmac_secret);
     assert_eq!(d1, d2);
 }
+
+#[test]
+fn api_key_debug_redacts_raw_value() {
+    let key = ApiKey::new("super-secret-key").unwrap();
+    let debug_output = format!("{key:?}");
+    assert!(!debug_output.contains("super-secret-key"));
+    assert!(debug_output.contains("<redacted>"));
+}

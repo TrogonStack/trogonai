@@ -1,0 +1,12 @@
+edition = "2024";
+
+package trogonai.workflows.definitions.v1alpha1;
+
+import "trogonai/workflows/definitions/v1alpha1/workflow_definition.proto";
+
+// Dispatch requires DecideRequest.expected_revision. Only ACTIVE transitions,
+// and the reference must match the latest revision. Archival blocks new saved
+// recipe launches; pinned runs and immutable revision history are preserved.
+message ArchiveWorkflowDefinition {
+  WorkflowDefinitionRef definition = 1 [features.field_presence = LEGACY_REQUIRED];
+}

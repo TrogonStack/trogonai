@@ -1,0 +1,121 @@
+edition = "2024";
+
+package trogonai.model_access.provider_connections.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogon/hierarchy/v1alpha1/node.proto";
+import "trogonai/agents/agents/v1alpha1/digest.proto";
+import "trogonai/agents/agents/v1alpha1/model_selection.proto";
+import "trogonai/model_access/provider_connections/v1alpha1/identity.proto";
+import "trogonai/model_access/provider_connections/v1alpha1/protocol.proto";
+
+// Credential-free HTTPS base URL, retaining path and trailing slash. No user
+// info, query, or fragment is permitted. Admission additionally enforces
+// ADR#0032 endpoint trust, egress, DNS, and redirect rules before every use.
+message NetworkEndpoint {
+  string base_url = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.uri = true,
+    (buf.validate.field).string.pattern = "^https://[^/?#@]+(/[^?#]*)?$"
+  ];
+}
+
+// Only deployment configuration can register this auth-free local endpoint.
+// The identifier resolves through deployment authority, never tenant input.
+message DeploymentLocalEndpoint {
+  string endpoint_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// Exactly one known endpoint is required. There are no arbitrary trust knobs,
+// host overrides, provider SDK options, or secret-bearing URL parameters.
+message ProviderEndpoint {
+  oneof endpoint {
+    option (buf.validate.oneof).required = true;
+    NetworkEndpoint network = 1;
+    DeploymentLocalEndpoint deployment_local = 2;
+  }
+}
+
+// Exact existing catalog reference plus definition digest. Admission proves
+// the provider offering serves this release; an alias alone cannot prove it.
+message CatalogModelPin {
+  trogonai.agents.agents.v1alpha1.ModelVersionRef version_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.agents.v1alpha1.Digest definition_digest = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ProviderModelOffering {
+  ProviderModelIdentifier identifier = 1 [features.field_presence = LEGACY_REQUIRED];
+  CatalogModelPin catalog_pin = 2;
+  // Optional exact provider revision/deployment fingerprint, preserved whole.
+  // Presence does not establish immutability without driver verification.
+  string provider_revision = 3 [(buf.validate.field).string.min_len = 1];
+}
+
+// Managed admission requires exact catalog pins and an ADR#0032-compatible
+// binding. Gateway-only configuration is outside those Session guarantees and
+// cannot be promoted implicitly or used to mint managed model-access grants.
+enum ProviderAccessScope {
+  PROVIDER_ACCESS_SCOPE_UNSPECIFIED = 0;
+  PROVIDER_ACCESS_SCOPE_MANAGED = 1;
+  PROVIDER_ACCESS_SCOPE_GATEWAY_ONLY = 2;
+}
+
+// Immutable admitted configuration. Any change creates a new connection and
+// digest, including parent, provider, endpoint, models, protocols, subject, or
+// translation options. Presets only prefill these shared fields.
+// Unknown/unspecified enums, duplicate provider model identifiers, empty model
+// or protocol sets, and duplicate protocols are invalid. Managed offerings
+// require exact catalog pins. An output-limit option requires an OpenAI protocol.
+message ProviderConnectionConfiguration {
+  option (buf.validate.message).cel = {
+    id: "connection.models_unique"
+    message: "provider model identifiers must be unique"
+    expression: "this.allowed_models.map(m, m.identifier.value).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection.managed_catalog_pins"
+    message: "managed offerings require exact catalog pins"
+    expression: "this.access_scope != 1 || this.allowed_models.all(m, has(m.catalog_pin))"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection.output_limit_protocol"
+    message: "output-limit selection requires an OpenAI protocol"
+    expression: "!has(this.open_ai_output_limit_field) || this.supported_protocols.exists(p, p == 1 || p == 2)"
+  };
+
+  trogon.hierarchy.v1alpha1.NodeId parent = 1 [features.field_presence = LEGACY_REQUIRED];
+  ProviderId provider = 2 [features.field_presence = LEGACY_REQUIRED];
+  ProviderEndpoint endpoint = 3 [features.field_presence = LEGACY_REQUIRED];
+  ProviderAccessScope access_scope = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  repeated ProviderModelOffering allowed_models = 5 [(buf.validate.field).repeated.min_items = 1];
+  repeated ProviderProtocol supported_protocols = 6 [(buf.validate.field).repeated = {
+    min_items: 1
+    unique: true
+    items: {
+      enum: {
+        defined_only: true
+        not_in: [0]
+      }
+    }
+  }];
+  ProviderSubjectFingerprint provider_subject = 7;
+  OpenAiOutputLimitField open_ai_output_limit_field = 8 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // Version of this exact nonsecret protobuf configuration contract, included
+  // in retained bytes and their digest. Only version 1 is supported.
+  string contract_version = 9 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.const = "1"
+  ];
+}

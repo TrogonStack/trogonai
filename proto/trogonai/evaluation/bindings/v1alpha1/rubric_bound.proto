@@ -1,0 +1,10 @@
+edition = "2024";
+
+package trogonai.evaluation.bindings.v1alpha1;
+
+import "trogonai/evaluation/bindings/v1alpha1/binding.proto";
+
+// Genesis fixes the rubric version, subject, and judge for this history.
+message RubricBound {
+  EvaluationBinding binding = 1 [features.field_presence = LEGACY_REQUIRED];
+}

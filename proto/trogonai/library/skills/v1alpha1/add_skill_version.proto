@@ -1,0 +1,18 @@
+edition = "2024";
+
+package trogonai.library.skills.v1alpha1;
+
+import "trogonai/agents/agents/v1alpha1/dependencies.proto";
+import "trogonai/library/skills/v1alpha1/claim_check.proto";
+import "trogonai/library/skills/v1alpha1/skill_provenance.proto";
+
+// Appends an immutable version; a version is never edited. version_ref is what a
+// revision's SkillDeclaration pins. Its version is an exact identifier: empty
+// values and moving aliases are invalid, and a repeated version is rejected.
+// Content is held by claim check, and its digest is what
+// SkillDeclaration.content_digest must match.
+message AddSkillVersion {
+  trogonai.agents.agents.v1alpha1.SkillVersionRef version_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  ClaimCheck content_ref = 2 [features.field_presence = LEGACY_REQUIRED];
+  SkillProvenance provenance = 3 [features.field_presence = LEGACY_REQUIRED];
+}

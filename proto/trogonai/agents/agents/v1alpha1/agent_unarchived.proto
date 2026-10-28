@@ -1,0 +1,15 @@
+edition = "2024";
+
+package trogonai.agents.agents.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// AgentUnarchived transitions an archived agent back to active without
+// changing its identity, revision history, or latest active revision.
+// Consumed proposal ids remain consumed and stale proposal bases remain stale.
+message AgentUnarchived {
+  string agent_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}

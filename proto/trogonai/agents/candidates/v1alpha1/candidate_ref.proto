@@ -1,0 +1,14 @@
+edition = "2024";
+
+package trogonai.agents.candidates.v1alpha1;
+
+import "trogonai/agents/agents/v1alpha1/digest.proto";
+import "trogonai/agents/candidates/v1alpha1/candidate_id.proto";
+
+// A typed pointer to one recorded candidate, pinned by the digest of its
+// content. A candidate is immutable, so the pin can never name different bytes
+// than the ones that were measured.
+message CandidateRef {
+  CandidateId candidate_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.agents.v1alpha1.Digest content_digest = 2 [features.field_presence = LEGACY_REQUIRED];
+}

@@ -105,18 +105,25 @@ fn push_dlq_subject_includes_derived_principal_caller_segment() {
     let prefix = A2aPrefix::new("a2a".to_string()).unwrap();
     let tid = A2aTaskId::new("task7").unwrap();
     let cid = CallerId::from_principal(&a2a_identity_types::SpiceDbPrincipal(
-        serde_json::json!({"spicedb_subject": "c1.d2"}),
+        serde_json::json!({"spicedb_subject": "c1-d2"}),
     ));
     assert_eq!(
         push_dlq_publish_subject(&prefix, &cid, &tid),
-        "a2a.v1.push.dlq.c1_d2.task7"
+        "a2a.v1.push.dlq.c1-d2.task7"
     );
 }
 
 #[test]
-fn sanitize_replaces_spaces_and_dots() {
-    assert_eq!(sanitize_subject_token(" u1.id ").as_ref(), "u1_id",);
-    assert_eq!(sanitize_subject_token("").as_ref(), "_");
+fn push_dlq_subject_percent_encodes_dotted_principal_caller_segment() {
+    let prefix = A2aPrefix::new("a2a".to_string()).unwrap();
+    let tid = A2aTaskId::new("task7").unwrap();
+    let cid = CallerId::from_principal(&a2a_identity_types::SpiceDbPrincipal(
+        serde_json::json!({"spicedb_subject": "c1.d2"}),
+    ));
+    assert_eq!(
+        push_dlq_publish_subject(&prefix, &cid, &tid),
+        "a2a.v1.push.dlq.c1%2Ed2.task7"
+    );
 }
 
 #[test]
@@ -144,11 +151,11 @@ fn resolve_absent_principal_keeps_fallback_caller_segment() {
 fn resolve_principal_with_spicedb_subject_builds_dlq_subject() {
     let prefix = A2aPrefix::new("a2a".to_string()).unwrap();
     let tid = A2aTaskId::new("task7").unwrap();
-    let p = a2a_identity_types::SpiceDbPrincipal(serde_json::json!({"spicedb_subject": "c1.d2"}));
+    let p = a2a_identity_types::SpiceDbPrincipal(serde_json::json!({"spicedb_subject": "c1-d2"}));
     let cid = resolve_push_dlq_caller_id(Some(&p), &CallerId::default());
     assert_eq!(
         push_dlq_publish_subject(&prefix, &cid, &tid),
-        "a2a.v1.push.dlq.c1_d2.task7"
+        "a2a.v1.push.dlq.c1-d2.task7"
     );
 }
 

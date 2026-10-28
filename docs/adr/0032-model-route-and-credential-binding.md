@@ -9,36 +9,39 @@ date: 2026-07-18
 
 ## Context
 
-An [AgentImplementation](../glossary/agentimplementation) executes the exact [model selections](../glossary/modelselection) in an
-[AgentConfiguration](../glossary/agentconfiguration), but the implementation is not the model provider and must
-not become the custodian of provider credentials. When their pinned releases
-and adapters declare compatibility, Codex, Claude Code, a fully pinned OpenClaw
-implementation, and the platform managed loop can use a selected model through
-Amazon Bedrock, OpenAI, or another provider. The provider may authenticate with
-a [tenant](../glossary/tenant) API key, delegated OAuth, mutual TLS, an auth-free deployment-local
-endpoint, or deployment-attested workload identity.
+Platform-managed model access requires an [AgentImplementation](../glossary/agentimplementation)
+whose pinned adapter can derive and enforce exact [model selections](../glossary/modelselection)
+from its runtime-owned settings in [AgentConfiguration](../glossary/agentconfiguration).
+The implementation is not the model provider and must not become the custodian
+of provider credentials. When their pinned releases and adapters prove the
+required compatibility, integrations can use selected models through Amazon
+Bedrock, OpenAI, or another provider. The provider may authenticate with a
+[tenant](../glossary/tenant) API key, delegated OAuth, mutual TLS, an auth-free
+deployment-local endpoint, or deployment-attested workload identity.
 
 Those choices have different ownership and lifecycle:
 
-1. The immutable AgentConfiguration owns the exact primary and auxiliary
-   ModelSelection values and deterministic parameters.
-2. The [Session](../glossary/session) resolves one provider route for each pinned selection. It does
-   not choose or override the model.
+1. The immutable AgentConfiguration owns the runtime binding and one complete
+   runtime-native settings message. Native model choices and parameters stay
+   there; there are no mandatory universal model-selection fields.
+2. A pinned adapter supporting managed-model admission derives verifiable
+   primary and auxiliary ModelSelection values from those settings. The
+   [Session](../glossary/session) records that projection and resolves one provider
+   route for each selection. Neither step creates another authored selection.
 3. A model provider connection identifies the provider security and billing
    boundary.
 4. A credential binding authorizes the platform model access service to use
    that connection.
 
-Item 1 is a precondition this ADR does not itself establish, and it is currently
-unmet. The shipped agent contract gives model selection to the runtime, inside
-the runtime-owned settings on AgentConfiguration, rather than carrying it as a
-platform-readable field. Everything decided below depends on the platform reading
-an exact model before a Session becomes runnable, so while that ownership question
-is open this ADR is blocked rather than merely unbuilt: allowed-model policy,
-route admission, and the `ProviderModelMismatch` check have nothing to read. The
-consequence recorded in
-[ADR#0025](./0025-agent-definition-data-ownership.md) tracks the conflict, and
-resolving it is a decision in its own right.
+Draft [ADR#0062](./0062-runtime-owned-settings-and-platform-declarations.md)
+resolves the previous ownership conflict by making model inspection and
+route enforcement a supported capability. A runtime may have a valid settings
+contract without that capability, but cannot run a Session that requires these
+managed-model guarantees. A hidden or internally managed model choice is not a
+model-free declaration. Allowed-model policy, route admission, and
+`ProviderModelMismatch` checks require the adapter's exact, verifiable
+projection before execution. Failure to provide it rejects this capability;
+it never silently disables enforcement.
 
 Calling all of these choices a Codex key, an OpenClaw profile, or implementation
 configuration would make provider selection, secret custody, rotation, and
@@ -58,10 +61,10 @@ The repository already fixes adjacent boundaries:
   client, and requires fail-closed resolution with bounded plaintext
   lifetimes.
 - Draft [ADR#0025](./0025-agent-definition-data-ownership.md) makes exact
-  implementation and model selections immutable AgentConfiguration content
-  while keeping live credential bindings outside [Agent revisions](../glossary/agentrevision).
-  Its own consequences now record that model-selection ownership is unresolved,
-  so this is a contested dependency rather than a settled boundary.
+  runtime bindings and settings immutable AgentConfiguration content while
+  keeping live credential bindings outside [Agent revisions](../glossary/agentrevision).
+  Model selections are derived from settings only for supported managed-model
+  admission.
 - Draft
   [ADR#0031](./0031-agent-implementation-and-session-plan.md) defines
   [SessionExecutionPlan](../glossary/sessionexecutionplan) as the immutable Session record of the exact revision,
@@ -73,20 +76,24 @@ provider selection method does not identify the platform Session whose grant
 would authorize the request.
 
 This [ADR](../glossary/adr) defines model provider routing and credential custody for hosted
-model access. It does not define implementation or model selection, execution
+model access admitted through that capability. It does not require every valid
+Agent configuration to support it. It does not define runtime-native settings, execution
 placement, [execution-attempt](../glossary/executionattempt) attestation, host operational authentication,
 model catalogs, pricing, budgets, channel credentials, tool credentials, or
 detailed provider translation semantics beyond requiring an exact driver and
 translation-contract pin.
 [ADR#0031](./0031-agent-implementation-and-session-plan.md) owns the exact
-implementation and model pins, Session planning, and verified execution
-attempts. A credential used only to launch a host or authenticate an execution
-supervisor is never a model provider CredentialBinding.
+implementation and settings pins, capability-specific model projection, Session
+planning, and verified execution attempts. A credential used only to launch a
+host or authenticate an execution supervisor is never a model provider
+CredentialBinding.
 
 This ADR depends on the SessionExecutionPlan boundary in
 [ADR#0031](./0031-agent-implementation-and-session-plan.md) and the
 SecretStore boundary in
-[ADR#0023](./0023-secret-management-and-key-custody-direction.md). It must not
+[ADR#0023](./0023-secret-management-and-key-custody-direction.md), and the
+runtime settings boundary in
+[ADR#0062](./0062-runtime-owned-settings-and-platform-declarations.md). It must not
 advance to accepted before those dependencies are accepted with compatible
 boundaries.
 
@@ -167,9 +174,10 @@ ModelProviderConnection and CredentialBinding are reusable, hierarchy-scoped
 control-plane resources. ModelProviderDriverVersion is an immutable platform
 release of provider request and response translation behavior.
 ResolvedModelRoute is immutable Session-owned data, not an independently
-mutable resource. SessionExecutionPlan contains one primary ResolvedModelRoute
-and zero or more typed AuxiliaryModelRoute values. Every primary and auxiliary
-selection comes from the pinned AgentConfiguration. Each auxiliary value
+mutable resource. For the managed-model capability, SessionExecutionPlan
+contains one primary ResolvedModelRoute and zero or more typed
+AuxiliaryModelRoute values. Every selection is derived by the pinned adapter
+from the admitted runtime settings. Each auxiliary value
 records its typed role, selection digest, and route. The canonical
 SessionExecutionPlan digest commits to the AgentRevision, AgentConfiguration
 digest, exact selections, roles, driver versions, and routes.
@@ -248,17 +256,19 @@ version. A provider, endpoint, provider subject, authentication kind,
 SecretRef, protocol, allowlist, or parent change creates a new resource and
 digest. Validated secret rotation behind one stable SecretRef changes neither.
 
-### 2. Resolve every route before a Session becomes runnable
+### 2. Resolve every route before a managed-model Session becomes runnable
 
 [ADR#0031](./0031-agent-implementation-and-session-plan.md) owns the overall
-Session admission order and the single atomic `SessionStarted` write. Its model
-route resolution step uses this subprocedure:
+Session admission order and the single atomic `SessionStarted` write. It first
+validates the runtime settings and requires support for managed-model admission.
+Its model route resolution step then uses this subprocedure:
 
 1. Derive tenant, hierarchy scope, and principal from authenticated context.
-2. Load the exact primary and typed auxiliary ModelSelection values from the
-   pinned AgentRevision and verify their AgentConfiguration and model
-   definition digests. A Session or implementation cannot add, remove, or
-   override a selection or deterministic parameter.
+2. Obtain the exact primary and typed auxiliary ModelSelection projection from
+   the pinned adapter and admitted runtime settings. Verify its provenance to
+   the AgentConfiguration digest, settings contract, and adapter artifacts,
+   then verify model definition digests. A Session or implementation cannot
+   add, remove, or override a derived selection or parameter.
 3. For every route, select an explicitly requested authorized
    ModelProviderConnection or the single applicable policy default at the
    Session hierarchy scope.
@@ -308,9 +318,10 @@ Session. No change edits a running plan.
 
 ### 3. Keep provider credentials out of agent, implementation, and execution state
 
-An AgentConfiguration owns exact ModelSelection values and deterministic
-parameters. It contains no ModelProviderConnection id, CredentialBinding id,
-SecretRef, provider token, auth profile, environment variable name, or
+An AgentConfiguration owns runtime-native settings from which the managed-model
+adapter derives exact ModelSelection values and parameters. It contains no
+ModelProviderConnection id, CredentialBinding id, SecretRef, provider token,
+auth profile, environment variable name, or
 provider-native credential locator.
 
 Provider connection metadata and credential lifecycle state are security-plane
@@ -349,8 +360,8 @@ boundary.
 
 ### 4. Broker hosted model access through a session-scoped proxy
 
-The hosted platform adds a model access service. It is the only hosted
-platform component that calls upstream model providers. The secrets service
+The managed-model path adds a model access service. It is the only component
+in that path that calls upstream model providers. The secrets service
 remains the only OpenBao client.
 
     Native AgentImplementation
@@ -449,16 +460,18 @@ implementation requires the platform-controlled attested supervisor. Without
 it, the AWS product is treated as an external delegated agent and cannot
 receive platform provider credentials or duplicate them in AgentCore Identity.
 
-### 6. Project the route without native defaults or fallback
+### 6. Project the admitted route without substitution or fallback
 
-Each implementation adapter projects the exact primary and auxiliary
-ModelSelection values from AgentConfiguration plus their ResolvedModelRoute
-values into the smallest native configuration needed to call the Session-bound
-model proxy. Native files and profiles are generated artifacts, not sources of
-truth.
+Each adapter admitted for managed-model access derives exact primary and
+auxiliary ModelSelection values from the runtime settings, then combines them
+with their ResolvedModelRoute values in the smallest native projection needed
+to call the Session-bound model proxy. The authored runtime settings remain the
+source of model choice; generated files and profiles do not create another
+source. Defaults are admissible only when their meaning is fixed by the pinned
+settings contract and included in the verified projection.
 
-Every adapter must set the exact provider model identifier, protocol, and
-proxy endpoint for each selection plus the exact revision-bound implementation
+Every adapter admitted for this capability must set the exact provider model
+identifier, protocol, and proxy endpoint for each selection plus the exact revision-bound implementation
 mode. It must inspect the effective native configuration before the Session
 becomes runnable. Its digest must match SessionExecutionPlan and Ready
 evidence. A mismatch is a typed configuration failure, not a reason to
@@ -475,7 +488,10 @@ The following behavior is prohibited:
 - retrying an authentication failure with another credential binding; and
 - using display strings or native error text to choose a route.
 
-Adapter-specific requirements include:
+The following are requirements for admitting possible adapters to this path,
+not claims that a particular SDK version already supports them. Each adapter
+keeps its own settings schema; compatibility must be verified for its pinned
+release before claiming these guarantees:
 
 - Codex receives an explicit model and custom provider route to the local
   proxy. Hosted execution does not seed shared auth state, copy a personal
@@ -690,8 +706,8 @@ secret values, refresh material, signed AWS requests, grant tokens,
 confirmation keys, and renewal authority. Audit records identify the stable
 SecretRef-backed binding, never the secret version's plaintext.
 
-An adapter and provider combination is not supported until automated proof
-shows:
+An adapter and provider combination is not supported for managed-model access
+until automated proof shows:
 
 - no upstream credential enters Agent, AgentConfiguration, native
   implementation, execution attempt, ACP, prompt, transcript, checkpoint,
@@ -732,14 +748,17 @@ shows:
 
 - Agent definitions remain portable across platform-funded and tenant-funded
   model access without embedding security state in revisions.
-- AgentConfiguration owns every exact model selection and AgentRevision binds
-  that immutable configuration, while SessionExecutionPlan records the
-  provider route and credential binding admitted to serve it. Rotation and
+- AgentConfiguration owns the runtime-native settings and AgentRevision binds
+  that immutable configuration. For managed-model access, the pinned adapter
+  derives exact selections and SessionExecutionPlan records that projection,
+  its provenance, and the provider routes admitted to serve it. Rotation and
   revocation remain live security operations.
-- Codex, Claude Code, fully pinned OpenClaw, the managed loop, Bedrock, and
-  non-Bedrock combinations use one typed provider boundary instead of
-  implementation-specific credential fields.
-- The hosted platform gains a model access service on the model-call hot path.
+- Compatible adapters use one typed provider boundary while retaining their
+  own settings contracts. An adapter that cannot expose and enforce exact model
+  choices remains ineligible for managed-model admission; it is not classified
+  as model-free and receives no grant through this path.
+- Sessions admitted to managed-model access gain a model access service on
+  their model-call hot path.
   It must stream responses, enforce live policy, preserve idempotency
   semantics, and remain highly available.
 - Native implementation compromise can spend only through its bound supervisor
@@ -764,6 +783,7 @@ shows:
 - [ADR#0023: Secret Management and Key Custody on OpenBao behind a Platform Secrets Service](./0023-secret-management-and-key-custody-direction.md)
 - [ADR#0025: Agent Definition Data Ownership](./0025-agent-definition-data-ownership.md)
 - [ADR#0031: Agent Implementation and Session Plan](./0031-agent-implementation-and-session-plan.md)
+- [ADR#0062: Runtime-Owned Settings and Platform Declarations](./0062-runtime-owned-settings-and-platform-declarations.md)
 - [ACP conformance matrix](../architecture/acp-conformance.md)
 - [Agent platform decision record](../research/agent-platform/decision-record.md)
 - [Claude Code Agent SDK research dossier](../research/agent-platform/products/claude-code-agent-sdk.md)

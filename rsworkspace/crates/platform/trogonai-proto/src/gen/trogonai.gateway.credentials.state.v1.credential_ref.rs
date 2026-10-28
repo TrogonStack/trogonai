@@ -17,6 +17,8 @@ pub enum CredentialSource {
     CREDENTIAL_SOURCE_TELEGRAM = 10i32,
     CREDENTIAL_SOURCE_TWITTER = 11i32,
     CREDENTIAL_SOURCE_DATADOG = 12i32,
+    CREDENTIAL_SOURCE_GOOGLE_PUBSUB = 13i32,
+    CREDENTIAL_SOURCE_ZOOM = 14i32,
 }
 impl CredentialSource {
     ///Idiomatic alias for [`Self::CREDENTIAL_SOURCE_UNSPECIFIED`]; `Debug` prints the variant name.
@@ -58,6 +60,12 @@ impl CredentialSource {
     ///Idiomatic alias for [`Self::CREDENTIAL_SOURCE_DATADOG`]; `Debug` prints the variant name.
     #[allow(non_upper_case_globals)]
     pub const Datadog: Self = Self::CREDENTIAL_SOURCE_DATADOG;
+    ///Idiomatic alias for [`Self::CREDENTIAL_SOURCE_GOOGLE_PUBSUB`]; `Debug` prints the variant name.
+    #[allow(non_upper_case_globals)]
+    pub const GooglePubsub: Self = Self::CREDENTIAL_SOURCE_GOOGLE_PUBSUB;
+    ///Idiomatic alias for [`Self::CREDENTIAL_SOURCE_ZOOM`]; `Debug` prints the variant name.
+    #[allow(non_upper_case_globals)]
+    pub const Zoom: Self = Self::CREDENTIAL_SOURCE_ZOOM;
 }
 impl ::core::default::Default for CredentialSource {
     fn default() -> Self {
@@ -168,6 +176,8 @@ impl ::buffa::Enumeration for CredentialSource {
             10i32 => ::core::option::Option::Some(Self::CREDENTIAL_SOURCE_TELEGRAM),
             11i32 => ::core::option::Option::Some(Self::CREDENTIAL_SOURCE_TWITTER),
             12i32 => ::core::option::Option::Some(Self::CREDENTIAL_SOURCE_DATADOG),
+            13i32 => ::core::option::Option::Some(Self::CREDENTIAL_SOURCE_GOOGLE_PUBSUB),
+            14i32 => ::core::option::Option::Some(Self::CREDENTIAL_SOURCE_ZOOM),
             _ => ::core::option::Option::None,
         }
     }
@@ -191,6 +201,8 @@ impl ::buffa::Enumeration for CredentialSource {
             Self::CREDENTIAL_SOURCE_TELEGRAM => "CREDENTIAL_SOURCE_TELEGRAM",
             Self::CREDENTIAL_SOURCE_TWITTER => "CREDENTIAL_SOURCE_TWITTER",
             Self::CREDENTIAL_SOURCE_DATADOG => "CREDENTIAL_SOURCE_DATADOG",
+            Self::CREDENTIAL_SOURCE_GOOGLE_PUBSUB => "CREDENTIAL_SOURCE_GOOGLE_PUBSUB",
+            Self::CREDENTIAL_SOURCE_ZOOM => "CREDENTIAL_SOURCE_ZOOM",
         }
     }
     fn from_proto_name(name: &str) -> ::core::option::Option<Self> {
@@ -234,6 +246,12 @@ impl ::buffa::Enumeration for CredentialSource {
             "CREDENTIAL_SOURCE_DATADOG" => {
                 ::core::option::Option::Some(Self::CREDENTIAL_SOURCE_DATADOG)
             }
+            "CREDENTIAL_SOURCE_GOOGLE_PUBSUB" => {
+                ::core::option::Option::Some(Self::CREDENTIAL_SOURCE_GOOGLE_PUBSUB)
+            }
+            "CREDENTIAL_SOURCE_ZOOM" => {
+                ::core::option::Option::Some(Self::CREDENTIAL_SOURCE_ZOOM)
+            }
             _ => ::core::option::Option::None,
         }
     }
@@ -252,6 +270,8 @@ impl ::buffa::Enumeration for CredentialSource {
             Self::CREDENTIAL_SOURCE_TELEGRAM,
             Self::CREDENTIAL_SOURCE_TWITTER,
             Self::CREDENTIAL_SOURCE_DATADOG,
+            Self::CREDENTIAL_SOURCE_GOOGLE_PUBSUB,
+            Self::CREDENTIAL_SOURCE_ZOOM,
         ]
     }
 }
@@ -269,6 +289,8 @@ pub enum CredentialKind {
     CREDENTIAL_KIND_VERIFICATION_TOKEN = 8i32,
     CREDENTIAL_KIND_WEBHOOK_SECRET = 9i32,
     CREDENTIAL_KIND_WEBHOOK_TOKEN = 10i32,
+    CREDENTIAL_KIND_SECRET_TOKEN = 11i32,
+    CREDENTIAL_KIND_SERVICE_ACCOUNT_CREDENTIALS = 12i32,
 }
 impl CredentialKind {
     ///Idiomatic alias for [`Self::CREDENTIAL_KIND_UNSPECIFIED`]; `Debug` prints the variant name.
@@ -304,6 +326,12 @@ impl CredentialKind {
     ///Idiomatic alias for [`Self::CREDENTIAL_KIND_WEBHOOK_TOKEN`]; `Debug` prints the variant name.
     #[allow(non_upper_case_globals)]
     pub const WebhookToken: Self = Self::CREDENTIAL_KIND_WEBHOOK_TOKEN;
+    ///Idiomatic alias for [`Self::CREDENTIAL_KIND_SECRET_TOKEN`]; `Debug` prints the variant name.
+    #[allow(non_upper_case_globals)]
+    pub const SecretToken: Self = Self::CREDENTIAL_KIND_SECRET_TOKEN;
+    ///Idiomatic alias for [`Self::CREDENTIAL_KIND_SERVICE_ACCOUNT_CREDENTIALS`]; `Debug` prints the variant name.
+    #[allow(non_upper_case_globals)]
+    pub const ServiceAccountCredentials: Self = Self::CREDENTIAL_KIND_SERVICE_ACCOUNT_CREDENTIALS;
 }
 impl ::core::default::Default for CredentialKind {
     fn default() -> Self {
@@ -414,6 +442,12 @@ impl ::buffa::Enumeration for CredentialKind {
             }
             9i32 => ::core::option::Option::Some(Self::CREDENTIAL_KIND_WEBHOOK_SECRET),
             10i32 => ::core::option::Option::Some(Self::CREDENTIAL_KIND_WEBHOOK_TOKEN),
+            11i32 => ::core::option::Option::Some(Self::CREDENTIAL_KIND_SECRET_TOKEN),
+            12i32 => {
+                ::core::option::Option::Some(
+                    Self::CREDENTIAL_KIND_SERVICE_ACCOUNT_CREDENTIALS,
+                )
+            }
             _ => ::core::option::Option::None,
         }
     }
@@ -435,6 +469,10 @@ impl ::buffa::Enumeration for CredentialKind {
             }
             Self::CREDENTIAL_KIND_WEBHOOK_SECRET => "CREDENTIAL_KIND_WEBHOOK_SECRET",
             Self::CREDENTIAL_KIND_WEBHOOK_TOKEN => "CREDENTIAL_KIND_WEBHOOK_TOKEN",
+            Self::CREDENTIAL_KIND_SECRET_TOKEN => "CREDENTIAL_KIND_SECRET_TOKEN",
+            Self::CREDENTIAL_KIND_SERVICE_ACCOUNT_CREDENTIALS => {
+                "CREDENTIAL_KIND_SERVICE_ACCOUNT_CREDENTIALS"
+            }
         }
     }
     fn from_proto_name(name: &str) -> ::core::option::Option<Self> {
@@ -472,6 +510,14 @@ impl ::buffa::Enumeration for CredentialKind {
             "CREDENTIAL_KIND_WEBHOOK_TOKEN" => {
                 ::core::option::Option::Some(Self::CREDENTIAL_KIND_WEBHOOK_TOKEN)
             }
+            "CREDENTIAL_KIND_SECRET_TOKEN" => {
+                ::core::option::Option::Some(Self::CREDENTIAL_KIND_SECRET_TOKEN)
+            }
+            "CREDENTIAL_KIND_SERVICE_ACCOUNT_CREDENTIALS" => {
+                ::core::option::Option::Some(
+                    Self::CREDENTIAL_KIND_SERVICE_ACCOUNT_CREDENTIALS,
+                )
+            }
             _ => ::core::option::Option::None,
         }
     }
@@ -488,6 +534,8 @@ impl ::buffa::Enumeration for CredentialKind {
             Self::CREDENTIAL_KIND_VERIFICATION_TOKEN,
             Self::CREDENTIAL_KIND_WEBHOOK_SECRET,
             Self::CREDENTIAL_KIND_WEBHOOK_TOKEN,
+            Self::CREDENTIAL_KIND_SECRET_TOKEN,
+            Self::CREDENTIAL_KIND_SERVICE_ACCOUNT_CREDENTIALS,
         ]
     }
 }

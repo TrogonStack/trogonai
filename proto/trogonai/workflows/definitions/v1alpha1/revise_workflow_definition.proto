@@ -1,0 +1,25 @@
+edition = "2024";
+
+package trogonai.workflows.definitions.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/workflows/definitions/v1alpha1/digest.proto";
+import "trogonai/workflows/definitions/v1alpha1/workflow_definition.proto";
+
+// Only ACTIVE accepts revisions. The exact base must be the latest retained
+// revision; admission validates the candidate before minting base + 1. Revision
+// exhaustion rejects instead of wrapping. Existing runs keep their pinned plan.
+message ReviseWorkflowDefinition {
+  option (buf.validate.message).cel = {
+    id: "revise_workflow_definition.changed_digest"
+    message: "a revision must change the exact definition artifact"
+    expression: "this.digest != this.base_revision.digest"
+  };
+
+  WorkflowDefinitionRef base_revision = 1 [features.field_presence = LEGACY_REQUIRED];
+  bytes definition_bytes = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.min_len = 1
+  ];
+  Digest digest = 3 [features.field_presence = LEGACY_REQUIRED];
+}

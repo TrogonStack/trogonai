@@ -1,0 +1,19 @@
+edition = "2024";
+
+package trogonai.policy.delegation_permissions.v1alpha1;
+
+import "trogonai/policy/delegation_permissions/v1alpha1/permission_policy.proto";
+import "trogonai/policy/subjects/v1alpha1/subject.proto";
+
+// Replaces an initialized subject's permission, including after a clear.
+// Dispatch requires live administration authority and a nonempty Decider
+// command_id plus original positive expected_revision. Retries preserve both; a
+// refreshed revision is a new intent. Equal targets succeed without an event
+// after the concurrency check; reordering targets alone is not a change. For an
+// Agent subject, authoritative registry lifecycle must be ACTIVE or ARCHIVED, so
+// requested provisioning setup cannot be replaced before activation. Genesis
+// provisioning origin survives every replacement.
+message SetDelegationPermission {
+  trogonai.policy.subjects.v1alpha1.PolicySubject subject = 1 [features.field_presence = LEGACY_REQUIRED];
+  DelegationPermissionPolicy policy = 2 [features.field_presence = LEGACY_REQUIRED];
+}

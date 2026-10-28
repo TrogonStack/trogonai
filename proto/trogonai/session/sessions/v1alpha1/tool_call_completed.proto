@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/duration.proto";
 import "trogonai/session/sessions/v1alpha1/command_output_replay.proto";
 import "trogonai/session/sessions/v1alpha1/command_termination.proto";
@@ -18,12 +19,24 @@ import "trogonai/session/sessions/v1alpha1/tool_call.proto";
 // audit-only, surfaced by a projection flag, never folded into state (D4). It
 // is a commuting happened-fact (WRITE_PRECONDITION = Any, ADR#0035 facet 2).
 message ToolCallCompleted {
-  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
-  string tool_call_id = 2 [features.field_presence = LEGACY_REQUIRED];
-  string tool_execution_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  string session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string tool_call_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string tool_execution_id = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   ToolCallResult result = 4 [features.field_presence = LEGACY_REQUIRED];
   // Turn this call belongs to (see UserMessageRecorded.turn_id).
-  string turn_id = 5 [features.field_presence = LEGACY_REQUIRED];
+  string turn_id = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // How the process ended, for a tool that executes one; unset for every other
   // tool. A command that ran and exited non-zero completes here with result
   // status TOOL_CALL_RESULT_STATUS_APPLICATION_ERROR and a termination set; a

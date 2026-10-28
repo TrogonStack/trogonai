@@ -1,0 +1,14 @@
+edition = "2024";
+
+package trogonai.policy.agent_budgets.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// Removes the policy, never the identity, denomination, or previously incurred
+// and reserved exposure. An already cleared history emits no second clear.
+message AgentBudgetCleared {
+  string agent_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}

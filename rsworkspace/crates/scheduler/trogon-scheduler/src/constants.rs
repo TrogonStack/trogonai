@@ -116,10 +116,10 @@ pub const SCHEDULES_CHECKPOINT_KEY: &str = "_query.schedules.read_model.v3.last_
 
 // projections::postgres::store
 /// This projection's id in the shared `jetstream_projection_checkpoint` table.
-#[cfg(all(feature = "postgres", not(coverage)))]
+#[cfg(feature = "postgres")]
 pub(crate) const SCHEDULES_CHECKPOINT_ID: &str = "schedules_read_model";
 
-#[cfg(all(feature = "postgres", not(coverage)))]
+#[cfg(feature = "postgres")]
 macro_rules! select_columns {
     () => {
         "SELECT schedule_id, status, completed, next_occurrence_at, last_occurrence_at, \
@@ -130,9 +130,9 @@ macro_rules! select_columns {
     };
 }
 
-#[cfg(all(feature = "postgres", not(coverage)))]
+#[cfg(feature = "postgres")]
 pub(crate) const SELECT_PROJECTION_BY_ID: &str = concat!(select_columns!(), " WHERE schedule_id = $1");
-#[cfg(all(feature = "postgres", not(coverage)))]
+#[cfg(feature = "postgres")]
 pub(crate) const SELECT_ALL_PROJECTIONS: &str = concat!(select_columns!(), " ORDER BY schedule_id");
 
 // commands::schedule_next_occurrence

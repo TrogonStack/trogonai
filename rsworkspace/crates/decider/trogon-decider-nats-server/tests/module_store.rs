@@ -5,7 +5,6 @@
 //! that a published object comes back byte-identical through chunking, and that
 //! a host refuses a component whose descriptor is not the module it asked for.
 
-#![cfg(not(coverage))]
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
 use std::path::{Path, PathBuf};

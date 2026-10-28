@@ -1,0 +1,17 @@
+edition = "2024";
+
+package trogonai.policy.holds.v1alpha1;
+
+import "trogonai/policy/holds/v1alpha1/hold.proto";
+import "trogonai/policy/subjects/v1alpha1/subject.proto";
+
+// Releases one named hold and leaves every other name on the subject in force,
+// so releasing a security hold never releases an owner's hold. Releasing a name
+// that is not held rejects with HoldNotPlaced rather than succeeding silently,
+// because an operator releasing the wrong name must find out. Dispatch requires
+// live hold-administration authority and a nonempty Decider command_id plus the
+// original positive expected_revision; retries preserve both.
+message ReleaseHold {
+  trogonai.policy.subjects.v1alpha1.PolicySubject subject = 1 [features.field_presence = LEGACY_REQUIRED];
+  HoldName name = 2 [features.field_presence = LEGACY_REQUIRED];
+}

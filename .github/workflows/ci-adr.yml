@@ -4,12 +4,17 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
     # ADR#NNNN references live in markdown across the whole repo (crate READMEs,
     # skills, architecture and research docs), not only under docs/adr, so this
     # guard is intentionally repo-wide rather than scoped to one workspace dir.
+    # Proto comments cite ADRs as the rationale for field shape and invariants,
+    # and buf.yaml cites the ADR explaining why a dependency is present, which is
+    # the same claim needing the same guarantee, so they trigger it too.
     paths:
       - "**/*.md"
+      - "**/*.proto"
+      - "**/*.yaml"
+      - "**/*.yml"
       - ".config/mise/tasks/github-actions/lint-adr-refs"
       - ".github/workflows/ci-adr.yml"
 
@@ -31,7 +36,7 @@ jobs:
           persist-credentials: false
 
       - name: Install mise
-        uses: jdx/mise-action@9e7f7633ff6f6d6048a9418a68d48f288f50eb14 # v4.2.3
+        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
         with:
           install: false
 

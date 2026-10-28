@@ -1,0 +1,1062 @@
+{
+  "templates": {
+    "value-empty-string": {
+      "type": "trogonai.workflows.definitions.v1alpha1.WorkflowValue",
+      "payload": {
+        "stringValue": ""
+      }
+    },
+    "value-false": {
+      "type": "trogonai.workflows.definitions.v1alpha1.WorkflowValue",
+      "payload": {
+        "boolValue": false
+      }
+    },
+    "value-zero-integer": {
+      "type": "trogonai.workflows.definitions.v1alpha1.WorkflowValue",
+      "payload": {
+        "integerValue": "0"
+      }
+    },
+    "value-finite-decimal": {
+      "type": "trogonai.workflows.definitions.v1alpha1.WorkflowValue",
+      "payload": {
+        "decimalValue": 1.25
+      }
+    },
+    "value-empty-bytes": {
+      "type": "trogonai.workflows.definitions.v1alpha1.WorkflowValue",
+      "payload": {
+        "bytesValue": ""
+      }
+    },
+    "value-null": {
+      "type": "trogonai.workflows.definitions.v1alpha1.WorkflowValue",
+      "payload": {
+        "nullValue": {}
+      }
+    },
+    "value-empty-list": {
+      "type": "trogonai.workflows.definitions.v1alpha1.WorkflowValue",
+      "payload": {
+        "listValue": {
+          "values": []
+        }
+      }
+    },
+    "value-object": {
+      "type": "trogonai.workflows.definitions.v1alpha1.WorkflowValue",
+      "payload": {
+        "objectValue": {
+          "fields": {
+            "result": {
+              "boolValue": false
+            }
+          }
+        }
+      }
+    },
+    "value-symbol": {
+      "type": "trogonai.workflows.definitions.v1alpha1.WorkflowValue",
+      "payload": {
+        "symbolValue": {
+          "typeName": "review.verdict",
+          "value": "changes_requested"
+        }
+      }
+    },
+    "value-artifact": {
+      "type": "trogonai.workflows.definitions.v1alpha1.WorkflowValue",
+      "payload": {
+        "artifactValue": {
+          "sessionId": "session-example",
+          "artifact": {
+            "artifactId": "artifact-example",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            },
+            "sizeBytes": "16",
+            "mime": "text/plain"
+          }
+        }
+      }
+    },
+    "value-registered": {
+      "type": "trogonai.workflows.definitions.v1alpha1.WorkflowValue",
+      "payload": {
+        "registeredValue": {
+          "contract": {
+            "contractId": "example.result",
+            "version": "1",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            },
+            "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+          },
+          "payload": ""
+        }
+      }
+    },
+    "value-timestamp": {
+      "type": "trogonai.workflows.definitions.v1alpha1.WorkflowValue",
+      "payload": {
+        "timestampValue": "2026-01-01T00:00:00Z"
+      }
+    },
+    "value-duration": {
+      "type": "trogonai.workflows.definitions.v1alpha1.WorkflowValue",
+      "payload": {
+        "durationValue": "30s"
+      }
+    },
+    "missing-value": {
+      "type": "trogonai.workflows.definitions.v1alpha1.WorkflowValue",
+      "payload": {}
+    },
+    "schema-string": {
+      "type": "trogonai.workflows.definitions.v1alpha1.ValueSchema",
+      "payload": {
+        "maxEncodedBytes": "4096",
+        "scalar": "SCALAR_TYPE_STRING"
+      }
+    },
+    "schema-bounded-list": {
+      "type": "trogonai.workflows.definitions.v1alpha1.ListSchema",
+      "payload": {
+        "item": {
+          "maxEncodedBytes": "4096",
+          "scalar": "SCALAR_TYPE_STRING"
+        },
+        "minItems": 0,
+        "maxItems": 3
+      }
+    },
+    "schema-closed-object": {
+      "type": "trogonai.workflows.definitions.v1alpha1.ObjectSchema",
+      "payload": {
+        "fields": [
+          {
+            "name": "summary",
+            "schema": {
+              "maxEncodedBytes": "4096",
+              "scalar": "SCALAR_TYPE_STRING"
+            },
+            "required": true
+          }
+        ]
+      }
+    },
+    "schema-verdict": {
+      "type": "trogonai.workflows.definitions.v1alpha1.SymbolSchema",
+      "payload": {
+        "typeName": "review.verdict",
+        "values": [
+          "approved",
+          "changes_requested"
+        ]
+      }
+    },
+    "reference-workflow-input": {
+      "type": "trogonai.workflows.definitions.v1alpha1.ValueReference",
+      "payload": {
+        "workflowInput": "task"
+      }
+    },
+    "reference-node-input": {
+      "type": "trogonai.workflows.definitions.v1alpha1.ValueReference",
+      "payload": {
+        "nodeInput": "task"
+      }
+    },
+    "reference-current-output": {
+      "type": "trogonai.workflows.definitions.v1alpha1.ValueReference",
+      "payload": {
+        "nodeOutput": {
+          "node": {
+            "nodeId": "review"
+          },
+          "outputName": "verdict",
+          "selection": "OUTPUT_SELECTION_CURRENT_ITERATION"
+        }
+      }
+    },
+    "reference-repeat-variable": {
+      "type": "trogonai.workflows.definitions.v1alpha1.ValueReference",
+      "payload": {
+        "repeatVariable": {
+          "repeatNode": {
+            "nodeId": "review-loop"
+          },
+          "variableName": "feedback"
+        }
+      }
+    },
+    "condition-always": {
+      "type": "trogonai.workflows.definitions.v1alpha1.Condition",
+      "payload": {
+        "always": {}
+      }
+    },
+    "condition-verdict": {
+      "type": "trogonai.workflows.definitions.v1alpha1.Condition",
+      "payload": {
+        "compare": {
+          "left": {
+            "literal": {
+              "symbolValue": {
+                "typeName": "review.verdict",
+                "value": "approved"
+              }
+            }
+          },
+          "operator": "COMPARISON_OPERATOR_EQUAL",
+          "right": {
+            "reference": {
+              "nodeOutput": {
+                "node": {
+                  "nodeId": "review"
+                },
+                "outputName": "verdict",
+                "selection": "OUTPUT_SELECTION_CURRENT_ITERATION"
+              }
+            }
+          }
+        }
+      }
+    },
+    "condition-nonempty-group": {
+      "type": "trogonai.workflows.definitions.v1alpha1.ConditionGroup",
+      "payload": {
+        "conditions": [
+          {
+            "always": {}
+          }
+        ]
+      }
+    },
+    "policy-run-bounds": {
+      "type": "trogonai.workflows.definitions.v1alpha1.RunPolicy",
+      "payload": {
+        "maxDuration": "600s",
+        "maxConcurrentInvocations": 4,
+        "maxInvocations": "100",
+        "maxControlDepth": 16,
+        "maxValueDepth": 16
+      }
+    },
+    "policy-no-retry": {
+      "type": "trogonai.workflows.definitions.v1alpha1.RetryPolicy",
+      "payload": {
+        "maxAttempts": 1,
+        "initialDelay": "0s",
+        "maxDelay": "0s",
+        "multiplier": 1,
+        "retryOn": []
+      }
+    },
+    "policy-bounded-retry": {
+      "type": "trogonai.workflows.definitions.v1alpha1.RetryPolicy",
+      "payload": {
+        "maxAttempts": 3,
+        "initialDelay": "1s",
+        "maxDelay": "10s",
+        "multiplier": 2,
+        "retryOn": [
+          "RETRY_CLASS_TRANSIENT",
+          "RETRY_CLASS_TIMEOUT"
+        ]
+      }
+    },
+    "digest-sha256": {
+      "type": "trogonai.workflows.definitions.v1alpha1.Digest",
+      "payload": {
+        "algorithm": "sha256",
+        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+      }
+    },
+    "value-node-result": {
+      "type": "trogonai.workflows.definitions.v1alpha1.WorkflowValue",
+      "payload": {
+        "nodeResultValue": "NODE_RESULT_REJECTED"
+      }
+    },
+    "schema-node-result": {
+      "type": "trogonai.workflows.definitions.v1alpha1.ValueSchema",
+      "payload": {
+        "maxEncodedBytes": "128",
+        "nodeResult": {}
+      }
+    },
+    "reference-previous-output-scoped": {
+      "type": "trogonai.workflows.definitions.v1alpha1.ValueReference",
+      "payload": {
+        "nodeOutput": {
+          "node": {
+            "nodeId": "review"
+          },
+          "outputName": "verdict",
+          "selection": "OUTPUT_SELECTION_PREVIOUS_ITERATION",
+          "repeatNode": {
+            "nodeId": "review-loop"
+          }
+        }
+      }
+    },
+    "reference-node-result-scoped": {
+      "type": "trogonai.workflows.definitions.v1alpha1.ValueReference",
+      "payload": {
+        "nodeResult": {
+          "node": {
+            "nodeId": "review"
+          },
+          "selection": "OUTPUT_SELECTION_PREVIOUS_ITERATION",
+          "repeatNode": {
+            "nodeId": "review-loop"
+          }
+        }
+      }
+    },
+    "reference-captured-output": {
+      "type": "trogonai.workflows.definitions.v1alpha1.ValueReference",
+      "payload": {
+        "capturedOutput": "verdict"
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "value-empty-string",
+      "template": "value-empty-string"
+    },
+    {
+      "name": "value-false",
+      "template": "value-false"
+    },
+    {
+      "name": "value-zero-integer",
+      "template": "value-zero-integer"
+    },
+    {
+      "name": "value-finite-decimal",
+      "template": "value-finite-decimal"
+    },
+    {
+      "name": "value-empty-bytes",
+      "template": "value-empty-bytes"
+    },
+    {
+      "name": "value-null",
+      "template": "value-null"
+    },
+    {
+      "name": "value-empty-list",
+      "template": "value-empty-list"
+    },
+    {
+      "name": "value-object",
+      "template": "value-object"
+    },
+    {
+      "name": "value-symbol",
+      "template": "value-symbol"
+    },
+    {
+      "name": "value-artifact",
+      "template": "value-artifact"
+    },
+    {
+      "name": "value-registered",
+      "template": "value-registered"
+    },
+    {
+      "name": "value-timestamp",
+      "template": "value-timestamp"
+    },
+    {
+      "name": "value-duration",
+      "template": "value-duration"
+    },
+    {
+      "name": "value-requires-arm",
+      "template": "missing-value",
+      "patch": [],
+      "violations": [
+        "value: exactly one field is required in oneof"
+      ]
+    },
+    {
+      "name": "value-rejects-infinity",
+      "template": "value-finite-decimal",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/decimalValue",
+          "value": "Infinity"
+        }
+      ],
+      "violations": [
+        "must be finite"
+      ]
+    },
+    {
+      "name": "value-rejects-nan",
+      "template": "value-finite-decimal",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/decimalValue",
+          "value": "NaN"
+        }
+      ],
+      "violations": [
+        "must be finite"
+      ]
+    },
+    {
+      "name": "value-object-rejects-empty-key",
+      "template": "value-object",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/objectValue/fields",
+          "value": {
+            "": {
+              "boolValue": false
+            }
+          }
+        }
+      ],
+      "violations": [
+        "must be at least 1 characters"
+      ]
+    },
+    {
+      "name": "value-symbol-rejects-empty-type",
+      "template": "value-symbol",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/symbolValue/typeName",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "must be at least 1 characters"
+      ]
+    },
+    {
+      "name": "value-artifact-rejects-unscoped-session",
+      "template": "value-artifact",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/artifactValue/sessionId",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "must be at least 1 characters"
+      ]
+    },
+    {
+      "name": "value-registered-rejects-empty-contract",
+      "template": "value-registered",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/registeredValue/contract/contractId",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "must be at least 1 characters"
+      ]
+    },
+    {
+      "name": "schema-string",
+      "template": "schema-string"
+    },
+    {
+      "name": "schema-requires-size-limit",
+      "template": "schema-string",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/maxEncodedBytes",
+          "value": "0"
+        }
+      ],
+      "violations": [
+        "must be greater than 0"
+      ]
+    },
+    {
+      "name": "schema-requires-arm",
+      "template": "schema-string",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/scalar"
+        }
+      ],
+      "violations": [
+        "kind: exactly one field is required in oneof"
+      ]
+    },
+    {
+      "name": "schema-rejects-unspecified-scalar",
+      "template": "schema-string",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/scalar",
+          "value": "SCALAR_TYPE_UNSPECIFIED"
+        }
+      ],
+      "violations": [
+        "must not be in list"
+      ]
+    },
+    {
+      "name": "schema-rejects-unknown-scalar",
+      "template": "schema-string",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/scalar",
+          "value": 99
+        }
+      ],
+      "violations": [
+        "must be one of the defined enum values"
+      ]
+    },
+    {
+      "name": "schema-bounded-list",
+      "template": "schema-bounded-list"
+    },
+    {
+      "name": "schema-rejects-inverted-list-bounds",
+      "template": "schema-bounded-list",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/minItems",
+          "value": 4
+        }
+      ],
+      "violations": [
+        "min_items must not exceed max_items"
+      ]
+    },
+    {
+      "name": "schema-closed-object",
+      "template": "schema-closed-object"
+    },
+    {
+      "name": "schema-rejects-duplicate-field",
+      "template": "schema-closed-object",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/fields/-",
+          "value": {
+            "name": "summary",
+            "schema": {
+              "maxEncodedBytes": "4096",
+              "scalar": "SCALAR_TYPE_STRING"
+            },
+            "required": true
+          }
+        }
+      ],
+      "violations": [
+        "object field names must be unique"
+      ]
+    },
+    {
+      "name": "schema-verdict",
+      "template": "schema-verdict"
+    },
+    {
+      "name": "schema-rejects-duplicate-symbol",
+      "template": "schema-verdict",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/values",
+          "value": [
+            "approved",
+            "approved"
+          ]
+        }
+      ],
+      "violations": [
+        "must contain unique items"
+      ]
+    },
+    {
+      "name": "schema-rejects-empty-symbol-set",
+      "template": "schema-verdict",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/values",
+          "value": []
+        }
+      ],
+      "violations": [
+        "must contain at least 1 item(s)"
+      ]
+    },
+    {
+      "name": "reference-workflow-input",
+      "template": "reference-workflow-input"
+    },
+    {
+      "name": "reference-node-input",
+      "template": "reference-node-input"
+    },
+    {
+      "name": "reference-current-output",
+      "template": "reference-current-output"
+    },
+    {
+      "name": "reference-repeat-variable",
+      "template": "reference-repeat-variable"
+    },
+    {
+      "name": "reference-requires-source",
+      "template": "reference-workflow-input",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/workflowInput"
+        }
+      ],
+      "violations": [
+        "source: exactly one field is required in oneof"
+      ]
+    },
+    {
+      "name": "reference-rejects-empty-input-name",
+      "template": "reference-workflow-input",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/workflowInput",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "must be at least 1 characters"
+      ]
+    },
+    {
+      "name": "reference-rejects-unspecified-selection",
+      "template": "reference-current-output",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodeOutput/selection",
+          "value": "OUTPUT_SELECTION_UNSPECIFIED"
+        }
+      ],
+      "violations": [
+        "must not be in list"
+      ]
+    },
+    {
+      "name": "condition-always",
+      "template": "condition-always"
+    },
+    {
+      "name": "condition-verdict",
+      "template": "condition-verdict"
+    },
+    {
+      "name": "condition-requires-arm",
+      "template": "condition-always",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/always"
+        }
+      ],
+      "violations": [
+        "condition: exactly one field is required in oneof"
+      ]
+    },
+    {
+      "name": "condition-rejects-unspecified-operator",
+      "template": "condition-verdict",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/compare/operator",
+          "value": "COMPARISON_OPERATOR_UNSPECIFIED"
+        }
+      ],
+      "violations": [
+        "must not be in list"
+      ]
+    },
+    {
+      "name": "condition-nonempty-group",
+      "template": "condition-nonempty-group"
+    },
+    {
+      "name": "condition-rejects-empty-group",
+      "template": "condition-nonempty-group",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/conditions",
+          "value": []
+        }
+      ],
+      "violations": [
+        "must contain at least 1 item(s)"
+      ]
+    },
+    {
+      "name": "policy-run-bounds",
+      "template": "policy-run-bounds"
+    },
+    {
+      "name": "policy-run-rejects-zero-maxDuration",
+      "template": "policy-run-bounds",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/maxDuration",
+          "value": "0s"
+        }
+      ],
+      "violations": [
+        "must be greater than"
+      ]
+    },
+    {
+      "name": "policy-run-rejects-zero-maxConcurrentInvocations",
+      "template": "policy-run-bounds",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/maxConcurrentInvocations",
+          "value": 0
+        }
+      ],
+      "violations": [
+        "must be greater than"
+      ]
+    },
+    {
+      "name": "policy-run-rejects-zero-maxInvocations",
+      "template": "policy-run-bounds",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/maxInvocations",
+          "value": "0"
+        }
+      ],
+      "violations": [
+        "must be greater than"
+      ]
+    },
+    {
+      "name": "policy-run-rejects-zero-maxControlDepth",
+      "template": "policy-run-bounds",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/maxControlDepth",
+          "value": 0
+        }
+      ],
+      "violations": [
+        "must be greater than"
+      ]
+    },
+    {
+      "name": "policy-run-rejects-zero-maxValueDepth",
+      "template": "policy-run-bounds",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/maxValueDepth",
+          "value": 0
+        }
+      ],
+      "violations": [
+        "must be greater than"
+      ]
+    },
+    {
+      "name": "policy-no-retry",
+      "template": "policy-no-retry"
+    },
+    {
+      "name": "policy-bounded-retry",
+      "template": "policy-bounded-retry"
+    },
+    {
+      "name": "policy-retry-rejects-zero-attempts",
+      "template": "policy-no-retry",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/maxAttempts",
+          "value": 0
+        }
+      ],
+      "violations": [
+        "must be greater than 0"
+      ]
+    },
+    {
+      "name": "policy-retry-rejects-inverted-delay",
+      "template": "policy-bounded-retry",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/maxDelay",
+          "value": "0s"
+        }
+      ],
+      "violations": [
+        "max_delay must be at least initial_delay"
+      ]
+    },
+    {
+      "name": "policy-retry-rejects-missing-classes",
+      "template": "policy-bounded-retry",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/retryOn",
+          "value": []
+        }
+      ],
+      "violations": [
+        "retryable classes are required exactly when multiple attempts are permitted"
+      ]
+    },
+    {
+      "name": "policy-single-attempt-rejects-retry-classes",
+      "template": "policy-no-retry",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/retryOn",
+          "value": [
+            "RETRY_CLASS_TRANSIENT"
+          ]
+        }
+      ],
+      "violations": [
+        "retryable classes are required exactly when multiple attempts are permitted"
+      ]
+    },
+    {
+      "name": "policy-retry-rejects-duplicate-classes",
+      "template": "policy-bounded-retry",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/retryOn",
+          "value": [
+            "RETRY_CLASS_TRANSIENT",
+            "RETRY_CLASS_TRANSIENT"
+          ]
+        }
+      ],
+      "violations": [
+        "must contain unique items"
+      ]
+    },
+    {
+      "name": "policy-retry-rejects-unspecified-class",
+      "template": "policy-bounded-retry",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/retryOn",
+          "value": [
+            "RETRY_CLASS_UNSPECIFIED"
+          ]
+        }
+      ],
+      "violations": [
+        "must not be in list"
+      ]
+    },
+    {
+      "name": "policy-retry-rejects-negative-delay",
+      "template": "policy-bounded-retry",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/initialDelay",
+          "value": "-1s"
+        }
+      ],
+      "violations": [
+        "must be greater than or equal to"
+      ]
+    },
+    {
+      "name": "policy-retry-rejects-subunit-multiplier",
+      "template": "policy-bounded-retry",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/multiplier",
+          "value": 0.5
+        }
+      ],
+      "violations": [
+        "must be greater than or equal to 1"
+      ]
+    },
+    {
+      "name": "digest-sha256",
+      "template": "digest-sha256"
+    },
+    {
+      "name": "digest-rejects-other-algorithm",
+      "template": "digest-sha256",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/algorithm",
+          "value": "sha512"
+        }
+      ],
+      "violations": [
+        "must equal"
+      ]
+    },
+    {
+      "name": "digest-rejects-short-value",
+      "template": "digest-sha256",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/value",
+          "value": "AA=="
+        }
+      ],
+      "violations": [
+        "must be 32 bytes"
+      ]
+    },
+    {
+      "name": "value-node-result",
+      "template": "value-node-result"
+    },
+    {
+      "name": "value-node-result-rejects-unspecified",
+      "template": "value-node-result",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodeResultValue",
+          "value": "NODE_RESULT_UNSPECIFIED"
+        }
+      ],
+      "violations": [
+        "must not be in list"
+      ]
+    },
+    {
+      "name": "schema-node-result",
+      "template": "schema-node-result"
+    },
+    {
+      "name": "reference-previous-output-scoped",
+      "template": "reference-previous-output-scoped"
+    },
+    {
+      "name": "reference-previous-output-rejects-missing-repeat-frame",
+      "template": "reference-previous-output-scoped",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/nodeOutput/repeatNode"
+        }
+      ],
+      "violations": [
+        "a previous-iteration reference must name exactly the repeat frame it selects"
+      ]
+    },
+    {
+      "name": "reference-current-output-rejects-repeat-frame",
+      "template": "reference-current-output",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodeOutput/repeatNode",
+          "value": {
+            "nodeId": "review-loop"
+          }
+        }
+      ],
+      "violations": [
+        "a previous-iteration reference must name exactly the repeat frame it selects"
+      ]
+    },
+    {
+      "name": "reference-node-result-scoped",
+      "template": "reference-node-result-scoped"
+    },
+    {
+      "name": "reference-previous-result-rejects-missing-repeat-frame",
+      "template": "reference-node-result-scoped",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/nodeResult/repeatNode"
+        }
+      ],
+      "violations": [
+        "a previous-iteration result must name exactly the repeat frame it selects"
+      ]
+    },
+    {
+      "name": "reference-captured-output",
+      "template": "reference-captured-output"
+    },
+    {
+      "name": "reference-captured-output-rejects-empty-name",
+      "template": "reference-captured-output",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/capturedOutput",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "must be at least 1 characters"
+      ]
+    },
+    {
+      "name": "policy-run-rejects-oversized-concurrency",
+      "template": "policy-run-bounds",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/maxConcurrentInvocations",
+          "value": 101
+        }
+      ],
+      "violations": [
+        "concurrency must not exceed the total invocation bound"
+      ]
+    }
+  ]
+}

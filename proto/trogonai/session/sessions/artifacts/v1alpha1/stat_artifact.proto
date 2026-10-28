@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.artifacts.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 import "trogonai/session/sessions/artifacts/v1alpha1/availability.proto";
 
@@ -14,13 +15,28 @@ import "trogonai/session/sessions/artifacts/v1alpha1/availability.proto";
 // not have to read a value to know a call was cheap. This is the same
 // structural argument that gives DiagnoseSession no repair mode.
 message StatArtifactRequest {
-  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
-  string artifact_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string artifact_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
 }
 
 // StatArtifactResponse describes the artifact and what can be done with it.
 message StatArtifactResponse {
-  string artifact_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  option (buf.validate.message).cel = {
+    id: "stat_artifact_response.content_requires_available"
+    message: "content is set only for ARTIFACT_AVAILABILITY_AVAILABLE"
+    expression: "!has(this.content) || this.availability == trogonai.session.sessions.artifacts.v1alpha1.ArtifactAvailability.ARTIFACT_AVAILABILITY_AVAILABLE"
+  };
+
+  string artifact_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   ArtifactAvailability availability = 2 [features.field_presence = LEGACY_REQUIRED];
   // Short human-readable preview recorded with the artifact; empty when none
   // was produced. Present regardless of availability, because a preview is

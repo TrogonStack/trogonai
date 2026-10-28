@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.maintenance.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "trogonai/session/sessions/maintenance/v1alpha1/migration.proto";
@@ -15,7 +16,10 @@ import "trogonai/session/sessions/maintenance/v1alpha1/stream_boundary.proto";
 // leaves state that ReconcileMigration can classify, because the intent was
 // written before anything else was.
 message MigrateSessionRequest {
-  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   uint32 target_schema_version = 2 [features.field_presence = LEGACY_REQUIRED];
   string implementation_version = 3 [features.field_presence = LEGACY_REQUIRED];
   string actor = 4 [features.field_presence = LEGACY_REQUIRED];
@@ -49,6 +53,12 @@ message MigrationLimits {
 }
 
 message MigrateSessionResponse {
+  option (buf.validate.message).cel = {
+    id: "migrate_session_response.not_admissible_only_for_not_admissible"
+    message: "not_admissible may be set only for MIGRATION_RESULT_NOT_ADMISSIBLE"
+    expression: "!has(this.not_admissible) || this.result == trogonai.session.sessions.maintenance.v1alpha1.MigrationResult.MIGRATION_RESULT_NOT_ADMISSIBLE"
+  };
+
   MigrationResult result = 1 [features.field_presence = LEGACY_REQUIRED];
   // Always present, including on refusal: the record is what a later
   // reconciliation is run against, so a caller that cannot store it cannot

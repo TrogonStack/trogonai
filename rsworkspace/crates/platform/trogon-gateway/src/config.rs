@@ -7,34 +7,43 @@ use crate::source::datadog::DatadogWebhookToken;
 use crate::source::discord::config::DiscordBotToken;
 use crate::source::github::config::GitHubWebhookSecret;
 use crate::source::gitlab::GitLabSigningToken;
+use crate::source::google_pubsub::config::{GooglePubSubTransportConfig, StreamingPullConfig};
+use crate::source::google_pubsub::credentials::GoogleCredentials;
+use crate::source::google_pubsub::{MaxOutstandingMessages, PubSubSubscriptionName};
 use crate::source::incidentio::config::IncidentioConfig as IncidentioSourceConfig;
 use crate::source::incidentio::incidentio_signing_secret::IncidentioSigningSecret;
 use crate::source::linear::config::LinearWebhookSecret;
 use crate::source::microsoft_graph::MicrosoftGraphClientState;
 use crate::source::notion::NotionVerificationToken;
 use crate::source::sentry::SentryClientSecret;
+use crate::source::slack::ack_budget::AckBudget;
 use crate::source::slack::config::{
     SlackAppToken, SlackSigningSecret, SlackSocketModeConfig as SlackSocketModeSourceConfig, SlackTransportConfig,
     SlackWebhookConfig as SlackWebhookSourceConfig,
 };
+use crate::source::slack::constants::DEFAULT_HTTP_BODY_SIZE_MAX;
 use crate::source::telegram::config::{
     TelegramBotToken, TelegramPublicWebhookUrl, TelegramWebhookRegistrationConfig, TelegramWebhookSecret,
 };
 use crate::source::twitter::config::TwitterConsumerSecret;
+use crate::source::zoom::config::ZoomConfig as ZoomSourceConfig;
+use crate::source::zoom::zoom_secret_token::ZoomSecretToken;
 use crate::source_integration_id::{SourceIntegrationId, SourceIntegrationIdError};
 use axum::http::HeaderName;
 use confique::Config;
+use trogon_config_value::{ConfigValue, ConfigValueError};
 #[cfg(test)]
 use trogon_nats::NatsAuth;
 use trogon_nats::jetstream::StreamMaxAge;
 use trogon_nats::{NatsToken, SubjectTokenViolationError};
 use trogon_service_config::{NatsArgs, NatsConfigSection, load_config, resolve_nats};
-use trogon_std::{NonZeroDuration, ZeroDurationError};
+use trogon_std::env::{ReadEnv, SystemEnv};
+use trogon_std::{ByteSize, HttpBodySizeMax, NonZeroDuration, ZeroDurationError};
 
 use crate::constants::{
     DEFAULT_GITLAB_TIMESTAMP_TOLERANCE_SECS, DEFAULT_INCIDENTIO_TIMESTAMP_TOLERANCE_SECS,
     DEFAULT_LINEAR_TIMESTAMP_TOLERANCE_SECS, DEFAULT_NATS_ACK_TIMEOUT_SECS, DEFAULT_SLACK_TIMESTAMP_MAX_DRIFT_SECS,
-    DEFAULT_STREAM_MAX_AGE_SECS, SENTRY_MAX_ACK_TIMEOUT_SECS,
+    DEFAULT_STREAM_MAX_AGE_SECS, DEFAULT_ZOOM_TIMESTAMP_TOLERANCE_SECS, SENTRY_MAX_ACK_TIMEOUT_SECS,
 };
 use crate::source_status::SourceStatus;
 
@@ -70,14 +79,64 @@ enum SecretInput {
 impl SecretInput {
     fn resolve(self, scope: CredentialScope, kind: CredentialKind) -> Result<String, SecretInputError> {
         let secret = StaticConfigSecretStore::resolve(scope, kind, self.into())?;
-        Ok(secret.into_plaintext()?.as_str().to_string())
+        let plaintext = secret.into_plaintext()?;
+        ConfigValue::parse(plaintext.as_str().to_string())
+            .map(ConfigValue::into_string)
+            .map_err(SecretInputError::InvalidValue)
     }
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(untagged)]
+enum ByteCountInput {
+    Literal(u64),
+    Env { env: String },
+}
+
+impl ByteCountInput {
+    fn resolve(self, env: &impl ReadEnv) -> Result<HttpBodySizeMax, ByteCountInputError> {
+        let bytes = match self {
+            Self::Literal(bytes) => bytes,
+            Self::Env { env: var_name } => {
+                let name = var_name.trim();
+                if name.is_empty() {
+                    return Err(ByteCountInputError::EmptyEnvName);
+                }
+                let raw = env.var(name).map_err(|error| match error {
+                    std::env::VarError::NotPresent => ByteCountInputError::MissingEnv { name: name.to_string() },
+                    std::env::VarError::NotUnicode(_) => {
+                        ByteCountInputError::InvalidUnicodeEnv { name: name.to_string() }
+                    }
+                })?;
+                raw.trim()
+                    .parse::<u64>()
+                    .map_err(|_| ByteCountInputError::NotAWholeNumber { value: raw })?
+            }
+        };
+        HttpBodySizeMax::new(ByteSize::b(bytes)).ok_or(ByteCountInputError::Zero)
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+enum ByteCountInputError {
+    #[error("env var name must not be empty")]
+    EmptyEnvName,
+    #[error("env var '{name}' is not set")]
+    MissingEnv { name: String },
+    #[error("env var '{name}' is not valid unicode")]
+    InvalidUnicodeEnv { name: String },
+    #[error("'{value}' is not a whole number of bytes")]
+    NotAWholeNumber { value: String },
+    #[error("must not be zero")]
+    Zero,
 }
 
 #[derive(Debug, thiserror::Error)]
 enum SecretInputError {
     #[error(transparent)]
     StaticConfig(#[from] StaticConfigSecretStoreError),
+    #[error(transparent)]
+    InvalidValue(ConfigValueError),
 }
 
 impl From<SecretInput> for StaticConfigSecretInput {
@@ -336,6 +395,8 @@ struct SourcesConfig {
     #[config(nested)]
     gitlab: GitlabConfig,
     #[config(nested)]
+    google_pubsub: GooglePubSubConfigInput,
+    #[config(nested)]
     incidentio: IncidentioConfig,
     #[config(nested)]
     linear: LinearConfig,
@@ -347,6 +408,8 @@ struct SourcesConfig {
     sentry: SentryConfig,
     #[config(nested)]
     datadog: DatadogConfig,
+    #[config(nested)]
+    zoom: ZoomConfig,
 }
 
 #[derive(Config)]
@@ -407,6 +470,14 @@ struct GitlabConfig {
 
 #[derive(Config)]
 #[config(layer_attr(serde(deny_unknown_fields)))]
+struct GooglePubSubConfigInput {
+    status: Option<String>,
+    #[config(default = {})]
+    integrations: BTreeMap<String, GooglePubSubIntegrationInput>,
+}
+
+#[derive(Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
 struct LinearConfig {
     status: Option<String>,
     #[config(default = {})]
@@ -453,6 +524,14 @@ struct DatadogConfig {
     integrations: BTreeMap<String, SourceIntegrationInput<DatadogWebhookConfig>>,
 }
 
+#[derive(Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
+struct ZoomConfig {
+    status: Option<String>,
+    #[config(default = {})]
+    integrations: BTreeMap<String, SourceIntegrationInput<ZoomWebhookConfig>>,
+}
+
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SourceIntegrationInput<T> {
@@ -478,6 +557,25 @@ struct SlackIntegrationInput {
 
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
+struct GooglePubSubIntegrationInput {
+    status: Option<String>,
+    subject_prefix: Option<String>,
+    stream_name: Option<String>,
+    stream_max_age_secs: Option<u64>,
+    nats_ack_timeout_secs: Option<u64>,
+    streaming_pull: Option<GooglePubSubStreamingPullInput>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GooglePubSubStreamingPullInput {
+    subscription: Option<String>,
+    max_outstanding_messages: Option<u32>,
+    credentials: Option<SecretInput>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct GithubWebhookConfig {
     webhook_secret: Option<SecretInput>,
 }
@@ -487,6 +585,7 @@ struct GithubWebhookConfig {
 struct SlackWebhookConfig {
     signing_secret: Option<SecretInput>,
     timestamp_max_drift_secs: Option<u64>,
+    max_body_bytes: Option<ByteCountInput>,
 }
 
 #[derive(serde::Deserialize)]
@@ -557,6 +656,13 @@ struct DatadogWebhookConfig {
     timestamp_tolerance_secs: Option<u64>,
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ZoomWebhookConfig {
+    secret_token: Option<SecretInput>,
+    timestamp_tolerance_secs: Option<u64>,
+}
+
 pub struct ResolvedHttpServerConfig {
     pub port: u16,
 }
@@ -581,12 +687,14 @@ pub struct ResolvedConfig {
     pub telegram: Vec<SourceIntegration<crate::source::telegram::TelegramSourceConfig>>,
     pub twitter: Vec<SourceIntegration<crate::source::twitter::TwitterConfig>>,
     pub gitlab: Vec<SourceIntegration<crate::source::gitlab::GitlabConfig>>,
+    pub google_pubsub: Vec<SourceIntegration<crate::source::google_pubsub::GooglePubSubConfig>>,
     pub incidentio: Vec<SourceIntegration<crate::source::incidentio::IncidentioConfig>>,
     pub linear: Vec<SourceIntegration<crate::source::linear::LinearConfig>>,
     pub microsoft_graph: Vec<SourceIntegration<crate::source::microsoft_graph::MicrosoftGraphConfig>>,
     pub notion: Vec<SourceIntegration<crate::source::notion::NotionConfig>>,
     pub sentry: Vec<SourceIntegration<crate::source::sentry::SentryConfig>>,
     pub datadog: Vec<SourceIntegration<crate::source::datadog::DatadogConfig>>,
+    pub zoom: Vec<SourceIntegration<crate::source::zoom::ZoomConfig>>,
 }
 
 impl ResolvedConfig {
@@ -608,12 +716,14 @@ impl ResolvedConfig {
             .chain(self.telegram.iter().map(|i| i.config.stream_max_age))
             .chain(self.twitter.iter().map(|i| i.config.stream_max_age))
             .chain(self.gitlab.iter().map(|i| i.config.stream_max_age))
+            .chain(self.google_pubsub.iter().map(|i| i.config.stream_max_age))
             .chain(self.incidentio.iter().map(|i| i.config.stream_max_age))
             .chain(self.linear.iter().map(|i| i.config.stream_max_age))
             .chain(self.microsoft_graph.iter().map(|i| i.config.stream_max_age))
             .chain(self.notion.iter().map(|i| i.config.stream_max_age))
             .chain(self.sentry.iter().map(|i| i.config.stream_max_age))
             .chain(self.datadog.iter().map(|i| i.config.stream_max_age))
+            .chain(self.zoom.iter().map(|i| i.config.stream_max_age))
     }
 
     pub fn has_any_source(&self) -> bool {
@@ -623,12 +733,14 @@ impl ResolvedConfig {
             || !self.telegram.is_empty()
             || !self.twitter.is_empty()
             || !self.gitlab.is_empty()
+            || !self.google_pubsub.is_empty()
             || !self.incidentio.is_empty()
             || !self.linear.is_empty()
             || !self.microsoft_graph.is_empty()
             || !self.notion.is_empty()
             || !self.sentry.is_empty()
             || !self.datadog.is_empty()
+            || !self.zoom.is_empty()
     }
 }
 
@@ -666,12 +778,14 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs) -> Result<ResolvedConf
     let telegram = resolve_telegram_integrations(cfg.sources.telegram, &mut errors);
     let twitter = resolve_twitter_integrations(cfg.sources.twitter, &mut errors);
     let gitlab = resolve_gitlab_integrations(cfg.sources.gitlab, &mut errors);
+    let google_pubsub = resolve_google_pubsub_integrations(cfg.sources.google_pubsub, &mut errors);
     let incidentio = resolve_incidentio_integrations(cfg.sources.incidentio, &mut errors);
     let linear = resolve_linear_integrations(cfg.sources.linear, &mut errors);
     let microsoft_graph = resolve_microsoft_graph_integrations(cfg.sources.microsoft_graph, &mut errors);
     let notion = resolve_notion_integrations(cfg.sources.notion, &mut errors);
     let sentry = resolve_sentry_integrations(cfg.sources.sentry, &mut errors);
     let datadog = resolve_datadog_integrations(cfg.sources.datadog, &mut errors);
+    let zoom = resolve_zoom_integrations(cfg.sources.zoom, &mut errors);
 
     if !errors.is_empty() {
         return Err(ConfigError::Validation(AggregateValidationError(errors)));
@@ -688,12 +802,14 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs) -> Result<ResolvedConf
         telegram,
         twitter,
         gitlab,
+        google_pubsub,
         incidentio,
         linear,
         microsoft_graph,
         notion,
         sentry,
         datadog,
+        zoom,
     })
 }
 
@@ -902,6 +1018,7 @@ fn resolve_slack_integrations(
         if !resolve_integration_source_status("slack", &id, integration.status.as_deref(), errors) {
             continue;
         }
+        let requested_nats_ack_timeout = integration.nats_ack_timeout_secs.is_some();
         let Some((subject_prefix, stream_name, stream_max_age, nats_ack_timeout)) = resolve_common_integration_fields(
             CommonIntegrationFieldsInput {
                 source: "slack",
@@ -922,13 +1039,14 @@ fn resolve_slack_integrations(
             Some(transport) => transport,
             None => continue,
         };
+        let ack_budget = AckBudget::new(requested_nats_ack_timeout.then_some(nats_ack_timeout));
         integrations.push(SourceIntegration::new(
             id,
             crate::source::slack::SlackConfig {
                 subject_prefix,
                 stream_name,
                 stream_max_age,
-                nats_ack_timeout,
+                ack_budget,
                 transport,
             },
         ));
@@ -1003,9 +1121,26 @@ fn resolve_slack_webhook_transport(
         }
     };
 
+    let max_body_size = match webhook.max_body_bytes {
+        Some(input) => match input.resolve(&SystemEnv) {
+            Ok(size) => size,
+            Err(error) => {
+                errors.push(ConfigValidationError::invalid_integration(
+                    "slack",
+                    id,
+                    "max_body_bytes",
+                    error,
+                ));
+                return None;
+            }
+        },
+        None => DEFAULT_HTTP_BODY_SIZE_MAX,
+    };
+
     Some(SlackTransportConfig::Webhook(SlackWebhookSourceConfig {
         signing_secret,
         timestamp_max_drift,
+        max_body_size,
     }))
 }
 
@@ -1476,6 +1611,143 @@ fn resolve_linear_integrations(
     integrations
 }
 
+fn resolve_google_pubsub_integrations(
+    section: GooglePubSubConfigInput,
+    errors: &mut Vec<ConfigValidationError>,
+) -> Vec<SourceIntegration<crate::source::google_pubsub::GooglePubSubConfig>> {
+    let GooglePubSubConfigInput {
+        status,
+        integrations: configured_integrations,
+    } = section;
+    let mut integrations = Vec::new();
+    if !resolve_source_status("google_pubsub", status.as_deref(), errors) {
+        return integrations;
+    }
+    for (raw_id, integration) in configured_integrations {
+        let Some(id) = resolve_integration_id("google_pubsub", raw_id, errors) else {
+            continue;
+        };
+        if !resolve_integration_source_status("google_pubsub", &id, integration.status.as_deref(), errors) {
+            continue;
+        }
+        let Some((subject_prefix, stream_name, stream_max_age, nats_ack_timeout)) = resolve_common_integration_fields(
+            CommonIntegrationFieldsInput {
+                source: "google_pubsub",
+                id: &id,
+                subject_source_prefix: "google-pubsub",
+                stream_source_prefix: "GOOGLE_PUBSUB",
+                subject_prefix: integration.subject_prefix,
+                stream_name: integration.stream_name,
+                stream_max_age_secs: integration.stream_max_age_secs,
+                nats_ack_timeout_secs: integration.nats_ack_timeout_secs,
+                default_nats_ack_timeout_secs: DEFAULT_NATS_ACK_TIMEOUT_SECS,
+            },
+            errors,
+        ) else {
+            continue;
+        };
+        let Some(transport) = resolve_google_pubsub_transport(&id, integration.streaming_pull, errors) else {
+            continue;
+        };
+        integrations.push(SourceIntegration::new(
+            id,
+            crate::source::google_pubsub::GooglePubSubConfig {
+                subject_prefix,
+                stream_name,
+                stream_max_age,
+                nats_ack_timeout,
+                transport,
+            },
+        ));
+    }
+    integrations
+}
+
+fn resolve_google_pubsub_transport(
+    id: &SourceIntegrationId,
+    streaming_pull: Option<GooglePubSubStreamingPullInput>,
+    errors: &mut Vec<ConfigValidationError>,
+) -> Option<GooglePubSubTransportConfig> {
+    let Some(streaming_pull) = streaming_pull else {
+        errors.push(ConfigValidationError::missing_integration(
+            "google_pubsub",
+            id,
+            "transport",
+        ));
+        return None;
+    };
+
+    let subscription = match streaming_pull.subscription {
+        Some(raw) => match PubSubSubscriptionName::new(raw) {
+            Ok(subscription) => Some(subscription),
+            Err(error) => {
+                errors.push(ConfigValidationError::invalid_integration(
+                    "google_pubsub",
+                    id,
+                    "subscription",
+                    error,
+                ));
+                None
+            }
+        },
+        None => {
+            errors.push(ConfigValidationError::missing_integration(
+                "google_pubsub",
+                id,
+                "subscription",
+            ));
+            None
+        }
+    };
+
+    let (max_outstanding_messages, max_outstanding_messages_valid) =
+        match streaming_pull.max_outstanding_messages.map(MaxOutstandingMessages::new) {
+            Some(Ok(max)) => (Some(max), true),
+            Some(Err(error)) => {
+                errors.push(ConfigValidationError::invalid_integration(
+                    "google_pubsub",
+                    id,
+                    "max_outstanding_messages",
+                    error,
+                ));
+                (None, false)
+            }
+            None => (None, true),
+        };
+
+    let credentials = require_integration_value(
+        SourceKind::GooglePubSub,
+        id,
+        "credentials",
+        CredentialKind::ServiceAccountCredentials,
+        streaming_pull.credentials,
+        errors,
+    )
+    .and_then(|document| match GoogleCredentials::parse(document) {
+        Ok(credentials) => Some(credentials),
+        Err(error) => {
+            errors.push(ConfigValidationError::invalid_integration(
+                "google_pubsub",
+                id,
+                "credentials",
+                error,
+            ));
+            None
+        }
+    });
+
+    let (Some(subscription), Some(credentials), true) = (subscription, credentials, max_outstanding_messages_valid)
+    else {
+        return None;
+    };
+
+    Some(GooglePubSubTransportConfig::StreamingPull(StreamingPullConfig {
+        subscription,
+        max_outstanding_messages,
+        credentials,
+    }))
+}
+
 fn resolve_microsoft_graph_integrations(
     section: MicrosoftGraphConfigInput,
     errors: &mut Vec<ConfigValidationError>,
@@ -1636,6 +1908,98 @@ fn resolve_incidentio_integrations(
             id,
             IncidentioSourceConfig {
                 signing_secret,
+                subject_prefix,
+                stream_name,
+                stream_max_age,
+                nats_ack_timeout,
+                timestamp_tolerance,
+            },
+        ));
+    }
+    integrations
+}
+
+fn resolve_zoom_integrations(
+    section: ZoomConfig,
+    errors: &mut Vec<ConfigValidationError>,
+) -> Vec<SourceIntegration<ZoomSourceConfig>> {
+    let ZoomConfig {
+        status,
+        integrations: configured_integrations,
+    } = section;
+    let mut integrations = Vec::new();
+    if !resolve_source_status("zoom", status.as_deref(), errors) {
+        return integrations;
+    }
+    for (raw_id, integration) in configured_integrations {
+        let Some(id) = resolve_integration_id("zoom", raw_id, errors) else {
+            continue;
+        };
+        if !resolve_integration_source_status("zoom", &id, integration.status.as_deref(), errors) {
+            continue;
+        }
+        let Some(webhook) = integration.webhook else {
+            errors.push(ConfigValidationError::missing_integration("zoom", &id, "webhook"));
+            continue;
+        };
+        let Some(secret) = require_integration_value(
+            SourceKind::Zoom,
+            &id,
+            "secret_token",
+            CredentialKind::SecretToken,
+            webhook.secret_token,
+            errors,
+        ) else {
+            continue;
+        };
+        let secret_token = match ZoomSecretToken::new(secret) {
+            Ok(secret) => secret,
+            Err(error) => {
+                errors.push(ConfigValidationError::invalid_integration(
+                    "zoom",
+                    &id,
+                    "secret_token",
+                    error,
+                ));
+                continue;
+            }
+        };
+        let Some((subject_prefix, stream_name, stream_max_age, nats_ack_timeout)) = resolve_common_integration_fields(
+            CommonIntegrationFieldsInput {
+                source: "zoom",
+                id: &id,
+                subject_source_prefix: "zoom",
+                stream_source_prefix: "ZOOM",
+                subject_prefix: integration.subject_prefix,
+                stream_name: integration.stream_name,
+                stream_max_age_secs: integration.stream_max_age_secs,
+                nats_ack_timeout_secs: integration.nats_ack_timeout_secs,
+                default_nats_ack_timeout_secs: DEFAULT_NATS_ACK_TIMEOUT_SECS,
+            },
+            errors,
+        ) else {
+            continue;
+        };
+        let timestamp_tolerance = match NonZeroDuration::from_secs(
+            webhook
+                .timestamp_tolerance_secs
+                .unwrap_or(DEFAULT_ZOOM_TIMESTAMP_TOLERANCE_SECS),
+        ) {
+            Ok(duration) => duration,
+            Err(error) => {
+                errors.push(ConfigValidationError::invalid_integration(
+                    "zoom",
+                    &id,
+                    "timestamp_tolerance_secs",
+                    error,
+                ));
+                continue;
+            }
+        };
+        integrations.push(SourceIntegration::new(
+            id,
+            ZoomSourceConfig {
+                secret_token,
                 subject_prefix,
                 stream_name,
                 stream_max_age,

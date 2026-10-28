@@ -1,0 +1,24 @@
+edition = "2024";
+
+package trogonai.policy.agent_rate_limits.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/policy/agent_rate_limits/v1alpha1/rate_limit_policy.proto";
+
+// Replaces an initialized Agent's policy, including after a clear. Dispatch
+// requires live administration authority and a nonempty Decider command_id plus
+// original positive expected_revision. Retries preserve both; a refreshed
+// revision is a new intent. Equal limits by scope and meter and an equal
+// session call limit succeed without an event after the concurrency check;
+// reordering limits alone is not a change. Accounting history is untouched.
+// Authoritative current registry lifecycle must be ACTIVE or ARCHIVED. Pending,
+// cancelled, or unknown lifecycle rejects normal replacement, preserving
+// required provisioning setup. Genesis provisioning origin survives every
+// replacement.
+message SetAgentRateLimit {
+  string agent_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  AgentRateLimitPolicy policy = 2 [features.field_presence = LEGACY_REQUIRED];
+}

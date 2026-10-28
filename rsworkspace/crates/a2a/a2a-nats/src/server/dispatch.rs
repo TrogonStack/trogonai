@@ -35,6 +35,22 @@ impl A2aMethod {
         }
     }
 
+    pub fn as_dotted_suffix(&self) -> &'static str {
+        match self {
+            Self::MessageSend => "message.send",
+            Self::MessageStream => "message.stream",
+            Self::TasksGet => "tasks.get",
+            Self::TasksList => "tasks.list",
+            Self::TasksCancel => "tasks.cancel",
+            Self::TasksResubscribe => "tasks.resubscribe",
+            Self::PushNotificationSet => "push.set",
+            Self::PushNotificationGet => "push.get",
+            Self::PushNotificationList => "push.list",
+            Self::PushNotificationDelete => "push.delete",
+            Self::AgentCard => "card",
+        }
+    }
+
     /// Resolve the method from the full NATS subject string and the known
     /// `{prefix}.v1.agents.{agent_id}` byte-length component.
     pub fn from_subject(subject: &str, prefix_len: usize) -> Option<Self> {

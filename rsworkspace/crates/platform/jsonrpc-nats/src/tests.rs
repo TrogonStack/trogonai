@@ -8,6 +8,26 @@ use crate::{decode, decode_value, encode, encode_value, from_json_value};
 use async_nats::header::HeaderMap;
 
 #[test]
+fn typed_error_conversion_preserves_escaped_identity_and_header_projections() {
+    let message = Message::Error {
+        id: ResponseId::String("caller\n\"reply\"".into()),
+        code: -32118,
+        message: "verification rejected\nrequest".into(),
+        data: Some(serde_json::json!({"rule": "auth", "details": [null, true, 7]})),
+    };
+    let encoded = Encoded::from(&message);
+    assert_eq!(
+        encoded.headers.get(HEADER_ID).unwrap().as_str(),
+        "\"caller\\n\\\"reply\\\"\""
+    );
+    assert_eq!(encoded.headers.get(HEADER_ERROR_CODE).unwrap().as_str(), "-32118");
+    assert_eq!(
+        decode(Direction::Response, None, &encoded.headers, &encoded.body).unwrap(),
+        message
+    );
+}
+
+#[test]
 fn from_json_value_rejects_mismatched_version() {
     let v3 = serde_json::json!({ "jsonrpc": "3.0", "id": 1, "method": "ping", "params": {} });
     assert!(matches!(

@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.replay.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/duration.proto";
 
 // ReplayIndex is the trailer that makes a bounded range read of a replay
@@ -33,7 +34,7 @@ message ReplayIndex {
   // has no use for it: it binary-searches on whichever coordinate it is seeking
   // by, and a fixed stride would be a promise a capturer that stops early
   // cannot keep.
-  repeated ReplayIndexEntry entries = 3;
+  repeated ReplayIndexEntry entries = 3 [(buf.validate.field).repeated.min_items = 1];
 }
 
 // ReplayIndexEntry is one seek point, expressed in every coordinate a reader

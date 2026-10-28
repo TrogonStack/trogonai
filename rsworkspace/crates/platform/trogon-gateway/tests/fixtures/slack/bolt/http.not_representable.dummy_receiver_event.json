@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "id": "http.not_representable.dummy_receiver_event",
+  "kind": "malformed",
+  "transport": "http",
+  "provenance": {
+    "bolt_version": "5.1.0",
+    "bolt_commit": "3f8823c93f5639e99f05a2df9c7dc692da5cc184",
+    "node_slack_sdk_commit": "d02afdfd5c87f896dc9994dfe2b55472758fbcf4",
+    "payload_source": "test/unit/helpers/events.ts:createDummyReceiverEvent",
+    "wire_source": null,
+    "ack_source": null
+  },
+  "not_representable": "createDummyReceiverEvent is an in-process ReceiverEvent that omits the event_callback envelope, which Slack never sends",
+  "input": {
+    "headers": {
+      "content-type": "application/json",
+      "x-slack-request-timestamp": "1700000000",
+      "x-slack-signature": "v0=4367df14ee5f9c0ab69a957a19d4356349c4fabccaa08c021bf06dac79e7b735"
+    },
+    "body": "{\"event\":{\"type\":\"dummy_event_type\"}}"
+  },
+  "bolt": {
+    "outcome": "dispatched",
+    "status": 200,
+    "body": null,
+    "content_type": null,
+    "reason": null,
+    "dispatch": {
+      "incoming_type": "Event",
+      "conversation_id": null,
+      "retry_num": null,
+      "retry_reason": null,
+      "is_enterprise_install": false,
+      "team_id": null,
+      "enterprise_id": null,
+      "user_id": null
+    }
+  },
+  "expected": {
+    "outcome": "ignore",
+    "nats": null,
+    "http": null,
+    "socket_ack": null
+  }
+}

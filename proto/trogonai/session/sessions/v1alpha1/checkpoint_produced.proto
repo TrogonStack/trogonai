@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "trogonai/session/sessions/v1alpha1/checkpoint.proto";
 
 // CheckpointProduced records an opaque durable checkpoint an execution attempt
@@ -13,6 +14,9 @@ import "trogonai/session/sessions/v1alpha1/checkpoint.proto";
 // ExecutionAttemptStarted.restored_checkpoint. It is a commuting happened-fact
 // (WRITE_PRECONDITION = Any, ADR#0035 facet 2).
 message CheckpointProduced {
-  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   Checkpoint checkpoint = 3 [features.field_presence = LEGACY_REQUIRED];
 }

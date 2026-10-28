@@ -1,0 +1,17 @@
+edition = "2024";
+
+package trogonai.evaluation.comparisons.v1alpha1;
+
+import "trogonai/agents/candidates/v1alpha1/candidate_ref.proto";
+import "trogonai/evaluation/comparisons/v1alpha1/candidate_label.proto";
+import "trogonai/evaluation/comparisons/v1alpha1/comparison_id.proto";
+import "trogonai/session/sessions/v1alpha1/session_id.proto";
+
+// The label, session, and candidate are immutable once enrolled. The mapping
+// recorded here is never exposed to the improver.
+message ComparisonRunEnrolled {
+  ComparisonId comparison_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  CandidateLabel label = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.session.sessions.v1alpha1.SessionId session_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.candidates.v1alpha1.CandidateRef candidate_ref = 4;
+}

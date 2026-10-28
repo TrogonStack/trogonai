@@ -1,0 +1,46 @@
+edition = "2024";
+
+package trogonai.agents.versions.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/agents/agents/v1alpha1/version_snapshot_reference.proto";
+import "trogonai/agents/versions/v1alpha1/version.proto";
+
+// Dates come from the trusted event envelope's recorded_at. Snapshot bytes stay
+// immutable in this history; replacing the draft appends a new snapshot. Unknown
+// events, identity mismatches, noncontiguous edits, and terminal mutations reject
+// replay. Commit neither activates a registry revision nor publishes a release.
+message AgentVersionEvent {
+  oneof event {
+    option (buf.validate.oneof).required = true;
+
+    AgentVersionCreated version_created = 1;
+    AgentVersionSnapshotReplaced snapshot_replaced = 2;
+    AgentVersionCommitted version_committed = 3;
+    AgentVersionDiscarded version_discarded = 4;
+    AgentVersionExpired version_expired = 5;
+  }
+}
+
+message AgentVersionCreated {
+  AgentVersionCreation creation = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message AgentVersionSnapshotReplaced {
+  AgentVersionEdit edit = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message AgentVersionCommitted {
+  AgentVersionCommit commit = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message AgentVersionDiscarded {
+  AgentVersionDiscard discard = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message AgentVersionExpired {
+  trogonai.agents.agents.v1alpha1.AgentVersionSnapshotRef snapshot = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Copied exactly from genesis, never a caller-selected expiry override.
+  google.protobuf.Timestamp expires_at = 2 [features.field_presence = LEGACY_REQUIRED];
+}

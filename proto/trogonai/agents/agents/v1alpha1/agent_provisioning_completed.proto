@@ -1,0 +1,27 @@
+edition = "2024";
+
+package trogonai.agents.agents.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// Changes the matching pending Agent to ACTIVE without minting a revision.
+// This registry fact authorizes workflow progress; another stream's requested
+// completion cannot substitute for it. Later provisioning cancellation rejects.
+message AgentProvisioningCompleted {
+  string agent_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).cel = {
+      id: "agent_provisioning_completed.agent_id_nonblank"
+      message: "agent_id must contain a non-whitespace character"
+      expression: "this.trim() != ''"
+    }
+  ];
+  string provisioning_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).cel = {
+      id: "agent_provisioning_completed.provisioning_id_nonblank"
+      message: "provisioning_id must contain a non-whitespace character"
+      expression: "this.trim() != ''"
+    }
+  ];
+}

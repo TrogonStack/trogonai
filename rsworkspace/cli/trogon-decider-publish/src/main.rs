@@ -1,3 +1,4 @@
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 use std::fs;
@@ -37,12 +38,13 @@ struct Args {
 
 #[tokio::main]
 #[cfg_attr(
-    dylint_lib = "trogon_lints",
+    dylint_lib = "trogon_dylint_lints",
     allow(
         debug_remnants,
         reason = "the CLI exits before a subscriber is installed, so stderr is the only channel left to report on"
     )
 )]
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn main() {
     if let Err(error) = run(Args::parse()).await {
         eprintln!("error: {error:#}");
@@ -51,7 +53,7 @@ async fn main() {
 }
 
 #[cfg_attr(
-    dylint_lib = "trogon_lints",
+    dylint_lib = "trogon_dylint_lints",
     allow(
         debug_remnants,
         reason = "the published reference on stdout is this CLI's result, which a caller pipes onward"

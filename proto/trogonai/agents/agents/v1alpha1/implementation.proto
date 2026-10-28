@@ -1,0 +1,100 @@
+edition = "2024";
+
+package trogonai.agents.agents.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/any.proto";
+import "trogonai/agents/agents/v1alpha1/digest.proto";
+import "trogonai/agents/agents/v1alpha1/editable_surface.proto";
+import "trogonai/agents/agents/v1alpha1/model_selection.proto";
+
+message PlatformHarnessVersionRef {
+  string version = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+message RegisteredExtensionVersionRef {
+  string extension_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string version = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// Enables requesting user input before continuing through the harness's
+// interaction contract. Presence declares behavior and grants no authority.
+message AskUserCapability {}
+
+// Enables intermediate progress output through the harness's interaction
+// contract. It does not choose a destination or grant permission to publish.
+message ProgressUpdatesCapability {}
+
+// This concrete settings contract belongs to the platform harness. Other
+// runtimes admit their own message types in AgentConfiguration.settings.
+// Instruction assembly and model controls follow the exact harness release.
+message PlatformHarnessConfiguration {
+  // Absent or empty means no authored standing instructions.
+  string instructions = 1;
+  // This harness uses platform-managed model access. Its native settings own
+  // these selections; they are not required controls for other runtimes.
+  ModelSelections models = 2 [features.field_presence = LEGACY_REQUIRED];
+  // An unordered set of runtime-owned declarations. Presence enables a
+  // capability and absence disables it. The exact harness release registers
+  // supported contracts. Admission rejects duplicate canonical message types,
+  // unsupported types, malformed payloads, and unknown behavior-affecting fields.
+  // These checks require the release registry; the Any rule below only requires
+  // a nonempty type URL.
+  // Type URLs resolve only in that registry and are never fetched. These built-in
+  // interactions must not be independently configured again as tool dependencies.
+  // Capability changes are charter-class, including when instructions also change.
+  repeated google.protobuf.Any capabilities = 3 [(buf.validate.field).repeated.items.any.not_in = ""];
+  // Where adapted parts of `instructions` came from, so the license obligations
+  // travel with the exact text they cover. Behavior-neutral: the harness never
+  // reads them, and they change only with the instructions they describe.
+  repeated InstructionSource instruction_sources = 4;
+}
+
+// InstructionSource attributes adapted third-party instruction text.
+message InstructionSource {
+  // A stable locator of the upstream work, pinned to a release or commit.
+  string source_uri = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.uri = true
+  ];
+  // SPDX license identifier of the upstream work, such as Apache-2.0.
+  string spdx_license_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  // The attribution or NOTICE text the license requires to be retained.
+  string attribution_notice = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// The definition commits transitively to every behavior-significant artifact,
+// the accepted settings type URL, contract version, descriptor closure, and
+// validation and interpretation semantics, plus supported integrations and
+// inspection capabilities. Type URLs name registered types; never fetch them.
+// Admission rejects missing releases, digest mismatches, incompatible settings,
+// and unsupported declarations. Settings live only in AgentConfiguration.settings.
+// Exactly one known arm is required. Versions name immutable admitted releases;
+// mutable aliases, version ranges, and release-selection fallback are invalid.
+message AgentImplementation {
+  oneof implementation {
+    option (buf.validate.oneof).required = true;
+
+    PlatformHarnessVersionRef platform_harness = 1;
+    RegisteredExtensionVersionRef registered_extension = 2;
+  }
+  Digest definition_digest = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Absent means nothing is editable by a candidate. Committed by
+  // definition_digest.
+  EditableSurface editable_surface = 4;
+}

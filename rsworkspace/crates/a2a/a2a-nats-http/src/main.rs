@@ -1,5 +1,7 @@
-#[cfg(not(coverage))]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 #[tokio::main]
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -13,9 +15,3 @@ async fn main() {
         std::process::exit(1);
     }
 }
-
-#[cfg(coverage)]
-fn main() {}
-
-#[cfg(test)]
-mod main_tests;

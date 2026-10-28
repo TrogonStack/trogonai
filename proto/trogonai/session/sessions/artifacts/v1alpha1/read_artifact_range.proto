@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.artifacts.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 import "trogonai/session/sessions/artifacts/v1alpha1/availability.proto";
 
@@ -15,8 +16,14 @@ import "trogonai/session/sessions/artifacts/v1alpha1/availability.proto";
 // bound is always the caller's and always visible, instead of a limit
 // discovered when a response fails to fit.
 message ReadArtifactRangeRequest {
-  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
-  string artifact_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string artifact_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // First byte requested, counted from the start of the artifact.
   uint64 offset = 3 [features.field_presence = LEGACY_REQUIRED];
   // How many bytes are wanted. The server may serve fewer at the end of the
@@ -52,7 +59,16 @@ enum VerificationRequirement {
 // ReadArtifactRangeResponse carries the served bytes and says what they are
 // worth.
 message ReadArtifactRangeResponse {
-  string artifact_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  option (buf.validate.message).cel = {
+    id: "read_artifact_range_response.content_requires_available"
+    message: "content is empty for every availability except ARTIFACT_AVAILABILITY_AVAILABLE"
+    expression: "this.availability == trogonai.session.sessions.artifacts.v1alpha1.ArtifactAvailability.ARTIFACT_AVAILABILITY_AVAILABLE || this.content == b''"
+  };
+
+  string artifact_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   ArtifactAvailability availability = 2 [features.field_presence = LEGACY_REQUIRED];
   // First byte actually served. Equal to the requested offset unless
   // verification required aligning down to a chunk boundary.

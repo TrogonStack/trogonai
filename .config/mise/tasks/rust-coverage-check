@@ -12,8 +12,8 @@ if [[ ! -f "$baseline" ]]; then
   git -C "$root" show origin/_xml_coverage_reports:data/main/coverage.xml >"$baseline"
 fi
 
-echo "Running Rust tests with coverage (cargo cov)..."
-(cd "$root/rsworkspace" && cargo cov --cobertura --output-path coverage.xml)
+echo "Running Rust tests with the CI coverage task..."
+mise run github-actions:rust-coverage
 
 echo ""
 cd "$root"

@@ -1,7 +1,6 @@
 pub mod claim_bucket;
 pub mod claim_check;
 pub mod claim_retention;
-#[cfg(not(coverage))]
 pub mod client;
 pub mod create_conflicts;
 pub mod message;
@@ -19,7 +18,6 @@ pub use crate::constants::{DEFAULT_CLAIM_BUCKET, HEADER_CLAIM_BUCKET, HEADER_CLA
 pub use claim_bucket::{ClaimBucket, ClaimBucketError, ClaimBucketHeader};
 pub use claim_check::{ClaimCheckPublisher, ClaimResolveError, ClaimResolver, MaxPayload, is_claim, resolve_claim};
 pub use claim_retention::ClaimRetention;
-#[cfg(not(coverage))]
 pub use client::{
     ConsumerError, GetStreamError, MessagesError, NatsJetStreamClient, NatsJetStreamConsumer, PublishAckFuture,
     PublishError, StreamError,
@@ -29,7 +27,6 @@ pub use create_conflicts::{
 };
 pub use message::{JsAck, JsAckWith, JsDispatchMessage, JsDoubleAck, JsDoubleAckWith, JsMessageRef, JsRequestMessage};
 pub use not_found::{is_get_key_value_not_found, is_get_stream_not_found};
-#[cfg(not(coverage))]
 pub use object_store::NatsObjectStore;
 pub use object_store::{ClaimBucketBinding, ObjectStoreGet, ObjectStorePut};
 pub use processor::{HandlerVerdict, MessageHandler, PoisonReason, Processor, ProcessorError, RedeliveryPolicy};

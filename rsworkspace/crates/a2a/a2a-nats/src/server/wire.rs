@@ -43,7 +43,12 @@ pub fn encode_error_reply(
     message: impl Into<String>,
     data: Option<serde_json::Value>,
 ) -> Result<Encoded, WireError> {
-    encode_error(response_id_from_request_headers(request_headers), code, message, data)
+    Ok(encode_error(
+        response_id_from_request_headers(request_headers),
+        code,
+        message,
+        data,
+    ))
 }
 
 pub fn request_id(headers: &HeaderMap) -> Option<ResponseId> {

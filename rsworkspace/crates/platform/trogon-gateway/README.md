@@ -8,6 +8,7 @@ How to run the unified ingress gateway that receives source events and publishes
 
 - One HTTP server for webhook-based sources
 - Optional Discord Gateway (WebSocket) runner when Discord is enabled
+- Optional Google Cloud Pub/Sub StreamingPull runner per `google_pubsub` integration
 - JetStream stream provisioning for every enabled source
 - Health probes at `GET /-/liveness` and `GET /-/readiness`
 
@@ -45,6 +46,7 @@ configured as a named integration and mounted at its integration path.
 | Notion | `/sources/notion/{integration}/webhook` |
 | Sentry | `/sources/sentry/{integration}/webhook` |
 | Datadog | `/sources/datadog/{integration}/webhook` |
+| Zoom | `/sources/zoom/{integration}/webhook` |
 
 Integration IDs must contain only ASCII letters, numbers, `_`, or `-`. They cannot be empty, contain path
 separators, or exceed 64 characters.
@@ -72,6 +74,7 @@ or explicit environment reference shape.
 | Notion | `verification_token` |
 | Sentry | `client_secret` |
 | Datadog | `webhook_token` |
+| Zoom | `secret_token` |
 
 ## Core configuration
 
@@ -80,12 +83,19 @@ Gateway-level settings:
 - `TROGON_GATEWAY_PORT` (default: `8080`)
 - `NATS_URL` (default: `localhost:4222`, comma-separated supported)
 
-NATS auth is resolved in this priority order:
+NATS auth accepts the same values as the `nats` CLI. One method is chosen in this priority order:
 
-1. `NATS_CREDS`
-2. `NATS_NKEY`
+1. `NATS_CREDS` (path or `file://path`)
+2. `NATS_NKEY` (an NKey seed, or a seed file as a path or `file://path`)
 3. `NATS_USER` + `NATS_PASSWORD`
-4. `NATS_TOKEN`
+4. `NATS_TOKEN`, or `NATS_USER` set without `NATS_PASSWORD`
+5. `NATS_JWT` + `NATS_SEED`, or `NATS_JWT` alone with an empty signature
+
+`NATS_JWT`, `NATS_SEED`, `NATS_PASSWORD` and `NATS_TOKEN` accept `file://path` and `env://NAME` references. The `op`, `nsc` and `data` schemes are rejected at connect time.
+
+TLS is configured with `NATS_CERT` + `NATS_KEY` (setting only one fails the connection) and `NATS_CA`. Setting any of them requires TLS.
+
+The same settings can be given as flags (`--nats-user`, `--nats-password`, `--nats-creds`, `--nats-nkey`, `--nats-jwt`, `--nats-seed`, `--nats-token`, `--nats-tls-cert`, `--nats-tls-key`, `--nats-tls-ca`) or in the `[nats]` TOML section (`tls_cert`, `tls_key`, `tls_ca` for the TLS values).
 
 Discord optional tuning is configured in TOML under `[sources.discord]`:
 
@@ -102,15 +112,19 @@ Source-specific extras:
 
 - Microsoft Graph `client_state` must match the `clientState` used when creating Microsoft Graph subscriptions
 - Slack `timestamp_max_drift_secs` (default: `300`)
+- Slack acknowledges within Slack's 3 second deadline, so the publish budget is 2.5 seconds. `nats_ack_timeout_secs` defaults to that budget for Slack and a larger value is lowered to it with a warning at startup
+- Slack webhook requests with `Content-Type: application/x-www-form-urlencoded` and exactly one `ssl_check=1` field are answered `200` before signature verification and are never published, matching Slack's connectivity probe
+- Slack webhook `max_body_bytes` (default: `4194304`) is either an integer or `{ env = "VAR" }` naming an environment variable that holds the byte count. Requests above it are refused with `413`. It does not apply to Socket Mode
 - Telegram `webhook_registration_mode = "startup"` attempts registration on startup and requires `bot_token` plus `public_webhook_url`
 - Linear `timestamp_tolerance_secs` (default: `60`, `0` disables tolerance)
 - Twitter/X `consumer_secret` is used for both CRC responses and `x-twitter-webhooks-signature` validation
 - Datadog webhooks are not signed. `webhook_token` is a shared secret the operator sends as a custom header (configured in the Datadog webhook's *Custom Headers*), verified in constant time. The header name defaults to `X-Datadog-Webhook-Token` and can be overridden per integration with `webhook_token_header`. Routing keys off an `event_type` field in the payload template, falling back to `.unroutable` when it is absent or invalid; an optional `id` field is used as the NATS message ID for deduplication
 - Datadog `timestamp_tolerance_secs` (optional, disabled by default) enables a freshness/anti-replay check. Datadog sends no timestamp header, so the operator must template a `timestamp` field carrying `$DATE_POSIX` (POSIX seconds) into the payload. When enabled, requests whose `timestamp` is outside the window are rejected (`401`), and requests missing/with an unparseable `timestamp` are rejected (`400`). `0` or unset disables the check
+- Zoom `secret_token` is the app's Secret Token. Requests are verified with `x-zm-signature` over `v0:{x-zm-request-timestamp}:{body}`, and `timestamp_tolerance_secs` (default: `300`) bounds how far `x-zm-request-timestamp` may drift from the gateway clock. Zoom provides no stable per-delivery identifier, so no NATS message ID is set and retries are not deduplicated
 
 ## Config file shape
 
-Source configuration lives in TOML. Secret fields can reference environment variables explicitly:
+Source configuration lives in TOML. Secret fields can reference environment variables explicitly. A secret value marked as `secret:<nid>:<nss>:<value>` is used without its marker, and a value starting with `base64:` is decoded once at startup, so multi-line or JSON secrets can be stored as a single line such as `secret:gcp:service-account:base64:...`:
 
 ```toml
 [http_server]
@@ -119,10 +133,15 @@ port = 8080
 [nats]
 url = "localhost:4222"
 # creds = "/path/to/nats.creds"
-# nkey = "SU..."
+# nkey = "SU..." # or "/path/to/user.nk"
 # user = "my-user"
 # password = "my-pass"
 # token = "my-token"
+# jwt = "file:///path/to/user.jwt"
+# seed = "env://NATS_USER_SEED"
+# tls_cert = "/path/to/client.crt"
+# tls_key = "/path/to/client.key"
+# tls_ca = "/path/to/ca.pem"
 
 [sources.github.integrations.acme-main.webhook]
 webhook_secret = { env = "GITHUB_ACME_MAIN_WEBHOOK_SECRET" }
@@ -172,6 +191,10 @@ client_secret = "sentry-client-secret"
 webhook_token = { env = "DATADOG_PRIMARY_WEBHOOK_TOKEN" }
 # webhook_token_header = "X-Datadog-Webhook-Token"  # optional; override the custom header name
 # timestamp_tolerance_secs = 300  # optional anti-replay window; requires "timestamp": "$DATE_POSIX" in the payload
+
+[sources.zoom.integrations.primary.webhook]
+secret_token = { env = "ZOOM_PRIMARY_SECRET_TOKEN" }
+# timestamp_tolerance_secs = 300  # optional; max drift of x-zm-request-timestamp
 ```
 
 Configure the matching Datadog webhook (Integrations > Webhooks) with a custom header and a payload template, for example:
@@ -194,6 +217,18 @@ Configure the matching Datadog webhook (Integrations > Webhooks) with a custom h
 ```
 
 `timestamp` is only required when `timestamp_tolerance_secs` is set; `$DATE_POSIX` is POSIX epoch seconds (`$DATE` is epoch milliseconds, which this source does not accept).
+
+## Zoom
+
+Subscribe a Zoom app's Event Subscriptions to `https://<gateway-host>/sources/zoom/{integration}/webhook` and
+set the app's Secret Token as `secret_token`. The gateway verifies the signature and timestamp on every request,
+answers the `endpoint.url_validation` handshake inline with the `plainToken` and its `encryptedToken` (no NATS
+publish), and publishes every other event body unchanged to `{subject_prefix}.{event}`. Dots in Zoom event
+names become subject tokens, so `recording.transcript_completed` lands on
+`zoom-primary.recording.transcript_completed` and `meeting.ended` on `zoom-primary.meeting.ended`. Bodies that
+are not JSON, lack `event`, or carry an event name that is not a valid subject go to `{subject_prefix}.unroutable`
+with an `X-Zoom-Reject-Reason` header. This source does not call the Zoom API; consumers fetch recordings or
+transcripts themselves.
 
 ## Microsoft Graph change notifications
 

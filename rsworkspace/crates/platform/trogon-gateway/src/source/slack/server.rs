@@ -1,14 +1,21 @@
 use std::fmt;
 use std::time::Duration;
 
+use super::ack_budget::AckBudget;
 use super::config::SlackConfig;
 use super::config::SlackSigningSecret;
+use super::config::SlackTransport;
 use super::config::SlackWebhookConfig;
 use super::constants::{
-    CONTENT_TYPE_FORM, HEADER_SIGNATURE, HEADER_TIMESTAMP, HTTP_BODY_SIZE_MAX, NATS_HEADER_EVENT_ID,
-    NATS_HEADER_EVENT_TYPE, NATS_HEADER_PAYLOAD_KIND, NATS_HEADER_REJECT_REASON, NATS_HEADER_TEAM_ID,
+    CONTENT_TYPE_FORM, HEADER_SIGNATURE, HEADER_TIMESTAMP, NATS_HEADER_EVENT_ID, NATS_HEADER_EVENT_TYPE,
+    NATS_HEADER_PAYLOAD_KIND, NATS_HEADER_REJECT_REASON, NATS_HEADER_TEAM_ID, NATS_HEADER_TRANSPORT, UNKNOWN_TEAM_ID,
 };
+use super::header_text::{DeliveryHeaders, HeaderText, InvalidHeaderTextError};
+use super::interaction_key::InteractionKey;
 use super::signature;
+use super::ssl_check::SslCheck;
+use super::subject::SlackSubject;
+use super::unroutable::{UnroutableMessageId, UnroutableReason};
 use trogon_std::NonZeroDuration;
 use trogon_std::SystemClock;
 use trogon_std::time::EpochClock;
@@ -17,13 +24,14 @@ use axum::{
     Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap, http::StatusCode, routing::post,
 };
 use form_urlencoded;
+use serde_json::value::RawValue;
 use std::future::Future;
 use std::pin::Pin;
 use tracing::{info, instrument, warn};
-use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
 };
+use trogon_nats::{NatsToken, SubjectTokenViolationError};
 use trogon_semconv::span::SLACK_WEBHOOK;
 
 use crate::credential::commands::domain::{CredentialKind, SourceKind};
@@ -43,11 +51,52 @@ fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode 
     }
 }
 
+fn delivery_headers(
+    transport: SlackTransport,
+    kind: &'static str,
+    message_id: &str,
+    event_type: &str,
+    event_id: Option<&str>,
+    team_id: &str,
+) -> Result<async_nats::HeaderMap, InvalidHeaderTextError> {
+    let headers = DeliveryHeaders::new()
+        .with(async_nats::header::NATS_MESSAGE_ID, &HeaderText::new(message_id)?)
+        .with(NATS_HEADER_EVENT_TYPE, &HeaderText::new(event_type)?)
+        .with(NATS_HEADER_TEAM_ID, &HeaderText::new(team_id)?)
+        .with_static(NATS_HEADER_PAYLOAD_KIND, kind)
+        .with_static(NATS_HEADER_TRANSPORT, transport.as_str());
+    let headers = match event_id {
+        Some(event_id) => headers.with(NATS_HEADER_EVENT_ID, &HeaderText::new(event_id)?),
+        None => headers,
+    };
+    Ok(headers.into_inner())
+}
+
+fn json_team_id(payload: &serde_json::Value) -> &str {
+    payload
+        .get("team_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or(UNKNOWN_TEAM_ID)
+}
+
+fn interaction_team_id(payload: &serde_json::Value) -> &str {
+    payload
+        .get("team")
+        .and_then(|v| v.get("id"))
+        .and_then(|v| v.as_str())
+        .unwrap_or(UNKNOWN_TEAM_ID)
+}
+
+fn form_field<'a>(fields: &'a [(String, String)], name: &str) -> Option<&'a str> {
+    fields.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str())
+}
+
 #[derive(Clone)]
 pub struct SlackBridge<P: JetStreamPublisher, S: ObjectStorePut> {
     publisher: ClaimCheckPublisher<P, S>,
     subject_prefix: NatsToken,
-    nats_ack_timeout: NonZeroDuration,
+    ack_budget: AckBudget,
+    transport: SlackTransport,
 }
 
 #[derive(Clone)]
@@ -72,54 +121,93 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
         Self {
             publisher,
             subject_prefix: config.subject_prefix.clone(),
-            nats_ack_timeout: config.nats_ack_timeout,
+            ack_budget: config.ack_budget,
+            transport: config.transport_kind(),
         }
     }
 
     pub async fn handle_json_body(&self, body: Bytes) -> (StatusCode, String) {
         let Ok(payload) = serde_json::from_slice::<serde_json::Value>(&body) else {
             warn!("Invalid JSON payload");
-            self.publish_unroutable("invalid_json", body).await;
-            return (StatusCode::BAD_REQUEST, String::new());
+            let status = self
+                .reject(
+                    UnroutableReason::InvalidJson,
+                    UNKNOWN_TEAM_ID,
+                    body,
+                    StatusCode::BAD_REQUEST,
+                )
+                .await;
+            return (status, String::new());
         };
 
         self.handle_json_payload(&body, &payload).await
     }
 
-    pub async fn handle_socket_interaction(
+    pub async fn handle_socket_interaction(&self, payload: &RawValue) -> StatusCode {
+        self.handle_interaction(payload.get(), Bytes::copy_from_slice(payload.get().as_bytes()))
+            .await
+    }
+
+    pub async fn handle_socket_slash_command(&self, payload: &RawValue) -> StatusCode {
+        let raw_body = Bytes::copy_from_slice(payload.get().as_bytes());
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(payload.get()) else {
+            warn!("Invalid JSON in slash command payload");
+            return self
+                .reject(
+                    UnroutableReason::InvalidJson,
+                    UNKNOWN_TEAM_ID,
+                    raw_body,
+                    StatusCode::BAD_REQUEST,
+                )
+                .await;
+        };
+        self.handle_slash_command_value(&value, raw_body).await
+    }
+
+    pub async fn publish_socket_unroutable(&self, reason: UnroutableReason, body: Bytes) -> StatusCode {
+        self.reject(reason, UNKNOWN_TEAM_ID, body, StatusCode::OK).await
+    }
+
+    async fn publish_unroutable(
         &self,
-        payload: &serde_json::Value,
-    ) -> Result<StatusCode, serde_json::Error> {
-        let payload_json = serde_json::to_string(payload)?;
-        let status = self
-            .handle_interaction(&payload_json, Bytes::from(payload_json.clone()))
-            .await;
-        Ok(status)
+        reason: UnroutableReason,
+        team_id: &str,
+        body: Bytes,
+    ) -> PublishOutcome<P::PublishError> {
+        let subject = SlackSubject::unroutable(&self.subject_prefix).into_string();
+        let message_id = UnroutableMessageId::new(reason, &body);
+        let headers = DeliveryHeaders::new()
+            .with(async_nats::header::NATS_MESSAGE_ID, message_id.header())
+            .with_static(NATS_HEADER_REJECT_REASON, reason.as_str())
+            .with_static(NATS_HEADER_PAYLOAD_KIND, "unroutable")
+            .with(NATS_HEADER_TEAM_ID, &HeaderText::or_unknown(team_id))
+            .with_static(NATS_HEADER_TRANSPORT, self.transport.as_str())
+            .into_inner();
+
+        self.publish(subject, headers, body).await
     }
 
-    pub async fn handle_socket_slash_command(
+    async fn publish(
         &self,
-        payload: &serde_json::Value,
-    ) -> Result<StatusCode, serde_json::Error> {
-        let raw_body = Bytes::from(serde_json::to_vec(payload)?);
-        Ok(self.handle_slash_command_value(payload, raw_body).await)
+        subject: String,
+        headers: async_nats::HeaderMap,
+        body: Bytes,
+    ) -> PublishOutcome<P::PublishError> {
+        let limit = self.ack_budget.limit();
+        match tokio::time::timeout(limit, self.publisher.publish_event(subject, headers, body, limit)).await {
+            Ok(outcome) => outcome,
+            Err(_) => PublishOutcome::AckTimedOut(limit),
+        }
     }
 
-    pub async fn publish_socket_unroutable(&self, reason: &str, body: Bytes) {
-        self.publish_unroutable(reason, body).await;
-    }
-
-    async fn publish_unroutable(&self, reason: &str, body: Bytes) {
-        let subject = format!("{}.unroutable", self.subject_prefix);
-        let mut headers = async_nats::HeaderMap::new();
-        headers.insert(NATS_HEADER_REJECT_REASON, reason);
-        headers.insert(NATS_HEADER_PAYLOAD_KIND, "unroutable");
-
-        let outcome = self
-            .publisher
-            .publish_event(subject, headers, body, self.nats_ack_timeout.into())
-            .await;
-        outcome.log_on_error("slack.unroutable");
+    async fn reject(&self, reason: UnroutableReason, team_id: &str, body: Bytes, stored: StatusCode) -> StatusCode {
+        let outcome = self.publish_unroutable(reason, team_id, body).await;
+        if outcome.is_ok() {
+            stored
+        } else {
+            outcome.log_on_error("slack.unroutable");
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
     }
 
     async fn handle_json_payload(&self, body: &Bytes, payload: &serde_json::Value) -> (StatusCode, String) {
@@ -135,10 +223,19 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
             return (StatusCode::OK, challenge);
         }
 
+        let team_id = json_team_id(payload).to_owned();
+
         if payload_type != "event_callback" {
             warn!(payload_type, "Unhandled payload type");
-            self.publish_unroutable("unhandled_payload_type", body.clone()).await;
-            return (StatusCode::OK, String::new());
+            let status = self
+                .reject(
+                    UnroutableReason::UnhandledPayloadType,
+                    &team_id,
+                    body.clone(),
+                    StatusCode::OK,
+                )
+                .await;
+            return (status, String::new());
         }
 
         let Some(event_type) = payload
@@ -147,42 +244,74 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
             .and_then(|v| v.as_str())
         else {
             warn!("Missing event.type in event_callback payload");
-            self.publish_unroutable("missing_event_type", body.clone()).await;
-            return (StatusCode::BAD_REQUEST, String::new());
+            let status = self
+                .reject(
+                    UnroutableReason::MissingEventType,
+                    &team_id,
+                    body.clone(),
+                    StatusCode::BAD_REQUEST,
+                )
+                .await;
+            return (status, String::new());
         };
         let event_type = event_type.to_owned();
 
         let Some(event_id) = payload.get("event_id").and_then(|v| v.as_str()) else {
             warn!("Missing event_id in event_callback payload");
-            self.publish_unroutable("missing_event_id", body.clone()).await;
-            return (StatusCode::BAD_REQUEST, String::new());
+            let status = self
+                .reject(
+                    UnroutableReason::MissingEventId,
+                    &team_id,
+                    body.clone(),
+                    StatusCode::BAD_REQUEST,
+                )
+                .await;
+            return (status, String::new());
         };
         let event_id = event_id.to_owned();
 
-        let team_id = payload
-            .get("team_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown")
-            .to_owned();
-
-        let subject = format!("{}.event.{}", self.subject_prefix, event_type);
+        let subject = match SlackSubject::event(&self.subject_prefix, &event_type) {
+            Ok(subject) => subject,
+            Err(error) => {
+                warn!(%error, "Event type is not a valid subject token");
+                let status = self
+                    .reject(
+                        UnroutableReason::InvalidSubjectToken,
+                        &team_id,
+                        body.clone(),
+                        StatusCode::BAD_REQUEST,
+                    )
+                    .await;
+                return (status, String::new());
+            }
+        };
 
         let span = tracing::Span::current();
         span.record(trogon_semconv::attribute::EVENT_TYPE, &event_type);
         span.record(trogon_semconv::attribute::EVENT_ID, &event_id);
-        span.record(trogon_semconv::attribute::SUBJECT, &subject);
+        span.record(trogon_semconv::attribute::SUBJECT, subject.as_str());
 
-        let mut nats_headers = async_nats::HeaderMap::new();
-        nats_headers.insert(async_nats::header::NATS_MESSAGE_ID, event_id.as_str());
-        nats_headers.insert(NATS_HEADER_EVENT_TYPE, event_type.as_str());
-        nats_headers.insert(NATS_HEADER_EVENT_ID, event_id.as_str());
-        nats_headers.insert(NATS_HEADER_TEAM_ID, team_id.as_str());
-        nats_headers.insert(NATS_HEADER_PAYLOAD_KIND, "event");
+        let Ok(nats_headers) = delivery_headers(
+            self.transport,
+            "event",
+            &event_id,
+            &event_type,
+            Some(&event_id),
+            &team_id,
+        ) else {
+            warn!("Event metadata is not valid header text");
+            let status = self
+                .reject(
+                    UnroutableReason::InvalidHeaderValue,
+                    &team_id,
+                    body.clone(),
+                    StatusCode::BAD_REQUEST,
+                )
+                .await;
+            return (status, String::new());
+        };
 
-        let outcome = self
-            .publisher
-            .publish_event(subject, nats_headers, body.clone(), self.nats_ack_timeout.into())
-            .await;
+        let outcome = self.publish(subject.into_string(), nats_headers, body.clone()).await;
 
         (outcome_to_status(outcome), String::new())
     }
@@ -192,8 +321,15 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
             Ok(s) => s,
             Err(_) => {
                 warn!("Invalid UTF-8 in form payload");
-                self.publish_unroutable("invalid_utf8_form", body.clone()).await;
-                return (StatusCode::BAD_REQUEST, String::new());
+                let status = self
+                    .reject(
+                        UnroutableReason::InvalidUtf8Form,
+                        UNKNOWN_TEAM_ID,
+                        body.clone(),
+                        StatusCode::BAD_REQUEST,
+                    )
+                    .await;
+                return (status, String::new());
             }
         };
 
@@ -201,28 +337,40 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
             .map(|(k, v)| (k.into_owned(), v.into_owned()))
             .collect();
 
-        let find_field = |name: &str| fields.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str());
-
-        if let Some(payload_json) = find_field("payload") {
+        if let Some(payload_json) = form_field(&fields, "payload") {
             let status = self.handle_interaction(payload_json, body.clone()).await;
             return (status, String::new());
         }
 
-        if let Some(command) = find_field("command") {
+        if let Some(command) = form_field(&fields, "command") {
             let status = self.handle_slash_command(command, &fields, body.clone()).await;
             return (status, String::new());
         }
 
         warn!("Unrecognized form payload");
-        self.publish_unroutable("unrecognized_form", body.clone()).await;
-        (StatusCode::BAD_REQUEST, String::new())
+        let team_id = form_field(&fields, "team_id").unwrap_or(UNKNOWN_TEAM_ID);
+        let status = self
+            .reject(
+                UnroutableReason::UnrecognizedForm,
+                team_id,
+                body.clone(),
+                StatusCode::BAD_REQUEST,
+            )
+            .await;
+        (status, String::new())
     }
 
     async fn handle_interaction(&self, payload_json: &str, raw_body: Bytes) -> StatusCode {
         let Ok(payload) = serde_json::from_str::<serde_json::Value>(payload_json) else {
             warn!("Invalid JSON in interaction payload field");
-            self.publish_unroutable("invalid_interaction_json", raw_body).await;
-            return StatusCode::BAD_REQUEST;
+            return self
+                .reject(
+                    UnroutableReason::InvalidInteractionJson,
+                    UNKNOWN_TEAM_ID,
+                    raw_body,
+                    StatusCode::BAD_REQUEST,
+                )
+                .await;
         };
 
         self.publish_interaction_payload(&payload, Bytes::from(payload_json.to_owned()))
@@ -230,78 +378,123 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
     }
 
     async fn publish_interaction_payload(&self, payload: &serde_json::Value, body: Bytes) -> StatusCode {
+        let team_id = interaction_team_id(payload).to_owned();
+
         let Some(interaction_type) = payload.get("type").and_then(|v| v.as_str()) else {
             warn!("Missing type in interaction payload");
-            self.publish_unroutable("missing_interaction_type", body).await;
-            return StatusCode::BAD_REQUEST;
+            return self
+                .reject(
+                    UnroutableReason::MissingInteractionType,
+                    &team_id,
+                    body,
+                    StatusCode::BAD_REQUEST,
+                )
+                .await;
         };
         let interaction_type = interaction_type.to_owned();
 
-        let Some(trigger_id) = payload.get("trigger_id").and_then(|v| v.as_str()) else {
-            warn!("Missing trigger_id in interaction payload");
-            self.publish_unroutable("missing_interaction_trigger_id", body).await;
-            return StatusCode::BAD_REQUEST;
+        let key = InteractionKey::derive(payload, &interaction_type, &body);
+
+        let subject = match SlackSubject::interaction(&self.subject_prefix, &interaction_type) {
+            Ok(subject) => subject,
+            Err(error) => {
+                warn!(%error, "Interaction type is not a valid subject token");
+                return self
+                    .reject(
+                        UnroutableReason::InvalidSubjectToken,
+                        &team_id,
+                        body,
+                        StatusCode::BAD_REQUEST,
+                    )
+                    .await;
+            }
         };
-        let trigger_id = trigger_id.to_owned();
-
-        let team_id = payload
-            .get("team")
-            .and_then(|v| v.get("id"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown")
-            .to_owned();
-
-        let subject = format!("{}.interaction.{}", self.subject_prefix, interaction_type);
 
         let span = tracing::Span::current();
         span.record(trogon_semconv::attribute::EVENT_TYPE, &interaction_type);
-        span.record(trogon_semconv::attribute::EVENT_ID, &trigger_id);
-        span.record(trogon_semconv::attribute::SUBJECT, &subject);
+        span.record(trogon_semconv::attribute::EVENT_ID, key.as_str());
+        span.record(trogon_semconv::attribute::SUBJECT, subject.as_str());
 
         info!(interaction_type, "Received Slack interaction");
 
-        let mut nats_headers = async_nats::HeaderMap::new();
-        nats_headers.insert(async_nats::header::NATS_MESSAGE_ID, trigger_id.as_str());
-        nats_headers.insert(NATS_HEADER_EVENT_TYPE, interaction_type.as_str());
-        nats_headers.insert(NATS_HEADER_TEAM_ID, team_id.as_str());
-        nats_headers.insert(NATS_HEADER_PAYLOAD_KIND, "interaction");
+        let Ok(nats_headers) = delivery_headers(
+            self.transport,
+            "interaction",
+            key.as_str(),
+            &interaction_type,
+            None,
+            &team_id,
+        ) else {
+            warn!("Interaction metadata is not valid header text");
+            return self
+                .reject(
+                    UnroutableReason::InvalidHeaderValue,
+                    &team_id,
+                    body,
+                    StatusCode::BAD_REQUEST,
+                )
+                .await;
+        };
 
-        let outcome = self
-            .publisher
-            .publish_event(subject, nats_headers, body, self.nats_ack_timeout.into())
-            .await;
+        let outcome = self.publish(subject.into_string(), nats_headers, body).await;
 
         outcome_to_status(outcome)
     }
 
     async fn handle_slash_command(&self, command: &str, fields: &[(String, String)], raw_body: Bytes) -> StatusCode {
-        let team_id = fields
-            .iter()
-            .find(|(k, _)| k == "team_id")
-            .map(|(_, v)| v.as_str())
-            .unwrap_or("unknown");
+        let team_id = form_field(fields, "team_id").unwrap_or(UNKNOWN_TEAM_ID);
 
-        let Some(trigger_id) = fields.iter().find(|(k, _)| k == "trigger_id").map(|(_, v)| v.as_str()) else {
+        if command.is_empty() {
+            warn!("Missing command in slash command payload");
+            return self
+                .reject(
+                    UnroutableReason::MissingCommand,
+                    team_id,
+                    raw_body,
+                    StatusCode::BAD_REQUEST,
+                )
+                .await;
+        }
+
+        let Some(trigger_id) = form_field(fields, "trigger_id") else {
             warn!(command, "Missing trigger_id in slash command payload");
-            self.publish_unroutable("missing_command_trigger_id", raw_body).await;
-            return StatusCode::BAD_REQUEST;
+            return self
+                .reject(
+                    UnroutableReason::MissingCommandTriggerId,
+                    team_id,
+                    raw_body,
+                    StatusCode::BAD_REQUEST,
+                )
+                .await;
         };
 
         self.publish_slash_command(command, team_id, trigger_id, raw_body).await
     }
 
     async fn handle_slash_command_value(&self, payload: &serde_json::Value, raw_body: Bytes) -> StatusCode {
+        let team_id = json_team_id(payload);
         let command = payload.get("command").and_then(|v| v.as_str()).unwrap_or_default();
         if command.is_empty() {
             warn!("Missing command in slash command payload");
-            self.publish_unroutable("missing_command", raw_body).await;
-            return StatusCode::BAD_REQUEST;
+            return self
+                .reject(
+                    UnroutableReason::MissingCommand,
+                    team_id,
+                    raw_body,
+                    StatusCode::BAD_REQUEST,
+                )
+                .await;
         }
-        let team_id = payload.get("team_id").and_then(|v| v.as_str()).unwrap_or("unknown");
         let Some(trigger_id) = payload.get("trigger_id").and_then(|v| v.as_str()) else {
             warn!(command, "Missing trigger_id in slash command payload");
-            self.publish_unroutable("missing_command_trigger_id", raw_body).await;
-            return StatusCode::BAD_REQUEST;
+            return self
+                .reject(
+                    UnroutableReason::MissingCommandTriggerId,
+                    team_id,
+                    raw_body,
+                    StatusCode::BAD_REQUEST,
+                )
+                .await;
         };
 
         self.publish_slash_command(command, team_id, trigger_id, raw_body).await
@@ -314,26 +507,38 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
         trigger_id: &str,
         raw_body: Bytes,
     ) -> StatusCode {
-        let command_name = command.trim_start_matches('/');
-        let subject = format!("{}.command.{}", self.subject_prefix, command_name);
+        let subject = match SlackSubject::command(&self.subject_prefix, command) {
+            Ok(subject) => subject,
+            Err(error) => {
+                warn!(%error, "Command name is not a valid subject token");
+                let reason = match error {
+                    SubjectTokenViolationError::Empty => UnroutableReason::MissingCommand,
+                    _ => UnroutableReason::InvalidSubjectToken,
+                };
+                return self.reject(reason, team_id, raw_body, StatusCode::BAD_REQUEST).await;
+            }
+        };
 
         let span = tracing::Span::current();
         span.record(trogon_semconv::attribute::EVENT_TYPE, command);
         span.record(trogon_semconv::attribute::EVENT_ID, trigger_id);
-        span.record(trogon_semconv::attribute::SUBJECT, &subject);
+        span.record(trogon_semconv::attribute::SUBJECT, subject.as_str());
 
         info!(command, "Received Slack slash command");
 
-        let mut nats_headers = async_nats::HeaderMap::new();
-        nats_headers.insert(async_nats::header::NATS_MESSAGE_ID, trigger_id);
-        nats_headers.insert(NATS_HEADER_EVENT_TYPE, command);
-        nats_headers.insert(NATS_HEADER_TEAM_ID, team_id);
-        nats_headers.insert(NATS_HEADER_PAYLOAD_KIND, "command");
+        let Ok(nats_headers) = delivery_headers(self.transport, "command", trigger_id, command, None, team_id) else {
+            warn!("Slash command metadata is not valid header text");
+            return self
+                .reject(
+                    UnroutableReason::InvalidHeaderValue,
+                    team_id,
+                    raw_body,
+                    StatusCode::BAD_REQUEST,
+                )
+                .await;
+        };
 
-        let outcome = self
-            .publisher
-            .publish_event(subject, nats_headers, raw_body, self.nats_ack_timeout.into())
-            .await;
+        let outcome = self.publish(subject.into_string(), nats_headers, raw_body).await;
 
         outcome_to_status(outcome)
     }
@@ -347,6 +552,16 @@ pub async fn provision<C: JetStreamContext>(js: &C, config: &SlackConfig) -> Res
         ..Default::default()
     })
     .await?;
+
+    if let Some(requested) = config.ack_budget.capped_from() {
+        let requested_secs = Duration::from(requested).as_secs();
+        let effective_millis = config.ack_budget.limit().as_millis() as u64;
+        warn!(
+            requested_secs,
+            effective_millis,
+            "nats_ack_timeout_secs exceeds the time Slack allows for an acknowledgement and was lowered"
+        );
+    }
 
     let max_age_secs = Duration::from(config.stream_max_age).as_secs();
     let stream_name = config.stream_name.as_str();
@@ -384,7 +599,7 @@ where
     )
 }
 
-fn router_with_clock<P: JetStreamPublisher, S: ObjectStorePut, C: EpochClock>(
+pub(super) fn router_with_clock<P: JetStreamPublisher, S: ObjectStorePut, C: EpochClock>(
     publisher: ClaimCheckPublisher<P, S>,
     config: &SlackConfig,
     webhook: &SlackWebhookConfig,
@@ -399,7 +614,7 @@ fn router_with_clock<P: JetStreamPublisher, S: ObjectStorePut, C: EpochClock>(
 
     Router::new()
         .route("/webhook", post(handle_webhook::<P, S, C>))
-        .layer(DefaultBodyLimit::max(HTTP_BODY_SIZE_MAX.as_usize()))
+        .layer(DefaultBodyLimit::max(webhook.max_body_size.as_usize()))
         .with_state(state)
 }
 
@@ -427,7 +642,7 @@ where
 
     Router::new()
         .route("/webhook", post(handle_runtime_webhook::<P, S, C, G>))
-        .layer(DefaultBodyLimit::max(HTTP_BODY_SIZE_MAX.as_usize()))
+        .layer(DefaultBodyLimit::max(webhook.max_body_size.as_usize()))
         .with_state(state)
 }
 
@@ -467,6 +682,12 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut, C: Epoch
     headers: HeaderMap,
     body: Bytes,
 ) -> (StatusCode, String) {
+    let content_type = headers.get("content-type").and_then(|v| v.to_str().ok());
+    if SslCheck::detect(content_type, &body) == SslCheck::Requested {
+        info!("Responding to Slack ssl_check");
+        return (StatusCode::OK, String::new());
+    }
+
     let Some((timestamp, sig)) = slack_signature_parts(&state.clock, state.timestamp_max_drift, &headers) else {
         return (StatusCode::UNAUTHORIZED, String::new());
     };
@@ -508,6 +729,12 @@ where
     C: EpochClock,
     G: SecretStoreGet<Error = SecretStoreError>,
 {
+    let content_type = headers.get("content-type").and_then(|v| v.to_str().ok());
+    if SslCheck::detect(content_type, &body) == SslCheck::Requested {
+        info!("Responding to Slack ssl_check");
+        return (StatusCode::OK, String::new());
+    }
+
     let Some((timestamp, sig)) = slack_signature_parts(&state.clock, state.timestamp_max_drift, &headers) else {
         return (StatusCode::UNAUTHORIZED, String::new());
     };

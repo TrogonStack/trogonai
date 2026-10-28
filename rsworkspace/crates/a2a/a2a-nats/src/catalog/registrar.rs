@@ -79,9 +79,7 @@ pub fn success_reply() -> Option<Bytes> {
 }
 
 pub fn error_reply(code: i32, message: &str) -> Option<Bytes> {
-    encode_error(ResponseId::Null, code, message, None)
-        .ok()
-        .map(|encoded| encoded.body)
+    Some(encode_error(ResponseId::Null, code, message, None).body)
 }
 
 #[derive(Debug, thiserror::Error)]

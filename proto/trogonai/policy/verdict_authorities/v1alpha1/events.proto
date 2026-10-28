@@ -1,0 +1,20 @@
+edition = "2024";
+
+package trogonai.policy.verdict_authorities.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/policy/verdict_authorities/v1alpha1/verdict_authority_cleared.proto";
+import "trogonai/policy/verdict_authorities/v1alpha1/verdict_authority_initialized.proto";
+import "trogonai/policy/verdict_authorities/v1alpha1/verdict_authority_set.proto";
+
+// An unset or unknown event rejects replay; skipping an authority change could
+// accept a verdict from an issuer the current authority forbids, or refuse one it allows.
+message VerdictAuthorityEvent {
+  oneof event {
+    option (buf.validate.oneof).required = true;
+
+    VerdictAuthorityInitialized verdict_authority_initialized = 1;
+    VerdictAuthoritySet verdict_authority_set = 2;
+    VerdictAuthorityCleared verdict_authority_cleared = 3;
+  }
+}

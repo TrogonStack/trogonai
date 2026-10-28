@@ -97,6 +97,16 @@ groups:
     display_name: Reused OpenTelemetry Attributes
     brief: Standard OpenTelemetry attributes emitted by TrogonAi, documented as-is.
     attributes:
+      - id: http.route
+        type: string
+        stability: stable
+        brief: Matched HTTP route template; never a raw request path.
+        examples: ["/v1/models/{id}"]
+      - id: url.scheme
+        type: string
+        stability: stable
+        brief: URL scheme of the HTTP listener.
+        examples: ["http"]
       - id: messaging.system
         type:
           members:

@@ -6,6 +6,7 @@ pub enum SourceKind {
     Discord,
     GitHub,
     Gitlab,
+    GooglePubSub,
     Incidentio,
     Linear,
     MicrosoftGraph,
@@ -14,13 +15,15 @@ pub enum SourceKind {
     Slack,
     Telegram,
     Twitter,
+    Zoom,
 }
 
 impl SourceKind {
-    const ALL: [Self; 11] = [
+    const ALL: [Self; 13] = [
         Self::Discord,
         Self::GitHub,
         Self::Gitlab,
+        Self::GooglePubSub,
         Self::Incidentio,
         Self::Linear,
         Self::MicrosoftGraph,
@@ -29,6 +32,7 @@ impl SourceKind {
         Self::Slack,
         Self::Telegram,
         Self::Twitter,
+        Self::Zoom,
     ];
 
     pub fn parse(value: &str) -> Option<Self> {
@@ -41,6 +45,7 @@ impl SourceKind {
             Self::Discord => "discord",
             Self::GitHub => "github",
             Self::Gitlab => "gitlab",
+            Self::GooglePubSub => "google_pubsub",
             Self::Incidentio => "incidentio",
             Self::Linear => "linear",
             Self::MicrosoftGraph => "microsoft_graph",
@@ -49,6 +54,7 @@ impl SourceKind {
             Self::Slack => "slack",
             Self::Telegram => "telegram",
             Self::Twitter => "twitter",
+            Self::Zoom => "zoom",
         }
     }
 }

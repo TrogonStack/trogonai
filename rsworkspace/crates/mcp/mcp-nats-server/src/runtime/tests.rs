@@ -5,8 +5,8 @@ use axum::Router;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use rmcp::model::{
-    ClientCapabilities, ClientInfo, ClientRequest, Implementation, InitializeRequest, InitializeRequestParams,
-    InitializeResult, JsonRpcMessage, NumberOrString, ServerCapabilities, ServerResult,
+    ClientCapabilities, ClientConfig, ClientRequest, Implementation, InitializeRequest, InitializeRequestParams,
+    InitializeResult, JsonRpcMessage, NumberOrString, ProtocolVersion, ServerCapabilities, ServerResult,
 };
 use rmcp::service::RoleServer;
 use tower::ServiceExt;
@@ -15,6 +15,10 @@ use trogon_nats::ToSubject;
 use mcp_nats::wire;
 
 use super::*;
+
+mod forwarding_tests;
+mod protocol_surface_tests;
+mod worker_lifecycle_tests;
 
 #[derive(Clone, Debug)]
 struct CapturedNatsRequest {
@@ -102,19 +106,19 @@ impl FlushClient for CapturingNatsClient {
 fn mcp_config() -> Config {
     Config::new(
         mcp_nats::McpPrefix::new("mcp").unwrap(),
-        trogon_nats::NatsConfig {
-            servers: vec!["localhost:4222".to_string()],
-            auth: trogon_nats::NatsAuth::None,
-        },
+        trogon_nats::NatsConfig::new(vec!["localhost:4222".to_string()], trogon_nats::NatsAuth::None),
     )
 }
 
 fn initialize_request() -> ClientJsonRpcMessage {
     ClientJsonRpcMessage::request(
-        ClientRequest::InitializeRequest(InitializeRequest::new(InitializeRequestParams::new(
-            ClientCapabilities::default(),
-            Implementation::new("test-client", "1.0.0"),
-        ))),
+        ClientRequest::InitializeRequest(InitializeRequest::new(
+            InitializeRequestParams::new(
+                ClientCapabilities::default(),
+                Implementation::new("test-client", "1.0.0"),
+            )
+            .with_protocol_version(ProtocolVersion::V_2025_11_25),
+        )),
         NumberOrString::Number(1),
     )
 }
@@ -123,6 +127,7 @@ fn initialize_response() -> ServerJsonRpcMessage {
     ServerJsonRpcMessage::response(
         ServerResult::InitializeResult(
             InitializeResult::new(ServerCapabilities::default())
+                .with_protocol_version(ProtocolVersion::V_2025_11_25)
                 .with_server_info(Implementation::new("remote-server", "1.0.0")),
         ),
         NumberOrString::Number(1),
@@ -449,7 +454,7 @@ async fn service_info_is_available_before_remote_initialize() {
         McpPeerId::new("default").unwrap(),
     );
 
-    let info: ServerInfo = service.get_info();
+    let info: ServerConfig = service.get_info();
 
     assert!(!info.server_info.name.is_empty());
 }
@@ -468,13 +473,13 @@ async fn remembered_server_info_replaces_the_placeholder() {
 
     service.remember_server_info(&remote);
 
-    let info: ServerInfo = service.get_info();
+    let info: ServerConfig = service.get_info();
     assert_eq!(info.server_info.name, "remote-server");
     assert_eq!(info.server_info.version, "9.9.9");
 }
 
 #[test]
-fn initialize_request_uses_client_info_type() {
+fn initialize_request_uses_client_config_type() {
     let message = initialize_request();
 
     let JsonRpcMessage::Request(request) = message else {
@@ -483,7 +488,7 @@ fn initialize_request_uses_client_info_type() {
     let ClientRequest::InitializeRequest(InitializeRequest { params, .. }) = request.request else {
         panic!("expected initialize method");
     };
-    let _: ClientInfo = params;
+    let _: ClientConfig = params;
 }
 
 #[test]

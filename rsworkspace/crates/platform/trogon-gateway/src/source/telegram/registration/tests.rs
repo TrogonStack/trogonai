@@ -5,11 +5,8 @@ use super::*;
 use reqwest::header::CONTENT_TYPE;
 use serde_json::{Value, json};
 use std::error::Error;
-#[cfg(coverage)]
 use std::time::Duration;
-#[cfg(coverage)]
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-#[cfg(coverage)]
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
@@ -144,7 +141,6 @@ fn test_config() -> TelegramSourceConfig {
     }
 }
 
-#[cfg(coverage)]
 async fn reqwest_test_api(body: &'static str) -> String {
     let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -161,6 +157,20 @@ async fn reqwest_test_api(body: &'static str) -> String {
     });
 
     format!("http://{addr}")
+}
+
+#[test]
+fn set_webhook_debug_redacts_bot_token_and_secret() {
+    let request = SetWebhook {
+        bot_token: TEST_BOT_TOKEN.to_string(),
+        public_webhook_url: "https://example.com/sources/telegram/primary/webhook".to_string(),
+        webhook_secret: "webhook-secret".to_string(),
+    };
+    let debug_output = format!("{request:?}");
+    assert!(!debug_output.contains(TEST_BOT_TOKEN));
+    assert!(!debug_output.contains("webhook-secret"));
+    assert!(debug_output.contains("https://example.com/sources/telegram/primary/webhook"));
+    assert!(debug_output.contains("<redacted>"));
 }
 
 #[test]
@@ -329,7 +339,6 @@ async fn http_response_json_error_propagates() {
     );
 }
 
-#[cfg(coverage)]
 #[tokio::test]
 async fn reqwest_http_traits_delegate_to_reqwest() {
     let config = test_config();

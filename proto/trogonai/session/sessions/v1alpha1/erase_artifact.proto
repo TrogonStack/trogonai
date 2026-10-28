@@ -2,6 +2,8 @@ edition = "2024";
 
 package trogonai.session.sessions.v1alpha1;
 
+import "buf/validate/validate.proto";
+
 // EraseArtifact removes claim-checked bytes an event referenced, recording
 // [ArtifactErased]. The event that referenced them stays on the log; only the
 // out-of-line payload goes.
@@ -10,7 +12,13 @@ package trogonai.session.sessions.v1alpha1;
 // at the command boundary against the artifact store rather than from folded
 // state.
 message EraseArtifact {
-  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
-  string artifact_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string artifact_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   string reason = 3;
 }

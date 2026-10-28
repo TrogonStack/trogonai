@@ -1,3 +1,4 @@
+use super::super::ack_budget::AckBudget;
 use super::*;
 use axum::Router;
 use axum::extract::State;
@@ -28,23 +29,23 @@ fn socket_config() -> SlackConfig {
         subject_prefix: NatsToken::new("slack").unwrap(),
         stream_name: NatsToken::new("SLACK").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
-        nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
+        ack_budget: AckBudget::default(),
         transport: super::super::config::SlackTransportConfig::SocketMode(SlackSocketModeConfig {
             app_token: super::super::config::SlackAppToken::new("xapp-test-token").unwrap(),
         }),
     }
 }
 
-#[cfg(not(coverage))]
 fn webhook_config() -> SlackConfig {
     SlackConfig {
         subject_prefix: NatsToken::new("slack").unwrap(),
         stream_name: NatsToken::new("SLACK").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
-        nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
+        ack_budget: AckBudget::default(),
         transport: super::super::config::SlackTransportConfig::Webhook(super::super::config::SlackWebhookConfig {
             signing_secret: super::super::config::SlackSigningSecret::new("slack-secret").unwrap(),
             timestamp_max_drift: NonZeroDuration::from_secs(300).unwrap(),
+            max_body_size: super::super::constants::DEFAULT_HTTP_BODY_SIZE_MAX,
         }),
     }
 }
@@ -60,12 +61,64 @@ fn reconnect_delay_doubles_until_cap() {
     assert_eq!(next_reconnect_delay(RECONNECT_MAX_DELAY), RECONNECT_MAX_DELAY);
 }
 
-#[cfg(not(coverage))]
+struct ScriptedConnector {
+    results: std::collections::VecDeque<Result<(), SocketModeError>>,
+    attempts: mpsc::Sender<tokio::time::Instant>,
+}
+
+impl SocketConnector<MockJetStreamPublisher, MockObjectStore> for ScriptedConnector {
+    async fn connect<'a>(
+        &'a mut self,
+        _bridge: &'a SlackBridge<MockJetStreamPublisher, MockObjectStore>,
+        config: &'a SlackSocketModeConfig,
+    ) -> Result<(), SocketModeError> {
+        assert_eq!(config.app_token.as_str(), "xapp-test-token");
+        self.attempts.send(tokio::time::Instant::now()).await.unwrap();
+        match self.results.pop_front() {
+            Some(result) => result,
+            None => std::future::pending().await,
+        }
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn reconnect_failures_back_off_and_success_resets_the_delay() {
+    let (attempts, mut observed) = mpsc::channel(1);
+    let connector = ScriptedConnector {
+        results: [
+            Err(SocketModeError::WebSocket(WebSocketError::ConnectionClosed)),
+            Err(SocketModeError::WebSocket(WebSocketError::ConnectionClosed)),
+            Ok(()),
+        ]
+        .into(),
+        attempts,
+    };
+    let task = tokio::spawn(run(
+        wrap_publisher(MockJetStreamPublisher::new()),
+        socket_config(),
+        connector,
+    ));
+    let first = observed.recv().await.unwrap();
+    let second = observed.recv().await.unwrap();
+    let third = observed.recv().await.unwrap();
+    let fourth = observed.recv().await.unwrap();
+    assert_eq!(second - first, RECONNECT_INITIAL_DELAY);
+    assert_eq!(third - second, RECONNECT_INITIAL_DELAY * 2);
+    assert_eq!(fourth - third, RECONNECT_INITIAL_DELAY);
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+    assert!(observed.recv().await.is_none());
+}
+
 #[tokio::test]
 async fn run_requires_socket_mode_config() {
-    let error = run(wrap_publisher(MockJetStreamPublisher::new()), &webhook_config())
-        .await
-        .unwrap_err();
+    let error = run(
+        wrap_publisher(MockJetStreamPublisher::new()),
+        webhook_config(),
+        HttpSocketConnector::slack(),
+    )
+    .await
+    .unwrap_err();
 
     assert!(matches!(error, SocketModeError::MissingSocketModeConfig));
     assert_eq!(error.to_string(), "slack socket_mode config is missing");
@@ -332,7 +385,7 @@ async fn payload_envelope_with_unexpected_kind_publishes_unroutable_without_ack(
     let envelope = SocketEnvelope {
         kind: "unexpected".to_string(),
         envelope_id: Some("env-unexpected".to_string()),
-        payload: Some(serde_json::json!({})),
+        payload: Some(RawValue::from_string("{}".to_string()).unwrap()),
         reason: None,
     };
 
@@ -402,6 +455,171 @@ async fn socket_slash_command_missing_trigger_publishes_unroutable_without_ack()
             .map(|v| v.as_str()),
         Some("missing_command_trigger_id"),
     );
+}
+
+#[tokio::test]
+async fn unknown_frame_is_not_acked_when_the_unroutable_publish_fails() {
+    let publisher = MockJetStreamPublisher::new();
+    publisher.fail_next_js_publish();
+    let envelope = serde_json::json!({
+        "type": "unsupported",
+        "envelope_id": "env-unsupported",
+        "payload": { "value": true }
+    });
+
+    let (reconnect, ack) = handle_text_frame(&bridge(publisher.clone()), &envelope.to_string())
+        .await
+        .unwrap();
+
+    assert!(!reconnect);
+    assert_eq!(ack, None);
+    assert!(publisher.published_messages().is_empty());
+}
+
+#[tokio::test]
+async fn socket_unroutable_carries_message_id_team_and_transport_headers() {
+    let publisher = MockJetStreamPublisher::new();
+    let envelope = serde_json::json!({
+        "type": "events_api",
+        "envelope_id": "env-5",
+        "payload": {
+            "type": "event_callback",
+            "team_id": "T01ABC",
+            "event": { "type": "message" }
+        }
+    });
+
+    handle_text_frame(&bridge(publisher.clone()), &envelope.to_string())
+        .await
+        .unwrap();
+
+    let messages = publisher.published_messages();
+    let headers = &messages[0].headers;
+    assert_eq!(
+        headers
+            .get(super::super::constants::NATS_HEADER_TEAM_ID)
+            .map(|v| v.as_str()),
+        Some("T01ABC"),
+    );
+    assert_eq!(
+        headers
+            .get(super::super::constants::NATS_HEADER_TRANSPORT)
+            .map(|v| v.as_str()),
+        Some("socket_mode"),
+    );
+    assert!(
+        headers
+            .get("Nats-Msg-Id")
+            .is_some_and(|id| id.as_str().starts_with("unroutable-"))
+    );
+}
+
+#[tokio::test]
+async fn socket_routable_event_is_tagged_with_its_transport() {
+    let publisher = MockJetStreamPublisher::new();
+    let envelope = serde_json::json!({
+        "type": "events_api",
+        "envelope_id": "env-1",
+        "payload": {
+            "type": "event_callback",
+            "event_id": "Ev01ABC123",
+            "team_id": "T01ABC",
+            "event": { "type": "message" }
+        }
+    });
+
+    handle_text_frame(&bridge(publisher.clone()), &envelope.to_string())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        publisher.published_messages()[0]
+            .headers
+            .get(super::super::constants::NATS_HEADER_TRANSPORT)
+            .map(|v| v.as_str()),
+        Some("socket_mode"),
+    );
+}
+
+fn envelope_text(kind: &str, payload: &str) -> String {
+    format!(r#"{{"type":"{kind}","envelope_id":"env-raw","accepts_response_payload":false,"payload":{payload}}}"#)
+}
+
+#[tokio::test]
+async fn events_api_payload_is_published_byte_for_byte() {
+    let publisher = MockJetStreamPublisher::new();
+    let payload = "{\"z\":1,  \"event\" :{\"type\":\"message\",\"text\":\"caf\\u00e9 \\/ \\\"quoted\\\"\"},\n\t\"event_id\":\"Ev01ABC123\",\"team_id\":\"T01ABC\",\"a\":2.50,\"type\":\"event_callback\"}";
+
+    let (_, ack) = handle_text_frame(&bridge(publisher.clone()), &envelope_text("events_api", payload))
+        .await
+        .unwrap();
+
+    assert_eq!(ack, Some(r#"{"envelope_id":"env-raw"}"#.to_string()));
+    let messages = publisher.published_messages();
+    assert_eq!(messages[0].subject, "slack.event.message");
+    assert_eq!(messages[0].payload.as_ref(), payload.as_bytes());
+}
+
+#[tokio::test]
+async fn interactive_payload_is_published_byte_for_byte() {
+    let publisher = MockJetStreamPublisher::new();
+    let payload = "{ \"trigger_id\" : \"trigger123\",\"type\":\"block_actions\",\n  \"team\":{\"id\":\"T01ABC\"}, \"z\":[1,  2] }";
+
+    let (_, ack) = handle_text_frame(&bridge(publisher.clone()), &envelope_text("interactive", payload))
+        .await
+        .unwrap();
+
+    assert!(ack.is_some());
+    assert_eq!(publisher.published_messages()[0].payload.as_ref(), payload.as_bytes());
+}
+
+#[tokio::test]
+async fn slash_command_payload_is_published_byte_for_byte() {
+    let publisher = MockJetStreamPublisher::new();
+    let payload = "{\"text\":\"a  b\",  \"trigger_id\":\"trigger456\",\"command\":\"/trogon\" ,\"team_id\":\"T01ABC\"}";
+
+    let (_, ack) = handle_text_frame(&bridge(publisher.clone()), &envelope_text("slash_commands", payload))
+        .await
+        .unwrap();
+
+    assert!(ack.is_some());
+    assert_eq!(publisher.published_messages()[0].payload.as_ref(), payload.as_bytes());
+}
+
+#[tokio::test]
+async fn slash_command_payload_that_is_not_a_json_value_is_kept_as_unroutable_without_ack() {
+    let publisher = MockJetStreamPublisher::new();
+    let payload = "{\"command\":\"/trogon\",\"trigger_id\":\"trigger456\",\"team_id\":\"T01ABC\",\"n\":1e999}";
+
+    let (reconnect, ack) = handle_text_frame(&bridge(publisher.clone()), &envelope_text("slash_commands", payload))
+        .await
+        .unwrap();
+
+    assert!(!reconnect);
+    assert_eq!(ack, None);
+    let message = &publisher.published_messages()[0];
+    assert_eq!(
+        message
+            .headers
+            .get(super::super::constants::NATS_HEADER_REJECT_REASON)
+            .map(|v| v.as_str()),
+        Some("invalid_json"),
+    );
+    assert_eq!(message.payload.as_ref(), payload.as_bytes());
+}
+
+#[tokio::test]
+async fn unroutable_payload_keeps_the_original_bytes() {
+    let publisher = MockJetStreamPublisher::new();
+    let payload = "{ \"type\" : \"event_callback\",  \"team_id\":\"T01ABC\", \"event\":{\"type\":\"message\"} }";
+
+    handle_text_frame(&bridge(publisher.clone()), &envelope_text("events_api", payload))
+        .await
+        .unwrap();
+
+    let messages = publisher.published_messages();
+    assert_eq!(messages[0].subject, "slack.unroutable");
+    assert_eq!(messages[0].payload.as_ref(), payload.as_bytes());
 }
 
 #[derive(Clone)]
@@ -517,12 +735,8 @@ async fn apps_connections_open_response_url_is_used() {
     let bridge = bridge(MockJetStreamPublisher::new());
     let result = tokio::time::timeout(
         Duration::from_secs(2),
-        connect_once(
-            &client,
-            &format!("http://{open_addr}/apps.connections.open"),
-            &bridge,
-            config.socket_mode().unwrap(),
-        ),
+        HttpSocketConnector::new(format!("http://{open_addr}/apps.connections.open"))
+            .connect(&bridge, config.socket_mode().unwrap()),
     )
     .await;
 
@@ -778,4 +992,86 @@ async fn disconnect_frame_defaults_missing_reason_without_ack() {
 
     assert!(reconnect);
     assert_eq!(ack, None);
+}
+
+#[tokio::test]
+async fn socket_payloads_with_unsafe_subject_tokens_are_unroutable_and_not_acked() {
+    let cases = [
+        (
+            "events_api",
+            serde_json::json!({
+                "type": "event_callback",
+                "event_id": "Ev01ABC123",
+                "team_id": "T01ABC",
+                "event": { "type": "a.b" }
+            }),
+        ),
+        (
+            "interactive",
+            serde_json::json!({
+                "type": "block*actions",
+                "trigger_id": "trigger123",
+                "team": { "id": "T01ABC" }
+            }),
+        ),
+        (
+            "slash_commands",
+            serde_json::json!({
+                "command": "/a b",
+                "team_id": "T01ABC",
+                "trigger_id": "trigger123"
+            }),
+        ),
+    ];
+
+    for (kind, payload) in cases {
+        let publisher = MockJetStreamPublisher::new();
+        let envelope = serde_json::json!({
+            "type": kind,
+            "envelope_id": "env-bad-token",
+            "payload": payload
+        });
+
+        let (reconnect, ack) = handle_text_frame(&bridge(publisher.clone()), &envelope.to_string())
+            .await
+            .unwrap();
+
+        assert!(!reconnect);
+        assert_eq!(ack, None, "{kind}");
+        let messages = publisher.published_messages();
+        assert_eq!(messages.len(), 1, "{kind}");
+        assert_eq!(messages[0].subject, "slack.unroutable", "{kind}");
+        assert_eq!(
+            messages[0]
+                .headers
+                .get(super::super::constants::NATS_HEADER_REJECT_REASON)
+                .map(|v| v.as_str()),
+            Some("invalid_subject_token"),
+            "{kind}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn socket_interaction_without_trigger_id_is_published_and_acked() {
+    let publisher = MockJetStreamPublisher::new();
+    let envelope = serde_json::json!({
+        "type": "interactive",
+        "envelope_id": "env-view-closed",
+        "payload": {
+            "type": "view_closed",
+            "team": { "id": "T01ABC" },
+            "view": { "id": "V01" }
+        }
+    });
+
+    let (reconnect, ack) = handle_text_frame(&bridge(publisher.clone()), &envelope.to_string())
+        .await
+        .unwrap();
+
+    assert!(!reconnect);
+    assert_eq!(ack, Some(r#"{"envelope_id":"env-view-closed"}"#.to_string()));
+    let messages = publisher.published_messages();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].subject, "slack.interaction.view_closed");
 }

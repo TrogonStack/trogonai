@@ -1,0 +1,93 @@
+edition = "2024";
+
+package trogonai.workflows.definitions.queries.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+// Query views own their contract independently of definition events and state.
+message DefinitionDigest {
+  string algorithm = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.const = "sha256"
+  ];
+  bytes value = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.len = 32
+  ];
+}
+
+message WorkflowDefinitionViewRef {
+  string workflow_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  uint64 revision = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  DefinitionDigest digest = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Returns the exact admitted artifact, never a query-owned re-encoding. Verify
+// digest before decoding under definition_contract_version. Unsupported payload
+// interpretation refuses the query rather than deleting fields or behavior.
+message WorkflowDefinitionArtifact {
+  WorkflowDefinitionViewRef reference = 1 [features.field_presence = LEGACY_REQUIRED];
+  bytes definition_bytes = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.min_len = 1
+  ];
+  uint32 definition_contract_version = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32.const = 1
+  ];
+}
+
+message WorkflowDefinitionSummary {
+  WorkflowDefinitionViewRef latest_revision = 1 [features.field_presence = LEGACY_REQUIRED];
+  string display_name = 2 [features.field_presence = LEGACY_REQUIRED];
+  string parent = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  DefinitionLifecycle lifecycle = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  google.protobuf.Timestamp updated_at = 5 [features.field_presence = LEGACY_REQUIRED];
+  uint64 applied_ordinal = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+}
+
+enum DefinitionLifecycle {
+  DEFINITION_LIFECYCLE_UNSPECIFIED = 0;
+  DEFINITION_LIFECYCLE_ACTIVE = 1;
+  DEFINITION_LIFECYCLE_ARCHIVED = 2;
+}
+
+message DefinitionListFilter {
+  string parent = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ArchivedFilter archived = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+enum ArchivedFilter {
+  ARCHIVED_FILTER_UNSPECIFIED = 0;
+  ARCHIVED_FILTER_EXCLUDE = 1;
+  ARCHIVED_FILTER_INCLUDE = 2;
+  ARCHIVED_FILTER_ONLY = 3;
+}

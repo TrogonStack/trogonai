@@ -1,25 +1,42 @@
-use std::path::PathBuf;
-use trogon_std::env::ReadEnv;
+use std::fmt;
 
-use crate::constants::{
-    DEFAULT_NATS_URL, ENV_NATS_CREDS, ENV_NATS_NKEY, ENV_NATS_PASSWORD, ENV_NATS_TOKEN, ENV_NATS_URL, ENV_NATS_USER,
-};
+use crate::credential_value::{CredentialValue, Location, NKeySeed};
+use crate::tls::NatsTls;
 
-/// NATS authentication method.
-///
-/// When resolved from environment variables, priority order is:
-/// 1. Credentials file (`NATS_CREDS`)
-/// 2. NKey (`NATS_NKEY`)
-/// 3. User/Password (`NATS_USER` + `NATS_PASSWORD`)
-/// 4. Token (`NATS_TOKEN`)
-/// 5. No auth
-#[derive(Debug, Clone)]
+/// NATS authentication method, chosen exclusively; see
+/// [`NatsSettings`](crate::settings::NatsSettings) for the precedence.
+#[derive(Clone)]
 pub enum NatsAuth {
-    Credentials(PathBuf),
-    NKey(String),
-    UserPassword { user: String, password: String },
-    Token(String),
+    Credentials(Location),
+    NKey(NKeySeed),
+    UserPassword {
+        user: String,
+        password: CredentialValue,
+    },
+    Jwt {
+        jwt: CredentialValue,
+        seed: Option<CredentialValue>,
+    },
+    Token(CredentialValue),
     None,
+}
+
+/// Secret-bearing values are redacted by their own `Debug`.
+impl fmt::Debug for NatsAuth {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Credentials(location) => f.debug_tuple("Credentials").field(location).finish(),
+            Self::NKey(location) => f.debug_tuple("NKey").field(location).finish(),
+            Self::UserPassword { user, password } => f
+                .debug_struct("UserPassword")
+                .field("user", user)
+                .field("password", password)
+                .finish(),
+            Self::Jwt { jwt, seed } => f.debug_struct("Jwt").field("jwt", jwt).field("seed", seed).finish(),
+            Self::Token(token) => f.debug_tuple("Token").field(token).finish(),
+            Self::None => f.write_str("None"),
+        }
+    }
 }
 
 impl NatsAuth {
@@ -28,6 +45,8 @@ impl NatsAuth {
             Self::Credentials(_) => "credentials file",
             Self::NKey(_) => "NKey",
             Self::UserPassword { .. } => "user/password",
+            Self::Jwt { seed: Some(_), .. } => "JWT",
+            Self::Jwt { seed: None, .. } => "JWT without signature",
             Self::Token(_) => "token",
             Self::None => "none",
         }
@@ -38,54 +57,26 @@ impl NatsAuth {
 pub struct NatsConfig {
     pub servers: Vec<String>,
     pub auth: NatsAuth,
+    pub tls: NatsTls,
 }
 
 impl NatsConfig {
     pub fn new(servers: Vec<String>, auth: NatsAuth) -> Self {
-        Self { servers, auth }
+        Self {
+            servers,
+            auth,
+            tls: NatsTls::default(),
+        }
     }
 
     pub fn from_url(url: impl Into<String>) -> Self {
-        Self {
-            servers: vec![url.into()],
-            auth: NatsAuth::None,
-        }
+        Self::new(vec![url.into()], NatsAuth::None)
     }
 
-    /// Build config from environment variables.
-    ///
-    /// - `NATS_URL`: comma-separated server list (default: `localhost:4222`)
-    /// - Auth resolved via `NATS_CREDS` > `NATS_NKEY` > `NATS_USER`+`NATS_PASSWORD` > `NATS_TOKEN` > none
-    pub fn from_env<E: ReadEnv>(env: &E) -> Self {
-        Self {
-            servers: servers_from_env(env),
-            auth: auth_from_env(env),
-        }
+    pub fn with_tls(mut self, tls: NatsTls) -> Self {
+        self.tls = tls;
+        self
     }
-}
-
-fn servers_from_env<E: ReadEnv>(env: &E) -> Vec<String> {
-    let raw = env.var(ENV_NATS_URL).unwrap_or_else(|_| DEFAULT_NATS_URL.to_string());
-    raw.split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect()
-}
-
-fn auth_from_env<E: ReadEnv>(env: &E) -> NatsAuth {
-    if let Ok(creds_path) = env.var(ENV_NATS_CREDS) {
-        return NatsAuth::Credentials(PathBuf::from(creds_path));
-    }
-    if let Ok(nkey) = env.var(ENV_NATS_NKEY) {
-        return NatsAuth::NKey(nkey);
-    }
-    if let (Ok(user), Ok(password)) = (env.var(ENV_NATS_USER), env.var(ENV_NATS_PASSWORD)) {
-        return NatsAuth::UserPassword { user, password };
-    }
-    if let Ok(token) = env.var(ENV_NATS_TOKEN) {
-        return NatsAuth::Token(token);
-    }
-    NatsAuth::None
 }
 
 #[cfg(test)]

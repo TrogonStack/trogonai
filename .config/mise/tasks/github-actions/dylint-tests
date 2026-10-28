@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT="${GITHUB_WORKSPACE:-$(git rev-parse --show-toplevel)}"
-cd "$ROOT/rsworkspace/dylints/trogon_lints"
+cd "$ROOT/rsworkspace/dylints/trogonai_dylint"
 
 dylint_toolchain="$(python - <<'PY'
 import tomllib

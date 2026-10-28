@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "id": "http.url_verification.signed",
+  "kind": "url_verification",
+  "transport": "http",
+  "provenance": {
+    "bolt_version": "5.1.0",
+    "bolt_commit": "3f8823c93f5639e99f05a2df9c7dc692da5cc184",
+    "node_slack_sdk_commit": "d02afdfd5c87f896dc9994dfe2b55472758fbcf4",
+    "payload_source": "url_verification example from the Events API reference",
+    "wire_source": "https://docs.slack.dev/apis/events-api/",
+    "ack_source": null
+  },
+  "not_representable": null,
+  "input": {
+    "headers": {
+      "content-type": "application/json",
+      "x-slack-request-timestamp": "1700000000",
+      "x-slack-signature": "v0=1421c9e45f397145cf6c7c8e5af2199cc56665e0dd81ada30d13fdaedc87b969"
+    },
+    "body": "{\"token\":\"Jhj5dZrVaK7ZwHHjRyZWjbDl\",\"challenge\":\"3eZbrw1aBm2rZgRNFdxV2595E9CY3gmdALWMmHkvFXO7tYXAYM8P\",\"type\":\"url_verification\"}"
+  },
+  "bolt": {
+    "outcome": "inline",
+    "status": 200,
+    "body": "{\"challenge\":\"3eZbrw1aBm2rZgRNFdxV2595E9CY3gmdALWMmHkvFXO7tYXAYM8P\"}",
+    "content_type": "application/json",
+    "reason": null,
+    "dispatch": null
+  },
+  "expected": {
+    "outcome": "inline",
+    "nats": null,
+    "http": {
+      "status": 200,
+      "body": null,
+      "challenge": "3eZbrw1aBm2rZgRNFdxV2595E9CY3gmdALWMmHkvFXO7tYXAYM8P"
+    },
+    "socket_ack": null
+  }
+}

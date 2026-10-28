@@ -1,0 +1,39 @@
+edition = "2024";
+
+package trogonai.evaluation.bindings.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// A per-criterion value. The criterion name is meaningful only against the
+// bound rubric.
+message CriterionScore {
+  string criterion = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  double value = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).double.finite = true
+  ];
+}
+
+message ScoreVector {
+  option (buf.validate.message).cel = {
+    id: "score_vector.criteria_unique"
+    message: "each criterion may appear at most once"
+    expression: "this.criteria.map(c, c.criterion).unique()"
+  };
+
+  repeated CriterionScore criteria = 1 [(buf.validate.field).repeated.min_items = 1];
+}
+
+// A measurement. Scores exist only in the evaluation streams and must never be
+// readable via agent, proposal, or session queries (ADR#0024).
+message Score {
+  oneof value {
+    option (buf.validate.oneof).required = true;
+
+    double scalar = 1 [(buf.validate.field).double.finite = true];
+    ScoreVector vector = 2;
+  }
+}

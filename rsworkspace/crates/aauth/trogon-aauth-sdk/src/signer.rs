@@ -2,6 +2,8 @@
 //! `aa-agent+jwt`, and produces the NATS header set that
 //! `trogon_aauth_verify::NatsPopVerifier` accepts.
 
+use std::fmt;
+
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use p256::ecdsa::signature::Signer as _;
@@ -20,8 +22,23 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// The six NATS headers produced by a signed request, in the order the
 /// verifier expects to find them (order doesn't matter on the wire, but a
 /// named struct keeps call sites from mixing up which string is which).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct PopHeaders(Vec<(String, String)>);
+
+/// Carries bearer JWTs as header values, so header names are shown but values are not.
+impl fmt::Debug for PopHeaders {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("PopHeaders")
+            .field(
+                &self
+                    .0
+                    .iter()
+                    .map(|(name, _)| (name.as_str(), "<redacted>"))
+                    .collect::<Vec<_>>(),
+            )
+            .finish()
+    }
+}
 
 impl PopHeaders {
     /// Consume into the `(name, value)` pairs a NATS message header map expects.
@@ -187,3 +204,6 @@ fn public_jwk(signing_key: &SigningKey) -> Result<serde_json::Value, AgentSigner
     };
     serde_json::to_value(jwk).map_err(|_| AgentSignerError::InvalidPublicKey)
 }
+
+#[cfg(test)]
+mod tests;

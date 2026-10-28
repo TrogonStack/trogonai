@@ -1,0 +1,30 @@
+edition = "2024";
+
+package trogonai.projects.projects.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogon/hierarchy/v1alpha1/node.proto";
+import "trogonai/projects/projects/v1alpha1/access_preset.proto";
+import "trogonai/projects/projects/v1alpha1/identity.proto";
+
+// NoStream creation requires a nonempty Decider command_id and no
+// expected_revision; retries preserve the id. Admission, not this fold, checks
+// that parent resolves to a workspace or a node below it, never the tenant
+// root, and caps initial_access_preset by that node's ancestors' limits. Until
+// the policy plane records the project's first binding, discovery defaults to
+// members-only regardless of the preset recorded here.
+message CreateProject {
+  ProjectId project_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string display_name = 2 [features.field_presence = LEGACY_REQUIRED];
+  string goal = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Creation placement. Hierarchy owns subsequent moves and projects current
+  // placement; this stream records no relocation event.
+  trogon.hierarchy.v1alpha1.NodeId parent = 4 [features.field_presence = LEGACY_REQUIRED];
+  ProjectAccessPreset initial_access_preset = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}

@@ -1,0 +1,39 @@
+edition = "2024";
+
+package trogonai.policy.model_ceilings.v1alpha1;
+
+import "trogon/error/v1alpha1/options.proto";
+
+// Schema-only templates for the policy.model_ceilings module's DeciderService
+// refusals. These messages are never encoded. Administration authorization and
+// model selection admission keep their own failure contracts; this fold only
+// owns ceiling mutations.
+message ModelCeilingCommandInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "policy.model_ceilings"
+    reason: "MODEL_CEILING_COMMAND_INVALID"
+    message: "The command violates the model ceiling policy contract."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ModelCeilingNotSetError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "policy.model_ceilings"
+    reason: "MODEL_CEILING_NOT_SET"
+    message: "No model ceiling history exists for this subject."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ModelCeilingSubjectMismatchError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "policy.model_ceilings"
+    reason: "MODEL_CEILING_SUBJECT_MISMATCH"
+    message: "The command names a different subject from this model ceiling history."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}

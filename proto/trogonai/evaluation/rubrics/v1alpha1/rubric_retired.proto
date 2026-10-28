@@ -1,0 +1,11 @@
+edition = "2024";
+
+package trogonai.evaluation.rubrics.v1alpha1;
+
+import "trogonai/evaluation/rubrics/v1alpha1/rubric_id.proto";
+
+// Retiring never removes versions. An already retired history emits no second
+// retirement.
+message RubricRetired {
+  RubricId rubric_id = 1 [features.field_presence = LEGACY_REQUIRED];
+}

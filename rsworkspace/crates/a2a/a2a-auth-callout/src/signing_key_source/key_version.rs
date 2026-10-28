@@ -2,6 +2,8 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use crate::constants::{VERSION_CURRENT, VERSION_PREVIOUS};
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct KeyVersion(String);
@@ -13,6 +15,14 @@ pub enum KeyVersionError {
 }
 
 impl KeyVersion {
+    pub(crate) fn current() -> Self {
+        Self(VERSION_CURRENT.to_owned())
+    }
+
+    pub(crate) fn previous() -> Self {
+        Self(VERSION_PREVIOUS.to_owned())
+    }
+
     pub fn new(version: impl Into<String>) -> Result<Self, KeyVersionError> {
         let s = version.into();
         if s.is_empty() {
@@ -32,7 +42,6 @@ impl fmt::Display for KeyVersion {
     }
 }
 
-#[allow(dead_code, clippy::expect_used)]
 pub(crate) fn unminted_placeholder() -> KeyVersion {
-    KeyVersion::new("pending").expect("static placeholder")
+    KeyVersion("pending".to_owned())
 }

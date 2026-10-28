@@ -1,0 +1,90 @@
+edition = "2024";
+
+package trogonai.agents.proposals.v1alpha1;
+
+import "trogon/error/v1alpha1/options.proto";
+
+// Schema-only templates for Proposal module rejections under ADR#0057.
+// The module descriptor namespace must be agents.proposals. These messages are
+// never encoded; google.rpc.Status carries the module domain and reason.
+// Dispatch authentication, authorization, and artifact admission keep their
+// own failure contracts; the proposal fold owns only the rules below.
+message ProposalCommandInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.proposals"
+    reason: "PROPOSAL_COMMAND_INVALID"
+    message: "The command violates the Proposal contract."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ProposalMissingError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.proposals"
+    reason: "PROPOSAL_MISSING"
+    message: "The proposal has not been opened."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ProposalAlreadyOpenedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.proposals"
+    reason: "PROPOSAL_ALREADY_OPENED"
+    message: "The proposal has already been opened."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ProposalIdentityMismatchError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.proposals"
+    reason: "PROPOSAL_IDENTITY_MISMATCH"
+    message: "The command names a different proposal from this stream."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ProposalAlreadyJudgedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.proposals"
+    reason: "PROPOSAL_ALREADY_JUDGED"
+    message: "The proposal already has its immutable verdict."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ProposalWithdrawnError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.proposals"
+    reason: "PROPOSAL_WITHDRAWN"
+    message: "The proposal has been withdrawn."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ProposalSelfJudgmentError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.proposals"
+    reason: "PROPOSAL_SELF_JUDGMENT"
+    message: "The proposal author cannot judge the proposal."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ProposalWithdrawalAuthorMismatchError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "agents.proposals"
+    reason: "PROPOSAL_WITHDRAWAL_AUTHOR_MISMATCH"
+    message: "Only the proposal author may withdraw the proposal."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}

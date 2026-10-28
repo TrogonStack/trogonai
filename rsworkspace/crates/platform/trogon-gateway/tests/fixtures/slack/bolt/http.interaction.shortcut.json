@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "id": "http.interaction.shortcut",
+  "kind": "interaction",
+  "transport": "http",
+  "provenance": {
+    "bolt_version": "5.1.0",
+    "bolt_commit": "3f8823c93f5639e99f05a2df9c7dc692da5cc184",
+    "node_slack_sdk_commit": "d02afdfd5c87f896dc9994dfe2b55472758fbcf4",
+    "payload_source": "test/unit/helpers/events.ts:createDummyGlobalShortcutMiddlewareArgs",
+    "wire_source": "https://docs.slack.dev/interactivity/handling-user-interaction",
+    "ack_source": null
+  },
+  "not_representable": null,
+  "input": {
+    "headers": {
+      "content-type": "application/x-www-form-urlencoded",
+      "x-slack-request-timestamp": "1700000000",
+      "x-slack-signature": "v0=705012d3f6f42af2ceb044134c07059b118366319cad14d002ecb02b65d72790"
+    },
+    "body": "payload=%7B%22type%22%3A%22shortcut%22%2C%22callback_id%22%3A%22Cb1234%22%2C%22trigger_id%22%3A%221234.56%22%2C%22user%22%3A%7B%22id%22%3A%22U1234%22%2C%22username%22%3A%22filmaj%22%2C%22team_id%22%3A%22T1234%22%7D%2C%22team%22%3A%7B%22id%22%3A%22T1234%22%2C%22domain%22%3A%22slack.com%22%7D%2C%22token%22%3A%22xoxb-1234%22%2C%22action_ts%22%3A%221234.56%22%7D"
+  },
+  "bolt": {
+    "outcome": "dispatched",
+    "status": 200,
+    "body": null,
+    "content_type": null,
+    "reason": null,
+    "dispatch": {
+      "incoming_type": "Shortcut",
+      "conversation_id": null,
+      "retry_num": null,
+      "retry_reason": null,
+      "is_enterprise_install": false,
+      "team_id": "T1234",
+      "enterprise_id": null,
+      "user_id": "U1234"
+    }
+  },
+  "expected": {
+    "outcome": "publish",
+    "nats": {
+      "subject_suffix": "interaction.shortcut",
+      "dedup_id": "1234.56",
+      "payload": "{\"type\":\"shortcut\",\"callback_id\":\"Cb1234\",\"trigger_id\":\"1234.56\",\"user\":{\"id\":\"U1234\",\"username\":\"filmaj\",\"team_id\":\"T1234\"},\"team\":{\"id\":\"T1234\",\"domain\":\"slack.com\"},\"token\":\"xoxb-1234\",\"action_ts\":\"1234.56\"}",
+      "payload_fill": null,
+      "headers": {
+        "X-Slack-Event-Type": "shortcut",
+        "X-Slack-Team-Id": "T1234",
+        "X-Slack-Payload-Kind": "interaction",
+        "X-Slack-Is-Enterprise-Install": "false",
+        "X-Slack-Transport": "webhook",
+        "X-Slack-Request-Timestamp": "1700000000"
+      }
+    },
+    "http": {
+      "status": 200,
+      "body": null,
+      "challenge": null
+    },
+    "socket_ack": null
+  }
+}

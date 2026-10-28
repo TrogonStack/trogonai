@@ -1,0 +1,19 @@
+edition = "2024";
+
+package trogonai.policy.verdict_authorities.v1alpha1;
+
+import "trogonai/policy/subjects/v1alpha1/subject.proto";
+import "trogonai/policy/verdict_authorities/v1alpha1/authority_policy.proto";
+
+// Replaces an initialized subject's authority policy, including after a clear.
+// Dispatch requires live administration authority and a nonempty Decider
+// command_id plus original positive expected_revision. Retries preserve both; a
+// refreshed revision is a new intent. Equal policies succeed without an event
+// after the concurrency check; reordering rules alone is not a change. For an
+// Agent subject, authoritative registry lifecycle must be ACTIVE or ARCHIVED, so
+// requested provisioning setup cannot be replaced before activation. Genesis
+// provisioning origin survives every replacement.
+message SetVerdictAuthority {
+  trogonai.policy.subjects.v1alpha1.PolicySubject subject = 1 [features.field_presence = LEGACY_REQUIRED];
+  VerdictAuthorityPolicy policy = 2 [features.field_presence = LEGACY_REQUIRED];
+}

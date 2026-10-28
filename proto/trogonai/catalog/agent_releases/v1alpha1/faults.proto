@@ -1,0 +1,58 @@
+edition = "2024";
+
+package trogonai.catalog.agent_releases.v1alpha1;
+
+import "trogon/error/v1alpha1/options.proto";
+
+// Local rejection templates for catalog.agent_releases on DeciderService's
+// error channel. Authorization, lifecycle, and authoritative publication-policy,
+// committed-source, revision, and validation proofs remain dispatch-owned.
+message AgentReleaseCommandInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "catalog.agent_releases"
+    reason: "AGENT_RELEASE_COMMAND_INVALID"
+    message: "The command violates the Agent release contract."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentReleaseNotFoundError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "catalog.agent_releases"
+    reason: "AGENT_RELEASE_NOT_FOUND"
+    message: "The Agent release has not been published."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentReleaseAlreadyExistsError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "catalog.agent_releases"
+    reason: "AGENT_RELEASE_ALREADY_EXISTS"
+    message: "The Agent release identity has already been published."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentReleaseAlreadyWithdrawnError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "catalog.agent_releases"
+    reason: "AGENT_RELEASE_ALREADY_WITHDRAWN"
+    message: "The Agent release has already been withdrawn."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentReleaseIdentityMismatchError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "catalog.agent_releases"
+    reason: "AGENT_RELEASE_IDENTITY_MISMATCH"
+    message: "The command names a different release from this stream."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}

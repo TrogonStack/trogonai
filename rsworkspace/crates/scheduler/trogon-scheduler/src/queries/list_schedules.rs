@@ -1,8 +1,6 @@
-#![cfg_attr(coverage, allow(unused_imports))]
-
 use futures::StreamExt;
 
-use async_nats::jetstream::kv;
+use trogon_nats::jetstream::{JetStreamKvGet, JetStreamKvKeys};
 
 use crate::{constants::SCHEDULES_CHECKPOINT_KEY, error::SchedulerError};
 
@@ -12,8 +10,10 @@ use super::read_model::Schedule;
 #[derive(Debug, Clone, Default)]
 pub struct ListSchedules;
 
-#[cfg(not(coverage))]
-pub async fn run(store: &kv::Store, _command: ListSchedules) -> Result<Vec<Schedule>, SchedulerError> {
+pub async fn run<K>(store: &K, _command: ListSchedules) -> Result<Vec<Schedule>, SchedulerError>
+where
+    K: JetStreamKvGet + JetStreamKvKeys,
+{
     let mut keys = store
         .keys()
         .await
@@ -27,7 +27,7 @@ pub async fn run(store: &kv::Store, _command: ListSchedules) -> Result<Vec<Sched
             continue;
         }
         let Some(value) = store
-            .get(key.as_str())
+            .get(key.clone())
             .await
             .map_err(|source| SchedulerError::kv_source("failed to read projected schedule value", source))?
         else {
@@ -45,3 +45,6 @@ pub async fn run(store: &kv::Store, _command: ListSchedules) -> Result<Vec<Sched
 
     Ok(jobs)
 }
+
+#[cfg(test)]
+mod tests;

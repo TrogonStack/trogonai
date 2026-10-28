@@ -1,0 +1,48 @@
+edition = "2024";
+
+package trogonai.catalog.agent_listings.v1alpha1;
+
+import "trogon/error/v1alpha1/options.proto";
+
+// Schema-only rejection templates for the generic DeciderService error channel.
+// The module name must be catalog.agent_listings. Authentication, authorization,
+// Agent existence, and publication eligibility failures remain dispatch-owned.
+message AgentListingCommandInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "catalog.agent_listings"
+    reason: "AGENT_LISTING_COMMAND_INVALID"
+    message: "The command violates the Agent listing contract."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentListingNotInitializedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "catalog.agent_listings"
+    reason: "AGENT_LISTING_NOT_INITIALIZED"
+    message: "The Agent listing must be initialized before its visibility can be set."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentListingAlreadyInitializedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "catalog.agent_listings"
+    reason: "AGENT_LISTING_ALREADY_INITIALIZED"
+    message: "The Agent listing has already been initialized."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentListingIdentityMismatchError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "catalog.agent_listings"
+    reason: "AGENT_LISTING_IDENTITY_MISMATCH"
+    message: "The command names a different Agent from this listing stream."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}

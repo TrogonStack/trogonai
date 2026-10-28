@@ -20,7 +20,7 @@ use trogon_aauth_verify::TokenVerifier;
 use trogon_aauth_verify::jkt::jwk_thumbprint;
 use trogon_aauth_verify::jwks::JwksResolver;
 use trogon_aauth_verify::time_source::TimeSource;
-use trogon_identity_types::aauth::AuthClaims;
+use trogon_identity_types::aauth::{AuthClaims, CnfError};
 
 /// Successful verification result, carrying the parts of [`AuthClaims`] a
 /// caller commonly needs next (e.g. to call
@@ -58,6 +58,9 @@ pub enum VerifyResponseError {
     /// Rule 4: `cnf.jwk` thumbprint computation failed.
     #[error("could not compute jkt for auth token cnf.jwk: {0}")]
     ConfirmationKeyThumbprint(#[source] trogon_aauth_verify::jkt::JktError),
+    /// Rule 4: `cnf.jwk` carried private key material or a symmetric key.
+    #[error("auth token cnf.jwk is not a valid public confirmation key: {0}")]
+    ConfirmationKeyNotPublic(#[source] CnfError),
     /// Rule 5: `agent` did not match the agent's own identifier.
     #[error("auth token agent {actual:?} does not match own agent id {expected:?}")]
     AgentMismatch { expected: String, actual: String },
@@ -111,6 +114,8 @@ pub fn verify_auth_claims(
         .cnf
         .as_ref()
         .ok_or(VerifyResponseError::ConfirmationClaimMissing)?;
+    cnf.reject_if_not_public()
+        .map_err(VerifyResponseError::ConfirmationKeyNotPublic)?;
     let token_jkt = jwk_thumbprint(cnf.jwk()).map_err(VerifyResponseError::ConfirmationKeyThumbprint)?;
     let own_jkt = jwk_thumbprint(own_agent_jwk).map_err(VerifyResponseError::ConfirmationKeyThumbprint)?;
     if token_jkt != own_jkt {

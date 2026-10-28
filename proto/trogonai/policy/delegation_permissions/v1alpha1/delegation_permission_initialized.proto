@@ -1,0 +1,20 @@
+edition = "2024";
+
+package trogonai.policy.delegation_permissions.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/policy/delegation_permissions/v1alpha1/permission_policy.proto";
+import "trogonai/policy/subjects/v1alpha1/subject.proto";
+
+// Genesis fixes the subject for this history. The admitted origin and exact
+// initial policy remain immutable receipt evidence after replacements and
+// clears, independent of the current policy projection.
+message DelegationPermissionInitialized {
+  trogonai.policy.subjects.v1alpha1.PolicySubject subject = 1 [features.field_presence = LEGACY_REQUIRED];
+  DelegationPermissionPolicy policy = 2 [features.field_presence = LEGACY_REQUIRED];
+  string provisioning_id = 3 [(buf.validate.field).cel = {
+    id: "delegation_permission_initialized.provisioning_id_nonblank"
+    message: "a supplied provisioning_id must contain a non-whitespace character"
+    expression: "this.trim() != ''"
+  }];
+}

@@ -2,6 +2,8 @@ edition = "2024";
 
 package trogonai.session.sessions.v1alpha1;
 
+import "buf/validate/validate.proto";
+
 // StartToolCall records that execution began, recording [ToolCallStarted].
 //
 // Write precondition Any. This is the fact a crash strands: a started call with
@@ -9,8 +11,20 @@ package trogonai.session.sessions.v1alpha1;
 // finish or reject it. A start whose tool_call_id matches no request folds as
 // unjoined and is flagged, never refused (ADR#0035 orphan happened-fact rule).
 message StartToolCall {
-  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
-  string tool_call_id = 2 [features.field_presence = LEGACY_REQUIRED];
-  string tool_execution_id = 3 [features.field_presence = LEGACY_REQUIRED];
-  string turn_id = 4 [features.field_presence = LEGACY_REQUIRED];
+  string session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string tool_call_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string tool_execution_id = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string turn_id = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
 }

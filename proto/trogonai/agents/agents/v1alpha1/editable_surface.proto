@@ -1,0 +1,53 @@
+edition = "2024";
+
+package trogonai.agents.agents.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// What a candidate may change for one implementation version.
+// Anything not listed is not editable. The set is committed by the
+// implementation definition digest, so the surface cannot change under a
+// pinned revision. Absent on an implementation means it opts out of candidates.
+message EditableSurface {
+  option (buf.validate.message).cel = {
+    id: "editable_surface.settings_paths_unique"
+    message: "each settings path may be listed at most once"
+    expression: "this.settings_paths.map(p, p.path).unique()"
+  };
+  repeated EditableSettingsPath settings_paths = 1;
+  // Each PlatformEdit change case of a candidate corresponds to one PlatformComponent value.
+  repeated PlatformComponent platform_components = 2 [(buf.validate.field).repeated = {
+    unique: true
+    items: {
+      enum: {
+        defined_only: true
+        not_in: [0]
+      }
+    }
+  }];
+  EditCaps caps = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Path is a field path in the runtime settings message. A path covers its
+// whole subtree. Only learned-layer paths are listable; model selections,
+// runtime identity, required declarations, connections, variables schema and
+// grant or budget data never are.
+message EditableSettingsPath {
+  string path = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  uint32 max_bytes = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+enum PlatformComponent {
+  PLATFORM_COMPONENT_UNSPECIFIED = 0;
+  PLATFORM_COMPONENT_SKILL_SET = 1;
+  PLATFORM_COMPONENT_MEMORY_KINDS = 2;
+}
+
+message EditCaps {
+  uint32 max_staged_skills = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint32 max_staged_skill_bytes = 2 [features.field_presence = LEGACY_REQUIRED];
+  uint32 max_candidate_bytes = 3 [features.field_presence = LEGACY_REQUIRED];
+}

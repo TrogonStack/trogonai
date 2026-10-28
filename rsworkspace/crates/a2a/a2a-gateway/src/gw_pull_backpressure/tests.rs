@@ -442,3 +442,7 @@ fn egress_caller_id_rejects_wildcards() {
     assert!(EgressCallerId::new("*").is_err());
     assert!(EgressCallerId::new(">").is_err());
 }
+
+mod consumer_tests;
+
+mod delivery_tests;

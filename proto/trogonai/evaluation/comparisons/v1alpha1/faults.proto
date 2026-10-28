@@ -1,0 +1,78 @@
+edition = "2024";
+
+package trogonai.evaluation.comparisons.v1alpha1;
+
+import "trogon/error/v1alpha1/options.proto";
+
+// Schema-only templates for the evaluation.comparisons module's DeciderService
+// refusals. These messages are never encoded.
+
+message ComparisonCommandInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "evaluation.comparisons"
+    reason: "COMPARISON_COMMAND_INVALID"
+    message: "The command violates the comparison contract."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ComparisonAlreadyOpenedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "evaluation.comparisons"
+    reason: "COMPARISON_ALREADY_OPENED"
+    message: "The comparison has already been opened."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ComparisonNotFoundError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "evaluation.comparisons"
+    reason: "COMPARISON_NOT_FOUND"
+    message: "The comparison has not been opened."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ComparisonClosedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "evaluation.comparisons"
+    reason: "COMPARISON_CLOSED"
+    message: "The comparison is closed and accepts no new runs."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ComparisonLabelAlreadyAssignedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "evaluation.comparisons"
+    reason: "COMPARISON_LABEL_ALREADY_ASSIGNED"
+    message: "The label is already assigned within this comparison."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ComparisonTaskWithheldVocabularyError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "evaluation.comparisons"
+    reason: "COMPARISON_TASK_WITHHELD_VOCABULARY"
+    message: "The task contains vocabulary a screening rubric withholds."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ComparisonSessionAlreadyEnrolledError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "evaluation.comparisons"
+    reason: "COMPARISON_SESSION_ALREADY_ENROLLED"
+    message: "The session is already enrolled in this comparison."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}

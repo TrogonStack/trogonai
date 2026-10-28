@@ -668,10 +668,10 @@ who did it."
 
 The two facts only share a resource when their locations resolve to the same
 URI: `ResourceObservation.uri` is already in that form, while `FileChanged.path`
-is workspace-relative and must be resolved against the session's
-`WorkspaceRef.uri` (`workspace.uri + "/" + path`) before the comparison holds.
-The asymmetry is deliberate: `FileChanged` is inherently workspace-scoped,
-while `ResourceObservation` also covers resources a workspace-relative path
+is checkout-relative and must be resolved against the session's
+`CheckoutRef.uri` (`checkout.uri + "/" + path`) before the comparison holds.
+The asymmetry is deliberate: `FileChanged` is inherently checkout-scoped,
+while `ResourceObservation` also covers resources a checkout-relative path
 cannot name at all, such as a fetched URL or an MCP resource, and those have no
 `FileChanged` counterpart to join against.
 
@@ -684,8 +684,8 @@ termination set, while a command that never ran at all is `ToolCallFailed` with
 no termination. Parsing an exit status back out of result text is not a
 projection this store asks readers to write.
 
-**Workspace, settings, change shape, and usage completeness.**
-`SessionStarted.workspace` is a required `WorkspaceRef` (`workspace_id`, `uri`,
+**Checkout, settings, change shape, and usage completeness.**
+`SessionStarted.checkout_ref` is a required `CheckoutRef` (`checkout_id`, `uri`,
 optional `revision`), so the ground a session's file facts refer to is recorded
 with the session rather than inferred from paths.
 `AssistantMessageStarted.settings` carries the `ModelSettings` a completion was

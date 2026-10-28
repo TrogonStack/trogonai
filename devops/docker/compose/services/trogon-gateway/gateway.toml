@@ -92,6 +92,16 @@ webhook_secret = { env = "TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET" }
 # webhook_token_header = "X-Datadog-Webhook-Token"  # optional; override the custom header name
 # timestamp_tolerance_secs = 300  # optional anti-replay window; requires "timestamp": "$DATE_POSIX" in the payload
 #
+# [sources.zoom.integrations.primary]
+# subject_prefix = "zoom-primary"
+# stream_name = "ZOOM_PRIMARY"
+# stream_max_age_secs = 604800
+# nats_ack_timeout_secs = 10
+#
+# [sources.zoom.integrations.primary.webhook]
+# secret_token = { env = "ZOOM_PRIMARY_SECRET_TOKEN" }
+# timestamp_tolerance_secs = 300  # optional; max drift of x-zm-request-timestamp
+#
 # [sources.discord]
 # bot_token = { env = "DISCORD_BOT_TOKEN" }
 # gateway_intents = "guilds,guild_members,guild_messages,guild_message_reactions,direct_messages,message_content,guild_voice_states"
@@ -133,3 +143,19 @@ webhook_secret = { env = "TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET" }
 #
 # [sources.slack.integrations.primary.socket_mode]
 # app_token = { env = "SLACK_PRIMARY_APP_TOKEN" }
+#
+# Google Cloud Pub/Sub is consumed over an outbound StreamingPull connection. It
+# needs no public URL. Each integration supplies its own Google credentials JSON
+# document, either a service_account key or an external_account (workload
+# identity federation) configuration. Other types are rejected.
+#
+# [sources.google_pubsub.integrations.primary]
+# subject_prefix = "google-pubsub-primary"
+# stream_name = "GOOGLE_PUBSUB_PRIMARY"
+# stream_max_age_secs = 604800
+# nats_ack_timeout_secs = 10
+#
+# [sources.google_pubsub.integrations.primary.streaming_pull]
+# subscription = "projects/my-project/subscriptions/my-subscription"
+# max_outstanding_messages = 1000
+# credentials = { env = "GOOGLE_PUBSUB_PRIMARY_CREDENTIALS" }

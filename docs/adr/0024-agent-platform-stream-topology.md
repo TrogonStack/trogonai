@@ -92,8 +92,8 @@ stream, not streams, and this [ADR](../glossary/adr) does not change that patter
 
 ## Decision
 
-Split the agent record's mutations into two kinds of stream and adopt one
-placement rule. This ADR fixes the topology, the invariants each stream
+Separate the agent registry, proposals, and optional management histories
+according to one placement rule. This ADR fixes the topology, the invariants each stream
 enforces, and the naming intent. Concrete message, package, and field names
 below are illustrative; the wire contracts own the final spelling, and
 renames do not reopen this decision.
@@ -252,12 +252,64 @@ mutations remain dispatch preconditions; deciders treat principals as opaque
 identities. Revert authorization is also a dispatch concern outside this
 topology decision.
 
+### Coordinated provisioning and optional management
+
+An Agent's existence does not require a profile, a catalog listing, or an
+Agent-specific budget. Presentation belongs to the application's catalog;
+discovery intent and spending policy retain their own authority and history.
+These optional records are initialized when needed. A missing listing never
+permits public discovery. A missing budget removes only the Agent-specific
+ceiling, so it cannot stand in for a requested cap during creation.
+
+A composed creation request owns a provisioning history. Its immutable plan
+records the Agent identity, requested participant commands, and stable command
+identities before any participant receives work. Participant commands remain
+typed extensible payloads: the registry does not acquire catalog fields or a
+closed list of product-specific setup requirements. The operation's progress
+records verified outcomes; the original facts remain authoritative in their
+owning streams.
+
+The registry owns the execution gate because partial provisioning must not
+become runnable through a different client or a stale projection. A registry
+genesis bound to a provisioning operation starts in provisioning state. Only
+that operation may complete or cancel it. Completion requires proof that the
+required preparation succeeded; cancellation is terminal. Both decisions are
+serialized in the registry history, and neither mints a behavior revision.
+Direct provisioning without an operation retains its existing active genesis
+and still requires the normal registration and live policy checks.
+
+Preparation may initialize private catalog records and spending policy while
+execution remains blocked. Participants retain their provisioning provenance,
+and admission prevents unrelated writes from replacing pending setup. Public
+publication follows registry completion and still evaluates current access,
+lifecycle, and policy. Profile availability never grants execution or public
+access. Readiness does not replace ongoing policy or accounting checks.
+
+This is recoverable coordination, not an atomic commit across histories. Each
+accepted participant write can survive a later failure. Recovery reuses the
+original command identity and reconciles target facts after a lost reply;
+an already-existing resource alone cannot prove the requested write succeeded.
+Temporary failures leave the operation resumable. A cancellation racing with
+completion follows the registry's actual winner: an active Agent requires
+forward recovery, while a cancelled Agent remains unable to execute or publish.
+Cancellation before any durable registry dispatch needs no Agent record. After
+dispatch, a missing reply cannot prove that creation did not happen. A verified
+genesis belonging to another operation rejects the losing request without
+touching the winner's resources. Late receipts for already-dispatched effects
+remain recordable after cancellation; retained private participant records do
+not revive the Agent.
+
+The contracts describe these obligations; they do not implement a worker,
+execution admission, reconciliation, or accounting enforcement. A shared server
+or physical event store does not add a multi-stream transaction to the current
+single-stream Decider contract.
+
 ## Consequences
 
-- The agent domain implementation ships as two decider families: agent
-  stream (provision, activate, archive) and proposal stream (open,
-  record verdict, withdraw). The proto packages split the same way, and each
-  decider carries its own serialized fold state.
+- The registry and proposal remain separate decider families. Optional
+  management and coordinated provisioning have their own histories and fold
+  states, so a product can adopt them without changing the Agent's behavior
+  contract.
 - Agent stream replay stays proportional to meaningful history (activations
   and lifecycle), not to experimentation volume. Rejected proposals age out
   in their own streams and remain queryable through projections.

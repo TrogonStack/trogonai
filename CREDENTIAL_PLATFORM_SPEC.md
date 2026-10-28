@@ -28,7 +28,7 @@ reads of the relevant modules), not copied from `SECRET_STORE.md` or
 slice and are the background reading, not the current state.
 
 `API_KEY.md` has since been reconciled against ADR#0046, ADR#0048,
-ADR#0050, ADR#0051, and ADR#0062 through ADR#0065, so it is now the design
+ADR#0050, ADR#0051, and ADR#0075 through ADR#0078, so it is now the design
 of record for the API key platform rather than a superseded draft. It still
 describes nothing that exists in code.
 
@@ -82,7 +82,7 @@ shape described throughout this document. Read the OPENBAO_OPERATIONS and
 RUNTIME_PROJECTION sections in particular as a record of prototype mechanics
 that are scheduled to relocate, not as a description of where this
 responsibility settles.
-[ADR#0061](./docs/adr/0061-credential-platform-extraction-boundary.md)
+[ADR#0074](./docs/adr/0074-credential-platform-extraction-boundary.md)
 carries the move list and the four decisions that block the extraction.
 
 ## Direction
@@ -227,7 +227,7 @@ OpenBao client the gateway holds itself. The gateway is a consumer of refs,
 and after the extraction it has no OpenBao address, token, or policy of its
 own. The current `OpenBaoSecretStore` in `trogon-gateway` is prototype
 scaffolding against that target, tracked in
-[ADR#0061](./docs/adr/0061-credential-platform-extraction-boundary.md).
+[ADR#0074](./docs/adr/0074-credential-platform-extraction-boundary.md).
 
 Runtime services receive typed values:
 
@@ -254,9 +254,9 @@ API key model
   -> signed keys strongly recommended for all callers (ADR#0050)
   -> bearer keys as the policy-bounded compatibility tier
   -> root/management keyspaces are signed-only
-  -> two keyspaces per project from creation: management, default (ADR#0063)
-  -> permissions are the only authorization vocabulary; no scopes (ADR#0064)
-  -> built-in roles only in the first milestone (ADR#0064)
+  -> two keyspaces per project from creation: management, default (ADR#0076)
+  -> permissions are the only authorization vocabulary; no scopes (ADR#0077)
+  -> built-in roles only in the first milestone (ADR#0077)
 
 signed key default
   -> Coinbase-style JWT request token, single-use and fully bound (ADR#0051)
@@ -266,13 +266,13 @@ signed key default
   -> replay store in NATS KV, keyed by (key_id, jti), always fail closed
 
 bearer key default
-  -> tg_<env>_<key_id>_<secret><checksum> (ADR#0062)
+  -> tg_<env>_<key_id>_<secret><checksum> (ADR#0075)
   -> HMAC-SHA-256 verifier under a versioned pepper, constant-time compare
   -> pepper in OpenBao KV, resolved at boot, never on the request path
-  -> 24h reroll grace; 1h in management keyspaces (ADR#0065)
+  -> 24h reroll grace; 1h in management keyspaces (ADR#0078)
 
 rate limits
-  -> per-key and per-project only in the first milestone (ADR#0064)
+  -> per-key and per-project only in the first milestone (ADR#0077)
   -> counters in NATS KV; fail open on product traffic, closed on management
 
 idempotency
@@ -729,7 +729,7 @@ kind: bearer
 ```
 
 The `management` and `default` keyspaces are created by project creation
-(ADR#0063 section 3), so `POST .../api-keyspaces` is for additional ones
+(ADR#0076 section 3), so `POST .../api-keyspaces` is for additional ones
 and neither of the two built-ins can be deleted while it holds active keys.
 
 Idempotency rule per write command, following the idempotency contract
@@ -782,7 +782,7 @@ POST .../keys/{key}/reroll, POST .../keys/{key}/revoke
 POST .../keys/{key}/public-keys
   namespace api_key.add_public_key, targeted by public_key_fingerprint,
   which makes re-applying the same registration a no-op and is the same
-  idempotency key ADR#0063 section 4 relies on for bootstrap
+  idempotency key ADR#0076 section 4 relies on for bootstrap
 
 POST .../keys/{key}/public-keys/{public_key}/revoke
   namespace api_key.revoke_public_key, targeted by public_key_id
@@ -871,7 +871,7 @@ keyspace is at `max_active_keys`, or the keyspace still holds active keys
 and therefore cannot be deleted.
 
 A delegation-ceiling violation is `permission_denied`, not a code of its
-own (ADR#0064 section 5). The caller asked for authority they do not hold,
+own (ADR#0077 section 5). The caller asked for authority they do not hold,
 which is the same answer as any other authorization failure.
 
 Mapped per endpoint by what can plausibly fail there:
@@ -945,7 +945,7 @@ POST .../keys/{key}/public-keys       validation_failed, permission_denied,
                                        idempotency_conflict,
                                        algorithm_not_allowed,
                                        key_limit_reached (2 active public
-                                       keys per signed key, ADR#0065)
+                                       keys per signed key, ADR#0078)
 POST .../public-keys/{public_key}/revoke
                                        validation_failed, permission_denied,
                                        idempotency_conflict
@@ -1153,7 +1153,7 @@ a multi-token name.
 
 The platform defines five roles, derived from the segregated store traits
 so the split survives the extraction in
-[ADR#0061](./docs/adr/0061-credential-platform-extraction-boundary.md):
+[ADR#0074](./docs/adr/0074-credential-platform-extraction-boundary.md):
 `control_plane_write`, `gateway_read`, `lifecycle_worker_cleanup`,
 `audit_read`, `break_glass_admin`. They exist as HCL under
 `devops/openbao/policies/`, one file per role, with a `verify.sh` that
@@ -1208,7 +1208,7 @@ break_glass_admin
             can do every operation with no logging beyond ordinary tracing
   gap:      no break-glass concept, no audit trail specific to emergency
             access
-  consumer: ADR#0063 section 6 gives this role its first concrete
+  consumer: ADR#0076 section 6 gives this role its first concrete
             consumer, the operator CLI that registers an additional root
             public key when every root private key is lost. That path is
             unusable in production until an audit device is provisioned,
@@ -1572,7 +1572,7 @@ actions: create, reroll, revoke, add public key, revoke public key,
 ```
 
 `rotating` and the direct-permissions badge are not cosmetic choices:
-ADR#0065 section 3 and ADR#0064 section 3 make them the product surface for
+ADR#0078 section 3 and ADR#0077 section 3 make them the product surface for
 a half-finished rotation and for an out-of-role grant, both of which are
 otherwise visible only in the data.
 
@@ -1845,7 +1845,7 @@ no publicly visible credential exists yet
 a publicly visible credential already exists
   -> rotation_pending, destroy_requested, cleanup_failed
   -> the credential still renders under its own product status
-     (`rotating` per ADR#0065 section 3, `cleanup_pending` per the product
+     (`rotating` per ADR#0078 section 3, `cleanup_pending` per the product
      states in UI_ACCEPTANCE)
   -> but this read model's operational fields (attempt_count,
      stream_position, reason, first_seen_at) are never rendered
@@ -1914,10 +1914,10 @@ ADR#0046  project-anchored resource names; environment is an attribute
 ADR#0048  one-time plaintext exposure; no escrow in any form
 ADR#0050  signed-first posture; client-generated keys only; Ed25519/ES256
 ADR#0051  fully bound single-use request tokens; NATS KV replay store
-ADR#0062  key format, HMAC verifier construction, pepper custody
-ADR#0063  keyspace model, keyspace policy, root key bootstrap
-ADR#0064  permissions vocabulary, built-in roles, delegation, rate limits
-ADR#0065  rotation grace, first-release audit set
+ADR#0075  key format, HMAC verifier construction, pepper custody
+ADR#0076  keyspace model, keyspace policy, root key bootstrap
+ADR#0077  permissions vocabulary, built-in roles, delegation, rate limits
+ADR#0078  rotation grace, first-release audit set
 ```
 
 ### Commands to implement
@@ -1932,30 +1932,30 @@ generated proto message names under `proto/trogonai/platform/`, so the
 build surface and the wire contract cannot drift into two vocabularies.
 
 ```text
-CreateApiKeyspace               ADR#0063  policy boundary and its fields
+CreateApiKeyspace               ADR#0076  policy boundary and its fields
 UpdateApiKeyspacePolicy                   environment and tier are immutable
 DeleteApiKeyspace                         refused while active keys remain
 
-CreateApiKey                    ADR#0062  format and verifier digest
-RerollApiKey                    ADR#0065  grace window; revoke has none
+CreateApiKey                    ADR#0075  format and verifier digest
+RerollApiKey                    ADR#0078  grace window; revoke has none
 RevokeApiKey
-ChangeApiKeyPolicy              ADR#0064  delegation ceiling checked here
-ExpireApiKey                    ADR#0065  lazy, on first denied use
+ChangeApiKeyPolicy              ADR#0077  delegation ceiling checked here
+ExpireApiKey                    ADR#0078  lazy, on first denied use
 
 AddApiKeyPublicKey              ADR#0050  client-generated pairs only
-RevokeApiKeyPublicKey           ADR#0065  swap bounded at 2 active
+RevokeApiKeyPublicKey           ADR#0078  swap bounded at 2 active
 ```
 
 Verification is deliberately not on this list. It appends no event and
 changes no state, so it is not a command: bearer verification is a
 constant-time compare against the peppered digest
-([ADR#0062](./docs/adr/0062-api-key-format-and-verifier-construction.md)),
+([ADR#0075](./docs/adr/0075-api-key-format-and-verifier-construction.md)),
 and signed-request verification is a signature check plus an atomic
 check-and-record against the replay store
 ([ADR#0051](./docs/adr/0051-fully-bound-request-signing.md) section 4).
 Neither produces a domain event, because successful verification is a
 metric rather than an audit fact
-([ADR#0065](./docs/adr/0065-api-key-rotation-grace-and-audit-set.md)
+([ADR#0078](./docs/adr/0078-api-key-rotation-grace-and-audit-set.md)
 section 6) and a denial is an audit fact rather than a state change.
 `ExpireApiKey` is the single exception, and it is a command precisely
 because it is the one thing a verification can durably record.
@@ -1973,12 +1973,12 @@ properties of this plan rather than of the design:
   not belong on any path downstream of admission.
 
 Both modes return an `ApiPrincipal`, whose shape is in API_KEY.md as
-amended by [ADR#0064](./docs/adr/0064-api-key-authorization-model-and-rate-limits.md):
+amended by [ADR#0077](./docs/adr/0077-api-key-authorization-model-and-rate-limits.md):
 one effective permission set, no `scopes`, resource scope as a
 `ResourceScope` value object ANDed with permissions.
 
 The seven required first-release audit facts are in
-[ADR#0065](./docs/adr/0065-api-key-rotation-grace-and-audit-set.md)
+[ADR#0078](./docs/adr/0078-api-key-rotation-grace-and-audit-set.md)
 section 5. Two of them, `api_key.denied` and
 `api_key.signed_request_replayed`, are what the two unfirable alerts in
 `devops/openbao/runbooks/alerts.md` are waiting on, so item 6i below closes
@@ -2132,7 +2132,7 @@ the rest of this work actually is.
 - a declarative apply (Terraform or equivalent) instead of the manual loop
   in the policies README;
 - provision an audit device, without which break-glass access cannot be
-  audited and the ADR#0063 section 6 root-key recovery path cannot be used
+  audited and the ADR#0076 section 6 root-key recovery path cannot be used
   in production;
 - run the restore drill specified in
   `devops/openbao/runbooks/backup-and-restore.md`, which needs a cluster.
@@ -2154,7 +2154,7 @@ here; no key issuance surface exists today, so there is nothing for them to
 transition or identify yet.
 
 Every design question is now ratified (ADR#0046, ADR#0048, ADR#0050,
-ADR#0051, ADR#0062 through ADR#0065), so what remains is build order rather
+ADR#0051, ADR#0075 through ADR#0078), so what remains is build order rather
 than open design:
 
 ```text
@@ -2231,7 +2231,7 @@ repeated OpenBao write failures, closed by
 Of the remaining three, the two API-key alerts, suspicious verification
 failures and signed-request replay attempts, now have a specified signal
 source: `api_key.denied` and `api_key.signed_request_replayed` in the
-ADR#0065 audit set. They are no longer blocked on a design decision, only
+ADR#0078 audit set. They are no longer blocked on a design decision, only
 on item 6i shipping, and item 6i names them as its reason for landing
 incrementally rather than last.
 
@@ -2246,7 +2246,7 @@ alerted on.
 
 Beyond the `DECISION NEEDED` blocks inline above and the four extraction
 questions in
-[ADR#0061](./docs/adr/0061-credential-platform-extraction-boundary.md):
+[ADR#0074](./docs/adr/0074-credential-platform-extraction-boundary.md):
 
 - which OpenBao auth method each service should use;
 - which credential kinds ship in the first UI;
@@ -2254,7 +2254,7 @@ questions in
 - the default idempotency TTL;
 - the default pending credential TTL;
 - whether idempotency records stay in NATS KV or move to the control-plane
-  database (the same question as ADR#0061's Q3).
+  database (the same question as ADR#0074's Q3).
 
 Owner boundary, metadata backend, path convention, cache TTL, revocation
 latency target, signed-key algorithm, the signed-first posture, request
@@ -2265,7 +2265,7 @@ The API key platform has no architectural decisions left. Key format,
 verifier construction, pepper custody, keyspaces and their policy fields,
 root key bootstrap, the permissions vocabulary, built-in roles, delegation
 enforcement, rate-limit subject kinds and counter store, rotation grace,
-and the first-release audit set are decided in ADR#0062 through ADR#0065.
+and the first-release audit set are decided in ADR#0075 through ADR#0078.
 The three things deferred there (customer-authored roles, identity-level
 and route-level rate limits, and a dedicated counter store) carry stated
 trigger conditions, so they are deferrals rather than undecided design.

@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.maintenance.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 import "trogonai/session/sessions/maintenance/v1alpha1/migration.proto";
 import "trogonai/session/sessions/maintenance/v1alpha1/outcome.proto";
@@ -15,7 +16,10 @@ import "trogonai/session/sessions/maintenance/v1alpha1/stream_boundary.proto";
 // again is precisely the failure this workflow exists to prevent. Acting on a
 // verdict is a separate MigrateSession call, made by whoever read the verdict.
 message ReconcileMigrationRequest {
-  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // The identity from the recorded intent. Reconciliation compares against what
   // was planned, so a caller with no intent has nothing to reconcile and gets
   // INDETERMINATE_REASON_INTENT_MISSING rather than a guess.
@@ -23,6 +27,14 @@ message ReconcileMigrationRequest {
 }
 
 message ReconcileMigrationResponse {
+  option (buf.validate.message).cel = {
+    id: "reconcile_migration_response.indeterminate_only_for_unresolved"
+    message: "indeterminate may be set only for RECONCILIATION_VERDICT_UNRESOLVED"
+    expression:
+      "!has(this.indeterminate) || "
+      "this.verdict == trogonai.session.sessions.maintenance.v1alpha1.ReconciliationVerdict.RECONCILIATION_VERDICT_UNRESOLVED"
+  };
+
   ReconciliationVerdict verdict = 1 [features.field_presence = LEGACY_REQUIRED];
   // The state the record should be moved to. Reported rather than applied,
   // because applying it is a write.

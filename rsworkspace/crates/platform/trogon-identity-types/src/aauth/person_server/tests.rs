@@ -19,6 +19,35 @@ fn token_request_matches_draft_example() {
 }
 
 #[test]
+fn token_request_debug_redacts_tokens() {
+    let req = TokenRequest {
+        resource_token: "resource.jwt.value".to_string(),
+        upstream_token: Some("upstream.jwt.value".to_string()),
+        subagent_token: Some("subagent.jwt.value".to_string()),
+        justification: Some("Find available meeting times".to_string()),
+        ..Default::default()
+    };
+    let debug_output = format!("{req:?}");
+    assert!(!debug_output.contains("resource.jwt.value"));
+    assert!(!debug_output.contains("upstream.jwt.value"));
+    assert!(!debug_output.contains("subagent.jwt.value"));
+    assert!(debug_output.contains("Find available meeting times"));
+    assert!(debug_output.contains("<redacted>"));
+}
+
+#[test]
+fn token_grant_response_debug_redacts_auth_token() {
+    let resp = TokenGrantResponse {
+        auth_token: "auth.jwt.value".to_string(),
+        expires_in: 3600,
+    };
+    let debug_output = format!("{resp:?}");
+    assert!(!debug_output.contains("auth.jwt.value"));
+    assert!(debug_output.contains("3600"));
+    assert!(debug_output.contains("<redacted>"));
+}
+
+#[test]
 fn token_grant_response_matches_draft_example() {
     let raw = serde_json::json!({"auth_token": "eyJhbGc...", "expires_in": 3600});
     let resp: TokenGrantResponse = serde_json::from_value(raw.clone()).unwrap();

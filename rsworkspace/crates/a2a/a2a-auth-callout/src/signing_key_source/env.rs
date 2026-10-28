@@ -9,7 +9,6 @@ use trogon_std::env::ReadEnv;
 #[cfg(test)]
 static ENV_DEV_WARN_COUNT: AtomicUsize = AtomicUsize::new(0);
 
-use crate::constants::{VERSION_CURRENT, VERSION_PREVIOUS};
 use crate::error::AuthCalloutError;
 use crate::jwt::SigningKey;
 
@@ -42,14 +41,7 @@ impl EnvSigningKeySource {
             ENV_DEV_WARN_COUNT.fetch_add(1, Ordering::SeqCst);
             warn!("AUTH_CALLOUT_SIGNING_SECRET env custody is dev-only; use file or vault in production");
         });
-        // `KeyVersion::new` only rejects empty / illegal-char strings; the
-        // VERSION_CURRENT / VERSION_PREVIOUS constants are validated at
-        // compile time, so a failure here would be a code bug, not runtime.
-        #[allow(clippy::expect_used)]
-        let current = SigningKeyHandle::new(
-            KeyVersion::new(VERSION_CURRENT).expect("static version"),
-            signing_key_from_secret(&current_secret)?,
-        );
+        let current = SigningKeyHandle::new(KeyVersion::current(), signing_key_from_secret(&current_secret)?);
 
         let previous = match env
             .var("AUTH_CALLOUT_SIGNING_SECRET_PREVIOUS")
@@ -57,11 +49,10 @@ impl EnvSigningKeySource {
             .filter(|s| !s.is_empty())
         {
             None => None,
-            Some(secret) => {
-                #[allow(clippy::expect_used)]
-                let version = KeyVersion::new(VERSION_PREVIOUS).expect("static version");
-                Some(SigningKeyHandle::new(version, signing_key_from_secret(&secret)?))
-            }
+            Some(secret) => Some(SigningKeyHandle::new(
+                KeyVersion::previous(),
+                signing_key_from_secret(&secret)?,
+            )),
         };
 
         Ok(Self { current, previous })

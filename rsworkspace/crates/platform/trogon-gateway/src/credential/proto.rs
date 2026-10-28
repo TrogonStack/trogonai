@@ -267,6 +267,8 @@ fn proto_source_kind(value: SourceKind) -> v1::CredentialSource {
         SourceKind::Telegram => v1::CredentialSource::CREDENTIAL_SOURCE_TELEGRAM,
         SourceKind::Twitter => v1::CredentialSource::CREDENTIAL_SOURCE_TWITTER,
         SourceKind::Datadog => v1::CredentialSource::CREDENTIAL_SOURCE_DATADOG,
+        SourceKind::GooglePubSub => v1::CredentialSource::CREDENTIAL_SOURCE_GOOGLE_PUBSUB,
+        SourceKind::Zoom => v1::CredentialSource::CREDENTIAL_SOURCE_ZOOM,
     }
 }
 
@@ -282,6 +284,8 @@ fn proto_credential_kind(value: CredentialKind) -> v1::CredentialKind {
         CredentialKind::VerificationToken => v1::CredentialKind::CREDENTIAL_KIND_VERIFICATION_TOKEN,
         CredentialKind::WebhookSecret => v1::CredentialKind::CREDENTIAL_KIND_WEBHOOK_SECRET,
         CredentialKind::WebhookToken => v1::CredentialKind::CREDENTIAL_KIND_WEBHOOK_TOKEN,
+        CredentialKind::SecretToken => v1::CredentialKind::CREDENTIAL_KIND_SECRET_TOKEN,
+        CredentialKind::ServiceAccountCredentials => v1::CredentialKind::CREDENTIAL_KIND_SERVICE_ACCOUNT_CREDENTIALS,
     }
 }
 
@@ -321,6 +325,8 @@ fn decode_source_kind(
         v1::CredentialSource::CREDENTIAL_SOURCE_TELEGRAM => Ok(SourceKind::Telegram),
         v1::CredentialSource::CREDENTIAL_SOURCE_TWITTER => Ok(SourceKind::Twitter),
         v1::CredentialSource::CREDENTIAL_SOURCE_DATADOG => Ok(SourceKind::Datadog),
+        v1::CredentialSource::CREDENTIAL_SOURCE_GOOGLE_PUBSUB => Ok(SourceKind::GooglePubSub),
+        v1::CredentialSource::CREDENTIAL_SOURCE_ZOOM => Ok(SourceKind::Zoom),
         v1::CredentialSource::CREDENTIAL_SOURCE_UNSPECIFIED => Err(invalid_field(field, "unspecified source kind")),
     }
 }
@@ -340,6 +346,10 @@ fn decode_credential_kind(
         v1::CredentialKind::CREDENTIAL_KIND_VERIFICATION_TOKEN => Ok(CredentialKind::VerificationToken),
         v1::CredentialKind::CREDENTIAL_KIND_WEBHOOK_SECRET => Ok(CredentialKind::WebhookSecret),
         v1::CredentialKind::CREDENTIAL_KIND_WEBHOOK_TOKEN => Ok(CredentialKind::WebhookToken),
+        v1::CredentialKind::CREDENTIAL_KIND_SECRET_TOKEN => Ok(CredentialKind::SecretToken),
+        v1::CredentialKind::CREDENTIAL_KIND_SERVICE_ACCOUNT_CREDENTIALS => {
+            Ok(CredentialKind::ServiceAccountCredentials)
+        }
         v1::CredentialKind::CREDENTIAL_KIND_UNSPECIFIED => Err(invalid_field(field, "unspecified credential kind")),
     }
 }
@@ -603,6 +613,8 @@ fn proto_state_source_kind(value: SourceKind) -> state_v1::CredentialSource {
         SourceKind::Telegram => state_v1::CredentialSource::CREDENTIAL_SOURCE_TELEGRAM,
         SourceKind::Twitter => state_v1::CredentialSource::CREDENTIAL_SOURCE_TWITTER,
         SourceKind::Datadog => state_v1::CredentialSource::CREDENTIAL_SOURCE_DATADOG,
+        SourceKind::GooglePubSub => state_v1::CredentialSource::CREDENTIAL_SOURCE_GOOGLE_PUBSUB,
+        SourceKind::Zoom => state_v1::CredentialSource::CREDENTIAL_SOURCE_ZOOM,
     }
 }
 
@@ -618,6 +630,10 @@ fn proto_state_credential_kind(value: CredentialKind) -> state_v1::CredentialKin
         CredentialKind::VerificationToken => state_v1::CredentialKind::CREDENTIAL_KIND_VERIFICATION_TOKEN,
         CredentialKind::WebhookSecret => state_v1::CredentialKind::CREDENTIAL_KIND_WEBHOOK_SECRET,
         CredentialKind::WebhookToken => state_v1::CredentialKind::CREDENTIAL_KIND_WEBHOOK_TOKEN,
+        CredentialKind::SecretToken => state_v1::CredentialKind::CREDENTIAL_KIND_SECRET_TOKEN,
+        CredentialKind::ServiceAccountCredentials => {
+            state_v1::CredentialKind::CREDENTIAL_KIND_SERVICE_ACCOUNT_CREDENTIALS
+        }
     }
 }
 
@@ -657,6 +673,8 @@ fn decode_source_kind_state(
         state_v1::CredentialSource::CREDENTIAL_SOURCE_TELEGRAM => Ok(SourceKind::Telegram),
         state_v1::CredentialSource::CREDENTIAL_SOURCE_TWITTER => Ok(SourceKind::Twitter),
         state_v1::CredentialSource::CREDENTIAL_SOURCE_DATADOG => Ok(SourceKind::Datadog),
+        state_v1::CredentialSource::CREDENTIAL_SOURCE_GOOGLE_PUBSUB => Ok(SourceKind::GooglePubSub),
+        state_v1::CredentialSource::CREDENTIAL_SOURCE_ZOOM => Ok(SourceKind::Zoom),
         state_v1::CredentialSource::CREDENTIAL_SOURCE_UNSPECIFIED => {
             Err(invalid_field(field, "unspecified source kind"))
         }
@@ -678,6 +696,10 @@ fn decode_credential_kind_state(
         state_v1::CredentialKind::CREDENTIAL_KIND_VERIFICATION_TOKEN => Ok(CredentialKind::VerificationToken),
         state_v1::CredentialKind::CREDENTIAL_KIND_WEBHOOK_SECRET => Ok(CredentialKind::WebhookSecret),
         state_v1::CredentialKind::CREDENTIAL_KIND_WEBHOOK_TOKEN => Ok(CredentialKind::WebhookToken),
+        state_v1::CredentialKind::CREDENTIAL_KIND_SECRET_TOKEN => Ok(CredentialKind::SecretToken),
+        state_v1::CredentialKind::CREDENTIAL_KIND_SERVICE_ACCOUNT_CREDENTIALS => {
+            Ok(CredentialKind::ServiceAccountCredentials)
+        }
         state_v1::CredentialKind::CREDENTIAL_KIND_UNSPECIFIED => {
             Err(invalid_field(field, "unspecified credential kind"))
         }

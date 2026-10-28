@@ -1,0 +1,17 @@
+edition = "2024";
+
+package trogonai.agents.agents.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// AgentArchived transitions an ACTIVE agent to archived. An archived agent accepts
+// no further revisions or annotation changes until unarchived. Sessions already
+// running against the archived agent are not interrupted; the registry only
+// stops resolving it for new work. Dispatch rejects new proposals, while orphan
+// proposals cannot pass registry activation until the agent is unarchived.
+message AgentArchived {
+  string agent_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}

@@ -81,9 +81,14 @@ export default async () => {
             { text: "Session Title and Preview", link: "/architecture/session-title-and-preview" },
             { text: "Session Tool Effects", link: "/architecture/session-tool-effects" },
             {
+              text: "Slack Acknowledgement Responses",
+              link: "/architecture/slack-acknowledgement-responses",
+            },
+            {
               text: "Usage Settlement Ledger",
               link: "/architecture/usage-settlement-ledger",
             },
+            { text: "Workflows", link: "/architecture/workflows" },
           ],
         },
         {
@@ -100,6 +105,10 @@ export default async () => {
             { text: "Bring Your Own OpenBao", link: "/how-to/bring-your-own-openbao" },
             { text: "Migrate Between Key Backends", link: "/how-to/migrate-key-backends" },
             { text: "Handle Unusable Keys", link: "/how-to/handle-unusable-keys" },
+            {
+              text: "Receive Meeting Transcript Notifications",
+              link: "/how-to/receive-meeting-transcript-notifications",
+            },
             {
               text: "Retire the ACP Notifications Stream",
               link: "/how-to/retire-acp-notifications-stream",

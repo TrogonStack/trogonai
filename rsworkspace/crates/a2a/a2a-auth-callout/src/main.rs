@@ -1,4 +1,5 @@
-#[cfg(not(coverage))]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 use {
     a2a_auth_callout::credentials::mtls::MTlsVerifier,
     a2a_auth_callout::credentials::mtls::{TrustAnchorPem, X509MtlsVerifier},
@@ -15,7 +16,9 @@ use {
     trogon_std::env::{ReadEnv, SystemEnv},
 };
 
-#[cfg(not(coverage))]
+#[cfg(test)]
+mod main_tests;
+
 fn split_env_list(env: &impl ReadEnv, name: &str) -> Vec<String> {
     env.var(name)
         .ok()
@@ -29,22 +32,18 @@ fn split_env_list(env: &impl ReadEnv, name: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-#[cfg(not(coverage))]
 fn env_required(env: &impl ReadEnv, name: &'static str) -> Result<String, AuthCalloutError> {
     env.var(name).map_err(|_| AuthCalloutError::MissingEnvVar(name))
 }
 
-#[cfg(not(coverage))]
 fn load_nkey_seed_env(env: &impl ReadEnv, name: &'static str) -> Result<NkeySeed, AuthCalloutError> {
     NkeySeed::parse(env_required(env, name)?)
 }
 
-#[cfg(not(coverage))]
 fn load_nkey_public_env(env: &impl ReadEnv, name: &'static str) -> Result<NkeyPublic, AuthCalloutError> {
     NkeyPublic::parse(env_required(env, name)?)
 }
 
-#[cfg(not(coverage))]
 async fn build_oidc_verifier(env: &impl ReadEnv) -> Option<Arc<dyn OidcVerifier>> {
     let issuer_raw = env.var("AUTH_CALLOUT_OIDC_ISSUER").ok()?;
     let issuer = match OidcIssuerUrl::parse(&issuer_raw) {
@@ -68,7 +67,6 @@ async fn build_oidc_verifier(env: &impl ReadEnv) -> Option<Arc<dyn OidcVerifier>
     }
 }
 
-#[cfg(not(coverage))]
 fn build_mtls_verifier(env: &impl ReadEnv) -> Option<Arc<dyn MTlsVerifier>> {
     let path = env.var("AUTH_CALLOUT_MTLS_TRUST_ANCHORS").ok()?;
     let bundle = match std::fs::read_to_string(&path) {
@@ -81,8 +79,8 @@ fn build_mtls_verifier(env: &impl ReadEnv) -> Option<Arc<dyn MTlsVerifier>> {
     Some(Arc::new(X509MtlsVerifier::new(TrustAnchorPem::new(bundle))))
 }
 
-#[cfg(not(coverage))]
 #[tokio::main]
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -218,6 +216,3 @@ async fn main() {
         }
     }
 }
-
-#[cfg(coverage)]
-fn main() {}

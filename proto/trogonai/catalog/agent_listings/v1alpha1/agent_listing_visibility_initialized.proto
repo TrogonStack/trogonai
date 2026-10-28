@@ -1,0 +1,20 @@
+edition = "2024";
+
+package trogonai.catalog.agent_listings.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/catalog/agent_listings/v1alpha1/agent_listing.proto";
+
+// Records authored intent, never evidence of current public eligibility.
+// The admitted provisioning origin and exact initial listing remain immutable
+// receipt evidence after later visibility changes.
+// A bound PRIVATE genesis can prepare pending setup; a bound PUBLIC genesis is
+// admitted only by its owning PUBLISH step after authoritative ACTIVE readiness.
+message AgentListingVisibilityInitialized {
+  AgentListing listing = 1 [features.field_presence = LEGACY_REQUIRED];
+  string provisioning_id = 2 [(buf.validate.field).cel = {
+    id: "agent_listing_visibility_initialized.provisioning_id_nonblank"
+    message: "a supplied provisioning_id must contain a non-whitespace character"
+    expression: "this.trim() != ''"
+  }];
+}

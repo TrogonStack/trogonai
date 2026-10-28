@@ -1,0 +1,13 @@
+edition = "2024";
+
+package trogonai.evaluation.rubrics.v1alpha1;
+
+import "trogonai/evaluation/rubrics/v1alpha1/rubric_id.proto";
+
+// Retiring stops new versions and new bindings; bindings and results that
+// already pin a version keep resolving it. Dispatch requires the original
+// positive expected_revision; an already retired rubric succeeds without an
+// event after that concurrency check.
+message RetireRubric {
+  RubricId rubric_id = 1 [features.field_presence = LEGACY_REQUIRED];
+}

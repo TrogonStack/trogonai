@@ -81,10 +81,7 @@ impl Config {
 
     #[cfg(test)]
     pub(crate) fn for_test(acp_prefix: &str) -> Self {
-        let nats = NatsConfig {
-            servers: vec!["localhost:4222".to_string()],
-            auth: trogon_nats::NatsAuth::None,
-        };
+        let nats = NatsConfig::new(vec!["localhost:4222".to_string()], trogon_nats::NatsAuth::None);
         Self::new(AcpPrefix::new(acp_prefix.to_string()).unwrap(), nats)
             .with_prompt_timeout(crate::constants::TEST_PROMPT_TIMEOUT)
     }

@@ -21,7 +21,6 @@ pub const DEFAULT_STREAMING_MAX_INFLIGHT: usize = 32;
 /// Term's a message that the caller reply persistently rejects. Mirrors the
 /// 3-attempt budget the egress planner uses so the two pumps behave the
 /// same under a permanently broken reply subject (bad ACL, closed inbox).
-#[cfg(not(coverage))]
 pub(crate) const STREAMING_INGRESS_MAX_FORWARD_ATTEMPTS: i64 = 3;
 
 // --- gw_pull_backpressure.rs ---
@@ -38,17 +37,13 @@ pub const DEFAULT_FETCH_HEARTBEAT_SECS: u64 = 5;
 pub const DEFAULT_INACTIVE_THRESHOLD_SECS: u64 = 300;
 pub const DEFAULT_MAX_INFLIGHT_PER_CALLER: usize = 32;
 
-#[cfg(not(coverage))]
 pub(crate) const INITIAL_BACKOFF: Duration = Duration::from_millis(250);
-#[cfg(not(coverage))]
 pub(crate) const MAX_BACKOFF: Duration = Duration::from_secs(30);
-#[cfg(not(coverage))]
 pub(crate) const FETCH_EXPIRES: Duration = Duration::from_secs(30);
 /// Delay applied when the per-caller inflight gate is full. Keeps the
 /// JetStream redelivery rate bounded while the offending caller's other
 /// in-flight forwards drain — without a delay JetStream would re-deliver
 /// immediately and the pump would burn CPU on rejected messages.
-#[cfg(not(coverage))]
 pub(crate) const GATE_NAK_DELAY: Duration = Duration::from_millis(500);
 
 // --- push_dlq_mirror.rs ---
@@ -91,36 +86,36 @@ pub const ANONYMOUS_CALLER_SLUG: &str = "_";
 // as `ANONYMOUS_CALLER_SLUG` and `ENV_GATEWAY_JWT_AUDIENCE` above; dispatch
 // references those rather than redeclaring the literals.
 
-#[cfg(all(feature = "spicedb", not(coverage)))]
+#[cfg(feature = "spicedb")]
 pub(crate) const SPAN_GATEWAY_INGRESS_DISPATCH: &str = "gateway.ingress.dispatch";
-#[cfg(all(feature = "spicedb", not(coverage)))]
+#[cfg(feature = "spicedb")]
 pub(crate) const ATTR_CALLER_ID: &str = "caller_id";
-#[cfg(all(feature = "spicedb", not(coverage)))]
+#[cfg(feature = "spicedb")]
 pub(crate) const ATTR_AGENT_SUBJECT: &str = "agent_subject";
-#[cfg(all(feature = "spicedb", not(coverage)))]
+#[cfg(feature = "spicedb")]
 pub(crate) const ATTR_ROUTING_OUTCOME: &str = "routing_outcome";
-#[cfg(all(feature = "spicedb", not(coverage)))]
+#[cfg(feature = "spicedb")]
 pub(crate) const ATTR_AAUTH_AGENT_ID: &str = "aauth_agent_id";
 
-#[cfg(all(feature = "spicedb", not(coverage)))]
+#[cfg(feature = "spicedb")]
 pub(crate) const ROUTING_IGNORED_NO_REPLY: &str = "ignored_no_reply";
-#[cfg(all(feature = "spicedb", not(coverage)))]
+#[cfg(feature = "spicedb")]
 pub(crate) const ROUTING_AAUTH_DENIED: &str = "aauth_denied";
-#[cfg(all(feature = "spicedb", not(coverage)))]
+#[cfg(feature = "spicedb")]
 pub(crate) const ROUTING_TIER1_DENIED: &str = "tier1_denied";
-#[cfg(all(feature = "spicedb", not(coverage)))]
+#[cfg(feature = "spicedb")]
 pub(crate) const ROUTING_POLICY_DENIED: &str = "policy_denied";
-#[cfg(all(feature = "spicedb", not(coverage)))]
+#[cfg(feature = "spicedb")]
 pub(crate) const ROUTING_TIER3_REFUSED: &str = "tier3_refused";
-#[cfg(all(feature = "spicedb", not(coverage)))]
+#[cfg(feature = "spicedb")]
 pub(crate) const ROUTING_TIER3_ENGINE_ERROR: &str = "tier3_engine_error";
-#[cfg(all(feature = "spicedb", not(coverage)))]
+#[cfg(feature = "spicedb")]
 pub(crate) const ROUTING_FORWARDED: &str = "forwarded";
-#[cfg(all(feature = "spicedb", not(coverage)))]
+#[cfg(feature = "spicedb")]
 pub(crate) const ROUTING_FORWARD_FAILED: &str = "forward_failed";
-#[cfg(all(feature = "spicedb", not(coverage)))]
+#[cfg(feature = "spicedb")]
 pub(crate) const ROUTING_DEADLINE_EXCEEDED: &str = "deadline_exceeded";
-#[cfg(all(feature = "spicedb", not(coverage)))]
+#[cfg(feature = "spicedb")]
 pub(crate) const ROUTING_INGRESS_ERROR: &str = "ingress_error";
 
 // --- runtime/env.rs ---
@@ -132,7 +127,7 @@ pub const ENV_GATEWAY_UNARY_DEADLINE_SECS: &str = "A2A_GATEWAY_UNARY_DEADLINE_SE
 
 /// Method-dots string for the unary `message/send`. Shared by
 /// `runtime::env` (unary deadline lookup) and `runtime::dispatch`
-/// (`spicedb` + non-coverage builds).
+/// (`spicedb` builds).
 pub(crate) const MESSAGE_SEND_METHOD_DOTS: &str = "message.send";
 
 // --- runtime/streaming.rs ---

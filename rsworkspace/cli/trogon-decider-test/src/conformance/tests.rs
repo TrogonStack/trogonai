@@ -96,3 +96,105 @@ fn a_suite_whose_name_does_not_match_the_component_is_refused() {
         "a suite that runs green against a component it was not written for proves nothing: {error}"
     );
 }
+
+#[test]
+fn failed_scenarios_accumulate_in_human_and_tap_runs() {
+    let wasm = schedules_wasm();
+    let mut suite = schedules_suite();
+    suite.scenarios[0].then = Some(Then::Rejected { rejected: true });
+    suite.scenarios[1].then = Some(Then::Rejected { rejected: false });
+
+    for format in [OutputFormat::Human, OutputFormat::Tap] {
+        let error = run_suite(&wasm, &suite, format, Strictness::Strict).unwrap_err();
+        assert_eq!(error.to_string(), "2 scenario(s) failed");
+    }
+}
+
+#[test]
+fn strictness_controls_whether_a_suite_with_no_coverage_can_pass() {
+    let wasm = schedules_wasm();
+    let mut suite = schedules_suite();
+    suite.scenarios.clear();
+
+    let error = run_suite(&wasm, &suite, OutputFormat::Human, Strictness::Strict).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "4 declared command(s) and 4 declared event(s) have zero scenario coverage"
+    );
+    run_suite(&wasm, &suite, OutputFormat::Human, Strictness::Lenient)
+        .expect("lenient runs report gaps without failing the suite");
+}
+
+#[test]
+fn an_explicit_normal_budget_still_executes_the_scenario() {
+    let wasm = schedules_wasm();
+    let host = SimHost::load(&wasm).unwrap();
+    let suite = schedules_suite();
+    let registry = codec::type_registry(&suite.suite).unwrap();
+    let mut scenario = suite.scenarios[0].to_ir(registry).unwrap();
+    scenario.budget = Some(trogon_decider_sim::BudgetOverrides {
+        fuel_per_call: Some(host.config().fuel_per_call()),
+        ..Default::default()
+    });
+
+    run_scenario(&host, &wasm, &scenario).expect("the normal fuel budget accepts the valid create scenario");
+}
+
+#[test]
+fn an_instantiation_trap_does_not_satisfy_an_accepted_expectation() {
+    let wasm = schedules_wasm();
+    let host = SimHost::load(&wasm).unwrap();
+    let suite = schedules_suite();
+    let registry = codec::type_registry(&suite.suite).unwrap();
+    let mut scenario = suite
+        .scenarios
+        .iter()
+        .find(|scenario| scenario.budget.is_some())
+        .expect("the suite contains a starved-fuel scenario")
+        .to_ir(registry)
+        .unwrap();
+    scenario.steps[0].expect = ExpectedOutcome::Accepted;
+
+    let error = run_scenario(&host, &wasm, &scenario).unwrap_err();
+    let error = error
+        .downcast_ref::<trogon_decider_sim::SimError>()
+        .expect("the instantiation error retains its type");
+    assert!(error.is_trap());
+}
+
+#[test]
+fn an_instantiation_trap_cannot_stand_in_for_multiple_steps() {
+    let wasm = schedules_wasm();
+    let host = SimHost::load(&wasm).unwrap();
+    let suite = schedules_suite();
+    let registry = codec::type_registry(&suite.suite).unwrap();
+    let mut scenario = suite
+        .scenarios
+        .iter()
+        .find(|scenario| scenario.budget.is_some())
+        .expect("the suite contains a starved-fuel scenario")
+        .to_ir(registry)
+        .unwrap();
+    scenario.steps.push(scenario.steps[0].clone());
+
+    let error = run_scenario(&host, &wasm, &scenario).unwrap_err();
+    let error = error
+        .downcast_ref::<trogon_decider_sim::SimError>()
+        .expect("the instantiation error retains its type");
+    assert!(error.is_trap());
+}
+
+#[test]
+fn an_authored_error_code_is_checked_against_the_guest_outcome() {
+    let wasm = schedules_wasm();
+    let mut suite = schedules_suite();
+    suite.scenarios[3].then = Some(Then::Error {
+        error: crate::ErrorExpectation::Structured {
+            code: Some("rejected".to_string()),
+            message: None,
+        },
+    });
+
+    run_suite(&wasm, &suite, OutputFormat::Human, Strictness::Strict)
+        .expect("pausing a missing schedule has the expected rejection code");
+}

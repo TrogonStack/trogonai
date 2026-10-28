@@ -1,0 +1,18 @@
+edition = "2024";
+
+package trogonai.catalog.agent_listings.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/catalog/agent_listings/v1alpha1/agent_listing_visibility_initialized.proto";
+import "trogonai/catalog/agent_listings/v1alpha1/agent_listing_visibility_set.proto";
+
+// Registry lifecycle stays in its own history. Unknown events reject replay
+// and prevent public eligibility rather than silently retaining old intent.
+message AgentListingEvent {
+  oneof event {
+    option (buf.validate.oneof).required = true;
+
+    AgentListingVisibilityInitialized visibility_initialized = 1;
+    AgentListingVisibilitySet visibility_set = 2;
+  }
+}

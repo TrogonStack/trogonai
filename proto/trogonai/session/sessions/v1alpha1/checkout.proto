@@ -1,0 +1,27 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// CheckoutRef identifies the checkout a session is bound to. SessionStarted
+// carries it inline rather than leaving it inside the opaque
+// StoredSessionExecutionPlan bytes, so "every session for this checkout" is a
+// projection over decoded event fields and never a decode-and-verify pass over
+// every plan in the store (ADR#0031 §6).
+//
+// The binding is immutable for the life of the session, exactly as the plan's
+// working directory is: a different checkout requires a new session or a fork.
+message CheckoutRef {
+  // Stable checkout id, assigned by the platform and independent of location.
+  string checkout_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  // Location the checkout resolved to at session start, for example
+  // "file:///srv/checkouts/api" or "git+ssh://host/org/repo".
+  string uri = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Source-control revision the checkout was at when the session started;
+  // empty when the checkout is not version controlled or was not resolved.
+  string revision = 3;
+}

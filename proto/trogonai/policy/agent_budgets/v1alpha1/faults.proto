@@ -1,0 +1,59 @@
+edition = "2024";
+
+package trogonai.policy.agent_budgets.v1alpha1;
+
+import "trogon/error/v1alpha1/options.proto";
+
+// Schema-only templates for the policy.agent_budgets module's DeciderService
+// refusals. These messages are never encoded. Administration authorization and
+// spending admission keep their own failure contracts; this fold only owns
+// policy mutations, not reservation or settlement outcomes.
+message AgentBudgetCommandInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "policy.agent_budgets"
+    reason: "AGENT_BUDGET_COMMAND_INVALID"
+    message: "The command violates the Agent budget policy contract."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentBudgetNotInitializedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "policy.agent_budgets"
+    reason: "AGENT_BUDGET_NOT_INITIALIZED"
+    message: "The Agent budget history must be initialized before this command."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentBudgetAlreadyInitializedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "policy.agent_budgets"
+    reason: "AGENT_BUDGET_ALREADY_INITIALIZED"
+    message: "The Agent budget history has already been initialized."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentBudgetIdentityMismatchError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "policy.agent_budgets"
+    reason: "AGENT_BUDGET_IDENTITY_MISMATCH"
+    message: "The command names a different Agent from this budget history."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AgentBudgetCurrencyMismatchError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "policy.agent_budgets"
+    reason: "AGENT_BUDGET_CURRENCY_MISMATCH"
+    message: "The policy must retain this Agent budget history's accounting currency."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}

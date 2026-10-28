@@ -1,8 +1,10 @@
 use std::fmt;
 
+use super::ack_budget::AckBudget;
+
 use trogon_nats::NatsToken;
 use trogon_nats::jetstream::StreamMaxAge;
-use trogon_std::{EmptySecretError, NonZeroDuration, SecretString};
+use trogon_std::{EmptySecretError, HttpBodySizeMax, NonZeroDuration, SecretString};
 
 #[derive(Clone)]
 pub struct SlackSigningSecret(SecretString);
@@ -58,6 +60,7 @@ impl fmt::Debug for SlackAppToken {
 pub struct SlackWebhookConfig {
     pub signing_secret: SlackSigningSecret,
     pub timestamp_max_drift: NonZeroDuration,
+    pub max_body_size: HttpBodySizeMax,
 }
 
 #[derive(Clone)]
@@ -71,16 +74,38 @@ pub enum SlackTransportConfig {
     SocketMode(SlackSocketModeConfig),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlackTransport {
+    Webhook,
+    SocketMode,
+}
+
+impl SlackTransport {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Webhook => "webhook",
+            Self::SocketMode => "socket_mode",
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct SlackConfig {
     pub subject_prefix: NatsToken,
     pub stream_name: NatsToken,
     pub stream_max_age: StreamMaxAge,
-    pub nats_ack_timeout: NonZeroDuration,
+    pub ack_budget: AckBudget,
     pub transport: SlackTransportConfig,
 }
 
 impl SlackConfig {
+    pub fn transport_kind(&self) -> SlackTransport {
+        match &self.transport {
+            SlackTransportConfig::Webhook(_) => SlackTransport::Webhook,
+            SlackTransportConfig::SocketMode(_) => SlackTransport::SocketMode,
+        }
+    }
+
     pub fn webhook(&self) -> Option<&SlackWebhookConfig> {
         match &self.transport {
             SlackTransportConfig::Webhook(config) => Some(config),

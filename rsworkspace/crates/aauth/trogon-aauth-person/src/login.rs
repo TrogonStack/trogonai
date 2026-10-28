@@ -10,16 +10,27 @@
 //! [`LoginRequest`] redirect and completing it with a resource token minted
 //! for the requesting party, which the caller then redirects back with.
 
+use std::fmt;
+
 use trogon_identity_types::aauth::login::LoginRequest;
 
 /// Outcome of the PS handling one login redirect: the party that redirected
 /// the user here (the agent, per `LoginRequest.ps` naming this PS) receives
 /// a resource token to present at the PS's own `token_endpoint`, completing
 /// the three-party exchange described in "Third-Party Login".
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct LoginOutcome {
     pub resource_token: String,
     pub redirect_back_to: Option<String>,
+}
+
+impl fmt::Debug for LoginOutcome {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("LoginOutcome")
+            .field("resource_token", &"<redacted>")
+            .field("redirect_back_to", &self.redirect_back_to)
+            .finish()
+    }
 }
 
 /// Parses the incoming login redirect's query string per "Third-Party

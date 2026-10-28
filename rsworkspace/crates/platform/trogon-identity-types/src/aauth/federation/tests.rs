@@ -25,6 +25,34 @@ fn as_token_request_with_subagent_and_upstream() {
 }
 
 #[test]
+fn as_token_request_debug_redacts_tokens() {
+    let req = AsTokenRequest {
+        resource_token: "resource.jwt.value".to_string(),
+        agent_token: "agent.jwt.value".to_string(),
+        subagent_token: Some("subagent.jwt.value".to_string()),
+        upstream_token: Some("upstream.jwt.value".to_string()),
+    };
+    let debug_output = format!("{req:?}");
+    assert!(!debug_output.contains("resource.jwt.value"));
+    assert!(!debug_output.contains("agent.jwt.value"));
+    assert!(!debug_output.contains("subagent.jwt.value"));
+    assert!(!debug_output.contains("upstream.jwt.value"));
+    assert!(debug_output.contains("<redacted>"));
+}
+
+#[test]
+fn as_token_response_debug_redacts_auth_token() {
+    let resp = AsTokenResponse {
+        auth_token: "auth.jwt.value".to_string(),
+        expires_in: 3600,
+    };
+    let debug_output = format!("{resp:?}");
+    assert!(!debug_output.contains("auth.jwt.value"));
+    assert!(debug_output.contains("3600"));
+    assert!(debug_output.contains("<redacted>"));
+}
+
+#[test]
 fn as_token_response_matches_draft_example() {
     let raw = serde_json::json!({"auth_token": "eyJhbGc...", "expires_in": 3600});
     let resp: AsTokenResponse = serde_json::from_value(raw.clone()).unwrap();

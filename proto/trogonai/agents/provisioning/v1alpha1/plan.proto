@@ -1,0 +1,113 @@
+edition = "2024";
+
+package trogonai.agents.provisioning.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/agents/agents/v1alpha1/provision_agent.proto";
+import "trogonai/decider/v1/decide_request.proto";
+
+message ProvisioningIdentity {
+  option (buf.validate.message).cel = {
+    id: "provisioning_identity.nonblank"
+    message: "Agent and provisioning identities must contain non-whitespace characters"
+    expression: "this.provisioning_id.trim() != '' && this.agent_id.trim() != ''"
+  };
+  string provisioning_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string agent_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+enum ProvisioningPhase {
+  PROVISIONING_PHASE_UNSPECIFIED = 0;
+  PROVISIONING_PHASE_PREPARE = 1;
+  PROVISIONING_PHASE_PUBLISH = 2;
+}
+
+// Admission unpacks only registered participant commands, proves this Agent and
+// provisioning provenance, and rejects duplicate participant targets. Registry,
+// workflow, nested orchestration, and wrapper commands are forbidden.
+// PREPARE establishes required configuration and policy before readiness.
+// PUBLISH performs only requested discovery/publication after readiness and
+// cannot change execution-critical preparation. Phase cannot be caller-guessed.
+// Requests, including Any.value bytes and original write preconditions, are
+// immutable. URL validation, target resolution, and payload equality require
+// the registered participant adapter rather than generic Any CEL inspection.
+message ProvisioningAction {
+  option (buf.validate.message).cel = {
+    id: "provisioning_action.id_nonblank"
+    message: "action id must contain a non-whitespace character"
+    expression: "this.action_id.trim() != ''"
+  };
+  option (buf.validate.message).cel = {
+    id: "provisioning_action.command_identity"
+    message: "an action requires a nonempty stable command id and a positive expected revision when present"
+    expression: "has(this.request.command_id) && this.request.command_id.trim() != '' && (!has(this.request.expected_revision) || this.request.expected_revision > 0)"
+  };
+
+  string action_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  ProvisioningPhase phase = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  trogonai.decider.v1.DecideRequest request = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Persist this exact plan before sending any registry or participant command.
+// Empty actions means registry-only creation. Optional histories are not created
+// unless requested. A public listing can be one PUBLISH initialization request;
+// it need not first create a private listing. Missing listing remains private.
+// This intent does not atomically commit its independently owned target streams.
+message AgentProvisioningPlan {
+  option (buf.validate.message).cel = {
+    id: "agent_provisioning_plan.command_ids_nonblank"
+    message: "system command ids must contain non-whitespace characters"
+    expression: "[this.begin_command_id, this.registry_command_id, this.readiness_command_id, this.cancellation_command_id].all(id, id.trim() != '')"
+  };
+  option (buf.validate.message).cel = {
+    id: "agent_provisioning_plan.registry_binding"
+    message: "registry genesis must name this Agent and provisioning operation"
+    expression: "this.registry_provisioning.identity.agent_id == this.identity.agent_id && has(this.registry_provisioning.provisioning_id) && this.registry_provisioning.provisioning_id == this.identity.provisioning_id"
+  };
+  option (buf.validate.message).cel = {
+    id: "agent_provisioning_plan.action_ids_unique"
+    message: "action ids must be unique"
+    expression: "this.actions.map(a, a.action_id).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "agent_provisioning_plan.command_ids_unique"
+    message: "operation and target command ids must be globally distinct within the plan"
+    expression: "([this.begin_command_id, this.registry_command_id, this.readiness_command_id, this.cancellation_command_id] + this.actions.map(a, a.request.command_id)).unique()"
+  };
+
+  ProvisioningIdentity identity = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.agents.v1alpha1.ProvisionAgent registry_provisioning = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Must equal the enclosing BeginAgentProvisioning DecideRequest.command_id.
+  string begin_command_id = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string registry_command_id = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string readiness_command_id = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string cancellation_command_id = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  repeated ProvisioningAction actions = 7;
+}

@@ -1,0 +1,13 @@
+edition = "2024";
+
+package trogonai.policy.holds.v1alpha1;
+
+import "trogonai/policy/holds/v1alpha1/hold.proto";
+import "trogonai/policy/subjects/v1alpha1/subject.proto";
+
+// Removes one name. The history stays, so an empty hold list is a subject with
+// no hold, not a subject that was never held.
+message HoldReleased {
+  trogonai.policy.subjects.v1alpha1.PolicySubject subject = 1 [features.field_presence = LEGACY_REQUIRED];
+  HoldName name = 2 [features.field_presence = LEGACY_REQUIRED];
+}

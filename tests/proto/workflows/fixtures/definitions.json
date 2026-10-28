@@ -1,0 +1,2239 @@
+{
+  "templates": {
+    "definition-review-and-feedback-recipe": {
+      "type": "trogonai.workflows.definitions.v1alpha1.WorkflowDefinition",
+      "payload": {
+        "root": {
+          "nodeId": "review-loop"
+        },
+        "nodes": [
+          {
+            "reference": {
+              "nodeId": "review-loop"
+            },
+            "timeout": "480s",
+            "inputs": [],
+            "outputs": [
+              {
+                "name": "verdict",
+                "schema": {
+                  "maxEncodedBytes": "128",
+                  "symbol": {
+                    "typeName": "review.verdict",
+                    "values": [
+                      "approved",
+                      "changes_requested"
+                    ]
+                  }
+                },
+                "required": true
+              }
+            ],
+            "inputBindings": [],
+            "outputBindings": [
+              {
+                "targetName": "verdict",
+                "expression": {
+                  "reference": {
+                    "nodeOutput": {
+                      "node": {
+                        "nodeId": "cycle"
+                      },
+                      "outputName": "verdict",
+                      "selection": "OUTPUT_SELECTION_CURRENT_ITERATION"
+                    }
+                  }
+                }
+              }
+            ],
+            "repeat": {
+              "body": {
+                "nodeId": "cycle"
+              },
+              "until": {
+                "compare": {
+                  "left": {
+                    "reference": {
+                      "nodeOutput": {
+                        "node": {
+                          "nodeId": "cycle"
+                        },
+                        "outputName": "verdict",
+                        "selection": "OUTPUT_SELECTION_CURRENT_ITERATION"
+                      }
+                    }
+                  },
+                  "operator": "COMPARISON_OPERATOR_EQUAL",
+                  "right": {
+                    "literal": {
+                      "symbolValue": {
+                        "typeName": "review.verdict",
+                        "value": "approved"
+                      }
+                    }
+                  }
+                }
+              },
+              "maxIterations": 4,
+              "onLimit": "ITERATION_LIMIT_POLICY_REQUEST_INPUT",
+              "variables": [
+                {
+                  "declaration": {
+                    "name": "feedback",
+                    "schema": {
+                      "maxEncodedBytes": "4096",
+                      "scalar": "SCALAR_TYPE_STRING"
+                    },
+                    "required": true
+                  },
+                  "initial": {
+                    "literal": {
+                      "stringValue": ""
+                    }
+                  },
+                  "next": {
+                    "reference": {
+                      "nodeOutput": {
+                        "node": {
+                          "nodeId": "cycle"
+                        },
+                        "outputName": "feedback",
+                        "selection": "OUTPUT_SELECTION_CURRENT_ITERATION"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "reference": {
+              "nodeId": "cycle"
+            },
+            "timeout": "120s",
+            "inputs": [],
+            "outputs": [
+              {
+                "name": "verdict",
+                "schema": {
+                  "maxEncodedBytes": "128",
+                  "symbol": {
+                    "typeName": "review.verdict",
+                    "values": [
+                      "approved",
+                      "changes_requested"
+                    ]
+                  }
+                },
+                "required": true
+              },
+              {
+                "name": "feedback",
+                "schema": {
+                  "maxEncodedBytes": "4096",
+                  "scalar": "SCALAR_TYPE_STRING"
+                },
+                "required": true
+              }
+            ],
+            "inputBindings": [],
+            "outputBindings": [
+              {
+                "targetName": "verdict",
+                "expression": {
+                  "reference": {
+                    "nodeOutput": {
+                      "node": {
+                        "nodeId": "combine"
+                      },
+                      "outputName": "verdict",
+                      "selection": "OUTPUT_SELECTION_CURRENT_ITERATION"
+                    }
+                  }
+                }
+              },
+              {
+                "targetName": "feedback",
+                "expression": {
+                  "reference": {
+                    "nodeOutput": {
+                      "node": {
+                        "nodeId": "combine"
+                      },
+                      "outputName": "feedback",
+                      "selection": "OUTPUT_SELECTION_CURRENT_ITERATION"
+                    }
+                  }
+                }
+              }
+            ],
+            "sequence": {
+              "children": [
+                {
+                  "nodeId": "implement"
+                },
+                {
+                  "nodeId": "reviews"
+                },
+                {
+                  "nodeId": "combine"
+                }
+              ]
+            }
+          },
+          {
+            "reference": {
+              "nodeId": "implement"
+            },
+            "timeout": "120s",
+            "inputs": [
+              {
+                "name": "task",
+                "schema": {
+                  "maxEncodedBytes": "4096",
+                  "scalar": "SCALAR_TYPE_STRING"
+                },
+                "required": true
+              },
+              {
+                "name": "feedback",
+                "schema": {
+                  "maxEncodedBytes": "4096",
+                  "scalar": "SCALAR_TYPE_STRING"
+                },
+                "required": true
+              }
+            ],
+            "outputs": [
+              {
+                "name": "change",
+                "schema": {
+                  "maxEncodedBytes": "4096",
+                  "scalar": "SCALAR_TYPE_STRING"
+                },
+                "required": true
+              }
+            ],
+            "inputBindings": [
+              {
+                "targetName": "task",
+                "expression": {
+                  "reference": {
+                    "workflowInput": "task"
+                  }
+                }
+              },
+              {
+                "targetName": "feedback",
+                "expression": {
+                  "reference": {
+                    "repeatVariable": {
+                      "repeatNode": {
+                        "nodeId": "review-loop"
+                      },
+                      "variableName": "feedback"
+                    }
+                  }
+                }
+              }
+            ],
+            "outputBindings": [],
+            "agentStep": {
+              "agentRevision": {
+                "agentId": "agent-example",
+                "revisionNumber": "1",
+                "configuration": {
+                  "configurationDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                }
+              },
+              "prompt": {
+                "parts": [
+                  {
+                    "literal": "Complete the assigned task."
+                  }
+                ]
+              },
+              "retry": {
+                "maxAttempts": 1,
+                "initialDelay": "0s",
+                "maxDelay": "0s",
+                "multiplier": 1,
+                "retryOn": []
+              },
+              "resultCapture": {
+                "contract": {
+                  "contractId": "example.capture",
+                  "version": "1",
+                  "digest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+                },
+                "payload": ""
+              }
+            }
+          },
+          {
+            "reference": {
+              "nodeId": "reviews"
+            },
+            "timeout": "120s",
+            "inputs": [],
+            "outputs": [
+              {
+                "name": "quality",
+                "schema": {
+                  "maxEncodedBytes": "128",
+                  "symbol": {
+                    "typeName": "review.verdict",
+                    "values": [
+                      "approved",
+                      "changes_requested"
+                    ]
+                  }
+                },
+                "required": true
+              },
+              {
+                "name": "security",
+                "schema": {
+                  "maxEncodedBytes": "128",
+                  "symbol": {
+                    "typeName": "review.verdict",
+                    "values": [
+                      "approved",
+                      "changes_requested"
+                    ]
+                  }
+                },
+                "required": true
+              }
+            ],
+            "inputBindings": [],
+            "outputBindings": [
+              {
+                "targetName": "quality",
+                "expression": {
+                  "reference": {
+                    "nodeOutput": {
+                      "node": {
+                        "nodeId": "quality-review"
+                      },
+                      "outputName": "verdict",
+                      "selection": "OUTPUT_SELECTION_CURRENT_ITERATION"
+                    }
+                  }
+                }
+              },
+              {
+                "targetName": "security",
+                "expression": {
+                  "reference": {
+                    "nodeOutput": {
+                      "node": {
+                        "nodeId": "security-review"
+                      },
+                      "outputName": "verdict",
+                      "selection": "OUTPUT_SELECTION_CURRENT_ITERATION"
+                    }
+                  }
+                }
+              }
+            ],
+            "parallel": {
+              "branches": [
+                {
+                  "nodeId": "quality-review"
+                },
+                {
+                  "nodeId": "security-review"
+                }
+              ],
+              "join": "JOIN_POLICY_ALL",
+              "siblings": "SIBLING_DISPOSITION_CANCEL",
+              "maxConcurrency": 2
+            }
+          },
+          {
+            "reference": {
+              "nodeId": "quality-review"
+            },
+            "timeout": "120s",
+            "inputs": [
+              {
+                "name": "change",
+                "schema": {
+                  "maxEncodedBytes": "4096",
+                  "scalar": "SCALAR_TYPE_STRING"
+                },
+                "required": true
+              }
+            ],
+            "outputs": [
+              {
+                "name": "verdict",
+                "schema": {
+                  "maxEncodedBytes": "128",
+                  "symbol": {
+                    "typeName": "review.verdict",
+                    "values": [
+                      "approved",
+                      "changes_requested"
+                    ]
+                  }
+                },
+                "required": true
+              }
+            ],
+            "inputBindings": [
+              {
+                "targetName": "change",
+                "expression": {
+                  "reference": {
+                    "nodeOutput": {
+                      "node": {
+                        "nodeId": "implement"
+                      },
+                      "outputName": "change",
+                      "selection": "OUTPUT_SELECTION_CURRENT_ITERATION"
+                    }
+                  }
+                }
+              }
+            ],
+            "outputBindings": [],
+            "agentStep": {
+              "agentRevision": {
+                "agentId": "agent-example",
+                "revisionNumber": "1",
+                "configuration": {
+                  "configurationDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                }
+              },
+              "prompt": {
+                "parts": [
+                  {
+                    "literal": "Complete the assigned task."
+                  }
+                ]
+              },
+              "retry": {
+                "maxAttempts": 1,
+                "initialDelay": "0s",
+                "maxDelay": "0s",
+                "multiplier": 1,
+                "retryOn": []
+              },
+              "resultCapture": {
+                "contract": {
+                  "contractId": "example.capture",
+                  "version": "1",
+                  "digest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+                },
+                "payload": ""
+              }
+            }
+          },
+          {
+            "reference": {
+              "nodeId": "security-review"
+            },
+            "timeout": "120s",
+            "inputs": [
+              {
+                "name": "change",
+                "schema": {
+                  "maxEncodedBytes": "4096",
+                  "scalar": "SCALAR_TYPE_STRING"
+                },
+                "required": true
+              }
+            ],
+            "outputs": [
+              {
+                "name": "verdict",
+                "schema": {
+                  "maxEncodedBytes": "128",
+                  "symbol": {
+                    "typeName": "review.verdict",
+                    "values": [
+                      "approved",
+                      "changes_requested"
+                    ]
+                  }
+                },
+                "required": true
+              }
+            ],
+            "inputBindings": [
+              {
+                "targetName": "change",
+                "expression": {
+                  "reference": {
+                    "nodeOutput": {
+                      "node": {
+                        "nodeId": "implement"
+                      },
+                      "outputName": "change",
+                      "selection": "OUTPUT_SELECTION_CURRENT_ITERATION"
+                    }
+                  }
+                }
+              }
+            ],
+            "outputBindings": [],
+            "agentStep": {
+              "agentRevision": {
+                "agentId": "agent-example",
+                "revisionNumber": "1",
+                "configuration": {
+                  "configurationDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                }
+              },
+              "prompt": {
+                "parts": [
+                  {
+                    "literal": "Complete the assigned task."
+                  }
+                ]
+              },
+              "retry": {
+                "maxAttempts": 1,
+                "initialDelay": "0s",
+                "maxDelay": "0s",
+                "multiplier": 1,
+                "retryOn": []
+              },
+              "resultCapture": {
+                "contract": {
+                  "contractId": "example.capture",
+                  "version": "1",
+                  "digest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+                },
+                "payload": ""
+              }
+            }
+          },
+          {
+            "reference": {
+              "nodeId": "combine"
+            },
+            "timeout": "120s",
+            "inputs": [
+              {
+                "name": "quality",
+                "schema": {
+                  "maxEncodedBytes": "128",
+                  "symbol": {
+                    "typeName": "review.verdict",
+                    "values": [
+                      "approved",
+                      "changes_requested"
+                    ]
+                  }
+                },
+                "required": true
+              },
+              {
+                "name": "security",
+                "schema": {
+                  "maxEncodedBytes": "128",
+                  "symbol": {
+                    "typeName": "review.verdict",
+                    "values": [
+                      "approved",
+                      "changes_requested"
+                    ]
+                  }
+                },
+                "required": true
+              }
+            ],
+            "outputs": [
+              {
+                "name": "verdict",
+                "schema": {
+                  "maxEncodedBytes": "128",
+                  "symbol": {
+                    "typeName": "review.verdict",
+                    "values": [
+                      "approved",
+                      "changes_requested"
+                    ]
+                  }
+                },
+                "required": true
+              },
+              {
+                "name": "feedback",
+                "schema": {
+                  "maxEncodedBytes": "4096",
+                  "scalar": "SCALAR_TYPE_STRING"
+                },
+                "required": true
+              }
+            ],
+            "inputBindings": [
+              {
+                "targetName": "quality",
+                "expression": {
+                  "reference": {
+                    "nodeOutput": {
+                      "node": {
+                        "nodeId": "reviews"
+                      },
+                      "outputName": "quality",
+                      "selection": "OUTPUT_SELECTION_CURRENT_ITERATION"
+                    }
+                  }
+                }
+              },
+              {
+                "targetName": "security",
+                "expression": {
+                  "reference": {
+                    "nodeOutput": {
+                      "node": {
+                        "nodeId": "reviews"
+                      },
+                      "outputName": "security",
+                      "selection": "OUTPUT_SELECTION_CURRENT_ITERATION"
+                    }
+                  }
+                }
+              }
+            ],
+            "outputBindings": [],
+            "agentStep": {
+              "agentRevision": {
+                "agentId": "agent-example",
+                "revisionNumber": "1",
+                "configuration": {
+                  "configurationDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                }
+              },
+              "prompt": {
+                "parts": [
+                  {
+                    "literal": "Complete the assigned task."
+                  }
+                ]
+              },
+              "retry": {
+                "maxAttempts": 1,
+                "initialDelay": "0s",
+                "maxDelay": "0s",
+                "multiplier": 1,
+                "retryOn": []
+              },
+              "resultCapture": {
+                "contract": {
+                  "contractId": "example.capture",
+                  "version": "1",
+                  "digest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+                },
+                "payload": ""
+              }
+            }
+          }
+        ],
+        "inputs": [
+          {
+            "name": "task",
+            "schema": {
+              "maxEncodedBytes": "4096",
+              "scalar": "SCALAR_TYPE_STRING"
+            },
+            "required": true
+          }
+        ],
+        "outputs": [
+          {
+            "name": "verdict",
+            "schema": {
+              "maxEncodedBytes": "128",
+              "symbol": {
+                "typeName": "review.verdict",
+                "values": [
+                  "approved",
+                  "changes_requested"
+                ]
+              }
+            },
+            "required": true
+          }
+        ],
+        "outputBindings": [
+          {
+            "targetName": "verdict",
+            "expression": {
+              "reference": {
+                "nodeOutput": {
+                  "node": {
+                    "nodeId": "review-loop"
+                  },
+                  "outputName": "verdict",
+                  "selection": "OUTPUT_SELECTION_CURRENT_ITERATION"
+                }
+              }
+            }
+          }
+        ],
+        "policy": {
+          "maxDuration": "600s",
+          "maxConcurrentInvocations": 4,
+          "maxInvocations": "100",
+          "maxControlDepth": 16,
+          "maxValueDepth": 16
+        },
+        "contractVersion": 1
+      }
+    },
+    "node-agent-captured-outputs": {
+      "type": "trogonai.workflows.definitions.v1alpha1.WorkflowNode",
+      "payload": {
+        "reference": {
+          "nodeId": "implement"
+        },
+        "timeout": "120s",
+        "inputs": [
+          {
+            "name": "task",
+            "schema": {
+              "maxEncodedBytes": "4096",
+              "scalar": "SCALAR_TYPE_STRING"
+            },
+            "required": true
+          },
+          {
+            "name": "feedback",
+            "schema": {
+              "maxEncodedBytes": "4096",
+              "scalar": "SCALAR_TYPE_STRING"
+            },
+            "required": true
+          }
+        ],
+        "outputs": [
+          {
+            "name": "change",
+            "schema": {
+              "maxEncodedBytes": "4096",
+              "scalar": "SCALAR_TYPE_STRING"
+            },
+            "required": true
+          }
+        ],
+        "inputBindings": [
+          {
+            "targetName": "task",
+            "expression": {
+              "reference": {
+                "workflowInput": "task"
+              }
+            }
+          },
+          {
+            "targetName": "feedback",
+            "expression": {
+              "reference": {
+                "repeatVariable": {
+                  "repeatNode": {
+                    "nodeId": "review-loop"
+                  },
+                  "variableName": "feedback"
+                }
+              }
+            }
+          }
+        ],
+        "outputBindings": [],
+        "agentStep": {
+          "agentRevision": {
+            "agentId": "agent-example",
+            "revisionNumber": "1",
+            "configuration": {
+              "configurationDigest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            }
+          },
+          "prompt": {
+            "parts": [
+              {
+                "literal": "Complete the assigned task."
+              }
+            ]
+          },
+          "retry": {
+            "maxAttempts": 1,
+            "initialDelay": "0s",
+            "maxDelay": "0s",
+            "multiplier": 1,
+            "retryOn": []
+          },
+          "resultCapture": {
+            "contract": {
+              "contractId": "example.capture",
+              "version": "1",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              },
+              "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+            },
+            "payload": ""
+          }
+        }
+      }
+    },
+    "node-delay": {
+      "type": "trogonai.workflows.definitions.v1alpha1.WorkflowNode",
+      "payload": {
+        "reference": {
+          "nodeId": "delay"
+        },
+        "timeout": "120s",
+        "inputs": [],
+        "outputs": [],
+        "inputBindings": [],
+        "outputBindings": [],
+        "wait": {
+          "delay": {
+            "duration": "1s"
+          }
+        }
+      }
+    },
+    "node-composite-output-bindings": {
+      "type": "trogonai.workflows.definitions.v1alpha1.WorkflowNode",
+      "payload": {
+        "reference": {
+          "nodeId": "cycle"
+        },
+        "timeout": "120s",
+        "inputs": [],
+        "outputs": [
+          {
+            "name": "verdict",
+            "schema": {
+              "maxEncodedBytes": "128",
+              "symbol": {
+                "typeName": "review.verdict",
+                "values": [
+                  "approved",
+                  "changes_requested"
+                ]
+              }
+            },
+            "required": true
+          },
+          {
+            "name": "feedback",
+            "schema": {
+              "maxEncodedBytes": "4096",
+              "scalar": "SCALAR_TYPE_STRING"
+            },
+            "required": true
+          }
+        ],
+        "inputBindings": [],
+        "outputBindings": [
+          {
+            "targetName": "verdict",
+            "expression": {
+              "reference": {
+                "nodeOutput": {
+                  "node": {
+                    "nodeId": "combine"
+                  },
+                  "outputName": "verdict",
+                  "selection": "OUTPUT_SELECTION_CURRENT_ITERATION"
+                }
+              }
+            }
+          },
+          {
+            "targetName": "feedback",
+            "expression": {
+              "reference": {
+                "nodeOutput": {
+                  "node": {
+                    "nodeId": "combine"
+                  },
+                  "outputName": "feedback",
+                  "selection": "OUTPUT_SELECTION_CURRENT_ITERATION"
+                }
+              }
+            }
+          }
+        ],
+        "sequence": {
+          "children": [
+            {
+              "nodeId": "implement"
+            },
+            {
+              "nodeId": "reviews"
+            },
+            {
+              "nodeId": "combine"
+            }
+          ]
+        }
+      }
+    },
+    "sequence-unique-ordered-children": {
+      "type": "trogonai.workflows.definitions.v1alpha1.SequenceNode",
+      "payload": {
+        "children": [
+          {
+            "nodeId": "implement"
+          },
+          {
+            "nodeId": "reviews"
+          },
+          {
+            "nodeId": "combine"
+          }
+        ]
+      }
+    },
+    "parallel-all": {
+      "type": "trogonai.workflows.definitions.v1alpha1.ParallelNode",
+      "payload": {
+        "branches": [
+          {
+            "nodeId": "quality-review"
+          },
+          {
+            "nodeId": "security-review"
+          }
+        ],
+        "join": "JOIN_POLICY_ALL",
+        "siblings": "SIBLING_DISPOSITION_CANCEL",
+        "maxConcurrency": 2
+      }
+    },
+    "parallel-all-settled": {
+      "type": "trogonai.workflows.definitions.v1alpha1.ParallelNode",
+      "payload": {
+        "branches": [
+          {
+            "nodeId": "quality-review"
+          },
+          {
+            "nodeId": "security-review"
+          }
+        ],
+        "join": "JOIN_POLICY_ALL_SETTLED",
+        "siblings": "SIBLING_DISPOSITION_WAIT",
+        "maxConcurrency": 2
+      }
+    },
+    "parallel-first-success": {
+      "type": "trogonai.workflows.definitions.v1alpha1.ParallelNode",
+      "payload": {
+        "branches": [
+          {
+            "nodeId": "quality-review"
+          },
+          {
+            "nodeId": "security-review"
+          }
+        ],
+        "join": "JOIN_POLICY_FIRST_SUCCESS",
+        "siblings": "SIBLING_DISPOSITION_CANCEL",
+        "maxConcurrency": 2
+      }
+    },
+    "repeat-bounded-feedback": {
+      "type": "trogonai.workflows.definitions.v1alpha1.RepeatNode",
+      "payload": {
+        "body": {
+          "nodeId": "cycle"
+        },
+        "until": {
+          "compare": {
+            "left": {
+              "reference": {
+                "nodeOutput": {
+                  "node": {
+                    "nodeId": "cycle"
+                  },
+                  "outputName": "verdict",
+                  "selection": "OUTPUT_SELECTION_CURRENT_ITERATION"
+                }
+              }
+            },
+            "operator": "COMPARISON_OPERATOR_EQUAL",
+            "right": {
+              "literal": {
+                "symbolValue": {
+                  "typeName": "review.verdict",
+                  "value": "approved"
+                }
+              }
+            }
+          }
+        },
+        "maxIterations": 4,
+        "onLimit": "ITERATION_LIMIT_POLICY_REQUEST_INPUT",
+        "variables": [
+          {
+            "declaration": {
+              "name": "feedback",
+              "schema": {
+                "maxEncodedBytes": "4096",
+                "scalar": "SCALAR_TYPE_STRING"
+              },
+              "required": true
+            },
+            "initial": {
+              "literal": {
+                "stringValue": ""
+              }
+            },
+            "next": {
+              "reference": {
+                "nodeOutput": {
+                  "node": {
+                    "nodeId": "cycle"
+                  },
+                  "outputName": "feedback",
+                  "selection": "OUTPUT_SELECTION_CURRENT_ITERATION"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "external-wait-subscribed": {
+      "type": "trogonai.workflows.definitions.v1alpha1.ExternalEventWait",
+      "payload": {
+        "watcher": {
+          "contract": {
+            "contractId": "example.capture",
+            "version": "1",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            },
+            "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+          },
+          "payload": ""
+        },
+        "observationContract": {
+          "contractId": "example.capture",
+          "version": "1",
+          "digest": {
+            "algorithm": "sha256",
+            "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          },
+          "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+        },
+        "until": {
+          "always": {}
+        },
+        "subscribed": {}
+      }
+    },
+    "external-wait-polled": {
+      "type": "trogonai.workflows.definitions.v1alpha1.ExternalEventWait",
+      "payload": {
+        "watcher": {
+          "contract": {
+            "contractId": "example.capture",
+            "version": "1",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            },
+            "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+          },
+          "payload": ""
+        },
+        "observationContract": {
+          "contractId": "example.capture",
+          "version": "1",
+          "digest": {
+            "algorithm": "sha256",
+            "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          },
+          "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+        },
+        "until": {
+          "always": {}
+        },
+        "pollInterval": "30s"
+      }
+    },
+    "input-wait-user": {
+      "type": "trogonai.workflows.definitions.v1alpha1.InputWait",
+      "payload": {
+        "question": {
+          "parts": [
+            {
+              "literal": "Approve the result?"
+            }
+          ]
+        },
+        "responseSchema": {
+          "maxEncodedBytes": "128",
+          "symbol": {
+            "typeName": "review.verdict",
+            "values": [
+              "approved",
+              "changes_requested"
+            ]
+          }
+        },
+        "audience": "INPUT_AUDIENCE_USER",
+        "outputName": "decision"
+      }
+    },
+    "schema-admits-incompatible-binding-requiring-semantic-admission": {
+      "type": "trogonai.workflows.definitions.v1alpha1.WorkflowNode",
+      "payload": {
+        "reference": {
+          "nodeId": "implement"
+        },
+        "timeout": "120s",
+        "inputs": [
+          {
+            "name": "task",
+            "schema": {
+              "maxEncodedBytes": "4096",
+              "scalar": "SCALAR_TYPE_STRING"
+            },
+            "required": true
+          },
+          {
+            "name": "feedback",
+            "schema": {
+              "maxEncodedBytes": "4096",
+              "scalar": "SCALAR_TYPE_STRING"
+            },
+            "required": true
+          }
+        ],
+        "outputs": [
+          {
+            "name": "change",
+            "schema": {
+              "maxEncodedBytes": "4096",
+              "scalar": "SCALAR_TYPE_STRING"
+            },
+            "required": true
+          }
+        ],
+        "inputBindings": [
+          {
+            "targetName": "task",
+            "expression": {
+              "literal": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "targetName": "feedback",
+            "expression": {
+              "reference": {
+                "repeatVariable": {
+                  "repeatNode": {
+                    "nodeId": "review-loop"
+                  },
+                  "variableName": "feedback"
+                }
+              }
+            }
+          }
+        ],
+        "outputBindings": [],
+        "agentStep": {
+          "agentRevision": {
+            "agentId": "agent-example",
+            "revisionNumber": "1",
+            "configuration": {
+              "configurationDigest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            }
+          },
+          "prompt": {
+            "parts": [
+              {
+                "literal": "Complete the assigned task."
+              }
+            ]
+          },
+          "retry": {
+            "maxAttempts": 1,
+            "initialDelay": "0s",
+            "maxDelay": "0s",
+            "multiplier": 1,
+            "retryOn": []
+          },
+          "resultCapture": {
+            "contract": {
+              "contractId": "example.capture",
+              "version": "1",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              },
+              "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+            },
+            "payload": ""
+          }
+        }
+      }
+    },
+    "schema-admits-disconnected-cycle-requiring-semantic-admission": {
+      "type": "trogonai.workflows.definitions.v1alpha1.WorkflowDefinition",
+      "payload": {
+        "root": {
+          "nodeId": "delay-root"
+        },
+        "nodes": [
+          {
+            "reference": {
+              "nodeId": "delay-root"
+            },
+            "timeout": "120s",
+            "wait": {
+              "delay": {
+                "duration": "1s"
+              }
+            }
+          },
+          {
+            "reference": {
+              "nodeId": "first"
+            },
+            "timeout": "120s",
+            "sequence": {
+              "children": [
+                {
+                  "nodeId": "second"
+                }
+              ]
+            }
+          },
+          {
+            "reference": {
+              "nodeId": "second"
+            },
+            "timeout": "120s",
+            "sequence": {
+              "children": [
+                {
+                  "nodeId": "first"
+                }
+              ]
+            }
+          }
+        ],
+        "policy": {
+          "maxDuration": "600s",
+          "maxConcurrentInvocations": 4,
+          "maxInvocations": "100",
+          "maxControlDepth": 16,
+          "maxValueDepth": 16
+        },
+        "contractVersion": 1
+      }
+    },
+    "node-input-wait-output-matches-schema": {
+      "type": "trogonai.workflows.definitions.v1alpha1.WorkflowNode",
+      "payload": {
+        "reference": {
+          "nodeId": "input"
+        },
+        "timeout": "120s",
+        "outputs": [
+          {
+            "name": "decision",
+            "schema": {
+              "maxEncodedBytes": "128",
+              "symbol": {
+                "typeName": "review.verdict",
+                "values": [
+                  "approved",
+                  "changes_requested"
+                ]
+              }
+            },
+            "required": true
+          }
+        ],
+        "wait": {
+          "input": {
+            "question": {
+              "parts": [
+                {
+                  "literal": "Approve the result?"
+                }
+              ]
+            },
+            "responseSchema": {
+              "maxEncodedBytes": "128",
+              "symbol": {
+                "typeName": "review.verdict",
+                "values": [
+                  "approved",
+                  "changes_requested"
+                ]
+              }
+            },
+            "audience": "INPUT_AUDIENCE_USER",
+            "outputName": "decision"
+          }
+        }
+      }
+    },
+    "definition-state-single-genesis": {
+      "type": "trogonai.workflows.definitions.state.v1alpha1.ProvisionedWorkflowDefinition",
+      "payload": {
+        "workflowId": "workflow-example",
+        "lifecycle": "WORKFLOW_DEFINITION_LIFECYCLE_ACTIVE",
+        "revisions": {
+          "1": {
+            "reference": {
+              "workflowId": "workflow-example",
+              "revision": "1",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            },
+            "definitionBytes": "AA=="
+          }
+        }
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "definition-review-and-feedback-recipe",
+      "template": "definition-review-and-feedback-recipe"
+    },
+    {
+      "name": "definition-rejects-duplicate-node-id",
+      "template": "definition-review-and-feedback-recipe",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/-",
+          "value": {
+            "reference": {
+              "nodeId": "combine"
+            },
+            "timeout": "120s",
+            "inputs": [
+              {
+                "name": "quality",
+                "schema": {
+                  "maxEncodedBytes": "128",
+                  "symbol": {
+                    "typeName": "review.verdict",
+                    "values": [
+                      "approved",
+                      "changes_requested"
+                    ]
+                  }
+                },
+                "required": true
+              },
+              {
+                "name": "security",
+                "schema": {
+                  "maxEncodedBytes": "128",
+                  "symbol": {
+                    "typeName": "review.verdict",
+                    "values": [
+                      "approved",
+                      "changes_requested"
+                    ]
+                  }
+                },
+                "required": true
+              }
+            ],
+            "outputs": [
+              {
+                "name": "verdict",
+                "schema": {
+                  "maxEncodedBytes": "128",
+                  "symbol": {
+                    "typeName": "review.verdict",
+                    "values": [
+                      "approved",
+                      "changes_requested"
+                    ]
+                  }
+                },
+                "required": true
+              },
+              {
+                "name": "feedback",
+                "schema": {
+                  "maxEncodedBytes": "4096",
+                  "scalar": "SCALAR_TYPE_STRING"
+                },
+                "required": true
+              }
+            ],
+            "inputBindings": [
+              {
+                "targetName": "quality",
+                "expression": {
+                  "reference": {
+                    "nodeOutput": {
+                      "node": {
+                        "nodeId": "reviews"
+                      },
+                      "outputName": "quality",
+                      "selection": "OUTPUT_SELECTION_CURRENT_ITERATION"
+                    }
+                  }
+                }
+              },
+              {
+                "targetName": "security",
+                "expression": {
+                  "reference": {
+                    "nodeOutput": {
+                      "node": {
+                        "nodeId": "reviews"
+                      },
+                      "outputName": "security",
+                      "selection": "OUTPUT_SELECTION_CURRENT_ITERATION"
+                    }
+                  }
+                }
+              }
+            ],
+            "outputBindings": [],
+            "agentStep": {
+              "agentRevision": {
+                "agentId": "agent-example",
+                "revisionNumber": "1",
+                "configuration": {
+                  "configurationDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                }
+              },
+              "prompt": {
+                "parts": [
+                  {
+                    "literal": "Complete the assigned task."
+                  }
+                ]
+              },
+              "retry": {
+                "maxAttempts": 1,
+                "initialDelay": "0s",
+                "maxDelay": "0s",
+                "multiplier": 1,
+                "retryOn": []
+              },
+              "resultCapture": {
+                "contract": {
+                  "contractId": "example.capture",
+                  "version": "1",
+                  "digest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "payloadTypeUrl": "type.googleapis.com/google.protobuf.Empty"
+                },
+                "payload": ""
+              }
+            }
+          }
+        }
+      ],
+      "violations": [
+        "node ids must be unique"
+      ]
+    },
+    {
+      "name": "definition-rejects-missing-root",
+      "template": "definition-review-and-feedback-recipe",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/root/nodeId",
+          "value": "absent"
+        }
+      ],
+      "violations": [
+        "the root must name a declared node"
+      ]
+    },
+    {
+      "name": "definition-rejects-missing-control-child",
+      "template": "definition-review-and-feedback-recipe",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/1/sequence/children/0/nodeId",
+          "value": "absent"
+        }
+      ],
+      "violations": [
+        "control children must name another declared node"
+      ]
+    },
+    {
+      "name": "definition-rejects-control-self-reference",
+      "template": "definition-review-and-feedback-recipe",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/1/sequence/children/0/nodeId",
+          "value": "cycle"
+        }
+      ],
+      "violations": [
+        "control children must name another declared node"
+      ]
+    },
+    {
+      "name": "definition-rejects-duplicate-input",
+      "template": "definition-review-and-feedback-recipe",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/inputs/-",
+          "value": {
+            "name": "task",
+            "schema": {
+              "maxEncodedBytes": "4096",
+              "scalar": "SCALAR_TYPE_STRING"
+            },
+            "required": true
+          }
+        }
+      ],
+      "violations": [
+        "workflow input and output names must be unique"
+      ]
+    },
+    {
+      "name": "definition-rejects-duplicate-output",
+      "template": "definition-review-and-feedback-recipe",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/outputs/-",
+          "value": {
+            "name": "verdict",
+            "schema": {
+              "maxEncodedBytes": "128",
+              "symbol": {
+                "typeName": "review.verdict",
+                "values": [
+                  "approved",
+                  "changes_requested"
+                ]
+              }
+            },
+            "required": true
+          }
+        }
+      ],
+      "violations": [
+        "workflow input and output names must be unique"
+      ]
+    },
+    {
+      "name": "definition-rejects-missing-required-output-binding",
+      "template": "definition-review-and-feedback-recipe",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/outputBindings",
+          "value": []
+        }
+      ],
+      "violations": [
+        "output binding targets must be unique declared outputs and cover required outputs"
+      ]
+    },
+    {
+      "name": "definition-rejects-undeclared-output-binding",
+      "template": "definition-review-and-feedback-recipe",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/outputBindings/0/targetName",
+          "value": "other"
+        }
+      ],
+      "violations": [
+        "output binding targets must be unique declared outputs and cover required outputs"
+      ]
+    },
+    {
+      "name": "definition-rejects-duplicate-output-binding",
+      "template": "definition-review-and-feedback-recipe",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/outputBindings/-",
+          "value": {
+            "targetName": "verdict",
+            "expression": {
+              "reference": {
+                "nodeOutput": {
+                  "node": {
+                    "nodeId": "review-loop"
+                  },
+                  "outputName": "verdict",
+                  "selection": "OUTPUT_SELECTION_CURRENT_ITERATION"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "violations": [
+        "output binding targets must be unique declared outputs and cover required outputs"
+      ]
+    },
+    {
+      "name": "node-agent-captured-outputs",
+      "template": "node-agent-captured-outputs"
+    },
+    {
+      "name": "node-rejects-missing-kind",
+      "template": "node-agent-captured-outputs",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/agentStep"
+        }
+      ],
+      "violations": [
+        "kind: exactly one field is required in oneof"
+      ]
+    },
+    {
+      "name": "node-rejects-duplicate-input",
+      "template": "node-agent-captured-outputs",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/inputs/-",
+          "value": {
+            "name": "task",
+            "schema": {
+              "maxEncodedBytes": "4096",
+              "scalar": "SCALAR_TYPE_STRING"
+            },
+            "required": true
+          }
+        }
+      ],
+      "violations": [
+        "node input and output names must be unique"
+      ]
+    },
+    {
+      "name": "node-rejects-duplicate-output",
+      "template": "node-agent-captured-outputs",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/outputs/-",
+          "value": {
+            "name": "change",
+            "schema": {
+              "maxEncodedBytes": "4096",
+              "scalar": "SCALAR_TYPE_STRING"
+            },
+            "required": true
+          }
+        }
+      ],
+      "violations": [
+        "node input and output names must be unique"
+      ]
+    },
+    {
+      "name": "node-rejects-missing-input-binding",
+      "template": "node-agent-captured-outputs",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/inputBindings",
+          "value": []
+        }
+      ],
+      "violations": [
+        "input binding targets must be unique declared inputs and cover required inputs"
+      ]
+    },
+    {
+      "name": "node-rejects-undeclared-input-binding",
+      "template": "node-agent-captured-outputs",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/inputBindings/0/targetName",
+          "value": "other"
+        }
+      ],
+      "violations": [
+        "input binding targets must be unique declared inputs and cover required inputs"
+      ]
+    },
+    {
+      "name": "node-rejects-duplicate-input-binding",
+      "template": "node-agent-captured-outputs",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/inputBindings/-",
+          "value": {
+            "targetName": "task",
+            "expression": {
+              "reference": {
+                "workflowInput": "task"
+              }
+            }
+          }
+        }
+      ],
+      "violations": [
+        "input binding targets must be unique declared inputs and cover required inputs"
+      ]
+    },
+    {
+      "name": "node-rejects-uncaptured-agent-outputs",
+      "template": "node-agent-captured-outputs",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/agentStep/resultCapture"
+        }
+      ],
+      "violations": [
+        "an agent step declaring outputs requires an exact result capture contract"
+      ]
+    },
+    {
+      "name": "node-rejects-leaf-output-bindings",
+      "template": "node-agent-captured-outputs",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/outputBindings/-",
+          "value": {
+            "targetName": "change",
+            "expression": {
+              "literal": {
+                "stringValue": "change"
+              }
+            }
+          }
+        }
+      ],
+      "violations": [
+        "composite nodes must bind their required outputs; leaf nodes capture outputs directly"
+      ]
+    },
+    {
+      "name": "node-delay",
+      "template": "node-delay"
+    },
+    {
+      "name": "node-rejects-delay-capture",
+      "template": "node-delay",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/outputs/-",
+          "value": {
+            "name": "result",
+            "schema": {
+              "maxEncodedBytes": "4096",
+              "scalar": "SCALAR_TYPE_STRING"
+            },
+            "required": true
+          }
+        }
+      ],
+      "violations": [
+        "a delay wait cannot declare captured outputs"
+      ]
+    },
+    {
+      "name": "node-rejects-zero-timeout",
+      "template": "node-delay",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/timeout",
+          "value": "0s"
+        }
+      ],
+      "violations": [
+        "must be greater than"
+      ]
+    },
+    {
+      "name": "node-composite-output-bindings",
+      "template": "node-composite-output-bindings"
+    },
+    {
+      "name": "node-rejects-unbound-composite-output",
+      "template": "node-composite-output-bindings",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/outputBindings",
+          "value": []
+        }
+      ],
+      "violations": [
+        "composite nodes must bind their required outputs; leaf nodes capture outputs directly"
+      ]
+    },
+    {
+      "name": "node-rejects-undeclared-composite-output",
+      "template": "node-composite-output-bindings",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/outputBindings/0/targetName",
+          "value": "other"
+        }
+      ],
+      "violations": [
+        "output binding targets must be unique declared outputs"
+      ]
+    },
+    {
+      "name": "sequence-unique-ordered-children",
+      "template": "sequence-unique-ordered-children"
+    },
+    {
+      "name": "sequence-rejects-empty-children",
+      "template": "sequence-unique-ordered-children",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/children",
+          "value": []
+        }
+      ],
+      "violations": [
+        "must contain at least 1 item(s)"
+      ]
+    },
+    {
+      "name": "sequence-rejects-duplicate-children",
+      "template": "sequence-unique-ordered-children",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/children/-",
+          "value": {
+            "nodeId": "implement"
+          }
+        }
+      ],
+      "violations": [
+        "sequence children must be unique"
+      ]
+    },
+    {
+      "name": "parallel-all",
+      "template": "parallel-all"
+    },
+    {
+      "name": "parallel-all-settled",
+      "template": "parallel-all-settled"
+    },
+    {
+      "name": "parallel-first-success",
+      "template": "parallel-first-success"
+    },
+    {
+      "name": "parallel-rejects-duplicate-branch",
+      "template": "parallel-all",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/branches",
+          "value": [
+            {
+              "nodeId": "quality-review"
+            },
+            {
+              "nodeId": "quality-review"
+            }
+          ]
+        }
+      ],
+      "violations": [
+        "parallel branches must be unique"
+      ]
+    },
+    {
+      "name": "parallel-rejects-excess-concurrency",
+      "template": "parallel-all",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/maxConcurrency",
+          "value": 3
+        }
+      ],
+      "violations": [
+        "parallel concurrency must not exceed the branch count"
+      ]
+    },
+    {
+      "name": "parallel-rejects-all-settled-cancellation",
+      "template": "parallel-all-settled",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/siblings",
+          "value": "SIBLING_DISPOSITION_CANCEL"
+        }
+      ],
+      "violations": [
+        "an all-settled join must wait for siblings without cancelling them"
+      ]
+    },
+    {
+      "name": "parallel-rejects-unknown-join",
+      "template": "parallel-all",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/join",
+          "value": 99
+        }
+      ],
+      "violations": [
+        "must be one of the defined enum values"
+      ]
+    },
+    {
+      "name": "repeat-bounded-feedback",
+      "template": "repeat-bounded-feedback"
+    },
+    {
+      "name": "repeat-rejects-zero-limit",
+      "template": "repeat-bounded-feedback",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/maxIterations",
+          "value": 0
+        }
+      ],
+      "violations": [
+        "must be greater than 0"
+      ]
+    },
+    {
+      "name": "repeat-rejects-duplicate-variable",
+      "template": "repeat-bounded-feedback",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/variables/-",
+          "value": {
+            "declaration": {
+              "name": "feedback",
+              "schema": {
+                "maxEncodedBytes": "4096",
+                "scalar": "SCALAR_TYPE_STRING"
+              },
+              "required": true
+            },
+            "initial": {
+              "literal": {
+                "stringValue": ""
+              }
+            },
+            "next": {
+              "reference": {
+                "nodeOutput": {
+                  "node": {
+                    "nodeId": "cycle"
+                  },
+                  "outputName": "feedback",
+                  "selection": "OUTPUT_SELECTION_CURRENT_ITERATION"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "violations": [
+        "repeat variable names must be unique"
+      ]
+    },
+    {
+      "name": "repeat-rejects-unspecified-limit-policy",
+      "template": "repeat-bounded-feedback",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/onLimit",
+          "value": "ITERATION_LIMIT_POLICY_UNSPECIFIED"
+        }
+      ],
+      "violations": [
+        "must not be in list"
+      ]
+    },
+    {
+      "name": "external-wait-subscribed",
+      "template": "external-wait-subscribed"
+    },
+    {
+      "name": "external-wait-polled",
+      "template": "external-wait-polled"
+    },
+    {
+      "name": "external-wait-rejects-missing-delivery",
+      "template": "external-wait-subscribed",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/subscribed"
+        }
+      ],
+      "violations": [
+        "delivery: exactly one field is required in oneof"
+      ]
+    },
+    {
+      "name": "external-wait-rejects-zero-poll-interval",
+      "template": "external-wait-polled",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/pollInterval",
+          "value": "0s"
+        }
+      ],
+      "violations": [
+        "must be greater than"
+      ]
+    },
+    {
+      "name": "input-wait-user",
+      "template": "input-wait-user"
+    },
+    {
+      "name": "input-wait-rejects-unknown-audience",
+      "template": "input-wait-user",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/audience",
+          "value": 99
+        }
+      ],
+      "violations": [
+        "must be one of the defined enum values"
+      ]
+    },
+    {
+      "name": "schema-admits-incompatible-binding-requiring-semantic-admission",
+      "template": "schema-admits-incompatible-binding-requiring-semantic-admission"
+    },
+    {
+      "name": "schema-admits-disconnected-cycle-requiring-semantic-admission",
+      "template": "schema-admits-disconnected-cycle-requiring-semantic-admission"
+    },
+    {
+      "name": "definition-rejects-multiple-owners",
+      "template": "definition-review-and-feedback-recipe",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/1/sequence/children/-",
+          "value": {
+            "nodeId": "quality-review"
+          }
+        }
+      ],
+      "violations": [
+        "the root must have no parent and every other node must have exactly one parent"
+      ]
+    },
+    {
+      "name": "definition-rejects-ownerless-node",
+      "template": "definition-review-and-feedback-recipe",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/-",
+          "value": {
+            "reference": {
+              "nodeId": "delay-root"
+            },
+            "timeout": "120s",
+            "wait": {
+              "delay": {
+                "duration": "1s"
+              }
+            }
+          }
+        }
+      ],
+      "violations": [
+        "the root must have no parent and every other node must have exactly one parent"
+      ]
+    },
+    {
+      "name": "node-rejects-delay-longer-than-timeout",
+      "template": "node-delay",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/wait/delay/duration",
+          "value": "121s"
+        }
+      ],
+      "violations": [
+        "a delay wait duration must not exceed its node timeout"
+      ]
+    },
+    {
+      "name": "node-input-wait-output-matches-schema",
+      "template": "node-input-wait-output-matches-schema"
+    },
+    {
+      "name": "node-input-wait-rejects-missing-output",
+      "template": "node-input-wait-output-matches-schema",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/outputs",
+          "value": []
+        }
+      ],
+      "violations": [
+        "an input wait must declare its single required response output with the exact response schema"
+      ]
+    },
+    {
+      "name": "node-input-wait-rejects-optional-response",
+      "template": "node-input-wait-output-matches-schema",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/outputs/0/required",
+          "value": false
+        }
+      ],
+      "violations": [
+        "an input wait must declare its single required response output with the exact response schema"
+      ]
+    },
+    {
+      "name": "node-input-wait-rejects-schema-mismatch",
+      "template": "node-input-wait-output-matches-schema",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/outputs/0/schema",
+          "value": {
+            "maxEncodedBytes": "4096",
+            "scalar": "SCALAR_TYPE_STRING"
+          }
+        }
+      ],
+      "violations": [
+        "an input wait must declare its single required response output with the exact response schema"
+      ]
+    },
+    {
+      "name": "definition-state-single-genesis",
+      "template": "definition-state-single-genesis"
+    },
+    {
+      "name": "definition-state-rejects-zero-revision-key",
+      "template": "definition-state-single-genesis",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/revisions",
+          "value": {
+            "0": {
+              "reference": {
+                "workflowId": "workflow-example",
+                "revision": "0",
+                "digest": {
+                  "algorithm": "sha256",
+                  "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                }
+              },
+              "definitionBytes": "AA=="
+            }
+          }
+        }
+      ],
+      "violations": [
+        "revisions must cover every number from 1 through the latest revision"
+      ]
+    },
+    {
+      "name": "definition-rejects-unknown-contract-version",
+      "template": "definition-review-and-feedback-recipe",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/contractVersion",
+          "value": 2
+        }
+      ],
+      "violations": [
+        "must equal 1"
+      ]
+    }
+  ]
+}

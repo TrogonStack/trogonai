@@ -1,7 +1,10 @@
 use super::*;
 use crate::commands::domain::MessageHeadersError as CommandMessageHeadersError;
-use trogon_decider_nats::{JetStreamStoreError, OptimisticConcurrencyConflictError, SnapshotStoreError};
-use trogon_decider_runtime::{StreamPosition, StreamWritePrecondition};
+use trogon_decider_nats::{
+    JetStreamStoreError, OptimisticConcurrencyConflictError, ReadStreamError, SnapshotCodecError, SnapshotKvError,
+    SnapshotStoreError, StreamStoreError,
+};
+use trogon_decider_runtime::{SnapshotTypeName, StreamPosition, StreamWritePrecondition};
 use trogon_nats::SubjectTokenViolationError;
 
 fn position(value: u64) -> StreamPosition {
@@ -90,6 +93,70 @@ fn from_snapshot_invalid_key_maps_to_event_error() {
         })
         .into();
     assert!(matches!(via_store, SchedulerError::Event { .. }));
+}
+
+#[test]
+fn snapshot_storage_and_codec_errors_keep_their_typed_causes() {
+    let kv_error: SchedulerError =
+        SnapshotStoreError::<std::convert::Infallible>::Kv(SnapshotKvError::ReadSnapshotValue {
+            source: async_nats::jetstream::kv::EntryError::new(async_nats::jetstream::kv::EntryErrorKind::Other),
+        })
+        .into();
+    assert!(matches!(kv_error, SchedulerError::Kv { .. }));
+    assert!(std::error::Error::source(&kv_error).unwrap().is::<SnapshotKvError>());
+
+    let codec_error: SchedulerError = SnapshotStoreError::<std::io::Error>::Codec(SnapshotCodecError::DecodePayload {
+        source: std::io::Error::other("corrupt snapshot payload"),
+    })
+    .into();
+    assert!(matches!(codec_error, SchedulerError::Event { .. }));
+    assert!(
+        std::error::Error::source(&codec_error)
+            .unwrap()
+            .is::<SnapshotCodecError<std::io::Error>>()
+    );
+
+    let missing_checkpoint: SchedulerError = SnapshotStoreError::<std::convert::Infallible>::MissingCheckpointName {
+        snapshot_type: SnapshotTypeName::new("tests.scheduler.State").unwrap(),
+    }
+    .into();
+    assert!(matches!(missing_checkpoint, SchedulerError::Event { .. }));
+    assert!(std::error::Error::source(&missing_checkpoint).is_some());
+}
+
+#[test]
+fn stream_failures_preserve_causes_and_scope_violations_remain_schedule_errors() {
+    let read: SchedulerError = JetStreamStoreError::<SchedulerError>::ReadStream(StreamStoreError::Read(
+        ReadStreamError::MissingMessageHeader {
+            header_name: "Nats-Msg-Id",
+        },
+    ))
+    .into();
+    assert!(matches!(read, SchedulerError::Event { .. }));
+    assert!(matches!(
+        std::error::Error::source(&read)
+            .unwrap()
+            .downcast_ref::<StreamStoreError>(),
+        Some(StreamStoreError::Read(ReadStreamError::MissingMessageHeader { .. }))
+    ));
+
+    let append: SchedulerError =
+        JetStreamStoreError::<SchedulerError>::AppendStream(StreamStoreError::WrongExpectedVersion).into();
+    assert!(matches!(append, SchedulerError::Event { .. }));
+    assert!(matches!(
+        std::error::Error::source(&append)
+            .unwrap()
+            .downcast_ref::<StreamStoreError>(),
+        Some(StreamStoreError::WrongExpectedVersion)
+    ));
+
+    let scope: SchedulerError = JetStreamStoreError::<SchedulerError>::SubjectOutsideScope {
+        subject: "other.events.schedule".to_string(),
+        scope: "scheduler.schedules.events.>".to_string(),
+    }
+    .into();
+    assert!(matches!(scope, SchedulerError::Schedule { .. }));
+    assert!(std::error::Error::source(&scope).is_some());
 }
 
 #[test]

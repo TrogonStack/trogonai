@@ -40,6 +40,10 @@ signing_secret = "whsec_dGVzdC1zZWNyZXQ="
 [sources.linear.integrations.primary.webhook]
 webhook_secret = "linear-secret"
 
+[sources.google_pubsub.integrations.primary.streaming_pull]
+subscription = "projects/p/subscriptions/sub"
+credentials = '{"type":"service_account","project_id":"fake","private_key_id":"fake","private_key":"fake","client_email":"fake@example.invalid"}'
+
 [sources.microsoft_graph.integrations.primary.webhook]
 client_state = "microsoft-graph-client-state"
 
@@ -51,6 +55,9 @@ client_secret = "sentry-client-secret"
 
 [sources.datadog.integrations.primary.webhook]
 webhook_token = "datadog-webhook-token"
+
+[sources.zoom.integrations.primary.webhook]
+secret_token = "zoom-secret-token"
 "#
     .to_string()
 }
@@ -80,7 +87,7 @@ async fn provision_all_sources_creates_all_streams() {
 
     provision(&js, &cfg).await.expect("provision should succeed");
 
-    assert_eq!(js.created_streams().len(), 13);
+    assert_eq!(js.created_streams().len(), 15);
 }
 
 #[tokio::test]
@@ -156,4 +163,50 @@ webhook_token = "datadog-webhook-token"
     provision(&js, &cfg).await.expect("provision should succeed");
 
     assert_eq!(js.created_streams().len(), 12);
+}
+
+#[tokio::test]
+async fn provision_google_pubsub_creates_a_stream_per_integration() {
+    let toml = r#"
+[sources.google_pubsub.integrations.orders.streaming_pull]
+subscription = "projects/p/subscriptions/orders"
+credentials = '{"type":"service_account","project_id":"fake","private_key_id":"fake","private_key":"fake","client_email":"fake@example.invalid"}'
+
+[sources.google_pubsub.integrations.billing]
+subject_prefix = "billing-events"
+stream_name = "BILLING_EVENTS"
+
+[sources.google_pubsub.integrations.billing.streaming_pull]
+subscription = "projects/p/subscriptions/billing"
+credentials = '{"type":"service_account","project_id":"fake","private_key_id":"fake","private_key":"fake","client_email":"fake@example.invalid"}'
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+    let js = MockJetStreamContext::new();
+
+    provision(&js, &cfg).await.expect("provision should succeed");
+
+    let streams = js.created_streams();
+    assert_eq!(streams.len(), 3);
+    assert_eq!(streams[0].name, CREDENTIAL_STREAM);
+    assert_eq!(streams[1].name, "BILLING_EVENTS");
+    assert_eq!(streams[1].subjects, vec!["billing-events.>"]);
+    assert_eq!(streams[2].name, "GOOGLE_PUBSUB_ORDERS");
+    assert_eq!(streams[2].subjects, vec!["google-pubsub-orders.>"]);
+}
+
+#[tokio::test]
+async fn provision_google_pubsub_propagates_stream_errors() {
+    let f = write_toml(
+        r#"
+[sources.google_pubsub.integrations.orders.streaming_pull]
+subscription = "projects/p/subscriptions/orders"
+credentials = '{"type":"service_account","project_id":"fake","private_key_id":"fake","private_key":"fake","client_email":"fake@example.invalid"}'
+"#,
+    );
+    let cfg = load(Some(f.path())).expect("load failed");
+    let js = MockJetStreamContext::new();
+    js.fail_next();
+
+    assert!(provision(&js, &cfg).await.is_err());
 }

@@ -1,0 +1,14 @@
+edition = "2024";
+
+package trogonai.workflows.definitions.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// Scoped to one admitted definition. Runs add plan revision and occurrence
+// identities instead of changing a node's identity on every iteration.
+message NodeRef {
+  string node_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}

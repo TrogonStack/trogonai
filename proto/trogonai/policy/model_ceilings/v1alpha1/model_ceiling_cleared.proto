@@ -1,0 +1,11 @@
+edition = "2024";
+
+package trogonai.policy.model_ceilings.v1alpha1;
+
+import "trogonai/policy/subjects/v1alpha1/subject.proto";
+
+// Removes the subject's ceiling and retains its history. A later set reuses the
+// same stream.
+message ModelCeilingCleared {
+  trogonai.policy.subjects.v1alpha1.PolicySubject subject = 1 [features.field_presence = LEGACY_REQUIRED];
+}

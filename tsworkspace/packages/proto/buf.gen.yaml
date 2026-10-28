@@ -1,0 +1,18 @@
+version: v2
+clean: true
+inputs:
+  - directory: ../../..
+    paths:
+      - ../../../proto/trogonai/model_access/provider_connections
+      - ../../../proto/trogonai/projects
+  - git_repo: https://github.com/TrogonStack/trogonai.git
+    branch: yordis/feat-connector-webhook-contracts
+    depth: 1
+    paths:
+      - proto/trogonai/secrets
+plugins:
+  - local: node_modules/.bin/protoc-gen-es
+    out: src/gen
+    include_imports: true
+    opt:
+      - target=ts

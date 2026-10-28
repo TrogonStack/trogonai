@@ -1,0 +1,20 @@
+edition = "2024";
+
+package trogonai.library.skills.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/library/skills/v1alpha1/skill_archived.proto";
+import "trogonai/library/skills/v1alpha1/skill_registered.proto";
+import "trogonai/library/skills/v1alpha1/skill_version_added.proto";
+
+// An unset or unknown event rejects replay; skipping a version could resolve a
+// pinned SkillDeclaration to the wrong content.
+message SkillEvent {
+  oneof event {
+    option (buf.validate.oneof).required = true;
+
+    SkillRegistered skill_registered = 1;
+    SkillVersionAdded skill_version_added = 2;
+    SkillArchived skill_archived = 3;
+  }
+}

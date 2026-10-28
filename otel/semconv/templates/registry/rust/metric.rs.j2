@@ -48,6 +48,9 @@ pub fn build_{{ metric.metric_name | snake_case }}(
 {% if metric.unit %}
         .with_unit("{{ metric.unit }}")
 {% endif %}
+{% if metric.annotations.code_generation.histogram_boundaries %}
+        .with_boundaries(vec![{{ metric.annotations.code_generation.histogram_boundaries | join(", ") }}])
+{% endif %}
         .build()
 }
 

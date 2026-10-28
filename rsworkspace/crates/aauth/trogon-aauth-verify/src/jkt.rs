@@ -14,7 +14,11 @@ use sha2::{Digest, Sha256};
 /// backslashes, weakening the `agent_jkt` binding for crafted `cnf.jwk`
 /// payloads.
 ///
-/// Supports EC (P-256/P-384), OKP (Ed25519), RSA, and oct key types.
+/// Supports EC (P-256/P-384), OKP (Ed25519), and RSA key types. `oct`
+/// (symmetric) keys are rejected as unsupported: this thumbprint exists to
+/// bind an asymmetric proof-of-possession key, and a symmetric key's `k`
+/// member is the secret itself, not a public half a verifier could safely
+/// name.
 pub fn jwk_thumbprint(jwk: &serde_json::Value) -> Result<String, JktError> {
     let kty = jwk.get("kty").and_then(|v| v.as_str()).ok_or(JktError::MissingKty)?;
     let mut required = Map::new();
@@ -34,10 +38,6 @@ pub fn jwk_thumbprint(jwk: &serde_json::Value) -> Result<String, JktError> {
             require_str(jwk, "e", &mut required)?;
             required.insert("kty".into(), Value::String("RSA".into()));
             require_str(jwk, "n", &mut required)?;
-        }
-        "oct" => {
-            require_str(jwk, "k", &mut required)?;
-            required.insert("kty".into(), Value::String("oct".into()));
         }
         other => return Err(JktError::UnsupportedKty(other.to_string())),
     }

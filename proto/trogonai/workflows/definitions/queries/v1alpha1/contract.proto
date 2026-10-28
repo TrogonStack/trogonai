@@ -1,0 +1,149 @@
+edition = "2024";
+
+package trogonai.workflows.definitions.queries.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+// Same-major evolution is additive; different majors refuse the request. Servers
+// render no higher than accepted_contract and report their own supported maximum.
+message ContractVersion {
+  uint32 major = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32.gt = 0
+  ];
+  uint32 minor = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ContractNegotiation {
+  option (buf.validate.message).cel = {
+    id: "definition_query_contract.negotiation"
+    message: "rendered must share the server major and have no greater minor"
+    expression: "this.rendered.major == this.server_max.major && this.rendered.minor <= this.server_max.minor"
+  };
+
+  ContractVersion rendered = 1 [features.field_presence = LEGACY_REQUIRED];
+  ContractVersion server_max = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Ordinal is the applied definition-stream event position, including archival
+// facts. It is not a recipe revision, which advances only for content changes.
+message DefinitionPosition {
+  string workflow_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  uint64 ordinal = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+}
+
+message ReadConsistency {
+  option (buf.validate.message).cel = {
+    id: "definition_read_consistency.wait_requires_position"
+    message: "max_wait requires an at_least position"
+    expression: "!has(this.max_wait) || has(this.at_least)"
+  };
+
+  DefinitionPosition at_least = 1;
+  google.protobuf.Duration max_wait = 2 [(buf.validate.field).duration.gte = {}];
+}
+
+// List checkpoints are projection-owned opaque positions across independent
+// streams. Success affirms a requested consistency bound; unsatisfied reads fail.
+message ProjectionFreshness {
+  option (buf.validate.message).cel = {
+    id: "definition_projection_freshness.unique_positions"
+    message: "applied workflow positions must be unique"
+    expression: "this.applied.map(position, position.workflow_id).unique()"
+  };
+
+  string generation = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  bytes checkpoint = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.min_len = 1
+  ];
+  google.protobuf.Timestamp observed_at = 3 [features.field_presence = LEGACY_REQUIRED];
+  repeated DefinitionPosition applied = 4;
+  FreshnessCondition condition = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  bool consistency_satisfied = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bool.const = true
+  ];
+}
+
+enum FreshnessCondition {
+  FRESHNESS_CONDITION_UNSPECIFIED = 0;
+  FRESHNESS_CONDITION_CURRENT = 1;
+  FRESHNESS_CONDITION_LAGGING = 2;
+  FRESHNESS_CONDITION_INDETERMINATE = 3;
+}
+
+// Errors use the transport error channel; no successful response can encode an
+// absent definition or a read whose required consistency was silently weakened.
+message QueryError {
+  QueryErrorCode code = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  string message = 2 [features.field_presence = LEGACY_REQUIRED];
+  string field_path = 3;
+  ContractVersion supported_contract = 4;
+  ProjectionProgress reached_progress = 5;
+}
+
+// Failed consistency waits can report progress without asserting that the
+// requested consistency bound was satisfied.
+message ProjectionProgress {
+  option (buf.validate.message).cel = {
+    id: "definition_projection_progress.unique_positions"
+    message: "applied workflow positions must be unique"
+    expression: "this.applied.map(position, position.workflow_id).unique()"
+  };
+
+  string generation = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  bytes checkpoint = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.min_len = 1
+  ];
+  google.protobuf.Timestamp observed_at = 3 [features.field_presence = LEGACY_REQUIRED];
+  repeated DefinitionPosition applied = 4;
+  FreshnessCondition condition = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+enum QueryErrorCode {
+  QUERY_ERROR_CODE_UNSPECIFIED = 0;
+  QUERY_ERROR_CODE_DEFINITION_NOT_FOUND = 1;
+  QUERY_ERROR_CODE_REVISION_NOT_FOUND = 2;
+  QUERY_ERROR_CODE_INVALID_ARGUMENT = 3;
+  QUERY_ERROR_CODE_UNSUPPORTED_CONTRACT = 4;
+  QUERY_ERROR_CODE_STALE_CURSOR = 5;
+  QUERY_ERROR_CODE_MALFORMED_CURSOR = 6;
+  QUERY_ERROR_CODE_PROJECTION_UNAVAILABLE = 7;
+  QUERY_ERROR_CODE_PERMISSION_DENIED = 8;
+  QUERY_ERROR_CODE_RESOURCE_EXHAUSTED = 9;
+  QUERY_ERROR_CODE_INTERNAL = 10;
+}

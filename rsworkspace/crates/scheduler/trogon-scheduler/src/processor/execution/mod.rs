@@ -6,7 +6,7 @@
 //! reconciliation rules, execution schedule writes, checkpoint persistence, and
 //! the durable worker.
 #![cfg_attr(
-    dylint_lib = "trogon_lints",
+    dylint_lib = "trogon_dylint_lints",
     expect(
         acyclic_modules,
         reason = "reconciliation resumes from the checkpoint it last wrote and a checkpoint records the reconciliation position it was taken at"
@@ -19,5 +19,5 @@ pub(crate) mod reconciliation;
 pub mod wakeup;
 pub mod worker;
 
-#[cfg(all(test, not(coverage)))]
+#[cfg(test)]
 mod nats_execution_tests;

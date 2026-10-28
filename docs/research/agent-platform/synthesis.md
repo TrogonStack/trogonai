@@ -27,6 +27,44 @@ ADR is authoritative.
 > Divergences A, C, D, and E, and the conceptual and comparison tables. The
 > revisions are marked inline.
 
+> [OpenAI Agents API](./products/openai-agents-api.md) was researched on
+> 2026-09-11, one day after its public beta announcement. It is the first
+> product in the corpus to *contradict* a recorded finding rather than
+> qualify one: the same vendor whose retreat from server-side agent
+> resources anchors Divergence A now ships a stored `agent` resource with
+> CRUD, a durable `session`, and a first-class `turn`, alongside the SDK,
+> with no statement of which is preferred. Its evidence revises Divergence A
+> and both tables, adds an `environment` axis none of the other dossiers
+> forced, and is read back against our wire contracts in
+> [contract impact](./contract-impact-agents-api.md). The revisions are
+> marked inline.
+
+> [Guild](./products/guild.md) was researched on 2026-09-17 from unversioned
+> live documentation, with a second pass on 2026-09-18 over the running product
+> console, recorded in its own section and kept apart as the weaker evidence
+> class. It is the corpus's sharpest separation between the agent
+> record and its deployment: the workspace install is its own resource, with
+> its own id, the version it currently points at, and the credential
+> associations, so the
+> definition itself never holds a secret and cannot grant itself one. It also
+> inverts the usual session binding, since the session carries no agent id and
+> the per-message task pins the version instead. Only the tables below were
+> extended for it, with its rows marked "(added post-synthesis)", following the
+> Netclaw and kagent precedent for late additions; the prose sections were
+> deliberately not reworked.
+
+> LiteLLM was researched on 2026-10-13, after this synthesis was written; see
+> [products/litellm.md](./products/litellm.md). It changes one thing: it is the
+> first product whose stored agent record is a policy principal with no
+> definition content. The record names an upstream A2A endpoint and carries its
+> card, grants, rate limits, budgets, and the keys and tokens bound to it, but
+> holds no prompt, model, tools, or loop, so identity and authority live apart
+> from persona and execution, which always run outside the gateway. Only the
+> tables below were extended for it, with its rows marked "(added
+> post-synthesis)", following the Guild, Netclaw, kagent, and IronClaw
+> precedent for late additions; the prose sections were deliberately not
+> reworked.
+
 ## Convergence
 
 **1. The behavioral definition is settled.** Every product that states one
@@ -205,6 +243,20 @@ went the other way historically: it *had* the versioned server-side agent
 resource (Assistants), deprecated it, and decomposed it into config
 (Prompts) + state (Conversations) + loop (SDK).
 
+*Revised after the [Agents API](./products/openai-agents-api.md) (2026-09-10)*:
+the OpenAI extreme above is no longer a direction, it is one of two postures
+the same vendor now holds at once. `POST /v1/agents` stores an agent with an
+id, update, and delete; `POST /v1/agents/sessions` creates a durable session
+that "persists indefinitely"; and a session may instead carry an inline
+`agent` object with no stored record at all. So one vendor spans
+server-side config resource, in-memory code object, *and* an ephemeral
+inline definition, and publishes no guidance on which to choose. The lesson
+for the spectrum is that position on it is a per-product *posture*, not a
+per-vendor conviction, and a platform may need to serve more than one point
+on it simultaneously. The Agents API also forces an axis no other dossier
+did: `environment`, a compute identity with its own lifetime that the
+session outlives.
+
 *Revised after IronClaw*, which adds a new low end to the spectrum: **nothing
 at all**. `AgentId` is declared alongside `TenantId` and `UserId` by the same
 `string_id!` macro with the same scope-id validator, and that is the whole of
@@ -382,6 +434,8 @@ from the scope plus a run profile rather than published from a definition.
 | agent-as-config (versioned record) | OpenComputer, Managed Agents, LangGraph assistant, AgentCore harness |
 | agent-as-file (git-versioned persona) | Claude Code, Vercel eve, OpenClaw workspace |
 | agent-as-code-object | OpenAI Agents SDK, CrewAI, ADK, Vercel AI SDK, Jido struct |
+| agent-as-config *or* inline-per-session (same vendor, same API) | [OpenAI Agents API](./products/openai-agents-api.md) (added post-synthesis) |
+| agent-as-git-backed record, installed per workspace by a separate record naming one version | [Guild](./products/guild.md) (added post-synthesis) |
 | agent-as-process/actor | Jido AgentServer, Cloudflare durable object |
 | agent-as-deployed-service | Bedrock AgentCore, Vertex Agent Engine |
 | agent-as-network-endpoint | A2A AgentCard |
@@ -393,6 +447,7 @@ from the scope plus a run profile rather than published from a definition.
 | agent-as-code-first-definition compiled into a managed assistant and deployment | LangSmith Managed Deep Agents |
 | agent-as-scope-coordinate (a validated axis in a scope tuple; no stored object, persona in files, runtime shape resolved onto each run) | IronClaw |
 | agent-as-live-session-bound-handle | DeepSeek Harness |
+| agent-as-policy-principal over a proxied endpoint (registered A2A card plus grants, limits, and spend attribution; no prompt, model, or loop) | [LiteLLM](./products/litellm.md) (added post-synthesis) |
 
 These are not mutually exclusive; most products stack two or three.
 IronClaw stacks agent-as-scope-coordinate with agent-as-file, which is what
@@ -407,6 +462,7 @@ makes it legible: the scope answers "whose," the files answer "who."
 | Jido | immutable struct + module (process separate) | dynamic spawn directive, logical refs, orphan policy | compile-time macro; state via cmd/2 | customer BEAM app | no session noun |
 | Claude Code / Agent SDK | markdown file → fresh context window | richest: 5 scopes, depth 5, fork, background | live reload per invocation; no versions | customer process (harness/SDK) | subagent ⊂ session |
 | OpenAI Agents SDK | code object (dataclass) | handoffs (transfer) + agent-as-tool (return) | construction + per-run overrides; no versions | customer process | sessions independent of agents |
+| [OpenAI Agents API](./products/openai-agents-api.md) (added post-synthesis) | stored resource with id and CRUD, or an inline object on the session; no revisions, no pinning | in-session subagents sharing one filesystem and one environment; `max_concurrent_subagents` default 6; own context, no function tools | stored agent at create, inline agent at session create; harness version moves underneath the customer | OpenAI owns the loop; `self_hosted` environment gives the customer compute only | 1:N; session is durable and outlives its environment |
 | Bedrock AgentCore | ARN'd deployed container service | none, inside the container; A2A between peers | immutable versions + endpoint pointers | customer loop, AWS shell | 1:N, session = microVM |
 | LangGraph Platform | assistant = versioned config over a graph | subgraphs + Command handoffs, declared in code | deploy (graph) / versioned (assistant) / per-run | platform executes customer graph | assistant N:M threads |
 | Google ADK + A2A | code object in a tree / endpoint + card | first-class sub_agents tree; A2A = opaque peers | construction / discovery-time (card) | customer (ADK) / managed (Vertex) | runner binds agent↔sessions; task = unit of work |
@@ -423,6 +479,8 @@ makes it legible: the scope answers "whose," the files answer "who."
 | [LangChain Deep Agents](./products/deep-agents.md) (added post-synthesis) | compiled LangGraph harness graph; no durable Agent resource | sync child = stateless nested invocation; async child = independent thread and run | construction plus per-run context; thread state via checkpointer; no definition version contract | customer process or surrounding deployment | graph serves N threads; thread is the session boundary, run is one invocation |
 | [LangSmith Managed Deep Agents](./products/managed-deep-agents.md) (added post-synthesis) | code-first pre-runtime definition compiled into an assistant and deployment | underlying Deep Agents sync and async models; no MDA-specific child resource | code/model/tools at build; instructions/skills on every run; state on thread | LangSmith managed harness and runtime | one assistant serves N threads; session maps to thread, with N runs |
 | [DeepSeek Harness](./products/deepseek-harness.md) (added post-synthesis) | live Agent handle over one same-ID durable Session; no definition resource | provider-backed one-shot or continuable children; spawn, fork, and remote implementations; depth defaults to 3 | profile at boot; preset generation at create; prompt and tools per step; fresh setup on resume; no definition version | user-run process with a replaceable first-party loop plugin | 1:1 while live under one ID; persisted Session may later rehydrate a fresh Agent |
+| [Guild](./products/guild.md) (added post-synthesis) | owned, git-backed record whose published version is frozen for the lifetime of each task that runs it, with general version immutability undocumented; the workspace install is a separate resource naming one version, following new publishes unless `should_autoupdate` is off | declared in config and resolved to a published version at build, invoked agent-as-tool; 50 agent tasks per execution tree by default and 250,000 under `unlimited_power_mode`, no documented depth cap | version content frozen for the task's life; account credential and model policy re-checked per request, including mid-session | Guild owns the loop, in its own runtime containers | 1:N; the session holds no agent id, the per-message task pins the version |
+| [LiteLLM](./products/litellm.md) (added post-synthesis) | registered gateway record pointing at an upstream A2A endpoint, and a policy principal that keys and JWTs can be bound to | no subagent noun; trace headers are propagated when the upstream agent calls back through the gateway | card and endpoint at registration, mutable by PATCH with no versions; grants and limits checked per request; config-file agents read at startup | the upstream agent owns the loop; the gateway routes, limits, and fires the kill-switch webhook | 1:N; a session is only the caller-supplied trace id, with counters expiring after 1 hour by default |
 
 ## Working definition
 

@@ -47,3 +47,15 @@ fn run_fails_when_the_wasm_path_does_not_exist() {
     .to_string();
     assert!(error.contains("read"), "unexpected error: {error}");
 }
+
+#[test]
+fn no_strict_allows_an_incomplete_suite_to_run() {
+    let suite = std::env::temp_dir().join(format!("decider-test-empty-suite-{}.yaml", std::process::id()));
+    fs::write(&suite, "suite: scheduler.schedules\nscenarios: []\n").unwrap();
+    let strict = run(args(OutputFormat::Human, false, schedules_wasm_path(), suite.clone()));
+    let lenient = run(args(OutputFormat::Human, true, schedules_wasm_path(), suite.clone()));
+    fs::remove_file(suite).unwrap();
+
+    assert!(strict.is_err());
+    lenient.expect("--no-strict tolerates unexercised declared commands and events");
+}

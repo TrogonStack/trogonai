@@ -6,8 +6,7 @@
 ///
 /// Every message here is schema-only. None is referenced by a field, none is
 /// ever encoded, and a caller will never decode one. What travels is the
-/// `google.rpc.Status` on the error channel, per
-/// [ADR#0016](../../../../docs/adr/0016-protobuf-rpc-over-nats-micro-binding.md);
+/// `google.rpc.Status` on the error channel, per ADR#0016;
 /// these declare what the host puts in it, in a form a reader does not have to
 /// take on trust from a comment.
 ///

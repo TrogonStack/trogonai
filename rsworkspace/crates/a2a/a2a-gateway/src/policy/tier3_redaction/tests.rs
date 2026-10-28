@@ -135,8 +135,7 @@ fn tier3_refused_response_uses_32802_and_rule_data() {
     let payload = br#"{"jsonrpc":"2.0","id":"x","method":"message/send","params":{}}"#;
     let headers = async_nats::HeaderMap::new();
     let bytes =
-        ingress_gateway_tier3_refused_response_bytes(&headers, payload, "tier-3 skill refused part", "deny-part")
-            .unwrap();
+        ingress_gateway_tier3_refused_response_bytes(&headers, payload, "tier-3 skill refused part", "deny-part");
     let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(value["error"]["message"], "tier-3 skill refused part");
     assert_eq!(value["error"]["data"]["rule"], "deny-part");
@@ -147,8 +146,7 @@ fn tier3_refused_response_uses_32802_and_rule_data() {
         -32_802,
         "tier-3 skill refused part",
         Some(serde_json::json!({ "rule": "deny-part" })),
-    )
-    .unwrap();
+    );
     assert_eq!(
         wire.headers.get("Jsonrpc-Error-Code").map(|v| v.as_str().to_owned()),
         Some("-32802".to_owned())
@@ -159,12 +157,11 @@ fn tier3_refused_response_uses_32802_and_rule_data() {
 fn tier3_engine_error_response_uses_32801() {
     let payload = br#"{"jsonrpc":"2.0","id":"x","method":"message/send","params":{}}"#;
     let headers = async_nats::HeaderMap::new();
-    let bytes =
-        ingress_gateway_policy_denied_response_bytes(&headers, payload, "tier-3 redaction engine error").unwrap();
+    let bytes = ingress_gateway_policy_denied_response_bytes(&headers, payload, "tier-3 redaction engine error");
     let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(value["error"]["message"], "tier-3 redaction engine error");
 
-    let wire = ingress_error_response_wire(&headers, payload, -32_801, "tier-3 redaction engine error", None).unwrap();
+    let wire = ingress_error_response_wire(&headers, payload, -32_801, "tier-3 redaction engine error", None);
     assert_eq!(
         wire.headers.get("Jsonrpc-Error-Code").map(|v| v.as_str().to_owned()),
         Some("-32801".to_owned())
@@ -190,7 +187,7 @@ fn dispatch_path_tier3_allow_then_forward_payload_bytes() {
 
     let decision = gate.redact(&mut ctx);
     assert!(decision.is_allow());
-    let forwarded = ctx.into_payload_bytes().unwrap();
+    let forwarded = ctx.into_payload_bytes();
     let parsed: serde_json::Value = serde_json::from_slice(&forwarded).unwrap();
     assert_eq!(parsed["params"]["message"]["parts"][0]["text"], "***");
 }
@@ -448,7 +445,7 @@ fn evaluation_context_accessors_round_trip() {
     assert_eq!(ctx.method(), "m");
     assert_eq!(ctx.caller_id(), Some("c"));
     assert_eq!(ctx.skill_manifests().len(), 1);
-    let bytes = ctx.into_payload_bytes().expect("to bytes");
+    let bytes = ctx.into_payload_bytes();
     assert!(!bytes.is_empty());
 }
 

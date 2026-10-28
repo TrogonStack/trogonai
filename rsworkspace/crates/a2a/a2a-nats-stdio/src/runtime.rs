@@ -1,26 +1,15 @@
 //! Env-parsing entry point for the a2a-nats-stdio binary.
-//!
-//! Same coverage-friendly split as `a2a-nats-server`: env validation is pure
-//! and testable; the NATS connect-and-pump half lives in `main.rs` behind
-//! `cfg(not(coverage))` because `trogon-nats::NatsJetStreamClient` is excluded
-//! during coverage builds.
 
 use a2a_nats::{A2aAgentId, A2aPrefix, A2aPrefixError, AgentIdError, DEFAULT_A2A_PREFIX, ENV_A2A_PREFIX};
 use trogon_nats::connect::ConnectError;
 use trogon_std::env::ReadEnv;
 
-#[cfg(not(coverage))]
 use a2a_nats::client::A2aClient;
-#[cfg(not(coverage))]
 use a2a_nats::{Config, apply_timeout_overrides, nats_connect_timeout};
-#[cfg(not(coverage))]
 use trogon_nats::jetstream::NatsJetStreamClient;
-#[cfg(not(coverage))]
 use trogon_std::env::SystemEnv;
-#[cfg(not(coverage))]
 use trogon_std::signal::shutdown_signal;
 
-#[cfg(not(coverage))]
 use crate::io_loop::run_io_loop;
 
 use crate::constants::ENV_A2A_AGENT_ID;
@@ -73,9 +62,7 @@ pub fn parse_env<E: ReadEnv>(env: &E) -> Result<ValidatedStdioConfig, RuntimeErr
 }
 
 /// Backwards-compatible entry point used by integration tests / external
-/// callers that want to drive the binary through the library. Returns
-/// `RuntimeError` on env validation failure; connect-and-pump is in main.rs.
-#[cfg(not(coverage))]
+/// callers that want to drive the binary through the library.
 pub async fn run() -> Result<(), RuntimeError> {
     let env = SystemEnv;
     let validated = parse_env(&env)?;
@@ -98,11 +85,6 @@ pub async fn run() -> Result<(), RuntimeError> {
     run_io_loop(client, tokio::io::stdin(), tokio::io::stdout(), shutdown_signal())
         .await
         .map_err(RuntimeError::IoLoop)
-}
-
-#[cfg(coverage)]
-pub async fn run() -> Result<(), RuntimeError> {
-    Ok(())
 }
 
 #[cfg(test)]

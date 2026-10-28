@@ -1,0 +1,16 @@
+edition = "2024";
+
+package trogonai.agents.candidates.v1alpha1;
+
+import "trogonai/agents/agents/v1alpha1/digest.proto";
+import "trogonai/agents/candidates/v1alpha1/candidate.proto";
+import "trogonai/agents/candidates/v1alpha1/candidate_id.proto";
+
+// The creation fact for a candidate stream. The content and its digest are
+// immutable; the digest is what every CandidateRef pins. The envelope owns who
+// recorded it and when (ADR#0069).
+message CandidateRecorded {
+  CandidateId candidate_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  Candidate candidate = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.agents.v1alpha1.Digest content_digest = 3 [features.field_presence = LEGACY_REQUIRED];
+}

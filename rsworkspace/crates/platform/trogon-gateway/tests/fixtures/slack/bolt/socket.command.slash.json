@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "id": "socket.command.slash",
+  "kind": "command",
+  "transport": "socket_mode",
+  "provenance": {
+    "bolt_version": "5.1.0",
+    "bolt_commit": "3f8823c93f5639e99f05a2df9c7dc692da5cc184",
+    "node_slack_sdk_commit": "d02afdfd5c87f896dc9994dfe2b55472758fbcf4",
+    "payload_source": "test/unit/helpers/events.ts:createDummyCommandMiddlewareArgs",
+    "wire_source": "https://docs.slack.dev/apis/events-api/using-socket-mode",
+    "ack_source": null
+  },
+  "not_representable": null,
+  "input": {
+    "frame": "{\"payload\":{\"token\":\"xoxb-1234\",\"command\":\"/slash\",\"text\":\"yo\",\"response_url\":\"https://slack.com\",\"trigger_id\":\"1234.56\",\"user_id\":\"U1234\",\"user_name\":\"filmaj\",\"team_id\":\"T1234\",\"team_domain\":\"slack.com\",\"channel_id\":\"C1234\",\"channel_name\":\"#random\",\"api_app_id\":\"A1234\"},\"envelope_id\":\"dbdd0ef3-1543-4f94-bfb4-133d0e6c1545\",\"type\":\"slash_commands\",\"accepts_response_payload\":true}"
+  },
+  "bolt": {
+    "outcome": "dispatched",
+    "ack": {
+      "envelope_id": "dbdd0ef3-1543-4f94-bfb4-133d0e6c1545",
+      "payload": {}
+    },
+    "dispatch": {
+      "incoming_type": "Command",
+      "conversation_id": "C1234",
+      "retry_num": null,
+      "retry_reason": null,
+      "is_enterprise_install": false,
+      "team_id": "T1234",
+      "enterprise_id": null,
+      "user_id": "U1234"
+    }
+  },
+  "expected": {
+    "outcome": "publish",
+    "nats": {
+      "subject_suffix": "command.slash",
+      "dedup_id": "1234.56",
+      "payload": "{\"token\":\"xoxb-1234\",\"command\":\"/slash\",\"text\":\"yo\",\"response_url\":\"https://slack.com\",\"trigger_id\":\"1234.56\",\"user_id\":\"U1234\",\"user_name\":\"filmaj\",\"team_id\":\"T1234\",\"team_domain\":\"slack.com\",\"channel_id\":\"C1234\",\"channel_name\":\"#random\",\"api_app_id\":\"A1234\"}",
+      "payload_fill": null,
+      "headers": {
+        "X-Slack-Event-Type": "/slash",
+        "X-Slack-Team-Id": "T1234",
+        "X-Slack-Payload-Kind": "command",
+        "X-Slack-Is-Enterprise-Install": "false",
+        "X-Slack-Api-App-Id": "A1234",
+        "X-Slack-Transport": "socket_mode",
+        "X-Slack-Envelope-Id": "dbdd0ef3-1543-4f94-bfb4-133d0e6c1545"
+      }
+    },
+    "http": null,
+    "socket_ack": {
+      "envelope_id": "dbdd0ef3-1543-4f94-bfb4-133d0e6c1545",
+      "payload": null
+    }
+  }
+}

@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.queries.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 import "trogonai/session/sessions/queries/v1alpha1/contract_version.proto";
 import "trogonai/session/sessions/queries/v1alpha1/projection_freshness.proto";
@@ -71,6 +72,11 @@ enum QueryErrorCode {
   QUERY_ERROR_CODE_RESOURCE_EXHAUSTED = 8;
   // An unexpected server-side failure. Carries no detail on purpose.
   QUERY_ERROR_CODE_INTERNAL = 9;
+  // The comparison id resolves to no stream. Like SESSION_NOT_FOUND, a
+  // comparison the caller may not see is QUERY_ERROR_CODE_PERMISSION_DENIED.
+  QUERY_ERROR_CODE_COMPARISON_NOT_FOUND = 10;
+  // The comparison exists but assigns no run to the requested candidate label.
+  QUERY_ERROR_CODE_CANDIDATE_LABEL_NOT_FOUND = 11;
 }
 
 // UnsupportedContractVersionDetail tells the caller what it would have to
@@ -113,6 +119,14 @@ enum StaleCursorReason {
 // ProjectionUnavailableDetail distinguishes "come back shortly" from "this is
 // broken", which a caller cannot guess from the code alone.
 message ProjectionUnavailableDetail {
+  option (buf.validate.message).cel = {
+    id: "projection_unavailable_detail.freshness_present_for_lagging"
+    message: "freshness must be present when reason is PROJECTION_UNAVAILABLE_REASON_LAGGING"
+    expression:
+      "this.reason != trogonai.session.sessions.queries.v1alpha1.ProjectionUnavailableReason.PROJECTION_UNAVAILABLE_REASON_LAGGING "
+      "|| has(this.freshness)"
+  };
+
   ProjectionUnavailableReason reason = 1 [features.field_presence = LEGACY_REQUIRED];
   // How current the projection was when it gave up. Present for REASON_LAGGING,
   // where it is the difference between an actionable failure and a bare one: a

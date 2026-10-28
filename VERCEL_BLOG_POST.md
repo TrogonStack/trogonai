@@ -295,7 +295,7 @@ responsibilities.
 | Key-custody tiers | [ADR#0033](./docs/adr/0033-two-tier-key-custody-product-model.md) distinguishes platform-managed and customer-managed business-key custody | Draft |
 | Model access broker | [ADR#0032](./docs/adr/0032-model-route-and-credential-binding.md) defines connection, credential binding, delegated identity, workload identity, attempt-scoped grant, and session proxy | Draft and model-specific |
 | External federation | [ADR#0053](./docs/adr/0053-external-oidc-federation-surface.md) defines a short-lived external workload assertion boundary | Draft |
-| Extraction seam | [ADR#0061](./docs/adr/0061-credential-platform-extraction-boundary.md) moves OpenBao and lifecycle machinery behind the trait boundary | Proposed and blocked on four decisions |
+| Extraction seam | [ADR#0074](./docs/adr/0074-credential-platform-extraction-boundary.md) moves OpenBao and lifecycle machinery behind the trait boundary | Proposed and blocked on four decisions |
 
 ### Current implementation gaps
 
@@ -340,7 +340,7 @@ responsibilities.
   the first-version source of truth.
 - The architecture says consumers hold plaintext only for an in-flight
   operation, while the gateway implements an ambient plaintext cache and a
-  long-lived Discord connection. Proposed ADR#0061 already identifies this
+  long-lived Discord connection. Proposed ADR#0074 already identifies this
   conflict.
 - ADR#0049 describes the cache backstop as 300 seconds plus up to 30 seconds of
   jitter, for a 330-second maximum. The implementation subtracts jitter from
@@ -549,7 +549,7 @@ testable.
    not the target architecture. Example: the gateway authenticates to the
    secrets service to verify an active GitHub webhook and has no credential that
    can read, rotate, or destroy OpenBao material directly.
-2. **Ratify ADR#0061 with provider-access operations included in Q1.** The
+2. **Ratify ADR#0074 with provider-access operations included in Q1.** The
    boundary must cover value resolution, operation-only verification, OAuth
    exchange or refresh, workload federation, and trusted credential injection.
    Example: a Slack post uses an ephemeral app token without exposing the stored
@@ -665,7 +665,7 @@ testable.
 
 ## Decisions this research should inform
 
-### Proposed ADR#0061
+### Proposed ADR#0074
 
 Q1 currently asks whether the secrets-service surface is a value verb, an
 operation verb, or both. The recommendation should remain "both" and become
@@ -770,7 +770,7 @@ Conflating them hides the new architectural layer this post introduces.
 - [ADR#0049: Revocation Latency Target](./docs/adr/0049-revocation-latency-target.md)
 - [ADR#0052: Cloud KMS Production Seal](./docs/adr/0052-cloud-kms-production-seal.md)
 - [ADR#0053: External OIDC Federation Surface](./docs/adr/0053-external-oidc-federation-surface.md)
-- [ADR#0061: Credential Platform Extraction Boundary](./docs/adr/0061-credential-platform-extraction-boundary.md)
+- [ADR#0074: Credential Platform Extraction Boundary](./docs/adr/0074-credential-platform-extraction-boundary.md)
 - [Credential platform specification](./CREDENTIAL_PLATFORM_SPEC.md)
 - [Secret store context](./SECRET_STORE.md)
 - [`SecretStore` traits](./rsworkspace/crates/platform/trogon-gateway/src/secret_store/traits.rs)

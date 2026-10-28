@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.queries.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "trogonai/session/sessions/queries/v1alpha1/contract_version.proto";
 import "trogonai/session/sessions/queries/v1alpha1/projection_freshness.proto";
 import "trogonai/session/sessions/queries/v1alpha1/read_consistency.proto";
@@ -14,7 +15,10 @@ import "trogonai/session/sessions/queries/v1alpha1/session_view.proto";
 // server can see, before rendering anything, whether the caller can read the
 // answer.
 message GetSessionRequest {
-  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // The highest contract version this caller understands. The server renders at
   // no higher than this, and refuses outright when the major does not match.
   ContractVersion accepted_contract = 2 [features.field_presence = LEGACY_REQUIRED];

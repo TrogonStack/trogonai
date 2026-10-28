@@ -1,0 +1,18 @@
+edition = "2024";
+
+package trogonai.policy.model_ceilings.v1alpha1;
+
+import "trogonai/policy/model_ceilings/v1alpha1/ceiling_policy.proto";
+import "trogonai/policy/subjects/v1alpha1/subject.proto";
+
+// Sets or replaces the subject's ceiling. There is no Initialize command and no
+// provisioning participation, because absence needs nothing set up. On a missing
+// history it creates the stream: NoStream requires a nonempty Decider command_id
+// and no expected_revision. Later commands carry the original positive
+// expected_revision; retries preserve both. Dispatch verifies the subject exists
+// and live administration authority. Equal matchers succeed without an event
+// after the concurrency check; reordering matchers alone is not a change.
+message SetModelCeiling {
+  trogonai.policy.subjects.v1alpha1.PolicySubject subject = 1 [features.field_presence = LEGACY_REQUIRED];
+  ModelCeilingPolicy policy = 2 [features.field_presence = LEGACY_REQUIRED];
+}

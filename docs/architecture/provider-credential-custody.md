@@ -14,7 +14,7 @@ secrets service is deployed. Accepted
 custody, and accepted
 [ADR#0047](../adr/0047-event-sourced-credential-metadata.md) fixes stream
 ownership of credential metadata. Proposed
-[ADR#0061](../adr/0061-credential-platform-extraction-boundary.md) describes
+[ADR#0074](../adr/0074-credential-platform-extraction-boundary.md) describes
 the unfinished extraction from the gateway prototype.
 
 ## Streams reconstruct authority, not material

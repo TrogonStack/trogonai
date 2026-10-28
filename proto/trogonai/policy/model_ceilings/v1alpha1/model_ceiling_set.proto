@@ -1,0 +1,12 @@
+edition = "2024";
+
+package trogonai.policy.model_ceilings.v1alpha1;
+
+import "trogonai/policy/model_ceilings/v1alpha1/ceiling_policy.proto";
+import "trogonai/policy/subjects/v1alpha1/subject.proto";
+
+// Records the ceiling in force from this event, replacing any earlier one.
+message ModelCeilingSet {
+  trogonai.policy.subjects.v1alpha1.PolicySubject subject = 1 [features.field_presence = LEGACY_REQUIRED];
+  ModelCeilingPolicy policy = 2 [features.field_presence = LEGACY_REQUIRED];
+}

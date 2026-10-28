@@ -1,0 +1,105 @@
+edition = "2024";
+
+package trogonai.agents.versions.state.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "trogonai/agents/agents/v1alpha1/version_snapshot_reference.proto";
+import "trogonai/agents/versions/v1alpha1/version.proto";
+
+message State {
+  oneof state {
+    option (buf.validate.oneof).required = true;
+
+    google.protobuf.Empty missing = 1;
+    PresentAgentVersion present = 2;
+  }
+}
+
+// Only creation leaves missing state. All later events preserve genesis
+// identity, creator, base, and initial retention. Edits retain every snapshot
+// reference and replace only the last editor; bytes remain in immutable events.
+// The highest snapshot is current. Commit pins it permanently and makes the
+// version durable even when initial retention was ephemeral. Terminal states
+// reject all later mutations. Validation and publication live in other streams.
+message PresentAgentVersion {
+  option (buf.validate.message).cel = {
+    id: "agent_version_state.snapshot_identity"
+    message: "retained snapshots must match this agent, version, and map key"
+    expression: "this.snapshots.all(number, this.snapshots[number].agent_id == this.agent_id && this.snapshots[number].version_id == this.version_id && this.snapshots[number].snapshot_number == number)"
+  };
+  option (buf.validate.message).cel = {
+    id: "agent_version_state.contiguous_snapshots"
+    message: "snapshots must cover every number from 1 through the current snapshot"
+    expression: "this.snapshots.all(number, number > 0u && number <= uint(this.snapshots.size()))"
+  };
+  option (buf.validate.message).cel = {
+    id: "agent_version_state.commit_status"
+    message: "commit metadata is present exactly for committed versions"
+    expression: "has(this.commit) == (this.status == 2)"
+  };
+  option (buf.validate.message).cel = {
+    id: "agent_version_state.commit_snapshot"
+    message: "the commit must pin the exact final retained snapshot"
+    expression: "!has(this.commit) || (uint(this.snapshots.size()) in this.snapshots && this.commit.snapshot == this.snapshots[uint(this.snapshots.size())])"
+  };
+  option (buf.validate.message).cel = {
+    id: "agent_version_state.expiry_retention"
+    message: "only initially ephemeral versions may expire"
+    expression: "this.status != 4 || has(this.initial_retention.expires_at)"
+  };
+  option (buf.validate.message).cel = {
+    id: "agent_version_state.base_identity"
+    message: "the base must belong to the same agent and a different version"
+    expression: "!has(this.base) || (has(this.base.committed_snapshot) ? (this.base.committed_snapshot.agent_id == this.agent_id && this.base.committed_snapshot.version_id != this.version_id) : this.base.admitted_revision.agent_id == this.agent_id)"
+  };
+  option (buf.validate.message).cel = {
+    id: "agent_version_state.first_editor"
+    message: "an unedited version retains its creator as last editor"
+    expression: "this.snapshots.size() != 1 || this.last_editor_id == this.creator_id"
+  };
+
+  string agent_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).cel = {
+      id: "agent_version.identity_nonblank"
+      message: "identity must contain a non-whitespace character"
+      expression: "this.trim() != ''"
+    }
+  ];
+  string version_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).cel = {
+      id: "agent_version.identity_nonblank"
+      message: "identity must contain a non-whitespace character"
+      expression: "this.trim() != ''"
+    }
+  ];
+  trogonai.agents.versions.v1alpha1.AgentVersionStatus status = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  string creator_id = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).cel = {
+      id: "agent_version.identity_nonblank"
+      message: "identity must contain a non-whitespace character"
+      expression: "this.trim() != ''"
+    }
+  ];
+  string last_editor_id = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).cel = {
+      id: "agent_version.identity_nonblank"
+      message: "identity must contain a non-whitespace character"
+      expression: "this.trim() != ''"
+    }
+  ];
+  trogonai.agents.versions.v1alpha1.AgentVersionRetention initial_retention = 6 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.versions.v1alpha1.AgentVersionBase base = 7;
+  map<uint64, trogonai.agents.agents.v1alpha1.AgentVersionSnapshotRef> snapshots = 8 [(buf.validate.field).map.min_pairs = 1];
+  trogonai.agents.versions.v1alpha1.AgentVersionCommit commit = 9;
+}

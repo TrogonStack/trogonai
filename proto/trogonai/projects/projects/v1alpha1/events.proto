@@ -1,0 +1,24 @@
+edition = "2024";
+
+package trogonai.projects.projects.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/projects/projects/v1alpha1/project_archived.proto";
+import "trogonai/projects/projects/v1alpha1/project_created.proto";
+import "trogonai/projects/projects/v1alpha1/project_goal_restated.proto";
+import "trogonai/projects/projects/v1alpha1/project_renamed.proto";
+import "trogonai/projects/projects/v1alpha1/project_unarchived.proto";
+
+// ProjectEvent is the Project stream's event union. An unset or unknown event
+// rejects replay; skipping it could admit a command against incomplete state.
+message ProjectEvent {
+  oneof event {
+    option (buf.validate.oneof).required = true;
+
+    ProjectCreated project_created = 1;
+    ProjectRenamed project_renamed = 2;
+    ProjectGoalRestated project_goal_restated = 3;
+    ProjectArchived project_archived = 4;
+    ProjectUnarchived project_unarchived = 5;
+  }
+}

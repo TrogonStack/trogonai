@@ -50,10 +50,11 @@ fn test_config() -> SlackConfig {
         subject_prefix: NatsToken::new("slack").unwrap(),
         stream_name: NatsToken::new("SLACK").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
-        nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
+        ack_budget: AckBudget::default(),
         transport: super::super::config::SlackTransportConfig::Webhook(SlackWebhookConfig {
             signing_secret: SlackSigningSecret::new(TEST_SECRET).unwrap(),
             timestamp_max_drift: NonZeroDuration::from_secs(300).unwrap(),
+            max_body_size: super::super::constants::DEFAULT_HTTP_BODY_SIZE_MAX,
         }),
     }
 }
@@ -415,10 +416,11 @@ async fn subject_uses_configured_prefix() {
         subject_prefix: NatsToken::new("custom").unwrap(),
         stream_name: NatsToken::new("SLACK").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
-        nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
+        ack_budget: AckBudget::default(),
         transport: super::super::config::SlackTransportConfig::Webhook(SlackWebhookConfig {
             signing_secret: SlackSigningSecret::new(TEST_SECRET).unwrap(),
             timestamp_max_drift: NonZeroDuration::from_secs(300).unwrap(),
+            max_body_size: super::super::constants::DEFAULT_HTTP_BODY_SIZE_MAX,
         }),
     };
 
@@ -487,73 +489,7 @@ async fn missing_event_id_returns_400() {
     assert_unroutable(&publisher, "missing_event_id");
 }
 
-mod ack_test_support {
-    use super::*;
-    use async_nats::jetstream::publish::PublishAck;
-    use std::sync::Arc;
-    use std::sync::Mutex;
-    use trogon_nats::mocks::MockError;
-
-    #[derive(Clone)]
-    enum AckBehavior {
-        Fail,
-        Hang,
-    }
-
-    #[derive(Clone)]
-    pub struct AckFailPublisher {
-        behavior: Arc<Mutex<AckBehavior>>,
-    }
-
-    impl AckFailPublisher {
-        pub fn failing() -> Self {
-            Self {
-                behavior: Arc::new(Mutex::new(AckBehavior::Fail)),
-            }
-        }
-
-        pub fn hanging() -> Self {
-            Self {
-                behavior: Arc::new(Mutex::new(AckBehavior::Hang)),
-            }
-        }
-    }
-
-    pub enum AckFuture {
-        Fail,
-        Hang,
-    }
-
-    impl IntoFuture for AckFuture {
-        type Output = Result<PublishAck, MockError>;
-        type IntoFuture = std::pin::Pin<Box<dyn Future<Output = Self::Output> + Send>>;
-
-        fn into_future(self) -> Self::IntoFuture {
-            match self {
-                AckFuture::Fail => Box::pin(async { Err(MockError("simulated ack failure".to_string())) }),
-                AckFuture::Hang => Box::pin(std::future::pending()),
-            }
-        }
-    }
-
-    impl JetStreamPublisher for AckFailPublisher {
-        type PublishError = MockError;
-        type AckFuture = AckFuture;
-
-        async fn publish_with_headers<S: ToSubject + Send>(
-            &self,
-            _subject: S,
-            _headers: async_nats::HeaderMap,
-            _payload: Bytes,
-        ) -> Result<AckFuture, MockError> {
-            let behavior = self.behavior.lock().unwrap().clone();
-            match behavior {
-                AckBehavior::Fail => Ok(AckFuture::Fail),
-                AckBehavior::Hang => Ok(AckFuture::Hang),
-            }
-        }
-    }
-}
+mod ack_test_support;
 
 use ack_test_support::AckFailPublisher;
 use async_nats::subject::ToSubject;
@@ -602,10 +538,11 @@ async fn ack_timeout_returns_500() {
         subject_prefix: NatsToken::new("slack").unwrap(),
         stream_name: NatsToken::new("SLACK").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
-        nats_ack_timeout: NonZeroDuration::from_millis(10).unwrap(),
+        ack_budget: AckBudget::new(Some(NonZeroDuration::from_millis(10).unwrap())),
         transport: super::super::config::SlackTransportConfig::Webhook(SlackWebhookConfig {
             signing_secret: SlackSigningSecret::new(TEST_SECRET).unwrap(),
             timestamp_max_drift: NonZeroDuration::from_secs(300).unwrap(),
+            max_body_size: super::super::constants::DEFAULT_HTTP_BODY_SIZE_MAX,
         }),
     };
 
@@ -723,7 +660,7 @@ async fn interaction_view_submission_publishes_to_nats() {
 }
 
 #[tokio::test]
-async fn interaction_missing_trigger_id_returns_400() {
+async fn interaction_without_trigger_id_is_published_and_keyed_by_its_view() {
     let _guard = tracing_guard();
     let publisher = MockJetStreamPublisher::new();
     let app = mock_app(publisher.clone());
@@ -731,7 +668,8 @@ async fn interaction_missing_trigger_id_returns_400() {
     let interaction_payload = serde_json::json!({
         "type": "view_closed",
         "team": { "id": "T01ABC" },
-        "user": { "id": "U01ABC" }
+        "user": { "id": "U01ABC" },
+        "view": { "id": "V01" }
     });
     let form_body = format!(
         "payload={}",
@@ -745,8 +683,44 @@ async fn interaction_missing_trigger_id_returns_400() {
         .await
         .unwrap();
 
-    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-    assert_unroutable(&publisher, "missing_interaction_trigger_id");
+    assert_eq!(resp.status(), StatusCode::OK);
+    let messages = publisher.published_messages();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].subject, "slack.interaction.view_closed");
+    assert_eq!(header(&messages[0].headers, "Nats-Msg-Id"), Some("view_closed-V01"));
+}
+
+#[tokio::test]
+async fn interaction_without_any_identifier_is_keyed_by_its_bytes() {
+    let _guard = tracing_guard();
+    let interaction_payload = serde_json::json!({
+        "type": "block_suggestion",
+        "team": { "id": "T01ABC" },
+        "value": "tro"
+    });
+    let form_body = format!(
+        "payload={}",
+        form_urlencoded::byte_serialize(interaction_payload.to_string().as_bytes()).collect::<String>()
+    );
+    let mut ids = Vec::new();
+    for _ in 0..2 {
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+        let ts = current_timestamp();
+        let sig = compute_sig(TEST_SECRET, &ts, form_body.as_bytes());
+
+        let resp = app
+            .oneshot(form_request(form_body.as_bytes(), &ts, &sig))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let messages = publisher.published_messages();
+        assert_eq!(messages[0].subject, "slack.interaction.block_suggestion");
+        ids.push(header(&messages[0].headers, "Nats-Msg-Id").unwrap().to_owned());
+    }
+    assert_eq!(ids[0], ids[1]);
+    assert!(ids[0].starts_with("interaction-"));
 }
 
 #[tokio::test]
@@ -877,4 +851,568 @@ async fn interaction_missing_type_publishes_unroutable() {
 
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     assert_unroutable(&publisher, "missing_interaction_type");
+}
+
+fn header<'a>(headers: &'a async_nats::HeaderMap, name: &str) -> Option<&'a str> {
+    headers.get(name).map(|v| v.as_str())
+}
+
+#[tokio::test]
+async fn failed_unroutable_publish_turns_a_400_into_a_500() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    publisher.fail_next_js_publish();
+    let app = mock_app(publisher.clone());
+    let body = b"not json at all";
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, body);
+
+    let resp = app.oneshot(webhook_request(body, &ts, Some(&sig))).await.unwrap();
+
+    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+#[tokio::test]
+async fn failed_unroutable_publish_turns_a_200_into_a_500() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    publisher.fail_next_js_publish();
+    let app = mock_app(publisher.clone());
+    let body = serde_json::to_vec(&serde_json::json!({ "type": "app_rate_limited" })).unwrap();
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, &body);
+
+    let resp = app.oneshot(webhook_request(&body, &ts, Some(&sig))).await.unwrap();
+
+    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+#[tokio::test]
+async fn unroutable_message_carries_the_same_envelope_headers_as_routable_ones() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = mock_app(publisher.clone());
+    let body = serde_json::to_vec(&serde_json::json!({
+        "type": "event_callback",
+        "event_id": "Ev01ABC123",
+        "team_id": "T01ABC",
+        "event": {}
+    }))
+    .unwrap();
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, &body);
+
+    app.oneshot(webhook_request(&body, &ts, Some(&sig))).await.unwrap();
+
+    let messages = publisher.published_messages();
+    assert_eq!(header(&messages[0].headers, NATS_HEADER_TEAM_ID), Some("T01ABC"));
+    assert_eq!(header(&messages[0].headers, NATS_HEADER_TRANSPORT), Some("webhook"));
+    assert!(
+        header(&messages[0].headers, "Nats-Msg-Id")
+            .unwrap()
+            .starts_with("unroutable-")
+    );
+    assert_eq!(messages[0].payload.as_ref(), body.as_slice());
+}
+
+#[tokio::test]
+async fn replayed_unroutable_body_gets_the_same_message_id() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let ts = current_timestamp();
+    let body = b"not json at all";
+    let sig = compute_sig(TEST_SECRET, &ts, body);
+
+    for _ in 0..2 {
+        mock_app(publisher.clone())
+            .oneshot(webhook_request(body, &ts, Some(&sig)))
+            .await
+            .unwrap();
+    }
+
+    let messages = publisher.published_messages();
+    assert_eq!(messages.len(), 2);
+    assert_eq!(
+        header(&messages[0].headers, "Nats-Msg-Id"),
+        header(&messages[1].headers, "Nats-Msg-Id")
+    );
+    assert_eq!(header(&messages[0].headers, NATS_HEADER_TEAM_ID), Some("unknown"));
+}
+
+#[tokio::test]
+async fn unroutable_message_falls_back_to_unknown_when_the_team_id_is_not_header_safe() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = mock_app(publisher.clone());
+    let body = serde_json::to_vec(&serde_json::json!({
+        "type": "event_callback",
+        "event_id": "Ev01ABC123",
+        "team_id": "T01\r\nX-Injected: 1",
+        "event": { "type": "message" }
+    }))
+    .unwrap();
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, &body);
+
+    app.oneshot(webhook_request(&body, &ts, Some(&sig))).await.unwrap();
+
+    let messages = publisher.published_messages();
+    assert_eq!(header(&messages[0].headers, NATS_HEADER_TEAM_ID), Some("unknown"));
+}
+
+#[tokio::test]
+async fn routable_event_is_tagged_with_its_transport() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = mock_app(publisher.clone());
+    let body = event_callback_body("message");
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, &body);
+
+    app.oneshot(webhook_request(&body, &ts, Some(&sig))).await.unwrap();
+
+    let messages = publisher.published_messages();
+    assert_eq!(header(&messages[0].headers, NATS_HEADER_TRANSPORT), Some("webhook"));
+}
+
+#[tokio::test]
+async fn event_with_line_break_in_team_id_returns_400_and_is_kept_as_unroutable() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = mock_app(publisher.clone());
+    let body = serde_json::to_vec(&serde_json::json!({
+        "type": "event_callback",
+        "event_id": "Ev01ABC123",
+        "team_id": "T01\r\nX-Injected: 1",
+        "event": { "type": "message" }
+    }))
+    .unwrap();
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, &body);
+
+    let resp = app.oneshot(webhook_request(&body, &ts, Some(&sig))).await.unwrap();
+
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    assert_unroutable(&publisher, "invalid_header_value");
+}
+
+#[tokio::test]
+async fn event_with_line_break_in_event_id_returns_400() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = mock_app(publisher.clone());
+    let body = serde_json::to_vec(&serde_json::json!({
+        "type": "event_callback",
+        "event_id": "Ev01\nABC",
+        "team_id": "T01ABC",
+        "event": { "type": "message" }
+    }))
+    .unwrap();
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, &body);
+
+    let resp = app.oneshot(webhook_request(&body, &ts, Some(&sig))).await.unwrap();
+
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    assert_unroutable(&publisher, "invalid_header_value");
+}
+
+#[tokio::test]
+async fn interaction_with_line_break_in_trigger_id_returns_400() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = mock_app(publisher.clone());
+    let interaction_payload = serde_json::json!({
+        "type": "block_actions",
+        "trigger_id": "trigger\r\n123",
+        "team": { "id": "T01ABC" }
+    });
+    let form_body = format!(
+        "payload={}",
+        form_urlencoded::byte_serialize(interaction_payload.to_string().as_bytes()).collect::<String>()
+    );
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, form_body.as_bytes());
+
+    let resp = app
+        .oneshot(form_request(form_body.as_bytes(), &ts, &sig))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    assert_unroutable(&publisher, "invalid_header_value");
+}
+
+#[tokio::test]
+async fn slash_command_with_line_break_in_team_id_returns_400() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = mock_app(publisher.clone());
+    let form_body = "command=%2Ftrogon&team_id=T01%0D%0AX-Injected%3A+1&trigger_id=cmd789";
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, form_body.as_bytes());
+
+    let resp = app
+        .oneshot(form_request(form_body.as_bytes(), &ts, &sig))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    assert_unroutable(&publisher, "invalid_header_value");
+}
+
+#[tokio::test]
+async fn event_type_with_subject_wildcard_is_kept_as_unroutable() {
+    let _guard = tracing_guard();
+    for bad in ["a.b", "a*", ">", "a b", "caf\u{e9}"] {
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+        let body = event_callback_body(bad);
+        let ts = current_timestamp();
+        let sig = compute_sig(TEST_SECRET, &ts, &body);
+
+        let resp = app.oneshot(webhook_request(&body, &ts, Some(&sig))).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "{bad:?}");
+        assert_unroutable(&publisher, "invalid_subject_token");
+        assert_eq!(publisher.published_messages()[0].payload.as_ref(), body.as_slice());
+    }
+}
+
+#[tokio::test]
+async fn interaction_type_with_subject_separator_is_kept_as_unroutable() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = mock_app(publisher.clone());
+    let interaction_payload = serde_json::json!({
+        "type": "block.actions",
+        "trigger_id": "trigger123",
+        "team": { "id": "T01ABC" }
+    });
+    let form_body = format!(
+        "payload={}",
+        form_urlencoded::byte_serialize(interaction_payload.to_string().as_bytes()).collect::<String>()
+    );
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, form_body.as_bytes());
+
+    let resp = app
+        .oneshot(form_request(form_body.as_bytes(), &ts, &sig))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    assert_unroutable(&publisher, "invalid_subject_token");
+}
+
+#[tokio::test]
+async fn command_name_with_subject_separator_is_kept_as_unroutable() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = mock_app(publisher.clone());
+    let form_body = "command=%2Fa.b&team_id=T01ABC&trigger_id=cmd789";
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, form_body.as_bytes());
+
+    let resp = app
+        .oneshot(form_request(form_body.as_bytes(), &ts, &sig))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    assert_unroutable(&publisher, "invalid_subject_token");
+}
+
+#[tokio::test]
+async fn empty_command_is_rejected_as_missing_command() {
+    let _guard = tracing_guard();
+    for form_body in [
+        "command=&team_id=T01ABC&trigger_id=cmd789",
+        "command=%2F&team_id=T01ABC&trigger_id=cmd789",
+    ] {
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+        let ts = current_timestamp();
+        let sig = compute_sig(TEST_SECRET, &ts, form_body.as_bytes());
+
+        let resp = app
+            .oneshot(form_request(form_body.as_bytes(), &ts, &sig))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "{form_body}");
+        assert_unroutable(&publisher, "missing_command");
+    }
+}
+
+fn app_with_body_limit(publisher: MockJetStreamPublisher, limit: usize) -> Router {
+    let config = test_config();
+    let mut webhook = config.webhook().unwrap().clone();
+    webhook.max_body_size = trogon_std::HttpBodySizeMax::new(trogon_std::ByteSize::b(limit as u64)).unwrap();
+    router_with_clock(
+        wrap_publisher(publisher),
+        &config,
+        &webhook,
+        FixedEpochClock::from_secs(TEST_NOW),
+    )
+}
+
+#[tokio::test]
+async fn configured_body_limit_rejects_larger_requests_and_admits_smaller_ones() {
+    let _guard = tracing_guard();
+    let body = event_callback_body("message");
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, &body);
+
+    let publisher = MockJetStreamPublisher::new();
+    let too_small = app_with_body_limit(publisher.clone(), body.len() - 1);
+    let resp = too_small
+        .oneshot(webhook_request(&body, &ts, Some(&sig)))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    assert!(publisher.published_messages().is_empty());
+
+    let publisher = MockJetStreamPublisher::new();
+    let exact = app_with_body_limit(publisher.clone(), body.len());
+    let resp = exact.oneshot(webhook_request(&body, &ts, Some(&sig))).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(publisher.published_messages().len(), 1);
+}
+
+#[tokio::test]
+async fn default_body_limit_admits_payloads_above_the_old_one_mebibyte_cap() {
+    let _guard = tracing_guard();
+    let filler = "x".repeat(2 * 1024 * 1024);
+    let body = serde_json::to_vec(&serde_json::json!({
+        "type": "event_callback",
+        "event_id": "Ev01ABC123",
+        "team_id": "T01ABC",
+        "event": { "type": "message", "text": filler }
+    }))
+    .unwrap();
+    let publisher = MockJetStreamPublisher::new();
+    let app = mock_app(publisher.clone());
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, &body);
+
+    let resp = app.oneshot(webhook_request(&body, &ts, Some(&sig))).await.unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+}
+
+#[tokio::test(start_paused = true)]
+async fn unacknowledged_publish_answers_slack_inside_its_three_second_deadline() {
+    let _guard = tracing_guard();
+    let mut config = test_config();
+    config.ack_budget = AckBudget::default();
+
+    let state = AppState {
+        bridge: SlackBridge::new(
+            ClaimCheckPublisher::new(
+                AckFailPublisher::hanging(),
+                ClaimBucketBinding::for_test(MockObjectStore::new(), ClaimBucket::default()),
+                MaxPayload::from_server_limit(usize::MAX),
+            ),
+            &config,
+        ),
+        clock: FixedEpochClock::from_secs(TEST_NOW),
+        signing_secret: SlackSigningSecret::new(TEST_SECRET).unwrap(),
+        timestamp_max_drift: NonZeroDuration::from_secs(300).unwrap(),
+    };
+    let app = Router::new()
+        .route(
+            "/webhook",
+            post(handle_webhook::<AckFailPublisher, MockObjectStore, FixedEpochClock>),
+        )
+        .with_state(state);
+    let body = event_callback_body("message");
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, &body);
+
+    let started = tokio::time::Instant::now();
+    let resp = app.oneshot(webhook_request(&body, &ts, Some(&sig))).await.unwrap();
+    let elapsed = started.elapsed();
+
+    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(elapsed, std::time::Duration::from_millis(2500));
+    assert!(elapsed < super::super::constants::SLACK_ACK_DEADLINE);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_publish_that_never_returns_answers_slack_inside_its_three_second_deadline() {
+    let _guard = tracing_guard();
+    let mut config = test_config();
+    config.ack_budget = AckBudget::default();
+
+    let state = AppState {
+        bridge: SlackBridge::new(
+            ClaimCheckPublisher::new(
+                AckFailPublisher::hanging_publish(),
+                ClaimBucketBinding::for_test(MockObjectStore::new(), ClaimBucket::default()),
+                MaxPayload::from_server_limit(usize::MAX),
+            ),
+            &config,
+        ),
+        clock: FixedEpochClock::from_secs(TEST_NOW),
+        signing_secret: SlackSigningSecret::new(TEST_SECRET).unwrap(),
+        timestamp_max_drift: NonZeroDuration::from_secs(300).unwrap(),
+    };
+    let app = Router::new()
+        .route(
+            "/webhook",
+            post(handle_webhook::<AckFailPublisher, MockObjectStore, FixedEpochClock>),
+        )
+        .with_state(state);
+    let body = event_callback_body("message");
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, &body);
+
+    let started = tokio::time::Instant::now();
+    let resp = app.oneshot(webhook_request(&body, &ts, Some(&sig))).await.unwrap();
+    let elapsed = started.elapsed();
+
+    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(elapsed, std::time::Duration::from_millis(2500));
+    assert!(elapsed < super::super::constants::SLACK_ACK_DEADLINE);
+}
+
+#[derive(Clone, Default)]
+struct CapturedLogs(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for CapturedLogs {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for CapturedLogs {
+    type Writer = CapturedLogs;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        self.clone()
+    }
+}
+
+impl CapturedLogs {
+    fn text(&self) -> String {
+        String::from_utf8(self.0.lock().unwrap().clone()).unwrap()
+    }
+}
+
+fn capture_logs() -> (CapturedLogs, tracing::subscriber::DefaultGuard) {
+    let logs = CapturedLogs::default();
+    let guard = tracing_subscriber::fmt()
+        .with_writer(logs.clone())
+        .with_ansi(false)
+        .set_default();
+    (logs, guard)
+}
+
+#[tokio::test]
+async fn provision_warns_when_the_configured_ack_timeout_was_capped() {
+    let (logs, _guard) = capture_logs();
+    let mut config = test_config();
+    config.ack_budget = AckBudget::new(Some(NonZeroDuration::from_secs(10).unwrap()));
+
+    provision(&MockJetStreamContext::new(), &config).await.unwrap();
+
+    let text = logs.text();
+    assert!(text.contains("WARN"), "{text}");
+    assert!(text.contains("requested_secs=10"), "{text}");
+    assert!(text.contains("effective_millis=2500"), "{text}");
+}
+
+#[tokio::test]
+async fn provision_stays_quiet_when_the_ack_timeout_fits() {
+    let (logs, _guard) = capture_logs();
+
+    provision(&MockJetStreamContext::new(), &test_config()).await.unwrap();
+
+    let text = logs.text();
+    assert!(!text.contains("WARN"), "{text}");
+}
+
+fn unsigned_request(content_type: &str, body: &str) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri("/webhook")
+        .header("content-type", content_type)
+        .body(Body::from(body.to_owned()))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn ssl_check_is_answered_before_signature_verification_and_never_published() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = mock_app(publisher.clone());
+
+    let resp = app
+        .oneshot(unsigned_request("application/x-www-form-urlencoded", "ssl_check=1"))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(publisher.published_messages().is_empty());
+}
+
+#[tokio::test]
+async fn ssl_check_ignores_every_other_field() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = mock_app(publisher.clone());
+    let smuggled = "ssl_check=1&command=%2Ftrogon&team_id=T01ABC&trigger_id=cmd789";
+
+    let resp = app
+        .oneshot(unsigned_request("application/x-www-form-urlencoded", smuggled))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(publisher.published_messages().is_empty());
+}
+
+#[tokio::test]
+async fn ssl_check_with_a_valid_signature_is_still_not_published() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = mock_app(publisher.clone());
+    let form_body = "ssl_check=1&command=%2Ftrogon&team_id=T01ABC&trigger_id=cmd789";
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, form_body.as_bytes());
+
+    let resp = app
+        .oneshot(form_request(form_body.as_bytes(), &ts, &sig))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(publisher.published_messages().is_empty());
+}
+
+#[tokio::test]
+async fn requests_that_only_look_like_ssl_checks_still_need_a_signature() {
+    let _guard = tracing_guard();
+    let cases = [
+        ("application/x-www-form-urlencoded", "ssl_check=0"),
+        ("application/x-www-form-urlencoded", "ssl_check=1&ssl_check=1"),
+        ("application/x-www-form-urlencoded", "command=%2Ftrogon"),
+        ("application/x-www-form-urlencoded; charset=utf-8", "ssl_check=1"),
+        ("application/json", "ssl_check=1"),
+    ];
+    for (content_type, body) in cases {
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+
+        let resp = app.oneshot(unsigned_request(content_type, body)).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "{content_type} {body}");
+        assert!(publisher.published_messages().is_empty());
+    }
 }

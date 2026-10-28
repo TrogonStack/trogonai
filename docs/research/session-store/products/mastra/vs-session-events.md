@@ -132,7 +132,7 @@ would silently misread both:
   field) is the closest analogue to our Session, but it is deliberately
   thin: a thread has no execution-plan binding, no lifecycle state machine,
   and no terminal state. Our `SessionStarted` (`proto/trogonai/session/sessions/v1alpha1/session_started.proto:1-25`)
-  binds a session to a `StoredSessionExecutionPlan` and a `WorkspaceRef` at
+  binds a session to a `StoredSessionExecutionPlan` and a `CheckoutRef` at
   creation, and a session reaches one of four terminal states
   (`SessionClosed`, `SessionCancelled`, `SessionFailed`, `SessionHidden`).
   Mastra's thread has none of this: it is a container for messages, not a

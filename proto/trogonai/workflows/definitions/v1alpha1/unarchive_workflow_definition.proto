@@ -1,0 +1,12 @@
+edition = "2024";
+
+package trogonai.workflows.definitions.v1alpha1;
+
+import "trogonai/workflows/definitions/v1alpha1/workflow_definition.proto";
+
+// Dispatch requires DecideRequest.expected_revision. Only ARCHIVED transitions,
+// and the reference must match the latest revision. A delayed retry preserves its
+// original command id and expected stream revision, preventing a fresh intent.
+message UnarchiveWorkflowDefinition {
+  WorkflowDefinitionRef definition = 1 [features.field_presence = LEGACY_REQUIRED];
+}

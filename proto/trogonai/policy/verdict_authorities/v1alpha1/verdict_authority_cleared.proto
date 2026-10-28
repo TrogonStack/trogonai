@@ -1,0 +1,11 @@
+edition = "2024";
+
+package trogonai.policy.verdict_authorities.v1alpha1;
+
+import "trogonai/policy/subjects/v1alpha1/subject.proto";
+
+// Removes the rules, never the identity. An already cleared history emits
+// no second clear.
+message VerdictAuthorityCleared {
+  trogonai.policy.subjects.v1alpha1.PolicySubject subject = 1 [features.field_presence = LEGACY_REQUIRED];
+}

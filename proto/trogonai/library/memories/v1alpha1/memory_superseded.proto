@@ -1,0 +1,12 @@
+edition = "2024";
+
+package trogonai.library.memories.v1alpha1;
+
+import "trogonai/library/memories/v1alpha1/memory_id.proto";
+
+// The superseded entry stays in history; resolution simply prefers its
+// successor. An already superseded entry emits no second supersession.
+message MemorySuperseded {
+  MemoryId memory_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  MemoryId superseded_by_id = 2 [features.field_presence = LEGACY_REQUIRED];
+}

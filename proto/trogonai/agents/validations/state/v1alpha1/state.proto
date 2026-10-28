@@ -1,0 +1,19 @@
+edition = "2024";
+
+package trogonai.agents.validations.state.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "trogonai/agents/validations/v1alpha1/validation.proto";
+
+// Request transitions missing to PENDING. Completion retains the exact opening
+// request and records its single result. VALID, INVALID, and ERROR are terminal.
+// No authoring edits, activation, publication, or retries rewrite this history.
+message State {
+  oneof state {
+    option (buf.validate.oneof).required = true;
+
+    google.protobuf.Empty missing = 1;
+    trogonai.agents.validations.v1alpha1.AgentValidation present = 2;
+  }
+}

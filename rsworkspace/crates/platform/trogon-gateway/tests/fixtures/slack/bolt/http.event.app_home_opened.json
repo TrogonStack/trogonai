@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "id": "http.event.app_home_opened",
+  "kind": "event",
+  "transport": "http",
+  "provenance": {
+    "bolt_version": "5.1.0",
+    "bolt_commit": "3f8823c93f5639e99f05a2df9c7dc692da5cc184",
+    "node_slack_sdk_commit": "d02afdfd5c87f896dc9994dfe2b55472758fbcf4",
+    "payload_source": "test/unit/helpers/events.ts:createDummyAppHomeOpenedEventMiddlewareArgs",
+    "wire_source": "https://docs.slack.dev/apis/events-api/",
+    "ack_source": null
+  },
+  "not_representable": null,
+  "input": {
+    "headers": {
+      "content-type": "application/json",
+      "x-slack-request-timestamp": "1700000000",
+      "x-slack-signature": "v0=f5b980a790e3acd2dd2945b93427fa3d7d20bc853d6126fb5122b12f8b062987"
+    },
+    "body": "{\"token\":\"xoxb-1234\",\"team_id\":\"T1234\",\"api_app_id\":\"A1234\",\"event\":{\"type\":\"app_home_opened\",\"channel\":\"C1234\",\"user\":\"U1234\",\"tab\":\"home\",\"event_ts\":\"1234.56\"},\"type\":\"event_callback\",\"event_id\":\"1234\",\"event_time\":1234}"
+  },
+  "bolt": {
+    "outcome": "dispatched",
+    "status": 200,
+    "body": null,
+    "content_type": null,
+    "reason": null,
+    "dispatch": {
+      "incoming_type": "Event",
+      "conversation_id": "C1234",
+      "retry_num": null,
+      "retry_reason": null,
+      "is_enterprise_install": false,
+      "team_id": "T1234",
+      "enterprise_id": null,
+      "user_id": "U1234"
+    }
+  },
+  "expected": {
+    "outcome": "publish",
+    "nats": {
+      "subject_suffix": "event.app_home_opened",
+      "dedup_id": "1234",
+      "payload": "{\"token\":\"xoxb-1234\",\"team_id\":\"T1234\",\"api_app_id\":\"A1234\",\"event\":{\"type\":\"app_home_opened\",\"channel\":\"C1234\",\"user\":\"U1234\",\"tab\":\"home\",\"event_ts\":\"1234.56\"},\"type\":\"event_callback\",\"event_id\":\"1234\",\"event_time\":1234}",
+      "payload_fill": null,
+      "headers": {
+        "X-Slack-Event-Type": "app_home_opened",
+        "X-Slack-Event-Id": "1234",
+        "X-Slack-Team-Id": "T1234",
+        "X-Slack-Payload-Kind": "event",
+        "X-Slack-Is-Enterprise-Install": "false",
+        "X-Slack-Api-App-Id": "A1234",
+        "X-Slack-Transport": "webhook",
+        "X-Slack-Request-Timestamp": "1700000000"
+      }
+    },
+    "http": {
+      "status": 200,
+      "body": null,
+      "challenge": null
+    },
+    "socket_ack": null
+  }
+}

@@ -1,0 +1,179 @@
+edition = "2024";
+
+package trogonai.workflows.runs.queries.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/workflows/runs/queries/v1alpha1/view.proto";
+
+message HistoryItem {
+  string item_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  uint64 ordinal = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  google.protobuf.Timestamp occurred_at = 3 [features.field_presence = LEGACY_REQUIRED];
+  oneof detail {
+    option (buf.validate.oneof).required = true;
+    RunStatusChanged status_changed = 4;
+    InvocationDispatched invocation_dispatched = 5;
+    InvocationResultRecorded invocation_result_recorded = 6;
+    OccurrenceStatusChanged occurrence_changed = 7;
+    InteractionView interaction_changed = 8;
+    PlanChanged plan_changed = 9;
+    HistoryElision elided = 10;
+    FailedWorkRecovered failed_work_recovered = 11;
+  }
+}
+
+message RunStatusChanged {
+  RunLifecycle lifecycle = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  string reason = 2;
+}
+
+message InvocationDispatched {
+  OccurrenceViewRef occurrence = 1 [features.field_presence = LEGACY_REQUIRED];
+  string invocation_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  uint32 attempt_number = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32.gt = 0
+  ];
+  string child_session_id = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+message InvocationResultRecorded {
+  option (buf.validate.message).cel = {
+    id: "workflow_history.launch_rejection"
+    message: "launch rejection must record a failed invocation outcome"
+    expression: "!has(this.launch_rejection) || this.outcome == 2"
+  };
+  string invocation_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string receipt_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  oneof source {
+    option (buf.validate.oneof).required = true;
+    SessionReceiptViewRef session_event = 3;
+    LaunchRejectionViewEvidence launch_rejection = 4;
+  }
+  InvocationOutcome outcome = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+message SessionReceiptViewRef {
+  string child_session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  uint64 child_session_ordinal = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+}
+
+message LaunchRejectionViewEvidence {
+  string admission_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  google.protobuf.Timestamp rejected_at = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message FailedWorkRecovered {
+  string recovery_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string prior_termination_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  uint64 recovery_number = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  string root_occurrence_id = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+enum InvocationOutcome {
+  INVOCATION_OUTCOME_UNSPECIFIED = 0;
+  INVOCATION_OUTCOME_SUCCEEDED = 1;
+  INVOCATION_OUTCOME_FAILED = 2;
+  INVOCATION_OUTCOME_CANCELLED = 3;
+  INVOCATION_OUTCOME_INDETERMINATE = 4;
+}
+
+message OccurrenceStatusChanged {
+  OccurrenceViewRef occurrence = 1 [features.field_presence = LEGACY_REQUIRED];
+  NodeLifecycle lifecycle = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  string reason = 3;
+}
+
+message PlanChanged {
+  option (buf.validate.message).cel = {
+    id: "workflow_history.plan_changed"
+    message: "a plan change must name a different revision"
+    expression: "this.previous_revision_id != this.revision_id"
+  };
+  string previous_revision_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string revision_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string reason = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+message HistoryElision {
+  ElisionReason reason = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+enum ElisionReason {
+  ELISION_REASON_UNSPECIFIED = 0;
+  ELISION_REASON_CONTRACT_CLAMPED = 1;
+  ELISION_REASON_CONTENT_WITHHELD = 2;
+}

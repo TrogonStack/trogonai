@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.maintenance.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 import "trogonai/session/sessions/maintenance/v1alpha1/outcome.proto";
 import "trogonai/session/sessions/maintenance/v1alpha1/stream_boundary.proto";
@@ -34,7 +35,10 @@ import "trogonai/session/sessions/maintenance/v1alpha1/stream_boundary.proto";
 // and treating the second as a retry of the first is how a session gets
 // migrated twice.
 message MigrationIdentity {
-  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // Digest of the source cut. Part of identity because a migration of different
   // source content is a different migration even under the same version pair.
   ContentDigest source_digest = 2 [features.field_presence = LEGACY_REQUIRED];
@@ -53,6 +57,12 @@ message MigrationIdentity {
 // crash. Without an intent, a process that dies mid-commit leaves a target that
 // nobody can attribute and nobody can safely replace.
 message MigrationIntent {
+  option (buf.validate.message).cel = {
+    id: "migration_intent.expected_target_ordinal_matches_source"
+    message: "expected_target.ordinal must equal source.ordinal"
+    expression: "this.expected_target.ordinal == this.source.ordinal"
+  };
+
   MigrationIdentity identity = 1 [features.field_presence = LEGACY_REQUIRED];
   StreamBoundary source = 2 [features.field_presence = LEGACY_REQUIRED];
   // The boundary the target will have if the commit lands, computed before the
@@ -68,6 +78,14 @@ message MigrationIntent {
 
 // MigrationRecord is the intent plus everything learned since.
 message MigrationRecord {
+  option (buf.validate.message).cel = {
+    id: "migration_record.indeterminate_only_for_indeterminate"
+    message: "indeterminate may be set only for MAINTENANCE_STATE_INDETERMINATE"
+    expression:
+      "!has(this.indeterminate) || "
+      "this.state == trogonai.session.sessions.maintenance.v1alpha1.MaintenanceState.MAINTENANCE_STATE_INDETERMINATE"
+  };
+
   MigrationIntent intent = 1 [features.field_presence = LEGACY_REQUIRED];
   MaintenanceState state = 2 [features.field_presence = LEGACY_REQUIRED];
   // Set only for MAINTENANCE_STATE_INDETERMINATE.

@@ -62,8 +62,8 @@ import "trogonai/session/sessions/v1alpha1/user_message_recorded.proto";
 // already-stored bytes, so a producer shipping on v1alpha1 closes the window
 // early by creating those bytes, and promotion closes it regardless of producers
 // because promotion is the act of accepting the compatibility obligation. Once it
-// closes, a new required field needs a new package version. buf breaking under
-// WIRE_JSON does not catch this, because it compares fields present on both sides
+// closes, a new required field needs a new package version. buf breaking
+// does not catch this, because it compares fields present on both sides
 // and a field new to one side is not among them.
 //
 // SessionEvent is the session aggregate's event catalog: one oneof arm per

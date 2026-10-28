@@ -1,0 +1,20 @@
+edition = "2024";
+
+package trogonai.policy.delegation_permissions.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/policy/delegation_permissions/v1alpha1/delegation_permission_cleared.proto";
+import "trogonai/policy/delegation_permissions/v1alpha1/delegation_permission_initialized.proto";
+import "trogonai/policy/delegation_permissions/v1alpha1/delegation_permission_set.proto";
+
+// An unset or unknown event rejects replay; skipping a permission change could
+// admit a delegation the current permission forbids, or refuse one it allows.
+message DelegationPermissionEvent {
+  oneof event {
+    option (buf.validate.oneof).required = true;
+
+    DelegationPermissionInitialized delegation_permission_initialized = 1;
+    DelegationPermissionSet delegation_permission_set = 2;
+    DelegationPermissionCleared delegation_permission_cleared = 3;
+  }
+}

@@ -18,6 +18,8 @@ use crate::identity::BridgeUserJwt;
 
 use super::*;
 
+mod nats_port_tests;
+
 /// Bootstrap replies are built from the SDK response type rather than hand-written
 /// JSON: `SendMessageResponse` nests the payload under a variant key, and a fixture
 /// that spells the shape by hand can drift from the wire without failing.

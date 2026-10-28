@@ -3,15 +3,16 @@ use std::time::Duration;
 use bytes::Bytes;
 use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use serde::Deserialize;
+use serde_json::value::RawValue;
 use tokio_tungstenite::tungstenite::{Error as WebSocketError, Message};
 use tracing::{info, warn};
 use trogon_nats::jetstream::{ClaimCheckPublisher, JetStreamPublisher, ObjectStorePut};
 
 use super::config::{SlackConfig, SlackSocketModeConfig};
 use super::constants::RECONNECT_MAX_DELAY;
-#[cfg(not(coverage))]
 use super::constants::{APPS_CONNECTIONS_OPEN_URL, RECONNECT_INITIAL_DELAY};
 use super::server::SlackBridge;
+use super::unroutable::UnroutableReason;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SocketModeError {
@@ -59,26 +60,61 @@ struct SocketEnvelope {
     #[serde(default)]
     envelope_id: Option<String>,
     #[serde(default)]
-    payload: Option<serde_json::Value>,
+    payload: Option<Box<RawValue>>,
     #[serde(default)]
     reason: Option<String>,
 }
 
-#[cfg(not(coverage))]
+pub trait SocketConnector<P: JetStreamPublisher, S: ObjectStorePut> {
+    fn connect<'a>(
+        &'a mut self,
+        bridge: &'a SlackBridge<P, S>,
+        config: &'a SlackSocketModeConfig,
+    ) -> impl std::future::Future<Output = Result<(), SocketModeError>> + Send + 'a;
+}
+
+pub struct HttpSocketConnector {
+    client: reqwest::Client,
+    open_url: String,
+}
+
+impl HttpSocketConnector {
+    pub fn new(open_url: impl Into<String>) -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            open_url: open_url.into(),
+        }
+    }
+
+    pub fn slack() -> Self {
+        Self::new(APPS_CONNECTIONS_OPEN_URL)
+    }
+}
+
+impl<P: JetStreamPublisher, S: ObjectStorePut> SocketConnector<P, S> for HttpSocketConnector {
+    async fn connect<'a>(
+        &'a mut self,
+        bridge: &'a SlackBridge<P, S>,
+        config: &'a SlackSocketModeConfig,
+    ) -> Result<(), SocketModeError> {
+        connect_once(&self.client, &self.open_url, bridge, config).await
+    }
+}
+
 pub async fn run<P: JetStreamPublisher, S: ObjectStorePut>(
     publisher: ClaimCheckPublisher<P, S>,
-    config: &SlackConfig,
+    config: SlackConfig,
+    mut connector: impl SocketConnector<P, S>,
 ) -> Result<(), SocketModeError> {
     let socket_mode = config
         .socket_mode()
         .ok_or(SocketModeError::MissingSocketModeConfig)?
         .clone();
-    let bridge = SlackBridge::new(publisher, config);
-    let client = reqwest::Client::new();
+    let bridge = SlackBridge::new(publisher, &config);
     let mut reconnect_delay = RECONNECT_INITIAL_DELAY;
 
     loop {
-        match connect_once(&client, APPS_CONNECTIONS_OPEN_URL, &bridge, &socket_mode).await {
+        match connector.connect(&bridge, &socket_mode).await {
             Ok(()) => reconnect_delay = RECONNECT_INITIAL_DELAY,
             Err(error) => warn!(error = %error, "Slack Socket Mode connection failed"),
         }
@@ -165,7 +201,7 @@ async fn open_socket_url(
     ))
 }
 
-async fn handle_text_frame<P: JetStreamPublisher, S: ObjectStorePut>(
+pub(super) async fn handle_text_frame<P: JetStreamPublisher, S: ObjectStorePut>(
     bridge: &SlackBridge<P, S>,
     text: &str,
 ) -> Result<(bool, Option<String>), SocketModeError> {
@@ -186,10 +222,14 @@ async fn handle_text_frame<P: JetStreamPublisher, S: ObjectStorePut>(
             .map(|ack| (false, ack)),
         other => {
             warn!(kind = other, "Unhandled Slack Socket Mode envelope type");
-            bridge
-                .publish_socket_unroutable("unhandled_socket_mode_type", Bytes::copy_from_slice(text.as_bytes()))
+            let stored = bridge
+                .publish_socket_unroutable(
+                    UnroutableReason::UnhandledSocketModeType,
+                    Bytes::copy_from_slice(text.as_bytes()),
+                )
                 .await;
-            Ok((false, envelope.envelope_id.map(ack_frame)))
+            let ack = envelope.envelope_id.filter(|_| stored.is_success()).map(ack_frame);
+            Ok((false, ack))
         }
     }
 }
@@ -202,7 +242,10 @@ async fn handle_payload_envelope<P: JetStreamPublisher, S: ObjectStorePut>(
     let Some(envelope_id) = envelope.envelope_id else {
         warn!(kind = envelope.kind, "Missing Slack Socket Mode envelope_id");
         bridge
-            .publish_socket_unroutable("missing_envelope_id", Bytes::copy_from_slice(raw_text.as_bytes()))
+            .publish_socket_unroutable(
+                UnroutableReason::MissingEnvelopeId,
+                Bytes::copy_from_slice(raw_text.as_bytes()),
+            )
             .await;
         return Ok(None);
     };
@@ -211,7 +254,7 @@ async fn handle_payload_envelope<P: JetStreamPublisher, S: ObjectStorePut>(
         warn!(kind = envelope.kind, "Missing Slack Socket Mode payload");
         bridge
             .publish_socket_unroutable(
-                "missing_socket_mode_payload",
+                UnroutableReason::MissingSocketModePayload,
                 Bytes::copy_from_slice(raw_text.as_bytes()),
             )
             .await;
@@ -220,16 +263,16 @@ async fn handle_payload_envelope<P: JetStreamPublisher, S: ObjectStorePut>(
 
     let status = match envelope.kind.as_str() {
         "events_api" => {
-            let body = Bytes::from(serde_json::to_vec(&payload)?);
+            let body = Bytes::copy_from_slice(payload.get().as_bytes());
             bridge.handle_json_body(body).await.0
         }
-        "interactive" => bridge.handle_socket_interaction(&payload).await?,
-        "slash_commands" => bridge.handle_socket_slash_command(&payload).await?,
+        "interactive" => bridge.handle_socket_interaction(&payload).await,
+        "slash_commands" => bridge.handle_socket_slash_command(&payload).await,
         other => {
             warn!(kind = other, "Unhandled Slack Socket Mode payload envelope type");
             bridge
                 .publish_socket_unroutable(
-                    "unhandled_socket_mode_type",
+                    UnroutableReason::UnhandledSocketModeType,
                     Bytes::copy_from_slice(raw_text.as_bytes()),
                 )
                 .await;

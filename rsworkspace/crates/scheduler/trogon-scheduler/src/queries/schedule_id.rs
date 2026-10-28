@@ -18,13 +18,17 @@ pub struct ScheduleIdError(#[source] DomainScheduleIdError);
 
 impl ScheduleId {
     pub fn parse(raw: &str) -> Result<Self, ScheduleIdError> {
-        DomainScheduleId::parse(raw)
-            .map(|id| Self(id.to_string()))
-            .map_err(ScheduleIdError)
+        DomainScheduleId::parse(raw).map(Self::from).map_err(ScheduleIdError)
     }
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl From<DomainScheduleId> for ScheduleId {
+    fn from(value: DomainScheduleId) -> Self {
+        Self(value.to_string())
     }
 }
 

@@ -1,0 +1,13 @@
+edition = "2024";
+
+package trogonai.projects.projects.v1alpha1;
+
+// ProjectLifecycle is active or archived. Unknown and unspecified values
+// reject. Archival blocks rename and goal restatement without deleting the
+// project's history; current access and membership are policy facts and are
+// untouched by either transition.
+enum ProjectLifecycle {
+  PROJECT_LIFECYCLE_UNSPECIFIED = 0;
+  PROJECT_LIFECYCLE_ACTIVE = 1;
+  PROJECT_LIFECYCLE_ARCHIVED = 2;
+}

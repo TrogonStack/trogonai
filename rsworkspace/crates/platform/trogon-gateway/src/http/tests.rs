@@ -81,6 +81,12 @@ verification_token = "notion-verification-token-example"
 
 [sources.sentry.integrations.primary.webhook]
 client_secret = "sentry-client-secret"
+
+[sources.datadog.integrations.primary.webhook]
+webhook_token = "datadog-webhook-token"
+
+[sources.zoom.integrations.primary.webhook]
+secret_token = "zoom-secret-token"
 "#
     .to_string()
 }

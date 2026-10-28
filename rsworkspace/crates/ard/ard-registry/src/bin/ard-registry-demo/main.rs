@@ -1,3 +1,4 @@
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 use std::net::SocketAddr;
@@ -11,12 +12,13 @@ use tokio::net::TcpListener;
 
 #[tokio::main]
 #[cfg_attr(
-    dylint_lib = "trogon_lints",
+    dylint_lib = "trogon_dylint_lints",
     allow(
         debug_remnants,
         reason = "the bound address on stdout is this demo's contract with whatever started it and reads the port back"
     )
 )]
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
     let first = args.next();

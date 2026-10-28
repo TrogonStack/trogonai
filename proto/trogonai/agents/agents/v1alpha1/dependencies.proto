@@ -1,0 +1,251 @@
+edition = "2024";
+
+package trogonai.agents.agents.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/agents/agents/v1alpha1/digest.proto";
+import "trogonai/library/skills/ids/v1alpha1/skill_id.proto";
+
+// These declarations are revision-owned. Session admission resolves them under
+// live hierarchy and policy, then records exact references and digests. A
+// declaration grants no authority. Binding names are nonempty, case-sensitive,
+// and unique across every collection below. Resource identifiers must be
+// nonempty. Each declared integration requires a supported runtime or adapter
+// consumption contract; an absent or empty collection creates no integration
+// requirement. Invalid declarations or mismatched pin digests fail admission
+// even when the dependency is optional; only an unavailable eligible dependency
+// may be omitted. Connections are the one collection that pins no version, for
+// the reason recorded on ConnectionDeclaration.
+message AgentDependencies {
+  option (buf.validate.message).cel = {
+    id: "agent_dependencies.binding_names_unique"
+    message: "binding names must be unique across every declaration collection"
+    expression:
+      "(this.skills.map(d, d.binding_name) + this.tools.map(d, d.binding_name) + "
+      "this.delegates.map(d, d.binding_name) + this.memories.map(d, d.binding_name) + "
+      "this.connections.map(d, d.binding_name)).unique()"
+  };
+
+  repeated SkillDeclaration skills = 1;
+  repeated ToolDeclaration tools = 2;
+  repeated DelegateDeclaration delegates = 3;
+  repeated MemoryDeclaration memories = 4;
+  repeated ConnectionDeclaration connections = 5;
+}
+
+// Unspecified and unknown values are invalid. A required declaration must
+// resolve to at least one authorized dependency before Session start. An
+// optional declaration may resolve to none; it never permits a substitution
+// outside the declaration. Availability is not an authorization grant.
+enum DependencyRequirement {
+  DEPENDENCY_REQUIREMENT_UNSPECIFIED = 0;
+  DEPENDENCY_REQUIREMENT_REQUIRED = 1;
+  DEPENDENCY_REQUIREMENT_OPTIONAL = 2;
+}
+
+// Every skill declaration is required; Session admission cannot upgrade its
+// content.
+message SkillDeclaration {
+  string binding_name = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  SkillVersionRef version_ref = 2 [features.field_presence = LEGACY_REQUIRED];
+  Digest content_digest = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message SkillVersionRef {
+  trogonai.library.skills.ids.v1alpha1.SkillId skill_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Exact immutable version identifier. Empty values and moving aliases are invalid.
+  string version = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// Name and every label predicate must match by exact, case-sensitive equality.
+// An empty name omits that predicate; at least a name or label is required.
+// Empty label keys are invalid.
+// Selectors apply only within the Session's authorized resolution scope and
+// match logical resources. Multiple matching resources fail admission, even
+// for optional declarations. They never imply an arbitrary first match.
+message ToolSelector {
+  option (buf.validate.message).cel = {
+    id: "tool_selector.predicate_required"
+    message: "at least one predicate is required"
+    expression: "this.name != '' || this.labels.size() > 0"
+  };
+
+  string name = 1;
+  map<string, string> labels = 2 [(buf.validate.field).map.keys.string.min_len = 1];
+}
+
+message ToolDeclaration {
+  string binding_name = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  DependencyRequirement requirement = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // Exactly one known arm is required. A selector resolves the ToolDefinition
+  // resource; its owning domain resolves a version at Session start, which the
+  // Session must pin. The tool's input schema stays with that version.
+  oneof selection {
+    option (buf.validate.oneof).required = true;
+
+    ToolSelector selector = 3;
+    ExactToolVersionPin exact_pin = 4;
+  }
+}
+
+message ExactToolVersionPin {
+  string tool_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  // Exact immutable version identifier. Empty values and moving aliases are invalid.
+  string version = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  Digest definition_digest = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message DelegateDeclaration {
+  string binding_name = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  DependencyRequirement requirement = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // Exactly one known arm is required. Selectors match each Agent's latest
+  // minted revision's configuration-owned labels. Display names and annotations
+  // never participate. Session admission pins the selected revision. Resolution
+  // runs over the Session's hierarchy scope first; the resolved Agent is then
+  // checked against the dispatching Agent's delegation permissions, which may
+  // refuse it but never substitute another (ADR#0071).
+  oneof selection {
+    option (buf.validate.oneof).required = true;
+
+    DelegateSelector selector = 3;
+    ExactDelegateRevisionPin exact_pin = 4;
+  }
+}
+
+// Every label predicate must match by exact, case-sensitive equality. At least
+// one predicate is required and empty keys are invalid. Multiple matching
+// Agents fail admission, even for optional declarations, within the Session's
+// authorized resolution scope.
+message DelegateSelector {
+  map<string, string> labels = 1 [(buf.validate.field).map = {
+    min_pairs: 1
+    keys: {
+      string: {min_len: 1}
+    }
+  }];
+}
+
+message ExactDelegateRevisionPin {
+  string agent_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  // Positive minted revision number, never a moving latest alias.
+  uint64 revision = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  Digest configuration_digest = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// A memory dependency may resolve to multiple instances of the declared kind.
+// Their references and digests belong to the Session. No instance identity,
+// memory content, or cross-hierarchy authority belongs in this declaration.
+message MemoryDeclaration {
+  string binding_name = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  DependencyRequirement requirement = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  MemoryKindSelector selector = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message MemoryKindSelector {
+  // Nonempty memory-domain kind identifier, matched by exact equality within
+  // the Session's authorized hierarchy context. This is never an instance ID.
+  string kind = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// ConnectionDeclaration is how a revision states which external systems its
+// behavior reaches, without naming a credential, a connection resource, or a
+// secret handle. ADR#0032 Decision 3 keeps every one of those out of
+// AgentConfiguration, and this declaration does not reopen that boundary: it
+// names a requirement class, so a reviewer can read a revision and see what it
+// talks to without the revision becoming the custodian of how it authenticates.
+//
+// Unlike every other declaration in this file, this one has no exact pin arm,
+// and the omission is the decision rather than an unfinished shape. A pin
+// commits a revision to an immutable version, which is what makes a skill,
+// tool, or delegate reviewable. Credential material has no such version to
+// commit to. Rotation replaces the material while the connection it belongs to
+// remains the same connection, so a pin would either name material that the
+// next rotation invalidates, forcing a new revision for every rotation, or name
+// a version that is forbidden to change, which defeats rotation. Structural
+// identity is the part that holds still under rotation, and it is therefore the
+// only part a revision declares.
+message ConnectionDeclaration {
+  string binding_name = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  DependencyRequirement requirement = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  ConnectionSelector selector = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// The provider names the external security and billing boundary the behavior
+// reaches, matched by exact, case-sensitive equality within the Session's
+// authorized resolution scope. It is an open identifier rather than an
+// enumeration because the set of systems the platform can provision belongs to
+// the security plane's catalog; mirroring that catalog here would make every
+// new integration a change to the Agent contract and to every configuration
+// digest that encodes it.
+//
+// Everything narrower than the provider is a label predicate for the same
+// reason. Credential kind, environment, and account distinctions are the
+// security plane's vocabulary, and a declaration that restated them would hold
+// a second copy free to drift from the first. Every predicate must match by
+// exact, case-sensitive equality and empty keys are invalid. Multiple matching
+// connections fail admission, even for an optional declaration, because an
+// arbitrary first match would pick which external system the behavior reaches.
+message ConnectionSelector {
+  string provider = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  map<string, string> labels = 2 [(buf.validate.field).map.keys.string.min_len = 1];
+}

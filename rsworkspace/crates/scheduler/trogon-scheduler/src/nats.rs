@@ -1,5 +1,3 @@
-#![cfg_attr(coverage, allow(dead_code, unused_imports))]
-
 use crate::{
     commands::domain::ScheduleId,
     config::ScheduleWriteState,
@@ -27,7 +25,6 @@ pub(crate) fn resolve_event_subject_state(canonical_state: Option<ScheduleWriteS
     }
 }
 
-#[cfg(not(coverage))]
 pub(crate) fn validate_events_stream(stream: &jetstream::stream::Stream) -> Result<(), SchedulerError> {
     let config = &stream.cached_info().config;
     if !config.allow_atomic_publish {

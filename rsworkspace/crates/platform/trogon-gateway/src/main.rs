@@ -1,111 +1,74 @@
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
-#[cfg(not(coverage))]
 mod cli;
-#[cfg_attr(coverage, allow(dead_code))]
 mod config;
-#[cfg_attr(coverage, allow(dead_code))]
 mod constants;
-#[cfg_attr(coverage, allow(dead_code))]
 mod credential;
-#[cfg_attr(coverage, allow(dead_code))]
 mod credential_management;
-#[cfg_attr(coverage, allow(dead_code))]
 mod credential_management_idempotency;
-#[cfg_attr(coverage, allow(dead_code))]
 mod http;
-#[cfg_attr(coverage, allow(dead_code))]
 mod secret_store;
-#[cfg_attr(coverage, allow(dead_code))]
 mod source;
-#[cfg_attr(coverage, allow(dead_code))]
 mod source_integration_id;
-#[cfg_attr(coverage, allow(dead_code))]
 mod source_plugin;
-#[cfg_attr(coverage, allow(dead_code))]
 mod source_status;
-#[cfg_attr(coverage, allow(dead_code))]
 mod streams;
+mod supervision;
 
 use std::error::Error;
 use std::io::Write;
-#[cfg(not(coverage))]
 use std::net::SocketAddr;
-#[cfg(not(coverage))]
 use std::time::Duration;
 
-#[cfg(not(coverage))]
-use anyhow::Context;
-#[cfg(not(coverage))]
-use async_nats::jetstream::kv;
-#[cfg(not(coverage))]
-use tokio::task::JoinSet;
-#[cfg(not(coverage))]
-use tracing::{error, info};
-#[cfg(not(coverage))]
-use trogon_decider_runtime::StreamRead;
-#[cfg(not(coverage))]
-use trogon_nats::jetstream::{
-    ClaimBucket, ClaimCheckPublisher, ClaimRetention, JetStreamGetRawMessage, JetStreamGetStreamInfo, MaxPayload,
-    NatsJetStreamClient, NatsObjectStore,
+use crate::constants::{
+    CLAIM_CHECK_TTL_GRACE, NATS_CONNECT_TIMEOUT, NATS_SERVER_INFO_POLL_INTERVAL, SLACK_RESTART_BACKOFF,
 };
-#[cfg(not(coverage))]
+use anyhow::Context;
+use async_nats::jetstream::kv;
+use futures_util::FutureExt;
+use tokio::task::JoinSet;
+use tracing::{error, info, warn};
+use trogon_decider_runtime::StreamRead;
+use trogon_nats::jetstream::{
+    ClaimBucket, ClaimCheckPublisher, ClaimRetention, JetStreamGetRawMessage, JetStreamGetStreamInfo,
+    JetStreamPublisher, MaxPayload, NatsJetStreamClient, NatsObjectStore, ObjectStorePut,
+};
 use trogon_nats::{connect, wait_for_server_info};
-#[cfg(not(coverage))]
 use trogon_std::SecretString;
-#[cfg(not(coverage))]
 use trogon_std::args::{CliArgs, ParseArgs};
-#[cfg(not(coverage))]
 use trogon_std::env::SystemEnv;
-#[cfg(not(coverage))]
 use trogon_std::fs::SystemFs;
 
-#[cfg(not(coverage))]
-use crate::constants::{CLAIM_CHECK_TTL_GRACE, NATS_CONNECT_TIMEOUT, NATS_SERVER_INFO_POLL_INTERVAL};
-#[cfg(not(coverage))]
 const ENABLE_RUNTIME_DISCORD_CREDENTIALS: &str = "TROGON_GATEWAY_ENABLE_RUNTIME_DISCORD_CREDENTIALS";
-#[cfg(not(coverage))]
 const ENABLE_RUNTIME_GITHUB_CREDENTIALS: &str = "TROGON_GATEWAY_ENABLE_RUNTIME_GITHUB_CREDENTIALS";
-#[cfg(not(coverage))]
 const ENABLE_RUNTIME_GITLAB_CREDENTIALS: &str = "TROGON_GATEWAY_ENABLE_RUNTIME_GITLAB_CREDENTIALS";
-#[cfg(not(coverage))]
 const ENABLE_RUNTIME_INCIDENTIO_CREDENTIALS: &str = "TROGON_GATEWAY_ENABLE_RUNTIME_INCIDENTIO_CREDENTIALS";
-#[cfg(not(coverage))]
 const ENABLE_RUNTIME_LINEAR_CREDENTIALS: &str = "TROGON_GATEWAY_ENABLE_RUNTIME_LINEAR_CREDENTIALS";
-#[cfg(not(coverage))]
 const ENABLE_RUNTIME_MICROSOFT_GRAPH_CREDENTIALS: &str = "TROGON_GATEWAY_ENABLE_RUNTIME_MICROSOFT_GRAPH_CREDENTIALS";
-#[cfg(not(coverage))]
 const ENABLE_RUNTIME_NOTION_CREDENTIALS: &str = "TROGON_GATEWAY_ENABLE_RUNTIME_NOTION_CREDENTIALS";
-#[cfg(not(coverage))]
 const ENABLE_RUNTIME_SENTRY_CREDENTIALS: &str = "TROGON_GATEWAY_ENABLE_RUNTIME_SENTRY_CREDENTIALS";
-#[cfg(not(coverage))]
 const ENABLE_RUNTIME_SLACK_CREDENTIALS: &str = "TROGON_GATEWAY_ENABLE_RUNTIME_SLACK_CREDENTIALS";
-#[cfg(not(coverage))]
 const ENABLE_RUNTIME_TELEGRAM_CREDENTIALS: &str = "TROGON_GATEWAY_ENABLE_RUNTIME_TELEGRAM_CREDENTIALS";
-#[cfg(not(coverage))]
 const ENABLE_RUNTIME_TWITTER_CREDENTIALS: &str = "TROGON_GATEWAY_ENABLE_RUNTIME_TWITTER_CREDENTIALS";
-#[cfg(not(coverage))]
 const CREDENTIAL_MANAGEMENT_ADMIN_TOKEN: &str = "TROGON_GATEWAY_CREDENTIAL_MANAGEMENT_ADMIN_TOKEN";
-#[cfg(not(coverage))]
 const OPENBAO_ADDR: &str = "OPENBAO_ADDR";
-#[cfg(not(coverage))]
 const OPENBAO_TOKEN: &str = "OPENBAO_TOKEN";
-#[cfg(not(coverage))]
 const CREDENTIAL_WORKER_INTERVAL: Duration = Duration::from_secs(30);
-#[cfg(not(coverage))]
 const CREDENTIAL_RUNTIME_PROJECTION_WORKER_INTERVAL: Duration = Duration::from_secs(30);
 
-#[cfg(not(coverage))]
 type SourceResult = (&'static str, anyhow::Result<()>);
 
-#[cfg(not(coverage))]
 #[tokio::main]
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn main() -> anyhow::Result<()> {
+    trogon_std::tls::install_default_crypto_provider()?;
+
     let cli = CliArgs::<cli::Cli>::new().parse_args();
     let resolved = config::load_with_overrides(cli.runtime.config.as_deref(), &cli.runtime.nats)?;
 
     match cli.command {
-        cli::Command::Serve => serve(resolved).await,
+        cli::Command::Serve => serve(resolved, trogon_std::signal::shutdown_signal()).await,
         cli::Command::Source { source } => match source {
             cli::SourceCommand::Notion { command } => match command {
                 cli::NotionCommand::VerificationToken { integration, watch } => {
@@ -120,26 +83,26 @@ async fn main() -> anyhow::Result<()> {
     }
 }
 
-#[cfg(not(coverage))]
-async fn serve(resolved: config::ResolvedConfig) -> anyhow::Result<()> {
+async fn serve(
+    resolved: config::ResolvedConfig,
+    shutdown: impl std::future::Future<Output = ()> + Send + 'static,
+) -> anyhow::Result<()> {
     if !resolved.has_any_source() {
-        anyhow::bail!("no sources configured - provide a config file with at least one source");
+        anyhow::bail!("no sources configured — provide a config file with at least one source");
     }
 
     trogon_telemetry::init_logger(trogon_telemetry::ServiceName::TrogonGateway, [], &SystemEnv, &SystemFs);
 
     info!("trogon-gateway starting");
 
+    let google_pubsub_sources = prepare_google_pubsub_sources(&resolved.google_pubsub)?;
+
     let nats = connect(&resolved.nats, NATS_CONNECT_TIMEOUT).await?;
     let server_max_payload = wait_for_server_info(&nats, NATS_CONNECT_TIMEOUT, NATS_SERVER_INFO_POLL_INTERVAL)
         .await?
         .max_payload;
     let max_payload = MaxPayload::from_server_limit(server_max_payload);
-    info!(
-        server_max_payload_bytes = server_max_payload,
-        claim_check_threshold_bytes = max_payload.threshold(),
-        "NATS connected"
-    );
+    log_nats_connection(server_max_payload, max_payload);
     let js_context = async_nats::jetstream::new(nats.clone());
     // Size the claim bucket TTL from the longest stream it serves so a message
     // still on the stream can always resolve its claim. `has_any_source` is
@@ -162,106 +125,70 @@ async fn serve(resolved: config::ResolvedConfig) -> anyhow::Result<()> {
     );
     let (runtime_credentials, _credential_projection_refresh_report, runtime_projection_checkpoints) =
         refresh_credential_runtime_projection(&credential_store).await?;
-    let telegram_registration_configs: Vec<_> = resolved
-        .telegram
-        .iter()
-        .filter(|integration| integration.config.registration.is_some())
-        .map(|integration| (&integration.id, &integration.config))
-        .collect();
-    if !telegram_registration_configs.is_empty() {
-        match crate::source::telegram::registration::registration_http_client() {
-            Ok(telegram_http_client) => {
-                for (integration_id, config) in telegram_registration_configs {
-                    if let Err(error) =
-                        crate::source::telegram::registration::register_webhook(config, &telegram_http_client).await
-                    {
-                        error!(
-                            source = "telegram",
-                            integration = %integration_id,
-                            error = %error,
-                            "Telegram webhook registration failed"
-                        );
-                    }
-                }
-            }
-            Err(error) => {
-                error!(
-                    source = "telegram",
-                    error = %error,
-                    "Telegram webhook registration HTTP client initialization failed"
-                );
-            }
-        }
-    }
+    register_telegram_webhooks(
+        &resolved.telegram,
+        crate::source::telegram::registration::registration_http_client,
+        crate::source::telegram::registration::register_webhook,
+    )
+    .await;
 
     let port = resolved.http_server.port;
     let mut join_set: JoinSet<SourceResult> = JoinSet::new();
+    let shutdown = shutdown.shared();
 
     let publisher = ClaimCheckPublisher::new(client.clone(), claim_binding, nats.clone());
     {
         let projection_runtime_credentials = runtime_credentials.clone();
         let projection_event_stream = credential_store.events_stream().clone();
         let projection_event_store = credential_store.clone();
+        let shutdown = shutdown.clone();
         join_set.spawn(async move {
-            credential::processor::runtime_projection::run_checkpointed_refresh_worker(
-                projection_runtime_credentials,
-                projection_event_stream,
-                projection_event_store,
-                runtime_projection_checkpoints,
-                CREDENTIAL_RUNTIME_PROJECTION_WORKER_INTERVAL,
-            )
-            .await;
+            tokio::select! {
+                () = shutdown => {}
+                () = credential::processor::runtime_projection::run_checkpointed_refresh_worker(
+                    projection_runtime_credentials,
+                    projection_event_stream,
+                    projection_event_store,
+                    runtime_projection_checkpoints,
+                    CREDENTIAL_RUNTIME_PROJECTION_WORKER_INTERVAL,
+                ) => {}
+            }
             ("credential-runtime-projection-worker", Ok(()))
         });
         info!("credential runtime projection refresh worker spawned");
     }
-    let discord_runtime_credentials = discord_runtime_credentials_from_env(&runtime_credentials)?;
 
-    {
-        if let Some(ref cfg) = resolved.discord {
-            let p = publisher.clone();
-            let discord_cfg = cfg.clone();
-            let runtime_credentials = discord_runtime_credentials.clone();
-            join_set.spawn(async move {
-                if let Some(runtime_credentials) = runtime_credentials {
-                    crate::source::discord::gateway_runner::run_with_runtime_credentials(
-                        p,
-                        &discord_cfg,
-                        runtime_credentials,
-                    )
-                    .await;
-                } else {
-                    crate::source::discord::gateway_runner::run(p, &discord_cfg).await;
-                }
-                ("discord-gateway", Ok(()))
-            });
-            info!(source = "discord", "gateway runner spawned");
-        }
+    match discord_runtime_credentials_from_env(&runtime_credentials)? {
+        Some(discord_runtime_credentials) => spawn_discord_gateway_with_runtime_credentials(
+            &mut join_set,
+            resolved.discord.as_ref(),
+            discord_runtime_credentials,
+            publisher.clone(),
+            crate::source::discord::gateway_runner::run,
+        ),
+        None => spawn_discord_gateway(
+            &mut join_set,
+            resolved.discord.as_ref(),
+            publisher.clone(),
+            crate::source::discord::gateway_runner::run,
+        ),
     }
 
-    for integration in resolved
-        .slack
-        .iter()
-        .filter(|integration| integration.config.socket_mode().is_some())
-    {
-        let p = publisher.clone();
-        let integration_id = integration.id.clone();
-        let slack_cfg = integration.config.clone();
-        join_set.spawn(async move {
-            let result = tokio::select! {
-                _ = trogon_std::signal::shutdown_signal() => Ok(()),
-                result = crate::source::slack::socket_mode::run(p, &slack_cfg) => {
-                    result.context("slack socket mode")
-                }
-            };
-            ("slack-socket-mode", result)
-        });
-        info!(
-            source = "slack",
-            integration = %integration_id,
-            "socket mode runner spawned"
-        );
-    }
+    spawn_slack_socket_modes(
+        &mut join_set,
+        &resolved.slack,
+        publisher.clone(),
+        shutdown.clone(),
+        crate::source::slack::socket_mode::run,
+    );
+
+    spawn_google_pubsub_streaming_pulls(
+        &mut join_set,
+        google_pubsub_sources,
+        publisher.clone(),
+        shutdown.clone(),
+        crate::source::google_pubsub::streaming_pull::run,
+    );
 
     let app = match source_runtime_credentials_from_env(&runtime_credentials)? {
         Some(runtime_credentials) => {
@@ -281,20 +208,23 @@ async fn serve(resolved: config::ResolvedConfig) -> anyhow::Result<()> {
             let worker_handler_event_store = credential_store.clone();
             let worker_store = store.clone();
             let worker_runtime_credentials = runtime_credentials.clone();
+            let worker_shutdown = shutdown.clone();
             join_set.spawn(async move {
                 let handler = credential::handler::CredentialRuntimeHandler::new(
                     worker_handler_event_store,
                     worker_store,
                     worker_runtime_credentials,
                 );
-                credential::processor::recovery_worker::run(
-                    worker_event_stream,
-                    worker_event_store,
-                    handler,
-                    worker_checkpoints,
-                    CREDENTIAL_WORKER_INTERVAL,
-                )
-                .await;
+                tokio::select! {
+                    () = worker_shutdown => {}
+                    () = credential::processor::recovery_worker::run(
+                        worker_event_stream,
+                        worker_event_store,
+                        handler,
+                        worker_checkpoints,
+                        CREDENTIAL_WORKER_INTERVAL,
+                    ) => {}
+                }
                 ("credential-worker", Ok(()))
             });
             info!("credential recovery worker spawned");
@@ -321,12 +251,250 @@ async fn serve(resolved: config::ResolvedConfig) -> anyhow::Result<()> {
     info!(addr = %addr, "listening");
 
     join_set.spawn(async move {
-        let result = axum::serve(listener, app)
-            .with_graceful_shutdown(trogon_std::signal::shutdown_signal())
-            .await;
+        let result = axum::serve(listener, app).with_graceful_shutdown(shutdown).await;
         ("http", result.context("http server"))
     });
 
+    wait_for_sources(join_set).await
+}
+
+async fn wait_for_sources(join_set: JoinSet<SourceResult>) -> anyhow::Result<()> {
+    wait_for_sources_with_shutdown(join_set, trogon_telemetry::shutdown_otel).await
+}
+
+fn log_nats_connection(server_max_payload: usize, max_payload: MaxPayload) {
+    info!(
+        server_max_payload_bytes = server_max_payload,
+        claim_check_threshold_bytes = max_payload.threshold(),
+        "NATS connected"
+    );
+}
+
+async fn register_telegram_webhooks<C, E, Register>(
+    integrations: &[config::SourceIntegration<source::telegram::TelegramSourceConfig>],
+    client: impl FnOnce() -> Result<C, E>,
+    register: Register,
+) where
+    E: std::error::Error,
+    Register: for<'a> std::ops::AsyncFn(
+            &'a source::telegram::TelegramSourceConfig,
+            &'a C,
+        ) -> Result<(), source::telegram::registration::RegistrationError>,
+{
+    let registrations: Vec<_> = integrations
+        .iter()
+        .filter(|integration| integration.config.registration.is_some())
+        .collect();
+    if !registrations.is_empty() {
+        match client() {
+            Ok(client) => {
+                for integration in registrations {
+                    if let Err(error) = register(&integration.config, &client).await {
+                        error!(
+                            source = "telegram",
+                            integration = %integration.id,
+                            error = %error,
+                            "Telegram webhook registration failed"
+                        );
+                    }
+                }
+            }
+            Err(error) => {
+                error!(
+                    source = "telegram",
+                    error = %error,
+                    "Telegram webhook registration HTTP client initialization failed"
+                );
+            }
+        }
+    }
+}
+
+fn spawn_discord_gateway<P, S, Run, Running>(
+    tasks: &mut JoinSet<SourceResult>,
+    config: Option<&source::discord::config::DiscordConfig>,
+    publisher: ClaimCheckPublisher<P, S>,
+    run: Run,
+) where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    Run: FnOnce(ClaimCheckPublisher<P, S>, source::discord::config::DiscordConfig, twilight_gateway::Shard) -> Running
+        + Send
+        + 'static,
+    Running: std::future::Future<Output = ()> + Send + 'static,
+{
+    let static_bot_token = config.and_then(|config| config.bot_token.clone());
+    spawn_discord_gateway_with_bot_token(tasks, config, publisher, run, async move {
+        if static_bot_token.is_none() {
+            warn!("Discord gateway configured without a static bot token");
+        }
+        static_bot_token
+    });
+}
+
+fn spawn_discord_gateway_with_runtime_credentials<P, S, G, Run, Running>(
+    tasks: &mut JoinSet<SourceResult>,
+    config: Option<&source::discord::config::DiscordConfig>,
+    credentials: credential::processor::runtime_projection::RuntimeCredentialResolver<G>,
+    publisher: ClaimCheckPublisher<P, S>,
+    run: Run,
+) where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: secret_store::SecretStoreGet<Error = secret_store::SecretStoreError> + Send + Sync + 'static,
+    Run: FnOnce(ClaimCheckPublisher<P, S>, source::discord::config::DiscordConfig, twilight_gateway::Shard) -> Running
+        + Send
+        + 'static,
+    Running: std::future::Future<Output = ()> + Send + 'static,
+{
+    spawn_discord_gateway_with_bot_token(tasks, config, publisher, run, async move {
+        match source::discord::gateway_runner::resolve_runtime_bot_token(&credentials).await {
+            Ok(bot_token) => Some(bot_token),
+            Err(error) => {
+                warn!(?error, "Discord runtime bot token could not be resolved");
+                None
+            }
+        }
+    });
+}
+
+fn spawn_discord_gateway_with_bot_token<P, S, Run, Running, BotToken>(
+    tasks: &mut JoinSet<SourceResult>,
+    config: Option<&source::discord::config::DiscordConfig>,
+    publisher: ClaimCheckPublisher<P, S>,
+    run: Run,
+    bot_token: BotToken,
+) where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    Run: FnOnce(ClaimCheckPublisher<P, S>, source::discord::config::DiscordConfig, twilight_gateway::Shard) -> Running
+        + Send
+        + 'static,
+    Running: std::future::Future<Output = ()> + Send + 'static,
+    BotToken: std::future::Future<Output = Option<source::discord::config::DiscordBotToken>> + Send + 'static,
+{
+    if let Some(config) = config {
+        let config = config.clone();
+        tasks.spawn(async move {
+            if let Some(bot_token) = bot_token.await {
+                let shard = twilight_gateway::Shard::new(
+                    twilight_gateway::ShardId::ONE,
+                    bot_token.as_str().to_owned(),
+                    config.intents,
+                );
+                run(publisher, config, shard).await;
+            }
+            ("discord-gateway", Ok(()))
+        });
+        info!(source = "discord", "gateway runner spawned");
+    }
+}
+
+fn spawn_slack_socket_modes<P, S, Shutdown, Run, Running>(
+    tasks: &mut JoinSet<SourceResult>,
+    integrations: &[config::SourceIntegration<source::slack::SlackConfig>],
+    publisher: ClaimCheckPublisher<P, S>,
+    shutdown: Shutdown,
+    run: Run,
+) where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    Shutdown: std::future::Future<Output = ()> + Clone + Send + 'static,
+    Run: FnOnce(
+            ClaimCheckPublisher<P, S>,
+            source::slack::SlackConfig,
+            source::slack::socket_mode::HttpSocketConnector,
+        ) -> Running
+        + Clone
+        + Send
+        + 'static,
+    Running: std::future::Future<Output = Result<(), source::slack::socket_mode::SocketModeError>> + Send + 'static,
+{
+    for integration in integrations
+        .iter()
+        .filter(|integration| integration.config.socket_mode().is_some())
+    {
+        let publisher = publisher.clone();
+        let config = integration.config.clone();
+        let shutdown = shutdown.clone();
+        let run = run.clone();
+        tasks.spawn(async move {
+            let result = tokio::select! {
+                () = shutdown => Ok(()),
+                result = supervision::supervise("slack-socket-mode", SLACK_RESTART_BACKOFF, move || {
+                    let connector = source::slack::socket_mode::HttpSocketConnector::slack();
+                    run.clone()(publisher.clone(), config.clone(), connector)
+                }) => result.context("slack socket mode"),
+            };
+            ("slack-socket-mode", result)
+        });
+        info!(source = "slack", integration = %integration.id, "socket mode runner spawned");
+    }
+}
+
+struct PreparedGooglePubSub<'a> {
+    integration: &'a config::SourceIntegration<source::google_pubsub::GooglePubSubConfig>,
+    source: source::google_pubsub::GooglePubSubSource,
+}
+
+fn prepare_google_pubsub_sources(
+    integrations: &[config::SourceIntegration<source::google_pubsub::GooglePubSubConfig>],
+) -> anyhow::Result<Vec<PreparedGooglePubSub<'_>>> {
+    integrations
+        .iter()
+        .map(|integration| {
+            let source::google_pubsub::config::GooglePubSubTransportConfig::StreamingPull(streaming_pull) =
+                &integration.config.transport;
+            let credentials = streaming_pull
+                .credentials
+                .build()
+                .with_context(|| format!("google_pubsub/{}: invalid credentials", integration.id))?;
+            Ok(PreparedGooglePubSub {
+                integration,
+                source: source::google_pubsub::GooglePubSubSource::new(credentials),
+            })
+        })
+        .collect()
+}
+
+fn spawn_google_pubsub_streaming_pulls<P, S, Shutdown, Run, Running>(
+    tasks: &mut JoinSet<SourceResult>,
+    prepared: Vec<PreparedGooglePubSub<'_>>,
+    publisher: ClaimCheckPublisher<P, S>,
+    shutdown: Shutdown,
+    run: Run,
+) where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    Shutdown: std::future::Future<Output = ()> + Clone + Send + 'static,
+    Run: FnOnce(
+            ClaimCheckPublisher<P, S>,
+            source::google_pubsub::GooglePubSubConfig,
+            source::google_pubsub::GooglePubSubSource,
+            Shutdown,
+        ) -> Running
+        + Clone
+        + Send
+        + 'static,
+    Running: std::future::Future<Output = ()> + Send + 'static,
+{
+    for PreparedGooglePubSub { integration, source } in prepared {
+        let publisher = publisher.clone();
+        let config = integration.config.clone();
+        let shutdown = shutdown.clone();
+        let run = run.clone();
+        tasks.spawn(async move {
+            run(publisher, config, source, shutdown).await;
+            ("google-pubsub-streaming-pull", Ok(()))
+        });
+        info!(source = "google_pubsub", integration = %integration.id, "streaming pull runner spawned");
+    }
+}
+
+async fn wait_for_sources_with_shutdown<E: std::error::Error>(
+    mut join_set: JoinSet<SourceResult>,
+    shutdown_telemetry: impl FnOnce() -> Result<(), E>,
+) -> anyhow::Result<()> {
     let task_count = join_set.len();
     info!(count = task_count, "tasks spawned");
 
@@ -346,7 +514,7 @@ async fn serve(resolved: config::ResolvedConfig) -> anyhow::Result<()> {
     }
 
     info!("all tasks stopped, shutting down");
-    if let Err(e) = trogon_telemetry::shutdown_otel() {
+    if let Err(e) = shutdown_telemetry() {
         error!(error = %e, "OpenTelemetry shutdown failed");
     }
 
@@ -357,7 +525,6 @@ async fn serve(resolved: config::ResolvedConfig) -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(not(coverage))]
 async fn refresh_credential_runtime_projection(
     event_store: &credential::store::CredentialEventStore,
 ) -> anyhow::Result<(
@@ -380,7 +547,6 @@ async fn refresh_credential_runtime_projection(
     Ok((registry, report, checkpoints))
 }
 
-#[cfg(not(coverage))]
 async fn refresh_credential_runtime_projection_with_checkpoints<EventStream, EventStore, Checkpoints>(
     event_stream: &EventStream,
     event_store: &EventStore,
@@ -415,7 +581,6 @@ where
     Ok((registry, report))
 }
 
-#[cfg(not(coverage))]
 fn source_runtime_credentials_from_env(
     runtime_credentials: &credential::processor::runtime_projection::RuntimeCredentialRegistry,
 ) -> anyhow::Result<
@@ -519,7 +684,6 @@ fn source_runtime_credentials_from_env(
     }))
 }
 
-#[cfg(not(coverage))]
 fn discord_runtime_credentials_from_env(
     runtime_credentials: &credential::processor::runtime_projection::RuntimeCredentialRegistry,
 ) -> anyhow::Result<
@@ -538,7 +702,6 @@ fn discord_runtime_credentials_from_env(
     Ok(Some(runtime_credentials.resolver(store)))
 }
 
-#[cfg(not(coverage))]
 fn credential_management_admin_token_from_env() -> anyhow::Result<Option<SecretString>> {
     match std::env::var(CREDENTIAL_MANAGEMENT_ADMIN_TOKEN) {
         Ok(value) => SecretString::new(value)
@@ -549,7 +712,6 @@ fn credential_management_admin_token_from_env() -> anyhow::Result<Option<SecretS
     }
 }
 
-#[cfg(not(coverage))]
 fn openbao_secret_store_from_env(
     enabled_by: &str,
 ) -> anyhow::Result<secret_store::openbao_secret_store::OpenBaoSecretStore> {
@@ -561,7 +723,6 @@ fn openbao_secret_store_from_env(
         .context("OpenBao secret store configuration")
 }
 
-#[cfg(not(coverage))]
 fn env_flag_enabled(name: &str) -> bool {
     std::env::var(name)
         .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
@@ -604,11 +765,7 @@ where
     Ok(())
 }
 
-#[cfg(coverage)]
-fn main() {}
-
 #[cfg(test)]
 mod command_tests;
-
-#[cfg(all(coverage, test))]
-mod tests;
+#[cfg(test)]
+mod lifecycle_tests;

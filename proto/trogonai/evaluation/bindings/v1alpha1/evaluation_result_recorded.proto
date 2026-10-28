@@ -1,0 +1,23 @@
+edition = "2024";
+
+package trogonai.evaluation.bindings.v1alpha1;
+
+import "trogonai/agents/agents/v1alpha1/digest.proto";
+import "trogonai/agents/candidates/v1alpha1/candidate_ref.proto";
+import "trogonai/evaluation/bindings/v1alpha1/claim_check.proto";
+import "trogonai/evaluation/bindings/v1alpha1/evaluation_binding_id.proto";
+import "trogonai/evaluation/bindings/v1alpha1/evaluation_result_id.proto";
+import "trogonai/evaluation/bindings/v1alpha1/score.proto";
+import "trogonai/session/sessions/v1alpha1/session_position_ref.proto";
+
+// Immutable measurement evidence for one binding. The envelope owns the time of
+// measurement and who judged.
+message EvaluationResultRecorded {
+  EvaluationResultId evaluation_result_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  EvaluationBindingId binding_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.session.sessions.v1alpha1.SessionPositionRef evaluated_ref = 3 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.candidates.v1alpha1.CandidateRef candidate_ref = 4;
+  Score score = 5 [features.field_presence = LEGACY_REQUIRED];
+  ClaimCheck rationale_ref = 6;
+  trogonai.agents.agents.v1alpha1.Digest content_digest = 7 [features.field_presence = LEGACY_REQUIRED];
+}

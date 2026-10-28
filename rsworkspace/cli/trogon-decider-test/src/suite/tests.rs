@@ -156,6 +156,44 @@ fn to_ir_maps_rejected_and_accepted() {
 }
 
 #[test]
+fn authored_error_expectations_survive_conversion_to_ir() {
+    for (yaml, expected) in [
+        ("error: rejected", "rejected"),
+        ("error:\n  code: rejected\n  message: ignored", "rejected"),
+        ("error:\n  message: schedule missing", "schedule missing"),
+    ] {
+        let scenario = scenario(
+            Some(serde_json::json!({
+                "@type": "type.googleapis.com/trogonai.scheduler.schedules.v1.PauseSchedule",
+                "schedule_id": "backup",
+            })),
+            Some(serde_yaml::from_str(yaml).unwrap()),
+            None,
+        );
+
+        let ir = scenario.to_ir(schedules_registry()).unwrap();
+
+        assert_eq!(ir.steps[0].expect, ExpectedOutcome::Error(expected.to_string()));
+    }
+}
+
+#[test]
+fn an_error_expectation_without_code_or_message_cannot_run() {
+    let scenario = scenario(
+        Some(serde_json::json!({
+            "@type": "type.googleapis.com/trogonai.scheduler.schedules.v1.PauseSchedule",
+            "schedule_id": "backup",
+        })),
+        Some(serde_yaml::from_str("error: {}").unwrap()),
+        None,
+    );
+
+    let error = scenario.to_ir(schedules_registry()).unwrap_err();
+
+    assert_eq!(error.to_string(), "then.error requires a code or message");
+}
+
+#[test]
 fn to_ir_maps_trap_true_and_carries_budget_overrides() {
     let mut trap_scenario = scenario(
         Some(serde_json::json!({

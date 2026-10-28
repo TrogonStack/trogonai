@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.doctor.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 
@@ -57,7 +58,10 @@ message OrphanDetail {
   OrphanClass orphan_class = 1 [features.field_presence = LEGACY_REQUIRED];
   // Upload id, artifact id, projection generation, migration id, or lease id,
   // per `orphan_class`.
-  string resource_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string resource_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   // When the resource was created in its store, as the store recorded it. A
   // wall-clock occurrence, not a position derived from append order (D10),
   // because an orphan by definition never reached the log.
@@ -124,6 +128,12 @@ enum TraceCompleteness {
 // the outcome is a single value rather than a set of flags a caller could read
 // selectively.
 message ReleaseGate {
+  option (buf.validate.message).cel = {
+    id: "release_gate.minimum_age_exceeds_indeterminacy_window"
+    message: "minimum_age must exceed indeterminacy_window"
+    expression: "this.minimum_age > this.indeterminacy_window"
+  };
+
   GateOutcome outcome = 1 [features.field_presence = LEGACY_REQUIRED];
   // How old a resource of this class must be before release is considered.
   google.protobuf.Duration minimum_age = 2 [features.field_presence = LEGACY_REQUIRED];

@@ -29,6 +29,6 @@ trogon-nats = { workspace = true }
 trogon-std = { workspace = true, features = ["signal"] }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["test-util"] }
+tokio = { workspace = true, features = ["test-util", "process"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-std = { workspace = true, features = ["test-support"] }

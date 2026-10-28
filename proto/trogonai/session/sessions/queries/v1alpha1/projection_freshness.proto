@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.queries.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 
 // ProjectionFreshness is how current the read model was when it answered.
@@ -16,6 +17,21 @@ import "google/protobuf/timestamp.proto";
 // of it belongs in one: it describes the read path's progress, which is not a
 // fact about the session.
 message ProjectionFreshness {
+  option (buf.validate.message).cel = {
+    id: "projection_freshness.replay_has_no_generation"
+    message: "projection_generation must be empty when source is ANSWER_SOURCE_AUTHORITATIVE_REPLAY"
+    expression:
+      "this.source != trogonai.session.sessions.queries.v1alpha1.AnswerSource.ANSWER_SOURCE_AUTHORITATIVE_REPLAY "
+      "|| this.projection_generation == ''"
+  };
+  option (buf.validate.message).cel = {
+    id: "projection_freshness.replay_is_current"
+    message: "condition must be CURRENT when source is ANSWER_SOURCE_AUTHORITATIVE_REPLAY"
+    expression:
+      "this.source != trogonai.session.sessions.queries.v1alpha1.AnswerSource.ANSWER_SOURCE_AUTHORITATIVE_REPLAY "
+      "|| this.condition == trogonai.session.sessions.queries.v1alpha1.ProjectionCondition.PROJECTION_CONDITION_CURRENT"
+  };
+
   ProjectionCondition condition = 1 [features.field_presence = LEGACY_REQUIRED];
   // Identifies the projection instance. A rebuild under a new generation
   // invalidates positions and orderings minted against the old one, which is
@@ -103,6 +119,15 @@ enum ProjectionCondition {
 // ReadConsistency, so a satisfied requirement is affirmed rather than implied
 // by the absence of an error.
 message ConsistencyOutcome {
+  option (buf.validate.message).cel = {
+    id: "consistency_outcome.waited_millis_zero_when_not_waited"
+    message: "waited_millis must be zero for NOT_REQUESTED and SATISFIED_IMMEDIATELY"
+    expression:
+      "(this.result != trogonai.session.sessions.queries.v1alpha1.ConsistencyResult.CONSISTENCY_RESULT_NOT_REQUESTED && "
+      "this.result != trogonai.session.sessions.queries.v1alpha1.ConsistencyResult.CONSISTENCY_RESULT_SATISFIED_IMMEDIATELY) "
+      "|| this.waited_millis == 0u"
+  };
+
   ConsistencyResult result = 1 [features.field_presence = LEGACY_REQUIRED];
   // How long the read waited before answering. Zero for both NOT_REQUESTED and
   // SATISFIED_IMMEDIATELY.

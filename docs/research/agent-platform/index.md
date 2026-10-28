@@ -22,6 +22,8 @@ and evidence rules behind each product dossier remain reproducible.
 - [CrewAI](./products/crewai.md)
 - [DeepSeek Harness](./products/deepseek-harness.md)
 - [Devin](./products/devin.md)
+- [Google Agent Executor (AX)](./products/google-ax.md)
+- [Guild](./products/guild.md)
 - [Hermes Agent](./products/hermes-agent.md)
 - [IronClaw (NEAR AI)](./products/ironclaw.md)
 - [Jido](./products/jido.md)
@@ -29,11 +31,20 @@ and evidence rules behind each product dossier remain reproducible.
 - [LangChain Deep Agents](./products/deep-agents.md)
 - [LangGraph Platform](./products/langgraph-platform.md)
 - [LangSmith Managed Deep Agents](./products/managed-deep-agents.md)
+- [LiteLLM](./products/litellm.md)
 - [Netclaw](./products/netclaw.md)
+- [OpenAI Agents API](./products/openai-agents-api.md)
 - [OpenAI Agents SDK](./products/openai-agents-sdk.md)
 - [OpenClaw](./products/openclaw.md)
 - [OpenComputer](./products/opencomputer.md)
 - [Vercel](./products/vercel.md)
+
+## Contract impact
+
+- [Contract impact: OpenAI Agents API](./contract-impact-agents-api.md),
+  the dossier findings read back against `proto/trogonai/agents/agents/v1alpha1`
+  and `proto/trogonai/session/sessions/v1alpha1`. Analysis only; every
+  proposed change is gated on an ADR.
 
 ## Synthesis
 
@@ -47,3 +58,10 @@ and evidence rules behind each product dossier remain reproducible.
   running Q&A (Q1 through Q26) that turned the synthesis into directional
   design decisions, including the mistakes surfaced along the way and where
   the design is heading next.
+
+## Later research on the same providers
+
+The [provider agent contracts corpus](../provider-agent-contracts/index.md)
+re-studied three of the products above, plus xAI, against a narrower question:
+how each provider designs sessions, agents, and vault secrets. It goes deeper
+on credentials than the dossiers here and does not revise them.

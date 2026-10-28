@@ -2,6 +2,8 @@ edition = "2024";
 
 package trogonai.session.sessions.v1alpha1;
 
+import "buf/validate/validate.proto";
+
 // TokenUsage is the token accounting recorded for one completed assistant
 // message; audit and budgeting input, never an identity or ordering input.
 message TokenUsage {
@@ -22,6 +24,42 @@ message TokenUsage {
   // and final readings for the same message double-counts. Unset is read as
   // final, which is what every counter recorded before this field meant.
   UsageCompleteness completeness = 6;
+  // The portion of output_tokens spent on reasoning rather than on the
+  // emitted reply, for providers that meter reasoning as billable output.
+  // Already included in output_tokens, not additional to it, so a reader that
+  // never looks at this field still sums correctly; a provider that reports
+  // reasoning tokens separately from its output count is normalized at the
+  // adapter so this invariant holds regardless of how the provider itself
+  // accounts for it. Unset when the provider does not meter reasoning
+  // separately or the generation used none.
+  uint64 reasoning_tokens = 7;
+  // Decomposition of input_tokens by the modality each token was spent on.
+  // A breakdown, not an additional count: summing tokens across every entry
+  // here reproduces input_tokens, so a reader that only wants the total keeps
+  // reading input_tokens and ignores this field entirely. Empty when the
+  // provider reported only the total.
+  repeated ModalityTokenCount input_modality_tokens = 8;
+  // Decomposition of output_tokens by the modality each token was spent on,
+  // on the same terms as input_modality_tokens.
+  repeated ModalityTokenCount output_modality_tokens = 9;
+}
+
+// ModalityTokenCount is one modality's share of a token total it decomposes.
+// It is always read alongside the total it breaks down, never in isolation.
+message ModalityTokenCount {
+  TokenModality modality = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint64 tokens = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// TokenModality is the closed set of content kinds token counts are reported
+// against.
+enum TokenModality {
+  TOKEN_MODALITY_UNSPECIFIED = 0;
+  TOKEN_MODALITY_TEXT = 1;
+  TOKEN_MODALITY_IMAGE = 2;
+  TOKEN_MODALITY_AUDIO = 3;
+  TOKEN_MODALITY_VIDEO = 4;
+  TOKEN_MODALITY_DOCUMENT = 5;
 }
 
 // UsageCompleteness distinguishes a settled token accounting from a reading
@@ -35,12 +73,23 @@ enum UsageCompleteness {
   USAGE_COMPLETENESS_PARTIAL = 2;
 }
 
+// PriceRateId identifies the price catalog entry or rate version a cost was
+// computed under.
+message PriceRateId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
 // Cost is a fixed-point monetary amount priced when the usage was recorded.
 message Cost {
   // Amount in millionths of one currency unit (micros); avoids floating point.
   int64 amount_micros = 1 [features.field_presence = LEGACY_REQUIRED];
   // ISO 4217 currency code, for example "USD".
   string currency_code = 2 [features.field_presence = LEGACY_REQUIRED];
-  // Reference to the price catalog or rate version applied; empty when untracked.
-  string rate_ref = 3;
+  reserved 3;
+  reserved rate_ref;
+  // Price catalog or rate version this cost was computed under; unset when untracked.
+  PriceRateId rate_id = 4;
 }

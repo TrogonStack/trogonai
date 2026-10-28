@@ -1,5 +1,3 @@
-#![cfg_attr(coverage, allow(unused_imports))]
-
 use async_nats::jetstream::kv;
 
 use crate::error::SchedulerError;
@@ -19,7 +17,6 @@ impl GetSchedule {
     }
 }
 
-#[cfg(not(coverage))]
 pub async fn run(store: &kv::Store, command: GetSchedule) -> Result<Option<Schedule>, SchedulerError> {
     let Some(value) = store
         .get(command.id.as_str())

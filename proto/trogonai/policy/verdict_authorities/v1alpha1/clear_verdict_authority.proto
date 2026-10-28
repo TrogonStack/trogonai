@@ -1,0 +1,16 @@
+edition = "2024";
+
+package trogonai.policy.verdict_authorities.v1alpha1;
+
+import "trogonai/policy/subjects/v1alpha1/subject.proto";
+
+// Clears only this subject's rules, which returns its classes to the nearest
+// ancestor node that decides them, or to human member when none does. The initialized identity remains.
+// Dispatch requires live authority and a nonempty Decider command_id plus the
+// original positive expected_revision; retries preserve both. An already cleared
+// authority succeeds without an event after that concurrency check. For an
+// Agent subject, authoritative registry lifecycle must be ACTIVE or ARCHIVED,
+// so requested provisioning setup cannot disappear before activation.
+message ClearVerdictAuthority {
+  trogonai.policy.subjects.v1alpha1.PolicySubject subject = 1 [features.field_presence = LEGACY_REQUIRED];
+}

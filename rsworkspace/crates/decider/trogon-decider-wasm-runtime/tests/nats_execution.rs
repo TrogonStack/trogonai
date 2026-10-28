@@ -1,5 +1,4 @@
 //! Live JetStream coverage for WASM command execution storage semantics.
-#![cfg(not(coverage))]
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
 use std::fs;

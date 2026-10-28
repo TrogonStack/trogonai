@@ -1,0 +1,23 @@
+edition = "2024";
+
+package trogonai.evaluation.bindings.v1alpha1;
+
+import "trogonai/agents/agents/v1alpha1/identity.proto";
+import "trogonai/evaluation/bindings/v1alpha1/evaluation_binding_id.proto";
+import "trogonai/evaluation/rubrics/v1alpha1/rubric_version_ref.proto";
+import "trogonai/policy/subjects/v1alpha1/subject.proto";
+
+// Attaches one exact rubric version to a subject for evaluation purposes. The
+// binding is immutable once bound: it pins the rubric version, never the rubric,
+// so what a result was measured against never changes. Rebinding is an unbind
+// followed by a new binding under a new binding_id. The judge is a distinct
+// principal from every agent it evaluates: a judge that is the subject Agent, or
+// an Agent under the subject node, is rejected (ADR#0024). Bindings never enter
+// agent or proposal streams, and are never readable through agent or session
+// queries.
+message EvaluationBinding {
+  EvaluationBindingId binding_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.evaluation.rubrics.v1alpha1.RubricVersionRef rubric_version_ref = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.policy.subjects.v1alpha1.PolicySubject subject = 3 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.agents.v1alpha1.AgentId judge = 4 [features.field_presence = LEGACY_REQUIRED];
+}

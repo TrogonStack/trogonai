@@ -31,7 +31,7 @@ import "trogonai/session/sessions/v1alpha1/artifact.proto";
 message ResourceAccessRecord {
   ResourceAction action = 1 [features.field_presence = LEGACY_REQUIRED];
   // The namespace this access covered, as a URI prefix or a glob in the same URI
-  // form as WorkspaceRef.uri. This is the extent of exposure, not a single
+  // form as CheckoutRef.uri. This is the extent of exposure, not a single
   // resource: a directory listing's scope is the directory, and a recursive
   // search's scope is its root.
   string scope = 2 [features.field_presence = LEGACY_REQUIRED];

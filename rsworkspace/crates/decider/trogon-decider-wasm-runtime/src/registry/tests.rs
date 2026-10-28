@@ -5,17 +5,12 @@ use trogon_decider_wit::host::CommandEnvelope;
 use trogonai_proto::content::v1alpha1 as content_v1alpha1;
 use trogonai_proto::scheduler::schedules::v1;
 
-#[cfg(not(coverage))]
 use async_nats::jetstream;
-#[cfg(not(coverage))]
 use buffa::MessageName as _;
-#[cfg(not(coverage))]
 use trogon_decider_nats::{
     JetStreamStore, StreamStoreError, StreamSubject, StreamSubjectResolver, SubjectState, subject_current_position,
 };
-#[cfg(not(coverage))]
 use trogon_decider_runtime::{ReadStreamRequest, StreamRead};
-#[cfg(not(coverage))]
 use trogon_nats::test_support::JetStreamTestServer;
 
 use super::*;
@@ -24,13 +19,9 @@ use crate::test_fixture::schedules_bytes;
 use crate::{WasmCommandExecution, WasmDeciderEngine, WasmEngineConfig, WasmSnapshotId};
 
 const SCHEDULE_ID: &str = "0198be07a38479e1a376f250f9181be9";
-#[cfg(not(coverage))]
 const HOT_SWAP_SCHEDULE_ID: &str = "0198be07a38479e1a376f250f9181bee";
-#[cfg(not(coverage))]
 const HOT_SWAP_EVENTS_STREAM: &str = "WASM_REGISTRY_HOT_SWAP_EVENTS";
-#[cfg(not(coverage))]
 const HOT_SWAP_EVENTS_SUBJECT: &str = "wasm.registry.hot_swap.events.>";
-#[cfg(not(coverage))]
 const HOT_SWAP_SNAPSHOT_BUCKET: &str = "WASM_REGISTRY_HOT_SWAP_SNAPSHOTS";
 
 fn schedules_module() -> WasmDeciderModule {
@@ -102,11 +93,9 @@ fn position(value: u64) -> StreamPosition {
     StreamPosition::try_new(value).expect("test stream position must be non-zero")
 }
 
-#[cfg(not(coverage))]
 #[derive(Clone, Copy)]
 struct TestSubjectResolver;
 
-#[cfg(not(coverage))]
 impl StreamSubjectResolver<str> for TestSubjectResolver {
     type Error = StreamStoreError;
 
@@ -125,7 +114,6 @@ impl StreamSubjectResolver<str> for TestSubjectResolver {
     }
 }
 
-#[cfg(not(coverage))]
 async fn live_hot_swap_store() -> (JetStreamTestServer, JetStreamStore<TestSubjectResolver>) {
     let server = JetStreamTestServer::start().await;
     let js = server.jetstream().await;
@@ -392,7 +380,6 @@ async fn activating_a_new_module_version_starts_cold_and_keeps_the_prior_snapsho
     );
 }
 
-#[cfg(not(coverage))]
 #[tokio::test]
 async fn activate_under_live_jetstream_keeps_in_flight_dispatch_pinned_to_its_resolved_module() {
     let (_server, store) = live_hot_swap_store().await;

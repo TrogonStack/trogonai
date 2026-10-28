@@ -4,6 +4,7 @@ pub mod constants;
 mod file_logging_outcome;
 mod log;
 mod metric;
+mod resource;
 mod resource_attribute;
 mod service_name;
 mod trace;
@@ -14,7 +15,6 @@ pub use service_name::ServiceName;
 use file_logging_outcome::FileLoggingOutcome;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
-use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use std::error::Error;
 use tracing_subscriber::EnvFilter;
@@ -85,7 +85,7 @@ fn try_open_log_file<F: CreateDirAll + OpenAppendFile>(
 }
 
 #[cfg_attr(
-    dylint_lib = "trogon_lints",
+    dylint_lib = "trogon_dylint_lints",
     allow(
         debug_remnants,
         reason = "these warnings report that the subscriber itself could not be installed, so there is no `tracing` event to record them as"
@@ -114,7 +114,7 @@ where
             .json()
     });
 
-    match try_init_otel(service_name, resource_attributes) {
+    match try_init_otel(service_name, resource_attributes, env) {
         Ok((tracer_provider, meter_provider, logger_provider)) => {
             opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
             opentelemetry::global::set_tracer_provider(tracer_provider.clone());
@@ -171,6 +171,7 @@ where
 fn try_init_otel<A>(
     service_name: ServiceName,
     resource_attributes: A,
+    env: &impl ReadEnv,
 ) -> Result<
     (
         opentelemetry_sdk::trace::SdkTracerProvider,
@@ -182,10 +183,7 @@ fn try_init_otel<A>(
 where
     A: IntoIterator<Item = ResourceAttribute>,
 {
-    let resource = Resource::builder()
-        .with_service_name(service_name.as_str())
-        .with_attributes(resource_attributes.into_iter().map(opentelemetry::KeyValue::from))
-        .build();
+    let resource = resource::build(service_name, resource_attributes, env);
 
     let tracer_provider = trace::init_provider(&resource)?;
     let meter_provider = metric::init_provider(&resource)?;

@@ -3,6 +3,28 @@ use serde_json::json;
 
 use super::*;
 
+#[tokio::test]
+async fn a_unary_request_does_not_spawn_a_streaming_consumer() {
+    let server = trogon_nats::test_support::CoreTestServer::start().await;
+    let client = async_nats::connect(server.address()).await.unwrap();
+    let prefix = a2a_nats::A2aPrefix::new("a2a").unwrap();
+    let config = GatewayStreamingIngressConfig::from_env(&trogon_std::env::InMemoryEnv::new());
+    let outcome = maybe_spawn_streaming_ingress_pump(
+        &client,
+        &prefix,
+        config,
+        &StreamingIngressGate::new(config),
+        tokio_util::sync::CancellationToken::new(),
+        "message.send",
+        &headers_with_req_id("unary-request"),
+        br#"{"id":"unary-request","params":{}}"#,
+        "_INBOX.unary".into(),
+        CallerKey::new("alice").unwrap(),
+        Some(0),
+    );
+    assert!(matches!(outcome, MaybeStreamingSpawn::NotStreaming));
+}
+
 fn headers_with_req_id(req_id: &str) -> HeaderMap {
     let mut h = HeaderMap::new();
     h.insert(a2a_nats::constants::REQ_ID_HEADER, req_id);

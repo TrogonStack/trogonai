@@ -1,0 +1,14 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// SessionId is the identity of one session's logical stream. New fields that
+// point at a session use it; existing session_id strings are not migrated.
+message SessionId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}

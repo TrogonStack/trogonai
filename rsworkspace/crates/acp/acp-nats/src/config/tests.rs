@@ -4,10 +4,7 @@ use super::*;
 use tracing_subscriber::util::SubscriberInitExt;
 
 fn default_nats() -> NatsConfig {
-    NatsConfig {
-        servers: vec!["localhost:4222".to_string()],
-        auth: trogon_nats::NatsAuth::None,
-    }
+    NatsConfig::new(vec!["localhost:4222".to_string()], trogon_nats::NatsAuth::None)
 }
 
 #[test]

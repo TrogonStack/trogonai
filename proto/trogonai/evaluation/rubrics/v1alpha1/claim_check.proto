@@ -1,0 +1,22 @@
+edition = "2024";
+
+package trogonai.evaluation.rubrics.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/agents/agents/v1alpha1/digest.proto";
+
+// StorageLocator is an opaque external location of stored bytes, for example
+// an Object Store key. It names where bytes live, never what they are.
+message StorageLocator {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// ClaimCheck is bytes stored out of line: a locator to fetch them plus the
+// digest they are verified against before use.
+message ClaimCheck {
+  StorageLocator storage_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.agents.v1alpha1.Digest digest = 2 [features.field_presence = LEGACY_REQUIRED];
+}

@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.queries.v1alpha1;
 
+import "buf/validate/validate.proto";
 import "trogonai/session/sessions/queries/v1alpha1/contract_version.proto";
 import "trogonai/session/sessions/queries/v1alpha1/projection_freshness.proto";
 
@@ -76,7 +77,10 @@ message PresentationCacheBinding {
 // could make it return timeline data, so it cannot quietly become the
 // expensive path it was added to avoid.
 message CheckPresentationCacheRequest {
-  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   ContractVersion accepted_contract = 2 [features.field_presence = LEGACY_REQUIRED];
   // What the held cache was rendered against.
   PresentationCacheBinding binding = 3 [features.field_presence = LEGACY_REQUIRED];

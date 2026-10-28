@@ -37,6 +37,10 @@ fn validate_caller_segment(s: &str) -> Result<(), JwtError> {
         match c {
             '.' | '*' | '>' => return Err(JwtError::InvalidCallerId),
             c if c.is_whitespace() => return Err(JwtError::InvalidCallerId),
+            // C0 control characters aren't whitespace by Rust's definition, but are
+            // just as unsafe in a NATS subject segment since the wire protocol frames
+            // on CR/LF.
+            '\u{0}'..='\u{1f}' | '\u{7f}' => return Err(JwtError::InvalidCallerId),
             _ => {}
         }
     }

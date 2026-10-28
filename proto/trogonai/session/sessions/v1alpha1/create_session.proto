@@ -2,8 +2,10 @@ edition = "2024";
 
 package trogonai.session.sessions.v1alpha1;
 
+import "buf/validate/validate.proto";
+import "trogonai/session/sessions/v1alpha1/candidate_ref.proto";
+import "trogonai/session/sessions/v1alpha1/checkout.proto";
 import "trogonai/session/sessions/v1alpha1/execution_plan.proto";
-import "trogonai/session/sessions/v1alpha1/workspace.proto";
 
 // CreateSession opens a session stream, recording [SessionStarted].
 //
@@ -12,8 +14,18 @@ import "trogonai/session/sessions/v1alpha1/workspace.proto";
 // second history (ADR#0035 facet 2). The execution plan is immutable for the
 // session's life; every later attempt, checkpoint, and compaction is bound to
 // its digest.
+// Agent-backed admission requires the registry's current ACTIVE lifecycle and
+// live policy authorization. A pinned revision or prepared execution plan never
+// bypasses pending or cancelled provisioning (ADR#0024).
 message CreateSession {
-  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string session_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
   StoredSessionExecutionPlan execution_plan = 2 [features.field_presence = LEGACY_REQUIRED];
-  WorkspaceRef workspace = 3 [features.field_presence = LEGACY_REQUIRED];
+  CheckoutRef checkout_ref = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Projection surface of the candidate pinned in the plan, as on
+  // SessionStarted; the plan stays authoritative. Absent means the registered
+  // revision ran unchanged.
+  CandidateRef candidate_ref = 4;
 }

@@ -1,6 +1,8 @@
 use super::*;
 use agent_client_protocol::Error as AcpError;
 
+mod lifecycle_tests;
+
 /// An initialize response carrying the given agent capabilities, deserialized
 /// rather than constructed because the schema types are `#[non_exhaustive]`. This
 /// also puts the wire names under test, which is where a capability gets misread.

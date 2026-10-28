@@ -1,7 +1,11 @@
 # Research sources
 
-Repos we lean on most for research. One deduplicated list across all corpora.
+Sources we lean on most for research. One deduplicated list across all
+corpora. Entries are public repositories unless the line says otherwise.
 
+- [xAI documentation](https://docs.x.ai): high-priority primary reference to
+  consult and lean on when researching provider APIs, agent capabilities, and
+  tool integrations.
 - [anthropics/claude-agent-sdk-python](https://github.com/anthropics/claude-agent-sdk-python) / [claude-agent-sdk-typescript](https://github.com/anthropics/claude-agent-sdk-typescript)
 - [openai/codex](https://github.com/openai/codex)
 - [openai/openai-agents-python](https://github.com/openai/openai-agents-python)
@@ -33,3 +37,12 @@ Repos we lean on most for research. One deduplicated list across all corpora.
 - [zed-industries/zed](https://github.com/zed-industries/zed)
 - [agentclientprotocol/agent-client-protocol](https://github.com/agentclientprotocol/agent-client-protocol)
 - [cline/cline](https://github.com/cline/cline)
+- [BerriAI/litellm](https://github.com/BerriAI/litellm), studied through its
+  [docs](https://docs.litellm.ai) and
+  [`llms.txt`](https://docs.litellm.ai/llms.txt) index, which now live in
+  [BerriAI/litellm-docs](https://github.com/BerriAI/litellm-docs)
+- [Guild](https://guild.ai): no public repo, studied through its
+  [docs](https://docs.guild.ai) and [`llms.txt`](https://docs.guild.ai/llms.txt)
+  index
+- [Uber Engineering, Designing MCP Gateway](https://www.uber.com/us/en/blog/designing-mcp-gateway/):
+  no public repo, studied through the engineering post
