@@ -1,0 +1,59 @@
+use std::fmt;
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum CredentialKind {
+    AppToken,
+    BotToken,
+    ClientSecret,
+    ClientState,
+    ConsumerSecret,
+    SecretToken,
+    ServiceAccountCredentials,
+    SigningSecret,
+    SigningToken,
+    VerificationToken,
+    WebhookSecret,
+    WebhookToken,
+}
+
+impl CredentialKind {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "app_token" => Some(Self::AppToken),
+            "bot_token" => Some(Self::BotToken),
+            "client_secret" => Some(Self::ClientSecret),
+            "client_state" => Some(Self::ClientState),
+            "consumer_secret" => Some(Self::ConsumerSecret),
+            "secret_token" => Some(Self::SecretToken),
+            "service_account_credentials" => Some(Self::ServiceAccountCredentials),
+            "signing_secret" => Some(Self::SigningSecret),
+            "signing_token" => Some(Self::SigningToken),
+            "verification_token" => Some(Self::VerificationToken),
+            "webhook_secret" => Some(Self::WebhookSecret),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::AppToken => "app_token",
+            Self::BotToken => "bot_token",
+            Self::ClientSecret => "client_secret",
+            Self::ClientState => "client_state",
+            Self::ConsumerSecret => "consumer_secret",
+            Self::SecretToken => "secret_token",
+            Self::ServiceAccountCredentials => "service_account_credentials",
+            Self::SigningSecret => "signing_secret",
+            Self::SigningToken => "signing_token",
+            Self::VerificationToken => "verification_token",
+            Self::WebhookSecret => "webhook_secret",
+            Self::WebhookToken => "webhook_token",
+        }
+    }
+}
+
+impl fmt::Display for CredentialKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
