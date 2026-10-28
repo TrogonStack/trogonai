@@ -3,6 +3,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use serde::Deserialize;
+use serde_json::value::RawValue;
 use tokio_tungstenite::tungstenite::{Error as WebSocketError, Message};
 use tracing::{info, warn};
 use trogon_nats::jetstream::{ClaimCheckPublisher, JetStreamPublisher, ObjectStorePut};
@@ -59,7 +60,7 @@ struct SocketEnvelope {
     #[serde(default)]
     envelope_id: Option<String>,
     #[serde(default)]
-    payload: Option<serde_json::Value>,
+    payload: Option<Box<RawValue>>,
     #[serde(default)]
     reason: Option<String>,
 }
@@ -262,11 +263,11 @@ async fn handle_payload_envelope<P: JetStreamPublisher, S: ObjectStorePut>(
 
     let status = match envelope.kind.as_str() {
         "events_api" => {
-            let body = Bytes::from(serde_json::to_vec(&payload)?);
+            let body = Bytes::copy_from_slice(payload.get().as_bytes());
             bridge.handle_json_body(body).await.0
         }
-        "interactive" => bridge.handle_socket_interaction(&payload).await?,
-        "slash_commands" => bridge.handle_socket_slash_command(&payload).await?,
+        "interactive" => bridge.handle_socket_interaction(&payload).await,
+        "slash_commands" => bridge.handle_socket_slash_command(&payload).await,
         other => {
             warn!(kind = other, "Unhandled Slack Socket Mode payload envelope type");
             bridge

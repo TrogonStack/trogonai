@@ -21,6 +21,7 @@ use axum::{
     Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap, http::StatusCode, routing::post,
 };
 use form_urlencoded;
+use serde_json::value::RawValue;
 use std::future::Future;
 use std::pin::Pin;
 use tracing::{info, instrument, warn};
@@ -123,23 +124,25 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
         self.handle_json_payload(&body, &payload).await
     }
 
-    pub async fn handle_socket_interaction(
-        &self,
-        payload: &serde_json::Value,
-    ) -> Result<StatusCode, serde_json::Error> {
-        let payload_json = serde_json::to_string(payload)?;
-        let status = self
-            .handle_interaction(&payload_json, Bytes::from(payload_json.clone()))
-            .await;
-        Ok(status)
+    pub async fn handle_socket_interaction(&self, payload: &RawValue) -> StatusCode {
+        self.handle_interaction(payload.get(), Bytes::copy_from_slice(payload.get().as_bytes()))
+            .await
     }
 
-    pub async fn handle_socket_slash_command(
-        &self,
-        payload: &serde_json::Value,
-    ) -> Result<StatusCode, serde_json::Error> {
-        let raw_body = Bytes::from(serde_json::to_vec(payload)?);
-        Ok(self.handle_slash_command_value(payload, raw_body).await)
+    pub async fn handle_socket_slash_command(&self, payload: &RawValue) -> StatusCode {
+        let raw_body = Bytes::copy_from_slice(payload.get().as_bytes());
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(payload.get()) else {
+            warn!("Invalid JSON in slash command payload");
+            return self
+                .reject(
+                    UnroutableReason::InvalidJson,
+                    UNKNOWN_TEAM_ID,
+                    raw_body,
+                    StatusCode::BAD_REQUEST,
+                )
+                .await;
+        };
+        self.handle_slash_command_value(&value, raw_body).await
     }
 
     pub async fn publish_socket_unroutable(&self, reason: UnroutableReason, body: Bytes) -> StatusCode {
