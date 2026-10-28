@@ -3,7 +3,7 @@
 This page describes the intended design recorded in
 [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md)
 (accepted) and [ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md)
-and [ADR#0033](../adr/0033-two-tier-key-custody-product-model.md) (both
+and [ADR#0033](../adr/0033-key-custody-product-model.md) (both
 draft). None of it is implemented yet. It is the model the implementation
 must satisfy, not current behavior.
 
@@ -23,7 +23,7 @@ Confirm you have:
 
 - Tenant admin access to the platform console or the admin API. The exact
   console screens and API request and response shapes are an open decision
-  that [ADR#0033](../adr/0033-two-tier-key-custody-product-model.md) leaves to future work ([ADR#0033](../adr/0033-two-tier-key-custody-product-model.md) Non-Goals); this procedure
+  that [ADR#0033](../adr/0033-key-custody-product-model.md) leaves to future work ([ADR#0033](../adr/0033-key-custody-product-model.md) Non-Goals); this procedure
   describes the operations you must complete, not their exact fields.
 - An OpenBao deployment you operate, reachable from the platform's
   deployment over a network path you control.

@@ -4,7 +4,7 @@ This page describes the intended design recorded in
 [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md)
 (accepted) and
 [ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) and
-[ADR#0033](../adr/0033-two-tier-key-custody-product-model.md) (both draft).
+[ADR#0033](../adr/0033-key-custody-product-model.md) (both draft).
 None of it is implemented yet. It is the model the implementation must
 satisfy, not current behavior.
 
@@ -115,13 +115,16 @@ Decision 2.)
 
 ### KeyBackendRegistration and KeyBackendId
 
-A `KeyBackendRegistration` is durable, tenant-scoped product state. It owns
-connection, authentication, and trust configuration for one backend, but no
-key locator. It has an opaque `KeyBackendId`, a typed provider variant,
+A `KeyBackendRegistration` is durable product state owned by one tenant or by
+the platform. It owns connection, authentication, and trust configuration for
+one backend, but no key locator. It has an opaque `KeyBackendId`, a typed provider variant,
 ownership, lifecycle status, provider access parameters, and a non-secret
 authentication profile. Raw credentials never appear in configuration, an
 event, or the registration itself; an unavoidable secret is represented by a
-`CredentialRef` and stays behind `SecretStore`.
+`CredentialRef` and stays behind `SecretStore`. Platform-owned registrations
+back the managed and dedicated tiers of
+[ADR#0033](../adr/0033-key-custody-product-model.md) and follow every rule on
+this page.
 
 `KeyBackendId` identifies an immutable provider account, project, or OpenBao
 security boundary. A credential, trust root, authorization principal, or
@@ -203,20 +206,23 @@ Decision 4).
 ## Custody tiers
 
 `KeyManagement` backends are provider adapters, not customer-facing tiers.
-The product offers exactly two tiers, [managed key](../glossary/managed-key)
-and [customer managed key](../glossary/customer-managed-key), and tier is a
-question of who owns the backend registration, never which vendor
-implements it. See
-[ADR#0033](../adr/0033-two-tier-key-custody-product-model.md) and
+The product offers a [managed key](../glossary/managed-key), a
+[dedicated key](../glossary/dedicated-key), and a
+[customer managed key](../glossary/customer-managed-key). Tier is a question
+of who owns the backend registration and whether the key wraps one tenant or
+many, never which vendor implements it. See
+[ADR#0033](../adr/0033-key-custody-product-model.md) and
 [Key Custody](./key-custody.md) for the full model and the reasoning behind
 it.
 
-| Backend | Tier |
-| --- | --- |
-| Platform-operated OpenBao Transit | Managed key |
-| Customer AWS KMS key | Customer managed key |
-| Customer Google Cloud KMS key | Customer managed key |
-| Customer-operated OpenBao Transit | Customer managed key |
+| Backend | Registration owner | Wraps | Tier |
+| --- | --- | --- | --- |
+| Platform-operated OpenBao Transit | Platform | Many tenants | Managed key |
+| Platform-operated OpenBao Transit | Platform | One tenant | Dedicated key |
+| Platform-owned AWS KMS or Google Cloud KMS key | Platform | Many tenants or one tenant | Managed key or dedicated key |
+| Customer AWS KMS key | Customer | One tenant | Customer managed key |
+| Customer Google Cloud KMS key | Customer | One tenant | Customer managed key |
+| Customer-operated OpenBao Transit | Customer | One tenant | Customer managed key |
 
 ## Failure handling
 
@@ -278,10 +284,10 @@ Standing rules that hold across all eight categories:
   immediate, but does not fix how long the waiting period is
   ([ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md)
   Decision 6).
-- **Console and API request shapes.** Neither [ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) nor [ADR#0033](../adr/0033-two-tier-key-custody-product-model.md) defines
+- **Console and API request shapes.** Neither [ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) nor [ADR#0033](../adr/0033-key-custody-product-model.md) defines
   console screens or API request and response shapes; both fix only the
   vocabulary and boundaries those surfaces must respect
-  ([ADR#0033](../adr/0033-two-tier-key-custody-product-model.md)
+  ([ADR#0033](../adr/0033-key-custody-product-model.md)
   Non-Goals).
 
 ## See also

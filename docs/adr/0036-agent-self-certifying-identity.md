@@ -43,7 +43,7 @@ public key and verifies proof-of-possession in `trogon-aauth-verify`, and
 [ADR#0026](./0026-command-authorization-principal.md) hands the decider a typed
 `CommandPrincipal` *after* authorization runs, so `decide` never sees keys or
 signatures. [ADR#0023](./0023-secret-management-and-key-custody-direction.md)
-and [ADR#0033](./0033-two-tier-key-custody-product-model.md) keep private key
+and [ADR#0033](./0033-key-custody-product-model.md) keep private key
 custody on the security plane. What is missing is the *binding at
 registration*: recording the agent's public identity on the genesis event, and
 requiring the registrant to prove control of the key it claims.
@@ -78,7 +78,7 @@ name.**
    agent-owned identity and belongs on the agent record. Private keys and
    custody remain on the security plane
    ([ADR#0023](./0023-secret-management-and-key-custody-direction.md),
-   [ADR#0033](./0033-two-tier-key-custody-product-model.md)). This is distinct
+   [ADR#0033](./0033-key-custody-product-model.md)). This is distinct
    from the provisioning *actor* ("who ran the command"), which is envelope
    metadata, not agent identity.
 
@@ -129,7 +129,7 @@ These do not change the genesis anchor and are added when needed:
 - [ADR#0024: Agent Platform Stream Topology](./0024-agent-platform-stream-topology.md)
 - [ADR#0025: Agent Definition Data Ownership](./0025-agent-definition-data-ownership.md)
 - [ADR#0026: Command Authorization Principal and Authorizer Hook for Decider Execution](./0026-command-authorization-principal.md)
-- [ADR#0033: Two-Tier Key Custody Product Model](./0033-two-tier-key-custody-product-model.md)
+- [ADR#0033: Key Custody Product Model](./0033-key-custody-product-model.md)
 - [ADR#0037: Agent Identity Governance: Decentralized Verification under Governed Authority](./0037-agent-identity-governance.md)
 - [ADR#0038: Agent Identity Cryptographic Suite and Crypto-Agility](./0038-agent-identity-crypto-suite.md)
 - [ADR#0039: Self-Authenticating Event Provenance](./0039-self-authenticating-event-provenance.md)

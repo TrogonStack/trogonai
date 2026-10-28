@@ -66,7 +66,7 @@ that dependency. Contract design can proceed around the reference boundary
 without implementing encryption or secret storage in the provider aggregate.
 
 Workload identity and other authentication methods without stored secret
-material retain their own typed bindings under draft ADR#0032. They do not
+material retain their own typed bindings under draft [ADR#0032](../adr/0032-model-route-and-credential-binding.md). They do not
 require uploading a fabricated secret to fit this boundary.
 
 ## Supplied material uses a separate ingress
@@ -104,10 +104,12 @@ its own stream.
 External secret storage and external encryption-key custody are different
 capabilities. Draft [ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md)
 describes key-backend routing; it does not establish an implemented adapter for
-reading arbitrary externally stored API keys. External source registration,
-reference identity, pinned versus current-version selection, and rotation
-ownership remain design work. An external update must not bypass validation of
-the expected provider subject and billing boundary.
+reading arbitrary externally stored API keys. Draft
+[ADR#0079](../adr/0079-external-secret-sources.md) fixes the first-version
+semantics of external source registration, reference identity,
+current-version selection, rotation ownership, and fail-closed disappearance;
+no adapter exists yet. An external update must not bypass validation of the
+expected provider subject and billing boundary.
 
 ## Encryption policy is not credential content
 
@@ -158,7 +160,7 @@ firing is not proof that a credential changed or passed validation.
 [Google rotation schedules](https://docs.cloud.google.com/secret-manager/docs/secret-rotation),
 [Google managed Cloud SQL rotation preview](https://docs.cloud.google.com/secret-manager/regional-secrets/set-up-automatic-rotation-for-cloudsql-secrets-rs).
 
-Under draft ADR#0032, validated replacement of material behind the same stable
+Under draft [ADR#0032](../adr/0032-model-route-and-credential-binding.md), validated replacement of material behind the same stable
 reference and provider subject does not rewrite a session route. Changing the
 authentication method, reference, or provider identity follows the explicit
 binding/connection replacement rules. This distinction lets provider streams

@@ -46,8 +46,8 @@ declare the subtree it writes into and has the store refuse anything outside
 it, closing exactly the flat-global-namespace shape a permissionless key space
 assumes.
 [ADR#0023](./0023-secret-management-and-key-custody-direction.md) and
-[ADR#0033](./0033-two-tier-key-custody-product-model.md) put private key
-custody behind a platform secrets service and a two-tier managed or
+[ADR#0033](./0033-key-custody-product-model.md) put private key
+custody behind a platform secrets service and a tiered managed or
 customer-managed product model, not in the sole personal custody of whoever
 generated the key. And the platform carries an enterprise obligation Nostr
 structurally cannot express at all: to offboard an agent and revoke its
@@ -190,7 +190,7 @@ reachability is an optional bridge added later, not the root identity itself.
 - [ADR#0026: Command Authorization Principal and Authorizer Hook for Decider Execution](./0026-command-authorization-principal.md)
 - [ADR#0027: Declared Subject Scope for Decider Stream Resolution](./0027-decider-multi-tenancy-primitive.md)
 - [ADR#0028: Admission Control for Decider Command Execution](./0028-decider-admission-control-and-backpressure.md)
-- [ADR#0033: Two-Tier Key Custody Product Model](./0033-two-tier-key-custody-product-model.md)
+- [ADR#0033: Key Custody Product Model](./0033-key-custody-product-model.md)
 - [ADR#0036: Agent Self-Certifying Cryptographic Identity](./0036-agent-self-certifying-identity.md)
 - [ADR#0038: Agent Identity Cryptographic Suite and Crypto-Agility](./0038-agent-identity-crypto-suite.md)
 - [ADR#0039: Self-Authenticating Event Provenance](./0039-self-authenticating-event-provenance.md)

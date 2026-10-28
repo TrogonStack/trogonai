@@ -3,7 +3,7 @@
 This page describes the intended design recorded in
 [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md)
 (accepted) and [ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md)
-and [ADR#0033](../adr/0033-two-tier-key-custody-product-model.md) (both
+and [ADR#0033](../adr/0033-key-custody-product-model.md) (both
 draft). None of it is implemented yet. It is the model the implementation
 must satisfy, not current behavior.
 
@@ -15,9 +15,9 @@ page maps each category to who acts on it and what that action is.
 ## Failure categories and responses
 
 The console and API request shapes for the actions below are an open
-decision that [ADR#0033](../adr/0033-two-tier-key-custody-product-model.md) leaves to future work: it fixes only the vocabulary
+decision that [ADR#0033](../adr/0033-key-custody-product-model.md) leaves to future work: it fixes only the vocabulary
 and boundaries those surfaces must respect, not their screens or request
-shapes ([ADR#0033](../adr/0033-two-tier-key-custody-product-model.md) Non-Goals).
+shapes ([ADR#0033](../adr/0033-key-custody-product-model.md) Non-Goals).
 
 | Category | Likely cause | Who acts | Action |
 | --- | --- | --- | --- |
@@ -94,8 +94,8 @@ the internal category from a caller-visible error alone.
   Secrets Service](../adr/0023-secret-management-and-key-custody-direction.md)
 - [ADR#0030: Customer-Controlled Key Backend
   Routing](../adr/0030-customer-controlled-key-backend-routing.md)
-- [ADR#0033: Two-Tier Key Custody Product
-  Model](../adr/0033-two-tier-key-custody-product-model.md)
+- [ADR#0033: Key Custody Product
+  Model](../adr/0033-key-custody-product-model.md)
 - [Key Management](../architecture/key-management.md)
 - [Key States](../architecture/key-states.md)
 - [Key Custody](../architecture/key-custody.md)

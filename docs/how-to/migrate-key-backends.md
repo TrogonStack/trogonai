@@ -4,7 +4,7 @@ This page describes the intended design recorded in
 [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md)
 (accepted) and
 [ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) and
-[ADR#0033](../adr/0033-two-tier-key-custody-product-model.md) (both draft).
+[ADR#0033](../adr/0033-key-custody-product-model.md) (both draft).
 None of it is implemented yet. It is the model the implementation must
 satisfy, not current behavior.
 
@@ -49,7 +49,7 @@ Before you start a migration, confirm all of the following:
 
 Migration follows the rewrap flow that [ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) Decision 4 defines. The
 console and API request shapes that trigger it are an open decision that
-[ADR#0033](../adr/0033-two-tier-key-custody-product-model.md) leaves for
+[ADR#0033](../adr/0033-key-custody-product-model.md) leaves for
 later work; what follows is the operation sequence the implementation must
 satisfy, not a concrete request format:
 
@@ -112,7 +112,7 @@ satisfy, not a concrete request format:
 
 - [ADR#0023: Secret Management and Key Custody on OpenBao behind a Platform Secrets Service](../adr/0023-secret-management-and-key-custody-direction.md)
 - [ADR#0030: Customer-Controlled Key Backend Routing](../adr/0030-customer-controlled-key-backend-routing.md)
-- [ADR#0033: Two-Tier Key Custody Product Model](../adr/0033-two-tier-key-custody-product-model.md)
+- [ADR#0033: Key Custody Product Model](../adr/0033-key-custody-product-model.md)
 - [Key Management](../architecture/key-management.md)
 - [Key States](../architecture/key-states.md)
 - [Key Custody](../architecture/key-custody.md)

@@ -41,7 +41,7 @@ supervisor, tool executor, or egress proxy should apply the credential and make
 the provider call.
 
 The repository already contains most of this stronger model for model-provider
-access in draft ADR#0032. The right move is to reuse that connection, binding,
+access in draft [ADR#0032](./docs/adr/0032-model-route-and-credential-binding.md). The right move is to reuse that connection, binding,
 short-lived grant, and proxy model for tools, channels, remote MCP servers, and
 other provider calls instead of creating a second credential architecture.
 
@@ -249,7 +249,7 @@ request within a platform policy ceiling.
 
 Authenticating the service does not authorize it to act as a particular person.
 A user-subject request needs a separately recorded user consent and a verified
-mapping to the provider subject. This agrees with draft ADR#0053, which says
+mapping to the provider subject. This agrees with draft [ADR#0053](./docs/adr/0053-external-oidc-federation-surface.md), which says
 external workload federation does not imply delegated user authority.
 
 ### Issuance controls do not recall issued tokens
@@ -288,11 +288,11 @@ responsibilities.
 | Metadata authority | [ADR#0047](./docs/adr/0047-event-sourced-credential-metadata.md) makes the event stream the first-version source of truth | Accepted |
 | Plaintext exposure | [ADR#0048](./docs/adr/0048-one-time-plaintext-exposure.md) permits one-time direct responses and metadata-only replay | Accepted |
 | Runtime cache | `RuntimeCredentialCache` has a 300-second TTL and subtracts up to 30 seconds of deterministic jitter | Implemented |
-| Delivery policy | Host, runtime-service, injection-location, and cache-TTL policy types exist and are checked before lookup | Implemented but not populated by production state |
+| Release policy | Host, runtime-service, injection-location, and cache-TTL policy types exist and are checked before lookup | Implemented but not populated by production state |
 | Revocation objective | [ADR#0049](./docs/adr/0049-revocation-latency-target.md) sets a 5-second normal-operation p99 target and a TTL backstop | Accepted target, alert not deployed |
 | OpenBao production seal | [ADR#0052](./docs/adr/0052-cloud-kms-production-seal.md) requires cloud KMS auto-unseal in production | Accepted direction |
 | Customer-controlled key routing | [ADR#0030](./docs/adr/0030-customer-controlled-key-backend-routing.md) defines optional customer-controlled KEK backends behind `KeyManagement`, not `SecretStore` | Draft |
-| Key-custody tiers | [ADR#0033](./docs/adr/0033-two-tier-key-custody-product-model.md) distinguishes platform-managed and customer-managed business-key custody | Draft |
+| Key-custody tiers | [ADR#0033](./docs/adr/0033-key-custody-product-model.md) distinguishes managed, dedicated, and customer-managed business-key custody | Draft |
 | Model access broker | [ADR#0032](./docs/adr/0032-model-route-and-credential-binding.md) defines connection, credential binding, delegated identity, workload identity, attempt-scoped grant, and session proxy | Draft and model-specific |
 | External federation | [ADR#0053](./docs/adr/0053-external-oidc-federation-surface.md) defines a short-lived external workload assertion boundary | Draft |
 | Extraction seam | [ADR#0074](./docs/adr/0074-credential-platform-extraction-boundary.md) moves OpenBao and lifecycle machinery behind the trait boundary | Proposed and blocked on four decisions |
@@ -300,13 +300,13 @@ responsibilities.
 ### Current implementation gaps
 
 1. The gateway is still the OpenBao client and reads `OPENBAO_TOKEN` from the
-   environment. This is the direct-read shape accepted ADR#0023 supersedes.
+   environment. This is the direct-read shape accepted [ADR#0023](./docs/adr/0023-secret-management-and-key-custody-direction.md) supersedes.
 2. The internal `/-/credentials` API uses one shared admin token and trusts a
    caller-supplied owner identifier. It does not derive project ownership from
    an authenticated principal.
 3. OpenBao policy files exist, but no production service identity is bound to
    them. The gateway's token can reach operations broader than runtime read.
-4. `RuntimeDeliveryPolicy` defaults are permissive for hosts and runtime
+4. `RuntimeReleasePolicy` defaults are permissive for hosts and runtime
    services because the management API and credential event stream do not
    populate the policy.
 5. `RuntimeCredentialResolver::resolve_plaintext_for` returns a raw
@@ -325,7 +325,7 @@ responsibilities.
     is terminal and currently lacks an operator-visible recovery path.
 11. There is no public credential management API, UI, or implemented API-key
     platform.
-12. There is no `KeyManagement` implementation. Draft ADR#0030 and ADR#0033
+12. There is no `KeyManagement` implementation. Draft [ADR#0030](./docs/adr/0030-customer-controlled-key-backend-routing.md) and [ADR#0033](./docs/adr/0033-key-custody-product-model.md)
     address customer-controlled KEK routing and custody tiers, not provider
     secret storage or runtime token exchange.
 13. Existing Vercel notes in `SECRET_STORE.md` focus on environment-variable
@@ -336,13 +336,13 @@ responsibilities.
 - `docs/architecture/secret-management.md` says the prototype is absent, which
   is no longer true in this checkout.
 - `CREDENTIAL_PLATFORM_SPEC.md` assigns lifecycle state to an application
-  database in one section, while accepted ADR#0047 selects the event stream as
+  database in one section, while accepted [ADR#0047](./docs/adr/0047-event-sourced-credential-metadata.md) selects the event stream as
   the first-version source of truth.
 - The architecture says consumers hold plaintext only for an in-flight
   operation, while the gateway implements an ambient plaintext cache and a
-  long-lived Discord connection. Proposed ADR#0074 already identifies this
+  long-lived Discord connection. Proposed [ADR#0074](./docs/adr/0074-credential-platform-extraction-boundary.md) already identifies this
   conflict.
-- ADR#0049 describes the cache backstop as 300 seconds plus up to 30 seconds of
+- [ADR#0049](./docs/adr/0049-revocation-latency-target.md) describes the cache backstop as 300 seconds plus up to 30 seconds of
   jitter, for a 330-second maximum. The implementation subtracts jitter from
   the 300-second TTL, so entries expire between roughly 270 and 300 seconds.
   The accepted ADR and code need one authoritative interpretation.
@@ -370,7 +370,7 @@ responsibilities.
 ### Adapt to TrogonAI
 
 - Reuse the `ModelProviderConnection`, `CredentialBinding`, and short-lived
-  grant concepts from draft ADR#0032 as the pattern. Introduce a general
+  grant concepts from draft [ADR#0032](./docs/adr/0032-model-route-and-credential-binding.md) as the pattern. Introduce a general
   connection model through an ADR instead of copying Vercel names directly.
 - Authenticate the broker over TrogonAI's workload and NATS identity boundary,
   not Vercel-specific OIDC.
@@ -463,7 +463,7 @@ ProviderAccessGrant
   audience + confirmation key + expiry + lifecycle state
 ```
 
-The model-specific names in draft ADR#0032 should remain model-specific. A
+The model-specific names in draft [ADR#0032](./docs/adr/0032-model-route-and-credential-binding.md) should remain model-specific. A
 general connection model should be factored underneath or beside them only
 after the relationship is decided, so model routing does not drift from tool
 and channel access.
@@ -549,7 +549,7 @@ testable.
    not the target architecture. Example: the gateway authenticates to the
    secrets service to verify an active GitHub webhook and has no credential that
    can read, rotate, or destroy OpenBao material directly.
-2. **Ratify ADR#0074 with provider-access operations included in Q1.** The
+2. **Ratify [ADR#0074](./docs/adr/0074-credential-platform-extraction-boundary.md) with provider-access operations included in Q1.** The
    boundary must cover value resolution, operation-only verification, OAuth
    exchange or refresh, workload federation, and trusted credential injection.
    Example: a Slack post uses an ephemeral app token without exposing the stored
@@ -557,7 +557,7 @@ testable.
 3. **Derive project ownership from the authenticated principal.** Remove the
    shared-token plus caller-supplied-owner trust model. Example: a project-A
    operator cannot name project B in a create or resolve request.
-4. **Persist and populate delivery policy.** Carry policy through commands,
+4. **Persist and populate release policy.** Carry policy through commands,
    events, projections, and management APIs, with deny-by-default behavior for
    newly managed outbound connections. Example: a GitHub credential admitted
    for one repository and `api.github.com` is denied for another host or an
@@ -579,7 +579,7 @@ testable.
 
 ### P1: build the general provider-access broker
 
-1. **Generalize the draft ADR#0032 access pattern.** Reuse its connection,
+1. **Generalize the draft [ADR#0032](./docs/adr/0032-model-route-and-credential-binding.md) access pattern.** Reuse its connection,
    binding, workload identity, delegated identity, short-lived grant, and
    proxy-side access principles for tools, channels, and MCP. Example: a Session
    tool call receives a typed issue result, not a GitHub token.
@@ -665,7 +665,7 @@ testable.
 
 ## Decisions this research should inform
 
-### Proposed ADR#0074
+### Proposed [ADR#0074](./docs/adr/0074-credential-platform-extraction-boundary.md)
 
 Q1 currently asks whether the secrets-service surface is a value verb, an
 operation verb, or both. The recommendation should remain "both" and become
@@ -680,7 +680,7 @@ more precise:
 - provider-specific operations live behind typed drivers, not a stringly
   generic request.
 
-### Draft ADR#0032
+### Draft [ADR#0032](./docs/adr/0032-model-route-and-credential-binding.md)
 
 Keep its stronger properties:
 
@@ -694,7 +694,7 @@ Keep its stronger properties:
 Add a companion decision for how this pattern relates to non-model external
 services. Do not silently broaden a model-specific ADR.
 
-### Draft ADR#0053
+### Draft [ADR#0053](./docs/adr/0053-external-oidc-federation-surface.md)
 
 Keep the separation between workload authentication and user delegation. Add
 the provider-access broker as a concrete consumer of short-lived external
@@ -763,7 +763,7 @@ Conflating them hides the new architectural layer this post introduces.
 - [ADR#0023: Secret Management and Key Custody](./docs/adr/0023-secret-management-and-key-custody-direction.md)
 - [ADR#0030: Customer-Controlled Key Backend Routing](./docs/adr/0030-customer-controlled-key-backend-routing.md)
 - [ADR#0032: Model Route and Credential Binding](./docs/adr/0032-model-route-and-credential-binding.md)
-- [ADR#0033: Two-Tier Key Custody Product Model](./docs/adr/0033-two-tier-key-custody-product-model.md)
+- [ADR#0033: Key Custody Product Model](./docs/adr/0033-key-custody-product-model.md)
 - [ADR#0046: Project-Anchored Resource Hierarchy](./docs/adr/0046-project-anchored-resource-hierarchy.md)
 - [ADR#0047: Event-Sourced Credential Metadata](./docs/adr/0047-event-sourced-credential-metadata.md)
 - [ADR#0048: One-Time Plaintext Exposure](./docs/adr/0048-one-time-plaintext-exposure.md)

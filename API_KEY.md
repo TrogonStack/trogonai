@@ -77,18 +77,18 @@ This distinction is the core rule.
   grant raw secret access.
 - API-key verification returns a domain principal with permissions, roles,
   project, identity, and allowed resource boundaries. There is no separate
-  `scopes` vocabulary; permissions are the only one (ADR#0077).
+  `scopes` vocabulary; permissions are the only one ([ADR#0077](./docs/adr/0077-api-key-authorization-model-and-rate-limits.md)).
 - Rate limits, permissions, identities, lifecycle state, and audit events are
   part of the API-key domain model, not optional add-ons.
 - OpenBao stores the verifier pepper, but not individual raw Trogonai API
   keys. The pepper is resolved once at process start and never touched on
-  the request path (ADR#0075).
+  the request path ([ADR#0075](./docs/adr/0075-api-key-format-and-verifier-construction.md)).
 - Signed request keys are the strongly recommended mode for every caller,
   not a high-risk exception; bearer keys are the labeled compatibility tier
-  for tooling that cannot sign (ADR#0050).
+  for tooling that cannot sign ([ADR#0050](./docs/adr/0050-signed-first-caller-authentication.md)).
 - Signed-request API keys store public verification material and metadata.
   The key pair is client-generated. The platform never generates,
-  transmits, stores, or displays a private key (ADR#0050).
+  transmits, stores, or displays a private key ([ADR#0050](./docs/adr/0050-signed-first-caller-authentication.md)).
 
 ## Reference Inspiration
 
@@ -127,21 +127,21 @@ Two things about the Coinbase reference are deliberately not copied.
 
 Their portal generates the key pair server-side and hands the private key
 back as a one-time download, which reintroduces the plaintext-issuance
-moment the whole protocol exists to remove. ADR#0050 rejects it: key pairs
+moment the whole protocol exists to remove. [ADR#0050](./docs/adr/0050-signed-first-caller-authentication.md) rejects it: key pairs
 are client-generated only.
 
 Their App API surface requires ES256/ECDSA and does not support Ed25519.
-That is their compatibility constraint, not a security finding. ADR#0050
+That is their compatibility constraint, not a security finding. [ADR#0050](./docs/adr/0050-signed-first-caller-authentication.md)
 makes Ed25519 the default and accepts ES256.
 
-The binding set is also stronger here than the Coinbase sketch. ADR#0051
+The binding set is also stronger here than the Coinbase sketch. [ADR#0051](./docs/adr/0051-fully-bound-request-signing.md)
 adds a payload digest, a `jti` checked against a replay store, DPoP-style
 server-issued nonces, and a NATS subject mapping for the internal
 transport. Tokens are single-use; there is no multi-use or reduced-binding
 mode.
 
 The two modes are not peers, and the platform does not present them as a
-choice between equals (ADR#0050):
+choice between equals ([ADR#0050](./docs/adr/0050-signed-first-caller-authentication.md)):
 
 ```text
 Signed key (recommended for every caller)
@@ -191,7 +191,7 @@ for the platform management model and Coinbase for the high-security
 authentication model.
 
 The split is by keyspace policy, not by how important the key feels
-(ADR#0050 section 5, ADR#0076 section 3):
+([ADR#0050](./docs/adr/0050-signed-first-caller-authentication.md) section 5, [ADR#0076](./docs/adr/0076-api-keyspaces-and-root-key-bootstrap.md) section 3):
 
 ```text
 management keyspace
@@ -252,12 +252,12 @@ What not to focus on first:
 - a general-purpose OAuth authorization server;
 - FAPI certification;
 - mandatory mutual TLS for every customer;
-- customer-authored roles (built-in roles only, ADR#0077 section 2);
-- identity-level shared rate limits (ADR#0077 section 6);
+- customer-authored roles (built-in roles only, [ADR#0077](./docs/adr/0077-api-key-authorization-model-and-rate-limits.md) section 2);
+- identity-level shared rate limits ([ADR#0077](./docs/adr/0077-api-key-authorization-model-and-rate-limits.md) section 6);
 - certificate-based client authentication (JWT request tokens first);
 - exposing OpenBao paths or policies as the product API.
 
-Storing customer private keys is not a deferred item. ADR#0050 forbids it
+Storing customer private keys is not a deferred item. [ADR#0050](./docs/adr/0050-signed-first-caller-authentication.md) forbids it
 outright; there is no configuration under which the platform holds one.
 
 Those can be future compatibility paths. They should not define the first
@@ -288,13 +288,13 @@ raw provider key
   -> OpenBao
 
 runtime use
-  -> CredentialDeliveryPolicy
+  -> CredentialReleasePolicy
 ```
 
-Provider API keys should carry delivery policy:
+Provider API keys should carry release policy:
 
 ```text
-CredentialDeliveryPolicy
+CredentialReleasePolicy
   allowed_environments
   allowed_runtime_services
   allowed_hosts
@@ -327,7 +327,7 @@ verifier digest + verifier_key_version
 
 verifier pepper
   -> OpenBao KV; resolved once at process start, held in memory,
-     never touched on the request path (ADR#0075 section 3)
+     never touched on the request path ([ADR#0075](./docs/adr/0075-api-key-format-and-verifier-construction.md) section 3)
 
 signed key private material
   -> nowhere. The caller holds it; the platform never sees it.
@@ -374,22 +374,22 @@ not have, because each absence answers a question that would otherwise be
 reopened by habit:
 
 - **No `scopes`.** Permissions are the only authorization vocabulary
-  (ADR#0077 section 1). Two grant vocabularies mean every future check has
+  ([ADR#0077](./docs/adr/0077-api-key-authorization-model-and-rate-limits.md) section 1). Two grant vocabularies mean every future check has
   to decide which wins when they disagree.
 - **No stored `public_prefix`.** It is the derived display form
   `tg_<env>_<key_id>`, and lookup uses the key id directly, so there is no
-  second minted value that can disagree with the first (ADR#0075 section 1).
+  second minted value that can disagree with the first ([ADR#0075](./docs/adr/0075-api-key-format-and-verifier-construction.md) section 1).
 - **No standalone `fingerprint`.** Signed keys fingerprint their public key;
   a bearer key has nothing to fingerprint that is not either the id or the
   digest.
-- **No `owner_id`.** The owner boundary is `project_id` (ADR#0046).
+- **No `owner_id`.** The owner boundary is `project_id` ([ADR#0046](./docs/adr/0046-project-anchored-resource-hierarchy.md)).
 - **No `last_used_at`.** It would put a write on the authenticated request
   path for the same reason `api_key.verified` is a metric rather than an
   audit fact. If it is wanted, derive it from the verification metric at a
   coarse granularity.
 
 Resource boundaries are a `ResourceScope` rather than a bare list, so the
-empty-list question never has to be answered at runtime (ADR#0077 section 4):
+empty-list question never has to be answered at runtime ([ADR#0077](./docs/adr/0077-api-key-authorization-model-and-rate-limits.md) section 4):
 the scope is either the whole project or an explicit non-empty set, and an
 empty set is a validation error rather than a value with two possible
 readings.
@@ -400,12 +400,12 @@ the record. A bearer key carries a verifier digest and its pepper version; a
 signed key carries one or two registered public keys and never anything
 private. The create command's oneof is shaped so that "a signed key whose
 private half the platform generates" cannot be expressed at all, which is
-the request ADR#0050 section 2 exists to refuse.
+the request [ADR#0050](./docs/adr/0050-signed-first-caller-authentication.md) section 2 exists to refuse.
 
 ## Key Format
 
 The format, its components, and the scanner-facing pattern are fixed in
-ADR#0075 section 1.
+[ADR#0075](./docs/adr/0075-api-key-format-and-verifier-construction.md) section 1.
 
 ```text
 tg_<env>_<key_id>_<secret><checksum>
@@ -413,7 +413,7 @@ tg_<env>_<key_id>_<secret><checksum>
 
 Two properties of it matter to the rest of this document. The `<env>`
 segment stays truthful because keyspace environment is immutable
-(ADR#0076 section 2), so a key minted in a test keyspace cannot come to
+([ADR#0076](./docs/adr/0076-api-keyspaces-and-root-key-bootstrap.md) section 2), so a key minted in a test keyspace cannot come to
 display as live. And the checksum lets SDKs and secret scanners reject
 typos and truncations offline, before anything reaches verification.
 
@@ -427,7 +427,7 @@ one code path for both tiers.
 
 ### Signed Request Token
 
-The binding contract is ADR#0051. The claim set, its canonical
+The binding contract is [ADR#0051](./docs/adr/0051-fully-bound-request-signing.md). The claim set, its canonical
 serialization, and the canonicalization test vectors are in
 [CREDENTIAL_PLATFORM_SPEC.md](./CREDENTIAL_PLATFORM_SPEC.md); the message
 shape is `api_keys/admission/v1/signed_request.proto`. Tokens are
@@ -491,11 +491,11 @@ bearer secret minted and then rejected on policy.
 
 The raw key appears in the response only on the first, non-replay create or
 reroll. Every later response is metadata-only, including an idempotent
-replay of the same call by the same caller (ADR#0048).
+replay of the same call by the same caller ([ADR#0048](./docs/adr/0048-one-time-plaintext-exposure.md)).
 
 ### Signed Key Create Flow
 
-There is one flow. Client-generated key pairs are the only mode (ADR#0050
+There is one flow. Client-generated key pairs are the only mode ([ADR#0050](./docs/adr/0050-signed-first-caller-authentication.md)
 section 2).
 
 ```text
@@ -511,7 +511,7 @@ section 2).
 ```
 
 There is no server-generated fallback. The platform never generates,
-transmits, stores, or displays a private key, so the ADR#0048 one-time
+transmits, stores, or displays a private key, so the [ADR#0048](./docs/adr/0048-one-time-plaintext-exposure.md) one-time
 display machinery does not apply to this tier at all: no secret ever exists
 on the platform side to display once. An earlier draft of this document
 described a server-generated one-time download; that flow is superseded and
@@ -583,7 +583,7 @@ record has to outlive that whole span.
 Verification happens once, at admission, by the first service that accepts
 the request while the token is fresh. Downstream and JetStream consumers do
 not re-verify caller tokens; authority travels onward as provenance
-(ADR#0039). An expired token inside a persisted message is the expected
+([ADR#0039](./docs/adr/0039-self-authenticating-event-provenance.md)). An expired token inside a persisted message is the expected
 state of an already-admitted request, not an error.
 
 A target-binding failure at step 9 is the one verification failure that
@@ -622,7 +622,7 @@ gateway.sessions.create
 ```
 
 Roles group permissions. The first milestone ships built-in roles only;
-customers assign them and do not author them (ADR#0077 section 2). The set
+customers assign them and do not author them ([ADR#0077](./docs/adr/0077-api-key-authorization-model-and-rate-limits.md) section 2). The set
 and what each one covers is `api_keys/v1/role.proto`.
 
 API keys may have roles and direct permissions:
@@ -655,7 +655,7 @@ passes.
 ## Root And Management Keys
 
 Root and management keys live in the project's `management` keyspace, which
-is signed-only and demands server nonces by policy (ADR#0076 section 3).
+is signed-only and demands server nonces by policy ([ADR#0076](./docs/adr/0076-api-keyspaces-and-root-key-bootstrap.md) section 3).
 The separation is enforced by keyspace policy rather than by convention.
 
 ```text
@@ -675,7 +675,7 @@ Root keys are:
 - rare;
 - environment-specific;
 - permissioned;
-- rotated periodically, on the shorter management grace (ADR#0078 section 2);
+- rotated periodically, on the shorter management grace ([ADR#0078](./docs/adr/0078-api-key-rotation-grace-and-audit-set.md) section 2);
 - forbidden from browser/client-side use;
 - audited aggressively;
 - signed-request keys always, not by default.
@@ -684,7 +684,7 @@ Root keys are:
 
 Self-hosted deployments start with no key at all, and creating a key
 requires a key. The bootstrap is a public key supplied as deployment
-configuration (ADR#0076 section 4):
+configuration ([ADR#0076](./docs/adr/0076-api-keyspaces-and-root-key-bootstrap.md) section 4):
 
 ```text
 1. The operator generates a key pair locally with the CLI.
@@ -706,7 +706,7 @@ credential the deployment will ever have.
 
 Cloud has no separate bootstrap. The first root key there is registered by
 an authenticated human session against the human identity system
-(ADR#0053), not by an API key.
+([ADR#0053](./docs/adr/0053-external-oidc-federation-surface.md)), not by an API key.
 
 Losing every root private key with no break-glass host access is
 unrecoverable by design. That is the correct trade for a platform whose
@@ -717,7 +717,7 @@ central promise is that it never holds a caller's private key.
 The policy shape and the enforced subject kinds are
 `api_keys/v1/rate_limit_policy.proto`. The first milestone enforces `key`
 and `project` only; `identity` and `route` are declared and not enforced
-(ADR#0077 section 6).
+([ADR#0077](./docs/adr/0077-api-key-authorization-model-and-rate-limits.md) section 6).
 
 Identity-level shared limits are deferred because they need a counter
 shared across keys, which is the one shape that turns a per-key local
@@ -762,7 +762,7 @@ Apply rate limits to:
 Reroll is planned rotation. Revoke is compromise. Keeping them separate is
 what makes a non-zero grace period safe: nobody has to choose between a
 rotation that will not break their fleet and a containment action that
-takes effect now (ADR#0078).
+takes effect now ([ADR#0078](./docs/adr/0078-api-key-rotation-grace-and-audit-set.md)).
 
 Rerolling creates a new raw key while preserving the old key's policy. It
 is bearer-only.
@@ -785,7 +785,7 @@ Showing the old key as `rotating` rather than `active` is what makes a
 rotation somebody started and forgot to finish visible in the product
 instead of only in the data.
 
-Grace defaults and the configurable range are ADR#0078 section 2, carried
+Grace defaults and the configurable range are [ADR#0078](./docs/adr/0078-api-key-rotation-grace-and-audit-set.md) section 2, carried
 on keyspace policy. Ordinary keyspaces get a default long enough to cover a
 deploy cycle for consumers the platform has no visibility into; management
 keyspaces have few consumers and privileged reach, so they get a much
@@ -850,8 +850,8 @@ Resource scopes:
 allowed_vaults            on the key
 allowed_integrations      on the key
 allowed_environments      on the key
-allowed_runtime_services  on the credential's delivery policy
-allowed_hosts             on the credential's delivery policy
+allowed_runtime_services  on the credential's release policy
+allowed_hosts             on the credential's release policy
 ```
 
 The last two already exist and are enforced in the runtime projection; the
@@ -902,7 +902,7 @@ Emit metrics and logs for operations, not values:
 - create count;
 - usage by key id or fingerprint if cardinality has been reviewed.
 
-The required first-release audit facts are fixed at seven in ADR#0078
+The required first-release audit facts are fixed at seven in [ADR#0078](./docs/adr/0078-api-key-rotation-grace-and-audit-set.md)
 section 5 and modelled in `api_keys/audit/v1/audit_fact.proto`. Each is
 either a change of authority or an attack signal. Two of them,
 `api_key.denied` and `api_key.signed_request_replayed`, are the signals the
@@ -915,7 +915,7 @@ api_key.verified   a metric, not an audit fact. Its volume equals the
                    platform's authenticated request rate, which would make
                    audit the highest-volume stream on the platform and put
                    its retention and cost profile on the request path.
-                   Attribution comes from event provenance (ADR#0039).
+                   Attribution comes from event provenance ([ADR#0039](./docs/adr/0039-self-authenticating-event-provenance.md)).
 
 api_key.expired    emitted lazily on the first denied use, not by a
                    sweeper. Expiry is a property of the record, and a
@@ -933,7 +933,7 @@ authenticated actor exists at that moment.
 The wire contract lives in
 [CREDENTIAL_PLATFORM_SPEC.md](./CREDENTIAL_PLATFORM_SPEC.md), section
 API_CONTRACTS, alongside every other endpoint on the platform: the
-project-anchored route list (ADR#0046 section 3), the signed and bearer
+project-anchored route list ([ADR#0046](./docs/adr/0046-project-anchored-resource-hierarchy.md) section 3), the signed and bearer
 create variants, the reason there is no public verify route, per-endpoint
 idempotency namespaces, the error vocabulary, and the canonical
 signed-request target serialization.
@@ -987,7 +987,7 @@ The response snapshot is metadata-only. It may carry the operation id, key
 id, derived public prefix, public key fingerprint, status, and validation
 errors. It must never carry a raw bearer key or a reusable token value.
 Generated private keys are absent from that prohibition because they no
-longer exist anywhere: the platform never generates one (ADR#0050).
+longer exist anywhere: the platform never generates one ([ADR#0050](./docs/adr/0050-signed-first-caller-authentication.md)).
 
 This creates the product rule for one-time display values.
 
@@ -995,7 +995,7 @@ If a bearer API key was created successfully but the client lost the
 response, the backend must not redisplay the raw value. It returns metadata
 and requires a reroll.
 
-DECIDED (ADR#0048): there is no server-side escrow of one-time material, in
+DECIDED ([ADR#0048](./docs/adr/0048-one-time-plaintext-exposure.md)): there is no server-side escrow of one-time material, in
 any form. A replay of the same idempotency key returns metadata only, never
 plaintext, even to the caller who originally received it on the first,
 non-replay execution. Recovery from a lost one-time response is reroll, never
@@ -1020,7 +1020,7 @@ Use pending-operation limits to prevent accidental or malicious row growth:
 max pending api_key.create operations per project
 max pending api_key.reroll operations per key
 max active root keys per project
-max active public keys per signed key    fixed at 2 (ADR#0078 section 4)
+max active public keys per signed key    fixed at 2 ([ADR#0078](./docs/adr/0078-api-key-rotation-grace-and-audit-set.md) section 4)
 ```
 
 ## Open Questions

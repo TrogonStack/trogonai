@@ -27,8 +27,8 @@ reads of the relevant modules), not copied from `SECRET_STORE.md` or
 `API_KEY.md`. Those two design documents predate the first implementation
 slice and are the background reading, not the current state.
 
-`API_KEY.md` has since been reconciled against ADR#0046, ADR#0048,
-ADR#0050, ADR#0051, and ADR#0075 through ADR#0078, so it is now the design
+`API_KEY.md` has since been reconciled against [ADR#0046](./docs/adr/0046-project-anchored-resource-hierarchy.md), [ADR#0048](./docs/adr/0048-one-time-plaintext-exposure.md),
+[ADR#0050](./docs/adr/0050-signed-first-caller-authentication.md), [ADR#0051](./docs/adr/0051-fully-bound-request-signing.md), and [ADR#0075](./docs/adr/0075-api-key-format-and-verifier-construction.md) through [ADR#0078](./docs/adr/0078-api-key-rotation-grace-and-audit-set.md), so it is now the design
 of record for the API key platform rather than a superseded draft. It still
 describes nothing that exists in code.
 
@@ -93,12 +93,12 @@ Three credential families, three different homes:
 Provider credentials
   -> raw material Trogonai needs later on the customer's behalf
   -> OpenBao holds the material
-  -> the application database holds metadata, refs, status, fingerprints,
-     and delivery policy
+  -> the credential event stream holds metadata, refs, status, fingerprints,
+     and release policy; NATS KV holds operational records
 
 Trogonai bearer API keys
   -> authenticate callers to Trogonai
-  -> the raw key is shown once (ADR#0048)
+  -> the raw key is shown once ([ADR#0048](./docs/adr/0048-one-time-plaintext-exposure.md))
   -> the application database holds a verifier digest and metadata
 
 Trogonai signed API keys
@@ -131,7 +131,7 @@ API, and nothing about it reaches a customer-visible contract.
 - Do not store customer caller private keys in OpenBao by default.
 - Do not expose OpenBao paths, mounts, tokens, or policies through the
   public API.
-- Do not put raw provider secrets in the application database.
+- Do not put raw provider secrets in any store other than OpenBao.
 - Do not make every runtime request call OpenBao.
 - Do not make Valkey the source of truth for secrets.
 
@@ -164,9 +164,16 @@ see product states only; they are listed under UI_ACCEPTANCE below.
 
 ## Architecture Boundaries
 
-### Application Database
+### Durable State Outside OpenBao
 
-The application database stores:
+Credential metadata, refs, lifecycle state, fingerprints, release policy,
+idempotency records, and operation records live on the JetStream credential
+event stream, which is the source of truth, and in NATS KV
+([ADR#0047](./docs/adr/0047-event-sourced-credential-metadata.md),
+[ADR#0074](./docs/adr/0074-credential-platform-extraction-boundary.md) Q3).
+No relational database enters the credential platform. Other platform state
+named below lives in its own subsystem's store. Durable state outside OpenBao
+holds:
 
 - owners, workspaces, identities, and authorization scope;
 - vault metadata;
@@ -175,14 +182,14 @@ The application database stores:
 - credential refs;
 - credential lifecycle state;
 - fingerprints;
-- delivery policy;
+- release policy;
 - idempotency records;
 - operation records;
 - audit facts;
 - API-key verifier digests;
 - signed-key public verification material.
 
-The application database must not store:
+No store outside OpenBao may hold:
 
 - raw provider API keys;
 - OAuth refresh tokens;
@@ -247,32 +254,32 @@ Unless a later decision overrides them:
 
 ```text
 credential backend
-  -> event stream as the metadata source of truth (ADR#0047)
+  -> event stream as the metadata source of truth ([ADR#0047](./docs/adr/0047-event-sourced-credential-metadata.md))
   -> OpenBao for raw provider credential material
 
 API key model
-  -> signed keys strongly recommended for all callers (ADR#0050)
+  -> signed keys strongly recommended for all callers ([ADR#0050](./docs/adr/0050-signed-first-caller-authentication.md))
   -> bearer keys as the policy-bounded compatibility tier
   -> root/management keyspaces are signed-only
-  -> two keyspaces per project from creation: management, default (ADR#0076)
-  -> permissions are the only authorization vocabulary; no scopes (ADR#0077)
-  -> built-in roles only in the first milestone (ADR#0077)
+  -> two keyspaces per project from creation: management, default ([ADR#0076](./docs/adr/0076-api-keyspaces-and-root-key-bootstrap.md))
+  -> permissions are the only authorization vocabulary; no scopes ([ADR#0077](./docs/adr/0077-api-key-authorization-model-and-rate-limits.md))
+  -> built-in roles only in the first milestone ([ADR#0077](./docs/adr/0077-api-key-authorization-model-and-rate-limits.md))
 
 signed key default
-  -> Coinbase-style JWT request token, single-use and fully bound (ADR#0051)
+  -> Coinbase-style JWT request token, single-use and fully bound ([ADR#0051](./docs/adr/0051-fully-bound-request-signing.md))
   -> client-generated key pair only; the platform never holds private keys
-  -> Ed25519 default, ES256 accepted for compatibility (ADR#0050)
+  -> Ed25519 default, ES256 accepted for compatibility ([ADR#0050](./docs/adr/0050-signed-first-caller-authentication.md))
   -> 1 minute token lifetime, 2 minute ceiling, 30s skew tolerance
   -> replay store in NATS KV, keyed by (key_id, jti), always fail closed
 
 bearer key default
-  -> tg_<env>_<key_id>_<secret><checksum> (ADR#0075)
+  -> tg_<env>_<key_id>_<secret><checksum> ([ADR#0075](./docs/adr/0075-api-key-format-and-verifier-construction.md))
   -> HMAC-SHA-256 verifier under a versioned pepper, constant-time compare
   -> pepper in OpenBao KV, resolved at boot, never on the request path
-  -> 24h reroll grace; 1h in management keyspaces (ADR#0078)
+  -> 24h reroll grace; 1h in management keyspaces ([ADR#0078](./docs/adr/0078-api-key-rotation-grace-and-audit-set.md))
 
 rate limits
-  -> per-key and per-project only in the first milestone (ADR#0077)
+  -> per-key and per-project only in the first milestone ([ADR#0077](./docs/adr/0077-api-key-authorization-model-and-rate-limits.md))
   -> counters in NATS KV; fail open on product traffic, closed on management
 
 idempotency
@@ -471,13 +478,13 @@ before wiring CredentialState failed to any retry UI. Today, offering a
 "retry" action against a write_failed credential would offer an action the
 decider has no path to accept.
 
-DECIDED (ADR#0046): the hierarchy is organization over project, and the
+DECIDED ([ADR#0046](./docs/adr/0046-project-anchored-resource-hierarchy.md)): the hierarchy is organization over project, and the
 owner boundary is the project: an immutable project id. Resource names,
 OpenBao paths, and event streams anchor at the project and never embed the
 organization above it. See
 docs/adr/0046-project-anchored-resource-hierarchy.md.
 
-DECIDED (ADR#0047): the event stream is the source of truth for credential
+DECIDED ([ADR#0047](./docs/adr/0047-event-sourced-credential-metadata.md)): the event stream is the source of truth for credential
 metadata. Operational records live in NATS KV, listing surfaces arrive
 later as projections over the same streams, and no relational store enters
 the first version. See
@@ -613,7 +620,7 @@ this; the rest is unbuilt.
 ```text
 IdempotencyRecord
   owner_id
-  workspace_id       (project id per ADR#0046)
+  workspace_id       (project id per [ADR#0046](./docs/adr/0046-project-anchored-resource-hierarchy.md))
   command_namespace
   target_resource_id
   idempotency_key
@@ -664,7 +671,7 @@ Acceptance:
 
 Every endpoint below is unbuilt. There is no vault, operation, or
 resubmit-secret concept behind any of them today. Paths are parent-scoped
-resource names rooted at the project, following ADR#0046 section 3.
+resource names rooted at the project, following [ADR#0046](./docs/adr/0046-project-anchored-resource-hierarchy.md) section 3.
 
 ```text
 POST   /v1/projects/{project}/credential-vaults
@@ -703,7 +710,7 @@ GET    /v1/projects/{project}/operations/{operation_id}
 ```
 
 The flat `/v1/api-keys` shape an earlier draft used is superseded by the
-project-anchored form above (ADR#0046 section 3).
+project-anchored form above ([ADR#0046](./docs/adr/0046-project-anchored-resource-hierarchy.md) section 3).
 
 The `{project}` segment is an authorization statement, not just addressing.
 Admission derives the expected project from the authenticated caller
@@ -729,7 +736,7 @@ kind: bearer
 ```
 
 The `management` and `default` keyspaces are created by project creation
-(ADR#0076 section 3), so `POST .../api-keyspaces` is for additional ones
+([ADR#0076](./docs/adr/0076-api-keyspaces-and-root-key-bootstrap.md) section 3), so `POST .../api-keyspaces` is for additional ones
 and neither of the two built-ins can be deleted while it holds active keys.
 
 Idempotency rule per write command, following the idempotency contract
@@ -782,7 +789,7 @@ POST .../keys/{key}/reroll, POST .../keys/{key}/revoke
 POST .../keys/{key}/public-keys
   namespace api_key.add_public_key, targeted by public_key_fingerprint,
   which makes re-applying the same registration a no-op and is the same
-  idempotency key ADR#0076 section 4 relies on for bootstrap
+  idempotency key [ADR#0076](./docs/adr/0076-api-keyspaces-and-root-key-bootstrap.md) section 4 relies on for bootstrap
 
 POST .../keys/{key}/public-keys/{public_key}/revoke
   namespace api_key.revoke_public_key, targeted by public_key_id
@@ -871,7 +878,7 @@ keyspace is at `max_active_keys`, or the keyspace still holds active keys
 and therefore cannot be deleted.
 
 A delegation-ceiling violation is `permission_denied`, not a code of its
-own (ADR#0077 section 5). The caller asked for authority they do not hold,
+own ([ADR#0077](./docs/adr/0077-api-key-authorization-model-and-rate-limits.md) section 5). The caller asked for authority they do not hold,
 which is the same answer as any other authorization failure.
 
 Mapped per endpoint by what can plausibly fail there:
@@ -945,7 +952,7 @@ POST .../keys/{key}/public-keys       validation_failed, permission_denied,
                                        idempotency_conflict,
                                        algorithm_not_allowed,
                                        key_limit_reached (2 active public
-                                       keys per signed key, ADR#0078)
+                                       keys per signed key, [ADR#0078](./docs/adr/0078-api-key-rotation-grace-and-audit-set.md))
 POST .../public-keys/{public_key}/revoke
                                        validation_failed, permission_denied,
                                        idempotency_conflict
@@ -953,7 +960,7 @@ POST .../public-keys/{public_key}/revoke
 
 Two codes in that vocabulary, `host_not_allowed` and
 `runtime_service_not_allowed`, describe runtime resolution failures rather
-than management-API failures; they belong to the delivery-policy checks
+than management-API failures; they belong to the release-policy checks
 described in RUNTIME_PROJECTION (allowed_hosts, allowed_runtime_services),
 not to any of the endpoints above.
 
@@ -985,12 +992,12 @@ expired key. A caller who reaches that point holds the private key, so the
 only thing the detail tells them is how the server serialized the request
 they themselves sent. Every other failure returns the bare code.
 
-DECIDED (ADR#0048): a replay of the same idempotency key returns metadata
+DECIDED ([ADR#0048](./docs/adr/0048-one-time-plaintext-exposure.md)): a replay of the same idempotency key returns metadata
 only, never plaintext, even for the caller who originally received it on
 the first, non-replay execution. See
 docs/adr/0048-one-time-plaintext-exposure.md.
 
-DECIDED (ADR#0048): no server-side escrow of one-time material exists in
+DECIDED ([ADR#0048](./docs/adr/0048-one-time-plaintext-exposure.md)): no server-side escrow of one-time material exists in
 any form. Recovery from a lost one-time response is reroll
 (Trogonai-issued keys) or resubmission (provider-supplied secrets), never
 recovery of the original value. See
@@ -1083,7 +1090,7 @@ subject    the concrete subject the message was published on, verbatim.
            Subjects are already a restricted alphabet, so no normalization
            applies. A subject containing `*` or `>` is rejected: a wildcard
            is not a target. Subject mapping that rewrites subjects is
-           unsupported in front of signed subjects, per ADR#0051 section 6.
+           unsupported in front of signed subjects, per [ADR#0051](./docs/adr/0051-fully-bound-request-signing.md) section 6.
 
 operation  the operation name from the payload envelope, verbatim.
 ```
@@ -1137,7 +1144,7 @@ way when they are missed:
   served authorities before it compares targets, so a forged `Host` header
   cannot decide what a signature is checked against;
 - an intermediary that rewrites paths, query strings, or bodies breaks
-  signatures by design, which is the stated consequence in ADR#0051 rather
+  signatures by design, which is the stated consequence in [ADR#0051](./docs/adr/0051-fully-bound-request-signing.md) rather
   than a bug to work around.
 
 Test vectors ship as one shared fixture consumed by both the verifier tests
@@ -1208,7 +1215,7 @@ break_glass_admin
             can do every operation with no logging beyond ordinary tracing
   gap:      no break-glass concept, no audit trail specific to emergency
             access
-  consumer: ADR#0076 section 6 gives this role its first concrete
+  consumer: [ADR#0076](./docs/adr/0076-api-keyspaces-and-root-key-bootstrap.md) section 6 gives this role its first concrete
             consumer, the operator CLI that registers an additional root
             public key when every root private key is lost. That path is
             unusable in production until an audit device is provisioned,
@@ -1233,7 +1240,7 @@ named policies. Keep the current static-token adapter for local dev only.
 
 ## OpenBao Operations (OPENBAO_OPERATIONS)
 
-DECIDED (ADR#0052): production OpenBao must auto-unseal against a cloud KMS
+DECIDED ([ADR#0052](./docs/adr/0052-cloud-kms-production-seal.md)): production OpenBao must auto-unseal against a cloud KMS
 key (GCP Cloud KMS or AWS KMS expected); the Shamir quorum seal is
 prohibited in production except for deployments whose network cannot reach
 a cloud KMS, and recovery keys exist for break-glass ceremonies only. See
@@ -1291,7 +1298,7 @@ describe the whole path's current state, not any one historical version.
 Planned metadata fields that do not exist yet:
 
 ```text
-workspace_id            (the project id per ADR#0046)
+workspace_id            (the project id per [ADR#0046](./docs/adr/0046-project-anchored-resource-hierarchy.md))
 integration_id          (needs integration records)
 operation_id            (needs operation records)
 credential_version_id   (needs its own convention, since KV v2 metadata has
@@ -1341,7 +1348,7 @@ the recovery worker reads metadata() to recover stuck activations. The
 "during cleanup" pattern has no code yet since async cleanup itself is
 unbuilt (see RUNTIME_PROJECTION and Remaining Work).
 
-DECIDED (ADR#0046): `trogonai/{owner_id}/credentials/{credential_id}` and
+DECIDED ([ADR#0046](./docs/adr/0046-project-anchored-resource-hierarchy.md)): `trogonai/{owner_id}/credentials/{credential_id}` and
 its mount are ratified as-is, with owner_id understood as project id.
 Names anchor at the project and never embed the organization above it. See
 docs/adr/0046-project-anchored-resource-hierarchy.md.
@@ -1466,32 +1473,32 @@ same credential always gets the same effective expiry point under a given
 policy; this is stable per-key skew to avoid a thundering herd of
 simultaneous expiries, not run-to-run randomness.
 
-### Delivery policy (implemented, not yet populated)
+### Release policy (implemented, not yet populated)
 
-`RuntimeIntegrationProjection` carries a `RuntimeDeliveryPolicy` alongside
+`RuntimeIntegrationProjection` carries a `RuntimeReleasePolicy` alongside
 key, owner_id, status, version, and the per-kind CredentialRef map:
 
 ```text
-RuntimeDeliveryPolicy
+RuntimeReleasePolicy
   allowed_hosts              AllowedHosts { Unrestricted | Only(AllowedHost) }
   allowed_runtime_services   AllowedRuntimeServices { Unrestricted | Only(RuntimeServiceId) }
   injection_locations        InjectionLocations (default empty = deny)
   cache_ttl_override         Option<Duration> (may only shorten)
 ```
 
-`workspace_id` is deliberately not a field. ADR#0046 makes
+`workspace_id` is deliberately not a field. [ADR#0046](./docs/adr/0046-project-anchored-resource-hierarchy.md) makes
 `CredentialOwnerId` the project id, so the projection's existing `owner_id`
 already carries it; adding a second field would reintroduce the
 workspace/project split that ADR removed.
 
 Enforcement lives on `RuntimeCredentialResolver::resolve_for`, which takes
-a `RuntimeDeliveryRequest` and denies before the secret store is touched,
+a `RuntimeReleaseRequest` and denies before the secret store is touched,
 so a denied caller cannot warm the cache or distinguish a present
 credential from an absent one. The existing `resolve` delegates with an
 empty request, which the permissive default admits, so the twelve shipped
 source paths are unchanged.
-`RuntimeDeliveryPolicy::effective_cache_ttl` clamps an override to the
-configured TTL, so a policy can only narrow the ADR#0049 staleness bound,
+`RuntimeReleasePolicy::effective_cache_ttl` clamps an override to the
+configured TTL, so a policy can only narrow the [ADR#0049](./docs/adr/0049-revocation-latency-target.md) staleness bound,
 never widen it.
 
 Nothing populates these fields yet. The management API and the credential
@@ -1499,7 +1506,7 @@ event stream have to carry them before a policy can be configured in
 production. Until then the default is permissive on hosts and runtime
 services, and the fail-closed behavior is exercised only by tests.
 
-DECIDED (ADR#0049): target p99 revocation-to-invalidation latency at or
+DECIDED ([ADR#0049](./docs/adr/0049-revocation-latency-target.md)): target p99 revocation-to-invalidation latency at or
 under 5 seconds under normal operation; page when p99 exceeds 10 seconds
 sustained over 5 minutes. The existing 300s ttl / 30s jitter is ratified as
 the working cache default. See docs/adr/0049-revocation-latency-target.md.
@@ -1572,7 +1579,7 @@ actions: create, reroll, revoke, add public key, revoke public key,
 ```
 
 `rotating` and the direct-permissions badge are not cosmetic choices:
-ADR#0078 section 3 and ADR#0077 section 3 make them the product surface for
+[ADR#0078](./docs/adr/0078-api-key-rotation-grace-and-audit-set.md) section 3 and [ADR#0077](./docs/adr/0077-api-key-authorization-model-and-rate-limits.md) section 3 make them the product surface for
 a half-finished rotation and for an out-of-role grant, both of which are
 otherwise visible only in the data.
 
@@ -1635,7 +1642,7 @@ Given a user is creating a signed key
 When the UI walks them through it
 Then it never offers to generate, upload, or accept a private key, and
   asks only for a public key produced by the CLI, because the platform
-  never holds a private key (ADR#0050 section 2).
+  never holds a private key ([ADR#0050](./docs/adr/0050-signed-first-caller-authentication.md) section 2).
 
 Given a keyspace whose policy disallows bearer issuance
 When the user opens the create-key flow for it
@@ -1807,8 +1814,7 @@ IncompleteProvision
 
 Keyed by `credential_id`. Built from the same credential event stream the
 runtime projection already consumes, on the same checkpointed refresh
-mechanism, so it needs no new transport, no application database table, and
-no OpenBao read.
+mechanism, so it needs no new transport, no new store, and no OpenBao read.
 
 A row is created when the aggregate enters a non-terminal or failed phase and
 deleted when it reaches `Active`, `Revoked`, or `Destroyed`. Deletion, not a
@@ -1845,7 +1851,7 @@ no publicly visible credential exists yet
 a publicly visible credential already exists
   -> rotation_pending, destroy_requested, cleanup_failed
   -> the credential still renders under its own product status
-     (`rotating` per ADR#0078 section 3, `cleanup_pending` per the product
+     (`rotating` per [ADR#0078](./docs/adr/0078-api-key-rotation-grace-and-audit-set.md) section 3, `cleanup_pending` per the product
      states in UI_ACCEPTANCE)
   -> but this read model's operational fields (attempt_count,
      stream_position, reason, first_seen_at) are never rendered
@@ -1910,14 +1916,14 @@ bearer is the policy-bounded compatibility tier.
 Every decision this section depends on is ratified:
 
 ```text
-ADR#0046  project-anchored resource names; environment is an attribute
-ADR#0048  one-time plaintext exposure; no escrow in any form
-ADR#0050  signed-first posture; client-generated keys only; Ed25519/ES256
-ADR#0051  fully bound single-use request tokens; NATS KV replay store
-ADR#0075  key format, HMAC verifier construction, pepper custody
-ADR#0076  keyspace model, keyspace policy, root key bootstrap
-ADR#0077  permissions vocabulary, built-in roles, delegation, rate limits
-ADR#0078  rotation grace, first-release audit set
+[ADR#0046](./docs/adr/0046-project-anchored-resource-hierarchy.md)  project-anchored resource names; environment is an attribute
+[ADR#0048](./docs/adr/0048-one-time-plaintext-exposure.md)  one-time plaintext exposure; no escrow in any form
+[ADR#0050](./docs/adr/0050-signed-first-caller-authentication.md)  signed-first posture; client-generated keys only; Ed25519/ES256
+[ADR#0051](./docs/adr/0051-fully-bound-request-signing.md)  fully bound single-use request tokens; NATS KV replay store
+[ADR#0075](./docs/adr/0075-api-key-format-and-verifier-construction.md)  key format, HMAC verifier construction, pepper custody
+[ADR#0076](./docs/adr/0076-api-keyspaces-and-root-key-bootstrap.md)  keyspace model, keyspace policy, root key bootstrap
+[ADR#0077](./docs/adr/0077-api-key-authorization-model-and-rate-limits.md)  permissions vocabulary, built-in roles, delegation, rate limits
+[ADR#0078](./docs/adr/0078-api-key-rotation-grace-and-audit-set.md)  rotation grace, first-release audit set
 ```
 
 ### Commands to implement
@@ -1932,18 +1938,18 @@ generated proto message names under `proto/trogonai/platform/`, so the
 build surface and the wire contract cannot drift into two vocabularies.
 
 ```text
-CreateApiKeyspace               ADR#0076  policy boundary and its fields
+CreateApiKeyspace               [ADR#0076](./docs/adr/0076-api-keyspaces-and-root-key-bootstrap.md)  policy boundary and its fields
 UpdateApiKeyspacePolicy                   environment and tier are immutable
 DeleteApiKeyspace                         refused while active keys remain
 
-CreateApiKey                    ADR#0075  format and verifier digest
-RerollApiKey                    ADR#0078  grace window; revoke has none
+CreateApiKey                    [ADR#0075](./docs/adr/0075-api-key-format-and-verifier-construction.md)  format and verifier digest
+RerollApiKey                    [ADR#0078](./docs/adr/0078-api-key-rotation-grace-and-audit-set.md)  grace window; revoke has none
 RevokeApiKey
-ChangeApiKeyPolicy              ADR#0077  delegation ceiling checked here
-ExpireApiKey                    ADR#0078  lazy, on first denied use
+ChangeApiKeyPolicy              [ADR#0077](./docs/adr/0077-api-key-authorization-model-and-rate-limits.md)  delegation ceiling checked here
+ExpireApiKey                    [ADR#0078](./docs/adr/0078-api-key-rotation-grace-and-audit-set.md)  lazy, on first denied use
 
-AddApiKeyPublicKey              ADR#0050  client-generated pairs only
-RevokeApiKeyPublicKey           ADR#0078  swap bounded at 2 active
+AddApiKeyPublicKey              [ADR#0050](./docs/adr/0050-signed-first-caller-authentication.md)  client-generated pairs only
+RevokeApiKeyPublicKey           [ADR#0078](./docs/adr/0078-api-key-rotation-grace-and-audit-set.md)  swap bounded at 2 active
 ```
 
 Verification is deliberately not on this list. It appends no event and
@@ -2014,7 +2020,7 @@ invalidation. 909 tests run in `trogon-gateway`.
 
 Covered:
 
-- delivery policy validation (`runtime_delivery_policy.rs`,
+- release policy validation (`runtime_release_policy.rs`,
   `injection_location.rs`, `runtime_service_id.rs`, plus resolver-level
   enforcement tests in `runtime_projection.rs`);
 - allowed-host matching (`allowed_host.rs`, covering wildcard scope, case
@@ -2040,7 +2046,7 @@ verifier digest construction            (API key platform)
 wire-format checksum rejection          (API key platform)
 pepper rotation dual-version window     (API key platform)
 canonical target vectors, both          (API key platform, and the one
-  transports                             item ADR#0051 requires before
+  transports                             item [ADR#0051](./docs/adr/0051-fully-bound-request-signing.md) requires before
                                          signed verification ships)
 signed-request verification             (API key platform)
 signed request replay is rejected       (API key platform)
@@ -2055,7 +2061,7 @@ no plaintext in outbox                  (outbox does not exist)
 The canonical target vectors are the one entry above that is not blocked on
 the feature it tests. The serialization is fully specified in API_CONTRACTS
 and the vectors are a fixture file, so they can be written and shared with
-SDK authors before any verifier exists, which is the order ADR#0051 section
+SDK authors before any verifier exists, which is the order [ADR#0051](./docs/adr/0051-fully-bound-request-signing.md) section
 2 asks for.
 
 Failure injection, none of it written:
@@ -2120,7 +2126,7 @@ before OpenBao-to-DB reconciliation is possible at all.
 
 The incomplete provision read model is the exception in this group: it reads
 only the credential event stream, so it does not wait on `SecretStoreList` or
-on the application database, and it is the prerequisite for knowing how large
+on any other store, and it is the prerequisite for knowing how large
 the rest of this work actually is.
 
 ### 4. OpenBao production hardening
@@ -2132,14 +2138,14 @@ the rest of this work actually is.
 - a declarative apply (Terraform or equivalent) instead of the manual loop
   in the policies README;
 - provision an audit device, without which break-glass access cannot be
-  audited and the ADR#0076 section 6 root-key recovery path cannot be used
+  audited and the [ADR#0076](./docs/adr/0076-api-keyspaces-and-root-key-bootstrap.md) section 6 root-key recovery path cannot be used
   in production;
 - run the restore drill specified in
   `devops/openbao/runbooks/backup-and-restore.md`, which needs a cluster.
 
 ### 5. Runtime projection
 
-- populate the delivery policy from the management API and the credential
+- populate the release policy from the management API and the credential
   event stream; the enforcement path exists and is exercised only by tests
   until something writes a policy;
 - expose the cache TTL policy through configuration;
@@ -2153,8 +2159,8 @@ Per the section above. `ApiKeyState`, `SignedPublicKeyState`, `ApiKeyId`,
 here; no key issuance surface exists today, so there is nothing for them to
 transition or identify yet.
 
-Every design question is now ratified (ADR#0046, ADR#0048, ADR#0050,
-ADR#0051, ADR#0075 through ADR#0078), so what remains is build order rather
+Every design question is now ratified ([ADR#0046](./docs/adr/0046-project-anchored-resource-hierarchy.md), [ADR#0048](./docs/adr/0048-one-time-plaintext-exposure.md), [ADR#0050](./docs/adr/0050-signed-first-caller-authentication.md),
+[ADR#0051](./docs/adr/0051-fully-bound-request-signing.md), [ADR#0075](./docs/adr/0075-api-key-format-and-verifier-construction.md) through [ADR#0078](./docs/adr/0078-api-key-rotation-grace-and-audit-set.md)), so what remains is build order rather
 than open design:
 
 ```text
@@ -2164,7 +2170,7 @@ than open design:
     in, and the policy fields decide what the issuance paths may do.
 
 6b  canonical target serialization and its shared test vectors
-    Required by ADR#0051 section 2 to land before signed verification.
+    Required by [ADR#0051](./docs/adr/0051-fully-bound-request-signing.md) section 2 to land before signed verification.
     Independent of 6a, so it can run in parallel.
 
 6c  signed key issuance
@@ -2187,7 +2193,7 @@ than open design:
     The wire format, the CRC32C checksum, the pepper resolved at boot
     through the secrets service, HMAC verification, one-time display, and
     reroll with its grace window. Deliberately after the signed tier:
-    ADR#0050 makes bearer the compatibility tier, and building it second
+    [ADR#0050](./docs/adr/0050-signed-first-caller-authentication.md) makes bearer the compatibility tier, and building it second
     keeps the management API from having a bearer-authenticated era.
 
 6g  authorization
@@ -2231,7 +2237,7 @@ repeated OpenBao write failures, closed by
 Of the remaining three, the two API-key alerts, suspicious verification
 failures and signed-request replay attempts, now have a specified signal
 source: `api_key.denied` and `api_key.signed_request_replayed` in the
-ADR#0078 audit set. They are no longer blocked on a design decision, only
+[ADR#0078](./docs/adr/0078-api-key-rotation-grace-and-audit-set.md) audit set. They are no longer blocked on a design decision, only
 on item 6i shipping, and item 6i names them as its reason for landing
 incrementally rather than last.
 
@@ -2254,18 +2260,18 @@ questions in
 - the default idempotency TTL;
 - the default pending credential TTL;
 - whether idempotency records stay in NATS KV or move to the control-plane
-  database (the same question as ADR#0074's Q3).
+  database (the same question as [ADR#0074](./docs/adr/0074-credential-platform-extraction-boundary.md)'s Q3).
 
 Owner boundary, metadata backend, path convention, cache TTL, revocation
 latency target, signed-key algorithm, the signed-first posture, request
-signing binding, and the production seal are decided in ADR#0046 through
-ADR#0052.
+signing binding, and the production seal are decided in [ADR#0046](./docs/adr/0046-project-anchored-resource-hierarchy.md) through
+[ADR#0052](./docs/adr/0052-cloud-kms-production-seal.md).
 
 The API key platform has no architectural decisions left. Key format,
 verifier construction, pepper custody, keyspaces and their policy fields,
 root key bootstrap, the permissions vocabulary, built-in roles, delegation
 enforcement, rate-limit subject kinds and counter store, rotation grace,
-and the first-release audit set are decided in ADR#0075 through ADR#0078.
+and the first-release audit set are decided in [ADR#0075](./docs/adr/0075-api-key-format-and-verifier-construction.md) through [ADR#0078](./docs/adr/0078-api-key-rotation-grace-and-audit-set.md).
 The three things deferred there (customer-authored roles, identity-level
 and route-level rate limits, and a dedicated counter store) carry stated
 trigger conditions, so they are deferrals rather than undecided design.
@@ -2281,7 +2287,7 @@ release or create-time only. None of them blocks starting item 6.
 
 The credential platform is done when:
 
-- raw provider credentials are not in the application database;
+- raw provider credentials are held nowhere but OpenBao;
 - public API responses are metadata-only after one-time display;
 - idempotent retries cannot create duplicate pending records;
 - OpenBao paths are generated from validated domain values;
