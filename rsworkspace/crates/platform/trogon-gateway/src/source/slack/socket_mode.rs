@@ -1,6 +1,8 @@
+use std::future::Future;
 use std::time::Duration;
 
 use bytes::Bytes;
+use futures_util::stream::FuturesUnordered;
 use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -12,7 +14,8 @@ use trogon_nats::jetstream::{ClaimCheckPublisher, JetStreamPublisher, ObjectStor
 use super::config::{SlackConfig, SlackSocketModeConfig};
 use super::connections_open_error_code::ConnectionsOpenErrorCode;
 use super::constants::{
-    CLIENT_PING_PAYLOAD, DISCONNECT_REASON_LINK_DISABLED, RECONNECT_INITIAL_DELAY, RECONNECT_MAX_DELAY, SOCKET_LIVENESS,
+    CLIENT_PING_PAYLOAD, DISCONNECT_REASON_LINK_DISABLED, ENVELOPE_CONCURRENCY_LIMIT, RECONNECT_INITIAL_DELAY,
+    RECONNECT_MAX_DELAY, SOCKET_LIVENESS,
 };
 use super::delivery_metadata::DeliveryContext;
 use super::server::SlackBridge;
@@ -173,6 +176,7 @@ where
     let server_ping_deadline = tokio::time::sleep(server_ping_timeout);
     tokio::pin!(server_ping_deadline);
     let mut server_ping_seen = false;
+    let mut in_flight = FuturesUnordered::new();
 
     loop {
         let stall_deadline = pong_watch.stall_deadline();
@@ -182,21 +186,35 @@ where
                 sender.send(Message::Ping(Bytes::from_static(CLIENT_PING_PAYLOAD))).await?;
                 pong_watch.ping_sent(Instant::now());
             }
-            message = receiver.next() => {
+            Some(ack) = in_flight.next(), if !in_flight.is_empty() => {
+                if let Some(ack) = ack {
+                    sender.send(ack_message(ack)).await?;
+                }
+            }
+            message = receiver.next(), if in_flight.len() < ENVELOPE_CONCURRENCY_LIMIT => {
                 let Some(message) = message else {
+                    drain_acks(&mut in_flight, sender).await;
                     return Ok(());
                 };
                 match message? {
-                    Message::Text(text) => {
-                        let (reconnect, ack) = handle_text_frame(bridge, text.as_str()).await?;
-                        if let Some(ack) = ack {
-                            sender.send(Message::Text(ack.into())).await?;
-                        }
-                        if reconnect {
+                    Message::Text(text) => match inspect_frame(text.as_str()) {
+                        Ok(Frame::Ignored) => {}
+                        Ok(Frame::Reconnect) => {
+                            drain_acks(&mut in_flight, sender).await;
                             return Ok(());
                         }
+                        Ok(Frame::Delivery(envelope)) => {
+                            in_flight.push(async move { deliver_envelope(bridge, envelope, text.as_str()).await });
+                        }
+                        Err(error) => {
+                            drain_acks(&mut in_flight, sender).await;
+                            return Err(error);
+                        }
+                    },
+                    Message::Close(_) => {
+                        drain_acks(&mut in_flight, sender).await;
+                        return Ok(());
                     }
-                    Message::Close(_) => return Ok(()),
                     Message::Ping(payload) => {
                         server_ping_deadline.as_mut().reset(Instant::now() + server_ping_timeout);
                         server_ping_seen = true;
@@ -215,6 +233,24 @@ where
                 warn!(timeout = ?server_ping_timeout, "Slack Socket Mode ping was not received in time, reconnecting");
                 return Ok(());
             }
+        }
+    }
+}
+
+fn ack_message(ack: String) -> Message {
+    Message::Text(ack.into())
+}
+
+async fn drain_acks<Delivery, Outgoing>(in_flight: &mut FuturesUnordered<Delivery>, sender: &mut Outgoing)
+where
+    Delivery: Future<Output = Option<String>>,
+    Outgoing: Sink<Message, Error = WebSocketError> + Unpin,
+{
+    while let Some(ack) = in_flight.next().await {
+        if let Some(ack) = ack
+            && sender.send(ack_message(ack)).await.is_err()
+        {
+            return;
         }
     }
 }
@@ -248,10 +284,13 @@ async fn open_socket_url(
     )))
 }
 
-pub(super) async fn handle_text_frame<P: JetStreamPublisher, S: ObjectStorePut>(
-    bridge: &SlackBridge<P, S>,
-    text: &str,
-) -> Result<(bool, Option<String>), SocketModeError> {
+enum Frame {
+    Ignored,
+    Reconnect,
+    Delivery(SocketEnvelope),
+}
+
+fn inspect_frame(text: &str) -> Result<Frame, SocketModeError> {
     let envelope = match serde_json::from_str::<SocketEnvelope>(text) {
         Ok(envelope) => envelope,
         Err(parse_error) => {
@@ -259,14 +298,14 @@ pub(super) async fn handle_text_frame<P: JetStreamPublisher, S: ObjectStorePut>(
             let line = parse_error.line();
             let column = parse_error.column();
             warn!(?category, line, column, "Ignoring malformed Slack Socket Mode frame");
-            return Ok((false, None));
+            return Ok(Frame::Ignored);
         }
     };
 
     match envelope.kind.as_str() {
         "hello" => {
             info!("Slack Socket Mode connection established");
-            Ok((false, None))
+            Ok(Frame::Ignored)
         }
         "disconnect" => {
             let reason = envelope.reason.as_deref().unwrap_or("unknown");
@@ -274,11 +313,19 @@ pub(super) async fn handle_text_frame<P: JetStreamPublisher, S: ObjectStorePut>(
             if reason == DISCONNECT_REASON_LINK_DISABLED {
                 return Err(SocketModeError::LinkDisabled);
             }
-            Ok((true, None))
+            Ok(Frame::Reconnect)
         }
-        "events_api" | "interactive" | "slash_commands" => handle_payload_envelope(bridge, envelope, text)
-            .await
-            .map(|ack| (false, ack)),
+        _ => Ok(Frame::Delivery(envelope)),
+    }
+}
+
+async fn deliver_envelope<P: JetStreamPublisher, S: ObjectStorePut>(
+    bridge: &SlackBridge<P, S>,
+    envelope: SocketEnvelope,
+    text: &str,
+) -> Option<String> {
+    match envelope.kind.as_str() {
+        "events_api" | "interactive" | "slash_commands" => handle_payload_envelope(bridge, envelope, text).await,
         other => {
             warn!(kind = other, "Unhandled Slack Socket Mode envelope type");
             let stored = bridge
@@ -287,9 +334,20 @@ pub(super) async fn handle_text_frame<P: JetStreamPublisher, S: ObjectStorePut>(
                     Bytes::copy_from_slice(text.as_bytes()),
                 )
                 .await;
-            let ack = envelope.envelope_id.filter(|_| stored.is_success()).map(ack_frame);
-            Ok((false, ack))
+            envelope.envelope_id.filter(|_| stored.is_success()).map(ack_frame)
         }
+    }
+}
+
+#[cfg(test)]
+pub(super) async fn handle_text_frame<P: JetStreamPublisher, S: ObjectStorePut>(
+    bridge: &SlackBridge<P, S>,
+    text: &str,
+) -> Result<(bool, Option<String>), SocketModeError> {
+    match inspect_frame(text)? {
+        Frame::Ignored => Ok((false, None)),
+        Frame::Reconnect => Ok((true, None)),
+        Frame::Delivery(envelope) => Ok((false, deliver_envelope(bridge, envelope, text).await)),
     }
 }
 
@@ -297,7 +355,7 @@ async fn handle_payload_envelope<P: JetStreamPublisher, S: ObjectStorePut>(
     bridge: &SlackBridge<P, S>,
     envelope: SocketEnvelope,
     raw_text: &str,
-) -> Result<Option<String>, SocketModeError> {
+) -> Option<String> {
     let Some(envelope_id) = envelope.envelope_id else {
         warn!(kind = envelope.kind, "Missing Slack Socket Mode envelope_id");
         bridge
@@ -306,7 +364,7 @@ async fn handle_payload_envelope<P: JetStreamPublisher, S: ObjectStorePut>(
                 Bytes::copy_from_slice(raw_text.as_bytes()),
             )
             .await;
-        return Ok(None);
+        return None;
     };
 
     let Some(payload) = envelope.payload else {
@@ -317,7 +375,7 @@ async fn handle_payload_envelope<P: JetStreamPublisher, S: ObjectStorePut>(
                 Bytes::copy_from_slice(raw_text.as_bytes()),
             )
             .await;
-        return Ok(None);
+        return None;
     };
 
     let Ok(context) = DeliveryContext::socket(
@@ -335,7 +393,7 @@ async fn handle_payload_envelope<P: JetStreamPublisher, S: ObjectStorePut>(
                 Bytes::copy_from_slice(payload.get().as_bytes()),
             )
             .await;
-        return Ok(None);
+        return None;
     };
 
     let status = match envelope.kind.as_str() {
@@ -353,14 +411,14 @@ async fn handle_payload_envelope<P: JetStreamPublisher, S: ObjectStorePut>(
                     Bytes::copy_from_slice(raw_text.as_bytes()),
                 )
                 .await;
-            return Ok(None);
+            return None;
         }
     };
 
     if status.is_success() {
-        Ok(Some(ack_frame(envelope_id)))
+        Some(ack_frame(envelope_id))
     } else {
-        Ok(None)
+        None
     }
 }
 

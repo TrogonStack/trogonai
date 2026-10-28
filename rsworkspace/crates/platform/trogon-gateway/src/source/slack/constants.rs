@@ -67,3 +67,5 @@ pub const PERMANENT_CONNECTIONS_OPEN_ERRORS: &[&str] = &[
     "not_allowed_token_type",
 ];
 pub const DISCONNECT_REASON_LINK_DISABLED: &str = "link_disabled";
+
+pub const ENVELOPE_CONCURRENCY_LIMIT: usize = 16;
