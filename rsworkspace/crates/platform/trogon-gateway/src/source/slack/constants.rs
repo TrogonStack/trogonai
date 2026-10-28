@@ -28,6 +28,8 @@ pub const NATS_HEADER_ENVELOPE_ID: &str = "X-Slack-Envelope-Id";
 pub const NATS_HEADER_REQUEST_TIMESTAMP: &str = "X-Slack-Request-Timestamp";
 
 pub const NATS_HEADER_CALLBACK_ID: &str = "X-Slack-Callback-Id";
+pub const NATS_HEADER_ACTION_ID: &str = "X-Slack-Action-Id";
+pub const NATS_HEADER_BLOCK_ID: &str = "X-Slack-Block-Id";
 pub const NATS_HEADER_TRANSPORT: &str = "X-Slack-Transport";
 pub const NATS_HEADER_REJECT_REASON: &str = "X-Slack-Reject-Reason";
 pub const NATS_HEADER_CONTENT_TYPE: &str = "Content-Type";

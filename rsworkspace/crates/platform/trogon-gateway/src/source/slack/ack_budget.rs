@@ -8,6 +8,7 @@ use super::constants::{ACK_LIMIT_MAX, REPLY_PUBLISH_LIMIT_MAX};
 pub enum AckPlan {
     Acknowledge,
     AwaitReply,
+    RequestOnly,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,6 +21,7 @@ impl AckPlan {
     pub fn for_interaction(interaction_type: &str) -> Self {
         match interaction_type {
             "view_submission" => Self::AwaitReply,
+            "block_suggestion" => Self::RequestOnly,
             _ => Self::Acknowledge,
         }
     }
@@ -49,7 +51,7 @@ impl AckBudget {
 
     pub fn publish_limit(self, plan: AckPlan) -> Duration {
         match plan {
-            AckPlan::Acknowledge => self.limit,
+            AckPlan::Acknowledge | AckPlan::RequestOnly => self.limit,
             AckPlan::AwaitReply => self.limit.min(REPLY_PUBLISH_LIMIT_MAX),
         }
     }

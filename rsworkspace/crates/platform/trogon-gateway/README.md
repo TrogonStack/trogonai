@@ -241,6 +241,10 @@ window is reconciled on every start, so a stream created before this setting exi
 - When no responder is subscribed, or the reply is later than Slack's deadline minus a 200 millisecond margin, the
   gateway answers HTTP `404` and sends no Socket Mode ack. The delivery is still stored, so a command that must
   always acknowledge needs a responder that is always running.
+- An external select asks for its options with a `block_suggestion`. It is never published or stored: the gateway
+  sends only a core NATS request to `{subject_prefix}.respond.interaction.block_suggestion` with the payload and
+  headers plus `X-Slack-Action-Id` and `X-Slack-Block-Id`, and the reply carrying `options` or `option_groups` is
+  the response. The same `404` and no ack rules apply when nothing answers.
 - The respond subjects are outside the stream filters on purpose, so replies are never stored.
 
 ## Zoom

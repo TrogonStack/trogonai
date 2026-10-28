@@ -91,6 +91,7 @@ enum PayloadKind {
 #[serde(rename_all = "snake_case")]
 enum Outcome {
     Publish,
+    Request,
     Inline,
     Reject,
     Ignore,
@@ -215,16 +216,6 @@ impl Fixture {
     fn socket_input(&self) -> SocketInput {
         serde_json::from_value(self.input.clone()).unwrap_or_else(|e| panic!("{}: bad socket input: {e}", self.id))
     }
-
-    fn expects_ack_body(&self) -> bool {
-        let http_body = self.expected.http.as_ref().is_some_and(|http| http.body.is_some());
-        let socket_payload = self
-            .expected
-            .socket_ack
-            .as_ref()
-            .is_some_and(|ack| ack.payload.is_some());
-        http_body || socket_payload
-    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -283,10 +274,6 @@ impl fmt::Display for Diff {
 impl GapId {
     fn explains(self, fixture: &Fixture, diff: &Diff) -> bool {
         match self {
-            GapId::G2 => {
-                fixture.expects_ack_body()
-                    && matches!(diff.field, Field::ResponseBody | Field::SocketAck | Field::ContentType)
-            }
             GapId::G11 => fixture.transport == Transport::SocketMode && diff.field == Field::PayloadReserialized,
             GapId::G23 => diff.field == Field::Unroutable && fixture.expected.outcome == Outcome::Reject,
             _ => false,
@@ -480,8 +467,11 @@ async fn observe_http(fixture: &Fixture) -> Observed {
         .await
         .expect("readable response body");
     let published = published(&publisher);
+    let requests = requested(&requester);
     let outcome = if !published.routed.is_empty() {
         Outcome::Publish
+    } else if status.is_success() && !requests.is_empty() {
+        Outcome::Request
     } else if status.is_success() {
         Outcome::Inline
     } else {
@@ -489,7 +479,7 @@ async fn observe_http(fixture: &Fixture) -> Observed {
     };
     Observed {
         outcome,
-        requests: requested(&requester),
+        requests,
         content_type,
         deliveries: published.routed,
         unroutable: published.unroutable,
@@ -515,14 +505,17 @@ async fn observe_socket(fixture: &Fixture) -> Observed {
         Err(error) => (None, Some(error.to_string())),
     };
     let published = published(&publisher);
-    let outcome = if published.routed.is_empty() {
-        Outcome::Reject
-    } else {
+    let requests = requested(&requester);
+    let outcome = if !published.routed.is_empty() {
         Outcome::Publish
+    } else if socket_ack.is_some() && !requests.is_empty() {
+        Outcome::Request
+    } else {
+        Outcome::Reject
     };
     Observed {
         outcome,
-        requests: requested(&requester),
+        requests,
         content_type: None,
         deliveries: published.routed,
         unroutable: published.unroutable,

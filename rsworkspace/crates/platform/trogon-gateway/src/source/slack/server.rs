@@ -7,9 +7,9 @@ use super::config::SlackSigningSecret;
 use super::config::SlackTransport;
 use super::config::SlackWebhookConfig;
 use super::constants::{
-    CONTENT_TYPE_FORM, CONTENT_TYPE_UNKNOWN, HEADER_SIGNATURE, HEADER_TIMESTAMP, NATS_HEADER_CALLBACK_ID,
-    NATS_HEADER_CONTENT_TYPE, NATS_HEADER_EVENT_ID, NATS_HEADER_EVENT_TYPE, NATS_HEADER_PAYLOAD_KIND,
-    NATS_HEADER_REJECT_REASON, NATS_HEADER_TEAM_ID, NATS_HEADER_TRANSPORT, UNKNOWN_TEAM_ID,
+    CONTENT_TYPE_FORM, CONTENT_TYPE_UNKNOWN, HEADER_SIGNATURE, HEADER_TIMESTAMP, NATS_HEADER_CONTENT_TYPE,
+    NATS_HEADER_EVENT_ID, NATS_HEADER_EVENT_TYPE, NATS_HEADER_PAYLOAD_KIND, NATS_HEADER_REJECT_REASON,
+    NATS_HEADER_TEAM_ID, NATS_HEADER_TRANSPORT, UNKNOWN_TEAM_ID,
 };
 use super::dedup_window::DedupWindow;
 use super::delivery_metadata::{DeliveryContext, DeliveryMetadata};
@@ -19,6 +19,7 @@ use super::payload_encoding::PayloadEncoding;
 use super::payload_kind::PayloadKind;
 use super::payload_metadata::PayloadMetadata;
 use super::reply::{Acknowledgement, ConsumerReply};
+use super::request_headers::RequestHeaders;
 use super::signature;
 use super::ssl_check::SslCheck;
 use super::subject::SlackSubject;
@@ -509,18 +510,8 @@ impl<P: JetStreamPublisher, S: ObjectStorePut, R: RequestClient> SlackBridge<P, 
         };
 
         let plan = AckPlan::for_interaction(&interaction_type);
-        if plan == AckPlan::Acknowledge {
-            let outcome = self.publish(subject.into_string(), nats_headers, body, plan).await;
-            return outcome_to_status(outcome).into();
-        }
-
-        let callback_id = payload
-            .pointer("/view/callback_id")
-            .and_then(|value| value.as_str())
-            .map(HeaderText::new)
-            .transpose();
-        let Ok(callback_id) = callback_id else {
-            warn!("Interaction callback_id is not valid header text");
+        let Ok(request_headers) = RequestHeaders::from_payload(plan, payload) else {
+            warn!("Interaction identifiers are not valid header text");
             return self
                 .reject(
                     UnroutableReason::InvalidHeaderValue,
@@ -531,23 +522,44 @@ impl<P: JetStreamPublisher, S: ObjectStorePut, R: RequestClient> SlackBridge<P, 
                 .await;
         };
 
-        self.publish_and_respond(
-            subject,
-            respond_subject,
-            nats_headers,
-            callback_id,
-            body,
-            context.accepts_reply(),
-        )
-        .await
+        match plan {
+            AckPlan::Acknowledge => {
+                let outcome = self.publish(subject.into_string(), nats_headers, body, plan).await;
+                outcome_to_status(outcome).into()
+            }
+            AckPlan::AwaitReply => {
+                self.publish_and_respond(
+                    subject,
+                    respond_subject,
+                    nats_headers,
+                    request_headers,
+                    body,
+                    context.accepts_reply(),
+                )
+                .await
+            }
+            AckPlan::RequestOnly => {
+                if !context.accepts_reply() {
+                    return StatusCode::OK.into();
+                }
+                self.request_reply(
+                    respond_subject,
+                    nats_headers,
+                    request_headers,
+                    body,
+                    AckBudget::reply_limit(Duration::ZERO),
+                )
+                .await
+            }
+        }
     }
 
     async fn publish_and_respond(
         &self,
         subject: SlackSubject,
         respond_subject: SlackSubject,
-        mut headers: async_nats::HeaderMap,
-        callback_id: Option<HeaderText>,
+        headers: async_nats::HeaderMap,
+        request_headers: RequestHeaders,
         body: Bytes,
         accepts_reply: bool,
     ) -> Acknowledgement {
@@ -565,10 +577,20 @@ impl<P: JetStreamPublisher, S: ObjectStorePut, R: RequestClient> SlackBridge<P, 
             return status.into();
         }
 
-        if let Some(callback_id) = callback_id {
-            headers.insert(NATS_HEADER_CALLBACK_ID, callback_id.value().clone());
-        }
         let budget = AckBudget::reply_limit(started.elapsed());
+        self.request_reply(respond_subject, headers, request_headers, body, budget)
+            .await
+    }
+
+    async fn request_reply(
+        &self,
+        respond_subject: SlackSubject,
+        mut headers: async_nats::HeaderMap,
+        request_headers: RequestHeaders,
+        body: Bytes,
+        budget: Duration,
+    ) -> Acknowledgement {
+        request_headers.apply(&mut headers);
         let request = self
             .requester
             .request_with_headers(respond_subject.as_str().to_owned(), headers, body);
@@ -718,7 +740,7 @@ impl<P: JetStreamPublisher, S: ObjectStorePut, R: RequestClient> SlackBridge<P, 
             subject,
             respond_subject,
             nats_headers,
-            None,
+            RequestHeaders::default(),
             raw_body,
             metadata.accepts_reply(),
         )

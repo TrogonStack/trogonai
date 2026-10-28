@@ -4,7 +4,7 @@ export type Transport = 'http' | 'socket_mode';
 
 export type PayloadKind = 'event' | 'interaction' | 'command' | 'ssl_check' | 'url_verification' | 'malformed';
 
-export type ExpectedOutcome = 'publish' | 'inline' | 'reject' | 'ignore';
+export type ExpectedOutcome = 'publish' | 'request' | 'inline' | 'reject' | 'ignore';
 
 export interface BodyFill {
   prefix: string;
