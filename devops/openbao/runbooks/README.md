@@ -35,7 +35,7 @@ exists and is undocumented.
 **Path convention.** Credential material lives at
 `secret/data/trogonai/{owner_id}/credentials/{credential_id}` and its
 metadata at `secret/metadata/trogonai/{owner_id}/credentials/{credential_id}`,
-where `owner_id` is the project id (ADR#0046) and `credential_id` is
+where `owner_id` is the project id ([ADR#0046](../../../docs/adr/0046-project-anchored-resource-hierarchy.md)) and `credential_id` is
 `openbao:{owner}:{scope_key}:{kind}`. The credential id contains `:` and
 `/`, so it is not a single path segment. See
 [../policies/README.md](../policies/README.md) for why that matters to

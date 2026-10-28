@@ -83,7 +83,7 @@ Each claim below is asserted by `verify.sh`, not argued from the file contents.
   on revoked and destroyed versions comes from `SecretStoreGet::get` checking
   metadata status before reading data. The "authorized to resolve" half needs
   either per-owner identity templating (commented in `gateway-read.hcl`) or the
-  secrets-service resolve authorization from ADR#0023, and neither exists yet.
+  secrets-service resolve authorization from [ADR#0023](../../../docs/adr/0023-secret-management-and-key-custody-direction.md), and neither exists yet.
 
 ## Applying
 

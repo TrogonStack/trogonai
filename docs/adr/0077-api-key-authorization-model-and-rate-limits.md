@@ -152,7 +152,7 @@ Both paths emit a distinct metric, so a fail-open window is visible rather
 than silent.
 
 This is deliberately unlike the replay store, which fails closed in every
-case per ADR#0051 section 4. Replay protection is a security control; rate
+case per [ADR#0051](./0051-fully-bound-request-signing.md) section 4. Replay protection is a security control; rate
 limiting mostly is not, except where it is, and that exception is exactly
 the management keyspace.
 

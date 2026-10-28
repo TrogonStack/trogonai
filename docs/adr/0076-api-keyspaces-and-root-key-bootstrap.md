@@ -24,7 +24,7 @@ The harder half is bootstrap. To create a key you must authenticate with a
 key, and API_KEY.md leaves the self-hosted root key bootstrap flow open.
 The obvious answer, printing an initial root token at first boot the way
 `bao operator init` does, fails on this platform for two specific reasons:
-it mints a bearer key into a keyspace ADR#0050 declares signed-only, and it
+it mints a bearer key into a keyspace [ADR#0050](./0050-signed-first-caller-authentication.md) declares signed-only, and it
 reintroduces the plaintext-issuance moment signed mode exists to remove,
 at the single highest-authority credential the deployment will ever have.
 An unauthenticated first-run window is worse: it converts a bootstrap
@@ -59,10 +59,10 @@ environment          immutable after creation
 bearer_issuance      allowed | disallowed
 allowed_algorithms   non-empty subset of {Ed25519, ES256}
 server_nonce         optional | required
-max_token_lifetime   <= 2 minutes (the ADR#0051 ceiling)
+max_token_lifetime   <= 2 minutes (the [ADR#0051](./0051-fully-bound-request-signing.md) ceiling)
 default_key_expiry
 max_active_keys
-reroll_grace         (ADR#0078)
+reroll_grace         ([ADR#0078](./0078-api-key-rotation-grace-and-audit-set.md))
 ```
 
 Environment immutability is load-bearing rather than incidental: it is
@@ -79,8 +79,8 @@ can be deleted while it holds active keys.
 
 ```text
 management
-  -> bearer_issuance: disallowed  (ADR#0050 section 5)
-  -> server_nonce: required       (ADR#0051 section 3)
+  -> bearer_issuance: disallowed  ([ADR#0050](./0050-signed-first-caller-authentication.md) section 5)
+  -> server_nonce: required       ([ADR#0051](./0051-fully-bound-request-signing.md) section 3)
   -> holds root and management keys for the management API
 
 default
@@ -105,7 +105,7 @@ somewhere to put its first key at the moment it exists.
 ```
 
 - Registration is idempotent by public-key fingerprint (the `sha256:` SPKI
-  fingerprint from ADR#0075 section 4), so re-applying the same
+  fingerprint from [ADR#0075](./0075-api-key-format-and-verifier-construction.md) section 4), so re-applying the same
   configuration is a no-op and the flow is safe under a declarative apply.
 - If a root key already exists under a different fingerprint, first boot
   does not replace it. Adding a second root key is an explicit operation,
@@ -117,7 +117,7 @@ somewhere to put its first key at the moment it exists.
   fill the field.
 - No secret crosses the boundary at any point, so
   [ADR#0048](./0048-one-time-plaintext-exposure.md)'s one-time display
-  never engages and ADR#0050 section 2 holds without an exception carved
+  never engages and [ADR#0050](./0050-signed-first-caller-authentication.md) section 2 holds without an exception carved
   into it.
 
 ### 5. Cloud has no separate bootstrap
@@ -144,7 +144,7 @@ central promise is that it never holds a caller's private key.
 
 ## Consequences
 
-- ADR#0050 section 5 and ADR#0051 section 3 stop referring to an undefined
+- [ADR#0050](./0050-signed-first-caller-authentication.md) section 5 and [ADR#0051](./0051-fully-bound-request-signing.md) section 3 stop referring to an undefined
   object; keyspace policy has a field list an implementation can read.
 - Every project gets a signed-only management keyspace from creation, so
   the management API has no bearer-authenticated era to migrate off later.
