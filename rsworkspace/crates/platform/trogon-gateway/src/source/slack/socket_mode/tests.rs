@@ -1219,3 +1219,47 @@ async fn socket_retry_reason_with_line_break_is_unroutable_without_ack() {
         Some("invalid_header_value"),
     );
 }
+
+#[tokio::test]
+async fn socket_payloads_carry_enterprise_and_app_identity() {
+    let cases = [
+        (
+            "events_api",
+            serde_json::json!({
+                "type": "event_callback", "event_id": "Ev01ABC123", "team_id": "T01ABC", "api_app_id": "A01APP",
+                "authorizations": [{ "enterprise_id": "E01ENT", "is_enterprise_install": true }],
+                "event": { "type": "message" }
+            }),
+            "true",
+        ),
+        (
+            "interactive",
+            serde_json::json!({
+                "type": "block_actions", "trigger_id": "trigger123", "api_app_id": "A01APP",
+                "enterprise": { "id": "E01ENT" }, "team": { "id": "T01ABC" }, "is_enterprise_install": false
+            }),
+            "false",
+        ),
+        (
+            "slash_commands",
+            serde_json::json!({
+                "command": "/deploy", "trigger_id": "trigger123", "team_id": "T01ABC", "api_app_id": "A01APP",
+                "enterprise_id": "E01ENT", "is_enterprise_install": "true"
+            }),
+            "true",
+        ),
+    ];
+
+    for (kind, payload, install) in cases {
+        let publisher = MockJetStreamPublisher::new();
+        let frame = serde_json::json!({ "type": kind, "envelope_id": "env-1", "payload": payload }).to_string();
+
+        handle_text_frame(&bridge(publisher.clone()), &frame).await.unwrap();
+
+        let messages = publisher.published_messages();
+        let header = |name: &str| messages[0].headers.get(name).map(|v| v.as_str());
+        assert_eq!(header("X-Slack-Enterprise-Id"), Some("E01ENT"), "{kind}");
+        assert_eq!(header("X-Slack-Is-Enterprise-Install"), Some(install), "{kind}");
+        assert_eq!(header("X-Slack-Api-App-Id"), Some("A01APP"), "{kind}");
+    }
+}

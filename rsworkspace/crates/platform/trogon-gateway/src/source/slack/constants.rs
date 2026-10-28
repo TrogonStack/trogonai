@@ -17,6 +17,9 @@ pub const NATS_HEADER_EVENT_ID: &str = "X-Slack-Event-Id";
 pub const NATS_HEADER_PAYLOAD_KIND: &str = "X-Slack-Payload-Kind";
 pub const NATS_HEADER_RETRY_NUM: &str = "X-Slack-Retry-Num";
 pub const NATS_HEADER_RETRY_REASON: &str = "X-Slack-Retry-Reason";
+pub const NATS_HEADER_ENTERPRISE_ID: &str = "X-Slack-Enterprise-Id";
+pub const NATS_HEADER_IS_ENTERPRISE_INSTALL: &str = "X-Slack-Is-Enterprise-Install";
+pub const NATS_HEADER_API_APP_ID: &str = "X-Slack-Api-App-Id";
 
 pub const NATS_HEADER_TRANSPORT: &str = "X-Slack-Transport";
 pub const NATS_HEADER_REJECT_REASON: &str = "X-Slack-Reject-Reason";

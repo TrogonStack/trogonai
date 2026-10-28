@@ -29,11 +29,6 @@ const UNROUTABLE_SUBJECT: &str = "slack.unroutable";
 const DEDUP_HEADER: &str = "Nats-Msg-Id";
 const HEADER_ENVELOPE_ID: &str = "X-Slack-Envelope-Id";
 const HEADER_REQUEST_TIMESTAMP: &str = "X-Slack-Request-Timestamp";
-const HEADERS_ENTERPRISE_AND_APP: [&str; 3] = [
-    "X-Slack-Enterprise-Id",
-    "X-Slack-Is-Enterprise-Install",
-    "X-Slack-Api-App-Id",
-];
 const HEADERS_EVENT_METADATA: [&str; 2] = ["X-Slack-Event-Subtype", "X-Slack-Channel-Type"];
 const PAYLOAD_PREVIEW_CHARS: usize = 96;
 
@@ -54,7 +49,6 @@ enum GapId {
     G3,
     G4,
     G6,
-    G7,
     G8,
     G9,
     G10,
@@ -277,7 +271,6 @@ impl GapId {
         };
         match self {
             GapId::G2 => fixture.expects_ack_body() && matches!(diff.field, Field::ResponseBody | Field::SocketAck),
-            GapId::G7 => missing.is_some_and(|name| HEADERS_ENTERPRISE_AND_APP.contains(&name)),
             GapId::G11 => fixture.transport == Transport::SocketMode && diff.field == Field::PayloadReserialized,
             GapId::G13 => missing.is_some_and(|name| name == HEADER_ENVELOPE_ID || name == HEADER_REQUEST_TIMESTAMP),
             GapId::G22 => missing.is_some_and(|name| HEADERS_EVENT_METADATA.contains(&name)),

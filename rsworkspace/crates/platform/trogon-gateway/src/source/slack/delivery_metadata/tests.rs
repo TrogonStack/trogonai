@@ -106,3 +106,22 @@ fn socket_rejects_an_unsafe_retry_reason() {
         InvalidHeaderTextError
     );
 }
+
+#[test]
+fn delivery_metadata_applies_context_and_payload_together() {
+    let context = DeliveryContext::socket(Some(1), None).unwrap();
+    let payload = serde_json::json!({ "api_app_id": "A1234" });
+
+    let headers = DeliveryMetadata::new(&context, PayloadMetadata::event(&payload))
+        .apply(DeliveryHeaders::new())
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(headers.get(NATS_HEADER_RETRY_NUM).map(|v| v.as_str()), Some("1"));
+    assert_eq!(
+        headers
+            .get(super::super::constants::NATS_HEADER_API_APP_ID)
+            .map(|v| v.as_str()),
+        Some("A1234")
+    );
+}

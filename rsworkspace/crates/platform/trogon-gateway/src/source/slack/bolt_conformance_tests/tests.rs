@@ -51,14 +51,14 @@ fn gaps(ids: &[GapId]) -> LedgerEntry {
 
 #[test]
 fn a_mismatch_without_a_ledger_entry_fails() {
-    let problems = judge(&fixture(), None, &[header_diff(HEADERS_ENTERPRISE_AND_APP[0])]);
+    let problems = judge(&fixture(), None, &[header_diff(HEADER_ENVELOPE_ID)]);
     assert_eq!(problems.len(), 1);
     assert!(problems[0].contains("not covered"));
 }
 
 #[test]
 fn a_ledger_entry_that_no_longer_matches_anything_is_stale() {
-    let problems = judge(&fixture(), Some(&gaps(&[GapId::G7])), &[]);
+    let problems = judge(&fixture(), Some(&gaps(&[GapId::G13])), &[]);
     assert_eq!(problems.len(), 1);
     assert!(problems[0].contains("stale"));
 }
@@ -67,8 +67,8 @@ fn a_ledger_entry_that_no_longer_matches_anything_is_stale() {
 fn a_gap_that_explains_a_different_mismatch_is_stale_and_leaves_the_mismatch_uncovered() {
     let problems = judge(
         &fixture(),
-        Some(&gaps(&[GapId::G13])),
-        &[header_diff(HEADERS_ENTERPRISE_AND_APP[0])],
+        Some(&gaps(&[GapId::G22])),
+        &[header_diff(HEADER_ENVELOPE_ID)],
     );
     assert_eq!(problems.len(), 2);
 }
@@ -77,8 +77,8 @@ fn a_gap_that_explains_a_different_mismatch_is_stale_and_leaves_the_mismatch_unc
 fn a_matching_gap_covers_its_mismatch() {
     let problems = judge(
         &fixture(),
-        Some(&gaps(&[GapId::G7])),
-        &[header_diff(HEADERS_ENTERPRISE_AND_APP[0])],
+        Some(&gaps(&[GapId::G13])),
+        &[header_diff(HEADER_ENVELOPE_ID)],
     );
     assert!(problems.is_empty(), "{problems:?}");
 }
@@ -91,16 +91,16 @@ fn a_representable_fixture_cannot_be_marked_not_representable() {
 
 #[test]
 fn a_missing_header_gap_does_not_excuse_a_wrong_header_value() {
-    let diff = header_value_diff(HEADERS_ENTERPRISE_AND_APP[2]);
-    let problems = judge(&fixture(), Some(&gaps(&[GapId::G7])), &[diff]);
+    let diff = header_value_diff(HEADER_ENVELOPE_ID);
+    let problems = judge(&fixture(), Some(&gaps(&[GapId::G13])), &[diff]);
     assert_eq!(problems.len(), 2, "{problems:?}");
 }
 
 #[test]
-fn an_event_metadata_header_is_not_an_enterprise_header() {
+fn an_event_metadata_header_is_not_a_delivery_identifier_header() {
     let diff = header_diff(HEADERS_EVENT_METADATA[0]);
     assert_eq!(
-        judge(&fixture(), Some(&gaps(&[GapId::G7])), std::slice::from_ref(&diff)).len(),
+        judge(&fixture(), Some(&gaps(&[GapId::G13])), std::slice::from_ref(&diff)).len(),
         2
     );
     assert!(judge(&fixture(), Some(&gaps(&[GapId::G22])), &[diff]).is_empty());

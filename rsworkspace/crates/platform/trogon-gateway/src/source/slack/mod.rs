@@ -40,7 +40,9 @@
 //! - **Headers**: `Nats-Msg-Id`, `X-Slack-Payload-Kind`, `X-Slack-Event-Type`,
 //!   `X-Slack-Team-Id`, `X-Slack-Transport`, plus `X-Slack-Event-Id` for events,
 //!   `X-Slack-Retry-Num` and `X-Slack-Retry-Reason` when Slack marks the
-//!   delivery as a redelivery, and `X-Slack-Reject-Reason` for unroutable
+//!   delivery as a redelivery, `X-Slack-Is-Enterprise-Install` always,
+//!   `X-Slack-Enterprise-Id` and `X-Slack-Api-App-Id` when the payload names
+//!   them, and `X-Slack-Reject-Reason` for unroutable
 //!   messages.
 //!
 //! ## Configuration
@@ -62,6 +64,7 @@ pub mod constants;
 pub mod delivery_metadata;
 pub mod header_text;
 pub mod interaction_key;
+pub mod payload_metadata;
 pub mod retry_attempt;
 pub mod retry_reason;
 pub mod server;
