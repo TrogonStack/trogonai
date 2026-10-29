@@ -19,7 +19,7 @@ use crate::credential::commands::domain::{
 };
 use crate::credential::commands::proto::{
     CredentialProtoDecodeError, active_credential_ref, decode_destroy_requested_state, decode_destroyed_state,
-    decode_message_field, decode_pending_write_state,
+    decode_message_field, decode_pending_write_state, decode_revoked_state,
 };
 use crate::credential::{
     ActivateCredentialRotation, ActivateCredentialWrite, CompleteCredentialDestroy, CredentialDecideError,
@@ -767,6 +767,18 @@ where
     ) -> HandlerResult<EventStore, <Secrets as SecretStoreRevoke>::Error> {
         let revoke = RevokeCredential::new(command.credential_ref.clone());
         let (state, stream_position) = load_state(&self.event_store, command.credential_ref.id().as_str()).await?;
+        let already_revoked = match state.state.as_ref() {
+            Some(CredentialStateSnapshotCase::Revoked(revoked)) => {
+                let current_ref =
+                    decode_revoked_state(revoked).map_err(|source| CredentialHandlerError::InvalidState { source })?;
+                current_ref == command.credential_ref
+            }
+            _ => false,
+        };
+        if already_revoked {
+            let stream_position = stream_position.ok_or(CredentialHandlerError::MissingRevokedStreamPosition)?;
+            return Ok(CredentialHandlerOutcome::new(state, stream_position));
+        }
         revoke
             .ensure_revocable(&state)
             .map_err(|source| CredentialHandlerError::Revoke {
@@ -1041,6 +1053,8 @@ where
         #[source]
         source: ExecutionError<SnapshotReadError, ReadError, AppendError>,
     },
+    #[error("credential was revoked but its persisted state carried no stream position")]
+    MissingRevokedStreamPosition,
     #[error("credential was destroyed but its persisted state carried no stream position")]
     MissingDestroyedStreamPosition,
 }

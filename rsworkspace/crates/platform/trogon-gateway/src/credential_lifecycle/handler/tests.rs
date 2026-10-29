@@ -978,6 +978,70 @@ async fn revoke_rejects_a_pending_rotation_without_touching_the_secret_store() {
 }
 
 #[tokio::test]
+async fn revoke_is_idempotent_for_an_already_revoked_credential() {
+    let events = HandlerTestStreamStore::default();
+    let handler = CredentialHandler::new(events.clone(), MockOpenBaoSecretStore::default());
+    let state = handler.put(put_command("initial-secret")).await.unwrap().into_state();
+    let Some(CredentialStateSnapshotCase::Active(active)) = state.state.as_ref() else {
+        panic!("expected active credential");
+    };
+    let (active_metadata, _) = decode_active_state("active", active).unwrap();
+    let credential_ref = active_metadata.reference().clone();
+    let first = handler
+        .revoke(RevokeStoredCredential::new(credential_ref.clone()))
+        .await
+        .unwrap();
+    let secrets = RecordingRevokeSecretStore::default();
+    let revoking_handler = CredentialHandler::new(events.clone(), secrets.clone());
+
+    let second = revoking_handler
+        .revoke(RevokeStoredCredential::new(credential_ref.clone()))
+        .await
+        .unwrap();
+
+    assert_eq!(second.stream_position(), first.stream_position());
+    let Some(CredentialStateSnapshotCase::Revoked(revoked)) = second.state().state.as_ref() else {
+        panic!("expected revoked credential");
+    };
+    assert_eq!(decode_revoked_state(revoked).unwrap(), credential_ref);
+    assert!(secrets.revoked().is_empty());
+    assert_eq!(events.decoded_events().len(), 3);
+}
+
+#[tokio::test]
+async fn revoke_rejects_an_already_revoked_credential_with_a_different_ref() {
+    let events = HandlerTestStreamStore::default();
+    let handler = CredentialHandler::new(events.clone(), MockOpenBaoSecretStore::default());
+    let state = handler.put(put_command("initial-secret")).await.unwrap().into_state();
+    let Some(CredentialStateSnapshotCase::Active(active)) = state.state.as_ref() else {
+        panic!("expected active credential");
+    };
+    let (active_metadata, _) = decode_active_state("active", active).unwrap();
+    let credential_ref = active_metadata.reference().clone();
+    handler
+        .revoke(RevokeStoredCredential::new(credential_ref.clone()))
+        .await
+        .unwrap();
+    let secrets = RecordingRevokeSecretStore::default();
+    let revoking_handler = CredentialHandler::new(events.clone(), secrets.clone());
+    let other_ref = credential_ref.next_version();
+
+    let error = revoking_handler
+        .revoke(RevokeStoredCredential::new(other_ref))
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        CredentialHandlerError::Revoke {
+            source: CommandError::Decide(CredentialDecideError::CredentialNotActive { credential_id }),
+        } if credential_id == *credential_ref.id()
+    ));
+    assert!(secrets.revoked().is_empty());
+    assert_eq!(events.decoded_events().len(), 3);
+}
+
+#[tokio::test]
 async fn destroy_destroys_secret_and_records_state() {
     let events = HandlerTestStreamStore::default();
     let secrets = MockOpenBaoSecretStore::default();
