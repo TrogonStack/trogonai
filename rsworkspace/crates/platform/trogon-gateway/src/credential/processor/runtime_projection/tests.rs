@@ -870,8 +870,13 @@ async fn a_delivery_denial_message_carries_no_plaintext() {
         .await
         .unwrap_err();
 
-    assert!(denied.to_string().contains("api.evil.net"));
-    assert!(!denied.to_string().contains("Bot token"));
+    assert!(matches!(
+        &denied,
+        RuntimeCredentialError::DeliveryDenied {
+            denied: RuntimeReleaseDeniedError::Host { host: Some(host) },
+            ..
+        } if host == "api.evil.net"
+    ));
     assert!(!format!("{denied:?}").contains("Bot token"));
 }
 

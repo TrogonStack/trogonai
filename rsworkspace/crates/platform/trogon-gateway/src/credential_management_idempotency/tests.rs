@@ -139,11 +139,10 @@ async fn provision_bucket_surfaces_get_errors_after_already_exists() {
 
     let error = provision_bucket::<_, MockJetStreamKvStore>(&client).await.unwrap_err();
 
-    assert!(
-        error
-            .to_string()
-            .contains("failed to open existing credential management idempotency bucket")
-    );
+    assert!(matches!(
+        error,
+        CredentialManagementIdempotencyOpenError::OpenExisting(_)
+    ));
 }
 
 #[tokio::test]
@@ -153,11 +152,7 @@ async fn provision_bucket_surfaces_create_errors() {
 
     let error = provision_bucket::<_, MockJetStreamKvStore>(&client).await.unwrap_err();
 
-    assert!(
-        error
-            .to_string()
-            .contains("failed to create credential management idempotency bucket")
-    );
+    assert!(matches!(error, CredentialManagementIdempotencyOpenError::Create(_)));
 }
 
 #[tokio::test]
@@ -169,5 +164,14 @@ async fn provision_bucket_rejects_incompatible_max_age() {
 
     let error = provision_bucket::<_, MockJetStreamKvStore>(&client).await.unwrap_err();
 
-    assert!(error.to_string().contains("idempotency bucket is incompatible"));
+    assert!(matches!(
+        error,
+        CredentialManagementIdempotencyOpenError::Incompatible {
+            source: IncompatibleCredentialManagementIdempotencyBucketError {
+                expected_max_age,
+                actual_max_age,
+                ..
+            },
+        } if expected_max_age == CREDENTIAL_MANAGEMENT_IDEMPOTENCY_MAX_AGE && actual_max_age == Duration::ZERO
+    ));
 }

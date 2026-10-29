@@ -24,7 +24,7 @@ use super::*;
 use crate::credential::commands::domain::{
     CredentialKind, CredentialOwnerId, CredentialRef, CredentialScope, CredentialVersion, SourceKind,
 };
-use crate::credential::handler::{CredentialHandler, PutCredential, RotateCredential};
+use crate::credential::handler::{CredentialHandler, CredentialHandlerError, PutCredential, RotateCredential};
 use crate::credential::processor::runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationKey};
 use crate::credential::proto::{decode_active_state, write_requested_to_proto};
 use crate::secret_store::MockOpenBaoSecretStore;
@@ -203,7 +203,7 @@ async fn worker_recovers_pending_write_activation_after_secret_store_success() {
     let handler = CredentialHandler::new(events.clone(), secrets.clone());
     events.fail_append_at(2);
     let error = handler.put(put_command("super-secret")).await.unwrap_err();
-    assert!(error.to_string().contains("credential write activation failed"));
+    assert!(matches!(error, CredentialHandlerError::ActivateWrite { .. }));
 
     let runtime_credentials = RuntimeCredentialRegistry::default();
     let runtime_handler = CredentialRuntimeHandler::new(events.clone(), secrets.clone(), runtime_credentials.clone());
@@ -250,7 +250,7 @@ async fn worker_recovers_pending_rotation_activation_after_secret_store_success(
         ))
         .await
         .unwrap_err();
-    assert!(error.to_string().contains("credential rotation activation failed"));
+    assert!(matches!(error, CredentialHandlerError::ActivateRotation { .. }));
 
     let runtime_credentials = RuntimeCredentialRegistry::default();
     let runtime_handler = CredentialRuntimeHandler::new(events.clone(), secrets.clone(), runtime_credentials.clone());

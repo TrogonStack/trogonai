@@ -76,11 +76,7 @@ async fn provision_snapshot_bucket_surfaces_get_errors_after_already_exists() {
         .await
         .unwrap_err();
 
-    assert!(
-        error
-            .to_string()
-            .contains("failed to open existing credential snapshot bucket")
-    );
+    assert!(matches!(error, CredentialEventStoreError::OpenSnapshotBucket(_)));
 }
 
 #[tokio::test]
@@ -92,11 +88,7 @@ async fn provision_snapshot_bucket_surfaces_create_errors() {
         .await
         .unwrap_err();
 
-    assert!(
-        error
-            .to_string()
-            .contains("failed to create credential snapshot bucket")
-    );
+    assert!(matches!(error, CredentialEventStoreError::CreateSnapshotBucket(_)));
 }
 
 #[tokio::test]
@@ -110,11 +102,7 @@ async fn provision_snapshot_bucket_surfaces_status_errors() {
         .await
         .unwrap_err();
 
-    assert!(
-        error
-            .to_string()
-            .contains("failed to inspect credential snapshot bucket")
-    );
+    assert!(matches!(error, CredentialEventStoreError::InspectSnapshotBucket(_)));
 }
 
 #[tokio::test]
@@ -128,7 +116,16 @@ async fn provision_snapshot_bucket_rejects_incompatible_history() {
         .await
         .unwrap_err();
 
-    assert!(error.to_string().contains("credential snapshot bucket is incompatible"));
+    assert!(matches!(
+        error,
+        CredentialEventStoreError::IncompatibleSnapshotBucket {
+            source: IncompatibleCredentialSnapshotBucketError {
+                expected_history: 1,
+                actual_history: 2,
+                ..
+            },
+        }
+    ));
 }
 
 #[tokio::test]
@@ -142,5 +139,14 @@ async fn provision_snapshot_bucket_rejects_incompatible_max_age() {
         .await
         .unwrap_err();
 
-    assert!(error.to_string().contains("credential snapshot bucket is incompatible"));
+    assert!(matches!(
+        error,
+        CredentialEventStoreError::IncompatibleSnapshotBucket {
+            source: IncompatibleCredentialSnapshotBucketError {
+                expected_max_age,
+                actual_max_age,
+                ..
+            },
+        } if expected_max_age == Duration::ZERO && actual_max_age == Duration::from_secs(60)
+    ));
 }
