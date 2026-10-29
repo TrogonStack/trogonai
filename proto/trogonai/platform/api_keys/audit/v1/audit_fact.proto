@@ -6,6 +6,7 @@ import "google/protobuf/timestamp.proto";
 import "trogonai/platform/api_keys/admission/v1/denial_reason.proto";
 import "trogonai/platform/api_keys/audit/v1/audit_actor.proto";
 import "trogonai/platform/api_keys/v1/api_key_authorization.proto";
+import "trogonai/platform/api_keys/v1/rate_limit_policy.proto";
 
 // AuditResult is whether the recorded attempt succeeded.
 //
@@ -114,6 +115,10 @@ message ApiKeySignedRequestReplayed {
 message ApiKeyPolicyChanged {
   trogonai.platform.api_keys.v1.ApiKeyAuthorization previous_authorization = 1 [features.field_presence = LEGACY_REQUIRED];
   trogonai.platform.api_keys.v1.ApiKeyAuthorization authorization = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.platform.api_keys.v1.RateLimitPolicy previous_rate_limit = 3;
+  trogonai.platform.api_keys.v1.RateLimitPolicy rate_limit = 4;
+  google.protobuf.Timestamp previous_expires_at = 5;
+  google.protobuf.Timestamp expires_at = 6;
 }
 
 message ApiKeyExpired {
