@@ -241,10 +241,10 @@ fn spawn_slack_socket_modes<P, S, Shutdown, Run, Running>(
         + 'static,
     Running: std::future::Future<Output = Result<(), source::slack::socket_mode::SocketModeError>> + Send + 'static,
 {
-    for integration in integrations
-        .iter()
-        .filter(|integration| integration.config.socket_mode().is_some())
-    {
+    for (integration, open_url) in integrations.iter().filter_map(|integration| {
+        let socket_mode = integration.config.socket_mode()?;
+        Some((integration, socket_mode.api_base_url.connections_open_url().to_string()))
+    }) {
         let publisher = publisher.clone();
         let config = integration.config.clone();
         let shutdown = shutdown.clone();
@@ -253,7 +253,7 @@ fn spawn_slack_socket_modes<P, S, Shutdown, Run, Running>(
             let result = tokio::select! {
                 () = shutdown => Ok(()),
                 result = supervision::supervise("slack-socket-mode", SLACK_RESTART_BACKOFF, move || {
-                    let connector = source::slack::socket_mode::HttpSocketConnector::slack();
+                    let connector = source::slack::socket_mode::HttpSocketConnector::new(open_url.clone());
                     run.clone()(publisher.clone(), config.clone(), connector)
                 }) => result.context("slack socket mode"),
             };

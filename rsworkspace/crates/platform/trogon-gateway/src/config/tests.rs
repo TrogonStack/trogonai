@@ -696,6 +696,49 @@ app_token = "xapp-test-token"
 }
 
 #[test]
+fn slack_socket_mode_defaults_to_the_public_slack_api() {
+    let f = write_toml(&slack_socket_mode_toml("xapp-test-token"));
+    let cfg = load(Some(f.path())).expect("load failed");
+    let socket_mode = cfg.slack[0].config.socket_mode().unwrap();
+    assert_eq!(
+        socket_mode.api_base_url.connections_open_url().as_str(),
+        "https://slack.com/api/apps.connections.open"
+    );
+}
+
+#[test]
+fn slack_socket_mode_accepts_a_custom_api_base_url() {
+    let f = write_toml(
+        r#"
+[sources.slack.integrations.primary.socket_mode]
+app_token = "xapp-test-token"
+api_base_url = "https://slack-gov.com/api/"
+"#,
+    );
+    let cfg = load(Some(f.path())).expect("load failed");
+    let socket_mode = cfg.slack[0].config.socket_mode().unwrap();
+    assert_eq!(
+        socket_mode.api_base_url.connections_open_url().as_str(),
+        "https://slack-gov.com/api/apps.connections.open"
+    );
+}
+
+#[test]
+fn slack_socket_mode_rejects_an_invalid_api_base_url() {
+    let f = write_toml(
+        r#"
+[sources.slack.integrations.primary.socket_mode]
+app_token = "xapp-test-token"
+api_base_url = "ftp://slack-gov.com/api/"
+"#,
+    );
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("slack/primary: invalid api_base_url: invalid Slack API base URL: must use http or https")))
+    );
+}
+
+#[test]
 fn slack_socket_mode_rejects_non_app_token() {
     let f = write_toml(&slack_socket_mode_toml("xoxb-bot-token"));
     let result = load(Some(f.path()));

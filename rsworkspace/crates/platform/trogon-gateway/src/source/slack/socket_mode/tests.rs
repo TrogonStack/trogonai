@@ -1,4 +1,5 @@
 use super::super::ack_budget::AckBudget;
+use super::super::constants::DEFAULT_API_BASE_URL;
 use super::*;
 use axum::Router;
 use axum::extract::State;
@@ -32,6 +33,8 @@ fn socket_config() -> SlackConfig {
         ack_budget: AckBudget::default(),
         transport: super::super::config::SlackTransportConfig::SocketMode(SlackSocketModeConfig {
             app_token: super::super::config::SlackAppToken::new("xapp-test-token").unwrap(),
+            api_base_url: super::super::config::SlackApiBaseUrl::new(super::super::constants::DEFAULT_API_BASE_URL)
+                .unwrap(),
         }),
     }
 }
@@ -115,7 +118,7 @@ async fn run_requires_socket_mode_config() {
     let error = run(
         wrap_publisher(MockJetStreamPublisher::new()),
         webhook_config(),
-        HttpSocketConnector::slack(),
+        HttpSocketConnector::new(DEFAULT_API_BASE_URL),
     )
     .await
     .unwrap_err();

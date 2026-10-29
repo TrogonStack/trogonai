@@ -30,7 +30,8 @@ pub const NATS_HEADER_REJECT_REASON: &str = "X-Slack-Reject-Reason";
 
 pub const CONTENT_TYPE_FORM: &str = "application/x-www-form-urlencoded";
 
-pub const APPS_CONNECTIONS_OPEN_URL: &str = "https://slack.com/api/apps.connections.open";
+pub const DEFAULT_API_BASE_URL: &str = "https://slack.com/api/";
+pub const APPS_CONNECTIONS_OPEN_METHOD: &str = "apps.connections.open";
 pub const RECONNECT_INITIAL_DELAY: Duration = Duration::from_secs(1);
 pub const RECONNECT_MAX_DELAY: Duration = Duration::from_secs(30);
 
