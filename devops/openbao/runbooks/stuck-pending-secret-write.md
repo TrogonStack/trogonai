@@ -62,9 +62,18 @@ healthy but the credential is stuck".
 
 **`consecutive_failure_count` climbing while the checkpoint stays pinned**:
 each pass is failing at the same sequence. Something about that specific
-event or credential is unprocessable. The gateway logs the underlying error
-on each failed pass; `error = ...` on `credential recovery pass failed` is
-the actual cause and everything above is just its shadow.
+event or credential is unprocessable. A failing pass does not stop at the
+first problem: it recovers every other credential, keeps the checkpoint
+pinned, and logs a warning for each cause with the underlying error.
+`credential recovery found an invalid credential event` carries the
+`stream_sequence` of the bad event. `credential recovery replay failed`,
+`credential recovery planning failed`,
+`credential write activation recovery failed` and
+`credential rotation activation recovery failed` carry the `credential_id`.
+`error = ...` on those lines is the actual cause and everything above is just
+its shadow. `credential recovery pass failed` is logged only when a pass
+cannot read the credential event stream or its checkpoint. Such a pass
+records no failure, so it does not move `consecutive_failure_count`.
 
 ## When the worker is failing
 
@@ -79,10 +88,19 @@ fails every pass. Check `bao status`; see
 JetStream problem, a stream at its limit, or a version conflict fails the
 append. Check the credentials stream health in NATS.
 
-**Event decode.** A malformed or unknown event in the scan window fails the
-plan build. Unknown event types are skipped by design and counted in
-`skipped_events`, so a decode *failure* means a genuinely corrupt payload.
-This is the one case where the checkpoint will not advance on its own.
+**Event decode.** An event in the scan window that fails to decode, has no
+event case, or carries an invalid credential reference is counted in
+`invalid_events` and logged as
+`credential recovery found an invalid credential event` with its
+`stream_sequence`, which is where to look in the credential stream. Unknown
+event types are skipped by design and counted in `skipped_events`, so an
+invalid event means a genuinely corrupt payload. The pass still recovers every
+other credential, but it does not move the checkpoint past the bad event and
+records a failure with the usual backoff, so `stuck_recovery` turns true after
+30 minutes. Unlike an outage, this does not clear on its own: every retry
+reads the event again. A credential whose own stream fails to read, decode or
+replay is handled the same way, counted in `failed_recoveries` and logged as
+`credential recovery replay failed` with its `credential_id`.
 
 ## When the worker is healthy but the credential is stuck
 

@@ -33,8 +33,8 @@ gateway.credential.recovery.recoveries     counter, labels: status, kind
 gateway.credential.recovery.stuck_reports  counter
 ```
 
-`outcome` is one of `retry_delayed`, `failed_recovery`, `advanced`,
-`recovered`, `stuck`, `idle`, `error`. `reason` on
+`outcome` is one of `retry_delayed`, `invalid_event`, `failed_recovery`,
+`advanced`, `recovered`, `stuck`, `idle`, `error`. `reason` on
 `delivery.denied` is one of `runtime_service`, `host`, `injection_location`.
 `status` on `recoveries` is `planned`, `recovered`, or `failed`. `operation`
 on `store.write.failures` is one of `put`, `rotate`, `revoke`, `destroy`.
@@ -55,14 +55,16 @@ and the responder gets the host from the logs.
 
 The worker only reports stuck after 30 minutes of continuous failure, so this
 counter is already debounced by the worker itself. Any increase means a
-credential has been unresolvable for at least half an hour and the automatic
-repair has given up. Do not add a further threshold on top; that delays the
-page by the debounce twice.
+credential has been unresolvable, or an event unreadable, for at least half an
+hour and the automatic repair has given up. Do not add a further threshold on
+top; that delays the page by the debounce twice.
 
 **Companion condition, same runbook, ticket severity:**
+`recovery.passes{outcome="invalid_event"}` or
 `recovery.passes{outcome="failed_recovery"}` increasing while
-`recovery.scanned_events` stays flat. Each pass is failing at the same
-sequence. This precedes the stuck report and is the earlier, cheaper catch.
+`recovery.passes{outcome="advanced"}` stays flat. Each pass is failing at the
+same sequence. This precedes the stuck report and is the earlier, cheaper
+catch.
 
 ## OpenBao read failure rate
 
@@ -155,10 +157,15 @@ is leaking while you look.
 **Severity:** page for `put` and `rotate`; ticket for `revoke` and `destroy`.
 **Runbook:** [stuck-pending-secret-write.md](stuck-pending-secret-write.md)
 
-A failed `put` or `rotate` leaves the credential in `pending_write`, which is
-the state the recovery worker eventually reports as stuck. This alert exists
-so that failure is visible in minutes rather than after the worker's 30
-minute debounce, so it fires well before
+A failed `put` leaves the credential in `write_failed`, which the recovery
+worker never retries: only a new `PUT` for the same credential moves it
+forward. A failed `rotate` returns it to `active` on its previous version. The
+worker reports neither as stuck, so this alert is what surfaces the failure.
+
+Only a failure that could not be recorded leaves the credential pending, which
+is the state the recovery worker eventually reports as stuck. For that case
+this alert makes the failure visible in minutes rather than after the worker's
+30 minute debounce, so it fires well before
 [stuck pending credentials](#stuck-pending-credentials) does. If both fire,
 this one is the earlier symptom of the same incident, not a second one.
 
