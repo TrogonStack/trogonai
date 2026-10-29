@@ -370,6 +370,13 @@ impl SecretStoreRevoke for OpenBaoSecretStore {
 
     async fn revoke(&self, credential: &CredentialRef) -> Result<(), Self::Error> {
         let metadata = self.openbao_metadata(credential).await?;
+        if metadata.data.status(credential.version()) == Some(CredentialStatus::Destroyed) {
+            return Err(SecretStoreError::Unwritable {
+                credential: credential.clone(),
+                status: CredentialStatus::Destroyed,
+            });
+        }
+
         let versions: Vec<u64> = (1..=metadata.data.current_version).collect();
         if versions.is_empty() {
             return Err(SecretStoreError::Missing {
@@ -407,23 +414,12 @@ impl SecretStoreMetadata for OpenBaoSecretStore {
 
     async fn metadata(&self, credential: &CredentialRef) -> Result<CredentialMetadata, Self::Error> {
         let metadata = self.openbao_metadata(credential).await?;
-        let version = metadata
+        let status = metadata
             .data
-            .versions
-            .get(&credential.version().get().to_string())
+            .status(credential.version())
             .ok_or_else(|| SecretStoreError::Missing {
                 credential: credential.clone(),
             })?;
-
-        let status = if version.destroyed {
-            CredentialStatus::Destroyed
-        } else if !version.deletion_time.is_empty() {
-            CredentialStatus::Revoked
-        } else if credential.version().get() == metadata.data.current_version {
-            CredentialStatus::Active
-        } else {
-            CredentialStatus::Previous
-        };
 
         let fingerprint = CredentialFingerprint::new(openbao_fingerprint(
             &self.metadata_path(credential),
@@ -589,6 +585,22 @@ struct OpenBaoMetadata {
     #[serde(default)]
     #[allow(dead_code, reason = "populated for reconciliation tooling; read from tests today")]
     custom_metadata: Option<BTreeMap<String, String>>,
+}
+
+impl OpenBaoMetadata {
+    fn status(&self, version: CredentialVersion) -> Option<CredentialStatus> {
+        let metadata = self.versions.get(&version.get().to_string())?;
+        let status = if metadata.destroyed {
+            CredentialStatus::Destroyed
+        } else if !metadata.deletion_time.is_empty() {
+            CredentialStatus::Revoked
+        } else if version.get() == self.current_version {
+            CredentialStatus::Active
+        } else {
+            CredentialStatus::Previous
+        };
+        Some(status)
+    }
 }
 
 #[derive(Deserialize)]

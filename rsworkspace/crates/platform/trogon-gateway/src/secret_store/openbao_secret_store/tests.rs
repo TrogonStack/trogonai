@@ -215,6 +215,47 @@ async fn destroy_of_unknown_credential_returns_missing() {
     assert!(openbao.posted_to(OpenBaoEndpoint::Destroy).await.is_empty());
 }
 
+fn metadata_with_destroyed_first_version() -> Value {
+    json!({
+        "current_version": 2,
+        "versions": {
+            "1": { "deletion_time": "", "destroyed": true },
+            "2": { "deletion_time": "", "destroyed": false },
+        },
+    })
+}
+
+#[tokio::test]
+async fn revoke_through_destroyed_version_is_unwritable_without_posting_delete() {
+    let openbao = FakeOpenBao::start(Some(metadata_with_destroyed_first_version())).await;
+    let credential = discord_bot_token(CredentialVersion::initial());
+
+    let error = openbao.store().revoke(&credential).await.unwrap_err();
+
+    assert!(matches!(
+        error,
+        SecretStoreError::Unwritable { credential: unwritable, status: CredentialStatus::Destroyed }
+            if unwritable == credential
+    ));
+    assert!(openbao.posted_to(OpenBaoEndpoint::Delete).await.is_empty());
+}
+
+#[tokio::test]
+async fn revoke_posts_delete_for_every_version() {
+    let openbao = FakeOpenBao::start(Some(metadata_with_destroyed_first_version())).await;
+
+    openbao
+        .store()
+        .revoke(&discord_bot_token(CredentialVersion::new(2).unwrap()))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        openbao.posted_to(OpenBaoEndpoint::Delete).await,
+        vec![json!({ "versions": [1, 2] })]
+    );
+}
+
 struct OpenBaoServer {
     _container: ContainerAsync<GenericImage>,
     address: String,
