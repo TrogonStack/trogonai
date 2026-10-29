@@ -2,7 +2,7 @@
 
 mod constants;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::{Arc, OnceLock};
@@ -44,7 +44,9 @@ use crate::credential::commands::proto::{
     decode_destroyed_state, decode_message_field, decode_revoked, decode_revoked_state, decode_rotated,
     decode_rotation_failed, decode_rotation_requested, decode_write_failed, decode_write_requested,
 };
+use crate::credential::constants::CREDENTIAL_EVENT_SUBJECT_PREFIX;
 use crate::credential::event_stream::{CredentialEventStreamReadError, read_credential_event_stream};
+use crate::credential::stream::{CredentialKey, CredentialSubject};
 use crate::credential::{CredentialEvolveError, evolve, initial_state};
 use crate::secret_store::{SecretMaterial, SecretStoreError, SecretStoreGet};
 use crate::source_integration_id::{SourceIntegrationId, SourceIntegrationIdError};
@@ -435,6 +437,10 @@ pub enum RuntimeProjectionRefreshError {
     },
     #[error("credential event is missing its event case")]
     MissingEvent,
+    #[error(
+        "credential event at stream position {stream_position} on '{stream_id}' cannot be attributed to a credential"
+    )]
+    UnattributableEvent { stream_id: String, stream_position: u64 },
     #[error("credential event is invalid: {source}")]
     InvalidEvent {
         #[source]
@@ -830,6 +836,20 @@ impl InMemoryRuntimeProjectionRepository {
         removed
     }
 
+    async fn credential_ids(&self) -> BTreeSet<CredentialId> {
+        self.projections
+            .lock()
+            .await
+            .values()
+            .flat_map(|projection| {
+                projection
+                    .credentials
+                    .values()
+                    .map(|credential| credential.id().clone())
+            })
+            .collect()
+    }
+
     async fn remove_credential_id(&self, id: &CredentialId) -> Vec<CredentialRef> {
         let mut projections = self.projections.lock().await;
         let mut removed = Vec::new();
@@ -1104,6 +1124,7 @@ where
     let mut report = RuntimeProjectionRefreshReport::default();
     let mut changed_credentials = BTreeMap::<CredentialId, u64>::new();
     let mut revoked_recorded_at = BTreeMap::<CredentialId, DateTime<Utc>>::new();
+    let mut poisoned_subjects = Vec::<(u64, String)>::new();
 
     for event in events {
         report.scanned_events += 1;
@@ -1117,8 +1138,9 @@ where
                 continue;
             }
             Err(source) => {
-                warn!(stream_position, error = %source, "skipping undecodable credential event");
+                warn!(stream_position, error = %source, "undecodable credential event");
                 report.poisoned_events += 1;
+                poisoned_subjects.push((stream_position, event.stream_id().to_string()));
                 continue;
             }
         };
@@ -1139,8 +1161,9 @@ where
                 credential_id
             }
             Err(source) => {
-                warn!(stream_position, error = %source, "skipping invalid credential event");
+                warn!(stream_position, error = %source, "invalid credential event");
                 report.poisoned_events += 1;
+                poisoned_subjects.push((stream_position, event.stream_id().to_string()));
                 continue;
             }
         };
@@ -1148,6 +1171,43 @@ where
             .entry(credential_id)
             .and_modify(|position| *position = (*position).max(stream_position))
             .or_insert(stream_position);
+    }
+
+    let mut known_subjects = BTreeMap::<String, CredentialId>::new();
+    for credential_id in projections
+        .credential_ids()
+        .await
+        .into_iter()
+        .chain(changed_credentials.keys().cloned())
+    {
+        if let Ok(subject) = CredentialSubject::event(&CredentialKey::derive(&credential_id)) {
+            known_subjects.insert(subject.as_str().to_string(), credential_id);
+        }
+    }
+    let mut poisoned_credentials = BTreeSet::<CredentialId>::new();
+    for (stream_position, stream_id) in poisoned_subjects {
+        match known_subjects.get(&stream_id) {
+            Some(credential_id) => {
+                poisoned_credentials.insert(credential_id.clone());
+            }
+            None if is_credential_event_subject(&stream_id) => {
+                warn!(stream_position, %stream_id, "poisoned event belongs to a credential that is not projected");
+            }
+            None => {
+                return Err(RuntimeProjectionRefreshError::UnattributableEvent {
+                    stream_id,
+                    stream_position,
+                });
+            }
+        }
+    }
+    for credential_id in &poisoned_credentials {
+        changed_credentials.remove(credential_id);
+        error!(%credential_id, "evicting credential with an unreadable event");
+        for evicted in projections.remove_credential_id(credential_id).await {
+            cache.invalidate(&evicted).await;
+        }
+        report.poisoned_credentials += 1;
     }
 
     report.changed_credentials = changed_credentials.len();
@@ -1189,6 +1249,13 @@ where
     report.projected_integrations = projections.len().await;
 
     Ok(report)
+}
+
+fn is_credential_event_subject(stream_id: &str) -> bool {
+    stream_id
+        .strip_prefix(CREDENTIAL_EVENT_SUBJECT_PREFIX)
+        .and_then(|rest| rest.strip_prefix('.'))
+        .is_some_and(|key| key.len() == 32 && key.bytes().all(|byte| byte.is_ascii_hexdigit()))
 }
 
 async fn load_credential_state<EventStore>(

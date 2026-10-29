@@ -8,6 +8,7 @@ use crate::credential::commands::proto::{
     activated_to_proto, decode_scope_key, destroy_failed_to_proto, destroy_requested_to_proto, destroyed_to_proto,
     revoked_to_proto, rotated_to_proto, rotation_requested_to_proto, write_requested_to_proto,
 };
+use crate::credential::stream::{CredentialKey, CredentialSubject};
 use crate::secret_store::{
     MockOpenBaoSecretStore, SecretDestroyReason, SecretStoreDestroy, SecretStoreMetadata, SecretStorePut,
     SecretStoreRevoke, SecretStoreRotate, SecretVerifier,
@@ -1789,6 +1790,19 @@ async fn incremental_refresh_invalidates_cache_and_removes_projection_when_batch
     ));
 }
 
+fn subject_of(credential: &CredentialRef) -> String {
+    CredentialSubject::event(&CredentialKey::derive(credential.id()))
+        .unwrap()
+        .as_str()
+        .to_string()
+}
+
+async fn publish(stream: &MockJetStreamPublishMessage, subject: &str, events: &[Event]) {
+    append_stream(stream, StreamSubject::new(subject).unwrap(), None, events)
+        .await
+        .unwrap();
+}
+
 fn undecodable_runtime_event(id: u64) -> Event {
     Event {
         content: vec![0xff, 0xff, 0xff, 0xff],
@@ -1804,11 +1818,21 @@ async fn incremental_refresh_skips_an_undecodable_event_and_applies_later_creden
     let event_store = ProjectionTestEventStore::default();
     event_store.push(credential.id().as_str(), 1, write_requested(&credential));
     event_store.push(credential.id().as_str(), 2, activated(&metadata));
-    let stream = raw_stream([
-        undecodable_runtime_event(1),
-        runtime_event(2, write_requested(&credential)),
-        runtime_event(3, activated(&metadata)),
-    ])
+    let stream = MockJetStreamPublishMessage::new();
+    publish(
+        &stream,
+        &subject_of(&cache_credential("poison")),
+        &[undecodable_runtime_event(1)],
+    )
+    .await;
+    publish(
+        &stream,
+        &subject_of(&credential),
+        &[
+            runtime_event(2, write_requested(&credential)),
+            runtime_event(3, activated(&metadata)),
+        ],
+    )
     .await;
     let registry = RuntimeCredentialRegistry::default();
     let resolver = registry.resolver(store);
@@ -1879,5 +1903,68 @@ async fn incremental_refresh_evicts_a_credential_whose_history_cannot_be_replaye
     assert!(matches!(
         resolver.resolve(&key(), CredentialKind::BotToken).await,
         Err(RuntimeCredentialError::IntegrationNotFound { .. })
+    ));
+}
+
+#[tokio::test]
+async fn incremental_refresh_evicts_a_served_credential_whose_new_event_cannot_be_decoded() {
+    let store = MockOpenBaoSecretStore::default();
+    let credential = put_bot_token(&store, "Bot token").await;
+    let metadata = store.metadata(&credential).await.unwrap();
+    let event_store = ProjectionTestEventStore::default();
+    event_store.push(credential.id().as_str(), 1, write_requested(&credential));
+    event_store.push(credential.id().as_str(), 2, activated(&metadata));
+    let stream = MockJetStreamPublishMessage::new();
+    publish(
+        &stream,
+        &subject_of(&credential),
+        &[
+            runtime_event(1, write_requested(&credential)),
+            runtime_event(2, activated(&metadata)),
+        ],
+    )
+    .await;
+    let registry = RuntimeCredentialRegistry::default();
+    let resolver = registry.resolver(store);
+    registry
+        .refresh_from_credential_stream_incremental(&stream, &event_store, 1)
+        .await
+        .unwrap();
+    resolver
+        .resolve_plaintext(&key(), CredentialKind::BotToken)
+        .await
+        .unwrap();
+    publish(&stream, &subject_of(&credential), &[undecodable_runtime_event(3)]).await;
+
+    let report = registry
+        .refresh_from_credential_stream_incremental(&stream, &event_store, 3)
+        .await
+        .unwrap();
+
+    assert_eq!(report.poisoned_events(), 1);
+    assert_eq!(report.poisoned_credentials(), 1);
+    assert_eq!(report.checkpoint_advanced_to(), Some(3));
+    assert!(matches!(
+        resolver.resolve(&key(), CredentialKind::BotToken).await,
+        Err(RuntimeCredentialError::IntegrationNotFound { .. })
+    ));
+}
+
+#[tokio::test]
+async fn incremental_refresh_stops_at_an_undecodable_event_that_belongs_to_no_credential_stream() {
+    let event_store = ProjectionTestEventStore::default();
+    let stream = raw_stream([undecodable_runtime_event(1)]).await;
+    let registry = RuntimeCredentialRegistry::default();
+
+    let error = registry
+        .refresh_from_credential_stream_incremental(&stream, &event_store, 1)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        RuntimeProjectionStreamRefreshError::Refresh {
+            source: RuntimeProjectionRefreshError::UnattributableEvent { stream_position: 1, .. }
+        }
     ));
 }
