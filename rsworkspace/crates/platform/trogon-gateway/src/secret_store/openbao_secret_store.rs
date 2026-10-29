@@ -391,19 +391,22 @@ impl SecretStoreRevoke for OpenBaoSecretStore {
 
     async fn revoke(&self, credential: &CredentialRef) -> Result<(), Self::Error> {
         let metadata = self.openbao_metadata(credential).await?;
-        if metadata.data.status(credential.version()) == Some(CredentialStatus::Destroyed) {
-            return Err(SecretStoreError::Unwritable {
-                credential: credential.clone(),
-                status: CredentialStatus::Destroyed,
-            });
+        match metadata.data.status(credential.version()) {
+            None => {
+                return Err(SecretStoreError::Missing {
+                    credential: credential.clone(),
+                });
+            }
+            Some(CredentialStatus::Destroyed) => {
+                return Err(SecretStoreError::Unwritable {
+                    credential: credential.clone(),
+                    status: CredentialStatus::Destroyed,
+                });
+            }
+            Some(_) => {}
         }
 
         let versions: Vec<u64> = (1..=metadata.data.current_version).collect();
-        if versions.is_empty() {
-            return Err(SecretStoreError::Missing {
-                credential: credential.clone(),
-            });
-        }
 
         self.send_empty(
             self.authorize(self.http.post(self.endpoint(OpenBaoEndpoint::Delete, credential)?))
