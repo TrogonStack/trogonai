@@ -31,6 +31,9 @@
     "socket.event.missing_event_id": [
       "G25"
     ],
+    "socket.malformed.missing_payload": [
+      "G23"
+    ],
     "socket.unclassified.unknown_shape": [
       "G23"
     ]

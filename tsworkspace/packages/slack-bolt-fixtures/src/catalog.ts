@@ -852,6 +852,19 @@ async function negativeFixtures(context: CatalogContext): Promise<Fixture[]> {
     }
   }
 
+  fixtures.push(
+    await socketFrameFixture(context, {
+      id: 'socket.malformed.missing_payload',
+      kind: 'malformed',
+      provenance: provenance(
+        oracle,
+        'hand written interactive Socket Mode envelope without a payload',
+        DOCS.socketMode,
+      ),
+      frame: JSON.stringify({ envelope_id: ENVELOPE_ID, type: 'interactive', accepts_response_payload: false }),
+    }),
+  );
+
   const controlSource = 'hand written Socket Mode control frame';
   fixtures.push(
     await socketFrameFixture(context, {
