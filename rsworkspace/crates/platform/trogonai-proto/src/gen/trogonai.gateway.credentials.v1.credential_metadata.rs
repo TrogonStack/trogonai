@@ -193,168 +193,6 @@ impl ::buffa::Enumeration for CredentialStatus {
         ]
     }
 }
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-#[repr(i32)]
-pub enum StorageBackend {
-    STORAGE_BACKEND_UNSPECIFIED = 0i32,
-    STORAGE_BACKEND_IN_MEMORY = 1i32,
-    STORAGE_BACKEND_OPENBAO = 2i32,
-    STORAGE_BACKEND_STATIC_CONFIG = 3i32,
-}
-impl StorageBackend {
-    ///Idiomatic alias for [`Self::STORAGE_BACKEND_UNSPECIFIED`]; `Debug` prints the variant name.
-    #[allow(non_upper_case_globals)]
-    pub const Unspecified: Self = Self::STORAGE_BACKEND_UNSPECIFIED;
-    ///Idiomatic alias for [`Self::STORAGE_BACKEND_IN_MEMORY`]; `Debug` prints the variant name.
-    #[allow(non_upper_case_globals)]
-    pub const InMemory: Self = Self::STORAGE_BACKEND_IN_MEMORY;
-    ///Idiomatic alias for [`Self::STORAGE_BACKEND_OPENBAO`]; `Debug` prints the variant name.
-    #[allow(non_upper_case_globals)]
-    pub const Openbao: Self = Self::STORAGE_BACKEND_OPENBAO;
-    ///Idiomatic alias for [`Self::STORAGE_BACKEND_STATIC_CONFIG`]; `Debug` prints the variant name.
-    #[allow(non_upper_case_globals)]
-    pub const StaticConfig: Self = Self::STORAGE_BACKEND_STATIC_CONFIG;
-}
-impl ::core::default::Default for StorageBackend {
-    fn default() -> Self {
-        Self::STORAGE_BACKEND_UNSPECIFIED
-    }
-}
-impl ::serde::Serialize for StorageBackend {
-    fn serialize<S: ::serde::Serializer>(
-        &self,
-        s: S,
-    ) -> ::core::result::Result<S::Ok, S::Error> {
-        s.serialize_str(::buffa::Enumeration::proto_name(self))
-    }
-}
-impl<'de> ::serde::Deserialize<'de> for StorageBackend {
-    fn deserialize<D: ::serde::Deserializer<'de>>(
-        d: D,
-    ) -> ::core::result::Result<Self, D::Error> {
-        struct _V;
-        impl ::serde::de::Visitor<'_> for _V {
-            type Value = StorageBackend;
-            fn expecting(
-                &self,
-                f: &mut ::core::fmt::Formatter<'_>,
-            ) -> ::core::fmt::Result {
-                f.write_str(
-                    concat!(
-                        "a string, integer, or null for ", stringify!(StorageBackend)
-                    ),
-                )
-            }
-            fn visit_str<E: ::serde::de::Error>(
-                self,
-                v: &str,
-            ) -> ::core::result::Result<StorageBackend, E> {
-                <StorageBackend as ::buffa::Enumeration>::from_proto_name(v)
-                    .ok_or_else(|| { ::serde::de::Error::unknown_variant(v, &[]) })
-            }
-            fn visit_i64<E: ::serde::de::Error>(
-                self,
-                v: i64,
-            ) -> ::core::result::Result<StorageBackend, E> {
-                let v32 = i32::try_from(v)
-                    .map_err(|_| {
-                        ::serde::de::Error::custom(
-                            ::buffa::alloc::format!("enum value {v} out of i32 range"),
-                        )
-                    })?;
-                <StorageBackend as ::buffa::Enumeration>::from_i32(v32)
-                    .ok_or_else(|| {
-                        ::serde::de::Error::custom(
-                            ::buffa::alloc::format!("unknown enum value {v32}"),
-                        )
-                    })
-            }
-            fn visit_u64<E: ::serde::de::Error>(
-                self,
-                v: u64,
-            ) -> ::core::result::Result<StorageBackend, E> {
-                let v32 = i32::try_from(v)
-                    .map_err(|_| {
-                        ::serde::de::Error::custom(
-                            ::buffa::alloc::format!("enum value {v} out of i32 range"),
-                        )
-                    })?;
-                <StorageBackend as ::buffa::Enumeration>::from_i32(v32)
-                    .ok_or_else(|| {
-                        ::serde::de::Error::custom(
-                            ::buffa::alloc::format!("unknown enum value {v32}"),
-                        )
-                    })
-            }
-            fn visit_unit<E: ::serde::de::Error>(
-                self,
-            ) -> ::core::result::Result<StorageBackend, E> {
-                ::core::result::Result::Ok(::core::default::Default::default())
-            }
-        }
-        d.deserialize_any(_V)
-    }
-}
-impl ::buffa::json_helpers::ProtoElemJson for StorageBackend {
-    fn serialize_proto_json<S: ::serde::Serializer>(
-        v: &Self,
-        s: S,
-    ) -> ::core::result::Result<S::Ok, S::Error> {
-        ::serde::Serialize::serialize(v, s)
-    }
-    fn deserialize_proto_json<'de, D: ::serde::Deserializer<'de>>(
-        d: D,
-    ) -> ::core::result::Result<Self, D::Error> {
-        <Self as ::serde::Deserialize>::deserialize(d)
-    }
-}
-impl ::buffa::Enumeration for StorageBackend {
-    fn from_i32(value: i32) -> ::core::option::Option<Self> {
-        match value {
-            0i32 => ::core::option::Option::Some(Self::STORAGE_BACKEND_UNSPECIFIED),
-            1i32 => ::core::option::Option::Some(Self::STORAGE_BACKEND_IN_MEMORY),
-            2i32 => ::core::option::Option::Some(Self::STORAGE_BACKEND_OPENBAO),
-            3i32 => ::core::option::Option::Some(Self::STORAGE_BACKEND_STATIC_CONFIG),
-            _ => ::core::option::Option::None,
-        }
-    }
-    fn to_i32(&self) -> i32 {
-        *self as i32
-    }
-    fn proto_name(&self) -> &'static str {
-        match self {
-            Self::STORAGE_BACKEND_UNSPECIFIED => "STORAGE_BACKEND_UNSPECIFIED",
-            Self::STORAGE_BACKEND_IN_MEMORY => "STORAGE_BACKEND_IN_MEMORY",
-            Self::STORAGE_BACKEND_OPENBAO => "STORAGE_BACKEND_OPENBAO",
-            Self::STORAGE_BACKEND_STATIC_CONFIG => "STORAGE_BACKEND_STATIC_CONFIG",
-        }
-    }
-    fn from_proto_name(name: &str) -> ::core::option::Option<Self> {
-        match name {
-            "STORAGE_BACKEND_UNSPECIFIED" => {
-                ::core::option::Option::Some(Self::STORAGE_BACKEND_UNSPECIFIED)
-            }
-            "STORAGE_BACKEND_IN_MEMORY" => {
-                ::core::option::Option::Some(Self::STORAGE_BACKEND_IN_MEMORY)
-            }
-            "STORAGE_BACKEND_OPENBAO" => {
-                ::core::option::Option::Some(Self::STORAGE_BACKEND_OPENBAO)
-            }
-            "STORAGE_BACKEND_STATIC_CONFIG" => {
-                ::core::option::Option::Some(Self::STORAGE_BACKEND_STATIC_CONFIG)
-            }
-            _ => ::core::option::Option::None,
-        }
-    }
-    fn values() -> &'static [Self] {
-        &[
-            Self::STORAGE_BACKEND_UNSPECIFIED,
-            Self::STORAGE_BACKEND_IN_MEMORY,
-            Self::STORAGE_BACKEND_OPENBAO,
-            Self::STORAGE_BACKEND_STATIC_CONFIG,
-        ]
-    }
-}
 #[derive(Clone, PartialEq, Default)]
 #[derive(::serde::Serialize, ::serde::Deserialize)]
 #[serde(default)]
@@ -369,14 +207,6 @@ pub struct CredentialMetadata {
         skip_serializing_if = "::core::option::Option::is_none"
     )]
     pub status: ::core::option::Option<::buffa::EnumValue<CredentialStatus>>,
-    /// Field 3: `storage_backend`
-    #[serde(
-        rename = "storageBackend",
-        alias = "storage_backend",
-        with = "::buffa::json_helpers::opt_enum",
-        skip_serializing_if = "::core::option::Option::is_none"
-    )]
-    pub storage_backend: ::core::option::Option<::buffa::EnumValue<StorageBackend>>,
     /// Field 4: `fingerprint`
     #[serde(rename = "fingerprint", with = "::buffa::json_helpers::proto_string")]
     pub fingerprint: ::buffa::alloc::string::String,
@@ -386,7 +216,6 @@ impl ::core::fmt::Debug for CredentialMetadata {
         f.debug_struct("CredentialMetadata")
             .field("reference", &self.reference)
             .field("status", &self.status)
-            .field("storage_backend", &self.storage_backend)
             .field("fingerprint", &self.fingerprint)
             .finish()
     }
@@ -407,16 +236,6 @@ impl CredentialMetadata {
         value: impl Into<::buffa::EnumValue<CredentialStatus>>,
     ) -> Self {
         self.status = Some(value.into());
-        self
-    }
-    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
-    #[inline]
-    ///Sets [`Self::storage_backend`] to `Some(value)`, consuming and returning `self`.
-    pub fn with_storage_backend(
-        mut self,
-        value: impl Into<::buffa::EnumValue<StorageBackend>>,
-    ) -> Self {
-        self.storage_backend = Some(value.into());
         self
     }
 }
@@ -451,9 +270,6 @@ impl ::buffa::Message for CredentialMetadata {
         if let Some(ref v) = self.status {
             size += 1u64 + ::buffa::types::int32_encoded_len(v.to_i32()) as u64;
         }
-        if let Some(ref v) = self.storage_backend {
-            size += 1u64 + ::buffa::types::int32_encoded_len(v.to_i32()) as u64;
-        }
         size += 1u64 + ::buffa::types::string_encoded_len(&self.fingerprint) as u64;
         ::buffa::saturate_size(size)
     }
@@ -474,9 +290,6 @@ impl ::buffa::Message for CredentialMetadata {
         }
         if let Some(ref v) = self.status {
             ::buffa::types::put_int32_field(2u32, v.to_i32(), buf);
-        }
-        if let Some(ref v) = self.storage_backend {
-            ::buffa::types::put_int32_field(3u32, v.to_i32(), buf);
         }
         ::buffa::types::put_string_field(4u32, &self.fingerprint, buf);
     }
@@ -511,15 +324,6 @@ impl ::buffa::Message for CredentialMetadata {
                     ::buffa::EnumValue::from(::buffa::types::decode_int32(buf)?),
                 );
             }
-            3u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::Varint,
-                )?;
-                self.storage_backend = ::core::option::Option::Some(
-                    ::buffa::EnumValue::from(::buffa::types::decode_int32(buf)?),
-                );
-            }
             4u32 => {
                 ::buffa::encoding::check_wire_type(
                     tag,
@@ -536,7 +340,6 @@ impl ::buffa::Message for CredentialMetadata {
     fn clear(&mut self) {
         self.reference = ::buffa::MessageField::none();
         self.status = ::core::option::Option::None;
-        self.storage_backend = ::core::option::Option::None;
         self.fingerprint.clear();
     }
 }

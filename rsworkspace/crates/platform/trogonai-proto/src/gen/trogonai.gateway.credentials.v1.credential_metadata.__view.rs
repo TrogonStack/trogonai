@@ -11,10 +11,6 @@ pub struct CredentialMetadataView<'a> {
     pub status: ::core::option::Option<
         ::buffa::EnumValue<super::super::CredentialStatus>,
     >,
-    /// Field 3: `storage_backend`
-    pub storage_backend: ::core::option::Option<
-        ::buffa::EnumValue<super::super::StorageBackend>,
-    >,
     /// Field 4: `fingerprint`
     pub fingerprint: &'a str,
     #[doc(hidden)]
@@ -96,15 +92,6 @@ impl<'a> ::buffa::MessageView<'a> for CredentialMetadataView<'a> {
                     ::buffa::EnumValue::from(::buffa::types::decode_int32(&mut cur)?),
                 );
             }
-            3u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::Varint,
-                )?;
-                view.storage_backend = Some(
-                    ::buffa::EnumValue::from(::buffa::types::decode_int32(&mut cur)?),
-                );
-            }
             4u32 => {
                 ::buffa::encoding::check_wire_type(
                     tag,
@@ -143,7 +130,6 @@ impl<'a> ::buffa::MessageView<'a> for CredentialMetadataView<'a> {
                 None => ::buffa::MessageField::none(),
             },
             status: self.status,
-            storage_backend: self.storage_backend,
             fingerprint: self.fingerprint.to_string(),
             ..::core::default::Default::default()
         })
@@ -164,9 +150,6 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialMetadataView<'a> {
                     + inner_size as u64;
         }
         if let Some(ref v) = self.status {
-            size += 1u64 + ::buffa::types::int32_encoded_len(v.to_i32()) as u64;
-        }
-        if let Some(ref v) = self.storage_backend {
             size += 1u64 + ::buffa::types::int32_encoded_len(v.to_i32()) as u64;
         }
         size += 1u64 + ::buffa::types::string_encoded_len(&self.fingerprint) as u64;
@@ -190,9 +173,6 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialMetadataView<'a> {
         }
         if let Some(ref v) = self.status {
             ::buffa::types::put_int32_field(2u32, v.to_i32(), buf);
-        }
-        if let Some(ref v) = self.storage_backend {
-            ::buffa::types::put_int32_field(3u32, v.to_i32(), buf);
         }
         ::buffa::types::put_string_field(4u32, &self.fingerprint, buf);
     }
@@ -222,9 +202,6 @@ impl<'__a> ::serde::Serialize for CredentialMetadataView<'__a> {
         }
         if let ::core::option::Option::Some(ref __v) = self.status {
             __map.serialize_entry("status", __v)?;
-        }
-        if let ::core::option::Option::Some(ref __v) = self.storage_backend {
-            __map.serialize_entry("storageBackend", __v)?;
         }
         {
             __map.serialize_entry("fingerprint", self.fingerprint)?;
@@ -337,13 +314,6 @@ impl CredentialMetadataOwnedView {
         &self,
     ) -> ::core::option::Option<::buffa::EnumValue<super::super::CredentialStatus>> {
         self.0.reborrow().status
-    }
-    /// Field 3: `storage_backend`
-    #[must_use]
-    pub fn storage_backend(
-        &self,
-    ) -> ::core::option::Option<::buffa::EnumValue<super::super::StorageBackend>> {
-        self.0.reborrow().storage_backend
     }
     /// Field 4: `fingerprint`
     #[must_use]

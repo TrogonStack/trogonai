@@ -68,7 +68,6 @@ fn event_decode_dispatches_all_lifecycle_event_types() {
                 kind: Some(v1::CredentialKind::WebhookSecret.into()),
             }),
             status: Some(v1::CredentialStatus::Active.into()),
-            storage_backend: Some(v1::StorageBackend::Openbao.into()),
             fingerprint: "fingerprint".to_string(),
         }),
     };

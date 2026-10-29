@@ -1,5 +1,6 @@
 use std::sync::Mutex;
 
+use buffa::encoding::{Tag, WireType, encode_varint};
 use buffa::{Message as _, MessageField};
 use chrono::Utc;
 use trogon_decider::testing::TestCase;
@@ -800,6 +801,74 @@ fn event_codec_rejects_scope_key_that_does_not_match_source() {
             ..
         })
     ));
+}
+
+#[test]
+fn event_codec_rejects_activation_for_a_credential_id_with_an_unknown_storage_prefix() {
+    let payload = proto::CredentialActivated {
+        metadata: MessageField::some(proto::CredentialMetadata {
+            reference: MessageField::some(proto::CredentialRef {
+                id: "vault:tenant-1:github/primary:webhook_secret".to_string(),
+                version: Some(1),
+                owner_id: "tenant-1".to_string(),
+                source: Some(proto::CredentialSource::CREDENTIAL_SOURCE_GITHUB.into()),
+                scope_key: "github/primary".to_string(),
+                kind: Some(proto::CredentialKind::CREDENTIAL_KIND_WEBHOOK_SECRET.into()),
+            }),
+            status: Some(proto::CredentialStatus::CREDENTIAL_STATUS_ACTIVE.into()),
+            fingerprint: "vault:secret/metadata/webhook_secret".to_string(),
+        }),
+    }
+    .encode_to_vec();
+
+    let decoded = <proto::CredentialEvent as EventDecode>::decode(EventData::new(
+        <proto::CredentialActivated as buffa::MessageName>::FULL_NAME,
+        &payload,
+    ))
+    .unwrap()
+    .into_decoded()
+    .unwrap();
+
+    let state = rebuild_state_from_events([write_requested()]);
+    let error = evolve(state, &decoded).unwrap_err();
+
+    assert!(matches!(
+        error,
+        CredentialEvolveError::InvalidProto(CredentialProtoDecodeError::InvalidField {
+            field: "metadata.reference.id",
+            ..
+        })
+    ));
+}
+
+#[test]
+fn event_codec_ignores_a_legacy_storage_backend_on_the_wire() {
+    let activated = activated_to_proto(&metadata(1));
+    let mut metadata_bytes = activated.metadata.as_option().unwrap().encode_to_vec();
+    Tag::new(3, WireType::Varint).encode(&mut metadata_bytes);
+    encode_varint(1, &mut metadata_bytes);
+    let mut payload = Vec::new();
+    Tag::new(1, WireType::LengthDelimited).encode(&mut payload);
+    encode_varint(metadata_bytes.len() as u64, &mut payload);
+    payload.extend_from_slice(&metadata_bytes);
+
+    let decoded = <proto::CredentialEvent as EventDecode>::decode(EventData::new(
+        <proto::CredentialActivated as buffa::MessageName>::FULL_NAME,
+        &payload,
+    ))
+    .unwrap()
+    .into_decoded()
+    .unwrap();
+
+    let Some(CredentialEventCase::Activated(activated)) = decoded.event else {
+        panic!("expected activated event");
+    };
+    let metadata = decode_credential_metadata(
+        "metadata",
+        decode_message_field("metadata", &activated.metadata).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(metadata.storage_backend(), StorageBackend::OpenBao);
 }
 
 #[tokio::test]

@@ -33,7 +33,6 @@ pub(crate) fn credential_metadata_to_proto(value: &CredentialMetadata) -> v1::Cr
     v1::CredentialMetadata {
         reference: MessageField::some(credential_ref_to_proto(value.reference())),
         status: Some(proto_credential_status(value.status()).into()),
-        storage_backend: Some(proto_storage_backend(value.storage_backend()).into()),
         fingerprint: value.fingerprint().as_str().to_string(),
     }
 }
@@ -161,16 +160,17 @@ pub(crate) fn decode_credential_metadata(
     field: &'static str,
     value: &v1::CredentialMetadata,
 ) -> Result<CredentialMetadata, CredentialProtoDecodeError> {
-    Ok(CredentialMetadata::new(
-        decode_credential_ref(
-            nested_field(field, "reference"),
-            decode_message_field(nested_field(field, "reference"), &value.reference)?,
-        )?,
-        decode_credential_status(nested_field(field, "status"), value.status.as_ref())?,
-        decode_storage_backend(nested_field(field, "storage_backend"), value.storage_backend.as_ref())?,
-        CredentialFingerprint::new(&value.fingerprint)
-            .map_err(|source| invalid_field(nested_field(field, "fingerprint"), source))?,
-    ))
+    let reference_field = nested_field(field, "reference");
+    let reference = decode_credential_ref(
+        reference_field,
+        decode_message_field(reference_field, &value.reference)?,
+    )?;
+    let status = decode_credential_status(nested_field(field, "status"), value.status.as_ref())?;
+    let storage_backend = StorageBackend::from_credential_id(reference.id())
+        .map_err(|source| invalid_field(nested_field(reference_field, "id"), source))?;
+    let fingerprint = CredentialFingerprint::new(&value.fingerprint)
+        .map_err(|source| invalid_field(nested_field(field, "fingerprint"), source))?;
+    Ok(CredentialMetadata::new(reference, status, storage_backend, fingerprint))
 }
 
 pub(crate) fn decode_write_failed(
@@ -300,14 +300,6 @@ fn proto_credential_status(value: CredentialStatus) -> v1::CredentialStatus {
     }
 }
 
-fn proto_storage_backend(value: StorageBackend) -> v1::StorageBackend {
-    match value {
-        StorageBackend::InMemory => v1::StorageBackend::STORAGE_BACKEND_IN_MEMORY,
-        StorageBackend::OpenBao => v1::StorageBackend::STORAGE_BACKEND_OPENBAO,
-        StorageBackend::StaticConfig => v1::StorageBackend::STORAGE_BACKEND_STATIC_CONFIG,
-    }
-}
-
 fn decode_source_kind(
     field: &'static str,
     value: Option<&EnumValue<v1::CredentialSource>>,
@@ -368,18 +360,6 @@ fn decode_credential_status(
         v1::CredentialStatus::CREDENTIAL_STATUS_UNSPECIFIED => {
             Err(invalid_field(field, "unspecified credential status"))
         }
-    }
-}
-
-fn decode_storage_backend(
-    field: &'static str,
-    value: Option<&EnumValue<v1::StorageBackend>>,
-) -> Result<StorageBackend, CredentialProtoDecodeError> {
-    match decode_known_enum(field, value)? {
-        v1::StorageBackend::STORAGE_BACKEND_IN_MEMORY => Ok(StorageBackend::InMemory),
-        v1::StorageBackend::STORAGE_BACKEND_OPENBAO => Ok(StorageBackend::OpenBao),
-        v1::StorageBackend::STORAGE_BACKEND_STATIC_CONFIG => Ok(StorageBackend::StaticConfig),
-        v1::StorageBackend::STORAGE_BACKEND_UNSPECIFIED => Err(invalid_field(field, "unspecified storage backend")),
     }
 }
 
@@ -799,7 +779,6 @@ pub(crate) fn nested_field(parent: &'static str, child: &'static str) -> &'stati
     match (parent, child) {
         ("metadata", "reference") => "metadata.reference",
         ("metadata", "status") => "metadata.status",
-        ("metadata", "storage_backend") => "metadata.storage_backend",
         ("metadata", "fingerprint") => "metadata.fingerprint",
         ("metadata.reference", "id") => "metadata.reference.id",
         ("metadata.reference", "version") => "metadata.reference.version",
