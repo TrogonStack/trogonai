@@ -40,72 +40,6 @@ fn default_mount_is_secret() {
 }
 
 #[test]
-fn parses_integration_scoped_openbao_credential_id() {
-    let id = CredentialId::new("openbao:tenant-1:github/primary:webhook_secret").unwrap();
-
-    let credential = openbao_credential_ref_from_id(id, CredentialVersion::new(2).unwrap()).unwrap();
-
-    assert_eq!(
-        credential.id().as_str(),
-        "openbao:tenant-1:github/primary:webhook_secret"
-    );
-    assert_eq!(credential.version().get(), 2);
-    assert_eq!(credential.owner_id().as_str(), "tenant-1");
-    assert_eq!(credential.source(), SourceKind::GitHub);
-    assert_eq!(credential.scope_key(), "github/primary");
-    assert_eq!(credential.kind(), CredentialKind::WebhookSecret);
-}
-
-#[test]
-fn parses_source_scoped_openbao_credential_id() {
-    let id = CredentialId::new("openbao:tenant-1:discord:bot_token").unwrap();
-
-    let credential = openbao_credential_ref_from_id(id, CredentialVersion::initial()).unwrap();
-
-    assert_eq!(credential.owner_id().as_str(), "tenant-1");
-    assert_eq!(credential.source(), SourceKind::Discord);
-    assert_eq!(credential.scope_key(), "discord");
-    assert_eq!(credential.kind(), CredentialKind::BotToken);
-}
-
-#[test]
-fn parses_datadog_openbao_credential_id() {
-    let id = CredentialId::new("openbao:tenant-1:datadog/primary:webhook_token").unwrap();
-
-    let credential = openbao_credential_ref_from_id(id, CredentialVersion::initial()).unwrap();
-
-    assert_eq!(credential.source(), SourceKind::Datadog);
-    assert_eq!(credential.scope_key(), "datadog/primary");
-    assert_eq!(credential.kind(), CredentialKind::WebhookToken);
-}
-
-#[test]
-fn parses_owner_id_with_colons_from_the_right() {
-    let id = CredentialId::new("openbao:tenant:region:github/primary:webhook_secret").unwrap();
-
-    let credential = openbao_credential_ref_from_id(id, CredentialVersion::initial()).unwrap();
-
-    assert_eq!(credential.owner_id().as_str(), "tenant:region");
-    assert_eq!(credential.scope_key(), "github/primary");
-    assert_eq!(credential.kind(), CredentialKind::WebhookSecret);
-}
-
-#[test]
-fn rejects_unknown_openbao_scope_source() {
-    let id = CredentialId::new("openbao:tenant-1:unknown/primary:webhook_secret").unwrap();
-
-    let error = openbao_credential_ref_from_id(id, CredentialVersion::initial()).unwrap_err();
-
-    assert!(matches!(
-        error,
-        OpenBaoCredentialIdParseError::InvalidScope {
-            source: OpenBaoScopeKeyParseError::UnknownSource,
-            ..
-        }
-    ));
-}
-
-#[test]
 fn rotated_credential_ref_preserves_integration_scope() {
     let scope = CredentialScope::integration(
         CredentialOwnerId::new("tenant-1").unwrap(),
@@ -398,39 +332,6 @@ fn debug_redacts_the_token() {
     assert!(debug.contains("openbao.example"));
     assert!(debug.contains("***"));
     assert!(!debug.contains("s3cr3t-root-token"));
-}
-
-#[test]
-fn rejects_credential_id_without_the_openbao_prefix() {
-    let id = CredentialId::new("tenant-1:discord:bot_token").unwrap();
-
-    let error = openbao_credential_ref_from_id(id, CredentialVersion::initial()).unwrap_err();
-
-    assert!(matches!(error, OpenBaoCredentialIdParseError::MissingPrefix { .. }));
-}
-
-#[test]
-fn rejects_credential_id_without_owner_scope_and_kind() {
-    let id = CredentialId::new("openbao:discord").unwrap();
-
-    let error = openbao_credential_ref_from_id(id, CredentialVersion::initial()).unwrap_err();
-
-    assert!(matches!(error, OpenBaoCredentialIdParseError::InvalidShape { .. }));
-}
-
-#[test]
-fn rejects_scope_that_is_neither_a_source_nor_an_integration() {
-    let id = CredentialId::new("openbao:tenant-1:primary:webhook_secret").unwrap();
-
-    let error = openbao_credential_ref_from_id(id, CredentialVersion::initial()).unwrap_err();
-
-    assert!(matches!(
-        error,
-        OpenBaoCredentialIdParseError::InvalidScope {
-            source: OpenBaoScopeKeyParseError::MissingSource,
-            ..
-        }
-    ));
 }
 
 #[tokio::test]

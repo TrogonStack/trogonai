@@ -26,7 +26,7 @@ pub use credential_fingerprint::{CredentialFingerprint, CredentialFingerprintErr
 pub use credential_id::{CredentialId, CredentialIdError};
 pub use credential_kind::CredentialKind;
 pub use credential_metadata::CredentialMetadata;
-pub use credential_owner_id::{CredentialOwnerId, CredentialOwnerIdError};
+pub use credential_owner_id::CredentialOwnerId;
 pub use credential_path::CredentialPath;
 pub use credential_ref::CredentialRef;
 pub use credential_scope::CredentialScope;

@@ -14,8 +14,8 @@ use trogonai_proto::gateway::credentials::{CredentialEventPayloadError, Credenti
 
 use crate::constants::METER_NAME;
 use crate::credential::commands::domain::{
-    CredentialDestroyReason, CredentialDestroyReasonError, CredentialId, CredentialIdError, CredentialKind,
-    CredentialOwnerId, CredentialRef, CredentialScope, CredentialVersion, SourceKind,
+    CredentialDestroyReason, CredentialDestroyReasonError, CredentialId, CredentialKind, CredentialRef,
+    CredentialScope, CredentialVersion, SourceKind,
 };
 use crate::credential::commands::proto::{
     CredentialProtoDecodeError, active_credential_ref, decode_destroy_requested_state, decode_destroyed_state,
@@ -28,7 +28,6 @@ use crate::credential::{
     RevokeCredential, evolve, initial_state,
 };
 use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeProjectionRefreshError};
-use crate::secret_store::openbao_secret_store::{OpenBaoCredentialIdParseError, openbao_credential_ref_from_id};
 use crate::secret_store::{
     SecretDestroyReason, SecretStoreDestroy, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke, SecretStoreRotate,
 };
@@ -238,12 +237,12 @@ pub(crate) enum CredentialActivationRecoveryCommand {
 }
 
 pub(crate) fn activation_recovery_command(
-    stream_id: &str,
+    credential_id: &CredentialId,
     state: &state_v1::CredentialStateSnapshot,
 ) -> Result<Option<CredentialActivationRecoveryCommand>, CredentialActivationRecoveryPlanError> {
     match state.state.as_ref() {
         Some(CredentialStateSnapshotCase::PendingWrite(pending)) => {
-            let credential = pending_write_credential_ref(stream_id, pending)?;
+            let credential = pending_write_credential_ref(credential_id, pending)?;
             Ok(Some(CredentialActivationRecoveryCommand::Write(
                 RecoverCredentialWriteActivation::new(credential),
             )))
@@ -271,46 +270,34 @@ pub(crate) fn activation_recovery_command(
 }
 
 fn pending_write_credential_ref(
-    stream_id: &str,
+    credential_id: &CredentialId,
     pending: &state_v1::PendingCredentialWriteState,
 ) -> Result<CredentialRef, CredentialActivationRecoveryPlanError> {
-    let (pending_id, pending_scope, pending_kind) =
+    let (pending_id, scope, kind) =
         decode_pending_write_state(pending).map_err(CredentialActivationRecoveryPlanError::InvalidState)?;
-    let credential_id =
-        CredentialId::new(stream_id).map_err(CredentialActivationRecoveryPlanError::InvalidCredentialId)?;
-    let credential = openbao_credential_ref_from_id(credential_id, CredentialVersion::initial())
-        .map_err(CredentialActivationRecoveryPlanError::InvalidOpenBaoCredentialId)?;
-
-    if credential.id() != &pending_id || !credential.is_scoped_to(&pending_scope) || credential.kind() != pending_kind {
+    if pending_id != *credential_id {
         return Err(CredentialActivationRecoveryPlanError::PendingWriteMismatch {
-            credential,
-            expected_id: pending_id,
-            expected_owner_id: pending_scope.owner_id().clone(),
-            expected_source: pending_scope.source_kind(),
-            expected_kind: pending_kind,
+            expected: credential_id.clone(),
+            actual: pending_id,
         });
     }
 
-    Ok(credential)
+    Ok(CredentialRef::new(
+        pending_id,
+        CredentialVersion::initial(),
+        &scope,
+        kind,
+    ))
 }
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum CredentialActivationRecoveryPlanError {
-    #[error("credential recovery stream id is invalid: {0}")]
-    InvalidCredentialId(#[source] CredentialIdError),
-    #[error("credential recovery stream id is not an OpenBao credential id: {0}")]
-    InvalidOpenBaoCredentialId(#[source] OpenBaoCredentialIdParseError),
     #[error("credential recovery persisted state is invalid: {0}")]
     InvalidState(#[source] CredentialProtoDecodeError),
-    #[error(
-        "credential recovery pending write does not match parsed credential ref: expected {expected_id} {expected_owner_id} {expected_source} {expected_kind}, got {credential}"
-    )]
+    #[error("credential recovery pending write belongs to '{actual}', not stream '{expected}'")]
     PendingWriteMismatch {
-        credential: CredentialRef,
-        expected_id: CredentialId,
-        expected_owner_id: CredentialOwnerId,
-        expected_source: SourceKind,
-        expected_kind: CredentialKind,
+        expected: CredentialId,
+        actual: CredentialId,
     },
 }
 

@@ -15,10 +15,11 @@ use trogon_decider_runtime::{
 
 use super::*;
 use crate::credential::commands::domain::{
-    CredentialFingerprint, CredentialMetadata, CredentialStatus, StorageBackend,
+    CredentialFingerprint, CredentialMetadata, CredentialOwnerId, CredentialStatus, StorageBackend,
 };
 use crate::credential::commands::proto::{
-    activated_to_proto, decode_active_state, rotation_requested_to_proto, write_requested_to_proto,
+    activated_to_proto, decode_active_state, pending_write_to_proto_state, rotation_requested_to_proto,
+    write_requested_to_proto,
 };
 use crate::credential_runtime_projection::{
     RuntimeCredentialError, RuntimeCredentialRegistry, RuntimeIntegrationKey, RuntimeIntegrationProjection,
@@ -361,7 +362,7 @@ impl OpenBaoServer {
 fn recovery_plan_builds_write_activation_command_for_pending_write() {
     let state = evolve(initial_state(), &write_requested_event()).unwrap();
 
-    let command = activation_recovery_command(credential_id().as_str(), &state).unwrap();
+    let command = activation_recovery_command(&credential_id(), &state).unwrap();
 
     assert_eq!(
         command,
@@ -369,6 +370,42 @@ fn recovery_plan_builds_write_activation_command_for_pending_write() {
             RecoverCredentialWriteActivation::new(credential_ref(1))
         ))
     );
+}
+
+#[test]
+fn recovery_plan_builds_write_activation_from_the_pending_scope_for_any_backend() {
+    let credential_id = CredentialId::new("memory:github/primary:webhook_secret:1").unwrap();
+    let state = state_v1::CredentialStateSnapshot {
+        state: Some(pending_write_to_proto_state(&credential_id, &scope(), CredentialKind::WebhookSecret).into()),
+    };
+
+    let command = activation_recovery_command(&credential_id, &state).unwrap();
+
+    assert_eq!(
+        command,
+        Some(CredentialActivationRecoveryCommand::Write(
+            RecoverCredentialWriteActivation::new(CredentialRef::new(
+                credential_id,
+                CredentialVersion::initial(),
+                &scope(),
+                CredentialKind::WebhookSecret,
+            ))
+        ))
+    );
+}
+
+#[test]
+fn recovery_plan_rejects_a_pending_write_from_another_stream() {
+    let state = evolve(initial_state(), &write_requested_event()).unwrap();
+    let stream_id = source_scoped_credential_id();
+
+    let error = activation_recovery_command(&stream_id, &state).unwrap_err();
+
+    assert!(matches!(
+        error,
+        CredentialActivationRecoveryPlanError::PendingWriteMismatch { expected, actual }
+            if expected == stream_id && actual == credential_id()
+    ));
 }
 
 #[test]
@@ -388,7 +425,7 @@ fn recovery_plan_builds_rotation_activation_command_for_pending_rotation() {
     .try_fold(initial_state(), |state, event| evolve(state, &event))
     .unwrap();
 
-    let command = activation_recovery_command(credential_id().as_str(), &state).unwrap();
+    let command = activation_recovery_command(&credential_id(), &state).unwrap();
 
     assert_eq!(
         command,
@@ -411,7 +448,7 @@ fn recovery_plan_skips_completed_state() {
         .try_fold(initial_state(), |state, event| evolve(state, &event))
         .unwrap();
 
-    let command = activation_recovery_command(credential_id().as_str(), &state).unwrap();
+    let command = activation_recovery_command(&credential_id(), &state).unwrap();
 
     assert_eq!(command, None);
 }

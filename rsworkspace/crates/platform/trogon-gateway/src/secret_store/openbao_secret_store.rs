@@ -16,10 +16,9 @@ use super::{
     SecretStorePut, SecretStoreRevoke, SecretStoreRotate, fingerprint,
 };
 use crate::credential::commands::domain::{
-    CredentialId, CredentialIdError, CredentialKind, CredentialMetadata, CredentialOwnerId, CredentialOwnerIdError,
-    CredentialPath, CredentialRef, CredentialScope, CredentialStatus, CredentialVersion, SourceKind, StorageBackend,
+    CredentialId, CredentialIdError, CredentialKind, CredentialMetadata, CredentialPath, CredentialRef,
+    CredentialScope, CredentialStatus, CredentialVersion, StorageBackend,
 };
-use crate::source_integration_id::SourceIntegrationId;
 
 pub(crate) fn openbao_credential_id(
     scope: &CredentialScope,
@@ -31,82 +30,6 @@ pub(crate) fn openbao_credential_id(
         scope.scope_key(),
         kind.as_str()
     ))
-}
-
-pub(crate) fn openbao_credential_ref_from_id(
-    id: CredentialId,
-    version: CredentialVersion,
-) -> Result<CredentialRef, OpenBaoCredentialIdParseError> {
-    let value = id.as_str();
-    let Some(rest) = value.strip_prefix("openbao:") else {
-        return Err(OpenBaoCredentialIdParseError::MissingPrefix { id });
-    };
-    let Some((owner_id, scope_key, kind)) = split_openbao_credential_id(rest) else {
-        return Err(OpenBaoCredentialIdParseError::InvalidShape { id });
-    };
-    let owner_id = CredentialOwnerId::new(owner_id)
-        .map_err(|source| OpenBaoCredentialIdParseError::InvalidOwner { id: id.clone(), source })?;
-    let kind =
-        CredentialKind::parse(kind).ok_or_else(|| OpenBaoCredentialIdParseError::InvalidKind { id: id.clone() })?;
-    let scope = openbao_scope_from_scope_key(owner_id, scope_key)
-        .map_err(|source| OpenBaoCredentialIdParseError::InvalidScope { id: id.clone(), source })?;
-
-    Ok(CredentialRef::new(id, version, &scope, kind))
-}
-
-fn split_openbao_credential_id(value: &str) -> Option<(&str, &str, &str)> {
-    let (owner_and_scope, kind) = value.rsplit_once(':')?;
-    let (owner_id, scope_key) = owner_and_scope.rsplit_once(':')?;
-    Some((owner_id, scope_key, kind))
-}
-
-fn openbao_scope_from_scope_key(
-    owner_id: CredentialOwnerId,
-    scope_key: &str,
-) -> Result<CredentialScope, OpenBaoScopeKeyParseError> {
-    if let Some(source) = SourceKind::parse(scope_key) {
-        return Ok(CredentialScope::source(owner_id, source));
-    }
-
-    let Some((source, integration_id)) = scope_key.split_once('/') else {
-        return Err(OpenBaoScopeKeyParseError::MissingSource);
-    };
-    let source = SourceKind::parse(source).ok_or(OpenBaoScopeKeyParseError::UnknownSource)?;
-    let integration_id =
-        SourceIntegrationId::new(integration_id).map_err(OpenBaoScopeKeyParseError::InvalidIntegration)?;
-    Ok(CredentialScope::integration(owner_id, source, integration_id))
-}
-
-#[derive(Debug, thiserror::Error)]
-pub(crate) enum OpenBaoCredentialIdParseError {
-    #[error("OpenBao credential id is missing expected prefix: {id}")]
-    MissingPrefix { id: CredentialId },
-    #[error("OpenBao credential id has invalid shape: {id}")]
-    InvalidShape { id: CredentialId },
-    #[error("OpenBao credential id has invalid owner: {id}")]
-    InvalidOwner {
-        id: CredentialId,
-        #[source]
-        source: CredentialOwnerIdError,
-    },
-    #[error("OpenBao credential id has invalid scope: {id}")]
-    InvalidScope {
-        id: CredentialId,
-        #[source]
-        source: OpenBaoScopeKeyParseError,
-    },
-    #[error("OpenBao credential id has invalid kind: {id}")]
-    InvalidKind { id: CredentialId },
-}
-
-#[derive(Debug, thiserror::Error)]
-pub(crate) enum OpenBaoScopeKeyParseError {
-    #[error("scope key is missing source")]
-    MissingSource,
-    #[error("scope key source is unknown")]
-    UnknownSource,
-    #[error("scope key integration id is invalid")]
-    InvalidIntegration(#[source] crate::source_integration_id::SourceIntegrationIdError),
 }
 
 #[derive(Clone)]

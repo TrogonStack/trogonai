@@ -535,7 +535,7 @@ where
             }
         };
 
-        match activation_recovery_command(credential_id.as_str(), &state) {
+        match activation_recovery_command(&credential_id, &state) {
             Ok(Some(command)) => {
                 report.planned_recoveries += 1;
                 commands.push(PlannedCredentialRecovery { credential_id, command });
