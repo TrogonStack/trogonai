@@ -6,13 +6,12 @@ This page describes the intended design recorded in
 [ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) and
 [ADR#0033](../adr/0033-key-custody-product-model.md) (both draft).
 The standalone secrets-service topology is a target, not a claim of deployed
-behavior. The gateway contains an embedded prototype under
-`rsworkspace/crates/platform/trogon-gateway/src/credential` and its secret-store
-adapter. [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md)
-records that the write model was validated by that prototype and requires
-extracting its mechanics into the secrets service. Proposed
+behavior. [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md)
+records that the write model was validated by a credential prototype embedded
+in the gateway, with its own secret-store adapter, and requires extracting its
+mechanics into the secrets service. Proposed
 [ADR#0074](../adr/0074-credential-platform-extraction-boundary.md) leaves that
-extraction unfinished. Source presence does not establish standalone-service
+extraction unfinished. That prototype does not establish standalone-service
 readiness.
 
 [Provider Credential Custody](./provider-credential-custody.md) explains the

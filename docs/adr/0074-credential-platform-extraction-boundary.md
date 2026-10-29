@@ -86,8 +86,13 @@ scheduled.
 #### Q1: The resolve surface has a value verb and an operation verb
 
 Both. [ADR#0023](./0023-secret-management-and-key-custody-direction.md) Decision 7 already floats verifying webhook HMACs through
-Transit so the signing secret never leaves OpenBao. That covers ten of the
-twelve sources and takes the gateway off the plaintext path almost entirely.
+Transit so the signing secret never leaves OpenBao. That verification is the
+operation verb, and it is a `verify` call on [ADR#0023](./0023-secret-management-and-key-custody-direction.md)'s `KeyManagement` port: the
+secrets service runs it against Transit and returns a verdict. The gateway
+reaches it through that port's secrets-service client and never calls Transit
+directly, because [ADR#0023](./0023-secret-management-and-key-custody-direction.md)'s single-client rule keeps the secrets service the
+only OpenBao client. That covers ten of the twelve sources and takes the
+gateway off the plaintext path almost entirely.
 The value verb remains for Discord's bot token and for outbound provider
 calls, which need the value itself. A new source uses the operation verb
 unless it can show it needs the value.
@@ -101,9 +106,13 @@ The gateway keeps `RuntimeCredentialCache`, and [ADR#0023](./0023-secret-managem
 amended: a consumer may hold resolved values as bounded ambient state under
 the [ADR#0049](./0049-revocation-latency-target.md) bound of 300s plus 30s
 jitter behind fan-out invalidation, not only for the duration of one
-in-flight operation. The Discord bot token is held for the life of its
-WebSocket connection, evicted on the revocation event, and re-resolved on
-reconnect.
+in-flight operation. That bound applies to consumers that resolve per use. A
+long-lived connection, such as the Discord gateway WebSocket, keeps the bot
+token it connected with until that connection ends, and the revocation event
+evicts only the cached copy. A revoke or rotate at the provider ends the
+provider-side session, and the next connect resolves fresh. The residual
+exposure window for a held connection therefore ends at reconnect, not within
+the [ADR#0049](./0049-revocation-latency-target.md) bound.
 
 Moving the cache into the service was priced and rejected: it puts a NATS
 round trip on every webhook, and the staleness bound is enforced identically
@@ -131,6 +140,13 @@ paths are not rewritten: the path a credential was written under stays
 recorded in its aggregate as adapter-private state, so the path convention
 [ADR#0046](./0046-project-anchored-resource-hierarchy.md) ratified holds, and so does its rule that an id carries the project
 and nothing above it, because an opaque id carries no hierarchy at all.
+
+The migration contract is that this is the only re-key. It runs once, as that
+first extraction task, while `CredentialRef` is still an in-process type. From
+then on `CredentialId` values and stream identities are preserved verbatim
+through the rest of the extraction: relocating the aggregate into the secrets
+service re-keys nothing, and projections and references keep working without
+a mapping table.
 
 The management API already emits `PublicCredentialId`, composed from owner,
 scope, and kind, so no storage backend is named there. The `StorageBackend`

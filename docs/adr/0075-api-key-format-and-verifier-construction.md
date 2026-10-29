@@ -66,6 +66,12 @@ tg_<env>_<key_id>_<secret><checksum>
   fixed 6 characters. It lets SDKs and scanners reject typos and
   truncations offline, with no lookup and no verification attempt.
 
+The secret and the checksum share one canonical base62: the alphabet is
+`0-9A-Za-z` in that order, the value is encoded big-endian (the secret's 32
+bytes read as one unsigned integer, the checksum as the unsigned 32-bit
+CRC32C, most significant digit first), and the output is fixed width,
+left-padded with `0` to 43 characters for the secret and 6 for the checksum.
+
 The scanner-facing pattern is fixed by the above:
 
 ```text
@@ -88,6 +94,12 @@ verifier_digest = HMAC-SHA-256(
 )
 ```
 
+The message is a byte string: `"tgapikey/v1"` contributes the ASCII bytes of
+the label, each `0x00` is a single zero byte separating the fields, `key_id`
+contributes the ASCII characters of `<key_id>` exactly as printed in the key
+rather than the decoded ULID bytes, and `secret` contributes the 32 raw CSPRNG
+bytes rather than their base62 text.
+
 The domain-separation label and the bound `key_id` mean a digest cannot be
 transplanted onto a different key record. Comparison is constant time, the
 same discipline the internal admin API's token check already uses.
@@ -105,13 +117,21 @@ still verifying under `v(n)` until they are rerolled or expire) rather than
 a fleet-wide forced reroll, which would otherwise be the only way to
 rotate a pepper the platform cannot re-derive digests without.
 
+Rollover keeps every record verifiable throughout. A verifying process loads
+every non-retired pepper version at start. A new version is published to every
+verifier, by rolling restart or re-resolve, before any key is minted under it,
+so no process meets a record whose version it lacks. A version is retired only
+when no stored verifier record references it.
+
 ### 3. Pepper custody: OpenBao KV, resolved at boot, never on the request path
 
-The pepper is stored in OpenBao KV and resolved once at process start by
-the verifying service, through the secrets service as an opaque ref per
+The pepper is stored in OpenBao KV and resolved by the verifying service,
+through the secrets service as an opaque ref per
 [ADR#0074](./0074-credential-platform-extraction-boundary.md), not by the
-verifier holding an OpenBao client of its own. It is held in memory for the
-process lifetime.
+verifier holding an OpenBao client of its own. Every non-retired version is
+resolved at process start, a newly published version arrives by re-resolve or
+rolling restart, and no resolution happens on the request path. Resolved
+versions are held in memory.
 
 - OpenBao Transit is rejected: it would put a round trip on every
   authenticated request and make caller authentication unavailable exactly
@@ -130,9 +150,9 @@ wrapped in `SecretString` like every other material on the platform, so
 redaction is structural rather than a formatting rule, matching the
 existing no-plaintext-in-logs and no-plaintext-in-traces guarantees.
 
-Failure to resolve the pepper at boot is fatal. The verifying service
-refuses to start rather than starting with bearer verification silently
-disabled or failing open.
+Failure to resolve any non-retired pepper version at boot is fatal. The
+verifying service refuses to start rather than starting with bearer
+verification silently disabled or failing open.
 
 ### 4. Signed keys share the identifier, not the format
 

@@ -451,9 +451,11 @@ DECISION NEEDED: does the decider's write_failed map onto CredentialState
 failed as a recoverable state, or is the
 resubmission_required transition needed in evolve() first?
 recommendation: add the resubmission_required transition to the decider
-before wiring CredentialState failed to any retry UI. Today, offering a
-"retry" action against a write_failed credential would offer an action the
-decider has no path to accept.
+before wiring CredentialState failed to resubmit secret. The acceptance
+scenarios let the same credential id be written again after a failed write,
+as a new attempt under a new idempotency key, while retry stays a
+metadata-only lookup that never re-runs the write. Today the decider has no
+path to accept that second write.
 
 DECIDED ([ADR#0046](../../adr/0046-project-anchored-resource-hierarchy.md)): the hierarchy is organization over project, and the
 owner boundary is the project: an immutable project id. Resource names,
@@ -1571,16 +1573,18 @@ Then the client submits exactly once, clears the plaintext secret from
 
 Given a user has already submitted a create request whose response has not
   arrived yet
-When the same client, or a retry from a flaky connection, resubmits the
-  identical request with the same idempotency key
-Then the server treats it as a replay of the same operation, and the UI
-  must not show a second pending credential.
+When the same client, or a retry from a flaky connection, asks for the
+  outcome by operation id or idempotency key
+Then the server answers from a metadata-only lookup that never carries or
+  replays the secret, and the UI must not show a second pending credential.
 
 Given a create request fails with secret_write_failed while its operation
   is still active
 When the UI polls the operation
-Then the UI offers a retry using the same idempotency key, rather than
-  starting a new create.
+Then the UI offers resubmit secret: a fresh secret entry, sent as a new
+  attempt for the same credential id under a new idempotency key, which gets
+  a fresh ledger entry. The failed write is never replayed from the
+  idempotency ledger.
 
 Given a create request fails with secret_write_failed and the operation is
   no longer active
@@ -1661,32 +1665,37 @@ parse gap should be fixed in code regardless of which kinds ship first.
 
 The gateway performs the immediate write, rotate, revoke, and destroy sagas
 against OpenBao today, with a recovery worker for stuck activations. The
-target sagas below add a database intent and an outbox, neither of which
-exists. Revoke currently deletes from OpenBao synchronously in the same
-request rather than deferring to async cleanup.
+target sagas below keep that shape: the JetStream credential event stream
+records intent and outcome, idempotency and operation records live in NATS
+KV, and consumers read the stream, so there is no database intent and no
+outbox ([ADR#0047](../../adr/0047-event-sourced-credential-metadata.md),
+[ADR#0074](../../adr/0074-credential-platform-extraction-boundary.md) Q3).
+Operation records do not exist yet. Revoke currently deletes from OpenBao
+synchronously in the same request rather than deferring to async cleanup.
 
 ### Create saga
 
 ```text
 1. Authorize command.
-2. Create scoped idempotency record.
-3. Create DB credential/version intent as pending_secret_write.
+2. Create scoped idempotency record in NATS KV.
+3. Append WriteRequested to the credential event stream (pending_write).
 4. Write raw secret to OpenBao.
-5. Mark version active.
-6. Emit outbox event.
-7. Gateway refreshes projection.
+5. Append Activated with metadata only (active).
+6. Complete the idempotency and operation records in NATS KV.
+7. Gateway refreshes its projection from the event stream.
 ```
 
 ### Rotation saga
 
 ```text
 1. Keep current active version active.
-2. Create new pending version.
+2. Append RotationRequested (rotation_pending).
 3. Write new secret to OpenBao.
 4. Validate if the provider supports validation.
-5. Promote new version to active.
-6. Mark old version previous or revoked.
-7. Emit outbox event.
+5. Append Rotated to promote the new version to active; on failure, append
+   RotationFailed, which restores the current active version.
+6. Record the old version as previous or revoked on the event stream.
+7. Gateway refreshes its projection and cache from the event stream.
 ```
 
 ### Cleanup rules
@@ -1732,8 +1741,8 @@ Provider -> DB
 Acceptance for this area:
 
 - every midway failure has a test;
-- an OpenBao write success plus a DB activation failure can be reconciled;
-- a DB pending with no OpenBao secret expires to resubmission;
+- an OpenBao write success plus a failed `Activated` append can be reconciled;
+- a `pending_write` credential with no OpenBao secret expires to resubmission;
 - cleanup is idempotent.
 
 ### Incomplete provision read model (not built)
@@ -2031,9 +2040,9 @@ signed request replay is rejected       (API key platform)
 delegation ceiling is enforced          (API key platform)
 rate limiter fails open on ordinary     (API key platform)
   keyspaces and closed on management
-create saga with DB intent and outbox   (sagas)
+target create saga                      (sagas)
 cleanup worker                          (worker does not exist)
-no plaintext in outbox                  (outbox does not exist)
+no plaintext in operation records       (operation records do not exist)
 ```
 
 The canonical target vectors are the one entry above that is not blocked on
@@ -2045,9 +2054,9 @@ SDK authors before any verifier exists, which is the order [ADR#0051](../../adr/
 Failure injection, none of it written:
 
 ```text
-DB intent write fails
+WriteRequested append fails
 OpenBao write outcome unknown
-DB activation succeeds but outbox publish fails
+Activated append succeeds but idempotency completion fails
 cleanup worker fails
 provider revocation fails
 client loses one-time API key response

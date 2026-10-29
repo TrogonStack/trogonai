@@ -124,6 +124,12 @@ dedicated to one tenant, never which vendor implements it:
 | Customer Google Cloud KMS key | Customer | One tenant | Customer managed key |
 | Customer-operated OpenBao Transit | Customer | One tenant | Customer managed key |
 
+A platform-owned AWS KMS or Google Cloud KMS key is allowed only once that
+provider's key states are mapped onto the platform-managed key states in
+[Key States](../architecture/key-states.md). Those states describe only an
+OpenBao Transit key today, and until that mapping exists the platform does not
+offer that alternative.
+
 Product surfaces (console, docs, APIs) present the tiers, and provider
 selection appears only inside the customer-managed flow. Adding an adapter
 under [ADR#0030](./0030-customer-controlled-key-backend-routing.md)'s rules
@@ -143,10 +149,14 @@ The default platform backend is OpenBao Transit in the platform's own OpenBao,
 sealed by a cloud KMS key under
 [ADR#0052](./0052-cloud-kms-production-seal.md); in the hosted deployment that
 seal is AWS KMS. A platform-owned AWS KMS or Google Cloud KMS registration is
-an allowed alternative when a hardware-rooted managed tier is required, and it
-carries the key hygiene [ADR#0052](./0052-cloud-kms-production-seal.md)
-requires of the seal key: provider-generated material, deliberate rotation, old
-key versions never destroyed, deletion protection, and a tested recovery path.
+an allowed alternative once its key states are mapped as the tier table
+requires, and it carries the key hygiene
+[ADR#0052](./0052-cloud-kms-production-seal.md) requires of the seal key:
+provider-generated material, deliberate rotation, old key versions never
+destroyed, deletion protection, and a tested recovery path. The platform
+claims no hardware-rooted property for the managed or dedicated tier on any
+backend; a customer whose requirement is hardware-rooted custody chooses the
+customer managed tier with a provider that terminates in hardware.
 Which backend the platform runs is a platform operations decision recorded in
 deployment capability and routing policy. It is never a tenant-visible setting
 and it does not change the tier list. Moving the platform's tiers to another

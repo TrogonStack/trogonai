@@ -2087,7 +2087,12 @@ Cache policy:
 For webhook verification, the gateway can usually cache the credential for a
 short period because providers retry quickly and request volume can be bursty.
 For bot tokens and socket-mode connections, cache for the life of the connection
-but re-read on reconnect.
+but re-read on reconnect. The cache bound applies to consumers that resolve per
+use. A held connection keeps the credential it connected with until that
+connection ends, and invalidation evicts only the cached copy. A revoke or
+rotate at the provider ends the provider-side session, and the next connect
+resolves fresh, so the residual exposure window for a held connection ends at
+reconnect.
 
 For equality-style credentials that use verifier-only storage, cache the verifier
 instead of raw material.

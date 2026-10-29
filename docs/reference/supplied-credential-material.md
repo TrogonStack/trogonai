@@ -1,10 +1,10 @@
 # Supplied Credential Material
 
 Status: proposed contract requirements. No new protobuf or runtime API is
-implemented by this page. The existing prototype's
-`proto/trogonai/gateway/credentials/commands/v1/commands.proto` accepts a string
-secret. The shape below is a candidate replacement to evaluate when finalizing
-the secrets-service boundary, not a description of that prototype API.
+implemented by this page. The existing prototype's credential write command
+accepts the secret as a plain string. The shape below is a candidate
+replacement to evaluate when finalizing the secrets-service boundary, not a
+description of that prototype API.
 
 For ownership and event-stream boundaries, see
 [Provider Credential Custody](../architecture/provider-credential-custody.md)

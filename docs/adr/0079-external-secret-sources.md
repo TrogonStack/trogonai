@@ -57,9 +57,12 @@ credential enters a provider stream.
 Resolving a source-backed reference reads the provider's current version at
 resolve time: the `AWSCURRENT` staging label in AWS Secrets Manager, the latest
 enabled version in Google Secret Manager, and the current KV v2 version in
-OpenBao. The first version does not offer pinning to a specific provider
-version. A reference therefore follows the customer's rotation without any
-platform action.
+OpenBao. Google Secret Manager reads through `latest` or an alias are not
+strongly consistent, and its other operations converge eventually, typically
+within minutes but possibly over hours, so such a read can keep returning the
+previous version for a while after a rotation. The first version does not
+offer pinning to a specific provider version. A reference therefore follows
+the customer's rotation without any platform action.
 
 ### 3. The customer owns rotation; the platform owns validation
 
@@ -79,19 +82,28 @@ Resolved values are cached under the
 [ADR#0049](./0049-revocation-latency-target.md) bound of 300 seconds plus up to
 30 seconds of jitter, in the same caches and with the same fan-out
 invalidation as platform-stored material. The first version subscribes to no
-provider change notifications; a rotation at the source is observed within the
-bound. Revoking the reference on the platform invalidates immediately through
-the existing revocation event.
+provider change notifications. The bound limits platform-side cache expiry and
+applies to consumers that resolve per use, whose next resolve after expiry
+reads the source again. How soon that read sees a rotation is not bounded by
+the platform: it depends on the provider's consistency model, as with Google
+Secret Manager's `latest` reads. A long-lived connection, such as the Discord
+gateway WebSocket, keeps the credential it connected with until that
+connection ends. A revoke or rotate at the credential's issuer (Discord, for a
+bot token) ends that session, and the next connect resolves fresh, so the
+residual exposure window for a held connection ends at reconnect. Revoking the
+reference on the platform invalidates cached copies immediately through the
+existing revocation event.
 
 This narrows [ADR#0049](./0049-revocation-latency-target.md) for source-backed
 references. Its event path stays the operative mechanism for every change the
 platform makes, including revoking the reference. A change made at the source,
 including the customer revoking the platform's access there, raises no platform
-event in the first version, so the bound is the guarantee for it. This ADR
-records that as an accepted limit of source-backed references, not as a failure
-of the event path, and the change-notification subscription below is the route
-to lifting it. A customer who needs immediate effect revokes the reference on
-the platform.
+event in the first version, so platform-side cache expiry under the bound is
+the only guarantee for it. This ADR records that as an accepted limit of
+source-backed references, not as a failure of the event path, and the
+change-notification subscription below is the route to lifting it. A customer
+who needs immediate effect revokes the reference on the platform, and for a
+held connection also revokes or rotates the credential at its issuer.
 
 ### 5. Disappearance fails closed
 
@@ -157,8 +169,9 @@ sources behind the same reference, not replacement stores.
   [Provider Credential Custody](../architecture/provider-credential-custody.md)
   asks for holds.
 - Customers get rotation without platform coordination, and accept that a
-  rotated value is observed within the
-  [ADR#0049](./0049-revocation-latency-target.md) bound rather than instantly.
+  rotated value is observed once the
+  [ADR#0049](./0049-revocation-latency-target.md) cache bound expires and the
+  source exposes the new version, rather than instantly.
 - An external source outage is a tenant-visible degradation, never a silent
   fallback, which is the posture
   [ADR#0030](./0030-customer-controlled-key-backend-routing.md) takes for

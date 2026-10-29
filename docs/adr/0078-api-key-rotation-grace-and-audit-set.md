@@ -37,8 +37,8 @@ three angles.
 ### 1. Reroll is planned rotation; revoke is compromise
 
 Reroll issues a new key that inherits policy, identity, roles, permissions,
-scopes, and limits, and leaves the old key valid for a grace window. Revoke
-takes effect at the next verification with no window.
+and limits, and leaves the old key valid for a grace window. Revoke takes
+effect at the next verification with no window.
 
 Keeping the two separate is what makes a non-zero default grace safe.
 Nobody has to choose between a rotation that will not break their fleet and
