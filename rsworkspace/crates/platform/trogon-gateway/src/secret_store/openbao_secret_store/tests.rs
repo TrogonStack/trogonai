@@ -1,11 +1,21 @@
+use std::net::SocketAddr;
+
 use crate::credential::commands::domain::{CredentialOwnerId, SourceKind};
 use crate::source_integration_id::SourceIntegrationId;
-use serde_json::json;
+use axum::Json;
+use axum::Router;
+use axum::body::Bytes;
+use axum::extract::State;
+use axum::http::{Method, StatusCode, Uri};
+use axum::response::{IntoResponse, Response};
+use serde_json::{Value, json};
 use testcontainers_modules::testcontainers::{
     ContainerAsync, GenericImage, ImageExt,
     core::{IntoContainerPort, WaitFor},
     runners::AsyncRunner,
 };
+use tokio::net::TcpListener;
+use tokio::sync::Mutex;
 use trogon_std::env::{ReadEnv, SystemEnv};
 
 use super::*;
@@ -126,6 +136,83 @@ fn rotated_credential_ref_preserves_integration_scope() {
     assert_eq!(rotated.id(), credential.id());
     assert_eq!(rotated.kind(), CredentialKind::WebhookSecret);
     assert_eq!(rotated.version().get(), 2);
+}
+
+#[derive(Clone)]
+struct FakeOpenBao {
+    address: SocketAddr,
+    metadata: Option<Value>,
+    requests: Arc<Mutex<Vec<FakeOpenBaoRequest>>>,
+}
+
+struct FakeOpenBaoRequest {
+    method: Method,
+    path: String,
+    body: Value,
+}
+
+impl FakeOpenBao {
+    async fn start(metadata: Option<Value>) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let openbao = Self {
+            address: listener.local_addr().unwrap(),
+            metadata,
+            requests: Arc::default(),
+        };
+        let app = Router::new().fallback(answer_as_openbao).with_state(openbao.clone());
+        tokio::spawn(axum::serve(listener, app).into_future());
+        openbao
+    }
+
+    fn store(&self) -> OpenBaoSecretStore {
+        OpenBaoSecretStore::new(format!("http://{}", self.address), OPENBAO_DEV_ROOT_TOKEN).unwrap()
+    }
+
+    async fn posted_to(&self, endpoint: OpenBaoEndpoint) -> Vec<Value> {
+        let prefix = format!("/v1/secret/{}/", endpoint.as_str());
+        self.requests
+            .lock()
+            .await
+            .iter()
+            .filter(|request| request.method == Method::POST && request.path.starts_with(&prefix))
+            .map(|request| request.body.clone())
+            .collect()
+    }
+}
+
+async fn answer_as_openbao(State(openbao): State<FakeOpenBao>, method: Method, uri: Uri, body: Bytes) -> Response {
+    let response = match (&method, &openbao.metadata) {
+        (&Method::GET, Some(metadata)) => Json(json!({ "data": metadata })).into_response(),
+        (&Method::GET, None) => (StatusCode::NOT_FOUND, Json(json!({ "errors": [] }))).into_response(),
+        _ => StatusCode::NO_CONTENT.into_response(),
+    };
+    openbao.requests.lock().await.push(FakeOpenBaoRequest {
+        method,
+        path: uri.path().to_string(),
+        body: serde_json::from_slice(&body).unwrap_or(Value::Null),
+    });
+    response
+}
+
+fn discord_bot_token(version: CredentialVersion) -> CredentialRef {
+    let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
+    let id = openbao_credential_id(&scope, CredentialKind::BotToken).unwrap();
+    CredentialRef::new(id, version, &scope, CredentialKind::BotToken)
+}
+
+#[tokio::test]
+async fn destroy_of_unknown_credential_returns_missing() {
+    let openbao = FakeOpenBao::start(None).await;
+    let credential = discord_bot_token(CredentialVersion::initial());
+
+    let error = openbao
+        .store()
+        .destroy(&credential, &SecretDestroyReason::new("operator request").unwrap())
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, SecretStoreError::Missing { credential: missing } if missing == credential));
+    assert!(openbao.posted_to(OpenBaoEndpoint::Destroy).await.is_empty());
 }
 
 struct OpenBaoServer {

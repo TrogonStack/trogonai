@@ -389,6 +389,7 @@ impl SecretStoreDestroy for OpenBaoSecretStore {
     type Error = SecretStoreError;
 
     async fn destroy(&self, credential: &CredentialRef, reason: &SecretDestroyReason) -> Result<(), Self::Error> {
+        self.metadata(credential).await?;
         info!(credential = %credential, reason = %reason, "destroying credential material in OpenBao");
 
         self.send_empty(
