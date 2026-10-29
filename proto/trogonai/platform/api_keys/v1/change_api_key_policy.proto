@@ -22,6 +22,8 @@ message ChangeApiKeyPolicy {
   // Replaced wholesale, not merged. A field-by-field patch would let two
   // concurrent edits combine into a grant neither operator requested.
   ApiKeyAuthorization authorization = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Replaced wholesale like authorization. Absent removes the limit, so an
+  // edit that keeps the limit must send it again.
   RateLimitPolicy rate_limit = 3;
   // Changing expiry is a policy change like any other. Absent clears it.
   google.protobuf.Timestamp expires_at = 4;

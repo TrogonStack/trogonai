@@ -27,12 +27,15 @@ message ApiKeyAuthorization {
   // distinct badge, never folded into the role display, so a key carrying one
   // is visible to whoever audits it later.
   repeated string direct_permissions = 2;
-  ResourceScope allowed_vaults = 3;
-  ResourceScope allowed_integrations = 4;
-  ResourceScope allowed_environments = 5;
+  // Every scope is required. An unset scope would leave each call site to
+  // guess between all and none, which is the ambiguity ResourceScope exists
+  // to remove.
+  ResourceScope allowed_vaults = 3 [features.field_presence = LEGACY_REQUIRED];
+  ResourceScope allowed_integrations = 4 [features.field_presence = LEGACY_REQUIRED];
+  ResourceScope allowed_environments = 5 [features.field_presence = LEGACY_REQUIRED];
   // The runtime-side narrowings that already exist in the shipped credential
   // delivery path, carried here so a key's authority is described in one place
   // rather than split across the key record and the runtime policy.
-  ResourceScope allowed_runtime_services = 6;
-  ResourceScope allowed_hosts = 7;
+  ResourceScope allowed_runtime_services = 6 [features.field_presence = LEGACY_REQUIRED];
+  ResourceScope allowed_hosts = 7 [features.field_presence = LEGACY_REQUIRED];
 }

@@ -54,11 +54,11 @@ message ApiPrincipal {
   // (ADR#0077 section 3).
   repeated string direct_permissions = 9;
 
-  trogonai.platform.api_keys.v1.ResourceScope allowed_vaults = 10;
-  trogonai.platform.api_keys.v1.ResourceScope allowed_integrations = 11;
-  trogonai.platform.api_keys.v1.ResourceScope allowed_environments = 12;
-  trogonai.platform.api_keys.v1.ResourceScope allowed_runtime_services = 13;
-  trogonai.platform.api_keys.v1.ResourceScope allowed_hosts = 14;
+  trogonai.platform.api_keys.v1.ResourceScope allowed_vaults = 10 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.platform.api_keys.v1.ResourceScope allowed_integrations = 11 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.platform.api_keys.v1.ResourceScope allowed_environments = 12 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.platform.api_keys.v1.ResourceScope allowed_runtime_services = 13 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.platform.api_keys.v1.ResourceScope allowed_hosts = 14 [features.field_presence = LEGACY_REQUIRED];
 }
 
 // AuthorizationCheck is one question asked of a principal.

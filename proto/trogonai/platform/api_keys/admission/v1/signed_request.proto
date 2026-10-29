@@ -37,7 +37,7 @@ message SignedRequestTarget {
     // which records a signed list request returned. Whether the shipped AAuth
     // HTTP profile should also cover it is a separate question about agent
     // traffic, and this field does not answer it.
-    string query = 4;
+    string query = 4 [features.field_presence = LEGACY_REQUIRED];
   }
 
   message NatsTarget {
