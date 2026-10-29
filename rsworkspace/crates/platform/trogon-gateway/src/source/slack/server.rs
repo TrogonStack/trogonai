@@ -627,7 +627,7 @@ pub async fn provision<C: JetStreamContext>(js: &C, config: &SlackConfig) -> Res
     js.create_or_reconcile_stream(
         async_nats::jetstream::stream::Config {
             name: config.stream_name.to_string(),
-            subjects: vec![format!("{}.>", config.subject_prefix)],
+            subjects: SlackSubject::stream_filters(&config.subject_prefix),
             max_age: config.stream_max_age.into(),
             duplicate_window: dedup_window.into(),
             ..Default::default()

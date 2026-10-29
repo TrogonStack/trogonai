@@ -42,6 +42,11 @@
 //! 9. The JetStream stream is created on startup if it does not exist. Its
 //!    subjects, `max_age` and dedup window are reconciled on every start, and
 //!    settings an operator changed out of band, such as replicas, are left alone.
+//!    The stream captures `{prefix}.event.>`, `{prefix}.interaction.>`,
+//!    `{prefix}.command.>`, `{prefix}.system.>` and `{prefix}.unroutable`
+//!    rather than `{prefix}.>`, so a subject the gateway uses for core NATS
+//!    requests is never stored. A stream created on the broad filter is
+//!    narrowed on the next start.
 //!
 //! ## NATS message format
 //!
