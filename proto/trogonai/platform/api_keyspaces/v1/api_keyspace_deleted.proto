@@ -1,0 +1,11 @@
+edition = "2024";
+
+package trogonai.platform.api_keyspaces.v1;
+
+// ApiKeyspaceDeleted retires the keyspace.
+//
+// Deletion is logical. The stream is retained because keys issued under this
+// keyspace carry its id in their own events, and an audit reader resolving one
+// of those keys still has to be able to answer which policy was in force when
+// it was issued.
+message ApiKeyspaceDeleted {}

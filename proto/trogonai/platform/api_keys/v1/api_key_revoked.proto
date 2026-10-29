@@ -1,0 +1,15 @@
+edition = "2024";
+
+package trogonai.platform.api_keys.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// ApiKeyRevoked ends the key with no window.
+//
+// Terminal. Every later command against this stream is refused, including a
+// second revoke, so a double-click in the console produces one fact rather than
+// two.
+message ApiKeyRevoked {
+  string reason = 1;
+  google.protobuf.Timestamp revoked_at = 2 [features.field_presence = LEGACY_REQUIRED];
+}
