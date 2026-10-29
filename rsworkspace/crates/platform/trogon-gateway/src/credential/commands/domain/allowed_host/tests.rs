@@ -27,6 +27,23 @@ fn port_is_stripped_before_matching() {
 }
 
 #[test]
+fn wildcard_strips_the_candidate_port_before_matching() {
+    let host = AllowedHost::new("*.example.com").unwrap();
+
+    assert!(host.matches("api.example.com:8443"));
+    assert!(!host.matches("example.com:8443"));
+}
+
+#[test]
+fn bracketed_ipv6_literal_matches_with_or_without_a_port() {
+    let host = AllowedHost::new("[FE80::1]").unwrap();
+
+    assert!(host.matches("[fe80::1]"));
+    assert!(host.matches("[fe80::1]:8443"));
+    assert!(!host.matches("[fe80::2]"));
+}
+
+#[test]
 fn wildcard_matches_exactly_one_label() {
     let host = AllowedHost::new("*.example.com").unwrap();
 
@@ -56,6 +73,46 @@ fn rejects_malformed_patterns() {
     assert_eq!(
         AllowedHost::new("api.example.com/path"),
         Err(AllowedHostError::InvalidCharacter('/'))
+    );
+}
+
+#[test]
+fn rejects_a_port_in_the_pattern() {
+    assert_eq!(
+        AllowedHost::new("api.example.com:8443"),
+        Err(AllowedHostError::PortNotAllowed)
+    );
+    assert_eq!(
+        AllowedHost::new("*.example.com:443"),
+        Err(AllowedHostError::PortNotAllowed)
+    );
+    assert_eq!(
+        AllowedHost::new("127.0.0.1:8080"),
+        Err(AllowedHostError::PortNotAllowed)
+    );
+    assert_eq!(AllowedHost::new("[::1]:8443"), Err(AllowedHostError::PortNotAllowed));
+    assert_eq!(
+        AllowedHost::new("api.example.com:https"),
+        Err(AllowedHostError::InvalidCharacter(':'))
+    );
+}
+
+#[test]
+fn rejects_malformed_ipv6_literals() {
+    assert_eq!(AllowedHost::new("[::1"), Err(AllowedHostError::InvalidIpv6Literal));
+    assert_eq!(AllowedHost::new("[]"), Err(AllowedHostError::InvalidIpv6Literal));
+    assert_eq!(
+        AllowedHost::new("[not-an-address]"),
+        Err(AllowedHostError::InvalidIpv6Literal)
+    );
+    assert_eq!(
+        AllowedHost::new("[::1]extra"),
+        Err(AllowedHostError::InvalidIpv6Literal)
+    );
+    assert_eq!(AllowedHost::new("::1"), Err(AllowedHostError::InvalidCharacter(':')));
+    assert_eq!(
+        AllowedHost::new("*.[::1]"),
+        Err(AllowedHostError::InvalidCharacter('['))
     );
 }
 

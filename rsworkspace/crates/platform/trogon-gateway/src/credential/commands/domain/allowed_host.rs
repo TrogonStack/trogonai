@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 use std::fmt;
+use std::net::Ipv6Addr;
 
 use super::constants::MAX_HOST_LEN;
 
@@ -26,6 +27,13 @@ impl AllowedHost {
         }
 
         let normalized = normalize_host(value);
+        if normalized.starts_with('[') {
+            validate_ipv6_literal(&normalized)?;
+            return Ok(Self::Exact(normalized));
+        }
+        if has_port(&normalized) {
+            return Err(AllowedHostError::PortNotAllowed);
+        }
         if normalized == "*" {
             return Err(AllowedHostError::BareWildcard);
         }
@@ -127,6 +135,10 @@ pub enum AllowedHostError {
     InvalidCharacter(char),
     #[error("allowed host may only use '*' as a leading label")]
     MisplacedWildcard,
+    #[error("allowed host must not include a port because ports are ignored when matching")]
+    PortNotAllowed,
+    #[error("allowed host in brackets must be an IPv6 address, as in '[::1]'")]
+    InvalidIpv6Literal,
 }
 
 fn normalize_host(value: &str) -> String {
@@ -146,13 +158,35 @@ fn normalize_candidate(candidate: &str) -> Option<String> {
         &candidate[..end + 2]
     } else {
         match candidate.rsplit_once(':') {
-            Some((host, port)) if !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()) => host,
+            Some((host, port)) if is_port(port) => host,
             _ => candidate,
         }
     };
 
     let normalized = normalize_host(without_port);
     if normalized.is_empty() { None } else { Some(normalized) }
+}
+
+fn has_port(value: &str) -> bool {
+    value.split_once(':').is_some_and(|(_, port)| is_port(port))
+}
+
+fn is_port(value: &str) -> bool {
+    !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit())
+}
+
+fn validate_ipv6_literal(value: &str) -> Result<(), AllowedHostError> {
+    let (address, rest) = value
+        .strip_prefix('[')
+        .and_then(|inner| inner.split_once(']'))
+        .ok_or(AllowedHostError::InvalidIpv6Literal)?;
+    if has_port(rest) {
+        return Err(AllowedHostError::PortNotAllowed);
+    }
+    if !rest.is_empty() || address.parse::<Ipv6Addr>().is_err() {
+        return Err(AllowedHostError::InvalidIpv6Literal);
+    }
+    Ok(())
 }
 
 fn validate_labels(value: &str) -> Result<(), AllowedHostError> {
@@ -176,7 +210,7 @@ fn validate_labels(value: &str) -> Result<(), AllowedHostError> {
 }
 
 fn is_host_char(ch: char) -> bool {
-    ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '[' | ']' | ':')
+    ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_')
 }
 
 #[cfg(test)]
