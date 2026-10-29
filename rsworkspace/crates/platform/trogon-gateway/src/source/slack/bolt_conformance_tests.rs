@@ -373,7 +373,7 @@ impl Observed {
     }
 
     fn processed(&self) -> bool {
-        matches!(self.outcome, Outcome::Publish | Outcome::Request) && self.status.is_some_and(|status| status < 500)
+        (!self.deliveries.is_empty() || !self.requests.is_empty()) && self.status.is_some_and(|status| status < 500)
     }
 }
 

@@ -374,8 +374,15 @@ fn a_lenient_content_type_gap_only_explains_an_http_request_the_gateway_processe
     ];
     let mut accepted = observed_body("");
     accepted.outcome = Outcome::Publish;
+    accepted.deliveries.push(delivery(&[]));
     assert!(judge(&fixture_expecting("reject"), Some(&gap), Some(&accepted), &diffs).is_empty());
     assert_eq!(judge(&fixture(), Some(&gap), Some(&accepted), &diffs).len(), 5);
+    let mut unanswered = rejected(404);
+    unanswered.requests.push(Requested {
+        headers: BTreeMap::new(),
+        payload: Bytes::new(),
+    });
+    assert!(judge(&fixture_expecting("reject"), Some(&gap), Some(&unanswered), &diffs).is_empty());
     let status_diffs = [diff_on(Field::Status)];
     assert_eq!(
         judge(
