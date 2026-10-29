@@ -1,7 +1,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-const MAX_CREDENTIAL_ID_LEN: usize = 256;
+use super::constants::MAX_CREDENTIAL_ID_LEN;
 
 #[derive(Clone, Eq, Ord, PartialEq, PartialOrd)]
 pub struct CredentialId(Arc<str>);

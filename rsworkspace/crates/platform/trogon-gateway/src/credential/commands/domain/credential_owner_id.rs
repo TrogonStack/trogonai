@@ -1,7 +1,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-const MAX_OWNER_ID_LEN: usize = 128;
+use super::constants::MAX_OWNER_ID_LEN;
 
 #[derive(Clone, Eq, Ord, PartialEq, PartialOrd)]
 pub struct CredentialOwnerId(Arc<str>);

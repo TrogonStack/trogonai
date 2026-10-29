@@ -1,11 +1,7 @@
 use std::fmt;
 
+use super::constants::{COLLECTION_SEGMENT, CREDENTIAL_PATH_SEGMENTS, ROOT_SEGMENT};
 use super::{CredentialId, CredentialOwnerId, CredentialRef};
-
-const ROOT_SEGMENT: &str = "trogonai";
-const COLLECTION_SEGMENT: &str = "credentials";
-
-pub const CREDENTIAL_PATH_SEGMENTS: usize = 4;
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct CredentialPath {

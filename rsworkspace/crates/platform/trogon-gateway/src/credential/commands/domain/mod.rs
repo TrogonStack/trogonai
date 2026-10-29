@@ -1,3 +1,4 @@
+mod constants;
 mod credential_fingerprint;
 mod credential_id;
 mod credential_kind;

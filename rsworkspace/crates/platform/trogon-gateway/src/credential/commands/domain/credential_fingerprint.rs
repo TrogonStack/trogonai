@@ -1,7 +1,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-const MAX_FINGERPRINT_LEN: usize = 128;
+use super::constants::MAX_FINGERPRINT_LEN;
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct CredentialFingerprint(Arc<str>);
