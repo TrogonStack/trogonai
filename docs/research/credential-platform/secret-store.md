@@ -2106,6 +2106,17 @@ freshly resolved credential; the residual exposure window for a held
 connection ends at that close
 ([ADR#0074](../../adr/0074-credential-platform-extraction-boundary.md) Q2).
 
+A source-side rotation or revocation has no such close path in the first
+version. It raises no platform event, so a held connection backed by a source
+reference keeps the credential it connected with until the connection ends on
+its own, and that window has no platform bound. This is accepted because the
+customer already holds the platform-side close: revoking the source reference
+is a platform mutation
+([ADR#0079](../../adr/0079-external-secret-sources.md) Decision 3) and raises
+the revocation event that closes the connection. A customer who revokes at the
+source because the token leaked has to revoke the reference too, and any
+operator documentation for source-backed references has to state that step.
+
 For equality-style credentials that use verifier-only storage, cache the verifier
 instead of raw material.
 
