@@ -27,9 +27,12 @@ impl AllowedHost {
         }
 
         let normalized = normalize_host(value);
+        if let Some(literal) = unbracketed_ipv6_literal(&normalized) {
+            return Ok(Self::Exact(literal));
+        }
         if normalized.starts_with('[') {
-            validate_ipv6_literal(&normalized)?;
-            return Ok(Self::Exact(normalized));
+            let address = validate_ipv6_literal(&normalized)?;
+            return Ok(Self::Exact(bracketed(address)));
         }
         if has_port(&normalized) {
             return Err(AllowedHostError::PortNotAllowed);
@@ -154,8 +157,16 @@ fn normalize_candidate(candidate: &str) -> Option<String> {
         return None;
     }
 
+    if let Some(literal) = unbracketed_ipv6_literal(&normalize_host(candidate)) {
+        return Some(literal);
+    }
+
     let without_port = if let Some(end) = candidate.strip_prefix('[').and_then(|rest| rest.find(']')) {
-        &candidate[..end + 2]
+        let literal = &candidate[..end + 2];
+        return match literal[1..literal.len() - 1].parse::<Ipv6Addr>() {
+            Ok(address) => Some(bracketed(address)),
+            Err(_) => Some(normalize_host(literal)),
+        };
     } else {
         match candidate.rsplit_once(':') {
             Some((host, port)) if is_port(port) => host,
@@ -175,7 +186,15 @@ fn is_port(value: &str) -> bool {
     !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit())
 }
 
-fn validate_ipv6_literal(value: &str) -> Result<(), AllowedHostError> {
+fn bracketed(address: Ipv6Addr) -> String {
+    format!("[{address}]")
+}
+
+fn unbracketed_ipv6_literal(value: &str) -> Option<String> {
+    value.parse::<Ipv6Addr>().ok().map(bracketed)
+}
+
+fn validate_ipv6_literal(value: &str) -> Result<Ipv6Addr, AllowedHostError> {
     let (address, rest) = value
         .strip_prefix('[')
         .and_then(|inner| inner.split_once(']'))
@@ -183,10 +202,10 @@ fn validate_ipv6_literal(value: &str) -> Result<(), AllowedHostError> {
     if has_port(rest) {
         return Err(AllowedHostError::PortNotAllowed);
     }
-    if !rest.is_empty() || address.parse::<Ipv6Addr>().is_err() {
+    if !rest.is_empty() {
         return Err(AllowedHostError::InvalidIpv6Literal);
     }
-    Ok(())
+    address.parse().map_err(|_| AllowedHostError::InvalidIpv6Literal)
 }
 
 fn validate_labels(value: &str) -> Result<(), AllowedHostError> {

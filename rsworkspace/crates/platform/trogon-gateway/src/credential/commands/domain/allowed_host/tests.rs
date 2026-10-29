@@ -44,6 +44,43 @@ fn bracketed_ipv6_literal_matches_with_or_without_a_port() {
 }
 
 #[test]
+fn unbracketed_ipv6_candidate_matches_a_bracketed_pattern() {
+    let host = AllowedHost::new("[fe80::1]").unwrap();
+
+    assert!(host.matches("fe80::1"));
+    assert!(host.matches("FE80:0:0:0:0:0:0:1"));
+    assert!(!host.matches("fe80::2"));
+}
+
+#[test]
+fn unbracketed_ipv6_pattern_matches_the_same_hosts_as_the_bracketed_form() {
+    let unbracketed = AllowedHost::new("fe80::1").unwrap();
+
+    assert_eq!(unbracketed, AllowedHost::new("[fe80::1]").unwrap());
+    assert_eq!(unbracketed.as_str(), "[fe80::1]");
+    assert!(unbracketed.matches("fe80::1"));
+    assert!(unbracketed.matches("[fe80::1]"));
+    assert!(unbracketed.matches("[fe80::1]:8443"));
+    assert!(!unbracketed.matches("fe80::"));
+}
+
+#[test]
+fn ipv6_literals_are_compared_in_canonical_form() {
+    let host = AllowedHost::new("[0:0:0:0:0:0:0:1]").unwrap();
+
+    assert!(host.matches("::1"));
+    assert!(host.matches("[::1]:443"));
+}
+
+#[test]
+fn name_with_port_still_matches_after_ipv6_handling() {
+    let host = AllowedHost::new("example.com").unwrap();
+
+    assert!(host.matches("example.com:443"));
+    assert!(AllowedHost::new("127.0.0.1").unwrap().matches("127.0.0.1:8080"));
+}
+
+#[test]
 fn wildcard_matches_exactly_one_label() {
     let host = AllowedHost::new("*.example.com").unwrap();
 
@@ -109,7 +146,10 @@ fn rejects_malformed_ipv6_literals() {
         AllowedHost::new("[::1]extra"),
         Err(AllowedHostError::InvalidIpv6Literal)
     );
-    assert_eq!(AllowedHost::new("::1"), Err(AllowedHostError::InvalidCharacter(':')));
+    assert_eq!(
+        AllowedHost::new("fe80::zz"),
+        Err(AllowedHostError::InvalidCharacter(':'))
+    );
     assert_eq!(
         AllowedHost::new("*.[::1]"),
         Err(AllowedHostError::InvalidCharacter('['))
