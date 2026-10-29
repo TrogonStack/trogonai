@@ -7,7 +7,6 @@ mod constants;
 mod credential;
 mod credential_lifecycle;
 mod credential_management;
-mod credential_management_idempotency;
 mod credential_runtime_projection;
 mod http;
 mod secret_store;
@@ -178,7 +177,7 @@ async fn serve(
     let app = match credential_management_admin_token_from_env(&SystemEnv)? {
         Some(admin_token) => {
             let store = openbao_secret_store_from_env(&SystemEnv, CREDENTIAL_MANAGEMENT_ADMIN_TOKEN)?;
-            let idempotency = credential_management_idempotency::open(client.context().clone()).await?;
+            let idempotency = credential_management::idempotency::open(client.context().clone()).await?;
             let worker_checkpoints =
                 credential_lifecycle::recovery_worker::open_checkpoint_store(client.context().clone()).await?;
             let recovery_status_checkpoints = worker_checkpoints.clone();

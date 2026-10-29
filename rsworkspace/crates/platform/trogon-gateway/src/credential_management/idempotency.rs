@@ -17,7 +17,7 @@ use trogon_nats::jetstream::{
 };
 use trogonai_proto::gateway::credentials::idempotency_v1 as proto;
 
-use crate::credential_management::{CredentialCommandResponse, CredentialRefResponse};
+use super::{CredentialCommandResponse, CredentialRefResponse};
 
 const IDEMPOTENCY_KEY_PREFIX: &str = "v1.";
 pub(crate) const CREDENTIAL_MANAGEMENT_IDEMPOTENCY_BUCKET: &str = "GATEWAY_CREDENTIAL_MANAGEMENT_IDEMPOTENCY";

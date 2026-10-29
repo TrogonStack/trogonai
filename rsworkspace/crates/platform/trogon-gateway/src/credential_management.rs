@@ -1,3 +1,5 @@
+pub(crate) mod idempotency;
+
 use std::error::Error;
 use std::fmt;
 use std::time::SystemTime;
@@ -16,6 +18,12 @@ use trogon_decider_runtime::{CommandError, SnapshotRead, SnapshotWrite, StreamAp
 use trogon_std::SecretString;
 use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1};
 
+#[cfg(test)]
+use self::idempotency::CredentialCommandInMemoryIdempotencyLedger;
+use self::idempotency::{
+    CredentialCommandIdempotencyStore, CredentialCommandIdempotencyStoreError, IdempotencyDecision, IdempotencyKey,
+    IdempotencyScope, RequestFingerprint,
+};
 use crate::credential::commands::domain::{
     CredentialKind, CredentialOwnerId, CredentialRef, CredentialScope, CredentialStatus, CredentialVersion, SourceKind,
 };
@@ -28,12 +36,6 @@ use crate::credential_lifecycle::handler::{
     PutCredential, RevokeStoredCredential, RotateCredential,
 };
 use crate::credential_lifecycle::recovery_worker::{CredentialRecoveryCheckpointStore, CredentialRecoveryPolicy};
-#[cfg(test)]
-use crate::credential_management_idempotency::CredentialCommandInMemoryIdempotencyLedger;
-use crate::credential_management_idempotency::{
-    CredentialCommandIdempotencyStore, CredentialCommandIdempotencyStoreError, IdempotencyDecision, IdempotencyKey,
-    IdempotencyScope, RequestFingerprint,
-};
 use crate::credential_runtime_projection::RuntimeCredentialRegistry;
 use crate::secret_store::openbao_secret_store::openbao_credential_id;
 use crate::secret_store::{
