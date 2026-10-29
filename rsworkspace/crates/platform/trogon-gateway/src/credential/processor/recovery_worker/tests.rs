@@ -24,9 +24,9 @@ use super::*;
 use crate::credential::commands::domain::{
     CredentialKind, CredentialOwnerId, CredentialRef, CredentialScope, CredentialVersion, SourceKind,
 };
+use crate::credential::commands::proto::{decode_active_state, write_requested_to_proto};
 use crate::credential::handler::{CredentialHandler, CredentialHandlerError, PutCredential, RotateCredential};
 use crate::credential::processor::runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationKey};
-use crate::credential::proto::{decode_active_state, write_requested_to_proto};
 use crate::secret_store::MockOpenBaoSecretStore;
 use crate::source_integration_id::SourceIntegrationId;
 use trogonai_proto::gateway::credentials::CredentialStateSnapshotCase;

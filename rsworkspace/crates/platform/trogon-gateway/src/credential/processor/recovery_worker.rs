@@ -20,15 +20,15 @@ use trogonai_proto::gateway::credentials::checkpoints_v1 as proto;
 use trogonai_proto::gateway::credentials::{CredentialEventCase, CredentialEventPayloadError, state_v1, v1};
 
 use crate::credential::commands::domain::CredentialId;
-use crate::credential::handler::{
-    CredentialActivationRecoveryCommand, CredentialRuntimeHandler, activation_recovery_command,
-};
-use crate::credential::processor::event_stream::{CredentialEventStreamReadError, read_credential_event_stream};
-use crate::credential::proto::{
+use crate::credential::commands::proto::{
     CredentialProtoDecodeError, decode_credential_metadata, decode_destroy_failed, decode_destroy_requested,
     decode_destroyed, decode_message_field, decode_revoked, decode_rotated, decode_rotation_failed,
     decode_rotation_requested, decode_write_failed, decode_write_requested,
 };
+use crate::credential::handler::{
+    CredentialActivationRecoveryCommand, CredentialRuntimeHandler, activation_recovery_command,
+};
+use crate::credential::processor::event_stream::{CredentialEventStreamReadError, read_credential_event_stream};
 use crate::credential::{CredentialEvolveError, evolve, initial_state};
 use crate::secret_store::SecretStoreMetadata;
 

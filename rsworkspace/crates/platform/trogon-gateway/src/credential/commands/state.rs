@@ -1,6 +1,9 @@
 use trogonai_proto::gateway::credentials::{CredentialEventCase, CredentialStateSnapshotCase, state_v1, v1};
 
-use super::super::proto::{
+use super::domain::{
+    CredentialId, CredentialKind, CredentialMetadata, CredentialOwnerId, CredentialRef, CredentialStatus, SourceKind,
+};
+use super::proto::{
     CredentialProtoDecodeError, active_credential_ref, active_state_to_proto, cleanup_failed_to_proto_state,
     decode_active_state, decode_cleanup_failed_state, decode_credential_metadata, decode_destroy_failed,
     decode_destroy_requested, decode_destroy_requested_state, decode_destroyed, decode_message_field,
@@ -8,9 +11,6 @@ use super::super::proto::{
     decode_rotation_requested, decode_write_failed, decode_write_failed_state, decode_write_requested,
     destroy_requested_to_proto_state, destroyed_to_proto_state, pending_write_to_proto_state, revoked_to_proto_state,
     rotation_pending_to_proto_state, write_failed_to_proto_state,
-};
-use super::domain::{
-    CredentialId, CredentialKind, CredentialMetadata, CredentialOwnerId, CredentialRef, CredentialStatus, SourceKind,
 };
 
 pub fn initial_state() -> state_v1::CredentialStateSnapshot {

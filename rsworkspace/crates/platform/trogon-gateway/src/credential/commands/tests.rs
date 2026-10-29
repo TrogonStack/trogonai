@@ -11,16 +11,16 @@ use trogon_decider_runtime::{
 };
 use trogonai_proto::gateway::credentials::{CredentialEventCase, CredentialStateSnapshotCase, state_v1, v1 as proto};
 
-use super::super::proto::{
-    CredentialProtoDecodeError, activated_to_proto, decode_active_state, decode_credential_metadata,
-    decode_message_field, decode_pending_write_state, destroy_failed_to_proto, destroy_requested_to_proto,
-    destroyed_to_proto, revoked_to_proto, rotated_to_proto, rotation_failed_to_proto, rotation_requested_to_proto,
-    write_failed_to_proto, write_requested_to_proto,
-};
 use super::domain::{
     CredentialDestroyReason, CredentialFailureReason, CredentialFingerprint, CredentialId, CredentialKind,
     CredentialMetadata, CredentialOwnerId, CredentialRef, CredentialScope, CredentialStatus, CredentialVersion,
     SourceKind, StorageBackend,
+};
+use super::proto::{
+    CredentialProtoDecodeError, activated_to_proto, decode_active_state, decode_credential_metadata,
+    decode_message_field, decode_pending_write_state, destroy_failed_to_proto, destroy_requested_to_proto,
+    destroyed_to_proto, revoked_to_proto, rotated_to_proto, rotation_failed_to_proto, rotation_requested_to_proto,
+    write_failed_to_proto, write_requested_to_proto,
 };
 use super::snapshot::CREDENTIAL_SNAPSHOT_POLICY;
 use super::state::{CredentialDecideError, CredentialEvolveError, evolve, initial_state};

@@ -1,8 +1,8 @@
 use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot, WritePrecondition};
 use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1, v1};
 
-use super::super::proto::{active_credential_ref, decode_message_field, rotated_to_proto};
 use super::domain::CredentialMetadata;
+use super::proto::{active_credential_ref, decode_message_field, rotated_to_proto};
 use super::state::{
     CredentialDecideError, CredentialEvolveError, validate_activation_metadata, validate_newer_version,
     validate_same_logical_ref,

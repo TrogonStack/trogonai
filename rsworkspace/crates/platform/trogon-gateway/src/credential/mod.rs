@@ -3,7 +3,6 @@
 pub(crate) mod commands;
 pub(crate) mod handler;
 pub(crate) mod processor;
-pub(crate) mod proto;
 pub(crate) mod store;
 pub(crate) mod stream;
 

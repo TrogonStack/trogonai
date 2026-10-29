@@ -4,7 +4,7 @@ use crate::credential::commands::domain::{
     AllowedHosts, AllowedRuntimeServices, CredentialDestroyReason, CredentialScope, CredentialVersion,
     InjectionLocation, InjectionLocations, RuntimeServiceId,
 };
-use crate::credential::proto::{
+use crate::credential::commands::proto::{
     activated_to_proto, destroy_requested_to_proto, destroyed_to_proto, revoked_to_proto, write_requested_to_proto,
 };
 use crate::secret_store::{

@@ -15,7 +15,7 @@ use super::commands::domain::{
     CredentialDestroyReason, CredentialDestroyReasonError, CredentialId, CredentialIdError, CredentialKind,
     CredentialOwnerId, CredentialRef, CredentialScope, CredentialVersion, SourceKind,
 };
-use super::proto::{
+use super::commands::proto::{
     CredentialProtoDecodeError, active_credential_ref, decode_destroy_requested_state, decode_destroyed_state,
     decode_message_field, decode_pending_write_state,
 };

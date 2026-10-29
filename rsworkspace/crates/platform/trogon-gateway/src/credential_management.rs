@@ -19,16 +19,16 @@ use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1
 use crate::credential::commands::domain::{
     CredentialKind, CredentialOwnerId, CredentialRef, CredentialScope, CredentialStatus, CredentialVersion, SourceKind,
 };
+use crate::credential::commands::proto::{
+    decode_active_state, decode_cleanup_failed_state, decode_destroy_requested_state, decode_destroyed_state,
+    decode_message_field, decode_revoked_state,
+};
 use crate::credential::handler::{
     CredentialHandlerError, CredentialRuntimeHandler, CredentialRuntimeHandlerError, DestroyStoredCredential,
     PutCredential, RevokeStoredCredential, RotateCredential,
 };
 use crate::credential::processor::recovery_worker::{CredentialRecoveryCheckpointStore, CredentialRecoveryPolicy};
 use crate::credential::processor::runtime_projection::RuntimeCredentialRegistry;
-use crate::credential::proto::{
-    decode_active_state, decode_cleanup_failed_state, decode_destroy_requested_state, decode_destroyed_state,
-    decode_message_field, decode_revoked_state,
-};
 #[cfg(test)]
 use crate::credential_management_idempotency::CredentialCommandInMemoryIdempotencyLedger;
 use crate::credential_management_idempotency::{

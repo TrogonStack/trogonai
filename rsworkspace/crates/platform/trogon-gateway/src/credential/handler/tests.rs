@@ -17,11 +17,11 @@ use super::*;
 use crate::credential::commands::domain::{
     CredentialFingerprint, CredentialMetadata, CredentialStatus, StorageBackend,
 };
+use crate::credential::commands::proto::{
+    activated_to_proto, decode_active_state, rotation_requested_to_proto, write_requested_to_proto,
+};
 use crate::credential::processor::runtime_projection::{
     RuntimeCredentialError, RuntimeCredentialRegistry, RuntimeIntegrationKey, RuntimeIntegrationProjection,
-};
-use crate::credential::proto::{
-    activated_to_proto, decode_active_state, rotation_requested_to_proto, write_requested_to_proto,
 };
 use crate::secret_store::openbao_secret_store::OpenBaoSecretStore;
 use crate::secret_store::{MockOpenBaoSecretStore, SecretStoreError, SecretStoreGet};

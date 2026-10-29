@@ -3,7 +3,7 @@ use std::fmt;
 use buffa::{EnumValue, MessageField, ProtoBox};
 use trogonai_proto::gateway::credentials::{state_v1, v1};
 
-use super::commands::domain::{
+use super::domain::{
     CredentialDestroyReason, CredentialFailureReason, CredentialFingerprint, CredentialId, CredentialKind,
     CredentialMetadata, CredentialOwnerId, CredentialRef, CredentialScope, CredentialStatus, CredentialVersion,
     SourceKind, StorageBackend,
