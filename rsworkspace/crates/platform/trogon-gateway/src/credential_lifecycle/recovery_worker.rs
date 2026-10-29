@@ -26,7 +26,7 @@ use super::constants::{
 };
 use super::handler::{CredentialActivationRecoveryCommand, CredentialRuntimeHandler, activation_recovery_command};
 use crate::constants::METER_NAME;
-use crate::credential::commands::domain::CredentialId;
+use crate::credential::commands::domain::{CredentialId, CredentialVersion};
 use crate::credential::commands::proto::{
     CredentialProtoDecodeError, decode_credential_metadata, decode_destroy_failed, decode_destroy_requested,
     decode_destroyed, decode_message_field, decode_revoked, decode_rotated, decode_rotation_failed,
@@ -522,8 +522,8 @@ where
 
     let mut commands = Vec::new();
     for credential_id in changed_credentials {
-        let state = match load_credential_state(event_store, &credential_id).await {
-            Ok(state) => state,
+        let (state, destroyed_version) = match load_credential_state(event_store, &credential_id).await {
+            Ok(loaded) => loaded,
             Err(source) => {
                 report.failed_recoveries += 1;
                 warn!(
@@ -535,7 +535,7 @@ where
             }
         };
 
-        match activation_recovery_command(&credential_id, &state) {
+        match activation_recovery_command(&credential_id, &state, destroyed_version) {
             Ok(Some(command)) => {
                 report.planned_recoveries += 1;
                 commands.push(PlannedCredentialRecovery { credential_id, command });
@@ -573,7 +573,7 @@ fn stream_event_credential_id(event: &StreamEvent) -> Result<Option<CredentialId
 async fn load_credential_state<EventStore>(
     event_store: &EventStore,
     credential_id: &CredentialId,
-) -> Result<state_v1::CredentialStateSnapshot, CredentialRecoveryReplayError>
+) -> Result<(state_v1::CredentialStateSnapshot, Option<CredentialVersion>), CredentialRecoveryReplayError>
 where
     EventStore: StreamRead<str>,
 {
@@ -587,6 +587,7 @@ where
             source: Box::new(source),
         })?;
     let mut state = initial_state();
+    let mut destroyed_version = None;
     for event in stream.events {
         let EventDecodeOutcome::Decoded(event) = event
             .decode::<v1::CredentialEvent>()
@@ -594,9 +595,16 @@ where
         else {
             continue;
         };
+        if let Some(CredentialEventCase::Destroyed(destroyed)) = event.event.as_ref() {
+            destroyed_version = Some(
+                decode_destroyed(destroyed)
+                    .map_err(|source| CredentialRecoveryReplayError::DecodeDestroyed { source })?
+                    .version(),
+            );
+        }
         state = evolve(state, &event).map_err(|source| CredentialRecoveryReplayError::ReplayCredential { source })?;
     }
-    Ok(state)
+    Ok((state, destroyed_version))
 }
 
 fn event_credential_id(event: &CredentialEventCase) -> Result<CredentialId, CredentialProtoDecodeError> {
@@ -661,6 +669,11 @@ enum CredentialRecoveryReplayError {
     DecodeEvent {
         #[source]
         source: CredentialEventPayloadError,
+    },
+    #[error("credential destroyed event is invalid: {source}")]
+    DecodeDestroyed {
+        #[source]
+        source: CredentialProtoDecodeError,
     },
     #[error("credential stream replay failed: {source}")]
     ReplayCredential {

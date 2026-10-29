@@ -269,10 +269,11 @@ pub(crate) enum CredentialActivationRecoveryCommand {
 pub(crate) fn activation_recovery_command(
     credential_id: &CredentialId,
     state: &state_v1::CredentialStateSnapshot,
+    destroyed_version: Option<CredentialVersion>,
 ) -> Result<Option<CredentialActivationRecoveryCommand>, CredentialActivationRecoveryPlanError> {
     match state.state.as_ref() {
         Some(CredentialStateSnapshotCase::PendingWrite(pending)) => {
-            let credential = pending_write_credential_ref(credential_id, pending)?;
+            let credential = pending_write_credential_ref(credential_id, pending, destroyed_version)?;
             Ok(Some(CredentialActivationRecoveryCommand::Write(
                 RecoverCredentialWriteActivation::new(credential),
             )))
@@ -302,6 +303,7 @@ pub(crate) fn activation_recovery_command(
 fn pending_write_credential_ref(
     credential_id: &CredentialId,
     pending: &state_v1::PendingCredentialWriteState,
+    destroyed_version: Option<CredentialVersion>,
 ) -> Result<CredentialRef, CredentialActivationRecoveryPlanError> {
     let (pending_id, scope, kind) =
         decode_pending_write_state(pending).map_err(CredentialActivationRecoveryPlanError::InvalidState)?;
@@ -314,7 +316,7 @@ fn pending_write_credential_ref(
 
     Ok(CredentialRef::new(
         pending_id,
-        CredentialVersion::initial(),
+        destroyed_version.map_or_else(CredentialVersion::initial, CredentialVersion::next),
         &scope,
         kind,
     ))

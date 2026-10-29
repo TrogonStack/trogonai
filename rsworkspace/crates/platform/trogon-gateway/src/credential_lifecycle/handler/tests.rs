@@ -391,7 +391,7 @@ impl OpenBaoServer {
 fn recovery_plan_builds_write_activation_command_for_pending_write() {
     let state = evolve(initial_state(), &write_requested_event()).unwrap();
 
-    let command = activation_recovery_command(&credential_id(), &state).unwrap();
+    let command = activation_recovery_command(&credential_id(), &state, None).unwrap();
 
     assert_eq!(
         command,
@@ -408,7 +408,7 @@ fn recovery_plan_builds_write_activation_from_the_pending_scope_for_any_backend(
         state: Some(pending_write_to_proto_state(&credential_id, &scope(), CredentialKind::WebhookSecret).into()),
     };
 
-    let command = activation_recovery_command(&credential_id, &state).unwrap();
+    let command = activation_recovery_command(&credential_id, &state, None).unwrap();
 
     assert_eq!(
         command,
@@ -428,7 +428,7 @@ fn recovery_plan_rejects_a_pending_write_from_another_stream() {
     let state = evolve(initial_state(), &write_requested_event()).unwrap();
     let stream_id = source_scoped_credential_id();
 
-    let error = activation_recovery_command(&stream_id, &state).unwrap_err();
+    let error = activation_recovery_command(&stream_id, &state, None).unwrap_err();
 
     assert!(matches!(
         error,
@@ -454,7 +454,7 @@ fn recovery_plan_builds_rotation_activation_command_for_pending_rotation() {
     .try_fold(initial_state(), |state, event| evolve(state, &event))
     .unwrap();
 
-    let command = activation_recovery_command(&credential_id(), &state).unwrap();
+    let command = activation_recovery_command(&credential_id(), &state, None).unwrap();
 
     assert_eq!(
         command,
@@ -477,7 +477,7 @@ fn recovery_plan_skips_completed_state() {
         .try_fold(initial_state(), |state, event| evolve(state, &event))
         .unwrap();
 
-    let command = activation_recovery_command(&credential_id(), &state).unwrap();
+    let command = activation_recovery_command(&credential_id(), &state, None).unwrap();
 
     assert_eq!(command, None);
 }
@@ -1337,6 +1337,65 @@ async fn destroy_destroys_secret_and_records_state() {
         Some(CredentialEventCase::DestroyRequested(_))
     ));
     assert!(matches!(decoded[4].event, Some(CredentialEventCase::Destroyed(_))));
+}
+
+#[tokio::test]
+async fn put_after_revoke_and_destroy_restarts_the_credential_on_the_next_version() {
+    let events = HandlerTestStreamStore::default();
+    let secrets = MockOpenBaoSecretStore::default();
+    let runtime_credentials = RuntimeCredentialRegistry::default();
+    let resolver = runtime_credentials.resolver(secrets.clone());
+    let handler = CredentialRuntimeHandler::new(events.clone(), secrets.clone(), runtime_credentials);
+    let state = handler.put(put_command("first-secret")).await.unwrap().into_state();
+    let Some(CredentialStateSnapshotCase::Active(active)) = state.state.as_ref() else {
+        panic!("expected active credential");
+    };
+    let (active_metadata, _) = decode_active_state("active", active).unwrap();
+    let destroyed_ref = active_metadata.reference().clone();
+    handler
+        .revoke(RevokeStoredCredential::new(destroyed_ref.clone()))
+        .await
+        .unwrap();
+    handler
+        .destroy(DestroyStoredCredential::new(destroyed_ref.clone(), destroy_reason()))
+        .await
+        .unwrap();
+
+    let outcome = handler.put(put_command("second-secret")).await.unwrap();
+
+    assert_eq!(outcome.stream_position(), position(7));
+    let state = outcome.into_state();
+    let Some(CredentialStateSnapshotCase::Active(active)) = state.state.as_ref() else {
+        panic!("expected active credential");
+    };
+    let (active_metadata, _) = decode_active_state("active", active).unwrap();
+    assert_eq!(active_metadata.reference(), &destroyed_ref.next_version());
+    assert!(matches!(
+        secrets.get(&destroyed_ref).await,
+        Err(SecretStoreError::Unreadable { .. })
+    ));
+    let resolved = resolver
+        .resolve_plaintext(&runtime_key(), CredentialKind::WebhookSecret)
+        .await
+        .unwrap();
+    assert_eq!(resolved.as_str(), "second-secret");
+}
+
+#[test]
+fn recovery_after_destroy_targets_the_version_following_the_destroyed_one() {
+    let destroyed_ref = credential_ref(3);
+    let state = state_v1::CredentialStateSnapshot {
+        state: Some(pending_write_to_proto_state(&credential_id(), &scope(), CredentialKind::WebhookSecret).into()),
+    };
+
+    let command = activation_recovery_command(&credential_id(), &state, Some(destroyed_ref.version())).unwrap();
+
+    assert_eq!(
+        command,
+        Some(CredentialActivationRecoveryCommand::Write(
+            RecoverCredentialWriteActivation::new(credential_ref(4))
+        ))
+    );
 }
 
 #[tokio::test]

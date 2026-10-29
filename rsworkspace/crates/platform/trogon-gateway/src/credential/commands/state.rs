@@ -6,11 +6,11 @@ use super::domain::{
 use super::proto::{
     CredentialProtoDecodeError, active_credential_ref, active_state_to_proto, cleanup_failed_to_proto_state,
     decode_active_state, decode_cleanup_failed_state, decode_credential_metadata, decode_destroy_failed,
-    decode_destroy_requested, decode_destroy_requested_state, decode_destroyed, decode_message_field,
-    decode_pending_write_state, decode_revoked, decode_revoked_state, decode_rotated, decode_rotation_failed,
-    decode_rotation_requested, decode_write_failed, decode_write_failed_state, decode_write_requested,
-    destroy_requested_to_proto_state, destroyed_to_proto_state, pending_write_to_proto_state, revoked_to_proto_state,
-    rotation_pending_to_proto_state, write_failed_to_proto_state,
+    decode_destroy_requested, decode_destroy_requested_state, decode_destroyed, decode_destroyed_state,
+    decode_message_field, decode_pending_write_state, decode_revoked, decode_revoked_state, decode_rotated,
+    decode_rotation_failed, decode_rotation_requested, decode_write_failed, decode_write_failed_state,
+    decode_write_requested, destroy_requested_to_proto_state, destroyed_to_proto_state, pending_write_to_proto_state,
+    revoked_to_proto_state, rotation_pending_to_proto_state, write_failed_to_proto_state,
 };
 
 pub fn initial_state() -> state_v1::CredentialStateSnapshot {
@@ -116,6 +116,17 @@ pub fn evolve(
                 if failed_id != credential_id {
                     return Err(CredentialEvolveError::CredentialRefMismatch {
                         expected: failed_id,
+                        actual: credential_id,
+                    });
+                }
+                pending_write_to_proto_state(&credential_id, &scope, kind).into()
+            }
+            CredentialStateSnapshotCase::Destroyed(destroyed) => {
+                let destroyed_ref = decode_destroyed_state(destroyed)?;
+                let (credential_id, scope, kind) = decode_write_requested(inner)?;
+                if destroyed_ref.id() != &credential_id {
+                    return Err(CredentialEvolveError::CredentialRefMismatch {
+                        expected: destroyed_ref.id().clone(),
                         actual: credential_id,
                     });
                 }

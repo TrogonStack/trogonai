@@ -398,6 +398,18 @@ fn given_when_then_rejects_credential_write_for_revoked_credential() {
 }
 
 #[test]
+fn given_when_then_allows_write_after_credential_destroyed() {
+    TestCase::<RequestCredentialWrite>::new()
+        .given([write_requested()])
+        .given([activated(1)])
+        .given([revoked(1)])
+        .given([destroy_requested(1)])
+        .given([destroyed(1)])
+        .when(request_write())
+        .then([write_requested()]);
+}
+
+#[test]
 fn given_when_then_allows_write_retry_after_write_failure() {
     let reason = CredentialFailureReason::new("openbao write failed").unwrap();
 
@@ -705,6 +717,56 @@ fn rebuild_state_from_events_returns_failed_write_to_pending_write_on_retry() {
     assert_eq!(
         decode_pending_write_state(pending).unwrap(),
         (credential_id(), scope(), CredentialKind::WebhookSecret)
+    );
+}
+
+#[test]
+fn rebuild_state_from_events_restarts_a_destroyed_credential_as_pending_write() {
+    let state = rebuild_state_from_events([
+        write_requested(),
+        activated(1),
+        revoked(1),
+        destroy_requested(1),
+        destroyed(1),
+        write_requested(),
+    ]);
+
+    let Some(CredentialStateSnapshotCase::PendingWrite(pending)) = state.state.as_ref() else {
+        panic!("expected pending write");
+    };
+    assert_eq!(
+        decode_pending_write_state(pending).unwrap(),
+        (credential_id(), scope(), CredentialKind::WebhookSecret)
+    );
+}
+
+#[test]
+fn evolve_rejects_restart_after_destroy_for_a_different_credential() {
+    let destroyed_state = rebuild_state_from_events([
+        write_requested(),
+        activated(1),
+        revoked(1),
+        destroy_requested(1),
+        destroyed(1),
+    ]);
+    let other_id = CredentialId::new("openbao:tenant-1:github/secondary:webhook_secret").unwrap();
+    let restart = proto::CredentialEvent {
+        event: Some(
+            write_requested_to_proto(
+                &other_id,
+                &integration_scope("secondary"),
+                CredentialKind::WebhookSecret,
+            )
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        evolve(destroyed_state, &restart).unwrap_err(),
+        CredentialEvolveError::CredentialRefMismatch {
+            expected: credential_id(),
+            actual: other_id,
+        }
     );
 }
 

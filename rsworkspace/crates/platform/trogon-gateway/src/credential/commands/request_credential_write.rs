@@ -59,7 +59,9 @@ impl Decider for RequestCredentialWrite {
         let current = state.state.as_ref().ok_or(CredentialDecideError::MissingState)?;
 
         match current {
-            CredentialStateSnapshotCase::Missing(_) | CredentialStateSnapshotCase::WriteFailed(_) => {}
+            CredentialStateSnapshotCase::Missing(_)
+            | CredentialStateSnapshotCase::WriteFailed(_)
+            | CredentialStateSnapshotCase::Destroyed(_) => {}
             CredentialStateSnapshotCase::Revoked(_) => {
                 return Err(CredentialDecideError::Revoked {
                     credential_id: command.credential_id.clone(),
