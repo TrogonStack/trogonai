@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use trogon_std::NonZeroDuration;
 
-use super::{NatsObjectStore, ProvisionObjectStoreError};
+use super::{NatsObjectStore, ObjectStorePut, ProvisionObjectStoreError};
 use crate::jetstream::claim_bucket::ClaimBucket;
 use crate::jetstream::claim_check::ClaimResolver;
 use crate::jetstream::claim_retention::ClaimRetention;
@@ -97,4 +97,25 @@ async fn a_resolver_reads_the_bucket_its_binding_opened() {
         .expect("bind claim bucket");
     assert_eq!(binding.bucket(), &claim_bucket());
     assert_eq!(ClaimResolver::new(binding).bucket(), &claim_bucket());
+}
+
+#[tokio::test]
+async fn contains_reports_only_live_objects() {
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
+    let (store, _) = NatsObjectStore::provision_claim_bucket(&js, claim_bucket(), tracking(3600))
+        .await
+        .expect("provision claim bucket")
+        .into_parts();
+
+    assert!(!store.contains("absent").await);
+
+    store
+        .put("present", &mut std::io::Cursor::new(b"body".to_vec()))
+        .await
+        .expect("put");
+    assert!(store.contains("present").await);
+
+    store.store.delete("present").await.expect("delete");
+    assert!(!store.contains("present").await);
 }

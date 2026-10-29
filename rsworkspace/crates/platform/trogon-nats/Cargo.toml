@@ -24,6 +24,8 @@ tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 trogon-std = { workspace = true }
 uuid = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
 testcontainers-modules = { workspace = true, optional = true }
 
 [dev-dependencies]

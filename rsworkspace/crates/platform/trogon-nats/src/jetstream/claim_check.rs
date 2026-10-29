@@ -4,12 +4,13 @@ use std::time::Duration;
 
 use async_nats::HeaderMap;
 use bytes::Bytes;
+use sha2::{Digest, Sha256};
 use tokio::io::AsyncReadExt;
 use tracing::{debug, error};
 
 use crate::constants::{
     CLAIM_CHECK_VERSION, CLAIM_HEADER_PREFIX, HEADER_CLAIM_BUCKET, HEADER_CLAIM_CHECK, HEADER_CLAIM_KEY,
-    PROTOCOL_OVERHEAD,
+    HEADER_NATS_MSG_ID, PROTOCOL_OVERHEAD,
 };
 
 use super::claim_bucket::{ClaimBucket, ClaimBucketError, ClaimBucketHeader};
@@ -213,9 +214,22 @@ fn strip_claim_headers(headers: HeaderMap) -> HeaderMap {
         .collect()
 }
 
-fn claim_object_key(subject: &str) -> String {
-    let id = uuid::Uuid::now_v7();
-    format!("{subject}/{id}")
+fn message_id(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get(HEADER_NATS_MSG_ID)
+        .map(|value| value.as_str())
+        .filter(|value| !value.is_empty())
+}
+
+fn claim_object_key(subject: &str, headers: &HeaderMap, payload: &[u8]) -> String {
+    match message_id(headers) {
+        Some(id) => format!(
+            "{subject}/{}/{}",
+            hex::encode(Sha256::digest(id.as_bytes())),
+            hex::encode(Sha256::digest(payload))
+        ),
+        None => format!("{subject}/{}", uuid::Uuid::now_v7()),
+    }
 }
 
 impl<P: JetStreamPublisher, S: ObjectStorePut> ClaimCheckPublisher<P, S> {
@@ -248,7 +262,7 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> ClaimCheckPublisher<P, S> {
             .await;
         }
 
-        let key = claim_object_key(&subject);
+        let key = claim_object_key(&subject, &headers, &payload);
 
         debug!(
             nats.subject = %subject,
@@ -259,13 +273,16 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> ClaimCheckPublisher<P, S> {
             "payload exceeds threshold, storing in object store"
         );
 
-        // Store-then-publish: if publish fails, the object becomes orphaned.
-        // Cleanup relies on the object store bucket's retention, which is sized
-        // from the owning stream via `ClaimRetention`.
-        let mut cursor = std::io::Cursor::new(payload);
-        if let Err(e) = self.store.put(&key, &mut cursor).await {
-            error!(error = %e, "claim check: failed to store payload in object store");
-            return PublishOutcome::StoreFailed(Box::new(e));
+        // Store-then-publish: a failed publish orphans the object until bucket retention expires it.
+        // The key carries the message id and a payload digest, so a deduplicated retry finds the object
+        // already stored. Rewriting it would purge the chunks a consumer may be reading.
+        let already_stored = message_id(&headers).is_some() && self.store.contains(&key).await;
+        if !already_stored {
+            let mut cursor = std::io::Cursor::new(payload);
+            if let Err(e) = self.store.put(&key, &mut cursor).await {
+                error!(error = %e, "claim check: failed to store payload in object store");
+                return PublishOutcome::StoreFailed(Box::new(e));
+            }
         }
 
         let mut claim_headers = headers;
