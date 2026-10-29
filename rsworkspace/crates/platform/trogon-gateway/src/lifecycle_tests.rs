@@ -209,6 +209,14 @@ async fn telegram_registration_follows_a_rotated_runtime_secret_and_skips_an_unc
     )
     .await;
     assert_eq!(*registered.lock().await, ["runtime-first", "runtime-rotated"]);
+    assert_eq!(
+        registrations
+            .registered_secrets
+            .get(&source_integration_id::SourceIntegrationId::new("first").unwrap())
+            .unwrap()
+            .as_str(),
+        "runtime-rotated"
+    );
 }
 
 #[tokio::test]

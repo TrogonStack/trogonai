@@ -3,6 +3,7 @@ use super::config::TelegramWebhookSecret;
 use super::constants::{
     HEADER_SECRET_TOKEN, HTTP_BODY_SIZE_MAX, NATS_HEADER_UPDATE_ID, NATS_HEADER_UPDATE_TYPE, UPDATE_TYPES,
 };
+use super::registered_secrets::TelegramRegisteredWebhookSecrets;
 use super::signature;
 use axum::{
     Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap, http::StatusCode, routing::post,
@@ -47,6 +48,8 @@ struct RuntimeAppState<P: JetStreamPublisher, S: ObjectStorePut, G> {
     publisher: ClaimCheckPublisher<P, S>,
     credential_resolver: RuntimeCredentialResolver<G>,
     runtime_key: RuntimeIntegrationKey,
+    integration_id: SourceIntegrationId,
+    registered_secrets: TelegramRegisteredWebhookSecrets,
     subject_prefix: NatsToken,
     nats_ack_timeout: NonZeroDuration,
 }
@@ -88,6 +91,7 @@ pub fn runtime_router<P, S, G>(
     config: &TelegramSourceConfig,
     integration_id: SourceIntegrationId,
     credential_resolver: RuntimeCredentialResolver<G>,
+    registered_secrets: TelegramRegisteredWebhookSecrets,
 ) -> Router
 where
     P: JetStreamPublisher,
@@ -98,6 +102,8 @@ where
         publisher,
         credential_resolver,
         runtime_key: RuntimeIntegrationKey::new(SourceKind::Telegram, &integration_id),
+        integration_id,
+        registered_secrets,
         subject_prefix: config.subject_prefix.clone(),
         nats_ack_timeout: config.nats_ack_timeout,
     };
@@ -195,9 +201,16 @@ where
         }
     };
 
-    if let Err(e) = signature::verify(webhook_secret.as_str(), token) {
-        warn!(reason = %e, "Telegram webhook secret validation failed");
-        return StatusCode::UNAUTHORIZED;
+    let verified = signature::verify(webhook_secret.as_str(), token);
+    if let Err(e) = verified {
+        let registered_matches = state
+            .registered_secrets
+            .get(&state.integration_id)
+            .is_some_and(|registered| signature::verify(registered.as_str(), token).is_ok());
+        if !registered_matches {
+            warn!(reason = %e, "Telegram webhook secret validation failed");
+            return StatusCode::UNAUTHORIZED;
+        }
     }
 
     publish_verified_update(state.publisher, state.subject_prefix, state.nats_ack_timeout, body).await

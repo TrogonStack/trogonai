@@ -45,6 +45,14 @@ fn mock_app(publisher: MockJetStreamPublisher) -> Router {
 }
 
 async fn runtime_app(publisher: MockJetStreamPublisher, secret: &str) -> Router {
+    runtime_app_with(publisher, secret, TelegramRegisteredWebhookSecrets::default()).await
+}
+
+async fn runtime_app_with(
+    publisher: MockJetStreamPublisher,
+    secret: &str,
+    registered_secrets: TelegramRegisteredWebhookSecrets,
+) -> Router {
     let config = test_config();
     let store = MockOpenBaoSecretStore::default();
     let integration_id = SourceIntegrationId::new("primary").unwrap();
@@ -71,6 +79,7 @@ async fn runtime_app(publisher: MockJetStreamPublisher, secret: &str) -> Router 
         &config,
         integration_id,
         registry.resolver(store),
+        registered_secrets,
     )
 }
 
@@ -167,6 +176,36 @@ async fn runtime_webhook_secret_publishes_to_nats_and_rejects_static_secret() {
     let messages = publisher.published_messages();
     assert_eq!(messages.len(), 1);
     assert_eq!(messages[0].subject, "telegram.message");
+}
+
+#[tokio::test]
+async fn runtime_webhook_accepts_the_registered_secret_until_the_rotated_one_is_registered() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let registered_secrets = TelegramRegisteredWebhookSecrets::default();
+    registered_secrets.record(
+        SourceIntegrationId::new("primary").unwrap(),
+        TelegramWebhookSecret::new("previous-secret").unwrap(),
+    );
+    let app = runtime_app_with(publisher.clone(), "rotated-secret", registered_secrets.clone()).await;
+    let body = update_json("message");
+    let status = |token: &'static str| {
+        let app = app.clone();
+        let request = webhook_request(&body, Some(token));
+        async move { app.oneshot(request).await.unwrap().status() }
+    };
+
+    assert_eq!(status("previous-secret").await, StatusCode::OK);
+    assert_eq!(status("rotated-secret").await, StatusCode::OK);
+    assert_eq!(status("unknown-secret").await, StatusCode::UNAUTHORIZED);
+
+    registered_secrets.record(
+        SourceIntegrationId::new("primary").unwrap(),
+        TelegramWebhookSecret::new("rotated-secret").unwrap(),
+    );
+
+    assert_eq!(status("previous-secret").await, StatusCode::UNAUTHORIZED);
+    assert_eq!(status("rotated-secret").await, StatusCode::OK);
 }
 
 #[tokio::test]

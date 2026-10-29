@@ -484,6 +484,7 @@ fn every_runtime_credential_mount() -> RuntimeCredentialMounts<MockOpenBaoSecret
         sentry: Some(resolver.clone()),
         slack: Some(resolver.clone()),
         telegram: Some(resolver.clone()),
+        telegram_registered_secrets: Default::default(),
         twitter: Some(resolver.clone()),
         notion: Some(resolver),
     }
