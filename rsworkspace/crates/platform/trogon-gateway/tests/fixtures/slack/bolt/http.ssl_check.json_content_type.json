@@ -29,9 +29,11 @@
   "expected": {
     "outcome": "reject",
     "nats": null,
+    "request": null,
     "http": {
       "status": 401,
       "body": null,
+      "content_type": null,
       "challenge": null
     },
     "socket_ack": null

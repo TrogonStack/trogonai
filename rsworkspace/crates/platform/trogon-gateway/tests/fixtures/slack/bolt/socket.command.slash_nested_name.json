@@ -50,6 +50,24 @@
         "X-Slack-Envelope-Id": "dbdd0ef3-1543-4f94-bfb4-133d0e6c1545"
       }
     },
+    "request": {
+      "subject_suffix": "respond.command.deploy-app",
+      "headers": {
+        "X-Slack-Event-Type": "/deploy-app",
+        "X-Slack-Team-Id": "T1234",
+        "X-Slack-Payload-Kind": "command",
+        "Content-Type": "application/json",
+        "X-Slack-Is-Enterprise-Install": "false",
+        "X-Slack-Api-App-Id": "A1234",
+        "X-Slack-Transport": "socket_mode",
+        "X-Slack-Envelope-Id": "dbdd0ef3-1543-4f94-bfb4-133d0e6c1545"
+      },
+      "payload": "{\"token\":\"xoxb-1234\",\"command\":\"/deploy-app\",\"text\":\"yo\",\"response_url\":\"https://slack.com\",\"trigger_id\":\"1234.56\",\"user_id\":\"U1234\",\"user_name\":\"filmaj\",\"team_id\":\"T1234\",\"team_domain\":\"slack.com\",\"channel_id\":\"C1234\",\"channel_name\":\"#random\",\"api_app_id\":\"A1234\"}",
+      "reply": {
+        "content_type": null,
+        "body": ""
+      }
+    },
     "http": null,
     "socket_ack": {
       "envelope_id": "dbdd0ef3-1543-4f94-bfb4-133d0e6c1545",

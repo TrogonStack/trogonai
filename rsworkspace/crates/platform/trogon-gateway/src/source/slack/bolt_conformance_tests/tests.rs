@@ -124,6 +124,8 @@ fn http_fixture(challenge: &str) -> Fixture {
 fn observed_body(body: &str) -> Observed {
     Observed {
         outcome: Outcome::Inline,
+        requests: Vec::new(),
+        content_type: None,
         deliveries: Vec::new(),
         unroutable: 0,
         status: Some(200),
@@ -178,4 +180,101 @@ fn an_unroutable_record_is_only_explained_when_bolt_rejects_the_request() {
         2
     );
     assert_eq!(judge(&fixture(), None, &[unroutable_diff()]).len(), 1);
+}
+
+fn request_fixture(content_type: serde_json::Value) -> Fixture {
+    serde_json::from_value(serde_json::json!({
+        "id": "http.synthetic",
+        "kind": "command",
+        "transport": "http",
+        "provenance": {
+            "bolt_version": "0.0.0",
+            "bolt_commit": "0000000000000000000000000000000000000000",
+            "payload_source": "synthetic"
+        },
+        "not_representable": null,
+        "input": { "headers": {}, "body": "{}" },
+        "expected": {
+            "outcome": "inline",
+            "nats": null,
+            "request": {
+                "subject_suffix": "respond.command.deploy",
+                "headers": { "X-Slack-Team-Id": "T1" },
+                "payload": "{}",
+                "reply": { "content_type": null, "body": "" }
+            },
+            "http": { "status": 200, "body": null, "content_type": content_type, "challenge": null },
+            "socket_ack": null
+        }
+    }))
+    .expect("synthetic fixture")
+}
+
+fn requested(headers: &[(&str, &str)], payload: &'static [u8]) -> Requested {
+    Requested {
+        headers: headers
+            .iter()
+            .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+            .collect(),
+        payload: Bytes::from_static(payload),
+    }
+}
+
+fn fields(diffs: &[Diff]) -> Vec<&Field> {
+    diffs.iter().map(|diff| &diff.field).collect()
+}
+
+#[test]
+fn a_matching_request_leaves_no_mismatch() {
+    let fixture = request_fixture(serde_json::Value::Null);
+    let mut observed = observed_body("");
+    observed.requests = vec![requested(&[("X-Slack-Team-Id", "T1"), (DEDUP_HEADER, "d")], b"{}")];
+    assert!(compare(&fixture, &observed).is_empty());
+}
+
+#[test]
+fn a_request_is_compared_on_count_payload_and_headers() {
+    let fixture = request_fixture(serde_json::Value::Null);
+
+    let missing = compare(&fixture, &observed_body(""));
+    assert_eq!(fields(&missing), [&Field::Requests]);
+
+    let mut observed = observed_body("");
+    observed.requests = vec![requested(&[("X-Slack-Team-Id", "T2"), ("X-Slack-Extra", "1")], b"[]")];
+    let diffs = compare(&fixture, &observed);
+    assert_eq!(
+        fields(&diffs),
+        [
+            &Field::RequestPayload,
+            &Field::RequestHeader("X-Slack-Team-Id".to_owned()),
+            &Field::RequestHeader("X-Slack-Extra".to_owned()),
+        ]
+    );
+
+    let mut observed = observed_body("");
+    observed.requests = vec![requested(&[], b"{}")];
+    let diffs = compare(&fixture, &observed);
+    assert_eq!(fields(&diffs), [&Field::RequestHeader("X-Slack-Team-Id".to_owned())]);
+}
+
+#[test]
+fn a_request_nobody_expected_is_a_mismatch() {
+    let mut observed = observed_body("");
+    observed.requests = vec![requested(&[], b"{}")];
+    let diffs = compare(&fixture_expecting("inline"), &observed);
+    assert_eq!(fields(&diffs), [&Field::Requests]);
+}
+
+#[test]
+fn an_expected_content_type_must_be_the_one_observed() {
+    let fixture = request_fixture(serde_json::json!("application/json"));
+    let mut observed = observed_body("");
+    observed.requests = vec![requested(&[("X-Slack-Team-Id", "T1")], b"{}")];
+    assert_eq!(fields(&compare(&fixture, &observed)), [&Field::ContentType]);
+
+    observed.content_type = Some("text/plain".to_owned());
+    assert_eq!(fields(&compare(&fixture, &observed)), [&Field::ContentType]);
+
+    observed.content_type = Some("application/json".to_owned());
+    assert!(compare(&fixture, &observed).is_empty());
 }

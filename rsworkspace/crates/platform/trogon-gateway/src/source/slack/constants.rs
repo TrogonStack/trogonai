@@ -27,12 +27,14 @@ pub const NATS_HEADER_CHANNEL_TYPE: &str = "X-Slack-Channel-Type";
 pub const NATS_HEADER_ENVELOPE_ID: &str = "X-Slack-Envelope-Id";
 pub const NATS_HEADER_REQUEST_TIMESTAMP: &str = "X-Slack-Request-Timestamp";
 
+pub const NATS_HEADER_CALLBACK_ID: &str = "X-Slack-Callback-Id";
 pub const NATS_HEADER_TRANSPORT: &str = "X-Slack-Transport";
 pub const NATS_HEADER_REJECT_REASON: &str = "X-Slack-Reject-Reason";
 pub const NATS_HEADER_CONTENT_TYPE: &str = "Content-Type";
 
 pub const CONTENT_TYPE_FORM: &str = "application/x-www-form-urlencoded";
 pub const CONTENT_TYPE_JSON: &str = "application/json";
+pub const CONTENT_TYPE_TEXT: &str = "text/plain";
 pub const CONTENT_TYPE_UNKNOWN: &str = "application/octet-stream";
 
 pub const DEFAULT_API_BASE_URL: &str = "https://slack.com/api/";

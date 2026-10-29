@@ -31,9 +31,11 @@
   "expected": {
     "outcome": "inline",
     "nats": null,
+    "request": null,
     "http": {
       "status": 200,
       "body": null,
+      "content_type": null,
       "challenge": "3eZbrw1aBm2rZgRNFdxV2595E9CY3gmdALWMmHkvFXO7tYXAYM8P"
     },
     "socket_ack": null

@@ -72,7 +72,20 @@ export interface ExpectedNats {
 export interface ExpectedHttp {
   status: number;
   body: string | null;
+  content_type: string | null;
   challenge: string | null;
+}
+
+export interface ExpectedReply {
+  content_type: string | null;
+  body: string;
+}
+
+export interface ExpectedRequest {
+  subject_suffix: string;
+  headers: Record<string, string>;
+  payload: string;
+  reply: ExpectedReply;
 }
 
 export interface ExpectedSocketAck {
@@ -83,6 +96,7 @@ export interface ExpectedSocketAck {
 export interface Expected {
   outcome: ExpectedOutcome;
   nats: ExpectedNats | null;
+  request: ExpectedRequest | null;
   http: ExpectedHttp | null;
   socket_ack: ExpectedSocketAck | null;
 }

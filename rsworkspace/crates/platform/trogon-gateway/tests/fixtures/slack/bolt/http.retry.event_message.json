@@ -61,9 +61,11 @@
         "X-Slack-Request-Timestamp": "1700000000"
       }
     },
+    "request": null,
     "http": {
       "status": 200,
       "body": null,
+      "content_type": null,
       "challenge": null
     },
     "socket_ack": null

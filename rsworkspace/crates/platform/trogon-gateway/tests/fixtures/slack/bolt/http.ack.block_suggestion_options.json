@@ -55,9 +55,11 @@
         "X-Slack-Request-Timestamp": "1700000000"
       }
     },
+    "request": null,
     "http": {
       "status": 200,
       "body": "{\"options\":[{\"text\":{\"type\":\"plain_text\",\"text\":\"First option\"},\"value\":\"first\"}]}",
+      "content_type": "application/json",
       "challenge": null
     },
     "socket_ack": null

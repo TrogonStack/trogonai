@@ -12,6 +12,7 @@
 
 use axum::Router;
 use tracing::info;
+use trogon_nats::client::RequestClient;
 use trogon_nats::jetstream::{ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut};
 
 use crate::config::{ResolvedConfig, SourceIntegration};
@@ -27,10 +28,17 @@ pub trait SourcePlugin: Send + Sync {
 
     async fn provision<C: JetStreamContext>(&self, client: &C, config: &ResolvedConfig) -> Result<(), C::Error>;
 
-    fn mount<P, S>(&self, app: Router, publisher: ClaimCheckPublisher<P, S>, config: &ResolvedConfig) -> Router
+    fn mount<P, S, R>(
+        &self,
+        app: Router,
+        publisher: ClaimCheckPublisher<P, S>,
+        requester: &R,
+        config: &ResolvedConfig,
+    ) -> Router
     where
         P: JetStreamPublisher,
-        S: ObjectStorePut;
+        S: ObjectStorePut,
+        R: RequestClient;
 }
 
 pub struct GithubPlugin;
@@ -98,10 +106,17 @@ impl SourcePlugin for GithubPlugin {
         provision_integrations(&config.github, self.id(), client, crate::source::github::provision).await
     }
 
-    fn mount<P, S>(&self, app: Router, publisher: ClaimCheckPublisher<P, S>, config: &ResolvedConfig) -> Router
+    fn mount<P, S, R>(
+        &self,
+        app: Router,
+        publisher: ClaimCheckPublisher<P, S>,
+        _requester: &R,
+        config: &ResolvedConfig,
+    ) -> Router
     where
         P: JetStreamPublisher,
         S: ObjectStorePut,
+        R: RequestClient,
     {
         mount_integrations(
             &config.github,
@@ -123,10 +138,17 @@ impl SourcePlugin for SlackPlugin {
         provision_integrations(&config.slack, self.id(), client, crate::source::slack::provision).await
     }
 
-    fn mount<P, S>(&self, mut app: Router, publisher: ClaimCheckPublisher<P, S>, config: &ResolvedConfig) -> Router
+    fn mount<P, S, R>(
+        &self,
+        mut app: Router,
+        publisher: ClaimCheckPublisher<P, S>,
+        requester: &R,
+        config: &ResolvedConfig,
+    ) -> Router
     where
         P: JetStreamPublisher,
         S: ObjectStorePut,
+        R: RequestClient,
     {
         for integration in &config.slack {
             let Some(webhook) = integration.config.webhook() else {
@@ -135,7 +157,7 @@ impl SourcePlugin for SlackPlugin {
             let path = format!("{}/{}", self.path_prefix(), integration.id);
             app = app.nest(
                 &path,
-                crate::source::slack::router(publisher.clone(), &integration.config, webhook),
+                crate::source::slack::router(publisher.clone(), requester.clone(), &integration.config, webhook),
             );
             info!(
                 source = self.id(),
@@ -157,10 +179,17 @@ impl SourcePlugin for TelegramPlugin {
         provision_integrations(&config.telegram, self.id(), client, crate::source::telegram::provision).await
     }
 
-    fn mount<P, S>(&self, app: Router, publisher: ClaimCheckPublisher<P, S>, config: &ResolvedConfig) -> Router
+    fn mount<P, S, R>(
+        &self,
+        app: Router,
+        publisher: ClaimCheckPublisher<P, S>,
+        _requester: &R,
+        config: &ResolvedConfig,
+    ) -> Router
     where
         P: JetStreamPublisher,
         S: ObjectStorePut,
+        R: RequestClient,
     {
         mount_integrations(
             &config.telegram,
@@ -182,10 +211,17 @@ impl SourcePlugin for TwitterPlugin {
         provision_integrations(&config.twitter, self.id(), client, crate::source::twitter::provision).await
     }
 
-    fn mount<P, S>(&self, app: Router, publisher: ClaimCheckPublisher<P, S>, config: &ResolvedConfig) -> Router
+    fn mount<P, S, R>(
+        &self,
+        app: Router,
+        publisher: ClaimCheckPublisher<P, S>,
+        _requester: &R,
+        config: &ResolvedConfig,
+    ) -> Router
     where
         P: JetStreamPublisher,
         S: ObjectStorePut,
+        R: RequestClient,
     {
         mount_integrations(
             &config.twitter,
@@ -207,10 +243,17 @@ impl SourcePlugin for GitlabPlugin {
         provision_integrations(&config.gitlab, self.id(), client, crate::source::gitlab::provision).await
     }
 
-    fn mount<P, S>(&self, app: Router, publisher: ClaimCheckPublisher<P, S>, config: &ResolvedConfig) -> Router
+    fn mount<P, S, R>(
+        &self,
+        app: Router,
+        publisher: ClaimCheckPublisher<P, S>,
+        _requester: &R,
+        config: &ResolvedConfig,
+    ) -> Router
     where
         P: JetStreamPublisher,
         S: ObjectStorePut,
+        R: RequestClient,
     {
         mount_integrations(
             &config.gitlab,
@@ -238,10 +281,17 @@ impl SourcePlugin for IncidentioPlugin {
         .await
     }
 
-    fn mount<P, S>(&self, app: Router, publisher: ClaimCheckPublisher<P, S>, config: &ResolvedConfig) -> Router
+    fn mount<P, S, R>(
+        &self,
+        app: Router,
+        publisher: ClaimCheckPublisher<P, S>,
+        _requester: &R,
+        config: &ResolvedConfig,
+    ) -> Router
     where
         P: JetStreamPublisher,
         S: ObjectStorePut,
+        R: RequestClient,
     {
         mount_integrations(
             &config.incidentio,
@@ -263,10 +313,17 @@ impl SourcePlugin for LinearPlugin {
         provision_integrations(&config.linear, self.id(), client, crate::source::linear::provision).await
     }
 
-    fn mount<P, S>(&self, app: Router, publisher: ClaimCheckPublisher<P, S>, config: &ResolvedConfig) -> Router
+    fn mount<P, S, R>(
+        &self,
+        app: Router,
+        publisher: ClaimCheckPublisher<P, S>,
+        _requester: &R,
+        config: &ResolvedConfig,
+    ) -> Router
     where
         P: JetStreamPublisher,
         S: ObjectStorePut,
+        R: RequestClient,
     {
         mount_integrations(
             &config.linear,
@@ -294,10 +351,17 @@ impl SourcePlugin for MicrosoftGraphPlugin {
         .await
     }
 
-    fn mount<P, S>(&self, app: Router, publisher: ClaimCheckPublisher<P, S>, config: &ResolvedConfig) -> Router
+    fn mount<P, S, R>(
+        &self,
+        app: Router,
+        publisher: ClaimCheckPublisher<P, S>,
+        _requester: &R,
+        config: &ResolvedConfig,
+    ) -> Router
     where
         P: JetStreamPublisher,
         S: ObjectStorePut,
+        R: RequestClient,
     {
         mount_integrations(
             &config.microsoft_graph,
@@ -319,10 +383,17 @@ impl SourcePlugin for NotionPlugin {
         provision_integrations(&config.notion, self.id(), client, crate::source::notion::provision).await
     }
 
-    fn mount<P, S>(&self, app: Router, publisher: ClaimCheckPublisher<P, S>, config: &ResolvedConfig) -> Router
+    fn mount<P, S, R>(
+        &self,
+        app: Router,
+        publisher: ClaimCheckPublisher<P, S>,
+        _requester: &R,
+        config: &ResolvedConfig,
+    ) -> Router
     where
         P: JetStreamPublisher,
         S: ObjectStorePut,
+        R: RequestClient,
     {
         mount_integrations(
             &config.notion,
@@ -344,10 +415,17 @@ impl SourcePlugin for SentryPlugin {
         provision_integrations(&config.sentry, self.id(), client, crate::source::sentry::provision).await
     }
 
-    fn mount<P, S>(&self, app: Router, publisher: ClaimCheckPublisher<P, S>, config: &ResolvedConfig) -> Router
+    fn mount<P, S, R>(
+        &self,
+        app: Router,
+        publisher: ClaimCheckPublisher<P, S>,
+        _requester: &R,
+        config: &ResolvedConfig,
+    ) -> Router
     where
         P: JetStreamPublisher,
         S: ObjectStorePut,
+        R: RequestClient,
     {
         mount_integrations(
             &config.sentry,
@@ -369,10 +447,17 @@ impl SourcePlugin for DatadogPlugin {
         provision_integrations(&config.datadog, self.id(), client, crate::source::datadog::provision).await
     }
 
-    fn mount<P, S>(&self, app: Router, publisher: ClaimCheckPublisher<P, S>, config: &ResolvedConfig) -> Router
+    fn mount<P, S, R>(
+        &self,
+        app: Router,
+        publisher: ClaimCheckPublisher<P, S>,
+        _requester: &R,
+        config: &ResolvedConfig,
+    ) -> Router
     where
         P: JetStreamPublisher,
         S: ObjectStorePut,
+        R: RequestClient,
     {
         mount_integrations(
             &config.datadog,
@@ -394,10 +479,17 @@ impl SourcePlugin for ZoomPlugin {
         provision_integrations(&config.zoom, self.id(), client, crate::source::zoom::provision).await
     }
 
-    fn mount<P, S>(&self, app: Router, publisher: ClaimCheckPublisher<P, S>, config: &ResolvedConfig) -> Router
+    fn mount<P, S, R>(
+        &self,
+        app: Router,
+        publisher: ClaimCheckPublisher<P, S>,
+        _requester: &R,
+        config: &ResolvedConfig,
+    ) -> Router
     where
         P: JetStreamPublisher,
         S: ObjectStorePut,
+        R: RequestClient,
     {
         mount_integrations(
             &config.zoom,
@@ -431,25 +523,27 @@ pub async fn provision_webhook_sources<C: JetStreamContext>(
 }
 
 /// Mount HTTP routes for every webhook source.
-pub fn mount_webhook_sources<P, S>(
+pub fn mount_webhook_sources<P, S, R>(
     mut app: Router,
     publisher: ClaimCheckPublisher<P, S>,
+    requester: &R,
     config: &ResolvedConfig,
 ) -> Router
 where
     P: JetStreamPublisher,
     S: ObjectStorePut,
+    R: RequestClient,
 {
-    app = GithubPlugin.mount(app, publisher.clone(), config);
-    app = SlackPlugin.mount(app, publisher.clone(), config);
-    app = TelegramPlugin.mount(app, publisher.clone(), config);
-    app = TwitterPlugin.mount(app, publisher.clone(), config);
-    app = GitlabPlugin.mount(app, publisher.clone(), config);
-    app = IncidentioPlugin.mount(app, publisher.clone(), config);
-    app = LinearPlugin.mount(app, publisher.clone(), config);
-    app = MicrosoftGraphPlugin.mount(app, publisher.clone(), config);
-    app = NotionPlugin.mount(app, publisher.clone(), config);
-    app = SentryPlugin.mount(app, publisher.clone(), config);
-    app = DatadogPlugin.mount(app, publisher.clone(), config);
-    ZoomPlugin.mount(app, publisher, config)
+    app = GithubPlugin.mount(app, publisher.clone(), requester, config);
+    app = SlackPlugin.mount(app, publisher.clone(), requester, config);
+    app = TelegramPlugin.mount(app, publisher.clone(), requester, config);
+    app = TwitterPlugin.mount(app, publisher.clone(), requester, config);
+    app = GitlabPlugin.mount(app, publisher.clone(), requester, config);
+    app = IncidentioPlugin.mount(app, publisher.clone(), requester, config);
+    app = LinearPlugin.mount(app, publisher.clone(), requester, config);
+    app = MicrosoftGraphPlugin.mount(app, publisher.clone(), requester, config);
+    app = NotionPlugin.mount(app, publisher.clone(), requester, config);
+    app = SentryPlugin.mount(app, publisher.clone(), requester, config);
+    app = DatadogPlugin.mount(app, publisher.clone(), requester, config);
+    ZoomPlugin.mount(app, publisher, requester, config)
 }

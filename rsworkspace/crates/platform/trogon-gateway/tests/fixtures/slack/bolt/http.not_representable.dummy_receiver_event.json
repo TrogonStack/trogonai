@@ -40,6 +40,7 @@
   "expected": {
     "outcome": "ignore",
     "nats": null,
+    "request": null,
     "http": null,
     "socket_ack": null
   }

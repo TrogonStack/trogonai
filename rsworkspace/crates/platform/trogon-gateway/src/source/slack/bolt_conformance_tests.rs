@@ -7,11 +7,11 @@ use axum::http::Request;
 use bytes::Bytes;
 use serde::Deserialize;
 use tower::ServiceExt;
-use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{
     ClaimBucket, ClaimBucketBinding, ClaimCheckPublisher, MaxPayload, MockJetStreamPublisher, MockObjectStore,
     StreamMaxAge,
 };
+use trogon_nats::{AdvancedMockNatsClient, NatsToken};
 use trogon_std::NonZeroDuration;
 use trogon_std::time::FixedEpochClock;
 
@@ -20,6 +20,7 @@ use super::config::{
     SlackApiBaseUrl, SlackAppToken, SlackConfig, SlackSigningSecret, SlackSocketModeConfig, SlackTransportConfig,
     SlackWebhookConfig,
 };
+use super::constants::NATS_HEADER_CONTENT_TYPE;
 use super::server::{SlackBridge, router_with_clock};
 use super::socket_mode::handle_text_frame;
 
@@ -159,9 +160,24 @@ impl ExpectedNats {
 }
 
 #[derive(Debug, Deserialize)]
+struct ExpectedReply {
+    content_type: Option<String>,
+    body: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExpectedRequest {
+    subject_suffix: String,
+    headers: BTreeMap<String, String>,
+    payload: String,
+    reply: ExpectedReply,
+}
+
+#[derive(Debug, Deserialize)]
 struct ExpectedHttp {
     status: u16,
     body: Option<String>,
+    content_type: Option<String>,
     challenge: Option<String>,
 }
 
@@ -175,6 +191,7 @@ struct ExpectedSocketAck {
 struct Expected {
     outcome: Outcome,
     nats: Option<ExpectedNats>,
+    request: Option<ExpectedRequest>,
     http: Option<ExpectedHttp>,
     socket_ack: Option<ExpectedSocketAck>,
 }
@@ -243,6 +260,10 @@ enum Field {
     UnexpectedHeader(String),
     HeaderValue(String),
     SocketAck,
+    ContentType,
+    Requests,
+    RequestPayload,
+    RequestHeader(String),
     Unroutable,
 }
 
@@ -262,7 +283,10 @@ impl fmt::Display for Diff {
 impl GapId {
     fn explains(self, fixture: &Fixture, diff: &Diff) -> bool {
         match self {
-            GapId::G2 => fixture.expects_ack_body() && matches!(diff.field, Field::ResponseBody | Field::SocketAck),
+            GapId::G2 => {
+                fixture.expects_ack_body()
+                    && matches!(diff.field, Field::ResponseBody | Field::SocketAck | Field::ContentType)
+            }
             GapId::G11 => fixture.transport == Transport::SocketMode && diff.field == Field::PayloadReserialized,
             GapId::G23 => diff.field == Field::Unroutable && fixture.expected.outcome == Outcome::Reject,
             _ => false,
@@ -284,8 +308,16 @@ struct Published {
 }
 
 #[derive(Debug)]
+struct Requested {
+    headers: BTreeMap<String, String>,
+    payload: Bytes,
+}
+
+#[derive(Debug)]
 struct Observed {
     outcome: Outcome,
+    requests: Vec<Requested>,
+    content_type: Option<String>,
     deliveries: Vec<Delivery>,
     unroutable: usize,
     status: Option<u16>,
@@ -383,12 +415,49 @@ fn published(publisher: &MockJetStreamPublisher) -> Published {
     Published { routed, unroutable }
 }
 
+fn requester_for(fixture: &Fixture) -> AdvancedMockNatsClient {
+    let requester = AdvancedMockNatsClient::new();
+    if let Some(request) = &fixture.expected.request {
+        let mut headers = async_nats::HeaderMap::new();
+        if let Some(content_type) = &request.reply.content_type {
+            headers.insert(NATS_HEADER_CONTENT_TYPE, content_type.as_str());
+        }
+        requester.set_response_wire(
+            &format!("{SUBJECT_PREFIX}.{}", request.subject_suffix),
+            headers,
+            Bytes::from(request.reply.body.clone().into_bytes()),
+        );
+    }
+    requester
+}
+
+fn requested(requester: &AdvancedMockNatsClient) -> Vec<Requested> {
+    requester
+        .requested_headers()
+        .into_iter()
+        .zip(requester.requested_payloads())
+        .map(|(headers, payload)| Requested {
+            headers: headers
+                .iter()
+                .filter_map(|(name, values)| {
+                    values
+                        .first()
+                        .map(|value| (name.to_string(), value.as_str().to_owned()))
+                })
+                .collect(),
+            payload,
+        })
+        .collect()
+}
+
 async fn observe_http(fixture: &Fixture) -> Observed {
     let input = fixture.http_input();
     let publisher = MockJetStreamPublisher::new();
+    let requester = requester_for(fixture);
     let config = webhook_config();
     let app = router_with_clock(
         wrap_publisher(publisher.clone()),
+        requester.clone(),
         &config,
         config.webhook().expect("webhook transport"),
         FixedEpochClock::from_secs(REQUEST_NOW_SECONDS),
@@ -402,6 +471,11 @@ async fn observe_http(fixture: &Fixture) -> Observed {
     let response = app.oneshot(request).await.expect("router is infallible");
 
     let status = response.status();
+    let content_type = response
+        .headers()
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
     let body = to_bytes(response.into_body(), usize::MAX)
         .await
         .expect("readable response body");
@@ -415,6 +489,8 @@ async fn observe_http(fixture: &Fixture) -> Observed {
     };
     Observed {
         outcome,
+        requests: requested(&requester),
+        content_type,
         deliveries: published.routed,
         unroutable: published.unroutable,
         status: Some(status.as_u16()),
@@ -427,7 +503,12 @@ async fn observe_http(fixture: &Fixture) -> Observed {
 async fn observe_socket(fixture: &Fixture) -> Observed {
     let input = fixture.socket_input();
     let publisher = MockJetStreamPublisher::new();
-    let bridge = SlackBridge::new(wrap_publisher(publisher.clone()), &socket_mode_config());
+    let requester = requester_for(fixture);
+    let bridge = SlackBridge::new(
+        wrap_publisher(publisher.clone()),
+        requester.clone(),
+        &socket_mode_config(),
+    );
 
     let (socket_ack, failure) = match handle_text_frame(&bridge, &input.frame).await {
         Ok((_, ack)) => (ack, None),
@@ -441,6 +522,8 @@ async fn observe_socket(fixture: &Fixture) -> Observed {
     };
     Observed {
         outcome,
+        requests: requested(&requester),
+        content_type: None,
         deliveries: published.routed,
         unroutable: published.unroutable,
         status: None,
@@ -489,6 +572,15 @@ fn compare_http(expected: &Expected, observed: &Observed, diffs: &mut Vec<Diff>)
             field: Field::Status,
             expected: http.status.to_string(),
             actual: status.to_string(),
+        });
+    }
+    if let Some(expected_type) = &http.content_type
+        && observed.content_type.as_ref() != Some(expected_type)
+    {
+        diffs.push(Diff {
+            field: Field::ContentType,
+            expected: format!("{expected_type:?}"),
+            actual: format!("{:?}", observed.content_type),
         });
     }
     let body = observed.body.as_deref().unwrap_or_default();
@@ -617,6 +709,54 @@ fn compare_delivery(nats: &ExpectedNats, delivery: &Delivery, diffs: &mut Vec<Di
     }
 }
 
+fn compare_request(request: &ExpectedRequest, requested: &Requested, diffs: &mut Vec<Diff>) {
+    if requested.payload.as_ref() != request.payload.as_bytes() {
+        diffs.push(Diff {
+            field: Field::RequestPayload,
+            expected: describe_bytes(request.payload.as_bytes(), &requested.payload),
+            actual: describe_bytes(&requested.payload, request.payload.as_bytes()),
+        });
+    }
+    for (name, value) in &request.headers {
+        match requested.headers.get(name) {
+            Some(actual) if actual == value => {}
+            Some(actual) => diffs.push(Diff {
+                field: Field::RequestHeader(name.clone()),
+                expected: format!("{value:?}"),
+                actual: format!("{actual:?}"),
+            }),
+            None => diffs.push(Diff {
+                field: Field::RequestHeader(name.clone()),
+                expected: format!("{value:?}"),
+                actual: "missing".to_owned(),
+            }),
+        }
+    }
+    for (name, value) in &requested.headers {
+        if name != DEDUP_HEADER && !request.headers.contains_key(name) {
+            diffs.push(Diff {
+                field: Field::RequestHeader(name.clone()),
+                expected: "absent".to_owned(),
+                actual: format!("{value:?}"),
+            });
+        }
+    }
+}
+
+fn compare_requests(expected: &Expected, observed: &Observed, diffs: &mut Vec<Diff>) {
+    let expected_count = usize::from(expected.request.is_some());
+    if observed.requests.len() != expected_count {
+        diffs.push(Diff {
+            field: Field::Requests,
+            expected: expected_count.to_string(),
+            actual: observed.requests.len().to_string(),
+        });
+    }
+    if let (Some(request), Some(requested)) = (&expected.request, observed.requests.first()) {
+        compare_request(request, requested, diffs);
+    }
+}
+
 fn compare(fixture: &Fixture, observed: &Observed) -> Vec<Diff> {
     let expected = &fixture.expected;
     let mut diffs = Vec::new();
@@ -636,6 +776,7 @@ fn compare(fixture: &Fixture, observed: &Observed) -> Vec<Diff> {
 
     compare_http(expected, observed, &mut diffs);
     compare_socket_ack(expected, observed, &mut diffs);
+    compare_requests(expected, observed, &mut diffs);
 
     if observed.unroutable > 0 {
         diffs.push(Diff {

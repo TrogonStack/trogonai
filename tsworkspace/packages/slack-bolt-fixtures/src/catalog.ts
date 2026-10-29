@@ -1,10 +1,11 @@
-import { expectedNats } from './expected.ts';
+import { expectedNats, expectedRequest } from './expected.ts';
 import type {
   BodyFill,
   BoltHttpVerdict,
   BoltSocketVerdict,
   DispatchRecord,
   Expected,
+  ExpectedReply,
   Fixture,
   HttpFixture,
   PayloadKind,
@@ -117,10 +118,22 @@ function command(id: string, builder: string, ...args: unknown[]): PayloadCase {
   return { id: `command.${id}`, kind: 'command', builder, args, acceptsResponsePayload: true };
 }
 
+type AckBody = JsonObject | string;
+
+function consumerReply(ackBody: AckBody | undefined): ExpectedReply {
+  if (ackBody === undefined) {
+    return { content_type: null, body: '' };
+  }
+  if (typeof ackBody === 'string') {
+    return { content_type: 'text/plain', body: ackBody };
+  }
+  return { content_type: 'application/json', body: JSON.stringify(ackBody) };
+}
+
 interface AckCase {
   id: string;
   payloadCase: string;
-  ackBody: JsonObject;
+  ackBody: AckBody;
   ackSource: string;
   ackNote: string;
 }
@@ -147,6 +160,13 @@ const ACK_CASES: readonly AckCase[] = [
     ackBody: { response_type: 'in_channel', text: 'It is 80 degrees right now.' },
     ackSource: DOCS.commands,
     ackNote: 'immediate response shape from the slash commands guide',
+  },
+  {
+    id: 'slash_text_reply',
+    payloadCase: 'command.slash',
+    ackBody: 'It is 80 degrees right now.',
+    ackSource: DOCS.commands,
+    ackNote: 'plain text immediate response from the slash commands guide',
   },
 ];
 
@@ -203,7 +223,7 @@ interface HttpSpec {
   headers: Headers;
   body: string | BodyFill;
   wirePayload?: string;
-  ackBody?: JsonObject;
+  ackBody?: AckBody;
   challenge?: string;
 }
 
@@ -230,10 +250,13 @@ function httpExpected(spec: HttpSpec, verdict: BoltHttpVerdict, parsedBody: Json
       nats.payload = '';
       nats.payload_fill = spec.body;
     }
+    const replyBody = verdict.body ?? '';
+    const replyContentType = replyBody === '' ? null : verdict.content_type;
     return {
       outcome: 'publish',
       nats,
-      http: { status, body: verdict.body, challenge: null },
+      request: expectedRequest(spec.kind, parsedBody, nats, { content_type: replyContentType, body: replyBody }),
+      http: { status, body: verdict.body, content_type: replyContentType, challenge: null },
       socket_ack: null,
     };
   }
@@ -241,15 +264,23 @@ function httpExpected(spec: HttpSpec, verdict: BoltHttpVerdict, parsedBody: Json
     return {
       outcome: 'inline',
       nats: null,
+      request: null,
       http: {
         status,
         body: spec.challenge === undefined ? verdict.body : null,
+        content_type: null,
         challenge: spec.challenge ?? null,
       },
       socket_ack: null,
     };
   }
-  return { outcome: 'reject', nats: null, http: { status, body: null, challenge: null }, socket_ack: null };
+  return {
+    outcome: 'reject',
+    nats: null,
+    request: null,
+    http: { status, body: null, content_type: null, challenge: null },
+    socket_ack: null,
+  };
 }
 
 async function httpFixture(context: CatalogContext, spec: HttpSpec): Promise<HttpFixture> {
@@ -280,23 +311,25 @@ interface SocketSpec {
   acceptsResponsePayload: boolean;
   retryAttempt?: number;
   retryReason?: string;
-  ackBody?: JsonObject;
+  ackBody?: AckBody;
 }
 
 function socketExpected(spec: SocketSpec, verdict: BoltSocketVerdict, parsedBody: JsonObject | null): Expected {
   if (verdict.outcome !== 'dispatched' || verdict.dispatch === null || parsedBody === null || verdict.ack === null) {
     throw new Error(`${spec.id}: Bolt did not dispatch and acknowledge the envelope`);
   }
+  const nats = expectedNats({
+    kind: spec.kind,
+    transport: 'socket_mode',
+    body: parsedBody,
+    wirePayload: JSON.stringify(spec.payload),
+    dispatch: verdict.dispatch satisfies DispatchRecord,
+    envelopeId: ENVELOPE_ID,
+  });
   return {
     outcome: 'publish',
-    nats: expectedNats({
-      kind: spec.kind,
-      transport: 'socket_mode',
-      body: parsedBody,
-      wirePayload: JSON.stringify(spec.payload),
-      dispatch: verdict.dispatch satisfies DispatchRecord,
-      envelopeId: ENVELOPE_ID,
-    }),
+    nats,
+    request: expectedRequest(spec.kind, parsedBody, nats, consumerReply(spec.ackBody)),
     http: null,
     socket_ack: { envelope_id: verdict.ack.envelope_id, payload: nonEmpty(verdict.ack.payload) },
   };
@@ -351,7 +384,7 @@ function representableHttpSpec(
   id: string,
   payloadCase: PayloadCase,
   payload: JsonObject,
-  extra: { headers?: Headers; ackBody?: JsonObject; provenance?: Provenance } = {},
+  extra: { headers?: Headers; ackBody?: AckBody; provenance?: Provenance } = {},
 ): HttpSpec {
   const wire = httpWire(payloadCase.kind, payload);
   return {
@@ -679,7 +712,7 @@ async function degenerateReceiverEvent(context: CatalogContext): Promise<HttpFix
       'createDummyReceiverEvent is an in-process ReceiverEvent that omits the event_callback envelope, which Slack never sends',
     input: { headers: signedHeaders({ contentType: CONTENT_TYPE_JSON, body }), body },
     bolt: verdict,
-    expected: { outcome: 'ignore', nats: null, http: null, socket_ack: null },
+    expected: { outcome: 'ignore', nats: null, request: null, http: null, socket_ack: null },
   };
 }
 

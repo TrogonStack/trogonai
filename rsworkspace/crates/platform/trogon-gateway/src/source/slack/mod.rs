@@ -47,6 +47,42 @@
 //!    rather than `{prefix}.>`, so a subject the gateway uses for core NATS
 //!    requests is never stored. A stream created on the broad filter is
 //!    narrowed on the next start.
+//! 10. A modal `view_submission` and a slash command are answered by a consumer
+//!     inside the acknowledgement. The gateway publishes first, then makes a
+//!     core NATS request and forwards the reply, as described below.
+//!
+//! ## Answering inside the acknowledgement
+//!
+//! Slack lets the acknowledgement of a `view_submission` carry a
+//! `response_action` and lets the acknowledgement of a slash command carry an
+//! immediate message. After the JetStream publish is stored, the gateway sends
+//! a core NATS request and waits for one reply.
+//!
+//! | Payload | Request subject |
+//! |---|---|
+//! | `view_submission` | `{prefix}.respond.interaction.view_submission` |
+//! | Slash command | `{prefix}.respond.command.{name}` without the leading `/` |
+//!
+//! The request carries the same body and headers as the published message.
+//! A `view_submission` request adds `X-Slack-Callback-Id` with the view's
+//! `callback_id` when it has one.
+//!
+//! - **HTTP**: the reply body is the response body, byte for byte, with the
+//!   reply's `Content-Type` header as the response content type, or
+//!   `application/json` when it has none. An empty reply is a plain `200`.
+//! - **Socket Mode**: the reply is the `payload` of the envelope ack. A reply
+//!   whose `Content-Type` is `text/plain` is sent as `{"text": ...}`. A reply
+//!   that is not valid JSON is logged and the envelope is acknowledged without
+//!   a payload. An empty reply is a plain ack.
+//! - **No answer**: when nothing is subscribed, the request fails, or no reply
+//!   arrives in time, the gateway answers HTTP `404` and sends no Socket Mode
+//!   ack, so Slack shows its own failure and the stored message remains the
+//!   record. The reply deadline is Slack's 3 second limit minus a 200
+//!   millisecond margin, counted from the start of the publish.
+//! - **Refused**: an envelope with `accepts_response_payload: false` is
+//!   acknowledged plainly without a request.
+//!
+//! Respond subjects are never part of the stream, so a reply is never stored.
 //!
 //! ## NATS message format
 //!
@@ -108,6 +144,7 @@ pub mod interaction_key;
 pub mod payload_encoding;
 pub mod payload_kind;
 pub mod payload_metadata;
+pub mod reply;
 pub mod retry_attempt;
 pub mod retry_reason;
 pub mod server;

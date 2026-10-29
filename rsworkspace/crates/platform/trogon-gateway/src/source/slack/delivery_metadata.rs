@@ -9,8 +9,16 @@ use super::payload_metadata::PayloadMetadata;
 use super::retry_attempt::RetryAttempt;
 use super::retry_reason::RetryReason;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ReplyAcceptance {
+    #[default]
+    Accepted,
+    Refused,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DeliveryContext {
+    reply: ReplyAcceptance,
     retry_num: Option<RetryAttempt>,
     retry_reason: Option<RetryReason>,
     envelope_id: Option<HeaderText>,
@@ -46,6 +54,15 @@ impl DeliveryContext {
         })
     }
 
+    pub fn with_reply_acceptance(mut self, reply: ReplyAcceptance) -> Self {
+        self.reply = reply;
+        self
+    }
+
+    pub fn accepts_reply(&self) -> bool {
+        self.reply == ReplyAcceptance::Accepted
+    }
+
     pub fn apply(&self, headers: DeliveryHeaders) -> DeliveryHeaders {
         let retry_num = self.retry_num.map(|num| HeaderText::integer(num.get()));
         headers
@@ -68,6 +85,10 @@ pub struct DeliveryMetadata<'a> {
 impl<'a> DeliveryMetadata<'a> {
     pub fn new(context: &'a DeliveryContext, payload: PayloadMetadata<'a>) -> Self {
         Self { context, payload }
+    }
+
+    pub fn accepts_reply(&self) -> bool {
+        self.context.accepts_reply()
     }
 
     pub fn apply(&self, headers: DeliveryHeaders) -> Result<DeliveryHeaders, InvalidHeaderTextError> {

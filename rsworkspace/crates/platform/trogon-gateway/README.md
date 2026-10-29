@@ -231,6 +231,17 @@ window is reconciled on every start, so a stream created before this setting exi
 - Payloads are stored exactly as Slack sent them, including the verification `token` field Slack still includes in
   Events API bodies. The stream `max_age` is therefore also how long those tokens stay readable in NATS, so size
   it and restrict access to the stream accordingly.
+- A modal `view_submission` and a slash command can be answered inside Slack's acknowledgement. After the publish is
+  stored, the gateway sends a core NATS request to `{subject_prefix}.respond.interaction.view_submission` or
+  `{subject_prefix}.respond.command.{name}` with the published body and headers, plus `X-Slack-Callback-Id` for
+  modal submissions, and forwards the reply. Run a responder on those subjects, for example a `response_action`
+  of `errors` for a modal or an in channel message for a command, and set `Content-Type` on the reply.
+- Over HTTP the reply body and its `Content-Type` become the response. Over Socket Mode the reply becomes the ack
+  `payload`, and a `text/plain` reply is sent as `{"text": ...}`. An empty reply is a plain acknowledgement.
+- When no responder is subscribed, or the reply is later than Slack's deadline minus a 200 millisecond margin, the
+  gateway answers HTTP `404` and sends no Socket Mode ack. The delivery is still stored, so a command that must
+  always acknowledge needs a responder that is always running.
+- The respond subjects are outside the stream filters on purpose, so replies are never stored.
 
 ## Zoom
 

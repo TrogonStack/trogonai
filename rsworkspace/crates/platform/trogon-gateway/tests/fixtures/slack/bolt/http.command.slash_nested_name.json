@@ -55,9 +55,28 @@
         "X-Slack-Request-Timestamp": "1700000000"
       }
     },
+    "request": {
+      "subject_suffix": "respond.command.deploy-app",
+      "headers": {
+        "X-Slack-Event-Type": "/deploy-app",
+        "X-Slack-Team-Id": "T1234",
+        "X-Slack-Payload-Kind": "command",
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-Slack-Is-Enterprise-Install": "false",
+        "X-Slack-Api-App-Id": "A1234",
+        "X-Slack-Transport": "webhook",
+        "X-Slack-Request-Timestamp": "1700000000"
+      },
+      "payload": "token=xoxb-1234&command=%2Fdeploy-app&text=yo&response_url=https%3A%2F%2Fslack.com&trigger_id=1234.56&user_id=U1234&user_name=filmaj&team_id=T1234&team_domain=slack.com&channel_id=C1234&channel_name=%23random&api_app_id=A1234",
+      "reply": {
+        "content_type": null,
+        "body": ""
+      }
+    },
     "http": {
       "status": 200,
       "body": null,
+      "content_type": null,
       "challenge": null
     },
     "socket_ack": null

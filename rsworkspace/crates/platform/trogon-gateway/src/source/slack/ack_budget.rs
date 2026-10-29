@@ -54,6 +54,10 @@ impl AckBudget {
         }
     }
 
+    pub fn reply_limit(elapsed: Duration) -> Duration {
+        ACK_LIMIT_MAX.saturating_sub(elapsed)
+    }
+
     pub fn capped_from(self) -> Option<NonZeroDuration> {
         self.capped_from
     }

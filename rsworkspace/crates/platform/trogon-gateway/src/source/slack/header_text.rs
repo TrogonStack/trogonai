@@ -20,6 +20,10 @@ impl HeaderText {
         Self(HeaderValue::from(value.to_string()))
     }
 
+    pub fn value(&self) -> &HeaderValue {
+        &self.0
+    }
+
     pub fn unknown() -> Self {
         Self(HeaderValue::from("unknown"))
     }

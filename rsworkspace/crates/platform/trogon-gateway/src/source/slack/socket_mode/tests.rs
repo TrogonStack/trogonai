@@ -20,6 +20,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::Poll;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
+use trogon_nats::AdvancedMockNatsClient;
 use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{MaxPayload, MockJetStreamPublisher, MockObjectStore, StreamMaxAge};
@@ -61,8 +62,63 @@ fn webhook_config() -> SlackConfig {
     }
 }
 
-fn bridge<P: JetStreamPublisher>(publisher: P) -> SlackBridge<P, MockObjectStore> {
-    SlackBridge::new(wrap_publisher(publisher), &socket_config())
+fn bridge<P: JetStreamPublisher>(publisher: P) -> SlackBridge<P, MockObjectStore, AdvancedMockNatsClient> {
+    bridge_with_requester(publisher, acknowledging_requester())
+}
+
+fn bridge_with_requester<P: JetStreamPublisher>(
+    publisher: P,
+    requester: AdvancedMockNatsClient,
+) -> SlackBridge<P, MockObjectStore, AdvancedMockNatsClient> {
+    SlackBridge::new(wrap_publisher(publisher), requester, &socket_config())
+}
+
+fn acknowledging_requester() -> AdvancedMockNatsClient {
+    let requester = AdvancedMockNatsClient::new();
+    for subject in [
+        "slack.respond.command.trogon",
+        "slack.respond.interaction.view_submission",
+    ] {
+        requester.set_response(subject, Bytes::new());
+    }
+    requester
+}
+
+fn replying_requester(subject: &str, content_type: Option<&str>, body: &'static [u8]) -> AdvancedMockNatsClient {
+    let requester = AdvancedMockNatsClient::new();
+    let mut headers = async_nats::HeaderMap::new();
+    if let Some(content_type) = content_type {
+        headers.insert("Content-Type", content_type);
+    }
+    requester.set_response_wire(subject, headers, Bytes::from_static(body));
+    requester
+}
+
+fn slash_envelope(accepts_response_payload: Option<bool>) -> String {
+    let mut envelope = serde_json::json!({
+        "type": "slash_commands",
+        "envelope_id": "env-3",
+        "payload": { "command": "/trogon", "team_id": "T01ABC", "trigger_id": "trigger456" }
+    });
+    if let Some(accepts) = accepts_response_payload {
+        envelope["accepts_response_payload"] = accepts.into();
+    }
+    envelope.to_string()
+}
+
+fn view_submission_envelope() -> String {
+    serde_json::json!({
+        "type": "interactive",
+        "envelope_id": "env-4",
+        "accepts_response_payload": true,
+        "payload": {
+            "type": "view_submission",
+            "trigger_id": "trigger789",
+            "team": { "id": "T01ABC" },
+            "view": { "callback_id": "my_modal" }
+        }
+    })
+    .to_string()
 }
 
 #[test]
@@ -77,10 +133,10 @@ struct ScriptedConnector {
     attempts: mpsc::Sender<tokio::time::Instant>,
 }
 
-impl SocketConnector<MockJetStreamPublisher, MockObjectStore> for ScriptedConnector {
+impl SocketConnector<MockJetStreamPublisher, MockObjectStore, AdvancedMockNatsClient> for ScriptedConnector {
     async fn connect<'a>(
         &'a mut self,
-        _bridge: &'a SlackBridge<MockJetStreamPublisher, MockObjectStore>,
+        _bridge: &'a SlackBridge<MockJetStreamPublisher, MockObjectStore, AdvancedMockNatsClient>,
         config: &'a SlackSocketModeConfig,
     ) -> Result<(), SocketModeError> {
         assert_eq!(config.app_token.as_str(), "xapp-test-token");
@@ -106,6 +162,7 @@ async fn reconnect_failures_back_off_and_success_resets_the_delay() {
     };
     let task = tokio::spawn(run(
         wrap_publisher(MockJetStreamPublisher::new()),
+        AdvancedMockNatsClient::new(),
         socket_config(),
         connector,
     ));
@@ -125,6 +182,7 @@ async fn reconnect_failures_back_off_and_success_resets_the_delay() {
 async fn run_requires_socket_mode_config() {
     let error = run(
         wrap_publisher(MockJetStreamPublisher::new()),
+        AdvancedMockNatsClient::new(),
         webhook_config(),
         HttpSocketConnector::new(DEFAULT_API_BASE_URL),
     )
@@ -400,6 +458,7 @@ async fn payload_envelope_with_unexpected_kind_publishes_unroutable_without_ack(
         reason: None,
         retry_attempt: None,
         retry_reason: None,
+        accepts_response_payload: None,
     };
 
     let ack = handle_payload_envelope(&bridge(publisher.clone()), envelope, raw_text).await;
@@ -1667,6 +1726,7 @@ async fn permanent_open_errors_keep_the_existing_backoff() {
     };
     let task = tokio::spawn(run(
         wrap_publisher(MockJetStreamPublisher::new()),
+        AdvancedMockNatsClient::new(),
         socket_config(),
         connector,
     ));
@@ -2015,4 +2075,169 @@ async fn a_delivery_that_is_not_acked_leaves_the_connection_open() {
     assert_eq!(publisher.published_messages().len(), 1);
     assert!(!socket.task.is_finished());
     socket.task.abort();
+}
+
+#[tokio::test]
+async fn socket_slash_command_reply_is_the_ack_payload_byte_for_byte() {
+    let requester = replying_requester(
+        "slack.respond.command.trogon",
+        Some("application/json"),
+        br#"{ "response_type":"in_channel",  "text":"hi" }"#,
+    );
+    let publisher = MockJetStreamPublisher::new();
+
+    let (_, ack) = handle_text_frame(
+        &bridge_with_requester(publisher.clone(), requester.clone()),
+        &slash_envelope(Some(true)),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        ack.as_deref(),
+        Some(r#"{"envelope_id":"env-3","payload":{ "response_type":"in_channel",  "text":"hi" }}"#)
+    );
+    assert_eq!(publisher.published_subjects(), vec!["slack.command.trogon"]);
+    assert_eq!(requester.requested_payloads().len(), 1);
+}
+
+#[tokio::test]
+async fn socket_text_reply_is_wrapped_as_the_text_field() {
+    let requester = replying_requester(
+        "slack.respond.command.trogon",
+        Some("text/plain; charset=utf-8"),
+        b"say \"hi\"",
+    );
+
+    let (_, ack) = handle_text_frame(
+        &bridge_with_requester(MockJetStreamPublisher::new(), requester),
+        &slash_envelope(None),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        ack.as_deref(),
+        Some(r#"{"envelope_id":"env-3","payload":{"text":"say \"hi\""}}"#)
+    );
+}
+
+#[tokio::test]
+async fn socket_view_submission_reply_carries_response_action() {
+    let requester = replying_requester(
+        "slack.respond.interaction.view_submission",
+        Some("application/json"),
+        br#"{"response_action":"clear"}"#,
+    );
+
+    let (_, ack) = handle_text_frame(
+        &bridge_with_requester(MockJetStreamPublisher::new(), requester.clone()),
+        &view_submission_envelope(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        ack.as_deref(),
+        Some(r#"{"envelope_id":"env-4","payload":{"response_action":"clear"}}"#)
+    );
+    let headers = requester.requested_headers();
+    assert_eq!(
+        headers[0].get("X-Slack-Callback-Id").map(|v| v.as_str()),
+        Some("my_modal")
+    );
+}
+
+#[tokio::test]
+async fn an_empty_socket_reply_is_a_plain_ack() {
+    let (_, ack) = handle_text_frame(&bridge(MockJetStreamPublisher::new()), &slash_envelope(None))
+        .await
+        .unwrap();
+
+    assert_eq!(ack.as_deref(), Some(r#"{"envelope_id":"env-3"}"#));
+}
+
+#[tokio::test]
+async fn socket_replies_that_are_not_json_are_acknowledged_without_a_payload() {
+    for (content_type, body) in [
+        (Some("application/json"), &b"not json"[..]),
+        (Some("text/plain"), &[0xff, 0xfe][..]),
+    ] {
+        let requester = AdvancedMockNatsClient::new();
+        let mut headers = async_nats::HeaderMap::new();
+        if let Some(content_type) = content_type {
+            headers.insert("Content-Type", content_type);
+        }
+        requester.set_response_wire("slack.respond.command.trogon", headers, Bytes::copy_from_slice(body));
+
+        let (_, ack) = handle_text_frame(
+            &bridge_with_requester(MockJetStreamPublisher::new(), requester),
+            &slash_envelope(None),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(ack.as_deref(), Some(r#"{"envelope_id":"env-3"}"#));
+    }
+}
+
+#[tokio::test]
+async fn no_consumer_answering_sends_no_socket_frame() {
+    let publisher = MockJetStreamPublisher::new();
+    let (_, ack) = handle_text_frame(
+        &bridge_with_requester(publisher.clone(), AdvancedMockNatsClient::new()),
+        &slash_envelope(None),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(ack, None);
+    assert_eq!(publisher.published_subjects(), vec!["slack.command.trogon"]);
+}
+
+#[tokio::test]
+async fn a_failed_consumer_request_sends_no_socket_frame() {
+    let requester = acknowledging_requester();
+    requester.fail_next_request();
+
+    let (_, ack) = handle_text_frame(
+        &bridge_with_requester(MockJetStreamPublisher::new(), requester),
+        &view_submission_envelope(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(ack, None);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_consumer_that_misses_the_deadline_sends_no_socket_frame() {
+    let requester = acknowledging_requester();
+    requester.hang_next_request();
+
+    let (_, ack) = handle_text_frame(
+        &bridge_with_requester(MockJetStreamPublisher::new(), requester),
+        &slash_envelope(None),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(ack, None);
+}
+
+#[tokio::test]
+async fn an_envelope_that_refuses_response_payloads_is_acked_without_asking_a_consumer() {
+    let requester = replying_requester("slack.respond.command.trogon", Some("application/json"), b"{}");
+    let publisher = MockJetStreamPublisher::new();
+
+    let (_, ack) = handle_text_frame(
+        &bridge_with_requester(publisher.clone(), requester.clone()),
+        &slash_envelope(Some(false)),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(ack.as_deref(), Some(r#"{"envelope_id":"env-3"}"#));
+    assert_eq!(publisher.published_subjects(), vec!["slack.command.trogon"]);
+    assert!(requester.requested_payloads().is_empty());
 }

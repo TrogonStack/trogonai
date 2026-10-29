@@ -6,6 +6,7 @@ use axum::http::{Request, StatusCode};
 use hmac::{KeyInit, Mac};
 use std::io::Write;
 use tower::ServiceExt;
+use trogon_nats::AdvancedMockNatsClient;
 use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{ClaimCheckPublisher, MaxPayload, MockJetStreamPublisher, MockObjectStore};
 
@@ -93,14 +94,22 @@ fn github_webhook_request(uri: &str, body: &[u8], secret: &str) -> Request<Body>
 #[test]
 fn mount_sources_with_no_sources_builds_router() {
     let cfg = load(None).expect("load failed");
-    let _app = mount_sources(cfg, wrap_publisher(MockJetStreamPublisher::new()));
+    let _app = mount_sources(
+        cfg,
+        wrap_publisher(MockJetStreamPublisher::new()),
+        &AdvancedMockNatsClient::new(),
+    );
 }
 
 #[test]
 fn mount_sources_with_all_sources_builds_router() {
     let f = write_toml(&all_sources_toml());
     let cfg = load(Some(f.path())).expect("load failed");
-    let _app = mount_sources(cfg, wrap_publisher(MockJetStreamPublisher::new()));
+    let _app = mount_sources(
+        cfg,
+        wrap_publisher(MockJetStreamPublisher::new()),
+        &AdvancedMockNatsClient::new(),
+    );
 }
 
 #[tokio::test]
@@ -115,7 +124,7 @@ webhook_secret = "other-secret"
     let f = write_toml(toml);
     let cfg = load(Some(f.path())).expect("load failed");
     let publisher = MockJetStreamPublisher::new();
-    let app = mount_sources(cfg, wrap_publisher(publisher.clone()));
+    let app = mount_sources(cfg, wrap_publisher(publisher.clone()), &AdvancedMockNatsClient::new());
     let body = br#"{"ref":"refs/heads/main"}"#;
 
     let source_prefix_response = app
@@ -149,7 +158,11 @@ app_token = "xapp-test-token"
 "#;
     let f = write_toml(toml);
     let cfg = load(Some(f.path())).expect("load failed");
-    let app = mount_sources(cfg, wrap_publisher(MockJetStreamPublisher::new()));
+    let app = mount_sources(
+        cfg,
+        wrap_publisher(MockJetStreamPublisher::new()),
+        &AdvancedMockNatsClient::new(),
+    );
 
     let response = app
         .oneshot(

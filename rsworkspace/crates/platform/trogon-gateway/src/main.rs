@@ -22,6 +22,7 @@ use anyhow::Context;
 use futures_util::FutureExt;
 use tokio::task::JoinSet;
 use tracing::{error, info};
+use trogon_nats::client::RequestClient;
 use trogon_nats::jetstream::{
     ClaimBucket, ClaimCheckPublisher, ClaimRetention, JetStreamPublisher, MaxPayload, NatsJetStreamClient,
     NatsObjectStore, ObjectStorePut,
@@ -115,6 +116,7 @@ async fn serve(
         &mut join_set,
         &resolved.slack,
         publisher.clone(),
+        nats.clone(),
         shutdown.clone(),
         crate::source::slack::socket_mode::run,
     );
@@ -127,7 +129,7 @@ async fn serve(
         crate::source::google_pubsub::streaming_pull::run,
     );
 
-    let app = trogon_std::telemetry::http::instrument_router(http::mount_sources(resolved, publisher));
+    let app = trogon_std::telemetry::http::instrument_router(http::mount_sources(resolved, publisher, &nats));
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -221,18 +223,21 @@ fn spawn_discord_gateway<P, S, Run, Running>(
     }
 }
 
-fn spawn_slack_socket_modes<P, S, Shutdown, Run, Running>(
+fn spawn_slack_socket_modes<P, S, R, Shutdown, Run, Running>(
     tasks: &mut JoinSet<SourceResult>,
     integrations: &[config::SourceIntegration<source::slack::SlackConfig>],
     publisher: ClaimCheckPublisher<P, S>,
+    requester: R,
     shutdown: Shutdown,
     run: Run,
 ) where
     P: JetStreamPublisher,
     S: ObjectStorePut,
+    R: RequestClient,
     Shutdown: std::future::Future<Output = ()> + Clone + Send + 'static,
     Run: FnOnce(
             ClaimCheckPublisher<P, S>,
+            R,
             source::slack::SlackConfig,
             source::slack::socket_mode::HttpSocketConnector,
         ) -> Running
@@ -246,6 +251,7 @@ fn spawn_slack_socket_modes<P, S, Shutdown, Run, Running>(
         Some((integration, socket_mode.api_base_url.connections_open_url().to_string()))
     }) {
         let publisher = publisher.clone();
+        let requester = requester.clone();
         let config = integration.config.clone();
         let shutdown = shutdown.clone();
         let run = run.clone();
@@ -254,7 +260,7 @@ fn spawn_slack_socket_modes<P, S, Shutdown, Run, Running>(
                 () = shutdown => Ok(()),
                 result = supervision::supervise("slack-socket-mode", SLACK_RESTART_BACKOFF, move || {
                     let connector = source::slack::socket_mode::HttpSocketConnector::new(open_url.clone());
-                    run.clone()(publisher.clone(), config.clone(), connector)
+                    run.clone()(publisher.clone(), requester.clone(), config.clone(), connector)
                 }) => result.context("slack socket mode"),
             };
             ("slack-socket-mode", result)
