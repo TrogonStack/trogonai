@@ -27,6 +27,26 @@ fn resolves_literal_to_static_reference() {
 }
 
 #[test]
+fn metadata_fingerprint_stays_bounded_for_the_longest_integration_id() {
+    let scope = CredentialScope::integration(
+        CredentialOwnerId::static_config(),
+        SourceKind::GooglePubSub,
+        SourceIntegrationId::new("a".repeat(64)).unwrap(),
+    );
+    let secret = StaticConfigSecretStore::resolve(
+        scope,
+        CredentialKind::ServiceAccountCredentials,
+        StaticConfigSecretInput::Literal("service-account-json".to_string()),
+        &InMemoryEnv::new(),
+    )
+    .unwrap();
+
+    let metadata = StaticConfigSecretStore::metadata(&secret).unwrap();
+
+    assert_eq!(metadata.fingerprint().as_str().len(), "static-config:".len() + 64);
+}
+
+#[test]
 fn empty_literal_is_invalid_at_static_write_boundary() {
     let result = StaticConfigSecretStore::resolve(
         CredentialScope::source(CredentialOwnerId::static_config(), SourceKind::Discord),

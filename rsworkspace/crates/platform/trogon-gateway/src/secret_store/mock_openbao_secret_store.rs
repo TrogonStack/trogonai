@@ -6,11 +6,11 @@ use trogon_std::SecretString;
 
 use super::{
     SecretDestroyReason, SecretMaterial, SecretStoreDestroy, SecretStoreError, SecretStoreGet, SecretStoreMetadata,
-    SecretStorePut, SecretStoreRevoke, SecretStoreRotate,
+    SecretStorePut, SecretStoreRevoke, SecretStoreRotate, fingerprint,
 };
 use crate::credential::commands::domain::{
-    CredentialFingerprint, CredentialKind, CredentialMetadata, CredentialPath, CredentialRef, CredentialScope,
-    CredentialStatus, CredentialVersion, StorageBackend,
+    CredentialKind, CredentialMetadata, CredentialPath, CredentialRef, CredentialScope, CredentialStatus,
+    CredentialVersion, StorageBackend,
 };
 use crate::secret_store::openbao_secret_store::openbao_credential_id;
 
@@ -215,11 +215,14 @@ impl SecretStoreMetadata for MockOpenBaoSecretStore {
 }
 
 fn metadata(credential: &CredentialRef, status: CredentialStatus) -> Result<CredentialMetadata, SecretStoreError> {
-    let fingerprint = CredentialFingerprint::new(format!(
-        "openbao:{}#{}",
-        MockOpenBaoSecretStore::metadata_path(credential),
-        credential.version().get()
-    ))
+    let fingerprint = fingerprint::digest(
+        "openbao",
+        format!(
+            "{}#{}",
+            MockOpenBaoSecretStore::metadata_path(credential),
+            credential.version().get()
+        ),
+    )
     .map_err(|error| SecretStoreError::BackendUnavailable {
         backend: StorageBackend::OpenBao,
         message: format!("generated credential fingerprint is invalid: {error}"),

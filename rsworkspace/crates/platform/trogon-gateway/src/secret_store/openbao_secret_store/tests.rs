@@ -40,17 +40,6 @@ fn default_mount_is_secret() {
 }
 
 #[test]
-fn openbao_fingerprint_stays_within_value_object_limit() {
-    let fingerprint = openbao_fingerprint(
-        "secret/metadata/trogonai/tenant-compose-smoke/credentials/openbao%3Atenant-compose-smoke%3Agithub%2Fcompose-smoke%3Awebhook_secret",
-        2,
-    );
-
-    assert!(CredentialFingerprint::new(&fingerprint).is_ok());
-    assert_eq!(fingerprint.len(), "openbao:".len() + 64);
-}
-
-#[test]
 fn parses_integration_scoped_openbao_credential_id() {
     let id = CredentialId::new("openbao:tenant-1:github/primary:webhook_secret").unwrap();
 
@@ -253,6 +242,33 @@ async fn revoke_posts_delete_for_every_version() {
     assert_eq!(
         openbao.posted_to(OpenBaoEndpoint::Delete).await,
         vec![json!({ "versions": [1, 2] })]
+    );
+}
+
+#[tokio::test]
+async fn metadata_fingerprints_the_metadata_path_and_version() {
+    let openbao = FakeOpenBao::start(Some(json!({
+        "current_version": 2,
+        "versions": { "2": { "deletion_time": "", "destroyed": false } },
+    })))
+    .await;
+    let scope = CredentialScope::integration(
+        CredentialOwnerId::new("tenant-compose-smoke").unwrap(),
+        SourceKind::GitHub,
+        SourceIntegrationId::new("compose-smoke").unwrap(),
+    );
+    let credential = CredentialRef::new(
+        openbao_credential_id(&scope, CredentialKind::WebhookSecret).unwrap(),
+        CredentialVersion::new(2).unwrap(),
+        &scope,
+        CredentialKind::WebhookSecret,
+    );
+
+    let metadata = openbao.store().metadata(&credential).await.unwrap();
+
+    assert_eq!(
+        metadata.fingerprint().as_str(),
+        "openbao:ca45fc4dbbb75097b66c4fdf179938511f07d24c06be4a794ecc31841a61b1c4"
     );
 }
 

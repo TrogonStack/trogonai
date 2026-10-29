@@ -6,11 +6,11 @@ use trogon_std::SecretString;
 
 use super::{
     SecretDestroyReason, SecretMaterial, SecretStoreDestroy, SecretStoreError, SecretStoreGet, SecretStoreMetadata,
-    SecretStorePut, SecretStoreRevoke, SecretStoreRotate,
+    SecretStorePut, SecretStoreRevoke, SecretStoreRotate, fingerprint,
 };
 use crate::credential::commands::domain::{
-    CredentialFingerprint, CredentialId, CredentialKind, CredentialMetadata, CredentialRef, CredentialScope,
-    CredentialStatus, CredentialVersion, StorageBackend,
+    CredentialId, CredentialKind, CredentialMetadata, CredentialRef, CredentialScope, CredentialStatus,
+    CredentialVersion, StorageBackend,
 };
 
 #[derive(Clone, Default)]
@@ -194,12 +194,11 @@ impl SecretStoreMetadata for InMemorySecretStore {
 }
 
 fn metadata(credential: &CredentialRef, status: CredentialStatus) -> Result<CredentialMetadata, SecretStoreError> {
-    let fingerprint = CredentialFingerprint::new(format!("memory:{}", credential)).map_err(|error| {
-        SecretStoreError::BackendUnavailable {
+    let fingerprint =
+        fingerprint::digest("memory", credential).map_err(|error| SecretStoreError::BackendUnavailable {
             backend: StorageBackend::InMemory,
             message: format!("generated credential fingerprint is invalid: {error}"),
-        }
-    })?;
+        })?;
     Ok(CredentialMetadata::new(
         credential.clone(),
         status,

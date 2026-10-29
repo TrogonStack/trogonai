@@ -5,19 +5,17 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use tracing::info;
 use trogon_std::{EmptySecretError, SecretString};
 use url::Url;
 
 use super::{
     SecretDestroyReason, SecretMaterial, SecretStoreDestroy, SecretStoreError, SecretStoreGet, SecretStoreMetadata,
-    SecretStorePut, SecretStoreRevoke, SecretStoreRotate,
+    SecretStorePut, SecretStoreRevoke, SecretStoreRotate, fingerprint,
 };
 use crate::credential::commands::domain::{
-    CredentialFingerprint, CredentialId, CredentialIdError, CredentialKind, CredentialMetadata, CredentialOwnerId,
-    CredentialOwnerIdError, CredentialPath, CredentialRef, CredentialScope, CredentialStatus, CredentialVersion,
-    SourceKind, StorageBackend,
+    CredentialId, CredentialIdError, CredentialKind, CredentialMetadata, CredentialOwnerId, CredentialOwnerIdError,
+    CredentialPath, CredentialRef, CredentialScope, CredentialStatus, CredentialVersion, SourceKind, StorageBackend,
 };
 use crate::source_integration_id::SourceIntegrationId;
 
@@ -421,10 +419,10 @@ impl SecretStoreMetadata for OpenBaoSecretStore {
                 credential: credential.clone(),
             })?;
 
-        let fingerprint = CredentialFingerprint::new(openbao_fingerprint(
-            &self.metadata_path(credential),
-            credential.version().get(),
-        ))
+        let fingerprint = fingerprint::digest(
+            "openbao",
+            format!("{}#{}", self.metadata_path(credential), credential.version().get()),
+        )
         .map_err(|error| self.backend_error(error.to_string()))?;
 
         Ok(CredentialMetadata::new(
@@ -434,14 +432,6 @@ impl SecretStoreMetadata for OpenBaoSecretStore {
             fingerprint,
         ))
     }
-}
-
-fn openbao_fingerprint(metadata_path: &str, version: u64) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(metadata_path.as_bytes());
-    hasher.update(b"#");
-    hasher.update(version.to_string().as_bytes());
-    format!("openbao:{}", hex::encode(hasher.finalize()))
 }
 
 impl OpenBaoSecretStore {

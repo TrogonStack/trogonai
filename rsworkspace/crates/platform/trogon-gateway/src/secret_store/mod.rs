@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+mod fingerprint;
 mod in_memory_secret_store;
 mod mock_openbao_secret_store;
 pub(crate) mod openbao_secret_store;

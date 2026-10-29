@@ -4,7 +4,7 @@ use std::fmt;
 use trogon_std::env::ReadEnv;
 use trogon_std::{EmptySecretError, SecretString};
 
-use super::SecretMaterial;
+use super::{SecretMaterial, fingerprint};
 use crate::credential::commands::domain::{
     CredentialFingerprintError, CredentialId, CredentialIdError, CredentialKind, CredentialMetadata, CredentialRef,
     CredentialScope, CredentialStatus, CredentialVersion, StorageBackend,
@@ -84,11 +84,8 @@ impl StaticConfigSecretStore {
     }
 
     pub fn metadata(secret: &StaticConfigSecret) -> Result<CredentialMetadata, StaticConfigSecretStoreError> {
-        let fingerprint = crate::credential::commands::domain::CredentialFingerprint::new(format!(
-            "static-config:{}",
-            secret.reference()
-        ))
-        .map_err(StaticConfigSecretStoreError::InvalidFingerprint)?;
+        let fingerprint = fingerprint::digest("static-config", secret.reference())
+            .map_err(StaticConfigSecretStoreError::InvalidFingerprint)?;
 
         Ok(CredentialMetadata::new(
             secret.reference().clone(),
