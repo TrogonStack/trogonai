@@ -13,7 +13,7 @@ secrets service is deployed. Accepted
 [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) fixes
 custody, and accepted
 [ADR#0047](../adr/0047-event-sourced-credential-metadata.md) fixes stream
-ownership of credential metadata. Proposed
+ownership of credential metadata. Accepted
 [ADR#0074](../adr/0074-credential-platform-extraction-boundary.md) describes
 the unfinished extraction from the gateway prototype.
 

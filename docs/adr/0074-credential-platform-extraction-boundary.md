@@ -76,6 +76,15 @@ traits rather than against today's process layout, so the role split
 survives the relocation unchanged. They live in
 `devops/openbao/policies/`.
 
+Every one of them binds to a secrets-service identity. `gateway_read` names
+the read the service performs on the gateway's behalf through
+`SecretStoreGet`; it is not a role the gateway process holds. The gateway's
+requests are authorized the way
+[ADR#0023](./0023-secret-management-and-key-custody-direction.md) Decision 3
+already prescribes, by the tenant-scoped NATS user JWT and the NATS account
+that scope its resolve subjects, so no OpenBao policy is attached to the
+gateway after the move.
+
 ### 4. Four boundary questions, answered before extraction starts
 
 Each of them changes the shape of the secrets-service boundary, so answering

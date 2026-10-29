@@ -46,6 +46,14 @@ with a tenant-unique external ID are the expected authentication shapes; an
 unavoidable long-lived credential for reaching the source is itself stored
 behind `SecretStore`. Registration validates access with a read of metadata,
 not material, and returns one opaque `SecretRef` per selected entry.
+Metadata access does not prove resolution access. Resolution needs each
+provider's material-read permission: `secretsmanager:GetSecretValue`, plus
+`kms:Decrypt` on the customer-managed key when the entry is encrypted with
+one, in AWS Secrets Manager; `secretmanager.versions.access` in Google Secret
+Manager; and read on the selected KV v2 data path in OpenBao. Registration
+does not probe material access, so issuing a reference is not activation: a
+source that grants metadata but not material fails at its first resolve with
+the typed denied failure of Decision 5.
 
 Provider management, model access, and every other consumer hold that
 reference exactly as they hold a reference to platform-stored material.

@@ -69,6 +69,7 @@ console/API:
 Trogonai console / API
   -> application database records for integrations, scopes, environments, and
      delivery rules
+  -> platform secrets service
   -> OpenBao for raw credential material
   -> CredentialRef links between the two
   -> gateway runtime projection and cache
@@ -2081,7 +2082,13 @@ Cache policy:
 - Never persist decrypted cache entries.
 - Do not cache authorization failures for long.
 - Include credential version in the cache key.
-- Invalidate cache entries on rotation, revocation, and integration disable.
+- Invalidate cache entries on platform rotation, platform revocation, and
+  integration disable.
+- Expire source-backed entries within 300 seconds plus up to 30 seconds of
+  jitter. A rotation or revocation made at the source raises no platform
+  event in the first version
+  ([ADR#0079](../../adr/0079-external-secret-sources.md) Decision 4), so that
+  bound is the only guarantee for source-side changes.
 - Record cache hit/miss metrics without secret labels.
 
 For webhook verification, the gateway can usually cache the credential for a

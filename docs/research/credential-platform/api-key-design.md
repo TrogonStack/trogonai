@@ -142,7 +142,8 @@ choice between equals ([ADR#0050](../../adr/0050-signed-first-caller-authenticat
 ```text
 Signed key (recommended for every caller)
   -> the platform stores a public key, which is not a secret
-  -> nothing replayable crosses the wire
+  -> no long-lived reusable credential crosses the wire; a captured request
+     is usable only until its jti is recorded
   -> the request is bound to target, payload, and a validity window
   -> every request is attributable to a specific key by signature
   -> rotation is a public-key swap
@@ -542,6 +543,16 @@ flow.
 8. Record non-secret usage metadata; emit api_key.denied on failure.
 9. Return authenticated principal.
 ```
+
+Steps 1 and 2 run before any key or project is known, so the per-key and
+per-project limits of step 7 cannot protect them, and a well-formed key with
+an unknown id costs one metadata read per request. The verifier bounds that
+path itself: a per-client-address limit on failed lookups, checked before
+step 2 and counted in the same NATS KV store as the other limiters. It is a
+pre-authentication abuse control with a fixed ceiling, not a
+`RateLimitPolicy` subject kind, so it adds no identity-level limit and leaves
+[ADR#0077](../../adr/0077-api-key-authorization-model-and-rate-limits.md)
+section 6 as it stands.
 
 ### Signed Key Verification Flow
 

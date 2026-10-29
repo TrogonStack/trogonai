@@ -9,9 +9,9 @@ The standalone secrets-service topology is a target, not a claim of deployed
 behavior. [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md)
 records that the write model was validated by a credential prototype embedded
 in the gateway, with its own secret-store adapter, and requires extracting its
-mechanics into the secrets service. Proposed
-[ADR#0074](../adr/0074-credential-platform-extraction-boundary.md) leaves that
-extraction unfinished. That prototype does not establish standalone-service
+mechanics into the secrets service. Accepted
+[ADR#0074](../adr/0074-credential-platform-extraction-boundary.md) draws the
+boundary of that extraction, which remains unfinished. That prototype does not establish standalone-service
 readiness.
 
 [Provider Credential Custody](./provider-credential-custody.md) explains the
@@ -255,10 +255,11 @@ revocation events as the primary mechanism and a TTL backstop as the
 maximum stale window after a missed event; that TTL is bounded in
 minutes, not hours. Invalidation is fan-out, not queue-group
 work-sharing: resolve traffic load-balances across the queue group, but
-every secrets-service replica must observe rotation and revocation
-through its own JetStream consumer, because queue-group delivery would
-evict one replica's cache and leave the others serving a stale or revoked
-credential. A consumer may hold a resolved value as bounded ambient state
+every replica that holds a resolved value, each secrets-service replica
+and each gateway replica holding a value as bounded ambient state, must
+observe rotation and revocation through its own JetStream consumer,
+because queue-group delivery would evict one replica's cache and leave the
+others serving a stale or revoked credential. A consumer may hold a resolved value as bounded ambient state
 under that TTL behind fan-out invalidation, which is how
 [ADR#0074](../adr/0074-credential-platform-extraction-boundary.md) Q2 amends
 [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md)

@@ -898,13 +898,19 @@ POST .../rotate                       validation_failed, permission_denied,
                                        idempotency_conflict,
                                        pending_operation_exists,
                                        credential_not_ready,
+                                       needs_secret_resubmission (the
+                                       credential has no stored value to
+                                       rotate; resubmit it first),
                                        secret_write_failed,
                                        secret_store_unavailable
 POST .../resubmit-secret              validation_failed, permission_denied,
                                        idempotency_conflict,
-                                       needs_secret_resubmission (if OpenBao
-                                       already has the value and no
-                                       resubmission was actually needed),
+                                       pending_operation_exists (a write for
+                                       this credential is still in flight),
+                                       credential_not_ready (OpenBao already
+                                       holds the value, so there is nothing
+                                       to resubmit; a new value goes through
+                                       rotate),
                                        secret_write_failed,
                                        secret_store_unavailable
 POST .../revoke                       validation_failed, permission_denied,
@@ -1889,8 +1895,10 @@ worker and no gauge.
 - a credential that appends WriteRequested and never activates appears in the
   read model within one refresh interval;
 - it disappears on activation, without a separate cleanup pass;
-- a WriteFailed credential is listed with its reason and stays listed until a
-  new write request activates it, since the recovery worker never retries it;
+- a WriteFailed credential is listed with its reason, moves to the
+  write_requested phase when a new write request is accepted, and leaves the
+  read model only when an Activated event moves it to active, since the
+  recovery worker never retries it;
 - no user-facing response contains a row, a count, or any field derived from
   this read model;
 - the refresh reads only the credential event stream, with no OpenBao read,

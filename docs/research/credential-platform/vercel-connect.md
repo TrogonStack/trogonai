@@ -548,7 +548,7 @@ testable.
    not the target architecture. Example: the gateway authenticates to the
    secrets service to verify an active GitHub webhook and has no credential that
    can read, rotate, or destroy OpenBao material directly.
-2. **Ratify [ADR#0074](../../adr/0074-credential-platform-extraction-boundary.md) with provider-access operations included in Q1.** The
+2. **Amend accepted [ADR#0074](../../adr/0074-credential-platform-extraction-boundary.md), or add a companion ADR, so Q1 includes provider-access operations.** The
    boundary must cover value resolution, operation-only verification, OAuth
    exchange or refresh, workload federation, and trusted credential injection.
    Example: a Slack post uses an ephemeral app token without exposing the stored
