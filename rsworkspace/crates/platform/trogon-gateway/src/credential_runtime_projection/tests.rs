@@ -1788,3 +1788,96 @@ async fn incremental_refresh_invalidates_cache_and_removes_projection_when_batch
         Err(RuntimeCredentialError::SecretStore(SecretStoreError::Unreadable { .. }))
     ));
 }
+
+fn undecodable_runtime_event(id: u64) -> Event {
+    Event {
+        content: vec![0xff, 0xff, 0xff, 0xff],
+        ..runtime_event(id, write_requested(&cache_credential("poison")))
+    }
+}
+
+#[tokio::test]
+async fn incremental_refresh_skips_an_undecodable_event_and_applies_later_credentials() {
+    let store = MockOpenBaoSecretStore::default();
+    let credential = put_bot_token(&store, "Bot token").await;
+    let metadata = store.metadata(&credential).await.unwrap();
+    let event_store = ProjectionTestEventStore::default();
+    event_store.push(credential.id().as_str(), 1, write_requested(&credential));
+    event_store.push(credential.id().as_str(), 2, activated(&metadata));
+    let stream = raw_stream([
+        undecodable_runtime_event(1),
+        runtime_event(2, write_requested(&credential)),
+        runtime_event(3, activated(&metadata)),
+    ])
+    .await;
+    let registry = RuntimeCredentialRegistry::default();
+    let resolver = registry.resolver(store);
+
+    let report = registry
+        .refresh_from_credential_stream_incremental(&stream, &event_store, 1)
+        .await
+        .unwrap();
+
+    assert_eq!(report.poisoned_events(), 1);
+    assert_eq!(report.checkpoint_advanced_to(), Some(3));
+    assert_eq!(
+        resolver
+            .resolve_plaintext(&key(), CredentialKind::BotToken)
+            .await
+            .unwrap()
+            .as_str(),
+        "Bot token"
+    );
+}
+
+#[tokio::test]
+async fn incremental_refresh_evicts_a_credential_whose_history_cannot_be_replayed() {
+    let store = MockOpenBaoSecretStore::default();
+    let credential = put_bot_token(&store, "Bot token").await;
+    let metadata = store.metadata(&credential).await.unwrap();
+    let event_store = ProjectionTestEventStore::default();
+    event_store.push(credential.id().as_str(), 1, write_requested(&credential));
+    event_store.push(credential.id().as_str(), 2, activated(&metadata));
+    let stream = raw_stream([
+        runtime_event(1, write_requested(&credential)),
+        runtime_event(2, activated(&metadata)),
+    ])
+    .await;
+    let registry = RuntimeCredentialRegistry::default();
+    let resolver = registry.resolver(store.clone());
+    registry
+        .refresh_from_credential_stream_incremental(&stream, &event_store, 1)
+        .await
+        .unwrap();
+    resolver
+        .resolve_plaintext(&key(), CredentialKind::BotToken)
+        .await
+        .unwrap();
+    assert!(registry.cache().get(&credential).await.is_some());
+
+    let rotated = v1::CredentialEvent {
+        event: Some(rotated_to_proto(&credential, &metadata).into()),
+    };
+    event_store.push(credential.id().as_str(), 3, rotated.clone());
+    append_stream(
+        &stream,
+        StreamSubject::new("gateway.credentials.events.v1.raw").unwrap(),
+        None,
+        &[runtime_event(3, rotated)],
+    )
+    .await
+    .unwrap();
+
+    let report = registry
+        .refresh_from_credential_stream_incremental(&stream, &event_store, 3)
+        .await
+        .unwrap();
+
+    assert_eq!(report.poisoned_credentials(), 1);
+    assert_eq!(report.checkpoint_advanced_to(), Some(3));
+    assert!(registry.cache().get(&credential).await.is_none());
+    assert!(matches!(
+        resolver.resolve(&key(), CredentialKind::BotToken).await,
+        Err(RuntimeCredentialError::IntegrationNotFound { .. })
+    ));
+}

@@ -15,7 +15,7 @@ use chrono::{DateTime, Utc};
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Histogram};
 use tokio::sync::Mutex;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use trogon_decider_runtime::{
     EventDecodeOutcome, InvalidStreamPositionError, ReadFrom, ReadStreamRequest, StreamEvent, StreamPosition,
     StreamRead,
@@ -363,6 +363,8 @@ pub struct RuntimeProjectionRefreshReport {
     scanned_events: usize,
     decoded_events: usize,
     skipped_events: usize,
+    poisoned_events: usize,
+    poisoned_credentials: usize,
     changed_credentials: usize,
     applied_credentials: usize,
     projected_integrations: usize,
@@ -381,6 +383,14 @@ impl RuntimeProjectionRefreshReport {
 
     pub fn skipped_events(self) -> usize {
         self.skipped_events
+    }
+
+    pub fn poisoned_events(self) -> usize {
+        self.poisoned_events
+    }
+
+    pub fn poisoned_credentials(self) -> usize {
+        self.poisoned_credentials
     }
 
     pub fn changed_credentials(self) -> usize {
@@ -407,6 +417,8 @@ impl RuntimeProjectionRefreshReport {
         self.scanned_events > 0
             || self.decoded_events > 0
             || self.skipped_events > 0
+            || self.poisoned_events > 0
+            || self.poisoned_credentials > 0
             || self.changed_credentials > 0
             || self.applied_credentials > 0
             || self.projected_integrations > 0
@@ -516,6 +528,8 @@ pub async fn run_checkpointed_refresh_worker<EventStream, EventStore, Checkpoint
                             scanned_events = report.scanned_events(),
                             decoded_events = report.decoded_events(),
                             skipped_events = report.skipped_events(),
+                            poisoned_events = report.poisoned_events(),
+                            poisoned_credentials = report.poisoned_credentials(),
                             changed_credentials = report.changed_credentials(),
                             applied_credentials = report.applied_credentials(),
                             projected_integrations = report.projected_integrations(),
@@ -816,6 +830,24 @@ impl InMemoryRuntimeProjectionRepository {
         removed
     }
 
+    async fn remove_credential_id(&self, id: &CredentialId) -> Vec<CredentialRef> {
+        let mut projections = self.projections.lock().await;
+        let mut removed = Vec::new();
+        for projection in projections.values_mut() {
+            let kinds = projection
+                .credentials
+                .iter()
+                .filter(|(_, credential)| credential.id() == id)
+                .map(|(kind, _)| *kind)
+                .collect::<Vec<_>>();
+            for kind in kinds {
+                removed.extend(projection.remove_credential(kind));
+            }
+        }
+        projections.retain(|_, projection| !projection.is_empty());
+        removed
+    }
+
     async fn get(&self, key: &RuntimeIntegrationKey) -> Option<RuntimeIntegrationProjection> {
         self.projections.lock().await.get(key).cloned()
     }
@@ -1078,46 +1110,81 @@ where
         let stream_position = event.stream_position.as_u64();
         let recorded_at = event.recorded_at;
         report.checkpoint_advanced_to = Some(report.checkpoint_advanced_to.unwrap_or(0).max(stream_position));
-        match event
-            .decode::<v1::CredentialEvent>()
-            .map_err(|source| RuntimeProjectionRefreshError::DecodeEvent { source })?
-        {
-            EventDecodeOutcome::Decoded(event) => {
-                report.decoded_events += 1;
-                let case = event
-                    .event
-                    .as_ref()
-                    .ok_or(RuntimeProjectionRefreshError::MissingEvent)?;
-                let credential_id = event_credential_id(case)
-                    .map_err(|source| RuntimeProjectionRefreshError::InvalidEvent { source })?;
-                if matches!(case, CredentialEventCase::Revoked(_)) {
+        let decoded = match event.decode::<v1::CredentialEvent>() {
+            Ok(EventDecodeOutcome::Decoded(decoded)) => decoded,
+            Ok(EventDecodeOutcome::Skipped) => {
+                report.skipped_events += 1;
+                continue;
+            }
+            Err(source) => {
+                warn!(stream_position, error = %source, "skipping undecodable credential event");
+                report.poisoned_events += 1;
+                continue;
+            }
+        };
+        report.decoded_events += 1;
+        let credential_id = match decoded
+            .event
+            .as_ref()
+            .ok_or(RuntimeProjectionRefreshError::MissingEvent)
+            .and_then(|case| {
+                event_credential_id(case)
+                    .map(|id| (id, matches!(case, CredentialEventCase::Revoked(_))))
+                    .map_err(|source| RuntimeProjectionRefreshError::InvalidEvent { source })
+            }) {
+            Ok((credential_id, revoked)) => {
+                if revoked {
                     revoked_recorded_at.insert(credential_id.clone(), recorded_at);
                 }
-                changed_credentials
-                    .entry(credential_id)
-                    .and_modify(|position| *position = (*position).max(stream_position))
-                    .or_insert(stream_position);
+                credential_id
             }
-            EventDecodeOutcome::Skipped => {
-                report.skipped_events += 1;
+            Err(source) => {
+                warn!(stream_position, error = %source, "skipping invalid credential event");
+                report.poisoned_events += 1;
+                continue;
             }
-        }
+        };
+        changed_credentials
+            .entry(credential_id)
+            .and_modify(|position| *position = (*position).max(stream_position))
+            .or_insert(stream_position);
     }
 
     report.changed_credentials = changed_credentials.len();
 
+    let mut transient_failure = None;
     for (credential_id, version) in changed_credentials {
-        let state = load_credential_state(event_store, &credential_id).await?;
         let revoked_event_recorded_at = revoked_recorded_at.get(&credential_id).copied();
-        apply_state_to_projection(
-            projections,
-            cache,
-            &state,
-            position(version)?,
-            revoked_event_recorded_at,
-        )
-        .await?;
-        report.applied_credentials += 1;
+        let applied = match load_credential_state(event_store, &credential_id).await {
+            Ok(state) => {
+                apply_state_to_projection(
+                    projections,
+                    cache,
+                    &state,
+                    position(version)?,
+                    revoked_event_recorded_at,
+                )
+                .await
+            }
+            Err(source) => Err(source),
+        };
+        match applied {
+            Ok(()) => report.applied_credentials += 1,
+            Err(source @ RuntimeProjectionRefreshError::ReadCredential { .. }) => {
+                warn!(%credential_id, error = %source, "credential read failed, will retry");
+                transient_failure.get_or_insert(source);
+            }
+            Err(source) => {
+                error!(%credential_id, error = %source, "evicting credential whose state cannot be projected");
+                for evicted in projections.remove_credential_id(&credential_id).await {
+                    cache.invalidate(&evicted).await;
+                }
+                report.poisoned_credentials += 1;
+            }
+        }
+    }
+    if let Some(source) = transient_failure {
+        return Err(source);
     }
     report.projected_integrations = projections.len().await;
 
