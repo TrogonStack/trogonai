@@ -47,25 +47,31 @@
 //!    rather than `{prefix}.>`, so a subject the gateway uses for core NATS
 //!    requests is never stored. A stream created on the broad filter is
 //!    narrowed on the next start.
-//! 10. A modal `view_submission` and a slash command are answered by a consumer
-//!     inside the acknowledgement. The gateway publishes first, then makes a
-//!     core NATS request and forwards the reply, as described below.
+//! 10. A modal `view_submission`, a slash command and a `block_suggestion` are
+//!     answered by a consumer inside the acknowledgement. The gateway publishes
+//!     first, except for `block_suggestion`, then makes a core NATS request and
+//!     forwards the reply, as described below.
 //!
 //! ## Answering inside the acknowledgement
 //!
 //! Slack lets the acknowledgement of a `view_submission` carry a
 //! `response_action` and lets the acknowledgement of a slash command carry an
-//! immediate message. After the JetStream publish is stored, the gateway sends
-//! a core NATS request and waits for one reply.
+//! immediate message, and the acknowledgement of a `block_suggestion` is the
+//! list of options. After the JetStream publish is stored, the gateway sends a
+//! core NATS request and waits for one reply. A `block_suggestion` is never
+//! published, because it has no `trigger_id`, fires on every keystroke and is
+//! worth nothing once answered.
 //!
 //! | Payload | Request subject |
 //! |---|---|
 //! | `view_submission` | `{prefix}.respond.interaction.view_submission` |
+//! | `block_suggestion` | `{prefix}.respond.interaction.block_suggestion` |
 //! | Slash command | `{prefix}.respond.command.{name}` without the leading `/` |
 //!
 //! The request carries the same body and headers as the published message.
 //! A `view_submission` request adds `X-Slack-Callback-Id` with the view's
-//! `callback_id` when it has one.
+//! `callback_id` when it has one. A `block_suggestion` request adds
+//! `X-Slack-Action-Id` and `X-Slack-Block-Id` when the payload has them.
 //!
 //! - **HTTP**: the reply body is the response body, byte for byte, with the
 //!   reply's `Content-Type` header as the response content type, or
@@ -145,6 +151,7 @@ pub mod payload_encoding;
 pub mod payload_kind;
 pub mod payload_metadata;
 pub mod reply;
+pub mod request_headers;
 pub mod retry_attempt;
 pub mod retry_reason;
 pub mod server;

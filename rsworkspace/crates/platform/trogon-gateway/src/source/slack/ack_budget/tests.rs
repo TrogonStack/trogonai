@@ -44,6 +44,15 @@ fn a_delivery_that_awaits_a_reply_publishes_within_one_second() {
 }
 
 #[test]
+fn option_lookups_are_requests_with_no_publish() {
+    assert_eq!(AckPlan::for_interaction("block_suggestion"), AckPlan::RequestOnly);
+    assert_eq!(
+        AckBudget::default().publish_limit(AckPlan::RequestOnly),
+        Duration::from_millis(2800)
+    );
+}
+
+#[test]
 fn a_shorter_configured_limit_still_wins_for_a_reply() {
     let budget = AckBudget::new(Some(NonZeroDuration::from_millis(400).unwrap()));
     assert_eq!(budget.publish_limit(AckPlan::AwaitReply), Duration::from_millis(400));
@@ -52,7 +61,7 @@ fn a_shorter_configured_limit_still_wins_for_a_reply() {
 #[test]
 fn only_modal_submissions_await_a_reply_among_interactions() {
     assert_eq!(AckPlan::for_interaction("view_submission"), AckPlan::AwaitReply);
-    for other in ["block_actions", "view_closed", "shortcut", "block_suggestion"] {
+    for other in ["block_actions", "view_closed", "shortcut"] {
         assert_eq!(AckPlan::for_interaction(other), AckPlan::Acknowledge);
     }
 }

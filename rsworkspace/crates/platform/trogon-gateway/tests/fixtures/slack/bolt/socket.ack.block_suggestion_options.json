@@ -43,12 +43,10 @@
     }
   },
   "expected": {
-    "outcome": "publish",
-    "nats": {
-      "subject_suffix": "interaction.block_suggestion",
-      "dedup_id": "interaction-b760a57cc2c43caf3ebf41c26cb517fe72a6090cd3abe708a95c3b0a8039ff50",
-      "payload": "{\"type\":\"block_suggestion\",\"action_id\":\"action_id\",\"block_id\":\"block_id\",\"value\":\"value\",\"action_ts\":\"1234.56\",\"api_app_id\":\"A1234\",\"team\":{\"id\":\"T1234\",\"domain\":\"slack.com\"},\"user\":{\"id\":\"U1234\",\"name\":\"filmaj\"},\"token\":\"xoxb-1234\",\"container\":{}}",
-      "payload_fill": null,
+    "outcome": "request",
+    "nats": null,
+    "request": {
+      "subject_suffix": "respond.interaction.block_suggestion",
       "headers": {
         "X-Slack-Event-Type": "block_suggestion",
         "X-Slack-Team-Id": "T1234",
@@ -57,10 +55,16 @@
         "X-Slack-Is-Enterprise-Install": "false",
         "X-Slack-Api-App-Id": "A1234",
         "X-Slack-Transport": "socket_mode",
-        "X-Slack-Envelope-Id": "dbdd0ef3-1543-4f94-bfb4-133d0e6c1545"
+        "X-Slack-Envelope-Id": "dbdd0ef3-1543-4f94-bfb4-133d0e6c1545",
+        "X-Slack-Action-Id": "action_id",
+        "X-Slack-Block-Id": "block_id"
+      },
+      "payload": "{\"type\":\"block_suggestion\",\"action_id\":\"action_id\",\"block_id\":\"block_id\",\"value\":\"value\",\"action_ts\":\"1234.56\",\"api_app_id\":\"A1234\",\"team\":{\"id\":\"T1234\",\"domain\":\"slack.com\"},\"user\":{\"id\":\"U1234\",\"name\":\"filmaj\"},\"token\":\"xoxb-1234\",\"container\":{}}",
+      "reply": {
+        "content_type": "application/json",
+        "body": "{\"options\":[{\"text\":{\"type\":\"plain_text\",\"text\":\"First option\"},\"value\":\"first\"}]}"
       }
     },
-    "request": null,
     "http": null,
     "socket_ack": {
       "envelope_id": "dbdd0ef3-1543-4f94-bfb4-133d0e6c1545",

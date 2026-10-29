@@ -121,6 +121,19 @@ export function expectedNats(input: ExpectedNatsInput): ExpectedNats {
 }
 
 const CALLBACK_ID_HEADER = 'X-Slack-Callback-Id';
+const ACTION_ID_HEADER = 'X-Slack-Action-Id';
+const BLOCK_ID_HEADER = 'X-Slack-Block-Id';
+
+export function isRequestOnly(nats: ExpectedNats): boolean {
+  return nats.subject_suffix === 'interaction.block_suggestion';
+}
+
+function setIdentifier(headers: Record<string, string>, name: string, value: unknown): void {
+  const identifier = text(value);
+  if (identifier !== null && identifier !== '') {
+    headers[name] = identifier;
+  }
+}
 
 export function expectedRequest(
   kind: ExpectedNatsInput['kind'],
@@ -128,14 +141,18 @@ export function expectedRequest(
   nats: ExpectedNats,
   reply: ExpectedReply,
 ): ExpectedRequest | null {
-  const awaitsReply = kind === 'command' || nats.subject_suffix === 'interaction.view_submission';
+  const awaitsReply =
+    kind === 'command' || nats.subject_suffix === 'interaction.view_submission' || isRequestOnly(nats);
   if (!awaitsReply || nats.payload_fill !== null) {
     return null;
   }
   const headers: Record<string, string> = { ...nats.headers };
-  const callbackId = text(record(body.view).callback_id);
-  if (kind === 'interaction' && callbackId !== null && callbackId !== '') {
-    headers[CALLBACK_ID_HEADER] = callbackId;
+  if (nats.subject_suffix === 'interaction.view_submission') {
+    setIdentifier(headers, CALLBACK_ID_HEADER, record(body.view).callback_id);
+  }
+  if (isRequestOnly(nats)) {
+    setIdentifier(headers, ACTION_ID_HEADER, body.action_id);
+    setIdentifier(headers, BLOCK_ID_HEADER, body.block_id);
   }
   return { subject_suffix: `respond.${nats.subject_suffix}`, headers, payload: nats.payload, reply };
 }

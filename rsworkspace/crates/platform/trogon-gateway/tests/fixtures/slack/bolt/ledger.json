@@ -1,18 +1,12 @@
 {
   "schema_version": 1,
   "entries": {
-    "http.ack.block_suggestion_options": [
-      "G2"
-    ],
     "http.malformed.invalid_interaction_payload": [
       "G23"
     ],
     "http.malformed.invalid_json": [
       "G23"
     ],
-    "http.not_representable.dummy_receiver_event": "not_representable",
-    "socket.ack.block_suggestion_options": [
-      "G2"
-    ]
+    "http.not_representable.dummy_receiver_event": "not_representable"
   }
 }

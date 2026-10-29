@@ -1,4 +1,4 @@
-import { expectedNats, expectedRequest } from './expected.ts';
+import { expectedNats, expectedRequest, isRequestOnly } from './expected.ts';
 import type {
   BodyFill,
   BoltHttpVerdict,
@@ -252,9 +252,10 @@ function httpExpected(spec: HttpSpec, verdict: BoltHttpVerdict, parsedBody: Json
     }
     const replyBody = verdict.body ?? '';
     const replyContentType = replyBody === '' ? null : verdict.content_type;
+    const requestOnly = isRequestOnly(nats);
     return {
-      outcome: 'publish',
-      nats,
+      outcome: requestOnly ? 'request' : 'publish',
+      nats: requestOnly ? null : nats,
       request: expectedRequest(spec.kind, parsedBody, nats, { content_type: replyContentType, body: replyBody }),
       http: { status, body: verdict.body, content_type: replyContentType, challenge: null },
       socket_ack: null,
@@ -326,9 +327,10 @@ function socketExpected(spec: SocketSpec, verdict: BoltSocketVerdict, parsedBody
     dispatch: verdict.dispatch satisfies DispatchRecord,
     envelopeId: ENVELOPE_ID,
   });
+  const requestOnly = isRequestOnly(nats);
   return {
-    outcome: 'publish',
-    nats,
+    outcome: requestOnly ? 'request' : 'publish',
+    nats: requestOnly ? null : nats,
     request: expectedRequest(spec.kind, parsedBody, nats, consumerReply(spec.ackBody)),
     http: null,
     socket_ack: { envelope_id: verdict.ack.envelope_id, payload: nonEmpty(verdict.ack.payload) },

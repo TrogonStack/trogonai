@@ -106,6 +106,22 @@ fn slash_envelope(accepts_response_payload: Option<bool>) -> String {
     envelope.to_string()
 }
 
+fn block_suggestion_envelope(accepts_response_payload: bool) -> String {
+    serde_json::json!({
+        "type": "interactive",
+        "envelope_id": "env-5",
+        "accepts_response_payload": accepts_response_payload,
+        "payload": {
+            "type": "block_suggestion",
+            "team": { "id": "T01ABC" },
+            "action_id": "pick",
+            "block_id": "blk",
+            "value": "tro"
+        }
+    })
+    .to_string()
+}
+
 fn view_submission_envelope() -> String {
     serde_json::json!({
         "type": "interactive",
@@ -2239,5 +2255,64 @@ async fn an_envelope_that_refuses_response_payloads_is_acked_without_asking_a_co
 
     assert_eq!(ack.as_deref(), Some(r#"{"envelope_id":"env-3"}"#));
     assert_eq!(publisher.published_subjects(), vec!["slack.command.trogon"]);
+    assert!(requester.requested_payloads().is_empty());
+}
+
+#[tokio::test]
+async fn socket_block_suggestion_options_are_the_ack_payload_and_nothing_is_published() {
+    let requester = replying_requester(
+        "slack.respond.interaction.block_suggestion",
+        Some("application/json"),
+        br#"{"options":[]}"#,
+    );
+    let publisher = MockJetStreamPublisher::new();
+
+    let (_, ack) = handle_text_frame(
+        &bridge_with_requester(publisher.clone(), requester.clone()),
+        &block_suggestion_envelope(true),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        ack.as_deref(),
+        Some(r#"{"envelope_id":"env-5","payload":{"options":[]}}"#)
+    );
+    assert!(publisher.published_messages().is_empty());
+    let headers = requester.requested_headers();
+    assert_eq!(headers[0].get("X-Slack-Action-Id").map(|v| v.as_str()), Some("pick"));
+    assert_eq!(headers[0].get("X-Slack-Block-Id").map(|v| v.as_str()), Some("blk"));
+}
+
+#[tokio::test]
+async fn socket_block_suggestion_with_no_consumer_sends_no_frame() {
+    let publisher = MockJetStreamPublisher::new();
+    let (_, ack) = handle_text_frame(
+        &bridge_with_requester(publisher.clone(), AdvancedMockNatsClient::new()),
+        &block_suggestion_envelope(true),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(ack, None);
+    assert!(publisher.published_messages().is_empty());
+}
+
+#[tokio::test]
+async fn socket_block_suggestion_that_refuses_a_payload_is_acked_without_asking() {
+    let requester = replying_requester(
+        "slack.respond.interaction.block_suggestion",
+        Some("application/json"),
+        br#"{"options":[]}"#,
+    );
+
+    let (_, ack) = handle_text_frame(
+        &bridge_with_requester(MockJetStreamPublisher::new(), requester.clone()),
+        &block_suggestion_envelope(false),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(ack.as_deref(), Some(r#"{"envelope_id":"env-5"}"#));
     assert!(requester.requested_payloads().is_empty());
 }

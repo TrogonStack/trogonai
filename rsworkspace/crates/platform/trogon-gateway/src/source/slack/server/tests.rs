@@ -736,9 +736,9 @@ async fn interaction_without_trigger_id_is_published_and_keyed_by_its_view() {
 async fn interaction_without_any_identifier_is_keyed_by_its_bytes() {
     let _guard = tracing_guard();
     let interaction_payload = serde_json::json!({
-        "type": "block_suggestion",
+        "type": "shortcut",
         "team": { "id": "T01ABC" },
-        "value": "tro"
+        "callback_id": "tro"
     });
     let form_body = format!(
         "payload={}",
@@ -758,7 +758,7 @@ async fn interaction_without_any_identifier_is_keyed_by_its_bytes() {
 
         assert_eq!(resp.status(), StatusCode::OK);
         let messages = publisher.published_messages();
-        assert_eq!(messages[0].subject, "slack.interaction.block_suggestion");
+        assert_eq!(messages[0].subject, "slack.interaction.shortcut");
         ids.push(header(&messages[0].headers, "Nats-Msg-Id").unwrap().to_owned());
     }
     assert_eq!(ids[0], ids[1]);
@@ -2006,6 +2006,95 @@ async fn view_submission_with_an_unrepresentable_callback_id_is_unroutable() {
     let requester = acknowledging_requester();
     let response = mock_app_with_requester(publisher.clone(), requester.clone())
         .oneshot(signed_form(&interaction_form(&view_submission_payload("bad\nid"))))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_unroutable(&publisher, "invalid_header_value");
+    assert!(requester.requested_payloads().is_empty());
+}
+
+fn block_suggestion_payload() -> serde_json::Value {
+    serde_json::json!({
+        "type": "block_suggestion",
+        "team": { "id": "T01ABC" },
+        "action_id": "pick",
+        "block_id": "blk",
+        "value": "tro"
+    })
+}
+
+#[tokio::test]
+async fn block_suggestion_options_are_the_body_and_nothing_is_published() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let requester = AdvancedMockNatsClient::new();
+    let options = br#"{"options":[{"text":{"type":"plain_text","text":"One"},"value":"1"}]}"#;
+    requester.set_response_wire(
+        "slack.respond.interaction.block_suggestion",
+        reply_headers("application/json"),
+        Bytes::from_static(options),
+    );
+    let response = mock_app_with_requester(publisher.clone(), requester.clone())
+        .oneshot(signed_form(&interaction_form(&block_suggestion_payload())))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("content-type").and_then(|v| v.to_str().ok()),
+        Some("application/json")
+    );
+    assert_eq!(response_body(response).await.as_ref(), options);
+    assert!(publisher.published_messages().is_empty());
+    let headers = requester.requested_headers();
+    assert_eq!(headers.len(), 1);
+    assert_eq!(header(&headers[0], "X-Slack-Action-Id"), Some("pick"));
+    assert_eq!(header(&headers[0], "X-Slack-Block-Id"), Some("blk"));
+    assert_eq!(header(&headers[0], "X-Slack-Callback-Id"), None);
+    assert_eq!(header(&headers[0], NATS_HEADER_EVENT_TYPE), Some("block_suggestion"));
+}
+
+#[tokio::test]
+async fn block_suggestion_with_no_consumer_is_a_404() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let response = mock_app_with_requester(publisher.clone(), AdvancedMockNatsClient::new())
+        .oneshot(signed_form(&interaction_form(&block_suggestion_payload())))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert!(publisher.published_messages().is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn block_suggestion_waits_for_the_consumer_until_the_ack_limit() {
+    let _guard = tracing_guard();
+    let requester = AdvancedMockNatsClient::new();
+    requester.hang_next_request();
+    let started = tokio::time::Instant::now();
+    let response = mock_app_with_requester(MockJetStreamPublisher::new(), requester)
+        .oneshot(signed_form(&interaction_form(&block_suggestion_payload())))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(started.elapsed(), crate::source::slack::constants::ACK_LIMIT_MAX);
+}
+
+#[tokio::test]
+async fn block_suggestion_with_an_unrepresentable_identifier_is_unroutable() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let requester = acknowledging_requester();
+    let payload = serde_json::json!({
+        "type": "block_suggestion",
+        "team": { "id": "T01ABC" },
+        "action_id": "bad\nid"
+    });
+    let response = mock_app_with_requester(publisher.clone(), requester.clone())
+        .oneshot(signed_form(&interaction_form(&payload)))
         .await
         .unwrap();
 
