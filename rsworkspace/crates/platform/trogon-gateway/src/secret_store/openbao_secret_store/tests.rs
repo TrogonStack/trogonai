@@ -131,6 +131,7 @@ fn rotated_credential_ref_preserves_integration_scope() {
 struct FakeOpenBao {
     address: SocketAddr,
     metadata: Option<Value>,
+    metadata_failure: Option<(StatusCode, &'static str)>,
     requests: Arc<Mutex<Vec<FakeOpenBaoRequest>>>,
 }
 
@@ -142,10 +143,19 @@ struct FakeOpenBaoRequest {
 
 impl FakeOpenBao {
     async fn start(metadata: Option<Value>) -> Self {
+        Self::start_with(metadata, None).await
+    }
+
+    async fn start_failing_metadata(status: StatusCode, body: &'static str) -> Self {
+        Self::start_with(None, Some((status, body))).await
+    }
+
+    async fn start_with(metadata: Option<Value>, metadata_failure: Option<(StatusCode, &'static str)>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let openbao = Self {
             address: listener.local_addr().unwrap(),
             metadata,
+            metadata_failure,
             requests: Arc::default(),
         };
         let app = Router::new().fallback(answer_as_openbao).with_state(openbao.clone());
@@ -171,6 +181,10 @@ impl FakeOpenBao {
 
 async fn answer_as_openbao(State(openbao): State<FakeOpenBao>, method: Method, uri: Uri, body: Bytes) -> Response {
     let response = match (&method, &openbao.metadata) {
+        (&Method::GET, _) if openbao.metadata_failure.is_some() => {
+            let (status, body) = openbao.metadata_failure.unwrap();
+            (status, body).into_response()
+        }
         (&Method::GET, Some(metadata)) => Json(json!({ "data": metadata })).into_response(),
         (&Method::GET, None) => (StatusCode::NOT_FOUND, Json(json!({ "errors": [] }))).into_response(),
         _ => StatusCode::NO_CONTENT.into_response(),
@@ -202,6 +216,32 @@ async fn destroy_of_unknown_credential_returns_missing() {
 
     assert!(matches!(error, SecretStoreError::Missing { credential: missing } if missing == credential));
     assert!(openbao.posted_to(OpenBaoEndpoint::Destroy).await.is_empty());
+}
+
+#[tokio::test]
+async fn metadata_failure_mentioning_404_is_a_backend_outage() {
+    let openbao = FakeOpenBao::start_failing_metadata(StatusCode::INTERNAL_SERVER_ERROR, "upstream 404 on path").await;
+    let credential = discord_bot_token(CredentialVersion::initial());
+
+    let error = openbao.store().metadata(&credential).await.unwrap_err();
+
+    assert!(matches!(
+        error,
+        SecretStoreError::BackendUnavailable {
+            backend: StorageBackend::OpenBao,
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn metadata_of_unknown_credential_is_missing() {
+    let openbao = FakeOpenBao::start(None).await;
+    let credential = discord_bot_token(CredentialVersion::initial());
+
+    let error = openbao.store().metadata(&credential).await.unwrap_err();
+
+    assert!(matches!(error, SecretStoreError::Missing { credential: missing } if missing == credential));
 }
 
 fn metadata_with_destroyed_first_version() -> Value {

@@ -183,21 +183,30 @@ impl OpenBaoSecretStore {
         &self,
         request: reqwest::RequestBuilder,
     ) -> Result<T, SecretStoreError> {
+        self.send_json_checked(request)
+            .await
+            .map_err(|error| error.into_store_error(self))
+    }
+
+    async fn send_json_checked<T: for<'de> Deserialize<'de>>(
+        &self,
+        request: reqwest::RequestBuilder,
+    ) -> Result<T, OpenBaoCallError> {
         let response = request
             .send()
             .await
-            .map_err(|error| self.backend_error(error.to_string()))?;
+            .map_err(|error| OpenBaoCallError::Backend(error.to_string()))?;
         let status = response.status();
         let body = response
             .text()
             .await
-            .map_err(|error| self.backend_error(error.to_string()))?;
+            .map_err(|error| OpenBaoCallError::Backend(error.to_string()))?;
 
         if !status.is_success() {
-            return Err(self.status_error(status, body));
+            return Err(OpenBaoCallError::Status { status, body });
         }
 
-        serde_json::from_str(&body).map_err(|error| self.backend_error(error.to_string()))
+        serde_json::from_str(&body).map_err(|error| OpenBaoCallError::Backend(error.to_string()))
     }
 
     async fn send_empty(&self, request: reqwest::RequestBuilder) -> Result<(), SecretStoreError> {
@@ -224,6 +233,20 @@ impl OpenBaoSecretStore {
         SecretStoreError::BackendUnavailable {
             backend: StorageBackend::OpenBao,
             message,
+        }
+    }
+}
+
+enum OpenBaoCallError {
+    Status { status: StatusCode, body: String },
+    Backend(String),
+}
+
+impl OpenBaoCallError {
+    fn into_store_error(self, store: &OpenBaoSecretStore) -> SecretStoreError {
+        match self {
+            Self::Status { status, body } => store.status_error(status, body),
+            Self::Backend(message) => store.backend_error(message),
         }
     }
 }
@@ -437,16 +460,17 @@ impl SecretStoreMetadata for OpenBaoSecretStore {
 impl OpenBaoSecretStore {
     async fn openbao_metadata(&self, credential: &CredentialRef) -> Result<OpenBaoMetadataResponse, SecretStoreError> {
         match self
-            .send_json(self.authorize(self.http.get(self.endpoint(OpenBaoEndpoint::Metadata, credential)?)))
+            .send_json_checked(self.authorize(self.http.get(self.endpoint(OpenBaoEndpoint::Metadata, credential)?)))
             .await
         {
             Ok(metadata) => Ok(metadata),
-            Err(SecretStoreError::BackendUnavailable { message, .. }) if message.contains("404") => {
-                Err(SecretStoreError::Missing {
-                    credential: credential.clone(),
-                })
-            }
-            Err(error) => Err(error),
+            Err(OpenBaoCallError::Status {
+                status: StatusCode::NOT_FOUND,
+                ..
+            }) => Err(SecretStoreError::Missing {
+                credential: credential.clone(),
+            }),
+            Err(error) => Err(error.into_store_error(self)),
         }
     }
 
