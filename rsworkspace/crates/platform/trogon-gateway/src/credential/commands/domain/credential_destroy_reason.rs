@@ -1,6 +1,8 @@
 use std::fmt;
 use std::sync::Arc;
 
+use super::constants::MAX_DESTROY_REASON_LEN;
+
 #[derive(Clone, Eq, PartialEq)]
 pub struct CredentialDestroyReason(Arc<str>);
 
@@ -10,7 +12,7 @@ impl CredentialDestroyReason {
         if value.is_empty() {
             return Err(CredentialDestroyReasonError::Empty);
         }
-        if value.chars().count() > 512 {
+        if value.chars().count() > MAX_DESTROY_REASON_LEN {
             return Err(CredentialDestroyReasonError::TooLong);
         }
         Ok(Self(Arc::from(value)))

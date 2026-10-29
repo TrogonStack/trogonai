@@ -20,10 +20,11 @@ mod supervision;
 use std::error::Error;
 use std::io::Write;
 use std::net::SocketAddr;
-use std::time::Duration;
 
 use crate::constants::{
-    CLAIM_CHECK_TTL_GRACE, NATS_CONNECT_TIMEOUT, NATS_SERVER_INFO_POLL_INTERVAL, SLACK_RESTART_BACKOFF,
+    CLAIM_CHECK_TTL_GRACE, CREDENTIAL_MANAGEMENT_ADMIN_TOKEN, CREDENTIAL_RUNTIME_PROJECTION_WORKER_INTERVAL,
+    CREDENTIAL_WORKER_INTERVAL, NATS_CONNECT_TIMEOUT, NATS_SERVER_INFO_POLL_INTERVAL, OPENBAO_ADDR, OPENBAO_TOKEN,
+    SLACK_RESTART_BACKOFF,
 };
 use anyhow::Context;
 use async_nats::jetstream::kv;
@@ -41,12 +42,6 @@ use trogon_std::SecretString;
 use trogon_std::args::{CliArgs, ParseArgs};
 use trogon_std::env::{ReadEnv, SystemEnv};
 use trogon_std::fs::SystemFs;
-
-const CREDENTIAL_MANAGEMENT_ADMIN_TOKEN: &str = "TROGON_GATEWAY_CREDENTIAL_MANAGEMENT_ADMIN_TOKEN";
-const OPENBAO_ADDR: &str = "OPENBAO_ADDR";
-const OPENBAO_TOKEN: &str = "OPENBAO_TOKEN";
-const CREDENTIAL_WORKER_INTERVAL: Duration = Duration::from_secs(30);
-const CREDENTIAL_RUNTIME_PROJECTION_WORKER_INTERVAL: Duration = Duration::from_secs(30);
 
 type SourceResult = (&'static str, anyhow::Result<()>);
 
@@ -110,8 +105,8 @@ async fn serve(
     streams::provision(&client, &resolved).await?;
     let credential_store = credential::store::open(client.context().clone()).await?;
     info!(
-        stream = credential::stream::CREDENTIAL_STREAM,
-        snapshot_bucket = credential::store::CREDENTIAL_SNAPSHOT_BUCKET,
+        stream = credential::constants::CREDENTIAL_STREAM,
+        snapshot_bucket = credential::constants::CREDENTIAL_SNAPSHOT_BUCKET,
         "credential event store opened"
     );
     let (runtime_credentials, _credential_projection_refresh_report, runtime_projection_checkpoints) =

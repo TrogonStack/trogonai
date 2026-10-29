@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
-const MAX_INJECTION_NAME_LEN: usize = 128;
+use super::constants::MAX_INJECTION_NAME_LEN;
 
 /// Where a resolved credential may be placed in an outbound provider request.
 ///

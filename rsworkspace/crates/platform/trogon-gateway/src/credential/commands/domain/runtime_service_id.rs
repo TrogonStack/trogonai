@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::fmt;
 use std::sync::Arc;
 
-const MAX_RUNTIME_SERVICE_ID_LEN: usize = 128;
+use super::constants::MAX_RUNTIME_SERVICE_ID_LEN;
 
 /// Identity of a runtime service permitted to resolve a credential.
 ///

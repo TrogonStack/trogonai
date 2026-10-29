@@ -1,3 +1,4 @@
+mod constants;
 pub(crate) mod idempotency;
 
 use std::error::Error;
@@ -18,6 +19,11 @@ use trogon_decider_runtime::{CommandError, SnapshotRead, SnapshotWrite, StreamAp
 use trogon_std::SecretString;
 use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1};
 
+use self::constants::{
+    ADMIN_TOKEN_HEADER, DISCORD_BOT_TOKEN, GITHUB_WEBHOOK_SECRET, GITLAB_SIGNING_TOKEN, IDEMPOTENCY_KEY_HEADER,
+    INCIDENTIO_SIGNING_SECRET, LINEAR_WEBHOOK_SECRET, MICROSOFT_GRAPH_CLIENT_STATE, NOTION_VERIFICATION_TOKEN,
+    SENTRY_CLIENT_SECRET, SLACK_SIGNING_SECRET, TELEGRAM_WEBHOOK_SECRET, TWITTER_CONSUMER_SECRET,
+};
 #[cfg(test)]
 use self::idempotency::CredentialCommandInMemoryIdempotencyLedger;
 use self::idempotency::{
@@ -44,9 +50,6 @@ use crate::secret_store::{
 };
 use crate::source_integration_id::SourceIntegrationId;
 
-pub(crate) const ADMIN_TOKEN_HEADER: &str = "x-trogon-admin-token";
-pub(crate) const IDEMPOTENCY_KEY_HEADER: &str = "idempotency-key";
-
 type HmacSha256 = Hmac<Sha256>;
 
 #[derive(Clone)]
@@ -67,61 +70,6 @@ struct ManagedCredentialTarget {
     source: SourceKind,
     kind: CredentialKind,
 }
-
-const GITHUB_WEBHOOK_SECRET: ManagedCredentialTarget = ManagedCredentialTarget {
-    source: SourceKind::GitHub,
-    kind: CredentialKind::WebhookSecret,
-};
-
-const DISCORD_BOT_TOKEN: ManagedCredentialTarget = ManagedCredentialTarget {
-    source: SourceKind::Discord,
-    kind: CredentialKind::BotToken,
-};
-
-const GITLAB_SIGNING_TOKEN: ManagedCredentialTarget = ManagedCredentialTarget {
-    source: SourceKind::Gitlab,
-    kind: CredentialKind::SigningToken,
-};
-
-const INCIDENTIO_SIGNING_SECRET: ManagedCredentialTarget = ManagedCredentialTarget {
-    source: SourceKind::Incidentio,
-    kind: CredentialKind::SigningSecret,
-};
-
-const LINEAR_WEBHOOK_SECRET: ManagedCredentialTarget = ManagedCredentialTarget {
-    source: SourceKind::Linear,
-    kind: CredentialKind::WebhookSecret,
-};
-
-const MICROSOFT_GRAPH_CLIENT_STATE: ManagedCredentialTarget = ManagedCredentialTarget {
-    source: SourceKind::MicrosoftGraph,
-    kind: CredentialKind::ClientState,
-};
-
-const NOTION_VERIFICATION_TOKEN: ManagedCredentialTarget = ManagedCredentialTarget {
-    source: SourceKind::Notion,
-    kind: CredentialKind::VerificationToken,
-};
-
-const SENTRY_CLIENT_SECRET: ManagedCredentialTarget = ManagedCredentialTarget {
-    source: SourceKind::Sentry,
-    kind: CredentialKind::ClientSecret,
-};
-
-const SLACK_SIGNING_SECRET: ManagedCredentialTarget = ManagedCredentialTarget {
-    source: SourceKind::Slack,
-    kind: CredentialKind::SigningSecret,
-};
-
-const TELEGRAM_WEBHOOK_SECRET: ManagedCredentialTarget = ManagedCredentialTarget {
-    source: SourceKind::Telegram,
-    kind: CredentialKind::WebhookSecret,
-};
-
-const TWITTER_CONSUMER_SECRET: ManagedCredentialTarget = ManagedCredentialTarget {
-    source: SourceKind::Twitter,
-    kind: CredentialKind::ConsumerSecret,
-};
 
 pub(crate) fn router<EventStore, Secrets, Idempotency>(
     event_store: EventStore,

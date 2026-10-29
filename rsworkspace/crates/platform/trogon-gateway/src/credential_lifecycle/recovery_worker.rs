@@ -19,7 +19,12 @@ use trogon_nats::jetstream::{
 use trogonai_proto::gateway::credentials::checkpoints_v1 as proto;
 use trogonai_proto::gateway::credentials::{CredentialEventCase, CredentialEventPayloadError, state_v1, v1};
 
+use super::constants::{
+    CHECKPOINT_KEY, CREDENTIAL_WORKER_CHECKPOINT_BUCKET, DEFAULT_INITIAL_FAILURE_BACKOFF, DEFAULT_MAX_FAILURE_BACKOFF,
+    DEFAULT_STUCK_AFTER,
+};
 use super::handler::{CredentialActivationRecoveryCommand, CredentialRuntimeHandler, activation_recovery_command};
+use crate::constants::METER_NAME;
 use crate::credential::commands::domain::CredentialId;
 use crate::credential::commands::proto::{
     CredentialProtoDecodeError, decode_credential_metadata, decode_destroy_failed, decode_destroy_requested,
@@ -29,13 +34,6 @@ use crate::credential::commands::proto::{
 use crate::credential::event_stream::{CredentialEventStreamReadError, read_credential_event_stream};
 use crate::credential::{CredentialEvolveError, evolve, initial_state};
 use crate::secret_store::SecretStoreMetadata;
-
-const CHECKPOINT_KEY: &str = "v1.recovery-worker";
-const DEFAULT_INITIAL_FAILURE_BACKOFF: Duration = Duration::from_secs(30);
-const DEFAULT_MAX_FAILURE_BACKOFF: Duration = Duration::from_secs(15 * 60);
-const DEFAULT_STUCK_AFTER: Duration = Duration::from_secs(30 * 60);
-const RECOVERY_METER_NAME: &str = "trogon-gateway";
-pub(crate) const CREDENTIAL_WORKER_CHECKPOINT_BUCKET: &str = "GATEWAY_CREDENTIAL_WORKER_CHECKPOINTS";
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct CredentialRecoveryReport {
@@ -268,7 +266,7 @@ struct CredentialRecoveryMetrics {
 
 impl CredentialRecoveryMetrics {
     fn new() -> Self {
-        let meter = trogon_telemetry::meter(RECOVERY_METER_NAME);
+        let meter = trogon_telemetry::meter(METER_NAME);
         Self {
             passes: meter
                 .u64_counter("gateway.credential.recovery.passes")

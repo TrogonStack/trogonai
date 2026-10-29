@@ -17,11 +17,10 @@ use trogon_nats::jetstream::{
 };
 use trogonai_proto::gateway::credentials::idempotency_v1 as proto;
 
+use super::constants::{
+    CREDENTIAL_MANAGEMENT_IDEMPOTENCY_BUCKET, CREDENTIAL_MANAGEMENT_IDEMPOTENCY_MAX_AGE, IDEMPOTENCY_KEY_PREFIX,
+};
 use super::{CredentialCommandResponse, CredentialRefResponse};
-
-const IDEMPOTENCY_KEY_PREFIX: &str = "v1.";
-pub(crate) const CREDENTIAL_MANAGEMENT_IDEMPOTENCY_BUCKET: &str = "GATEWAY_CREDENTIAL_MANAGEMENT_IDEMPOTENCY";
-pub(crate) const CREDENTIAL_MANAGEMENT_IDEMPOTENCY_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) struct IdempotencyKey(Arc<str>);

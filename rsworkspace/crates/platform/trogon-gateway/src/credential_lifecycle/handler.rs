@@ -11,6 +11,7 @@ use trogon_decider_runtime::{
 use trogon_std::SecretString;
 use trogonai_proto::gateway::credentials::{CredentialEventPayloadError, CredentialStateSnapshotCase, state_v1, v1};
 
+use crate::constants::METER_NAME;
 use crate::credential::commands::domain::{
     CredentialDestroyReason, CredentialDestroyReasonError, CredentialId, CredentialIdError, CredentialKind,
     CredentialOwnerId, CredentialRef, CredentialScope, CredentialVersion, SourceKind,
@@ -58,8 +59,6 @@ type RuntimeHandlerResult<EventStore, SecretError> = Result<
     >,
 >;
 
-const CREDENTIAL_WRITE_METER_NAME: &str = "trogon-gateway";
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum CredentialWriteOperation {
     Put,
@@ -86,7 +85,7 @@ struct CredentialWriteMetrics {
 
 impl CredentialWriteMetrics {
     fn new() -> Self {
-        let meter = trogon_telemetry::meter(CREDENTIAL_WRITE_METER_NAME);
+        let meter = trogon_telemetry::meter(METER_NAME);
         Self {
             write_failures: meter
                 .u64_counter("gateway.credential.store.write.failures")

@@ -1,6 +1,6 @@
 use super::*;
 use crate::config::load;
-use crate::credential::stream::{CREDENTIAL_EVENT_SUBJECT_PREFIX, CREDENTIAL_STREAM};
+use crate::credential::constants::{CREDENTIAL_EVENT_SUBJECT_PREFIX, CREDENTIAL_STREAM};
 use std::io::Write;
 use trogon_nats::jetstream::MockJetStreamContext;
 

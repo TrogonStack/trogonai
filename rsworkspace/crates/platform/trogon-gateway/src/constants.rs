@@ -24,3 +24,11 @@ pub const SENTRY_MAX_ACK_TIMEOUT_SECS: u64 = 1;
 pub const MAX_INTEGRATION_ID_LEN: usize = 64;
 
 pub const SLACK_RESTART_BACKOFF: RestartBackoff = RestartBackoff::new(Duration::from_secs(1), Duration::from_secs(30));
+
+pub const METER_NAME: &str = "trogon-gateway";
+
+pub const CREDENTIAL_MANAGEMENT_ADMIN_TOKEN: &str = "TROGON_GATEWAY_CREDENTIAL_MANAGEMENT_ADMIN_TOKEN";
+pub const OPENBAO_ADDR: &str = "OPENBAO_ADDR";
+pub const OPENBAO_TOKEN: &str = "OPENBAO_TOKEN";
+pub const CREDENTIAL_WORKER_INTERVAL: Duration = Duration::from_secs(30);
+pub const CREDENTIAL_RUNTIME_PROJECTION_WORKER_INTERVAL: Duration = Duration::from_secs(30);

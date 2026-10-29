@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
-const MAX_HOST_LEN: usize = 253;
+use super::constants::MAX_HOST_LEN;
 
 /// One entry in a credential's allowed-host list.
 ///

@@ -11,9 +11,8 @@ use trogon_nats::jetstream::{
     JetStreamCreateKeyValue, JetStreamGetKeyValue, JetStreamKeyValueStatus, is_create_key_value_already_exists,
 };
 
+use super::constants::CREDENTIAL_SNAPSHOT_BUCKET;
 use super::stream::{CredentialEventSubjectResolver, CredentialKey, CredentialStreamId, stream_config};
-
-pub(crate) const CREDENTIAL_SNAPSHOT_BUCKET: &str = "GATEWAY_CREDENTIAL_SNAPSHOTS";
 
 #[derive(Clone)]
 pub(crate) struct CredentialEventStore {

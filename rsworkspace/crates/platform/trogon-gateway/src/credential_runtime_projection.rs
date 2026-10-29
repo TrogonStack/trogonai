@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+mod constants;
+
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -29,6 +31,8 @@ use trogonai_proto::gateway::credentials::{
     CredentialEventCase, CredentialEventPayloadError, CredentialStateSnapshotCase, state_v1, v1,
 };
 
+use self::constants::{CREDENTIAL_RUNTIME_PROJECTION_CHECKPOINT_BUCKET, RUNTIME_PROJECTION_CHECKPOINT_KEY};
+use crate::constants::METER_NAME;
 use crate::credential::commands::domain::{
     CredentialId, CredentialKind, CredentialOwnerId, CredentialRef, RuntimeReleaseDeniedError, RuntimeReleasePolicy,
     RuntimeReleaseRequest, SourceKind,
@@ -44,11 +48,6 @@ use crate::credential::{CredentialEvolveError, evolve, initial_state};
 use crate::secret_store::{SecretMaterial, SecretStoreError, SecretStoreGet};
 use crate::source_integration_id::{SourceIntegrationId, SourceIntegrationIdError};
 
-const RUNTIME_PROJECTION_CHECKPOINT_KEY: &str = "v1.runtime-projection";
-pub(crate) const CREDENTIAL_RUNTIME_PROJECTION_CHECKPOINT_BUCKET: &str =
-    "GATEWAY_CREDENTIAL_RUNTIME_PROJECTION_CHECKPOINTS";
-const RUNTIME_PROJECTION_METER_NAME: &str = "trogon-gateway";
-
 #[derive(Debug)]
 struct RuntimeProjectionMetrics {
     revocation_latency: Histogram<f64>,
@@ -60,7 +59,7 @@ struct RuntimeProjectionMetrics {
 
 impl RuntimeProjectionMetrics {
     fn new() -> Self {
-        let meter = trogon_telemetry::meter(RUNTIME_PROJECTION_METER_NAME);
+        let meter = trogon_telemetry::meter(METER_NAME);
         Self {
             revocation_latency: meter
                 .f64_histogram("gateway.credential.revocation.latency")
