@@ -25,6 +25,7 @@ use trogon_nats::jetstream::{
     JetStreamKeyValueStatus, JetStreamKeyValueUpdate, JetStreamKvCreate, JetStreamKvEntry,
     is_create_key_value_already_exists,
 };
+use trogon_semconv::{attribute, metric};
 use trogon_std::SecretString;
 use trogonai_proto::gateway::credentials::checkpoints_v1 as proto;
 use trogonai_proto::gateway::credentials::{
@@ -61,29 +62,11 @@ impl RuntimeProjectionMetrics {
     fn new() -> Self {
         let meter = trogon_telemetry::meter(METER_NAME);
         Self {
-            revocation_latency: meter
-                .f64_histogram("gateway.credential.revocation.latency")
-                .with_description(
-                    "Time from a credential revocation event's recorded timestamp to runtime cache invalidation.",
-                )
-                .with_unit("s")
-                .build(),
-            cache_hits: meter
-                .u64_counter("gateway.credential.cache.hits")
-                .with_description("Credential resolutions served from the runtime cache.")
-                .build(),
-            cache_misses: meter
-                .u64_counter("gateway.credential.cache.misses")
-                .with_description("Credential resolutions that had to read the secret store.")
-                .build(),
-            delivery_denials: meter
-                .u64_counter("gateway.credential.delivery.denied")
-                .with_description("Credential resolutions refused by the credential's runtime release policy.")
-                .build(),
-            resolve_failures: meter
-                .u64_counter("gateway.credential.resolve.failures")
-                .with_description("Credential resolutions that failed to read material from the secret store.")
-                .build(),
+            revocation_latency: metric::build_gateway_credential_revocation_latency(&meter),
+            cache_hits: metric::build_gateway_credential_cache_hits(&meter),
+            cache_misses: metric::build_gateway_credential_cache_misses(&meter),
+            delivery_denials: metric::build_gateway_credential_delivery_denied(&meter),
+            resolve_failures: metric::build_gateway_credential_resolve_failures(&meter),
         }
     }
 
@@ -105,7 +88,7 @@ impl RuntimeProjectionMetrics {
     /// an unbounded label set is a cardinality bomb.
     fn record_delivery_denial(&self, key: &RuntimeIntegrationKey, denied: &RuntimeReleaseDeniedError) {
         let mut attributes = resolution_attributes(key);
-        attributes.push(KeyValue::new("reason", denial_reason(denied)));
+        attributes.push(KeyValue::new(attribute::REASON, denial_reason(denied)));
         self.delivery_denials.add(1, &attributes);
     }
 
@@ -115,7 +98,7 @@ impl RuntimeProjectionMetrics {
 }
 
 fn resolution_attributes(key: &RuntimeIntegrationKey) -> Vec<KeyValue> {
-    vec![KeyValue::new("source", key.source().as_str().to_string())]
+    vec![KeyValue::new(attribute::SOURCE, key.source().as_str().to_string())]
 }
 
 fn denial_reason(denied: &RuntimeReleaseDeniedError) -> &'static str {

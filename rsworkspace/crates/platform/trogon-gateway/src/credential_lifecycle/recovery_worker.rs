@@ -16,6 +16,7 @@ use trogon_nats::jetstream::{
     JetStreamKeyValueStatus, JetStreamKeyValueUpdate, JetStreamKvCreate, JetStreamKvEntry,
     is_create_key_value_already_exists,
 };
+use trogon_semconv::{attribute, metric};
 use trogonai_proto::gateway::credentials::checkpoints_v1 as proto;
 use trogonai_proto::gateway::credentials::{CredentialEventCase, CredentialEventPayloadError, state_v1, v1};
 
@@ -268,31 +269,17 @@ impl CredentialRecoveryMetrics {
     fn new() -> Self {
         let meter = trogon_telemetry::meter(METER_NAME);
         Self {
-            passes: meter
-                .u64_counter("gateway.credential.recovery.passes")
-                .with_description("Credential recovery worker passes by outcome.")
-                .build(),
-            errors: meter
-                .u64_counter("gateway.credential.recovery.errors")
-                .with_description("Credential recovery worker pass errors by reason.")
-                .build(),
-            scanned_events: meter
-                .u64_counter("gateway.credential.recovery.scanned_events")
-                .with_description("Raw credential stream events scanned by the recovery worker.")
-                .build(),
-            recoveries: meter
-                .u64_counter("gateway.credential.recovery.recoveries")
-                .with_description("Credential recovery commands by status and kind.")
-                .build(),
-            stuck_reports: meter
-                .u64_counter("gateway.credential.recovery.stuck_reports")
-                .with_description("Recovery passes that observed a stuck recovery checkpoint.")
-                .build(),
+            passes: metric::build_gateway_credential_recovery_passes(&meter),
+            errors: metric::build_gateway_credential_recovery_errors(&meter),
+            scanned_events: metric::build_gateway_credential_recovery_scanned_events(&meter),
+            recoveries: metric::build_gateway_credential_recovery_recoveries(&meter),
+            stuck_reports: metric::build_gateway_credential_recovery_stuck_reports(&meter),
         }
     }
 
     fn record_report(&self, report: &CredentialRecoveryReport) {
-        self.passes.add(1, &[KeyValue::new("outcome", report.metric_outcome())]);
+        self.passes
+            .add(1, &[KeyValue::new(attribute::OUTCOME, report.metric_outcome())]);
         if report.scanned_events() > 0 {
             self.scanned_events.add(report.scanned_events() as u64, &[]);
         }
@@ -306,8 +293,8 @@ impl CredentialRecoveryMetrics {
     }
 
     fn record_error(&self, reason: &'static str) {
-        self.passes.add(1, &[KeyValue::new("outcome", "error")]);
-        self.errors.add(1, &[KeyValue::new("reason", reason)]);
+        self.passes.add(1, &[KeyValue::new(attribute::OUTCOME, "error")]);
+        self.errors.add(1, &[KeyValue::new(attribute::REASON, reason)]);
     }
 
     fn record_recovery_count(&self, status: &'static str, kind: &'static str, count: usize) {
@@ -316,7 +303,10 @@ impl CredentialRecoveryMetrics {
         }
         self.recoveries.add(
             count as u64,
-            &[KeyValue::new("status", status), KeyValue::new("kind", kind)],
+            &[
+                KeyValue::new(attribute::STATUS, status),
+                KeyValue::new(attribute::KIND, kind),
+            ],
         );
     }
 }

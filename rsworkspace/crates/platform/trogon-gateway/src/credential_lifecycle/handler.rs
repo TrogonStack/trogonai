@@ -8,6 +8,7 @@ use trogon_decider_runtime::{
     CommandError, CommandExecution, EventDecodeOutcome, ReadFrom, ReadStreamRequest, SnapshotRead, SnapshotWrite,
     StreamAppend, StreamPosition, StreamRead, TokioSnapshotTaskScheduler,
 };
+use trogon_semconv::{attribute, metric};
 use trogon_std::SecretString;
 use trogonai_proto::gateway::credentials::{CredentialEventPayloadError, CredentialStateSnapshotCase, state_v1, v1};
 
@@ -87,10 +88,7 @@ impl CredentialWriteMetrics {
     fn new() -> Self {
         let meter = trogon_telemetry::meter(METER_NAME);
         Self {
-            write_failures: meter
-                .u64_counter("gateway.credential.store.write.failures")
-                .with_description("Credential secret-store writes that failed, by lifecycle operation.")
-                .build(),
+            write_failures: metric::build_gateway_credential_store_write_failures(&meter),
         }
     }
 
@@ -101,8 +99,8 @@ impl CredentialWriteMetrics {
         self.write_failures.add(
             1,
             &[
-                KeyValue::new("operation", operation.as_str()),
-                KeyValue::new("source", source.as_str()),
+                KeyValue::new(attribute::OPERATION, operation.as_str()),
+                KeyValue::new(attribute::SOURCE, source.as_str()),
             ],
         );
     }

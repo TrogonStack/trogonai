@@ -22,7 +22,7 @@ otel/semconv/
     nats.yaml        # trogon-nats
     mcp.yaml         # mcp-nats
     a2a.yaml         # a2a-nats
-    gateway.yaml     # trogon-gateway webhooks
+    gateway.yaml     # trogon-gateway webhooks and credentials
     std.yaml         # trogon-std (HTTP server span)
     provider.yaml    # trogon-provider-gateway (standard HTTP duration)
   policies/          # Rego policies (metric + attribute naming)
