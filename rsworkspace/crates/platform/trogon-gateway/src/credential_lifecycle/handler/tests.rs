@@ -8,9 +8,9 @@ use testcontainers_modules::testcontainers::{
     runners::AsyncRunner,
 };
 use trogon_decider_runtime::{
-    AppendStreamRequest, AppendStreamResponse, ReadSnapshotRequest, ReadSnapshotResponse, ReadStreamResponse, Snapshot,
-    SnapshotRead, SnapshotWrite, StreamEvent, StreamPosition, StreamWritePrecondition, WriteSnapshotRequest,
-    WriteSnapshotResponse,
+    AppendStreamRequest, AppendStreamResponse, Event, EventEncode, EventId, EventType, Headers, ReadSnapshotRequest,
+    ReadSnapshotResponse, ReadStreamResponse, Snapshot, SnapshotRead, SnapshotWrite, StreamEvent, StreamPosition,
+    StreamWritePrecondition, WriteSnapshotRequest, WriteSnapshotResponse,
 };
 
 use super::*;
@@ -317,6 +317,15 @@ fn source_scoped_put_command(value: &str) -> PutCredential {
         CredentialKind::WebhookSecret,
         SecretString::new(value).unwrap(),
     )
+}
+
+fn stored_event(event: &v1::CredentialEvent, id: u128) -> Event {
+    Event {
+        id: EventId::new(uuid::Uuid::from_u128(id)),
+        r#type: event.event_type().unwrap().to_string(),
+        content: event.encode().unwrap(),
+        headers: Headers::empty(),
+    }
 }
 
 fn payload_contains(payload: &[u8], needle: &str) -> bool {
@@ -929,8 +938,68 @@ async fn revoke_retry_records_state_after_append_failure() {
     );
 }
 
+#[derive(Clone)]
+struct RotationRacingRevokeSecretStore {
+    events: HandlerTestStreamStore,
+    revoked: Arc<Mutex<Vec<CredentialRef>>>,
+}
+
+impl SecretStoreRevoke for RotationRacingRevokeSecretStore {
+    type Error = SecretStoreError;
+
+    async fn revoke(&self, credential: &CredentialRef) -> Result<(), Self::Error> {
+        self.revoked.lock().unwrap().push(credential.clone());
+        let current = current_position(&self.events.events(), credential.id().as_str());
+        self.events
+            .append_stream(AppendStreamRequest {
+                stream_id: credential.id().as_str(),
+                stream_write_precondition: StreamWritePrecondition::At(current.unwrap()),
+                events: vec![stored_event(&rotation_requested_event(credential.version().get()), 900)],
+            })
+            .await
+            .unwrap();
+        Ok(())
+    }
+}
+
 #[tokio::test]
-async fn revoke_rejects_a_pending_rotation_without_touching_the_secret_store() {
+async fn revoke_completes_when_a_rotation_request_lands_after_the_secret_was_disabled() {
+    let events = HandlerTestStreamStore::default();
+    let handler = CredentialHandler::new(events.clone(), MockOpenBaoSecretStore::default());
+    let state = handler.put(put_command("initial-secret")).await.unwrap().into_state();
+    let Some(CredentialStateSnapshotCase::Active(active)) = state.state.as_ref() else {
+        panic!("expected active credential");
+    };
+    let (active_metadata, _) = decode_active_state("active", active).unwrap();
+    let credential_ref = active_metadata.reference().clone();
+    let secrets = RotationRacingRevokeSecretStore {
+        events: events.clone(),
+        revoked: Arc::default(),
+    };
+
+    let outcome = CredentialHandler::new(events.clone(), secrets.clone())
+        .revoke(RevokeStoredCredential::new(credential_ref.clone()))
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        outcome.state().state.as_ref(),
+        Some(CredentialStateSnapshotCase::Revoked(_))
+    ));
+    assert_eq!(secrets.revoked.lock().unwrap().clone(), [credential_ref]);
+    let decoded = events.decoded_events();
+    assert!(matches!(
+        decoded[decoded.len() - 2].event,
+        Some(CredentialEventCase::RotationRequested(_))
+    ));
+    assert!(matches!(
+        decoded[decoded.len() - 1].event,
+        Some(CredentialEventCase::Revoked(_))
+    ));
+}
+
+#[tokio::test]
+async fn revoke_revokes_a_credential_whose_rotation_is_pending() {
     let events = HandlerTestStreamStore::default();
     let handler = CredentialHandler::new(events.clone(), MockOpenBaoSecretStore::default());
     let state = handler.put(put_command("initial-secret")).await.unwrap().into_state();
@@ -948,33 +1017,17 @@ async fn revoke_rejects_a_pending_rotation_without_touching_the_secret_store() {
         .await
         .unwrap_err();
     let secrets = RecordingRevokeSecretStore::default();
-    let revoking_handler = CredentialHandler::new(events.clone(), secrets.clone());
 
-    let error = revoking_handler
+    let outcome = CredentialHandler::new(events.clone(), secrets.clone())
         .revoke(RevokeStoredCredential::new(credential_ref.clone()))
         .await
-        .unwrap_err();
+        .unwrap();
 
     assert!(matches!(
-        error,
-        CredentialHandlerError::Revoke {
-            source: CommandError::Decide(CredentialDecideError::CredentialNotActive { credential_id }),
-        } if credential_id == *credential_ref.id()
+        outcome.state().state.as_ref(),
+        Some(CredentialStateSnapshotCase::Revoked(_))
     ));
-    assert!(secrets.revoked().is_empty());
-    assert!(matches!(
-        events.decoded_events().last().and_then(|event| event.event.as_ref()),
-        Some(CredentialEventCase::RotationRequested(_))
-    ));
-    assert_eq!(
-        events.write_preconditions(),
-        [
-            StreamWritePrecondition::NoStream,
-            StreamWritePrecondition::At(position(1)),
-            StreamWritePrecondition::At(position(2)),
-            StreamWritePrecondition::At(position(3))
-        ]
-    );
+    assert_eq!(secrets.revoked(), [credential_ref]);
 }
 
 #[tokio::test]

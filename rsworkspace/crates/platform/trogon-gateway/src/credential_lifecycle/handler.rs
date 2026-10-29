@@ -767,14 +767,7 @@ where
     ) -> HandlerResult<EventStore, <Secrets as SecretStoreRevoke>::Error> {
         let revoke = RevokeCredential::new(command.credential_ref.clone());
         let (state, stream_position) = load_state(&self.event_store, command.credential_ref.id().as_str()).await?;
-        let already_revoked = match state.state.as_ref() {
-            Some(CredentialStateSnapshotCase::Revoked(revoked)) => {
-                let current_ref =
-                    decode_revoked_state(revoked).map_err(|source| CredentialHandlerError::InvalidState { source })?;
-                current_ref == command.credential_ref
-            }
-            _ => false,
-        };
+        let already_revoked = is_revoked_as(&state, &command.credential_ref)?;
         if already_revoked {
             let stream_position = stream_position.ok_or(CredentialHandlerError::MissingRevokedStreamPosition)?;
             return Ok(CredentialHandlerOutcome::new(state, stream_position));
@@ -790,15 +783,31 @@ where
             CredentialHandlerError::SecretRevoke { source }
         })?;
 
-        let result = CommandExecution::new(&self.event_store, &revoke)
-            .with_snapshot(&self.event_store)
-            .with_task_runtime(TokioSnapshotTaskScheduler)
-            .with_expected_revision(stream_position)
-            .execute()
-            .await
-            .map_err(|source| CredentialHandlerError::Revoke { source })?;
-
-        Ok(CredentialHandlerOutcome::new(result.state, result.stream_position))
+        let mut expected = stream_position;
+        loop {
+            match CommandExecution::new(&self.event_store, &revoke)
+                .with_snapshot(&self.event_store)
+                .with_task_runtime(TokioSnapshotTaskScheduler)
+                .with_expected_revision(expected)
+                .execute()
+                .await
+            {
+                Ok(result) => return Ok(CredentialHandlerOutcome::new(result.state, result.stream_position)),
+                Err(source) => {
+                    let (state, fresh_position) =
+                        load_state(&self.event_store, command.credential_ref.id().as_str()).await?;
+                    if is_revoked_as(&state, &command.credential_ref)? {
+                        let fresh_position =
+                            fresh_position.ok_or(CredentialHandlerError::MissingRevokedStreamPosition)?;
+                        return Ok(CredentialHandlerOutcome::new(state, fresh_position));
+                    }
+                    if fresh_position == expected || revoke.ensure_revocable(&state).is_err() {
+                        return Err(CredentialHandlerError::Revoke { source });
+                    }
+                    expected = fresh_position;
+                }
+            }
+        }
     }
 }
 
@@ -1057,6 +1066,24 @@ where
     MissingRevokedStreamPosition,
     #[error("credential was destroyed but its persisted state carried no stream position")]
     MissingDestroyedStreamPosition,
+}
+
+fn is_revoked_as<SecretError, SnapshotReadError, ReadError, AppendError>(
+    state: &state_v1::CredentialStateSnapshot,
+    credential_ref: &CredentialRef,
+) -> Result<bool, CredentialHandlerError<SecretError, SnapshotReadError, ReadError, AppendError>>
+where
+    SecretError: Error + Send + Sync + 'static,
+    SnapshotReadError: Error + Send + Sync + 'static,
+    ReadError: Error + Send + Sync + 'static,
+    AppendError: Error + Send + Sync + 'static,
+{
+    match state.state.as_ref() {
+        Some(CredentialStateSnapshotCase::Revoked(revoked)) => decode_revoked_state(revoked)
+            .map(|current_ref| current_ref == *credential_ref)
+            .map_err(|source| CredentialHandlerError::InvalidState { source }),
+        _ => Ok(false),
+    }
 }
 
 fn pending_matches(

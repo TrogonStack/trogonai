@@ -2,7 +2,7 @@ use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, Frequency
 use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1, v1};
 
 use super::domain::CredentialRef;
-use super::proto::{active_credential_ref, revoked_to_proto};
+use super::proto::{active_credential_ref, decode_message_field, revoked_to_proto};
 use super::state::{CredentialDecideError, CredentialEvolveError, validate_same_ref};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -20,12 +20,17 @@ impl RevokeCredential {
         state: &state_v1::CredentialStateSnapshot,
     ) -> Result<(), CredentialDecideError> {
         let current = state.state.as_ref().ok_or(CredentialDecideError::MissingState)?;
-        let CredentialStateSnapshotCase::Active(active) = current else {
-            return Err(CredentialDecideError::CredentialNotActive {
-                credential_id: self.credential_ref.id().clone(),
-            });
+        let current_ref = match current {
+            CredentialStateSnapshotCase::Active(active) => active_credential_ref(active)?,
+            CredentialStateSnapshotCase::RotationPending(rotation) => {
+                active_credential_ref(decode_message_field("rotation_pending.active", &rotation.active)?)?
+            }
+            _ => {
+                return Err(CredentialDecideError::CredentialNotActive {
+                    credential_id: self.credential_ref.id().clone(),
+                });
+            }
         };
-        let current_ref = active_credential_ref(active)?;
         validate_same_ref(&current_ref, &self.credential_ref)
     }
 }

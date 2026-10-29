@@ -194,6 +194,13 @@ pub fn evolve(
                 validate_same_ref_for_evolve(&current_ref, &event_ref)?;
                 revoked_to_proto_state(&event_ref).into()
             }
+            CredentialStateSnapshotCase::RotationPending(rotation) => {
+                let active = decode_message_field("rotation_pending.active", &rotation.active)?;
+                let current_ref = active_credential_ref(active)?;
+                let event_ref = decode_revoked(inner)?;
+                validate_same_ref_for_evolve(&current_ref, &event_ref)?;
+                revoked_to_proto_state(&event_ref).into()
+            }
             _ => return Err(CredentialEvolveError::RevokedWithoutActiveCredential),
         },
         CredentialEventCase::DestroyRequested(inner) => match current {
