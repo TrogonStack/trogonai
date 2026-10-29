@@ -18,7 +18,11 @@ impl RestartBackoff {
         Self { initial, max }
     }
 
-    fn next(self, current: Duration) -> Duration {
+    pub const fn initial(self) -> Duration {
+        self.initial
+    }
+
+    pub fn next(self, current: Duration) -> Duration {
         current.saturating_mul(2).min(self.max)
     }
 }

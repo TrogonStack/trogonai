@@ -8,6 +8,9 @@ use tokio::sync::Mutex;
 use trogon_nats::AdvancedMockNatsClient;
 use trogon_nats::jetstream::{ClaimBucketBinding, MockJetStreamPublisher, MockObjectStore};
 
+use crate::credential::commands::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
+use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
+use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
 use crate::source::google_pubsub::credentials::GoogleCredentialsError;
 
 use super::*;
@@ -155,7 +158,7 @@ async fn failed_telegram_client_skips_registration_and_empty_sources_skip_client
 
 #[tokio::test]
 async fn discord_task_receives_configured_shard_and_reports_normal_completion() {
-    trogon_std::tls::install_default_crypto_provider().unwrap();
+    let _ = trogon_std::tls::install_default_crypto_provider();
     let resolved = configuration(
         r#"
 [sources.discord]
@@ -179,6 +182,92 @@ gateway_intents = "guilds,guild_messages"
     assert_eq!(name, "discord-gateway");
     result.unwrap();
     assert!(tasks.is_empty());
+}
+
+fn discord_without_static_bot_token() -> config::ResolvedConfig {
+    configuration(
+        r#"
+[sources.discord]
+gateway_intents = "guilds,guild_messages"
+"#,
+    )
+}
+
+#[tokio::test(start_paused = true)]
+async fn discord_runtime_bot_token_retry_stops_on_shutdown() {
+    let events = trogon_std::log_capture::CapturedEvents::new();
+    let _guard = events.install(trogon_std::log_capture::LevelFilter::WARN);
+    let resolved = discord_without_static_bot_token();
+    let (shutdown, signal) = tokio::sync::oneshot::channel();
+    let mut tasks = JoinSet::new();
+    spawn_discord_gateway_with_runtime_credentials(
+        &mut tasks,
+        resolved.discord.as_ref(),
+        RuntimeCredentialRegistry::default().resolver(MockOpenBaoSecretStore::default()),
+        publisher(),
+        async { signal.await.unwrap() },
+        async |_, _, _| unreachable!("the gateway must not start without a bot token"),
+    );
+
+    tokio::time::sleep(Duration::from_secs(10)).await;
+    shutdown.send(()).unwrap();
+    let (name, result) = tokio::time::timeout(Duration::from_secs(1), tasks.join_next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(name, "discord-gateway");
+    result.unwrap();
+    let failed_attempts = events
+        .events()
+        .iter()
+        .filter(|event| event.message() == Some("Discord runtime bot token could not be resolved"))
+        .count();
+    assert!(failed_attempts > 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn discord_runtime_gateway_starts_once_the_bot_token_projection_catches_up() {
+    let _ = trogon_std::tls::install_default_crypto_provider();
+    let resolved = discord_without_static_bot_token();
+    let store = MockOpenBaoSecretStore::default();
+    let registry = RuntimeCredentialRegistry::default();
+    let (shard_token, observed_shard_token) = tokio::sync::oneshot::channel();
+    let mut tasks = JoinSet::new();
+    spawn_discord_gateway_with_runtime_credentials(
+        &mut tasks,
+        resolved.discord.as_ref(),
+        registry.resolver(store.clone()),
+        publisher(),
+        std::future::pending(),
+        move |_, _, shard| async move {
+            shard_token.send(shard.config().token().to_owned()).unwrap();
+        },
+    );
+
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let credential = store
+        .put(
+            CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord),
+            CredentialKind::BotToken,
+            SecretString::new("runtime-token").unwrap(),
+        )
+        .await
+        .unwrap();
+    registry
+        .projections()
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1).unwrap())
+        .await;
+    let (name, result) = tokio::time::timeout(Duration::from_secs(60), tasks.join_next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(name, "discord-gateway");
+    result.unwrap();
+    assert_eq!(observed_shard_token.await.unwrap(), "Bot runtime-token");
 }
 
 fn slack_integrations() -> Vec<config::SourceIntegration<source::slack::SlackConfig>> {

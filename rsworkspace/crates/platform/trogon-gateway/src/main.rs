@@ -23,12 +23,12 @@ use std::net::SocketAddr;
 
 use crate::constants::{
     CLAIM_CHECK_TTL_GRACE, CREDENTIAL_MANAGEMENT_ADMIN_TOKEN, CREDENTIAL_RUNTIME_PROJECTION_WORKER_INTERVAL,
-    CREDENTIAL_WORKER_INTERVAL, ENABLE_RUNTIME_DISCORD_CREDENTIALS, ENABLE_RUNTIME_GITHUB_CREDENTIALS,
-    ENABLE_RUNTIME_GITLAB_CREDENTIALS, ENABLE_RUNTIME_INCIDENTIO_CREDENTIALS, ENABLE_RUNTIME_LINEAR_CREDENTIALS,
-    ENABLE_RUNTIME_MICROSOFT_GRAPH_CREDENTIALS, ENABLE_RUNTIME_NOTION_CREDENTIALS, ENABLE_RUNTIME_SENTRY_CREDENTIALS,
-    ENABLE_RUNTIME_SLACK_CREDENTIALS, ENABLE_RUNTIME_TELEGRAM_CREDENTIALS, ENABLE_RUNTIME_TWITTER_CREDENTIALS,
-    NATS_CONNECT_TIMEOUT, NATS_SERVER_INFO_POLL_INTERVAL, OPENBAO_ADDR, OPENBAO_ALLOW_PLAINTEXT, OPENBAO_TOKEN,
-    SLACK_RESTART_BACKOFF,
+    CREDENTIAL_WORKER_INTERVAL, DISCORD_BOT_TOKEN_RETRY_BACKOFF, ENABLE_RUNTIME_DISCORD_CREDENTIALS,
+    ENABLE_RUNTIME_GITHUB_CREDENTIALS, ENABLE_RUNTIME_GITLAB_CREDENTIALS, ENABLE_RUNTIME_INCIDENTIO_CREDENTIALS,
+    ENABLE_RUNTIME_LINEAR_CREDENTIALS, ENABLE_RUNTIME_MICROSOFT_GRAPH_CREDENTIALS, ENABLE_RUNTIME_NOTION_CREDENTIALS,
+    ENABLE_RUNTIME_SENTRY_CREDENTIALS, ENABLE_RUNTIME_SLACK_CREDENTIALS, ENABLE_RUNTIME_TELEGRAM_CREDENTIALS,
+    ENABLE_RUNTIME_TWITTER_CREDENTIALS, NATS_CONNECT_TIMEOUT, NATS_SERVER_INFO_POLL_INTERVAL, OPENBAO_ADDR,
+    OPENBAO_ALLOW_PLAINTEXT, OPENBAO_TOKEN, SLACK_RESTART_BACKOFF,
 };
 use crate::secret_store::openbao_secret_store::OpenBaoTransport;
 use anyhow::Context;
@@ -160,6 +160,7 @@ async fn serve_with_env(
             resolved.discord.as_ref(),
             discord_runtime_credentials,
             publisher.clone(),
+            shutdown.clone(),
             crate::source::discord::gateway_runner::run,
         ),
         None => spawn_discord_gateway(
@@ -319,28 +320,30 @@ fn spawn_discord_gateway<P, S, Run, Running>(
     });
 }
 
-fn spawn_discord_gateway_with_runtime_credentials<P, S, G, Run, Running>(
+fn spawn_discord_gateway_with_runtime_credentials<P, S, G, Shutdown, Run, Running>(
     tasks: &mut JoinSet<SourceResult>,
     config: Option<&source::discord::config::DiscordConfig>,
     credentials: credential_runtime_projection::RuntimeCredentialResolver<G>,
     publisher: ClaimCheckPublisher<P, S>,
+    shutdown: Shutdown,
     run: Run,
 ) where
     P: JetStreamPublisher,
     S: ObjectStorePut,
     G: secret_store::SecretStoreGet<Error = secret_store::SecretStoreError> + Send + Sync + 'static,
+    Shutdown: std::future::Future<Output = ()> + Send + 'static,
     Run: FnOnce(ClaimCheckPublisher<P, S>, source::discord::config::DiscordConfig, twilight_gateway::Shard) -> Running
         + Send
         + 'static,
     Running: std::future::Future<Output = ()> + Send + 'static,
 {
     spawn_discord_gateway_with_bot_token(tasks, config, publisher, run, async move {
-        match source::discord::gateway_runner::resolve_runtime_bot_token(&credentials).await {
-            Ok(bot_token) => Some(bot_token),
-            Err(error) => {
-                warn!(?error, "Discord runtime bot token could not be resolved");
-                None
-            }
+        tokio::select! {
+            () = shutdown => None,
+            bot_token = source::discord::gateway_runner::resolve_runtime_bot_token_with_retry(
+                &credentials,
+                DISCORD_BOT_TOKEN_RETRY_BACKOFF,
+            ) => Some(bot_token),
         }
     });
 }
