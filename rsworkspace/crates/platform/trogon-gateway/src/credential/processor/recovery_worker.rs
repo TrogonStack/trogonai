@@ -21,8 +21,7 @@ use trogonai_proto::gateway::credentials::{CredentialEventCase, CredentialEventP
 
 use crate::credential::commands::domain::CredentialId;
 use crate::credential::handler::{
-    CredentialActivationRecoveryCommand, CredentialActivationRecoveryPlanError, CredentialRuntimeHandler,
-    activation_recovery_command,
+    CredentialActivationRecoveryCommand, CredentialRuntimeHandler, activation_recovery_command,
 };
 use crate::credential::processor::event_stream::{CredentialEventStreamReadError, read_credential_event_stream};
 use crate::credential::proto::{
@@ -45,6 +44,7 @@ pub(crate) struct CredentialRecoveryReport {
     scanned_events: usize,
     decoded_events: usize,
     skipped_events: usize,
+    invalid_events: usize,
     changed_credentials: usize,
     skipped_credentials: usize,
     planned_recoveries: usize,
@@ -70,6 +70,10 @@ impl CredentialRecoveryReport {
 
     pub(crate) fn skipped_events(&self) -> usize {
         self.skipped_events
+    }
+
+    pub(crate) fn invalid_events(&self) -> usize {
+        self.invalid_events
     }
 
     pub(crate) fn changed_credentials(&self) -> usize {
@@ -121,12 +125,19 @@ impl CredentialRecoveryReport {
     }
 
     fn has_recovery_activity(&self) -> bool {
-        self.planned_recoveries > 0 || self.failed_recoveries > 0 || self.retry_delayed || self.stuck_recovery
+        self.planned_recoveries > 0 || self.has_failures() || self.retry_delayed || self.stuck_recovery
+    }
+
+    fn has_failures(&self) -> bool {
+        self.failed_recoveries > 0 || self.invalid_events > 0
     }
 
     fn metric_outcome(&self) -> &'static str {
         if self.retry_delayed {
             return "retry_delayed";
+        }
+        if self.invalid_events > 0 {
+            return "invalid_event";
         }
         if self.failed_recoveries > 0 {
             return "failed_recovery";
@@ -219,6 +230,7 @@ pub(crate) async fn run<EventStream, EventStore, Secrets>(
                             scanned_events = report.scanned_events(),
                             decoded_events = report.decoded_events(),
                             skipped_events = report.skipped_events(),
+                            invalid_events = report.invalid_events(),
                             changed_credentials = report.changed_credentials(),
                             skipped_credentials = report.skipped_credentials(),
                             planned_recoveries = report.planned_recoveries(),
@@ -382,15 +394,13 @@ where
         .await
         .map_err(|source| CredentialRecoveryWorkerError::ReadStream { source })?;
     let max_scanned_sequence = events.iter().map(|event| event.stream_position.as_u64()).max();
-    let mut report = recover_pending_credential_activations_from_events(events, event_store, handler)
-        .await
-        .map_err(|source| CredentialRecoveryWorkerError::BuildPlan { source })?;
+    let mut report = recover_pending_credential_activations_from_events(events, event_store, handler).await;
     report.checkpoint_loaded_sequence = checkpoint.last_scanned_sequence();
     report.checkpoint_failure_count = checkpoint.consecutive_failure_count();
     report.checkpoint_retry_after_unix_seconds = checkpoint.retry_after_unix_seconds();
     report.stuck_recovery = checkpoint.stuck_at(now, policy);
 
-    if report.failed_recoveries == 0 {
+    if !report.has_failures() {
         if let Some(last_scanned_sequence) = max_scanned_sequence {
             let checkpoint = CredentialRecoveryCheckpoint::new(last_scanned_sequence);
             checkpoints
@@ -413,6 +423,7 @@ where
         report.stuck_recovery = checkpoint.stuck_at(now, policy);
         warn!(
             failed_recoveries = report.failed_recoveries(),
+            invalid_events = report.invalid_events(),
             checkpoint_loaded_sequence = report.checkpoint_loaded_sequence(),
             checkpoint_failure_count = report.checkpoint_failure_count(),
             checkpoint_retry_after_unix_seconds = ?report.checkpoint_retry_after_unix_seconds(),
@@ -444,7 +455,7 @@ async fn recover_pending_credential_activations_from_events<EventStore, Secrets>
     events: impl IntoIterator<Item = StreamEvent>,
     event_store: &EventStore,
     handler: &CredentialRuntimeHandler<EventStore, Secrets>,
-) -> Result<CredentialRecoveryReport, CredentialRecoveryPlanBuildError>
+) -> CredentialRecoveryReport
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
@@ -454,7 +465,7 @@ where
         + 'static,
     Secrets: SecretStoreMetadata,
 {
-    let plan = recovery_plan_from_credential_events(events, event_store).await?;
+    let plan = recovery_plan_from_credential_events(events, event_store).await;
     let mut report = plan.report;
 
     for planned in plan.commands {
@@ -488,13 +499,13 @@ where
         }
     }
 
-    Ok(report)
+    report
 }
 
 async fn recovery_plan_from_credential_events<EventStore>(
     events: impl IntoIterator<Item = StreamEvent>,
     event_store: &EventStore,
-) -> Result<CredentialRecoveryPlan, CredentialRecoveryPlanBuildError>
+) -> CredentialRecoveryPlan
 where
     EventStore: StreamRead<str>,
 {
@@ -503,22 +514,21 @@ where
 
     for event in events {
         report.scanned_events += 1;
-        match event
-            .decode::<v1::CredentialEvent>()
-            .map_err(|source| CredentialRecoveryPlanBuildError::DecodeEvent { source })?
-        {
-            EventDecodeOutcome::Decoded(event) => {
+        match stream_event_credential_id(&event) {
+            Ok(Some(credential_id)) => {
                 report.decoded_events += 1;
-                let case = event
-                    .event
-                    .as_ref()
-                    .ok_or(CredentialRecoveryPlanBuildError::MissingEvent)?;
-                let credential_id = event_credential_id(case)
-                    .map_err(|source| CredentialRecoveryPlanBuildError::InvalidEvent { source })?;
                 changed_credentials.insert(credential_id);
             }
-            EventDecodeOutcome::Skipped => {
+            Ok(None) => {
                 report.skipped_events += 1;
+            }
+            Err(source) => {
+                report.invalid_events += 1;
+                warn!(
+                    stream_sequence = event.stream_position.as_u64(),
+                    error = %source,
+                    "credential recovery found an invalid credential event"
+                );
             }
         }
     }
@@ -526,31 +536,58 @@ where
 
     let mut commands = Vec::new();
     for credential_id in changed_credentials {
-        let state = load_credential_state(event_store, &credential_id).await?;
-
-        match activation_recovery_command(credential_id.as_str(), &state).map_err(|source| {
-            CredentialRecoveryPlanBuildError::PlanRecovery {
-                credential_id: credential_id.clone(),
-                source: Box::new(source),
+        let state = match load_credential_state(event_store, &credential_id).await {
+            Ok(state) => state,
+            Err(source) => {
+                report.failed_recoveries += 1;
+                warn!(
+                    credential_id = %credential_id,
+                    error = %source,
+                    "credential recovery replay failed"
+                );
+                continue;
             }
-        })? {
-            Some(command) => {
+        };
+
+        match activation_recovery_command(credential_id.as_str(), &state) {
+            Ok(Some(command)) => {
                 report.planned_recoveries += 1;
                 commands.push(PlannedCredentialRecovery { credential_id, command });
             }
-            None => {
+            Ok(None) => {
                 report.skipped_credentials += 1;
+            }
+            Err(source) => {
+                report.failed_recoveries += 1;
+                warn!(
+                    credential_id = %credential_id,
+                    error = %source,
+                    "credential recovery planning failed"
+                );
             }
         }
     }
 
-    Ok(CredentialRecoveryPlan { report, commands })
+    CredentialRecoveryPlan { report, commands }
+}
+
+fn stream_event_credential_id(event: &StreamEvent) -> Result<Option<CredentialId>, CredentialRecoveryEventError> {
+    let EventDecodeOutcome::Decoded(event) = event
+        .decode::<v1::CredentialEvent>()
+        .map_err(|source| CredentialRecoveryEventError::Decode { source })?
+    else {
+        return Ok(None);
+    };
+    let case = event.event.as_ref().ok_or(CredentialRecoveryEventError::MissingCase)?;
+    event_credential_id(case)
+        .map(Some)
+        .map_err(|source| CredentialRecoveryEventError::Invalid { source })
 }
 
 async fn load_credential_state<EventStore>(
     event_store: &EventStore,
     credential_id: &CredentialId,
-) -> Result<state_v1::CredentialStateSnapshot, CredentialRecoveryPlanBuildError>
+) -> Result<state_v1::CredentialStateSnapshot, CredentialRecoveryReplayError>
 where
     EventStore: StreamRead<str>,
 {
@@ -560,22 +597,18 @@ where
             from: ReadFrom::Beginning,
         })
         .await
-        .map_err(|source| CredentialRecoveryPlanBuildError::ReadCredential {
-            credential_id: credential_id.clone(),
+        .map_err(|source| CredentialRecoveryReplayError::ReadCredential {
             source: Box::new(source),
         })?;
     let mut state = initial_state();
     for event in stream.events {
         let EventDecodeOutcome::Decoded(event) = event
             .decode::<v1::CredentialEvent>()
-            .map_err(|source| CredentialRecoveryPlanBuildError::DecodeEvent { source })?
+            .map_err(|source| CredentialRecoveryReplayError::DecodeEvent { source })?
         else {
             continue;
         };
-        state = evolve(state, &event).map_err(|source| CredentialRecoveryPlanBuildError::ReplayCredential {
-            credential_id: credential_id.clone(),
-            source,
-        })?;
+        state = evolve(state, &event).map_err(|source| CredentialRecoveryReplayError::ReplayCredential { source })?;
     }
     Ok(state)
 }
@@ -613,44 +646,40 @@ pub(crate) enum CredentialRecoveryWorkerError {
         #[source]
         source: CredentialRecoveryCheckpointStoreError,
     },
-    #[error("credential recovery plan failed: {source}")]
-    BuildPlan {
+}
+
+#[derive(Debug, thiserror::Error)]
+enum CredentialRecoveryEventError {
+    #[error("credential event decode failed: {source}")]
+    Decode {
         #[source]
-        source: CredentialRecoveryPlanBuildError,
+        source: CredentialEventPayloadError,
+    },
+    #[error("credential event is missing its event case")]
+    MissingCase,
+    #[error("credential event is invalid: {source}")]
+    Invalid {
+        #[source]
+        source: CredentialProtoDecodeError,
     },
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum CredentialRecoveryPlanBuildError {
+enum CredentialRecoveryReplayError {
+    #[error("credential stream read failed: {source}")]
+    ReadCredential {
+        #[source]
+        source: Box<dyn Error + Send + Sync>,
+    },
     #[error("credential event decode failed: {source}")]
     DecodeEvent {
         #[source]
         source: CredentialEventPayloadError,
     },
-    #[error("credential event is missing its event case")]
-    MissingEvent,
-    #[error("credential event is invalid: {source}")]
-    InvalidEvent {
-        #[source]
-        source: CredentialProtoDecodeError,
-    },
-    #[error("credential stream read failed for {credential_id}: {source}")]
-    ReadCredential {
-        credential_id: CredentialId,
-        #[source]
-        source: Box<dyn Error + Send + Sync>,
-    },
-    #[error("credential stream replay failed for {credential_id}: {source}")]
+    #[error("credential stream replay failed: {source}")]
     ReplayCredential {
-        credential_id: CredentialId,
         #[source]
         source: CredentialEvolveError,
-    },
-    #[error("credential recovery planning failed for {credential_id}: {source}")]
-    PlanRecovery {
-        credential_id: CredentialId,
-        #[source]
-        source: Box<CredentialActivationRecoveryPlanError>,
     },
 }
 
@@ -988,7 +1017,7 @@ mod tests {
     use trogonai_proto::gateway::credentials::CredentialStateSnapshotCase;
 
     #[derive(Debug, thiserror::Error)]
-    #[error("worker test stream store rejected the append")]
+    #[error("worker test stream store rejected the request")]
     struct WorkerTestStreamStoreError;
 
     #[derive(Clone, Default)]
@@ -997,11 +1026,16 @@ mod tests {
         snapshots: Arc<Mutex<BTreeMap<String, Snapshot<state_v1::CredentialStateSnapshot>>>>,
         write_preconditions: Arc<Mutex<Vec<StreamWritePrecondition>>>,
         fail_append_at: Arc<Mutex<Option<usize>>>,
+        fail_read_stream_id: Arc<Mutex<Option<String>>>,
     }
 
     impl WorkerTestStreamStore {
         fn fail_append_at(&self, append_count: usize) {
             *self.fail_append_at.lock().unwrap() = Some(append_count);
+        }
+
+        fn fail_read_stream(&self, stream_id: &str) {
+            *self.fail_read_stream_id.lock().unwrap() = Some(stream_id.to_string());
         }
 
         fn events_as_raw_stream_scan(&self) -> Vec<StreamEvent> {
@@ -1033,6 +1067,9 @@ mod tests {
         type Error = WorkerTestStreamStoreError;
 
         async fn read_stream(&self, request: ReadStreamRequest<'_, str>) -> Result<ReadStreamResponse, Self::Error> {
+            if self.fail_read_stream_id.lock().unwrap().as_deref() == Some(request.stream_id) {
+                return Err(WorkerTestStreamStoreError);
+            }
             let start = match request.from {
                 ReadFrom::Beginning => 1,
                 ReadFrom::Position(position) => position.as_u64(),
@@ -1131,7 +1168,7 @@ mod tests {
         store.push_credential_event(credential_id().as_str(), write_requested_event());
         let events = store.events_as_raw_stream_scan();
 
-        let plan = recovery_plan_from_credential_events(events, &store).await.unwrap();
+        let plan = recovery_plan_from_credential_events(events, &store).await;
 
         assert_eq!(plan.report.scanned_events(), 1);
         assert_eq!(plan.report.decoded_events(), 1);
@@ -1164,8 +1201,7 @@ mod tests {
             &events,
             &runtime_handler,
         )
-        .await
-        .unwrap();
+        .await;
 
         assert_eq!(report.planned_recoveries(), 1);
         assert_eq!(report.recovered_writes(), 1);
@@ -1213,8 +1249,7 @@ mod tests {
             &events,
             &runtime_handler,
         )
-        .await
-        .unwrap();
+        .await;
 
         assert_eq!(report.planned_recoveries(), 1);
         assert_eq!(report.recovered_rotations(), 1);
@@ -1241,13 +1276,61 @@ mod tests {
         let runtime_credentials = RuntimeCredentialRegistry::default();
         let runtime_handler = CredentialRuntimeHandler::new(store.clone(), secrets, runtime_credentials);
 
-        let report = recover_pending_credential_activations_from_events(events, &store, &runtime_handler)
-            .await
-            .unwrap();
+        let report = recover_pending_credential_activations_from_events(events, &store, &runtime_handler).await;
 
         assert_eq!(report.planned_recoveries(), 1);
         assert_eq!(report.recovered_writes(), 0);
         assert_eq!(report.failed_recoveries(), 1);
+    }
+
+    #[tokio::test]
+    async fn worker_recovers_other_credentials_when_one_credential_stream_read_fails() {
+        let events = WorkerTestStreamStore::default();
+        let secrets = MockOpenBaoSecretStore::default();
+        let handler = CredentialHandler::new(events.clone(), secrets.clone());
+        events.fail_append_at(2);
+        handler.put(put_command("primary-secret")).await.unwrap_err();
+        let secondary_integration_id = SourceIntegrationId::new("secondary").unwrap();
+        events.fail_append_at(4);
+        handler
+            .put(PutCredential::new(
+                CredentialId::new("openbao:tenant-1:github/secondary:webhook_secret").unwrap(),
+                CredentialScope::integration(owner_id(), SourceKind::GitHub, secondary_integration_id.clone()),
+                CredentialKind::WebhookSecret,
+                SecretString::new("secondary-secret").unwrap(),
+            ))
+            .await
+            .unwrap_err();
+        events.fail_read_stream(credential_id().as_str());
+
+        let runtime_credentials = RuntimeCredentialRegistry::default();
+        let runtime_handler =
+            CredentialRuntimeHandler::new(events.clone(), secrets.clone(), runtime_credentials.clone());
+        let report = recover_pending_credential_activations_from_events(
+            events.events_as_raw_stream_scan(),
+            &events,
+            &runtime_handler,
+        )
+        .await;
+
+        assert_eq!(report.changed_credentials(), 2);
+        assert_eq!(report.planned_recoveries(), 1);
+        assert_eq!(report.recovered_writes(), 1);
+        assert_eq!(report.failed_recoveries(), 1);
+        assert_eq!(
+            runtime_credentials
+                .resolver(secrets)
+                .resolve(
+                    &RuntimeIntegrationKey::new(SourceKind::GitHub, &secondary_integration_id),
+                    CredentialKind::WebhookSecret
+                )
+                .await
+                .unwrap()
+                .as_plaintext()
+                .unwrap()
+                .as_str(),
+            "secondary-secret"
+        );
     }
 
     #[tokio::test]
@@ -1425,6 +1508,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn worker_recovers_past_undecodable_event_and_holds_checkpoint() {
+        let events = WorkerTestStreamStore::default();
+        let secrets = MockOpenBaoSecretStore::default();
+        let handler = CredentialHandler::new(events.clone(), secrets.clone());
+        events.fail_append_at(2);
+        handler.put(put_command("super-secret")).await.unwrap_err();
+
+        let raw_events = vec![
+            undecodable_stream_event(1),
+            stream_event("gateway.credentials.events.v1.subject", 2, write_requested_event()),
+        ];
+        let stream = raw_stream_with_events(raw_events).await;
+        let kv = MockJetStreamKvStore::new();
+        kv.enqueue_entry_none();
+        let checkpoints = CredentialRecoveryKvCheckpointStore::new(kv.clone());
+        let runtime_credentials = RuntimeCredentialRegistry::default();
+        let runtime_handler =
+            CredentialRuntimeHandler::new(events.clone(), secrets.clone(), runtime_credentials.clone());
+
+        let report = recover_pending_credential_activations(&stream, &events, &runtime_handler, &checkpoints)
+            .await
+            .unwrap();
+
+        assert_eq!(report.scanned_events(), 2);
+        assert_eq!(report.decoded_events(), 1);
+        assert_eq!(report.invalid_events(), 1);
+        assert_eq!(report.planned_recoveries(), 1);
+        assert_eq!(report.recovered_writes(), 1);
+        assert_eq!(report.failed_recoveries(), 0);
+        assert_eq!(report.checkpoint_advanced_to(), None);
+        assert_eq!(report.checkpoint_failure_count(), 1);
+        assert!(report.checkpoint_retry_after_unix_seconds().is_some());
+        assert_eq!(stream.raw_message_calls(), vec![1, 2]);
+        let calls = kv.create_calls();
+        assert_eq!(calls.len(), 1);
+        let saved = decode_checkpoint(&calls[0].1).unwrap();
+        assert_eq!(saved.last_scanned_sequence(), 0);
+        assert_eq!(saved.consecutive_failure_count(), 1);
+        assert_eq!(
+            runtime_credentials
+                .resolver(secrets)
+                .resolve(&runtime_key(), CredentialKind::WebhookSecret)
+                .await
+                .unwrap()
+                .as_plaintext()
+                .unwrap()
+                .as_str(),
+            "super-secret"
+        );
+    }
+
+    #[tokio::test]
     async fn worker_saves_retry_backoff_when_recovery_fails() {
         let store = WorkerTestStreamStore::default();
         store.push_credential_event(credential_id().as_str(), write_requested_event());
@@ -1596,6 +1731,15 @@ mod tests {
         );
         assert_eq!(
             CredentialRecoveryReport {
+                invalid_events: 1,
+                failed_recoveries: 1,
+                ..Default::default()
+            }
+            .metric_outcome(),
+            "invalid_event"
+        );
+        assert_eq!(
+            CredentialRecoveryReport {
                 failed_recoveries: 1,
                 ..Default::default()
             }
@@ -1693,6 +1837,16 @@ mod tests {
             stream_position: position(stream_position),
             recorded_at: Utc::now(),
         }
+    }
+
+    fn undecodable_stream_event(stream_position: u64) -> StreamEvent {
+        let mut event = stream_event(
+            "gateway.credentials.events.v1.subject",
+            stream_position,
+            write_requested_event(),
+        );
+        event.event.content = b"\0".to_vec();
+        event
     }
 
     fn write_requested_event() -> v1::CredentialEvent {
