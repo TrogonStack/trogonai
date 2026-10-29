@@ -42,8 +42,13 @@
 //!   `X-Slack-Retry-Num` and `X-Slack-Retry-Reason` when Slack marks the
 //!   delivery as a redelivery, `X-Slack-Is-Enterprise-Install` always,
 //!   `X-Slack-Enterprise-Id` and `X-Slack-Api-App-Id` when the payload names
-//!   them, and `X-Slack-Reject-Reason` for unroutable
+//!   them, `X-Slack-Event-Subtype` and `X-Slack-Channel-Type` for events that
+//!   carry them, and `X-Slack-Reject-Reason` for unroutable
 //!   messages.
+//! - **Channel type**: `X-Slack-Channel-Type` copies Slack's `channel_type`
+//!   as sent, and its values depend on the event. Message events send names
+//!   such as `channel` or `im`, while membership events send single letter
+//!   codes such as `C`, so filter on it together with `X-Slack-Event-Type`.
 //!
 //! ## Configuration
 //!

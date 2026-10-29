@@ -1263,3 +1263,18 @@ async fn socket_payloads_carry_enterprise_and_app_identity() {
         assert_eq!(header("X-Slack-Api-App-Id"), Some("A01APP"), "{kind}");
     }
 }
+
+#[tokio::test]
+async fn socket_event_carries_subtype_and_channel_type() {
+    let publisher = MockJetStreamPublisher::new();
+    let payload = r#"{"type":"event_callback","event_id":"Ev01ABC123","team_id":"T01ABC","event":{"type":"message","subtype":"bot_message","channel_type":"im"}}"#;
+
+    handle_text_frame(&bridge(publisher.clone()), &envelope_text("events_api", payload))
+        .await
+        .unwrap();
+
+    let messages = publisher.published_messages();
+    let header = |name: &str| messages[0].headers.get(name).map(|v| v.as_str());
+    assert_eq!(header("X-Slack-Event-Subtype"), Some("bot_message"));
+    assert_eq!(header("X-Slack-Channel-Type"), Some("im"));
+}
