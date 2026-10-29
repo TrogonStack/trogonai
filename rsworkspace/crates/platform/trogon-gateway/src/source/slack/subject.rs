@@ -1,5 +1,7 @@
 use trogon_nats::{NatsToken, SubjectTokenViolationError};
 
+use super::system_notice::SystemNoticeType;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SlackSubject(String);
 
@@ -22,6 +24,10 @@ impl SlackSubject {
     pub fn command(prefix: &NatsToken, command: &str) -> Result<Self, SubjectTokenViolationError> {
         let name = command.trim_start_matches('/');
         Ok(Self(format!("{prefix}.command.{}", token(name)?)))
+    }
+
+    pub fn system(prefix: &NatsToken, notice: SystemNoticeType) -> Self {
+        Self(format!("{prefix}.system.{}", notice.as_str()))
     }
 
     pub fn unroutable(prefix: &NatsToken) -> Self {

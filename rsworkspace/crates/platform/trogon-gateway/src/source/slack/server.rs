@@ -17,6 +17,7 @@ use super::payload_metadata::PayloadMetadata;
 use super::signature;
 use super::ssl_check::SslCheck;
 use super::subject::SlackSubject;
+use super::system_notice::{SystemMessageId, SystemNoticeType};
 use super::unroutable::{UnroutableMessageId, UnroutableReason};
 use trogon_std::NonZeroDuration;
 use trogon_std::SystemClock;
@@ -214,6 +215,13 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
 
         let team_id = json_team_id(payload).to_owned();
 
+        if let Some(notice) = SystemNoticeType::from_payload_type(payload_type) {
+            let status = self
+                .publish_system_notice(notice, &team_id, payload, body.clone(), context)
+                .await;
+            return (status, String::new());
+        }
+
         if payload_type != "event_callback" {
             warn!(payload_type, "Unhandled payload type");
             let status = self
@@ -304,6 +312,49 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
         let outcome = self.publish(subject.into_string(), nats_headers, body.clone()).await;
 
         (outcome_to_status(outcome), String::new())
+    }
+
+    async fn publish_system_notice(
+        &self,
+        notice: SystemNoticeType,
+        team_id: &str,
+        payload: &serde_json::Value,
+        body: Bytes,
+        context: &DeliveryContext,
+    ) -> StatusCode {
+        let subject = SlackSubject::system(&self.subject_prefix, notice);
+        let message_id = SystemMessageId::new(&body);
+        let notice_type = notice.as_str();
+
+        let span = tracing::Span::current();
+        span.record(trogon_semconv::attribute::EVENT_TYPE, notice_type);
+        span.record(trogon_semconv::attribute::SUBJECT, subject.as_str());
+
+        info!(notice_type, "Received Slack system notice");
+
+        let Ok(nats_headers) = delivery_headers(
+            self.transport,
+            "system",
+            message_id.as_str(),
+            notice_type,
+            None,
+            team_id,
+            &DeliveryMetadata::new(context, PayloadMetadata::system(payload)),
+        ) else {
+            warn!("System notice metadata is not valid header text");
+            return self
+                .reject(
+                    UnroutableReason::InvalidHeaderValue,
+                    team_id,
+                    body,
+                    StatusCode::BAD_REQUEST,
+                )
+                .await;
+        };
+
+        let outcome = self.publish(subject.into_string(), nats_headers, body).await;
+
+        outcome_to_status(outcome)
     }
 
     async fn handle_form_payload(&self, body: &Bytes, context: &DeliveryContext) -> (StatusCode, String) {

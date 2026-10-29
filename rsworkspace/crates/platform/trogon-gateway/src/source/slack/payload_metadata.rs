@@ -37,6 +37,13 @@ impl<'a> PayloadMetadata<'a> {
         }
     }
 
+    pub fn system(payload: &'a Value) -> Self {
+        Self {
+            api_app_id: text(payload, "api_app_id"),
+            ..Self::default()
+        }
+    }
+
     pub fn interaction(payload: &'a Value) -> Self {
         let enterprise = payload.get("enterprise").filter(|value| !value.is_null());
         let team = payload.get("team").filter(|value| !value.is_null());

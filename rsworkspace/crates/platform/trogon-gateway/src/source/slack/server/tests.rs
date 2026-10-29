@@ -1,6 +1,6 @@
 use super::super::constants::{
     HEADER_RETRY_NUM, HEADER_RETRY_REASON, NATS_HEADER_API_APP_ID, NATS_HEADER_ENTERPRISE_ID,
-    NATS_HEADER_IS_ENTERPRISE_INSTALL, NATS_HEADER_RETRY_NUM, NATS_HEADER_RETRY_REASON,
+    NATS_HEADER_IS_ENTERPRISE_INSTALL, NATS_HEADER_REQUEST_TIMESTAMP, NATS_HEADER_RETRY_NUM, NATS_HEADER_RETRY_REASON,
 };
 use super::*;
 use axum::body::Body;
@@ -319,7 +319,7 @@ async fn unhandled_payload_type_returns_200() {
     let publisher = MockJetStreamPublisher::new();
     let app = mock_app(publisher.clone());
     let body = serde_json::to_vec(&serde_json::json!({
-        "type": "app_rate_limited"
+        "type": "future_outer_type"
     }))
     .unwrap();
     let ts = current_timestamp();
@@ -816,7 +816,7 @@ async fn failed_unroutable_publish_turns_a_200_into_a_500() {
     let publisher = MockJetStreamPublisher::new();
     publisher.fail_next_js_publish();
     let app = mock_app(publisher.clone());
-    let body = serde_json::to_vec(&serde_json::json!({ "type": "app_rate_limited" })).unwrap();
+    let body = serde_json::to_vec(&serde_json::json!({ "type": "future_outer_type" })).unwrap();
     let ts = current_timestamp();
     let sig = compute_sig(TEST_SECRET, &ts, &body);
 
@@ -1641,4 +1641,121 @@ async fn http_delivery_carries_the_request_timestamp_for_every_payload_kind() {
         );
         assert!(messages[0].headers.get("X-Slack-Envelope-Id").is_none());
     }
+}
+
+fn app_rate_limited_body() -> Vec<u8> {
+    serde_json::to_vec(&serde_json::json!({
+        "token": "verification-token",
+        "team_id": "T01ABC",
+        "minute_rate_limited": 1_518_467_820,
+        "api_app_id": "A01ABC",
+        "type": "app_rate_limited"
+    }))
+    .unwrap()
+}
+
+#[tokio::test]
+async fn app_rate_limited_is_published_on_the_system_subject() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = mock_app(publisher.clone());
+    let body = app_rate_limited_body();
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, &body);
+
+    let resp = app.oneshot(webhook_request(&body, &ts, Some(&sig))).await.unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let messages = publisher.published_messages();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].subject, "slack.system.app_rate_limited");
+    assert_eq!(messages[0].payload.as_ref(), body.as_slice());
+    let headers = &messages[0].headers;
+    assert_eq!(header(headers, NATS_HEADER_PAYLOAD_KIND), Some("system"));
+    assert_eq!(header(headers, NATS_HEADER_EVENT_TYPE), Some("app_rate_limited"));
+    assert_eq!(header(headers, NATS_HEADER_TEAM_ID), Some("T01ABC"));
+    assert_eq!(header(headers, NATS_HEADER_TRANSPORT), Some("webhook"));
+    assert_eq!(header(headers, NATS_HEADER_API_APP_ID), Some("A01ABC"));
+    assert_eq!(header(headers, NATS_HEADER_EVENT_ID), None);
+    assert_eq!(header(headers, NATS_HEADER_REQUEST_TIMESTAMP), Some(ts.as_str()));
+    let expected_id = super::super::system_notice::SystemMessageId::new(&body);
+    assert_eq!(header(headers, "Nats-Msg-Id"), Some(expected_id.as_str()));
+}
+
+#[tokio::test]
+async fn a_redelivered_rate_limit_notice_keeps_its_message_id() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let body = app_rate_limited_body();
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, &body);
+
+    for _ in 0..2 {
+        mock_app(publisher.clone())
+            .oneshot(webhook_request(&body, &ts, Some(&sig)))
+            .await
+            .unwrap();
+    }
+
+    let messages = publisher.published_messages();
+    assert_eq!(
+        header(&messages[0].headers, "Nats-Msg-Id"),
+        header(&messages[1].headers, "Nats-Msg-Id")
+    );
+}
+
+#[tokio::test]
+async fn app_rate_limited_without_a_team_id_uses_the_unknown_team() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let body = serde_json::to_vec(&serde_json::json!({ "type": "app_rate_limited" })).unwrap();
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, &body);
+
+    mock_app(publisher.clone())
+        .oneshot(webhook_request(&body, &ts, Some(&sig)))
+        .await
+        .unwrap();
+
+    let messages = publisher.published_messages();
+    assert_eq!(messages[0].subject, "slack.system.app_rate_limited");
+    assert_eq!(header(&messages[0].headers, NATS_HEADER_TEAM_ID), Some("unknown"));
+}
+
+#[tokio::test]
+async fn app_rate_limited_publish_failure_returns_500() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    publisher.fail_next_js_publish();
+    let body = app_rate_limited_body();
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, &body);
+
+    let resp = mock_app(publisher)
+        .oneshot(webhook_request(&body, &ts, Some(&sig)))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+#[tokio::test]
+async fn app_rate_limited_with_unsafe_header_text_is_stored_as_unroutable() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let body = serde_json::to_vec(&serde_json::json!({
+        "type": "app_rate_limited",
+        "team_id": "T01\r\nX-Injected: 1"
+    }))
+    .unwrap();
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, &body);
+
+    let resp = mock_app(publisher.clone())
+        .oneshot(webhook_request(&body, &ts, Some(&sig)))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    assert_unroutable(&publisher, "invalid_header_value");
 }
