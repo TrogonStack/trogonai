@@ -690,16 +690,25 @@ where
     ) -> HandlerResult<EventStore, <Secrets as SecretStoreRotate>::Error> {
         let _write_guard = self.write_locks.acquire(command.credential_ref.id()).await;
         let request = RequestCredentialRotation::new(command.credential_ref.clone());
-        self.ensure_rotation_requested(&request).await?;
+        let resumed = self.ensure_rotation_requested(&request).await?;
 
-        let rotated_ref = match self.secrets.rotate(&command.credential_ref, command.value).await {
-            Ok(rotated_ref) => rotated_ref,
-            Err(source) => {
-                record_write_failure(CredentialWriteOperation::Rotate, command.credential_ref.source());
-                let reason = failure_reason(&source);
-                self.record_rotation_failure(command.credential_ref, reason).await?;
-                return Err(CredentialHandlerError::SecretRotate { source });
-            }
+        let already_written = if resumed {
+            let next_ref = command.credential_ref.next_version();
+            self.secrets.metadata(&next_ref).await.ok().map(|_| next_ref)
+        } else {
+            None
+        };
+        let rotated_ref = match already_written {
+            Some(rotated_ref) => rotated_ref,
+            None => match self.secrets.rotate(&command.credential_ref, command.value).await {
+                Ok(rotated_ref) => rotated_ref,
+                Err(source) => {
+                    record_write_failure(CredentialWriteOperation::Rotate, command.credential_ref.source());
+                    let reason = failure_reason(&source);
+                    self.record_rotation_failure(command.credential_ref, reason).await?;
+                    return Err(CredentialHandlerError::SecretRotate { source });
+                }
+            },
         };
         let metadata = self
             .secrets
@@ -720,7 +729,7 @@ where
         &self,
         command: &RequestCredentialRotation,
     ) -> Result<
-        (),
+        bool,
         CredentialHandlerError<
             <Secrets as SecretStoreRotate>::Error,
             SnapshotReadError<EventStore>,
@@ -734,7 +743,7 @@ where
             .execute()
             .await
         {
-            Ok(_) => Ok(()),
+            Ok(_) => Ok(false),
             Err(source) => {
                 let (state, _stream_position) =
                     load_state(&self.event_store, command.credential_ref().id().as_str()).await?;
@@ -749,7 +758,7 @@ where
                     _ => false,
                 };
                 if matches {
-                    Ok(())
+                    Ok(true)
                 } else {
                     Err(CredentialHandlerError::RequestRotation { source })
                 }
