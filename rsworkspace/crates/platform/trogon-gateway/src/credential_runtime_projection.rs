@@ -39,10 +39,10 @@ use crate::credential::commands::domain::{
     RuntimeReleaseRequest, SourceKind,
 };
 use crate::credential::commands::proto::{
-    CredentialProtoDecodeError, active_credential_ref, decode_cleanup_failed_state, decode_credential_metadata,
-    decode_destroy_failed, decode_destroy_requested, decode_destroy_requested_state, decode_destroyed,
-    decode_destroyed_state, decode_message_field, decode_revoked, decode_revoked_state, decode_rotated,
-    decode_rotation_failed, decode_rotation_requested, decode_write_failed, decode_write_requested,
+    CredentialProtoDecodeError, active_credential_ref, decode_cleanup_failed_state, decode_credential_id,
+    decode_credential_metadata, decode_destroy_failed, decode_destroy_requested, decode_destroy_requested_state,
+    decode_destroyed, decode_destroyed_state, decode_message_field, decode_revoked, decode_revoked_state,
+    decode_rotated, decode_rotation_failed, decode_rotation_requested, decode_write_failed, decode_write_requested,
 };
 use crate::credential::constants::CREDENTIAL_EVENT_SUBJECT_PREFIX;
 use crate::credential::event_stream::{CredentialEventStreamReadError, read_credential_event_stream};
@@ -971,6 +971,15 @@ impl RuntimeCredentialRegistry {
             .map_err(|source| RuntimeProjectionRefreshError::InvalidEvent { source })?
         {
             self.remove_credential_ref(&credential_ref).await?;
+            return Ok(());
+        }
+
+        if let Some(credential_id) =
+            unpublished_credential_id(state).map_err(|source| RuntimeProjectionRefreshError::InvalidEvent { source })?
+        {
+            for evicted in self.projections.remove_credential_id(&credential_id).await {
+                self.cache.invalidate(&evicted).await;
+            }
         }
         Ok(())
     }
@@ -1323,8 +1332,42 @@ async fn apply_state_to_projection(
         {
             runtime_projection_metrics().record_revocation_latency(recorded_at);
         }
+        return Ok(());
+    }
+
+    if let Some(credential_id) =
+        unpublished_credential_id(state).map_err(|source| RuntimeProjectionRefreshError::InvalidEvent { source })?
+    {
+        for evicted in projections.remove_credential_id(&credential_id).await {
+            cache.invalidate(&evicted).await;
+        }
     }
     Ok(())
+}
+
+fn unpublished_credential_id(
+    state: &state_v1::CredentialStateSnapshot,
+) -> Result<Option<CredentialId>, CredentialProtoDecodeError> {
+    match state.state.as_ref() {
+        Some(CredentialStateSnapshotCase::PendingWrite(pending)) => Ok(Some(decode_credential_id(
+            "pending_write.credential_id",
+            &pending.credential_id,
+        )?)),
+        Some(CredentialStateSnapshotCase::WriteFailed(failed)) => Ok(Some(decode_credential_id(
+            "write_failed.credential_id",
+            &failed.credential_id,
+        )?)),
+        None
+        | Some(
+            CredentialStateSnapshotCase::Missing(_)
+            | CredentialStateSnapshotCase::Active(_)
+            | CredentialStateSnapshotCase::RotationPending(_)
+            | CredentialStateSnapshotCase::Revoked(_)
+            | CredentialStateSnapshotCase::DestroyRequested(_)
+            | CredentialStateSnapshotCase::Destroyed(_)
+            | CredentialStateSnapshotCase::CleanupFailed(_),
+        ) => Ok(None),
+    }
 }
 
 fn post_revocation_credential_ref(

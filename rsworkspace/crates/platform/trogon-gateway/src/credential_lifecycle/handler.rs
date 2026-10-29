@@ -32,7 +32,8 @@ use crate::credential::{
 };
 use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeProjectionRefreshError};
 use crate::secret_store::{
-    SecretDestroyReason, SecretStoreDestroy, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke, SecretStoreRotate,
+    SecretDestroyReason, SecretStoreDestroy, SecretStoreError, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke,
+    SecretStoreRotate,
 };
 
 type ExecutionError<SnapshotReadError, ReadError, AppendError> = CommandError<
@@ -384,7 +385,7 @@ where
         + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
-    Secrets: SecretStoreRotate + SecretStoreMetadata<Error = <Secrets as SecretStoreRotate>::Error>,
+    Secrets: SecretStoreRotate<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
 {
     pub(crate) async fn rotate(
         &self,
@@ -684,7 +685,7 @@ where
         + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
-    Secrets: SecretStoreRotate + SecretStoreMetadata<Error = <Secrets as SecretStoreRotate>::Error>,
+    Secrets: SecretStoreRotate<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
 {
     pub(crate) async fn rotate(
         &self,
@@ -696,7 +697,11 @@ where
 
         let already_written = if resumed {
             let next_ref = command.credential_ref.next_version();
-            self.secrets.metadata(&next_ref).await.ok().map(|_| next_ref)
+            match self.secrets.metadata(&next_ref).await {
+                Ok(_) => Some(next_ref),
+                Err(SecretStoreError::Missing { .. }) => None,
+                Err(source) => return Err(CredentialHandlerError::SecretMetadata { source }),
+            }
         } else {
             None
         };

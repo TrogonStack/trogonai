@@ -1723,6 +1723,71 @@ async fn incremental_refresh_invalidates_cache_and_removes_projection_when_batch
 }
 
 #[tokio::test]
+async fn incremental_refresh_stops_serving_a_destroyed_credential_once_it_is_rewritten() {
+    let store = MockOpenBaoSecretStore::default();
+    let credential = put_bot_token(&store, "Bot token").await;
+    let metadata = store.metadata(&credential).await.unwrap();
+    let event_store = ProjectionTestEventStore::default();
+    event_store.push(credential.id().as_str(), 1, write_requested(&credential));
+    event_store.push(credential.id().as_str(), 2, activated(&metadata));
+    let stream = raw_stream([
+        runtime_event(1, write_requested(&credential)),
+        runtime_event(2, activated(&metadata)),
+    ])
+    .await;
+    let registry = RuntimeCredentialRegistry::default();
+    let resolver = registry.resolver(store.clone());
+    registry
+        .refresh_from_credential_stream_incremental(&stream, &event_store, 1)
+        .await
+        .unwrap();
+    assert_eq!(
+        resolver
+            .resolve_plaintext(&key(), CredentialKind::BotToken)
+            .await
+            .unwrap()
+            .as_str(),
+        "Bot token"
+    );
+
+    let destroyed = v1::CredentialEvent {
+        event: Some(destroyed_to_proto(&credential).into()),
+    };
+    let rewrite = [
+        revoked(&credential),
+        destroy_requested(&credential),
+        destroyed,
+        write_requested(&credential),
+    ];
+    for (offset, event) in rewrite.iter().enumerate() {
+        event_store.push(credential.id().as_str(), 3 + offset as u64, event.clone());
+    }
+    let runtime_events = rewrite
+        .iter()
+        .enumerate()
+        .map(|(offset, event)| runtime_event(3 + offset as u64, event.clone()))
+        .collect::<Vec<_>>();
+    append_stream(
+        &stream,
+        StreamSubject::new("gateway.credentials.events.v1.raw").unwrap(),
+        None,
+        &runtime_events,
+    )
+    .await
+    .unwrap();
+
+    registry
+        .refresh_from_credential_stream_incremental(&stream, &event_store, 2)
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        resolver.resolve(&key(), CredentialKind::BotToken).await,
+        Err(RuntimeCredentialError::IntegrationNotFound { .. })
+    ));
+}
+
+#[tokio::test]
 async fn incremental_refresh_invalidates_cache_and_removes_projection_when_batch_ends_in_cleanup_failed() {
     let store = MockOpenBaoSecretStore::default();
     let credential = put_bot_token(&store, "Bot token").await;

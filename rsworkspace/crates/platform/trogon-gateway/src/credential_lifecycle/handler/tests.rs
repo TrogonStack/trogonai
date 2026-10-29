@@ -874,6 +874,7 @@ async fn rotate_records_request_rotates_secret_and_activates_metadata() {
 struct CountingRotateSecretStore {
     inner: MockOpenBaoSecretStore,
     rotations: Arc<std::sync::atomic::AtomicUsize>,
+    metadata_outage: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl SecretStorePut for CountingRotateSecretStore {
@@ -902,8 +903,71 @@ impl SecretStoreMetadata for CountingRotateSecretStore {
     type Error = SecretStoreError;
 
     async fn metadata(&self, credential: &CredentialRef) -> Result<CredentialMetadata, Self::Error> {
+        if self.metadata_outage.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(SecretStoreError::BackendUnavailable {
+                backend: StorageBackend::OpenBao,
+                message: "metadata read timed out".to_string(),
+            });
+        }
         self.inner.metadata(credential).await
     }
+}
+
+#[tokio::test]
+async fn rotate_retry_surfaces_metadata_outage_without_rotating_again() {
+    let events = HandlerTestStreamStore::default();
+    let secrets = CountingRotateSecretStore::default();
+    let handler = CredentialHandler::new(events.clone(), secrets.clone());
+    let state = handler.put(put_command("initial-secret")).await.unwrap().into_state();
+    let Some(CredentialStateSnapshotCase::Active(active)) = state.state.as_ref() else {
+        panic!("expected active credential");
+    };
+    let (active_metadata, _) = decode_active_state("active", active).unwrap();
+    let credential_ref = active_metadata.reference().clone();
+    events.fail_append_at(4);
+    handler
+        .rotate(RotateCredential::new(
+            credential_ref.clone(),
+            SecretString::new("rotated-secret").unwrap(),
+        ))
+        .await
+        .unwrap_err();
+    secrets.metadata_outage.store(true, std::sync::atomic::Ordering::SeqCst);
+
+    let error = handler
+        .rotate(RotateCredential::new(
+            credential_ref.clone(),
+            SecretString::new("rotated-secret").unwrap(),
+        ))
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, CredentialHandlerError::SecretMetadata { .. }));
+    assert_eq!(secrets.rotations.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert!(
+        !events
+            .decoded_events()
+            .iter()
+            .any(|event| matches!(event.event, Some(CredentialEventCase::RotationFailed(_))))
+    );
+
+    secrets
+        .metadata_outage
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    let state = handler
+        .rotate(RotateCredential::new(
+            credential_ref.clone(),
+            SecretString::new("rotated-secret").unwrap(),
+        ))
+        .await
+        .unwrap()
+        .into_state();
+    let Some(CredentialStateSnapshotCase::Active(active)) = state.state.as_ref() else {
+        panic!("expected active credential");
+    };
+    let (metadata, _) = decode_active_state("active", active).unwrap();
+    assert_eq!(metadata.reference(), &credential_ref.next_version());
+    assert_eq!(secrets.rotations.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
 
 #[tokio::test]
