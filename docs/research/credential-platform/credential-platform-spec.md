@@ -303,6 +303,9 @@ in full:
 
 ```text
 missing --WriteRequested--> pending_write
+write_failed --WriteRequested--> pending_write
+  (a new attempt; the event's credential_id must match the failed write,
+  otherwise: CredentialRefMismatch)
   otherwise: WriteRequestedAfterStart
 
 pending_write --WriteFailed--> write_failed
@@ -334,21 +337,28 @@ single transition: `CredentialRefMismatch` (an event's ref does not match
 the aggregate it is being applied to) and `RotationVersionNotNewer` (a
 Rotated event whose version is not strictly newer than the previous one).
 
-There is a real asymmetry worth flagging. `write_failed` is a terminal dead
-end in the decider: no arm of `evolve()` accepts any event while the current
-state is `write_failed`, since only `missing` accepts `WriteRequested`. The
-handler layer (`CredentialHandler::put` in `handler.rs`) can only route
-around this before a WriteFailed event is actually appended: if the append
-of an Activated event fails after the secret write already succeeded, a
-second `put()` call detects the still-pending write through
-`ensure_write_requested` and resumes from there. Once `record_write_failure`
-has appended a WriteFailed event, that credential_id has no decider path
-forward at all. By contrast, `rotation_pending --RotationFailed--> active`
-is explicitly a recovery transition; rotation failures are not terminal.
-This gap is exactly what the planned `resubmission_required` state is meant
-to close, and that state does not exist in code today.
+`write_failed` is recoverable. A failed secret store write still records a
+WriteFailed event (`record_write_failure` in `handler.rs`), and
+`RequestCredentialWrite` (`request_credential_write.rs`) accepts a new write
+from `write_failed` as well as from `missing`: it appends a new
+`WriteRequested` for the same credential_id, which returns the aggregate to
+`pending_write`, and the normal activation path runs from there. The command
+appends under a `StreamUnchanged` precondition, meaning the stream must not
+have changed since the state was read. On an empty stream that is the same
+guard as `NoStream`, so only one of two concurrent first write requests
+succeeds as a command. An `active` credential still rejects a new write with
+the already-exists error, and a `revoked` one with the revoked error.
 
-`revoked` is also terminal: there is no transition out of it in `evolve()`.
+The handler layer (`CredentialHandler::put` in `handler.rs`) has another
+route that needs no new event: if the append of an Activated event fails
+after the secret write already succeeded, the credential is still
+`pending_write`, and a second `put()` call detects the matching pending write
+through `ensure_write_requested` and resumes from there. Nothing retries a
+`write_failed` credential on its own, though. The recovery worker plans
+commands only for `pending_write` and `rotation_pending`, so a failed write
+waits for a new write request.
+
+`revoked` is terminal: there is no transition out of it in `evolve()`.
 There is no `destroyed` or `expired` case in the snapshot at all; those
 concerns live one layer down, in CredentialStatus.
 
@@ -447,15 +457,15 @@ Model above implies CredentialState is closer to what users actually see
 (draft, saving, ready, failed, ...; see UI_ACCEPTANCE), while the decider
 snapshot and CredentialStatus stay internal machinery.
 
-DECISION NEEDED: does the decider's write_failed map onto CredentialState
-failed as a recoverable state, or is the
-resubmission_required transition needed in evolve() first?
-recommendation: add the resubmission_required transition to the decider
-before wiring CredentialState failed to resubmit secret. The acceptance
-scenarios let the same credential id be written again after a failed write,
-as a new attempt under a new idempotency key, while retry stays a
-metadata-only lookup that never re-runs the write. Today the decider has no
-path to accept that second write.
+The decider's write_failed is recoverable, so CredentialState failed can map
+onto it as a recoverable state, and no resubmission_required transition is
+needed in evolve(). RequestCredentialWrite accepts a new write request for
+the same credential id from write_failed as well as from missing, appends
+WriteRequested, and returns the credential to pending_write. That is the
+write the acceptance scenarios call for. Resubmit is a new attempt for the
+same credential id under a new idempotency key, with a fresh ledger entry.
+Retry is a metadata-only lookup by operation id or idempotency key that
+never re-runs the write.
 
 DECIDED ([ADR#0046](../../adr/0046-project-anchored-resource-hierarchy.md)): the hierarchy is organization over project, and the
 owner boundary is the project: an immutable project id. Resource names,
@@ -1761,7 +1771,7 @@ the runtime projection excludes incomplete provisions structurally
      PendingWrite and WriteFailed, so no projection row is ever built
 
 discovery is a raw stream scan, not a query
-  -> recover_pending_credential_activations() (recovery_worker.rs:316)
+  -> recover_pending_credential_activations() (recovery_worker.rs:328)
      replays credential events from a checkpoint to find pending
      activations; there is no queryable set of them anywhere
 
@@ -1776,10 +1786,11 @@ the only operator surface reports worker health, not work
 The consequence is that a credential can sit in `PendingWrite` or
 `WriteFailed` indefinitely while every dashboard reads green, because the
 recovery worker is scanning normally and simply has nothing it can do about
-that credential. This is most acute for `WriteFailed`, which is terminal:
-`WriteRequested` is accepted only from `Missing` (`state.rs:108-114`), so a
-credential whose first OpenBao write failed has no path forward at all, and
-today no surface says so.
+that credential. This is most acute for `WriteFailed`, which nothing retries:
+`activation_recovery_command` plans no command for it (`handler.rs:243-274`),
+and `WriteRequested` is accepted from it (`state.rs:108-125`) only when a
+caller sends a new write, so a credential whose OpenBao write failed stays
+failed until someone resubmits it, and today no surface says so.
 
 #### Shape
 
@@ -1815,9 +1826,10 @@ predicate races in-flight work.
 
 There is no `rotation_failed` phase because there is no such state. A
 RotationFailed event collapses the aggregate back to `Active`
-(`state.rs:155-164`, which returns `active.clone()`), which is deliberate:
-rotation failure is a recovery transition, not a dead end, unlike
-`WriteFailed`. The cost is a blind spot. A rotation that failed and was never
+(`state.rs:166-175`, which returns `active.clone()`), which is deliberate:
+rotation failure is a recovery transition, not a state of its own, unlike
+`WriteFailed`, which stays a state until a new write request moves it on.
+The cost is a blind spot. A rotation that failed and was never
 retried is indistinguishable from a credential that never rotated, in the
 aggregate and therefore in any state-derived row. Closing it means counting
 RotationFailed events as they pass rather than reading them off state, which
@@ -1877,8 +1889,8 @@ worker and no gauge.
 - a credential that appends WriteRequested and never activates appears in the
   read model within one refresh interval;
 - it disappears on activation, without a separate cleanup pass;
-- a WriteFailed credential is listed with its reason and stays listed, since
-  nothing can currently move it forward;
+- a WriteFailed credential is listed with its reason and stays listed until a
+  new write request activates it, since the recovery worker never retries it;
 - no user-facing response contains a row, a count, or any field derived from
   this read model;
 - the refresh reads only the credential event stream, with no OpenBao read,

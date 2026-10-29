@@ -321,8 +321,9 @@ responsibilities.
    lifetime of plaintext in process memory.
 9. Credential access audit, an OpenBao audit device, deployed alerts, and
    anomaly detection are not complete.
-10. Recovery covers pending activation, not the full lifecycle. `WriteFailed`
-    is terminal and currently lacks an operator-visible recovery path.
+10. Recovery covers pending activation, not the full lifecycle. The recovery
+    worker never retries `WriteFailed`, which waits for a new write request,
+    and no operator-visible surface lists it.
 11. There is no public credential management API, UI, or implemented API-key
     platform.
 12. There is no `KeyManagement` implementation. Draft [ADR#0030](../../adr/0030-customer-controlled-key-backend-routing.md) and [ADR#0033](../../adr/0033-key-custody-product-model.md)
