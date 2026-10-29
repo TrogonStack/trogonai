@@ -239,8 +239,8 @@ impl RuntimeIntegrationProjection {
         self
     }
 
-    fn insert_credential(&mut self, credential: CredentialRef) {
-        self.credentials.insert(credential.kind(), credential);
+    fn insert_credential(&mut self, credential: CredentialRef) -> Option<CredentialRef> {
+        self.credentials.insert(credential.kind(), credential)
     }
 
     fn remove_credential(&mut self, kind: CredentialKind) -> Option<CredentialRef> {
@@ -798,7 +798,10 @@ impl InMemoryRuntimeProjectionRepository {
         self.projections.lock().await.remove(key);
     }
 
-    pub async fn merge(&self, projection: RuntimeIntegrationProjection) -> Result<(), RuntimeProjectionRefreshError> {
+    pub async fn merge(
+        &self,
+        projection: RuntimeIntegrationProjection,
+    ) -> Result<Vec<CredentialRef>, RuntimeProjectionRefreshError> {
         let mut projections = self.projections.lock().await;
         merge_projection(&mut projections, projection)
     }
@@ -906,8 +909,9 @@ impl RuntimeCredentialRegistry {
         if let Some(projection) = RuntimeIntegrationProjection::from_credential_state(state, stream_position.as_u64())
             .map_err(|source| RuntimeProjectionRefreshError::BuildProjection { source })?
         {
-            self.projections.merge(projection).await?;
-            self.cache.clear().await;
+            let mut affected = projection.credentials.values().cloned().collect::<Vec<_>>();
+            affected.extend(self.projections.merge(projection).await?);
+            invalidate_all(&self.cache, &affected).await;
             return Ok(());
         }
 
@@ -1151,6 +1155,12 @@ where
     Ok(state)
 }
 
+async fn invalidate_all(cache: &RuntimeCredentialCache, credentials: &[CredentialRef]) {
+    for credential in credentials {
+        cache.invalidate(credential).await;
+    }
+}
+
 async fn apply_state_to_projection(
     projections: &InMemoryRuntimeProjectionRepository,
     cache: &RuntimeCredentialCache,
@@ -1161,8 +1171,9 @@ async fn apply_state_to_projection(
     if let Some(projection) = RuntimeIntegrationProjection::from_credential_state(state, stream_position.as_u64())
         .map_err(|source| RuntimeProjectionRefreshError::BuildProjection { source })?
     {
-        projections.merge(projection).await?;
-        cache.clear().await;
+        let mut affected = projection.credentials.values().cloned().collect::<Vec<_>>();
+        affected.extend(projections.merge(projection).await?);
+        invalidate_all(cache, &affected).await;
         return Ok(());
     }
 
@@ -1236,7 +1247,8 @@ fn position(value: u64) -> Result<StreamPosition, RuntimeProjectionRefreshError>
 fn merge_projection(
     projections: &mut BTreeMap<RuntimeIntegrationKey, RuntimeIntegrationProjection>,
     projection: RuntimeIntegrationProjection,
-) -> Result<(), RuntimeProjectionRefreshError> {
+) -> Result<Vec<CredentialRef>, RuntimeProjectionRefreshError> {
+    let mut replaced = Vec::new();
     let key = projection.key().clone();
     match projections.get_mut(&key) {
         Some(existing) => {
@@ -1249,7 +1261,7 @@ fn merge_projection(
             }
             let version = projection.version();
             for credential in projection.credentials.into_values() {
-                existing.insert_credential(credential);
+                replaced.extend(existing.insert_credential(credential));
             }
             existing.advance_version(version);
         }
@@ -1257,7 +1269,7 @@ fn merge_projection(
             projections.insert(key, projection);
         }
     }
-    Ok(())
+    Ok(replaced)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

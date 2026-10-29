@@ -6,7 +6,7 @@ use crate::credential::commands::domain::{
 };
 use crate::credential::commands::proto::{
     activated_to_proto, decode_scope_key, destroy_failed_to_proto, destroy_requested_to_proto, destroyed_to_proto,
-    revoked_to_proto, write_requested_to_proto,
+    revoked_to_proto, rotated_to_proto, rotation_requested_to_proto, write_requested_to_proto,
 };
 use crate::secret_store::{
     MockOpenBaoSecretStore, SecretDestroyReason, SecretStoreDestroy, SecretStoreMetadata, SecretStorePut,
@@ -702,6 +702,84 @@ async fn registry_applies_revoked_state_incrementally_and_invalidates_cache() {
         resolver.resolve(&key(), CredentialKind::BotToken).await,
         Err(RuntimeCredentialError::SecretStore(SecretStoreError::Unreadable { .. }))
     ));
+}
+
+#[tokio::test]
+async fn activating_one_credential_leaves_other_cached_secrets_in_place() {
+    let store = MockOpenBaoSecretStore::default();
+    let first = put_bot_token(&store, "Bot first").await;
+    let second = store
+        .put(
+            CredentialScope::integration(
+                owner_id(),
+                SourceKind::Discord,
+                SourceIntegrationId::new("secondary").unwrap(),
+            ),
+            CredentialKind::BotToken,
+            SecretString::new("Bot second").unwrap(),
+        )
+        .await
+        .unwrap();
+    let registry = RuntimeCredentialRegistry::default();
+    let resolver = registry.resolver(store.clone());
+    let first_state = build_state([
+        write_requested(&first),
+        activated(&store.metadata(&first).await.unwrap()),
+    ]);
+    registry.apply_state(&first_state, position(2)).await.unwrap();
+    resolver
+        .resolve_plaintext(&key(), CredentialKind::BotToken)
+        .await
+        .unwrap();
+    assert!(registry.cache().get(&first).await.is_some());
+
+    let second_state = build_state([
+        write_requested(&second),
+        activated(&store.metadata(&second).await.unwrap()),
+    ]);
+    registry.apply_state(&second_state, position(2)).await.unwrap();
+
+    assert!(registry.cache().get(&first).await.is_some());
+}
+
+#[tokio::test]
+async fn applying_a_rotated_state_invalidates_the_replaced_credential() {
+    let store = MockOpenBaoSecretStore::default();
+    let previous = put_bot_token(&store, "Bot old-token").await;
+    let registry = RuntimeCredentialRegistry::default();
+    let resolver = registry.resolver(store.clone());
+    let active_state = build_state([
+        write_requested(&previous),
+        activated(&store.metadata(&previous).await.unwrap()),
+    ]);
+    registry.apply_state(&active_state, position(2)).await.unwrap();
+    resolver
+        .resolve_plaintext(&key(), CredentialKind::BotToken)
+        .await
+        .unwrap();
+    assert!(registry.cache().get(&previous).await.is_some());
+
+    let rotated = store
+        .rotate(&previous, SecretString::new("Bot new-token").unwrap())
+        .await
+        .unwrap();
+    let pending_state = evolve(
+        active_state,
+        &v1::CredentialEvent {
+            event: Some(rotation_requested_to_proto(&previous).into()),
+        },
+    )
+    .unwrap();
+    let rotated_state = evolve(
+        pending_state,
+        &v1::CredentialEvent {
+            event: Some(rotated_to_proto(&previous, &store.metadata(&rotated).await.unwrap()).into()),
+        },
+    )
+    .unwrap();
+    registry.apply_state(&rotated_state, position(3)).await.unwrap();
+
+    assert!(registry.cache().get(&previous).await.is_none());
 }
 
 #[tokio::test]
