@@ -4,7 +4,7 @@ use trogon_nats::{NatsToken, SubjectTokenViolationError};
 
 use crate::constants::MAX_INTEGRATION_ID_LEN;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct SourceIntegrationId(NatsToken);
 
 impl SourceIntegrationId {

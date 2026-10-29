@@ -674,6 +674,7 @@ pub struct ResolvedHttpServerConfig {
     pub port: u16,
 }
 
+#[derive(Clone)]
 pub struct SourceIntegration<T> {
     pub id: SourceIntegrationId,
     pub config: T,

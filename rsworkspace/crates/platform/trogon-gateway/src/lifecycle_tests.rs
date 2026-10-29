@@ -12,7 +12,7 @@ use crate::credential::commands::domain::{CredentialKind, CredentialOwnerId, Cre
 use crate::credential_runtime_projection::{
     RuntimeCredentialRegistry, RuntimeCredentialResolver, RuntimeIntegrationProjection,
 };
-use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
+use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut, SecretStoreRotate};
 use crate::source::google_pubsub::credentials::GoogleCredentialsError;
 use crate::source_integration_id::SourceIntegrationId;
 
@@ -120,6 +120,7 @@ async fn telegram_registration_uses_the_runtime_secret_and_fails_closed_without_
     register_telegram_webhooks(
         &telegram_integrations(),
         Some(&resolver),
+        &mut TelegramWebhookRegistrations::default(),
         || Ok::<_, io::Error>(()),
         async |config, _| {
             registered.lock().await.push(config.webhook_secret.as_str().to_owned());
@@ -134,6 +135,7 @@ async fn telegram_registration_uses_the_runtime_secret_and_fails_closed_without_
     register_telegram_webhooks(
         &telegram_integrations(),
         Some(&unprovisioned),
+        &mut TelegramWebhookRegistrations::default(),
         || Ok::<_, io::Error>(()),
         async |config, _| {
             registered.lock().await.push(config.webhook_secret.as_str().to_owned());
@@ -145,6 +147,71 @@ async fn telegram_registration_uses_the_runtime_secret_and_fails_closed_without_
 }
 
 #[tokio::test]
+async fn telegram_registration_follows_a_rotated_runtime_secret_and_skips_an_unchanged_one() {
+    let store = MockOpenBaoSecretStore::default();
+    let registry = RuntimeCredentialRegistry::default();
+    let credential = store
+        .put(
+            CredentialScope::integration(
+                CredentialOwnerId::new("tenant-1").unwrap(),
+                SourceKind::Telegram,
+                SourceIntegrationId::new("first").unwrap(),
+            ),
+            CredentialKind::WebhookSecret,
+            SecretString::new("runtime-first").unwrap(),
+        )
+        .await
+        .unwrap();
+    registry
+        .projections()
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential.clone(), 1).unwrap())
+        .await;
+    let resolver = registry.resolver(store.clone());
+    let mut registrations = TelegramWebhookRegistrations::default();
+    let registered = Mutex::new(Vec::new());
+    let register = async |config: &source::telegram::TelegramSourceConfig, _: &()| {
+        registered.lock().await.push(config.webhook_secret.as_str().to_owned());
+        Ok(())
+    };
+
+    register_telegram_webhooks(
+        &telegram_integrations(),
+        Some(&resolver),
+        &mut registrations,
+        || Ok::<_, io::Error>(()),
+        register,
+    )
+    .await;
+    register_telegram_webhooks(
+        &telegram_integrations(),
+        Some(&resolver),
+        &mut registrations,
+        || -> Result<(), io::Error> { panic!("an unchanged secret needs no client") },
+        register,
+    )
+    .await;
+    assert_eq!(*registered.lock().await, ["runtime-first"]);
+
+    let rotated = store
+        .rotate(&credential, SecretString::new("runtime-rotated").unwrap())
+        .await
+        .unwrap();
+    registry
+        .projections()
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(rotated, 2).unwrap())
+        .await;
+    register_telegram_webhooks(
+        &telegram_integrations(),
+        Some(&resolver),
+        &mut registrations,
+        || Ok::<_, io::Error>(()),
+        register,
+    )
+    .await;
+    assert_eq!(*registered.lock().await, ["runtime-first", "runtime-rotated"]);
+}
+
+#[tokio::test]
 async fn telegram_registration_reuses_client_and_continues_after_one_rejection() {
     let events = trogon_std::log_capture::CapturedEvents::new();
     let _guard = events.install(trogon_std::log_capture::LevelFilter::ERROR);
@@ -153,6 +220,7 @@ async fn telegram_registration_reuses_client_and_continues_after_one_rejection()
     register_telegram_webhooks(
         &telegram_integrations(),
         no_runtime_credentials(),
+        &mut TelegramWebhookRegistrations::default(),
         || {
             clients.fetch_add(1, Ordering::SeqCst);
             Ok::<_, io::Error>(7)
@@ -195,6 +263,7 @@ async fn failed_telegram_client_skips_registration_and_empty_sources_skip_client
     register_telegram_webhooks(
         &telegram_integrations(),
         no_runtime_credentials(),
+        &mut TelegramWebhookRegistrations::default(),
         || Err::<(), _>(io::Error::from(io::ErrorKind::PermissionDenied)),
         async |_, _| {
             attempts.fetch_add(1, Ordering::SeqCst);
@@ -206,6 +275,7 @@ async fn failed_telegram_client_skips_registration_and_empty_sources_skip_client
     register_telegram_webhooks(
         &[],
         no_runtime_credentials(),
+        &mut TelegramWebhookRegistrations::default(),
         || -> Result<(), io::Error> { panic!("client is unnecessary without registrations") },
         async |_, _| -> Result<(), source::telegram::registration::RegistrationError> {
             panic!("no registration configured")

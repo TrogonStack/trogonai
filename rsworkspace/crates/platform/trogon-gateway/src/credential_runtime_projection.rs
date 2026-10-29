@@ -1425,6 +1425,18 @@ impl<S> RuntimeCredentialResolver<S> {
     pub fn cache(&self) -> &RuntimeCredentialCache {
         &self.cache
     }
+
+    pub async fn active_credential_ref(
+        &self,
+        key: &RuntimeIntegrationKey,
+        kind: CredentialKind,
+    ) -> Option<CredentialRef> {
+        let projection = self.projections.get(key).await?;
+        if !projection.status().is_resolvable() {
+            return None;
+        }
+        projection.credential(kind).cloned()
+    }
 }
 
 impl<S> RuntimeCredentialResolver<S>
