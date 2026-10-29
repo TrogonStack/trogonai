@@ -22,3 +22,6 @@ impl fmt::Display for StorageBackend {
         f.write_str(self.as_str())
     }
 }
+
+#[cfg(test)]
+mod tests;

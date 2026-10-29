@@ -41,3 +41,8 @@ fn every_source_kind_is_in_all_and_round_trips_through_as_str_and_parse() {
     }
     assert_eq!(SourceKind::ALL.len(), sources.len());
 }
+
+#[test]
+fn display_matches_as_str() {
+    assert_eq!(SourceKind::GitHub.to_string(), SourceKind::GitHub.as_str());
+}

@@ -19,3 +19,20 @@ fn rejects_spaces() {
         Err(CredentialIdError::InvalidCharacter(' '))
     );
 }
+
+#[test]
+fn rejects_id_over_the_maximum_length() {
+    let too_long = "a".repeat(MAX_CREDENTIAL_ID_LEN + 1);
+
+    assert_eq!(
+        CredentialId::new(too_long),
+        Err(CredentialIdError::TooLong(MAX_CREDENTIAL_ID_LEN + 1))
+    );
+}
+
+#[test]
+fn debug_names_the_type_and_value() {
+    let id = CredentialId::new("static-config:discord:bot_token").unwrap();
+
+    assert_eq!(format!("{id:?}"), "CredentialId(\"static-config:discord:bot_token\")");
+}

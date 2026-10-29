@@ -39,3 +39,6 @@ impl CredentialMetadata {
         &self.fingerprint
     }
 }
+
+#[cfg(test)]
+mod tests;

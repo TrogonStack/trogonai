@@ -52,3 +52,11 @@ fn is_stable_across_storage_backends() {
 
     assert_eq!(openbao.public_id(), static_config.public_id());
 }
+
+#[test]
+fn display_and_into_string_yield_the_composed_id() {
+    let id = PublicCredentialId::new(&owner(), "discord", CredentialKind::BotToken);
+
+    assert_eq!(id.to_string(), "tenant-1:discord:bot_token");
+    assert_eq!(id.into_string(), "tenant-1:discord:bot_token");
+}

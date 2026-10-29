@@ -34,3 +34,14 @@ fn every_kind_round_trips_through_as_str_and_parse() {
         assert_eq!(CredentialKind::parse(kind.as_str()), Some(kind));
     }
 }
+
+#[test]
+fn parse_rejects_unknown_names() {
+    assert_eq!(CredentialKind::parse("password"), None);
+    assert_eq!(CredentialKind::parse(""), None);
+}
+
+#[test]
+fn display_matches_as_str() {
+    assert_eq!(CredentialKind::WebhookSecret.to_string(), "webhook_secret");
+}

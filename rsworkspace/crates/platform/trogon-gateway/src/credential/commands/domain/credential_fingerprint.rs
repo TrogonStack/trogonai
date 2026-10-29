@@ -37,3 +37,6 @@ pub enum CredentialFingerprintError {
     #[error("credential fingerprint exceeds maximum length: {0}")]
     TooLong(usize),
 }
+
+#[cfg(test)]
+mod tests;

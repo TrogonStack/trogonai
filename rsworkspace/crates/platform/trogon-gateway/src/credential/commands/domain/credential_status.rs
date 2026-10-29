@@ -36,3 +36,6 @@ impl fmt::Display for CredentialStatus {
         f.write_str(self.as_str())
     }
 }
+
+#[cfg(test)]
+mod tests;
