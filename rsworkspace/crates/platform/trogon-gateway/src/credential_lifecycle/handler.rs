@@ -1,5 +1,7 @@
 use std::error::Error;
 use std::fmt;
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::sync::Arc;
 use std::sync::OnceLock;
 
 use opentelemetry::KeyValue;
@@ -12,6 +14,7 @@ use trogon_semconv::{attribute, metric};
 use trogon_std::SecretString;
 use trogonai_proto::gateway::credentials::{CredentialEventPayloadError, CredentialStateSnapshotCase, state_v1, v1};
 
+use super::constants::CREDENTIAL_LOCK_STRIPES;
 use crate::constants::METER_NAME;
 use crate::credential::commands::domain::{
     CredentialDestroyReason, CredentialDestroyReasonError, CredentialId, CredentialKind, CredentialRef,
@@ -195,14 +198,41 @@ impl PutCredential {
 }
 
 #[derive(Clone)]
+struct CredentialWriteLocks {
+    stripes: Arc<[Arc<tokio::sync::Mutex<()>>]>,
+}
+
+impl CredentialWriteLocks {
+    fn new() -> Self {
+        Self {
+            stripes: (0..CREDENTIAL_LOCK_STRIPES)
+                .map(|_| Arc::new(tokio::sync::Mutex::new(())))
+                .collect(),
+        }
+    }
+
+    async fn acquire(&self, credential_id: &CredentialId) -> tokio::sync::OwnedMutexGuard<()> {
+        let mut hasher = DefaultHasher::new();
+        credential_id.as_str().hash(&mut hasher);
+        let stripe = (hasher.finish() % CREDENTIAL_LOCK_STRIPES as u64) as usize;
+        Arc::clone(&self.stripes[stripe]).lock_owned().await
+    }
+}
+
+#[derive(Clone)]
 pub(crate) struct CredentialHandler<EventStore, Secrets> {
     event_store: EventStore,
     secrets: Secrets,
+    write_locks: CredentialWriteLocks,
 }
 
 impl<EventStore, Secrets> CredentialHandler<EventStore, Secrets> {
     pub(crate) fn new(event_store: EventStore, secrets: Secrets) -> Self {
-        Self { event_store, secrets }
+        Self {
+            event_store,
+            secrets,
+            write_locks: CredentialWriteLocks::new(),
+        }
     }
 }
 
@@ -554,6 +584,7 @@ where
         &self,
         command: PutCredential,
     ) -> HandlerResult<EventStore, <Secrets as SecretStorePut>::Error> {
+        let _write_guard = self.write_locks.acquire(&command.credential_id).await;
         let request = RequestCredentialWrite::new(command.credential_id.clone(), command.scope.clone(), command.kind);
         self.ensure_write_requested(&request).await?;
 
@@ -657,6 +688,7 @@ where
         &self,
         command: RotateCredential,
     ) -> HandlerResult<EventStore, <Secrets as SecretStoreRotate>::Error> {
+        let _write_guard = self.write_locks.acquire(command.credential_ref.id()).await;
         let request = RequestCredentialRotation::new(command.credential_ref.clone());
         self.ensure_rotation_requested(&request).await?;
 

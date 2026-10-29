@@ -640,6 +640,131 @@ async fn put_retry_activates_credential_after_secret_store_failure() {
     );
 }
 
+#[derive(Clone)]
+struct GatedSecretStore {
+    inner: MockOpenBaoSecretStore,
+    writes: Arc<std::sync::atomic::AtomicUsize>,
+    release: Arc<tokio::sync::Notify>,
+}
+
+impl GatedSecretStore {
+    fn new() -> Self {
+        Self {
+            inner: MockOpenBaoSecretStore::default(),
+            writes: Arc::default(),
+            release: Arc::default(),
+        }
+    }
+
+    async fn gate_first_write(&self) {
+        if self.writes.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+            self.release.notified().await;
+        }
+    }
+
+    fn writes(&self) -> usize {
+        self.writes.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+impl SecretStorePut for GatedSecretStore {
+    type Error = SecretStoreError;
+
+    async fn put(
+        &self,
+        scope: CredentialScope,
+        kind: CredentialKind,
+        value: SecretString,
+    ) -> Result<CredentialRef, Self::Error> {
+        self.gate_first_write().await;
+        self.inner.put(scope, kind, value).await
+    }
+}
+
+impl SecretStoreRotate for GatedSecretStore {
+    type Error = SecretStoreError;
+
+    async fn rotate(&self, credential: &CredentialRef, value: SecretString) -> Result<CredentialRef, Self::Error> {
+        self.gate_first_write().await;
+        self.inner.rotate(credential, value).await
+    }
+}
+
+impl SecretStoreMetadata for GatedSecretStore {
+    type Error = SecretStoreError;
+
+    async fn metadata(&self, credential: &CredentialRef) -> Result<CredentialMetadata, Self::Error> {
+        self.inner.metadata(credential).await
+    }
+}
+
+#[tokio::test]
+async fn concurrent_put_with_another_secret_is_rejected_instead_of_overwriting_the_store() {
+    let events = HandlerTestStreamStore::default();
+    let secrets = GatedSecretStore::new();
+    let handler = CredentialHandler::new(events.clone(), secrets.clone());
+
+    let first = handler.put(put_command("first-secret"));
+    let second = handler.put(put_command("second-secret"));
+    let releaser = async {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        secrets.release.notify_one();
+    };
+    let (first, second, ()) = tokio::join!(first, second, releaser);
+
+    let state = first.unwrap().into_state();
+    assert!(matches!(second, Err(CredentialHandlerError::RequestWrite { .. })));
+    assert_eq!(secrets.writes(), 1);
+    let Some(CredentialStateSnapshotCase::Active(active)) = state.state.as_ref() else {
+        panic!("expected active credential");
+    };
+    let (metadata, _) = decode_active_state("active", active).unwrap();
+    assert_eq!(
+        secrets
+            .inner
+            .get(metadata.reference())
+            .await
+            .unwrap()
+            .as_plaintext()
+            .unwrap()
+            .as_str(),
+        "first-secret"
+    );
+}
+
+#[tokio::test]
+async fn concurrent_rotation_with_another_secret_is_rejected_instead_of_overwriting_the_store() {
+    let events = HandlerTestStreamStore::default();
+    let secrets = GatedSecretStore::new();
+    secrets.writes.store(1, std::sync::atomic::Ordering::SeqCst);
+    let handler = CredentialHandler::new(events.clone(), secrets.clone());
+    let state = handler.put(put_command("initial-secret")).await.unwrap().into_state();
+    let Some(CredentialStateSnapshotCase::Active(active)) = state.state.as_ref() else {
+        panic!("expected active credential");
+    };
+    let (active_metadata, _) = decode_active_state("active", active).unwrap();
+    let credential_ref = active_metadata.reference().clone();
+    secrets.writes.store(0, std::sync::atomic::Ordering::SeqCst);
+
+    let first = handler.rotate(RotateCredential::new(
+        credential_ref.clone(),
+        SecretString::new("first-rotation").unwrap(),
+    ));
+    let second = handler.rotate(RotateCredential::new(
+        credential_ref.clone(),
+        SecretString::new("second-rotation").unwrap(),
+    ));
+    let releaser = async {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        secrets.release.notify_one();
+    };
+    let (first, second, ()) = tokio::join!(first, second, releaser);
+
+    first.unwrap();
+    assert!(matches!(second, Err(CredentialHandlerError::RequestRotation { .. })));
+    assert_eq!(secrets.writes(), 1);
+}
+
 #[tokio::test]
 async fn recover_write_activation_records_missing_activation_without_plaintext() {
     let events = HandlerTestStreamStore::default();
