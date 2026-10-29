@@ -27,8 +27,6 @@ const SIGNING_SECRET: &str = "bolt-conformance-signing-secret";
 const SUBJECT_PREFIX: &str = "slack";
 const UNROUTABLE_SUBJECT: &str = "slack.unroutable";
 const DEDUP_HEADER: &str = "Nats-Msg-Id";
-const HEADER_ENVELOPE_ID: &str = "X-Slack-Envelope-Id";
-const HEADER_REQUEST_TIMESTAMP: &str = "X-Slack-Request-Timestamp";
 const PAYLOAD_PREVIEW_CHARS: usize = 96;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
@@ -53,7 +51,6 @@ enum GapId {
     G10,
     G11,
     G12,
-    G13,
     G14,
     G15,
     G16,
@@ -263,14 +260,9 @@ impl fmt::Display for Diff {
 
 impl GapId {
     fn explains(self, fixture: &Fixture, diff: &Diff) -> bool {
-        let missing = match &diff.field {
-            Field::MissingHeader(name) => Some(name.as_str()),
-            _ => None,
-        };
         match self {
             GapId::G2 => fixture.expects_ack_body() && matches!(diff.field, Field::ResponseBody | Field::SocketAck),
             GapId::G11 => fixture.transport == Transport::SocketMode && diff.field == Field::PayloadReserialized,
-            GapId::G13 => missing.is_some_and(|name| name == HEADER_ENVELOPE_ID || name == HEADER_REQUEST_TIMESTAMP),
             GapId::G23 => diff.field == Field::Unroutable && fixture.expected.outcome == Outcome::Reject,
             _ => false,
         }

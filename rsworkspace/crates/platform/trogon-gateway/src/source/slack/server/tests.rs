@@ -1608,3 +1608,37 @@ async fn http_event_with_line_break_in_subtype_returns_400() {
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     assert_unroutable(&publisher, "invalid_header_value");
 }
+
+#[tokio::test]
+async fn http_delivery_carries_the_request_timestamp_for_every_payload_kind() {
+    let _guard = tracing_guard();
+    let ts = current_timestamp();
+    let interaction =
+        serde_json::json!({ "type": "block_actions", "trigger_id": "trigger123", "team": { "id": "T01ABC" } });
+    let interaction_body = format!(
+        "payload={}",
+        form_urlencoded::byte_serialize(interaction.to_string().as_bytes()).collect::<String>()
+    );
+    let command_body = "command=%2Fdeploy&trigger_id=trigger123&team_id=T01ABC".to_owned();
+    let event_body = String::from_utf8(event_callback_body("message")).unwrap();
+
+    for (body, form) in [(event_body, false), (interaction_body, true), (command_body, true)] {
+        let publisher = MockJetStreamPublisher::new();
+        let sig = compute_sig(TEST_SECRET, &ts, body.as_bytes());
+        let request = if form {
+            form_request(body.as_bytes(), &ts, &sig)
+        } else {
+            webhook_request(body.as_bytes(), &ts, Some(&sig))
+        };
+
+        mock_app(publisher.clone()).oneshot(request).await.unwrap();
+
+        let messages = publisher.published_messages();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(
+            messages[0].headers.get("X-Slack-Request-Timestamp").map(|v| v.as_str()),
+            Some(ts.as_str())
+        );
+        assert!(messages[0].headers.get("X-Slack-Envelope-Id").is_none());
+    }
+}

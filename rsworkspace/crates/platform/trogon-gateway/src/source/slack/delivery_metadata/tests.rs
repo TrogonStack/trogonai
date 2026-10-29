@@ -75,7 +75,7 @@ fn leading_integer_follows_parse_int() {
 
 #[test]
 fn socket_carries_retry_attempt_and_reason() {
-    let headers = applied(&DeliveryContext::socket(Some(1), Some("timeout")).unwrap());
+    let headers = applied(&DeliveryContext::socket("env-1", Some(1), Some("timeout")).unwrap());
 
     assert_eq!(headers.get(NATS_HEADER_RETRY_NUM).map(|v| v.as_str()), Some("1"));
     assert_eq!(
@@ -86,30 +86,32 @@ fn socket_carries_retry_attempt_and_reason() {
 
 #[test]
 fn socket_treats_a_zero_attempt_and_empty_reason_as_a_first_delivery() {
-    let context = DeliveryContext::socket(Some(0), Some("")).unwrap();
+    let context = DeliveryContext::socket("env-1", Some(0), Some("")).unwrap();
     let headers = applied(&context);
 
-    assert_eq!(context, DeliveryContext::default());
     assert!(headers.get(NATS_HEADER_RETRY_NUM).is_none());
     assert!(headers.get(NATS_HEADER_RETRY_REASON).is_none());
 }
 
 #[test]
 fn socket_without_retry_fields_carries_nothing() {
-    assert_eq!(DeliveryContext::socket(None, None).unwrap(), DeliveryContext::default());
+    let headers = applied(&DeliveryContext::socket("env-1", None, None).unwrap());
+
+    assert!(headers.get(NATS_HEADER_RETRY_NUM).is_none());
+    assert!(headers.get(NATS_HEADER_RETRY_REASON).is_none());
 }
 
 #[test]
 fn socket_rejects_an_unsafe_retry_reason() {
     assert_eq!(
-        DeliveryContext::socket(None, Some("a\r\nb")).unwrap_err(),
+        DeliveryContext::socket("env-1", None, Some("a\r\nb")).unwrap_err(),
         InvalidHeaderTextError
     );
 }
 
 #[test]
 fn delivery_metadata_applies_context_and_payload_together() {
-    let context = DeliveryContext::socket(Some(1), None).unwrap();
+    let context = DeliveryContext::socket("env-1", Some(1), None).unwrap();
     let payload = serde_json::json!({ "api_app_id": "A1234" });
 
     let headers = DeliveryMetadata::new(&context, PayloadMetadata::event(&payload))
@@ -123,5 +125,32 @@ fn delivery_metadata_applies_context_and_payload_together() {
             .get(super::super::constants::NATS_HEADER_API_APP_ID)
             .map(|v| v.as_str()),
         Some("A1234")
+    );
+}
+
+#[test]
+fn http_carries_the_request_timestamp() {
+    let headers = applied(&http_context(&[(HEADER_TIMESTAMP, "1700000000")]));
+
+    assert_eq!(
+        headers.get(NATS_HEADER_REQUEST_TIMESTAMP).map(|v| v.as_str()),
+        Some("1700000000")
+    );
+    assert!(headers.get(NATS_HEADER_ENVELOPE_ID).is_none());
+}
+
+#[test]
+fn socket_carries_the_envelope_id_and_no_request_timestamp() {
+    let headers = applied(&DeliveryContext::socket("env-1", None, None).unwrap());
+
+    assert_eq!(headers.get(NATS_HEADER_ENVELOPE_ID).map(|v| v.as_str()), Some("env-1"));
+    assert!(headers.get(NATS_HEADER_REQUEST_TIMESTAMP).is_none());
+}
+
+#[test]
+fn socket_rejects_an_unsafe_envelope_id() {
+    assert_eq!(
+        DeliveryContext::socket("env\r\n1", None, None).unwrap_err(),
+        InvalidHeaderTextError
     );
 }

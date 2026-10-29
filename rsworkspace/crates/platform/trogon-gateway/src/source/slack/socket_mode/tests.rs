@@ -1278,3 +1278,41 @@ async fn socket_event_carries_subtype_and_channel_type() {
     assert_eq!(header("X-Slack-Event-Subtype"), Some("bot_message"));
     assert_eq!(header("X-Slack-Channel-Type"), Some("im"));
 }
+
+#[tokio::test]
+async fn socket_delivery_carries_the_envelope_id_and_no_request_timestamp() {
+    let publisher = MockJetStreamPublisher::new();
+    let payload = r#"{"type":"event_callback","event_id":"Ev01ABC123","team_id":"T01ABC","event":{"type":"message"}}"#;
+
+    handle_text_frame(&bridge(publisher.clone()), &envelope_text("events_api", payload))
+        .await
+        .unwrap();
+
+    let messages = publisher.published_messages();
+    let header = |name: &str| messages[0].headers.get(name).map(|v| v.as_str());
+    assert_eq!(header("X-Slack-Envelope-Id"), Some("env-raw"));
+    assert_eq!(header("X-Slack-Request-Timestamp"), None);
+}
+
+#[tokio::test]
+async fn socket_envelope_id_with_line_break_is_unroutable_without_ack() {
+    let publisher = MockJetStreamPublisher::new();
+    let frame = serde_json::json!({
+        "type": "events_api",
+        "envelope_id": "env\r\n1",
+        "payload": {
+            "type": "event_callback",
+            "event_id": "Ev01ABC123",
+            "team_id": "T01ABC",
+            "event": { "type": "message" }
+        }
+    })
+    .to_string();
+
+    let (_, ack) = handle_text_frame(&bridge(publisher.clone()), &frame).await.unwrap();
+
+    assert_eq!(ack, None);
+    let messages = publisher.published_messages();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].subject, "slack.unroutable");
+}
