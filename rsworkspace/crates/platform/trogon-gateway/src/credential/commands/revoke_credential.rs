@@ -14,6 +14,20 @@ impl RevokeCredential {
     pub fn new(credential_ref: CredentialRef) -> Self {
         Self { credential_ref }
     }
+
+    pub(crate) fn ensure_revocable(
+        &self,
+        state: &state_v1::CredentialStateSnapshot,
+    ) -> Result<(), CredentialDecideError> {
+        let current = state.state.as_ref().ok_or(CredentialDecideError::MissingState)?;
+        let CredentialStateSnapshotCase::Active(active) = current else {
+            return Err(CredentialDecideError::CredentialNotActive {
+                credential_id: self.credential_ref.id().clone(),
+            });
+        };
+        let current_ref = active_credential_ref(active)?;
+        validate_same_ref(&current_ref, &self.credential_ref)
+    }
 }
 
 impl Decider for RevokeCredential {
@@ -38,14 +52,7 @@ impl Decider for RevokeCredential {
     }
 
     fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
-        let current = state.state.as_ref().ok_or(CredentialDecideError::MissingState)?;
-        let CredentialStateSnapshotCase::Active(active) = current else {
-            return Err(CredentialDecideError::CredentialNotActive {
-                credential_id: command.credential_ref.id().clone(),
-            });
-        };
-        let current_ref = active_credential_ref(active)?;
-        validate_same_ref(&current_ref, &command.credential_ref)?;
+        command.ensure_revocable(state)?;
         Ok(Decision::event(v1::CredentialEvent {
             event: Some(revoked_to_proto(&command.credential_ref).into()),
         }))

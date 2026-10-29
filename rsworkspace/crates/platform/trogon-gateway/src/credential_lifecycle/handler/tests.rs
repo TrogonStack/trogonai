@@ -228,6 +228,26 @@ impl SecretStoreDestroy for FailingDestroySecretStore {
     }
 }
 
+#[derive(Clone, Default)]
+struct RecordingRevokeSecretStore {
+    revoked: Arc<Mutex<Vec<CredentialRef>>>,
+}
+
+impl RecordingRevokeSecretStore {
+    fn revoked(&self) -> Vec<CredentialRef> {
+        self.revoked.lock().unwrap().clone()
+    }
+}
+
+impl SecretStoreRevoke for RecordingRevokeSecretStore {
+    type Error = SecretStoreError;
+
+    async fn revoke(&self, credential: &CredentialRef) -> Result<(), Self::Error> {
+        self.revoked.lock().unwrap().push(credential.clone());
+        Ok(())
+    }
+}
+
 fn current_position(events: &[StreamEvent], stream_id: &str) -> Option<StreamPosition> {
     events
         .iter()
@@ -905,6 +925,54 @@ async fn revoke_retry_records_state_after_append_failure() {
             StreamWritePrecondition::At(position(1)),
             StreamWritePrecondition::At(position(2)),
             StreamWritePrecondition::At(position(2))
+        ]
+    );
+}
+
+#[tokio::test]
+async fn revoke_rejects_a_pending_rotation_without_touching_the_secret_store() {
+    let events = HandlerTestStreamStore::default();
+    let handler = CredentialHandler::new(events.clone(), MockOpenBaoSecretStore::default());
+    let state = handler.put(put_command("initial-secret")).await.unwrap().into_state();
+    let Some(CredentialStateSnapshotCase::Active(active)) = state.state.as_ref() else {
+        panic!("expected active credential");
+    };
+    let (active_metadata, _) = decode_active_state("active", active).unwrap();
+    let credential_ref = active_metadata.reference().clone();
+    events.fail_append_at(4);
+    handler
+        .rotate(RotateCredential::new(
+            credential_ref.clone(),
+            SecretString::new("rotated-secret").unwrap(),
+        ))
+        .await
+        .unwrap_err();
+    let secrets = RecordingRevokeSecretStore::default();
+    let revoking_handler = CredentialHandler::new(events.clone(), secrets.clone());
+
+    let error = revoking_handler
+        .revoke(RevokeStoredCredential::new(credential_ref.clone()))
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        CredentialHandlerError::Revoke {
+            source: CommandError::Decide(CredentialDecideError::CredentialNotActive { credential_id }),
+        } if credential_id == *credential_ref.id()
+    ));
+    assert!(secrets.revoked().is_empty());
+    assert!(matches!(
+        events.decoded_events().last().and_then(|event| event.event.as_ref()),
+        Some(CredentialEventCase::RotationRequested(_))
+    ));
+    assert_eq!(
+        events.write_preconditions(),
+        [
+            StreamWritePrecondition::NoStream,
+            StreamWritePrecondition::At(position(1)),
+            StreamWritePrecondition::At(position(2)),
+            StreamWritePrecondition::At(position(3))
         ]
     );
 }

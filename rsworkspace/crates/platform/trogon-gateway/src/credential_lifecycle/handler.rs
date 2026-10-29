@@ -765,14 +765,23 @@ where
         &self,
         command: RevokeStoredCredential,
     ) -> HandlerResult<EventStore, <Secrets as SecretStoreRevoke>::Error> {
+        let revoke = RevokeCredential::new(command.credential_ref.clone());
+        let (state, stream_position) = load_state(&self.event_store, command.credential_ref.id().as_str()).await?;
+        revoke
+            .ensure_revocable(&state)
+            .map_err(|source| CredentialHandlerError::Revoke {
+                source: CommandError::Decide(source),
+            })?;
+
         self.secrets.revoke(&command.credential_ref).await.map_err(|source| {
             record_write_failure(CredentialWriteOperation::Revoke, command.credential_ref.source());
             CredentialHandlerError::SecretRevoke { source }
         })?;
 
-        let result = CommandExecution::new(&self.event_store, &RevokeCredential::new(command.credential_ref))
+        let result = CommandExecution::new(&self.event_store, &revoke)
             .with_snapshot(&self.event_store)
             .with_task_runtime(TokioSnapshotTaskScheduler)
+            .with_expected_revision(stream_position)
             .execute()
             .await
             .map_err(|source| CredentialHandlerError::Revoke { source })?;
