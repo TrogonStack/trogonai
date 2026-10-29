@@ -52,7 +52,7 @@ impl Decider for RequestCredentialWrite {
     type DecideError = CredentialDecideError;
     type EvolveError = CredentialEvolveError;
 
-    const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::NoStream;
+    const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 
     fn stream_id(&self) -> &Self::StreamId {
         self.credential_id.as_str()
@@ -70,19 +70,25 @@ impl Decider for RequestCredentialWrite {
         let current = state.state.as_ref().ok_or(CredentialDecideError::MissingState)?;
 
         match current {
-            CredentialStateSnapshotCase::Missing(_) => Ok(Decision::event(v1::CredentialEvent {
-                event: Some(
-                    write_requested_to_proto(&command.credential_id, &command.owner_id, command.source, command.kind)
-                        .into(),
-                ),
-            })),
-            CredentialStateSnapshotCase::Revoked(_) => Err(CredentialDecideError::Revoked {
-                credential_id: command.credential_id.clone(),
-            }),
-            _ => Err(CredentialDecideError::AlreadyExists {
-                credential_id: command.credential_id.clone(),
-            }),
+            CredentialStateSnapshotCase::Missing(_) | CredentialStateSnapshotCase::WriteFailed(_) => {}
+            CredentialStateSnapshotCase::Revoked(_) => {
+                return Err(CredentialDecideError::Revoked {
+                    credential_id: command.credential_id.clone(),
+                });
+            }
+            _ => {
+                return Err(CredentialDecideError::AlreadyExists {
+                    credential_id: command.credential_id.clone(),
+                });
+            }
         }
+
+        Ok(Decision::event(v1::CredentialEvent {
+            event: Some(
+                write_requested_to_proto(&command.credential_id, &command.owner_id, command.source, command.kind)
+                    .into(),
+            ),
+        }))
     }
 }
 

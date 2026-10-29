@@ -1639,8 +1639,59 @@ mod tests {
             [
                 StreamWritePrecondition::NoStream,
                 StreamWritePrecondition::At(position(1)),
-                StreamWritePrecondition::NoStream,
                 StreamWritePrecondition::At(position(1))
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn put_retry_activates_credential_after_secret_store_failure() {
+        let events = HandlerTestStreamStore::default();
+
+        let error = CredentialHandler::new(events.clone(), FailingSecretStore)
+            .put(put_command("first-secret"))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, CredentialHandlerError::SecretWrite { .. }));
+        let decoded = events.decoded_events();
+        assert_eq!(decoded.len(), 2);
+        assert!(matches!(decoded[1].event, Some(CredentialEventCase::WriteFailed(_))));
+
+        let secrets = MockOpenBaoSecretStore::default();
+        let outcome = CredentialHandler::new(events.clone(), secrets.clone())
+            .put(put_command("retry-secret"))
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.stream_position(), position(4));
+        let state = outcome.into_state();
+        let Some(CredentialStateSnapshotCase::Active(active)) = state.state.as_ref() else {
+            panic!("expected active credential");
+        };
+        let (metadata, _previous_versions) = decode_active_state("active", active).unwrap();
+        assert_eq!(metadata.reference().id(), &credential_id());
+        assert_eq!(
+            secrets
+                .get(metadata.reference())
+                .await
+                .unwrap()
+                .as_plaintext()
+                .unwrap()
+                .as_str(),
+            "retry-secret"
+        );
+        let decoded = events.decoded_events();
+        assert_eq!(decoded.len(), 4);
+        assert!(matches!(decoded[2].event, Some(CredentialEventCase::WriteRequested(_))));
+        assert!(matches!(decoded[3].event, Some(CredentialEventCase::Activated(_))));
+        assert_eq!(
+            events.write_preconditions(),
+            [
+                StreamWritePrecondition::NoStream,
+                StreamWritePrecondition::At(position(1)),
+                StreamWritePrecondition::At(position(2)),
+                StreamWritePrecondition::At(position(3))
             ]
         );
     }

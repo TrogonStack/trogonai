@@ -5,9 +5,9 @@ use super::super::proto::{
     decode_active_state, decode_cleanup_failed_state, decode_credential_metadata, decode_destroy_failed,
     decode_destroy_requested, decode_destroy_requested_state, decode_destroyed, decode_message_field,
     decode_pending_write_state, decode_revoked, decode_revoked_state, decode_rotated, decode_rotation_failed,
-    decode_rotation_requested, decode_write_failed, decode_write_requested, destroy_requested_to_proto_state,
-    destroyed_to_proto_state, pending_write_to_proto_state, revoked_to_proto_state, rotation_pending_to_proto_state,
-    write_failed_to_proto_state,
+    decode_rotation_requested, decode_write_failed, decode_write_failed_state, decode_write_requested,
+    destroy_requested_to_proto_state, destroyed_to_proto_state, pending_write_to_proto_state, revoked_to_proto_state,
+    rotation_pending_to_proto_state, write_failed_to_proto_state,
 };
 use super::domain::{
     CredentialId, CredentialKind, CredentialMetadata, CredentialOwnerId, CredentialRef, CredentialStatus, SourceKind,
@@ -108,6 +108,17 @@ pub fn evolve(
         CredentialEventCase::WriteRequested(inner) => match current {
             CredentialStateSnapshotCase::Missing(_) => {
                 let (credential_id, owner_id, source, kind) = decode_write_requested(inner)?;
+                pending_write_to_proto_state(&credential_id, &owner_id, source, kind).into()
+            }
+            CredentialStateSnapshotCase::WriteFailed(failed) => {
+                let (failed_id, _) = decode_write_failed_state(failed)?;
+                let (credential_id, owner_id, source, kind) = decode_write_requested(inner)?;
+                if failed_id != credential_id {
+                    return Err(CredentialEvolveError::CredentialRefMismatch {
+                        expected: failed_id,
+                        actual: credential_id,
+                    });
+                }
                 pending_write_to_proto_state(&credential_id, &owner_id, source, kind).into()
             }
             _ => return Err(CredentialEvolveError::WriteRequestedAfterStart),

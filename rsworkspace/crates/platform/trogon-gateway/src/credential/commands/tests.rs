@@ -13,9 +13,9 @@ use trogonai_proto::gateway::credentials::{CredentialEventCase, CredentialStateS
 
 use super::super::proto::{
     CredentialProtoDecodeError, activated_to_proto, decode_active_state, decode_credential_metadata,
-    decode_message_field, destroy_failed_to_proto, destroy_requested_to_proto, destroyed_to_proto, revoked_to_proto,
-    rotated_to_proto, rotation_failed_to_proto, rotation_requested_to_proto, write_failed_to_proto,
-    write_requested_to_proto,
+    decode_message_field, decode_pending_write_state, destroy_failed_to_proto, destroy_requested_to_proto,
+    destroyed_to_proto, revoked_to_proto, rotated_to_proto, rotation_failed_to_proto, rotation_requested_to_proto,
+    write_failed_to_proto, write_requested_to_proto,
 };
 use super::domain::{
     CredentialFailureReason, CredentialFingerprint, CredentialId, CredentialKind, CredentialMetadata,
@@ -375,6 +375,40 @@ fn given_when_then_rejects_duplicate_credential_write() {
 }
 
 #[test]
+fn given_when_then_rejects_credential_write_for_active_credential() {
+    TestCase::<RequestCredentialWrite>::new()
+        .given([write_requested()])
+        .given([activated(1)])
+        .when(request_write())
+        .then_error(CredentialDecideError::AlreadyExists {
+            credential_id: credential_id(),
+        });
+}
+
+#[test]
+fn given_when_then_rejects_credential_write_for_revoked_credential() {
+    TestCase::<RequestCredentialWrite>::new()
+        .given([write_requested()])
+        .given([activated(1)])
+        .given([revoked(1)])
+        .when(request_write())
+        .then_error(CredentialDecideError::Revoked {
+            credential_id: credential_id(),
+        });
+}
+
+#[test]
+fn given_when_then_allows_write_retry_after_write_failure() {
+    let reason = CredentialFailureReason::new("openbao write failed").unwrap();
+
+    TestCase::<RequestCredentialWrite>::new()
+        .given([write_requested()])
+        .given([write_failed(reason)])
+        .when(request_write())
+        .then([write_requested()]);
+}
+
+#[test]
 fn given_when_then_activates_pending_credential_write() {
     TestCase::<ActivateCredentialWrite>::new()
         .given([write_requested()])
@@ -603,6 +637,52 @@ fn rebuild_state_from_events_active_rotated_state() {
 }
 
 #[test]
+fn rebuild_state_from_events_returns_failed_write_to_pending_write_on_retry() {
+    let reason = CredentialFailureReason::new("openbao write failed").unwrap();
+
+    let state = rebuild_state_from_events([write_requested(), write_failed(reason), write_requested()]);
+
+    let Some(CredentialStateSnapshotCase::PendingWrite(pending)) = state.state.as_ref() else {
+        panic!("expected pending write");
+    };
+    assert_eq!(
+        decode_pending_write_state(pending).unwrap(),
+        (
+            credential_id(),
+            owner_id(),
+            SourceKind::GitHub,
+            CredentialKind::WebhookSecret
+        )
+    );
+}
+
+#[test]
+fn evolve_rejects_write_retry_for_a_different_credential() {
+    let reason = CredentialFailureReason::new("openbao write failed").unwrap();
+    let failed = rebuild_state_from_events([write_requested(), write_failed(reason)]);
+    let other_id = CredentialId::new("openbao:tenant-1:github/secondary:webhook_secret").unwrap();
+    let retry = proto::CredentialEvent {
+        event: Some(
+            write_requested_to_proto(
+                &other_id,
+                &owner_id(),
+                SourceKind::GitHub,
+                CredentialKind::WebhookSecret,
+            )
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        evolve(failed, &retry).unwrap_err(),
+        CredentialEvolveError::CredentialRefMismatch {
+            expected: credential_id(),
+            actual: other_id,
+        }
+    );
+}
+
+#[test]
 fn event_codec_round_trips_all_events() {
     for event in [
         write_requested(),
@@ -755,7 +835,7 @@ async fn command_execution_persists_and_replays_events() {
 }
 
 #[tokio::test]
-async fn command_execution_rejects_duplicate_write_with_no_stream_precondition() {
+async fn command_execution_rejects_duplicate_write_without_appending() {
     let store = CredentialTestStore::default();
 
     CommandExecution::new(&store, &request_write()).execute().await.unwrap();
@@ -764,10 +844,60 @@ async fn command_execution_rejects_duplicate_write_with_no_stream_precondition()
         .await
         .unwrap_err();
 
-    assert!(matches!(error, CommandError::Append(CredentialTestStoreError)));
+    assert!(matches!(
+        error,
+        CommandError::Decide(CredentialDecideError::AlreadyExists { .. })
+    ));
+    assert_eq!(store.write_preconditions(), [StreamWritePrecondition::NoStream]);
+    assert_eq!(store.events().len(), 1);
+}
+
+struct ConcurrentReadStore {
+    inner: CredentialTestStore,
+    reads: tokio::sync::Barrier,
+}
+
+impl StreamRead<str> for ConcurrentReadStore {
+    type Error = CredentialTestStoreError;
+
+    async fn read_stream(&self, request: ReadStreamRequest<'_, str>) -> Result<ReadStreamResponse, Self::Error> {
+        let response = self.inner.read_stream(request).await?;
+        self.reads.wait().await;
+        Ok(response)
+    }
+}
+
+impl StreamAppend<str> for ConcurrentReadStore {
+    type Error = CredentialTestStoreError;
+
+    async fn append_stream(&self, request: AppendStreamRequest<'_, str>) -> Result<AppendStreamResponse, Self::Error> {
+        self.inner.append_stream(request).await
+    }
+}
+
+#[tokio::test]
+async fn command_execution_lets_only_one_concurrent_first_write_succeed() {
+    let store = ConcurrentReadStore {
+        inner: CredentialTestStore::default(),
+        reads: tokio::sync::Barrier::new(2),
+    };
+    let request = request_write();
+
+    let (first, second) = tokio::join!(
+        CommandExecution::new(&store, &request).execute(),
+        CommandExecution::new(&store, &request).execute()
+    );
+
+    let outcomes = [first, second];
+    assert_eq!(outcomes.iter().filter(|outcome| outcome.is_ok()).count(), 1);
+    assert!(
+        outcomes
+            .iter()
+            .any(|outcome| matches!(outcome, Err(CommandError::Append(CredentialTestStoreError))))
+    );
     assert_eq!(
-        store.write_preconditions(),
+        store.inner.write_preconditions(),
         [StreamWritePrecondition::NoStream, StreamWritePrecondition::NoStream]
     );
-    assert_eq!(store.events().len(), 1);
+    assert_eq!(store.inner.events().len(), 1);
 }
