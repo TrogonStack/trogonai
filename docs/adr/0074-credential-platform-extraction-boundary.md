@@ -149,8 +149,14 @@ change is an event-store migration, and it is sequenced as the first
 extraction task rather than deferred past the wire contract. Stored OpenBao
 paths are not rewritten: the path a credential was written under stays
 recorded in its aggregate as adapter-private state, so the path convention
-[ADR#0046](./0046-project-anchored-resource-hierarchy.md) ratified holds, and so does its rule that an id carries the project
-and nothing above it, because an opaque id carries no hierarchy at all.
+[ADR#0046](./0046-project-anchored-resource-hierarchy.md) ratified holds. Its rule that event stream routing
+contains the project id also holds: the aggregate's stream subject stays
+scoped by the project id it declares as its
+[ADR#0027](./0027-decider-multi-tenancy-primitive.md) `SubjectScope`, with the
+opaque id below it, so no aggregate becomes addressable outside its project.
+Only the clause of [ADR#0046](./0046-project-anchored-resource-hierarchy.md) Decision 2 that names generated
+credential ids reads as amended: the opaque id carries no hierarchy, and the
+project id travels beside it in the stream subject and the aggregate's state.
 
 The migration contract is that this is the only re-key. It runs once, as that
 first extraction task, while `CredentialRef` is still an in-process type. From
@@ -182,5 +188,6 @@ backend name.
   platform keeps shipping against a target instead of drifting away from
   one.
 - [ADR#0023](./0023-secret-management-and-key-custody-direction.md) Decision 6 and the [credential platform spec](../research/credential-platform/credential-platform-spec.md)'s Architecture
-  Boundaries section read as amended by Q2 and Q3. This ADR is the current
+  Boundaries section read as amended by Q2 and Q3, and
+  [ADR#0046](./0046-project-anchored-resource-hierarchy.md) Decision 2 reads as amended by Q4 for generated credential ids. This ADR is the current
   text on cache placement and lifecycle-state placement.

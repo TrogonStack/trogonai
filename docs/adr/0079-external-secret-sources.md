@@ -60,6 +60,16 @@ reference exactly as they hold a reference to platform-stored material.
 Nothing downstream can tell the two apart, and no provider locator or source
 credential enters a provider stream.
 
+A customer-operated OpenBao source is the only provider variant whose locator
+names a customer endpoint. The secrets service connects to it under the same
+requirements [ADR#0030](./0030-customer-controlled-key-backend-routing.md) sets for a customer-operated OpenBao key
+backend: authenticated HTTPS, hostname verification, explicit trust roots,
+disabled redirects, DNS-rebinding-safe resolution, and an egress policy that
+rejects loopback, link-local, metadata, and undeclared internal destinations.
+Registration rejects an endpoint that fails those checks before any metadata
+read. AWS and Google Cloud endpoints are derived from the provider resource,
+and a registration cannot override them.
+
 ### 2. Resolution reads the source's current version
 
 Resolving a source-backed reference reads the provider's current version at
@@ -101,10 +111,12 @@ the platform: it depends on the provider's consistency model, as with Google
 Secret Manager's `latest` reads. A long-lived connection, such as the Discord
 gateway WebSocket, keeps the credential it connected with until that
 connection ends. A revoke or rotate at the credential's issuer (Discord, for a
-bot token) ends that session, and the next connect resolves fresh, so the
-residual exposure window for a held connection ends at reconnect. Revoking the
-reference on the platform invalidates cached copies immediately through the
-existing revocation event.
+bot token) is not guaranteed to end a session that already authenticated, so
+a source-side change has no close path for a held connection in the first
+version. Revoking the reference on the platform invalidates cached copies
+immediately through the existing revocation event, and the gateway closes the
+held connection on that event and reconnects with a freshly resolved value, as
+[ADR#0074](./0074-credential-platform-extraction-boundary.md) Q2 requires.
 
 This narrows [ADR#0049](./0049-revocation-latency-target.md) for source-backed
 references. Its event path stays the operative mechanism for every change the
