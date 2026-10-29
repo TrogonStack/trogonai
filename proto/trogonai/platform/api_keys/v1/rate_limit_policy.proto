@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.platform.api_keys.v1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/duration.proto";
 
 // RateLimitSubjectKind names what a limit counts against.
@@ -32,7 +33,15 @@ enum RateLimitSubjectKind {
 // rate on the admission path, or a configured limit high enough that the
 // counter becomes the bottleneck before the limit does.
 message RateLimitPolicy {
-  RateLimitSubjectKind subject_kind = 1;
-  uint32 max_requests = 2;
-  google.protobuf.Duration window = 3 [features.field_presence = LEGACY_REQUIRED];
+  RateLimitSubjectKind subject_kind = 1 [(buf.validate.field).enum = {
+    in: [
+      1,
+      2
+    ]
+  }];
+  uint32 max_requests = 2 [(buf.validate.field).uint32.gt = 0];
+  google.protobuf.Duration window = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).duration.gt = {seconds: 0}
+  ];
 }

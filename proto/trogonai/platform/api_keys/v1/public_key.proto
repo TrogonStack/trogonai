@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.platform.api_keys.v1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 import "trogonai/platform/api_keyspaces/v1/signing_algorithm.proto";
 
@@ -23,6 +24,9 @@ message PublicKey {
   // RFC 8037) is derived from these bytes for display and for JWKS
   // publication, never stored alongside them, so the two cannot disagree.
   bytes spki_der = 2 [features.field_presence = LEGACY_REQUIRED];
-  trogonai.platform.api_keyspaces.v1.SigningAlgorithm algorithm = 3;
+  trogonai.platform.api_keyspaces.v1.SigningAlgorithm algorithm = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
   google.protobuf.Timestamp added_at = 4 [features.field_presence = LEGACY_REQUIRED];
 }
