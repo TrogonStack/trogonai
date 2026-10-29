@@ -3244,3 +3244,122 @@ secret_token = "zoom-token"
     let cfg = load(Some(f.path())).expect("load failed");
     assert!(cfg.zoom.is_empty());
 }
+
+struct NonUnicodeEnv;
+
+impl ReadEnv for NonUnicodeEnv {
+    fn var(&self, _key: &str) -> Result<String, std::env::VarError> {
+        Err(std::env::VarError::NotUnicode(std::ffi::OsString::from("raw")))
+    }
+}
+
+#[test]
+fn byte_count_input_rejects_a_blank_environment_variable_name() {
+    let env = trogon_std::env::InMemoryEnv::new();
+    let input = ByteCountInput::Env { env: "  ".to_string() };
+    assert!(matches!(input.resolve(&env), Err(ByteCountInputError::EmptyEnvName)));
+}
+
+#[test]
+fn byte_count_input_rejects_a_non_unicode_environment_variable() {
+    let input = ByteCountInput::Env {
+        env: "SLACK_BODY".to_string(),
+    };
+    match input.resolve(&NonUnicodeEnv) {
+        Err(ByteCountInputError::InvalidUnicodeEnv { name }) => assert_eq!(name, "SLACK_BODY"),
+        other => panic!("expected InvalidUnicodeEnv, got {other:?}"),
+    }
+}
+
+const WEBHOOK_INTEGRATION_SOURCES: [(&str, &str); 12] = [
+    ("github", "webhook_secret"),
+    ("slack", "signing_secret"),
+    ("telegram", "webhook_secret"),
+    ("twitter", "consumer_secret"),
+    ("gitlab", "signing_token"),
+    ("linear", "webhook_secret"),
+    ("microsoft_graph", "client_state"),
+    ("incidentio", "signing_secret"),
+    ("zoom", "secret_token"),
+    ("notion", "verification_token"),
+    ("sentry", "client_secret"),
+    ("datadog", "webhook_token"),
+];
+
+fn validation_messages(toml: &str) -> Vec<String> {
+    let f = write_toml(toml);
+    match load(Some(f.path())) {
+        Err(ConfigError::Validation(errs)) => errs.iter().map(ToString::to_string).collect(),
+        _ => panic!("expected validation errors"),
+    }
+}
+
+#[test]
+fn every_webhook_source_rejects_an_invalid_integration_id() {
+    for (source, field) in WEBHOOK_INTEGRATION_SOURCES {
+        let toml = format!("[sources.{source}.integrations.\"bad/id\".webhook]\n{field} = \"value\"\n");
+        let errs = validation_messages(&toml);
+        let expected = format!("{source}/bad/id: invalid integration id");
+        assert!(errs.iter().any(|e| e.contains(&expected)), "{source}: {errs:?}");
+    }
+}
+
+#[test]
+fn every_webhook_source_skips_a_disabled_integration() {
+    for (source, field) in WEBHOOK_INTEGRATION_SOURCES {
+        let toml = format!(
+            "[sources.{source}.integrations.primary]\nstatus = \"disabled\"\n\n[sources.{source}.integrations.primary.webhook]\n{field} = \"value\"\n"
+        );
+        let f = write_toml(&toml);
+        let cfg = load(Some(f.path())).unwrap_or_else(|e| panic!("{source}: {e:?}"));
+        assert!(!cfg.has_any_source(), "{source} should be skipped");
+    }
+}
+
+#[test]
+fn every_webhook_source_rejects_an_invalid_integration_status() {
+    for (source, field) in WEBHOOK_INTEGRATION_SOURCES {
+        let toml = format!(
+            "[sources.{source}.integrations.primary]\nstatus = \"maybe\"\n\n[sources.{source}.integrations.primary.webhook]\n{field} = \"value\"\n"
+        );
+        let errs = validation_messages(&toml);
+        let expected = format!("{source}/primary: invalid status");
+        assert!(errs.iter().any(|e| e.contains(&expected)), "{source}: {errs:?}");
+    }
+}
+
+#[test]
+fn every_webhook_secret_that_decodes_to_nothing_is_rejected() {
+    for (source, field) in WEBHOOK_INTEGRATION_SOURCES {
+        let toml = format!("[sources.{source}.integrations.primary.webhook]\n{field} = \"base64:\"\n");
+        let errs = validation_messages(&toml);
+        let expected = format!("{source}/primary: invalid {field}");
+        assert!(errs.iter().any(|e| e.contains(&expected)), "{source}: {errs:?}");
+    }
+}
+
+#[test]
+fn discord_bot_token_that_decodes_to_nothing_is_rejected() {
+    let errs = validation_messages(&discord_gateway_toml("base64:"));
+    assert!(
+        errs.iter().any(|e| e.contains("discord: invalid bot_token")),
+        "{errs:?}"
+    );
+}
+
+#[test]
+fn telegram_startup_registration_with_a_malformed_bot_token_is_invalid() {
+    let toml = r#"
+[sources.telegram.integrations.primary.webhook]
+webhook_secret = "telegram-webhook-secret"
+webhook_registration_mode = "startup"
+bot_token = "not-a-bot-token"
+public_webhook_url = "https://example.com/sources/telegram/primary/webhook"
+"#;
+    let errs = validation_messages(toml);
+    assert!(
+        errs.iter()
+            .any(|e| e.contains("telegram/primary: invalid bot_token") && e.contains("Telegram bot token format")),
+        "{errs:?}"
+    );
+}
