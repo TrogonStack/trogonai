@@ -138,12 +138,9 @@ impl SecretStoreRevoke for InMemorySecretStore {
 
     async fn revoke(&self, credential: &CredentialRef) -> Result<(), Self::Error> {
         let mut state = self.state.lock().await;
-        let stored = state
-            .entries
-            .get_mut(credential)
-            .ok_or_else(|| SecretStoreError::Missing {
-                credential: credential.clone(),
-            })?;
+        let stored = state.entries.get(credential).ok_or_else(|| SecretStoreError::Missing {
+            credential: credential.clone(),
+        })?;
         let status = stored.metadata.status();
         if status == CredentialStatus::Destroyed {
             return Err(SecretStoreError::Unwritable {
@@ -151,7 +148,11 @@ impl SecretStoreRevoke for InMemorySecretStore {
                 status,
             });
         }
-        stored.metadata = metadata(credential, CredentialStatus::Revoked)?;
+        for (stored_ref, stored) in &mut state.entries {
+            if stored_ref.id() == credential.id() && stored.metadata.status() != CredentialStatus::Destroyed {
+                stored.metadata = metadata(stored_ref, CredentialStatus::Revoked)?;
+            }
+        }
         Ok(())
     }
 }
@@ -255,6 +256,81 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[tokio::test]
+    async fn revoke_closes_every_version_of_the_credential() {
+        let store = InMemorySecretStore::default();
+        let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
+        let credential = store
+            .put(
+                scope,
+                CredentialKind::BotToken,
+                SecretString::new("Bot old-token").unwrap(),
+            )
+            .await
+            .unwrap();
+        let rotated = store
+            .rotate(&credential, SecretString::new("Bot new-token").unwrap())
+            .await
+            .unwrap();
+
+        store.revoke(&rotated).await.unwrap();
+
+        for version in [&credential, &rotated] {
+            assert_eq!(
+                store.metadata(version).await.unwrap().status(),
+                CredentialStatus::Revoked
+            );
+            assert!(matches!(
+                store.get(version).await,
+                Err(SecretStoreError::Unreadable {
+                    status: CredentialStatus::Revoked,
+                    ..
+                })
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn revoke_leaves_destroyed_versions_destroyed() {
+        let store = InMemorySecretStore::default();
+        let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
+        let first = store
+            .put(
+                scope,
+                CredentialKind::BotToken,
+                SecretString::new("Bot first-token").unwrap(),
+            )
+            .await
+            .unwrap();
+        let second = store
+            .rotate(&first, SecretString::new("Bot second-token").unwrap())
+            .await
+            .unwrap();
+        let third = store
+            .rotate(&second, SecretString::new("Bot third-token").unwrap())
+            .await
+            .unwrap();
+        store
+            .destroy(&first, &SecretDestroyReason::new("compliance request").unwrap())
+            .await
+            .unwrap();
+
+        store.revoke(&second).await.unwrap();
+
+        assert_eq!(
+            store.metadata(&first).await.unwrap().status(),
+            CredentialStatus::Destroyed
+        );
+        assert_eq!(
+            store.metadata(&second).await.unwrap().status(),
+            CredentialStatus::Revoked
+        );
+        assert_eq!(
+            store.metadata(&third).await.unwrap().status(),
+            CredentialStatus::Revoked
+        );
     }
 
     #[tokio::test]
