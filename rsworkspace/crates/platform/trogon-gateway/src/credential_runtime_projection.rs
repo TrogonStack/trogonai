@@ -39,7 +39,7 @@ use crate::credential::commands::proto::{
     decode_revoked_state, decode_rotated, decode_rotation_failed, decode_rotation_requested, decode_write_failed,
     decode_write_requested,
 };
-use crate::credential::processor::event_stream::{CredentialEventStreamReadError, read_credential_event_stream};
+use crate::credential::event_stream::{CredentialEventStreamReadError, read_credential_event_stream};
 use crate::credential::{CredentialEvolveError, evolve, initial_state};
 use crate::secret_store::{SecretMaterial, SecretStoreError, SecretStoreGet};
 use crate::source_integration_id::{SourceIntegrationId, SourceIntegrationIdError};

@@ -23,18 +23,18 @@ use crate::credential::commands::proto::{
     decode_active_state, decode_cleanup_failed_state, decode_destroy_requested_state, decode_destroyed_state,
     decode_message_field, decode_revoked_state,
 };
-use crate::credential::handler::{
+use crate::credential_lifecycle::handler::{
     CredentialHandlerError, CredentialRuntimeHandler, CredentialRuntimeHandlerError, DestroyStoredCredential,
     PutCredential, RevokeStoredCredential, RotateCredential,
 };
-use crate::credential::processor::recovery_worker::{CredentialRecoveryCheckpointStore, CredentialRecoveryPolicy};
-use crate::credential::processor::runtime_projection::RuntimeCredentialRegistry;
+use crate::credential_lifecycle::recovery_worker::{CredentialRecoveryCheckpointStore, CredentialRecoveryPolicy};
 #[cfg(test)]
 use crate::credential_management_idempotency::CredentialCommandInMemoryIdempotencyLedger;
 use crate::credential_management_idempotency::{
     CredentialCommandIdempotencyStore, CredentialCommandIdempotencyStoreError, IdempotencyDecision, IdempotencyKey,
     IdempotencyScope, RequestFingerprint,
 };
+use crate::credential_runtime_projection::RuntimeCredentialRegistry;
 use crate::secret_store::openbao_secret_store::openbao_credential_id;
 use crate::secret_store::{
     SecretDestroyReason, SecretStoreDestroy, SecretStoreError, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke,

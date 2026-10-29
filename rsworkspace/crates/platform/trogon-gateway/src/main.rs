@@ -5,8 +5,10 @@ mod cli;
 mod config;
 mod constants;
 mod credential;
+mod credential_lifecycle;
 mod credential_management;
 mod credential_management_idempotency;
+mod credential_runtime_projection;
 mod http;
 mod secret_store;
 mod source;
@@ -135,7 +137,7 @@ async fn serve(
         join_set.spawn(async move {
             tokio::select! {
                 () = shutdown => {}
-                () = credential::processor::runtime_projection::run_checkpointed_refresh_worker(
+                () = credential_runtime_projection::run_checkpointed_refresh_worker(
                     projection_runtime_credentials,
                     projection_event_stream,
                     projection_event_store,
@@ -178,7 +180,7 @@ async fn serve(
             let store = openbao_secret_store_from_env(&SystemEnv, CREDENTIAL_MANAGEMENT_ADMIN_TOKEN)?;
             let idempotency = credential_management_idempotency::open(client.context().clone()).await?;
             let worker_checkpoints =
-                credential::processor::recovery_worker::open_checkpoint_store(client.context().clone()).await?;
+                credential_lifecycle::recovery_worker::open_checkpoint_store(client.context().clone()).await?;
             let recovery_status_checkpoints = worker_checkpoints.clone();
             let worker_event_stream = credential_store.events_stream().clone();
             let worker_event_store = credential_store.clone();
@@ -187,14 +189,14 @@ async fn serve(
             let worker_runtime_credentials = runtime_credentials.clone();
             let worker_shutdown = shutdown.clone();
             join_set.spawn(async move {
-                let handler = credential::handler::CredentialRuntimeHandler::new(
+                let handler = credential_lifecycle::handler::CredentialRuntimeHandler::new(
                     worker_handler_event_store,
                     worker_store,
                     worker_runtime_credentials,
                 );
                 tokio::select! {
                     () = worker_shutdown => {}
-                    () = credential::processor::recovery_worker::run(
+                    () = credential_lifecycle::recovery_worker::run(
                         worker_event_stream,
                         worker_event_store,
                         handler,
@@ -457,15 +459,14 @@ async fn wait_for_sources_with_shutdown<E: std::error::Error>(
 async fn refresh_credential_runtime_projection(
     event_store: &credential::store::CredentialEventStore,
 ) -> anyhow::Result<(
-    credential::processor::runtime_projection::RuntimeCredentialRegistry,
-    credential::processor::runtime_projection::RuntimeProjectionRefreshReport,
-    credential::processor::runtime_projection::RuntimeProjectionKvCheckpointStore<kv::Store>,
+    credential_runtime_projection::RuntimeCredentialRegistry,
+    credential_runtime_projection::RuntimeProjectionRefreshReport,
+    credential_runtime_projection::RuntimeProjectionKvCheckpointStore<kv::Store>,
 )> {
-    let registry = credential::processor::runtime_projection::RuntimeCredentialRegistry::default();
-    let checkpoints = credential::processor::runtime_projection::open_runtime_projection_checkpoint_store(
-        event_store.as_jetstream().clone(),
-    )
-    .await?;
+    let registry = credential_runtime_projection::RuntimeCredentialRegistry::default();
+    let checkpoints =
+        credential_runtime_projection::open_runtime_projection_checkpoint_store(event_store.as_jetstream().clone())
+            .await?;
     let (registry, report) = refresh_credential_runtime_projection_with_checkpoints(
         event_store.events_stream(),
         event_store,
@@ -480,16 +481,16 @@ async fn refresh_credential_runtime_projection_with_checkpoints<EventStream, Eve
     event_stream: &EventStream,
     event_store: &EventStore,
     checkpoints: &Checkpoints,
-    registry: credential::processor::runtime_projection::RuntimeCredentialRegistry,
+    registry: credential_runtime_projection::RuntimeCredentialRegistry,
 ) -> anyhow::Result<(
-    credential::processor::runtime_projection::RuntimeCredentialRegistry,
-    credential::processor::runtime_projection::RuntimeProjectionRefreshReport,
+    credential_runtime_projection::RuntimeCredentialRegistry,
+    credential_runtime_projection::RuntimeProjectionRefreshReport,
 )>
 where
     EventStream: JetStreamGetStreamInfo + JetStreamGetRawMessage,
     EventStore: StreamRead<str>,
     <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    Checkpoints: credential::processor::runtime_projection::RuntimeProjectionCheckpointStore,
+    Checkpoints: credential_runtime_projection::RuntimeProjectionCheckpointStore,
 {
     let report = registry
         .refresh_from_credential_stream_checkpointed(event_stream, event_store, checkpoints)

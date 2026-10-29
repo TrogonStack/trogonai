@@ -1,8 +1,7 @@
 #![allow(dead_code)]
 
 pub(crate) mod commands;
-pub(crate) mod handler;
-pub(crate) mod processor;
+pub(crate) mod event_stream;
 pub(crate) mod store;
 pub(crate) mod stream;
 

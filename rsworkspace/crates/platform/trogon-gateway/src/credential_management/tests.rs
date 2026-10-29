@@ -14,10 +14,10 @@ use trogon_decider_runtime::{
 };
 
 use super::*;
-use crate::credential::processor::recovery_worker::{
+use crate::credential_lifecycle::recovery_worker::{
     CredentialRecoveryCheckpoint, CredentialRecoveryCheckpointStoreError,
 };
-use crate::credential::processor::runtime_projection::{RuntimeCredentialError, RuntimeIntegrationKey};
+use crate::credential_runtime_projection::{RuntimeCredentialError, RuntimeIntegrationKey};
 use crate::secret_store::MockOpenBaoSecretStore;
 use trogonai_proto::gateway::credentials::v1;
 

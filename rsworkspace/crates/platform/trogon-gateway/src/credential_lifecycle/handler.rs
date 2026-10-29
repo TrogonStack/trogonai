@@ -11,21 +11,21 @@ use trogon_decider_runtime::{
 use trogon_std::SecretString;
 use trogonai_proto::gateway::credentials::{CredentialEventPayloadError, CredentialStateSnapshotCase, state_v1, v1};
 
-use super::commands::domain::{
+use crate::credential::commands::domain::{
     CredentialDestroyReason, CredentialDestroyReasonError, CredentialId, CredentialIdError, CredentialKind,
     CredentialOwnerId, CredentialRef, CredentialScope, CredentialVersion, SourceKind,
 };
-use super::commands::proto::{
+use crate::credential::commands::proto::{
     CredentialProtoDecodeError, active_credential_ref, decode_destroy_requested_state, decode_destroyed_state,
     decode_message_field, decode_pending_write_state,
 };
-use super::{
+use crate::credential::{
     ActivateCredentialRotation, ActivateCredentialWrite, CompleteCredentialDestroy, CredentialDecideError,
     CredentialEvolveError, CredentialFailureReason, RecordCredentialDestroyFailure, RecordCredentialRotationFailure,
     RecordCredentialWriteFailure, RequestCredentialDestroy, RequestCredentialRotation, RequestCredentialWrite,
     RevokeCredential, evolve, initial_state,
 };
-use crate::credential::processor::runtime_projection::{RuntimeCredentialRegistry, RuntimeProjectionRefreshError};
+use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeProjectionRefreshError};
 use crate::secret_store::openbao_secret_store::{OpenBaoCredentialIdParseError, openbao_credential_ref_from_id};
 use crate::secret_store::{
     SecretDestroyReason, SecretStoreDestroy, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke, SecretStoreRotate,

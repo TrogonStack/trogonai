@@ -20,7 +20,7 @@ use crate::credential::commands::domain::{
 use crate::credential::commands::proto::{
     activated_to_proto, decode_active_state, rotation_requested_to_proto, write_requested_to_proto,
 };
-use crate::credential::processor::runtime_projection::{
+use crate::credential_runtime_projection::{
     RuntimeCredentialError, RuntimeCredentialRegistry, RuntimeIntegrationKey, RuntimeIntegrationProjection,
 };
 use crate::secret_store::openbao_secret_store::OpenBaoSecretStore;

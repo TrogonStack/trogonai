@@ -25,8 +25,10 @@ use crate::credential::commands::domain::{
     CredentialKind, CredentialOwnerId, CredentialRef, CredentialScope, CredentialVersion, SourceKind,
 };
 use crate::credential::commands::proto::{decode_active_state, write_requested_to_proto};
-use crate::credential::handler::{CredentialHandler, CredentialHandlerError, PutCredential, RotateCredential};
-use crate::credential::processor::runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationKey};
+use crate::credential_lifecycle::handler::{
+    CredentialHandler, CredentialHandlerError, PutCredential, RotateCredential,
+};
+use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationKey};
 use crate::secret_store::MockOpenBaoSecretStore;
 use crate::source_integration_id::SourceIntegrationId;
 use trogonai_proto::gateway::credentials::CredentialStateSnapshotCase;
@@ -190,7 +192,7 @@ async fn recovery_plan_groups_by_payload_credential_id_instead_of_raw_subject() 
         vec![PlannedCredentialRecovery {
             credential_id: credential_id(),
             command: CredentialActivationRecoveryCommand::Write(
-                crate::credential::handler::RecoverCredentialWriteActivation::new(credential_ref(1))
+                crate::credential_lifecycle::handler::RecoverCredentialWriteActivation::new(credential_ref(1))
             ),
         }]
     );

@@ -48,8 +48,8 @@ async fn credential_runtime_projection_refresh_handles_empty_stream() {
     let event_store = EmptyCredentialEventStore::default();
     let kv = MockJetStreamKvStore::new();
     kv.enqueue_entry_none();
-    let checkpoints = credential::processor::runtime_projection::RuntimeProjectionKvCheckpointStore::new(kv);
-    let registry = credential::processor::runtime_projection::RuntimeCredentialRegistry::default();
+    let checkpoints = credential_runtime_projection::RuntimeProjectionKvCheckpointStore::new(kv);
+    let registry = credential_runtime_projection::RuntimeCredentialRegistry::default();
 
     let (_registry, report) =
         refresh_credential_runtime_projection_with_checkpoints(&stream, &event_store, &checkpoints, registry)
