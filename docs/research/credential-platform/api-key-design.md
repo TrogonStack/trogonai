@@ -476,11 +476,18 @@ not a first-version item.
 4. Generate 32 bytes of CSPRNG secret; assemble the wire format.
 5. Compute verifier_digest = HMAC-SHA-256(pepper[v], domain-separated
    key_id and secret); record v as verifier_key_version.
-6. Store API key metadata and verifier digest in the database.
-7. Emit api_key.created audit event without raw key material.
-8. Return raw key once.
-9. Discard raw key.
+6. Append api_key.created, carrying the metadata and verifier digest but
+   no raw key material, to the key's stream as one conditional append.
+7. Return raw key once.
+8. Discard raw key.
 ```
+
+The event is the write. Key state lives in the event stream and every read
+model is a projection of it
+([ADR#0047](../../adr/0047-event-sourced-credential-metadata.md)), so there is
+no separate database write that could commit without its audit fact, and no
+audit fact without the state change it records. A failed append leaves no key
+behind; a retried append is deduplicated by the idempotency ledger.
 
 Step 1 comes first on purpose. A caller who is authorized to create keys in
 a signed-only keyspace should be told the tier is unavailable, not have a
@@ -502,9 +509,9 @@ section 2).
 3. Client submits the public key plus metadata. Nothing else.
 4. Server validates algorithm against keyspace allowed_algorithms, key
    encoding and strength, project, permissions, and policy.
-5. Server stores public verification material, fingerprint, and metadata.
-6. Server emits api_key.created audit event.
-7. Client keeps the private key locally.
+5. Server appends api_key.created, carrying the public verification
+   material, fingerprint, and metadata, as one conditional append.
+6. Client keeps the private key locally.
 ```
 
 There is no server-generated fallback. The platform never generates,
@@ -540,9 +547,16 @@ flow.
 5. Compare in constant time.
 6. Evaluate effective permissions, resource scope, and requested operation.
 7. Evaluate rate limits.
-8. Record non-secret usage metadata; emit api_key.denied on failure.
+8. Record non-secret usage metadata; emit api_key.denied on a failure at
+   step 3 or later.
 9. Return authenticated principal.
 ```
+
+`api_key.denied` names the key, keyspace, and project it denied, so it is
+emitted only once step 2 has loaded a key record. A failure at step 1 or
+step 2, a malformed key or an unknown id, has no key to attribute and is
+counted by the pre-authentication limiter and its metric instead of an
+audit fact.
 
 Steps 1 and 2 run before any key or project is known, so the per-key and
 per-project limits of step 7 cannot protect them, and a well-formed key with
@@ -566,22 +580,26 @@ section 6 as it stands.
 5. Verify the JWT signature against the stored public key.
 6. Validate issuer, subject, iat, exp, and clock skew (at most 30 seconds,
    window at most 2 minutes).
-7. Atomically check-and-record (key_id, jti) in the replay store as a
+7. Validate the server nonce where keyspace policy requires it; reject with
+   a fresh nonce challenge if absent or stale.
+8. Validate the target binding against the canonical serialization for the
+   transport, and the payload digest against the exact request body.
+9. Atomically check-and-record (key_id, jti) in the replay store as a
    single conditional create. Key-already-exists is the replay rejection.
    Fail closed if the store cannot be consulted.
-8. Validate the server nonce where keyspace policy requires it; reject with
-   a fresh nonce challenge if absent or stale.
-9. Validate the target binding against the canonical serialization for the
-   transport, and the payload digest against the exact request body.
 10. Evaluate effective permissions, resource scope, and requested operation.
 11. Evaluate rate limits.
-12. Record non-secret usage metadata; emit api_key.denied on failure and
-    api_key.signed_request_replayed on a replay rejection.
+12. Record non-secret usage metadata; emit api_key.denied on a failure at
+    step 3 or later and api_key.signed_request_replayed on a replay
+    rejection.
 13. Return authenticated principal.
 ```
 
-Step 7 is a single atomic conditional create, never a read followed by a
-write, because the read-then-write form is a race that admits the replay it
+The replay record is written only after the nonce, target, and payload
+checks pass. Recording it earlier would let anyone holding a captured token
+burn its `jti` with a wrong target or body, so the legitimate request would
+then fail as a replay. Step 9 is a single atomic conditional create, never a
+read followed by a write, because the read-then-write form is a race that admits the replay it
 exists to stop. Replay records live for the validity ceiling plus twice the
 clock-skew tolerance: skew is bidirectional, so a token admitted at the
 earliest tolerated moment stays verifiable until expiry plus skew, and the
@@ -593,11 +611,11 @@ not re-verify caller tokens; authority travels onward as provenance
 ([ADR#0039](../../adr/0039-self-authenticating-event-provenance.md)). An expired token inside a persisted message is the expected
 state of an already-admitted request, not an error.
 
-A target-binding failure at step 9 is the one verification failure that
+A target-binding failure at step 8 is the one verification failure that
 returns a detail: the verifier's own computed canonical target, so an SDK
 author can diff it against theirs. It is emitted only after step 5 has
 succeeded against a live public key, never for an unknown, revoked, or
-expired key, because a caller who reaches step 9 holds the private key and
+expired key, because a caller who reaches step 8 holds the private key and
 learns only how the server serialized their own request. Every other
 failure returns a bare code. The vocabulary is in the
 [credential platform spec](./credential-platform-spec.md).
@@ -827,10 +845,9 @@ The rotation flow must never require the caller to upload a private key.
 Revocation is logical first:
 
 ```text
-1. Mark key revoked in DB.
-2. Emit api_key.revoked audit event.
-3. Verification rejects the key immediately.
-4. Cleanup/retention jobs handle old metadata later.
+1. Append api_key.revoked to the key's stream; that append is the revocation.
+2. Verification rejects the key once the projection applies it.
+3. Cleanup/retention jobs handle old metadata later.
 ```
 
 Expiry should be checked during verification. Expired keys should fail closed.

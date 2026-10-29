@@ -63,9 +63,13 @@ credential enters a provider stream.
 ### 2. Resolution reads the source's current version
 
 Resolving a source-backed reference reads the provider's current version at
-resolve time: the `AWSCURRENT` staging label in AWS Secrets Manager, the latest
-enabled version in Google Secret Manager, and the current KV v2 version in
-OpenBao. Google Secret Manager reads through `latest` or an alias are not
+resolve time: the `AWSCURRENT` staging label in AWS Secrets Manager, the
+version the `latest` alias names in Google Secret Manager, and the current KV
+v2 version in OpenBao. The `latest` alias names the most recently created
+version whether or not it is enabled, so a disabled newest version is a
+resolve failure under Decision 5. The platform does not list versions to fall
+back to an older enabled one, which keeps `secretmanager.versions.access` the
+only permission a Google source needs. Google Secret Manager reads through `latest` or an alias are not
 strongly consistent, and its other operations converge eventually, typically
 within minutes but possibly over hours, so such a read can keep returning the
 previous version for a while after a rotation. The first version does not

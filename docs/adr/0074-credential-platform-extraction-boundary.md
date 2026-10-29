@@ -118,10 +118,12 @@ jitter behind fan-out invalidation, not only for the duration of one
 in-flight operation. That bound applies to consumers that resolve per use. A
 long-lived connection, such as the Discord gateway WebSocket, keeps the bot
 token it connected with until that connection ends, and the revocation event
-evicts only the cached copy. A revoke or rotate at the provider ends the
-provider-side session, and the next connect resolves fresh. The residual
-exposure window for a held connection therefore ends at reconnect, not within
-the [ADR#0049](./0049-revocation-latency-target.md) bound.
+evicts only the cached copy. Discord does not guarantee that resetting a bot
+token ends a session that already authenticated, so the gateway closes the
+connection when it receives the revocation event and reconnects with a freshly
+resolved token. Until that close lands, the held connection is the residual
+exposure window, and it sits outside the
+[ADR#0049](./0049-revocation-latency-target.md) bound.
 
 Moving the cache into the service was priced and rejected: it puts a NATS
 round trip on every webhook, and the staleness bound is enforced identically

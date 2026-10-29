@@ -2088,7 +2088,10 @@ Cache policy:
   jitter. A rotation or revocation made at the source raises no platform
   event in the first version
   ([ADR#0079](../../adr/0079-external-secret-sources.md) Decision 4), so that
-  bound is the only guarantee for source-side changes.
+  bound only decides when the gateway reads the source again. It is not an
+  end-to-end rotation bound: a provider that converges eventually, such as
+  Google Secret Manager, can keep returning the previous version past cache
+  expiry.
 - Record cache hit/miss metrics without secret labels.
 
 For webhook verification, the gateway can usually cache the credential for a
@@ -2096,10 +2099,12 @@ short period because providers retry quickly and request volume can be bursty.
 For bot tokens and socket-mode connections, cache for the life of the connection
 but re-read on reconnect. The cache bound applies to consumers that resolve per
 use. A held connection keeps the credential it connected with until that
-connection ends, and invalidation evicts only the cached copy. A revoke or
-rotate at the provider ends the provider-side session, and the next connect
-resolves fresh, so the residual exposure window for a held connection ends at
-reconnect.
+connection ends, and invalidation evicts only the cached copy. A provider does
+not necessarily end an authenticated session when its token is reset, so the
+consumer closes the connection on the revocation event and reconnects with a
+freshly resolved credential; the residual exposure window for a held
+connection ends at that close
+([ADR#0074](../../adr/0074-credential-platform-extraction-boundary.md) Q2).
 
 For equality-style credentials that use verifier-only storage, cache the verifier
 instead of raw material.
