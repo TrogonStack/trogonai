@@ -30,6 +30,7 @@ impl CredentialKind {
             "signing_token" => Some(Self::SigningToken),
             "verification_token" => Some(Self::VerificationToken),
             "webhook_secret" => Some(Self::WebhookSecret),
+            "webhook_token" => Some(Self::WebhookToken),
             _ => None,
         }
     }
@@ -55,5 +56,45 @@ impl CredentialKind {
 impl fmt::Display for CredentialKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    macro_rules! every_kind {
+        ($($variant:ident),+ $(,)?) => {{
+            let kinds = [$(CredentialKind::$variant),+];
+            for kind in kinds {
+                // No wildcard arm: a variant missing from the list fails to compile.
+                match kind {
+                    $(CredentialKind::$variant => {})+
+                }
+            }
+            kinds
+        }};
+    }
+
+    #[test]
+    fn every_kind_round_trips_through_as_str_and_parse() {
+        let kinds = every_kind![
+            AppToken,
+            BotToken,
+            ClientSecret,
+            ClientState,
+            ConsumerSecret,
+            SecretToken,
+            ServiceAccountCredentials,
+            SigningSecret,
+            SigningToken,
+            VerificationToken,
+            WebhookSecret,
+            WebhookToken,
+        ];
+
+        for kind in kinds {
+            assert_eq!(CredentialKind::parse(kind.as_str()), Some(kind));
+        }
     }
 }
