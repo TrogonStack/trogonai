@@ -40,3 +40,6 @@ pub enum SecretDestroyReasonError {
     #[error("secret destroy reason exceeds maximum length")]
     TooLong,
 }
+
+#[cfg(test)]
+mod tests;

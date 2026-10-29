@@ -47,10 +47,8 @@ impl MockOpenBaoSecretStoreState {
         scope: CredentialScope,
         kind: CredentialKind,
     ) -> Result<CredentialRef, SecretStoreError> {
-        let id = openbao_credential_id(&scope, kind).map_err(|error| SecretStoreError::BackendUnavailable {
-            backend: StorageBackend::OpenBao,
-            message: format!("generated credential id is invalid: {error}"),
-        })?;
+        let id = openbao_credential_id(&scope, kind)
+            .map_err(|error| SecretStoreError::invalid_generated(StorageBackend::OpenBao, "credential id", error))?;
         let current = self
             .versions
             .keys()
@@ -104,15 +102,13 @@ impl SecretStoreGet for MockOpenBaoSecretStore {
                 credential: credential.clone(),
             })?;
         let status = stored.metadata.status();
-        if !status.is_readable() {
-            return Err(SecretStoreError::Unreadable {
+        match &stored.material {
+            Some(material) if status.is_readable() => Ok(material.clone()),
+            _ => Err(SecretStoreError::Unreadable {
                 credential: credential.clone(),
                 status,
-            });
+            }),
         }
-        stored.material.clone().ok_or_else(|| SecretStoreError::Missing {
-            credential: credential.clone(),
-        })
     }
 }
 
@@ -223,10 +219,7 @@ fn metadata(credential: &CredentialRef, status: CredentialStatus) -> Result<Cred
             credential.version().get()
         ),
     )
-    .map_err(|error| SecretStoreError::BackendUnavailable {
-        backend: StorageBackend::OpenBao,
-        message: format!("generated credential fingerprint is invalid: {error}"),
-    })?;
+    .map_err(SecretStoreError::invalid_fingerprint(StorageBackend::OpenBao))?;
 
     Ok(CredentialMetadata::new(
         credential.clone(),

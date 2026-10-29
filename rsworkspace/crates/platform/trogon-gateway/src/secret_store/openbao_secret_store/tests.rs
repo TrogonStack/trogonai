@@ -132,6 +132,8 @@ struct FakeOpenBao {
     address: SocketAddr,
     metadata: Option<Value>,
     metadata_failure: Option<(StatusCode, &'static str)>,
+    write_response: Option<Value>,
+    write_failure: Option<(StatusCode, &'static str)>,
     requests: Arc<Mutex<Vec<FakeOpenBaoRequest>>>,
 }
 
@@ -143,19 +145,34 @@ struct FakeOpenBaoRequest {
 
 impl FakeOpenBao {
     async fn start(metadata: Option<Value>) -> Self {
-        Self::start_with(metadata, None).await
+        Self::start_with(metadata, None, None, None).await
+    }
+
+    async fn start_answering_writes_with(write_response: Value) -> Self {
+        Self::start_with(None, None, Some(write_response), None).await
+    }
+
+    async fn start_failing_writes(metadata: Value, status: StatusCode, body: &'static str) -> Self {
+        Self::start_with(Some(metadata), None, None, Some((status, body))).await
     }
 
     async fn start_failing_metadata(status: StatusCode, body: &'static str) -> Self {
-        Self::start_with(None, Some((status, body))).await
+        Self::start_with(None, Some((status, body)), None, None).await
     }
 
-    async fn start_with(metadata: Option<Value>, metadata_failure: Option<(StatusCode, &'static str)>) -> Self {
+    async fn start_with(
+        metadata: Option<Value>,
+        metadata_failure: Option<(StatusCode, &'static str)>,
+        write_response: Option<Value>,
+        write_failure: Option<(StatusCode, &'static str)>,
+    ) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let openbao = Self {
             address: listener.local_addr().unwrap(),
             metadata,
             metadata_failure,
+            write_response,
+            write_failure,
             requests: Arc::default(),
         };
         let app = Router::new().fallback(answer_as_openbao).with_state(openbao.clone());
@@ -187,6 +204,13 @@ async fn answer_as_openbao(State(openbao): State<FakeOpenBao>, method: Method, u
         }
         (&Method::GET, Some(metadata)) => Json(json!({ "data": metadata })).into_response(),
         (&Method::GET, None) => (StatusCode::NOT_FOUND, Json(json!({ "errors": [] }))).into_response(),
+        _ if openbao.write_failure.is_some() => {
+            let (status, body) = openbao.write_failure.unwrap();
+            (status, body).into_response()
+        }
+        _ if openbao.write_response.is_some() && uri.path().starts_with("/v1/secret/data/") => {
+            Json(json!({ "data": openbao.write_response.clone().unwrap() })).into_response()
+        }
         _ => StatusCode::NO_CONTENT.into_response(),
     };
     openbao.requests.lock().await.push(FakeOpenBaoRequest {
@@ -321,6 +345,239 @@ async fn metadata_fingerprints_the_metadata_path_and_version() {
         metadata.fingerprint().as_str(),
         "openbao:ca45fc4dbbb75097b66c4fdf179938511f07d24c06be4a794ecc31841a61b1c4"
     );
+}
+
+#[test]
+fn mount_accepts_its_allowed_alphabet() {
+    let mount = OpenBaoMount::new("kv-v2_team.a").unwrap();
+
+    assert_eq!(mount.as_str(), "kv-v2_team.a");
+    assert_eq!(mount.to_string(), "kv-v2_team.a");
+}
+
+#[test]
+fn mount_rejects_empty_value() {
+    assert_eq!(OpenBaoMount::new(""), Err(OpenBaoMountError::Empty));
+}
+
+#[test]
+fn mount_rejects_path_separators() {
+    assert_eq!(OpenBaoMount::new("a/b"), Err(OpenBaoMountError::InvalidCharacter('/')));
+}
+
+#[test]
+fn debug_redacts_the_token() {
+    let store = OpenBaoSecretStore::new("http://openbao.example:8200", "s3cr3t-root-token").unwrap();
+
+    let debug = format!("{store:?}");
+
+    assert!(debug.contains("OpenBaoSecretStore"));
+    assert!(debug.contains("openbao.example"));
+    assert!(debug.contains("***"));
+    assert!(!debug.contains("s3cr3t-root-token"));
+}
+
+#[test]
+fn rejects_credential_id_without_the_openbao_prefix() {
+    let id = CredentialId::new("tenant-1:discord:bot_token").unwrap();
+
+    let error = openbao_credential_ref_from_id(id, CredentialVersion::initial()).unwrap_err();
+
+    assert!(matches!(error, OpenBaoCredentialIdParseError::MissingPrefix { .. }));
+}
+
+#[test]
+fn rejects_credential_id_without_owner_scope_and_kind() {
+    let id = CredentialId::new("openbao:discord").unwrap();
+
+    let error = openbao_credential_ref_from_id(id, CredentialVersion::initial()).unwrap_err();
+
+    assert!(matches!(error, OpenBaoCredentialIdParseError::InvalidShape { .. }));
+}
+
+#[test]
+fn rejects_scope_that_is_neither_a_source_nor_an_integration() {
+    let id = CredentialId::new("openbao:tenant-1:primary:webhook_secret").unwrap();
+
+    let error = openbao_credential_ref_from_id(id, CredentialVersion::initial()).unwrap_err();
+
+    assert!(matches!(
+        error,
+        OpenBaoCredentialIdParseError::InvalidScope {
+            source: OpenBaoScopeKeyParseError::MissingSource,
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn address_that_cannot_be_a_base_is_a_backend_outage() {
+    let store = OpenBaoSecretStore::new("mailto:ops@example.com", OPENBAO_DEV_ROOT_TOKEN).unwrap();
+
+    let error = store
+        .metadata(&discord_bot_token(CredentialVersion::initial()))
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        SecretStoreError::BackendUnavailable { backend: StorageBackend::OpenBao, message }
+            if message.starts_with("failed to build endpoint url")
+    ));
+}
+
+#[tokio::test]
+async fn put_with_an_unparseable_write_response_is_a_backend_outage() {
+    let openbao = FakeOpenBao::start(None).await;
+    let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
+
+    let error = openbao
+        .store()
+        .put(scope, CredentialKind::BotToken, SecretString::new("Bot token").unwrap())
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        SecretStoreError::BackendUnavailable {
+            backend: StorageBackend::OpenBao,
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn put_rejects_a_zero_version_from_the_backend() {
+    let openbao = FakeOpenBao::start_answering_writes_with(json!({ "version": 0 })).await;
+    let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
+
+    let error = openbao
+        .store()
+        .put(scope, CredentialKind::BotToken, SecretString::new("Bot token").unwrap())
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        SecretStoreError::BackendUnavailable {
+            backend: StorageBackend::OpenBao,
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn rotate_of_a_destroyed_version_is_unwritable() {
+    let openbao = FakeOpenBao::start(Some(metadata_with_destroyed_first_version())).await;
+    let credential = discord_bot_token(CredentialVersion::initial());
+
+    let error = openbao
+        .store()
+        .rotate(&credential, SecretString::new("Bot new-token").unwrap())
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        SecretStoreError::Unwritable { credential: unwritable, status: CredentialStatus::Destroyed }
+            if unwritable == credential
+    ));
+    assert!(openbao.posted_to(OpenBaoEndpoint::Data).await.is_empty());
+}
+
+fn metadata_with_previous_and_revoked_versions() -> Value {
+    json!({
+        "current_version": 3,
+        "versions": {
+            "1": { "deletion_time": "", "destroyed": false },
+            "2": { "deletion_time": "2026-01-01T00:00:00Z", "destroyed": false },
+            "3": { "deletion_time": "", "destroyed": false },
+        },
+    })
+}
+
+#[tokio::test]
+async fn rotate_of_a_previous_version_reports_previous() {
+    let openbao = FakeOpenBao::start(Some(metadata_with_previous_and_revoked_versions())).await;
+    let credential = discord_bot_token(CredentialVersion::initial());
+
+    let error = openbao
+        .store()
+        .rotate(&credential, SecretString::new("Bot new-token").unwrap())
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        SecretStoreError::Unwritable {
+            status: CredentialStatus::Previous,
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn metadata_maps_a_deleted_version_to_revoked() {
+    let openbao = FakeOpenBao::start(Some(metadata_with_previous_and_revoked_versions())).await;
+
+    let metadata = openbao
+        .store()
+        .metadata(&discord_bot_token(CredentialVersion::new(2).unwrap()))
+        .await
+        .unwrap();
+
+    assert_eq!(metadata.status(), CredentialStatus::Revoked);
+}
+
+#[tokio::test]
+async fn get_of_a_revoked_version_is_unreadable() {
+    let openbao = FakeOpenBao::start(Some(metadata_with_previous_and_revoked_versions())).await;
+
+    let error = openbao
+        .store()
+        .get(&discord_bot_token(CredentialVersion::new(2).unwrap()))
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        SecretStoreError::Unreadable {
+            status: CredentialStatus::Revoked,
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn metadata_of_a_version_absent_from_the_backend_is_missing() {
+    let openbao = FakeOpenBao::start(Some(metadata_with_previous_and_revoked_versions())).await;
+    let credential = discord_bot_token(CredentialVersion::new(9).unwrap());
+
+    let error = openbao.store().metadata(&credential).await.unwrap_err();
+
+    assert!(matches!(error, SecretStoreError::Missing { credential: missing } if missing == credential));
+}
+
+#[tokio::test]
+async fn revoke_reports_a_backend_that_rejects_the_delete() {
+    let openbao = FakeOpenBao::start_failing_writes(
+        metadata_with_previous_and_revoked_versions(),
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "sealed",
+    )
+    .await;
+
+    let error = openbao
+        .store()
+        .revoke(&discord_bot_token(CredentialVersion::new(3).unwrap()))
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        SecretStoreError::BackendUnavailable { backend: StorageBackend::OpenBao, message }
+            if message.contains("500") && message.contains("sealed")
+    ));
 }
 
 struct OpenBaoServer {

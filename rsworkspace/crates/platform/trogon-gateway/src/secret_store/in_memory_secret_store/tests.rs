@@ -239,3 +239,107 @@ async fn destroying_previous_version_leaves_active_version_readable() {
         "Bot new-token"
     );
 }
+
+fn unknown_credential() -> CredentialRef {
+    let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
+    CredentialRef::new(
+        CredentialId::new("memory:tenant-1:discord:bot_token:missing").unwrap(),
+        CredentialVersion::initial(),
+        &scope,
+        CredentialKind::BotToken,
+    )
+}
+
+#[tokio::test]
+async fn get_of_unknown_ref_returns_missing() {
+    let store = InMemorySecretStore::default();
+    let unknown = unknown_credential();
+
+    assert_eq!(
+        store.get(&unknown).await.unwrap_err(),
+        SecretStoreError::Missing { credential: unknown }
+    );
+}
+
+#[tokio::test]
+async fn rotate_of_unknown_ref_returns_missing() {
+    let store = InMemorySecretStore::default();
+    let unknown = unknown_credential();
+
+    assert_eq!(
+        store
+            .rotate(&unknown, SecretString::new("Bot new-token").unwrap())
+            .await
+            .unwrap_err(),
+        SecretStoreError::Missing { credential: unknown }
+    );
+}
+
+#[tokio::test]
+async fn revoke_of_unknown_ref_returns_missing() {
+    let store = InMemorySecretStore::default();
+    let unknown = unknown_credential();
+
+    assert_eq!(
+        store.revoke(&unknown).await.unwrap_err(),
+        SecretStoreError::Missing { credential: unknown }
+    );
+}
+
+#[tokio::test]
+async fn metadata_of_unknown_ref_returns_missing() {
+    let store = InMemorySecretStore::default();
+    let unknown = unknown_credential();
+
+    assert_eq!(
+        store.metadata(&unknown).await.unwrap_err(),
+        SecretStoreError::Missing { credential: unknown }
+    );
+}
+
+#[tokio::test]
+async fn revoke_of_a_destroyed_version_is_unwritable() {
+    let store = InMemorySecretStore::default();
+    let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
+    let credential = store
+        .put(scope, CredentialKind::BotToken, SecretString::new("Bot token").unwrap())
+        .await
+        .unwrap();
+    store
+        .destroy(&credential, &SecretDestroyReason::new("compliance request").unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store.revoke(&credential).await.unwrap_err(),
+        SecretStoreError::Unwritable {
+            credential,
+            status: CredentialStatus::Destroyed,
+        }
+    );
+}
+
+#[tokio::test]
+async fn rotate_of_a_previous_version_is_unwritable() {
+    let store = InMemorySecretStore::default();
+    let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
+    let credential = store
+        .put(scope, CredentialKind::BotToken, SecretString::new("Bot token").unwrap())
+        .await
+        .unwrap();
+    store
+        .rotate(&credential, SecretString::new("Bot new-token").unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store
+            .rotate(&credential, SecretString::new("Bot newer-token").unwrap())
+            .await
+            .unwrap_err(),
+        SecretStoreError::Unwritable {
+            credential,
+            status: CredentialStatus::Previous,
+        }
+    );
+}

@@ -20,3 +20,6 @@ impl SecretMaterial {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

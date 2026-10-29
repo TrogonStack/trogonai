@@ -26,3 +26,6 @@ pub enum SecretVerifierError {
     #[error("{0}")]
     Empty(#[source] EmptySecretError),
 }
+
+#[cfg(test)]
+mod tests;
