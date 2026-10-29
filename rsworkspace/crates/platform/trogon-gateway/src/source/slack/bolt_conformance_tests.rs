@@ -22,7 +22,7 @@ use super::config::{
 };
 use super::constants::NATS_HEADER_CONTENT_TYPE;
 use super::server::{SlackBridge, router_with_clock};
-use super::socket_mode::handle_text_frame;
+use super::socket_mode::{SocketModeError, handle_text_frame};
 
 const REQUEST_NOW_SECONDS: u64 = 1_700_000_000;
 const SIGNING_SECRET: &str = "bolt-conformance-signing-secret";
@@ -30,6 +30,7 @@ const SUBJECT_PREFIX: &str = "slack";
 const UNROUTABLE_SUBJECT: &str = "slack.unroutable";
 const DEDUP_HEADER: &str = "Nats-Msg-Id";
 const PAYLOAD_PREVIEW_CHARS: usize = 96;
+const BOLT_UNHANDLED_STATUS: u16 = 404;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
 #[serde(transparent)]
@@ -61,6 +62,14 @@ enum GapId {
     G20,
     G21,
     G23,
+    /// Bolt only rejects stale timestamps; the gateway also rejects timestamps ahead of its clock by more than the drift.
+    G24,
+    /// The gateway needs `event_id` as the delivery dedup key and dead-letters an event without one; Bolt dispatches it.
+    G25,
+    /// The gateway matches form content types case-insensitively and ignores parameters; Bolt compares the header exactly.
+    G26,
+    /// Bolt leaves an unclassifiable body unanswered until its unhandled request timeout; the gateway answers at once and dead-letters it.
+    G27,
 }
 
 impl fmt::Display for GapId {
@@ -85,6 +94,7 @@ enum PayloadKind {
     SslCheck,
     UrlVerification,
     Malformed,
+    Control,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -95,6 +105,7 @@ enum Outcome {
     Inline,
     Reject,
     Ignore,
+    Reconnect,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -276,6 +287,35 @@ impl GapId {
         match self {
             GapId::G11 => fixture.transport == Transport::SocketMode && diff.field == Field::PayloadReserialized,
             GapId::G23 => diff.field == Field::Unroutable && fixture.expected.outcome == Outcome::Reject,
+            GapId::G24 => {
+                fixture.transport == Transport::Http
+                    && fixture.expected.outcome == Outcome::Publish
+                    && matches!(diff.field, Field::Outcome | Field::Status)
+            }
+            GapId::G25 => {
+                fixture.expected.outcome == Outcome::Publish
+                    && matches!(
+                        diff.field,
+                        Field::Outcome | Field::Status | Field::SocketAck | Field::Unroutable
+                    )
+            }
+            GapId::G26 => {
+                fixture.transport == Transport::Http
+                    && fixture.expected.outcome == Outcome::Reject
+                    && matches!(
+                        diff.field,
+                        Field::Outcome | Field::Status | Field::Requests | Field::Deliveries
+                    )
+            }
+            GapId::G27 => {
+                fixture.transport == Transport::Http
+                    && fixture
+                        .expected
+                        .http
+                        .as_ref()
+                        .is_some_and(|http| http.status == BOLT_UNHANDLED_STATUS)
+                    && matches!(diff.field, Field::Outcome | Field::Status)
+            }
             _ => false,
         }
     }
@@ -500,18 +540,25 @@ async fn observe_socket(fixture: &Fixture) -> Observed {
         &socket_mode_config(),
     );
 
-    let (socket_ack, failure) = match handle_text_frame(&bridge, &input.frame).await {
-        Ok((_, ack)) => (ack, None),
-        Err(error) => (None, Some(error.to_string())),
+    let (reconnect, socket_ack, failure) = match handle_text_frame(&bridge, &input.frame).await {
+        Ok((reconnect, ack)) => (reconnect, ack, None),
+        Err(SocketModeError::LinkDisabled) => (true, None, None),
+        Err(error) => (false, None, Some(error.to_string())),
     };
     let published = published(&publisher);
     let requests = requested(&requester);
     let outcome = if !published.routed.is_empty() {
         Outcome::Publish
+    } else if reconnect {
+        Outcome::Reconnect
     } else if socket_ack.is_some() && !requests.is_empty() {
         Outcome::Request
-    } else {
+    } else if socket_ack.is_some() {
+        Outcome::Inline
+    } else if published.unroutable > 0 || failure.is_some() {
         Outcome::Reject
+    } else {
+        Outcome::Ignore
     };
     Observed {
         outcome,
@@ -922,6 +969,7 @@ fn every_transport_and_payload_kind_is_covered() {
         PayloadKind::SslCheck,
         PayloadKind::UrlVerification,
         PayloadKind::Malformed,
+        PayloadKind::Control,
     ] {
         assert!(
             fixtures.iter().any(|fixture| fixture.kind == kind),

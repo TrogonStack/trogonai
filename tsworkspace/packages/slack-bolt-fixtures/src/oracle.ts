@@ -10,6 +10,7 @@ import { REQUEST_TIMESTAMP_SECONDS, SIGNING_SECRET } from './wire.ts';
 import type { JsonObject } from './wire.ts';
 
 const RESPONSE_DEADLINE_MS = 5_000;
+const UNHANDLED_REQUEST_TIMEOUT_MS = 25;
 
 type Constructor<T> = new (options: Record<string, unknown>) => T;
 
@@ -183,20 +184,11 @@ export function createOracle(options: OracleOptions): BoltOracle {
     { IncomingEventType: helpers.IncomingEventType, assertNever: helpers.assertNever },
   ) as (type: number, conversationId: string | undefined, body: JsonObject, enterprise: boolean) => BoltSource;
 
-  function describeDispatch(event: ReceiverEvent): DispatchRecord {
+  function describeDispatch(event: ReceiverEvent): DispatchRecord | null {
     const { body } = event;
     const { type, conversationId } = helpers.getTypeAndConversation(body);
     if (type === undefined) {
-      return {
-        incoming_type: 'Unclassified',
-        conversation_id: null,
-        retry_num: event.retryNum ?? null,
-        retry_reason: event.retryReason ?? null,
-        is_enterprise_install: false,
-        team_id: null,
-        enterprise_id: null,
-        user_id: null,
-      };
+      return null;
     }
     const isEnterpriseInstall = helpers.isBodyWithTypeEnterpriseInstall(body, type);
     const source = buildSource(type, conversationId, body, isEnterpriseInstall);
@@ -214,12 +206,20 @@ export function createOracle(options: OracleOptions): BoltOracle {
 
   async function runHttp(input: HttpInput & { body: string }, ackBody?: unknown): Promise<OracleRun<BoltHttpVerdict>> {
     const logger = createRecordingLogger();
-    const receiver = new HTTPReceiver({ signingSecret: SIGNING_SECRET, logger });
+    const receiver = new HTTPReceiver({
+      signingSecret: SIGNING_SECRET,
+      logger,
+      unhandledRequestTimeoutMillis: UNHANDLED_REQUEST_TIMEOUT_MS,
+    });
     const captured: { dispatch: DispatchRecord | null; body: JsonObject | null } = { dispatch: null, body: null };
     receiver.init({
       async processEvent(event) {
+        const dispatch = describeDispatch(event);
+        if (dispatch === null) {
+          return;
+        }
         captured.body = event.body;
-        captured.dispatch = describeDispatch(event);
+        captured.dispatch = dispatch;
         await event.ack(ackBody);
       },
     });
@@ -258,11 +258,17 @@ export function createOracle(options: OracleOptions): BoltOracle {
   async function runSocket(frame: string, ackBody?: unknown): Promise<OracleRun<BoltSocketVerdict>> {
     const receiver = new SocketModeReceiver({ appToken: 'xapp-1-conformance', logger: createRecordingLogger() });
     const sent: string[] = [];
-    const captured: { dispatch: DispatchRecord | null; body: JsonObject | null } = { dispatch: null, body: null };
+    const captured: { dispatch: DispatchRecord | null; body: JsonObject | null; disconnected: boolean } = {
+      dispatch: null,
+      body: null,
+      disconnected: false,
+    };
     receiver.client.websocket = {
       readyState: 1,
       isActive: () => true,
-      disconnect() {},
+      disconnect() {
+        captured.disconnected = true;
+      },
       send(data: string, callback: (error?: Error) => void) {
         sent.push(data);
         callback();
@@ -270,8 +276,12 @@ export function createOracle(options: OracleOptions): BoltOracle {
     };
     receiver.init({
       async processEvent(event) {
+        const dispatch = describeDispatch(event);
+        if (dispatch === null) {
+          return;
+        }
         captured.body = event.body;
-        captured.dispatch = describeDispatch(event);
+        captured.dispatch = dispatch;
         await event.ack(ackBody);
       },
     });
@@ -282,10 +292,8 @@ export function createOracle(options: OracleOptions): BoltOracle {
 
     const first = sent[0];
     const ack = first === undefined ? null : (JSON.parse(first) as SocketAckFrame);
-    return {
-      verdict: { outcome: captured.dispatch === null ? 'ignored' : 'dispatched', ack, dispatch: captured.dispatch },
-      parsedBody: captured.body,
-    };
+    const outcome = captured.dispatch !== null ? 'dispatched' : captured.disconnected ? 'disconnected' : 'ignored';
+    return { verdict: { outcome, ack, dispatch: captured.dispatch }, parsedBody: captured.body };
   }
 
   function dummyBody(builder: string, ...args: unknown[]): JsonObject {

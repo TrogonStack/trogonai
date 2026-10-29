@@ -37,6 +37,14 @@ fn unroutable_diff() -> Diff {
     }
 }
 
+fn diff_on(field: Field) -> Diff {
+    Diff {
+        field,
+        expected: "x".to_owned(),
+        actual: "y".to_owned(),
+    }
+}
+
 fn gaps(ids: &[GapId]) -> LedgerEntry {
     LedgerEntry::Gaps(ids.iter().copied().collect())
 }
@@ -277,4 +285,53 @@ fn an_expected_content_type_must_be_the_one_observed() {
 
     observed.content_type = Some("application/json".to_owned());
     assert!(compare(&fixture, &observed).is_empty());
+}
+
+#[test]
+fn a_future_timestamp_gap_only_explains_a_rejection_of_a_request_bolt_accepts() {
+    let gap = gaps(&[GapId::G24]);
+    let diffs = [diff_on(Field::Outcome), diff_on(Field::Status)];
+    assert!(judge(&fixture(), Some(&gap), &diffs).is_empty());
+    assert_eq!(judge(&fixture_expecting("reject"), Some(&gap), &diffs).len(), 3);
+    assert_eq!(judge(&fixture(), Some(&gap), &[diff_on(Field::Subject)]).len(), 2);
+}
+
+#[test]
+fn a_missing_event_id_gap_explains_the_dead_letter_and_the_missing_acknowledgement() {
+    let gap = gaps(&[GapId::G25]);
+    let diffs = [
+        diff_on(Field::Outcome),
+        diff_on(Field::SocketAck),
+        diff_on(Field::Unroutable),
+    ];
+    assert!(judge(&fixture(), Some(&gap), &diffs).is_empty());
+    assert_eq!(judge(&fixture_expecting("inline"), Some(&gap), &diffs).len(), 4);
+}
+
+#[test]
+fn a_lenient_content_type_gap_only_explains_an_http_request_bolt_rejects() {
+    let gap = gaps(&[GapId::G26]);
+    let diffs = [
+        diff_on(Field::Outcome),
+        diff_on(Field::Status),
+        diff_on(Field::Requests),
+        diff_on(Field::Deliveries),
+    ];
+    assert!(judge(&fixture_expecting("reject"), Some(&gap), &diffs).is_empty());
+    assert_eq!(judge(&fixture(), Some(&gap), &diffs).len(), 5);
+}
+
+#[test]
+fn an_unanswered_body_gap_only_explains_the_status_bolt_gives_after_its_timeout() {
+    let gap = gaps(&[GapId::G27]);
+    let diffs = [diff_on(Field::Outcome), diff_on(Field::Status)];
+    let mut unhandled = fixture_expecting("reject");
+    unhandled.expected.http = Some(ExpectedHttp {
+        status: BOLT_UNHANDLED_STATUS,
+        body: None,
+        content_type: None,
+        challenge: None,
+    });
+    assert!(judge(&unhandled, Some(&gap), &diffs).is_empty());
+    assert_eq!(judge(&fixture_expecting("reject"), Some(&gap), &diffs).len(), 3);
 }

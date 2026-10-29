@@ -2,9 +2,16 @@ import type { Headers, JsonObject } from './wire.ts';
 
 export type Transport = 'http' | 'socket_mode';
 
-export type PayloadKind = 'event' | 'interaction' | 'command' | 'ssl_check' | 'url_verification' | 'malformed';
+export type PayloadKind =
+  | 'event'
+  | 'interaction'
+  | 'command'
+  | 'ssl_check'
+  | 'url_verification'
+  | 'malformed'
+  | 'control';
 
-export type ExpectedOutcome = 'publish' | 'request' | 'inline' | 'reject' | 'ignore';
+export type ExpectedOutcome = 'publish' | 'request' | 'inline' | 'reject' | 'ignore' | 'reconnect';
 
 export interface BodyFill {
   prefix: string;
@@ -56,7 +63,7 @@ export interface SocketAckFrame {
 }
 
 export interface BoltSocketVerdict {
-  outcome: 'dispatched' | 'ignored';
+  outcome: 'dispatched' | 'ignored' | 'disconnected';
   ack: SocketAckFrame | null;
   dispatch: DispatchRecord | null;
 }
