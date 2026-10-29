@@ -220,7 +220,7 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
 }
 
 #[instrument(
-    name = "linear.webhook",
+    name = LINEAR_WEBHOOK,
     skip_all,
     fields(
         event_type = tracing::field::Empty,

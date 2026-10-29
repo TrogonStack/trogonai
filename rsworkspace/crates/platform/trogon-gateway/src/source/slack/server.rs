@@ -951,7 +951,7 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut, R: Reque
 }
 
 #[instrument(
-    name = "slack.webhook",
+    name = SLACK_WEBHOOK,
     skip_all,
     fields(
         event_type = tracing::field::Empty,

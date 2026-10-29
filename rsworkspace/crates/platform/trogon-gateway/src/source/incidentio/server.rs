@@ -191,7 +191,7 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
 }
 
 #[instrument(
-    name = "incidentio.webhook",
+    name = INCIDENTIO_WEBHOOK,
     skip_all,
     fields(
         event_type = tracing::field::Empty,

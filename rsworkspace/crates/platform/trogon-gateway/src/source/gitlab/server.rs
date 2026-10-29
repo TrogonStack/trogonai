@@ -213,7 +213,7 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
 }
 
 #[instrument(
-    name = "gitlab.webhook",
+    name = GITLAB_WEBHOOK,
     skip_all,
     fields(
         event = tracing::field::Empty,

@@ -293,7 +293,7 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
 }
 
 #[instrument(
-    name = "notion.webhook",
+    name = NOTION_WEBHOOK,
     skip_all,
     fields(
         event_type = tracing::field::Empty,
@@ -325,8 +325,8 @@ where
             }
 
             let subject = verification_subject(&state.subject_prefix);
-            span.record("event_type", "subscription.verification");
-            span.record("subject", &subject);
+            span.record(trogon_semconv::attribute::EVENT_TYPE, "subscription.verification");
+            span.record(trogon_semconv::attribute::SUBJECT, &subject);
 
             return publish_verification(&state.publisher, &state.subject_prefix, body, state.nats_ack_timeout).await;
         }

@@ -200,7 +200,7 @@ async fn handle_crc<P: JetStreamPublisher, S: ObjectStorePut>(
     Ok(Json(CrcResponse { response_token }))
 }
 
-#[instrument(name = "twitter.crc", skip_all)]
+#[instrument(name = TWITTER_CRC, skip_all)]
 async fn handle_runtime_crc<P, S, G>(
     State(state): State<RuntimeAppState<P, S, G>>,
     Query(query): Query<CrcQuery>,
@@ -260,7 +260,7 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
 }
 
 #[instrument(
-    name = "twitter.webhook",
+    name = TWITTER_WEBHOOK,
     skip_all,
     fields(
         event_type = tracing::field::Empty,

@@ -163,7 +163,7 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
 }
 
 #[instrument(
-    name = "telegram.webhook",
+    name = TELEGRAM_WEBHOOK,
     skip_all,
     fields(
         update_type = tracing::field::Empty,

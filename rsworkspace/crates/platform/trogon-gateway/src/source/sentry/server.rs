@@ -204,7 +204,7 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
 }
 
 #[instrument(
-    name = "sentry.webhook",
+    name = SENTRY_WEBHOOK,
     skip_all,
     fields(
         resource = tracing::field::Empty,
