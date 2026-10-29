@@ -324,6 +324,7 @@ pub(crate) fn validate_same_logical_ref(
     if expected.id() != actual.id()
         || expected.owner_id() != actual.owner_id()
         || expected.source() != actual.source()
+        || expected.scope_key() != actual.scope_key()
         || expected.kind() != actual.kind()
     {
         return Err(CredentialDecideError::CredentialRefMismatch {
@@ -341,6 +342,7 @@ pub(crate) fn validate_same_logical_ref_for_evolve(
     if expected.id() != actual.id()
         || expected.owner_id() != actual.owner_id()
         || expected.source() != actual.source()
+        || expected.scope_key() != actual.scope_key()
         || expected.kind() != actual.kind()
     {
         return Err(CredentialEvolveError::CredentialRefMismatch {

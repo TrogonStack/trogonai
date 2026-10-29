@@ -435,6 +435,26 @@ fn given_when_then_rejects_activation_for_a_different_scope() {
 }
 
 #[test]
+fn given_when_then_rejects_rotation_into_a_different_scope() {
+    let other_scope_ref = CredentialRef::new(
+        credential_id(),
+        CredentialVersion::new(2).unwrap(),
+        &integration_scope("secondary"),
+        CredentialKind::WebhookSecret,
+    );
+
+    TestCase::<ActivateCredentialRotation>::new()
+        .given([write_requested()])
+        .given([activated(1)])
+        .given([rotation_requested(1)])
+        .when(ActivateCredentialRotation::new(active_metadata(other_scope_ref)))
+        .then_error(CredentialDecideError::CredentialRefMismatch {
+            expected: credential_id(),
+            actual: credential_id(),
+        });
+}
+
+#[test]
 fn activation_rejects_a_pending_write_persisted_without_a_scope() {
     let mut pending = pending_write_to_proto_state(&credential_id(), &scope(), CredentialKind::WebhookSecret);
     pending.scope_key = String::new();
@@ -731,6 +751,28 @@ fn evolve_rejects_activation_for_a_different_scope() {
 
     assert_eq!(
         evolve(pending, &activation).unwrap_err(),
+        CredentialEvolveError::CredentialRefMismatch {
+            expected: credential_id(),
+            actual: credential_id(),
+        }
+    );
+}
+
+#[test]
+fn evolve_rejects_rotation_into_a_different_scope() {
+    let requested = rebuild_state_from_events([write_requested(), activated(1), rotation_requested(1)]);
+    let other_scope_ref = CredentialRef::new(
+        credential_id(),
+        CredentialVersion::new(2).unwrap(),
+        &integration_scope("secondary"),
+        CredentialKind::WebhookSecret,
+    );
+    let rotation = proto::CredentialEvent {
+        event: Some(rotated_to_proto(&credential_ref(1), &active_metadata(other_scope_ref)).into()),
+    };
+
+    assert_eq!(
+        evolve(requested, &rotation).unwrap_err(),
         CredentialEvolveError::CredentialRefMismatch {
             expected: credential_id(),
             actual: credential_id(),
