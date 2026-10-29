@@ -1,6 +1,7 @@
-use std::env;
+use std::env::VarError;
 use std::fmt;
 
+use trogon_std::env::ReadEnv;
 use trogon_std::{EmptySecretError, SecretString};
 
 use super::SecretMaterial;
@@ -57,6 +58,7 @@ impl StaticConfigSecretStore {
         scope: CredentialScope,
         kind: CredentialKind,
         input: StaticConfigSecretInput,
+        env: &impl ReadEnv,
     ) -> Result<StaticConfigSecret, StaticConfigSecretStoreError> {
         let raw_value = match input {
             StaticConfigSecretInput::Literal(value) => value,
@@ -65,9 +67,9 @@ impl StaticConfigSecretStore {
                 if name.is_empty() {
                     return Err(StaticConfigSecretStoreError::EmptyEnvName);
                 }
-                env::var(name).map_err(|error| match error {
-                    env::VarError::NotPresent => StaticConfigSecretStoreError::MissingEnv { name: name.to_string() },
-                    env::VarError::NotUnicode(_) => {
+                env.var(name).map_err(|error| match error {
+                    VarError::NotPresent => StaticConfigSecretStoreError::MissingEnv { name: name.to_string() },
+                    VarError::NotUnicode(_) => {
                         StaticConfigSecretStoreError::InvalidUnicodeEnv { name: name.to_string() }
                     }
                 })?

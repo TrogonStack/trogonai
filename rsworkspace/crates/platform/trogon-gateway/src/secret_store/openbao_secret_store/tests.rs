@@ -1,5 +1,3 @@
-use std::env;
-
 use crate::credential::commands::domain::{CredentialOwnerId, SourceKind};
 use crate::source_integration_id::SourceIntegrationId;
 use serde_json::json;
@@ -8,6 +6,7 @@ use testcontainers_modules::testcontainers::{
     core::{IntoContainerPort, WaitFor},
     runners::AsyncRunner,
 };
+use trogon_std::env::{ReadEnv, SystemEnv};
 
 use super::*;
 
@@ -291,8 +290,12 @@ async fn openbao_testcontainer_rotate_advances_custom_metadata_version() {
 #[tokio::test]
 #[ignore = "requires dev OpenBao from devops/docker/compose"]
 async fn openbao_dev_server_roundtrips_precise_value() {
-    let address = env::var("OPENBAO_ADDR").unwrap_or_else(|_| "http://openbao.trogonai.orb.local:8200".to_string());
-    let token = env::var("OPENBAO_TOKEN").unwrap_or_else(|_| "local-dev-root-token".to_string());
+    let address = SystemEnv
+        .var("OPENBAO_ADDR")
+        .unwrap_or_else(|_| "http://openbao.trogonai.orb.local:8200".to_string());
+    let token = SystemEnv
+        .var("OPENBAO_TOKEN")
+        .unwrap_or_else(|_| "local-dev-root-token".to_string());
     let store = OpenBaoSecretStore::new(address, token).unwrap();
     let credential = assert_roundtrip(&store).await;
     println!(

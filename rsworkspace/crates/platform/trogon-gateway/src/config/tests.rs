@@ -1,6 +1,5 @@
 use super::*;
 use crate::source::google_pubsub::credentials::fixtures::FAKE_EXTERNAL_ACCOUNT;
-use std::env;
 use std::error::Error;
 use std::io::Write;
 
@@ -227,13 +226,16 @@ fn github_resolves_with_valid_secret() {
 fn webhook_secret_can_resolve_from_env() {
     let toml = r#"
 [sources.github.integrations.primary.webhook]
-webhook_secret = { env = "PATH" }
+webhook_secret = { env = "TROGON_GATEWAY_TEST_WEBHOOK_SECRET" }
 "#;
     let f = write_toml(toml);
-    let cfg = load(Some(f.path())).expect("load failed");
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set("TROGON_GATEWAY_TEST_WEBHOOK_SECRET", "gh-secret-from-env");
+    let gateway_config = load_config::<GatewayConfig>(Some(f.path())).expect("load failed");
+    let cfg = resolve(gateway_config, &NatsArgs::default(), &env).expect("resolve failed");
     let github = cfg.github.first().expect("github should be configured");
 
-    assert_eq!(github.config.webhook_secret.as_str(), env::var("PATH").unwrap());
+    assert_eq!(github.config.webhook_secret.as_str(), "gh-secret-from-env");
 }
 
 #[test]
@@ -270,9 +272,10 @@ fn test_scope() -> CredentialScope {
 
 #[test]
 fn secret_marker_with_base64_value_is_decoded() {
+    let env = trogon_std::env::InMemoryEnv::new();
     let value =
         SecretInput::Literal("secret:gcp:service-account:base64:eyJ0eXBlIjoic2VydmljZV9hY2NvdW50In0=".to_string())
-            .resolve(test_scope(), CredentialKind::WebhookSecret)
+            .resolve(test_scope(), CredentialKind::WebhookSecret, &env)
             .expect("marked base64 secret should resolve");
 
     assert_eq!(value, "{\"type\":\"service_account\"}");
@@ -280,8 +283,9 @@ fn secret_marker_with_base64_value_is_decoded() {
 
 #[test]
 fn secret_with_base64_prefix_is_decoded() {
+    let env = trogon_std::env::InMemoryEnv::new();
     let value = SecretInput::Literal("base64:eyJsaW5lIjoiYVxuYiJ9Cm11bHRpCmxpbmUK".to_string())
-        .resolve(test_scope(), CredentialKind::WebhookSecret)
+        .resolve(test_scope(), CredentialKind::WebhookSecret, &env)
         .expect("base64 secret should resolve");
 
     assert_eq!(value, "{\"line\":\"a\\nb\"}\nmulti\nline\n");
@@ -289,8 +293,9 @@ fn secret_with_base64_prefix_is_decoded() {
 
 #[test]
 fn secret_with_invalid_base64_is_rejected_without_echoing_value() {
+    let env = trogon_std::env::InMemoryEnv::new();
     let error = SecretInput::Literal("base64:not*base64".to_string())
-        .resolve(test_scope(), CredentialKind::WebhookSecret)
+        .resolve(test_scope(), CredentialKind::WebhookSecret, &env)
         .expect_err("invalid base64 should fail");
 
     assert!(matches!(

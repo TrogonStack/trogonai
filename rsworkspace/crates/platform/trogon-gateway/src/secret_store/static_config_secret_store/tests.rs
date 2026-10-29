@@ -1,5 +1,6 @@
 use crate::credential::commands::domain::{CredentialOwnerId, SourceKind};
 use crate::source_integration_id::SourceIntegrationId;
+use trogon_std::env::InMemoryEnv;
 
 use super::*;
 
@@ -14,6 +15,7 @@ fn resolves_literal_to_static_reference() {
         scope,
         CredentialKind::WebhookSecret,
         StaticConfigSecretInput::Literal("gh-secret".to_string()),
+        &InMemoryEnv::new(),
     )
     .unwrap();
 
@@ -30,6 +32,7 @@ fn empty_literal_is_invalid_at_static_write_boundary() {
         CredentialScope::source(CredentialOwnerId::static_config(), SourceKind::Discord),
         CredentialKind::BotToken,
         StaticConfigSecretInput::Literal(String::new()),
+        &InMemoryEnv::new(),
     );
 
     assert!(matches!(result, Err(StaticConfigSecretStoreError::EmptySecretError(_))));
