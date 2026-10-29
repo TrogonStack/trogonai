@@ -2,10 +2,9 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use reqwest::StatusCode;
-use serde::Deserialize;
-use serde_json::json;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tracing::info;
 use trogon_std::{EmptySecretError, SecretString};
@@ -308,11 +307,7 @@ impl SecretStorePut for OpenBaoSecretStore {
         let response: OpenBaoWriteResponse = self
             .send_json(
                 self.authorize(self.http.post(self.endpoint(OpenBaoEndpoint::Data, &initial_ref)?))
-                    .json(&json!({
-                        "data": {
-                            "value": value.as_str(),
-                        },
-                    })),
+                    .json(&OpenBaoWriteRequest::new(&value)),
             )
             .await?;
         let credential = self.credential_ref(&scope, kind, response.data.version()?)?;
@@ -360,11 +355,7 @@ impl SecretStoreRotate for OpenBaoSecretStore {
         let response: OpenBaoWriteResponse = self
             .send_json(
                 self.authorize(self.http.post(self.endpoint(OpenBaoEndpoint::Data, credential)?))
-                    .json(&json!({
-                        "data": {
-                            "value": value.as_str(),
-                        },
-                    })),
+                    .json(&OpenBaoWriteRequest::new(&value)),
             )
             .await?;
 
@@ -388,9 +379,7 @@ impl SecretStoreRevoke for OpenBaoSecretStore {
 
         self.send_empty(
             self.authorize(self.http.post(self.endpoint(OpenBaoEndpoint::Delete, credential)?))
-                .json(&json!({
-                    "versions": versions,
-                })),
+                .json(&OpenBaoVersionsRequest { versions: &versions }),
         )
         .await
     }
@@ -404,9 +393,9 @@ impl SecretStoreDestroy for OpenBaoSecretStore {
 
         self.send_empty(
             self.authorize(self.http.post(self.endpoint(OpenBaoEndpoint::Destroy, credential)?))
-                .json(&json!({
-                    "versions": [credential.version().get()],
-                })),
+                .json(&OpenBaoVersionsRequest {
+                    versions: &[credential.version().get()],
+                }),
         )
         .await
     }
@@ -477,15 +466,7 @@ impl OpenBaoSecretStore {
     async fn write_custom_metadata(&self, credential: &CredentialRef) -> Result<(), SecretStoreError> {
         self.send_empty(
             self.authorize(self.http.post(self.endpoint(OpenBaoEndpoint::Metadata, credential)?))
-                .json(&json!({
-                    "custom_metadata": {
-                        "owner_id": credential.owner_id().as_str(),
-                        "credential_id": credential.id().as_str(),
-                        "credential_kind": credential.kind().as_str(),
-                        "current_version": credential.version().get().to_string(),
-                        "created_at": Utc::now().to_rfc3339(),
-                    },
-                })),
+                .json(&OpenBaoCustomMetadataRequest::new(credential, Utc::now())),
         )
         .await
     }
@@ -508,6 +489,57 @@ impl OpenBaoEndpoint {
             Self::Metadata => "metadata",
         }
     }
+}
+
+#[derive(Serialize)]
+struct OpenBaoWriteRequest<'a> {
+    data: OpenBaoWriteRequestData<'a>,
+}
+
+impl<'a> OpenBaoWriteRequest<'a> {
+    fn new(value: &'a SecretString) -> Self {
+        Self {
+            data: OpenBaoWriteRequestData { value: value.as_str() },
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct OpenBaoWriteRequestData<'a> {
+    value: &'a str,
+}
+
+#[derive(Serialize)]
+struct OpenBaoVersionsRequest<'a> {
+    versions: &'a [u64],
+}
+
+#[derive(Serialize)]
+struct OpenBaoCustomMetadataRequest<'a> {
+    custom_metadata: OpenBaoCustomMetadata<'a>,
+}
+
+impl<'a> OpenBaoCustomMetadataRequest<'a> {
+    fn new(credential: &'a CredentialRef, created_at: DateTime<Utc>) -> Self {
+        Self {
+            custom_metadata: OpenBaoCustomMetadata {
+                created_at: created_at.to_rfc3339(),
+                credential_id: credential.id().as_str(),
+                credential_kind: credential.kind().as_str(),
+                current_version: credential.version().get().to_string(),
+                owner_id: credential.owner_id().as_str(),
+            },
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct OpenBaoCustomMetadata<'a> {
+    created_at: String,
+    credential_id: &'a str,
+    credential_kind: &'a str,
+    current_version: String,
+    owner_id: &'a str,
 }
 
 #[derive(Deserialize)]

@@ -2,6 +2,7 @@ use std::env;
 
 use crate::credential::commands::domain::{CredentialOwnerId, SourceKind};
 use crate::source_integration_id::SourceIntegrationId;
+use serde_json::json;
 use testcontainers_modules::testcontainers::{
     ContainerAsync, GenericImage, ImageExt,
     core::{IntoContainerPort, WaitFor},
