@@ -43,6 +43,7 @@
         "X-Slack-Event-Type": "/slash",
         "X-Slack-Team-Id": "T1234",
         "X-Slack-Payload-Kind": "command",
+        "Content-Type": "application/json",
         "X-Slack-Is-Enterprise-Install": "false",
         "X-Slack-Api-App-Id": "A1234",
         "X-Slack-Transport": "socket_mode",

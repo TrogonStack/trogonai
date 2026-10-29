@@ -43,6 +43,7 @@
         "X-Slack-Event-Type": "shortcut",
         "X-Slack-Team-Id": "T1234",
         "X-Slack-Payload-Kind": "interaction",
+        "Content-Type": "application/json",
         "X-Slack-Is-Enterprise-Install": "false",
         "X-Slack-Transport": "socket_mode",
         "X-Slack-Envelope-Id": "dbdd0ef3-1543-4f94-bfb4-133d0e6c1545"

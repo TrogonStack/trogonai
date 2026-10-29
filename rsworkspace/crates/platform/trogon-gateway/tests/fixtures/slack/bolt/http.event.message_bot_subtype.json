@@ -49,6 +49,7 @@
         "X-Slack-Event-Id": "1234",
         "X-Slack-Team-Id": "T1234",
         "X-Slack-Payload-Kind": "event",
+        "Content-Type": "application/json",
         "X-Slack-Is-Enterprise-Install": "false",
         "X-Slack-Api-App-Id": "A1234",
         "X-Slack-Event-Subtype": "bot_message",

@@ -42,6 +42,10 @@ function transportHeader(transport: Transport): string {
   }
 }
 
+function contentType(kind: ExpectedNatsInput['kind'], transport: Transport): string {
+  return kind === 'command' && transport === 'http' ? 'application/x-www-form-urlencoded' : 'application/json';
+}
+
 export function expectedNats(input: ExpectedNatsInput): ExpectedNats {
   const { kind, transport, body, dispatch } = input;
   const event = record(body.event);
@@ -74,6 +78,7 @@ export function expectedNats(input: ExpectedNatsInput): ExpectedNats {
   }
   headers['X-Slack-Team-Id'] = dispatch.team_id ?? 'unknown';
   headers['X-Slack-Payload-Kind'] = kind;
+  headers['Content-Type'] = contentType(kind, transport);
 
   if (dispatch.retry_num !== null) {
     headers['X-Slack-Retry-Num'] = String(dispatch.retry_num);

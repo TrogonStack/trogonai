@@ -48,6 +48,7 @@
         "X-Slack-Event-Type": "shortcut",
         "X-Slack-Team-Id": "T1234",
         "X-Slack-Payload-Kind": "interaction",
+        "Content-Type": "application/json",
         "X-Slack-Is-Enterprise-Install": "false",
         "X-Slack-Transport": "webhook",
         "X-Slack-Request-Timestamp": "1700000000"

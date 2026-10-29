@@ -49,6 +49,7 @@
         "X-Slack-Event-Id": "Ev111",
         "X-Slack-Team-Id": "T111",
         "X-Slack-Payload-Kind": "event",
+        "Content-Type": "application/json",
         "X-Slack-Is-Enterprise-Install": "false",
         "X-Slack-Api-App-Id": "A111",
         "X-Slack-Transport": "webhook",

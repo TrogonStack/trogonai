@@ -243,6 +243,13 @@ async fn socket_slash_command_payload_publishes_and_acks() {
             .map(|v| v.as_str()),
         Some("command"),
     );
+    assert_eq!(
+        messages[0]
+            .headers
+            .get(super::super::constants::NATS_HEADER_CONTENT_TYPE)
+            .map(|v| v.as_str()),
+        Some("application/json"),
+    );
 }
 
 #[tokio::test]
