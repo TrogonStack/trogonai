@@ -477,6 +477,35 @@ gateway_intents = "guilds,guild_messages"
 }
 
 #[test]
+fn discord_empty_table_resolves_without_static_bot_token() {
+    let toml = r#"
+[sources.discord]
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+    let discord = cfg.discord.as_ref().expect("discord should be Some");
+    assert!(discord.bot_token.is_none());
+    assert_eq!(discord.intents, crate::source::discord::config::default_intents());
+    assert_eq!(discord.subject_prefix.as_str(), "discord");
+    assert_eq!(discord.stream_name.as_str(), "DISCORD");
+    assert_eq!(
+        discord.stream_max_age,
+        StreamMaxAge::from_secs(DEFAULT_STREAM_MAX_AGE_SECS).expect("non-zero")
+    );
+    assert_eq!(
+        discord.nats_ack_timeout,
+        NonZeroDuration::from_secs(DEFAULT_NATS_ACK_TIMEOUT_SECS).expect("non-zero")
+    );
+}
+
+#[test]
+fn discord_absent_table_returns_none() {
+    let f = write_toml(&github_toml("gh-secret"));
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert!(cfg.discord.is_none());
+}
+
+#[test]
 fn discord_disabled_returns_none() {
     let toml = r#"
 [sources.discord]
