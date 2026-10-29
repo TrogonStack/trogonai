@@ -79,3 +79,4 @@ future implementation work.
 - [ADR#0071: What an Agent May Reach, How Far It May Go, and Whether It May Run at All Are Policy Bindings on a Subject (Draft)](./0071-policy-bindings-on-a-subject-entitlements-ceilings-and-holds.md)
 - [ADR#0072: Agents Improve by Running Recorded Candidates, Scored Blind, and Promoted Only Through Proposals (Draft)](./0072-agents-improve-through-recorded-candidates.md)
 - [ADR#0073: A Slack Acknowledgement Body Comes From a Consumer Over NATS Request/Reply, After the Durable Publish (Draft)](./0073-slack-acknowledgement-bodies-over-request-reply.md)
+- [ADR#0080: A Bolt for JavaScript App Consumes the Gateway's Slack Traffic Through a `NatsReceiver` That Dispatches What the Gateway Already Verified and Stored (Draft)](./0080-slack-bolt-nats-receiver.md)
