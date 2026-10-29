@@ -21,7 +21,11 @@
 //! 5. A payload that cannot be routed is stored on the unroutable subject with
 //!    the reason in a header and the original bytes as the body. If that store
 //!    fails too, the delivery is not acknowledged so Slack redelivers it.
-//! 6. The JetStream stream is created on startup if it does not exist. Its
+//! 6. Socket Mode watches the connection the way Slack's Node SDK does. It pings
+//!    Slack every third of the 5 second client ping timeout and reconnects when
+//!    the pong is overdue, and reconnects when Slack's own pings stop for 30
+//!    seconds.
+//! 7. The JetStream stream is created on startup if it does not exist. Its
 //!    subjects, `max_age` and dedup window are reconciled on every start, and
 //!    settings an operator changed out of band, such as replicas, are left alone.
 //!
@@ -88,6 +92,7 @@ pub mod retry_attempt;
 pub mod retry_reason;
 pub mod server;
 pub mod signature;
+pub mod socket_liveness;
 pub mod socket_mode;
 pub mod ssl_check;
 pub mod subject;

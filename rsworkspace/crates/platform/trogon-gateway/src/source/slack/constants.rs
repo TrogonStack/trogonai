@@ -2,6 +2,8 @@ use std::time::Duration;
 
 use trogon_std::{ByteSize, HttpBodySizeMax};
 
+use super::socket_liveness::SocketLiveness;
+
 pub const DEFAULT_HTTP_BODY_SIZE_MAX: HttpBodySizeMax = HttpBodySizeMax::new(ByteSize::mib(4)).unwrap();
 
 pub const HEADER_SIGNATURE: &str = "x-slack-signature";
@@ -43,3 +45,15 @@ pub const DEDUP_WINDOW: Duration = Duration::from_secs(10 * 60);
 pub const SLACK_ACK_DEADLINE: Duration = Duration::from_secs(3);
 pub const ACK_RESPONSE_MARGIN: Duration = Duration::from_millis(500);
 pub const ACK_LIMIT_MAX: Duration = SLACK_ACK_DEADLINE.saturating_sub(ACK_RESPONSE_MARGIN);
+
+pub const CLIENT_PING_TIMEOUT: Duration = Duration::from_secs(5);
+pub const SERVER_PING_TIMEOUT: Duration = Duration::from_secs(30);
+pub const CLIENT_PING_INTERVAL: Duration = CLIENT_PING_TIMEOUT.checked_div(3).unwrap();
+pub const UNANSWERED_PING_LIMIT: u32 = 3;
+pub const CLIENT_PING_PAYLOAD: &[u8] = b"trogon-gateway";
+pub const SOCKET_LIVENESS: SocketLiveness = SocketLiveness::new(
+    CLIENT_PING_INTERVAL,
+    CLIENT_PING_TIMEOUT,
+    SERVER_PING_TIMEOUT,
+    UNANSWERED_PING_LIMIT,
+);

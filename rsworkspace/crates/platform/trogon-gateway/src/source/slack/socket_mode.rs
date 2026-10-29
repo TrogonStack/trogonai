@@ -4,15 +4,16 @@ use bytes::Bytes;
 use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use serde::Deserialize;
 use serde_json::value::RawValue;
+use tokio::time::{Instant, MissedTickBehavior};
 use tokio_tungstenite::tungstenite::{Error as WebSocketError, Message};
 use tracing::{info, warn};
 use trogon_nats::jetstream::{ClaimCheckPublisher, JetStreamPublisher, ObjectStorePut};
 
 use super::config::{SlackConfig, SlackSocketModeConfig};
-use super::constants::RECONNECT_INITIAL_DELAY;
-use super::constants::RECONNECT_MAX_DELAY;
+use super::constants::{CLIENT_PING_PAYLOAD, RECONNECT_INITIAL_DELAY, RECONNECT_MAX_DELAY, SOCKET_LIVENESS};
 use super::delivery_metadata::DeliveryContext;
 use super::server::SlackBridge;
+use super::socket_liveness::{PongWatch, SocketLiveness};
 use super::unroutable::UnroutableReason;
 
 #[derive(Debug, thiserror::Error)]
@@ -139,13 +140,14 @@ async fn connect_once<P: JetStreamPublisher, S: ObjectStorePut>(
     info!("connecting to Slack Socket Mode");
     let (ws, _) = tokio_tungstenite::connect_async(&websocket_url).await?;
     let (mut sender, mut receiver) = ws.split();
-    process_socket_messages(bridge, &mut receiver, &mut sender).await
+    process_socket_messages(bridge, &mut receiver, &mut sender, SOCKET_LIVENESS).await
 }
 
 async fn process_socket_messages<P, S, Incoming, Outgoing>(
     bridge: &SlackBridge<P, S>,
     receiver: &mut Incoming,
     sender: &mut Outgoing,
+    liveness: SocketLiveness,
 ) -> Result<(), SocketModeError>
 where
     P: JetStreamPublisher,
@@ -153,24 +155,58 @@ where
     Incoming: Stream<Item = Result<Message, WebSocketError>> + Unpin,
     Outgoing: Sink<Message, Error = WebSocketError> + Unpin,
 {
-    while let Some(message) = receiver.next().await {
-        match message? {
-            Message::Text(text) => {
-                let (reconnect, ack) = handle_text_frame(bridge, text.as_str()).await?;
-                if let Some(ack) = ack {
-                    sender.send(Message::Text(ack.into())).await?;
-                }
-                if reconnect {
+    let ping_interval = liveness.ping_interval();
+    let mut pings = tokio::time::interval_at(Instant::now() + ping_interval, ping_interval);
+    pings.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    let mut pong_watch = PongWatch::new(liveness);
+    let server_ping_timeout = liveness.server_ping_timeout();
+    let server_ping_deadline = tokio::time::sleep(server_ping_timeout);
+    tokio::pin!(server_ping_deadline);
+    let mut server_ping_seen = false;
+
+    loop {
+        let stall_deadline = pong_watch.stall_deadline();
+        tokio::select! {
+            biased;
+            _ = pings.tick() => {
+                sender.send(Message::Ping(Bytes::from_static(CLIENT_PING_PAYLOAD))).await?;
+                pong_watch.ping_sent(Instant::now());
+            }
+            message = receiver.next() => {
+                let Some(message) = message else {
                     return Ok(());
+                };
+                match message? {
+                    Message::Text(text) => {
+                        let (reconnect, ack) = handle_text_frame(bridge, text.as_str()).await?;
+                        if let Some(ack) = ack {
+                            sender.send(Message::Text(ack.into())).await?;
+                        }
+                        if reconnect {
+                            return Ok(());
+                        }
+                    }
+                    Message::Close(_) => return Ok(()),
+                    Message::Ping(payload) => {
+                        server_ping_deadline.as_mut().reset(Instant::now() + server_ping_timeout);
+                        server_ping_seen = true;
+                        sender.send(Message::Pong(payload)).await?;
+                    }
+                    Message::Pong(_) => pong_watch.pong_received(),
+                    Message::Binary(_) | Message::Frame(_) => {}
                 }
             }
-            Message::Close(_) => return Ok(()),
-            Message::Ping(payload) => sender.send(Message::Pong(payload)).await?,
-            Message::Binary(_) | Message::Pong(_) | Message::Frame(_) => {}
+            () = tokio::time::sleep_until(stall_deadline.unwrap_or_else(Instant::now)), if stall_deadline.is_some() => {
+                let timeout = liveness.client_ping_timeout();
+                warn!(timeout = ?timeout, "Slack Socket Mode pong was not received in time, reconnecting");
+                return Ok(());
+            }
+            () = &mut server_ping_deadline, if server_ping_seen => {
+                warn!(timeout = ?server_ping_timeout, "Slack Socket Mode ping was not received in time, reconnecting");
+                return Ok(());
+            }
         }
     }
-
-    Ok(())
 }
 
 async fn open_socket_url(
