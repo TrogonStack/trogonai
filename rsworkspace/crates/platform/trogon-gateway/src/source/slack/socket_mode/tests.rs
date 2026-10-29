@@ -1,5 +1,6 @@
 use super::super::ack_budget::AckBudget;
 use super::super::connections_open_error_code::ConnectionsOpenErrorCode;
+use super::super::constants::ENVELOPE_CONCURRENCY_LIMIT;
 use super::super::constants::{
     CLIENT_PING_INTERVAL, CLIENT_PING_TIMEOUT, DEFAULT_API_BASE_URL, SERVER_PING_TIMEOUT, UNANSWERED_PING_LIMIT,
 };
@@ -14,6 +15,9 @@ use axum::routing::{any, post};
 use std::error::Error;
 use std::future::IntoFuture;
 use std::net::SocketAddr;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::task::Poll;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use trogon_nats::NatsToken;
@@ -398,9 +402,7 @@ async fn payload_envelope_with_unexpected_kind_publishes_unroutable_without_ack(
         retry_reason: None,
     };
 
-    let ack = handle_payload_envelope(&bridge(publisher.clone()), envelope, raw_text)
-        .await
-        .unwrap();
+    let ack = handle_payload_envelope(&bridge(publisher.clone()), envelope, raw_text).await;
 
     assert_eq!(ack, None);
     assert_eq!(
@@ -1337,6 +1339,7 @@ struct SocketHarness {
     outbound: Outbound,
     task: tokio::task::JoinHandle<Result<(), SocketModeError>>,
     started: tokio::time::Instant,
+    reads: Arc<AtomicUsize>,
 }
 
 fn channel_sink(outbound: mpsc::UnboundedSender<Message>) -> impl Sink<Message, Error = WebSocketError> + Unpin {
@@ -1348,8 +1351,15 @@ fn channel_sink(outbound: mpsc::UnboundedSender<Message>) -> impl Sink<Message, 
 
 fn channel_stream(
     mut receiver: mpsc::UnboundedReceiver<Result<Message, WebSocketError>>,
+    reads: Arc<AtomicUsize>,
 ) -> impl Stream<Item = Result<Message, WebSocketError>> + Unpin {
-    Box::pin(futures_util::stream::poll_fn(move |cx| receiver.poll_recv(cx)))
+    Box::pin(futures_util::stream::poll_fn(move |cx| {
+        let polled = receiver.poll_recv(cx);
+        if matches!(polled, Poll::Ready(Some(_))) {
+            reads.fetch_add(1, Ordering::SeqCst);
+        }
+        polled
+    }))
 }
 
 fn start_socket() -> SocketHarness {
@@ -1359,8 +1369,10 @@ fn start_socket() -> SocketHarness {
 fn start_socket_with<P: JetStreamPublisher>(publisher: P) -> SocketHarness {
     let (inbound, receiver) = mpsc::unbounded_channel();
     let (outbound_tx, outbound) = mpsc::unbounded_channel();
+    let reads = Arc::new(AtomicUsize::new(0));
+    let stream_reads = reads.clone();
     let task = tokio::spawn(async move {
-        let mut receiver = channel_stream(receiver);
+        let mut receiver = channel_stream(receiver, stream_reads);
         let mut sender = channel_sink(outbound_tx);
         process_socket_messages(&bridge(publisher), &mut receiver, &mut sender, SOCKET_LIVENESS).await
     });
@@ -1369,6 +1381,7 @@ fn start_socket_with<P: JetStreamPublisher>(publisher: P) -> SocketHarness {
         outbound,
         task,
         started: tokio::time::Instant::now(),
+        reads,
     }
 }
 
@@ -1482,7 +1495,7 @@ async fn slow_publishes_do_not_make_a_queued_pong_count_as_missing() {
     });
     socket.next_client_ping().await;
     socket.pong();
-    let unanswered = socket.next_client_ping().await;
+    socket.next_client_ping().await;
     for index in 0..deliveries {
         socket
             .inbound
@@ -1490,7 +1503,6 @@ async fn slow_publishes_do_not_make_a_queued_pong_count_as_missing() {
             .unwrap();
     }
     socket.pong();
-    assert!(publish_delay * deliveries > CLIENT_PING_TIMEOUT);
 
     let mut acks = 0;
     while acks < deliveries {
@@ -1501,7 +1513,6 @@ async fn slow_publishes_do_not_make_a_queued_pong_count_as_missing() {
         }
     }
 
-    assert!(socket.started.elapsed() > unanswered + CLIENT_PING_TIMEOUT);
     socket.next_client_ping().await;
     assert!(!socket.task.is_finished());
     socket.task.abort();
@@ -1515,7 +1526,7 @@ async fn slow_publishes_before_the_first_pong_do_not_make_it_count_as_missing() 
         inner: MockJetStreamPublisher::new(),
         delay: publish_delay,
     });
-    let first = socket.next_client_ping().await;
+    socket.next_client_ping().await;
     for index in 0..deliveries {
         socket
             .inbound
@@ -1523,7 +1534,6 @@ async fn slow_publishes_before_the_first_pong_do_not_make_it_count_as_missing() 
             .unwrap();
     }
     socket.pong();
-    assert!(publish_delay * deliveries > CLIENT_PING_INTERVAL * UNANSWERED_PING_LIMIT);
 
     let mut acks = 0;
     while acks < deliveries {
@@ -1534,7 +1544,6 @@ async fn slow_publishes_before_the_first_pong_do_not_make_it_count_as_missing() 
         }
     }
 
-    assert!(socket.started.elapsed() > first + CLIENT_PING_INTERVAL * UNANSWERED_PING_LIMIT);
     socket.next_client_ping().await;
     assert!(!socket.task.is_finished());
     socket.task.abort();
@@ -1714,4 +1723,296 @@ async fn link_disabled_disconnect_is_reported_as_a_permanent_failure() {
         .unwrap_err();
 
     assert!(matches!(error, SocketModeError::LinkDisabled));
+}
+
+const SLOW_MARKER: &str = "EvSlow";
+const SLOW_PUBLISH: Duration = Duration::from_secs(2);
+const FAST_PUBLISH: Duration = Duration::from_secs(1);
+
+#[derive(Clone)]
+struct DelayedPublisher {
+    inner: MockJetStreamPublisher,
+    fast: Duration,
+    slow: Duration,
+    active: Arc<AtomicUsize>,
+    peak: Arc<AtomicUsize>,
+}
+
+impl DelayedPublisher {
+    fn new(fast: Duration, slow: Duration) -> Self {
+        Self {
+            inner: MockJetStreamPublisher::new(),
+            fast,
+            slow,
+            active: Arc::new(AtomicUsize::new(0)),
+            peak: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    fn peak(&self) -> usize {
+        self.peak.load(Ordering::SeqCst)
+    }
+}
+
+struct ActivePublish(Arc<AtomicUsize>);
+
+impl Drop for ActivePublish {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+impl JetStreamPublisher for DelayedPublisher {
+    type PublishError = <MockJetStreamPublisher as JetStreamPublisher>::PublishError;
+    type AckFuture = <MockJetStreamPublisher as JetStreamPublisher>::AckFuture;
+
+    async fn publish_with_headers<S: ToSubject + Send>(
+        &self,
+        subject: S,
+        headers: async_nats::HeaderMap,
+        payload: Bytes,
+    ) -> Result<Self::AckFuture, Self::PublishError> {
+        let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+        self.peak.fetch_max(active, Ordering::SeqCst);
+        let _guard = ActivePublish(self.active.clone());
+        let slow = payload
+            .windows(SLOW_MARKER.len())
+            .any(|window| window == SLOW_MARKER.as_bytes());
+        tokio::time::sleep(if slow { self.slow } else { self.fast }).await;
+        self.inner.publish_with_headers(subject, headers, payload).await
+    }
+}
+
+fn envelope_id_of(ack: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(ack).unwrap()["envelope_id"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+impl SocketHarness {
+    fn send(&self, message: Message) {
+        self.inbound.send(Ok(message)).unwrap();
+    }
+
+    async fn next_ack(&mut self) -> (String, Duration) {
+        loop {
+            match self.outbound.recv().await {
+                Some(Message::Text(ack)) => return (envelope_id_of(ack.as_str()), self.started.elapsed()),
+                Some(_) => {}
+                None => panic!("socket closed before an ack"),
+            }
+        }
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_slow_publish_does_not_delay_the_acks_of_other_envelopes() {
+    let mut socket = start_socket_with(DelayedPublisher::new(Duration::ZERO, SLOW_PUBLISH));
+    socket.send(socket_delivery("env-slow", "EvSlow1"));
+    for index in 1..=3 {
+        socket.send(socket_delivery(&format!("env-fast-{index}"), &format!("EvFast{index}")));
+    }
+
+    let mut acks = Vec::new();
+    for _ in 0..4 {
+        acks.push(socket.next_ack().await);
+    }
+
+    let mut fast: Vec<_> = acks[..3].iter().map(|(id, at)| (id.clone(), *at)).collect();
+    fast.sort();
+    assert_eq!(
+        fast,
+        (1..=3)
+            .map(|index| (format!("env-fast-{index}"), Duration::ZERO))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(acks[3], ("env-slow".to_string(), SLOW_PUBLISH));
+    socket.task.abort();
+}
+
+#[tokio::test(start_paused = true)]
+async fn envelopes_over_the_limit_wait_for_a_free_slot_instead_of_being_dropped() {
+    let publisher = DelayedPublisher::new(FAST_PUBLISH, FAST_PUBLISH);
+    let mut socket = start_socket_with(publisher.clone());
+    let total = ENVELOPE_CONCURRENCY_LIMIT + 4;
+    for index in 0..total {
+        socket.send(socket_delivery(&format!("env-{index}"), &format!("EvFast{index}")));
+    }
+
+    tokio::time::sleep(Duration::from_millis(1)).await;
+    assert_eq!(socket.reads.load(Ordering::SeqCst), ENVELOPE_CONCURRENCY_LIMIT);
+
+    let mut acks = Vec::new();
+    for _ in 0..total {
+        acks.push(socket.next_ack().await);
+    }
+
+    let mut ids: Vec<_> = acks.iter().map(|(id, _)| id.clone()).collect();
+    ids.sort();
+    let mut expected: Vec<_> = (0..total).map(|index| format!("env-{index}")).collect();
+    expected.sort();
+    assert_eq!(ids, expected);
+    assert!(
+        acks[..ENVELOPE_CONCURRENCY_LIMIT]
+            .iter()
+            .all(|(_, at)| *at == FAST_PUBLISH)
+    );
+    assert!(
+        acks[ENVELOPE_CONCURRENCY_LIMIT..]
+            .iter()
+            .all(|(_, at)| *at == FAST_PUBLISH * 2)
+    );
+    assert_eq!(publisher.peak(), ENVELOPE_CONCURRENCY_LIMIT);
+    socket.task.abort();
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_queued_pong_behind_a_full_set_of_slow_publishes_does_not_count_as_missing() {
+    let mut socket = start_socket_with(DelayedPublisher::new(SLOW_PUBLISH, SLOW_PUBLISH));
+    socket.next_client_ping().await;
+    socket.pong();
+    let unanswered = socket.next_client_ping().await;
+    for index in 0..ENVELOPE_CONCURRENCY_LIMIT {
+        socket.send(socket_delivery(&format!("env-{index}"), &format!("EvSlow{index}")));
+    }
+    socket.pong();
+
+    for _ in 0..ENVELOPE_CONCURRENCY_LIMIT {
+        let (_, at) = socket.next_ack().await;
+        assert_eq!(at, unanswered + SLOW_PUBLISH);
+    }
+
+    while socket.started.elapsed() < unanswered + CLIENT_PING_TIMEOUT * 2 {
+        socket.next_client_ping().await;
+        socket.pong();
+    }
+    assert!(!socket.task.is_finished());
+    socket.task.abort();
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_first_pong_behind_a_full_set_of_slow_publishes_does_not_count_as_missing() {
+    let mut socket = start_socket_with(DelayedPublisher::new(SLOW_PUBLISH, SLOW_PUBLISH));
+    let first = socket.next_client_ping().await;
+    for index in 0..ENVELOPE_CONCURRENCY_LIMIT {
+        socket.send(socket_delivery(&format!("env-{index}"), &format!("EvSlow{index}")));
+    }
+    socket.pong();
+
+    for _ in 0..ENVELOPE_CONCURRENCY_LIMIT {
+        socket.next_ack().await;
+    }
+
+    while socket.started.elapsed() < first + CLIENT_PING_INTERVAL * UNANSWERED_PING_LIMIT * 2 {
+        socket.next_client_ping().await;
+        socket.pong();
+    }
+    assert!(!socket.task.is_finished());
+    socket.task.abort();
+}
+
+#[tokio::test(start_paused = true)]
+async fn pings_keep_flowing_while_an_envelope_is_in_flight() {
+    let mut socket = start_socket_with(DelayedPublisher::new(Duration::ZERO, SLOW_PUBLISH));
+    socket.send(socket_delivery("env-slow", "EvSlow1"));
+
+    assert_eq!(socket.next_client_ping().await, ping_time(1));
+    socket.pong();
+    socket.server_ping();
+
+    assert_eq!(socket.next_ack().await, ("env-slow".to_string(), SLOW_PUBLISH));
+    assert!(!socket.task.is_finished());
+    socket.task.abort();
+}
+
+#[tokio::test(start_paused = true)]
+async fn disconnect_lets_in_flight_envelopes_finish_and_ack() {
+    let mut socket = start_socket_with(DelayedPublisher::new(Duration::ZERO, SLOW_PUBLISH));
+    socket.send(socket_delivery("env-slow", "EvSlow1"));
+    socket.send(Message::Text(
+        r#"{"type":"disconnect","reason":"refresh_requested"}"#.into(),
+    ));
+
+    assert_eq!(socket.next_ack().await, ("env-slow".to_string(), SLOW_PUBLISH));
+    assert_eq!(socket.finish().await, SLOW_PUBLISH);
+}
+
+#[tokio::test(start_paused = true)]
+async fn disconnect_drain_gives_up_when_an_ack_cannot_be_written() {
+    let socket = start_socket_with(DelayedPublisher::new(Duration::ZERO, SLOW_PUBLISH));
+    socket.send(socket_delivery("env-slow-1", "EvSlow1"));
+    socket.send(socket_delivery("env-slow-2", "EvSlow2"));
+    socket.send(Message::Text(r#"{"type":"disconnect"}"#.into()));
+    let SocketHarness { task, outbound, .. } = socket;
+    drop(outbound);
+
+    task.await.unwrap().unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn close_lets_in_flight_envelopes_finish_publishing() {
+    let publisher = DelayedPublisher::new(Duration::ZERO, SLOW_PUBLISH);
+    let mut socket = start_socket_with(publisher.clone());
+    socket.send(socket_delivery("env-slow", "EvSlow1"));
+    socket.send(Message::Close(None));
+
+    assert_eq!(socket.next_ack().await, ("env-slow".to_string(), SLOW_PUBLISH));
+    assert_eq!(socket.finish().await, SLOW_PUBLISH);
+    assert_eq!(publisher.inner.published_messages().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn stream_end_lets_in_flight_envelopes_finish_publishing() {
+    let publisher = DelayedPublisher::new(Duration::ZERO, SLOW_PUBLISH);
+    let socket = start_socket_with(publisher.clone());
+    socket.send(socket_delivery("env-slow", "EvSlow1"));
+    let SocketHarness {
+        inbound,
+        mut outbound,
+        task,
+        started,
+        ..
+    } = socket;
+    drop(inbound);
+
+    task.await.unwrap().unwrap();
+
+    assert_eq!(started.elapsed(), SLOW_PUBLISH);
+    assert_eq!(publisher.inner.published_messages().len(), 1);
+    assert!(matches!(outbound.recv().await, Some(Message::Text(_))));
+}
+
+#[tokio::test(start_paused = true)]
+async fn link_disabled_lets_in_flight_envelopes_finish_before_failing() {
+    let publisher = DelayedPublisher::new(Duration::ZERO, SLOW_PUBLISH);
+    let mut socket = start_socket_with(publisher.clone());
+    socket.send(socket_delivery("env-slow", "EvSlow1"));
+    socket.send(Message::Text(
+        r#"{"type":"disconnect","reason":"link_disabled"}"#.into(),
+    ));
+
+    assert_eq!(socket.next_ack().await, ("env-slow".to_string(), SLOW_PUBLISH));
+    let SocketHarness { task, started, .. } = socket;
+    let error = task.await.unwrap().unwrap_err();
+
+    assert!(matches!(error, SocketModeError::LinkDisabled));
+    assert_eq!(started.elapsed(), SLOW_PUBLISH);
+    assert_eq!(publisher.inner.published_messages().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_delivery_that_is_not_acked_leaves_the_connection_open() {
+    let publisher = MockJetStreamPublisher::new();
+    publisher.fail_next_js_publish();
+    let mut socket = start_socket_with(publisher.clone());
+    socket.send(socket_delivery("env-failed", "EvFailed1"));
+    socket.send(socket_delivery("env-stored", "EvStored1"));
+
+    let (acked, _) = socket.next_ack().await;
+
+    assert_eq!(acked, "env-stored");
+    assert_eq!(publisher.published_messages().len(), 1);
+    assert!(!socket.task.is_finished());
+    socket.task.abort();
 }

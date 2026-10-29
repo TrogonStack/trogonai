@@ -31,7 +31,15 @@
 //!    `link_disabled` disconnect, are logged at error level while the usual
 //!    reconnect backoff continues, because the gateway has no per integration
 //!    health signal.
-//! 8. The JetStream stream is created on startup if it does not exist. Its
+//! 8. Socket Mode handles up to 16 envelopes at once and acknowledges each one
+//!    as soon as its own publish is stored, so a slow publish does not hold back
+//!    the acknowledgements behind it. At the limit it stops reading frames until
+//!    a slot frees, which also delays replies to Slack's pings by at most one
+//!    publish. When Slack asks for a reconnect, work already in flight is
+//!    finished and acknowledged on the still open socket. When the connection is
+//!    lost or stalls, in-flight work is cancelled because the acknowledgements
+//!    could not be delivered, and Slack redelivers those envelopes.
+//! 9. The JetStream stream is created on startup if it does not exist. Its
 //!    subjects, `max_age` and dedup window are reconciled on every start, and
 //!    settings an operator changed out of band, such as replicas, are left alone.
 //!
