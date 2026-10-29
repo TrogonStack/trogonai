@@ -629,6 +629,39 @@ fn form_request(body: &[u8], timestamp: &str, sig: &str) -> Request<Body> {
 }
 
 #[tokio::test]
+async fn a_form_content_type_with_other_case_and_a_charset_is_still_a_form() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = mock_app(publisher.clone());
+
+    let interaction_payload = serde_json::json!({
+        "type": "block_actions",
+        "trigger_id": "trigger123",
+        "team": { "id": "T01ABC" },
+        "user": { "id": "U01ABC" },
+        "actions": [{ "action_id": "btn_click", "type": "button" }]
+    });
+    let form_body = format!(
+        "payload={}",
+        form_urlencoded::byte_serialize(interaction_payload.to_string().as_bytes()).collect::<String>()
+    );
+    let ts = current_timestamp();
+    let sig = compute_sig(TEST_SECRET, &ts, form_body.as_bytes());
+    let mut request = form_request(form_body.as_bytes(), &ts, &sig);
+    request.headers_mut().insert(
+        "content-type",
+        "Application/X-WWW-Form-Urlencoded; charset=UTF-8".parse().unwrap(),
+    );
+
+    let resp = app.oneshot(request).await.unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let messages = publisher.published_messages();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].subject, "slack.interaction.block_actions");
+}
+
+#[tokio::test]
 async fn interaction_block_actions_publishes_to_nats() {
     let _guard = tracing_guard();
     let publisher = MockJetStreamPublisher::new();
