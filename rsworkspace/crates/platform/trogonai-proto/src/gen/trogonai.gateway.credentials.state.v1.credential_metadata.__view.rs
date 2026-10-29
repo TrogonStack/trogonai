@@ -5,11 +5,11 @@
 pub struct CredentialMetadataView<'a> {
     /// Field 1: `reference`
     pub reference: ::buffa::MessageFieldView<
-        super::super::__buffa::view::CredentialRefView<'a>,
+        super::super::super::super::v1::__buffa::view::CredentialRefView<'a>,
     >,
     /// Field 2: `status`
     pub status: ::core::option::Option<
-        ::buffa::EnumValue<super::super::CredentialStatus>,
+        ::buffa::EnumValue<super::super::super::super::v1::CredentialStatus>,
     >,
     /// Field 3: `storage_backend`
     pub storage_backend: ::core::option::Option<
@@ -79,7 +79,7 @@ impl<'a> ::buffa::MessageView<'a> for CredentialMetadataView<'a> {
                     }
                     None => {
                         view.reference = ::buffa::MessageFieldView::set(
-                            <super::super::__buffa::view::CredentialRefView as ::buffa::MessageView>::decode_view_ctx(
+                            <super::super::super::super::v1::__buffa::view::CredentialRefView as ::buffa::MessageView>::decode_view_ctx(
                                 sub,
                                 __sub_ctx,
                             )?,
@@ -136,8 +136,8 @@ impl<'a> ::buffa::MessageView<'a> for CredentialMetadataView<'a> {
             reference: match self.reference.as_option() {
                 Some(v) => {
                     ::buffa::MessageField::<
-                        super::super::CredentialRef,
-                        ::buffa::Inline<super::super::CredentialRef>,
+                        super::super::super::super::v1::CredentialRef,
+                        ::buffa::Inline<super::super::super::super::v1::CredentialRef>,
                     >::some(v.to_owned_from_source(__buffa_src)?)
                 }
                 None => ::buffa::MessageField::none(),
@@ -328,14 +328,18 @@ impl CredentialMetadataOwnedView {
     #[must_use]
     pub fn reference(
         &self,
-    ) -> &::buffa::MessageFieldView<super::super::__buffa::view::CredentialRefView<'_>> {
+    ) -> &::buffa::MessageFieldView<
+        super::super::super::super::v1::__buffa::view::CredentialRefView<'_>,
+    > {
         &self.0.reborrow().reference
     }
     /// Field 2: `status`
     #[must_use]
     pub fn status(
         &self,
-    ) -> ::core::option::Option<::buffa::EnumValue<super::super::CredentialStatus>> {
+    ) -> ::core::option::Option<
+        ::buffa::EnumValue<super::super::super::super::v1::CredentialStatus>,
+    > {
         self.0.reborrow().status
     }
     /// Field 3: `storage_backend`

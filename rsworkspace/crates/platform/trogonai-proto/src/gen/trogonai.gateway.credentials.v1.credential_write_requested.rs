@@ -33,6 +33,13 @@ pub struct CredentialWriteRequested {
         skip_serializing_if = "::core::option::Option::is_none"
     )]
     pub kind: ::core::option::Option<::buffa::EnumValue<CredentialKind>>,
+    /// Field 5: `scope_key`
+    #[serde(
+        rename = "scopeKey",
+        alias = "scope_key",
+        with = "::buffa::json_helpers::proto_string"
+    )]
+    pub scope_key: ::buffa::alloc::string::String,
 }
 impl ::core::fmt::Debug for CredentialWriteRequested {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -41,6 +48,7 @@ impl ::core::fmt::Debug for CredentialWriteRequested {
             .field("owner_id", &self.owner_id)
             .field("source", &self.source)
             .field("kind", &self.kind)
+            .field("scope_key", &self.scope_key)
             .finish()
     }
 }
@@ -101,6 +109,7 @@ impl ::buffa::Message for CredentialWriteRequested {
         if let Some(ref v) = self.kind {
             size += 1u64 + ::buffa::types::int32_encoded_len(v.to_i32()) as u64;
         }
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.scope_key) as u64;
         ::buffa::saturate_size(size)
     }
     fn write_to(
@@ -118,6 +127,7 @@ impl ::buffa::Message for CredentialWriteRequested {
         if let Some(ref v) = self.kind {
             ::buffa::types::put_int32_field(4u32, v.to_i32(), buf);
         }
+        ::buffa::types::put_string_field(5u32, &self.scope_key, buf);
     }
     fn merge_field(
         &mut self,
@@ -162,6 +172,13 @@ impl ::buffa::Message for CredentialWriteRequested {
                     ::buffa::EnumValue::from(::buffa::types::decode_int32(buf)?),
                 );
             }
+            5u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::types::merge_string(&mut self.scope_key, buf)?;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -173,6 +190,7 @@ impl ::buffa::Message for CredentialWriteRequested {
         self.owner_id.clear();
         self.source = ::core::option::Option::None;
         self.kind = ::core::option::Option::None;
+        self.scope_key.clear();
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for CredentialWriteRequested {

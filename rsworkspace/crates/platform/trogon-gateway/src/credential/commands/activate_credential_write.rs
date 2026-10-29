@@ -49,16 +49,10 @@ impl Decider for ActivateCredentialWrite {
                 });
             }
         };
-        let (pending_id, pending_owner, pending_source, pending_kind) = decode_pending_write_state(pending)?;
+        let (pending_id, pending_scope, pending_kind) = decode_pending_write_state(pending)?;
 
         validate_activation_metadata(&command.metadata)?;
-        validate_ref_matches_pending(
-            command.metadata.reference(),
-            &pending_id,
-            &pending_owner,
-            pending_source,
-            pending_kind,
-        )?;
+        validate_ref_matches_pending(command.metadata.reference(), &pending_id, &pending_scope, pending_kind)?;
 
         Ok(Decision::event(v1::CredentialEvent {
             event: Some(activated_to_proto(&command.metadata).into()),

@@ -5,8 +5,8 @@ use crate::credential::commands::domain::{
     CredentialScope, CredentialVersion, InjectionLocation, InjectionLocations, RuntimeServiceId,
 };
 use crate::credential::commands::proto::{
-    activated_to_proto, destroy_failed_to_proto, destroy_requested_to_proto, destroyed_to_proto, revoked_to_proto,
-    write_requested_to_proto,
+    activated_to_proto, decode_scope_key, destroy_failed_to_proto, destroy_requested_to_proto, destroyed_to_proto,
+    revoked_to_proto, write_requested_to_proto,
 };
 use crate::secret_store::{
     MockOpenBaoSecretStore, SecretDestroyReason, SecretStoreDestroy, SecretStoreMetadata, SecretStorePut,
@@ -145,10 +145,15 @@ async fn raw_stream(events: impl IntoIterator<Item = Event>) -> MockJetStreamPub
 }
 
 fn write_requested(credential: &CredentialRef) -> v1::CredentialEvent {
+    let scope = decode_scope_key(
+        credential.owner_id().clone(),
+        credential.source(),
+        "scope_key",
+        credential.scope_key(),
+    )
+    .unwrap();
     v1::CredentialEvent {
-        event: Some(
-            write_requested_to_proto(credential.id(), &owner_id(), credential.source(), credential.kind()).into(),
-        ),
+        event: Some(write_requested_to_proto(credential.id(), &scope, credential.kind()).into()),
     }
 }
 

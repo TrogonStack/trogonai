@@ -12,6 +12,7 @@ fn write_requested() -> v1::CredentialWriteRequested {
         owner_id: "tenant-1".to_string(),
         source: Some(v1::CredentialSource::Github.into()),
         kind: Some(v1::CredentialKind::WebhookSecret.into()),
+        scope_key: "github".to_string(),
     }
 }
 

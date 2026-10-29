@@ -13,6 +13,8 @@ pub struct CredentialWriteRequestedView<'a> {
     >,
     /// Field 4: `kind`
     pub kind: ::core::option::Option<::buffa::EnumValue<super::super::CredentialKind>>,
+    /// Field 5: `scope_key`
+    pub scope_key: &'a str,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -32,6 +34,14 @@ Distinguishes a field that was absent from one explicitly encoded with its defau
     #[inline]
     pub const fn has_owner_id(&self) -> bool {
         self.__buffa_required_seen_0 & 2u64 != 0
+    }
+    /**Whether required field `scope_key` was present on the wire.
+
+Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
+    #[must_use]
+    #[inline]
+    pub const fn has_scope_key(&self) -> bool {
+        self.__buffa_required_seen_0 & 4u64 != 0
     }
 }
 impl<'a> ::buffa::MessageView<'a> for CredentialWriteRequestedView<'a> {
@@ -96,6 +106,14 @@ impl<'a> ::buffa::MessageView<'a> for CredentialWriteRequestedView<'a> {
                     ::buffa::EnumValue::from(::buffa::types::decode_int32(&mut cur)?),
                 );
             }
+            5u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.scope_key = ::buffa::types::borrow_str(&mut cur)?;
+                view.__buffa_required_seen_0 |= 4u64;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -126,6 +144,7 @@ impl<'a> ::buffa::MessageView<'a> for CredentialWriteRequestedView<'a> {
             owner_id: self.owner_id.to_string(),
             source: self.source,
             kind: self.kind,
+            scope_key: self.scope_key.to_string(),
             ..::core::default::Default::default()
         })
     }
@@ -144,6 +163,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialWriteRequestedView<'a> {
         if let Some(ref v) = self.kind {
             size += 1u64 + ::buffa::types::int32_encoded_len(v.to_i32()) as u64;
         }
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.scope_key) as u64;
         ::buffa::saturate_size(size)
     }
     #[allow(clippy::needless_borrow)]
@@ -162,6 +182,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialWriteRequestedView<'a> {
         if let Some(ref v) = self.kind {
             ::buffa::types::put_int32_field(4u32, v.to_i32(), buf);
         }
+        ::buffa::types::put_string_field(5u32, &self.scope_key, buf);
     }
 }
 /// Serializes this view as protobuf JSON.
@@ -193,6 +214,9 @@ impl<'__a> ::serde::Serialize for CredentialWriteRequestedView<'__a> {
         }
         if let ::core::option::Option::Some(ref __v) = self.kind {
             __map.serialize_entry("kind", __v)?;
+        }
+        {
+            __map.serialize_entry("scopeKey", self.scope_key)?;
         }
         __map.end()
     }
@@ -312,6 +336,11 @@ impl CredentialWriteRequestedOwnedView {
         &self,
     ) -> ::core::option::Option<::buffa::EnumValue<super::super::CredentialKind>> {
         self.0.reborrow().kind
+    }
+    /// Field 5: `scope_key`
+    #[must_use]
+    pub fn scope_key(&self) -> &'_ str {
+        self.0.reborrow().scope_key
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<CredentialWriteRequestedView<'static>>>

@@ -1,7 +1,7 @@
 use trogonai_proto::gateway::credentials::{CredentialEventCase, CredentialStateSnapshotCase, state_v1, v1};
 
 use super::domain::{
-    CredentialId, CredentialKind, CredentialMetadata, CredentialOwnerId, CredentialRef, CredentialStatus, SourceKind,
+    CredentialId, CredentialKind, CredentialMetadata, CredentialRef, CredentialScope, CredentialStatus,
 };
 use super::proto::{
     CredentialProtoDecodeError, active_credential_ref, active_state_to_proto, cleanup_failed_to_proto_state,
@@ -107,25 +107,25 @@ pub fn evolve(
     let next = match event {
         CredentialEventCase::WriteRequested(inner) => match current {
             CredentialStateSnapshotCase::Missing(_) => {
-                let (credential_id, owner_id, source, kind) = decode_write_requested(inner)?;
-                pending_write_to_proto_state(&credential_id, &owner_id, source, kind).into()
+                let (credential_id, scope, kind) = decode_write_requested(inner)?;
+                pending_write_to_proto_state(&credential_id, &scope, kind).into()
             }
             CredentialStateSnapshotCase::WriteFailed(failed) => {
                 let (failed_id, _) = decode_write_failed_state(failed)?;
-                let (credential_id, owner_id, source, kind) = decode_write_requested(inner)?;
+                let (credential_id, scope, kind) = decode_write_requested(inner)?;
                 if failed_id != credential_id {
                     return Err(CredentialEvolveError::CredentialRefMismatch {
                         expected: failed_id,
                         actual: credential_id,
                     });
                 }
-                pending_write_to_proto_state(&credential_id, &owner_id, source, kind).into()
+                pending_write_to_proto_state(&credential_id, &scope, kind).into()
             }
             _ => return Err(CredentialEvolveError::WriteRequestedAfterStart),
         },
         CredentialEventCase::WriteFailed(inner) => match current {
             CredentialStateSnapshotCase::PendingWrite(pending) => {
-                let (pending_id, _, _, _) = decode_pending_write_state(pending)?;
+                let (pending_id, _, _) = decode_pending_write_state(pending)?;
                 let (event_id, reason) = decode_write_failed(inner)?;
                 if pending_id != event_id {
                     return Err(CredentialEvolveError::CredentialRefMismatch {
@@ -139,15 +139,14 @@ pub fn evolve(
         },
         CredentialEventCase::Activated(inner) => match current {
             CredentialStateSnapshotCase::PendingWrite(pending) => {
-                let (pending_id, pending_owner, pending_source, pending_kind) = decode_pending_write_state(pending)?;
+                let (pending_id, pending_scope, pending_kind) = decode_pending_write_state(pending)?;
                 let metadata =
                     decode_credential_metadata("metadata", decode_message_field("metadata", &inner.metadata)?)?;
                 validate_activation_metadata_for_evolve(&metadata)?;
                 validate_ref_matches_pending_for_evolve(
                     metadata.reference(),
                     &pending_id,
-                    &pending_owner,
-                    pending_source,
+                    &pending_scope,
                     pending_kind,
                 )?;
                 active_state_to_proto(&metadata, &[]).into()
@@ -256,8 +255,7 @@ pub(crate) fn validate_activation_metadata_for_evolve(
 pub(crate) fn validate_ref_matches_pending(
     credential_ref: &CredentialRef,
     expected_id: &CredentialId,
-    expected_owner_id: &CredentialOwnerId,
-    expected_source: SourceKind,
+    expected_scope: &CredentialScope,
     expected_kind: CredentialKind,
 ) -> Result<(), CredentialDecideError> {
     if credential_ref.id() != expected_id {
@@ -266,10 +264,7 @@ pub(crate) fn validate_ref_matches_pending(
             actual: credential_ref.id().clone(),
         });
     }
-    if credential_ref.owner_id() != expected_owner_id
-        || credential_ref.source() != expected_source
-        || credential_ref.kind() != expected_kind
-    {
+    if !credential_ref.is_scoped_to(expected_scope) || credential_ref.kind() != expected_kind {
         return Err(CredentialDecideError::CredentialRefMismatch {
             expected: expected_id.clone(),
             actual: credential_ref.id().clone(),
@@ -281,8 +276,7 @@ pub(crate) fn validate_ref_matches_pending(
 pub(crate) fn validate_ref_matches_pending_for_evolve(
     credential_ref: &CredentialRef,
     expected_id: &CredentialId,
-    expected_owner_id: &CredentialOwnerId,
-    expected_source: SourceKind,
+    expected_scope: &CredentialScope,
     expected_kind: CredentialKind,
 ) -> Result<(), CredentialEvolveError> {
     if credential_ref.id() != expected_id {
@@ -291,10 +285,7 @@ pub(crate) fn validate_ref_matches_pending_for_evolve(
             actual: credential_ref.id().clone(),
         });
     }
-    if credential_ref.owner_id() != expected_owner_id
-        || credential_ref.source() != expected_source
-        || credential_ref.kind() != expected_kind
-    {
+    if !credential_ref.is_scoped_to(expected_scope) || credential_ref.kind() != expected_kind {
         return Err(CredentialEvolveError::CredentialRefMismatch {
             expected: expected_id.clone(),
             actual: credential_ref.id().clone(),

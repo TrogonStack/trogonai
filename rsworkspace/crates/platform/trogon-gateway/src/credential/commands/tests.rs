@@ -19,9 +19,9 @@ use super::domain::{
 };
 use super::proto::{
     CredentialProtoDecodeError, activated_to_proto, decode_active_state, decode_credential_metadata,
-    decode_message_field, decode_pending_write_state, destroy_failed_to_proto, destroy_requested_to_proto,
-    destroyed_to_proto, revoked_to_proto, rotated_to_proto, rotation_failed_to_proto, rotation_requested_to_proto,
-    write_failed_to_proto, write_requested_to_proto,
+    decode_message_field, decode_pending_write_state, decode_write_requested, destroy_failed_to_proto,
+    destroy_requested_to_proto, destroyed_to_proto, pending_write_to_proto_state, revoked_to_proto, rotated_to_proto,
+    rotation_failed_to_proto, rotation_requested_to_proto, write_failed_to_proto, write_requested_to_proto,
 };
 use super::snapshot::CREDENTIAL_SNAPSHOT_POLICY;
 use super::state::{CredentialDecideError, CredentialEvolveError, evolve, initial_state};
@@ -30,6 +30,7 @@ use super::{
     RecordCredentialRotationFailure, RecordCredentialWriteFailure, RequestCredentialDestroy, RequestCredentialRotation,
     RequestCredentialWrite, RevokeCredential,
 };
+use crate::source_integration_id::SourceIntegrationId;
 
 #[derive(Debug, thiserror::Error)]
 #[error("credential test stream store rejected the append")]
@@ -128,41 +129,44 @@ fn owner_id() -> CredentialOwnerId {
     CredentialOwnerId::new("tenant-1").unwrap()
 }
 
-fn credential_ref(version: u64) -> CredentialRef {
-    let scope = CredentialScope::integration(
+fn integration_scope(integration_id: &str) -> CredentialScope {
+    CredentialScope::integration(
         owner_id(),
         SourceKind::GitHub,
-        crate::source_integration_id::SourceIntegrationId::new("primary").unwrap(),
-    );
+        SourceIntegrationId::new(integration_id).unwrap(),
+    )
+}
+
+fn scope() -> CredentialScope {
+    integration_scope("primary")
+}
+
+fn credential_ref(version: u64) -> CredentialRef {
     CredentialRef::new(
         credential_id(),
         CredentialVersion::new(version).unwrap(),
-        &scope,
+        &scope(),
         CredentialKind::WebhookSecret,
     )
 }
 
-fn metadata(version: u64) -> CredentialMetadata {
-    let credential_ref = credential_ref(version);
+fn active_metadata(credential_ref: CredentialRef) -> CredentialMetadata {
+    let fingerprint = CredentialFingerprint::new(format!("openbao:secret/metadata/{credential_ref}")).unwrap();
     CredentialMetadata::new(
-        credential_ref.clone(),
+        credential_ref,
         CredentialStatus::Active,
         StorageBackend::OpenBao,
-        CredentialFingerprint::new(format!("openbao:secret/metadata/{credential_ref}")).unwrap(),
+        fingerprint,
     )
+}
+
+fn metadata(version: u64) -> CredentialMetadata {
+    active_metadata(credential_ref(version))
 }
 
 fn write_requested() -> proto::CredentialEvent {
     proto::CredentialEvent {
-        event: Some(
-            write_requested_to_proto(
-                &credential_id(),
-                &owner_id(),
-                SourceKind::GitHub,
-                CredentialKind::WebhookSecret,
-            )
-            .into(),
-        ),
+        event: Some(write_requested_to_proto(&credential_id(), &scope(), CredentialKind::WebhookSecret).into()),
     }
 }
 
@@ -235,12 +239,7 @@ fn destroy_failed(version: u64) -> proto::CredentialEvent {
 }
 
 fn request_write() -> RequestCredentialWrite {
-    RequestCredentialWrite::new(
-        credential_id(),
-        owner_id(),
-        SourceKind::GitHub,
-        CredentialKind::WebhookSecret,
-    )
+    RequestCredentialWrite::new(credential_id(), scope(), CredentialKind::WebhookSecret)
 }
 
 fn rebuild_state_from_events(
@@ -415,6 +414,43 @@ fn given_when_then_activates_pending_credential_write() {
         .given([write_requested()])
         .when(ActivateCredentialWrite::new(metadata(1)))
         .then([activated(1)]);
+}
+
+#[test]
+fn given_when_then_rejects_activation_for_a_different_scope() {
+    let other_scope_ref = CredentialRef::new(
+        credential_id(),
+        CredentialVersion::initial(),
+        &integration_scope("secondary"),
+        CredentialKind::WebhookSecret,
+    );
+
+    TestCase::<ActivateCredentialWrite>::new()
+        .given([write_requested()])
+        .when(ActivateCredentialWrite::new(active_metadata(other_scope_ref)))
+        .then_error(CredentialDecideError::CredentialRefMismatch {
+            expected: credential_id(),
+            actual: credential_id(),
+        });
+}
+
+#[test]
+fn activation_rejects_a_pending_write_persisted_without_a_scope() {
+    let mut pending = pending_write_to_proto_state(&credential_id(), &scope(), CredentialKind::WebhookSecret);
+    pending.scope_key = String::new();
+    let state = state_v1::CredentialStateSnapshot {
+        state: Some(pending.into()),
+    };
+
+    TestCase::<ActivateCredentialWrite>::new()
+        .given_state(state)
+        .when(ActivateCredentialWrite::new(metadata(1)))
+        .then_error(CredentialDecideError::InvalidProto(
+            CredentialProtoDecodeError::InvalidField {
+                field: "pending_write.scope_key",
+                reason: "credential scope key must not be empty".to_string(),
+            },
+        ));
 }
 
 #[test]
@@ -648,12 +684,57 @@ fn rebuild_state_from_events_returns_failed_write_to_pending_write_on_retry() {
     };
     assert_eq!(
         decode_pending_write_state(pending).unwrap(),
-        (
-            credential_id(),
-            owner_id(),
-            SourceKind::GitHub,
-            CredentialKind::WebhookSecret
-        )
+        (credential_id(), scope(), CredentialKind::WebhookSecret)
+    );
+}
+
+#[test]
+fn pending_write_keeps_the_requested_scope() {
+    let state = rebuild_state_from_events([write_requested()]);
+
+    let Some(CredentialStateSnapshotCase::PendingWrite(pending)) = state.state.as_ref() else {
+        panic!("expected pending write");
+    };
+    assert_eq!(pending.scope_key, "github/primary");
+    assert_eq!(
+        decode_pending_write_state(pending).unwrap(),
+        (credential_id(), scope(), CredentialKind::WebhookSecret)
+    );
+}
+
+#[test]
+fn write_requested_round_trips_a_source_scope() {
+    let credential_id = CredentialId::new("memory:discord:bot_token:1").unwrap();
+    let scope = CredentialScope::source(owner_id(), SourceKind::Discord);
+
+    let event = write_requested_to_proto(&credential_id, &scope, CredentialKind::BotToken);
+
+    assert_eq!(event.scope_key, "discord");
+    assert_eq!(
+        decode_write_requested(&event).unwrap(),
+        (credential_id, scope, CredentialKind::BotToken)
+    );
+}
+
+#[test]
+fn evolve_rejects_activation_for_a_different_scope() {
+    let pending = rebuild_state_from_events([write_requested()]);
+    let other_scope_ref = CredentialRef::new(
+        credential_id(),
+        CredentialVersion::initial(),
+        &integration_scope("secondary"),
+        CredentialKind::WebhookSecret,
+    );
+    let activation = proto::CredentialEvent {
+        event: Some(activated_to_proto(&active_metadata(other_scope_ref)).into()),
+    };
+
+    assert_eq!(
+        evolve(pending, &activation).unwrap_err(),
+        CredentialEvolveError::CredentialRefMismatch {
+            expected: credential_id(),
+            actual: credential_id(),
+        }
     );
 }
 
@@ -666,8 +747,7 @@ fn evolve_rejects_write_retry_for_a_different_credential() {
         event: Some(
             write_requested_to_proto(
                 &other_id,
-                &owner_id(),
-                SourceKind::GitHub,
+                &integration_scope("secondary"),
                 CredentialKind::WebhookSecret,
             )
             .into(),
@@ -747,6 +827,7 @@ fn event_codec_rejects_invalid_persisted_fields() {
         owner_id: "tenant-1".to_string(),
         source: Some(proto::CredentialSource::CREDENTIAL_SOURCE_GITHUB.into()),
         kind: Some(proto::CredentialKind::CREDENTIAL_KIND_WEBHOOK_SECRET.into()),
+        scope_key: "github/primary".to_string(),
     }
     .encode_to_vec();
 
@@ -767,6 +848,34 @@ fn event_codec_rejects_invalid_persisted_fields() {
             ..
         })
     ));
+}
+
+#[test]
+fn event_codec_rejects_a_write_request_without_a_scope() {
+    let payload = proto::CredentialWriteRequested {
+        credential_id: credential_id().as_str().to_string(),
+        owner_id: "tenant-1".to_string(),
+        source: Some(proto::CredentialSource::CREDENTIAL_SOURCE_GITHUB.into()),
+        kind: Some(proto::CredentialKind::CREDENTIAL_KIND_WEBHOOK_SECRET.into()),
+        scope_key: String::new(),
+    }
+    .encode_to_vec();
+
+    let decoded = <proto::CredentialEvent as EventDecode>::decode(EventData::new(
+        <proto::CredentialWriteRequested as buffa::MessageName>::FULL_NAME,
+        &payload,
+    ))
+    .unwrap()
+    .into_decoded()
+    .unwrap();
+
+    assert_eq!(
+        evolve(initial_state(), &decoded).unwrap_err(),
+        CredentialEvolveError::InvalidProto(CredentialProtoDecodeError::InvalidField {
+            field: "scope_key",
+            reason: "credential scope key must not be empty".to_string(),
+        })
+    );
 }
 
 #[test]

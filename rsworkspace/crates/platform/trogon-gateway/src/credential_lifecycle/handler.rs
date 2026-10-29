@@ -274,23 +274,19 @@ fn pending_write_credential_ref(
     stream_id: &str,
     pending: &state_v1::PendingCredentialWriteState,
 ) -> Result<CredentialRef, CredentialActivationRecoveryPlanError> {
-    let (pending_id, pending_owner_id, pending_source, pending_kind) =
+    let (pending_id, pending_scope, pending_kind) =
         decode_pending_write_state(pending).map_err(CredentialActivationRecoveryPlanError::InvalidState)?;
     let credential_id =
         CredentialId::new(stream_id).map_err(CredentialActivationRecoveryPlanError::InvalidCredentialId)?;
     let credential = openbao_credential_ref_from_id(credential_id, CredentialVersion::initial())
         .map_err(CredentialActivationRecoveryPlanError::InvalidOpenBaoCredentialId)?;
 
-    if credential.id() != &pending_id
-        || credential.owner_id() != &pending_owner_id
-        || credential.source() != pending_source
-        || credential.kind() != pending_kind
-    {
+    if credential.id() != &pending_id || !credential.is_scoped_to(&pending_scope) || credential.kind() != pending_kind {
         return Err(CredentialActivationRecoveryPlanError::PendingWriteMismatch {
             credential,
             expected_id: pending_id,
-            expected_owner_id: pending_owner_id,
-            expected_source: pending_source,
+            expected_owner_id: pending_scope.owner_id().clone(),
+            expected_source: pending_scope.source_kind(),
             expected_kind: pending_kind,
         });
     }
@@ -571,12 +567,7 @@ where
         &self,
         command: PutCredential,
     ) -> HandlerResult<EventStore, <Secrets as SecretStorePut>::Error> {
-        let request = RequestCredentialWrite::new(
-            command.credential_id.clone(),
-            command.scope.owner_id().clone(),
-            command.scope.source_kind(),
-            command.kind,
-        );
+        let request = RequestCredentialWrite::new(command.credential_id.clone(), command.scope.clone(), command.kind);
         self.ensure_write_requested(&request).await?;
 
         let source_kind = command.scope.source_kind();
@@ -1062,11 +1053,8 @@ fn pending_matches(
     pending: &state_v1::PendingCredentialWriteState,
     command: &RequestCredentialWrite,
 ) -> Result<bool, CredentialProtoDecodeError> {
-    let (credential_id, owner_id, source, kind) = decode_pending_write_state(pending)?;
-    Ok(credential_id == *command.credential_id()
-        && owner_id == *command.owner_id()
-        && source == command.source()
-        && kind == command.kind())
+    let (credential_id, scope, kind) = decode_pending_write_state(pending)?;
+    Ok(credential_id == *command.credential_id() && scope == *command.scope() && kind == command.kind())
 }
 
 async fn load_state<EventStore, SecretError>(

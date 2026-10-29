@@ -1,29 +1,22 @@
 use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot, WritePrecondition};
 use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1, v1};
 
-use super::domain::{CredentialId, CredentialKind, CredentialOwnerId, SourceKind};
+use super::domain::{CredentialId, CredentialKind, CredentialScope};
 use super::proto::write_requested_to_proto;
 use super::state::{CredentialDecideError, CredentialEvolveError};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RequestCredentialWrite {
     credential_id: CredentialId,
-    owner_id: CredentialOwnerId,
-    source: SourceKind,
+    scope: CredentialScope,
     kind: CredentialKind,
 }
 
 impl RequestCredentialWrite {
-    pub fn new(
-        credential_id: CredentialId,
-        owner_id: CredentialOwnerId,
-        source: SourceKind,
-        kind: CredentialKind,
-    ) -> Self {
+    pub fn new(credential_id: CredentialId, scope: CredentialScope, kind: CredentialKind) -> Self {
         Self {
             credential_id,
-            owner_id,
-            source,
+            scope,
             kind,
         }
     }
@@ -32,12 +25,8 @@ impl RequestCredentialWrite {
         &self.credential_id
     }
 
-    pub fn owner_id(&self) -> &CredentialOwnerId {
-        &self.owner_id
-    }
-
-    pub fn source(&self) -> SourceKind {
-        self.source
+    pub fn scope(&self) -> &CredentialScope {
+        &self.scope
     }
 
     pub fn kind(&self) -> CredentialKind {
@@ -84,10 +73,7 @@ impl Decider for RequestCredentialWrite {
         }
 
         Ok(Decision::event(v1::CredentialEvent {
-            event: Some(
-                write_requested_to_proto(&command.credential_id, &command.owner_id, command.source, command.kind)
-                    .into(),
-            ),
+            event: Some(write_requested_to_proto(&command.credential_id, &command.scope, command.kind).into()),
         }))
     }
 }

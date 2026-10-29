@@ -1075,10 +1075,14 @@ pub struct PendingCredentialWriteStateView<'a> {
     pub owner_id: &'a str,
     /// Field 3: `source`
     pub source: ::core::option::Option<
-        ::buffa::EnumValue<super::super::CredentialSource>,
+        ::buffa::EnumValue<super::super::super::super::v1::CredentialSource>,
     >,
     /// Field 4: `kind`
-    pub kind: ::core::option::Option<::buffa::EnumValue<super::super::CredentialKind>>,
+    pub kind: ::core::option::Option<
+        ::buffa::EnumValue<super::super::super::super::v1::CredentialKind>,
+    >,
+    /// Field 5: `scope_key`
+    pub scope_key: &'a str,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -1098,6 +1102,14 @@ Distinguishes a field that was absent from one explicitly encoded with its defau
     #[inline]
     pub const fn has_owner_id(&self) -> bool {
         self.__buffa_required_seen_0 & 2u64 != 0
+    }
+    /**Whether required field `scope_key` was present on the wire.
+
+Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
+    #[must_use]
+    #[inline]
+    pub const fn has_scope_key(&self) -> bool {
+        self.__buffa_required_seen_0 & 4u64 != 0
     }
 }
 impl<'a> ::buffa::MessageView<'a> for PendingCredentialWriteStateView<'a> {
@@ -1162,6 +1174,14 @@ impl<'a> ::buffa::MessageView<'a> for PendingCredentialWriteStateView<'a> {
                     ::buffa::EnumValue::from(::buffa::types::decode_int32(&mut cur)?),
                 );
             }
+            5u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.scope_key = ::buffa::types::borrow_str(&mut cur)?;
+                view.__buffa_required_seen_0 |= 4u64;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -1192,6 +1212,7 @@ impl<'a> ::buffa::MessageView<'a> for PendingCredentialWriteStateView<'a> {
             owner_id: self.owner_id.to_string(),
             source: self.source,
             kind: self.kind,
+            scope_key: self.scope_key.to_string(),
             ..::core::default::Default::default()
         })
     }
@@ -1210,6 +1231,7 @@ impl<'a> ::buffa::ViewEncode<'a> for PendingCredentialWriteStateView<'a> {
         if let Some(ref v) = self.kind {
             size += 1u64 + ::buffa::types::int32_encoded_len(v.to_i32()) as u64;
         }
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.scope_key) as u64;
         ::buffa::saturate_size(size)
     }
     #[allow(clippy::needless_borrow)]
@@ -1228,6 +1250,7 @@ impl<'a> ::buffa::ViewEncode<'a> for PendingCredentialWriteStateView<'a> {
         if let Some(ref v) = self.kind {
             ::buffa::types::put_int32_field(4u32, v.to_i32(), buf);
         }
+        ::buffa::types::put_string_field(5u32, &self.scope_key, buf);
     }
 }
 /// Serializes this view as protobuf JSON.
@@ -1259,6 +1282,9 @@ impl<'__a> ::serde::Serialize for PendingCredentialWriteStateView<'__a> {
         }
         if let ::core::option::Option::Some(ref __v) = self.kind {
             __map.serialize_entry("kind", __v)?;
+        }
+        {
+            __map.serialize_entry("scopeKey", self.scope_key)?;
         }
         __map.end()
     }
@@ -1369,15 +1395,24 @@ impl PendingCredentialWriteStateOwnedView {
     #[must_use]
     pub fn source(
         &self,
-    ) -> ::core::option::Option<::buffa::EnumValue<super::super::CredentialSource>> {
+    ) -> ::core::option::Option<
+        ::buffa::EnumValue<super::super::super::super::v1::CredentialSource>,
+    > {
         self.0.reborrow().source
     }
     /// Field 4: `kind`
     #[must_use]
     pub fn kind(
         &self,
-    ) -> ::core::option::Option<::buffa::EnumValue<super::super::CredentialKind>> {
+    ) -> ::core::option::Option<
+        ::buffa::EnumValue<super::super::super::super::v1::CredentialKind>,
+    > {
         self.0.reborrow().kind
+    }
+    /// Field 5: `scope_key`
+    #[must_use]
+    pub fn scope_key(&self) -> &'_ str {
+        self.0.reborrow().scope_key
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<PendingCredentialWriteStateView<'static>>>
@@ -1421,7 +1456,7 @@ pub struct ActiveCredentialStateView<'a> {
     /// Field 2: `previous_versions`
     pub previous_versions: ::buffa::RepeatedView<
         'a,
-        super::super::__buffa::view::CredentialRefView<'a>,
+        super::super::super::super::v1::__buffa::view::CredentialRefView<'a>,
     >,
 }
 impl<'a> ActiveCredentialStateView<'a> {
@@ -1492,12 +1527,12 @@ impl<'a> ::buffa::MessageView<'a> for ActiveCredentialStateView<'a> {
                 let sub = ::buffa::types::borrow_bytes(&mut cur)?;
                 ctx.register_element_memory(
                     ::core::mem::size_of::<
-                        super::super::__buffa::view::CredentialRefView,
+                        super::super::super::super::v1::__buffa::view::CredentialRefView,
                     >(),
                 )?;
                 view.previous_versions
                     .push(
-                        <super::super::__buffa::view::CredentialRefView as ::buffa::MessageView>::decode_view_ctx(
+                        <super::super::super::super::v1::__buffa::view::CredentialRefView as ::buffa::MessageView>::decode_view_ctx(
                             sub,
                             __sub_ctx,
                         )?,
@@ -1731,7 +1766,10 @@ impl ActiveCredentialStateOwnedView {
     #[must_use]
     pub fn previous_versions(
         &self,
-    ) -> &::buffa::RepeatedView<'_, super::super::__buffa::view::CredentialRefView<'_>> {
+    ) -> &::buffa::RepeatedView<
+        '_,
+        super::super::super::super::v1::__buffa::view::CredentialRefView<'_>,
+    > {
         &self.0.reborrow().previous_versions
     }
 }
@@ -2357,7 +2395,7 @@ impl ::serde::Serialize for RotationPendingCredentialStateOwnedView {
 pub struct RevokedCredentialStateView<'a> {
     /// Field 1: `credential_ref`
     pub credential_ref: ::buffa::MessageFieldView<
-        super::super::__buffa::view::CredentialRefView<'a>,
+        super::super::super::super::v1::__buffa::view::CredentialRefView<'a>,
     >,
 }
 impl<'a> RevokedCredentialStateView<'a> {
@@ -2411,7 +2449,7 @@ impl<'a> ::buffa::MessageView<'a> for RevokedCredentialStateView<'a> {
                     }
                     None => {
                         view.credential_ref = ::buffa::MessageFieldView::set(
-                            <super::super::__buffa::view::CredentialRefView as ::buffa::MessageView>::decode_view_ctx(
+                            <super::super::super::super::v1::__buffa::view::CredentialRefView as ::buffa::MessageView>::decode_view_ctx(
                                 sub,
                                 __sub_ctx,
                             )?,
@@ -2448,8 +2486,8 @@ impl<'a> ::buffa::MessageView<'a> for RevokedCredentialStateView<'a> {
             credential_ref: match self.credential_ref.as_option() {
                 Some(v) => {
                     ::buffa::MessageField::<
-                        super::super::CredentialRef,
-                        ::buffa::Inline<super::super::CredentialRef>,
+                        super::super::super::super::v1::CredentialRef,
+                        ::buffa::Inline<super::super::super::super::v1::CredentialRef>,
                     >::some(v.to_owned_from_source(__buffa_src)?)
                 }
                 None => ::buffa::MessageField::none(),
@@ -2614,7 +2652,9 @@ impl RevokedCredentialStateOwnedView {
     #[must_use]
     pub fn credential_ref(
         &self,
-    ) -> &::buffa::MessageFieldView<super::super::__buffa::view::CredentialRefView<'_>> {
+    ) -> &::buffa::MessageFieldView<
+        super::super::super::super::v1::__buffa::view::CredentialRefView<'_>,
+    > {
         &self.0.reborrow().credential_ref
     }
 }
@@ -2652,7 +2692,7 @@ impl ::serde::Serialize for RevokedCredentialStateOwnedView {
 pub struct DestroyRequestedCredentialStateView<'a> {
     /// Field 1: `credential_ref`
     pub credential_ref: ::buffa::MessageFieldView<
-        super::super::__buffa::view::CredentialRefView<'a>,
+        super::super::super::super::v1::__buffa::view::CredentialRefView<'a>,
     >,
     /// Field 2: `reason`
     pub reason: &'a str,
@@ -2718,7 +2758,7 @@ impl<'a> ::buffa::MessageView<'a> for DestroyRequestedCredentialStateView<'a> {
                     }
                     None => {
                         view.credential_ref = ::buffa::MessageFieldView::set(
-                            <super::super::__buffa::view::CredentialRefView as ::buffa::MessageView>::decode_view_ctx(
+                            <super::super::super::super::v1::__buffa::view::CredentialRefView as ::buffa::MessageView>::decode_view_ctx(
                                 sub,
                                 __sub_ctx,
                             )?,
@@ -2763,8 +2803,8 @@ impl<'a> ::buffa::MessageView<'a> for DestroyRequestedCredentialStateView<'a> {
             credential_ref: match self.credential_ref.as_option() {
                 Some(v) => {
                     ::buffa::MessageField::<
-                        super::super::CredentialRef,
-                        ::buffa::Inline<super::super::CredentialRef>,
+                        super::super::super::super::v1::CredentialRef,
+                        ::buffa::Inline<super::super::super::super::v1::CredentialRef>,
                     >::some(v.to_owned_from_source(__buffa_src)?)
                 }
                 None => ::buffa::MessageField::none(),
@@ -2937,7 +2977,9 @@ impl DestroyRequestedCredentialStateOwnedView {
     #[must_use]
     pub fn credential_ref(
         &self,
-    ) -> &::buffa::MessageFieldView<super::super::__buffa::view::CredentialRefView<'_>> {
+    ) -> &::buffa::MessageFieldView<
+        super::super::super::super::v1::__buffa::view::CredentialRefView<'_>,
+    > {
         &self.0.reborrow().credential_ref
     }
     /// Field 2: `reason`
@@ -2986,7 +3028,7 @@ impl ::serde::Serialize for DestroyRequestedCredentialStateOwnedView {
 pub struct DestroyedCredentialStateView<'a> {
     /// Field 1: `credential_ref`
     pub credential_ref: ::buffa::MessageFieldView<
-        super::super::__buffa::view::CredentialRefView<'a>,
+        super::super::super::super::v1::__buffa::view::CredentialRefView<'a>,
     >,
 }
 impl<'a> DestroyedCredentialStateView<'a> {
@@ -3040,7 +3082,7 @@ impl<'a> ::buffa::MessageView<'a> for DestroyedCredentialStateView<'a> {
                     }
                     None => {
                         view.credential_ref = ::buffa::MessageFieldView::set(
-                            <super::super::__buffa::view::CredentialRefView as ::buffa::MessageView>::decode_view_ctx(
+                            <super::super::super::super::v1::__buffa::view::CredentialRefView as ::buffa::MessageView>::decode_view_ctx(
                                 sub,
                                 __sub_ctx,
                             )?,
@@ -3077,8 +3119,8 @@ impl<'a> ::buffa::MessageView<'a> for DestroyedCredentialStateView<'a> {
             credential_ref: match self.credential_ref.as_option() {
                 Some(v) => {
                     ::buffa::MessageField::<
-                        super::super::CredentialRef,
-                        ::buffa::Inline<super::super::CredentialRef>,
+                        super::super::super::super::v1::CredentialRef,
+                        ::buffa::Inline<super::super::super::super::v1::CredentialRef>,
                     >::some(v.to_owned_from_source(__buffa_src)?)
                 }
                 None => ::buffa::MessageField::none(),
@@ -3243,7 +3285,9 @@ impl DestroyedCredentialStateOwnedView {
     #[must_use]
     pub fn credential_ref(
         &self,
-    ) -> &::buffa::MessageFieldView<super::super::__buffa::view::CredentialRefView<'_>> {
+    ) -> &::buffa::MessageFieldView<
+        super::super::super::super::v1::__buffa::view::CredentialRefView<'_>,
+    > {
         &self.0.reborrow().credential_ref
     }
 }
@@ -3281,7 +3325,7 @@ impl ::serde::Serialize for DestroyedCredentialStateOwnedView {
 pub struct CleanupFailedCredentialStateView<'a> {
     /// Field 1: `credential_ref`
     pub credential_ref: ::buffa::MessageFieldView<
-        super::super::__buffa::view::CredentialRefView<'a>,
+        super::super::super::super::v1::__buffa::view::CredentialRefView<'a>,
     >,
     /// Field 2: `reason`
     pub reason: &'a str,
@@ -3347,7 +3391,7 @@ impl<'a> ::buffa::MessageView<'a> for CleanupFailedCredentialStateView<'a> {
                     }
                     None => {
                         view.credential_ref = ::buffa::MessageFieldView::set(
-                            <super::super::__buffa::view::CredentialRefView as ::buffa::MessageView>::decode_view_ctx(
+                            <super::super::super::super::v1::__buffa::view::CredentialRefView as ::buffa::MessageView>::decode_view_ctx(
                                 sub,
                                 __sub_ctx,
                             )?,
@@ -3392,8 +3436,8 @@ impl<'a> ::buffa::MessageView<'a> for CleanupFailedCredentialStateView<'a> {
             credential_ref: match self.credential_ref.as_option() {
                 Some(v) => {
                     ::buffa::MessageField::<
-                        super::super::CredentialRef,
-                        ::buffa::Inline<super::super::CredentialRef>,
+                        super::super::super::super::v1::CredentialRef,
+                        ::buffa::Inline<super::super::super::super::v1::CredentialRef>,
                     >::some(v.to_owned_from_source(__buffa_src)?)
                 }
                 None => ::buffa::MessageField::none(),
@@ -3564,7 +3608,9 @@ impl CleanupFailedCredentialStateOwnedView {
     #[must_use]
     pub fn credential_ref(
         &self,
-    ) -> &::buffa::MessageFieldView<super::super::__buffa::view::CredentialRefView<'_>> {
+    ) -> &::buffa::MessageFieldView<
+        super::super::super::super::v1::__buffa::view::CredentialRefView<'_>,
+    > {
         &self.0.reborrow().credential_ref
     }
     /// Field 2: `reason`

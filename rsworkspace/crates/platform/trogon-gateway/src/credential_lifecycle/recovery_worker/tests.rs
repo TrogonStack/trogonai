@@ -854,15 +854,7 @@ fn undecodable_stream_event(stream_position: u64) -> StreamEvent {
 
 fn write_requested_event() -> v1::CredentialEvent {
     v1::CredentialEvent {
-        event: Some(
-            write_requested_to_proto(
-                &credential_id(),
-                &owner_id(),
-                SourceKind::GitHub,
-                CredentialKind::WebhookSecret,
-            )
-            .into(),
-        ),
+        event: Some(write_requested_to_proto(&credential_id(), &scope(), CredentialKind::WebhookSecret).into()),
     }
 }
 

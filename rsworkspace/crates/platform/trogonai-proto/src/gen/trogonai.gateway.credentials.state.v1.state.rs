@@ -817,14 +817,25 @@ pub struct PendingCredentialWriteState {
         with = "::buffa::json_helpers::opt_enum",
         skip_serializing_if = "::core::option::Option::is_none"
     )]
-    pub source: ::core::option::Option<::buffa::EnumValue<CredentialSource>>,
+    pub source: ::core::option::Option<
+        ::buffa::EnumValue<super::super::v1::CredentialSource>,
+    >,
     /// Field 4: `kind`
     #[serde(
         rename = "kind",
         with = "::buffa::json_helpers::opt_enum",
         skip_serializing_if = "::core::option::Option::is_none"
     )]
-    pub kind: ::core::option::Option<::buffa::EnumValue<CredentialKind>>,
+    pub kind: ::core::option::Option<
+        ::buffa::EnumValue<super::super::v1::CredentialKind>,
+    >,
+    /// Field 5: `scope_key`
+    #[serde(
+        rename = "scopeKey",
+        alias = "scope_key",
+        with = "::buffa::json_helpers::proto_string"
+    )]
+    pub scope_key: ::buffa::alloc::string::String,
 }
 impl ::core::fmt::Debug for PendingCredentialWriteState {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -833,6 +844,7 @@ impl ::core::fmt::Debug for PendingCredentialWriteState {
             .field("owner_id", &self.owner_id)
             .field("source", &self.source)
             .field("kind", &self.kind)
+            .field("scope_key", &self.scope_key)
             .finish()
     }
 }
@@ -849,7 +861,7 @@ impl PendingCredentialWriteState {
     ///Sets [`Self::source`] to `Some(value)`, consuming and returning `self`.
     pub fn with_source(
         mut self,
-        value: impl Into<::buffa::EnumValue<CredentialSource>>,
+        value: impl Into<::buffa::EnumValue<super::super::v1::CredentialSource>>,
     ) -> Self {
         self.source = Some(value.into());
         self
@@ -859,7 +871,7 @@ impl PendingCredentialWriteState {
     ///Sets [`Self::kind`] to `Some(value)`, consuming and returning `self`.
     pub fn with_kind(
         mut self,
-        value: impl Into<::buffa::EnumValue<CredentialKind>>,
+        value: impl Into<::buffa::EnumValue<super::super::v1::CredentialKind>>,
     ) -> Self {
         self.kind = Some(value.into());
         self
@@ -893,6 +905,7 @@ impl ::buffa::Message for PendingCredentialWriteState {
         if let Some(ref v) = self.kind {
             size += 1u64 + ::buffa::types::int32_encoded_len(v.to_i32()) as u64;
         }
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.scope_key) as u64;
         ::buffa::saturate_size(size)
     }
     fn write_to(
@@ -910,6 +923,7 @@ impl ::buffa::Message for PendingCredentialWriteState {
         if let Some(ref v) = self.kind {
             ::buffa::types::put_int32_field(4u32, v.to_i32(), buf);
         }
+        ::buffa::types::put_string_field(5u32, &self.scope_key, buf);
     }
     fn merge_field(
         &mut self,
@@ -954,6 +968,13 @@ impl ::buffa::Message for PendingCredentialWriteState {
                     ::buffa::EnumValue::from(::buffa::types::decode_int32(buf)?),
                 );
             }
+            5u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::types::merge_string(&mut self.scope_key, buf)?;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -965,6 +986,7 @@ impl ::buffa::Message for PendingCredentialWriteState {
         self.owner_id.clear();
         self.source = ::core::option::Option::None;
         self.kind = ::core::option::Option::None;
+        self.scope_key.clear();
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for PendingCredentialWriteState {
@@ -1004,7 +1026,7 @@ pub struct ActiveCredentialState {
         skip_serializing_if = "::buffa::json_helpers::skip_if::is_empty_vec",
         deserialize_with = "::buffa::json_helpers::null_as_default"
     )]
-    pub previous_versions: ::buffa::alloc::vec::Vec<CredentialRef>,
+    pub previous_versions: ::buffa::alloc::vec::Vec<super::super::v1::CredentialRef>,
 }
 impl ::core::fmt::Debug for ActiveCredentialState {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -1398,8 +1420,8 @@ pub struct RevokedCredentialState {
     /// Field 1: `credential_ref`
     #[serde(rename = "credentialRef", alias = "credential_ref")]
     pub credential_ref: ::buffa::MessageField<
-        CredentialRef,
-        ::buffa::Inline<CredentialRef>,
+        super::super::v1::CredentialRef,
+        ::buffa::Inline<super::super::v1::CredentialRef>,
     >,
 }
 impl ::core::fmt::Debug for RevokedCredentialState {
@@ -1521,8 +1543,8 @@ pub struct DestroyRequestedCredentialState {
     /// Field 1: `credential_ref`
     #[serde(rename = "credentialRef", alias = "credential_ref")]
     pub credential_ref: ::buffa::MessageField<
-        CredentialRef,
-        ::buffa::Inline<CredentialRef>,
+        super::super::v1::CredentialRef,
+        ::buffa::Inline<super::super::v1::CredentialRef>,
     >,
     /// Field 2: `reason`
     #[serde(rename = "reason", with = "::buffa::json_helpers::proto_string")]
@@ -1658,8 +1680,8 @@ pub struct DestroyedCredentialState {
     /// Field 1: `credential_ref`
     #[serde(rename = "credentialRef", alias = "credential_ref")]
     pub credential_ref: ::buffa::MessageField<
-        CredentialRef,
-        ::buffa::Inline<CredentialRef>,
+        super::super::v1::CredentialRef,
+        ::buffa::Inline<super::super::v1::CredentialRef>,
     >,
 }
 impl ::core::fmt::Debug for DestroyedCredentialState {
@@ -1781,8 +1803,8 @@ pub struct CleanupFailedCredentialState {
     /// Field 1: `credential_ref`
     #[serde(rename = "credentialRef", alias = "credential_ref")]
     pub credential_ref: ::buffa::MessageField<
-        CredentialRef,
-        ::buffa::Inline<CredentialRef>,
+        super::super::v1::CredentialRef,
+        ::buffa::Inline<super::super::v1::CredentialRef>,
     >,
     /// Field 2: `reason`
     #[serde(rename = "reason", with = "::buffa::json_helpers::proto_string")]
