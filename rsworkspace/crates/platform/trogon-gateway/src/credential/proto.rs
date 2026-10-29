@@ -4,10 +4,10 @@ use buffa::{EnumValue, MessageField, ProtoBox};
 use trogonai_proto::gateway::credentials::{state_v1, v1};
 
 use super::commands::domain::{
-    CredentialFailureReason, CredentialFingerprint, CredentialId, CredentialKind, CredentialMetadata,
-    CredentialOwnerId, CredentialRef, CredentialScope, CredentialStatus, CredentialVersion, SourceKind, StorageBackend,
+    CredentialDestroyReason, CredentialFailureReason, CredentialFingerprint, CredentialId, CredentialKind,
+    CredentialMetadata, CredentialOwnerId, CredentialRef, CredentialScope, CredentialStatus, CredentialVersion,
+    SourceKind, StorageBackend,
 };
-use crate::secret_store::SecretDestroyReason;
 use crate::source_integration_id::SourceIntegrationId;
 
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
@@ -122,7 +122,7 @@ pub(crate) fn revoked_to_proto(credential_ref: &CredentialRef) -> v1::Credential
 
 pub(crate) fn destroy_requested_to_proto(
     credential_ref: &CredentialRef,
-    reason: &SecretDestroyReason,
+    reason: &CredentialDestroyReason,
 ) -> v1::CredentialDestroyRequested {
     v1::CredentialDestroyRequested {
         credential_ref: MessageField::some(credential_ref_to_proto(credential_ref)),
@@ -224,13 +224,13 @@ pub(crate) fn decode_revoked(event: &v1::CredentialRevoked) -> Result<Credential
 
 pub(crate) fn decode_destroy_requested(
     event: &v1::CredentialDestroyRequested,
-) -> Result<(CredentialRef, SecretDestroyReason), CredentialProtoDecodeError> {
+) -> Result<(CredentialRef, CredentialDestroyReason), CredentialProtoDecodeError> {
     Ok((
         decode_credential_ref(
             "credential_ref",
             decode_message_field("credential_ref", &event.credential_ref)?,
         )?,
-        SecretDestroyReason::new(&event.reason).map_err(|source| invalid_field("reason", source))?,
+        CredentialDestroyReason::new(&event.reason).map_err(|source| invalid_field("reason", source))?,
     ))
 }
 
@@ -526,13 +526,14 @@ pub(crate) fn decode_revoked_state(
 
 pub(crate) fn decode_destroy_requested_state(
     state: &state_v1::DestroyRequestedCredentialState,
-) -> Result<(CredentialRef, SecretDestroyReason), CredentialProtoDecodeError> {
+) -> Result<(CredentialRef, CredentialDestroyReason), CredentialProtoDecodeError> {
     Ok((
         decode_credential_ref_state(
             "destroy_requested.credential_ref",
             decode_message_field("destroy_requested.credential_ref", &state.credential_ref)?,
         )?,
-        SecretDestroyReason::new(&state.reason).map_err(|source| invalid_field("destroy_requested.reason", source))?,
+        CredentialDestroyReason::new(&state.reason)
+            .map_err(|source| invalid_field("destroy_requested.reason", source))?,
     ))
 }
 
@@ -575,7 +576,7 @@ pub(crate) fn revoked_to_proto_state(credential_ref: &CredentialRef) -> state_v1
 
 pub(crate) fn destroy_requested_to_proto_state(
     credential_ref: &CredentialRef,
-    reason: &SecretDestroyReason,
+    reason: &CredentialDestroyReason,
 ) -> state_v1::DestroyRequestedCredentialState {
     state_v1::DestroyRequestedCredentialState {
         credential_ref: MessageField::some(credential_ref_to_proto_state(credential_ref)),

@@ -4,18 +4,17 @@ use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1
 use super::super::proto::{
     decode_cleanup_failed_state, decode_destroyed_state, decode_revoked_state, destroy_requested_to_proto,
 };
-use super::domain::CredentialRef;
+use super::domain::{CredentialDestroyReason, CredentialRef};
 use super::state::{CredentialDecideError, CredentialEvolveError, validate_same_ref};
-use crate::secret_store::SecretDestroyReason;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RequestCredentialDestroy {
     credential_ref: CredentialRef,
-    reason: SecretDestroyReason,
+    reason: CredentialDestroyReason,
 }
 
 impl RequestCredentialDestroy {
-    pub fn new(credential_ref: CredentialRef, reason: SecretDestroyReason) -> Self {
+    pub fn new(credential_ref: CredentialRef, reason: CredentialDestroyReason) -> Self {
         Self { credential_ref, reason }
     }
 

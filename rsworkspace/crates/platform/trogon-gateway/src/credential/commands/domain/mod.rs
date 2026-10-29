@@ -1,5 +1,6 @@
 mod allowed_host;
 mod constants;
+mod credential_destroy_reason;
 mod credential_failure_reason;
 mod credential_fingerprint;
 mod credential_id;
@@ -19,6 +20,7 @@ mod source_kind;
 mod storage_backend;
 
 pub use allowed_host::AllowedHosts;
+pub use credential_destroy_reason::{CredentialDestroyReason, CredentialDestroyReasonError};
 pub use credential_failure_reason::CredentialFailureReason;
 pub use credential_fingerprint::{CredentialFingerprint, CredentialFingerprintError};
 pub use credential_id::{CredentialId, CredentialIdError};

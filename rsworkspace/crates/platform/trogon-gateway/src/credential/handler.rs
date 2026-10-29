@@ -12,8 +12,8 @@ use trogon_std::SecretString;
 use trogonai_proto::gateway::credentials::{CredentialEventPayloadError, CredentialStateSnapshotCase, state_v1, v1};
 
 use super::commands::domain::{
-    CredentialId, CredentialIdError, CredentialKind, CredentialOwnerId, CredentialRef, CredentialScope,
-    CredentialVersion, SourceKind,
+    CredentialDestroyReason, CredentialDestroyReasonError, CredentialId, CredentialIdError, CredentialKind,
+    CredentialOwnerId, CredentialRef, CredentialScope, CredentialVersion, SourceKind,
 };
 use super::proto::{
     CredentialProtoDecodeError, active_credential_ref, decode_destroy_requested_state, decode_destroyed_state,
@@ -825,7 +825,9 @@ where
         &self,
         command: DestroyStoredCredential,
     ) -> HandlerResult<EventStore, <Secrets as SecretStoreDestroy>::Error> {
-        let request = RequestCredentialDestroy::new(command.credential_ref.clone(), command.reason.clone());
+        let reason = CredentialDestroyReason::new(command.reason.as_str())
+            .map_err(|source| CredentialHandlerError::InvalidDestroyReason { source })?;
+        let request = RequestCredentialDestroy::new(command.credential_ref.clone(), reason);
         match self.ensure_destroy_requested(&request).await? {
             DestroyRequestOutcome::AlreadyDestroyed(outcome) => return Ok(outcome),
             DestroyRequestOutcome::Proceed => {}
@@ -1029,6 +1031,11 @@ where
     Revoke {
         #[source]
         source: ExecutionError<SnapshotReadError, ReadError, AppendError>,
+    },
+    #[error("credential destroy reason is invalid: {source}")]
+    InvalidDestroyReason {
+        #[source]
+        source: CredentialDestroyReasonError,
     },
     #[error("credential destroy request failed: {source}")]
     RequestDestroy {

@@ -1,8 +1,8 @@
 use std::sync::{Arc, Mutex};
 
 use crate::credential::commands::domain::{
-    AllowedHosts, AllowedRuntimeServices, CredentialScope, CredentialVersion, InjectionLocation, InjectionLocations,
-    RuntimeServiceId,
+    AllowedHosts, AllowedRuntimeServices, CredentialDestroyReason, CredentialScope, CredentialVersion,
+    InjectionLocation, InjectionLocations, RuntimeServiceId,
 };
 use crate::credential::proto::{
     activated_to_proto, destroy_requested_to_proto, destroyed_to_proto, revoked_to_proto, write_requested_to_proto,
@@ -706,10 +706,11 @@ async fn registry_applies_destroyed_state_incrementally_and_invalidates_cache() 
     registry.apply_state(&revoked_state, position(3)).await.unwrap();
 
     let reason = SecretDestroyReason::new("credential lifecycle cleanup").unwrap();
+    let destroy_reason = CredentialDestroyReason::new(reason.as_str()).unwrap();
     let destroy_requested_state = evolve(
         revoked_state,
         &v1::CredentialEvent {
-            event: Some(destroy_requested_to_proto(&credential, &reason).into()),
+            event: Some(destroy_requested_to_proto(&credential, &destroy_reason).into()),
         },
     )
     .unwrap();

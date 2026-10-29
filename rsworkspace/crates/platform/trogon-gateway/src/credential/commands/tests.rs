@@ -18,8 +18,9 @@ use super::super::proto::{
     write_failed_to_proto, write_requested_to_proto,
 };
 use super::domain::{
-    CredentialFailureReason, CredentialFingerprint, CredentialId, CredentialKind, CredentialMetadata,
-    CredentialOwnerId, CredentialRef, CredentialScope, CredentialStatus, CredentialVersion, SourceKind, StorageBackend,
+    CredentialDestroyReason, CredentialFailureReason, CredentialFingerprint, CredentialId, CredentialKind,
+    CredentialMetadata, CredentialOwnerId, CredentialRef, CredentialScope, CredentialStatus, CredentialVersion,
+    SourceKind, StorageBackend,
 };
 use super::snapshot::CREDENTIAL_SNAPSHOT_POLICY;
 use super::state::{CredentialDecideError, CredentialEvolveError, evolve, initial_state};
@@ -28,7 +29,6 @@ use super::{
     RecordCredentialRotationFailure, RecordCredentialWriteFailure, RequestCredentialDestroy, RequestCredentialRotation,
     RequestCredentialWrite, RevokeCredential,
 };
-use crate::secret_store::SecretDestroyReason;
 
 #[derive(Debug, thiserror::Error)]
 #[error("credential test stream store rejected the append")]
@@ -207,8 +207,8 @@ fn revoked(version: u64) -> proto::CredentialEvent {
     }
 }
 
-fn destroy_reason() -> SecretDestroyReason {
-    SecretDestroyReason::new("credential lifecycle cleanup").unwrap()
+fn destroy_reason() -> CredentialDestroyReason {
+    CredentialDestroyReason::new("credential lifecycle cleanup").unwrap()
 }
 
 fn destroy_failure_reason() -> CredentialFailureReason {
