@@ -18,10 +18,11 @@ use super::domain::{
     SourceKind, StorageBackend,
 };
 use super::proto::{
-    CredentialProtoDecodeError, activated_to_proto, decode_active_state, decode_credential_metadata,
-    decode_message_field, decode_pending_write_state, decode_write_requested, destroy_failed_to_proto,
-    destroy_requested_to_proto, destroyed_to_proto, pending_write_to_proto_state, revoked_to_proto, rotated_to_proto,
-    rotation_failed_to_proto, rotation_requested_to_proto, write_failed_to_proto, write_requested_to_proto,
+    CredentialProtoDecodeError, activated_to_proto, credential_metadata_to_proto_state, decode_active_state,
+    decode_credential_metadata, decode_message_field, decode_pending_write_state, decode_write_requested,
+    destroy_failed_to_proto, destroy_requested_to_proto, destroyed_to_proto, pending_write_to_proto_state,
+    revoked_to_proto, rotated_to_proto, rotation_failed_to_proto, rotation_requested_to_proto, write_failed_to_proto,
+    write_requested_to_proto,
 };
 use super::snapshot::CREDENTIAL_SNAPSHOT_POLICY;
 use super::state::{CredentialDecideError, CredentialEvolveError, evolve, initial_state};
@@ -479,7 +480,7 @@ fn activation_rejects_a_pending_write_persisted_without_a_scope() {
         .when(ActivateCredentialWrite::new(metadata(1)))
         .then_error(CredentialDecideError::InvalidProto(
             CredentialProtoDecodeError::InvalidField {
-                field: "pending_write.scope_key",
+                field: "pending_write.scope_key".into(),
                 reason: "credential scope key must not be empty".to_string(),
             },
         ));
@@ -948,9 +949,9 @@ fn event_codec_rejects_invalid_persisted_fields() {
     assert!(matches!(
         error,
         CredentialEvolveError::InvalidProto(CredentialProtoDecodeError::InvalidField {
-            field: "credential_id",
+            field,
             ..
-        })
+        }) if field == "credential_id"
     ));
 }
 
@@ -976,7 +977,7 @@ fn event_codec_rejects_a_write_request_without_a_scope() {
     assert_eq!(
         evolve(initial_state(), &decoded).unwrap_err(),
         CredentialEvolveError::InvalidProto(CredentialProtoDecodeError::InvalidField {
-            field: "scope_key",
+            field: "scope_key".into(),
             reason: "credential scope key must not be empty".to_string(),
         })
     );
@@ -1010,9 +1011,9 @@ fn event_codec_rejects_scope_key_that_does_not_match_source() {
     assert!(matches!(
         error,
         CredentialEvolveError::InvalidProto(CredentialProtoDecodeError::InvalidField {
-            field: "credential_ref.scope_key",
+            field,
             ..
-        })
+        }) if field == "credential_ref.scope_key"
     ));
 }
 
@@ -1048,9 +1049,26 @@ fn event_codec_rejects_activation_for_a_credential_id_with_an_unknown_storage_pr
     assert!(matches!(
         error,
         CredentialEvolveError::InvalidProto(CredentialProtoDecodeError::InvalidField {
-            field: "metadata.reference.id",
+            field,
             ..
-        })
+        }) if field == "metadata.reference.id"
+    ));
+}
+
+#[test]
+fn active_state_decode_errors_name_the_full_field_path() {
+    let mut metadata = credential_metadata_to_proto_state(&metadata(1));
+    metadata.reference.as_option_mut().unwrap().id = String::new();
+    let active = state_v1::ActiveCredentialState {
+        metadata: metadata.into(),
+        ..Default::default()
+    };
+
+    let error = decode_active_state("active", &active).unwrap_err();
+
+    assert!(matches!(
+        error,
+        CredentialProtoDecodeError::InvalidField { field, .. } if field == "active.metadata.reference.id"
     ));
 }
 

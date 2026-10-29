@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::fmt;
 
 use buffa::{EnumValue, MessageField, ProtoBox};
@@ -13,9 +14,46 @@ use crate::source_integration_id::SourceIntegrationId;
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
 pub(crate) enum CredentialProtoDecodeError {
     #[error("credential field '{field}' is missing")]
-    MissingField { field: &'static str },
+    MissingField { field: CredentialFieldPath },
     #[error("credential field '{field}' is invalid: {reason}")]
-    InvalidField { field: &'static str, reason: String },
+    InvalidField { field: CredentialFieldPath, reason: String },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct CredentialFieldPath(Cow<'static, str>);
+
+impl CredentialFieldPath {
+    pub(crate) fn child(&self, name: &'static str) -> Self {
+        Self(Cow::Owned(format!("{}.{name}", self.0)))
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<&'static str> for CredentialFieldPath {
+    fn from(value: &'static str) -> Self {
+        Self(Cow::Borrowed(value))
+    }
+}
+
+impl From<&CredentialFieldPath> for CredentialFieldPath {
+    fn from(value: &CredentialFieldPath) -> Self {
+        value.clone()
+    }
+}
+
+impl PartialEq<&str> for CredentialFieldPath {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+
+impl fmt::Display for CredentialFieldPath {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
 }
 
 pub(crate) fn credential_ref_to_proto(value: &CredentialRef) -> v1::CredentialRef {
@@ -38,22 +76,23 @@ pub(crate) fn credential_metadata_to_proto(value: &CredentialMetadata) -> v1::Cr
 }
 
 pub(crate) fn decode_credential_ref(
-    field: &'static str,
+    field: impl Into<CredentialFieldPath>,
     value: &v1::CredentialRef,
 ) -> Result<CredentialRef, CredentialProtoDecodeError> {
-    let id = decode_credential_id(nested_field(field, "id"), &value.id)?;
-    let owner_id = decode_owner_id(nested_field(field, "owner_id"), &value.owner_id)?;
-    let source = decode_source_kind(nested_field(field, "source"), value.source.as_ref())?;
-    let kind = decode_credential_kind(nested_field(field, "kind"), value.kind.as_ref())?;
+    let field: CredentialFieldPath = field.into();
+    let id = decode_credential_id(field.child("id"), &value.id)?;
+    let owner_id = decode_owner_id(field.child("owner_id"), &value.owner_id)?;
+    let source = decode_source_kind(field.child("source"), value.source.as_ref())?;
+    let kind = decode_credential_kind(field.child("kind"), value.kind.as_ref())?;
     let version = value
         .version
         .ok_or(CredentialProtoDecodeError::MissingField {
-            field: nested_field(field, "version"),
+            field: field.child("version"),
         })
         .and_then(|value| {
-            CredentialVersion::new(value).map_err(|source| invalid_field(nested_field(field, "version"), source))
+            CredentialVersion::new(value).map_err(|source| invalid_field(field.child("version"), source))
         })?;
-    let scope = decode_scope_key(owner_id, source, nested_field(field, "scope_key"), &value.scope_key)?;
+    let scope = decode_scope_key(owner_id, source, field.child("scope_key"), &value.scope_key)?;
     Ok(CredentialRef::new(id, version, &scope, kind))
 }
 
@@ -157,19 +196,20 @@ pub(crate) fn decode_write_requested(
 }
 
 pub(crate) fn decode_credential_metadata(
-    field: &'static str,
+    field: impl Into<CredentialFieldPath>,
     value: &v1::CredentialMetadata,
 ) -> Result<CredentialMetadata, CredentialProtoDecodeError> {
-    let reference_field = nested_field(field, "reference");
+    let field: CredentialFieldPath = field.into();
+    let reference_field = field.child("reference");
     let reference = decode_credential_ref(
-        reference_field,
-        decode_message_field(reference_field, &value.reference)?,
+        &reference_field,
+        decode_message_field(&reference_field, &value.reference)?,
     )?;
-    let status = decode_credential_status(nested_field(field, "status"), value.status.as_ref())?;
+    let status = decode_credential_status(field.child("status"), value.status.as_ref())?;
     let storage_backend = StorageBackend::from_credential_id(reference.id())
-        .map_err(|source| invalid_field(nested_field(reference_field, "id"), source))?;
+        .map_err(|source| invalid_field(reference_field.child("id"), source))?;
     let fingerprint = CredentialFingerprint::new(&value.fingerprint)
-        .map_err(|source| invalid_field(nested_field(field, "fingerprint"), source))?;
+        .map_err(|source| invalid_field(field.child("fingerprint"), source))?;
     Ok(CredentialMetadata::new(reference, status, storage_backend, fingerprint))
 }
 
@@ -301,10 +341,11 @@ fn proto_credential_status(value: CredentialStatus) -> v1::CredentialStatus {
 }
 
 fn decode_source_kind(
-    field: &'static str,
+    field: impl Into<CredentialFieldPath>,
     value: Option<&EnumValue<v1::CredentialSource>>,
 ) -> Result<SourceKind, CredentialProtoDecodeError> {
-    match decode_known_enum(field, value)? {
+    let field: CredentialFieldPath = field.into();
+    match decode_known_enum(&field, value)? {
         v1::CredentialSource::CREDENTIAL_SOURCE_DISCORD => Ok(SourceKind::Discord),
         v1::CredentialSource::CREDENTIAL_SOURCE_GITHUB => Ok(SourceKind::GitHub),
         v1::CredentialSource::CREDENTIAL_SOURCE_GITLAB => Ok(SourceKind::Gitlab),
@@ -324,10 +365,11 @@ fn decode_source_kind(
 }
 
 fn decode_credential_kind(
-    field: &'static str,
+    field: impl Into<CredentialFieldPath>,
     value: Option<&EnumValue<v1::CredentialKind>>,
 ) -> Result<CredentialKind, CredentialProtoDecodeError> {
-    match decode_known_enum(field, value)? {
+    let field: CredentialFieldPath = field.into();
+    match decode_known_enum(&field, value)? {
         v1::CredentialKind::CREDENTIAL_KIND_APP_TOKEN => Ok(CredentialKind::AppToken),
         v1::CredentialKind::CREDENTIAL_KIND_BOT_TOKEN => Ok(CredentialKind::BotToken),
         v1::CredentialKind::CREDENTIAL_KIND_CLIENT_SECRET => Ok(CredentialKind::ClientSecret),
@@ -347,10 +389,11 @@ fn decode_credential_kind(
 }
 
 fn decode_credential_status(
-    field: &'static str,
+    field: impl Into<CredentialFieldPath>,
     value: Option<&EnumValue<v1::CredentialStatus>>,
 ) -> Result<CredentialStatus, CredentialProtoDecodeError> {
-    match decode_known_enum(field, value)? {
+    let field: CredentialFieldPath = field.into();
+    match decode_known_enum(&field, value)? {
         v1::CredentialStatus::CREDENTIAL_STATUS_PENDING => Ok(CredentialStatus::Pending),
         v1::CredentialStatus::CREDENTIAL_STATUS_ACTIVE => Ok(CredentialStatus::Active),
         v1::CredentialStatus::CREDENTIAL_STATUS_PREVIOUS => Ok(CredentialStatus::Previous),
@@ -373,18 +416,19 @@ pub(crate) fn credential_metadata_to_proto_state(value: &CredentialMetadata) -> 
 }
 
 pub(crate) fn decode_credential_metadata_state(
-    field: &'static str,
+    field: impl Into<CredentialFieldPath>,
     value: &state_v1::CredentialMetadata,
 ) -> Result<CredentialMetadata, CredentialProtoDecodeError> {
+    let field: CredentialFieldPath = field.into();
     Ok(CredentialMetadata::new(
         decode_credential_ref(
-            nested_field(field, "reference"),
-            decode_message_field(nested_field(field, "reference"), &value.reference)?,
+            field.child("reference"),
+            decode_message_field(field.child("reference"), &value.reference)?,
         )?,
-        decode_credential_status(nested_field(field, "status"), value.status.as_ref())?,
-        decode_storage_backend_state(nested_field(field, "storage_backend"), value.storage_backend.as_ref())?,
+        decode_credential_status(field.child("status"), value.status.as_ref())?,
+        decode_storage_backend_state(field.child("storage_backend"), value.storage_backend.as_ref())?,
         CredentialFingerprint::new(&value.fingerprint)
-            .map_err(|source| invalid_field(nested_field(field, "fingerprint"), source))?,
+            .map_err(|source| invalid_field(field.child("fingerprint"), source))?,
     ))
 }
 
@@ -414,12 +458,13 @@ pub(crate) fn decode_pending_write_state(
 }
 
 pub(crate) fn decode_active_state(
-    field: &'static str,
+    field: impl Into<CredentialFieldPath>,
     value: &state_v1::ActiveCredentialState,
 ) -> Result<(CredentialMetadata, Vec<CredentialRef>), CredentialProtoDecodeError> {
+    let field: CredentialFieldPath = field.into();
     let metadata = decode_credential_metadata_state(
-        nested_field(field, "metadata"),
-        decode_message_field(nested_field(field, "metadata"), &value.metadata)?,
+        field.child("metadata"),
+        decode_message_field(field.child("metadata"), &value.metadata)?,
     )?;
     let previous_versions = value
         .previous_versions
@@ -558,10 +603,11 @@ fn proto_state_storage_backend(value: StorageBackend) -> state_v1::StorageBacken
 }
 
 fn decode_storage_backend_state(
-    field: &'static str,
+    field: impl Into<CredentialFieldPath>,
     value: Option<&EnumValue<state_v1::StorageBackend>>,
 ) -> Result<StorageBackend, CredentialProtoDecodeError> {
-    match decode_known_enum(field, value)? {
+    let field: CredentialFieldPath = field.into();
+    match decode_known_enum(&field, value)? {
         state_v1::StorageBackend::STORAGE_BACKEND_IN_MEMORY => Ok(StorageBackend::InMemory),
         state_v1::StorageBackend::STORAGE_BACKEND_OPENBAO => Ok(StorageBackend::OpenBao),
         state_v1::StorageBackend::STORAGE_BACKEND_STATIC_CONFIG => Ok(StorageBackend::StaticConfig),
@@ -571,37 +617,41 @@ fn decode_storage_backend_state(
     }
 }
 
-pub(crate) fn decode_message_field<'a, T: Default, P: ProtoBox<T>>(
-    field: &'static str,
-    value: &'a MessageField<T, P>,
-) -> Result<&'a T, CredentialProtoDecodeError> {
+pub(crate) fn decode_message_field<T: Default, P: ProtoBox<T>>(
+    field: impl Into<CredentialFieldPath>,
+    value: &MessageField<T, P>,
+) -> Result<&T, CredentialProtoDecodeError> {
+    let field: CredentialFieldPath = field.into();
     value
         .as_option()
         .ok_or(CredentialProtoDecodeError::MissingField { field })
 }
 
 pub(crate) fn decode_credential_id(
-    field: &'static str,
+    field: impl Into<CredentialFieldPath>,
     value: &str,
 ) -> Result<CredentialId, CredentialProtoDecodeError> {
+    let field: CredentialFieldPath = field.into();
     CredentialId::new(value).map_err(|source| invalid_field(field, source))
 }
 
 pub(crate) fn decode_owner_id(
-    field: &'static str,
+    field: impl Into<CredentialFieldPath>,
     value: &str,
 ) -> Result<CredentialOwnerId, CredentialProtoDecodeError> {
+    let field: CredentialFieldPath = field.into();
     CredentialOwnerId::new(value).map_err(|source| invalid_field(field, source))
 }
 
 pub(crate) fn decode_scope_key(
     owner_id: CredentialOwnerId,
     source: SourceKind,
-    field: &'static str,
+    field: impl Into<CredentialFieldPath>,
     scope_key: &str,
 ) -> Result<CredentialScope, CredentialProtoDecodeError> {
+    let field: CredentialFieldPath = field.into();
     if scope_key.is_empty() {
-        return Err(invalid_field(field, "credential scope key must not be empty"));
+        return Err(invalid_field(&field, "credential scope key must not be empty"));
     }
 
     if scope_key == source.as_str() {
@@ -610,60 +660,35 @@ pub(crate) fn decode_scope_key(
 
     let Some(integration_id) = scope_key.strip_prefix(&format!("{}/", source.as_str())) else {
         return Err(invalid_field(
-            field,
+            &field,
             format!("scope key '{scope_key}' does not match source '{}'", source.as_str()),
         ));
     };
-    let integration_id = SourceIntegrationId::new(integration_id).map_err(|source| invalid_field(field, source))?;
+    let integration_id = SourceIntegrationId::new(integration_id).map_err(|source| invalid_field(&field, source))?;
 
     Ok(CredentialScope::integration(owner_id, source, integration_id))
 }
 
 pub(crate) fn decode_known_enum<T>(
-    field: &'static str,
+    field: impl Into<CredentialFieldPath>,
     value: Option<&EnumValue<T>>,
 ) -> Result<T, CredentialProtoDecodeError>
 where
     T: buffa::Enumeration,
 {
-    let value = value.ok_or(CredentialProtoDecodeError::MissingField { field })?;
+    let field: CredentialFieldPath = field.into();
+    let value = value.ok_or_else(|| CredentialProtoDecodeError::MissingField { field: field.clone() })?;
     value
         .as_known()
         .ok_or_else(|| invalid_field(field, format!("unknown enum value {}", value.to_i32())))
 }
 
-pub(crate) fn nested_field(parent: &'static str, child: &'static str) -> &'static str {
-    match (parent, child) {
-        ("metadata", "reference") => "metadata.reference",
-        ("metadata", "status") => "metadata.status",
-        ("metadata", "fingerprint") => "metadata.fingerprint",
-        ("metadata.reference", "id") => "metadata.reference.id",
-        ("metadata.reference", "version") => "metadata.reference.version",
-        ("metadata.reference", "owner_id") => "metadata.reference.owner_id",
-        ("metadata.reference", "source") => "metadata.reference.source",
-        ("metadata.reference", "scope_key") => "metadata.reference.scope_key",
-        ("metadata.reference", "kind") => "metadata.reference.kind",
-        ("credential_ref", "id") => "credential_ref.id",
-        ("credential_ref", "version") => "credential_ref.version",
-        ("credential_ref", "owner_id") => "credential_ref.owner_id",
-        ("credential_ref", "source") => "credential_ref.source",
-        ("credential_ref", "scope_key") => "credential_ref.scope_key",
-        ("credential_ref", "kind") => "credential_ref.kind",
-        ("previous_credential_ref", "id") => "previous_credential_ref.id",
-        ("previous_credential_ref", "version") => "previous_credential_ref.version",
-        ("previous_credential_ref", "owner_id") => "previous_credential_ref.owner_id",
-        ("previous_credential_ref", "source") => "previous_credential_ref.source",
-        ("previous_credential_ref", "scope_key") => "previous_credential_ref.scope_key",
-        ("previous_credential_ref", "kind") => "previous_credential_ref.kind",
-        ("active", "metadata") => "active.metadata",
-        ("rotation_pending.active", "metadata") => "rotation_pending.active.metadata",
-        _ => child,
-    }
-}
-
-pub(crate) fn invalid_field(field: &'static str, source: impl fmt::Display) -> CredentialProtoDecodeError {
+pub(crate) fn invalid_field(
+    field: impl Into<CredentialFieldPath>,
+    source: impl fmt::Display,
+) -> CredentialProtoDecodeError {
     CredentialProtoDecodeError::InvalidField {
-        field,
+        field: field.into(),
         reason: source.to_string(),
     }
 }
