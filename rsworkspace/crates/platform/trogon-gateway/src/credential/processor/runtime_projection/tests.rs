@@ -990,7 +990,7 @@ async fn host_restriction_denies_the_unqualified_resolve_path() {
     assert!(matches!(
         resolver.resolve(&key(), CredentialKind::BotToken).await,
         Err(RuntimeCredentialError::DeliveryDenied {
-            denied: RuntimeReleaseDenied::Host { .. },
+            denied: RuntimeReleaseDeniedError::Host { .. },
             ..
         })
     ));
@@ -1015,7 +1015,7 @@ async fn unauthorized_runtime_service_cannot_resolve() {
             )
             .await,
         Err(RuntimeCredentialError::DeliveryDenied {
-            denied: RuntimeReleaseDenied::RuntimeService { .. },
+            denied: RuntimeReleaseDeniedError::RuntimeService { .. },
             ..
         })
     ));
@@ -1049,7 +1049,7 @@ async fn injection_location_restriction_denies_a_query_parameter_placement() {
             )
             .await,
         Err(RuntimeCredentialError::DeliveryDenied {
-            denied: RuntimeReleaseDenied::InjectionLocation { .. },
+            denied: RuntimeReleaseDeniedError::InjectionLocation { .. },
             ..
         })
     ));

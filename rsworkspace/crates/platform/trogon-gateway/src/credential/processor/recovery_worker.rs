@@ -895,7 +895,7 @@ pub(crate) enum CredentialRecoveryCheckpointOpenError {
     #[error("{source}")]
     Incompatible {
         #[source]
-        source: IncompatibleCredentialRecoveryCheckpointBucket,
+        source: IncompatibleCredentialRecoveryCheckpointBucketError,
     },
 }
 
@@ -903,7 +903,7 @@ pub(crate) enum CredentialRecoveryCheckpointOpenError {
 #[error(
     "credential recovery checkpoint bucket is incompatible: expected history {expected_history}, got {actual_history}; expected max age {expected_max_age:?}, got {actual_max_age:?}"
 )]
-pub(crate) struct IncompatibleCredentialRecoveryCheckpointBucket {
+pub(crate) struct IncompatibleCredentialRecoveryCheckpointBucketError {
     expected_history: i64,
     actual_history: i64,
     expected_max_age: Duration,
@@ -949,7 +949,7 @@ where
     let max_age = status.max_age();
     if history != 1 || max_age != Duration::ZERO {
         return Err(CredentialRecoveryCheckpointOpenError::Incompatible {
-            source: IncompatibleCredentialRecoveryCheckpointBucket {
+            source: IncompatibleCredentialRecoveryCheckpointBucketError {
                 expected_history: 1,
                 actual_history: history,
                 expected_max_age: Duration::ZERO,

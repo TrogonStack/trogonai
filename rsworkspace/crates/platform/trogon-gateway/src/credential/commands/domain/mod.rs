@@ -32,7 +32,7 @@ pub use credential_status::CredentialStatus;
 pub use credential_version::CredentialVersion;
 pub use injection_location::{InjectionLocation, InjectionLocations};
 pub use public_credential_id::PublicCredentialId;
-pub use runtime_release_policy::{RuntimeReleaseDenied, RuntimeReleasePolicy, RuntimeReleaseRequest};
+pub use runtime_release_policy::{RuntimeReleaseDeniedError, RuntimeReleasePolicy, RuntimeReleaseRequest};
 pub use runtime_service_id::{AllowedRuntimeServices, RuntimeServiceId};
 pub use source_kind::SourceKind;
 pub use storage_backend::StorageBackend;

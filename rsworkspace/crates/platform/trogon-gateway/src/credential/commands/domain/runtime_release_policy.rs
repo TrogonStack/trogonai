@@ -71,21 +71,21 @@ impl RuntimeReleasePolicy {
         }
     }
 
-    pub fn permits(&self, request: &RuntimeReleaseRequest<'_>) -> Result<(), RuntimeReleaseDenied> {
+    pub fn permits(&self, request: &RuntimeReleaseRequest<'_>) -> Result<(), RuntimeReleaseDeniedError> {
         if !self.allowed_runtime_services.permits(request.runtime_service) {
-            return Err(RuntimeReleaseDenied::RuntimeService {
+            return Err(RuntimeReleaseDeniedError::RuntimeService {
                 runtime_service: request.runtime_service.cloned(),
             });
         }
         if !self.allowed_hosts.permits(request.host) {
-            return Err(RuntimeReleaseDenied::Host {
+            return Err(RuntimeReleaseDeniedError::Host {
                 host: request.host.map(str::to_string),
             });
         }
         if let Some(location) = request.injection_location
             && !self.injection_locations.permits(location)
         {
-            return Err(RuntimeReleaseDenied::InjectionLocation {
+            return Err(RuntimeReleaseDeniedError::InjectionLocation {
                 location: location.clone(),
             });
         }
@@ -127,7 +127,7 @@ impl<'a> RuntimeReleaseRequest<'a> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
-pub enum RuntimeReleaseDenied {
+pub enum RuntimeReleaseDeniedError {
     #[error("runtime service {} is not allowed to resolve this credential", describe_service(.runtime_service.as_ref()))]
     RuntimeService { runtime_service: Option<RuntimeServiceId> },
     #[error("host {} is not in the credential's allowed hosts", describe_host(.host.as_deref()))]

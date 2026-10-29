@@ -108,7 +108,7 @@ pub(crate) enum CredentialEventStoreError {
     #[error("{source}")]
     IncompatibleSnapshotBucket {
         #[source]
-        source: IncompatibleCredentialSnapshotBucket,
+        source: IncompatibleCredentialSnapshotBucketError,
     },
 }
 
@@ -116,7 +116,7 @@ pub(crate) enum CredentialEventStoreError {
 #[error(
     "credential snapshot bucket is incompatible: expected history {expected_history}, got {actual_history}; expected max age {expected_max_age:?}, got {actual_max_age:?}"
 )]
-pub(crate) struct IncompatibleCredentialSnapshotBucket {
+pub(crate) struct IncompatibleCredentialSnapshotBucketError {
     expected_history: i64,
     actual_history: i64,
     expected_max_age: Duration,
@@ -192,7 +192,7 @@ where
 
     if actual != expected {
         return Err(CredentialEventStoreError::IncompatibleSnapshotBucket {
-            source: IncompatibleCredentialSnapshotBucket {
+            source: IncompatibleCredentialSnapshotBucketError {
                 expected_history: expected.history,
                 actual_history: actual.history,
                 expected_max_age: expected.max_age,

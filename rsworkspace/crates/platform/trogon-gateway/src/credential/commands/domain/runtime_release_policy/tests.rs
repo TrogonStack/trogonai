@@ -17,7 +17,7 @@ fn host_restriction_denies_an_unspecified_host() {
 
     assert_eq!(
         policy.permits(&RuntimeReleaseRequest::new()),
-        Err(RuntimeReleaseDenied::Host { host: None })
+        Err(RuntimeReleaseDeniedError::Host { host: None })
     );
     assert_eq!(
         policy.permits(&RuntimeReleaseRequest::new().to_host("api.example.com")),
@@ -25,7 +25,7 @@ fn host_restriction_denies_an_unspecified_host() {
     );
     assert_eq!(
         policy.permits(&RuntimeReleaseRequest::new().to_host("evil.example.net")),
-        Err(RuntimeReleaseDenied::Host {
+        Err(RuntimeReleaseDeniedError::Host {
             host: Some("evil.example.net".to_string())
         })
     );
@@ -40,7 +40,7 @@ fn runtime_service_restriction_denies_an_unidentified_caller() {
 
     assert_eq!(
         policy.permits(&RuntimeReleaseRequest::new()),
-        Err(RuntimeReleaseDenied::RuntimeService { runtime_service: None })
+        Err(RuntimeReleaseDeniedError::RuntimeService { runtime_service: None })
     );
     assert_eq!(
         policy.permits(&RuntimeReleaseRequest::new().by_runtime_service(&allowed)),
@@ -48,7 +48,7 @@ fn runtime_service_restriction_denies_an_unidentified_caller() {
     );
     assert_eq!(
         policy.permits(&RuntimeReleaseRequest::new().by_runtime_service(&other)),
-        Err(RuntimeReleaseDenied::RuntimeService {
+        Err(RuntimeReleaseDeniedError::RuntimeService {
             runtime_service: Some(other)
         })
     );
@@ -62,7 +62,7 @@ fn service_identity_is_checked_before_the_host() {
 
     assert_eq!(
         policy.permits(&RuntimeReleaseRequest::new().to_host("api.example.com")),
-        Err(RuntimeReleaseDenied::RuntimeService { runtime_service: None })
+        Err(RuntimeReleaseDeniedError::RuntimeService { runtime_service: None })
     );
 }
 
@@ -79,7 +79,7 @@ fn injection_location_is_only_checked_when_requested() {
     );
     assert_eq!(
         policy.permits(&RuntimeReleaseRequest::new().at_injection_location(&query)),
-        Err(RuntimeReleaseDenied::InjectionLocation { location: query })
+        Err(RuntimeReleaseDeniedError::InjectionLocation { location: query })
     );
 }
 

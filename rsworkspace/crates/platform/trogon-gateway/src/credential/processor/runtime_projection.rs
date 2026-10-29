@@ -30,7 +30,7 @@ use trogonai_proto::gateway::credentials::{
 };
 
 use crate::credential::commands::domain::{
-    CredentialId, CredentialKind, CredentialOwnerId, CredentialRef, RuntimeReleaseDenied, RuntimeReleasePolicy,
+    CredentialId, CredentialKind, CredentialOwnerId, CredentialRef, RuntimeReleaseDeniedError, RuntimeReleasePolicy,
     RuntimeReleaseRequest, SourceKind,
 };
 use crate::credential::processor::event_stream::{CredentialEventStreamReadError, read_credential_event_stream};
@@ -104,7 +104,7 @@ impl RuntimeProjectionMetrics {
     /// The denial reason is a label so a spike can be attributed without
     /// reading logs. The rejected host is not: it is attacker-controlled, and
     /// an unbounded label set is a cardinality bomb.
-    fn record_delivery_denial(&self, key: &RuntimeIntegrationKey, denied: &RuntimeReleaseDenied) {
+    fn record_delivery_denial(&self, key: &RuntimeIntegrationKey, denied: &RuntimeReleaseDeniedError) {
         let mut attributes = resolution_attributes(key);
         attributes.push(KeyValue::new("reason", denial_reason(denied)));
         self.delivery_denials.add(1, &attributes);
@@ -119,11 +119,11 @@ fn resolution_attributes(key: &RuntimeIntegrationKey) -> Vec<KeyValue> {
     vec![KeyValue::new("source", key.source().as_str().to_string())]
 }
 
-fn denial_reason(denied: &RuntimeReleaseDenied) -> &'static str {
+fn denial_reason(denied: &RuntimeReleaseDeniedError) -> &'static str {
     match denied {
-        RuntimeReleaseDenied::RuntimeService { .. } => "runtime_service",
-        RuntimeReleaseDenied::Host { .. } => "host",
-        RuntimeReleaseDenied::InjectionLocation { .. } => "injection_location",
+        RuntimeReleaseDeniedError::RuntimeService { .. } => "runtime_service",
+        RuntimeReleaseDeniedError::Host { .. } => "host",
+        RuntimeReleaseDeniedError::InjectionLocation { .. } => "injection_location",
     }
 }
 
@@ -704,7 +704,7 @@ pub enum RuntimeProjectionCheckpointOpenError {
     #[error("{source}")]
     Incompatible {
         #[source]
-        source: IncompatibleRuntimeProjectionCheckpointBucket,
+        source: IncompatibleRuntimeProjectionCheckpointBucketError,
     },
 }
 
@@ -712,7 +712,7 @@ pub enum RuntimeProjectionCheckpointOpenError {
 #[error(
     "runtime projection checkpoint bucket is incompatible: expected history {expected_history}, got {actual_history}; expected max age {expected_max_age:?}, got {actual_max_age:?}"
 )]
-pub struct IncompatibleRuntimeProjectionCheckpointBucket {
+pub struct IncompatibleRuntimeProjectionCheckpointBucketError {
     expected_history: i64,
     actual_history: i64,
     expected_max_age: Duration,
@@ -763,7 +763,7 @@ where
     let max_age = status.max_age();
     if history != 1 || max_age != Duration::ZERO {
         return Err(RuntimeProjectionCheckpointOpenError::Incompatible {
-            source: IncompatibleRuntimeProjectionCheckpointBucket {
+            source: IncompatibleRuntimeProjectionCheckpointBucketError {
                 expected_history: 1,
                 actual_history: history,
                 expected_max_age: Duration::ZERO,
@@ -1546,7 +1546,7 @@ pub enum RuntimeCredentialError {
         key: RuntimeIntegrationKey,
         kind: CredentialKind,
         #[source]
-        denied: RuntimeReleaseDenied,
+        denied: RuntimeReleaseDeniedError,
     },
     #[error(transparent)]
     SecretStore(#[from] SecretStoreError),

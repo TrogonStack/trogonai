@@ -389,7 +389,7 @@ pub(crate) enum CredentialManagementIdempotencyOpenError {
     #[error("{source}")]
     Incompatible {
         #[source]
-        source: IncompatibleCredentialManagementIdempotencyBucket,
+        source: IncompatibleCredentialManagementIdempotencyBucketError,
     },
 }
 
@@ -397,7 +397,7 @@ pub(crate) enum CredentialManagementIdempotencyOpenError {
 #[error(
     "credential management idempotency bucket is incompatible: expected history {expected_history}, got {actual_history}; expected max age {expected_max_age:?}, got {actual_max_age:?}"
 )]
-pub(crate) struct IncompatibleCredentialManagementIdempotencyBucket {
+pub(crate) struct IncompatibleCredentialManagementIdempotencyBucketError {
     expected_history: i64,
     actual_history: i64,
     expected_max_age: Duration,
@@ -443,7 +443,7 @@ where
     let max_age = status.max_age();
     if history != 1 || max_age != CREDENTIAL_MANAGEMENT_IDEMPOTENCY_MAX_AGE {
         return Err(CredentialManagementIdempotencyOpenError::Incompatible {
-            source: IncompatibleCredentialManagementIdempotencyBucket {
+            source: IncompatibleCredentialManagementIdempotencyBucketError {
                 expected_history: 1,
                 actual_history: history,
                 expected_max_age: CREDENTIAL_MANAGEMENT_IDEMPOTENCY_MAX_AGE,
