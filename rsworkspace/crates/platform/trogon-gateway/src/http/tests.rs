@@ -5,6 +5,7 @@ use crate::credential_runtime_projection::{
     RuntimeCredentialRegistry, RuntimeCredentialResolver, RuntimeIntegrationProjection,
 };
 use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
+use crate::source::datadog::constants as datadog_constants;
 use crate::source::github::constants::{HEADER_DELIVERY, HEADER_EVENT, HEADER_SIGNATURE};
 use crate::source::gitlab::GitLabSigningToken;
 use crate::source::gitlab::constants as gitlab_constants;
@@ -16,6 +17,7 @@ use crate::source::sentry::constants as sentry_constants;
 use crate::source::slack::constants as slack_constants;
 use crate::source::telegram::constants as telegram_constants;
 use crate::source::twitter::constants as twitter_constants;
+use crate::source::zoom::constants as zoom_constants;
 use crate::source_integration_id::SourceIntegrationId;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -292,6 +294,46 @@ fn telegram_webhook_request(uri: &str, body: &[u8], secret: &str) -> Request<Bod
         .unwrap()
 }
 
+fn datadog_webhook_request(uri: &str, body: &[u8], token: &str) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header(datadog_constants::DEFAULT_HEADER_WEBHOOK_TOKEN, token)
+        .body(Body::from(body.to_vec()))
+        .unwrap()
+}
+
+fn zoom_timestamp() -> String {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        .to_string()
+}
+
+fn compute_zoom_sig(secret: &str, timestamp: &str, body: &[u8]) -> String {
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
+    mac.update(b"v0:");
+    mac.update(timestamp.as_bytes());
+    mac.update(b":");
+    mac.update(body);
+    format!("v0={}", hex::encode(mac.finalize().into_bytes()))
+}
+
+fn zoom_webhook_request(uri: &str, body: &[u8], secret: &str) -> Request<Body> {
+    let timestamp = zoom_timestamp();
+    Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header(zoom_constants::HEADER_TIMESTAMP, timestamp.as_str())
+        .header(
+            zoom_constants::HEADER_SIGNATURE,
+            compute_zoom_sig(secret, &timestamp, body),
+        )
+        .body(Body::from(body.to_vec()))
+        .unwrap()
+}
+
 async fn github_runtime_credentials(
     integration_id: &SourceIntegrationId,
     secret: &str,
@@ -429,6 +471,34 @@ async fn runtime_credentials(
         .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1).unwrap())
         .await;
     registry.resolver(store)
+}
+
+fn every_runtime_credential_mount() -> RuntimeCredentialMounts<MockOpenBaoSecretStore> {
+    let resolver = RuntimeCredentialRegistry::default().resolver(MockOpenBaoSecretStore::default());
+    RuntimeCredentialMounts {
+        github: Some(resolver.clone()),
+        gitlab: Some(resolver.clone()),
+        incidentio: Some(resolver.clone()),
+        linear: Some(resolver.clone()),
+        microsoft_graph: Some(resolver.clone()),
+        sentry: Some(resolver.clone()),
+        slack: Some(resolver.clone()),
+        telegram: Some(resolver.clone()),
+        twitter: Some(resolver.clone()),
+        notion: Some(resolver),
+    }
+}
+
+fn mounted_webhook_paths(mount: impl FnOnce() -> Router) -> std::collections::BTreeSet<String> {
+    let events = trogon_std::log_capture::CapturedEvents::new();
+    let _guard = events.install(trogon_std::log_capture::LevelFilter::INFO);
+    let _router = mount();
+    events
+        .events()
+        .iter()
+        .filter(|event| event.message() == Some("mounted source integration"))
+        .filter_map(|event| event.field("path").map(str::to_owned))
+        .collect()
 }
 
 #[test]
@@ -1004,6 +1074,87 @@ consumer_secret = "static-secret"
     let messages = publisher.published_messages();
     assert_eq!(messages.len(), 1);
     assert_eq!(messages[0].subject, "twitter-acme-main.profile.update.bio");
+}
+
+#[tokio::test]
+async fn datadog_and_zoom_webhooks_stay_mounted_with_runtime_credentials() {
+    let toml = r#"
+[sources.datadog.integrations.acme-main.webhook]
+webhook_token = "datadog-webhook-token"
+
+[sources.zoom.integrations.acme-main.webhook]
+secret_token = "zoom-secret-token"
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+    let publisher = MockJetStreamPublisher::new();
+    let app = mount_sources_with_runtime_credentials(
+        cfg,
+        wrap_publisher(publisher.clone()),
+        &AdvancedMockNatsClient::new(),
+        every_runtime_credential_mount(),
+    );
+
+    let datadog_response = app
+        .clone()
+        .oneshot(datadog_webhook_request(
+            "/sources/datadog/acme-main/webhook",
+            br#"{"event_type":"metric_alert_monitor","id":"7890"}"#,
+            "datadog-webhook-token",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(datadog_response.status(), StatusCode::OK);
+
+    let zoom_response = app
+        .oneshot(zoom_webhook_request(
+            "/sources/zoom/acme-main/webhook",
+            br#"{"event":"meeting.started","payload":{}}"#,
+            "zoom-secret-token",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(zoom_response.status(), StatusCode::OK);
+
+    let subjects: Vec<_> = publisher
+        .published_messages()
+        .into_iter()
+        .map(|message| message.subject)
+        .collect();
+    assert_eq!(
+        subjects,
+        [
+            "datadog-acme-main.metric_alert_monitor",
+            "zoom-acme-main.meeting.started"
+        ]
+    );
+}
+
+#[test]
+fn runtime_credential_mounting_exposes_every_static_webhook_route() {
+    let f = write_toml(&all_sources_toml());
+    let static_config = load(Some(f.path())).expect("load failed");
+    let runtime_config = load(Some(f.path())).expect("load failed");
+    let runtime_credentials = every_runtime_credential_mount();
+
+    let static_paths = mounted_webhook_paths(|| {
+        mount_sources(
+            static_config,
+            wrap_publisher(MockJetStreamPublisher::new()),
+            &AdvancedMockNatsClient::new(),
+        )
+    });
+    let runtime_paths = mounted_webhook_paths(|| {
+        mount_sources_with_runtime_credentials(
+            runtime_config,
+            wrap_publisher(MockJetStreamPublisher::new()),
+            &AdvancedMockNatsClient::new(),
+            runtime_credentials,
+        )
+    });
+
+    assert!(!static_paths.is_empty());
+    assert_eq!(runtime_paths, static_paths);
 }
 
 #[tokio::test]

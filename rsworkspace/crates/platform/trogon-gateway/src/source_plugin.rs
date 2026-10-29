@@ -994,8 +994,10 @@ where
         Some(notion_credentials) => NotionPlugin.mount_runtime(app, publisher.clone(), config, notion_credentials),
         None => NotionPlugin.mount(app, publisher.clone(), requester, config),
     };
-    match runtime_credentials.sentry {
-        Some(sentry_credentials) => SentryPlugin.mount_runtime(app, publisher, config, sentry_credentials),
-        None => SentryPlugin.mount(app, publisher, requester, config),
-    }
+    app = match runtime_credentials.sentry {
+        Some(sentry_credentials) => SentryPlugin.mount_runtime(app, publisher.clone(), config, sentry_credentials),
+        None => SentryPlugin.mount(app, publisher.clone(), requester, config),
+    };
+    app = DatadogPlugin.mount(app, publisher.clone(), requester, config);
+    ZoomPlugin.mount(app, publisher, requester, config)
 }
