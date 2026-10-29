@@ -653,6 +653,17 @@ mod tests {
     }
 
     #[test]
+    fn parses_datadog_openbao_credential_id() {
+        let id = CredentialId::new("openbao:tenant-1:datadog/primary:webhook_token").unwrap();
+
+        let credential = openbao_credential_ref_from_id(id, CredentialVersion::initial()).unwrap();
+
+        assert_eq!(credential.source(), SourceKind::Datadog);
+        assert_eq!(credential.scope_key(), "datadog/primary");
+        assert_eq!(credential.kind(), CredentialKind::WebhookToken);
+    }
+
+    #[test]
     fn parses_owner_id_with_colons_from_the_right() {
         let id = CredentialId::new("openbao:tenant:region:github/primary:webhook_secret").unwrap();
 
