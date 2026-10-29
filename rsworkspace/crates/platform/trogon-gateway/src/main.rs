@@ -38,7 +38,7 @@ use trogon_nats::jetstream::{
 use trogon_nats::{connect, wait_for_server_info};
 use trogon_std::SecretString;
 use trogon_std::args::{CliArgs, ParseArgs};
-use trogon_std::env::SystemEnv;
+use trogon_std::env::{ReadEnv, SystemEnv};
 use trogon_std::fs::SystemFs;
 
 const CREDENTIAL_MANAGEMENT_ADMIN_TOKEN: &str = "TROGON_GATEWAY_CREDENTIAL_MANAGEMENT_ADMIN_TOKEN";
@@ -173,9 +173,9 @@ async fn serve(
     );
 
     let app = http::mount_sources(resolved, publisher, &nats);
-    let app = match credential_management_admin_token_from_env()? {
+    let app = match credential_management_admin_token_from_env(&SystemEnv)? {
         Some(admin_token) => {
-            let store = openbao_secret_store_from_env(CREDENTIAL_MANAGEMENT_ADMIN_TOKEN)?;
+            let store = openbao_secret_store_from_env(&SystemEnv, CREDENTIAL_MANAGEMENT_ADMIN_TOKEN)?;
             let idempotency = credential_management_idempotency::open(client.context().clone()).await?;
             let worker_checkpoints =
                 credential::processor::recovery_worker::open_checkpoint_store(client.context().clone()).await?;
@@ -510,8 +510,8 @@ where
     Ok((registry, report))
 }
 
-fn credential_management_admin_token_from_env() -> anyhow::Result<Option<SecretString>> {
-    match std::env::var(CREDENTIAL_MANAGEMENT_ADMIN_TOKEN) {
+fn credential_management_admin_token_from_env(env: &impl ReadEnv) -> anyhow::Result<Option<SecretString>> {
+    match env.var(CREDENTIAL_MANAGEMENT_ADMIN_TOKEN) {
         Ok(value) => SecretString::new(value)
             .map(Some)
             .with_context(|| format!("{CREDENTIAL_MANAGEMENT_ADMIN_TOKEN} must not be empty")),
@@ -521,11 +521,14 @@ fn credential_management_admin_token_from_env() -> anyhow::Result<Option<SecretS
 }
 
 fn openbao_secret_store_from_env(
+    env: &impl ReadEnv,
     enabled_by: &str,
 ) -> anyhow::Result<secret_store::openbao_secret_store::OpenBaoSecretStore> {
-    let address = std::env::var(OPENBAO_ADDR)
+    let address = env
+        .var(OPENBAO_ADDR)
         .with_context(|| format!("{OPENBAO_ADDR} must be set when {enabled_by} is enabled"))?;
-    let token = std::env::var(OPENBAO_TOKEN)
+    let token = env
+        .var(OPENBAO_TOKEN)
         .with_context(|| format!("{OPENBAO_TOKEN} must be set when {enabled_by} is enabled"))?;
     secret_store::openbao_secret_store::OpenBaoSecretStore::new(address, token)
         .context("OpenBao secret store configuration")
