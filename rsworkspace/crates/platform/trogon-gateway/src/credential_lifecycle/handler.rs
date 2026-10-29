@@ -813,6 +813,7 @@ where
         &self,
         command: RevokeStoredCredential,
     ) -> HandlerResult<EventStore, <Secrets as SecretStoreRevoke>::Error> {
+        let _write_guard = self.write_locks.acquire(command.credential_ref.id()).await;
         let revoke = RevokeCredential::new(command.credential_ref.clone());
         let (state, stream_position) = load_state(&self.event_store, command.credential_ref.id().as_str()).await?;
         let already_revoked = is_revoked_as(&state, &command.credential_ref)?;

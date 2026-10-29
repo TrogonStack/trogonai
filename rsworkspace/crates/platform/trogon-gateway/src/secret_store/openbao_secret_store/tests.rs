@@ -278,6 +278,25 @@ async fn revoke_posts_delete_for_every_version() {
 }
 
 #[tokio::test]
+async fn destroy_posts_destroy_for_every_version() {
+    let openbao = FakeOpenBao::start(Some(metadata_with_destroyed_first_version())).await;
+
+    openbao
+        .store()
+        .destroy(
+            &discord_bot_token(CredentialVersion::new(2).unwrap()),
+            &SecretDestroyReason::new("operator request").unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        openbao.posted_to(OpenBaoEndpoint::Destroy).await,
+        vec![json!({ "versions": [1, 2] })]
+    );
+}
+
+#[tokio::test]
 async fn metadata_fingerprints_the_metadata_path_and_version() {
     let openbao = FakeOpenBao::start(Some(json!({
         "current_version": 2,

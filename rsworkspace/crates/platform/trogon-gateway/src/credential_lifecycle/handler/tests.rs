@@ -1160,6 +1160,31 @@ async fn revoke_revokes_secret_and_records_state() {
 }
 
 #[tokio::test]
+async fn revoke_waits_for_an_in_flight_write_on_the_same_credential() {
+    let events = HandlerTestStreamStore::default();
+    let secrets = MockOpenBaoSecretStore::default();
+    let handler = CredentialHandler::new(events.clone(), secrets.clone());
+    let state = handler.put(put_command("initial-secret")).await.unwrap().into_state();
+    let Some(CredentialStateSnapshotCase::Active(active)) = state.state.as_ref() else {
+        panic!("expected active credential");
+    };
+    let (active_metadata, _) = decode_active_state("active", active).unwrap();
+    let credential_ref = active_metadata.reference().clone();
+
+    let write_guard = handler.write_locks.acquire(credential_ref.id()).await;
+    let revoke = handler.revoke(RevokeStoredCredential::new(credential_ref.clone()));
+    tokio::pin!(revoke);
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(50), &mut revoke)
+            .await
+            .is_err()
+    );
+    drop(write_guard);
+
+    revoke.await.unwrap();
+}
+
+#[tokio::test]
 async fn revoke_retry_records_state_after_append_failure() {
     let events = HandlerTestStreamStore::default();
     let secrets = MockOpenBaoSecretStore::default();

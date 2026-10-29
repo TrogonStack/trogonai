@@ -356,14 +356,19 @@ impl SecretStoreDestroy for OpenBaoSecretStore {
     type Error = SecretStoreError;
 
     async fn destroy(&self, credential: &CredentialRef, reason: &SecretDestroyReason) -> Result<(), Self::Error> {
-        self.metadata(credential).await?;
+        let metadata = self.openbao_metadata(credential).await?;
+        if metadata.data.status(credential.version(), Utc::now()).is_none() {
+            return Err(SecretStoreError::Missing {
+                credential: credential.clone(),
+            });
+        }
         info!(credential = %credential, reason = %reason, "destroying credential material in OpenBao");
+
+        let versions: Vec<u64> = (1..=metadata.data.current_version).collect();
 
         self.send_empty(
             self.authorize(self.http.post(self.endpoint(OpenBaoEndpoint::Destroy, credential)?))
-                .json(&OpenBaoVersionsRequest {
-                    versions: &[credential.version().get()],
-                }),
+                .json(&OpenBaoVersionsRequest { versions: &versions }),
         )
         .await
     }
