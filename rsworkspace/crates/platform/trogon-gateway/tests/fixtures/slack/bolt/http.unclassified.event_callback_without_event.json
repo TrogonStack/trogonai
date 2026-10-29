@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "id": "http.unclassified.event_callback_without_event",
+  "kind": "malformed",
+  "transport": "http",
+  "provenance": {
+    "bolt_version": "5.1.0",
+    "bolt_commit": "3f8823c93f5639e99f05a2df9c7dc692da5cc184",
+    "node_slack_sdk_commit": "d02afdfd5c87f896dc9994dfe2b55472758fbcf4",
+    "payload_source": "hand written valid JSON that Bolt cannot classify: an event_callback that carries no event; test/unit/receivers/HTTPModuleFunctions.spec.ts and verify-request.spec.ts request verification vectors",
+    "wire_source": "https://docs.slack.dev/apis/events-api/",
+    "ack_source": null
+  },
+  "not_representable": null,
+  "input": {
+    "headers": {
+      "content-type": "application/json",
+      "x-slack-request-timestamp": "1700000000",
+      "x-slack-signature": "v0=68f493c6a4a178706ca2f6fba5f771b421c1e50a8ce79f87c106d2befca313a5"
+    },
+    "body": "{\"type\":\"event_callback\",\"event_id\":\"Ev0NOEVENT\",\"team_id\":\"T1234\"}"
+  },
+  "bolt": {
+    "outcome": "rejected",
+    "status": 404,
+    "body": null,
+    "content_type": null,
+    "reason": null,
+    "dispatch": null
+  },
+  "expected": {
+    "outcome": "reject",
+    "nats": null,
+    "request": null,
+    "http": {
+      "status": 404,
+      "body": null,
+      "content_type": null,
+      "challenge": null
+    },
+    "socket_ack": null
+  }
+}

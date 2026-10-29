@@ -1,12 +1,38 @@
 {
   "schema_version": 1,
   "entries": {
+    "http.content_type.form_mixed_case_charset_command": [
+      "G26"
+    ],
+    "http.content_type.form_mixed_case_charset_interaction": [
+      "G26"
+    ],
+    "http.event.missing_event_id": [
+      "G25"
+    ],
     "http.malformed.invalid_interaction_payload": [
       "G23"
     ],
     "http.malformed.invalid_json": [
       "G23"
     ],
-    "http.not_representable.dummy_receiver_event": "not_representable"
+    "http.not_representable.dummy_receiver_event": "not_representable",
+    "http.unclassified.event_callback_without_event": [
+      "G23",
+      "G27"
+    ],
+    "http.unclassified.unknown_shape": [
+      "G23",
+      "G27"
+    ],
+    "http.verify.future_timestamp": [
+      "G24"
+    ],
+    "socket.event.missing_event_id": [
+      "G25"
+    ],
+    "socket.unclassified.unknown_shape": [
+      "G23"
+    ]
   }
 }

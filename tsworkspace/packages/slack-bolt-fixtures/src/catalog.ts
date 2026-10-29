@@ -5,6 +5,7 @@ import type {
   BoltSocketVerdict,
   DispatchRecord,
   Expected,
+  ExpectedOutcome,
   ExpectedReply,
   Fixture,
   HttpFixture,
@@ -25,10 +26,13 @@ import {
   type JsonObject,
   REQUEST_TIMESTAMP_SECONDS,
   SIGNING_SECRET,
+  type SocketDisconnectReason,
   type SocketEnvelopeType,
   signedHeaders,
   signSlackRequest,
+  socketDisconnectFrame,
   socketEnvelope,
+  socketHelloFrame,
 } from './wire.ts';
 
 const DOCS = {
@@ -167,6 +171,20 @@ const ACK_CASES: readonly AckCase[] = [
     ackBody: 'It is 80 degrees right now.',
     ackSource: DOCS.commands,
     ackNote: 'plain text immediate response from the slash commands guide',
+  },
+];
+
+const MIXED_CASE_CONTENT_TYPES: ReadonlyArray<{ id: string; payloadCase: string; contentType: string }> = [
+  { id: 'json_mixed_case_charset', payloadCase: 'event.message', contentType: 'Application/JSON; charset=utf-8' },
+  {
+    id: 'form_mixed_case_charset_command',
+    payloadCase: 'command.slash',
+    contentType: 'Application/X-WWW-Form-Urlencoded; Charset=UTF-8',
+  },
+  {
+    id: 'form_mixed_case_charset_interaction',
+    payloadCase: 'interaction.block_actions',
+    contentType: 'Application/X-WWW-Form-Urlencoded; Charset=UTF-8',
   },
 ];
 
@@ -359,6 +377,46 @@ async function socketFixture(context: CatalogContext, spec: SocketSpec): Promise
   };
 }
 
+interface SocketFrameSpec {
+  id: string;
+  kind: PayloadKind;
+  provenance: Provenance;
+  frame: string;
+}
+
+function socketFrameExpected(spec: SocketFrameSpec, verdict: BoltSocketVerdict): Expected {
+  return { outcome: socketFrameOutcome(spec, verdict), nats: null, request: null, http: null, socket_ack: null };
+}
+
+function socketFrameOutcome(spec: SocketFrameSpec, verdict: BoltSocketVerdict): ExpectedOutcome {
+  switch (verdict.outcome) {
+    case 'ignored':
+      return spec.kind === 'control' ? 'ignore' : 'reject';
+    case 'disconnected':
+      return 'reconnect';
+    case 'dispatched':
+      throw new Error(`${spec.id}: Bolt dispatched a frame the catalog expects it to leave undelivered`);
+  }
+}
+
+async function socketFrameFixture(context: CatalogContext, spec: SocketFrameSpec): Promise<SocketFixture> {
+  const { verdict } = await context.oracle.runSocket(spec.frame);
+  if (verdict.ack !== null) {
+    throw new Error(`${spec.id}: Bolt acknowledged a frame the catalog expects it to leave unacknowledged`);
+  }
+  return {
+    schema_version: 1,
+    id: spec.id,
+    kind: spec.kind,
+    transport: 'socket_mode',
+    provenance: spec.provenance,
+    not_representable: null,
+    input: { frame: spec.frame },
+    bolt: verdict,
+    expected: socketFrameExpected(spec, verdict),
+  };
+}
+
 function httpWire(
   kind: RepresentableKind,
   payload: JsonObject,
@@ -487,8 +545,71 @@ async function representableFixtures(context: CatalogContext): Promise<Fixture[]
     }),
   );
 
+  const withoutEventId = Object.fromEntries(Object.entries(messagePayload).filter(([key]) => key !== 'event_id'));
+  const eventIdSource = `${EVENT_FILE}:${message.builder} without event_id`;
+  fixtures.push(
+    await httpFixture(
+      context,
+      representableHttpSpec(context, 'http.event.missing_event_id', message, withoutEventId, {
+        provenance: provenance(context.oracle, eventIdSource, DOCS.events),
+      }),
+    ),
+    await socketFixture(context, {
+      id: 'socket.event.missing_event_id',
+      kind: 'event',
+      provenance: provenance(context.oracle, eventIdSource, DOCS.socketMode),
+      type: 'events_api',
+      payload: withoutEventId,
+      acceptsResponsePayload: false,
+    }),
+  );
+
+  const contentTypeSource = (builder: string): string => `${EVENT_FILE}:${builder} with a mixed case content type`;
+  for (const mixedCase of MIXED_CASE_CONTENT_TYPES) {
+    const payloadCase = PAYLOAD_CASES.find((candidate) => candidate.id === mixedCase.payloadCase);
+    const payload = payloads.get(mixedCase.payloadCase);
+    if (payloadCase === undefined || payload === undefined) {
+      throw new Error(`Unknown payload case ${mixedCase.payloadCase}`);
+    }
+    fixtures.push(
+      await httpFixture(
+        context,
+        representableHttpSpec(context, `http.content_type.${mixedCase.id}`, payloadCase, payload, {
+          headers: { 'content-type': mixedCase.contentType },
+          provenance: provenance(
+            context.oracle,
+            contentTypeSource(payloadCase.builder),
+            wireSourceFor(payloadCase.kind),
+          ),
+        }),
+      ),
+    );
+  }
+
   return fixtures;
 }
+
+const DISCONNECT_REASONS: readonly SocketDisconnectReason[] = ['warning', 'refresh_requested', 'link_disabled'];
+
+const UNCLASSIFIED_BODIES: ReadonlyArray<{
+  id: string;
+  body: string;
+  note: string;
+  socketType: SocketEnvelopeType | null;
+}> = [
+  {
+    id: 'unknown_shape',
+    body: '{"unrecognized":"shape"}',
+    note: 'an object with none of the fields Bolt classifies on',
+    socketType: 'interactive',
+  },
+  {
+    id: 'event_callback_without_event',
+    body: '{"type":"event_callback","event_id":"Ev0NOEVENT","team_id":"T1234"}',
+    note: 'an event_callback that carries no event',
+    socketType: null,
+  },
+];
 
 async function negativeFixtures(context: CatalogContext): Promise<Fixture[]> {
   const { oracle } = context;
@@ -515,6 +636,8 @@ async function negativeFixtures(context: CatalogContext): Promise<Fixture[]> {
 
   const staleTimestamp = REQUEST_TIMESTAMP_SECONDS - 301;
   const driftLimitTimestamp = REQUEST_TIMESTAMP_SECONDS - 300;
+  const futureTimestamp = REQUEST_TIMESTAMP_SECONDS + 301;
+  const futureDriftLimitTimestamp = REQUEST_TIMESTAMP_SECONDS + 300;
   const specs: HttpSpec[] = [
     verification('http.verify.missing_signature', withoutHeader(signed(), 'x-slack-signature'), 'no signature header'),
     verification(
@@ -549,6 +672,16 @@ async function negativeFixtures(context: CatalogContext): Promise<Fixture[]> {
       'http.verify.timestamp_at_drift_limit',
       signedHeaders({ contentType: CONTENT_TYPE_JSON, body: messageBody, timestampSeconds: driftLimitTimestamp }),
       'timestamp exactly 300 seconds old',
+    ),
+    verification(
+      'http.verify.future_timestamp',
+      signedHeaders({ contentType: CONTENT_TYPE_JSON, body: messageBody, timestampSeconds: futureTimestamp }),
+      'timestamp 301 seconds ahead of the receiver clock',
+    ),
+    verification(
+      'http.verify.future_timestamp_at_drift_limit',
+      signedHeaders({ contentType: CONTENT_TYPE_JSON, body: messageBody, timestampSeconds: futureDriftLimitTimestamp }),
+      'timestamp exactly 300 seconds ahead of the receiver clock',
     ),
   ];
   for (const spec of specs) {
@@ -691,6 +824,53 @@ async function negativeFixtures(context: CatalogContext): Promise<Fixture[]> {
       body: aboveBolt,
     }),
   );
+
+  for (const unclassified of UNCLASSIFIED_BODIES) {
+    const source = `hand written valid JSON that Bolt cannot classify: ${unclassified.note}`;
+    fixtures.push(
+      await httpFixture(context, {
+        id: `http.unclassified.${unclassified.id}`,
+        kind: 'malformed',
+        provenance: provenance(oracle, `${source}; ${signingSource}`, DOCS.events),
+        headers: signedHeaders({ contentType: CONTENT_TYPE_JSON, body: unclassified.body }),
+        body: unclassified.body,
+      }),
+    );
+    if (unclassified.socketType !== null) {
+      fixtures.push(
+        await socketFrameFixture(context, {
+          id: `socket.unclassified.${unclassified.id}`,
+          kind: 'malformed',
+          provenance: provenance(oracle, source, DOCS.socketMode),
+          frame: socketEnvelope({
+            type: unclassified.socketType,
+            payload: JSON.parse(unclassified.body) as JsonObject,
+            acceptsResponsePayload: false,
+          }),
+        }),
+      );
+    }
+  }
+
+  const controlSource = 'hand written Socket Mode control frame';
+  fixtures.push(
+    await socketFrameFixture(context, {
+      id: 'socket.control.hello',
+      kind: 'control',
+      provenance: provenance(oracle, `${controlSource}: hello`, DOCS.socketMode),
+      frame: socketHelloFrame(),
+    }),
+  );
+  for (const reason of DISCONNECT_REASONS) {
+    fixtures.push(
+      await socketFrameFixture(context, {
+        id: `socket.control.disconnect_${reason}`,
+        kind: 'control',
+        provenance: provenance(oracle, `${controlSource}: disconnect with reason ${reason}`, DOCS.socketMode),
+        frame: socketDisconnectFrame(reason),
+      }),
+    );
+  }
 
   const receiverEvent = await degenerateReceiverEvent(context);
   fixtures.push(receiverEvent);

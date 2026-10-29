@@ -37,27 +37,45 @@ fn unroutable_diff() -> Diff {
     }
 }
 
+fn diff_on(field: Field) -> Diff {
+    Diff {
+        field,
+        expected: "x".to_owned(),
+        actual: "y".to_owned(),
+    }
+}
+
 fn gaps(ids: &[GapId]) -> LedgerEntry {
     LedgerEntry::Gaps(ids.iter().copied().collect())
 }
 
 #[test]
 fn a_mismatch_without_a_ledger_entry_fails() {
-    let problems = judge(&fixture(), None, &[header_diff("X-Slack-Extra")]);
+    let problems = judge(
+        &fixture(),
+        None,
+        Some(&observed_body("")),
+        &[header_diff("X-Slack-Extra")],
+    );
     assert_eq!(problems.len(), 1);
     assert!(problems[0].contains("not covered"));
 }
 
 #[test]
 fn a_ledger_entry_that_no_longer_matches_anything_is_stale() {
-    let problems = judge(&fixture(), Some(&gaps(&[GapId::G23])), &[]);
+    let problems = judge(&fixture(), Some(&gaps(&[GapId::G23])), Some(&observed_body("")), &[]);
     assert_eq!(problems.len(), 1);
     assert!(problems[0].contains("stale"));
 }
 
 #[test]
 fn a_gap_that_explains_a_different_mismatch_is_stale_and_leaves_the_mismatch_uncovered() {
-    let problems = judge(&fixture(), Some(&gaps(&[GapId::G23])), &[header_diff("X-Slack-Extra")]);
+    let problems = judge(
+        &fixture(),
+        Some(&gaps(&[GapId::G23])),
+        Some(&observed_body("")),
+        &[header_diff("X-Slack-Extra")],
+    );
     assert_eq!(problems.len(), 2);
 }
 
@@ -66,6 +84,7 @@ fn a_matching_gap_covers_its_mismatch() {
     let problems = judge(
         &fixture_expecting("reject"),
         Some(&gaps(&[GapId::G23])),
+        Some(&observed_body("")),
         &[unroutable_diff()],
     );
     assert!(problems.is_empty(), "{problems:?}");
@@ -74,7 +93,7 @@ fn a_matching_gap_covers_its_mismatch() {
 #[test]
 fn a_representable_fixture_cannot_be_marked_not_representable() {
     let entry = LedgerEntry::NotRepresentable(NotRepresentableMarker::NotRepresentable);
-    assert_eq!(judge(&fixture(), Some(&entry), &[]).len(), 1);
+    assert_eq!(judge(&fixture(), Some(&entry), Some(&observed_body("")), &[]).len(), 1);
 }
 
 fn expected_nats(headers: serde_json::Value) -> ExpectedNats {
@@ -119,6 +138,13 @@ fn http_fixture(challenge: &str) -> Fixture {
         }
     }))
     .expect("synthetic fixture")
+}
+
+fn rejected(status: u16) -> Observed {
+    let mut observed = observed_body("");
+    observed.outcome = Outcome::Reject;
+    observed.status = Some(status);
+    observed
 }
 
 fn observed_body(body: &str) -> Observed {
@@ -174,12 +200,29 @@ fn a_challenge_must_come_back_whole_in_a_supported_shape() {
 #[test]
 fn an_unroutable_record_is_only_explained_when_bolt_rejects_the_request() {
     let gap = gaps(&[GapId::G23]);
-    assert!(judge(&fixture_expecting("reject"), Some(&gap), &[unroutable_diff()]).is_empty());
+    assert!(
+        judge(
+            &fixture_expecting("reject"),
+            Some(&gap),
+            Some(&observed_body("")),
+            &[unroutable_diff()]
+        )
+        .is_empty()
+    );
     assert_eq!(
-        judge(&fixture_expecting("inline"), Some(&gap), &[unroutable_diff()]).len(),
+        judge(
+            &fixture_expecting("inline"),
+            Some(&gap),
+            Some(&observed_body("")),
+            &[unroutable_diff()]
+        )
+        .len(),
         2
     );
-    assert_eq!(judge(&fixture(), None, &[unroutable_diff()]).len(), 1);
+    assert_eq!(
+        judge(&fixture(), None, Some(&observed_body("")), &[unroutable_diff()]).len(),
+        1
+    );
 }
 
 fn request_fixture(content_type: serde_json::Value) -> Fixture {
@@ -277,4 +320,108 @@ fn an_expected_content_type_must_be_the_one_observed() {
 
     observed.content_type = Some("application/json".to_owned());
     assert!(compare(&fixture, &observed).is_empty());
+}
+
+#[test]
+fn a_future_timestamp_gap_only_explains_an_unauthorized_rejection_of_a_request_bolt_accepts() {
+    let gap = gaps(&[GapId::G24]);
+    let diffs = [diff_on(Field::Outcome), diff_on(Field::Status)];
+    let unauthorized = rejected(GATEWAY_UNAUTHORIZED_STATUS);
+    assert!(judge(&fixture(), Some(&gap), Some(&unauthorized), &diffs).is_empty());
+    assert_eq!(
+        judge(&fixture_expecting("reject"), Some(&gap), Some(&unauthorized), &diffs).len(),
+        3
+    );
+    assert_eq!(
+        judge(&fixture(), Some(&gap), Some(&unauthorized), &[diff_on(Field::Subject)]).len(),
+        2
+    );
+    assert_eq!(judge(&fixture(), Some(&gap), Some(&rejected(500)), &diffs).len(), 3);
+    let mut delivered = rejected(GATEWAY_UNAUTHORIZED_STATUS);
+    delivered.deliveries.push(delivery(&[]));
+    assert_eq!(judge(&fixture(), Some(&gap), Some(&delivered), &diffs).len(), 3);
+}
+
+#[test]
+fn a_missing_event_id_gap_only_explains_a_dead_letter() {
+    let gap = gaps(&[GapId::G25]);
+    let diffs = [
+        diff_on(Field::Outcome),
+        diff_on(Field::SocketAck),
+        diff_on(Field::Unroutable),
+    ];
+    let mut dead_letter = rejected(400);
+    dead_letter.unroutable = 1;
+    assert!(judge(&fixture(), Some(&gap), Some(&dead_letter), &diffs).is_empty());
+    assert_eq!(
+        judge(&fixture_expecting("inline"), Some(&gap), Some(&dead_letter), &diffs).len(),
+        4
+    );
+    let mut silent_drop = rejected(400);
+    silent_drop.outcome = Outcome::Ignore;
+    let drop_diffs = [diff_on(Field::Outcome), diff_on(Field::SocketAck)];
+    assert_eq!(judge(&fixture(), Some(&gap), Some(&silent_drop), &drop_diffs).len(), 3);
+}
+
+#[test]
+fn a_lenient_content_type_gap_only_explains_an_http_request_the_gateway_processed() {
+    let gap = gaps(&[GapId::G26]);
+    let diffs = [
+        diff_on(Field::Outcome),
+        diff_on(Field::Status),
+        diff_on(Field::Requests),
+        diff_on(Field::Deliveries),
+    ];
+    let mut accepted = observed_body("");
+    accepted.outcome = Outcome::Publish;
+    accepted.deliveries.push(delivery(&[]));
+    assert!(judge(&fixture_expecting("reject"), Some(&gap), Some(&accepted), &diffs).is_empty());
+    assert_eq!(judge(&fixture(), Some(&gap), Some(&accepted), &diffs).len(), 5);
+    let mut unanswered = rejected(404);
+    unanswered.requests.push(Requested {
+        headers: BTreeMap::new(),
+        payload: Bytes::new(),
+    });
+    assert!(judge(&fixture_expecting("reject"), Some(&gap), Some(&unanswered), &diffs).is_empty());
+    let status_diffs = [diff_on(Field::Status)];
+    assert_eq!(
+        judge(
+            &fixture_expecting("reject"),
+            Some(&gap),
+            Some(&rejected(500)),
+            &status_diffs
+        )
+        .len(),
+        2
+    );
+}
+
+#[test]
+fn an_unanswered_body_gap_only_explains_an_immediate_dead_letter() {
+    let gap = gaps(&[GapId::G27]);
+    let diffs = [diff_on(Field::Outcome), diff_on(Field::Status)];
+    let mut unhandled = fixture_expecting("reject");
+    unhandled.expected.http = Some(ExpectedHttp {
+        status: BOLT_UNHANDLED_STATUS,
+        body: None,
+        content_type: None,
+        challenge: None,
+    });
+    let mut dead_letter = observed_body("");
+    dead_letter.unroutable = 1;
+    assert!(judge(&unhandled, Some(&gap), Some(&dead_letter), &diffs).is_empty());
+    assert_eq!(
+        judge(&fixture_expecting("reject"), Some(&gap), Some(&dead_letter), &diffs).len(),
+        3
+    );
+    let mut failed = rejected(500);
+    failed.unroutable = 1;
+    assert_eq!(judge(&unhandled, Some(&gap), Some(&failed), &diffs).len(), 3);
+}
+
+#[test]
+fn a_representable_fixture_without_an_observation_fails() {
+    let problems = judge(&fixture(), None, None, &[]);
+    assert_eq!(problems.len(), 1);
+    assert!(problems[0].contains("never observed"));
 }

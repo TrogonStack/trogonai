@@ -75,3 +75,18 @@ export function socketEnvelope(options: SocketEnvelopeOptions): string {
   }
   return JSON.stringify(envelope);
 }
+
+export type SocketDisconnectReason = 'warning' | 'refresh_requested' | 'link_disabled';
+
+export function socketHelloFrame(): string {
+  return JSON.stringify({
+    type: 'hello',
+    num_connections: 1,
+    debug_info: { host: 'applink-1', build_number: 10, approximate_connection_time: 18060 },
+    connection_info: { app_id: 'A1234' },
+  });
+}
+
+export function socketDisconnectFrame(reason: SocketDisconnectReason): string {
+  return JSON.stringify({ type: 'disconnect', reason, debug_info: { host: 'applink-1' } });
+}
