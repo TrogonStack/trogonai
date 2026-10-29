@@ -11,6 +11,7 @@ use super::constants::{
     NATS_HEADER_EVENT_ID, NATS_HEADER_EVENT_TYPE, NATS_HEADER_PAYLOAD_KIND, NATS_HEADER_REJECT_REASON,
     NATS_HEADER_TEAM_ID, NATS_HEADER_TRANSPORT, UNKNOWN_TEAM_ID,
 };
+use super::dedup_window::DedupWindow;
 use super::delivery_metadata::{DeliveryContext, DeliveryMetadata};
 use super::header_text::{DeliveryHeaders, HeaderText, InvalidHeaderTextError};
 use super::interaction_key::InteractionKey;
@@ -35,7 +36,7 @@ use std::future::Future;
 use std::pin::Pin;
 use tracing::{info, instrument, warn};
 use trogon_nats::jetstream::{
-    ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
+    ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, ProvisionedStreamField, PublishOutcome,
 };
 use trogon_nats::{NatsToken, SubjectTokenViolationError};
 use trogon_semconv::span::SLACK_WEBHOOK;
@@ -622,12 +623,21 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
 }
 
 pub async fn provision<C: JetStreamContext>(js: &C, config: &SlackConfig) -> Result<(), C::Error> {
-    js.get_or_create_stream(async_nats::jetstream::stream::Config {
-        name: config.stream_name.to_string(),
-        subjects: vec![format!("{}.>", config.subject_prefix)],
-        max_age: config.stream_max_age.into(),
-        ..Default::default()
-    })
+    let dedup_window = DedupWindow::within(config.stream_max_age);
+    js.create_or_reconcile_stream(
+        async_nats::jetstream::stream::Config {
+            name: config.stream_name.to_string(),
+            subjects: vec![format!("{}.>", config.subject_prefix)],
+            max_age: config.stream_max_age.into(),
+            duplicate_window: dedup_window.into(),
+            ..Default::default()
+        },
+        &[
+            ProvisionedStreamField::Subjects,
+            ProvisionedStreamField::DuplicateWindow,
+            ProvisionedStreamField::MaxAge,
+        ],
+    )
     .await?;
 
     if let Some(requested) = config.ack_budget.capped_from() {
@@ -642,7 +652,11 @@ pub async fn provision<C: JetStreamContext>(js: &C, config: &SlackConfig) -> Res
 
     let max_age_secs = Duration::from(config.stream_max_age).as_secs();
     let stream_name = config.stream_name.as_str();
-    info!(stream = stream_name, max_age_secs, "JetStream stream ready");
+    let dedup_window_secs = Duration::from(dedup_window).as_secs();
+    info!(
+        stream = stream_name,
+        max_age_secs, dedup_window_secs, "JetStream stream ready"
+    );
     Ok(())
 }
 
