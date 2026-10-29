@@ -1,11 +1,12 @@
 use std::sync::{Arc, Mutex};
 
 use crate::credential::commands::domain::{
-    AllowedHosts, AllowedRuntimeServices, CredentialDestroyReason, CredentialScope, CredentialVersion,
-    InjectionLocation, InjectionLocations, RuntimeServiceId,
+    AllowedHosts, AllowedRuntimeServices, CredentialDestroyReason, CredentialFailureReason, CredentialMetadata,
+    CredentialScope, CredentialVersion, InjectionLocation, InjectionLocations, RuntimeServiceId,
 };
 use crate::credential::commands::proto::{
-    activated_to_proto, destroy_requested_to_proto, destroyed_to_proto, revoked_to_proto, write_requested_to_proto,
+    activated_to_proto, destroy_failed_to_proto, destroy_requested_to_proto, destroyed_to_proto, revoked_to_proto,
+    write_requested_to_proto,
 };
 use crate::secret_store::{
     MockOpenBaoSecretStore, SecretDestroyReason, SecretStoreDestroy, SecretStoreMetadata, SecretStorePut,
@@ -148,6 +149,32 @@ fn write_requested(credential: &CredentialRef) -> v1::CredentialEvent {
         event: Some(
             write_requested_to_proto(credential.id(), &owner_id(), credential.source(), credential.kind()).into(),
         ),
+    }
+}
+
+fn activated(metadata: &CredentialMetadata) -> v1::CredentialEvent {
+    v1::CredentialEvent {
+        event: Some(activated_to_proto(metadata).into()),
+    }
+}
+
+fn revoked(credential: &CredentialRef) -> v1::CredentialEvent {
+    v1::CredentialEvent {
+        event: Some(revoked_to_proto(credential).into()),
+    }
+}
+
+fn destroy_requested(credential: &CredentialRef) -> v1::CredentialEvent {
+    let reason = CredentialDestroyReason::new("credential lifecycle cleanup").unwrap();
+    v1::CredentialEvent {
+        event: Some(destroy_requested_to_proto(credential, &reason).into()),
+    }
+}
+
+fn destroy_failed(credential: &CredentialRef) -> v1::CredentialEvent {
+    let reason = CredentialFailureReason::new("openbao destroy failed").unwrap();
+    v1::CredentialEvent {
+        event: Some(destroy_failed_to_proto(credential, &reason).into()),
     }
 }
 
@@ -728,6 +755,94 @@ async fn registry_applies_destroyed_state_incrementally_and_invalidates_cache() 
     )
     .unwrap();
     registry.apply_state(&destroyed_state, position(5)).await.unwrap();
+
+    assert!(matches!(
+        resolver.resolve(&key(), CredentialKind::BotToken).await,
+        Err(RuntimeCredentialError::IntegrationNotFound { .. })
+    ));
+
+    registry
+        .projections()
+        .upsert(projection(RuntimeIntegrationStatus::Active, credential))
+        .await;
+    assert!(matches!(
+        resolver.resolve(&key(), CredentialKind::BotToken).await,
+        Err(RuntimeCredentialError::SecretStore(SecretStoreError::Unreadable { .. }))
+    ));
+}
+
+#[tokio::test]
+async fn registry_applies_destroy_requested_state_incrementally_and_invalidates_cache() {
+    let store = MockOpenBaoSecretStore::default();
+    let credential = put_bot_token(&store, "Bot token").await;
+    let metadata = store.metadata(&credential).await.unwrap();
+    let registry = RuntimeCredentialRegistry::default();
+    let resolver = registry.resolver(store.clone());
+    let active_state = build_state([write_requested(&credential), activated(&metadata)]);
+    registry.apply_state(&active_state, position(2)).await.unwrap();
+    assert_eq!(
+        resolver
+            .resolve_plaintext(&key(), CredentialKind::BotToken)
+            .await
+            .unwrap()
+            .as_str(),
+        "Bot token"
+    );
+
+    store.revoke(&credential).await.unwrap();
+    let destroy_requested_state = build_state([
+        write_requested(&credential),
+        activated(&metadata),
+        revoked(&credential),
+        destroy_requested(&credential),
+    ]);
+    registry
+        .apply_state(&destroy_requested_state, position(4))
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        resolver.resolve(&key(), CredentialKind::BotToken).await,
+        Err(RuntimeCredentialError::IntegrationNotFound { .. })
+    ));
+
+    registry
+        .projections()
+        .upsert(projection(RuntimeIntegrationStatus::Active, credential))
+        .await;
+    assert!(matches!(
+        resolver.resolve(&key(), CredentialKind::BotToken).await,
+        Err(RuntimeCredentialError::SecretStore(SecretStoreError::Unreadable { .. }))
+    ));
+}
+
+#[tokio::test]
+async fn registry_applies_cleanup_failed_state_incrementally_and_invalidates_cache() {
+    let store = MockOpenBaoSecretStore::default();
+    let credential = put_bot_token(&store, "Bot token").await;
+    let metadata = store.metadata(&credential).await.unwrap();
+    let registry = RuntimeCredentialRegistry::default();
+    let resolver = registry.resolver(store.clone());
+    let active_state = build_state([write_requested(&credential), activated(&metadata)]);
+    registry.apply_state(&active_state, position(2)).await.unwrap();
+    assert_eq!(
+        resolver
+            .resolve_plaintext(&key(), CredentialKind::BotToken)
+            .await
+            .unwrap()
+            .as_str(),
+        "Bot token"
+    );
+
+    store.revoke(&credential).await.unwrap();
+    let cleanup_failed_state = build_state([
+        write_requested(&credential),
+        activated(&metadata),
+        revoked(&credential),
+        destroy_requested(&credential),
+        destroy_failed(&credential),
+    ]);
+    registry.apply_state(&cleanup_failed_state, position(5)).await.unwrap();
 
     assert!(matches!(
         resolver.resolve(&key(), CredentialKind::BotToken).await,
@@ -1454,5 +1569,139 @@ async fn incremental_refresh_invalidates_cache_and_removes_projection_on_revoked
     assert!(matches!(
         resolver.resolve(&key(), CredentialKind::BotToken).await,
         Err(RuntimeCredentialError::IntegrationNotFound { .. })
+    ));
+}
+
+#[tokio::test]
+async fn incremental_refresh_invalidates_cache_and_removes_projection_when_batch_ends_in_destroy_requested() {
+    let store = MockOpenBaoSecretStore::default();
+    let credential = put_bot_token(&store, "Bot token").await;
+    let metadata = store.metadata(&credential).await.unwrap();
+    let event_store = ProjectionTestEventStore::default();
+    event_store.push(credential.id().as_str(), 1, write_requested(&credential));
+    event_store.push(credential.id().as_str(), 2, activated(&metadata));
+    let stream = raw_stream([
+        runtime_event(1, write_requested(&credential)),
+        runtime_event(2, activated(&metadata)),
+    ])
+    .await;
+    let registry = RuntimeCredentialRegistry::default();
+    let resolver = registry.resolver(store.clone());
+
+    registry
+        .refresh_from_credential_stream_incremental(&stream, &event_store, 1)
+        .await
+        .unwrap();
+    assert_eq!(
+        resolver
+            .resolve_plaintext(&key(), CredentialKind::BotToken)
+            .await
+            .unwrap()
+            .as_str(),
+        "Bot token"
+    );
+
+    store.revoke(&credential).await.unwrap();
+    event_store.push(credential.id().as_str(), 3, revoked(&credential));
+    event_store.push(credential.id().as_str(), 4, destroy_requested(&credential));
+    append_stream(
+        &stream,
+        StreamSubject::new("gateway.credentials.events.v1.raw").unwrap(),
+        None,
+        &[
+            runtime_event(3, revoked(&credential)),
+            runtime_event(4, destroy_requested(&credential)),
+        ],
+    )
+    .await
+    .unwrap();
+
+    let report = registry
+        .refresh_from_credential_stream_incremental(&stream, &event_store, 2)
+        .await
+        .unwrap();
+
+    assert_eq!(report.scanned_events(), 3);
+    assert_eq!(report.applied_credentials(), 1);
+    assert!(matches!(
+        resolver.resolve(&key(), CredentialKind::BotToken).await,
+        Err(RuntimeCredentialError::IntegrationNotFound { .. })
+    ));
+
+    registry
+        .projections()
+        .upsert(projection(RuntimeIntegrationStatus::Active, credential))
+        .await;
+    assert!(matches!(
+        resolver.resolve(&key(), CredentialKind::BotToken).await,
+        Err(RuntimeCredentialError::SecretStore(SecretStoreError::Unreadable { .. }))
+    ));
+}
+
+#[tokio::test]
+async fn incremental_refresh_invalidates_cache_and_removes_projection_when_batch_ends_in_cleanup_failed() {
+    let store = MockOpenBaoSecretStore::default();
+    let credential = put_bot_token(&store, "Bot token").await;
+    let metadata = store.metadata(&credential).await.unwrap();
+    let event_store = ProjectionTestEventStore::default();
+    event_store.push(credential.id().as_str(), 1, write_requested(&credential));
+    event_store.push(credential.id().as_str(), 2, activated(&metadata));
+    let stream = raw_stream([
+        runtime_event(1, write_requested(&credential)),
+        runtime_event(2, activated(&metadata)),
+    ])
+    .await;
+    let registry = RuntimeCredentialRegistry::default();
+    let resolver = registry.resolver(store.clone());
+
+    registry
+        .refresh_from_credential_stream_incremental(&stream, &event_store, 1)
+        .await
+        .unwrap();
+    assert_eq!(
+        resolver
+            .resolve_plaintext(&key(), CredentialKind::BotToken)
+            .await
+            .unwrap()
+            .as_str(),
+        "Bot token"
+    );
+
+    store.revoke(&credential).await.unwrap();
+    event_store.push(credential.id().as_str(), 3, revoked(&credential));
+    event_store.push(credential.id().as_str(), 4, destroy_requested(&credential));
+    event_store.push(credential.id().as_str(), 5, destroy_failed(&credential));
+    append_stream(
+        &stream,
+        StreamSubject::new("gateway.credentials.events.v1.raw").unwrap(),
+        None,
+        &[
+            runtime_event(3, revoked(&credential)),
+            runtime_event(4, destroy_requested(&credential)),
+            runtime_event(5, destroy_failed(&credential)),
+        ],
+    )
+    .await
+    .unwrap();
+
+    let report = registry
+        .refresh_from_credential_stream_incremental(&stream, &event_store, 2)
+        .await
+        .unwrap();
+
+    assert_eq!(report.scanned_events(), 4);
+    assert_eq!(report.applied_credentials(), 1);
+    assert!(matches!(
+        resolver.resolve(&key(), CredentialKind::BotToken).await,
+        Err(RuntimeCredentialError::IntegrationNotFound { .. })
+    ));
+
+    registry
+        .projections()
+        .upsert(projection(RuntimeIntegrationStatus::Active, credential))
+        .await;
+    assert!(matches!(
+        resolver.resolve(&key(), CredentialKind::BotToken).await,
+        Err(RuntimeCredentialError::SecretStore(SecretStoreError::Unreadable { .. }))
     ));
 }

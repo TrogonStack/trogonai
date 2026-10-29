@@ -39,10 +39,10 @@ use crate::credential::commands::domain::{
     RuntimeReleaseRequest, SourceKind,
 };
 use crate::credential::commands::proto::{
-    CredentialProtoDecodeError, active_credential_ref, decode_credential_metadata, decode_destroy_failed,
-    decode_destroy_requested, decode_destroyed, decode_destroyed_state, decode_message_field, decode_revoked,
-    decode_revoked_state, decode_rotated, decode_rotation_failed, decode_rotation_requested, decode_write_failed,
-    decode_write_requested,
+    CredentialProtoDecodeError, active_credential_ref, decode_cleanup_failed_state, decode_credential_metadata,
+    decode_destroy_failed, decode_destroy_requested, decode_destroy_requested_state, decode_destroyed,
+    decode_destroyed_state, decode_message_field, decode_revoked, decode_revoked_state, decode_rotated,
+    decode_rotation_failed, decode_rotation_requested, decode_write_failed, decode_write_requested,
 };
 use crate::credential::event_stream::{CredentialEventStreamReadError, read_credential_event_stream};
 use crate::credential::{CredentialEvolveError, evolve, initial_state};
@@ -911,15 +911,9 @@ impl RuntimeCredentialRegistry {
             return Ok(());
         }
 
-        if let Some(CredentialStateSnapshotCase::Revoked(revoked)) = state.state.as_ref() {
-            let credential_ref = decode_revoked_state(revoked)
-                .map_err(|source| RuntimeProjectionRefreshError::InvalidEvent { source })?;
-            self.remove_credential_ref(&credential_ref).await?;
-        }
-
-        if let Some(CredentialStateSnapshotCase::Destroyed(destroyed)) = state.state.as_ref() {
-            let credential_ref = decode_destroyed_state(destroyed)
-                .map_err(|source| RuntimeProjectionRefreshError::InvalidEvent { source })?;
+        if let Some(credential_ref) = post_revocation_credential_ref(state)
+            .map_err(|source| RuntimeProjectionRefreshError::InvalidEvent { source })?
+        {
             self.remove_credential_ref(&credential_ref).await?;
         }
         Ok(())
@@ -1172,27 +1166,45 @@ async fn apply_state_to_projection(
         return Ok(());
     }
 
-    if let Some(CredentialStateSnapshotCase::Revoked(revoked)) = state.state.as_ref() {
-        let credential_ref =
-            decode_revoked_state(revoked).map_err(|source| RuntimeProjectionRefreshError::InvalidEvent { source })?;
+    if let Some(credential_ref) = post_revocation_credential_ref(state)
+        .map_err(|source| RuntimeProjectionRefreshError::InvalidEvent { source })?
+    {
         cache.invalidate(&credential_ref).await;
         let key = RuntimeIntegrationKey::from_credential_ref(&credential_ref)
             .map_err(|source| RuntimeProjectionRefreshError::BuildProjection { source })?;
         projections.remove_credential(&key, credential_ref.kind()).await;
-        if let Some(recorded_at) = revoked_event_recorded_at {
+        if matches!(state.state, Some(CredentialStateSnapshotCase::Revoked(_)))
+            && let Some(recorded_at) = revoked_event_recorded_at
+        {
             runtime_projection_metrics().record_revocation_latency(recorded_at);
         }
     }
-
-    if let Some(CredentialStateSnapshotCase::Destroyed(destroyed)) = state.state.as_ref() {
-        let credential_ref = decode_destroyed_state(destroyed)
-            .map_err(|source| RuntimeProjectionRefreshError::InvalidEvent { source })?;
-        cache.invalidate(&credential_ref).await;
-        let key = RuntimeIntegrationKey::from_credential_ref(&credential_ref)
-            .map_err(|source| RuntimeProjectionRefreshError::BuildProjection { source })?;
-        projections.remove_credential(&key, credential_ref.kind()).await;
-    }
     Ok(())
+}
+
+fn post_revocation_credential_ref(
+    state: &state_v1::CredentialStateSnapshot,
+) -> Result<Option<CredentialRef>, CredentialProtoDecodeError> {
+    match state.state.as_ref() {
+        Some(CredentialStateSnapshotCase::Revoked(revoked)) => Ok(Some(decode_revoked_state(revoked)?)),
+        Some(CredentialStateSnapshotCase::DestroyRequested(pending)) => {
+            let (credential_ref, _reason) = decode_destroy_requested_state(pending)?;
+            Ok(Some(credential_ref))
+        }
+        Some(CredentialStateSnapshotCase::Destroyed(destroyed)) => Ok(Some(decode_destroyed_state(destroyed)?)),
+        Some(CredentialStateSnapshotCase::CleanupFailed(cleanup_failed)) => {
+            let (credential_ref, _reason) = decode_cleanup_failed_state(cleanup_failed)?;
+            Ok(Some(credential_ref))
+        }
+        None
+        | Some(
+            CredentialStateSnapshotCase::Missing(_)
+            | CredentialStateSnapshotCase::PendingWrite(_)
+            | CredentialStateSnapshotCase::WriteFailed(_)
+            | CredentialStateSnapshotCase::Active(_)
+            | CredentialStateSnapshotCase::RotationPending(_),
+        ) => Ok(None),
+    }
 }
 
 fn event_credential_id(event: &CredentialEventCase) -> Result<CredentialId, CredentialProtoDecodeError> {
