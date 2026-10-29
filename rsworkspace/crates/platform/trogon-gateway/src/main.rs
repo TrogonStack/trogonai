@@ -123,8 +123,12 @@ async fn serve_with_env(
     );
     let (runtime_credentials, _credential_projection_refresh_report) =
         refresh_credential_runtime_projection(&credential_store).await?;
+    let source_runtime_credentials = source_runtime_credentials_from_env(env, &runtime_credentials)?;
     register_telegram_webhooks(
         &resolved.telegram,
+        source_runtime_credentials
+            .as_ref()
+            .and_then(|mounts| mounts.telegram.as_ref()),
         crate::source::telegram::registration::registration_http_client,
         crate::source::telegram::registration::register_webhook,
     )
@@ -188,7 +192,7 @@ async fn serve_with_env(
         crate::source::google_pubsub::streaming_pull::run,
     );
 
-    let app = match source_runtime_credentials_from_env(env, &runtime_credentials)? {
+    let app = match source_runtime_credentials {
         Some(runtime_credentials) => {
             http::mount_sources_with_runtime_credentials(resolved, publisher, &nats, runtime_credentials)
         }
@@ -258,12 +262,14 @@ fn log_nats_connection(server_max_payload: usize, max_payload: MaxPayload) {
     );
 }
 
-async fn register_telegram_webhooks<C, E, Register>(
+async fn register_telegram_webhooks<C, E, Register, G>(
     integrations: &[config::SourceIntegration<source::telegram::TelegramSourceConfig>],
+    runtime_credentials: Option<&credential_runtime_projection::RuntimeCredentialResolver<G>>,
     client: impl FnOnce() -> Result<C, E>,
     register: Register,
 ) where
     E: std::error::Error,
+    G: secret_store::SecretStoreGet<Error = secret_store::SecretStoreError>,
     Register: for<'a> std::ops::AsyncFn(
             &'a source::telegram::TelegramSourceConfig,
             &'a C,
@@ -277,7 +283,44 @@ async fn register_telegram_webhooks<C, E, Register>(
         match client() {
             Ok(client) => {
                 for integration in registrations {
-                    if let Err(error) = register(&integration.config, &client).await {
+                    let config = match runtime_credentials {
+                        Some(resolver) => {
+                            let key = credential_runtime_projection::RuntimeIntegrationKey::new(
+                                credential::commands::domain::SourceKind::Telegram,
+                                &integration.id,
+                            );
+                            let secret = match resolver
+                                .resolve_plaintext(&key, credential::commands::domain::CredentialKind::WebhookSecret)
+                                .await
+                            {
+                                Ok(secret) => secret,
+                                Err(error) => {
+                                    error!(
+                                        source = "telegram",
+                                        integration = %integration.id,
+                                        error = %error,
+                                        "Telegram runtime webhook secret resolution failed, skipping registration"
+                                    );
+                                    continue;
+                                }
+                            };
+                            let Ok(webhook_secret) =
+                                source::telegram::config::TelegramWebhookSecret::new(secret.as_str())
+                            else {
+                                error!(
+                                    source = "telegram",
+                                    integration = %integration.id,
+                                    "Telegram runtime webhook secret is empty, skipping registration"
+                                );
+                                continue;
+                            };
+                            let mut config = integration.config.clone();
+                            config.webhook_secret = webhook_secret;
+                            std::borrow::Cow::Owned(config)
+                        }
+                        None => std::borrow::Cow::Borrowed(&integration.config),
+                    };
+                    if let Err(error) = register(&config, &client).await {
                         error!(
                             source = "telegram",
                             integration = %integration.id,

@@ -9,9 +9,12 @@ use trogon_nats::AdvancedMockNatsClient;
 use trogon_nats::jetstream::{ClaimBucketBinding, MockJetStreamPublisher, MockObjectStore};
 
 use crate::credential::commands::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
-use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
+use crate::credential_runtime_projection::{
+    RuntimeCredentialRegistry, RuntimeCredentialResolver, RuntimeIntegrationProjection,
+};
 use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
 use crate::source::google_pubsub::credentials::GoogleCredentialsError;
+use crate::source_integration_id::SourceIntegrationId;
 
 use super::*;
 
@@ -79,6 +82,68 @@ webhook_secret = "secret-passive"
     .telegram
 }
 
+fn no_runtime_credentials() -> Option<&'static RuntimeCredentialResolver<MockOpenBaoSecretStore>> {
+    None
+}
+
+async fn telegram_runtime_resolver(
+    integration_id: &str,
+    secret: Option<&str>,
+) -> RuntimeCredentialResolver<MockOpenBaoSecretStore> {
+    let store = MockOpenBaoSecretStore::default();
+    let registry = RuntimeCredentialRegistry::default();
+    if let Some(secret) = secret {
+        let credential = store
+            .put(
+                CredentialScope::integration(
+                    CredentialOwnerId::new("tenant-1").unwrap(),
+                    SourceKind::Telegram,
+                    SourceIntegrationId::new(integration_id).unwrap(),
+                ),
+                CredentialKind::WebhookSecret,
+                SecretString::new(secret).unwrap(),
+            )
+            .await
+            .unwrap();
+        registry
+            .projections()
+            .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1).unwrap())
+            .await;
+    }
+    registry.resolver(store)
+}
+
+#[tokio::test]
+async fn telegram_registration_uses_the_runtime_secret_and_fails_closed_without_one() {
+    let resolver = telegram_runtime_resolver("first", Some("runtime-first")).await;
+    let registered = Mutex::new(Vec::new());
+    register_telegram_webhooks(
+        &telegram_integrations(),
+        Some(&resolver),
+        || Ok::<_, io::Error>(()),
+        async |config, _| {
+            registered.lock().await.push(config.webhook_secret.as_str().to_owned());
+            Ok(())
+        },
+    )
+    .await;
+    assert_eq!(*registered.lock().await, ["runtime-first"]);
+
+    let unprovisioned = telegram_runtime_resolver("other", None).await;
+    registered.lock().await.clear();
+    register_telegram_webhooks(
+        &telegram_integrations(),
+        Some(&unprovisioned),
+        || Ok::<_, io::Error>(()),
+        async |config, _| {
+            registered.lock().await.push(config.webhook_secret.as_str().to_owned());
+            Ok(())
+        },
+    )
+    .await;
+    assert!(registered.lock().await.is_empty());
+}
+
 #[tokio::test]
 async fn telegram_registration_reuses_client_and_continues_after_one_rejection() {
     let events = trogon_std::log_capture::CapturedEvents::new();
@@ -87,6 +152,7 @@ async fn telegram_registration_reuses_client_and_continues_after_one_rejection()
     let registered = Mutex::new(Vec::new());
     register_telegram_webhooks(
         &telegram_integrations(),
+        no_runtime_credentials(),
         || {
             clients.fetch_add(1, Ordering::SeqCst);
             Ok::<_, io::Error>(7)
@@ -128,6 +194,7 @@ async fn failed_telegram_client_skips_registration_and_empty_sources_skip_client
     let attempts = AtomicUsize::new(0);
     register_telegram_webhooks(
         &telegram_integrations(),
+        no_runtime_credentials(),
         || Err::<(), _>(io::Error::from(io::ErrorKind::PermissionDenied)),
         async |_, _| {
             attempts.fetch_add(1, Ordering::SeqCst);
@@ -138,6 +205,7 @@ async fn failed_telegram_client_skips_registration_and_empty_sources_skip_client
     assert_eq!(attempts.load(Ordering::SeqCst), 0);
     register_telegram_webhooks(
         &[],
+        no_runtime_credentials(),
         || -> Result<(), io::Error> { panic!("client is unnecessary without registrations") },
         async |_, _| -> Result<(), source::telegram::registration::RegistrationError> {
             panic!("no registration configured")

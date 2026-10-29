@@ -99,6 +99,7 @@ pub struct TelegramWebhookRegistrationConfig {
     pub public_webhook_url: TelegramPublicWebhookUrl,
 }
 
+#[derive(Clone)]
 pub struct TelegramSourceConfig {
     pub webhook_secret: TelegramWebhookSecret,
     pub registration: Option<TelegramWebhookRegistrationConfig>,
