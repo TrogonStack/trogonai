@@ -93,7 +93,7 @@ so the canonicalization problem does not arise.
 Signing happens only where a private key can legitimately live: the agent or
 client itself, or a custody-plane signer
 ([ADR#0023](./0023-secret-management-and-key-custody-direction.md),
-[ADR#0033](./0033-two-tier-key-custody-product-model.md)). The
+[ADR#0033](./0033-key-custody-product-model.md)). The
 [decider](../glossary/decider), native and [WASM](../glossary/wasm) alike,
 remains keyless and signature-unaware: it never sees a private key, never
 verifies a signature, and never branches on one. This is the same boundary
@@ -155,7 +155,7 @@ signature proves nothing about who acted.
 - [ADR#0023: Secret Management and Key Custody on OpenBao behind a Platform Secrets Service](./0023-secret-management-and-key-custody-direction.md)
 - [ADR#0025: Agent Definition Data Ownership](./0025-agent-definition-data-ownership.md)
 - [ADR#0026: Command Authorization Principal and Authorizer Hook for Decider Execution](./0026-command-authorization-principal.md)
-- [ADR#0033: Two-Tier Key Custody Product Model](./0033-two-tier-key-custody-product-model.md)
+- [ADR#0033: Key Custody Product Model](./0033-key-custody-product-model.md)
 - [ADR#0036: Agent Self-Certifying Cryptographic Identity](./0036-agent-self-certifying-identity.md)
 - [ADR#0037: Agent Identity Governance: Decentralized Verification under Governed Authority](./0037-agent-identity-governance.md)
 - [ADR#0038: Agent Identity Cryptographic Suite and Crypto-Agility](./0038-agent-identity-crypto-suite.md)
