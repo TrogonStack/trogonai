@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.platform.api_keys.v1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 import "trogonai/platform/api_keys/v1/api_key_authorization.proto";
 import "trogonai/platform/api_keys/v1/public_key.proto";
@@ -29,6 +30,8 @@ message CreateApiKey {
   string display_name = 4 [features.field_presence = LEGACY_REQUIRED];
 
   oneof credential {
+    option (buf.validate.oneof).required = true;
+
     BearerKeyRequest bearer = 5;
     SignedKeyRequest signed = 6;
   }

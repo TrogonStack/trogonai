@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.platform.api_keys.audit.v1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 import "trogonai/platform/api_keys/admission/v1/denial_reason.proto";
 import "trogonai/platform/api_keys/audit/v1/audit_actor.proto";
@@ -52,6 +53,8 @@ message ApiKeyAuditFact {
   string source_address = 7;
 
   oneof fact {
+    option (buf.validate.oneof).required = true;
+
     ApiKeyCreated created = 8;
     ApiKeyRerolled rerolled = 9;
     ApiKeyRevoked revoked = 10;

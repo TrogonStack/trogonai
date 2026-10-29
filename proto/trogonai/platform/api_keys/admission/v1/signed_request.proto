@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.platform.api_keys.admission.v1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 import "trogonai/platform/api_keyspaces/v1/signing_algorithm.proto";
 
@@ -18,6 +19,8 @@ import "trogonai/platform/api_keyspaces/v1/signing_algorithm.proto";
 // binding over the existing scheme rather than a second scheme beside it.
 message SignedRequestTarget {
   oneof transport {
+    option (buf.validate.oneof).required = true;
+
     HttpTarget http = 1;
     NatsTarget nats = 2;
   }

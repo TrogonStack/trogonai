@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.platform.api_keys.v1;
 
+import "buf/validate/validate.proto";
 import "trogonai/platform/api_keys/v1/api_key_created.proto";
 import "trogonai/platform/api_keys/v1/api_key_expired.proto";
 import "trogonai/platform/api_keys/v1/api_key_policy_changed.proto";
@@ -26,6 +27,8 @@ import "trogonai/platform/api_keys/v1/api_key_revoked.proto";
 // changes nothing about the key.
 message ApiKeyEvent {
   oneof event {
+    option (buf.validate.oneof).required = true;
+
     ApiKeyCreated api_key_created = 1;
     ApiKeyRerolled api_key_rerolled = 2;
     ApiKeyRevoked api_key_revoked = 3;

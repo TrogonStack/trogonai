@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.platform.api_keys.state.v1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 import "trogonai/platform/api_keys/v1/api_key_authorization.proto";
 import "trogonai/platform/api_keys/v1/bearer_verifier.proto";
@@ -17,6 +18,8 @@ import "trogonai/platform/api_keys/v1/rate_limit_policy.proto";
 // question about which fields happen to be set.
 message ApiKeyStateSnapshot {
   oneof state {
+    option (buf.validate.oneof).required = true;
+
     MissingApiKeyState missing = 1;
     ActiveApiKeyState active = 2;
     RotatingApiKeyState rotating = 3;
@@ -44,6 +47,8 @@ message ApiKeyIdentity {
 // that would silently change what a caller has to hold to act as this identity.
 message ApiKeyCredential {
   oneof kind {
+    option (buf.validate.oneof).required = true;
+
     trogonai.platform.api_keys.v1.BearerVerifier bearer = 1;
     SignedCredential signed = 2;
   }

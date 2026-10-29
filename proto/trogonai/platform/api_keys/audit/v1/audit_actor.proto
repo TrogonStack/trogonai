@@ -2,6 +2,8 @@ edition = "2024";
 
 package trogonai.platform.api_keys.audit.v1;
 
+import "buf/validate/validate.proto";
+
 // AuditActor is who caused a fact.
 //
 // The oneof exists so the unattributed case is a named state rather than an
@@ -13,6 +15,8 @@ package trogonai.platform.api_keys.audit.v1;
 // indistinguishable from a service account.
 message AuditActor {
   oneof kind {
+    option (buf.validate.oneof).required = true;
+
     Unattributed unattributed = 1;
     ApiKeyActor api_key = 2;
     HumanSessionActor human_session = 3;

@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.platform.api_keys.admission.v1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 import "trogonai/platform/api_keys/admission/v1/api_principal.proto";
 import "trogonai/platform/api_keys/admission/v1/denial_reason.proto";
@@ -21,6 +22,8 @@ import "trogonai/platform/api_keys/admission/v1/denial_reason.proto";
 // unauthenticated oracle for testing candidate keys.
 message VerificationOutcome {
   oneof outcome {
+    option (buf.validate.oneof).required = true;
+
     ApiPrincipal principal = 1;
     Denial denial = 2;
     NonceChallenge nonce_challenge = 3;

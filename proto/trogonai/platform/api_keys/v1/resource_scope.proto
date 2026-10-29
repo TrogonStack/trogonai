@@ -2,6 +2,8 @@ edition = "2024";
 
 package trogonai.platform.api_keys.v1;
 
+import "buf/validate/validate.proto";
+
 // ResourceScope narrows where a permission applies. It never grants
 // (ADR#0077 section 4).
 //
@@ -16,6 +18,8 @@ package trogonai.platform.api_keys.v1;
 // empty set is rejected at creation rather than interpreted.
 message ResourceScope {
   oneof kind {
+    option (buf.validate.oneof).required = true;
+
     All all = 1;
     Only only = 2;
   }
@@ -23,10 +27,8 @@ message ResourceScope {
   // Project-wide, still subject to permissions.
   message All {}
 
-  // Exactly these ids. The set must be non-empty; proto cannot express that,
-  // so it is a decide-time validation error and the Rust value object refuses
-  // to construct one.
+  // Exactly these ids. The set must be non-empty.
   message Only {
-    repeated string ids = 1;
+    repeated string ids = 1 [(buf.validate.field).repeated.min_items = 1];
   }
 }
