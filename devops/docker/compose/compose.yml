@@ -32,6 +32,7 @@ services:
       NATS_URL: "nats://nats:4222"
       OPENBAO_ADDR: "http://openbao:8200"
       OPENBAO_TOKEN: "${OPENBAO_DEV_ROOT_TOKEN:-local-dev-root-token}"
+      OPENBAO_ALLOW_PLAINTEXT: "true"
       RUST_LOG: "${RUST_LOG:-info}"
       TROGON_GATEWAY_PORT: "${TROGON_GATEWAY_PORT:-8080}"
     volumes:

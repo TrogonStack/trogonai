@@ -20,7 +20,7 @@ disappears with `docker compose down -v`; see
 `devops/docker/compose/services/openbao/README.md` for the details.
 
 The gateway service in the same compose file already points at it through
-`OPENBAO_ADDR=http://openbao:8200`. From the host, OrbStack resolves
+`OPENBAO_ADDR=http://openbao:8200` with `OPENBAO_ALLOW_PLAINTEXT=true`. From the host, OrbStack resolves
 `http://openbao.trogonai.orb.local:8200`.
 
 ## Verify it
@@ -76,7 +76,11 @@ The compose stack does this already. For a gateway running outside compose:
 ```bash
 export OPENBAO_ADDR=http://openbao.trogonai.orb.local:8200
 export OPENBAO_TOKEN=local-dev-root-token
+export OPENBAO_ALLOW_PLAINTEXT=true
 ```
+
+The local server speaks plain HTTP, and the gateway refuses an `http://`
+address unless `OPENBAO_ALLOW_PLAINTEXT=true` is set.
 
 ## Integration tests
 
