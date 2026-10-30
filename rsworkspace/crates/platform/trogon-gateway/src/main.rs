@@ -176,24 +176,22 @@ async fn serve(
             let worker_checkpoints =
                 credential_lifecycle::recovery_worker::open_checkpoint_store(client.context().clone()).await?;
             let recovery_status_checkpoints = worker_checkpoints.clone();
+            let handler = credential_lifecycle::handler::CredentialRuntimeHandler::new(
+                credential_store.clone(),
+                store,
+                runtime_credentials.clone(),
+            );
             let worker_event_stream = credential_store.events_stream().clone();
             let worker_event_store = credential_store.clone();
-            let worker_handler_event_store = credential_store.clone();
-            let worker_store = store.clone();
-            let worker_runtime_credentials = runtime_credentials.clone();
+            let worker_handler = handler.clone();
             let worker_shutdown = shutdown.clone();
             join_set.spawn(async move {
-                let handler = credential_lifecycle::handler::CredentialRuntimeHandler::new(
-                    worker_handler_event_store,
-                    worker_store,
-                    worker_runtime_credentials,
-                );
                 tokio::select! {
                     () = worker_shutdown => {}
                     () = credential_lifecycle::recovery_worker::run(
                         worker_event_stream,
                         worker_event_store,
-                        handler,
+                        worker_handler,
                         worker_checkpoints,
                         CREDENTIAL_WORKER_INTERVAL,
                     ) => {}
@@ -202,17 +200,10 @@ async fn serve(
             });
             info!("credential recovery worker spawned");
             info!("credential management API enabled");
-            let credential_management_routes = credential_management::router(
-                credential_store.clone(),
-                store,
-                runtime_credentials.clone(),
-                admin_token.clone(),
-                idempotency,
-            )
-            .merge(credential_management::recovery_status_router(
-                admin_token,
-                recovery_status_checkpoints,
-            ));
+            let credential_management_routes =
+                credential_management::router(handler, admin_token.clone(), idempotency).merge(
+                    credential_management::recovery_status_router(admin_token, recovery_status_checkpoints),
+                );
             app.nest("/-/credentials", credential_management_routes)
         }
         None => app,

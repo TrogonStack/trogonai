@@ -881,6 +881,7 @@ where
         &self,
         command: DestroyStoredCredential,
     ) -> HandlerResult<EventStore, <Secrets as SecretStoreDestroy>::Error> {
+        let _write_guard = self.write_locks.acquire(command.credential_ref.id()).await;
         let reason = CredentialDestroyReason::new(command.reason.as_str())
             .map_err(|source| CredentialHandlerError::InvalidDestroyReason { source })?;
         let request = RequestCredentialDestroy::new(command.credential_ref.clone(), reason);

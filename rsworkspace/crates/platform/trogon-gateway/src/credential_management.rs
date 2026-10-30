@@ -42,6 +42,7 @@ use crate::credential_lifecycle::handler::{
     PutCredential, RevokeStoredCredential, RotateCredential,
 };
 use crate::credential_lifecycle::recovery_worker::{CredentialRecoveryCheckpointStore, CredentialRecoveryPolicy};
+#[cfg(test)]
 use crate::credential_runtime_projection::RuntimeCredentialRegistry;
 use crate::secret_store::openbao_secret_store::openbao_credential_id;
 use crate::secret_store::{
@@ -72,9 +73,7 @@ struct ManagedCredentialTarget {
 }
 
 pub(crate) fn router<EventStore, Secrets, Idempotency>(
-    event_store: EventStore,
-    secrets: Secrets,
-    runtime_credentials: RuntimeCredentialRegistry,
+    handler: CredentialRuntimeHandler<EventStore, Secrets>,
     admin_token: SecretString,
     idempotency: Idempotency,
 ) -> Router
@@ -101,7 +100,7 @@ where
     Idempotency: CredentialCommandIdempotencyStore,
 {
     let state = CredentialManagementState {
-        handler: CredentialRuntimeHandler::new(event_store, secrets, runtime_credentials),
+        handler,
         admin_token,
         idempotency,
     };
@@ -294,9 +293,7 @@ where
         + 'static,
 {
     router(
-        event_store,
-        secrets,
-        runtime_credentials,
+        CredentialRuntimeHandler::new(event_store, secrets, runtime_credentials),
         admin_token,
         CredentialCommandInMemoryIdempotencyLedger::default(),
     )

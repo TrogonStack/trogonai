@@ -1239,6 +1239,59 @@ async fn recover_rotation_activation_waits_for_an_in_flight_write_on_the_same_cr
 }
 
 #[tokio::test]
+async fn destroy_waits_for_an_in_flight_write_on_the_same_credential() {
+    let events = HandlerTestStreamStore::default();
+    let secrets = MockOpenBaoSecretStore::default();
+    let handler = CredentialHandler::new(events.clone(), secrets.clone());
+    let state = handler.put(put_command("initial-secret")).await.unwrap().into_state();
+    let Some(CredentialStateSnapshotCase::Active(active)) = state.state.as_ref() else {
+        panic!("expected active credential");
+    };
+    let (active_metadata, _) = decode_active_state("active", active).unwrap();
+    let credential_ref = active_metadata.reference().clone();
+    handler
+        .revoke(RevokeStoredCredential::new(credential_ref.clone()))
+        .await
+        .unwrap();
+
+    let write_guard = handler.write_locks.acquire(credential_ref.id()).await;
+    let destroy = handler.destroy(DestroyStoredCredential::new(credential_ref.clone(), destroy_reason()));
+    tokio::pin!(destroy);
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(50), &mut destroy)
+            .await
+            .is_err()
+    );
+    drop(write_guard);
+
+    destroy.await.unwrap();
+}
+
+#[tokio::test]
+async fn runtime_handler_clones_serialize_writes_on_the_same_locks() {
+    let events = HandlerTestStreamStore::default();
+    let secrets = MockOpenBaoSecretStore::default();
+    let handler = CredentialRuntimeHandler::new(events.clone(), secrets, RuntimeCredentialRegistry::default());
+    let worker_handler = handler.clone();
+
+    let write_guard = worker_handler
+        .handler
+        .write_locks
+        .acquire(&put_command("secret").credential_id)
+        .await;
+    let put = handler.put(put_command("secret"));
+    tokio::pin!(put);
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(50), &mut put)
+            .await
+            .is_err()
+    );
+    drop(write_guard);
+
+    put.await.unwrap();
+}
+
+#[tokio::test]
 async fn revoke_retry_records_state_after_append_failure() {
     let events = HandlerTestStreamStore::default();
     let secrets = MockOpenBaoSecretStore::default();
