@@ -9,6 +9,8 @@ use tracing::info;
 use trogon_std::{EmptySecretError, SecretString};
 use url::Url;
 
+mod constants;
+
 use super::{
     SecretDestroyReason, SecretMaterial, SecretStoreDestroy, SecretStoreError, SecretStoreGet, SecretStoreMetadata,
     SecretStorePut, SecretStoreRevoke, SecretStoreRotate, fingerprint,
@@ -132,7 +134,11 @@ impl OpenBaoSecretStore {
             address,
             token,
             mount,
-            http: reqwest::Client::new(),
+            http: reqwest::Client::builder()
+                .timeout(constants::OPENBAO_REQUEST_TIMEOUT)
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .map_err(OpenBaoSecretStoreConfigError::HttpClient)?,
         })
     }
 
@@ -313,6 +319,8 @@ pub enum OpenBaoSecretStoreConfigError {
     InvalidAddress(#[source] url::ParseError),
     #[error("invalid OpenBao token: {0}")]
     EmptyToken(#[source] EmptySecretError),
+    #[error("failed to build OpenBao HTTP client: {0}")]
+    HttpClient(#[source] reqwest::Error),
 }
 
 impl SecretStorePut for OpenBaoSecretStore {
@@ -391,7 +399,7 @@ impl SecretStoreRevoke for OpenBaoSecretStore {
 
     async fn revoke(&self, credential: &CredentialRef) -> Result<(), Self::Error> {
         let metadata = self.openbao_metadata(credential).await?;
-        match metadata.data.status(credential.version()) {
+        match metadata.data.status(credential.version(), Utc::now()) {
             None => {
                 return Err(SecretStoreError::Missing {
                     credential: credential.clone(),
@@ -438,12 +446,13 @@ impl SecretStoreMetadata for OpenBaoSecretStore {
 
     async fn metadata(&self, credential: &CredentialRef) -> Result<CredentialMetadata, Self::Error> {
         let metadata = self.openbao_metadata(credential).await?;
-        let status = metadata
-            .data
-            .status(credential.version())
-            .ok_or_else(|| SecretStoreError::Missing {
-                credential: credential.clone(),
-            })?;
+        let status =
+            metadata
+                .data
+                .status(credential.version(), Utc::now())
+                .ok_or_else(|| SecretStoreError::Missing {
+                    credential: credential.clone(),
+                })?;
 
         let fingerprint = fingerprint::digest(
             "openbao",
@@ -605,11 +614,11 @@ struct OpenBaoMetadata {
 }
 
 impl OpenBaoMetadata {
-    fn status(&self, version: CredentialVersion) -> Option<CredentialStatus> {
+    fn status(&self, version: CredentialVersion, now: DateTime<Utc>) -> Option<CredentialStatus> {
         let metadata = self.versions.get(&version.get().to_string())?;
         let status = if metadata.destroyed {
             CredentialStatus::Destroyed
-        } else if !metadata.deletion_time.is_empty() {
+        } else if metadata.deletion_time.is_some_and(|deletion_time| deletion_time <= now) {
             CredentialStatus::Revoked
         } else if version.get() == self.current_version {
             CredentialStatus::Active
@@ -622,10 +631,23 @@ impl OpenBaoMetadata {
 
 #[derive(Deserialize)]
 struct OpenBaoVersionMetadata {
-    #[serde(default)]
-    deletion_time: String,
+    #[serde(default, deserialize_with = "deserialize_deletion_time")]
+    deletion_time: Option<DateTime<Utc>>,
     #[serde(default)]
     destroyed: bool,
+}
+
+fn deserialize_deletion_time<'de, D>(deserializer: D) -> Result<Option<DateTime<Utc>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = String::deserialize(deserializer)?;
+    if raw.is_empty() {
+        return Ok(None);
+    }
+    DateTime::parse_from_rfc3339(&raw)
+        .map(|deletion_time| Some(deletion_time.with_timezone(&Utc)))
+        .map_err(serde::de::Error::custom)
 }
 
 fn encode_path_segment(value: &str) -> String {

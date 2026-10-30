@@ -761,3 +761,81 @@ async fn openbao_dev_server_roundtrips_precise_value() {
         })
     );
 }
+
+#[tokio::test]
+async fn metadata_treats_a_scheduled_deletion_as_not_yet_revoked() {
+    let openbao = FakeOpenBao::start(Some(json!({
+        "current_version": 1,
+        "versions": {
+            "1": { "deletion_time": "2999-01-01T00:00:00Z", "destroyed": false },
+        },
+    })))
+    .await;
+
+    let metadata = openbao
+        .store()
+        .metadata(&discord_bot_token(CredentialVersion::initial()))
+        .await
+        .unwrap();
+
+    assert_eq!(metadata.status(), CredentialStatus::Active);
+}
+
+#[tokio::test]
+async fn metadata_with_an_unparseable_deletion_time_is_a_backend_outage() {
+    let openbao = FakeOpenBao::start(Some(json!({
+        "current_version": 1,
+        "versions": {
+            "1": { "deletion_time": "yesterday", "destroyed": false },
+        },
+    })))
+    .await;
+
+    let error = openbao
+        .store()
+        .metadata(&discord_bot_token(CredentialVersion::initial()))
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        SecretStoreError::BackendUnavailable {
+            backend: StorageBackend::OpenBao,
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn redirects_are_not_followed_so_the_token_stays_with_openbao() {
+    let elsewhere = FakeOpenBao::start(Some(metadata_with_previous_and_revoked_versions())).await;
+    let location = format!("http://{}/v1/secret/metadata/stolen", elsewhere.address);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let redirector = listener.local_addr().unwrap();
+    let app = Router::new().fallback(move || {
+        let location = location.clone();
+        async move {
+            (
+                StatusCode::TEMPORARY_REDIRECT,
+                [(axum::http::header::LOCATION, location)],
+            )
+                .into_response()
+        }
+    });
+    tokio::spawn(axum::serve(listener, app).into_future());
+    let store = OpenBaoSecretStore::new(format!("http://{redirector}"), OPENBAO_DEV_ROOT_TOKEN).unwrap();
+
+    let error = store
+        .metadata(&discord_bot_token(CredentialVersion::initial()))
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        SecretStoreError::BackendUnavailable {
+            backend: StorageBackend::OpenBao,
+            ..
+        }
+    ));
+    assert!(elsewhere.requests.lock().await.is_empty());
+}
