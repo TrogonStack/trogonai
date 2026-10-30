@@ -73,19 +73,12 @@ bao write -field=ciphertext transit/encrypt/local-dev-kek \
 
 ## Storage
 
-OpenBao gets its own database on the shared postgres instance, created by
-`services/postgres/initdb/01-openbao-database.sh`. The name defaults to
+OpenBao gets its own database on the shared postgres instance, created when
+missing by the `openbao-database` one-shot service running
+`services/postgres/ensure-openbao-database.sh`. It runs on every `up`, so a
+postgres volume that predates OpenBao needs no manual step. The name defaults to
 `openbao` and both the connection and the provisioning read the same
 `OPENBAO_POSTGRES_DB`, so overriding it stays consistent.
-
-Postgres only runs that script when its data volume is created from empty, so a
-workspace that already had postgres running before this service existed needs
-the database created once, substituting your own `POSTGRES_USER` and
-`OPENBAO_POSTGRES_DB` if you overrode them:
-
-```bash
-docker compose exec postgres createdb -U trogon openbao
-```
 
 ## Auto-unseal
 

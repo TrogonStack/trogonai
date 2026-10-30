@@ -2,8 +2,9 @@
 # OpenBao's storage backend gets its own database rather than sharing the
 # scheduler projection's, so that resetting one never truncates the other.
 #
-# Postgres runs this only when the data volume is created from empty; an
-# existing volume needs `docker compose down -v` or a manual createdb.
+# Run by the openbao-database one-shot service on every `up`, so a data volume
+# created before OpenBao existed gets the database too. Creating it only when
+# missing keeps re-runs harmless.
 set -eu
 
 psql -v ON_ERROR_STOP=1 \
