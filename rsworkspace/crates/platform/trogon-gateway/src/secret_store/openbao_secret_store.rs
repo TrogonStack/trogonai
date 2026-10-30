@@ -5,7 +5,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
-use tracing::info;
+use tracing::{info, warn};
 use trogon_std::{EmptySecretError, SecretString};
 use url::Url;
 
@@ -340,7 +340,7 @@ impl SecretStorePut for OpenBaoSecretStore {
             )
             .await?;
         let credential = self.credential_ref(&scope, kind, response.data.version()?)?;
-        self.write_custom_metadata(&credential).await?;
+        self.describe_stored(&credential).await;
         Ok(credential)
     }
 }
@@ -389,7 +389,7 @@ impl SecretStoreRotate for OpenBaoSecretStore {
             .await?;
 
         let rotated = credential.with_version(response.data.version()?);
-        self.write_custom_metadata(&rotated).await?;
+        self.describe_stored(&rotated).await;
         Ok(rotated)
     }
 }
@@ -483,6 +483,12 @@ impl OpenBaoSecretStore {
                 credential: credential.clone(),
             }),
             Err(error) => Err(error.into_store_error(self)),
+        }
+    }
+
+    async fn describe_stored(&self, credential: &CredentialRef) {
+        if let Err(error) = self.write_custom_metadata(credential).await {
+            warn!(credential = %credential, error = %error, "stored credential version without its OpenBao custom metadata");
         }
     }
 

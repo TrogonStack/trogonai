@@ -134,6 +134,7 @@ struct FakeOpenBao {
     metadata_failure: Option<(StatusCode, &'static str)>,
     write_response: Option<Value>,
     write_failure: Option<(StatusCode, &'static str)>,
+    custom_metadata_failure: Option<StatusCode>,
     requests: Arc<Mutex<Vec<FakeOpenBaoRequest>>>,
 }
 
@@ -160,20 +161,37 @@ impl FakeOpenBao {
         Self::start_with(None, Some((status, body)), None, None).await
     }
 
+    async fn start_rejecting_custom_metadata(metadata: Option<Value>, write_response: Value) -> Self {
+        Self::serve(Self {
+            custom_metadata_failure: Some(StatusCode::SERVICE_UNAVAILABLE),
+            ..Self::start_with(metadata, None, Some(write_response), None).await
+        })
+        .await
+    }
+
     async fn start_with(
         metadata: Option<Value>,
         metadata_failure: Option<(StatusCode, &'static str)>,
         write_response: Option<Value>,
         write_failure: Option<(StatusCode, &'static str)>,
     ) -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let openbao = Self {
-            address: listener.local_addr().unwrap(),
+        Self::serve(Self {
+            address: SocketAddr::from(([127, 0, 0, 1], 0)),
             metadata,
             metadata_failure,
             write_response,
             write_failure,
+            custom_metadata_failure: None,
             requests: Arc::default(),
+        })
+        .await
+    }
+
+    async fn serve(openbao: Self) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let openbao = Self {
+            address: listener.local_addr().unwrap(),
+            ..openbao
         };
         let app = Router::new().fallback(answer_as_openbao).with_state(openbao.clone());
         tokio::spawn(axum::serve(listener, app).into_future());
@@ -207,6 +225,11 @@ async fn answer_as_openbao(State(openbao): State<FakeOpenBao>, method: Method, u
         _ if openbao.write_failure.is_some() => {
             let (status, body) = openbao.write_failure.unwrap();
             (status, body).into_response()
+        }
+        (&Method::POST, _)
+            if openbao.custom_metadata_failure.is_some() && uri.path().starts_with("/v1/secret/metadata/") =>
+        {
+            openbao.custom_metadata_failure.unwrap().into_response()
         }
         _ if openbao.write_response.is_some() && uri.path().starts_with("/v1/secret/data/") => {
             Json(json!({ "data": openbao.write_response.clone().unwrap() })).into_response()
@@ -838,4 +861,43 @@ async fn redirects_are_not_followed_so_the_token_stays_with_openbao() {
         }
     ));
     assert!(elsewhere.requests.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn put_returns_the_stored_version_when_custom_metadata_cannot_be_recorded() {
+    let openbao = FakeOpenBao::start_rejecting_custom_metadata(None, json!({ "version": 1 })).await;
+    let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
+
+    let credential = openbao
+        .store()
+        .put(scope, CredentialKind::BotToken, SecretString::new("Bot token").unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(credential, discord_bot_token(CredentialVersion::initial()));
+    assert_eq!(openbao.posted_to(OpenBaoEndpoint::Data).await.len(), 1);
+    assert_eq!(openbao.posted_to(OpenBaoEndpoint::Metadata).await.len(), 1);
+}
+
+#[tokio::test]
+async fn rotate_returns_the_stored_version_when_custom_metadata_cannot_be_recorded() {
+    let openbao = FakeOpenBao::start_rejecting_custom_metadata(
+        Some(json!({
+            "current_version": 1,
+            "versions": { "1": { "deletion_time": "", "destroyed": false } },
+        })),
+        json!({ "version": 2 }),
+    )
+    .await;
+    let credential = discord_bot_token(CredentialVersion::initial());
+
+    let rotated = openbao
+        .store()
+        .rotate(&credential, SecretString::new("Bot new-token").unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(rotated.version().get(), 2);
+    assert_eq!(openbao.posted_to(OpenBaoEndpoint::Data).await.len(), 1);
+    assert_eq!(openbao.posted_to(OpenBaoEndpoint::Metadata).await.len(), 1);
 }
