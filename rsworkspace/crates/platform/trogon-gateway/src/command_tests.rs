@@ -326,26 +326,6 @@ impl ReadEnv for NonUnicodeEnv {
 }
 
 #[tokio::test]
-async fn until_shutdown_returns_when_shutdown_fires_before_the_work_finishes() {
-    tokio::time::timeout(
-        Duration::from_secs(5),
-        until_shutdown(std::future::ready(()), std::future::pending()),
-    )
-    .await
-    .unwrap();
-}
-
-#[tokio::test]
-async fn until_shutdown_returns_when_the_work_finishes_before_shutdown() {
-    tokio::time::timeout(
-        Duration::from_secs(5),
-        until_shutdown(std::future::pending(), std::future::ready(())),
-    )
-    .await
-    .unwrap();
-}
-
-#[tokio::test]
 async fn serve_enables_credential_management_when_the_admin_token_is_configured() {
     let server = JetStreamTestServer::start().await;
     let mut resolved = resolved_config();

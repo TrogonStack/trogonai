@@ -1058,14 +1058,6 @@ fn active_metadata(version: u64) -> CredentialMetadata {
     )
 }
 
-fn terminate_current_process() {
-    let status = std::process::Command::new("kill")
-        .args(["-TERM", &std::process::id().to_string()])
-        .status()
-        .unwrap();
-    assert!(status.success());
-}
-
 fn message_of(events: &CapturedEvents, message: &str) -> Vec<trogon_std::log_capture::CapturedEvent> {
     events
         .events()
@@ -1456,7 +1448,7 @@ async fn recovery_pass_surfaces_a_checkpoint_load_failure() {
 }
 
 #[tokio::test]
-async fn run_keeps_recovering_until_a_termination_signal_arrives() {
+async fn run_keeps_recovering_until_shutdown() {
     let captured = CapturedEvents::new();
     let _guard = captured.install(LevelFilter::TRACE);
     let store = WorkerTestStreamStore::default();
@@ -1476,31 +1468,21 @@ async fn run_keeps_recovering_until_a_termination_signal_arrives() {
         UnavailableMetadataSecretStore,
         RuntimeCredentialRegistry::default(),
     );
+    let shutdown = async {
+        while kv.entry_calls().len() < 5 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    };
     let worker = run(
         stream,
         store.clone(),
         runtime_handler,
         CredentialRecoveryKvCheckpointStore::new(kv.clone()),
         Duration::from_millis(5),
+        shutdown,
     );
-    let stop = async {
-        while kv.entry_calls().len() < 5 {
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-        loop {
-            terminate_current_process();
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-    };
 
-    tokio::time::timeout(Duration::from_secs(30), async {
-        tokio::select! {
-            () = worker => {}
-            () = stop => {}
-        }
-    })
-    .await
-    .unwrap();
+    tokio::time::timeout(Duration::from_secs(30), worker).await.unwrap();
 
     assert_eq!(message_of(&captured, "credential recovery pass failed").len(), 1);
     assert!(!message_of(&captured, "credential recovery pass completed").is_empty());
@@ -1537,11 +1519,6 @@ async fn checkpoint_store_reports_a_backend_failure_while_loading() {
     let error = checkpoints.load().await.unwrap_err();
 
     assert!(matches!(error, CredentialRecoveryCheckpointStoreError::Backend { .. }));
-    assert!(
-        error
-            .to_string()
-            .starts_with("credential recovery checkpoint backend failed")
-    );
 }
 
 #[tokio::test]

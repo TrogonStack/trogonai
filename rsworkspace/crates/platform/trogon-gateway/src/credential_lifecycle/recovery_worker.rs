@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 use std::error::Error;
+use std::future::Future;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_nats::jetstream::{context, kv};
@@ -271,6 +272,7 @@ pub(crate) async fn run<EventStream, EventStore, Secrets, Checkpoints>(
     handler: CredentialRuntimeHandler<EventStore, Secrets>,
     checkpoints: Checkpoints,
     interval: Duration,
+    shutdown: impl Future<Output = ()>,
 ) where
     EventStream: JetStreamGetStreamInfo + JetStreamGetRawMessage,
     EventStore: StreamRead<str>
@@ -285,10 +287,11 @@ pub(crate) async fn run<EventStream, EventStore, Secrets, Checkpoints>(
     let mut interval = tokio::time::interval(interval);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let metrics = CredentialRecoveryMetrics::new();
+    tokio::pin!(shutdown);
 
     loop {
         tokio::select! {
-            _ = trogon_std::signal::shutdown_signal() => {
+            () = &mut shutdown => {
                 info!("credential recovery worker stopped");
                 return;
             }

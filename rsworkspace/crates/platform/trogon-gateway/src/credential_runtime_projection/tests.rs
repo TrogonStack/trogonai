@@ -2115,14 +2115,6 @@ fn runtime_event_without_a_case(id: u64) -> Event {
     }
 }
 
-fn terminate_current_process() {
-    let status = std::process::Command::new("kill")
-        .args(["-TERM", &std::process::id().to_string()])
-        .status()
-        .unwrap();
-    assert!(status.success());
-}
-
 fn messages(events: &CapturedEvents, message: &str) -> usize {
     events
         .events()
@@ -2131,25 +2123,14 @@ fn messages(events: &CapturedEvents, message: &str) -> usize {
         .count()
 }
 
-async fn stop_worker_once(until: impl Fn() -> bool) {
+async fn shutdown_once(until: impl Fn() -> bool) {
     while !until() {
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
-    loop {
-        terminate_current_process();
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
 }
 
-async fn run_until_stopped(worker: impl std::future::Future<Output = ()>, stop: impl std::future::Future<Output = ()>) {
-    tokio::time::timeout(Duration::from_secs(30), async {
-        tokio::select! {
-            () = worker => {}
-            () = stop => {}
-        }
-    })
-    .await
-    .unwrap();
+async fn run_until_stopped(worker: impl std::future::Future<Output = ()>) {
+    tokio::time::timeout(Duration::from_secs(30), worker).await.unwrap();
 }
 
 #[tokio::test]
@@ -2612,14 +2593,16 @@ async fn the_refresh_worker_stays_quiet_while_there_is_nothing_to_project() {
     let registry = RuntimeCredentialRegistry::default();
     let event_store = ProjectionTestEventStore::default();
     let stream = raw_stream([]).await;
-    let worker = run_tracked_refresh_worker(registry, stream, event_store, Duration::from_millis(5));
     let started = Instant::now();
+    let worker = run_tracked_refresh_worker(
+        registry,
+        stream,
+        event_store,
+        Duration::from_millis(5),
+        shutdown_once(|| started.elapsed() > Duration::from_millis(100)),
+    );
 
-    run_until_stopped(
-        worker,
-        stop_worker_once(|| started.elapsed() > Duration::from_millis(100)),
-    )
-    .await;
+    run_until_stopped(worker).await;
 
     assert_eq!(
         messages(&captured, "credential runtime projection refresh worker stopped"),
@@ -2653,13 +2636,15 @@ async fn the_refresh_worker_retries_after_a_failed_pass_and_logs_the_projection(
     .await;
     let registry = RuntimeCredentialRegistry::default();
     let resolver = registry.resolver(store);
-    let worker = run_tracked_refresh_worker(registry, stream, event_store, Duration::from_millis(5));
+    let worker = run_tracked_refresh_worker(
+        registry,
+        stream,
+        event_store,
+        Duration::from_millis(5),
+        shutdown_once(|| messages(&captured, "credential runtime projection refresh pass completed") > 0),
+    );
 
-    run_until_stopped(
-        worker,
-        stop_worker_once(|| messages(&captured, "credential runtime projection refresh pass completed") > 0),
-    )
-    .await;
+    run_until_stopped(worker).await;
 
     assert_eq!(
         messages(&captured, "credential runtime projection refresh pass failed"),

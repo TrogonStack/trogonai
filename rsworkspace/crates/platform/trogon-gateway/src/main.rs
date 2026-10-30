@@ -75,13 +75,6 @@ async fn serve(
     serve_with_env(resolved, shutdown, &SystemEnv).await
 }
 
-async fn until_shutdown(shutdown: impl std::future::Future<Output = ()>, work: impl std::future::Future<Output = ()>) {
-    tokio::select! {
-        () = shutdown => {}
-        () = work => {}
-    }
-}
-
 async fn serve_with_env(
     resolved: config::ResolvedConfig,
     shutdown: impl std::future::Future<Output = ()> + Send + 'static,
@@ -143,14 +136,12 @@ async fn serve_with_env(
         let projection_event_store = credential_store.clone();
         let shutdown = shutdown.clone();
         join_set.spawn(async move {
-            until_shutdown(
+            credential_runtime_projection::run_tracked_refresh_worker(
+                projection_runtime_credentials,
+                projection_event_stream,
+                projection_event_store,
+                CREDENTIAL_RUNTIME_PROJECTION_WORKER_INTERVAL,
                 shutdown,
-                credential_runtime_projection::run_tracked_refresh_worker(
-                    projection_runtime_credentials,
-                    projection_event_stream,
-                    projection_event_store,
-                    CREDENTIAL_RUNTIME_PROJECTION_WORKER_INTERVAL,
-                ),
             )
             .await;
             ("credential-runtime-projection-worker", Ok(()))
@@ -200,15 +191,13 @@ async fn serve_with_env(
             let worker_handler = handler.clone();
             let worker_shutdown = shutdown.clone();
             join_set.spawn(async move {
-                until_shutdown(
+                credential_lifecycle::recovery_worker::run(
+                    worker_event_stream,
+                    worker_event_store,
+                    worker_handler,
+                    worker_checkpoints,
+                    CREDENTIAL_WORKER_INTERVAL,
                     worker_shutdown,
-                    credential_lifecycle::recovery_worker::run(
-                        worker_event_stream,
-                        worker_event_store,
-                        worker_handler,
-                        worker_checkpoints,
-                        CREDENTIAL_WORKER_INTERVAL,
-                    ),
                 )
                 .await;
                 ("credential-worker", Ok(()))

@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
+use std::future::Future;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -466,6 +467,7 @@ pub async fn run_tracked_refresh_worker<EventStream, EventStore>(
     event_stream: EventStream,
     event_store: EventStore,
     interval: Duration,
+    shutdown: impl Future<Output = ()>,
 ) where
     EventStream: JetStreamGetStreamInfo + JetStreamGetRawMessage,
     EventStore: StreamRead<str>,
@@ -473,10 +475,11 @@ pub async fn run_tracked_refresh_worker<EventStream, EventStore>(
 {
     let mut interval = tokio::time::interval(interval);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    tokio::pin!(shutdown);
 
     loop {
         tokio::select! {
-            _ = trogon_std::signal::shutdown_signal() => {
+            () = &mut shutdown => {
                 info!("credential runtime projection refresh worker stopped");
                 return;
             }
