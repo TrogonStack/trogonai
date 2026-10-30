@@ -19,7 +19,7 @@ use trogon_semconv::span::LINEAR_WEBHOOK;
 use trogon_std::NonZeroDuration;
 
 use crate::credential::commands::domain::{CredentialKind, SourceKind};
-use crate::credential_runtime_projection::{RuntimeCredentialError, RuntimeCredentialResolver, RuntimeIntegrationKey};
+use crate::credential_runtime_projection::{RuntimeCredentialResolver, RuntimeIntegrationKey};
 use crate::secret_store::{SecretStoreError, SecretStoreGet};
 use crate::source_integration_id::SourceIntegrationId;
 
@@ -249,7 +249,7 @@ where
         Ok(secret) => secret,
         Err(error) => {
             warn!(reason = %error, "Linear runtime credential resolution failed");
-            return runtime_credential_error_to_status(&error);
+            return error.http_status();
         }
     };
 
@@ -314,12 +314,9 @@ async fn publish_verified_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
             .unwrap_or_default()
             .as_millis() as u64;
         let age_ms = now_ms.saturating_sub(ts_ms);
-        if age_ms > Duration::from(tolerance).as_millis() as u64 {
-            warn!(
-                age_ms,
-                tolerance_ms = Duration::from(tolerance).as_millis() as u64,
-                "Stale webhookTimestamp - potential replay attack"
-            );
+        let tolerance_ms = Duration::from(tolerance).as_millis() as u64;
+        if age_ms > tolerance_ms {
+            warn!(age_ms, tolerance_ms, "Stale webhookTimestamp - potential replay attack");
             return publish_unroutable(
                 &publisher,
                 &subject_prefix,
@@ -400,20 +397,6 @@ async fn publish_verified_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
         .await;
 
     outcome_to_status(outcome)
-}
-
-fn runtime_credential_error_to_status(error: &RuntimeCredentialError) -> StatusCode {
-    match error {
-        RuntimeCredentialError::SecretStore(SecretStoreError::BackendUnavailable { .. }) => {
-            StatusCode::INTERNAL_SERVER_ERROR
-        }
-        RuntimeCredentialError::SecretStore(_)
-        | RuntimeCredentialError::IntegrationNotFound { .. }
-        | RuntimeCredentialError::IntegrationNotResolvable { .. }
-        | RuntimeCredentialError::CredentialMissing { .. }
-        | RuntimeCredentialError::VerifierOnly { .. }
-        | RuntimeCredentialError::DeliveryDenied { .. } => StatusCode::UNAUTHORIZED,
-    }
 }
 
 #[cfg(test)]

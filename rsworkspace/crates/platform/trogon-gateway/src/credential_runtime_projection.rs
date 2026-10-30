@@ -1566,6 +1566,20 @@ impl RuntimeCredentialError {
     pub fn is_delivery_denied(&self) -> bool {
         matches!(self, Self::DeliveryDenied { .. })
     }
+
+    pub fn http_status(&self) -> axum::http::StatusCode {
+        match self {
+            Self::SecretStore(SecretStoreError::BackendUnavailable { .. }) => {
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR
+            }
+            Self::SecretStore(_)
+            | Self::IntegrationNotFound { .. }
+            | Self::IntegrationNotResolvable { .. }
+            | Self::CredentialMissing { .. }
+            | Self::VerifierOnly { .. }
+            | Self::DeliveryDenied { .. } => axum::http::StatusCode::UNAUTHORIZED,
+        }
+    }
 }
 
 impl std::fmt::Display for RuntimeIntegrationKey {

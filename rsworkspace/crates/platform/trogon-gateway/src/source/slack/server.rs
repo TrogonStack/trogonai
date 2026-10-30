@@ -46,7 +46,7 @@ use trogon_nats::{NatsToken, SubjectTokenViolationError};
 use trogon_semconv::span::SLACK_WEBHOOK;
 
 use crate::credential::commands::domain::{CredentialKind, SourceKind};
-use crate::credential_runtime_projection::{RuntimeCredentialError, RuntimeCredentialResolver, RuntimeIntegrationKey};
+use crate::credential_runtime_projection::{RuntimeCredentialResolver, RuntimeIntegrationKey};
 use crate::secret_store::{SecretStoreError, SecretStoreGet};
 use crate::source_integration_id::SourceIntegrationId;
 
@@ -989,7 +989,7 @@ where
         Ok(secret) => secret,
         Err(error) => {
             warn!(reason = %error, "Slack runtime credential resolution failed");
-            return (runtime_credential_error_to_status(&error), String::new()).into_response();
+            return (error.http_status(), String::new()).into_response();
         }
     };
 
@@ -1044,20 +1044,6 @@ fn slack_signature_parts<'a, C: EpochClock>(
     };
 
     Some((timestamp, sig))
-}
-
-fn runtime_credential_error_to_status(error: &RuntimeCredentialError) -> StatusCode {
-    match error {
-        RuntimeCredentialError::SecretStore(SecretStoreError::BackendUnavailable { .. }) => {
-            StatusCode::INTERNAL_SERVER_ERROR
-        }
-        RuntimeCredentialError::SecretStore(_)
-        | RuntimeCredentialError::IntegrationNotFound { .. }
-        | RuntimeCredentialError::IntegrationNotResolvable { .. }
-        | RuntimeCredentialError::CredentialMissing { .. }
-        | RuntimeCredentialError::VerifierOnly { .. }
-        | RuntimeCredentialError::DeliveryDenied { .. } => StatusCode::UNAUTHORIZED,
-    }
 }
 
 #[cfg(test)]

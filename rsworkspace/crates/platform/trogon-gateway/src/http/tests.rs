@@ -1185,3 +1185,32 @@ app_token = "xapp-test-token"
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn slack_socket_mode_integration_does_not_mount_runtime_webhook_route() {
+    let toml = r#"
+[sources.slack.integrations.primary.socket_mode]
+app_token = "xapp-test-token"
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+    let app = mount_sources_with_runtime_credentials(
+        cfg,
+        wrap_publisher(MockJetStreamPublisher::new()),
+        &AdvancedMockNatsClient::new(),
+        every_runtime_credential_mount(),
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/sources/slack/primary/webhook")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}

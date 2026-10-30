@@ -321,3 +321,29 @@ async fn publish_failure_returns_500() {
 
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }
+
+#[tokio::test]
+async fn unroutable_publish_failure_returns_500() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    publisher.fail_next_js_publish();
+    let app = mock_app(publisher);
+    let body = b"not-json";
+    let signature = compute_sig(&test_config().verification_token, body);
+
+    let response = app.oneshot(webhook_request(body, Some(&signature))).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+#[tokio::test]
+async fn verification_publish_failure_returns_500() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    publisher.fail_next_js_publish();
+    let app = mock_app(publisher);
+
+    let response = app.oneshot(webhook_request(&verification_body(), None)).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}

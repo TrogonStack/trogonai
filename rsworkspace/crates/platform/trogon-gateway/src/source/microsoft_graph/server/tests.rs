@@ -72,6 +72,16 @@ async fn runtime_app(publisher: MockJetStreamPublisher, client_state: &str) -> R
     )
 }
 
+fn runtime_app_without_credential(publisher: MockJetStreamPublisher) -> Router {
+    let registry = RuntimeCredentialRegistry::default();
+    runtime_router(
+        wrap_publisher(publisher),
+        &test_config(),
+        SourceIntegrationId::new("primary").unwrap(),
+        registry.resolver(MockOpenBaoSecretStore::default()),
+    )
+}
+
 fn webhook_request(uri: &str, body: impl Into<Body>) -> Request<Body> {
     Request::builder().method("POST").uri(uri).body(body.into()).unwrap()
 }
@@ -185,6 +195,41 @@ async fn runtime_client_state_publishes_and_rejects_static_client_state() {
     let messages = publisher.published_messages();
     assert_eq!(messages.len(), 1);
     assert_eq!(messages[0].subject, "microsoft-graph.change_notification_collection");
+}
+
+#[tokio::test]
+async fn runtime_validation_token_challenge_returns_plain_text_token_without_a_credential() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = runtime_app_without_credential(publisher.clone());
+
+    let response = app
+        .oneshot(webhook_request("/webhook?validationToken=hello%20world", Body::empty()))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(body.as_ref(), b"hello world");
+    assert_no_publishes(&publisher);
+}
+
+#[tokio::test]
+async fn runtime_webhook_without_a_resolvable_credential_returns_401() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = runtime_app_without_credential(publisher.clone());
+
+    let response = app
+        .oneshot(webhook_request(
+            "/webhook",
+            collection_body(notification_value_with_client_state(RUNTIME_CLIENT_STATE)),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_no_publishes(&publisher);
 }
 
 #[tokio::test]

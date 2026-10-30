@@ -423,6 +423,24 @@ async fn missing_event_header_publishes_to_dlq() {
 }
 
 #[tokio::test]
+async fn event_header_that_normalizes_to_no_token_publishes_to_dlq() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = mock_app(publisher.clone());
+
+    let resp = app.oneshot(webhook_request(b"{}", "")).await.unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let messages = publisher.published_messages();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].subject, "gitlab.unroutable");
+    assert_eq!(
+        messages[0].headers.get(NATS_HEADER_REJECT_REASON).map(|v| v.as_str()),
+        Some("invalid_event_token"),
+    );
+}
+
+#[tokio::test]
 async fn publish_failure_returns_500() {
     let _guard = tracing_guard();
     let publisher = MockJetStreamPublisher::new();

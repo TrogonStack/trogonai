@@ -1,3 +1,4 @@
+use axum::http::StatusCode;
 use std::sync::{Arc, Mutex};
 
 use crate::credential::commands::domain::{
@@ -2662,4 +2663,104 @@ async fn the_refresh_worker_retries_after_a_failed_pass_and_logs_the_projection(
     assert_eq!(completed.field("projected_integrations"), Some("1"));
     assert_eq!(completed.field("checkpoint_advanced_to"), Some("Some(2)"));
     assert!(resolver.resolve(&key(), CredentialKind::BotToken).await.is_ok());
+}
+
+#[tokio::test]
+async fn active_credential_ref_is_offered_only_for_a_resolvable_projection_that_holds_the_kind() {
+    let store = MockOpenBaoSecretStore::default();
+    let credential = put_bot_token(&store, "Bot token").await;
+    let disabled_id = SourceIntegrationId::new("dormant").unwrap();
+    let disabled_key = RuntimeIntegrationKey::new(SourceKind::Discord, &disabled_id);
+    let projections = InMemoryRuntimeProjectionRepository::default();
+    projections
+        .upsert(projection(RuntimeIntegrationStatus::Active, credential.clone()))
+        .await;
+    projections
+        .upsert(
+            RuntimeIntegrationProjection::new(
+                owner_id(),
+                SourceKind::Discord,
+                disabled_id,
+                RuntimeIntegrationStatus::Disabled,
+                1,
+            )
+            .with_credential(CredentialKind::BotToken, credential.clone()),
+        )
+        .await;
+    let resolver = RuntimeCredentialResolver::new(projections, store);
+
+    assert_eq!(
+        resolver.active_credential_ref(&key(), CredentialKind::BotToken).await,
+        Some(credential)
+    );
+    assert_eq!(
+        resolver
+            .active_credential_ref(&key(), CredentialKind::WebhookSecret)
+            .await,
+        None
+    );
+    assert_eq!(
+        resolver
+            .active_credential_ref(&disabled_key, CredentialKind::BotToken)
+            .await,
+        None
+    );
+}
+
+#[tokio::test]
+async fn every_runtime_credential_error_maps_to_the_status_a_webhook_caller_sees() {
+    let store = MockOpenBaoSecretStore::default();
+    let credential = put_bot_token(&store, "Bot token").await;
+    let (restricted, _) = restricted_resolver(
+        RuntimeReleasePolicy::default().with_allowed_hosts(AllowedHosts::only(["api.example.com"]).unwrap()),
+    )
+    .await;
+    let denied = restricted.resolve(&key(), CredentialKind::BotToken).await.unwrap_err();
+    assert!(denied.is_delivery_denied());
+
+    let cases = [
+        (
+            RuntimeCredentialError::SecretStore(SecretStoreError::BackendUnavailable {
+                backend: crate::credential::commands::domain::StorageBackend::OpenBao,
+                message: "down".to_string(),
+            }),
+            StatusCode::INTERNAL_SERVER_ERROR,
+        ),
+        (
+            RuntimeCredentialError::SecretStore(SecretStoreError::Missing {
+                credential: credential.clone(),
+            }),
+            StatusCode::UNAUTHORIZED,
+        ),
+        (
+            RuntimeCredentialError::IntegrationNotFound { key: key() },
+            StatusCode::UNAUTHORIZED,
+        ),
+        (
+            RuntimeCredentialError::IntegrationNotResolvable {
+                key: key(),
+                status: RuntimeIntegrationStatus::Disabled,
+            },
+            StatusCode::UNAUTHORIZED,
+        ),
+        (
+            RuntimeCredentialError::CredentialMissing {
+                key: key(),
+                kind: CredentialKind::BotToken,
+            },
+            StatusCode::UNAUTHORIZED,
+        ),
+        (
+            RuntimeCredentialError::VerifierOnly {
+                key: key(),
+                kind: CredentialKind::WebhookSecret,
+            },
+            StatusCode::UNAUTHORIZED,
+        ),
+        (denied, StatusCode::UNAUTHORIZED),
+    ];
+
+    for (error, expected) in cases {
+        assert_eq!(error.http_status(), expected, "{error}");
+    }
 }

@@ -901,6 +901,42 @@ async fn slash_command_publishes_to_nats() {
 }
 
 #[tokio::test]
+async fn runtime_credentials_serve_slash_commands_and_answer_ssl_checks() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = runtime_app(publisher.clone(), "runtime-secret").await;
+
+    let ssl_check = app
+        .clone()
+        .oneshot(unsigned_request("application/x-www-form-urlencoded", "ssl_check=1"))
+        .await
+        .unwrap();
+    assert_eq!(ssl_check.status(), StatusCode::OK);
+    assert!(publisher.published_messages().is_empty());
+
+    let form_body =
+        "command=%2Ftrogon&text=hello+world&team_id=T01ABC&trigger_id=cmd789&user_id=U01ABC&channel_id=C01ABC";
+    let ts = current_timestamp();
+    let static_sig = compute_sig(TEST_SECRET, &ts, form_body.as_bytes());
+    let rejected = app
+        .clone()
+        .oneshot(form_request(form_body.as_bytes(), &ts, &static_sig))
+        .await
+        .unwrap();
+    assert_eq!(rejected.status(), StatusCode::UNAUTHORIZED);
+
+    let runtime_sig = compute_sig("runtime-secret", &ts, form_body.as_bytes());
+    let accepted = app
+        .oneshot(form_request(form_body.as_bytes(), &ts, &runtime_sig))
+        .await
+        .unwrap();
+    assert_eq!(accepted.status(), StatusCode::OK);
+    let messages = publisher.published_messages();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].subject, "slack.command.trogon");
+}
+
+#[tokio::test]
 async fn slash_command_missing_trigger_id_returns_400() {
     let _guard = tracing_guard();
     let publisher = MockJetStreamPublisher::new();

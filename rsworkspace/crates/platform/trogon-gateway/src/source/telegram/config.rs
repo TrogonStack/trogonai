@@ -62,6 +62,12 @@ impl TelegramWebhookSecret {
     }
 }
 
+impl From<SecretString> for TelegramWebhookSecret {
+    fn from(secret: SecretString) -> Self {
+        Self(secret)
+    }
+}
+
 impl fmt::Debug for TelegramWebhookSecret {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("TelegramWebhookSecret(****)")

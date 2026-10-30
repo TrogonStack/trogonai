@@ -21,7 +21,7 @@ use super::client_state::MicrosoftGraphClientState;
 use super::config::MicrosoftGraphConfig;
 use super::constants::HTTP_BODY_SIZE_MAX;
 use crate::credential::commands::domain::{CredentialKind, SourceKind};
-use crate::credential_runtime_projection::{RuntimeCredentialError, RuntimeCredentialResolver, RuntimeIntegrationKey};
+use crate::credential_runtime_projection::{RuntimeCredentialResolver, RuntimeIntegrationKey};
 use crate::secret_store::{SecretStoreError, SecretStoreGet};
 use crate::source_integration_id::SourceIntegrationId;
 
@@ -148,16 +148,10 @@ where
         Ok(secret) => secret,
         Err(error) => {
             warn!(reason = %error, "Microsoft Graph runtime credential resolution failed");
-            return runtime_credential_error_to_status(&error).into_response();
+            return error.http_status().into_response();
         }
     };
-    let client_state = match MicrosoftGraphClientState::new(client_state.as_str()) {
-        Ok(client_state) => client_state,
-        Err(error) => {
-            warn!(reason = %error, "Microsoft Graph runtime client state is invalid");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    };
+    let client_state = MicrosoftGraphClientState::from(client_state);
 
     publish_notification_collection(
         state.publisher,
@@ -231,20 +225,6 @@ async fn publish_notification_collection<P: JetStreamPublisher, S: ObjectStorePu
     } else {
         outcome.log_on_error("microsoft-graph");
         StatusCode::INTERNAL_SERVER_ERROR
-    }
-}
-
-fn runtime_credential_error_to_status(error: &RuntimeCredentialError) -> StatusCode {
-    match error {
-        RuntimeCredentialError::SecretStore(SecretStoreError::BackendUnavailable { .. }) => {
-            StatusCode::INTERNAL_SERVER_ERROR
-        }
-        RuntimeCredentialError::SecretStore(_)
-        | RuntimeCredentialError::IntegrationNotFound { .. }
-        | RuntimeCredentialError::IntegrationNotResolvable { .. }
-        | RuntimeCredentialError::CredentialMissing { .. }
-        | RuntimeCredentialError::VerifierOnly { .. }
-        | RuntimeCredentialError::DeliveryDenied { .. } => StatusCode::UNAUTHORIZED,
     }
 }
 

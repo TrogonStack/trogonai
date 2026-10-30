@@ -13,7 +13,7 @@ use trogon_semconv::span::NOTION_WEBHOOK;
 use trogon_std::{EmptySecretError, NonZeroDuration};
 
 use crate::credential::commands::domain::{CredentialKind, SourceKind};
-use crate::credential_runtime_projection::{RuntimeCredentialError, RuntimeCredentialResolver, RuntimeIntegrationKey};
+use crate::credential_runtime_projection::{RuntimeCredentialResolver, RuntimeIntegrationKey};
 use crate::secret_store::{SecretStoreError, SecretStoreGet};
 use crate::source_integration_id::SourceIntegrationId;
 
@@ -351,7 +351,7 @@ where
         },
         Err(error) => {
             warn!(reason = %error, "Notion runtime credential resolution failed");
-            return runtime_credential_error_to_status(&error);
+            return error.http_status();
         }
     };
 
@@ -445,20 +445,6 @@ async fn publish_verified_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
         .await;
 
     outcome_to_status(outcome)
-}
-
-fn runtime_credential_error_to_status(error: &RuntimeCredentialError) -> StatusCode {
-    match error {
-        RuntimeCredentialError::SecretStore(SecretStoreError::BackendUnavailable { .. }) => {
-            StatusCode::INTERNAL_SERVER_ERROR
-        }
-        RuntimeCredentialError::SecretStore(_)
-        | RuntimeCredentialError::IntegrationNotFound { .. }
-        | RuntimeCredentialError::IntegrationNotResolvable { .. }
-        | RuntimeCredentialError::CredentialMissing { .. }
-        | RuntimeCredentialError::VerifierOnly { .. }
-        | RuntimeCredentialError::DeliveryDenied { .. } => StatusCode::UNAUTHORIZED,
-    }
 }
 
 #[cfg(test)]

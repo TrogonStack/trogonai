@@ -493,6 +493,9 @@ async fn discord_runtime_gateway_restarts_the_shard_with_a_rotated_bot_token() {
     );
     assert_eq!(observed_shard_tokens.recv().await.unwrap(), "Bot runtime-token");
 
+    tokio::time::sleep(CREDENTIAL_RUNTIME_PROJECTION_WORKER_INTERVAL * 2).await;
+    assert!(observed_shard_tokens.try_recv().is_err());
+
     let rotated = store
         .rotate(&credential, SecretString::new("runtime-rotated").unwrap())
         .await
@@ -793,4 +796,245 @@ async fn telemetry_shutdown_failure_does_not_reclassify_a_successful_source() {
         failure.field("error"),
         Some(io::Error::from(io::ErrorKind::BrokenPipe).to_string().as_str())
     );
+}
+
+#[tokio::test]
+async fn discord_without_a_static_bot_token_warns_and_never_starts_the_gateway() {
+    let events = trogon_std::log_capture::CapturedEvents::new();
+    let _guard = events.install(trogon_std::log_capture::LevelFilter::WARN);
+    let resolved = discord_without_static_bot_token();
+    let mut tasks = JoinSet::new();
+    spawn_discord_gateway(&mut tasks, resolved.discord.as_ref(), publisher(), async |_, _, _| {
+        unreachable!("the gateway must not start without a bot token")
+    });
+
+    let (name, result) = tasks.join_next().await.unwrap().unwrap();
+
+    assert_eq!(name, "discord-gateway");
+    result.unwrap();
+    assert!(
+        events
+            .events()
+            .iter()
+            .any(|event| event.message() == Some("Discord gateway configured without a static bot token"))
+    );
+}
+
+#[tokio::test]
+async fn discord_runtime_gateway_spawns_nothing_without_a_discord_source() {
+    let mut tasks = JoinSet::new();
+    spawn_discord_gateway_with_runtime_credentials(
+        &mut tasks,
+        None,
+        RuntimeCredentialRegistry::default().resolver(MockOpenBaoSecretStore::default()),
+        publisher(),
+        std::future::pending(),
+        async |_, _, _| unreachable!("there is no discord source"),
+    );
+
+    assert!(tasks.is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn telegram_registration_worker_keeps_polling_until_it_is_dropped() {
+    let events = trogon_std::log_capture::CapturedEvents::new();
+    let _guard = events.install(trogon_std::log_capture::LevelFilter::WARN);
+    let worker = run_telegram_webhook_registration_worker(
+        telegram_integrations(),
+        telegram_runtime_resolver("other", None).await,
+        TelegramWebhookRegistrations::default(),
+        Duration::from_secs(10),
+    );
+
+    assert!(tokio::time::timeout(Duration::from_secs(35), worker).await.is_err());
+
+    let skipped = events
+        .events()
+        .iter()
+        .filter(|event| {
+            event.message() == Some("Telegram runtime webhook secret is not provisioned, skipping registration")
+        })
+        .count();
+    assert_eq!(skipped, 2);
+}
+
+#[tokio::test]
+async fn telegram_registration_skips_an_integration_whose_runtime_secret_cannot_be_read() {
+    let events = trogon_std::log_capture::CapturedEvents::new();
+    let _guard = events.install(trogon_std::log_capture::LevelFilter::ERROR);
+    let writer = MockOpenBaoSecretStore::default();
+    let registry = RuntimeCredentialRegistry::default();
+    let credential = writer
+        .put(
+            CredentialScope::integration(
+                CredentialOwnerId::new("tenant-1").unwrap(),
+                SourceKind::Telegram,
+                SourceIntegrationId::new("first").unwrap(),
+            ),
+            CredentialKind::WebhookSecret,
+            SecretString::new("runtime-first").unwrap(),
+        )
+        .await
+        .unwrap();
+    registry
+        .projections()
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1).unwrap())
+        .await;
+    let resolver = registry.resolver(MockOpenBaoSecretStore::default());
+    let attempts = AtomicUsize::new(0);
+
+    register_telegram_webhooks(
+        &telegram_integrations(),
+        Some(&resolver),
+        &mut TelegramWebhookRegistrations::default(),
+        || Ok::<_, io::Error>(()),
+        async |_, _| {
+            attempts.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        },
+    )
+    .await;
+
+    assert_eq!(attempts.load(Ordering::SeqCst), 0);
+    assert!(events.events().iter().any(
+        |event| event.message() == Some("Telegram runtime webhook secret resolution failed, skipping registration")
+    ));
+}
+
+fn runtime_credential_env(flags: &[&str]) -> trogon_std::env::InMemoryEnv {
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set(OPENBAO_ADDR, "http://127.0.0.1:1");
+    env.set(OPENBAO_TOKEN, "openbao-token");
+    env.set(OPENBAO_ALLOW_PLAINTEXT, "true");
+    for flag in flags {
+        env.set(*flag, "true");
+    }
+    env
+}
+
+type OpenBaoMounts = source_plugin::RuntimeCredentialMounts<secret_store::openbao_secret_store::OpenBaoSecretStore>;
+
+fn mounted_sources(mounts: &OpenBaoMounts) -> [bool; 10] {
+    [
+        mounts.github.is_some(),
+        mounts.gitlab.is_some(),
+        mounts.incidentio.is_some(),
+        mounts.linear.is_some(),
+        mounts.microsoft_graph.is_some(),
+        mounts.notion.is_some(),
+        mounts.sentry.is_some(),
+        mounts.slack.is_some(),
+        mounts.telegram.is_some(),
+        mounts.twitter.is_some(),
+    ]
+}
+
+#[test]
+fn each_runtime_credential_flag_mounts_only_its_own_source() {
+    let flags = [
+        ENABLE_RUNTIME_GITHUB_CREDENTIALS,
+        ENABLE_RUNTIME_GITLAB_CREDENTIALS,
+        ENABLE_RUNTIME_INCIDENTIO_CREDENTIALS,
+        ENABLE_RUNTIME_LINEAR_CREDENTIALS,
+        ENABLE_RUNTIME_MICROSOFT_GRAPH_CREDENTIALS,
+        ENABLE_RUNTIME_NOTION_CREDENTIALS,
+        ENABLE_RUNTIME_SENTRY_CREDENTIALS,
+        ENABLE_RUNTIME_SLACK_CREDENTIALS,
+        ENABLE_RUNTIME_TELEGRAM_CREDENTIALS,
+        ENABLE_RUNTIME_TWITTER_CREDENTIALS,
+    ];
+    let registry = RuntimeCredentialRegistry::default();
+
+    for (index, flag) in flags.iter().enumerate() {
+        let mounts = source_runtime_credentials_from_env(&runtime_credential_env(&[*flag]), &registry)
+            .unwrap()
+            .unwrap();
+
+        let mut expected = [false; 10];
+        expected[index] = true;
+        assert_eq!(mounted_sources(&mounts), expected, "{flag}");
+    }
+}
+
+#[test]
+fn several_runtime_credential_flags_mount_every_flagged_source_and_log_each() {
+    let events = trogon_std::log_capture::CapturedEvents::new();
+    let _guard = events.install(trogon_std::log_capture::LevelFilter::INFO);
+    let flags = [
+        ENABLE_RUNTIME_GITHUB_CREDENTIALS,
+        ENABLE_RUNTIME_GITLAB_CREDENTIALS,
+        ENABLE_RUNTIME_INCIDENTIO_CREDENTIALS,
+        ENABLE_RUNTIME_LINEAR_CREDENTIALS,
+        ENABLE_RUNTIME_MICROSOFT_GRAPH_CREDENTIALS,
+        ENABLE_RUNTIME_NOTION_CREDENTIALS,
+        ENABLE_RUNTIME_SENTRY_CREDENTIALS,
+        ENABLE_RUNTIME_SLACK_CREDENTIALS,
+        ENABLE_RUNTIME_TELEGRAM_CREDENTIALS,
+        ENABLE_RUNTIME_TWITTER_CREDENTIALS,
+    ];
+
+    let mounts =
+        source_runtime_credentials_from_env(&runtime_credential_env(&flags), &RuntimeCredentialRegistry::default())
+            .unwrap()
+            .unwrap();
+
+    assert_eq!(mounted_sources(&mounts), [true; 10]);
+    let enabled = events
+        .events()
+        .iter()
+        .filter(|event| {
+            event
+                .message()
+                .is_some_and(|message| message.ends_with("webhook runtime credentials enabled"))
+        })
+        .count();
+    assert_eq!(enabled, 10);
+}
+
+#[test]
+fn no_runtime_credential_flag_mounts_nothing_and_needs_no_openbao() {
+    let env = trogon_std::env::InMemoryEnv::new();
+
+    assert!(
+        source_runtime_credentials_from_env(&env, &RuntimeCredentialRegistry::default())
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
+fn a_runtime_credential_flag_requires_the_openbao_settings() {
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set(ENABLE_RUNTIME_GITHUB_CREDENTIALS, "true");
+
+    let error = source_runtime_credentials_from_env(&env, &RuntimeCredentialRegistry::default())
+        .err()
+        .unwrap();
+
+    assert_eq!(
+        error.to_string(),
+        format!("{OPENBAO_ADDR} must be set when {ENABLE_RUNTIME_GITHUB_CREDENTIALS} is enabled")
+    );
+}
+
+#[test]
+fn discord_runtime_credentials_follow_their_flag() {
+    let registry = RuntimeCredentialRegistry::default();
+
+    assert!(
+        discord_runtime_credentials_from_env(&trogon_std::env::InMemoryEnv::new(), &registry)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        discord_runtime_credentials_from_env(
+            &runtime_credential_env(&[ENABLE_RUNTIME_DISCORD_CREDENTIALS]),
+            &registry
+        )
+        .unwrap()
+        .is_some()
+    );
+    let missing_settings = trogon_std::env::InMemoryEnv::new();
+    missing_settings.set(ENABLE_RUNTIME_DISCORD_CREDENTIALS, "true");
+    assert!(discord_runtime_credentials_from_env(&missing_settings, &registry).is_err());
 }

@@ -121,12 +121,8 @@ where
     for integration in integrations {
         let path = format!("{}/{}", path_prefix, integration.id);
         app = app.nest(&path, router_fn(publisher.clone(), &integration.config));
-        info!(
-            source,
-            integration = integration.id.as_str(),
-            path,
-            "mounted source integration"
-        );
+        let integration_id = integration.id.as_str();
+        info!(source, integration = integration_id, path, "mounted source integration");
     }
     app
 }
@@ -187,12 +183,9 @@ impl GithubPlugin {
                     credential_resolver.clone(),
                 ),
             );
-            info!(
-                source = self.id(),
-                integration = integration.id.as_str(),
-                path,
-                "mounted source integration"
-            );
+            let source = self.id();
+            let integration_id = integration.id.as_str();
+            info!(source, integration = integration_id, path, "mounted source integration");
         }
         app
     }
@@ -228,12 +221,9 @@ impl SourcePlugin for SlackPlugin {
                 &path,
                 crate::source::slack::router(publisher.clone(), requester.clone(), &integration.config, webhook),
             );
-            info!(
-                source = self.id(),
-                integration = integration.id.as_str(),
-                path,
-                "mounted source integration"
-            );
+            let source = self.id();
+            let integration_id = integration.id.as_str();
+            info!(source, integration = integration_id, path, "mounted source integration");
         }
         app
     }
@@ -270,12 +260,9 @@ impl SlackPlugin {
                     credential_resolver.clone(),
                 ),
             );
-            info!(
-                source = self.id(),
-                integration = integration.id.as_str(),
-                path,
-                "mounted source integration"
-            );
+            let source = self.id();
+            let integration_id = integration.id.as_str();
+            info!(source, integration = integration_id, path, "mounted source integration");
         }
         app
     }
@@ -339,12 +326,9 @@ impl TelegramPlugin {
                     registered_secrets.clone(),
                 ),
             );
-            info!(
-                source = self.id(),
-                integration = integration.id.as_str(),
-                path,
-                "mounted source integration"
-            );
+            let source = self.id();
+            let integration_id = integration.id.as_str();
+            info!(source, integration = integration_id, path, "mounted source integration");
         }
         app
     }
@@ -406,12 +390,9 @@ impl TwitterPlugin {
                     credential_resolver.clone(),
                 ),
             );
-            info!(
-                source = self.id(),
-                integration = integration.id.as_str(),
-                path,
-                "mounted source integration"
-            );
+            let source = self.id();
+            let integration_id = integration.id.as_str();
+            info!(source, integration = integration_id, path, "mounted source integration");
         }
         app
     }
@@ -473,12 +454,9 @@ impl GitlabPlugin {
                     credential_resolver.clone(),
                 ),
             );
-            info!(
-                source = self.id(),
-                integration = integration.id.as_str(),
-                path,
-                "mounted source integration"
-            );
+            let source = self.id();
+            let integration_id = integration.id.as_str();
+            info!(source, integration = integration_id, path, "mounted source integration");
         }
         app
     }
@@ -546,12 +524,9 @@ impl IncidentioPlugin {
                     credential_resolver.clone(),
                 ),
             );
-            info!(
-                source = self.id(),
-                integration = integration.id.as_str(),
-                path,
-                "mounted source integration"
-            );
+            let source = self.id();
+            let integration_id = integration.id.as_str();
+            info!(source, integration = integration_id, path, "mounted source integration");
         }
         app
     }
@@ -613,12 +588,9 @@ impl LinearPlugin {
                     credential_resolver.clone(),
                 ),
             );
-            info!(
-                source = self.id(),
-                integration = integration.id.as_str(),
-                path,
-                "mounted source integration"
-            );
+            let source = self.id();
+            let integration_id = integration.id.as_str();
+            info!(source, integration = integration_id, path, "mounted source integration");
         }
         app
     }
@@ -686,12 +658,9 @@ impl MicrosoftGraphPlugin {
                     credential_resolver.clone(),
                 ),
             );
-            info!(
-                source = self.id(),
-                integration = integration.id.as_str(),
-                path,
-                "mounted source integration"
-            );
+            let source = self.id();
+            let integration_id = integration.id.as_str();
+            info!(source, integration = integration_id, path, "mounted source integration");
         }
         app
     }
@@ -753,12 +722,9 @@ impl NotionPlugin {
                     credential_resolver.clone(),
                 ),
             );
-            info!(
-                source = self.id(),
-                integration = integration.id.as_str(),
-                path,
-                "mounted source integration"
-            );
+            let source = self.id();
+            let integration_id = integration.id.as_str();
+            info!(source, integration = integration_id, path, "mounted source integration");
         }
         app
     }
@@ -820,12 +786,9 @@ impl SentryPlugin {
                     credential_resolver.clone(),
                 ),
             );
-            info!(
-                source = self.id(),
-                integration = integration.id.as_str(),
-                path,
-                "mounted source integration"
-            );
+            let source = self.id();
+            let integration_id = integration.id.as_str();
+            info!(source, integration = integration_id, path, "mounted source integration");
         }
         app
     }

@@ -23,6 +23,12 @@ impl MicrosoftGraphClientState {
     }
 }
 
+impl From<SecretString> for MicrosoftGraphClientState {
+    fn from(secret: SecretString) -> Self {
+        Self(secret)
+    }
+}
+
 impl fmt::Debug for MicrosoftGraphClientState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("MicrosoftGraphClientState(****)")

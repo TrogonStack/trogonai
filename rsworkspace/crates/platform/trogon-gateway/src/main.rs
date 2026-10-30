@@ -174,15 +174,16 @@ async fn serve_with_env(
         let integrations = resolved.telegram.clone();
         let shutdown = shutdown.clone();
         join_set.spawn(async move {
-            tokio::select! {
-                () = shutdown => {}
-                () = run_telegram_webhook_registration_worker(
+            until_shutdown(
+                shutdown,
+                run_telegram_webhook_registration_worker(
                     integrations,
                     telegram_runtime_credentials,
                     telegram_registrations,
                     CREDENTIAL_RUNTIME_PROJECTION_WORKER_INTERVAL,
-                ) => {}
-            }
+                ),
+            )
+            .await;
             ("telegram-webhook-registration-worker", Ok(()))
         });
         info!("telegram webhook registration worker spawned");
@@ -326,12 +327,20 @@ impl TelegramWebhookRegistrations {
     }
 }
 
+async fn until_shutdown(
+    shutdown: impl std::future::Future<Output = ()>,
+    worker: impl std::future::Future<Output = std::convert::Infallible>,
+) {
+    futures_util::future::select(Box::pin(shutdown), Box::pin(worker)).await;
+}
+
 async fn run_telegram_webhook_registration_worker<G>(
     integrations: Vec<config::SourceIntegration<source::telegram::TelegramSourceConfig>>,
     runtime_credentials: credential_runtime_projection::RuntimeCredentialResolver<G>,
     mut registrations: TelegramWebhookRegistrations,
     interval: std::time::Duration,
-) where
+) -> std::convert::Infallible
+where
     G: secret_store::SecretStoreGet<Error = secret_store::SecretStoreError>,
 {
     let mut interval = tokio::time::interval(interval);
@@ -421,18 +430,8 @@ async fn register_telegram_webhooks<C, E, Register, G>(
                                     continue;
                                 }
                             };
-                            let Ok(webhook_secret) =
-                                source::telegram::config::TelegramWebhookSecret::new(secret.as_str())
-                            else {
-                                error!(
-                                    source = "telegram",
-                                    integration = %integration.id,
-                                    "Telegram runtime webhook secret is empty, skipping registration"
-                                );
-                                continue;
-                            };
                             let mut config = integration.config.clone();
-                            config.webhook_secret = webhook_secret;
+                            config.webhook_secret = source::telegram::config::TelegramWebhookSecret::from(secret);
                             std::borrow::Cow::Owned(config)
                         }
                         None => std::borrow::Cow::Borrowed(&integration.config),
@@ -511,17 +510,18 @@ fn spawn_discord_gateway_with_runtime_credentials<P, S, G, Shutdown, Run, Runnin
     if let Some(config) = config {
         let config = config.clone();
         tasks.spawn(async move {
-            tokio::select! {
-                () = shutdown => {}
-                () = supervise_discord_runtime_gateway(
+            until_shutdown(
+                shutdown,
+                supervise_discord_runtime_gateway(
                     credentials,
                     publisher,
                     config,
                     run,
                     DISCORD_BOT_TOKEN_RETRY_BACKOFF,
                     CREDENTIAL_RUNTIME_PROJECTION_WORKER_INTERVAL,
-                ) => {}
-            }
+                ),
+            )
+            .await;
             ("discord-gateway", Ok(()))
         });
         info!(source = "discord", "gateway runner spawned");
@@ -535,7 +535,8 @@ async fn supervise_discord_runtime_gateway<P, S, G, Run, Running>(
     run: Run,
     backoff: crate::supervision::RestartBackoff,
     credential_poll_interval: std::time::Duration,
-) where
+) -> std::convert::Infallible
+where
     P: JetStreamPublisher + Clone,
     S: ObjectStorePut + Clone,
     G: secret_store::SecretStoreGet<Error = secret_store::SecretStoreError>,
