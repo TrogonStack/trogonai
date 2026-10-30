@@ -469,7 +469,7 @@ pub(crate) fn decode_active_state(
     let previous_versions = value
         .previous_versions
         .iter()
-        .map(|credential| decode_credential_ref("previous_versions", credential))
+        .map(|credential| decode_credential_ref(field.child("previous_versions"), credential))
         .collect::<Result<Vec<_>, _>>()?;
     Ok((metadata, previous_versions))
 }

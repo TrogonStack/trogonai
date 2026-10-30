@@ -18,11 +18,11 @@ use super::domain::{
     SourceKind, StorageBackend,
 };
 use super::proto::{
-    CredentialProtoDecodeError, activated_to_proto, credential_metadata_to_proto_state, decode_active_state,
-    decode_credential_metadata, decode_message_field, decode_pending_write_state, decode_write_requested,
-    destroy_failed_to_proto, destroy_requested_to_proto, destroyed_to_proto, pending_write_to_proto_state,
-    revoked_to_proto, rotated_to_proto, rotation_failed_to_proto, rotation_requested_to_proto, write_failed_to_proto,
-    write_requested_to_proto,
+    CredentialProtoDecodeError, activated_to_proto, credential_metadata_to_proto_state, credential_ref_to_proto,
+    decode_active_state, decode_credential_metadata, decode_message_field, decode_pending_write_state,
+    decode_write_requested, destroy_failed_to_proto, destroy_requested_to_proto, destroyed_to_proto,
+    pending_write_to_proto_state, revoked_to_proto, rotated_to_proto, rotation_failed_to_proto,
+    rotation_requested_to_proto, write_failed_to_proto, write_requested_to_proto,
 };
 use super::snapshot::CREDENTIAL_SNAPSHOT_POLICY;
 use super::state::{CredentialDecideError, CredentialEvolveError, evolve, initial_state};
@@ -1069,6 +1069,23 @@ fn active_state_decode_errors_name_the_full_field_path() {
     assert!(matches!(
         error,
         CredentialProtoDecodeError::InvalidField { field, .. } if field == "active.metadata.reference.id"
+    ));
+}
+
+#[test]
+fn previous_version_decode_errors_name_the_full_field_path() {
+    let mut previous = credential_ref_to_proto(&credential_ref(1));
+    previous.id = String::new();
+    let active = state_v1::ActiveCredentialState {
+        metadata: credential_metadata_to_proto_state(&metadata(2)).into(),
+        previous_versions: vec![previous],
+    };
+
+    let error = decode_active_state("active", &active).unwrap_err();
+
+    assert!(matches!(
+        error,
+        CredentialProtoDecodeError::InvalidField { field, .. } if field == "active.previous_versions.id"
     ));
 }
 
