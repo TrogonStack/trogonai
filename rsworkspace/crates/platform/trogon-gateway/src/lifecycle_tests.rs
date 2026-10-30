@@ -513,6 +513,57 @@ async fn discord_runtime_gateway_restarts_the_shard_with_a_rotated_bot_token() {
     assert!(observed_shard_tokens.try_recv().is_err());
 }
 
+#[tokio::test(start_paused = true)]
+async fn discord_runtime_gateway_resets_the_restart_delay_after_a_healthy_shard_run() {
+    let _ = trogon_std::tls::install_default_crypto_provider();
+    let resolved = discord_without_static_bot_token();
+    let store = MockOpenBaoSecretStore::default();
+    let registry = RuntimeCredentialRegistry::default();
+    put_discord_bot_token(&store, &registry, "runtime-token").await;
+    let backoff = crate::supervision::RestartBackoff::new(Duration::from_secs(1), Duration::from_secs(4));
+    let healthy_run = Duration::from_secs(10);
+    let runs = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let (starts, mut observed_starts) = tokio::sync::mpsc::unbounded_channel();
+    let supervisor = tokio::spawn(supervise_discord_runtime_gateway(
+        registry.resolver(store.clone()),
+        publisher(),
+        resolved.discord.clone().unwrap(),
+        move |_, _, _| {
+            let run = runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            starts.send(tokio::time::Instant::now()).unwrap();
+            async move {
+                if run == 3 {
+                    tokio::time::sleep(healthy_run).await;
+                }
+            }
+        },
+        backoff,
+        Duration::from_secs(3600),
+    ));
+
+    let mut started = Vec::new();
+    for _ in 0..5 {
+        started.push(
+            tokio::time::timeout(Duration::from_secs(60), observed_starts.recv())
+                .await
+                .unwrap()
+                .unwrap(),
+        );
+    }
+    supervisor.abort();
+
+    let gaps: Vec<Duration> = started.windows(2).map(|pair| pair[1] - pair[0]).collect();
+    assert_eq!(
+        gaps,
+        vec![
+            Duration::from_secs(1),
+            Duration::from_secs(2),
+            Duration::from_secs(4),
+            healthy_run + backoff.initial(),
+        ]
+    );
+}
+
 fn slack_integrations() -> Vec<config::SourceIntegration<source::slack::SlackConfig>> {
     configuration(
         r#"

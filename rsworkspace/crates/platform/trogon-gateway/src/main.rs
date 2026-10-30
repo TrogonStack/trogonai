@@ -564,8 +564,12 @@ where
             bot_token.as_str().to_owned(),
             config.intents,
         );
+        let started = tokio::time::Instant::now();
         tokio::select! {
             () = run(publisher.clone(), config.clone(), shard) => {
+                if started.elapsed() >= backoff.max() {
+                    restart_delay = backoff.initial();
+                }
                 warn!(
                     source = "discord",
                     retry_in = ?restart_delay,

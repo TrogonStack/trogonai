@@ -2760,7 +2760,7 @@ async fn every_runtime_credential_error_maps_to_the_status_a_webhook_caller_sees
         (denied, StatusCode::UNAUTHORIZED),
     ];
 
-    for (error, expected) in cases {
-        assert_eq!(error.http_status(), expected, "{error}");
+    for (case, (error, expected)) in cases.into_iter().enumerate() {
+        assert_eq!(error.http_status(), expected, "case {case}");
     }
 }
