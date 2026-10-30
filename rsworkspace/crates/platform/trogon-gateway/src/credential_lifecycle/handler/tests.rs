@@ -18,8 +18,8 @@ use crate::credential::commands::domain::{
     CredentialFingerprint, CredentialMetadata, CredentialOwnerId, CredentialStatus, StorageBackend,
 };
 use crate::credential::commands::proto::{
-    activated_to_proto, decode_active_state, pending_write_to_proto_state, rotation_requested_to_proto,
-    write_requested_to_proto,
+    activated_to_proto, decode_active_state, pending_write_to_proto_state, revoked_to_proto,
+    rotation_requested_to_proto, write_requested_to_proto,
 };
 use crate::credential_runtime_projection::{
     RuntimeCredentialError, RuntimeCredentialRegistry, RuntimeIntegrationKey, RuntimeIntegrationProjection,
@@ -2058,4 +2058,252 @@ async fn runtime_handler_with_openbao_testcontainer_applies_state_and_resolves_p
             "rotated-copy-this-value-in-and-out"
         ));
     }
+}
+
+#[derive(Clone, Default)]
+struct NextVersionOutageSecretStore {
+    inner: MockOpenBaoSecretStore,
+}
+
+impl SecretStorePut for NextVersionOutageSecretStore {
+    type Error = SecretStoreError;
+
+    async fn put(
+        &self,
+        scope: CredentialScope,
+        kind: CredentialKind,
+        value: SecretString,
+    ) -> Result<CredentialRef, Self::Error> {
+        self.inner.put(scope, kind, value).await
+    }
+}
+
+impl SecretStoreMetadata for NextVersionOutageSecretStore {
+    type Error = SecretStoreError;
+
+    async fn metadata(&self, credential: &CredentialRef) -> Result<CredentialMetadata, Self::Error> {
+        if credential.version().get() > 1 {
+            return Err(SecretStoreError::BackendUnavailable {
+                backend: StorageBackend::OpenBao,
+                message: "metadata read timed out".to_string(),
+            });
+        }
+        self.inner.metadata(credential).await
+    }
+}
+
+#[derive(Clone)]
+struct FailingRevokeSecretStore;
+
+impl SecretStoreRevoke for FailingRevokeSecretStore {
+    type Error = SecretStoreError;
+
+    async fn revoke(&self, credential: &CredentialRef) -> Result<(), Self::Error> {
+        Err(SecretStoreError::BackendUnavailable {
+            backend: StorageBackend::OpenBao,
+            message: format!("OpenBao refused revoke for {}", credential.id()),
+        })
+    }
+}
+
+#[derive(Clone)]
+struct ConcurrentlyRevokingSecretStore {
+    events: HandlerTestStreamStore,
+}
+
+impl SecretStoreRevoke for ConcurrentlyRevokingSecretStore {
+    type Error = SecretStoreError;
+
+    async fn revoke(&self, credential: &CredentialRef) -> Result<(), Self::Error> {
+        let current = current_position(&self.events.events(), credential.id().as_str());
+        let revoked = v1::CredentialEvent {
+            event: Some(revoked_to_proto(credential).into()),
+        };
+        self.events
+            .append_stream(AppendStreamRequest {
+                stream_id: credential.id().as_str(),
+                stream_write_precondition: StreamWritePrecondition::At(current.unwrap()),
+                events: vec![stored_event(&revoked, 901)],
+            })
+            .await
+            .unwrap();
+        Ok(())
+    }
+}
+
+async fn active_credential_ref(
+    handler: &CredentialHandler<HandlerTestStreamStore, MockOpenBaoSecretStore>,
+) -> CredentialRef {
+    let state = handler.put(put_command("initial-secret")).await.unwrap().into_state();
+    let Some(CredentialStateSnapshotCase::Active(active)) = state.state.as_ref() else {
+        panic!("expected active credential");
+    };
+    let (metadata, _) = decode_active_state("active", active).unwrap();
+    metadata.reference().clone()
+}
+
+#[test]
+fn every_write_operation_has_a_distinct_label() {
+    assert_eq!(CredentialWriteOperation::Put.as_str(), "put");
+    assert_eq!(CredentialWriteOperation::Rotate.as_str(), "rotate");
+    assert_eq!(CredentialWriteOperation::Revoke.as_str(), "revoke");
+    assert_eq!(CredentialWriteOperation::Destroy.as_str(), "destroy");
+}
+
+#[tokio::test]
+async fn revoke_surfaces_secret_store_failure_without_recording_revocation() {
+    let events = HandlerTestStreamStore::default();
+    let handler = CredentialHandler::new(events.clone(), MockOpenBaoSecretStore::default());
+    let credential_ref = active_credential_ref(&handler).await;
+
+    let error = CredentialHandler::new(events.clone(), FailingRevokeSecretStore)
+        .revoke(RevokeStoredCredential::new(credential_ref))
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, CredentialHandlerError::SecretRevoke { .. }));
+    assert_eq!(events.decoded_events().len(), 2);
+}
+
+#[tokio::test]
+async fn revoke_returns_the_state_another_writer_recorded_while_the_secret_was_disabled() {
+    let events = HandlerTestStreamStore::default();
+    let handler = CredentialHandler::new(events.clone(), MockOpenBaoSecretStore::default());
+    let credential_ref = active_credential_ref(&handler).await;
+
+    let outcome = CredentialHandler::new(
+        events.clone(),
+        ConcurrentlyRevokingSecretStore { events: events.clone() },
+    )
+    .revoke(RevokeStoredCredential::new(credential_ref))
+    .await
+    .unwrap();
+
+    assert_eq!(outcome.stream_position(), position(3));
+    assert!(matches!(
+        outcome.state().state.as_ref(),
+        Some(CredentialStateSnapshotCase::Revoked(_))
+    ));
+    assert_eq!(events.decoded_events().len(), 3);
+}
+
+#[tokio::test]
+async fn destroy_resumes_a_pending_destroy_request_left_by_a_failed_failure_record() {
+    let events = HandlerTestStreamStore::default();
+    let handler = CredentialHandler::new(events.clone(), MockOpenBaoSecretStore::default());
+    let credential_ref = active_credential_ref(&handler).await;
+    handler
+        .revoke(RevokeStoredCredential::new(credential_ref.clone()))
+        .await
+        .unwrap();
+    events.fail_append_at(5);
+    CredentialHandler::new(events.clone(), FailingDestroySecretStore)
+        .destroy(DestroyStoredCredential::new(credential_ref.clone(), destroy_reason()))
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        events.decoded_events().last().unwrap().event,
+        Some(CredentialEventCase::DestroyRequested(_))
+    ));
+
+    let outcome = handler
+        .destroy(DestroyStoredCredential::new(credential_ref, destroy_reason()))
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        outcome.into_state().state.as_ref(),
+        Some(CredentialStateSnapshotCase::Destroyed(_))
+    ));
+    assert_eq!(events.decoded_events().len(), 5);
+}
+
+#[tokio::test]
+async fn rotate_retry_attempts_the_rotation_again_when_the_store_never_wrote_the_next_version() {
+    let events = HandlerTestStreamStore::default();
+    let handler = CredentialHandler::new(events.clone(), MockOpenBaoSecretStore::default());
+    let credential_ref = active_credential_ref(&handler).await;
+    events.fail_append_at(4);
+    let failing = CredentialHandler::new(events.clone(), FailingRotateSecretStore);
+    let command = || RotateCredential::new(credential_ref.clone(), SecretString::new("rotated-secret").unwrap());
+    failing.rotate(command()).await.unwrap_err();
+
+    let error = failing.rotate(command()).await.unwrap_err();
+
+    assert!(matches!(error, CredentialHandlerError::SecretRotate { .. }));
+    assert!(matches!(
+        events.decoded_events().last().unwrap().event,
+        Some(CredentialEventCase::RotationFailed(_))
+    ));
+}
+
+#[tokio::test]
+async fn recover_rotation_activation_surfaces_a_metadata_outage() {
+    let events = HandlerTestStreamStore::default();
+    let secrets = CountingRotateSecretStore::default();
+    let handler = CredentialHandler::new(events.clone(), secrets.clone());
+    let state = handler.put(put_command("initial-secret")).await.unwrap().into_state();
+    let Some(CredentialStateSnapshotCase::Active(active)) = state.state.as_ref() else {
+        panic!("expected active credential");
+    };
+    let (active_metadata, _) = decode_active_state("active", active).unwrap();
+    secrets.metadata_outage.store(true, std::sync::atomic::Ordering::SeqCst);
+
+    let error = handler
+        .recover_rotation_activation(RecoverCredentialRotationActivation::new(
+            active_metadata.reference().clone(),
+        ))
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, CredentialHandlerError::SecretMetadata { .. }));
+    assert_eq!(events.decoded_events().len(), 2);
+}
+
+#[tokio::test]
+async fn recover_write_activation_surfaces_an_outage_while_probing_later_versions() {
+    let events = HandlerTestStreamStore::default();
+    let secrets = NextVersionOutageSecretStore::default();
+    let handler = CredentialHandler::new(events.clone(), secrets);
+    events.fail_append_at(2);
+    handler.put(put_command("first-secret")).await.unwrap_err();
+
+    let error = handler
+        .recover_write_activation(RecoverCredentialWriteActivation::new(credential_ref(1)))
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, CredentialHandlerError::SecretMetadata { .. }));
+    assert_eq!(events.decoded_events().len(), 1);
+}
+
+#[tokio::test]
+async fn load_state_skips_events_outside_the_credential_event_set() {
+    let events = HandlerTestStreamStore::default();
+    let handler = CredentialHandler::new(events.clone(), MockOpenBaoSecretStore::default());
+    let credential_ref = active_credential_ref(&handler).await;
+    let foreign = Event {
+        id: EventId::new(uuid::Uuid::from_u128(902)),
+        r#type: "example.foreign.event".to_string(),
+        content: b"{}".to_vec(),
+        headers: Headers::empty(),
+    };
+    events
+        .append_stream(AppendStreamRequest {
+            stream_id: credential_ref.id().as_str(),
+            stream_write_precondition: StreamWritePrecondition::At(position(2)),
+            events: vec![foreign],
+        })
+        .await
+        .unwrap();
+
+    let (state, stream_position) = load_state::<_, SecretStoreError>(&events, credential_ref.id().as_str())
+        .await
+        .unwrap();
+
+    assert_eq!(stream_position, Some(position(3)));
+    assert!(matches!(
+        state.state.as_ref(),
+        Some(CredentialStateSnapshotCase::Active(_))
+    ));
 }

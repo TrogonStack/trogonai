@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::error::Error;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use async_nats::jetstream::{self, context, kv};
+use async_nats::jetstream::{context, kv};
 use buffa::Message as _;
 use bytes::Bytes;
 use opentelemetry::KeyValue;
@@ -121,6 +121,74 @@ impl CredentialRecoveryReport {
         self.stuck_recovery
     }
 
+    fn log_completed(&self) {
+        let scanned_events = self.scanned_events();
+        let decoded_events = self.decoded_events();
+        let skipped_events = self.skipped_events();
+        let invalid_events = self.invalid_events();
+        let changed_credentials = self.changed_credentials();
+        let skipped_credentials = self.skipped_credentials();
+        let planned_recoveries = self.planned_recoveries();
+        let recovered_writes = self.recovered_writes();
+        let recovered_rotations = self.recovered_rotations();
+        let failed_recoveries = self.failed_recoveries();
+        let checkpoint_loaded_sequence = self.checkpoint_loaded_sequence();
+        let checkpoint_advanced_to = self.checkpoint_advanced_to();
+        let checkpoint_failure_count = self.checkpoint_failure_count();
+        let checkpoint_retry_after_unix_seconds = self.checkpoint_retry_after_unix_seconds();
+        let retry_delayed = self.retry_delayed();
+        let stuck_recovery = self.stuck_recovery();
+        info!(
+            scanned_events,
+            decoded_events,
+            skipped_events,
+            invalid_events,
+            changed_credentials,
+            skipped_credentials,
+            planned_recoveries,
+            recovered_writes,
+            recovered_rotations,
+            failed_recoveries,
+            checkpoint_loaded_sequence,
+            checkpoint_advanced_to = ?checkpoint_advanced_to,
+            checkpoint_failure_count,
+            checkpoint_retry_after_unix_seconds = ?checkpoint_retry_after_unix_seconds,
+            retry_delayed,
+            stuck_recovery,
+            "credential recovery pass completed"
+        );
+    }
+
+    fn log_stuck(&self) {
+        let checkpoint_loaded_sequence = self.checkpoint_loaded_sequence();
+        let checkpoint_failure_count = self.checkpoint_failure_count();
+        let checkpoint_retry_after_unix_seconds = self.checkpoint_retry_after_unix_seconds();
+        warn!(
+            checkpoint_loaded_sequence,
+            checkpoint_failure_count,
+            checkpoint_retry_after_unix_seconds = ?checkpoint_retry_after_unix_seconds,
+            "credential recovery is stuck behind retry backoff"
+        );
+    }
+
+    fn log_not_advanced(&self) {
+        let failed_recoveries = self.failed_recoveries();
+        let invalid_events = self.invalid_events();
+        let checkpoint_loaded_sequence = self.checkpoint_loaded_sequence();
+        let checkpoint_failure_count = self.checkpoint_failure_count();
+        let checkpoint_retry_after_unix_seconds = self.checkpoint_retry_after_unix_seconds();
+        let stuck_recovery = self.stuck_recovery();
+        warn!(
+            failed_recoveries,
+            invalid_events,
+            checkpoint_loaded_sequence,
+            checkpoint_failure_count,
+            checkpoint_retry_after_unix_seconds = ?checkpoint_retry_after_unix_seconds,
+            stuck_recovery,
+            "credential recovery checkpoint was not advanced"
+        );
+    }
+
     fn has_recovery_activity(&self) -> bool {
         self.planned_recoveries > 0
             || self.has_failures()
@@ -197,11 +265,11 @@ struct PlannedCredentialRecovery {
     command: CredentialActivationRecoveryCommand,
 }
 
-pub(crate) async fn run<EventStream, EventStore, Secrets>(
+pub(crate) async fn run<EventStream, EventStore, Secrets, Checkpoints>(
     event_stream: EventStream,
     event_store: EventStore,
     handler: CredentialRuntimeHandler<EventStore, Secrets>,
-    checkpoints: CredentialRecoveryKvCheckpointStore<kv::Store>,
+    checkpoints: Checkpoints,
     interval: Duration,
 ) where
     EventStream: JetStreamGetStreamInfo + JetStreamGetRawMessage,
@@ -212,6 +280,7 @@ pub(crate) async fn run<EventStream, EventStore, Secrets>(
         + Clone
         + 'static,
     Secrets: SecretStoreMetadata<Error = SecretStoreError>,
+    Checkpoints: CredentialRecoveryCheckpointStore,
 {
     let mut interval = tokio::time::interval(interval);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -227,25 +296,7 @@ pub(crate) async fn run<EventStream, EventStore, Secrets>(
                 match recover_pending_credential_activations(&event_stream, &event_store, &handler, &checkpoints).await {
                     Ok(report) if report.has_recovery_activity() => {
                         metrics.record_report(&report);
-                        info!(
-                            scanned_events = report.scanned_events(),
-                            decoded_events = report.decoded_events(),
-                            skipped_events = report.skipped_events(),
-                            invalid_events = report.invalid_events(),
-                            changed_credentials = report.changed_credentials(),
-                            skipped_credentials = report.skipped_credentials(),
-                            planned_recoveries = report.planned_recoveries(),
-                            recovered_writes = report.recovered_writes(),
-                            recovered_rotations = report.recovered_rotations(),
-                            failed_recoveries = report.failed_recoveries(),
-                            checkpoint_loaded_sequence = report.checkpoint_loaded_sequence(),
-                            checkpoint_advanced_to = ?report.checkpoint_advanced_to(),
-                            checkpoint_failure_count = report.checkpoint_failure_count(),
-                            checkpoint_retry_after_unix_seconds = ?report.checkpoint_retry_after_unix_seconds(),
-                            retry_delayed = report.retry_delayed(),
-                            stuck_recovery = report.stuck_recovery(),
-                            "credential recovery pass completed"
-                        );
+                        report.log_completed();
                     }
                     Ok(report) => {
                         metrics.record_report(&report);
@@ -369,12 +420,7 @@ where
     if checkpoint.retry_delayed_at(now) {
         let report = report_from_checkpoint(checkpoint, now, policy, true);
         if report.stuck_recovery() {
-            warn!(
-                checkpoint_loaded_sequence = report.checkpoint_loaded_sequence(),
-                checkpoint_failure_count = report.checkpoint_failure_count(),
-                checkpoint_retry_after_unix_seconds = ?report.checkpoint_retry_after_unix_seconds(),
-                "credential recovery is stuck behind retry backoff"
-            );
+            report.log_stuck();
         }
         return Ok(report);
     }
@@ -411,15 +457,7 @@ where
         report.checkpoint_failure_count = checkpoint.consecutive_failure_count();
         report.checkpoint_retry_after_unix_seconds = checkpoint.retry_after_unix_seconds();
         report.stuck_recovery = checkpoint.stuck_at(now, policy);
-        warn!(
-            failed_recoveries = report.failed_recoveries(),
-            invalid_events = report.invalid_events(),
-            checkpoint_loaded_sequence = report.checkpoint_loaded_sequence(),
-            checkpoint_failure_count = report.checkpoint_failure_count(),
-            checkpoint_retry_after_unix_seconds = ?report.checkpoint_retry_after_unix_seconds(),
-            stuck_recovery = report.stuck_recovery(),
-            "credential recovery checkpoint was not advanced"
-        );
+        report.log_not_advanced();
     }
 
     Ok(report)
@@ -514,11 +552,7 @@ where
             }
             Err(source) => {
                 report.invalid_events += 1;
-                warn!(
-                    stream_sequence = event.stream_position.as_u64(),
-                    error = %source,
-                    "credential recovery found an invalid credential event"
-                );
+                log_invalid_event(event.stream_position.as_u64(), &source);
             }
         }
     }
@@ -559,6 +593,14 @@ where
     }
 
     CredentialRecoveryPlan { report, commands }
+}
+
+fn log_invalid_event(stream_sequence: u64, source: &CredentialRecoveryEventError) {
+    warn!(
+        stream_sequence,
+        error = %source,
+        "credential recovery found an invalid credential event"
+    );
 }
 
 fn stream_event_credential_id(event: &StreamEvent) -> Result<Option<CredentialId>, CredentialRecoveryEventError> {
@@ -880,10 +922,14 @@ where
     }
 }
 
-pub(crate) async fn open_checkpoint_store(
-    context: jetstream::Context,
-) -> Result<CredentialRecoveryKvCheckpointStore<kv::Store>, CredentialRecoveryCheckpointOpenError> {
-    let store = provision_checkpoint_bucket::<_, kv::Store>(&context).await?;
+pub(crate) async fn open_checkpoint_store<C, S>(
+    client: &C,
+) -> Result<CredentialRecoveryKvCheckpointStore<S>, CredentialRecoveryCheckpointOpenError>
+where
+    C: JetStreamCreateKeyValue<Store = S> + JetStreamGetKeyValue<Store = S>,
+    S: JetStreamKeyValueStatus + JetStreamKvEntry + JetStreamKvCreate + JetStreamKeyValueUpdate,
+{
+    let store = provision_checkpoint_bucket(client).await?;
     Ok(CredentialRecoveryKvCheckpointStore::new(store))
 }
 

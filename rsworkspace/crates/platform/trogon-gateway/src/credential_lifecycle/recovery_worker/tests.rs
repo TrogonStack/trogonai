@@ -18,18 +18,28 @@ use trogon_nats::jetstream::{
     JetStreamGetStream, MockJetStreamConsumerFactory, MockJetStreamKvClient, MockJetStreamKvStore,
 };
 use trogon_std::SecretString;
+use trogon_std::log_capture::{CapturedEvents, LevelFilter};
 use uuid::Uuid;
 
 use super::*;
 use crate::credential::commands::domain::{
+    CredentialDestroyReason, CredentialFailureReason, CredentialFingerprint, CredentialMetadata, CredentialStatus,
+    StorageBackend,
+};
+use crate::credential::commands::domain::{
     CredentialKind, CredentialOwnerId, CredentialRef, CredentialScope, CredentialVersion, SourceKind,
 };
-use crate::credential::commands::domain::{CredentialMetadata, StorageBackend};
-use crate::credential::commands::proto::{decode_active_state, write_requested_to_proto};
+use crate::credential::commands::proto::{
+    activated_to_proto, decode_active_state, destroy_failed_to_proto, destroy_requested_to_proto, destroyed_to_proto,
+    revoked_to_proto, rotated_to_proto, rotation_failed_to_proto, rotation_requested_to_proto, write_failed_to_proto,
+    write_requested_to_proto,
+};
 use crate::credential_lifecycle::handler::{
-    CredentialHandler, CredentialHandlerError, PutCredential, RotateCredential,
+    CredentialHandler, CredentialHandlerError, DestroyStoredCredential, PutCredential, RevokeStoredCredential,
+    RotateCredential,
 };
 use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationKey};
+use crate::secret_store::SecretDestroyReason;
 use crate::secret_store::{MockOpenBaoSecretStore, SecretStoreError, SecretStoreMetadata};
 use crate::source_integration_id::SourceIntegrationId;
 use trogonai_proto::gateway::credentials::CredentialStateSnapshotCase;
@@ -1023,4 +1033,721 @@ fn put_command(value: &str) -> PutCredential {
         CredentialKind::WebhookSecret,
         SecretString::new(value).unwrap(),
     )
+}
+
+fn foreign_stream_event(stream_id: &str, stream_position: u64) -> StreamEvent {
+    let mut event = stream_event(stream_id, stream_position, write_requested_event());
+    event.event.r#type = "example.foreign.event".to_string();
+    event
+}
+
+fn other_credential_id() -> CredentialId {
+    CredentialId::new("openbao:tenant-1:github/secondary:webhook_secret").unwrap()
+}
+
+fn failure_reason() -> CredentialFailureReason {
+    CredentialFailureReason::new("backend refused").unwrap()
+}
+
+fn active_metadata(version: u64) -> CredentialMetadata {
+    CredentialMetadata::new(
+        credential_ref(version),
+        CredentialStatus::Active,
+        StorageBackend::OpenBao,
+        CredentialFingerprint::new("fingerprint").unwrap(),
+    )
+}
+
+fn terminate_current_process() {
+    let status = std::process::Command::new("kill")
+        .args(["-TERM", &std::process::id().to_string()])
+        .status()
+        .unwrap();
+    assert!(status.success());
+}
+
+fn message_of(events: &CapturedEvents, message: &str) -> Vec<trogon_std::log_capture::CapturedEvent> {
+    events
+        .events()
+        .into_iter()
+        .filter(|event| event.message() == Some(message))
+        .collect()
+}
+
+async fn active_credential_ref(
+    handler: &CredentialHandler<WorkerTestStreamStore, MockOpenBaoSecretStore>,
+) -> CredentialRef {
+    let state = handler.put(put_command("old-secret")).await.unwrap().into_state();
+    let Some(CredentialStateSnapshotCase::Active(active)) = state.state.as_ref() else {
+        panic!("expected active credential");
+    };
+    decode_active_state("active", active).unwrap().0.reference().clone()
+}
+
+#[test]
+fn recovery_report_flags_every_condition_that_deserves_a_log_line() {
+    assert!(!CredentialRecoveryReport::default().has_recovery_activity());
+    for report in [
+        CredentialRecoveryReport {
+            planned_recoveries: 1,
+            ..Default::default()
+        },
+        CredentialRecoveryReport {
+            failed_recoveries: 1,
+            ..Default::default()
+        },
+        CredentialRecoveryReport {
+            invalid_events: 1,
+            ..Default::default()
+        },
+        CredentialRecoveryReport {
+            retry_delayed: true,
+            ..Default::default()
+        },
+        CredentialRecoveryReport {
+            stuck_recovery: true,
+            ..Default::default()
+        },
+    ] {
+        assert!(report.has_recovery_activity());
+    }
+}
+
+#[tokio::test]
+async fn recovery_skips_foreign_events_and_credentials_with_nothing_to_recover() {
+    let events = WorkerTestStreamStore::default();
+    let handler = CredentialHandler::new(events.clone(), MockOpenBaoSecretStore::default());
+    active_credential_ref(&handler).await;
+    let mut raw_events = events.events_as_raw_stream_scan();
+    raw_events.push(foreign_stream_event("gateway.credentials.events.v1.subject", 3));
+    events.events.lock().unwrap().push(StreamEvent {
+        stream_id: credential_id().as_str().to_string(),
+        event: foreign_stream_event("ignored", 3).event,
+        stream_position: position(3),
+        recorded_at: Utc::now(),
+    });
+
+    let plan = recovery_plan_from_credential_events(raw_events, &events).await;
+
+    assert_eq!(plan.report.scanned_events(), 3);
+    assert_eq!(plan.report.decoded_events(), 2);
+    assert_eq!(plan.report.skipped_events(), 1);
+    assert_eq!(plan.report.changed_credentials(), 1);
+    assert_eq!(plan.report.skipped_credentials(), 1);
+    assert_eq!(plan.report.planned_recoveries(), 0);
+    assert!(plan.commands.is_empty());
+}
+
+#[tokio::test]
+async fn recovery_logs_the_sequence_of_an_invalid_event() {
+    let captured = CapturedEvents::new();
+    let _guard = captured.install(LevelFilter::TRACE);
+    let store = WorkerTestStreamStore::default();
+
+    let plan = recovery_plan_from_credential_events(vec![undecodable_stream_event(7)], &store).await;
+
+    assert_eq!(plan.report.invalid_events(), 1);
+    let logged = message_of(&captured, "credential recovery found an invalid credential event");
+    assert_eq!(logged.len(), 1);
+    assert_eq!(logged[0].field("stream_sequence"), Some("7"));
+    assert!(logged[0].field("error").is_some());
+}
+
+#[tokio::test]
+async fn recovery_reports_a_pending_write_that_belongs_to_another_credential() {
+    let captured = CapturedEvents::new();
+    let _guard = captured.install(LevelFilter::TRACE);
+    let store = WorkerTestStreamStore::default();
+    let foreign_write = v1::CredentialEvent {
+        event: Some(write_requested_to_proto(&other_credential_id(), &scope(), CredentialKind::WebhookSecret).into()),
+    };
+    store.push_credential_event(credential_id().as_str(), foreign_write);
+    let raw_events = vec![stream_event(
+        "gateway.credentials.events.v1.subject",
+        1,
+        write_requested_event(),
+    )];
+
+    let plan = recovery_plan_from_credential_events(raw_events, &store).await;
+
+    assert_eq!(plan.report.planned_recoveries(), 0);
+    assert_eq!(plan.report.failed_recoveries(), 1);
+    assert!(plan.commands.is_empty());
+    let logged = message_of(&captured, "credential recovery planning failed");
+    assert_eq!(logged.len(), 1);
+    assert_eq!(logged[0].field("credential_id"), Some(credential_id().as_str()));
+}
+
+#[tokio::test]
+async fn recovery_logs_the_credential_whose_stream_could_not_be_replayed() {
+    let captured = CapturedEvents::new();
+    let _guard = captured.install(LevelFilter::TRACE);
+    let store = WorkerTestStreamStore::default();
+    store.push_credential_event(credential_id().as_str(), write_requested_event());
+    store.fail_read_stream(credential_id().as_str());
+
+    let plan = recovery_plan_from_credential_events(store.events_as_raw_stream_scan(), &store).await;
+
+    assert_eq!(plan.report.failed_recoveries(), 1);
+    let logged = message_of(&captured, "credential recovery replay failed");
+    assert_eq!(logged.len(), 1);
+    assert_eq!(logged[0].field("credential_id"), Some(credential_id().as_str()));
+}
+
+#[tokio::test]
+async fn worker_logs_a_failed_write_activation_recovery_with_its_credential() {
+    let captured = CapturedEvents::new();
+    let _guard = captured.install(LevelFilter::TRACE);
+    let store = WorkerTestStreamStore::default();
+    store.push_credential_event(credential_id().as_str(), write_requested_event());
+    let runtime_handler = CredentialRuntimeHandler::new(
+        store.clone(),
+        UnavailableMetadataSecretStore,
+        RuntimeCredentialRegistry::default(),
+    );
+
+    let report =
+        recover_pending_credential_activations_from_events(store.events_as_raw_stream_scan(), &store, &runtime_handler)
+            .await;
+
+    assert_eq!(report.failed_recoveries(), 1);
+    let logged = message_of(&captured, "credential write activation recovery failed");
+    assert_eq!(logged.len(), 1);
+    assert_eq!(logged[0].field("credential_id"), Some(credential_id().as_str()));
+    assert!(logged[0].field("error").is_some());
+}
+
+#[tokio::test]
+async fn worker_logs_a_failed_rotation_activation_recovery_with_its_credential() {
+    let captured = CapturedEvents::new();
+    let _guard = captured.install(LevelFilter::TRACE);
+    let events = WorkerTestStreamStore::default();
+    let secrets = MockOpenBaoSecretStore::default();
+    let handler = CredentialHandler::new(events.clone(), secrets);
+    let active_ref = active_credential_ref(&handler).await;
+    events.fail_append_at(4);
+    handler
+        .rotate(RotateCredential::new(
+            active_ref,
+            SecretString::new("new-secret").unwrap(),
+        ))
+        .await
+        .unwrap_err();
+    let runtime_handler = CredentialRuntimeHandler::new(
+        events.clone(),
+        UnavailableMetadataSecretStore,
+        RuntimeCredentialRegistry::default(),
+    );
+
+    let report = recover_pending_credential_activations_from_events(
+        events.events_as_raw_stream_scan(),
+        &events,
+        &runtime_handler,
+    )
+    .await;
+
+    assert_eq!(report.planned_recoveries(), 1);
+    assert_eq!(report.recovered_rotations(), 0);
+    assert_eq!(report.failed_recoveries(), 1);
+    let logged = message_of(&captured, "credential rotation activation recovery failed");
+    assert_eq!(logged.len(), 1);
+    assert_eq!(logged[0].field("credential_id"), Some(credential_id().as_str()));
+}
+
+#[tokio::test]
+async fn worker_recovers_the_version_after_a_destroyed_credential() {
+    let events = WorkerTestStreamStore::default();
+    let secrets = MockOpenBaoSecretStore::default();
+    let handler = CredentialHandler::new(events.clone(), secrets.clone());
+    let first = active_credential_ref(&handler).await;
+    handler
+        .revoke(RevokeStoredCredential::new(first.clone()))
+        .await
+        .unwrap();
+    handler
+        .destroy(DestroyStoredCredential::new(
+            first,
+            SecretDestroyReason::new("credential lifecycle cleanup").unwrap(),
+        ))
+        .await
+        .unwrap();
+    events.fail_append_at(7);
+    handler.put(put_command("second-secret")).await.unwrap_err();
+    let runtime_credentials = RuntimeCredentialRegistry::default();
+    let runtime_handler = CredentialRuntimeHandler::new(events.clone(), secrets.clone(), runtime_credentials.clone());
+
+    let report = recover_pending_credential_activations_from_events(
+        events.events_as_raw_stream_scan(),
+        &events,
+        &runtime_handler,
+    )
+    .await;
+
+    assert_eq!(report.planned_recoveries(), 1);
+    assert_eq!(report.recovered_writes(), 1);
+    assert_eq!(report.failed_recoveries(), 0);
+    assert_eq!(
+        runtime_credentials
+            .resolver(secrets)
+            .resolve(&runtime_key(), CredentialKind::WebhookSecret)
+            .await
+            .unwrap()
+            .as_plaintext()
+            .unwrap()
+            .as_str(),
+        "second-secret"
+    );
+}
+
+#[test]
+fn every_credential_event_resolves_to_the_credential_it_belongs_to() {
+    let metadata = active_metadata(1);
+    let next_metadata = active_metadata(2);
+    let reason = failure_reason();
+    let destroy_reason = CredentialDestroyReason::new("credential lifecycle cleanup").unwrap();
+    let events: Vec<CredentialEventCase> = vec![
+        write_requested_to_proto(&credential_id(), &scope(), CredentialKind::WebhookSecret).into(),
+        write_failed_to_proto(&credential_id(), &reason).into(),
+        activated_to_proto(&metadata).into(),
+        rotation_requested_to_proto(&credential_ref(1)).into(),
+        rotation_failed_to_proto(&credential_ref(1), &reason).into(),
+        rotated_to_proto(&credential_ref(1), &next_metadata).into(),
+        revoked_to_proto(&credential_ref(2)).into(),
+        destroy_requested_to_proto(&credential_ref(2), &destroy_reason).into(),
+        destroy_failed_to_proto(&credential_ref(2), &reason).into(),
+        destroyed_to_proto(&credential_ref(2)).into(),
+    ];
+
+    for event in &events {
+        assert_eq!(event_credential_id(event).unwrap(), credential_id());
+    }
+}
+
+#[tokio::test]
+async fn worker_leaves_the_checkpoint_alone_when_nothing_new_was_scanned() {
+    let store = WorkerTestStreamStore::default();
+    let stream = raw_stream_with_events(Vec::new()).await;
+    let kv = MockJetStreamKvStore::new();
+    let checkpoints = CredentialRecoveryKvCheckpointStore::new(kv.clone());
+    let runtime_handler = CredentialRuntimeHandler::new(
+        store.clone(),
+        MockOpenBaoSecretStore::default(),
+        RuntimeCredentialRegistry::default(),
+    );
+
+    let report = recover_pending_credential_activations(&stream, &store, &runtime_handler, &checkpoints)
+        .await
+        .unwrap();
+
+    assert_eq!(report.scanned_events(), 0);
+    assert_eq!(report.checkpoint_advanced_to(), None);
+    assert_eq!(report.metric_outcome(), "idle");
+    assert!(kv.create_calls().is_empty());
+    assert!(kv.update_calls().is_empty());
+}
+
+#[tokio::test]
+async fn worker_logs_why_the_checkpoint_was_not_advanced() {
+    let captured = CapturedEvents::new();
+    let _guard = captured.install(LevelFilter::TRACE);
+    let store = WorkerTestStreamStore::default();
+    store.push_credential_event(credential_id().as_str(), write_requested_event());
+    let stream = raw_stream_with_events(store.events_as_raw_stream_scan()).await;
+    let kv = MockJetStreamKvStore::new();
+    let checkpoints = CredentialRecoveryKvCheckpointStore::new(kv);
+    let runtime_handler = CredentialRuntimeHandler::new(
+        store.clone(),
+        UnavailableMetadataSecretStore,
+        RuntimeCredentialRegistry::default(),
+    );
+
+    let report = recover_pending_credential_activations_at(
+        &stream,
+        &store,
+        &runtime_handler,
+        &checkpoints,
+        UNIX_EPOCH + Duration::from_secs(1_000),
+        test_policy(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(report.failed_recoveries(), 1);
+    let logged = message_of(&captured, "credential recovery checkpoint was not advanced");
+    assert_eq!(logged.len(), 1);
+    assert_eq!(logged[0].field("failed_recoveries"), Some("1"));
+    assert_eq!(logged[0].field("checkpoint_failure_count"), Some("1"));
+    assert_eq!(
+        logged[0].field("checkpoint_retry_after_unix_seconds"),
+        Some("Some(1010)")
+    );
+    assert_eq!(logged[0].field("stuck_recovery"), Some("false"));
+}
+
+#[tokio::test]
+async fn worker_logs_when_recovery_is_stuck_behind_retry_backoff() {
+    let captured = CapturedEvents::new();
+    let _guard = captured.install(LevelFilter::TRACE);
+    let store = WorkerTestStreamStore::default();
+    let stream = raw_stream_with_events(Vec::new()).await;
+    let kv = MockJetStreamKvStore::new();
+    kv.enqueue_entry(
+        Bytes::from(encode_checkpoint(CredentialRecoveryCheckpoint::with_failure_state(
+            3,
+            4,
+            Some(100),
+            Some(1_000),
+        ))),
+        4,
+        kv::Operation::Put,
+    );
+    let checkpoints = CredentialRecoveryKvCheckpointStore::new(kv);
+    let runtime_handler = CredentialRuntimeHandler::new(
+        store.clone(),
+        MockOpenBaoSecretStore::default(),
+        RuntimeCredentialRegistry::default(),
+    );
+
+    let report = recover_pending_credential_activations_at(
+        &stream,
+        &store,
+        &runtime_handler,
+        &checkpoints,
+        UNIX_EPOCH + Duration::from_secs(999),
+        test_policy(),
+    )
+    .await
+    .unwrap();
+
+    assert!(report.stuck_recovery());
+    let logged = message_of(&captured, "credential recovery is stuck behind retry backoff");
+    assert_eq!(logged.len(), 1);
+    assert_eq!(logged[0].field("checkpoint_loaded_sequence"), Some("3"));
+    assert_eq!(logged[0].field("checkpoint_failure_count"), Some("4"));
+    assert_eq!(
+        logged[0].field("checkpoint_retry_after_unix_seconds"),
+        Some("Some(1000)")
+    );
+}
+
+#[tokio::test]
+async fn recovery_pass_surfaces_a_checkpoint_load_failure() {
+    let store = WorkerTestStreamStore::default();
+    let stream = raw_stream_with_events(Vec::new()).await;
+    let kv = MockJetStreamKvStore::new();
+    kv.enqueue_entry_error(kv::EntryErrorKind::TimedOut);
+    let checkpoints = CredentialRecoveryKvCheckpointStore::new(kv);
+    let runtime_handler = CredentialRuntimeHandler::new(
+        store.clone(),
+        MockOpenBaoSecretStore::default(),
+        RuntimeCredentialRegistry::default(),
+    );
+
+    let error = recover_pending_credential_activations(&stream, &store, &runtime_handler, &checkpoints)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        CredentialRecoveryWorkerError::Checkpoint {
+            source: CredentialRecoveryCheckpointStoreError::Backend { .. }
+        }
+    ));
+}
+
+#[tokio::test]
+async fn run_keeps_recovering_until_a_termination_signal_arrives() {
+    let captured = CapturedEvents::new();
+    let _guard = captured.install(LevelFilter::TRACE);
+    let store = WorkerTestStreamStore::default();
+    store.push_credential_event(credential_id().as_str(), write_requested_event());
+    let stream = raw_stream_with_events(store.events_as_raw_stream_scan()).await;
+    let kv = MockJetStreamKvStore::new();
+    kv.enqueue_entry_error(kv::EntryErrorKind::TimedOut);
+    kv.enqueue_entry_none();
+    kv.enqueue_entry_none();
+    kv.enqueue_entry(
+        Bytes::from(encode_checkpoint(CredentialRecoveryCheckpoint::new(1))),
+        3,
+        kv::Operation::Put,
+    );
+    let runtime_handler = CredentialRuntimeHandler::new(
+        store.clone(),
+        UnavailableMetadataSecretStore,
+        RuntimeCredentialRegistry::default(),
+    );
+    let worker = run(
+        stream,
+        store.clone(),
+        runtime_handler,
+        CredentialRecoveryKvCheckpointStore::new(kv.clone()),
+        Duration::from_millis(5),
+    );
+    let stop = async {
+        while kv.entry_calls().len() < 5 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        loop {
+            terminate_current_process();
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    };
+
+    tokio::time::timeout(Duration::from_secs(30), async {
+        tokio::select! {
+            () = worker => {}
+            () = stop => {}
+        }
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(message_of(&captured, "credential recovery pass failed").len(), 1);
+    assert!(!message_of(&captured, "credential recovery pass completed").is_empty());
+    assert_eq!(message_of(&captured, "credential recovery worker stopped").len(), 1);
+    let completed = message_of(&captured, "credential recovery pass completed");
+    assert_eq!(completed[0].field("failed_recoveries"), Some("1"));
+    assert_eq!(completed[0].field("planned_recoveries"), Some("1"));
+}
+
+#[tokio::test]
+async fn checkpoint_store_treats_a_deleted_or_purged_record_as_missing() {
+    for operation in [kv::Operation::Delete, kv::Operation::Purge] {
+        let kv = MockJetStreamKvStore::new();
+        kv.enqueue_entry(
+            Bytes::from(encode_checkpoint(CredentialRecoveryCheckpoint::new(9))),
+            3,
+            operation,
+        );
+        let checkpoints = CredentialRecoveryKvCheckpointStore::new(kv);
+
+        assert_eq!(
+            checkpoints.load().await.unwrap(),
+            CredentialRecoveryCheckpoint::default()
+        );
+    }
+}
+
+#[tokio::test]
+async fn checkpoint_store_reports_a_backend_failure_while_loading() {
+    let kv = MockJetStreamKvStore::new();
+    kv.enqueue_entry_error(kv::EntryErrorKind::TimedOut);
+    let checkpoints = CredentialRecoveryKvCheckpointStore::new(kv);
+
+    let error = checkpoints.load().await.unwrap_err();
+
+    assert!(matches!(error, CredentialRecoveryCheckpointStoreError::Backend { .. }));
+    assert!(
+        error
+            .to_string()
+            .starts_with("credential recovery checkpoint backend failed")
+    );
+}
+
+#[tokio::test]
+async fn checkpoint_store_reports_a_codec_failure_for_a_corrupt_record() {
+    let kv = MockJetStreamKvStore::new();
+    kv.enqueue_entry(Bytes::from_static(b"\xff\xff\xff\xff"), 3, kv::Operation::Put);
+    let checkpoints = CredentialRecoveryKvCheckpointStore::new(kv);
+
+    let error = checkpoints.load().await.unwrap_err();
+
+    assert!(matches!(error, CredentialRecoveryCheckpointStoreError::Codec { .. }));
+}
+
+#[tokio::test]
+async fn checkpoint_store_retries_creation_after_losing_the_creation_race() {
+    let kv = MockJetStreamKvStore::new();
+    kv.enqueue_entry_none();
+    kv.enqueue_entry_none();
+    kv.enqueue_create_result(Err(kv::CreateErrorKind::AlreadyExists));
+    let checkpoints = CredentialRecoveryKvCheckpointStore::new(kv.clone());
+
+    checkpoints.save(CredentialRecoveryCheckpoint::new(5)).await.unwrap();
+
+    assert_eq!(kv.create_calls().len(), 2);
+    assert_eq!(kv.entry_calls().len(), 2);
+}
+
+#[tokio::test]
+async fn checkpoint_store_reports_a_backend_failure_while_creating() {
+    let kv = MockJetStreamKvStore::new();
+    kv.enqueue_entry_none();
+    kv.enqueue_create_result(Err(kv::CreateErrorKind::Other));
+    let checkpoints = CredentialRecoveryKvCheckpointStore::new(kv.clone());
+
+    let error = checkpoints
+        .save(CredentialRecoveryCheckpoint::new(5))
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, CredentialRecoveryCheckpointStoreError::Backend { .. }));
+    assert_eq!(kv.create_calls().len(), 1);
+}
+
+#[tokio::test]
+async fn checkpoint_store_recreates_a_deleted_record() {
+    for operation in [kv::Operation::Delete, kv::Operation::Purge] {
+        let kv = MockJetStreamKvStore::new();
+        kv.enqueue_entry(Bytes::new(), 3, operation);
+        let checkpoints = CredentialRecoveryKvCheckpointStore::new(kv.clone());
+
+        checkpoints.save(CredentialRecoveryCheckpoint::new(6)).await.unwrap();
+
+        let calls = kv.create_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(decode_checkpoint(&calls[0].1).unwrap().last_scanned_sequence(), 6);
+        assert!(kv.update_calls().is_empty());
+    }
+}
+
+#[tokio::test]
+async fn checkpoint_store_retries_recreating_a_deleted_record_after_losing_the_race() {
+    let kv = MockJetStreamKvStore::new();
+    kv.enqueue_entry(Bytes::new(), 3, kv::Operation::Delete);
+    kv.enqueue_entry(Bytes::new(), 4, kv::Operation::Delete);
+    kv.enqueue_create_result(Err(kv::CreateErrorKind::AlreadyExists));
+    let checkpoints = CredentialRecoveryKvCheckpointStore::new(kv.clone());
+
+    checkpoints.save(CredentialRecoveryCheckpoint::new(6)).await.unwrap();
+
+    assert_eq!(kv.create_calls().len(), 2);
+}
+
+#[tokio::test]
+async fn checkpoint_store_reports_a_backend_failure_while_recreating_a_deleted_record() {
+    let kv = MockJetStreamKvStore::new();
+    kv.enqueue_entry(Bytes::new(), 3, kv::Operation::Delete);
+    kv.enqueue_create_result(Err(kv::CreateErrorKind::Other));
+    let checkpoints = CredentialRecoveryKvCheckpointStore::new(kv);
+
+    let error = checkpoints
+        .save(CredentialRecoveryCheckpoint::new(6))
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, CredentialRecoveryCheckpointStoreError::Backend { .. }));
+}
+
+#[tokio::test]
+async fn checkpoint_store_retries_the_update_after_a_revision_conflict() {
+    let kv = MockJetStreamKvStore::new();
+    let existing = Bytes::from(encode_checkpoint(CredentialRecoveryCheckpoint::new(1)));
+    kv.enqueue_entry(existing.clone(), 3, kv::Operation::Put);
+    kv.enqueue_entry(existing, 4, kv::Operation::Put);
+    kv.enqueue_update_result(Err(kv::UpdateErrorKind::WrongLastRevision));
+    kv.enqueue_update_result(Ok(5));
+    let checkpoints = CredentialRecoveryKvCheckpointStore::new(kv.clone());
+
+    checkpoints.save(CredentialRecoveryCheckpoint::new(8)).await.unwrap();
+
+    let revisions: Vec<u64> = kv.update_calls().iter().map(|call| call.2).collect();
+    assert_eq!(revisions, [3, 4]);
+}
+
+#[tokio::test]
+async fn checkpoint_store_reports_a_backend_failure_while_updating() {
+    let kv = MockJetStreamKvStore::new();
+    kv.enqueue_entry(
+        Bytes::from(encode_checkpoint(CredentialRecoveryCheckpoint::new(1))),
+        3,
+        kv::Operation::Put,
+    );
+    kv.enqueue_update_result(Err(kv::UpdateErrorKind::TimedOut));
+    let checkpoints = CredentialRecoveryKvCheckpointStore::new(kv);
+
+    let error = checkpoints
+        .save(CredentialRecoveryCheckpoint::new(8))
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, CredentialRecoveryCheckpointStoreError::Backend { .. }));
+}
+
+#[tokio::test]
+async fn checkpoint_store_gives_up_after_repeated_revision_conflicts() {
+    let kv = MockJetStreamKvStore::new();
+    let existing = Bytes::from(encode_checkpoint(CredentialRecoveryCheckpoint::new(1)));
+    for revision in 3..6 {
+        kv.enqueue_entry(existing.clone(), revision, kv::Operation::Put);
+        kv.enqueue_update_result(Err(kv::UpdateErrorKind::WrongLastRevision));
+    }
+    let checkpoints = CredentialRecoveryKvCheckpointStore::new(kv.clone());
+
+    let error = checkpoints
+        .save(CredentialRecoveryCheckpoint::new(8))
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, CredentialRecoveryCheckpointStoreError::Conflict));
+    assert_eq!(kv.update_calls().len(), 3);
+}
+
+#[tokio::test]
+async fn open_checkpoint_store_hands_back_a_store_that_persists_checkpoints() {
+    let client = MockJetStreamKvClient::new();
+    let kv = MockJetStreamKvStore::new();
+    client.set_create_result(kv.clone());
+
+    let checkpoints = open_checkpoint_store(&client).await.unwrap();
+    checkpoints.save(CredentialRecoveryCheckpoint::new(11)).await.unwrap();
+
+    let calls = kv.create_calls();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(decode_checkpoint(&calls[0].1).unwrap().last_scanned_sequence(), 11);
+}
+
+#[tokio::test]
+async fn open_checkpoint_store_surfaces_bucket_creation_failure() {
+    let client = MockJetStreamKvClient::new();
+    client.fail_create(context::CreateKeyValueErrorKind::TimedOut);
+
+    let error = open_checkpoint_store::<_, MockJetStreamKvStore>(&client)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, CredentialRecoveryCheckpointOpenError::Create(_)));
+}
+
+#[tokio::test]
+async fn open_checkpoint_store_surfaces_failure_to_open_the_existing_bucket() {
+    let client = MockJetStreamKvClient::new();
+    client.fail_create_already_exists();
+    client.fail_get(context::KeyValueErrorKind::GetBucket);
+
+    let error = open_checkpoint_store::<_, MockJetStreamKvStore>(&client)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, CredentialRecoveryCheckpointOpenError::OpenExisting(_)));
+}
+
+#[tokio::test]
+async fn open_checkpoint_store_surfaces_failure_to_inspect_the_bucket() {
+    let client = MockJetStreamKvClient::new();
+    let kv = MockJetStreamKvStore::new();
+    kv.fail_status(kv::StatusErrorKind::TimedOut);
+    client.set_create_result(kv);
+
+    let error = open_checkpoint_store(&client).await.err().unwrap();
+
+    assert!(matches!(error, CredentialRecoveryCheckpointOpenError::Inspect(_)));
+}
+
+#[tokio::test]
+async fn open_checkpoint_store_rejects_a_bucket_with_the_wrong_retention() {
+    let client = MockJetStreamKvClient::new();
+    let kv = MockJetStreamKvStore::new();
+    kv.set_settings(5, Duration::from_secs(60), true, None);
+    client.set_create_result(kv);
+
+    let error = open_checkpoint_store(&client).await.err().unwrap();
+
+    let CredentialRecoveryCheckpointOpenError::Incompatible { source } = &error else {
+        panic!("expected an incompatible bucket, got {error}");
+    };
+    assert_eq!(source.actual_history, 5);
+    assert_eq!(source.actual_max_age, Duration::from_secs(60));
+    assert_eq!(source.expected_history, 1);
+    assert_eq!(source.expected_max_age, Duration::ZERO);
 }

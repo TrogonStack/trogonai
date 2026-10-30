@@ -25,21 +25,22 @@ use trogonai_proto::gateway::credentials::{
 
 use crate::constants::METER_NAME;
 use crate::credential::commands::domain::{
-    CredentialId, CredentialKind, CredentialOwnerId, CredentialRef, RuntimeReleaseDeniedError, RuntimeReleasePolicy,
-    RuntimeReleaseRequest, SourceKind,
+    CredentialId, CredentialKind, CredentialOwnerId, CredentialRef, CredentialScope, RuntimeReleaseDeniedError,
+    RuntimeReleasePolicy, RuntimeReleaseRequest, SourceKind,
 };
 use crate::credential::commands::proto::{
     CredentialProtoDecodeError, active_credential_ref, decode_cleanup_failed_state, decode_credential_id,
     decode_credential_metadata, decode_destroy_failed, decode_destroy_requested, decode_destroy_requested_state,
     decode_destroyed, decode_destroyed_state, decode_message_field, decode_revoked, decode_revoked_state,
-    decode_rotated, decode_rotation_failed, decode_rotation_requested, decode_write_failed, decode_write_requested,
+    decode_rotated, decode_rotation_failed, decode_rotation_requested, decode_scope_key, decode_write_failed,
+    decode_write_requested,
 };
 use crate::credential::constants::CREDENTIAL_EVENT_SUBJECT_PREFIX;
 use crate::credential::event_stream::{CredentialEventStreamReadError, read_credential_event_stream};
 use crate::credential::stream::{CredentialKey, CredentialSubject};
 use crate::credential::{CredentialEvolveError, evolve, initial_state};
 use crate::secret_store::{SecretMaterial, SecretStoreError, SecretStoreGet};
-use crate::source_integration_id::{SourceIntegrationId, SourceIntegrationIdError};
+use crate::source_integration_id::SourceIntegrationId;
 
 #[derive(Debug)]
 struct RuntimeProjectionMetrics {
@@ -166,27 +167,20 @@ impl RuntimeIntegrationKey {
     }
 
     pub fn from_credential_ref(credential: &CredentialRef) -> Result<Self, RuntimeProjectionBuildError> {
-        let scope_key = credential.scope_key();
-        if scope_key == credential.source().as_str() {
-            return Ok(Self::for_source(credential.source()));
-        }
+        let scope = decode_scope_key(
+            credential.owner_id().clone(),
+            credential.source(),
+            "scope_key",
+            credential.scope_key(),
+        )
+        .map_err(RuntimeProjectionBuildError::InvalidState)?;
 
-        let source_prefix = format!("{}/", credential.source().as_str());
-        let Some(integration_id) = scope_key.strip_prefix(&source_prefix) else {
-            return Err(RuntimeProjectionBuildError::ScopeSourceMismatch {
-                credential: credential.clone(),
-                scope_key: scope_key.to_string(),
-                source_kind: credential.source(),
-            });
-        };
-        let integration_id = SourceIntegrationId::new(integration_id).map_err(|source| {
-            RuntimeProjectionBuildError::InvalidIntegrationId {
-                credential: credential.clone(),
-                source,
-            }
-        })?;
-
-        Ok(Self::new(credential.source(), &integration_id))
+        Ok(match scope {
+            CredentialScope::Source { source, .. } => Self::for_source(source),
+            CredentialScope::Integration {
+                source, integration_id, ..
+            } => Self::new(source, &integration_id),
+        })
     }
 }
 
@@ -334,18 +328,6 @@ fn active_runtime_projection(
 
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeProjectionBuildError {
-    #[error("credential scope key '{scope_key}' does not match source '{source_kind}' for {credential}")]
-    ScopeSourceMismatch {
-        credential: CredentialRef,
-        scope_key: String,
-        source_kind: SourceKind,
-    },
-    #[error("credential ref has invalid integration id: {credential}")]
-    InvalidIntegrationId {
-        credential: CredentialRef,
-        #[source]
-        source: SourceIntegrationIdError,
-    },
     #[error("persisted credential state is invalid: {0}")]
     InvalidState(#[source] CredentialProtoDecodeError),
 }
@@ -504,17 +486,27 @@ pub async fn run_tracked_refresh_worker<EventStream, EventStore>(
                     .await
                 {
                     Ok(report) if report.has_projection_activity() => {
+                        let scanned_events = report.scanned_events();
+                        let decoded_events = report.decoded_events();
+                        let skipped_events = report.skipped_events();
+                        let poisoned_events = report.poisoned_events();
+                        let poisoned_credentials = report.poisoned_credentials();
+                        let changed_credentials = report.changed_credentials();
+                        let applied_credentials = report.applied_credentials();
+                        let projected_integrations = report.projected_integrations();
+                        let checkpoint_loaded_sequence = report.checkpoint_loaded_sequence();
+                        let checkpoint_advanced_to = report.checkpoint_advanced_to();
                         info!(
-                            scanned_events = report.scanned_events(),
-                            decoded_events = report.decoded_events(),
-                            skipped_events = report.skipped_events(),
-                            poisoned_events = report.poisoned_events(),
-                            poisoned_credentials = report.poisoned_credentials(),
-                            changed_credentials = report.changed_credentials(),
-                            applied_credentials = report.applied_credentials(),
-                            projected_integrations = report.projected_integrations(),
-                            checkpoint_loaded_sequence = report.checkpoint_loaded_sequence(),
-                            checkpoint_advanced_to = ?report.checkpoint_advanced_to(),
+                            scanned_events,
+                            decoded_events,
+                            skipped_events,
+                            poisoned_events,
+                            poisoned_credentials,
+                            changed_credentials,
+                            applied_credentials,
+                            projected_integrations,
+                            checkpoint_loaded_sequence,
+                            checkpoint_advanced_to = ?checkpoint_advanced_to,
                             "credential runtime projection refresh pass completed"
                         );
                     }
@@ -931,9 +923,7 @@ pub async fn refresh_runtime_projections_from_credential_events(
     let mut next_projections = BTreeMap::new();
     for (_stream_id, mut stream_events) in streams {
         stream_events.sort_by_key(|(position, _)| *position);
-        let Some(version) = stream_events.last().map(|(position, _)| *position) else {
-            continue;
-        };
+        let version = stream_events.last().map_or(0, |(position, _)| *position);
         let state = stream_events
             .into_iter()
             .map(|(_, event)| event)

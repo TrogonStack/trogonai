@@ -188,7 +188,7 @@ async fn serve_with_env(
             let store = openbao_secret_store_from_env(env, CREDENTIAL_MANAGEMENT_ADMIN_TOKEN)?;
             let idempotency = credential_management::idempotency::open(client.context().clone()).await?;
             let worker_checkpoints =
-                credential_lifecycle::recovery_worker::open_checkpoint_store(client.context().clone()).await?;
+                credential_lifecycle::recovery_worker::open_checkpoint_store(client.context()).await?;
             let recovery_status_checkpoints = worker_checkpoints.clone();
             let handler = credential_lifecycle::handler::CredentialRuntimeHandler::new(
                 credential_store.clone(),
