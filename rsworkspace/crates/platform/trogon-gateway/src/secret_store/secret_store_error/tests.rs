@@ -1,32 +1,30 @@
 use super::*;
+use crate::credential::commands::domain::{CredentialFingerprintError, CredentialIdError};
 
 #[test]
-fn invalid_generated_names_the_backend_and_the_offending_value() {
-    let error = SecretStoreError::invalid_generated(StorageBackend::InMemory, "credential id", "too long");
+fn invalid_generated_keeps_the_credential_id_error_as_its_source() {
+    let error = SecretStoreError::invalid_generated(StorageBackend::InMemory)(CredentialIdError::Empty);
 
     assert_eq!(
         error,
-        SecretStoreError::BackendUnavailable {
+        SecretStoreError::InvalidGenerated {
             backend: StorageBackend::InMemory,
-            message: "generated credential id is invalid: too long".to_string(),
+            source: GeneratedValueError::CredentialId(CredentialIdError::Empty),
         }
     );
     assert_eq!(
         error.to_string(),
-        "in_memory secret store error: generated credential id is invalid: too long"
+        "in_memory secret store error: generated credential id is invalid: credential id must not be empty"
     );
 }
 
 #[test]
-fn invalid_fingerprint_reports_the_generated_fingerprint() {
-    let error = SecretStoreError::invalid_fingerprint(StorageBackend::OpenBao)(CredentialFingerprintError::Empty);
+fn invalid_generated_keeps_the_fingerprint_error_as_its_source() {
+    let error = SecretStoreError::invalid_generated(StorageBackend::OpenBao)(CredentialFingerprintError::Empty);
 
     assert_eq!(
-        error,
-        SecretStoreError::BackendUnavailable {
-            backend: StorageBackend::OpenBao,
-            message: "generated credential fingerprint is invalid: credential fingerprint must not be empty"
-                .to_string(),
-        }
+        error.to_string(),
+        "openbao secret store error: generated credential fingerprint is invalid: credential fingerprint must not be empty"
     );
+    assert!(std::error::Error::source(&error).is_some());
 }

@@ -48,7 +48,7 @@ impl MockOpenBaoSecretStoreState {
         kind: CredentialKind,
     ) -> Result<CredentialRef, SecretStoreError> {
         let id = openbao_credential_id(&scope, kind)
-            .map_err(|error| SecretStoreError::invalid_generated(StorageBackend::OpenBao, "credential id", error))?;
+            .map_err(SecretStoreError::invalid_generated(StorageBackend::OpenBao))?;
         let current = self
             .versions
             .keys()
@@ -219,7 +219,7 @@ fn metadata(credential: &CredentialRef, status: CredentialStatus) -> Result<Cred
             credential.version().get()
         ),
     )
-    .map_err(SecretStoreError::invalid_fingerprint(StorageBackend::OpenBao))?;
+    .map_err(SecretStoreError::invalid_generated(StorageBackend::OpenBao))?;
 
     Ok(CredentialMetadata::new(
         credential.clone(),

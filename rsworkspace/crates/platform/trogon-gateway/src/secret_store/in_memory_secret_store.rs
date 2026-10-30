@@ -44,7 +44,7 @@ impl InMemorySecretStoreState {
             kind.as_str(),
             self.next_id
         ))
-        .map_err(|error| SecretStoreError::invalid_generated(StorageBackend::InMemory, "credential id", error))?;
+        .map_err(SecretStoreError::invalid_generated(StorageBackend::InMemory))?;
 
         Ok(CredentialRef::new(id, CredentialVersion::initial(), &scope, kind))
     }
@@ -190,7 +190,7 @@ impl SecretStoreMetadata for InMemorySecretStore {
 
 fn metadata(credential: &CredentialRef, status: CredentialStatus) -> Result<CredentialMetadata, SecretStoreError> {
     let fingerprint = fingerprint::digest("memory", credential)
-        .map_err(SecretStoreError::invalid_fingerprint(StorageBackend::InMemory))?;
+        .map_err(SecretStoreError::invalid_generated(StorageBackend::InMemory))?;
     Ok(CredentialMetadata::new(
         credential.clone(),
         status,
