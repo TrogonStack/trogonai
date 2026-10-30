@@ -1230,6 +1230,7 @@ app_token = "xapp-test-token"
 async fn slack_socket_mode_integration_does_not_mount_runtime_webhook_route() {
     let toml = r#"
 [sources.slack.integrations.primary.socket_mode]
+intended_use = "development"
 app_token = "xapp-test-token"
 "#;
     let f = write_toml(toml);
