@@ -34,7 +34,7 @@ use crate::credential::commands::proto::{
 };
 use crate::credential::event_stream::{CredentialEventStreamReadError, read_credential_event_stream};
 use crate::credential::{CredentialEvolveError, evolve, initial_state};
-use crate::secret_store::SecretStoreMetadata;
+use crate::secret_store::{SecretStoreError, SecretStoreMetadata};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct CredentialRecoveryReport {
@@ -207,7 +207,7 @@ pub(crate) async fn run<EventStream, EventStore, Secrets>(
         + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
-    Secrets: SecretStoreMetadata,
+    Secrets: SecretStoreMetadata<Error = SecretStoreError>,
 {
     let mut interval = tokio::time::interval(interval);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -325,7 +325,7 @@ where
         + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
-    Secrets: SecretStoreMetadata,
+    Secrets: SecretStoreMetadata<Error = SecretStoreError>,
     Checkpoints: CredentialRecoveryCheckpointStore,
 {
     recover_pending_credential_activations_at(
@@ -355,7 +355,7 @@ where
         + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
-    Secrets: SecretStoreMetadata,
+    Secrets: SecretStoreMetadata<Error = SecretStoreError>,
     Checkpoints: CredentialRecoveryCheckpointStore,
 {
     let checkpoint = checkpoints
@@ -449,7 +449,7 @@ where
         + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
-    Secrets: SecretStoreMetadata,
+    Secrets: SecretStoreMetadata<Error = SecretStoreError>,
 {
     let plan = recovery_plan_from_credential_events(events, event_store).await;
     let mut report = plan.report;

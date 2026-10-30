@@ -409,7 +409,7 @@ where
         + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
-    Secrets: SecretStoreMetadata,
+    Secrets: SecretStoreMetadata<Error = SecretStoreError>,
 {
     pub(crate) async fn recover_write_activation(
         &self,
@@ -532,18 +532,42 @@ where
         + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
-    Secrets: SecretStoreMetadata,
+    Secrets: SecretStoreMetadata<Error = SecretStoreError>,
 {
     pub(crate) async fn recover_write_activation(
         &self,
         command: RecoverCredentialWriteActivation,
     ) -> HandlerResult<EventStore, <Secrets as SecretStoreMetadata>::Error> {
         let _write_guard = self.write_locks.acquire(command.credential_ref.id()).await;
-        let metadata = self
-            .secrets
-            .metadata(&command.credential_ref)
-            .await
-            .map_err(|source| CredentialHandlerError::SecretMetadata { source })?;
+        let mut credential_ref = command.credential_ref;
+        let mut metadata = match self.secrets.metadata(&credential_ref).await {
+            Ok(metadata) => metadata,
+            Err(source @ SecretStoreError::Missing { .. }) => {
+                let reason = failure_reason(&source);
+                let result = CommandExecution::new(
+                    &self.event_store,
+                    &RecordCredentialWriteFailure::new(credential_ref.id().clone(), reason),
+                )
+                .with_snapshot(&self.event_store)
+                .with_task_runtime(TokioSnapshotTaskScheduler)
+                .execute()
+                .await
+                .map_err(|source| CredentialHandlerError::RecordWriteFailure { source })?;
+                return Ok(CredentialHandlerOutcome::new(result.state, result.stream_position));
+            }
+            Err(source) => return Err(CredentialHandlerError::SecretMetadata { source }),
+        };
+        loop {
+            let next_ref = credential_ref.next_version();
+            match self.secrets.metadata(&next_ref).await {
+                Ok(next_metadata) => {
+                    credential_ref = next_ref;
+                    metadata = next_metadata;
+                }
+                Err(SecretStoreError::Missing { .. }) => break,
+                Err(source) => return Err(CredentialHandlerError::SecretMetadata { source }),
+            }
+        }
         let result = CommandExecution::new(&self.event_store, &ActivateCredentialWrite::new(metadata))
             .with_snapshot(&self.event_store)
             .with_task_runtime(TokioSnapshotTaskScheduler)

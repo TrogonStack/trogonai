@@ -814,6 +814,63 @@ async fn recover_write_activation_records_missing_activation_without_plaintext()
 }
 
 #[tokio::test]
+async fn recover_write_activation_targets_the_latest_version_after_a_resumed_put_fails_again() {
+    let events = HandlerTestStreamStore::default();
+    let secrets = MockOpenBaoSecretStore::default();
+    let handler = CredentialHandler::new(events.clone(), secrets.clone());
+    events.fail_append_at(2);
+    handler.put(put_command("first-secret")).await.unwrap_err();
+    events.fail_append_at(3);
+    let error = handler.put(put_command("retry-secret")).await.unwrap_err();
+    assert!(matches!(error, CredentialHandlerError::ActivateWrite { .. }));
+
+    let outcome = handler
+        .recover_write_activation(RecoverCredentialWriteActivation::new(credential_ref(1)))
+        .await
+        .unwrap();
+
+    let state = outcome.into_state();
+    let Some(CredentialStateSnapshotCase::Active(active)) = state.state.as_ref() else {
+        panic!("expected active credential");
+    };
+    let (metadata, _previous_versions) = decode_active_state("active", active).unwrap();
+    assert_eq!(metadata.reference(), &credential_ref(2));
+    assert_eq!(
+        secrets
+            .get(metadata.reference())
+            .await
+            .unwrap()
+            .as_plaintext()
+            .unwrap()
+            .as_str(),
+        "retry-secret"
+    );
+}
+
+#[tokio::test]
+async fn recover_write_activation_records_write_failure_when_the_secret_is_missing() {
+    let events = HandlerTestStreamStore::default();
+    let secrets = MockOpenBaoSecretStore::default();
+    let handler = CredentialHandler::new(events.clone(), secrets.clone());
+    events.fail_append_at(2);
+    handler.put(put_command("first-secret")).await.unwrap_err();
+    let empty_handler = CredentialHandler::new(events.clone(), MockOpenBaoSecretStore::default());
+
+    let outcome = empty_handler
+        .recover_write_activation(RecoverCredentialWriteActivation::new(credential_ref(1)))
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        outcome.into_state().state.as_ref(),
+        Some(CredentialStateSnapshotCase::WriteFailed(_))
+    ));
+    let decoded = events.decoded_events();
+    assert_eq!(decoded.len(), 2);
+    assert!(matches!(decoded[1].event, Some(CredentialEventCase::WriteFailed(_))));
+}
+
+#[tokio::test]
 async fn rotate_records_request_rotates_secret_and_activates_metadata() {
     let events = HandlerTestStreamStore::default();
     let secrets = MockOpenBaoSecretStore::default();

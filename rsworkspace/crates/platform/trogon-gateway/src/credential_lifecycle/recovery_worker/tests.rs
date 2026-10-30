@@ -24,12 +24,13 @@ use super::*;
 use crate::credential::commands::domain::{
     CredentialKind, CredentialOwnerId, CredentialRef, CredentialScope, CredentialVersion, SourceKind,
 };
+use crate::credential::commands::domain::{CredentialMetadata, StorageBackend};
 use crate::credential::commands::proto::{decode_active_state, write_requested_to_proto};
 use crate::credential_lifecycle::handler::{
     CredentialHandler, CredentialHandlerError, PutCredential, RotateCredential,
 };
 use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationKey};
-use crate::secret_store::MockOpenBaoSecretStore;
+use crate::secret_store::{MockOpenBaoSecretStore, SecretStoreError, SecretStoreMetadata};
 use crate::source_integration_id::SourceIntegrationId;
 use trogonai_proto::gateway::credentials::CredentialStateSnapshotCase;
 
@@ -176,6 +177,20 @@ impl SnapshotWrite<state_v1::CredentialStateSnapshot, str> for WorkerTestStreamS
     }
 }
 
+#[derive(Clone)]
+struct UnavailableMetadataSecretStore;
+
+impl SecretStoreMetadata for UnavailableMetadataSecretStore {
+    type Error = SecretStoreError;
+
+    async fn metadata(&self, _credential: &CredentialRef) -> Result<CredentialMetadata, Self::Error> {
+        Err(SecretStoreError::BackendUnavailable {
+            backend: StorageBackend::OpenBao,
+            message: "metadata unavailable".to_string(),
+        })
+    }
+}
+
 #[tokio::test]
 async fn recovery_plan_groups_by_payload_credential_id_instead_of_raw_subject() {
     let store = WorkerTestStreamStore::default();
@@ -284,7 +299,7 @@ async fn worker_continues_when_recovery_metadata_is_not_available() {
     let store = WorkerTestStreamStore::default();
     store.push_credential_event(credential_id().as_str(), write_requested_event());
     let events = store.events_as_raw_stream_scan();
-    let secrets = MockOpenBaoSecretStore::default();
+    let secrets = UnavailableMetadataSecretStore;
     let runtime_credentials = RuntimeCredentialRegistry::default();
     let runtime_handler = CredentialRuntimeHandler::new(store.clone(), secrets, runtime_credentials);
 
@@ -491,7 +506,7 @@ async fn worker_does_not_advance_checkpoint_when_recovery_fails() {
     let kv = MockJetStreamKvStore::new();
     kv.enqueue_entry_none();
     let checkpoints = CredentialRecoveryKvCheckpointStore::new(kv.clone());
-    let secrets = MockOpenBaoSecretStore::default();
+    let secrets = UnavailableMetadataSecretStore;
     let runtime_credentials = RuntimeCredentialRegistry::default();
     let runtime_handler = CredentialRuntimeHandler::new(store.clone(), secrets, runtime_credentials);
 
@@ -515,6 +530,34 @@ async fn worker_does_not_advance_checkpoint_when_recovery_fails() {
     assert!(saved.first_failure_unix_seconds.is_some());
     assert!(saved.retry_after_unix_seconds().is_some());
     assert!(kv.update_calls().is_empty());
+}
+
+#[tokio::test]
+async fn worker_records_write_failure_and_advances_checkpoint_when_pending_secret_is_missing() {
+    let store = WorkerTestStreamStore::default();
+    store.push_credential_event(credential_id().as_str(), write_requested_event());
+    let stream = raw_stream_with_events(store.events_as_raw_stream_scan()).await;
+    let kv = MockJetStreamKvStore::new();
+    kv.enqueue_entry_none();
+    let checkpoints = CredentialRecoveryKvCheckpointStore::new(kv.clone());
+    let runtime_handler = CredentialRuntimeHandler::new(
+        store.clone(),
+        MockOpenBaoSecretStore::default(),
+        RuntimeCredentialRegistry::default(),
+    );
+
+    let report = recover_pending_credential_activations(&stream, &store, &runtime_handler, &checkpoints)
+        .await
+        .unwrap();
+
+    assert_eq!(report.failed_recoveries(), 0);
+    assert_eq!(report.checkpoint_advanced_to(), Some(1));
+    assert!(!report.stuck_recovery());
+    let (state, _) = load_credential_state(&store, &credential_id()).await.unwrap();
+    assert!(matches!(
+        state.state.as_ref(),
+        Some(CredentialStateSnapshotCase::WriteFailed(_))
+    ));
 }
 
 #[tokio::test]
@@ -577,7 +620,7 @@ async fn worker_saves_retry_backoff_when_recovery_fails() {
     kv.enqueue_entry_none();
     kv.enqueue_entry_none();
     let checkpoints = CredentialRecoveryKvCheckpointStore::new(kv.clone());
-    let secrets = MockOpenBaoSecretStore::default();
+    let secrets = UnavailableMetadataSecretStore;
     let runtime_credentials = RuntimeCredentialRegistry::default();
     let runtime_handler = CredentialRuntimeHandler::new(store.clone(), secrets, runtime_credentials);
     let now = UNIX_EPOCH + Duration::from_secs(1_000);
@@ -617,7 +660,7 @@ async fn worker_skips_scan_until_retry_after_is_reached() {
         kv::Operation::Put,
     );
     let checkpoints = CredentialRecoveryKvCheckpointStore::new(kv.clone());
-    let secrets = MockOpenBaoSecretStore::default();
+    let secrets = UnavailableMetadataSecretStore;
     let runtime_credentials = RuntimeCredentialRegistry::default();
     let runtime_handler = CredentialRuntimeHandler::new(store.clone(), secrets, runtime_credentials);
 
