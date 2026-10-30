@@ -5,18 +5,73 @@ use buffa::{EnumValue, MessageField, ProtoBox};
 use trogonai_proto::gateway::credentials::{state_v1, v1};
 
 use super::domain::{
-    CredentialDestroyReason, CredentialFailureReason, CredentialFingerprint, CredentialId, CredentialKind,
-    CredentialMetadata, CredentialOwnerId, CredentialRef, CredentialScope, CredentialStatus, CredentialVersion,
-    SourceKind, StorageBackend,
+    CredentialDestroyReason, CredentialDestroyReasonError, CredentialFailureReason, CredentialFailureReasonError,
+    CredentialFingerprint, CredentialFingerprintError, CredentialId, CredentialIdError, CredentialKind,
+    CredentialMetadata, CredentialOwnerId, CredentialOwnerIdError, CredentialRef, CredentialScope, CredentialStatus,
+    CredentialVersion, CredentialVersionError, SourceKind, StorageBackend, StorageBackendError,
 };
-use crate::source_integration_id::SourceIntegrationId;
+use crate::source_integration_id::{SourceIntegrationId, SourceIntegrationIdError};
 
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
 pub(crate) enum CredentialProtoDecodeError {
     #[error("credential field '{field}' is missing")]
     MissingField { field: CredentialFieldPath },
     #[error("credential field '{field}' is invalid: {reason}")]
-    InvalidField { field: CredentialFieldPath, reason: String },
+    InvalidField {
+        field: CredentialFieldPath,
+        #[source]
+        reason: CredentialFieldInvalidError,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
+pub(crate) enum CredentialFieldInvalidError {
+    #[error(transparent)]
+    CredentialId(#[from] CredentialIdError),
+    #[error(transparent)]
+    OwnerId(#[from] CredentialOwnerIdError),
+    #[error(transparent)]
+    Fingerprint(#[from] CredentialFingerprintError),
+    #[error(transparent)]
+    StorageBackend(#[from] StorageBackendError),
+    #[error(transparent)]
+    FailureReason(#[from] CredentialFailureReasonError),
+    #[error(transparent)]
+    DestroyReason(#[from] CredentialDestroyReasonError),
+    #[error(transparent)]
+    Version(#[from] CredentialVersionError),
+    #[error(transparent)]
+    SourceIntegrationId(#[from] SourceIntegrationIdError),
+    #[error("credential scope key must not be empty")]
+    EmptyScopeKey,
+    #[error("scope key '{scope_key}' does not match source '{source_kind}'")]
+    ScopeKeyMismatch {
+        scope_key: String,
+        source_kind: &'static str,
+    },
+    #[error("unspecified {0}")]
+    UnspecifiedEnum(UnspecifiedEnumKind),
+    #[error("unknown enum value {0}")]
+    UnknownEnumValue(i32),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum UnspecifiedEnumKind {
+    SourceKind,
+    CredentialKind,
+    CredentialStatus,
+    StorageBackend,
+}
+
+impl fmt::Display for UnspecifiedEnumKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::SourceKind => "source kind",
+            Self::CredentialKind => "credential kind",
+            Self::CredentialStatus => "credential status",
+            Self::StorageBackend => "storage backend",
+        })
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -360,7 +415,10 @@ fn decode_source_kind(
         v1::CredentialSource::CREDENTIAL_SOURCE_DATADOG => Ok(SourceKind::Datadog),
         v1::CredentialSource::CREDENTIAL_SOURCE_GOOGLE_PUBSUB => Ok(SourceKind::GooglePubSub),
         v1::CredentialSource::CREDENTIAL_SOURCE_ZOOM => Ok(SourceKind::Zoom),
-        v1::CredentialSource::CREDENTIAL_SOURCE_UNSPECIFIED => Err(invalid_field(field, "unspecified source kind")),
+        v1::CredentialSource::CREDENTIAL_SOURCE_UNSPECIFIED => Err(invalid_field(
+            field,
+            CredentialFieldInvalidError::UnspecifiedEnum(UnspecifiedEnumKind::SourceKind),
+        )),
     }
 }
 
@@ -384,7 +442,10 @@ fn decode_credential_kind(
         v1::CredentialKind::CREDENTIAL_KIND_SERVICE_ACCOUNT_CREDENTIALS => {
             Ok(CredentialKind::ServiceAccountCredentials)
         }
-        v1::CredentialKind::CREDENTIAL_KIND_UNSPECIFIED => Err(invalid_field(field, "unspecified credential kind")),
+        v1::CredentialKind::CREDENTIAL_KIND_UNSPECIFIED => Err(invalid_field(
+            field,
+            CredentialFieldInvalidError::UnspecifiedEnum(UnspecifiedEnumKind::CredentialKind),
+        )),
     }
 }
 
@@ -400,9 +461,10 @@ fn decode_credential_status(
         v1::CredentialStatus::CREDENTIAL_STATUS_REVOKED => Ok(CredentialStatus::Revoked),
         v1::CredentialStatus::CREDENTIAL_STATUS_EXPIRED => Ok(CredentialStatus::Expired),
         v1::CredentialStatus::CREDENTIAL_STATUS_DESTROYED => Ok(CredentialStatus::Destroyed),
-        v1::CredentialStatus::CREDENTIAL_STATUS_UNSPECIFIED => {
-            Err(invalid_field(field, "unspecified credential status"))
-        }
+        v1::CredentialStatus::CREDENTIAL_STATUS_UNSPECIFIED => Err(invalid_field(
+            field,
+            CredentialFieldInvalidError::UnspecifiedEnum(UnspecifiedEnumKind::CredentialStatus),
+        )),
     }
 }
 
@@ -611,9 +673,10 @@ fn decode_storage_backend_state(
         state_v1::StorageBackend::STORAGE_BACKEND_IN_MEMORY => Ok(StorageBackend::InMemory),
         state_v1::StorageBackend::STORAGE_BACKEND_OPENBAO => Ok(StorageBackend::OpenBao),
         state_v1::StorageBackend::STORAGE_BACKEND_STATIC_CONFIG => Ok(StorageBackend::StaticConfig),
-        state_v1::StorageBackend::STORAGE_BACKEND_UNSPECIFIED => {
-            Err(invalid_field(field, "unspecified storage backend"))
-        }
+        state_v1::StorageBackend::STORAGE_BACKEND_UNSPECIFIED => Err(invalid_field(
+            field,
+            CredentialFieldInvalidError::UnspecifiedEnum(UnspecifiedEnumKind::StorageBackend),
+        )),
     }
 }
 
@@ -651,7 +714,7 @@ pub(crate) fn decode_scope_key(
 ) -> Result<CredentialScope, CredentialProtoDecodeError> {
     let field: CredentialFieldPath = field.into();
     if scope_key.is_empty() {
-        return Err(invalid_field(&field, "credential scope key must not be empty"));
+        return Err(invalid_field(&field, CredentialFieldInvalidError::EmptyScopeKey));
     }
 
     if scope_key == source.as_str() {
@@ -661,7 +724,10 @@ pub(crate) fn decode_scope_key(
     let Some(integration_id) = scope_key.strip_prefix(&format!("{}/", source.as_str())) else {
         return Err(invalid_field(
             &field,
-            format!("scope key '{scope_key}' does not match source '{}'", source.as_str()),
+            CredentialFieldInvalidError::ScopeKeyMismatch {
+                scope_key: scope_key.to_string(),
+                source_kind: source.as_str(),
+            },
         ));
     };
     let integration_id = SourceIntegrationId::new(integration_id).map_err(|source| invalid_field(&field, source))?;
@@ -680,15 +746,15 @@ where
     let value = value.ok_or_else(|| CredentialProtoDecodeError::MissingField { field: field.clone() })?;
     value
         .as_known()
-        .ok_or_else(|| invalid_field(field, format!("unknown enum value {}", value.to_i32())))
+        .ok_or_else(|| invalid_field(field, CredentialFieldInvalidError::UnknownEnumValue(value.to_i32())))
 }
 
 pub(crate) fn invalid_field(
     field: impl Into<CredentialFieldPath>,
-    source: impl fmt::Display,
+    source: impl Into<CredentialFieldInvalidError>,
 ) -> CredentialProtoDecodeError {
     CredentialProtoDecodeError::InvalidField {
         field: field.into(),
-        reason: source.to_string(),
+        reason: source.into(),
     }
 }

@@ -96,8 +96,10 @@ impl RuntimeReleasePolicy {
 /// What a caller is asking to do with a resolved credential.
 ///
 /// Every field is optional because the shipped webhook paths resolve without
-/// an outbound target. An absent field is not a wildcard: a configured
-/// restriction denies when the matching field is missing.
+/// an outbound target. An absent runtime service or host is not a wildcard: a
+/// configured restriction denies when the matching field is missing. The
+/// exception is the injection location, which is only checked when the request
+/// names one.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct RuntimeReleaseRequest<'a> {
     runtime_service: Option<&'a RuntimeServiceId>,

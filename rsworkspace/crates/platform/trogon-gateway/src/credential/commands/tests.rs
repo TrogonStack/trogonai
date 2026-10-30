@@ -18,10 +18,10 @@ use super::domain::{
     SourceKind, StorageBackend,
 };
 use super::proto::{
-    CredentialProtoDecodeError, activated_to_proto, credential_metadata_to_proto_state, credential_ref_to_proto,
-    decode_active_state, decode_credential_metadata, decode_message_field, decode_pending_write_state,
-    decode_write_requested, destroy_failed_to_proto, destroy_requested_to_proto, destroyed_to_proto,
-    pending_write_to_proto_state, revoked_to_proto, rotated_to_proto, rotation_failed_to_proto,
+    CredentialFieldInvalidError, CredentialProtoDecodeError, activated_to_proto, credential_metadata_to_proto_state,
+    credential_ref_to_proto, decode_active_state, decode_credential_metadata, decode_message_field,
+    decode_pending_write_state, decode_write_requested, destroy_failed_to_proto, destroy_requested_to_proto,
+    destroyed_to_proto, pending_write_to_proto_state, revoked_to_proto, rotated_to_proto, rotation_failed_to_proto,
     rotation_requested_to_proto, write_failed_to_proto, write_requested_to_proto,
 };
 use super::snapshot::CREDENTIAL_SNAPSHOT_POLICY;
@@ -481,7 +481,7 @@ fn activation_rejects_a_pending_write_persisted_without_a_scope() {
         .then_error(CredentialDecideError::InvalidProto(
             CredentialProtoDecodeError::InvalidField {
                 field: "pending_write.scope_key".into(),
-                reason: "credential scope key must not be empty".to_string(),
+                reason: CredentialFieldInvalidError::EmptyScopeKey,
             },
         ));
 }
@@ -978,7 +978,7 @@ fn event_codec_rejects_a_write_request_without_a_scope() {
         evolve(initial_state(), &decoded).unwrap_err(),
         CredentialEvolveError::InvalidProto(CredentialProtoDecodeError::InvalidField {
             field: "scope_key".into(),
-            reason: "credential scope key must not be empty".to_string(),
+            reason: CredentialFieldInvalidError::EmptyScopeKey,
         })
     );
 }
