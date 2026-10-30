@@ -692,6 +692,65 @@ fn given_when_then_rejects_destroy_failure_without_pending_destroy_request() {
 }
 
 #[test]
+fn given_when_then_rejects_write_activation_without_a_pending_write() {
+    TestCase::<ActivateCredentialWrite>::new()
+        .given_no_history()
+        .when(ActivateCredentialWrite::new(metadata(1)))
+        .then_error(CredentialDecideError::CredentialWriteNotPending {
+            credential_id: credential_id(),
+        });
+}
+
+#[test]
+fn given_when_then_rejects_write_failure_without_a_pending_write() {
+    TestCase::<RecordCredentialWriteFailure>::new()
+        .given([write_requested()])
+        .given([activated(1)])
+        .when(RecordCredentialWriteFailure::new(
+            credential_id(),
+            CredentialFailureReason::secret_store_write_failed(),
+        ))
+        .then_error(CredentialDecideError::CredentialWriteNotPending {
+            credential_id: credential_id(),
+        });
+}
+
+#[test]
+fn given_when_then_rejects_rotation_request_for_a_credential_that_is_not_active() {
+    TestCase::<RequestCredentialRotation>::new()
+        .given([write_requested()])
+        .when(RequestCredentialRotation::new(credential_ref(1)))
+        .then_error(CredentialDecideError::CredentialNotActive {
+            credential_id: credential_id(),
+        });
+}
+
+#[test]
+fn given_when_then_rejects_rotation_activation_without_a_pending_rotation() {
+    TestCase::<ActivateCredentialRotation>::new()
+        .given([write_requested()])
+        .given([activated(1)])
+        .when(ActivateCredentialRotation::new(metadata(2)))
+        .then_error(CredentialDecideError::CredentialRotationNotPending {
+            credential_id: credential_id(),
+        });
+}
+
+#[test]
+fn given_when_then_rejects_rotation_failure_without_a_pending_rotation() {
+    TestCase::<RecordCredentialRotationFailure>::new()
+        .given([write_requested()])
+        .given([activated(1)])
+        .when(RecordCredentialRotationFailure::new(
+            credential_ref(1),
+            CredentialFailureReason::new("openbao rotate failed").unwrap(),
+        ))
+        .then_error(CredentialDecideError::CredentialRotationNotPending {
+            credential_id: credential_id(),
+        });
+}
+
+#[test]
 fn rebuild_state_from_events_active_rotated_state() {
     let state = [write_requested(), activated(1), rotation_requested(1), rotated(1, 2)]
         .into_iter()

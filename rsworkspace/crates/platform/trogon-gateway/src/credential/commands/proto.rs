@@ -758,3 +758,6 @@ pub(crate) fn invalid_field(
         reason: source.into(),
     }
 }
+
+#[cfg(test)]
+mod tests;

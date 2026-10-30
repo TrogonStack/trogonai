@@ -390,3 +390,6 @@ pub(crate) fn validate_newer_version_for_evolve(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;

@@ -44,3 +44,6 @@ pub enum CredentialFailureReasonError {
     #[error("credential failure reason exceeds maximum length")]
     TooLong,
 }
+
+#[cfg(test)]
+mod tests;

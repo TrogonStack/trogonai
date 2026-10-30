@@ -42,3 +42,6 @@ pub enum CredentialDestroyReasonError {
     #[error("credential destroy reason exceeds maximum length")]
     TooLong,
 }
+
+#[cfg(test)]
+mod tests;

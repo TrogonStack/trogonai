@@ -210,3 +210,32 @@ fn round_trips_through_display() {
         "api.example.com"
     );
 }
+
+#[test]
+fn rejects_a_host_over_the_length_limit() {
+    let host = format!("{}.com", "a".repeat(MAX_HOST_LEN));
+
+    assert_eq!(AllowedHost::new(&host), Err(AllowedHostError::TooLong(host.len())));
+}
+
+#[test]
+fn rejects_a_wildcard_with_no_parent_domain() {
+    assert_eq!(AllowedHost::new("*.."), Err(AllowedHostError::BareWildcard));
+}
+
+#[test]
+fn never_matches_a_blank_or_root_only_candidate() {
+    let exact = AllowedHost::new("api.example.com").unwrap();
+    let wildcard = AllowedHost::new("*.example.com").unwrap();
+
+    for candidate in ["", "   ", "."] {
+        assert!(!exact.matches(candidate));
+        assert!(!wildcard.matches(candidate));
+    }
+}
+
+#[test]
+fn reports_whether_the_restriction_is_configured() {
+    assert!(AllowedHosts::Unrestricted.is_unrestricted());
+    assert!(!AllowedHosts::only(["api.example.com"]).unwrap().is_unrestricted());
+}

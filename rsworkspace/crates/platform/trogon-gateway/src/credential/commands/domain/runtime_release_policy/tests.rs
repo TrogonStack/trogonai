@@ -108,3 +108,55 @@ fn rejects_a_zero_cache_ttl_override() {
         Err(RuntimeReleasePolicyError::ZeroCacheTtl)
     );
 }
+
+#[test]
+fn getters_expose_the_configured_restrictions() {
+    let hosts = AllowedHosts::only(["api.example.com"]).unwrap();
+    let services = AllowedRuntimeServices::only(["trogon-gateway"]).unwrap();
+    let locations = InjectionLocations::new([InjectionLocation::header("authorization").unwrap()]);
+    let policy = RuntimeReleasePolicy::default()
+        .with_allowed_hosts(hosts.clone())
+        .with_allowed_runtime_services(services.clone())
+        .with_injection_locations(locations.clone())
+        .with_cache_ttl_override(Duration::from_secs(30))
+        .unwrap();
+
+    assert_eq!(policy.allowed_hosts(), &hosts);
+    assert_eq!(policy.allowed_runtime_services(), &services);
+    assert_eq!(policy.injection_locations(), &locations);
+    assert_eq!(policy.cache_ttl_override(), Some(Duration::from_secs(30)));
+    assert_eq!(RuntimeReleasePolicy::default().cache_ttl_override(), None);
+}
+
+#[test]
+fn denial_messages_name_the_caller_or_say_it_was_missing() {
+    let other = service("some-other-worker");
+    let header = InjectionLocation::header("authorization").unwrap();
+
+    assert_eq!(
+        RuntimeReleaseDeniedError::RuntimeService { runtime_service: None }.to_string(),
+        "runtime service (unidentified) is not allowed to resolve this credential"
+    );
+    assert_eq!(
+        RuntimeReleaseDeniedError::RuntimeService {
+            runtime_service: Some(other)
+        }
+        .to_string(),
+        "runtime service 'some-other-worker' is not allowed to resolve this credential"
+    );
+    assert_eq!(
+        RuntimeReleaseDeniedError::Host { host: None }.to_string(),
+        "host (unspecified) is not in the credential's allowed hosts"
+    );
+    assert_eq!(
+        RuntimeReleaseDeniedError::Host {
+            host: Some("evil.example.net".to_string())
+        }
+        .to_string(),
+        "host 'evil.example.net' is not in the credential's allowed hosts"
+    );
+    assert_eq!(
+        RuntimeReleaseDeniedError::InjectionLocation { location: header }.to_string(),
+        "injection location header:authorization is not allowed for this credential"
+    );
+}
