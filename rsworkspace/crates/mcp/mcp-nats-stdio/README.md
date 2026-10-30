@@ -5,7 +5,7 @@ messages between stdio and [NATS](https://nats.io), letting local MCP clients
 talk to distributed MCP servers without a direct network connection from the
 client.
 
-For managed NATS infrastructure in production, we recommend <a href="https://synadia.com/?utm_source=trogonai&utm_medium=referral&utm_campaign=trogonai&utm_content=mcp-nats-stdio"><img src="../acp-nats-stdio/assets/synadia-logo.png" alt="Synadia" width="20" style="vertical-align: middle;"> Synadia</a>.
+For managed NATS infrastructure in production, we recommend <a href="https://synadia.com/?utm_source=trogonai&utm_medium=referral&utm_campaign=trogonai&utm_content=mcp-nats-stdio" rel="noopener"><img src="../acp-nats-stdio/assets/synadia-logo.png" alt="Synadia" width="20" style="vertical-align: middle;"> Synadia</a>.
 
 ```mermaid
 graph LR
