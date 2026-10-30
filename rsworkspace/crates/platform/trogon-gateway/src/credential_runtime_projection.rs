@@ -1425,6 +1425,18 @@ impl<S> RuntimeCredentialResolver<S> {
     pub fn cache(&self) -> &RuntimeCredentialCache {
         &self.cache
     }
+
+    pub async fn active_credential_ref(
+        &self,
+        key: &RuntimeIntegrationKey,
+        kind: CredentialKind,
+    ) -> Option<CredentialRef> {
+        let projection = self.projections.get(key).await?;
+        if !projection.status().is_resolvable() {
+            return None;
+        }
+        projection.credential(kind).cloned()
+    }
 }
 
 impl<S> RuntimeCredentialResolver<S>
@@ -1494,6 +1506,15 @@ where
         Ok(material)
     }
 
+    /// Reads one exact credential version straight from the store.
+    ///
+    /// The cache is skipped on purpose: a version that is no longer the
+    /// projected one is not covered by revocation invalidation, so only the
+    /// store's own status check can fail it closed.
+    pub async fn read_uncached(&self, credential: &CredentialRef) -> Result<SecretMaterial, SecretStoreError> {
+        self.store.get(credential).await
+    }
+
     pub async fn resolve_plaintext(
         &self,
         key: &RuntimeIntegrationKey,
@@ -1553,6 +1574,20 @@ impl RuntimeCredentialError {
 
     pub fn is_delivery_denied(&self) -> bool {
         matches!(self, Self::DeliveryDenied { .. })
+    }
+
+    pub fn http_status(&self) -> axum::http::StatusCode {
+        match self {
+            Self::SecretStore(SecretStoreError::BackendUnavailable { .. }) => {
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR
+            }
+            Self::SecretStore(_)
+            | Self::IntegrationNotFound { .. }
+            | Self::IntegrationNotResolvable { .. }
+            | Self::CredentialMissing { .. }
+            | Self::VerifierOnly { .. }
+            | Self::DeliveryDenied { .. } => axum::http::StatusCode::UNAUTHORIZED,
+        }
     }
 }
 

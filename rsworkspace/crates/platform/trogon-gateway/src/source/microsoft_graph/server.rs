@@ -17,8 +17,13 @@ use trogon_nats::jetstream::{ClaimCheckPublisher, JetStreamContext, JetStreamPub
 use trogon_semconv::span::MICROSOFT_GRAPH_WEBHOOK;
 use trogon_std::NonZeroDuration;
 
+use super::client_state::MicrosoftGraphClientState;
 use super::config::MicrosoftGraphConfig;
 use super::constants::HTTP_BODY_SIZE_MAX;
+use crate::credential::commands::domain::{CredentialKind, SourceKind};
+use crate::credential_runtime_projection::{RuntimeCredentialResolver, RuntimeIntegrationKey};
+use crate::secret_store::{SecretStoreError, SecretStoreGet};
+use crate::source_integration_id::SourceIntegrationId;
 
 #[derive(Deserialize)]
 struct ChangeNotificationCollection {
@@ -28,7 +33,16 @@ struct ChangeNotificationCollection {
 #[derive(Clone)]
 struct AppState<P: JetStreamPublisher, S: ObjectStorePut> {
     publisher: ClaimCheckPublisher<P, S>,
-    client_state: super::client_state::MicrosoftGraphClientState,
+    client_state: MicrosoftGraphClientState,
+    subject_prefix: NatsToken,
+    nats_ack_timeout: NonZeroDuration,
+}
+
+#[derive(Clone)]
+struct RuntimeAppState<P: JetStreamPublisher, S: ObjectStorePut, G> {
+    publisher: ClaimCheckPublisher<P, S>,
+    credential_resolver: RuntimeCredentialResolver<G>,
+    runtime_key: RuntimeIntegrationKey,
     subject_prefix: NatsToken,
     nats_ack_timeout: NonZeroDuration,
 }
@@ -65,6 +79,31 @@ pub fn router<P: JetStreamPublisher, S: ObjectStorePut>(
         .with_state(state)
 }
 
+pub fn runtime_router<P, S, G>(
+    publisher: ClaimCheckPublisher<P, S>,
+    config: &MicrosoftGraphConfig,
+    integration_id: SourceIntegrationId,
+    credential_resolver: RuntimeCredentialResolver<G>,
+) -> Router
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    let state = RuntimeAppState {
+        publisher,
+        credential_resolver,
+        runtime_key: RuntimeIntegrationKey::new(SourceKind::MicrosoftGraph, &integration_id),
+        subject_prefix: config.subject_prefix.clone(),
+        nats_ack_timeout: config.nats_ack_timeout,
+    };
+
+    Router::new()
+        .route("/webhook", post(handle_runtime_webhook::<P, S, G>))
+        .layer(DefaultBodyLimit::max(HTTP_BODY_SIZE_MAX.as_usize()))
+        .with_state(state)
+}
+
 async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
     State(state): State<AppState<P, S>>,
     RawQuery(query): RawQuery,
@@ -75,7 +114,54 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
         return (StatusCode::OK, [(CONTENT_TYPE, "text/plain")], validation_token).into_response();
     }
 
-    handle_notification_collection(state, body).await.into_response()
+    publish_notification_collection(
+        state.publisher,
+        state.client_state,
+        state.subject_prefix,
+        state.nats_ack_timeout,
+        body,
+    )
+    .await
+    .into_response()
+}
+
+async fn handle_runtime_webhook<P, S, G>(
+    State(state): State<RuntimeAppState<P, S, G>>,
+    RawQuery(query): RawQuery,
+    body: Bytes,
+) -> Response
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    if let Some(validation_token) = validation_token_from_query(query.as_deref()) {
+        info!("Responding to Microsoft Graph notification URL validation");
+        return (StatusCode::OK, [(CONTENT_TYPE, "text/plain")], validation_token).into_response();
+    }
+
+    let client_state = match state
+        .credential_resolver
+        .resolve_plaintext(&state.runtime_key, CredentialKind::ClientState)
+        .await
+    {
+        Ok(secret) => secret,
+        Err(error) => {
+            warn!(reason = %error, "Microsoft Graph runtime credential resolution failed");
+            return error.http_status().into_response();
+        }
+    };
+    let client_state = MicrosoftGraphClientState::from(client_state);
+
+    publish_notification_collection(
+        state.publisher,
+        client_state,
+        state.subject_prefix,
+        state.nats_ack_timeout,
+        body,
+    )
+    .await
+    .into_response()
 }
 
 #[instrument(
@@ -86,8 +172,11 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
         subject = tracing::field::Empty,
     )
 )]
-async fn handle_notification_collection<P: JetStreamPublisher, S: ObjectStorePut>(
-    state: AppState<P, S>,
+async fn publish_notification_collection<P: JetStreamPublisher, S: ObjectStorePut>(
+    publisher: ClaimCheckPublisher<P, S>,
+    client_state: MicrosoftGraphClientState,
+    subject_prefix: NatsToken,
+    nats_ack_timeout: NonZeroDuration,
     body: Bytes,
 ) -> StatusCode {
     let collection = match serde_json::from_slice::<ChangeNotificationCollection>(&body) {
@@ -105,7 +194,7 @@ async fn handle_notification_collection<P: JetStreamPublisher, S: ObjectStorePut
 
     for notification in &collection.value {
         match client_state_from_notification(notification) {
-            Some(client_state) if state.client_state.matches(client_state) => {}
+            Some(provided) if client_state.matches(provided) => {}
             Some(_) => {
                 warn!("Microsoft Graph clientState validation failed");
                 return StatusCode::UNAUTHORIZED;
@@ -117,7 +206,7 @@ async fn handle_notification_collection<P: JetStreamPublisher, S: ObjectStorePut
         }
     }
 
-    let subject = format!("{}.change_notification_collection", state.subject_prefix);
+    let subject = format!("{}.change_notification_collection", subject_prefix);
     let span = tracing::Span::current();
     span.record(trogon_semconv::attribute::NOTIFICATION_COUNT, collection.value.len());
     span.record(trogon_semconv::attribute::SUBJECT, &subject);
@@ -126,9 +215,8 @@ async fn handle_notification_collection<P: JetStreamPublisher, S: ObjectStorePut
     let mut headers = async_nats::HeaderMap::new();
     headers.insert(async_nats::header::NATS_MESSAGE_ID, message_id.as_str());
 
-    let outcome = state
-        .publisher
-        .publish_event(subject, headers, body, state.nats_ack_timeout.into())
+    let outcome = publisher
+        .publish_event(subject, headers, body, nats_ack_timeout.into())
         .await;
 
     if outcome.is_ok() {

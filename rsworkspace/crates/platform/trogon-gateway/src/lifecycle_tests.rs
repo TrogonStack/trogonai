@@ -8,7 +8,13 @@ use tokio::sync::Mutex;
 use trogon_nats::AdvancedMockNatsClient;
 use trogon_nats::jetstream::{ClaimBucketBinding, MockJetStreamPublisher, MockObjectStore};
 
+use crate::credential::commands::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
+use crate::credential_runtime_projection::{
+    RuntimeCredentialRegistry, RuntimeCredentialResolver, RuntimeIntegrationProjection,
+};
+use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut, SecretStoreRotate};
 use crate::source::google_pubsub::credentials::GoogleCredentialsError;
+use crate::source_integration_id::SourceIntegrationId;
 
 use super::*;
 
@@ -76,6 +82,173 @@ webhook_secret = "secret-passive"
     .telegram
 }
 
+fn no_runtime_credentials() -> Option<&'static RuntimeCredentialResolver<MockOpenBaoSecretStore>> {
+    None
+}
+
+async fn telegram_runtime_resolver(
+    integration_id: &str,
+    secret: Option<&str>,
+) -> RuntimeCredentialResolver<MockOpenBaoSecretStore> {
+    let store = MockOpenBaoSecretStore::default();
+    let registry = RuntimeCredentialRegistry::default();
+    if let Some(secret) = secret {
+        let credential = store
+            .put(
+                CredentialScope::integration(
+                    CredentialOwnerId::new("tenant-1").unwrap(),
+                    SourceKind::Telegram,
+                    SourceIntegrationId::new(integration_id).unwrap(),
+                ),
+                CredentialKind::WebhookSecret,
+                SecretString::new(secret).unwrap(),
+            )
+            .await
+            .unwrap();
+        registry
+            .projections()
+            .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1).unwrap())
+            .await;
+    }
+    registry.resolver(store)
+}
+
+#[tokio::test]
+async fn telegram_registration_uses_the_runtime_secret_and_fails_closed_without_one() {
+    let resolver = telegram_runtime_resolver("first", Some("runtime-first")).await;
+    let registered = Mutex::new(Vec::new());
+    register_telegram_webhooks(
+        &telegram_integrations(),
+        Some(&resolver),
+        &mut TelegramWebhookRegistrations::default(),
+        || Ok::<_, io::Error>(()),
+        async |config, _| {
+            registered.lock().await.push(config.webhook_secret.as_str().to_owned());
+            Ok(())
+        },
+    )
+    .await;
+    assert_eq!(*registered.lock().await, ["runtime-first"]);
+
+    let unprovisioned = telegram_runtime_resolver("other", None).await;
+    registered.lock().await.clear();
+    register_telegram_webhooks(
+        &telegram_integrations(),
+        Some(&unprovisioned),
+        &mut TelegramWebhookRegistrations::default(),
+        || -> Result<(), io::Error> { panic!("an unprovisioned secret needs no client") },
+        async |config, _| {
+            registered.lock().await.push(config.webhook_secret.as_str().to_owned());
+            Ok(())
+        },
+    )
+    .await;
+    assert!(registered.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn telegram_registration_reports_an_unprovisioned_runtime_secret_once() {
+    let events = trogon_std::log_capture::CapturedEvents::new();
+    let _guard = events.install(trogon_std::log_capture::LevelFilter::WARN);
+    let unprovisioned = telegram_runtime_resolver("other", None).await;
+    let mut registrations = TelegramWebhookRegistrations::default();
+    for _ in 0..2 {
+        register_telegram_webhooks(
+            &telegram_integrations(),
+            Some(&unprovisioned),
+            &mut registrations,
+            || -> Result<(), io::Error> { panic!("an unprovisioned secret needs no client") },
+            async |_, _| -> Result<(), source::telegram::registration::RegistrationError> {
+                panic!("an unprovisioned secret is never registered")
+            },
+        )
+        .await;
+    }
+    let records = events.events();
+    let skipped: Vec<_> = records
+        .iter()
+        .filter(|event| {
+            event.message() == Some("Telegram runtime webhook secret is not provisioned, skipping registration")
+        })
+        .map(|event| event.field("integration"))
+        .collect();
+    assert_eq!(skipped, [Some("first"), Some("second")]);
+    assert!(records.iter().all(
+        |event| event.message() != Some("Telegram runtime webhook secret resolution failed, skipping registration")
+    ));
+}
+
+#[tokio::test]
+async fn telegram_registration_follows_a_rotated_runtime_secret_and_skips_an_unchanged_one() {
+    let store = MockOpenBaoSecretStore::default();
+    let registry = RuntimeCredentialRegistry::default();
+    let credential = store
+        .put(
+            CredentialScope::integration(
+                CredentialOwnerId::new("tenant-1").unwrap(),
+                SourceKind::Telegram,
+                SourceIntegrationId::new("first").unwrap(),
+            ),
+            CredentialKind::WebhookSecret,
+            SecretString::new("runtime-first").unwrap(),
+        )
+        .await
+        .unwrap();
+    registry
+        .projections()
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential.clone(), 1).unwrap())
+        .await;
+    let resolver = registry.resolver(store.clone());
+    let mut registrations = TelegramWebhookRegistrations::default();
+    let registered = Mutex::new(Vec::new());
+    let register = async |config: &source::telegram::TelegramSourceConfig, _: &()| {
+        registered.lock().await.push(config.webhook_secret.as_str().to_owned());
+        Ok(())
+    };
+
+    register_telegram_webhooks(
+        &telegram_integrations(),
+        Some(&resolver),
+        &mut registrations,
+        || Ok::<_, io::Error>(()),
+        register,
+    )
+    .await;
+    register_telegram_webhooks(
+        &telegram_integrations(),
+        Some(&resolver),
+        &mut registrations,
+        || -> Result<(), io::Error> { panic!("an unchanged secret needs no client") },
+        register,
+    )
+    .await;
+    assert_eq!(*registered.lock().await, ["runtime-first"]);
+
+    let rotated = store
+        .rotate(&credential, SecretString::new("runtime-rotated").unwrap())
+        .await
+        .unwrap();
+    registry
+        .projections()
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(rotated.clone(), 2).unwrap())
+        .await;
+    register_telegram_webhooks(
+        &telegram_integrations(),
+        Some(&resolver),
+        &mut registrations,
+        || Ok::<_, io::Error>(()),
+        register,
+    )
+    .await;
+    assert_eq!(*registered.lock().await, ["runtime-first", "runtime-rotated"]);
+    assert_eq!(
+        registrations
+            .registered_credentials
+            .get(&source_integration_id::SourceIntegrationId::new("first").unwrap()),
+        Some(rotated)
+    );
+}
+
 #[tokio::test]
 async fn telegram_registration_reuses_client_and_continues_after_one_rejection() {
     let events = trogon_std::log_capture::CapturedEvents::new();
@@ -84,6 +257,8 @@ async fn telegram_registration_reuses_client_and_continues_after_one_rejection()
     let registered = Mutex::new(Vec::new());
     register_telegram_webhooks(
         &telegram_integrations(),
+        no_runtime_credentials(),
+        &mut TelegramWebhookRegistrations::default(),
         || {
             clients.fetch_add(1, Ordering::SeqCst);
             Ok::<_, io::Error>(7)
@@ -125,6 +300,8 @@ async fn failed_telegram_client_skips_registration_and_empty_sources_skip_client
     let attempts = AtomicUsize::new(0);
     register_telegram_webhooks(
         &telegram_integrations(),
+        no_runtime_credentials(),
+        &mut TelegramWebhookRegistrations::default(),
         || Err::<(), _>(io::Error::from(io::ErrorKind::PermissionDenied)),
         async |_, _| {
             attempts.fetch_add(1, Ordering::SeqCst);
@@ -135,6 +312,8 @@ async fn failed_telegram_client_skips_registration_and_empty_sources_skip_client
     assert_eq!(attempts.load(Ordering::SeqCst), 0);
     register_telegram_webhooks(
         &[],
+        no_runtime_credentials(),
+        &mut TelegramWebhookRegistrations::default(),
         || -> Result<(), io::Error> { panic!("client is unnecessary without registrations") },
         async |_, _| -> Result<(), source::telegram::registration::RegistrationError> {
             panic!("no registration configured")
@@ -155,7 +334,7 @@ async fn failed_telegram_client_skips_registration_and_empty_sources_skip_client
 
 #[tokio::test]
 async fn discord_task_receives_configured_shard_and_reports_normal_completion() {
-    trogon_std::tls::install_default_crypto_provider().unwrap();
+    let _ = trogon_std::tls::install_default_crypto_provider();
     let resolved = configuration(
         r#"
 [sources.discord]
@@ -179,6 +358,208 @@ gateway_intents = "guilds,guild_messages"
     assert_eq!(name, "discord-gateway");
     result.unwrap();
     assert!(tasks.is_empty());
+}
+
+fn discord_without_static_bot_token() -> config::ResolvedConfig {
+    configuration(
+        r#"
+[sources.discord]
+gateway_intents = "guilds,guild_messages"
+"#,
+    )
+}
+
+#[tokio::test(start_paused = true)]
+async fn discord_runtime_bot_token_retry_stops_on_shutdown() {
+    let events = trogon_std::log_capture::CapturedEvents::new();
+    let _guard = events.install(trogon_std::log_capture::LevelFilter::WARN);
+    let resolved = discord_without_static_bot_token();
+    let (shutdown, signal) = tokio::sync::oneshot::channel();
+    let mut tasks = JoinSet::new();
+    spawn_discord_gateway_with_runtime_credentials(
+        &mut tasks,
+        resolved.discord.as_ref(),
+        RuntimeCredentialRegistry::default().resolver(MockOpenBaoSecretStore::default()),
+        publisher(),
+        async { signal.await.unwrap() },
+        async |_, _, _| unreachable!("the gateway must not start without a bot token"),
+    );
+
+    tokio::time::sleep(Duration::from_secs(10)).await;
+    shutdown.send(()).unwrap();
+    let (name, result) = tokio::time::timeout(Duration::from_secs(1), tasks.join_next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(name, "discord-gateway");
+    result.unwrap();
+    let failed_attempts = events
+        .events()
+        .iter()
+        .filter(|event| event.message() == Some("Discord runtime bot token could not be resolved"))
+        .count();
+    assert!(failed_attempts > 1);
+}
+
+async fn put_discord_bot_token(
+    store: &MockOpenBaoSecretStore,
+    registry: &RuntimeCredentialRegistry,
+    token: &str,
+) -> crate::credential::commands::domain::CredentialRef {
+    let credential = store
+        .put(
+            CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord),
+            CredentialKind::BotToken,
+            SecretString::new(token).unwrap(),
+        )
+        .await
+        .unwrap();
+    registry
+        .projections()
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential.clone(), 1).unwrap())
+        .await;
+    credential
+}
+
+#[tokio::test(start_paused = true)]
+async fn discord_runtime_gateway_starts_once_the_bot_token_projection_catches_up_and_restarts_an_ended_shard() {
+    let _ = trogon_std::tls::install_default_crypto_provider();
+    let resolved = discord_without_static_bot_token();
+    let store = MockOpenBaoSecretStore::default();
+    let registry = RuntimeCredentialRegistry::default();
+    let (shard_tokens, mut observed_shard_tokens) = tokio::sync::mpsc::unbounded_channel();
+    let (shutdown, signal) = tokio::sync::oneshot::channel();
+    let mut tasks = JoinSet::new();
+    spawn_discord_gateway_with_runtime_credentials(
+        &mut tasks,
+        resolved.discord.as_ref(),
+        registry.resolver(store.clone()),
+        publisher(),
+        async { signal.await.unwrap() },
+        move |_, _, shard| {
+            let shard_tokens = shard_tokens.clone();
+            async move {
+                shard_tokens.send(shard.config().token().to_owned()).unwrap();
+            }
+        },
+    );
+
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    put_discord_bot_token(&store, &registry, "runtime-token").await;
+    for _ in 0..2 {
+        let token = tokio::time::timeout(Duration::from_secs(60), observed_shard_tokens.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(token, "Bot runtime-token");
+    }
+
+    shutdown.send(()).unwrap();
+    let (name, result) = tokio::time::timeout(Duration::from_secs(1), tasks.join_next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(name, "discord-gateway");
+    result.unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn discord_runtime_gateway_restarts_the_shard_with_a_rotated_bot_token() {
+    let _ = trogon_std::tls::install_default_crypto_provider();
+    let resolved = discord_without_static_bot_token();
+    let store = MockOpenBaoSecretStore::default();
+    let registry = RuntimeCredentialRegistry::default();
+    let credential = put_discord_bot_token(&store, &registry, "runtime-token").await;
+    let (shard_tokens, mut observed_shard_tokens) = tokio::sync::mpsc::unbounded_channel();
+    let mut tasks = JoinSet::new();
+    spawn_discord_gateway_with_runtime_credentials(
+        &mut tasks,
+        resolved.discord.as_ref(),
+        registry.resolver(store.clone()),
+        publisher(),
+        std::future::pending(),
+        move |_, _, shard| {
+            let shard_tokens = shard_tokens.clone();
+            async move {
+                shard_tokens.send(shard.config().token().to_owned()).unwrap();
+                std::future::pending::<()>().await;
+            }
+        },
+    );
+    assert_eq!(observed_shard_tokens.recv().await.unwrap(), "Bot runtime-token");
+
+    tokio::time::sleep(CREDENTIAL_RUNTIME_PROJECTION_WORKER_INTERVAL * 2).await;
+    assert!(observed_shard_tokens.try_recv().is_err());
+
+    let rotated = store
+        .rotate(&credential, SecretString::new("runtime-rotated").unwrap())
+        .await
+        .unwrap();
+    registry
+        .projections()
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(rotated.clone(), 2).unwrap())
+        .await;
+    let token = tokio::time::timeout(Duration::from_secs(60), observed_shard_tokens.recv())
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(token, "Bot runtime-rotated");
+    assert!(observed_shard_tokens.try_recv().is_err());
+}
+
+#[tokio::test(start_paused = true)]
+async fn discord_runtime_gateway_resets_the_restart_delay_after_a_healthy_shard_run() {
+    let _ = trogon_std::tls::install_default_crypto_provider();
+    let resolved = discord_without_static_bot_token();
+    let store = MockOpenBaoSecretStore::default();
+    let registry = RuntimeCredentialRegistry::default();
+    put_discord_bot_token(&store, &registry, "runtime-token").await;
+    let backoff = crate::supervision::RestartBackoff::new(Duration::from_secs(1), Duration::from_secs(4));
+    let healthy_run = Duration::from_secs(10);
+    let runs = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let (starts, mut observed_starts) = tokio::sync::mpsc::unbounded_channel();
+    let supervisor = tokio::spawn(supervise_discord_runtime_gateway(
+        registry.resolver(store.clone()),
+        publisher(),
+        resolved.discord.clone().unwrap(),
+        move |_, _, _| {
+            let run = runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            starts.send(tokio::time::Instant::now()).unwrap();
+            async move {
+                if run == 3 {
+                    tokio::time::sleep(healthy_run).await;
+                }
+            }
+        },
+        backoff,
+        Duration::from_secs(3600),
+    ));
+
+    let mut started = Vec::new();
+    for _ in 0..5 {
+        started.push(
+            tokio::time::timeout(Duration::from_secs(60), observed_starts.recv())
+                .await
+                .unwrap()
+                .unwrap(),
+        );
+    }
+    supervisor.abort();
+
+    let gaps: Vec<Duration> = started.windows(2).map(|pair| pair[1] - pair[0]).collect();
+    assert_eq!(
+        gaps,
+        vec![
+            Duration::from_secs(1),
+            Duration::from_secs(2),
+            Duration::from_secs(4),
+            healthy_run + backoff.initial(),
+        ]
+    );
 }
 
 fn slack_integrations() -> Vec<config::SourceIntegration<source::slack::SlackConfig>> {
@@ -465,4 +846,245 @@ async fn telemetry_shutdown_failure_does_not_reclassify_a_successful_source() {
         failure.field("error"),
         Some(io::Error::from(io::ErrorKind::BrokenPipe).to_string().as_str())
     );
+}
+
+#[tokio::test]
+async fn discord_without_a_static_bot_token_warns_and_never_starts_the_gateway() {
+    let events = trogon_std::log_capture::CapturedEvents::new();
+    let _guard = events.install(trogon_std::log_capture::LevelFilter::WARN);
+    let resolved = discord_without_static_bot_token();
+    let mut tasks = JoinSet::new();
+    spawn_discord_gateway(&mut tasks, resolved.discord.as_ref(), publisher(), async |_, _, _| {
+        unreachable!("the gateway must not start without a bot token")
+    });
+
+    let (name, result) = tasks.join_next().await.unwrap().unwrap();
+
+    assert_eq!(name, "discord-gateway");
+    result.unwrap();
+    assert!(
+        events
+            .events()
+            .iter()
+            .any(|event| event.message() == Some("Discord gateway configured without a static bot token"))
+    );
+}
+
+#[tokio::test]
+async fn discord_runtime_gateway_spawns_nothing_without_a_discord_source() {
+    let mut tasks = JoinSet::new();
+    spawn_discord_gateway_with_runtime_credentials(
+        &mut tasks,
+        None,
+        RuntimeCredentialRegistry::default().resolver(MockOpenBaoSecretStore::default()),
+        publisher(),
+        std::future::pending(),
+        async |_, _, _| unreachable!("there is no discord source"),
+    );
+
+    assert!(tasks.is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn telegram_registration_worker_keeps_polling_until_it_is_dropped() {
+    let events = trogon_std::log_capture::CapturedEvents::new();
+    let _guard = events.install(trogon_std::log_capture::LevelFilter::WARN);
+    let worker = run_telegram_webhook_registration_worker(
+        telegram_integrations(),
+        telegram_runtime_resolver("other", None).await,
+        TelegramWebhookRegistrations::default(),
+        Duration::from_secs(10),
+    );
+
+    assert!(tokio::time::timeout(Duration::from_secs(35), worker).await.is_err());
+
+    let skipped = events
+        .events()
+        .iter()
+        .filter(|event| {
+            event.message() == Some("Telegram runtime webhook secret is not provisioned, skipping registration")
+        })
+        .count();
+    assert_eq!(skipped, 2);
+}
+
+#[tokio::test]
+async fn telegram_registration_skips_an_integration_whose_runtime_secret_cannot_be_read() {
+    let events = trogon_std::log_capture::CapturedEvents::new();
+    let _guard = events.install(trogon_std::log_capture::LevelFilter::ERROR);
+    let writer = MockOpenBaoSecretStore::default();
+    let registry = RuntimeCredentialRegistry::default();
+    let credential = writer
+        .put(
+            CredentialScope::integration(
+                CredentialOwnerId::new("tenant-1").unwrap(),
+                SourceKind::Telegram,
+                SourceIntegrationId::new("first").unwrap(),
+            ),
+            CredentialKind::WebhookSecret,
+            SecretString::new("runtime-first").unwrap(),
+        )
+        .await
+        .unwrap();
+    registry
+        .projections()
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1).unwrap())
+        .await;
+    let resolver = registry.resolver(MockOpenBaoSecretStore::default());
+    let attempts = AtomicUsize::new(0);
+
+    register_telegram_webhooks(
+        &telegram_integrations(),
+        Some(&resolver),
+        &mut TelegramWebhookRegistrations::default(),
+        || Ok::<_, io::Error>(()),
+        async |_, _| {
+            attempts.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        },
+    )
+    .await;
+
+    assert_eq!(attempts.load(Ordering::SeqCst), 0);
+    assert!(events.events().iter().any(
+        |event| event.message() == Some("Telegram runtime webhook secret resolution failed, skipping registration")
+    ));
+}
+
+fn runtime_credential_env(flags: &[&str]) -> trogon_std::env::InMemoryEnv {
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set(OPENBAO_ADDR, "http://127.0.0.1:1");
+    env.set(OPENBAO_TOKEN, "openbao-token");
+    env.set(OPENBAO_ALLOW_PLAINTEXT, "true");
+    for flag in flags {
+        env.set(*flag, "true");
+    }
+    env
+}
+
+type OpenBaoMounts = source_plugin::RuntimeCredentialMounts<secret_store::openbao_secret_store::OpenBaoSecretStore>;
+
+fn mounted_sources(mounts: &OpenBaoMounts) -> [bool; 10] {
+    [
+        mounts.github.is_some(),
+        mounts.gitlab.is_some(),
+        mounts.incidentio.is_some(),
+        mounts.linear.is_some(),
+        mounts.microsoft_graph.is_some(),
+        mounts.notion.is_some(),
+        mounts.sentry.is_some(),
+        mounts.slack.is_some(),
+        mounts.telegram.is_some(),
+        mounts.twitter.is_some(),
+    ]
+}
+
+#[test]
+fn each_runtime_credential_flag_mounts_only_its_own_source() {
+    let flags = [
+        ENABLE_RUNTIME_GITHUB_CREDENTIALS,
+        ENABLE_RUNTIME_GITLAB_CREDENTIALS,
+        ENABLE_RUNTIME_INCIDENTIO_CREDENTIALS,
+        ENABLE_RUNTIME_LINEAR_CREDENTIALS,
+        ENABLE_RUNTIME_MICROSOFT_GRAPH_CREDENTIALS,
+        ENABLE_RUNTIME_NOTION_CREDENTIALS,
+        ENABLE_RUNTIME_SENTRY_CREDENTIALS,
+        ENABLE_RUNTIME_SLACK_CREDENTIALS,
+        ENABLE_RUNTIME_TELEGRAM_CREDENTIALS,
+        ENABLE_RUNTIME_TWITTER_CREDENTIALS,
+    ];
+    let registry = RuntimeCredentialRegistry::default();
+
+    for (index, flag) in flags.iter().enumerate() {
+        let mounts = source_runtime_credentials_from_env(&runtime_credential_env(&[*flag]), &registry)
+            .unwrap()
+            .unwrap();
+
+        let mut expected = [false; 10];
+        expected[index] = true;
+        assert_eq!(mounted_sources(&mounts), expected, "{flag}");
+    }
+}
+
+#[test]
+fn several_runtime_credential_flags_mount_every_flagged_source_and_log_each() {
+    let events = trogon_std::log_capture::CapturedEvents::new();
+    let _guard = events.install(trogon_std::log_capture::LevelFilter::INFO);
+    let flags = [
+        ENABLE_RUNTIME_GITHUB_CREDENTIALS,
+        ENABLE_RUNTIME_GITLAB_CREDENTIALS,
+        ENABLE_RUNTIME_INCIDENTIO_CREDENTIALS,
+        ENABLE_RUNTIME_LINEAR_CREDENTIALS,
+        ENABLE_RUNTIME_MICROSOFT_GRAPH_CREDENTIALS,
+        ENABLE_RUNTIME_NOTION_CREDENTIALS,
+        ENABLE_RUNTIME_SENTRY_CREDENTIALS,
+        ENABLE_RUNTIME_SLACK_CREDENTIALS,
+        ENABLE_RUNTIME_TELEGRAM_CREDENTIALS,
+        ENABLE_RUNTIME_TWITTER_CREDENTIALS,
+    ];
+
+    let mounts =
+        source_runtime_credentials_from_env(&runtime_credential_env(&flags), &RuntimeCredentialRegistry::default())
+            .unwrap()
+            .unwrap();
+
+    assert_eq!(mounted_sources(&mounts), [true; 10]);
+    let enabled = events
+        .events()
+        .iter()
+        .filter(|event| {
+            event
+                .message()
+                .is_some_and(|message| message.ends_with("webhook runtime credentials enabled"))
+        })
+        .count();
+    assert_eq!(enabled, 10);
+}
+
+#[test]
+fn no_runtime_credential_flag_mounts_nothing_and_needs_no_openbao() {
+    let env = trogon_std::env::InMemoryEnv::new();
+
+    assert!(
+        source_runtime_credentials_from_env(&env, &RuntimeCredentialRegistry::default())
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
+fn a_runtime_credential_flag_requires_the_openbao_settings() {
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set(ENABLE_RUNTIME_GITHUB_CREDENTIALS, "true");
+
+    let error = source_runtime_credentials_from_env(&env, &RuntimeCredentialRegistry::default())
+        .err()
+        .unwrap();
+
+    assert_eq!(
+        error.to_string(),
+        format!("{OPENBAO_ADDR} must be set when {ENABLE_RUNTIME_GITHUB_CREDENTIALS} is enabled")
+    );
+}
+
+#[test]
+fn discord_runtime_credentials_follow_their_flag() {
+    let registry = RuntimeCredentialRegistry::default();
+
+    assert!(
+        discord_runtime_credentials_from_env(&trogon_std::env::InMemoryEnv::new(), &registry)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        discord_runtime_credentials_from_env(
+            &runtime_credential_env(&[ENABLE_RUNTIME_DISCORD_CREDENTIALS]),
+            &registry
+        )
+        .unwrap()
+        .is_some()
+    );
+    let missing_settings = trogon_std::env::InMemoryEnv::new();
+    missing_settings.set(ENABLE_RUNTIME_DISCORD_CREDENTIALS, "true");
+    assert!(discord_runtime_credentials_from_env(&missing_settings, &registry).is_err());
 }

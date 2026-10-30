@@ -13,6 +13,10 @@ use trogon_nats::jetstream::{
 };
 use trogon_std::NonZeroDuration;
 
+use crate::credential::commands::domain::{CredentialOwnerId, CredentialScope};
+use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
+use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
+
 type HmacSha256 = Hmac<Sha256>;
 
 fn wrap_publisher(publisher: MockJetStreamPublisher) -> ClaimCheckPublisher<MockJetStreamPublisher, MockObjectStore> {
@@ -31,6 +35,10 @@ fn compute_sig(secret: &str, body: &[u8]) -> String {
 
 const TEST_SECRET: &str = "test-secret";
 
+fn random_secret() -> String {
+    uuid::Uuid::new_v4().simple().to_string()
+}
+
 fn test_config() -> GithubConfig {
     GithubConfig {
         webhook_secret: GitHubWebhookSecret::new(TEST_SECRET).unwrap(),
@@ -47,6 +55,35 @@ fn tracing_guard() -> tracing::subscriber::DefaultGuard {
 
 fn mock_app(publisher: MockJetStreamPublisher) -> Router {
     router(wrap_publisher(publisher), &test_config())
+}
+
+async fn runtime_app(publisher: MockJetStreamPublisher, secret: &str) -> Router {
+    let store = MockOpenBaoSecretStore::default();
+    let integration_id = SourceIntegrationId::new("primary").unwrap();
+    let credential = store
+        .put(
+            CredentialScope::integration(
+                CredentialOwnerId::new("tenant-1").unwrap(),
+                SourceKind::GitHub,
+                integration_id.clone(),
+            ),
+            CredentialKind::WebhookSecret,
+            trogon_std::SecretString::new(secret).unwrap(),
+        )
+        .await
+        .unwrap();
+    let runtime_credentials = RuntimeCredentialRegistry::default();
+    runtime_credentials
+        .projections()
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1).unwrap())
+        .await;
+
+    runtime_router(
+        wrap_publisher(publisher),
+        &test_config(),
+        integration_id,
+        runtime_credentials.resolver(store),
+    )
 }
 
 fn webhook_request(body: &[u8], event: &str, delivery: &str, sig: Option<&str>) -> Request<Body> {
@@ -116,6 +153,44 @@ async fn valid_webhook_publishes_to_nats_and_returns_200() {
         messages[0].headers.get(NATS_HEADER_DELIVERY).map(|v| v.as_str()),
         Some("del-1"),
     );
+}
+
+#[tokio::test]
+async fn runtime_webhook_secret_publishes_to_nats_and_returns_200() {
+    let runtime_secret = random_secret();
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = runtime_app(publisher.clone(), &runtime_secret).await;
+    let body = br#"{"ref":"refs/heads/main"}"#;
+    let sig = compute_sig(&runtime_secret, body);
+
+    let resp = app
+        .oneshot(webhook_request(body, "push", "runtime-del-1", Some(&sig)))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let messages = publisher.published_messages();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].subject, "github.push");
+}
+
+#[tokio::test]
+async fn runtime_webhook_secret_does_not_use_static_config_secret() {
+    let runtime_secret = random_secret();
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = runtime_app(publisher.clone(), &runtime_secret).await;
+    let body = br#"{"ref":"refs/heads/main"}"#;
+    let sig = compute_sig(TEST_SECRET, body);
+
+    let resp = app
+        .oneshot(webhook_request(body, "push", "runtime-del-1", Some(&sig)))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    assert!(publisher.published_messages().is_empty());
 }
 
 #[tokio::test]

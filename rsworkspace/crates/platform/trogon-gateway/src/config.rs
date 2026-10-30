@@ -398,8 +398,7 @@ struct HttpServerConfig {
 struct SourcesConfig {
     #[config(nested)]
     github: GithubConfig,
-    #[config(nested)]
-    discord: DiscordConfig,
+    discord: Option<DiscordConfig>,
     #[config(nested)]
     slack: SlackConfig,
     #[config(nested)]
@@ -434,20 +433,16 @@ struct GithubConfig {
     integrations: BTreeMap<String, SourceIntegrationInput<GithubWebhookConfig>>,
 }
 
-#[derive(Config)]
-#[config(layer_attr(serde(deny_unknown_fields)))]
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct DiscordConfig {
     status: Option<String>,
     bot_token: Option<SecretInput>,
     gateway_intents: Option<String>,
-    #[config(default = "discord")]
-    subject_prefix: String,
-    #[config(default = "DISCORD")]
-    stream_name: String,
-    #[config(default = 604_800)]
-    stream_max_age_secs: u64,
-    #[config(default = 10)]
-    nats_ack_timeout_secs: u64,
+    subject_prefix: Option<String>,
+    stream_name: Option<String>,
+    stream_max_age_secs: Option<u64>,
+    nats_ack_timeout_secs: Option<u64>,
 }
 
 #[derive(Config)]
@@ -683,6 +678,7 @@ pub struct ResolvedHttpServerConfig {
     pub port: u16,
 }
 
+#[derive(Clone)]
 pub struct SourceIntegration<T> {
     pub id: SourceIntegrationId,
     pub config: T,
@@ -907,7 +903,7 @@ fn resolve_github_integrations(
 }
 
 fn resolve_discord(
-    section: DiscordConfig,
+    section: Option<DiscordConfig>,
     env: &impl ReadEnv,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Option<crate::source::discord::DiscordConfig> {
@@ -919,32 +915,31 @@ fn resolve_discord(
         stream_name,
         stream_max_age_secs,
         nats_ack_timeout_secs,
-    } = section;
+    } = section?;
 
     if !resolve_source_status("discord", status.as_deref(), errors) {
         return None;
     }
 
-    let token_str = match bot_token {
+    let bot_token = match bot_token {
         Some(input) => match input.resolve(
             static_config_source_scope(SourceKind::Discord),
             CredentialKind::BotToken,
             env,
         ) {
-            Ok(value) => value,
+            Ok(value) => match DiscordBotToken::new(value) {
+                Ok(s) => Some(s),
+                Err(e) => {
+                    errors.push(ConfigValidationError::invalid("discord", "bot_token", e));
+                    return None;
+                }
+            },
             Err(error) => {
                 errors.push(ConfigValidationError::invalid("discord", "bot_token", error));
                 return None;
             }
         },
-        None => return None,
-    };
-    let bot_token = match DiscordBotToken::new(token_str) {
-        Ok(s) => s,
-        Err(e) => {
-            errors.push(ConfigValidationError::invalid("discord", "bot_token", e));
-            return None;
-        }
+        None => None,
     };
 
     let intents = if let Some(s) = gateway_intents.as_deref().filter(|s| !s.is_empty()) {
@@ -959,7 +954,7 @@ fn resolve_discord(
         crate::source::discord::config::default_intents()
     };
 
-    let subject_prefix = match NatsToken::new(subject_prefix) {
+    let subject_prefix = match NatsToken::new(subject_prefix.as_deref().unwrap_or("discord")) {
         Ok(t) => t,
         Err(e) => {
             errors.push(ConfigValidationError::invalid_subject_token(
@@ -971,7 +966,7 @@ fn resolve_discord(
         }
     };
 
-    let stream_name = match NatsToken::new(stream_name) {
+    let stream_name = match NatsToken::new(stream_name.as_deref().unwrap_or("DISCORD")) {
         Ok(t) => t,
         Err(e) => {
             errors.push(ConfigValidationError::invalid_subject_token(
@@ -983,15 +978,16 @@ fn resolve_discord(
         }
     };
 
-    let nats_ack_timeout = match NonZeroDuration::from_secs(nats_ack_timeout_secs) {
-        Ok(d) => d,
-        Err(err) => {
-            errors.push(ConfigValidationError::invalid("discord", "nats_ack_timeout_secs", err));
-            return None;
-        }
-    };
+    let nats_ack_timeout =
+        match NonZeroDuration::from_secs(nats_ack_timeout_secs.unwrap_or(DEFAULT_NATS_ACK_TIMEOUT_SECS)) {
+            Ok(d) => d,
+            Err(err) => {
+                errors.push(ConfigValidationError::invalid("discord", "nats_ack_timeout_secs", err));
+                return None;
+            }
+        };
 
-    let stream_max_age = match StreamMaxAge::from_secs(stream_max_age_secs) {
+    let stream_max_age = match StreamMaxAge::from_secs(stream_max_age_secs.unwrap_or(DEFAULT_STREAM_MAX_AGE_SECS)) {
         Ok(age) => age,
         Err(err) => {
             errors.push(ConfigValidationError::invalid("discord", "stream_max_age_secs", err));

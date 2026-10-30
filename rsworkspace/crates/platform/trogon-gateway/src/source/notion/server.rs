@@ -12,6 +12,11 @@ use trogon_nats::jetstream::{
 use trogon_semconv::span::NOTION_WEBHOOK;
 use trogon_std::{EmptySecretError, NonZeroDuration};
 
+use crate::credential::commands::domain::{CredentialKind, SourceKind};
+use crate::credential_runtime_projection::{RuntimeCredentialResolver, RuntimeIntegrationKey};
+use crate::secret_store::{SecretStoreError, SecretStoreGet};
+use crate::source_integration_id::SourceIntegrationId;
+
 use super::NotionEventType;
 use super::NotionVerificationToken;
 use super::config::NotionConfig;
@@ -146,6 +151,15 @@ struct AppState<P: JetStreamPublisher, S: ObjectStorePut> {
     nats_ack_timeout: NonZeroDuration,
 }
 
+#[derive(Clone)]
+struct RuntimeAppState<P: JetStreamPublisher, S: ObjectStorePut, G> {
+    publisher: ClaimCheckPublisher<P, S>,
+    credential_resolver: RuntimeCredentialResolver<G>,
+    runtime_key: RuntimeIntegrationKey,
+    subject_prefix: NatsToken,
+    nats_ack_timeout: NonZeroDuration,
+}
+
 pub async fn provision<C: JetStreamContext>(js: &C, config: &NotionConfig) -> Result<(), C::Error> {
     js.get_or_create_stream(async_nats::jetstream::stream::Config {
         name: config.stream_name.to_string(),
@@ -174,6 +188,31 @@ pub fn router<P: JetStreamPublisher, S: ObjectStorePut>(
 
     Router::new()
         .route("/webhook", post(handle_webhook::<P, S>))
+        .layer(DefaultBodyLimit::max(HTTP_BODY_SIZE_MAX.as_usize()))
+        .with_state(state)
+}
+
+pub fn runtime_router<P, S, G>(
+    publisher: ClaimCheckPublisher<P, S>,
+    config: &NotionConfig,
+    integration_id: SourceIntegrationId,
+    credential_resolver: RuntimeCredentialResolver<G>,
+) -> Router
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    let state = RuntimeAppState {
+        publisher,
+        credential_resolver,
+        runtime_key: RuntimeIntegrationKey::new(SourceKind::Notion, &integration_id),
+        subject_prefix: config.subject_prefix.clone(),
+        nats_ack_timeout: config.nats_ack_timeout,
+    };
+
+    Router::new()
+        .route("/webhook", post(handle_runtime_webhook::<P, S, G>))
         .layer(DefaultBodyLimit::max(HTTP_BODY_SIZE_MAX.as_usize()))
         .with_state(state)
 }
@@ -250,17 +289,105 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
         }
     }
 
+    publish_verified_webhook(state.publisher, state.subject_prefix, state.nats_ack_timeout, body).await
+}
+
+#[instrument(
+    name = NOTION_WEBHOOK,
+    skip_all,
+    fields(
+        event_type = tracing::field::Empty,
+        event_id = tracing::field::Empty,
+        subscription_id = tracing::field::Empty,
+        subject = tracing::field::Empty,
+    )
+)]
+async fn handle_runtime_webhook<P, S, G>(
+    State(state): State<RuntimeAppState<P, S, G>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> StatusCode
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    let signature = headers.get(HEADER_SIGNATURE).and_then(|value| value.to_str().ok());
+    let span = tracing::Span::current();
+
+    match parse_verification_request(&body) {
+        Ok(Some(verification_request)) => {
+            if let Some(signature) = signature
+                && let Err(err) = signature::verify(&verification_request.verification_token, &body, signature)
+            {
+                warn!(error = %err, "Notion verification request signature validation failed");
+                return StatusCode::UNAUTHORIZED;
+            }
+
+            let subject = verification_subject(&state.subject_prefix);
+            span.record(trogon_semconv::attribute::EVENT_TYPE, "subscription.verification");
+            span.record(trogon_semconv::attribute::SUBJECT, &subject);
+
+            return publish_verification(&state.publisher, &state.subject_prefix, body, state.nats_ack_timeout).await;
+        }
+        Ok(None) => {}
+        Err(err) => {
+            warn!(error = %err, "Invalid Notion verification request payload");
+            return StatusCode::BAD_REQUEST;
+        }
+    }
+
+    let verification_token = match state
+        .credential_resolver
+        .resolve_plaintext(&state.runtime_key, CredentialKind::VerificationToken)
+        .await
+    {
+        Ok(secret) => match NotionVerificationToken::new(secret.as_str()) {
+            Ok(token) => token,
+            Err(error) => {
+                warn!(reason = %error, "Notion runtime verification token is invalid");
+                return StatusCode::INTERNAL_SERVER_ERROR;
+            }
+        },
+        Err(error) => {
+            warn!(reason = %error, "Notion runtime credential resolution failed");
+            return error.http_status();
+        }
+    };
+
+    match signature {
+        Some(signature) => {
+            if let Err(err) = signature::verify(&verification_token, &body, signature) {
+                warn!(error = %err, "Notion webhook signature validation failed");
+                return StatusCode::UNAUTHORIZED;
+            }
+        }
+        None => {
+            warn!("Missing X-Notion-Signature header");
+            return StatusCode::UNAUTHORIZED;
+        }
+    }
+
+    publish_verified_webhook(state.publisher, state.subject_prefix, state.nats_ack_timeout, body).await
+}
+
+async fn publish_verified_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
+    publisher: ClaimCheckPublisher<P, S>,
+    subject_prefix: NatsToken,
+    nats_ack_timeout: NonZeroDuration,
+    body: Bytes,
+) -> StatusCode {
     let parsed: serde_json::Value = match serde_json::from_slice(&body) {
         Ok(value) => value,
         Err(err) => {
             warn!(error = %err, "Failed to parse Notion webhook body as JSON");
             return publish_unroutable(
-                &state.publisher,
-                &state.subject_prefix,
+                &publisher,
+                &subject_prefix,
                 &EventMetadata::default(),
                 RejectReason::InvalidJson,
                 body,
-                state.nats_ack_timeout,
+                nats_ack_timeout,
             )
             .await;
         }
@@ -270,12 +397,12 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
     let Some(raw_event_type) = parsed.get("type").and_then(serde_json::Value::as_str) else {
         warn!("Missing type in Notion webhook payload");
         return publish_unroutable(
-            &state.publisher,
-            &state.subject_prefix,
+            &publisher,
+            &subject_prefix,
             &metadata,
             RejectReason::MissingEventType,
             body,
-            state.nats_ack_timeout,
+            nats_ack_timeout,
         )
         .await;
     };
@@ -285,18 +412,19 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
         Err(err) => {
             warn!(error = %err, "Invalid type in Notion webhook payload");
             return publish_unroutable(
-                &state.publisher,
-                &state.subject_prefix,
+                &publisher,
+                &subject_prefix,
                 &metadata,
                 RejectReason::InvalidEventType,
                 body,
-                state.nats_ack_timeout,
+                nats_ack_timeout,
             )
             .await;
         }
     };
 
-    let subject = format!("{}.{}", state.subject_prefix, event_type);
+    let subject = format!("{}.{}", subject_prefix, event_type);
+    let span = tracing::Span::current();
     span.record(trogon_semconv::attribute::EVENT_TYPE, event_type.as_str());
     span.record(
         trogon_semconv::attribute::EVENT_ID,
@@ -312,9 +440,8 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
     metadata.apply_headers(&mut nats_headers);
     nats_headers.insert(NATS_HEADER_EVENT_TYPE, event_type.as_str());
 
-    let outcome = state
-        .publisher
-        .publish_event(subject, nats_headers, body, state.nats_ack_timeout.into())
+    let outcome = publisher
+        .publish_event(subject, nats_headers, body, nats_ack_timeout.into())
         .await;
 
     outcome_to_status(outcome)

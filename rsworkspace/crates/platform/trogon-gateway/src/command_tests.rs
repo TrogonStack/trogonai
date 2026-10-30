@@ -373,6 +373,135 @@ async fn serve_does_not_provision_credential_management_without_the_admin_token(
 }
 
 #[tokio::test]
+async fn serve_mounts_runtime_credentials_and_spawns_their_workers_for_flagged_sources() {
+    let server = JetStreamTestServer::start().await;
+    let mut file = tempfile::Builder::new().suffix(".toml").tempfile().unwrap();
+    write!(
+        file,
+        r#"
+[sources.telegram.integrations.first.webhook]
+webhook_secret = "secret-first"
+webhook_registration_mode = "startup"
+bot_token = "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+public_webhook_url = "https://example.com/sources/telegram/first/webhook"
+
+[sources.discord]
+gateway_intents = "guilds,guild_messages"
+"#
+    )
+    .unwrap();
+    let mut resolved = config::load(Some(file.path())).unwrap();
+    resolved.http_server.port = 0;
+    resolved.nats = trogon_nats::NatsConfig::from_url(server.address());
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set(OPENBAO_ADDR, "http://127.0.0.1:1");
+    env.set(OPENBAO_TOKEN, "openbao-token");
+    env.set(OPENBAO_ALLOW_PLAINTEXT, "true");
+    env.set(ENABLE_RUNTIME_TELEGRAM_CREDENTIALS, "true");
+    env.set(ENABLE_RUNTIME_DISCORD_CREDENTIALS, "true");
+
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        serve_with_env(resolved, std::future::ready(()), &env),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    let js = server.jetstream().await;
+    js.get_stream("TELEGRAM_FIRST").await.unwrap();
+}
+
+const EVERY_WEBHOOK_SOURCE: &str = r#"
+[sources.github.integrations.primary.webhook]
+webhook_secret = "gh-secret"
+
+[sources.slack.integrations.primary.webhook]
+signing_secret = "slack-secret"
+
+[sources.telegram.integrations.primary.webhook]
+webhook_secret = "tg-secret"
+
+[sources.twitter.integrations.primary.webhook]
+consumer_secret = "twitter-consumer-secret"
+
+[sources.gitlab.integrations.primary.webhook]
+signing_token = "whsec_MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE="
+
+[sources.incidentio.integrations.primary.webhook]
+signing_secret = "whsec_dGVzdC1zZWNyZXQ="
+
+[sources.linear.integrations.primary.webhook]
+webhook_secret = "linear-secret"
+
+[sources.microsoft_graph.integrations.primary.webhook]
+client_state = "microsoft-graph-client-state"
+
+[sources.notion.integrations.primary.webhook]
+verification_token = "notion-verification-token-example"
+
+[sources.sentry.integrations.primary.webhook]
+client_secret = "sentry-client-secret"
+
+[sources.datadog.integrations.primary.webhook]
+webhook_token = "datadog-webhook-token"
+
+[sources.zoom.integrations.primary.webhook]
+secret_token = "zoom-secret-token"
+"#;
+
+async fn serve_every_webhook_source(env: &trogon_std::env::InMemoryEnv) {
+    let server = JetStreamTestServer::start().await;
+    let mut file = tempfile::Builder::new().suffix(".toml").tempfile().unwrap();
+    file.write_all(EVERY_WEBHOOK_SOURCE.as_bytes()).unwrap();
+    let mut resolved = config::load(Some(file.path())).unwrap();
+    resolved.http_server.port = 0;
+    resolved.nats = trogon_nats::NatsConfig::from_url(server.address());
+
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        serve_with_env(resolved, std::future::ready(()), env),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    let js = server.jetstream().await;
+    for stream in ["GITHUB_PRIMARY", "SLACK_PRIMARY", "ZOOM_PRIMARY"] {
+        js.get_stream(stream).await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn serve_mounts_every_webhook_source_with_static_secrets() {
+    serve_every_webhook_source(&trogon_std::env::InMemoryEnv::new()).await;
+}
+
+#[tokio::test]
+async fn serve_mounts_every_webhook_source_with_runtime_credentials() {
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set(OPENBAO_ADDR, "http://127.0.0.1:1");
+    env.set(OPENBAO_TOKEN, "openbao-token");
+    env.set(OPENBAO_ALLOW_PLAINTEXT, "true");
+    for flag in [
+        ENABLE_RUNTIME_GITHUB_CREDENTIALS,
+        ENABLE_RUNTIME_GITLAB_CREDENTIALS,
+        ENABLE_RUNTIME_INCIDENTIO_CREDENTIALS,
+        ENABLE_RUNTIME_LINEAR_CREDENTIALS,
+        ENABLE_RUNTIME_MICROSOFT_GRAPH_CREDENTIALS,
+        ENABLE_RUNTIME_NOTION_CREDENTIALS,
+        ENABLE_RUNTIME_SENTRY_CREDENTIALS,
+        ENABLE_RUNTIME_SLACK_CREDENTIALS,
+        ENABLE_RUNTIME_TELEGRAM_CREDENTIALS,
+        ENABLE_RUNTIME_TWITTER_CREDENTIALS,
+    ] {
+        env.set(flag, "true");
+    }
+
+    serve_every_webhook_source(&env).await;
+}
+
+#[tokio::test]
 async fn serve_requires_openbao_settings_when_credential_management_is_enabled() {
     let server = JetStreamTestServer::start().await;
     let mut resolved = resolved_config();

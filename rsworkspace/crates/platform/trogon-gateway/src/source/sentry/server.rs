@@ -20,6 +20,11 @@ use trogon_nats::jetstream::{
 use trogon_semconv::span::SENTRY_WEBHOOK;
 use trogon_std::NonZeroDuration;
 
+use crate::credential::commands::domain::{CredentialKind, SourceKind};
+use crate::credential_runtime_projection::{RuntimeCredentialResolver, RuntimeIntegrationKey};
+use crate::secret_store::{SecretStoreError, SecretStoreGet};
+use crate::source_integration_id::SourceIntegrationId;
+
 #[derive(Deserialize)]
 struct WebhookEnvelope {
     action: String,
@@ -97,6 +102,15 @@ struct AppState<P: JetStreamPublisher, S: ObjectStorePut> {
     nats_ack_timeout: NonZeroDuration,
 }
 
+#[derive(Clone)]
+struct RuntimeAppState<P: JetStreamPublisher, S: ObjectStorePut, G> {
+    publisher: ClaimCheckPublisher<P, S>,
+    credential_resolver: RuntimeCredentialResolver<G>,
+    runtime_key: RuntimeIntegrationKey,
+    subject_prefix: NatsToken,
+    nats_ack_timeout: NonZeroDuration,
+}
+
 pub async fn provision<C: JetStreamContext>(js: &C, config: &SentryConfig) -> Result<(), C::Error> {
     js.get_or_create_stream(async_nats::jetstream::stream::Config {
         name: config.stream_name.as_str().to_owned(),
@@ -129,6 +143,31 @@ pub fn router<P: JetStreamPublisher, S: ObjectStorePut>(
         .with_state(state)
 }
 
+pub fn runtime_router<P, S, G>(
+    publisher: ClaimCheckPublisher<P, S>,
+    config: &SentryConfig,
+    integration_id: SourceIntegrationId,
+    credential_resolver: RuntimeCredentialResolver<G>,
+) -> Router
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    let state = RuntimeAppState {
+        publisher,
+        credential_resolver,
+        runtime_key: RuntimeIntegrationKey::new(SourceKind::Sentry, &integration_id),
+        subject_prefix: config.subject_prefix.clone(),
+        nats_ack_timeout: config.nats_ack_timeout,
+    };
+
+    Router::new()
+        .route("/webhook", post(handle_runtime_webhook::<P, S, G>))
+        .layer(DefaultBodyLimit::max(HTTP_BODY_SIZE_MAX.as_usize()))
+        .with_state(state)
+}
+
 #[instrument(
     name = SENTRY_WEBHOOK,
     skip_all,
@@ -154,6 +193,75 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
         return StatusCode::UNAUTHORIZED;
     }
 
+    publish_verified_webhook(
+        state.publisher,
+        state.subject_prefix,
+        state.nats_ack_timeout,
+        headers,
+        body,
+    )
+    .await
+}
+
+#[instrument(
+    name = SENTRY_WEBHOOK,
+    skip_all,
+    fields(
+        resource = tracing::field::Empty,
+        action = tracing::field::Empty,
+        request_id = tracing::field::Empty,
+        subject = tracing::field::Empty,
+    )
+)]
+async fn handle_runtime_webhook<P, S, G>(
+    State(state): State<RuntimeAppState<P, S, G>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> StatusCode
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    let Some(signature) = header_value(&headers, HEADER_SIGNATURE) else {
+        warn!("Missing Sentry-Hook-Signature header");
+        return StatusCode::UNAUTHORIZED;
+    };
+
+    let client_secret = match state
+        .credential_resolver
+        .resolve_plaintext(&state.runtime_key, CredentialKind::ClientSecret)
+        .await
+    {
+        Ok(secret) => secret,
+        Err(error) => {
+            warn!(reason = %error, "Sentry runtime credential resolution failed");
+            return error.http_status();
+        }
+    };
+
+    if let Err(error) = signature::verify(client_secret.as_str(), &body, signature) {
+        warn!(reason = %error, "Sentry webhook signature validation failed");
+        return StatusCode::UNAUTHORIZED;
+    }
+
+    publish_verified_webhook(
+        state.publisher,
+        state.subject_prefix,
+        state.nats_ack_timeout,
+        headers,
+        body,
+    )
+    .await
+}
+
+async fn publish_verified_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
+    publisher: ClaimCheckPublisher<P, S>,
+    subject_prefix: NatsToken,
+    nats_ack_timeout: NonZeroDuration,
+    headers: HeaderMap,
+    body: Bytes,
+) -> StatusCode {
     let Some(resource) = header_value(&headers, HEADER_RESOURCE) else {
         warn!("Missing Sentry-Hook-Resource header");
         return StatusCode::BAD_REQUEST;
@@ -191,7 +299,7 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
         }
     };
 
-    let subject = format!("{}.{}.{}", state.subject_prefix, resource.as_str(), action_token);
+    let subject = format!("{}.{}.{}", subject_prefix, resource.as_str(), action_token);
     let span = tracing::Span::current();
     span.record(trogon_semconv::attribute::RESOURCE, resource.as_str());
     span.record(trogon_semconv::attribute::ACTION, &payload.action);
@@ -205,9 +313,8 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
     nats_headers.insert(NATS_HEADER_REQUEST_ID, request_id.as_str());
     nats_headers.insert(NATS_HEADER_TIMESTAMP, timestamp.as_str());
 
-    let outcome = state
-        .publisher
-        .publish_event(subject, nats_headers, body, state.nats_ack_timeout.into())
+    let outcome = publisher
+        .publish_event(subject, nats_headers, body, nats_ack_timeout.into())
         .await;
 
     outcome_to_status(outcome)

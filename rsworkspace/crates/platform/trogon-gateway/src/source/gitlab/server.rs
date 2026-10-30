@@ -22,6 +22,11 @@ use trogon_nats::jetstream::{
 use trogon_semconv::span::GITLAB_WEBHOOK;
 use trogon_std::NonZeroDuration;
 
+use crate::credential::commands::domain::{CredentialKind, SourceKind};
+use crate::credential_runtime_projection::{RuntimeCredentialResolver, RuntimeIntegrationKey};
+use crate::secret_store::{SecretStoreError, SecretStoreGet};
+use crate::source_integration_id::SourceIntegrationId;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RejectReason {
     MissingEventHeader,
@@ -83,6 +88,16 @@ struct AppState<P: JetStreamPublisher, S: ObjectStorePut> {
     timestamp_tolerance: NonZeroDuration,
 }
 
+#[derive(Clone)]
+struct RuntimeAppState<P: JetStreamPublisher, S: ObjectStorePut, G> {
+    publisher: ClaimCheckPublisher<P, S>,
+    credential_resolver: RuntimeCredentialResolver<G>,
+    runtime_key: RuntimeIntegrationKey,
+    subject_prefix: NatsToken,
+    nats_ack_timeout: NonZeroDuration,
+    timestamp_tolerance: NonZeroDuration,
+}
+
 pub async fn provision<C: JetStreamContext>(js: &C, config: &GitlabConfig) -> Result<(), C::Error> {
     // Reconciled rather than created-if-absent: `duplicate_window` is the
     // replay bound paired with the signature timestamp tolerance below, so a
@@ -130,6 +145,32 @@ pub fn router<P: JetStreamPublisher, S: ObjectStorePut>(
         .with_state(state)
 }
 
+pub fn runtime_router<P, S, G>(
+    publisher: ClaimCheckPublisher<P, S>,
+    config: &GitlabConfig,
+    integration_id: SourceIntegrationId,
+    credential_resolver: RuntimeCredentialResolver<G>,
+) -> Router
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    let state = RuntimeAppState {
+        publisher,
+        credential_resolver,
+        runtime_key: RuntimeIntegrationKey::new(SourceKind::Gitlab, &integration_id),
+        subject_prefix: config.subject_prefix.clone(),
+        nats_ack_timeout: config.nats_ack_timeout,
+        timestamp_tolerance: config.timestamp_tolerance,
+    };
+
+    Router::new()
+        .route("/webhook", post(handle_runtime_webhook::<P, S, G>))
+        .layer(DefaultBodyLimit::max(HTTP_BODY_SIZE_MAX.as_usize()))
+        .with_state(state)
+}
+
 fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
     State(state): State<AppState<P, S>>,
     headers: HeaderMap,
@@ -160,15 +201,91 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
         }
     };
 
+    publish_verified_webhook(
+        state.publisher,
+        state.subject_prefix,
+        state.nats_ack_timeout,
+        &verified,
+        headers,
+        body,
+    )
+    .await
+}
+
+#[instrument(
+    name = GITLAB_WEBHOOK,
+    skip_all,
+    fields(
+        event = tracing::field::Empty,
+        webhook_uuid = tracing::field::Empty,
+        subject = tracing::field::Empty,
+    )
+)]
+async fn handle_runtime_webhook<P, S, G>(
+    State(state): State<RuntimeAppState<P, S, G>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> StatusCode
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    let signing_token = match state
+        .credential_resolver
+        .resolve_plaintext(&state.runtime_key, CredentialKind::SigningToken)
+        .await
+    {
+        Ok(secret) => secret,
+        Err(error) => {
+            warn!(reason = %error, "GitLab runtime credential resolution failed");
+            return error.http_status();
+        }
+    };
+    let signing_token = match GitLabSigningToken::new(signing_token.as_str()) {
+        Ok(token) => token,
+        Err(error) => {
+            warn!(reason = %error, "GitLab runtime signing token is invalid");
+            return StatusCode::INTERNAL_SERVER_ERROR;
+        }
+    };
+
+    let verified = match signature::verify(&headers, &body, &signing_token, state.timestamp_tolerance) {
+        Ok(verified) => verified,
+        Err(error) => {
+            warn!(reason = %error, "GitLab webhook signature validation failed");
+            return StatusCode::UNAUTHORIZED;
+        }
+    };
+
+    publish_verified_webhook(
+        state.publisher,
+        state.subject_prefix,
+        state.nats_ack_timeout,
+        &verified,
+        headers,
+        body,
+    )
+    .await
+}
+
+async fn publish_verified_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
+    publisher: ClaimCheckPublisher<P, S>,
+    subject_prefix: NatsToken,
+    nats_ack_timeout: NonZeroDuration,
+    verified: &signature::VerifiedWebhook,
+    headers: HeaderMap,
+    body: Bytes,
+) -> StatusCode {
     let Some(raw_event) = headers.get(HEADER_EVENT).and_then(|v| v.to_str().ok()) else {
         warn!("Missing X-GitLab-Event header");
         return publish_unroutable(
-            &state.publisher,
-            &state.subject_prefix,
-            &verified,
+            &publisher,
+            &subject_prefix,
+            verified,
             RejectReason::MissingEventHeader,
             body,
-            state.nats_ack_timeout,
+            nats_ack_timeout,
         )
         .await;
     };
@@ -182,12 +299,12 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
     let Ok(event_token) = NatsToken::new(&event_token) else {
         warn!(raw_event, "X-GitLab-Event normalized to invalid NATS token");
         return publish_unroutable(
-            &state.publisher,
-            &state.subject_prefix,
-            &verified,
+            &publisher,
+            &subject_prefix,
+            verified,
             RejectReason::InvalidEventToken,
             body,
-            state.nats_ack_timeout,
+            nats_ack_timeout,
         )
         .await;
     };
@@ -197,7 +314,7 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
     let idempotency_key = headers.get(HEADER_IDEMPOTENCY_KEY).and_then(|v| v.to_str().ok());
     let instance = headers.get(HEADER_INSTANCE).and_then(|v| v.to_str().ok());
 
-    let subject = format!("{}.{}", state.subject_prefix, event_token);
+    let subject = format!("{}.{}", subject_prefix, event_token);
 
     let span = tracing::Span::current();
     span.record(trogon_semconv::attribute::EVENT, raw_event);
@@ -228,9 +345,8 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
         nats_headers.insert(NATS_HEADER_INSTANCE, inst);
     }
 
-    let outcome = state
-        .publisher
-        .publish_event(subject, nats_headers, body, state.nats_ack_timeout.into())
+    let outcome = publisher
+        .publish_event(subject, nats_headers, body, nats_ack_timeout.into())
         .await;
 
     outcome_to_status(outcome)

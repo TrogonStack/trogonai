@@ -5,9 +5,9 @@
 //! Connects to Discord via the Gateway WebSocket using twilight-gateway.
 //! Every gateway event is serialized to JSON and published to NATS on
 //! `{prefix}.{event_name}` subjects (e.g. `discord.message_create`,
-//! `discord.guild_member_add`). No filtering, no access control — dumb pipe.
+//! `discord.guild_member_add`). No filtering, no access control: dumb pipe.
 //!
-//! Requires `DISCORD_BOT_TOKEN`.
+//! The bot token can come from static config or the runtime credential registry.
 
 pub mod config;
 pub mod constants;
