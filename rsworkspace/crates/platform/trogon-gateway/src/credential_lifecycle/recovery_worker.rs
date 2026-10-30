@@ -130,6 +130,9 @@ impl CredentialRecoveryReport {
     }
 
     fn metric_outcome(&self) -> &'static str {
+        if self.stuck_recovery {
+            return "stuck";
+        }
         if self.retry_delayed {
             return "retry_delayed";
         }
@@ -144,9 +147,6 @@ impl CredentialRecoveryReport {
         }
         if self.planned_recoveries > 0 || self.recovered_writes > 0 || self.recovered_rotations > 0 {
             return "recovered";
-        }
-        if self.stuck_recovery {
-            return "stuck";
         }
         "idle"
     }

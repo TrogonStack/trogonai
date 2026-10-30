@@ -459,7 +459,7 @@ fn recovery_plan_builds_rotation_activation_command_for_pending_rotation() {
     assert_eq!(
         command,
         Some(CredentialActivationRecoveryCommand::Rotation(
-            RecoverCredentialRotationActivation::new(credential_ref(2))
+            RecoverCredentialRotationActivation::new(credential_ref(1))
         ))
     );
 }
@@ -871,6 +871,42 @@ async fn recover_write_activation_records_write_failure_when_the_secret_is_missi
 }
 
 #[tokio::test]
+async fn recover_rotation_activation_records_rotation_failure_when_the_secret_is_missing() {
+    let events = HandlerTestStreamStore::default();
+    let secrets = MockOpenBaoSecretStore::default();
+    let handler = CredentialHandler::new(events.clone(), secrets.clone());
+    let state = handler.put(put_command("initial-secret")).await.unwrap().into_state();
+    let Some(CredentialStateSnapshotCase::Active(active)) = state.state.as_ref() else {
+        panic!("expected active credential");
+    };
+    let (active_metadata, _) = decode_active_state("active", active).unwrap();
+    events.fail_append_at(4);
+    handler
+        .rotate(RotateCredential::new(
+            active_metadata.reference().clone(),
+            SecretString::new("rotated-secret").unwrap(),
+        ))
+        .await
+        .unwrap_err();
+    let empty_handler = CredentialHandler::new(events.clone(), MockOpenBaoSecretStore::default());
+
+    let outcome = empty_handler
+        .recover_rotation_activation(RecoverCredentialRotationActivation::new(
+            active_metadata.reference().clone(),
+        ))
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        outcome.into_state().state.as_ref(),
+        Some(CredentialStateSnapshotCase::Active(_))
+    ));
+    let decoded = events.decoded_events();
+    assert_eq!(decoded.len(), 4);
+    assert!(matches!(decoded[3].event, Some(CredentialEventCase::RotationFailed(_))));
+}
+
+#[tokio::test]
 async fn rotate_records_request_rotates_secret_and_activates_metadata() {
     let events = HandlerTestStreamStore::default();
     let secrets = MockOpenBaoSecretStore::default();
@@ -1149,7 +1185,9 @@ async fn recover_rotation_activation_records_missing_rotation_without_plaintext(
     );
 
     let outcome = handler
-        .recover_rotation_activation(RecoverCredentialRotationActivation::new(rotated_ref.clone()))
+        .recover_rotation_activation(RecoverCredentialRotationActivation::new(
+            active_metadata.reference().clone(),
+        ))
         .await
         .unwrap();
 
@@ -1283,7 +1321,9 @@ async fn recover_rotation_activation_waits_for_an_in_flight_write_on_the_same_cr
         .unwrap_err();
 
     let write_guard = handler.write_locks.acquire(rotated_ref.id()).await;
-    let recover = handler.recover_rotation_activation(RecoverCredentialRotationActivation::new(rotated_ref.clone()));
+    let recover = handler.recover_rotation_activation(RecoverCredentialRotationActivation::new(
+        active_metadata.reference().clone(),
+    ));
     tokio::pin!(recover);
     assert!(
         tokio::time::timeout(std::time::Duration::from_millis(50), &mut recover)

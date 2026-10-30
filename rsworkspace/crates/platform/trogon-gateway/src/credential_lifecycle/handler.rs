@@ -150,12 +150,12 @@ impl RecoverCredentialWriteActivation {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct RecoverCredentialRotationActivation {
-    credential_ref: CredentialRef,
+    active_ref: CredentialRef,
 }
 
 impl RecoverCredentialRotationActivation {
-    pub(crate) fn new(credential_ref: CredentialRef) -> Self {
-        Self { credential_ref }
+    pub(crate) fn new(active_ref: CredentialRef) -> Self {
+        Self { active_ref }
     }
 }
 
@@ -285,7 +285,7 @@ pub(crate) fn activation_recovery_command(
             let current_ref =
                 active_credential_ref(active).map_err(CredentialActivationRecoveryPlanError::InvalidState)?;
             Ok(Some(CredentialActivationRecoveryCommand::Rotation(
-                RecoverCredentialRotationActivation::new(current_ref.next_version()),
+                RecoverCredentialRotationActivation::new(current_ref),
             )))
         }
         None
@@ -582,12 +582,24 @@ where
         &self,
         command: RecoverCredentialRotationActivation,
     ) -> HandlerResult<EventStore, <Secrets as SecretStoreMetadata>::Error> {
-        let _write_guard = self.write_locks.acquire(command.credential_ref.id()).await;
-        let metadata = self
-            .secrets
-            .metadata(&command.credential_ref)
-            .await
-            .map_err(|source| CredentialHandlerError::SecretMetadata { source })?;
+        let _write_guard = self.write_locks.acquire(command.active_ref.id()).await;
+        let metadata = match self.secrets.metadata(&command.active_ref.next_version()).await {
+            Ok(metadata) => metadata,
+            Err(source @ SecretStoreError::Missing { .. }) => {
+                let reason = failure_reason(&source);
+                let result = CommandExecution::new(
+                    &self.event_store,
+                    &RecordCredentialRotationFailure::new(command.active_ref, reason),
+                )
+                .with_snapshot(&self.event_store)
+                .with_task_runtime(TokioSnapshotTaskScheduler)
+                .execute()
+                .await
+                .map_err(|source| CredentialHandlerError::RecordRotationFailure { source })?;
+                return Ok(CredentialHandlerOutcome::new(result.state, result.stream_position));
+            }
+            Err(source) => return Err(CredentialHandlerError::SecretMetadata { source }),
+        };
         let result = CommandExecution::new(&self.event_store, &ActivateCredentialRotation::new(metadata))
             .with_snapshot(&self.event_store)
             .with_task_runtime(TokioSnapshotTaskScheduler)

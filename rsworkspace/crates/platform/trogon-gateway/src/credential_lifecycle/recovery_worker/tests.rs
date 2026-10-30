@@ -816,6 +816,15 @@ fn recovery_report_metric_outcome_is_bounded() {
         .metric_outcome(),
         "stuck"
     );
+    assert_eq!(
+        CredentialRecoveryReport {
+            retry_delayed: true,
+            stuck_recovery: true,
+            ..Default::default()
+        }
+        .metric_outcome(),
+        "stuck"
+    );
     assert_eq!(CredentialRecoveryReport::default().metric_outcome(), "idle");
 }
 
