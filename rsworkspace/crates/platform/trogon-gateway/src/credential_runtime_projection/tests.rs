@@ -736,6 +736,59 @@ async fn registry_applies_revoked_state_incrementally_and_invalidates_cache() {
 }
 
 #[tokio::test]
+async fn a_stale_active_state_does_not_republish_a_revoked_credential() {
+    let store = MockOpenBaoSecretStore::default();
+    let credential = put_bot_token(&store, "Bot token").await;
+    let metadata = store.metadata(&credential).await.unwrap();
+    let registry = RuntimeCredentialRegistry::default();
+    let resolver = registry.resolver(store.clone());
+    let active_state = build_state([
+        write_requested(&credential),
+        v1::CredentialEvent {
+            event: Some(activated_to_proto(&metadata).into()),
+        },
+    ]);
+    let revoked_state = evolve(active_state.clone(), &revoked(&credential)).unwrap();
+
+    registry.apply_state(&revoked_state, position(3)).await.unwrap();
+    registry.apply_state(&active_state, position(2)).await.unwrap();
+
+    assert!(matches!(
+        resolver.resolve(&key(), CredentialKind::BotToken).await,
+        Err(RuntimeCredentialError::IntegrationNotFound { .. })
+    ));
+}
+
+#[tokio::test]
+async fn a_stale_pending_write_state_does_not_evict_a_live_credential() {
+    let store = MockOpenBaoSecretStore::default();
+    let credential = put_bot_token(&store, "Bot token").await;
+    let metadata = store.metadata(&credential).await.unwrap();
+    let registry = RuntimeCredentialRegistry::default();
+    let resolver = registry.resolver(store.clone());
+    let pending_state = build_state([write_requested(&credential)]);
+    let active_state = evolve(
+        pending_state.clone(),
+        &v1::CredentialEvent {
+            event: Some(activated_to_proto(&metadata).into()),
+        },
+    )
+    .unwrap();
+
+    registry.apply_state(&active_state, position(2)).await.unwrap();
+    registry.apply_state(&pending_state, position(1)).await.unwrap();
+
+    assert_eq!(
+        resolver
+            .resolve_plaintext(&key(), CredentialKind::BotToken)
+            .await
+            .unwrap()
+            .as_str(),
+        "Bot token"
+    );
+}
+
+#[tokio::test]
 async fn activating_one_credential_leaves_other_cached_secrets_in_place() {
     let store = MockOpenBaoSecretStore::default();
     let first = put_bot_token(&store, "Bot first").await;

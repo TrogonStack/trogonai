@@ -793,53 +793,171 @@ fn decode_projection_checkpoint(
     ))
 }
 
+#[derive(Default)]
+struct RuntimeProjectionTable {
+    integrations: BTreeMap<RuntimeIntegrationKey, RuntimeIntegrationProjection>,
+    applied_positions: BTreeMap<CredentialId, StreamPosition>,
+}
+
+impl RuntimeProjectionTable {
+    fn is_stale(&self, change: &RuntimeProjectionChange, position: StreamPosition) -> bool {
+        change.credential_ids().any(|id| {
+            self.applied_positions
+                .get(id)
+                .is_some_and(|applied| *applied >= position)
+        })
+    }
+
+    fn record(&mut self, change: &RuntimeProjectionChange, position: StreamPosition) {
+        for id in change.credential_ids() {
+            self.applied_positions.insert(id.clone(), position);
+        }
+    }
+
+    fn remove_credential(&mut self, key: &RuntimeIntegrationKey, kind: CredentialKind) -> Option<CredentialRef> {
+        let projection = self.integrations.get_mut(key)?;
+        let removed = projection.remove_credential(kind);
+        if projection.is_empty() {
+            self.integrations.remove(key);
+        }
+        removed
+    }
+
+    fn remove_credential_id(&mut self, id: &CredentialId) -> Vec<CredentialRef> {
+        let mut removed = Vec::new();
+        for projection in self.integrations.values_mut() {
+            let kinds = projection
+                .credentials
+                .iter()
+                .filter(|(_, credential)| credential.id() == id)
+                .map(|(kind, _)| *kind)
+                .collect::<Vec<_>>();
+            for kind in kinds {
+                removed.extend(projection.remove_credential(kind));
+            }
+        }
+        self.integrations.retain(|_, projection| !projection.is_empty());
+        removed
+    }
+}
+
+enum RuntimeProjectionChange {
+    Publish(RuntimeIntegrationProjection),
+    Retire {
+        key: RuntimeIntegrationKey,
+        credential: CredentialRef,
+    },
+    Unpublish(CredentialId),
+}
+
+impl RuntimeProjectionChange {
+    fn from_state(
+        state: &state_v1::CredentialStateSnapshot,
+        stream_position: StreamPosition,
+    ) -> Result<Option<Self>, RuntimeProjectionRefreshError> {
+        if let Some(projection) = RuntimeIntegrationProjection::from_credential_state(state, stream_position.as_u64())
+            .map_err(|source| RuntimeProjectionRefreshError::BuildProjection { source })?
+        {
+            return Ok(Some(Self::Publish(projection)));
+        }
+        if let Some(credential) = post_revocation_credential_ref(state)
+            .map_err(|source| RuntimeProjectionRefreshError::InvalidEvent { source })?
+        {
+            let key = RuntimeIntegrationKey::from_credential_ref(&credential)
+                .map_err(|source| RuntimeProjectionRefreshError::BuildProjection { source })?;
+            return Ok(Some(Self::Retire { key, credential }));
+        }
+        Ok(unpublished_credential_id(state)
+            .map_err(|source| RuntimeProjectionRefreshError::InvalidEvent { source })?
+            .map(Self::Unpublish))
+    }
+
+    fn credential_ids(&self) -> Box<dyn Iterator<Item = &CredentialId> + '_> {
+        match self {
+            Self::Publish(projection) => Box::new(projection.credentials.values().map(CredentialRef::id)),
+            Self::Retire { credential, .. } => Box::new(std::iter::once(credential.id())),
+            Self::Unpublish(id) => Box::new(std::iter::once(id)),
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct InMemoryRuntimeProjectionRepository {
-    projections: Arc<Mutex<BTreeMap<RuntimeIntegrationKey, RuntimeIntegrationProjection>>>,
+    table: Arc<Mutex<RuntimeProjectionTable>>,
 }
 
 impl InMemoryRuntimeProjectionRepository {
     pub async fn upsert(&self, projection: RuntimeIntegrationProjection) {
-        self.projections
+        self.table
             .lock()
             .await
+            .integrations
             .insert(projection.key().clone(), projection);
     }
 
     pub async fn replace_all(&self, projections: BTreeMap<RuntimeIntegrationKey, RuntimeIntegrationProjection>) {
-        *self.projections.lock().await = projections;
+        let mut table = self.table.lock().await;
+        table.applied_positions.clear();
+        for projection in projections.values() {
+            if let Ok(position) = StreamPosition::try_new(projection.version()) {
+                for credential in projection.credentials.values() {
+                    table.applied_positions.insert(credential.id().clone(), position);
+                }
+            }
+        }
+        table.integrations = projections;
     }
 
     pub async fn len(&self) -> usize {
-        self.projections.lock().await.len()
+        self.table.lock().await.integrations.len()
     }
 
     pub async fn remove(&self, key: &RuntimeIntegrationKey) {
-        self.projections.lock().await.remove(key);
+        self.table.lock().await.integrations.remove(key);
     }
 
     pub async fn merge(
         &self,
         projection: RuntimeIntegrationProjection,
     ) -> Result<Vec<CredentialRef>, RuntimeProjectionRefreshError> {
-        let mut projections = self.projections.lock().await;
-        merge_projection(&mut projections, projection)
+        merge_projection(&mut self.table.lock().await.integrations, projection)
     }
 
     pub async fn remove_credential(&self, key: &RuntimeIntegrationKey, kind: CredentialKind) -> Option<CredentialRef> {
-        let mut projections = self.projections.lock().await;
-        let projection = projections.get_mut(key)?;
-        let removed = projection.remove_credential(kind);
-        if projection.is_empty() {
-            projections.remove(key);
+        self.table.lock().await.remove_credential(key, kind)
+    }
+
+    async fn apply_change(
+        &self,
+        change: RuntimeProjectionChange,
+        position: StreamPosition,
+    ) -> Result<Option<Vec<CredentialRef>>, RuntimeProjectionRefreshError> {
+        let mut table = self.table.lock().await;
+        if table.is_stale(&change, position) {
+            return Ok(None);
         }
-        removed
+        let affected = match &change {
+            RuntimeProjectionChange::Publish(projection) => {
+                let mut affected = projection.credentials.values().cloned().collect::<Vec<_>>();
+                affected.extend(merge_projection(&mut table.integrations, projection.clone())?);
+                affected
+            }
+            RuntimeProjectionChange::Retire { key, credential } => {
+                let mut affected = vec![credential.clone()];
+                affected.extend(table.remove_credential(key, credential.kind()));
+                affected
+            }
+            RuntimeProjectionChange::Unpublish(id) => table.remove_credential_id(id),
+        };
+        table.record(&change, position);
+        Ok(Some(affected))
     }
 
     async fn credential_ids(&self) -> BTreeSet<CredentialId> {
-        self.projections
+        self.table
             .lock()
             .await
+            .integrations
             .values()
             .flat_map(|projection| {
                 projection
@@ -851,25 +969,11 @@ impl InMemoryRuntimeProjectionRepository {
     }
 
     async fn remove_credential_id(&self, id: &CredentialId) -> Vec<CredentialRef> {
-        let mut projections = self.projections.lock().await;
-        let mut removed = Vec::new();
-        for projection in projections.values_mut() {
-            let kinds = projection
-                .credentials
-                .iter()
-                .filter(|(_, credential)| credential.id() == id)
-                .map(|(kind, _)| *kind)
-                .collect::<Vec<_>>();
-            for kind in kinds {
-                removed.extend(projection.remove_credential(kind));
-            }
-        }
-        projections.retain(|_, projection| !projection.is_empty());
-        removed
+        self.table.lock().await.remove_credential_id(id)
     }
 
     async fn get(&self, key: &RuntimeIntegrationKey) -> Option<RuntimeIntegrationProjection> {
-        self.projections.lock().await.get(key).cloned()
+        self.table.lock().await.integrations.get(key).cloned()
     }
 }
 
@@ -958,38 +1062,7 @@ impl RuntimeCredentialRegistry {
         state: &state_v1::CredentialStateSnapshot,
         stream_position: StreamPosition,
     ) -> Result<(), RuntimeProjectionRefreshError> {
-        if let Some(projection) = RuntimeIntegrationProjection::from_credential_state(state, stream_position.as_u64())
-            .map_err(|source| RuntimeProjectionRefreshError::BuildProjection { source })?
-        {
-            let mut affected = projection.credentials.values().cloned().collect::<Vec<_>>();
-            affected.extend(self.projections.merge(projection).await?);
-            invalidate_all(&self.cache, &affected).await;
-            return Ok(());
-        }
-
-        if let Some(credential_ref) = post_revocation_credential_ref(state)
-            .map_err(|source| RuntimeProjectionRefreshError::InvalidEvent { source })?
-        {
-            self.remove_credential_ref(&credential_ref).await?;
-            return Ok(());
-        }
-
-        if let Some(credential_id) =
-            unpublished_credential_id(state).map_err(|source| RuntimeProjectionRefreshError::InvalidEvent { source })?
-        {
-            for evicted in self.projections.remove_credential_id(&credential_id).await {
-                self.cache.invalidate(&evicted).await;
-            }
-        }
-        Ok(())
-    }
-
-    async fn remove_credential_ref(&self, credential: &CredentialRef) -> Result<(), RuntimeProjectionRefreshError> {
-        self.cache.invalidate(credential).await;
-        let key = RuntimeIntegrationKey::from_credential_ref(credential)
-            .map_err(|source| RuntimeProjectionRefreshError::BuildProjection { source })?;
-        self.projections.remove_credential(&key, credential.kind()).await;
-        Ok(())
+        apply_state_to_projection(&self.projections, &self.cache, state, stream_position, None).await
     }
 }
 
@@ -1224,13 +1297,14 @@ where
     let mut transient_failure = None;
     for (credential_id, version) in changed_credentials {
         let revoked_event_recorded_at = revoked_recorded_at.get(&credential_id).copied();
+        let changed_position = position(version)?;
         let applied = match load_credential_state(event_store, &credential_id).await {
-            Ok(state) => {
+            Ok((state, loaded_position)) => {
                 apply_state_to_projection(
                     projections,
                     cache,
                     &state,
-                    position(version)?,
+                    loaded_position.map_or(changed_position, |loaded| loaded.max(changed_position)),
                     revoked_event_recorded_at,
                 )
                 .await
@@ -1270,7 +1344,7 @@ fn is_credential_event_subject(stream_id: &str) -> bool {
 async fn load_credential_state<EventStore>(
     event_store: &EventStore,
     credential_id: &CredentialId,
-) -> Result<state_v1::CredentialStateSnapshot, RuntimeProjectionRefreshError>
+) -> Result<(state_v1::CredentialStateSnapshot, Option<StreamPosition>), RuntimeProjectionRefreshError>
 where
     EventStore: StreamRead<str>,
     <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
@@ -1286,7 +1360,9 @@ where
             source: Box::new(source),
         })?;
     let mut state = initial_state();
+    let mut last_position = stream.current_position;
     for event in stream.events {
+        last_position = last_position.max(Some(event.stream_position));
         let EventDecodeOutcome::Decoded(event) = event
             .decode::<v1::CredentialEvent>()
             .map_err(|source| RuntimeProjectionRefreshError::DecodeEvent { source })?
@@ -1295,7 +1371,7 @@ where
         };
         state = evolve(state, &event).map_err(|source| RuntimeProjectionRefreshError::ReplayStream { source })?;
     }
-    Ok(state)
+    Ok((state, last_position))
 }
 
 async fn invalidate_all(cache: &RuntimeCredentialCache, credentials: &[CredentialRef]) {
@@ -1311,36 +1387,17 @@ async fn apply_state_to_projection(
     stream_position: StreamPosition,
     revoked_event_recorded_at: Option<DateTime<Utc>>,
 ) -> Result<(), RuntimeProjectionRefreshError> {
-    if let Some(projection) = RuntimeIntegrationProjection::from_credential_state(state, stream_position.as_u64())
-        .map_err(|source| RuntimeProjectionRefreshError::BuildProjection { source })?
-    {
-        let mut affected = projection.credentials.values().cloned().collect::<Vec<_>>();
-        affected.extend(projections.merge(projection).await?);
-        invalidate_all(cache, &affected).await;
+    let Some(change) = RuntimeProjectionChange::from_state(state, stream_position)? else {
         return Ok(());
-    }
-
-    if let Some(credential_ref) = post_revocation_credential_ref(state)
-        .map_err(|source| RuntimeProjectionRefreshError::InvalidEvent { source })?
-    {
-        cache.invalidate(&credential_ref).await;
-        let key = RuntimeIntegrationKey::from_credential_ref(&credential_ref)
-            .map_err(|source| RuntimeProjectionRefreshError::BuildProjection { source })?;
-        projections.remove_credential(&key, credential_ref.kind()).await;
-        if matches!(state.state, Some(CredentialStateSnapshotCase::Revoked(_)))
-            && let Some(recorded_at) = revoked_event_recorded_at
-        {
-            runtime_projection_metrics().record_revocation_latency(recorded_at);
-        }
+    };
+    let Some(affected) = projections.apply_change(change, stream_position).await? else {
         return Ok(());
-    }
-
-    if let Some(credential_id) =
-        unpublished_credential_id(state).map_err(|source| RuntimeProjectionRefreshError::InvalidEvent { source })?
+    };
+    invalidate_all(cache, &affected).await;
+    if matches!(state.state, Some(CredentialStateSnapshotCase::Revoked(_)))
+        && let Some(recorded_at) = revoked_event_recorded_at
     {
-        for evicted in projections.remove_credential_id(&credential_id).await {
-            cache.invalidate(&evicted).await;
-        }
+        runtime_projection_metrics().record_revocation_latency(recorded_at);
     }
     Ok(())
 }
