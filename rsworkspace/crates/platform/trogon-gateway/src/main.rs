@@ -383,6 +383,12 @@ async fn register_telegram_webhooks<C, E, Register, G>(
                 }
                 if current.is_none() {
                     registrations.record(integration.id.clone(), None);
+                    warn!(
+                        source = "telegram",
+                        integration = %integration.id,
+                        "Telegram runtime webhook secret is not provisioned, skipping registration"
+                    );
+                    continue;
                 }
                 current
             }

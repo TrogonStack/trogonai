@@ -136,7 +136,7 @@ async fn telegram_registration_uses_the_runtime_secret_and_fails_closed_without_
         &telegram_integrations(),
         Some(&unprovisioned),
         &mut TelegramWebhookRegistrations::default(),
-        || Ok::<_, io::Error>(()),
+        || -> Result<(), io::Error> { panic!("an unprovisioned secret needs no client") },
         async |config, _| {
             registered.lock().await.push(config.webhook_secret.as_str().to_owned());
             Ok(())
@@ -144,6 +144,38 @@ async fn telegram_registration_uses_the_runtime_secret_and_fails_closed_without_
     )
     .await;
     assert!(registered.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn telegram_registration_reports_an_unprovisioned_runtime_secret_once() {
+    let events = trogon_std::log_capture::CapturedEvents::new();
+    let _guard = events.install(trogon_std::log_capture::LevelFilter::WARN);
+    let unprovisioned = telegram_runtime_resolver("other", None).await;
+    let mut registrations = TelegramWebhookRegistrations::default();
+    for _ in 0..2 {
+        register_telegram_webhooks(
+            &telegram_integrations(),
+            Some(&unprovisioned),
+            &mut registrations,
+            || -> Result<(), io::Error> { panic!("an unprovisioned secret needs no client") },
+            async |_, _| -> Result<(), source::telegram::registration::RegistrationError> {
+                panic!("an unprovisioned secret is never registered")
+            },
+        )
+        .await;
+    }
+    let records = events.events();
+    let skipped: Vec<_> = records
+        .iter()
+        .filter(|event| {
+            event.message() == Some("Telegram runtime webhook secret is not provisioned, skipping registration")
+        })
+        .map(|event| event.field("integration"))
+        .collect();
+    assert_eq!(skipped, [Some("first"), Some("second")]);
+    assert!(records.iter().all(
+        |event| event.message() != Some("Telegram runtime webhook secret resolution failed, skipping registration")
+    ));
 }
 
 #[tokio::test]
