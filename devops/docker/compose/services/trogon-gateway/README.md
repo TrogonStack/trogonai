@@ -308,8 +308,10 @@ From `devops/docker/compose`:
 
 ```bash
 docker compose up -d openbao
-docker compose exec openbao bao kv put -mount=secret trogonai/manual/copy-in-out value=copy-this-value-in-and-out
-docker compose exec openbao bao kv get -format=json -mount=secret trogonai/manual/copy-in-out
+docker compose exec -e BAO_ADDR=http://127.0.0.1:8200 -e BAO_TOKEN=local-dev-root-token openbao \
+  bao kv put -mount=secret trogonai/manual/copy-in-out value=copy-this-value-in-and-out
+docker compose exec -e BAO_ADDR=http://127.0.0.1:8200 -e BAO_TOKEN=local-dev-root-token openbao \
+  bao kv get -format=json -mount=secret trogonai/manual/copy-in-out
 ```
 
 The JSON output should include:
@@ -356,6 +358,11 @@ TROGON_GATEWAY_CREDENTIAL_MANAGEMENT_ADMIN_TOKEN=local-admin-token
 TROGON_GATEWAY_ENABLE_RUNTIME_GITHUB_CREDENTIALS=true
 ```
 
+The flag switches every configured GitHub integration to runtime credential
+resolution, so the shipped `gateway.toml` integration `local` stops reading its
+webhook secret from `TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET` and resolves it
+from OpenBao instead. The examples below create that credential for `local`.
+
 Then start the stack:
 
 ```bash
@@ -365,30 +372,30 @@ docker compose up --build --remove-orphans
 Create a GitHub webhook secret:
 
 ```bash
-curl -sS -X PUT "http://trogon-gateway.trogonai.orb.local:8080/-/credentials/github/primary/webhook-secret" \
+curl -sS -X PUT "http://trogon-gateway.trogonai.orb.local:8080/-/credentials/github/local/webhook-secret" \
   -H "content-type: application/json" \
   -H "x-trogon-admin-token: local-admin-token" \
-  -H "Idempotency-Key: local-github-primary-webhook-secret-create-1" \
+  -H "Idempotency-Key: local-github-local-webhook-secret-create-1" \
   -d '{"owner_id":"tenant-1","secret":"copy-this-value-in-and-out"}'
 ```
 
 Rotate it:
 
 ```bash
-curl -sS -X POST "http://trogon-gateway.trogonai.orb.local:8080/-/credentials/github/primary/webhook-secret/rotations" \
+curl -sS -X POST "http://trogon-gateway.trogonai.orb.local:8080/-/credentials/github/local/webhook-secret/rotations" \
   -H "content-type: application/json" \
   -H "x-trogon-admin-token: local-admin-token" \
-  -H "Idempotency-Key: local-github-primary-webhook-secret-rotate-1" \
+  -H "Idempotency-Key: local-github-local-webhook-secret-rotate-1" \
   -d '{"owner_id":"tenant-1","version":1,"secret":"rotated-copy-this-value-in-and-out"}'
 ```
 
 Revoke the rotated version:
 
 ```bash
-curl -sS -X DELETE "http://trogon-gateway.trogonai.orb.local:8080/-/credentials/github/primary/webhook-secret" \
+curl -sS -X DELETE "http://trogon-gateway.trogonai.orb.local:8080/-/credentials/github/local/webhook-secret" \
   -H "content-type: application/json" \
   -H "x-trogon-admin-token: local-admin-token" \
-  -H "Idempotency-Key: local-github-primary-webhook-secret-revoke-1" \
+  -H "Idempotency-Key: local-github-local-webhook-secret-revoke-1" \
   -d '{"owner_id":"tenant-1","version":2}'
 ```
 
@@ -406,8 +413,9 @@ To inspect an API-created value directly in local OpenBao, use the logical
 credential id from the response as the final path segment:
 
 ```bash
-docker compose exec openbao bao kv get -format=json -mount=secret \
-  "trogonai/tenant-1/credentials/openbao:tenant-1:github/primary:webhook_secret"
+docker compose exec -e BAO_ADDR=http://127.0.0.1:8200 -e BAO_TOKEN=local-dev-root-token openbao \
+  bao kv get -format=json -mount=secret \
+  "trogonai/tenant-1/credentials/openbao:tenant-1:github/local:webhook_secret"
 ```
 
 Do not percent-encode this value for the `bao` CLI. The HTTP adapter URL-encodes

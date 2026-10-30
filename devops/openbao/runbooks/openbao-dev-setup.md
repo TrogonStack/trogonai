@@ -32,12 +32,13 @@ docker compose exec openbao bao status -address=http://127.0.0.1:8200
 `Sealed false` and `Storage Type postgresql` confirm the server is initialized
 and auto-unsealed.
 
-Round-trip a value through the same mount the platform uses:
+Round-trip a value through the same mount the platform uses. The `openbao`
+service does not carry the address or token, so pass both:
 
 ```bash
-docker compose exec openbao \
+docker compose exec -e BAO_ADDR=http://127.0.0.1:8200 -e BAO_TOKEN=local-dev-root-token openbao \
   bao kv put -mount=secret trogonai/manual/roundtrip value=hello
-docker compose exec openbao \
+docker compose exec -e BAO_ADDR=http://127.0.0.1:8200 -e BAO_TOKEN=local-dev-root-token openbao \
   bao kv get -format=json -mount=secret trogonai/manual/roundtrip
 ```
 
@@ -64,7 +65,8 @@ To apply the policies to the compose instance instead:
 cd devops/openbao/policies
 for policy in *.hcl; do
   name="${policy%.hcl}"
-  docker compose -f ../../docker/compose/compose.yml exec -T openbao \
+  docker compose -f ../../docker/compose/compose.yml exec -T \
+    -e BAO_ADDR=http://127.0.0.1:8200 -e BAO_TOKEN=local-dev-root-token openbao \
     bao policy write "${name//-/_}" - < "$policy"
 done
 ```
