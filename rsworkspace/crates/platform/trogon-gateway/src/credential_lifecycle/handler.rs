@@ -538,6 +538,7 @@ where
         &self,
         command: RecoverCredentialWriteActivation,
     ) -> HandlerResult<EventStore, <Secrets as SecretStoreMetadata>::Error> {
+        let _write_guard = self.write_locks.acquire(command.credential_ref.id()).await;
         let metadata = self
             .secrets
             .metadata(&command.credential_ref)
@@ -557,6 +558,7 @@ where
         &self,
         command: RecoverCredentialRotationActivation,
     ) -> HandlerResult<EventStore, <Secrets as SecretStoreMetadata>::Error> {
+        let _write_guard = self.write_locks.acquire(command.credential_ref.id()).await;
         let metadata = self
             .secrets
             .metadata(&command.credential_ref)

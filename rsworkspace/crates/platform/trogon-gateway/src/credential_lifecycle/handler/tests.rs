@@ -1185,6 +1185,60 @@ async fn revoke_waits_for_an_in_flight_write_on_the_same_credential() {
 }
 
 #[tokio::test]
+async fn recover_write_activation_waits_for_an_in_flight_write_on_the_same_credential() {
+    let events = HandlerTestStreamStore::default();
+    let secrets = MockOpenBaoSecretStore::default();
+    let handler = CredentialHandler::new(events.clone(), secrets.clone());
+    events.fail_append_at(2);
+    handler.put(put_command("first-secret")).await.unwrap_err();
+
+    let write_guard = handler.write_locks.acquire(credential_ref(1).id()).await;
+    let recover = handler.recover_write_activation(RecoverCredentialWriteActivation::new(credential_ref(1)));
+    tokio::pin!(recover);
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(50), &mut recover)
+            .await
+            .is_err()
+    );
+    drop(write_guard);
+
+    assert_eq!(recover.await.unwrap().stream_position(), position(2));
+}
+
+#[tokio::test]
+async fn recover_rotation_activation_waits_for_an_in_flight_write_on_the_same_credential() {
+    let events = HandlerTestStreamStore::default();
+    let secrets = MockOpenBaoSecretStore::default();
+    let handler = CredentialHandler::new(events.clone(), secrets.clone());
+    let state = handler.put(put_command("initial-secret")).await.unwrap().into_state();
+    let Some(CredentialStateSnapshotCase::Active(active)) = state.state.as_ref() else {
+        panic!("expected active credential");
+    };
+    let (active_metadata, _) = decode_active_state("active", active).unwrap();
+    let rotated_ref = active_metadata.reference().next_version();
+    events.fail_append_at(4);
+    handler
+        .rotate(RotateCredential::new(
+            active_metadata.reference().clone(),
+            SecretString::new("rotated-secret").unwrap(),
+        ))
+        .await
+        .unwrap_err();
+
+    let write_guard = handler.write_locks.acquire(rotated_ref.id()).await;
+    let recover = handler.recover_rotation_activation(RecoverCredentialRotationActivation::new(rotated_ref.clone()));
+    tokio::pin!(recover);
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(50), &mut recover)
+            .await
+            .is_err()
+    );
+    drop(write_guard);
+
+    assert_eq!(recover.await.unwrap().stream_position(), position(4));
+}
+
+#[tokio::test]
 async fn revoke_retry_records_state_after_append_failure() {
     let events = HandlerTestStreamStore::default();
     let secrets = MockOpenBaoSecretStore::default();
