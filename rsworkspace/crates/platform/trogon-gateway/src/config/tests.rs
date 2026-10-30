@@ -226,13 +226,16 @@ fn github_resolves_with_valid_secret() {
 fn webhook_secret_can_resolve_from_env() {
     let toml = r#"
 [sources.github.integrations.primary.webhook]
-webhook_secret = { env = "PATH" }
+webhook_secret = { env = "TROGON_GATEWAY_TEST_WEBHOOK_SECRET" }
 "#;
     let f = write_toml(toml);
-    let cfg = load(Some(f.path())).expect("load failed");
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set("TROGON_GATEWAY_TEST_WEBHOOK_SECRET", "gh-secret-from-env");
+    let gateway_config = load_config::<GatewayConfig>(Some(f.path())).expect("load failed");
+    let cfg = resolve(gateway_config, &NatsArgs::default(), &env).expect("resolve failed");
     let github = cfg.github.first().expect("github should be configured");
 
-    assert_eq!(github.config.webhook_secret.as_str(), SystemEnv.var("PATH").unwrap());
+    assert_eq!(github.config.webhook_secret.as_str(), "gh-secret-from-env");
 }
 
 #[test]
@@ -263,31 +266,27 @@ webhook_secret = { env = "" }
     );
 }
 
+fn test_scope() -> CredentialScope {
+    static_config_integration_scope(SourceKind::GitHub, &SourceIntegrationId::new("primary").unwrap())
+}
+
 #[test]
-fn secret_marker_with_base64_value_is_decoded_from_env() {
+fn secret_marker_with_base64_value_is_decoded() {
     let env = trogon_std::env::InMemoryEnv::new();
-    env.set(
-        "SECRET",
-        "secret:gcp:service-account:base64:eyJ0eXBlIjoic2VydmljZV9hY2NvdW50In0=",
-    );
-    let value = SecretInput::Env {
-        env: "SECRET".to_string(),
-    }
-    .resolve(&env)
-    .expect("marked base64 secret should resolve");
+    let value =
+        SecretInput::Literal("secret:gcp:service-account:base64:eyJ0eXBlIjoic2VydmljZV9hY2NvdW50In0=".to_string())
+            .resolve(test_scope(), CredentialKind::WebhookSecret, &env)
+            .expect("marked base64 secret should resolve");
 
     assert_eq!(value, "{\"type\":\"service_account\"}");
 }
 
 #[test]
-fn secret_with_base64_prefix_is_decoded_from_env() {
+fn secret_with_base64_prefix_is_decoded() {
     let env = trogon_std::env::InMemoryEnv::new();
-    env.set("SECRET", "base64:eyJsaW5lIjoiYVxuYiJ9Cm11bHRpCmxpbmUK");
-    let value = SecretInput::Env {
-        env: "SECRET".to_string(),
-    }
-    .resolve(&env)
-    .expect("base64 secret should resolve");
+    let value = SecretInput::Literal("base64:eyJsaW5lIjoiYVxuYiJ9Cm11bHRpCmxpbmUK".to_string())
+        .resolve(test_scope(), CredentialKind::WebhookSecret, &env)
+        .expect("base64 secret should resolve");
 
     assert_eq!(value, "{\"line\":\"a\\nb\"}\nmulti\nline\n");
 }
@@ -296,7 +295,7 @@ fn secret_with_base64_prefix_is_decoded_from_env() {
 fn secret_with_invalid_base64_is_rejected_without_echoing_value() {
     let env = trogon_std::env::InMemoryEnv::new();
     let error = SecretInput::Literal("base64:not*base64".to_string())
-        .resolve(&env)
+        .resolve(test_scope(), CredentialKind::WebhookSecret, &env)
         .expect_err("invalid base64 should fail");
 
     assert!(matches!(
@@ -592,6 +591,26 @@ fn byte_count_input_reads_a_whole_number_from_the_environment() {
         env: "SLACK_BODY".to_string(),
     };
     assert_eq!(input.resolve(&env).unwrap().as_usize(), 2048);
+}
+
+#[test]
+fn byte_count_input_decodes_an_encoded_environment_value() {
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set("SLACK_BODY", "base64:MjA0OA==");
+    let input = ByteCountInput::Env {
+        env: "SLACK_BODY".to_string(),
+    };
+    assert_eq!(input.resolve(&env).unwrap().as_usize(), 2048);
+}
+
+#[test]
+fn byte_count_input_rejects_an_invalid_encoded_environment_value() {
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set("SLACK_BODY", "base64:!!!");
+    let input = ByteCountInput::Env {
+        env: "SLACK_BODY".to_string(),
+    };
+    assert!(matches!(input.resolve(&env), Err(ByteCountInputError::InvalidValue(_))));
 }
 
 #[test]
@@ -3244,4 +3263,123 @@ secret_token = "zoom-token"
     let f = write_toml(toml);
     let cfg = load(Some(f.path())).expect("load failed");
     assert!(cfg.zoom.is_empty());
+}
+
+struct NonUnicodeEnv;
+
+impl ReadEnv for NonUnicodeEnv {
+    fn var(&self, _key: &str) -> Result<String, std::env::VarError> {
+        Err(std::env::VarError::NotUnicode(std::ffi::OsString::from("raw")))
+    }
+}
+
+#[test]
+fn byte_count_input_rejects_a_blank_environment_variable_name() {
+    let env = trogon_std::env::InMemoryEnv::new();
+    let input = ByteCountInput::Env { env: "  ".to_string() };
+    assert!(matches!(input.resolve(&env), Err(ByteCountInputError::EmptyEnvName)));
+}
+
+#[test]
+fn byte_count_input_rejects_a_non_unicode_environment_variable() {
+    let input = ByteCountInput::Env {
+        env: "SLACK_BODY".to_string(),
+    };
+    match input.resolve(&NonUnicodeEnv) {
+        Err(ByteCountInputError::InvalidUnicodeEnv { name }) => assert_eq!(name, "SLACK_BODY"),
+        other => panic!("expected InvalidUnicodeEnv, got {other:?}"),
+    }
+}
+
+const WEBHOOK_INTEGRATION_SOURCES: [(&str, &str); 12] = [
+    ("github", "webhook_secret"),
+    ("slack", "signing_secret"),
+    ("telegram", "webhook_secret"),
+    ("twitter", "consumer_secret"),
+    ("gitlab", "signing_token"),
+    ("linear", "webhook_secret"),
+    ("microsoft_graph", "client_state"),
+    ("incidentio", "signing_secret"),
+    ("zoom", "secret_token"),
+    ("notion", "verification_token"),
+    ("sentry", "client_secret"),
+    ("datadog", "webhook_token"),
+];
+
+fn validation_messages(toml: &str) -> Vec<String> {
+    let f = write_toml(toml);
+    match load(Some(f.path())) {
+        Err(ConfigError::Validation(errs)) => errs.iter().map(ToString::to_string).collect(),
+        _ => panic!("expected validation errors"),
+    }
+}
+
+#[test]
+fn every_webhook_source_rejects_an_invalid_integration_id() {
+    for (source, field) in WEBHOOK_INTEGRATION_SOURCES {
+        let toml = format!("[sources.{source}.integrations.\"bad/id\".webhook]\n{field} = \"value\"\n");
+        let errs = validation_messages(&toml);
+        let expected = format!("{source}/bad/id: invalid integration id");
+        assert!(errs.iter().any(|e| e.contains(&expected)), "{source}: {errs:?}");
+    }
+}
+
+#[test]
+fn every_webhook_source_skips_a_disabled_integration() {
+    for (source, field) in WEBHOOK_INTEGRATION_SOURCES {
+        let toml = format!(
+            "[sources.{source}.integrations.primary]\nstatus = \"disabled\"\n\n[sources.{source}.integrations.primary.webhook]\n{field} = \"value\"\n"
+        );
+        let f = write_toml(&toml);
+        let cfg = load(Some(f.path())).unwrap_or_else(|e| panic!("{source}: {e:?}"));
+        assert!(!cfg.has_any_source(), "{source} should be skipped");
+    }
+}
+
+#[test]
+fn every_webhook_source_rejects_an_invalid_integration_status() {
+    for (source, field) in WEBHOOK_INTEGRATION_SOURCES {
+        let toml = format!(
+            "[sources.{source}.integrations.primary]\nstatus = \"maybe\"\n\n[sources.{source}.integrations.primary.webhook]\n{field} = \"value\"\n"
+        );
+        let errs = validation_messages(&toml);
+        let expected = format!("{source}/primary: invalid status");
+        assert!(errs.iter().any(|e| e.contains(&expected)), "{source}: {errs:?}");
+    }
+}
+
+#[test]
+fn every_webhook_secret_that_decodes_to_nothing_is_rejected() {
+    for (source, field) in WEBHOOK_INTEGRATION_SOURCES {
+        let toml = format!("[sources.{source}.integrations.primary.webhook]\n{field} = \"base64:\"\n");
+        let errs = validation_messages(&toml);
+        let expected = format!("{source}/primary: invalid {field}");
+        assert!(errs.iter().any(|e| e.contains(&expected)), "{source}: {errs:?}");
+    }
+}
+
+#[test]
+fn discord_bot_token_that_decodes_to_nothing_is_rejected() {
+    let errs = validation_messages(&discord_gateway_toml("base64:"));
+    assert!(
+        errs.iter().any(|e| e.contains("discord: invalid bot_token")),
+        "{errs:?}"
+    );
+}
+
+#[test]
+fn telegram_startup_registration_with_a_malformed_bot_token_is_invalid() {
+    let toml = r#"
+[sources.telegram.integrations.primary.webhook]
+webhook_secret = "telegram-webhook-secret"
+webhook_registration_mode = "startup"
+bot_token = "not-a-bot-token"
+public_webhook_url = "https://example.com/sources/telegram/primary/webhook"
+"#;
+    let errs = validation_messages(toml);
+    assert!(
+        errs.iter()
+            .any(|e| e.contains("telegram/primary: invalid bot_token") && e.contains("Telegram bot token format")),
+        "{errs:?}"
+    );
 }

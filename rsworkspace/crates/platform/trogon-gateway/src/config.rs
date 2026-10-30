@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use crate::credential::commands::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
+use crate::secret_store::{StaticConfigSecretInput, StaticConfigSecretStore, StaticConfigSecretStoreError};
 use crate::source::datadog::DatadogWebhookToken;
 use crate::source::discord::config::DiscordBotToken;
 use crate::source::github::config::GitHubWebhookSecret;
@@ -75,21 +77,15 @@ enum SecretInput {
 }
 
 impl SecretInput {
-    fn resolve(self, env: &impl ReadEnv) -> Result<String, SecretInputError> {
-        let raw = match self {
-            Self::Literal(value) => value,
-            Self::Env { env: var_name } => {
-                let name = var_name.trim();
-                if name.is_empty() {
-                    return Err(SecretInputError::EmptyEnvName);
-                }
-                env.var(name).map_err(|error| match error {
-                    std::env::VarError::NotPresent => SecretInputError::MissingEnv { name: name.to_string() },
-                    std::env::VarError::NotUnicode(_) => SecretInputError::InvalidUnicodeEnv { name: name.to_string() },
-                })?
-            }
-        };
-        ConfigValue::parse(raw)
+    fn resolve(
+        self,
+        scope: CredentialScope,
+        kind: CredentialKind,
+        env: &impl ReadEnv,
+    ) -> Result<String, SecretInputError> {
+        let secret = StaticConfigSecretStore::resolve(scope, kind, self.into(), env)?;
+        let plaintext = secret.into_plaintext()?;
+        ConfigValue::parse(plaintext.as_str().to_string())
             .map(ConfigValue::into_string)
             .map_err(SecretInputError::InvalidValue)
     }
@@ -107,10 +103,23 @@ impl ByteCountInput {
         let bytes = match self {
             Self::Literal(bytes) => bytes,
             Self::Env { env: var_name } => {
-                let raw = SecretInput::Env { env: var_name }.resolve(env)?;
-                raw.trim()
+                let name = var_name.trim();
+                if name.is_empty() {
+                    return Err(ByteCountInputError::EmptyEnvName);
+                }
+                let raw = env.var(name).map_err(|error| match error {
+                    std::env::VarError::NotPresent => ByteCountInputError::MissingEnv { name: name.to_string() },
+                    std::env::VarError::NotUnicode(_) => {
+                        ByteCountInputError::InvalidUnicodeEnv { name: name.to_string() }
+                    }
+                })?;
+                let value = ConfigValue::parse(raw)
+                    .map(ConfigValue::into_string)
+                    .map_err(ByteCountInputError::InvalidValue)?;
+                value
+                    .trim()
                     .parse::<u64>()
-                    .map_err(|_| ByteCountInputError::NotAWholeNumber { value: raw })?
+                    .map_err(|_| ByteCountInputError::NotAWholeNumber { value })?
             }
         };
         HttpBodySizeMax::new(ByteSize::b(bytes)).ok_or(ByteCountInputError::Zero)
@@ -119,24 +128,35 @@ impl ByteCountInput {
 
 #[derive(Debug, thiserror::Error)]
 enum ByteCountInputError {
-    #[error(transparent)]
-    Env(#[from] SecretInputError),
-    #[error("'{value}' is not a whole number of bytes")]
-    NotAWholeNumber { value: String },
-    #[error("must not be zero")]
-    Zero,
-}
-
-#[derive(Debug, thiserror::Error)]
-enum SecretInputError {
     #[error("env var name must not be empty")]
     EmptyEnvName,
     #[error("env var '{name}' is not set")]
     MissingEnv { name: String },
     #[error("env var '{name}' is not valid unicode")]
     InvalidUnicodeEnv { name: String },
+    #[error("'{value}' is not a whole number of bytes")]
+    NotAWholeNumber { value: String },
+    #[error("must not be zero")]
+    Zero,
     #[error(transparent)]
     InvalidValue(ConfigValueError),
+}
+
+#[derive(Debug, thiserror::Error)]
+enum SecretInputError {
+    #[error(transparent)]
+    StaticConfig(#[from] StaticConfigSecretStoreError),
+    #[error(transparent)]
+    InvalidValue(ConfigValueError),
+}
+
+impl From<SecretInput> for StaticConfigSecretInput {
+    fn from(input: SecretInput) -> Self {
+        match input {
+            SecretInput::Literal(value) => Self::Literal(value),
+            SecretInput::Env { env } => Self::Env { name: env },
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -757,28 +777,27 @@ pub fn load_with_overrides(
     nats_overrides: &NatsArgs,
 ) -> Result<ResolvedConfig, ConfigError> {
     let cfg = load_config::<GatewayConfig>(config_path).map_err(ConfigError::Load)?;
-    resolve(cfg, nats_overrides)
+    resolve(cfg, nats_overrides, &SystemEnv)
 }
 
-fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs) -> Result<ResolvedConfig, ConfigError> {
+fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs, env: &impl ReadEnv) -> Result<ResolvedConfig, ConfigError> {
     let nats = resolve_nats(&cfg.nats, nats_overrides);
-    let env = SystemEnv;
     let mut errors = Vec::new();
 
-    let github = resolve_github_integrations(cfg.sources.github, &env, &mut errors);
-    let discord = resolve_discord(cfg.sources.discord, &env, &mut errors);
-    let slack = resolve_slack_integrations(cfg.sources.slack, &env, &mut errors);
-    let telegram = resolve_telegram_integrations(cfg.sources.telegram, &env, &mut errors);
-    let twitter = resolve_twitter_integrations(cfg.sources.twitter, &env, &mut errors);
-    let gitlab = resolve_gitlab_integrations(cfg.sources.gitlab, &env, &mut errors);
-    let google_pubsub = resolve_google_pubsub_integrations(cfg.sources.google_pubsub, &env, &mut errors);
-    let incidentio = resolve_incidentio_integrations(cfg.sources.incidentio, &env, &mut errors);
-    let linear = resolve_linear_integrations(cfg.sources.linear, &env, &mut errors);
-    let microsoft_graph = resolve_microsoft_graph_integrations(cfg.sources.microsoft_graph, &env, &mut errors);
-    let notion = resolve_notion_integrations(cfg.sources.notion, &env, &mut errors);
-    let sentry = resolve_sentry_integrations(cfg.sources.sentry, &env, &mut errors);
-    let datadog = resolve_datadog_integrations(cfg.sources.datadog, &env, &mut errors);
-    let zoom = resolve_zoom_integrations(cfg.sources.zoom, &env, &mut errors);
+    let github = resolve_github_integrations(cfg.sources.github, env, &mut errors);
+    let discord = resolve_discord(cfg.sources.discord, env, &mut errors);
+    let slack = resolve_slack_integrations(cfg.sources.slack, env, &mut errors);
+    let telegram = resolve_telegram_integrations(cfg.sources.telegram, env, &mut errors);
+    let twitter = resolve_twitter_integrations(cfg.sources.twitter, env, &mut errors);
+    let gitlab = resolve_gitlab_integrations(cfg.sources.gitlab, env, &mut errors);
+    let google_pubsub = resolve_google_pubsub_integrations(cfg.sources.google_pubsub, env, &mut errors);
+    let incidentio = resolve_incidentio_integrations(cfg.sources.incidentio, env, &mut errors);
+    let linear = resolve_linear_integrations(cfg.sources.linear, env, &mut errors);
+    let microsoft_graph = resolve_microsoft_graph_integrations(cfg.sources.microsoft_graph, env, &mut errors);
+    let notion = resolve_notion_integrations(cfg.sources.notion, env, &mut errors);
+    let sentry = resolve_sentry_integrations(cfg.sources.sentry, env, &mut errors);
+    let datadog = resolve_datadog_integrations(cfg.sources.datadog, env, &mut errors);
+    let zoom = resolve_zoom_integrations(cfg.sources.zoom, env, &mut errors);
 
     if !errors.is_empty() {
         return Err(ConfigError::Validation(AggregateValidationError(errors)));
@@ -830,9 +849,15 @@ fn resolve_github_integrations(
             errors.push(ConfigValidationError::missing_integration("github", &id, "webhook"));
             continue;
         };
-        let Some(secret) =
-            require_integration_value("github", &id, "webhook_secret", webhook.webhook_secret, env, errors)
-        else {
+        let Some(secret) = require_integration_value(
+            SourceKind::GitHub,
+            &id,
+            "webhook_secret",
+            CredentialKind::WebhookSecret,
+            webhook.webhook_secret,
+            env,
+            errors,
+        ) else {
             continue;
         };
         let webhook_secret = match GitHubWebhookSecret::new(secret) {
@@ -897,7 +922,11 @@ fn resolve_discord(
     }
 
     let token_str = match bot_token {
-        Some(input) => match input.resolve(env) {
+        Some(input) => match input.resolve(
+            static_config_source_scope(SourceKind::Discord),
+            CredentialKind::BotToken,
+            env,
+        ) {
             Ok(value) => value,
             Err(error) => {
                 errors.push(ConfigValidationError::invalid("discord", "bot_token", error));
@@ -1064,7 +1093,15 @@ fn resolve_slack_webhook_transport(
     env: &impl ReadEnv,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Option<SlackTransportConfig> {
-    let secret = require_integration_value("slack", id, "signing_secret", webhook.signing_secret, env, errors)?;
+    let secret = require_integration_value(
+        SourceKind::Slack,
+        id,
+        "signing_secret",
+        CredentialKind::SigningSecret,
+        webhook.signing_secret,
+        env,
+        errors,
+    )?;
     let signing_secret = match SlackSigningSecret::new(secret) {
         Ok(secret) => secret,
         Err(error) => {
@@ -1123,7 +1160,15 @@ fn resolve_slack_socket_mode_transport(
     env: &impl ReadEnv,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Option<SlackTransportConfig> {
-    let token = require_integration_value("slack", id, "app_token", socket_mode.app_token, env, errors)?;
+    let token = require_integration_value(
+        SourceKind::Slack,
+        id,
+        "app_token",
+        CredentialKind::AppToken,
+        socket_mode.app_token,
+        env,
+        errors,
+    )?;
     let app_token = match SlackAppToken::new(token) {
         Ok(token) => token,
         Err(error) => {
@@ -1180,9 +1225,15 @@ fn resolve_telegram_integrations(
             errors.push(ConfigValidationError::missing_integration("telegram", &id, "webhook"));
             continue;
         };
-        let Some(secret) =
-            require_integration_value("telegram", &id, "webhook_secret", webhook.webhook_secret, env, errors)
-        else {
+        let Some(secret) = require_integration_value(
+            SourceKind::Telegram,
+            &id,
+            "webhook_secret",
+            CredentialKind::WebhookSecret,
+            webhook.webhook_secret,
+            env,
+            errors,
+        ) else {
             continue;
         };
         let webhook_secret = match TelegramWebhookSecret::new(secret) {
@@ -1267,7 +1318,11 @@ fn resolve_telegram_integration_registration(
 
     let public_webhook_url = public_webhook_url.filter(|value| !value.is_empty());
     let bot_token = match bot_token {
-        Some(input) => match input.resolve(env) {
+        Some(input) => match input.resolve(
+            static_config_integration_scope(SourceKind::Telegram, id),
+            CredentialKind::BotToken,
+            env,
+        ) {
             Ok(value) => Some(value),
             Err(error) => {
                 errors.push(ConfigValidationError::invalid_integration(
@@ -1363,9 +1418,15 @@ fn resolve_twitter_integrations(
             errors.push(ConfigValidationError::missing_integration("twitter", &id, "webhook"));
             continue;
         };
-        let Some(secret) =
-            require_integration_value("twitter", &id, "consumer_secret", webhook.consumer_secret, env, errors)
-        else {
+        let Some(secret) = require_integration_value(
+            SourceKind::Twitter,
+            &id,
+            "consumer_secret",
+            CredentialKind::ConsumerSecret,
+            webhook.consumer_secret,
+            env,
+            errors,
+        ) else {
             continue;
         };
         let consumer_secret = match TwitterConsumerSecret::new(secret) {
@@ -1434,8 +1495,15 @@ fn resolve_gitlab_integrations(
             errors.push(ConfigValidationError::missing_integration("gitlab", &id, "webhook"));
             continue;
         };
-        let Some(token) = require_integration_value("gitlab", &id, "signing_token", webhook.signing_token, env, errors)
-        else {
+        let Some(token) = require_integration_value(
+            SourceKind::Gitlab,
+            &id,
+            "signing_token",
+            CredentialKind::SigningToken,
+            webhook.signing_token,
+            env,
+            errors,
+        ) else {
             continue;
         };
         let signing_token = match GitLabSigningToken::new(token) {
@@ -1521,9 +1589,15 @@ fn resolve_linear_integrations(
             errors.push(ConfigValidationError::missing_integration("linear", &id, "webhook"));
             continue;
         };
-        let Some(secret) =
-            require_integration_value("linear", &id, "webhook_secret", webhook.webhook_secret, env, errors)
-        else {
+        let Some(secret) = require_integration_value(
+            SourceKind::Linear,
+            &id,
+            "webhook_secret",
+            CredentialKind::WebhookSecret,
+            webhook.webhook_secret,
+            env,
+            errors,
+        ) else {
             continue;
         };
         let webhook_secret = match LinearWebhookSecret::new(secret) {
@@ -1681,9 +1755,10 @@ fn resolve_google_pubsub_transport(
         };
 
     let credentials = require_integration_value(
-        "google_pubsub",
+        SourceKind::GooglePubSub,
         id,
         "credentials",
+        CredentialKind::ServiceAccountCredentials,
         streaming_pull.credentials,
         env,
         errors,
@@ -1742,9 +1817,10 @@ fn resolve_microsoft_graph_integrations(
             continue;
         };
         let Some(raw_client_state) = require_integration_value(
-            "microsoft_graph",
+            SourceKind::MicrosoftGraph,
             &id,
             "client_state",
+            CredentialKind::ClientState,
             webhook.client_state,
             env,
             errors,
@@ -1817,9 +1893,15 @@ fn resolve_incidentio_integrations(
             errors.push(ConfigValidationError::missing_integration("incidentio", &id, "webhook"));
             continue;
         };
-        let Some(secret) =
-            require_integration_value("incidentio", &id, "signing_secret", webhook.signing_secret, env, errors)
-        else {
+        let Some(secret) = require_integration_value(
+            SourceKind::Incidentio,
+            &id,
+            "signing_secret",
+            CredentialKind::SigningSecret,
+            webhook.signing_secret,
+            env,
+            errors,
+        ) else {
             continue;
         };
         let signing_secret = match IncidentioSigningSecret::new(secret) {
@@ -1905,8 +1987,15 @@ fn resolve_zoom_integrations(
             errors.push(ConfigValidationError::missing_integration("zoom", &id, "webhook"));
             continue;
         };
-        let Some(secret) = require_integration_value("zoom", &id, "secret_token", webhook.secret_token, env, errors)
-        else {
+        let Some(secret) = require_integration_value(
+            SourceKind::Zoom,
+            &id,
+            "secret_token",
+            CredentialKind::SecretToken,
+            webhook.secret_token,
+            env,
+            errors,
+        ) else {
             continue;
         };
         let secret_token = match ZoomSecretToken::new(secret) {
@@ -1993,9 +2082,10 @@ fn resolve_notion_integrations(
             continue;
         };
         let Some(raw_token) = require_integration_value(
-            "notion",
+            SourceKind::Notion,
             &id,
             "verification_token",
+            CredentialKind::VerificationToken,
             webhook.verification_token,
             env,
             errors,
@@ -2068,9 +2158,15 @@ fn resolve_sentry_integrations(
             errors.push(ConfigValidationError::missing_integration("sentry", &id, "webhook"));
             continue;
         };
-        let Some(secret) =
-            require_integration_value("sentry", &id, "client_secret", webhook.client_secret, env, errors)
-        else {
+        let Some(secret) = require_integration_value(
+            SourceKind::Sentry,
+            &id,
+            "client_secret",
+            CredentialKind::ClientSecret,
+            webhook.client_secret,
+            env,
+            errors,
+        ) else {
             continue;
         };
         let client_secret = match SentryClientSecret::new(secret) {
@@ -2148,9 +2244,15 @@ fn resolve_datadog_integrations(
             errors.push(ConfigValidationError::missing_integration("datadog", &id, "webhook"));
             continue;
         };
-        let Some(token) =
-            require_integration_value("datadog", &id, "webhook_token", webhook.webhook_token, env, errors)
-        else {
+        let Some(token) = require_integration_value(
+            SourceKind::Datadog,
+            &id,
+            "webhook_token",
+            CredentialKind::WebhookToken,
+            webhook.webhook_token,
+            env,
+            errors,
+        ) else {
             continue;
         };
         let webhook_token = match DatadogWebhookToken::new(token) {
@@ -2230,26 +2332,40 @@ fn resolve_integration_id(
 }
 
 fn require_integration_value(
-    source: &'static str,
+    source: SourceKind,
     id: &SourceIntegrationId,
     field: &'static str,
+    kind: CredentialKind,
     value: Option<SecretInput>,
     env: &impl ReadEnv,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Option<String> {
     match value {
-        Some(value) => match value.resolve(env) {
+        Some(value) => match value.resolve(static_config_integration_scope(source, id), kind, env) {
             Ok(value) => Some(value),
             Err(error) => {
-                errors.push(ConfigValidationError::invalid_integration(source, id, field, error));
+                errors.push(ConfigValidationError::invalid_integration(
+                    source.as_str(),
+                    id,
+                    field,
+                    error,
+                ));
                 None
             }
         },
         None => {
-            errors.push(ConfigValidationError::missing_integration(source, id, field));
+            errors.push(ConfigValidationError::missing_integration(source.as_str(), id, field));
             None
         }
     }
+}
+
+fn static_config_source_scope(source: SourceKind) -> CredentialScope {
+    CredentialScope::source(CredentialOwnerId::static_config(), source)
+}
+
+fn static_config_integration_scope(source: SourceKind, id: &SourceIntegrationId) -> CredentialScope {
+    CredentialScope::integration(CredentialOwnerId::static_config(), source, id.clone())
 }
 
 struct CommonIntegrationFieldsInput<'a> {

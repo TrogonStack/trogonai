@@ -19,6 +19,7 @@ async-nats = { workspace = true, features = ["ring", "jetstream"] }
 axum = { workspace = true }
 base64 = "0.22"
 bytes = { workspace = true }
+chrono = "0.4"
 clap = { workspace = true }
 confique = { workspace = true }
 form_urlencoded = "1"
@@ -48,6 +49,7 @@ url = "2.5"
 [dev-dependencies]
 rustls = { workspace = true }
 tempfile = { workspace = true }
+testcontainers-modules = "0.15"
 time = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 tower = "0.5"

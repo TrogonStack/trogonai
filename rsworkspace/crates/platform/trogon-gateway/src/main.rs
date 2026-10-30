@@ -4,7 +4,9 @@
 mod cli;
 mod config;
 mod constants;
+mod credential;
 mod http;
+mod secret_store;
 mod source;
 mod source_integration_id;
 mod source_plugin;
