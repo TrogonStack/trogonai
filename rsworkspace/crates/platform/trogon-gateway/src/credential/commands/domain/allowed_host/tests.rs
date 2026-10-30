@@ -44,6 +44,16 @@ fn bracketed_ipv6_literal_matches_with_or_without_a_port() {
 }
 
 #[test]
+fn bracketed_ipv6_candidate_with_trailing_text_does_not_match() {
+    let host = AllowedHost::new("[fe80::1]").unwrap();
+
+    assert!(!host.matches("[fe80::1]evil.example"));
+    assert!(!host.matches("[fe80::1]:notaport"));
+    assert!(!host.matches("[fe80::1]:"));
+    assert!(!host.matches("[fe80::1"));
+}
+
+#[test]
 fn unbracketed_ipv6_candidate_matches_a_bracketed_pattern() {
     let host = AllowedHost::new("[fe80::1]").unwrap();
 

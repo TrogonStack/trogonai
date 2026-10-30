@@ -161,17 +161,17 @@ fn normalize_candidate(candidate: &str) -> Option<String> {
         return Some(literal);
     }
 
-    let without_port = if let Some(end) = candidate.strip_prefix('[').and_then(|rest| rest.find(']')) {
-        let literal = &candidate[..end + 2];
-        return match literal[1..literal.len() - 1].parse::<Ipv6Addr>() {
-            Ok(address) => Some(bracketed(address)),
-            Err(_) => Some(normalize_host(literal)),
-        };
-    } else {
-        match candidate.rsplit_once(':') {
-            Some((host, port)) if is_port(port) => host,
-            _ => candidate,
-        }
+    if let Some(inner) = candidate.strip_prefix('[') {
+        let literal = inner
+            .split_once(']')
+            .filter(|(_, rest)| rest.is_empty() || rest.strip_prefix(':').is_some_and(is_port))
+            .and_then(|(address, _)| address.parse::<Ipv6Addr>().ok());
+        return Some(literal.map_or_else(|| normalize_host(candidate), bracketed));
+    }
+
+    let without_port = match candidate.rsplit_once(':') {
+        Some((host, port)) if is_port(port) => host,
+        _ => candidate,
     };
 
     let normalized = normalize_host(without_port);
