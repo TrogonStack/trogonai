@@ -26,7 +26,10 @@ fn wrap_publisher(publisher: MockJetStreamPublisher) -> ClaimCheckPublisher<Mock
 }
 
 const TEST_SECRET: &str = "test-secret";
-const RUNTIME_SECRET: &str = "runtime-secret";
+
+fn random_secret() -> String {
+    uuid::Uuid::new_v4().simple().to_string()
+}
 
 fn compute_sig(secret: &str, body: &[u8]) -> String {
     let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).expect("valid key length");
@@ -144,9 +147,10 @@ async fn valid_webhook_returns_200() {
 
 #[tokio::test]
 async fn runtime_webhook_secret_publishes_to_nats_and_rejects_static_secret() {
+    let runtime_secret = random_secret();
     let _guard = tracing_guard();
     let publisher = MockJetStreamPublisher::new();
-    let app = runtime_app(publisher.clone(), RUNTIME_SECRET).await;
+    let app = runtime_app(publisher.clone(), &runtime_secret).await;
     let body = valid_body();
     let static_sig = compute_sig(TEST_SECRET, &body);
 
@@ -159,7 +163,7 @@ async fn runtime_webhook_secret_publishes_to_nats_and_rejects_static_secret() {
     assert_eq!(static_response.status(), StatusCode::UNAUTHORIZED);
     assert!(publisher.published_messages().is_empty());
 
-    let runtime_sig = compute_sig(RUNTIME_SECRET, &body);
+    let runtime_sig = compute_sig(&runtime_secret, &body);
     let runtime_response = app
         .oneshot(webhook_request(&body, Some(&runtime_sig)))
         .await

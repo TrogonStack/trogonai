@@ -34,7 +34,10 @@ fn compute_sig(secret: &str, body: &[u8]) -> String {
 }
 
 const TEST_SECRET: &str = "test-secret";
-const RUNTIME_SECRET: &str = "runtime-secret";
+
+fn random_secret() -> String {
+    uuid::Uuid::new_v4().simple().to_string()
+}
 
 fn test_config() -> GithubConfig {
     GithubConfig {
@@ -154,11 +157,12 @@ async fn valid_webhook_publishes_to_nats_and_returns_200() {
 
 #[tokio::test]
 async fn runtime_webhook_secret_publishes_to_nats_and_returns_200() {
+    let runtime_secret = random_secret();
     let _guard = tracing_guard();
     let publisher = MockJetStreamPublisher::new();
-    let app = runtime_app(publisher.clone(), RUNTIME_SECRET).await;
+    let app = runtime_app(publisher.clone(), &runtime_secret).await;
     let body = br#"{"ref":"refs/heads/main"}"#;
-    let sig = compute_sig(RUNTIME_SECRET, body);
+    let sig = compute_sig(&runtime_secret, body);
 
     let resp = app
         .oneshot(webhook_request(body, "push", "runtime-del-1", Some(&sig)))
@@ -173,9 +177,10 @@ async fn runtime_webhook_secret_publishes_to_nats_and_returns_200() {
 
 #[tokio::test]
 async fn runtime_webhook_secret_does_not_use_static_config_secret() {
+    let runtime_secret = random_secret();
     let _guard = tracing_guard();
     let publisher = MockJetStreamPublisher::new();
-    let app = runtime_app(publisher.clone(), RUNTIME_SECRET).await;
+    let app = runtime_app(publisher.clone(), &runtime_secret).await;
     let body = br#"{"ref":"refs/heads/main"}"#;
     let sig = compute_sig(TEST_SECRET, body);
 

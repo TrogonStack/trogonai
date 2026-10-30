@@ -30,11 +30,11 @@ use trogon_nats::AdvancedMockNatsClient;
 use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{ClaimCheckPublisher, MaxPayload, MockJetStreamPublisher, MockObjectStore};
 
-const RUNTIME_SECRET: &str = "runtime-secret";
-const STATIC_SECRET: &str = "static-secret";
-const ZOOM_SECRET_TOKEN: &str = "zoom-secret-token";
-
 type HmacSha256 = hmac::Hmac<sha2::Sha256>;
+
+fn random_secret() -> String {
+    uuid::Uuid::new_v4().simple().to_string()
+}
 
 fn wrap_publisher(publisher: MockJetStreamPublisher) -> ClaimCheckPublisher<MockJetStreamPublisher, MockObjectStore> {
     ClaimCheckPublisher::new(
@@ -567,11 +567,15 @@ webhook_secret = "other-secret"
 
 #[tokio::test]
 async fn github_webhook_can_resolve_secret_from_runtime_credentials() {
-    let toml = r#"
+    let static_secret = random_secret();
+    let runtime_secret = random_secret();
+    let toml = format!(
+        r#"
 [sources.github.integrations.acme-main.webhook]
-webhook_secret = "static-secret"
-"#;
-    let f = write_toml(toml);
+webhook_secret = "{static_secret}"
+"#
+    );
+    let f = write_toml(&toml);
     let cfg = load(Some(f.path())).expect("load failed");
     let integration_id = SourceIntegrationId::new("acme-main").unwrap();
     let publisher = MockJetStreamPublisher::new();
@@ -580,7 +584,7 @@ webhook_secret = "static-secret"
         wrap_publisher(publisher.clone()),
         &AdvancedMockNatsClient::new(),
         RuntimeCredentialMounts {
-            github: Some(github_runtime_credentials(&integration_id, RUNTIME_SECRET).await),
+            github: Some(github_runtime_credentials(&integration_id, &runtime_secret).await),
             ..RuntimeCredentialMounts::default()
         },
     );
@@ -591,7 +595,7 @@ webhook_secret = "static-secret"
         .oneshot(github_webhook_request(
             "/sources/github/acme-main/webhook",
             body,
-            STATIC_SECRET,
+            &static_secret,
         ))
         .await
         .unwrap();
@@ -602,7 +606,7 @@ webhook_secret = "static-secret"
         .oneshot(github_webhook_request(
             "/sources/github/acme-main/webhook",
             body,
-            RUNTIME_SECRET,
+            &runtime_secret,
         ))
         .await
         .unwrap();
@@ -716,11 +720,15 @@ signing_secret = "whsec_dGVzdC1zZWNyZXQ="
 
 #[tokio::test]
 async fn slack_webhook_can_resolve_secret_from_runtime_credentials() {
-    let toml = r#"
+    let static_secret = random_secret();
+    let runtime_secret = random_secret();
+    let toml = format!(
+        r#"
 [sources.slack.integrations.acme-main.webhook]
-signing_secret = "static-secret"
-"#;
-    let f = write_toml(toml);
+signing_secret = "{static_secret}"
+"#
+    );
+    let f = write_toml(&toml);
     let cfg = load(Some(f.path())).expect("load failed");
     let integration_id = SourceIntegrationId::new("acme-main").unwrap();
     let publisher = MockJetStreamPublisher::new();
@@ -729,7 +737,7 @@ signing_secret = "static-secret"
         wrap_publisher(publisher.clone()),
         &AdvancedMockNatsClient::new(),
         RuntimeCredentialMounts {
-            slack: Some(slack_runtime_credentials(&integration_id, RUNTIME_SECRET).await),
+            slack: Some(slack_runtime_credentials(&integration_id, &runtime_secret).await),
             ..RuntimeCredentialMounts::default()
         },
     );
@@ -746,7 +754,7 @@ signing_secret = "static-secret"
         .oneshot(slack_webhook_request(
             "/sources/slack/acme-main/webhook",
             &body,
-            STATIC_SECRET,
+            &static_secret,
         ))
         .await
         .unwrap();
@@ -757,7 +765,7 @@ signing_secret = "static-secret"
         .oneshot(slack_webhook_request(
             "/sources/slack/acme-main/webhook",
             &body,
-            RUNTIME_SECRET,
+            &runtime_secret,
         ))
         .await
         .unwrap();
@@ -770,11 +778,15 @@ signing_secret = "static-secret"
 
 #[tokio::test]
 async fn linear_webhook_can_resolve_secret_from_runtime_credentials() {
-    let toml = r#"
+    let static_secret = random_secret();
+    let runtime_secret = random_secret();
+    let toml = format!(
+        r#"
 [sources.linear.integrations.acme-main.webhook]
-webhook_secret = "static-secret"
-"#;
-    let f = write_toml(toml);
+webhook_secret = "{static_secret}"
+"#
+    );
+    let f = write_toml(&toml);
     let cfg = load(Some(f.path())).expect("load failed");
     let integration_id = SourceIntegrationId::new("acme-main").unwrap();
     let publisher = MockJetStreamPublisher::new();
@@ -783,7 +795,7 @@ webhook_secret = "static-secret"
         wrap_publisher(publisher.clone()),
         &AdvancedMockNatsClient::new(),
         RuntimeCredentialMounts {
-            linear: Some(linear_runtime_credentials(&integration_id, RUNTIME_SECRET).await),
+            linear: Some(linear_runtime_credentials(&integration_id, &runtime_secret).await),
             ..RuntimeCredentialMounts::default()
         },
     );
@@ -805,7 +817,7 @@ webhook_secret = "static-secret"
         .oneshot(linear_webhook_request(
             "/sources/linear/acme-main/webhook",
             &body,
-            STATIC_SECRET,
+            &static_secret,
         ))
         .await
         .unwrap();
@@ -816,7 +828,7 @@ webhook_secret = "static-secret"
         .oneshot(linear_webhook_request(
             "/sources/linear/acme-main/webhook",
             &body,
-            RUNTIME_SECRET,
+            &runtime_secret,
         ))
         .await
         .unwrap();
@@ -829,11 +841,15 @@ webhook_secret = "static-secret"
 
 #[tokio::test]
 async fn microsoft_graph_webhook_can_resolve_secret_from_runtime_credentials() {
-    let toml = r#"
+    let static_secret = random_secret();
+    let runtime_secret = random_secret();
+    let toml = format!(
+        r#"
 [sources.microsoft_graph.integrations.acme-main.webhook]
-client_state = "static-secret"
-"#;
-    let f = write_toml(toml);
+client_state = "{static_secret}"
+"#
+    );
+    let f = write_toml(&toml);
     let cfg = load(Some(f.path())).expect("load failed");
     let integration_id = SourceIntegrationId::new("acme-main").unwrap();
     let publisher = MockJetStreamPublisher::new();
@@ -842,7 +858,7 @@ client_state = "static-secret"
         wrap_publisher(publisher.clone()),
         &AdvancedMockNatsClient::new(),
         RuntimeCredentialMounts {
-            microsoft_graph: Some(microsoft_graph_runtime_credentials(&integration_id, RUNTIME_SECRET).await),
+            microsoft_graph: Some(microsoft_graph_runtime_credentials(&integration_id, &runtime_secret).await),
             ..RuntimeCredentialMounts::default()
         },
     );
@@ -851,7 +867,7 @@ client_state = "static-secret"
         .clone()
         .oneshot(microsoft_graph_webhook_request(
             "/sources/microsoft-graph/acme-main/webhook",
-            STATIC_SECRET,
+            &static_secret,
         ))
         .await
         .unwrap();
@@ -861,7 +877,7 @@ client_state = "static-secret"
     let runtime_response = app
         .oneshot(microsoft_graph_webhook_request(
             "/sources/microsoft-graph/acme-main/webhook",
-            RUNTIME_SECRET,
+            &runtime_secret,
         ))
         .await
         .unwrap();
@@ -877,11 +893,15 @@ client_state = "static-secret"
 
 #[tokio::test]
 async fn sentry_webhook_can_resolve_secret_from_runtime_credentials() {
-    let toml = r#"
+    let static_secret = random_secret();
+    let runtime_secret = random_secret();
+    let toml = format!(
+        r#"
 [sources.sentry.integrations.acme-main.webhook]
-client_secret = "static-secret"
-"#;
-    let f = write_toml(toml);
+client_secret = "{static_secret}"
+"#
+    );
+    let f = write_toml(&toml);
     let cfg = load(Some(f.path())).expect("load failed");
     let integration_id = SourceIntegrationId::new("acme-main").unwrap();
     let publisher = MockJetStreamPublisher::new();
@@ -890,7 +910,7 @@ client_secret = "static-secret"
         wrap_publisher(publisher.clone()),
         &AdvancedMockNatsClient::new(),
         RuntimeCredentialMounts {
-            sentry: Some(sentry_runtime_credentials(&integration_id, RUNTIME_SECRET).await),
+            sentry: Some(sentry_runtime_credentials(&integration_id, &runtime_secret).await),
             ..RuntimeCredentialMounts::default()
         },
     );
@@ -901,7 +921,7 @@ client_secret = "static-secret"
         .oneshot(sentry_webhook_request(
             "/sources/sentry/acme-main/webhook",
             body,
-            STATIC_SECRET,
+            &static_secret,
         ))
         .await
         .unwrap();
@@ -912,7 +932,7 @@ client_secret = "static-secret"
         .oneshot(sentry_webhook_request(
             "/sources/sentry/acme-main/webhook",
             body,
-            RUNTIME_SECRET,
+            &runtime_secret,
         ))
         .await
         .unwrap();
@@ -925,11 +945,15 @@ client_secret = "static-secret"
 
 #[tokio::test]
 async fn notion_webhook_can_resolve_secret_from_runtime_credentials() {
-    let toml = r#"
+    let static_secret = random_secret();
+    let runtime_secret = random_secret();
+    let toml = format!(
+        r#"
 [sources.notion.integrations.acme-main.webhook]
-verification_token = "static-secret"
-"#;
-    let f = write_toml(toml);
+verification_token = "{static_secret}"
+"#
+    );
+    let f = write_toml(&toml);
     let cfg = load(Some(f.path())).expect("load failed");
     let integration_id = SourceIntegrationId::new("acme-main").unwrap();
     let publisher = MockJetStreamPublisher::new();
@@ -938,7 +962,7 @@ verification_token = "static-secret"
         wrap_publisher(publisher.clone()),
         &AdvancedMockNatsClient::new(),
         RuntimeCredentialMounts {
-            notion: Some(notion_runtime_credentials(&integration_id, RUNTIME_SECRET).await),
+            notion: Some(notion_runtime_credentials(&integration_id, &runtime_secret).await),
             ..RuntimeCredentialMounts::default()
         },
     );
@@ -955,7 +979,7 @@ verification_token = "static-secret"
         .oneshot(notion_webhook_request(
             "/sources/notion/acme-main/webhook",
             &body,
-            STATIC_SECRET,
+            &static_secret,
         ))
         .await
         .unwrap();
@@ -966,7 +990,7 @@ verification_token = "static-secret"
         .oneshot(notion_webhook_request(
             "/sources/notion/acme-main/webhook",
             &body,
-            RUNTIME_SECRET,
+            &runtime_secret,
         ))
         .await
         .unwrap();
@@ -979,11 +1003,15 @@ verification_token = "static-secret"
 
 #[tokio::test]
 async fn telegram_webhook_can_resolve_secret_from_runtime_credentials() {
-    let toml = r#"
+    let static_secret = random_secret();
+    let runtime_secret = random_secret();
+    let toml = format!(
+        r#"
 [sources.telegram.integrations.acme-main.webhook]
-webhook_secret = "static-secret"
-"#;
-    let f = write_toml(toml);
+webhook_secret = "{static_secret}"
+"#
+    );
+    let f = write_toml(&toml);
     let cfg = load(Some(f.path())).expect("load failed");
     let integration_id = SourceIntegrationId::new("acme-main").unwrap();
     let publisher = MockJetStreamPublisher::new();
@@ -992,7 +1020,7 @@ webhook_secret = "static-secret"
         wrap_publisher(publisher.clone()),
         &AdvancedMockNatsClient::new(),
         RuntimeCredentialMounts {
-            telegram: Some(telegram_runtime_credentials(&integration_id, RUNTIME_SECRET).await),
+            telegram: Some(telegram_runtime_credentials(&integration_id, &runtime_secret).await),
             ..RuntimeCredentialMounts::default()
         },
     );
@@ -1007,7 +1035,7 @@ webhook_secret = "static-secret"
         .oneshot(telegram_webhook_request(
             "/sources/telegram/acme-main/webhook",
             &body,
-            STATIC_SECRET,
+            &static_secret,
         ))
         .await
         .unwrap();
@@ -1018,7 +1046,7 @@ webhook_secret = "static-secret"
         .oneshot(telegram_webhook_request(
             "/sources/telegram/acme-main/webhook",
             &body,
-            RUNTIME_SECRET,
+            &runtime_secret,
         ))
         .await
         .unwrap();
@@ -1031,11 +1059,15 @@ webhook_secret = "static-secret"
 
 #[tokio::test]
 async fn twitter_webhook_can_resolve_secret_from_runtime_credentials() {
-    let toml = r#"
+    let static_secret = random_secret();
+    let runtime_secret = random_secret();
+    let toml = format!(
+        r#"
 [sources.twitter.integrations.acme-main.webhook]
-consumer_secret = "static-secret"
-"#;
-    let f = write_toml(toml);
+consumer_secret = "{static_secret}"
+"#
+    );
+    let f = write_toml(&toml);
     let cfg = load(Some(f.path())).expect("load failed");
     let integration_id = SourceIntegrationId::new("acme-main").unwrap();
     let publisher = MockJetStreamPublisher::new();
@@ -1044,7 +1076,7 @@ consumer_secret = "static-secret"
         wrap_publisher(publisher.clone()),
         &AdvancedMockNatsClient::new(),
         RuntimeCredentialMounts {
-            twitter: Some(twitter_runtime_credentials(&integration_id, RUNTIME_SECRET).await),
+            twitter: Some(twitter_runtime_credentials(&integration_id, &runtime_secret).await),
             ..RuntimeCredentialMounts::default()
         },
     );
@@ -1059,7 +1091,7 @@ consumer_secret = "static-secret"
         .oneshot(twitter_webhook_request(
             "/sources/twitter/acme-main/webhook",
             body,
-            STATIC_SECRET,
+            &static_secret,
         ))
         .await
         .unwrap();
@@ -1070,7 +1102,7 @@ consumer_secret = "static-secret"
         .oneshot(twitter_webhook_request(
             "/sources/twitter/acme-main/webhook",
             body,
-            RUNTIME_SECRET,
+            &runtime_secret,
         ))
         .await
         .unwrap();
@@ -1083,14 +1115,17 @@ consumer_secret = "static-secret"
 
 #[tokio::test]
 async fn datadog_and_zoom_webhooks_stay_mounted_with_runtime_credentials() {
-    let toml = r#"
+    let zoom_secret_token = random_secret();
+    let toml = format!(
+        r#"
 [sources.datadog.integrations.acme-main.webhook]
 webhook_token = "datadog-webhook-token"
 
 [sources.zoom.integrations.acme-main.webhook]
-secret_token = "zoom-secret-token"
-"#;
-    let f = write_toml(toml);
+secret_token = "{zoom_secret_token}"
+"#
+    );
+    let f = write_toml(&toml);
     let cfg = load(Some(f.path())).expect("load failed");
     let publisher = MockJetStreamPublisher::new();
     let app = mount_sources_with_runtime_credentials(
@@ -1115,7 +1150,7 @@ secret_token = "zoom-secret-token"
         .oneshot(zoom_webhook_request(
             "/sources/zoom/acme-main/webhook",
             br#"{"event":"meeting.started","payload":{}}"#,
-            ZOOM_SECRET_TOKEN,
+            &zoom_secret_token,
         ))
         .await
         .unwrap();

@@ -25,7 +25,10 @@ use crate::source_integration_id::SourceIntegrationId;
 type HmacSha256 = Hmac<Sha256>;
 
 const TEST_SECRET: &str = "test-secret";
-const RUNTIME_SECRET: &str = "runtime-secret";
+
+fn random_secret() -> String {
+    uuid::Uuid::new_v4().simple().to_string()
+}
 
 fn wrap_publisher(publisher: MockJetStreamPublisher) -> ClaimCheckPublisher<MockJetStreamPublisher, MockObjectStore> {
     ClaimCheckPublisher::new(
@@ -162,8 +165,9 @@ async fn crc_request_returns_response_token() {
 
 #[tokio::test]
 async fn runtime_consumer_secret_handles_crc() {
+    let runtime_secret = random_secret();
     let _guard = tracing_guard();
-    let app = runtime_app(MockJetStreamPublisher::new(), RUNTIME_SECRET).await;
+    let app = runtime_app(MockJetStreamPublisher::new(), &runtime_secret).await;
 
     let response = app
         .oneshot(
@@ -181,7 +185,7 @@ async fn runtime_consumer_secret_handles_crc() {
     let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(
         payload["response_token"],
-        signature::crc_response_token(RUNTIME_SECRET, "challenge").unwrap(),
+        signature::crc_response_token(&runtime_secret, "challenge").unwrap(),
     );
 }
 
@@ -244,9 +248,10 @@ async fn x_activity_event_publishes_to_event_type_subject() {
 
 #[tokio::test]
 async fn runtime_consumer_secret_publishes_to_nats_and_rejects_static_secret() {
+    let runtime_secret = random_secret();
     let _guard = tracing_guard();
     let publisher = MockJetStreamPublisher::new();
-    let app = runtime_app(publisher.clone(), RUNTIME_SECRET).await;
+    let app = runtime_app(publisher.clone(), &runtime_secret).await;
     let body = br#"{
         "data": {
             "event_type": "profile.update.bio",
@@ -267,7 +272,7 @@ async fn runtime_consumer_secret_publishes_to_nats_and_rejects_static_secret() {
     assert_eq!(static_response.status(), StatusCode::UNAUTHORIZED);
     assert!(publisher.published_messages().is_empty());
 
-    let runtime_signature = compute_sig(RUNTIME_SECRET, body);
+    let runtime_signature = compute_sig(&runtime_secret, body);
     let runtime_response = app
         .oneshot(webhook_request(body, Some(&runtime_signature)))
         .await

@@ -45,7 +45,10 @@ fn compute_sig(secret: &str, timestamp: &str, body: &[u8]) -> String {
 }
 
 const TEST_SECRET: &str = "test-secret";
-const RUNTIME_SECRET: &str = "runtime-secret";
+
+fn random_secret() -> String {
+    uuid::Uuid::new_v4().simple().to_string()
+}
 
 fn current_timestamp() -> String {
     TEST_NOW.to_string()
@@ -327,9 +330,10 @@ async fn event_callback_publishes_to_nats_and_returns_200() {
 
 #[tokio::test]
 async fn event_callback_can_resolve_signing_secret_from_runtime_credentials() {
+    let runtime_secret = random_secret();
     let _guard = tracing_guard();
     let publisher = MockJetStreamPublisher::new();
-    let app = runtime_app(publisher.clone(), RUNTIME_SECRET).await;
+    let app = runtime_app(publisher.clone(), &runtime_secret).await;
     let body = event_callback_body("message");
     let ts = current_timestamp();
     let static_sig = compute_sig(TEST_SECRET, &ts, &body);
@@ -343,7 +347,7 @@ async fn event_callback_can_resolve_signing_secret_from_runtime_credentials() {
     assert_eq!(static_response.status(), StatusCode::UNAUTHORIZED);
     assert!(publisher.published_messages().is_empty());
 
-    let runtime_sig = compute_sig(RUNTIME_SECRET, &ts, &body);
+    let runtime_sig = compute_sig(&runtime_secret, &ts, &body);
     let runtime_response = app
         .oneshot(webhook_request(&body, &ts, Some(&runtime_sig)))
         .await
@@ -903,9 +907,10 @@ async fn slash_command_publishes_to_nats() {
 
 #[tokio::test]
 async fn runtime_credentials_serve_slash_commands_and_answer_ssl_checks() {
+    let runtime_secret = random_secret();
     let _guard = tracing_guard();
     let publisher = MockJetStreamPublisher::new();
-    let app = runtime_app(publisher.clone(), RUNTIME_SECRET).await;
+    let app = runtime_app(publisher.clone(), &runtime_secret).await;
 
     let ssl_check = app
         .clone()
@@ -926,7 +931,7 @@ async fn runtime_credentials_serve_slash_commands_and_answer_ssl_checks() {
         .unwrap();
     assert_eq!(rejected.status(), StatusCode::UNAUTHORIZED);
 
-    let runtime_sig = compute_sig(RUNTIME_SECRET, &ts, form_body.as_bytes());
+    let runtime_sig = compute_sig(&runtime_secret, &ts, form_body.as_bytes());
     let accepted = app
         .oneshot(form_request(form_body.as_bytes(), &ts, &runtime_sig))
         .await
