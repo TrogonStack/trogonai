@@ -133,7 +133,12 @@ impl FakeOpenBao {
     }
 
     fn store(&self) -> OpenBaoSecretStore {
-        OpenBaoSecretStore::new(format!("http://{}", self.address), OPENBAO_DEV_ROOT_TOKEN).unwrap()
+        OpenBaoSecretStore::new(
+            format!("http://{}", self.address),
+            OPENBAO_DEV_ROOT_TOKEN,
+            OpenBaoTransport::PlaintextAllowed,
+        )
+        .unwrap()
     }
 
     async fn posted_to(&self, endpoint: OpenBaoEndpoint) -> Vec<Value> {
@@ -357,8 +362,37 @@ fn mount_rejects_path_separators() {
 }
 
 #[test]
+fn tls_required_transport_rejects_a_plaintext_address() {
+    let error = OpenBaoSecretStore::new(
+        "http://openbao.example:8200",
+        OPENBAO_DEV_ROOT_TOKEN,
+        OpenBaoTransport::TlsRequired,
+    )
+    .unwrap_err();
+
+    assert!(matches!(error, OpenBaoSecretStoreConfigError::PlaintextAddress));
+}
+
+#[test]
+fn tls_required_transport_accepts_an_https_address() {
+    assert!(
+        OpenBaoSecretStore::new(
+            "https://openbao.example:8200",
+            OPENBAO_DEV_ROOT_TOKEN,
+            OpenBaoTransport::TlsRequired,
+        )
+        .is_ok()
+    );
+}
+
+#[test]
 fn debug_redacts_the_token() {
-    let store = OpenBaoSecretStore::new("http://openbao.example:8200", "s3cr3t-root-token").unwrap();
+    let store = OpenBaoSecretStore::new(
+        "http://openbao.example:8200",
+        "s3cr3t-root-token",
+        OpenBaoTransport::PlaintextAllowed,
+    )
+    .unwrap();
 
     let debug = format!("{store:?}");
 
@@ -370,7 +404,12 @@ fn debug_redacts_the_token() {
 
 #[tokio::test]
 async fn address_that_cannot_be_a_base_is_a_backend_outage() {
-    let store = OpenBaoSecretStore::new("mailto:ops@example.com", OPENBAO_DEV_ROOT_TOKEN).unwrap();
+    let store = OpenBaoSecretStore::new(
+        "mailto:ops@example.com",
+        OPENBAO_DEV_ROOT_TOKEN,
+        OpenBaoTransport::PlaintextAllowed,
+    )
+    .unwrap();
 
     let error = store
         .metadata(&discord_bot_token(CredentialVersion::initial()))
@@ -571,7 +610,12 @@ impl OpenBaoServer {
     }
 
     fn store(&self) -> OpenBaoSecretStore {
-        OpenBaoSecretStore::new(&self.address, OPENBAO_DEV_ROOT_TOKEN).unwrap()
+        OpenBaoSecretStore::new(
+            &self.address,
+            OPENBAO_DEV_ROOT_TOKEN,
+            OpenBaoTransport::PlaintextAllowed,
+        )
+        .unwrap()
     }
 }
 
@@ -706,7 +750,7 @@ async fn openbao_dev_server_roundtrips_precise_value() {
     let token = SystemEnv
         .var("OPENBAO_TOKEN")
         .unwrap_or_else(|_| "local-dev-root-token".to_string());
-    let store = OpenBaoSecretStore::new(address, token).unwrap();
+    let store = OpenBaoSecretStore::new(address, token, OpenBaoTransport::PlaintextAllowed).unwrap();
     let credential = assert_roundtrip(&store).await;
     println!(
         "{}",
@@ -781,7 +825,12 @@ async fn redirects_are_not_followed_so_the_token_stays_with_openbao() {
         }
     });
     tokio::spawn(axum::serve(listener, app).into_future());
-    let store = OpenBaoSecretStore::new(format!("http://{redirector}"), OPENBAO_DEV_ROOT_TOKEN).unwrap();
+    let store = OpenBaoSecretStore::new(
+        format!("http://{redirector}"),
+        OPENBAO_DEV_ROOT_TOKEN,
+        OpenBaoTransport::PlaintextAllowed,
+    )
+    .unwrap();
 
     let error = store
         .metadata(&discord_bot_token(CredentialVersion::initial()))

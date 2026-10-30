@@ -314,6 +314,7 @@ fn management_env(address: &str) -> trogon_std::env::InMemoryEnv {
     env.set(CREDENTIAL_MANAGEMENT_ADMIN_TOKEN, "admin-token");
     env.set(OPENBAO_ADDR, address);
     env.set(OPENBAO_TOKEN, "openbao-token");
+    env.set(OPENBAO_ALLOW_PLAINTEXT, "true");
     env
 }
 
@@ -473,6 +474,55 @@ fn openbao_store_rejects_an_invalid_address() {
     let error = openbao_secret_store_from_env(&env, "management").unwrap_err();
 
     assert_eq!(error.to_string(), "OpenBao secret store configuration");
+}
+
+#[test]
+fn openbao_store_rejects_a_plaintext_address_by_default() {
+    let env = management_env("http://openbao.invalid:8200");
+    env.remove(OPENBAO_ALLOW_PLAINTEXT);
+
+    let error = openbao_secret_store_from_env(&env, "management").unwrap_err();
+
+    assert!(matches!(
+        error.downcast_ref::<secret_store::openbao_secret_store::OpenBaoSecretStoreConfigError>(),
+        Some(secret_store::openbao_secret_store::OpenBaoSecretStoreConfigError::PlaintextAddress)
+    ));
+}
+
+#[test]
+fn openbao_store_accepts_an_https_address_by_default() {
+    let env = management_env("https://openbao.invalid:8200");
+    env.remove(OPENBAO_ALLOW_PLAINTEXT);
+
+    assert!(openbao_secret_store_from_env(&env, "management").is_ok());
+}
+
+#[test]
+fn openbao_transport_requires_tls_when_plaintext_is_explicitly_disallowed() {
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set(OPENBAO_ALLOW_PLAINTEXT, "false");
+
+    assert_eq!(openbao_transport_from_env(&env).unwrap(), OpenBaoTransport::TlsRequired);
+}
+
+#[test]
+fn openbao_transport_rejects_an_unrecognized_flag() {
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set(OPENBAO_ALLOW_PLAINTEXT, "yes");
+
+    let error = openbao_transport_from_env(&env).unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        format!("{OPENBAO_ALLOW_PLAINTEXT} must be true or false, got 'yes'")
+    );
+}
+
+#[test]
+fn openbao_transport_reports_an_unreadable_flag() {
+    let error = openbao_transport_from_env(&NonUnicodeEnv).unwrap_err();
+
+    assert_eq!(error.to_string(), format!("failed to read {OPENBAO_ALLOW_PLAINTEXT}"));
 }
 
 #[tokio::test]

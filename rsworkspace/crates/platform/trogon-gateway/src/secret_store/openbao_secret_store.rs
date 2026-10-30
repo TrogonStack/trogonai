@@ -41,17 +41,23 @@ pub struct OpenBaoSecretStore {
 }
 
 impl OpenBaoSecretStore {
-    pub fn new(address: impl AsRef<str>, token: impl AsRef<str>) -> Result<Self, OpenBaoSecretStoreConfigError> {
-        Self::with_mount(address, token, OpenBaoMount::default())
+    pub fn new(
+        address: impl AsRef<str>,
+        token: impl AsRef<str>,
+        transport: OpenBaoTransport,
+    ) -> Result<Self, OpenBaoSecretStoreConfigError> {
+        Self::with_mount(address, token, transport, OpenBaoMount::default())
     }
 
     pub fn with_mount(
         address: impl AsRef<str>,
         token: impl AsRef<str>,
+        transport: OpenBaoTransport,
         mount: OpenBaoMount,
     ) -> Result<Self, OpenBaoSecretStoreConfigError> {
         let address = Url::parse(address.as_ref().trim_end_matches('/'))
             .map_err(OpenBaoSecretStoreConfigError::InvalidAddress)?;
+        transport.admit(&address)?;
         let token = SecretString::new(token).map_err(OpenBaoSecretStoreConfigError::EmptyToken)?;
         Ok(Self {
             address,
@@ -241,10 +247,27 @@ fn is_mount_char(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.')
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpenBaoTransport {
+    TlsRequired,
+    PlaintextAllowed,
+}
+
+impl OpenBaoTransport {
+    fn admit(self, address: &Url) -> Result<(), OpenBaoSecretStoreConfigError> {
+        match (self, address.scheme()) {
+            (Self::TlsRequired, "http") => Err(OpenBaoSecretStoreConfigError::PlaintextAddress),
+            _ => Ok(()),
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum OpenBaoSecretStoreConfigError {
     #[error("invalid OpenBao address: {0}")]
     InvalidAddress(#[source] url::ParseError),
+    #[error("OpenBao address must use https unless plaintext transport is allowed")]
+    PlaintextAddress,
     #[error("invalid OpenBao token: {0}")]
     EmptyToken(#[source] EmptySecretError),
     #[error("failed to build OpenBao HTTP client: {0}")]

@@ -30,5 +30,6 @@ pub const METER_NAME: &str = "trogon-gateway";
 pub const CREDENTIAL_MANAGEMENT_ADMIN_TOKEN: &str = "TROGON_GATEWAY_CREDENTIAL_MANAGEMENT_ADMIN_TOKEN";
 pub const OPENBAO_ADDR: &str = "OPENBAO_ADDR";
 pub const OPENBAO_TOKEN: &str = "OPENBAO_TOKEN";
+pub const OPENBAO_ALLOW_PLAINTEXT: &str = "OPENBAO_ALLOW_PLAINTEXT";
 pub const CREDENTIAL_WORKER_INTERVAL: Duration = Duration::from_secs(30);
 pub const CREDENTIAL_RUNTIME_PROJECTION_WORKER_INTERVAL: Duration = Duration::from_secs(30);

@@ -23,9 +23,10 @@ use std::net::SocketAddr;
 
 use crate::constants::{
     CLAIM_CHECK_TTL_GRACE, CREDENTIAL_MANAGEMENT_ADMIN_TOKEN, CREDENTIAL_RUNTIME_PROJECTION_WORKER_INTERVAL,
-    CREDENTIAL_WORKER_INTERVAL, NATS_CONNECT_TIMEOUT, NATS_SERVER_INFO_POLL_INTERVAL, OPENBAO_ADDR, OPENBAO_TOKEN,
-    SLACK_RESTART_BACKOFF,
+    CREDENTIAL_WORKER_INTERVAL, NATS_CONNECT_TIMEOUT, NATS_SERVER_INFO_POLL_INTERVAL, OPENBAO_ADDR,
+    OPENBAO_ALLOW_PLAINTEXT, OPENBAO_TOKEN, SLACK_RESTART_BACKOFF,
 };
+use crate::secret_store::openbao_secret_store::OpenBaoTransport;
 use anyhow::Context;
 use futures_util::FutureExt;
 use tokio::task::JoinSet;
@@ -523,8 +524,19 @@ fn openbao_secret_store_from_env(
     let token = env
         .var(OPENBAO_TOKEN)
         .with_context(|| format!("{OPENBAO_TOKEN} must be set when {enabled_by} is enabled"))?;
-    secret_store::openbao_secret_store::OpenBaoSecretStore::new(address, token)
+    let transport = openbao_transport_from_env(env)?;
+    secret_store::openbao_secret_store::OpenBaoSecretStore::new(address, token, transport)
         .context("OpenBao secret store configuration")
+}
+
+fn openbao_transport_from_env(env: &impl ReadEnv) -> anyhow::Result<OpenBaoTransport> {
+    match env.var(OPENBAO_ALLOW_PLAINTEXT) {
+        Err(std::env::VarError::NotPresent) => Ok(OpenBaoTransport::TlsRequired),
+        Ok(value) if value == "false" => Ok(OpenBaoTransport::TlsRequired),
+        Ok(value) if value == "true" => Ok(OpenBaoTransport::PlaintextAllowed),
+        Ok(value) => anyhow::bail!("{OPENBAO_ALLOW_PLAINTEXT} must be true or false, got '{value}'"),
+        Err(source) => Err(source).with_context(|| format!("failed to read {OPENBAO_ALLOW_PLAINTEXT}")),
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

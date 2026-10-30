@@ -24,7 +24,7 @@ use crate::credential::commands::proto::{
 use crate::credential_runtime_projection::{
     RuntimeCredentialError, RuntimeCredentialRegistry, RuntimeIntegrationKey, RuntimeIntegrationProjection,
 };
-use crate::secret_store::openbao_secret_store::OpenBaoSecretStore;
+use crate::secret_store::openbao_secret_store::{OpenBaoSecretStore, OpenBaoTransport};
 use crate::secret_store::{MockOpenBaoSecretStore, SecretStoreError, SecretStoreGet};
 use crate::source_integration_id::SourceIntegrationId;
 use trogonai_proto::gateway::credentials::CredentialEventCase;
@@ -383,7 +383,12 @@ impl OpenBaoServer {
     }
 
     fn store(&self) -> OpenBaoSecretStore {
-        OpenBaoSecretStore::new(&self.address, OPENBAO_DEV_ROOT_TOKEN).unwrap()
+        OpenBaoSecretStore::new(
+            &self.address,
+            OPENBAO_DEV_ROOT_TOKEN,
+            OpenBaoTransport::PlaintextAllowed,
+        )
+        .unwrap()
     }
 }
 
