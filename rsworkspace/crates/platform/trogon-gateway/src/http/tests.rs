@@ -30,6 +30,10 @@ use trogon_nats::AdvancedMockNatsClient;
 use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{ClaimCheckPublisher, MaxPayload, MockJetStreamPublisher, MockObjectStore};
 
+const RUNTIME_SECRET: &str = "runtime-secret";
+const STATIC_SECRET: &str = "static-secret";
+const ZOOM_SECRET_TOKEN: &str = "zoom-secret-token";
+
 type HmacSha256 = hmac::Hmac<sha2::Sha256>;
 
 fn wrap_publisher(publisher: MockJetStreamPublisher) -> ClaimCheckPublisher<MockJetStreamPublisher, MockObjectStore> {
@@ -576,7 +580,7 @@ webhook_secret = "static-secret"
         wrap_publisher(publisher.clone()),
         &AdvancedMockNatsClient::new(),
         RuntimeCredentialMounts {
-            github: Some(github_runtime_credentials(&integration_id, "runtime-secret").await),
+            github: Some(github_runtime_credentials(&integration_id, RUNTIME_SECRET).await),
             ..RuntimeCredentialMounts::default()
         },
     );
@@ -587,7 +591,7 @@ webhook_secret = "static-secret"
         .oneshot(github_webhook_request(
             "/sources/github/acme-main/webhook",
             body,
-            "static-secret",
+            STATIC_SECRET,
         ))
         .await
         .unwrap();
@@ -598,7 +602,7 @@ webhook_secret = "static-secret"
         .oneshot(github_webhook_request(
             "/sources/github/acme-main/webhook",
             body,
-            "runtime-secret",
+            RUNTIME_SECRET,
         ))
         .await
         .unwrap();
@@ -725,7 +729,7 @@ signing_secret = "static-secret"
         wrap_publisher(publisher.clone()),
         &AdvancedMockNatsClient::new(),
         RuntimeCredentialMounts {
-            slack: Some(slack_runtime_credentials(&integration_id, "runtime-secret").await),
+            slack: Some(slack_runtime_credentials(&integration_id, RUNTIME_SECRET).await),
             ..RuntimeCredentialMounts::default()
         },
     );
@@ -742,7 +746,7 @@ signing_secret = "static-secret"
         .oneshot(slack_webhook_request(
             "/sources/slack/acme-main/webhook",
             &body,
-            "static-secret",
+            STATIC_SECRET,
         ))
         .await
         .unwrap();
@@ -753,7 +757,7 @@ signing_secret = "static-secret"
         .oneshot(slack_webhook_request(
             "/sources/slack/acme-main/webhook",
             &body,
-            "runtime-secret",
+            RUNTIME_SECRET,
         ))
         .await
         .unwrap();
@@ -779,7 +783,7 @@ webhook_secret = "static-secret"
         wrap_publisher(publisher.clone()),
         &AdvancedMockNatsClient::new(),
         RuntimeCredentialMounts {
-            linear: Some(linear_runtime_credentials(&integration_id, "runtime-secret").await),
+            linear: Some(linear_runtime_credentials(&integration_id, RUNTIME_SECRET).await),
             ..RuntimeCredentialMounts::default()
         },
     );
@@ -801,7 +805,7 @@ webhook_secret = "static-secret"
         .oneshot(linear_webhook_request(
             "/sources/linear/acme-main/webhook",
             &body,
-            "static-secret",
+            STATIC_SECRET,
         ))
         .await
         .unwrap();
@@ -812,7 +816,7 @@ webhook_secret = "static-secret"
         .oneshot(linear_webhook_request(
             "/sources/linear/acme-main/webhook",
             &body,
-            "runtime-secret",
+            RUNTIME_SECRET,
         ))
         .await
         .unwrap();
@@ -838,7 +842,7 @@ client_state = "static-secret"
         wrap_publisher(publisher.clone()),
         &AdvancedMockNatsClient::new(),
         RuntimeCredentialMounts {
-            microsoft_graph: Some(microsoft_graph_runtime_credentials(&integration_id, "runtime-secret").await),
+            microsoft_graph: Some(microsoft_graph_runtime_credentials(&integration_id, RUNTIME_SECRET).await),
             ..RuntimeCredentialMounts::default()
         },
     );
@@ -847,7 +851,7 @@ client_state = "static-secret"
         .clone()
         .oneshot(microsoft_graph_webhook_request(
             "/sources/microsoft-graph/acme-main/webhook",
-            "static-secret",
+            STATIC_SECRET,
         ))
         .await
         .unwrap();
@@ -857,7 +861,7 @@ client_state = "static-secret"
     let runtime_response = app
         .oneshot(microsoft_graph_webhook_request(
             "/sources/microsoft-graph/acme-main/webhook",
-            "runtime-secret",
+            RUNTIME_SECRET,
         ))
         .await
         .unwrap();
@@ -886,7 +890,7 @@ client_secret = "static-secret"
         wrap_publisher(publisher.clone()),
         &AdvancedMockNatsClient::new(),
         RuntimeCredentialMounts {
-            sentry: Some(sentry_runtime_credentials(&integration_id, "runtime-secret").await),
+            sentry: Some(sentry_runtime_credentials(&integration_id, RUNTIME_SECRET).await),
             ..RuntimeCredentialMounts::default()
         },
     );
@@ -897,7 +901,7 @@ client_secret = "static-secret"
         .oneshot(sentry_webhook_request(
             "/sources/sentry/acme-main/webhook",
             body,
-            "static-secret",
+            STATIC_SECRET,
         ))
         .await
         .unwrap();
@@ -908,7 +912,7 @@ client_secret = "static-secret"
         .oneshot(sentry_webhook_request(
             "/sources/sentry/acme-main/webhook",
             body,
-            "runtime-secret",
+            RUNTIME_SECRET,
         ))
         .await
         .unwrap();
@@ -934,7 +938,7 @@ verification_token = "static-secret"
         wrap_publisher(publisher.clone()),
         &AdvancedMockNatsClient::new(),
         RuntimeCredentialMounts {
-            notion: Some(notion_runtime_credentials(&integration_id, "runtime-secret").await),
+            notion: Some(notion_runtime_credentials(&integration_id, RUNTIME_SECRET).await),
             ..RuntimeCredentialMounts::default()
         },
     );
@@ -951,7 +955,7 @@ verification_token = "static-secret"
         .oneshot(notion_webhook_request(
             "/sources/notion/acme-main/webhook",
             &body,
-            "static-secret",
+            STATIC_SECRET,
         ))
         .await
         .unwrap();
@@ -962,7 +966,7 @@ verification_token = "static-secret"
         .oneshot(notion_webhook_request(
             "/sources/notion/acme-main/webhook",
             &body,
-            "runtime-secret",
+            RUNTIME_SECRET,
         ))
         .await
         .unwrap();
@@ -988,7 +992,7 @@ webhook_secret = "static-secret"
         wrap_publisher(publisher.clone()),
         &AdvancedMockNatsClient::new(),
         RuntimeCredentialMounts {
-            telegram: Some(telegram_runtime_credentials(&integration_id, "runtime-secret").await),
+            telegram: Some(telegram_runtime_credentials(&integration_id, RUNTIME_SECRET).await),
             ..RuntimeCredentialMounts::default()
         },
     );
@@ -1003,7 +1007,7 @@ webhook_secret = "static-secret"
         .oneshot(telegram_webhook_request(
             "/sources/telegram/acme-main/webhook",
             &body,
-            "static-secret",
+            STATIC_SECRET,
         ))
         .await
         .unwrap();
@@ -1014,7 +1018,7 @@ webhook_secret = "static-secret"
         .oneshot(telegram_webhook_request(
             "/sources/telegram/acme-main/webhook",
             &body,
-            "runtime-secret",
+            RUNTIME_SECRET,
         ))
         .await
         .unwrap();
@@ -1040,7 +1044,7 @@ consumer_secret = "static-secret"
         wrap_publisher(publisher.clone()),
         &AdvancedMockNatsClient::new(),
         RuntimeCredentialMounts {
-            twitter: Some(twitter_runtime_credentials(&integration_id, "runtime-secret").await),
+            twitter: Some(twitter_runtime_credentials(&integration_id, RUNTIME_SECRET).await),
             ..RuntimeCredentialMounts::default()
         },
     );
@@ -1055,7 +1059,7 @@ consumer_secret = "static-secret"
         .oneshot(twitter_webhook_request(
             "/sources/twitter/acme-main/webhook",
             body,
-            "static-secret",
+            STATIC_SECRET,
         ))
         .await
         .unwrap();
@@ -1066,7 +1070,7 @@ consumer_secret = "static-secret"
         .oneshot(twitter_webhook_request(
             "/sources/twitter/acme-main/webhook",
             body,
-            "runtime-secret",
+            RUNTIME_SECRET,
         ))
         .await
         .unwrap();
@@ -1111,7 +1115,7 @@ secret_token = "zoom-secret-token"
         .oneshot(zoom_webhook_request(
             "/sources/zoom/acme-main/webhook",
             br#"{"event":"meeting.started","payload":{}}"#,
-            "zoom-secret-token",
+            ZOOM_SECRET_TOKEN,
         ))
         .await
         .unwrap();

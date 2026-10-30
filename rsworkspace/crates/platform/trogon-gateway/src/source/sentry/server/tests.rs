@@ -24,6 +24,7 @@ use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
 type HmacSha256 = Hmac<Sha256>;
 
 const TEST_SECRET: &str = "test-secret";
+const RUNTIME_SECRET: &str = "runtime-secret";
 
 fn wrap_publisher(publisher: MockJetStreamPublisher) -> ClaimCheckPublisher<MockJetStreamPublisher, MockObjectStore> {
     ClaimCheckPublisher::new(
@@ -177,7 +178,7 @@ async fn valid_webhook_publishes_to_nats_and_returns_200() {
 async fn runtime_client_secret_publishes_to_nats_and_rejects_static_secret() {
     let _guard = tracing_guard();
     let publisher = MockJetStreamPublisher::new();
-    let app = runtime_app(publisher.clone(), "runtime-secret").await;
+    let app = runtime_app(publisher.clone(), RUNTIME_SECRET).await;
     let body = br#"{"action":"created","data":{}}"#;
     let static_signature = compute_sig(TEST_SECRET, body);
 
@@ -196,7 +197,7 @@ async fn runtime_client_secret_publishes_to_nats_and_rejects_static_secret() {
     assert_eq!(static_response.status(), StatusCode::UNAUTHORIZED);
     assert!(publisher.published_messages().is_empty());
 
-    let runtime_signature = compute_sig("runtime-secret", body);
+    let runtime_signature = compute_sig(RUNTIME_SECRET, body);
     let runtime_response = app
         .oneshot(webhook_request(
             body,
