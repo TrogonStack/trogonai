@@ -141,8 +141,12 @@ webhook_secret = { env = "TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET" }
 # signing_secret = { env = "SLACK_PRIMARY_SIGNING_SECRET" }
 # timestamp_max_drift_secs = 300
 #
+# Socket Mode is for development or apps behind a firewall, not for widely
+# distributed apps. Prefer the webhook transport in production.
+#
 # [sources.slack.integrations.primary.socket_mode]
 # app_token = { env = "SLACK_PRIMARY_APP_TOKEN" }
+# intended_use = "development"
 #
 # Google Cloud Pub/Sub is consumed over an outbound StreamingPull connection. It
 # needs no public URL. Each integration supplies its own Google credentials JSON

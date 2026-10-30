@@ -52,6 +52,7 @@ fn slack_socket_mode_toml(token: &str) -> String {
     format!(
         r#"
 [sources.slack.integrations.primary.socket_mode]
+intended_use = "development"
 app_token = "{token}"
 "#
     )
@@ -667,6 +668,7 @@ fn slack_ack_timeout_beyond_the_deadline_is_capped_instead_of_rejected() {
 nats_ack_timeout_secs = 10
 
 [sources.slack.integrations.primary.socket_mode]
+intended_use = "development"
 app_token = "xapp-test-token"
 "#;
     let f = write_toml(toml);
@@ -692,6 +694,7 @@ fn slack_socket_mode_resolves_with_valid_app_token() {
 fn slack_socket_mode_missing_app_token_is_invalid() {
     let toml = r#"
 [sources.slack.integrations.primary.socket_mode]
+intended_use = "development"
 "#;
     let f = write_toml(toml);
     let result = load(Some(f.path()));
@@ -707,6 +710,7 @@ fn slack_disabled_socket_mode_integration_is_skipped() {
 status = "disabled"
 
 [sources.slack.integrations.primary.socket_mode]
+intended_use = "development"
 app_token = "xapp-test-token"
 "#;
     let f = write_toml(toml);
@@ -730,6 +734,7 @@ fn slack_socket_mode_accepts_a_custom_api_base_url() {
     let f = write_toml(
         r#"
 [sources.slack.integrations.primary.socket_mode]
+intended_use = "development"
 app_token = "xapp-test-token"
 api_base_url = "https://slack-gov.com/api/"
 "#,
@@ -747,6 +752,7 @@ fn slack_socket_mode_rejects_an_invalid_api_base_url() {
     let f = write_toml(
         r#"
 [sources.slack.integrations.primary.socket_mode]
+intended_use = "development"
 app_token = "xapp-test-token"
 api_base_url = "ftp://slack-gov.com/api/"
 "#,
@@ -767,12 +773,60 @@ fn slack_socket_mode_rejects_non_app_token() {
 }
 
 #[test]
+fn slack_socket_mode_requires_intended_use() {
+    let f = write_toml(
+        r#"
+[sources.slack.integrations.primary.socket_mode]
+app_token = "xapp-test-token"
+"#,
+    );
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("slack/primary: invalid intended_use: required because Slack does not intend Socket Mode for widely distributed apps") && e.contains("'development' or 'behind_firewall'")))
+    );
+}
+
+#[test]
+fn slack_socket_mode_rejects_an_unknown_intended_use() {
+    let f = write_toml(
+        r#"
+[sources.slack.integrations.primary.socket_mode]
+app_token = "xapp-test-token"
+intended_use = "production"
+"#,
+    );
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("slack/primary: invalid intended_use: unsupported value 'production'; Slack does not intend Socket Mode for widely distributed apps, expected 'development' or 'behind_firewall'")))
+    );
+}
+
+#[test]
+fn slack_socket_mode_accepts_each_supported_intended_use() {
+    for (value, expected) in [
+        ("development", SlackSocketModeIntendedUse::Development),
+        ("behind_firewall", SlackSocketModeIntendedUse::BehindFirewall),
+    ] {
+        let f = write_toml(&format!(
+            r#"
+[sources.slack.integrations.primary.socket_mode]
+app_token = "xapp-test-token"
+intended_use = "{value}"
+"#
+        ));
+        let cfg = load(Some(f.path())).expect("load failed");
+        assert_eq!(cfg.slack[0].config.socket_mode().unwrap().intended_use, expected);
+    }
+}
+
+#[test]
 fn slack_integration_rejects_webhook_and_socket_mode_together() {
     let toml = r#"
 [sources.slack.integrations.primary.webhook]
 signing_secret = "slack-secret"
 
 [sources.slack.integrations.primary.socket_mode]
+intended_use = "development"
 app_token = "xapp-test-token"
 "#;
     let f = write_toml(toml);

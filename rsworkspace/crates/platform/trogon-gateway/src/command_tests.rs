@@ -147,6 +147,7 @@ async fn serve_stops_slack_and_http_on_the_shared_shutdown() {
         file,
         r#"
 [sources.slack.integrations.primary.socket_mode]
+intended_use = "development"
 app_token = "xapp-fixture-token"
 "#
     )

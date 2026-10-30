@@ -185,6 +185,7 @@ fn slack_integrations() -> Vec<config::SourceIntegration<source::slack::SlackCon
     configuration(
         r#"
 [sources.slack.integrations.socket.socket_mode]
+intended_use = "development"
 app_token = "xapp-fixture-token"
 [sources.slack.integrations.webhook.webhook]
 signing_secret = "fixture-secret"

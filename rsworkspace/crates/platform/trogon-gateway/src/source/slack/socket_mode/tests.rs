@@ -44,6 +44,7 @@ fn socket_config() -> SlackConfig {
             app_token: super::super::config::SlackAppToken::new("xapp-test-token").unwrap(),
             api_base_url: super::super::config::SlackApiBaseUrl::new(super::super::constants::DEFAULT_API_BASE_URL)
                 .unwrap(),
+            intended_use: super::super::config::SlackSocketModeIntendedUse::Development,
         }),
     }
 }
