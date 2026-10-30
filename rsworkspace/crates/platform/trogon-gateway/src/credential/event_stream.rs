@@ -56,3 +56,6 @@ where
     }
     Ok(events)
 }
+
+#[cfg(test)]
+mod tests;

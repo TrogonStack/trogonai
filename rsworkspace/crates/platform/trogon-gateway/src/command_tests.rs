@@ -308,3 +308,236 @@ async fn notion_verification_token_preserves_output_write_failures() {
         .unwrap_err();
     assert!(error.downcast_ref::<std::io::Error>().is_some());
 }
+
+fn management_env(address: &str) -> trogon_std::env::InMemoryEnv {
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set(CREDENTIAL_MANAGEMENT_ADMIN_TOKEN, "admin-token");
+    env.set(OPENBAO_ADDR, address);
+    env.set(OPENBAO_TOKEN, "openbao-token");
+    env
+}
+
+struct NonUnicodeEnv;
+
+impl ReadEnv for NonUnicodeEnv {
+    fn var(&self, _key: &str) -> Result<String, std::env::VarError> {
+        Err(std::env::VarError::NotUnicode(std::ffi::OsString::new()))
+    }
+}
+
+#[tokio::test]
+async fn until_shutdown_returns_when_shutdown_fires_before_the_work_finishes() {
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        until_shutdown(std::future::ready(()), std::future::pending()),
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn until_shutdown_returns_when_the_work_finishes_before_shutdown() {
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        until_shutdown(std::future::pending(), std::future::ready(())),
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn serve_enables_credential_management_when_the_admin_token_is_configured() {
+    let server = JetStreamTestServer::start().await;
+    let mut resolved = resolved_config();
+    resolved.http_server.port = 0;
+    resolved.nats = trogon_nats::NatsConfig::from_url(server.address());
+    let env = management_env("http://127.0.0.1:1");
+
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        serve_with_env(resolved, std::future::ready(()), &env),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    let js = server.jetstream().await;
+    js.get_key_value(credential_management::idempotency::bucket_config().bucket)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn serve_does_not_provision_credential_management_without_the_admin_token() {
+    let server = JetStreamTestServer::start().await;
+    let mut resolved = resolved_config();
+    resolved.http_server.port = 0;
+    resolved.nats = trogon_nats::NatsConfig::from_url(server.address());
+
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        serve_with_env(resolved, std::future::ready(()), &trogon_std::env::InMemoryEnv::new()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    let js = server.jetstream().await;
+    assert!(
+        js.get_key_value(credential_management::idempotency::bucket_config().bucket)
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn serve_requires_openbao_settings_when_credential_management_is_enabled() {
+    let server = JetStreamTestServer::start().await;
+    let mut resolved = resolved_config();
+    resolved.http_server.port = 0;
+    resolved.nats = trogon_nats::NatsConfig::from_url(server.address());
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set(CREDENTIAL_MANAGEMENT_ADMIN_TOKEN, "admin-token");
+
+    let error = tokio::time::timeout(
+        Duration::from_secs(10),
+        serve_with_env(resolved, std::future::ready(()), &env),
+    )
+    .await
+    .unwrap()
+    .unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        format!("{OPENBAO_ADDR} must be set when {CREDENTIAL_MANAGEMENT_ADMIN_TOKEN} is enabled")
+    );
+}
+
+#[test]
+fn admin_token_is_absent_when_the_variable_is_not_set() {
+    let env = trogon_std::env::InMemoryEnv::new();
+
+    assert!(credential_management_admin_token_from_env(&env).unwrap().is_none());
+}
+
+#[test]
+fn admin_token_is_read_from_the_environment() {
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set(CREDENTIAL_MANAGEMENT_ADMIN_TOKEN, "admin-token");
+
+    let token = credential_management_admin_token_from_env(&env).unwrap().unwrap();
+
+    assert_eq!(token.as_str(), "admin-token");
+}
+
+#[test]
+fn empty_admin_token_is_rejected() {
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set(CREDENTIAL_MANAGEMENT_ADMIN_TOKEN, "");
+
+    let error = credential_management_admin_token_from_env(&env).unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        format!("{CREDENTIAL_MANAGEMENT_ADMIN_TOKEN} must not be empty")
+    );
+}
+
+#[test]
+fn unreadable_admin_token_is_reported_with_the_variable_name() {
+    let error = credential_management_admin_token_from_env(&NonUnicodeEnv).unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        format!("failed to read {CREDENTIAL_MANAGEMENT_ADMIN_TOKEN}")
+    );
+}
+
+#[test]
+fn openbao_store_is_built_from_the_environment() {
+    let env = management_env("http://openbao.invalid:8200");
+
+    assert!(openbao_secret_store_from_env(&env, CREDENTIAL_MANAGEMENT_ADMIN_TOKEN).is_ok());
+}
+
+#[test]
+fn openbao_store_requires_an_address() {
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set(OPENBAO_TOKEN, "openbao-token");
+
+    let error = openbao_secret_store_from_env(&env, "management").unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        format!("{OPENBAO_ADDR} must be set when management is enabled")
+    );
+}
+
+#[test]
+fn openbao_store_requires_a_token() {
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set(OPENBAO_ADDR, "http://openbao.invalid:8200");
+
+    let error = openbao_secret_store_from_env(&env, "management").unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        format!("{OPENBAO_TOKEN} must be set when management is enabled")
+    );
+}
+
+#[test]
+fn openbao_store_rejects_an_invalid_address() {
+    let env = management_env("not a url");
+
+    let error = openbao_secret_store_from_env(&env, "management").unwrap_err();
+
+    assert_eq!(error.to_string(), "OpenBao secret store configuration");
+}
+
+#[tokio::test]
+async fn credential_runtime_projection_refresh_logs_the_report_fields() {
+    let events = trogon_std::log_capture::CapturedEvents::new();
+    let _guard = events.install(trogon_std::log_capture::LevelFilter::INFO);
+    let stream = MockJetStreamPublishMessage::new();
+
+    refresh_credential_runtime_projection_from_start(
+        &stream,
+        &EmptyCredentialEventStore::default(),
+        credential_runtime_projection::RuntimeCredentialRegistry::default(),
+    )
+    .await
+    .unwrap();
+
+    let records = events.events();
+    let refreshed = records
+        .iter()
+        .find(|event| event.message() == Some("credential runtime projection refreshed"))
+        .unwrap();
+    assert_eq!(refreshed.field("scanned_events"), Some("0"));
+    assert_eq!(refreshed.field("decoded_events"), Some("0"));
+    assert_eq!(refreshed.field("skipped_events"), Some("0"));
+    assert_eq!(refreshed.field("changed_credentials"), Some("0"));
+    assert_eq!(refreshed.field("applied_credentials"), Some("0"));
+    assert_eq!(refreshed.field("projected_integrations"), Some("0"));
+    assert_eq!(refreshed.field("checkpoint_loaded_sequence"), Some("0"));
+    assert_eq!(refreshed.field("checkpoint_advanced_to"), Some("None"));
+}
+
+#[tokio::test]
+async fn startup_projection_refresh_over_the_credential_store_logs_the_report() {
+    let events = trogon_std::log_capture::CapturedEvents::new();
+    let _guard = events.install(trogon_std::log_capture::LevelFilter::INFO);
+    let server = JetStreamTestServer::start().await;
+    let store = credential::store::open(server.jetstream().await).await.unwrap();
+
+    let (_registry, report) = refresh_credential_runtime_projection(&store).await.unwrap();
+
+    assert_eq!(report.scanned_events(), 0);
+    let records = events.events();
+    let refreshed = records
+        .iter()
+        .find(|event| event.message() == Some("credential runtime projection refreshed"))
+        .unwrap();
+    assert_eq!(refreshed.field("scanned_events"), Some("0"));
+}

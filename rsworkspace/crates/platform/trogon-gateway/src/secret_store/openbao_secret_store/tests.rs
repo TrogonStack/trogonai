@@ -278,6 +278,21 @@ async fn revoke_posts_delete_for_every_version() {
 }
 
 #[tokio::test]
+async fn destroy_of_version_absent_from_metadata_is_missing_without_posting_destroy() {
+    let openbao = FakeOpenBao::start(Some(metadata_with_destroyed_first_version())).await;
+    let credential = discord_bot_token(CredentialVersion::new(3).unwrap());
+
+    let error = openbao
+        .store()
+        .destroy(&credential, &SecretDestroyReason::new("operator request").unwrap())
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, SecretStoreError::Missing { credential: missing } if missing == credential));
+    assert!(openbao.posted_to(OpenBaoEndpoint::Destroy).await.is_empty());
+}
+
+#[tokio::test]
 async fn destroy_posts_destroy_for_every_version() {
     let openbao = FakeOpenBao::start(Some(metadata_with_destroyed_first_version())).await;
 

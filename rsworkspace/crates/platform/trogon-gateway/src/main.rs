@@ -72,6 +72,21 @@ async fn serve(
     resolved: config::ResolvedConfig,
     shutdown: impl std::future::Future<Output = ()> + Send + 'static,
 ) -> anyhow::Result<()> {
+    serve_with_env(resolved, shutdown, &SystemEnv).await
+}
+
+async fn until_shutdown(shutdown: impl std::future::Future<Output = ()>, work: impl std::future::Future<Output = ()>) {
+    tokio::select! {
+        () = shutdown => {}
+        () = work => {}
+    }
+}
+
+async fn serve_with_env(
+    resolved: config::ResolvedConfig,
+    shutdown: impl std::future::Future<Output = ()> + Send + 'static,
+    env: &impl ReadEnv,
+) -> anyhow::Result<()> {
     if !resolved.has_any_source() {
         anyhow::bail!("no sources configured — provide a config file with at least one source");
     }
@@ -128,15 +143,16 @@ async fn serve(
         let projection_event_store = credential_store.clone();
         let shutdown = shutdown.clone();
         join_set.spawn(async move {
-            tokio::select! {
-                () = shutdown => {}
-                () = credential_runtime_projection::run_tracked_refresh_worker(
+            until_shutdown(
+                shutdown,
+                credential_runtime_projection::run_tracked_refresh_worker(
                     projection_runtime_credentials,
                     projection_event_stream,
                     projection_event_store,
                     CREDENTIAL_RUNTIME_PROJECTION_WORKER_INTERVAL,
-                ) => {}
-            }
+                ),
+            )
+            .await;
             ("credential-runtime-projection-worker", Ok(()))
         });
         info!("credential runtime projection refresh worker spawned");
@@ -167,9 +183,9 @@ async fn serve(
     );
 
     let app = http::mount_sources(resolved, publisher, &nats);
-    let app = match credential_management_admin_token_from_env(&SystemEnv)? {
+    let app = match credential_management_admin_token_from_env(env)? {
         Some(admin_token) => {
-            let store = openbao_secret_store_from_env(&SystemEnv, CREDENTIAL_MANAGEMENT_ADMIN_TOKEN)?;
+            let store = openbao_secret_store_from_env(env, CREDENTIAL_MANAGEMENT_ADMIN_TOKEN)?;
             let idempotency = credential_management::idempotency::open(client.context().clone()).await?;
             let worker_checkpoints =
                 credential_lifecycle::recovery_worker::open_checkpoint_store(client.context().clone()).await?;
@@ -184,16 +200,17 @@ async fn serve(
             let worker_handler = handler.clone();
             let worker_shutdown = shutdown.clone();
             join_set.spawn(async move {
-                tokio::select! {
-                    () = worker_shutdown => {}
-                    () = credential_lifecycle::recovery_worker::run(
+                until_shutdown(
+                    worker_shutdown,
+                    credential_lifecycle::recovery_worker::run(
                         worker_event_stream,
                         worker_event_store,
                         worker_handler,
                         worker_checkpoints,
                         CREDENTIAL_WORKER_INTERVAL,
-                    ) => {}
-                }
+                    ),
+                )
+                .await;
                 ("credential-worker", Ok(()))
             });
             info!("credential recovery worker spawned");
@@ -470,19 +487,31 @@ where
         .refresh_from_credential_stream_tracked(event_stream, event_store)
         .await
         .context("credential runtime projection refresh")?;
-    info!(
-        scanned_events = report.scanned_events(),
-        decoded_events = report.decoded_events(),
-        skipped_events = report.skipped_events(),
-        changed_credentials = report.changed_credentials(),
-        applied_credentials = report.applied_credentials(),
-        projected_integrations = report.projected_integrations(),
-        checkpoint_loaded_sequence = report.checkpoint_loaded_sequence(),
-        checkpoint_advanced_to = ?report.checkpoint_advanced_to(),
-        "credential runtime projection refreshed"
-    );
+    log_projection_refresh(&report);
 
     Ok((registry, report))
+}
+
+fn log_projection_refresh(report: &credential_runtime_projection::RuntimeProjectionRefreshReport) {
+    let scanned_events = report.scanned_events();
+    let decoded_events = report.decoded_events();
+    let skipped_events = report.skipped_events();
+    let changed_credentials = report.changed_credentials();
+    let applied_credentials = report.applied_credentials();
+    let projected_integrations = report.projected_integrations();
+    let checkpoint_loaded_sequence = report.checkpoint_loaded_sequence();
+    let checkpoint_advanced_to = report.checkpoint_advanced_to();
+    info!(
+        scanned_events,
+        decoded_events,
+        skipped_events,
+        changed_credentials,
+        applied_credentials,
+        projected_integrations,
+        checkpoint_loaded_sequence,
+        checkpoint_advanced_to = ?checkpoint_advanced_to,
+        "credential runtime projection refreshed"
+    );
 }
 
 fn credential_management_admin_token_from_env(env: &impl ReadEnv) -> anyhow::Result<Option<SecretString>> {
