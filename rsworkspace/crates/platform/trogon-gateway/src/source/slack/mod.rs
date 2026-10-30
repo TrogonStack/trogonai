@@ -136,6 +136,7 @@
 //! | `webhook.timestamp_max_drift_secs` | `300` | Allowed clock drift for request timestamps |
 //! | `webhook.max_body_bytes` | `4194304` | Largest accepted request body |
 //! | `socket_mode.app_token` | required | App-level token, starts with `xapp-` |
+//! | `socket_mode.intended_use` | required | `development` or `behind_firewall`. Slack does not intend Socket Mode for widely distributed apps, so HTTP webhooks are the production transport |
 //! | `socket_mode.api_base_url` | `https://slack.com/api/` | Slack Web API base for `apps.connections.open`, for example `https://slack-gov.com/api/` for GovSlack |
 //! | `nats_ack_timeout_secs` | derived from Slack's 3 second deadline | Capped at 2.8 seconds, and at 1 second for deliveries that wait on a consumer reply |
 
@@ -156,6 +157,7 @@ pub mod retry_attempt;
 pub mod retry_reason;
 pub mod server;
 pub mod signature;
+pub mod slack_socket_mode_intended_use;
 pub mod socket_liveness;
 pub mod socket_mode;
 pub mod ssl_check;

@@ -22,6 +22,7 @@ use super::config::{
 };
 use super::constants::NATS_HEADER_CONTENT_TYPE;
 use super::server::{SlackBridge, router_with_clock};
+use super::slack_socket_mode_intended_use::SlackSocketModeIntendedUse;
 use super::socket_mode::{SocketModeError, handle_text_frame};
 
 const REQUEST_NOW_SECONDS: u64 = 1_700_000_000;
@@ -437,6 +438,7 @@ fn socket_mode_config() -> SlackConfig {
     gateway_config(SlackTransportConfig::SocketMode(SlackSocketModeConfig {
         app_token: SlackAppToken::new("xapp-conformance").expect("valid token"),
         api_base_url: SlackApiBaseUrl::new(super::constants::DEFAULT_API_BASE_URL).expect("valid url"),
+        intended_use: SlackSocketModeIntendedUse::Development,
     }))
 }
 

@@ -330,9 +330,13 @@ fn spawn_slack_socket_modes<P, S, R, Shutdown, Run, Running>(
         + 'static,
     Running: std::future::Future<Output = Result<(), source::slack::socket_mode::SocketModeError>> + Send + 'static,
 {
-    for (integration, open_url) in integrations.iter().filter_map(|integration| {
+    for (integration, open_url, intended_use) in integrations.iter().filter_map(|integration| {
         let socket_mode = integration.config.socket_mode()?;
-        Some((integration, socket_mode.api_base_url.connections_open_url().to_string()))
+        Some((
+            integration,
+            socket_mode.api_base_url.connections_open_url().to_string(),
+            socket_mode.intended_use,
+        ))
     }) {
         let publisher = publisher.clone();
         let requester = requester.clone();
@@ -349,7 +353,12 @@ fn spawn_slack_socket_modes<P, S, R, Shutdown, Run, Running>(
             };
             ("slack-socket-mode", result)
         });
-        info!(source = "slack", integration = %integration.id, "socket mode runner spawned");
+        info!(
+            source = "slack",
+            integration = %integration.id,
+            intended_use = %intended_use,
+            "socket mode runner spawned"
+        );
     }
 }
 

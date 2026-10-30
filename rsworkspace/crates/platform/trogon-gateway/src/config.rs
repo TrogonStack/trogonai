@@ -22,6 +22,9 @@ use crate::source::slack::config::{
     SlackTransportConfig, SlackWebhookConfig as SlackWebhookSourceConfig,
 };
 use crate::source::slack::constants::{DEFAULT_API_BASE_URL, DEFAULT_HTTP_BODY_SIZE_MAX};
+use crate::source::slack::slack_socket_mode_intended_use::{
+    SlackSocketModeIntendedUse, SlackSocketModeIntendedUseError,
+};
 use crate::source::telegram::config::{
     TelegramBotToken, TelegramPublicWebhookUrl, TelegramWebhookRegistrationConfig, TelegramWebhookSecret,
 };
@@ -604,6 +607,7 @@ struct SlackWebhookConfig {
 struct SlackSocketModeConfig {
     app_token: Option<SecretInput>,
     api_base_url: Option<String>,
+    intended_use: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -1195,9 +1199,27 @@ fn resolve_slack_socket_mode_transport(
         }
     };
 
+    let intended_use = match socket_mode
+        .intended_use
+        .ok_or(SlackSocketModeIntendedUseError::Missing)
+        .and_then(|value| value.parse::<SlackSocketModeIntendedUse>())
+    {
+        Ok(intended_use) => intended_use,
+        Err(error) => {
+            errors.push(ConfigValidationError::invalid_integration(
+                "slack",
+                id,
+                "intended_use",
+                error,
+            ));
+            return None;
+        }
+    };
+
     Some(SlackTransportConfig::SocketMode(SlackSocketModeSourceConfig {
         app_token,
         api_base_url,
+        intended_use,
     }))
 }
 

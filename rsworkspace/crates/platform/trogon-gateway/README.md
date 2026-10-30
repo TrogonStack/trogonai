@@ -115,6 +115,7 @@ Source-specific extras:
 - Slack acknowledges within Slack's 3 second deadline, so the publish budget is 2.8 seconds, or 1 second when the delivery also waits for a consumer reply. `nats_ack_timeout_secs` defaults to that budget for Slack and a larger value is lowered to it with a warning at startup
 - Slack webhook requests with `Content-Type: application/x-www-form-urlencoded` and exactly one `ssl_check=1` field are answered `200` before signature verification and are never published, matching Slack's connectivity probe
 - Slack webhook `max_body_bytes` (default: `4194304`) is either an integer or `{ env = "VAR" }` naming an environment variable that holds the byte count. Requests above it are refused with `413`. It does not apply to Socket Mode
+- Slack Socket Mode `intended_use` is required and must be `development` or `behind_firewall`, the two uses Slack names for Socket Mode. Slack does not intend Socket Mode for widely distributed apps, so a missing or different value is a configuration error. HTTP webhooks are the production transport
 - Slack Socket Mode `api_base_url` (default: `https://slack.com/api/`) is the Slack Web API base the gateway calls `apps.connections.open` on. Set it to `https://slack-gov.com/api/` for GovSlack. It must be an absolute `http` or `https` URL
 - Telegram `webhook_registration_mode = "startup"` attempts registration on startup and requires `bot_token` plus `public_webhook_url`
 - Linear `timestamp_tolerance_secs` (default: `60`, `0` disables tolerance)
@@ -220,6 +221,18 @@ Configure the matching Datadog webhook (Integrations > Webhooks) with a custom h
 `timestamp` is only required when `timestamp_tolerance_secs` is set; `$DATE_POSIX` is POSIX epoch seconds (`$DATE` is epoch milliseconds, which this source does not accept).
 
 ## Slack
+
+HTTP webhooks are the production transport. Socket Mode is for internal apps that are in development or deployed
+behind a firewall, and Slack does not intend it for widely distributed apps. An app that uses Socket Mode cannot be
+listed in the Slack Marketplace ([Slack: using Socket Mode](https://docs.slack.dev/apis/events-api/using-socket-mode)). Each Socket Mode integration must set
+`intended_use` under `socket_mode` to `development` or `behind_firewall`, and the gateway logs it when the runner
+starts.
+
+```toml
+[sources.slack.integrations.primary.socket_mode]
+app_token = { env = "SLACK_PRIMARY_APP_TOKEN" }
+intended_use = "behind_firewall"
+```
 
 Slack retries an Events API delivery that was not acknowledged, once almost immediately, again after about a
 minute and again after about five minutes. The gateway keeps the stream `duplicate_window` at ten minutes, or at

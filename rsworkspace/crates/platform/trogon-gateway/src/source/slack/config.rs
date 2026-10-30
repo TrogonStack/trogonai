@@ -4,6 +4,7 @@ use reqwest::Url;
 
 use super::ack_budget::AckBudget;
 use super::constants::APPS_CONNECTIONS_OPEN_METHOD;
+use super::slack_socket_mode_intended_use::SlackSocketModeIntendedUse;
 
 use trogon_nats::NatsToken;
 use trogon_nats::jetstream::StreamMaxAge;
@@ -104,6 +105,7 @@ pub struct SlackWebhookConfig {
 pub struct SlackSocketModeConfig {
     pub app_token: SlackAppToken,
     pub api_base_url: SlackApiBaseUrl,
+    pub intended_use: SlackSocketModeIntendedUse,
 }
 
 #[derive(Clone)]

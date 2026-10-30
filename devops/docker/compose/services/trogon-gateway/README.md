@@ -115,11 +115,20 @@ connection to Discord and publishes every gateway event to NATS.
 
 ## Slack Socket Mode
 
-Slack integrations can use either the existing HTTP webhook transport or Socket
-Mode. Configure exactly one transport per integration. Socket Mode does not use
-the HTTP ingress or ngrok; it opens an outbound WebSocket to Slack and publishes
+HTTP webhooks are the production transport for Slack integrations. Socket Mode
+is the alternative for internal apps that are in development or deployed behind
+a firewall. Slack does not intend it for widely distributed apps, and an app
+that uses it cannot be listed in the Slack Marketplace
+([Slack: using Socket Mode](https://docs.slack.dev/apis/events-api/using-socket-mode)).
+
+Configure exactly one transport per integration. Socket Mode does not use the
+HTTP ingress or ngrok; it opens an outbound WebSocket to Slack and publishes
 Events API payloads, interactive payloads, and slash commands to the same NATS
 subjects as the webhook transport.
+
+`intended_use` is required and states why this integration uses Socket Mode.
+The accepted values are `development` and `behind_firewall`. A missing or
+different value is a configuration error.
 
 ```toml
 [sources.slack.integrations.primary]
@@ -128,6 +137,7 @@ stream_name = "SLACK_PRIMARY"
 
 [sources.slack.integrations.primary.socket_mode]
 app_token = { env = "SLACK_PRIMARY_APP_TOKEN" }
+intended_use = "development"
 ```
 
 ## Telegram webhooks
