@@ -74,7 +74,7 @@ impl SecretStorePut for MockOpenBaoSecretStore {
         let credential = state.next_credential_ref(scope, kind)?;
         let active_metadata = metadata(&credential, CredentialStatus::Active)?;
         for (stored_ref, stored) in &mut state.versions {
-            if stored_ref.id() == credential.id() {
+            if stored_ref.id() == credential.id() && stored.metadata.status() == CredentialStatus::Active {
                 stored.metadata = metadata(stored_ref, CredentialStatus::Previous)?;
             }
         }

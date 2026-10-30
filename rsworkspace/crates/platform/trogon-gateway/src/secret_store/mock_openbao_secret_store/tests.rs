@@ -422,3 +422,35 @@ async fn revoke_leaves_destroyed_versions_destroyed() {
         CredentialStatus::Revoked
     );
 }
+
+#[tokio::test]
+async fn put_after_revoke_keeps_the_revoked_version_unreadable() {
+    let store = MockOpenBaoSecretStore::default();
+    let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
+    let revoked = store
+        .put(
+            scope.clone(),
+            CredentialKind::BotToken,
+            SecretString::new("Bot old-token").unwrap(),
+        )
+        .await
+        .unwrap();
+    store.revoke(&revoked).await.unwrap();
+
+    store
+        .put(
+            scope,
+            CredentialKind::BotToken,
+            SecretString::new("Bot new-token").unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        store.get(&revoked).await,
+        Err(SecretStoreError::Unreadable {
+            status: CredentialStatus::Revoked,
+            ..
+        })
+    ));
+}
