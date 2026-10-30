@@ -1,6 +1,6 @@
 use std::error::Error;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 #[cfg(test)]
 use std::collections::BTreeMap;
@@ -11,6 +11,8 @@ use bytes::Bytes;
 use sha2::{Digest, Sha256};
 #[cfg(test)]
 use tokio::sync::Mutex;
+#[cfg(test)]
+use tokio::time::Instant;
 use trogon_nats::jetstream::{
     JetStreamCreateKeyValue, JetStreamGetKeyValue, JetStreamKeyValueDeleteExpectRevision, JetStreamKeyValueStatus,
     JetStreamKeyValueUpdate, JetStreamKvCreate, JetStreamKvEntry, is_create_key_value_already_exists,
@@ -18,7 +20,8 @@ use trogon_nats::jetstream::{
 use trogonai_proto::gateway::credentials::idempotency_v1 as proto;
 
 use super::constants::{
-    CREDENTIAL_MANAGEMENT_IDEMPOTENCY_BUCKET, CREDENTIAL_MANAGEMENT_IDEMPOTENCY_MAX_AGE, IDEMPOTENCY_KEY_PREFIX,
+    CREDENTIAL_MANAGEMENT_IDEMPOTENCY_BUCKET, CREDENTIAL_MANAGEMENT_IDEMPOTENCY_IN_PROGRESS_LEASE,
+    CREDENTIAL_MANAGEMENT_IDEMPOTENCY_MAX_AGE, IDEMPOTENCY_KEY_PREFIX,
 };
 use super::{CredentialCommandResponse, CredentialRefResponse};
 
@@ -154,10 +157,31 @@ impl CredentialCommandIdempotencyStoreError {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 #[cfg(test)]
 pub(crate) struct CredentialCommandInMemoryIdempotencyLedger {
     records: Arc<Mutex<BTreeMap<IdempotencyScope, InMemoryRecord>>>,
+    in_progress_lease: Duration,
+}
+
+#[cfg(test)]
+impl Default for CredentialCommandInMemoryIdempotencyLedger {
+    fn default() -> Self {
+        Self {
+            records: Arc::default(),
+            in_progress_lease: CREDENTIAL_MANAGEMENT_IDEMPOTENCY_IN_PROGRESS_LEASE,
+        }
+    }
+}
+
+#[cfg(test)]
+impl CredentialCommandInMemoryIdempotencyLedger {
+    pub(crate) fn with_in_progress_lease(in_progress_lease: Duration) -> Self {
+        Self {
+            in_progress_lease,
+            ..Self::default()
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -165,6 +189,7 @@ pub(crate) struct CredentialCommandInMemoryIdempotencyLedger {
 enum InMemoryRecord {
     InProgress {
         fingerprint: RequestFingerprint,
+        started_at: Instant,
     },
     Completed {
         fingerprint: RequestFingerprint,
@@ -186,12 +211,32 @@ impl CredentialCommandIdempotencyStore for CredentialCommandInMemoryIdempotencyL
                 response,
             }) if existing == &fingerprint => Ok(IdempotencyDecision::Replay(response.clone())),
             Some(InMemoryRecord::Completed { .. }) => Ok(IdempotencyDecision::Conflict),
-            Some(InMemoryRecord::InProgress { fingerprint: existing }) if existing == &fingerprint => {
-                Ok(IdempotencyDecision::InProgress)
+            Some(InMemoryRecord::InProgress {
+                fingerprint: existing,
+                started_at,
+            }) if existing == &fingerprint => {
+                if started_at.elapsed() >= self.in_progress_lease {
+                    records.insert(
+                        scope,
+                        InMemoryRecord::InProgress {
+                            fingerprint,
+                            started_at: Instant::now(),
+                        },
+                    );
+                    Ok(IdempotencyDecision::Execute)
+                } else {
+                    Ok(IdempotencyDecision::InProgress)
+                }
             }
             Some(InMemoryRecord::InProgress { .. }) => Ok(IdempotencyDecision::Conflict),
             None => {
-                records.insert(scope, InMemoryRecord::InProgress { fingerprint });
+                records.insert(
+                    scope,
+                    InMemoryRecord::InProgress {
+                        fingerprint,
+                        started_at: Instant::now(),
+                    },
+                );
                 Ok(IdempotencyDecision::Execute)
             }
         }
@@ -203,7 +248,7 @@ impl CredentialCommandIdempotencyStore for CredentialCommandInMemoryIdempotencyL
         response: CredentialCommandResponse,
     ) -> Result<(), CredentialCommandIdempotencyStoreError> {
         let mut records = self.records.lock().await;
-        let Some(InMemoryRecord::InProgress { fingerprint }) = records.get(scope).cloned() else {
+        let Some(InMemoryRecord::InProgress { fingerprint, .. }) = records.get(scope).cloned() else {
             return Ok(());
         };
         records.insert(scope.clone(), InMemoryRecord::Completed { fingerprint, response });
@@ -222,6 +267,7 @@ impl CredentialCommandIdempotencyStore for CredentialCommandInMemoryIdempotencyL
 #[derive(Clone, Debug)]
 pub(crate) struct CredentialCommandKvIdempotencyLedger<S> {
     kv: S,
+    in_progress_lease: Duration,
 }
 
 impl<S> CredentialCommandKvIdempotencyLedger<S>
@@ -229,7 +275,16 @@ where
     S: JetStreamKvEntry + JetStreamKvCreate + JetStreamKeyValueUpdate,
 {
     pub(crate) fn new(kv: S) -> Self {
-        Self { kv }
+        Self {
+            kv,
+            in_progress_lease: CREDENTIAL_MANAGEMENT_IDEMPOTENCY_IN_PROGRESS_LEASE,
+        }
+    }
+
+    #[cfg(test)]
+    fn with_in_progress_lease(mut self, in_progress_lease: Duration) -> Self {
+        self.in_progress_lease = in_progress_lease;
+        self
     }
 }
 
@@ -267,7 +322,21 @@ where
                 }
             }
 
-            return decision_from_stored_record(&decode_record(&entry.value)?, &fingerprint);
+            let record = decode_record(&entry.value)?;
+            if self.lease_expired(&record, &fingerprint, entry.created) {
+                let reclaimed = StoredIdempotencyRecord::in_progress(fingerprint.clone());
+                match self
+                    .kv
+                    .update(&key, Bytes::from(encode_record(&reclaimed)), entry.revision)
+                    .await
+                {
+                    Ok(_) => return Ok(IdempotencyDecision::Execute),
+                    Err(source) if source.kind() == kv::UpdateErrorKind::WrongLastRevision => continue,
+                    Err(source) => return Err(CredentialCommandIdempotencyStoreError::backend(source)),
+                }
+            }
+
+            return decision_from_stored_record(&record, &fingerprint);
         }
 
         Err(CredentialCommandIdempotencyStoreError::Conflict)
@@ -338,6 +407,21 @@ where
         }
 
         Ok(())
+    }
+}
+
+impl<S> CredentialCommandKvIdempotencyLedger<S> {
+    fn lease_expired(
+        &self,
+        record: &StoredIdempotencyRecord,
+        fingerprint: &RequestFingerprint,
+        started_at: time::OffsetDateTime,
+    ) -> bool {
+        matches!(record.status, StoredIdempotencyStatus::InProgress)
+            && &record.fingerprint == fingerprint
+            && SystemTime::now()
+                .duration_since(SystemTime::from(started_at))
+                .is_ok_and(|elapsed| elapsed >= self.in_progress_lease)
     }
 }
 

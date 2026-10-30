@@ -175,3 +175,114 @@ async fn provision_bucket_rejects_incompatible_max_age() {
         } if expected_max_age == CREDENTIAL_MANAGEMENT_IDEMPOTENCY_MAX_AGE && actual_max_age == Duration::ZERO
     ));
 }
+
+const LONG_LEASE: Duration = Duration::from_secs(100 * 365 * 24 * 60 * 60);
+
+#[tokio::test(start_paused = true)]
+async fn in_memory_ledger_reports_in_progress_within_lease() {
+    let ledger = CredentialCommandInMemoryIdempotencyLedger::with_in_progress_lease(Duration::from_secs(60));
+    let scope = scope("tenant-1", "target", "retry-1");
+
+    let first = ledger.begin(scope.clone(), fingerprint("fp-1")).await.unwrap();
+    tokio::time::advance(Duration::from_secs(59)).await;
+    let second = ledger.begin(scope, fingerprint("fp-1")).await.unwrap();
+
+    assert!(matches!(first, IdempotencyDecision::Execute));
+    assert!(matches!(second, IdempotencyDecision::InProgress));
+}
+
+#[tokio::test(start_paused = true)]
+async fn in_memory_ledger_reclaims_expired_in_progress_record() {
+    let ledger = CredentialCommandInMemoryIdempotencyLedger::with_in_progress_lease(Duration::from_secs(60));
+    let scope = scope("tenant-1", "target", "retry-1");
+
+    ledger.begin(scope.clone(), fingerprint("fp-1")).await.unwrap();
+    tokio::time::advance(Duration::from_secs(60)).await;
+    let reclaimed = ledger.begin(scope.clone(), fingerprint("fp-1")).await.unwrap();
+    let after_reclaim = ledger.begin(scope, fingerprint("fp-1")).await.unwrap();
+
+    assert!(matches!(reclaimed, IdempotencyDecision::Execute));
+    assert!(matches!(after_reclaim, IdempotencyDecision::InProgress));
+}
+
+#[tokio::test(start_paused = true)]
+async fn in_memory_ledger_keeps_conflict_for_expired_record_with_other_fingerprint() {
+    let ledger = CredentialCommandInMemoryIdempotencyLedger::with_in_progress_lease(Duration::from_secs(60));
+    let scope = scope("tenant-1", "target", "retry-1");
+
+    ledger.begin(scope.clone(), fingerprint("fp-1")).await.unwrap();
+    tokio::time::advance(Duration::from_secs(120)).await;
+    let decision = ledger.begin(scope, fingerprint("fp-2")).await.unwrap();
+
+    assert!(matches!(decision, IdempotencyDecision::Conflict));
+}
+
+#[tokio::test]
+async fn kv_ledger_reclaims_expired_in_progress_record_with_revision_check() {
+    let kv = MockJetStreamKvStore::new();
+    kv.enqueue_entry(
+        Bytes::from(encode_record(&StoredIdempotencyRecord::in_progress(fingerprint(
+            "fp-1",
+        )))),
+        5,
+        kv::Operation::Put,
+    );
+    let ledger = CredentialCommandKvIdempotencyLedger::new(kv.clone()).with_in_progress_lease(Duration::from_secs(60));
+    let scope = scope("tenant-1", "target", "retry-1");
+    let key = scope.storage_key();
+
+    let decision = ledger.begin(scope, fingerprint("fp-1")).await.unwrap();
+
+    assert!(matches!(decision, IdempotencyDecision::Execute));
+    let updates = kv.update_calls();
+    assert_eq!(updates.len(), 1);
+    assert_eq!((updates[0].0.as_str(), updates[0].2), (key.as_str(), 5));
+    assert!(kv.create_calls().is_empty());
+}
+
+#[tokio::test]
+async fn kv_ledger_reports_in_progress_within_lease() {
+    let kv = MockJetStreamKvStore::new();
+    kv.enqueue_entry(
+        Bytes::from(encode_record(&StoredIdempotencyRecord::in_progress(fingerprint(
+            "fp-1",
+        )))),
+        5,
+        kv::Operation::Put,
+    );
+    let ledger = CredentialCommandKvIdempotencyLedger::new(kv.clone()).with_in_progress_lease(LONG_LEASE);
+
+    let decision = ledger
+        .begin(scope("tenant-1", "target", "retry-1"), fingerprint("fp-1"))
+        .await
+        .unwrap();
+
+    assert!(matches!(decision, IdempotencyDecision::InProgress));
+    assert!(kv.update_calls().is_empty());
+}
+
+#[tokio::test]
+async fn kv_ledger_retries_when_reclaim_loses_the_race() {
+    let kv = MockJetStreamKvStore::new();
+    let stale = Bytes::from(encode_record(&StoredIdempotencyRecord::in_progress(fingerprint(
+        "fp-1",
+    ))));
+    kv.enqueue_entry(stale, 5, kv::Operation::Put);
+    kv.enqueue_update_result(Err(kv::UpdateErrorKind::WrongLastRevision));
+    kv.enqueue_entry(
+        Bytes::from(encode_record(&StoredIdempotencyRecord::completed(
+            fingerprint("fp-1"),
+            response(1),
+        ))),
+        6,
+        kv::Operation::Put,
+    );
+    let ledger = CredentialCommandKvIdempotencyLedger::new(kv).with_in_progress_lease(Duration::from_secs(60));
+
+    let decision = ledger
+        .begin(scope("tenant-1", "target", "retry-1"), fingerprint("fp-1"))
+        .await
+        .unwrap();
+
+    assert!(matches!(decision, IdempotencyDecision::Replay(_)));
+}

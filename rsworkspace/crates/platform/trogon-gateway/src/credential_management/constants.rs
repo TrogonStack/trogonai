@@ -9,6 +9,7 @@ pub(super) const IDEMPOTENCY_KEY_HEADER: &str = "idempotency-key";
 pub(super) const IDEMPOTENCY_KEY_PREFIX: &str = "v1.";
 pub(super) const CREDENTIAL_MANAGEMENT_IDEMPOTENCY_BUCKET: &str = "GATEWAY_CREDENTIAL_MANAGEMENT_IDEMPOTENCY";
 pub(super) const CREDENTIAL_MANAGEMENT_IDEMPOTENCY_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
+pub(super) const CREDENTIAL_MANAGEMENT_IDEMPOTENCY_IN_PROGRESS_LEASE: Duration = Duration::from_secs(5 * 60);
 
 pub(super) const GITHUB_WEBHOOK_SECRET: ManagedCredentialTarget = ManagedCredentialTarget {
     source: SourceKind::GitHub,

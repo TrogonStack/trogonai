@@ -589,7 +589,7 @@ There is also `GET /-/credentials/recovery/status` (separately mounted
 `recovery_status_router`, same admin token), returning
 `CredentialRecoveryStatusResponse` (last_scanned_sequence,
 next_scan_sequence, consecutive_failure_count, first_failure_unix_seconds,
-retry_after_unix_seconds, retry_delayed, stuck_recovery). Read-only,
+retry_after_unix_seconds, status of idle, retry_delayed or stuck). Read-only,
 metadata-only, no idempotency key required.
 
 DECISION NEEDED: should the internal /-/credentials admin API adopt the
@@ -1784,8 +1784,8 @@ discovery is a raw stream scan, not a query
 the only operator surface reports worker health, not work
   -> GET /-/credentials/recovery/status returns
      CredentialRecoveryStatusResponse (credential_management.rs:1988):
-     checkpoint sequences, consecutive_failure_count, retry_delayed,
-     stuck_recovery. It answers "is the worker healthy", never "which
+     checkpoint sequences, consecutive_failure_count, and a
+     status of idle, retry_delayed or stuck. It answers "is the worker healthy", never "which
      credentials are stuck"
 ```
 

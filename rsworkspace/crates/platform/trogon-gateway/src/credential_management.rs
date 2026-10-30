@@ -2,7 +2,6 @@ mod constants;
 pub(crate) mod idempotency;
 
 use std::error::Error;
-use std::fmt;
 use std::time::SystemTime;
 
 use axum::extract::{Path, State};
@@ -41,7 +40,9 @@ use crate::credential_lifecycle::handler::{
     CredentialHandlerError, CredentialRuntimeHandler, CredentialRuntimeHandlerError, DestroyStoredCredential,
     PutCredential, RevokeStoredCredential, RotateCredential,
 };
-use crate::credential_lifecycle::recovery_worker::{CredentialRecoveryCheckpointStore, CredentialRecoveryPolicy};
+use crate::credential_lifecycle::recovery_worker::{
+    CredentialRecoveryCheckpoint, CredentialRecoveryCheckpointStore, CredentialRecoveryPolicy,
+};
 #[cfg(test)]
 use crate::credential_runtime_projection::RuntimeCredentialRegistry;
 use crate::secret_store::openbao_secret_store::openbao_credential_id;
@@ -320,8 +321,7 @@ where
         consecutive_failure_count: checkpoint.consecutive_failure_count(),
         first_failure_unix_seconds: checkpoint.first_failure_unix_seconds(),
         retry_after_unix_seconds: checkpoint.retry_after_unix_seconds(),
-        retry_delayed: checkpoint.retry_delayed_at(now),
-        stuck_recovery: checkpoint.stuck_at(now, policy),
+        status: CredentialRecoveryStatus::of(checkpoint, now, policy),
     }))
 }
 
@@ -651,6 +651,7 @@ where
     let idempotency_key = idempotency_key_from_headers(&headers)?;
     let credential_id =
         openbao_credential_id(&scope, target.kind).map_err(CredentialManagementHttpError::invalid_input)?;
+    let secret = SecretString::new(secret_value).map_err(CredentialManagementHttpError::invalid_input)?;
     let scope_key = scope.scope_key();
     let fingerprint = request_fingerprint(
         &state.admin_token,
@@ -660,7 +661,7 @@ where
             scope_key.as_str(),
             credential_id.as_str(),
             target.kind.as_str(),
-            secret_value.as_str(),
+            secret.as_str(),
         ],
     )?;
     let idempotency_scope = IdempotencyScope::new(
@@ -680,7 +681,6 @@ where
         IdempotencyDecision::Conflict => return Err(CredentialManagementHttpError::IdempotencyConflict),
         IdempotencyDecision::InProgress => return Err(CredentialManagementHttpError::IdempotencyInProgress),
     }
-    let secret = SecretString::new(secret_value).map_err(CredentialManagementHttpError::invalid_input)?;
     let command = PutCredential::new(credential_id, scope, target.kind, secret);
 
     let outcome = match state.handler.put(command).await {
@@ -698,11 +698,7 @@ where
             return Err(error);
         }
     };
-    state
-        .idempotency
-        .complete(&idempotency_scope, response.clone())
-        .await
-        .map_err(CredentialManagementHttpError::idempotency_store)?;
+    state.complete_idempotency(&idempotency_scope, &response).await;
     Ok(Json(response))
 }
 
@@ -1033,6 +1029,7 @@ where
     let idempotency_key = idempotency_key_from_headers(&headers)?;
     let credential_ref = credential_ref_from_request(&scope, target.kind, request_version)?;
     let scope_key = scope.scope_key();
+    let secret = SecretString::new(secret_value).map_err(CredentialManagementHttpError::invalid_input)?;
     let version = request_version.to_string();
     let fingerprint = request_fingerprint(
         &state.admin_token,
@@ -1043,7 +1040,7 @@ where
             credential_ref.id().as_str(),
             version.as_str(),
             target.kind.as_str(),
-            secret_value.as_str(),
+            secret.as_str(),
         ],
     )?;
     let idempotency_scope = IdempotencyScope::new(
@@ -1063,7 +1060,6 @@ where
         IdempotencyDecision::Conflict => return Err(CredentialManagementHttpError::IdempotencyConflict),
         IdempotencyDecision::InProgress => return Err(CredentialManagementHttpError::IdempotencyInProgress),
     }
-    let secret = SecretString::new(secret_value).map_err(CredentialManagementHttpError::invalid_input)?;
     let command = RotateCredential::new(credential_ref, secret);
 
     let outcome = match state.handler.rotate(command).await {
@@ -1081,11 +1077,7 @@ where
             return Err(error);
         }
     };
-    state
-        .idempotency
-        .complete(&idempotency_scope, response.clone())
-        .await
-        .map_err(CredentialManagementHttpError::idempotency_store)?;
+    state.complete_idempotency(&idempotency_scope, &response).await;
     Ok(Json(response))
 }
 
@@ -1416,6 +1408,7 @@ where
     let idempotency_key = idempotency_key_from_headers(&headers)?;
     let credential_ref = credential_ref_from_request(&scope, target.kind, request_version)?;
     let scope_key = scope.scope_key();
+    let reason = SecretDestroyReason::new(reason).map_err(CredentialManagementHttpError::invalid_input)?;
     let version = request_version.to_string();
     let fingerprint = request_fingerprint(
         &state.admin_token,
@@ -1446,7 +1439,6 @@ where
         IdempotencyDecision::Conflict => return Err(CredentialManagementHttpError::IdempotencyConflict),
         IdempotencyDecision::InProgress => return Err(CredentialManagementHttpError::IdempotencyInProgress),
     }
-    let reason = SecretDestroyReason::new(reason).map_err(CredentialManagementHttpError::invalid_input)?;
     let command = DestroyStoredCredential::new(credential_ref, reason);
 
     let outcome = match state.handler.destroy(command).await {
@@ -1464,11 +1456,7 @@ where
             return Err(error);
         }
     };
-    state
-        .idempotency
-        .complete(&idempotency_scope, response.clone())
-        .await
-        .map_err(CredentialManagementHttpError::idempotency_store)?;
+    state.complete_idempotency(&idempotency_scope, &response).await;
     Ok(Json(response))
 }
 
@@ -1844,11 +1832,7 @@ where
             return Err(error);
         }
     };
-    state
-        .idempotency
-        .complete(&idempotency_scope, response.clone())
-        .await
-        .map_err(CredentialManagementHttpError::idempotency_store)?;
+    state.complete_idempotency(&idempotency_scope, &response).await;
     Ok(Json(response))
 }
 
@@ -1856,6 +1840,16 @@ impl<EventStore, Secrets, Idempotency> CredentialManagementState<EventStore, Sec
 where
     Idempotency: CredentialCommandIdempotencyStore,
 {
+    async fn complete_idempotency(&self, scope: &IdempotencyScope, response: &CredentialCommandResponse) {
+        let Err(first) = self.idempotency.complete(scope, response.clone()).await else {
+            return;
+        };
+        warn!(error = %first, "credential management idempotency complete failed, retrying");
+        if let Err(error) = self.idempotency.complete(scope, response.clone()).await {
+            warn!(error = %error, "credential management idempotency complete failed after retry");
+        }
+    }
+
     async fn abandon_idempotency(&self, scope: &IdempotencyScope) {
         if let Err(error) = self.idempotency.abandon(scope).await {
             warn!(error = %error, "credential management idempotency abandon failed");
@@ -1938,8 +1932,27 @@ pub(crate) struct CredentialRecoveryStatusResponse {
     pub(crate) consecutive_failure_count: u32,
     pub(crate) first_failure_unix_seconds: Option<u64>,
     pub(crate) retry_after_unix_seconds: Option<u64>,
-    pub(crate) retry_delayed: bool,
-    pub(crate) stuck_recovery: bool,
+    pub(crate) status: CredentialRecoveryStatus,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum CredentialRecoveryStatus {
+    Idle,
+    RetryDelayed,
+    Stuck,
+}
+
+impl CredentialRecoveryStatus {
+    fn of(checkpoint: CredentialRecoveryCheckpoint, now: SystemTime, policy: CredentialRecoveryPolicy) -> Self {
+        if checkpoint.stuck_at(now, policy) {
+            Self::Stuck
+        } else if checkpoint.retry_delayed_at(now) {
+            Self::RetryDelayed
+        } else {
+            Self::Idle
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -1947,29 +1960,44 @@ struct CredentialManagementErrorResponse {
     error: &'static str,
 }
 
-#[derive(Debug)]
+type BoxedSource = Box<dyn Error + Send + Sync>;
+
+#[derive(Debug, thiserror::Error)]
 enum CredentialManagementHttpError {
+    #[error("unauthorized")]
     Unauthorized,
+    #[error("missing idempotency key")]
     MissingIdempotencyKey,
+    #[error("idempotency conflict")]
     IdempotencyConflict,
+    #[error("idempotency request is already in progress")]
     IdempotencyInProgress,
-    IdempotencyStore(String),
-    RecoveryCheckpoint(String),
-    InvalidInput(String),
-    CommandFailed(String),
-    DestroyRejected(String),
+    #[error("credential management idempotency store failed: {0}")]
+    IdempotencyStore(#[source] CredentialCommandIdempotencyStoreError),
+    #[error("request fingerprint key rejected: {0}")]
+    RequestFingerprint(#[source] hmac::digest::InvalidLength),
+    #[error("credential recovery checkpoint failed: {0}")]
+    RecoveryCheckpoint(#[source] BoxedSource),
+    #[error("credential management input rejected: {0}")]
+    InvalidInput(#[source] BoxedSource),
+    #[error("credential management command failed: {0}")]
+    CommandFailed(#[source] BoxedSource),
+    #[error("credential destroy request rejected: {0}")]
+    DestroyRejected(#[source] BoxedSource),
+    #[error("credential management command returned unexpected state: {0}")]
     UnexpectedCredentialState(&'static str),
-    InvalidState(String),
+    #[error("credential management persisted state is invalid: {0}")]
+    InvalidState(#[source] BoxedSource),
 }
 
 impl CredentialManagementHttpError {
-    fn invalid_input(error: impl fmt::Display) -> Self {
-        Self::InvalidInput(error.to_string())
+    fn invalid_input(error: impl Error + Send + Sync + 'static) -> Self {
+        Self::InvalidInput(Box::new(error))
     }
 
-    fn invalid_state(error: impl fmt::Display) -> Self {
+    fn invalid_state(error: impl Error + Send + Sync + 'static) -> Self {
         warn!(error = %error, "credential management persisted state is invalid");
-        Self::InvalidState(error.to_string())
+        Self::InvalidState(Box::new(error))
     }
 
     fn command_failed<SnapshotReadError, ReadError, AppendError>(
@@ -1981,7 +2009,7 @@ impl CredentialManagementHttpError {
         AppendError: Error + Send + Sync + 'static,
     {
         warn!(error = %error, "credential management command failed");
-        Self::CommandFailed(error.to_string())
+        Self::CommandFailed(Box::new(error))
     }
 
     fn destroy_command_failed<SnapshotReadError, ReadError, AppendError>(
@@ -1992,67 +2020,68 @@ impl CredentialManagementHttpError {
         ReadError: Error + Send + Sync + 'static,
         AppendError: Error + Send + Sync + 'static,
     {
-        if let CredentialRuntimeHandlerError::Command {
-            source:
-                CredentialHandlerError::RequestDestroy {
-                    source: CommandError::Decide(decide_error),
-                },
-        } = &error
-        {
-            warn!(error = %decide_error, "credential destroy request rejected");
-            return Self::DestroyRejected(decide_error.to_string());
+        match error {
+            CredentialRuntimeHandlerError::Command {
+                source:
+                    CredentialHandlerError::RequestDestroy {
+                        source: CommandError::Decide(decide_error),
+                    },
+            } => {
+                warn!(error = %decide_error, "credential destroy request rejected");
+                Self::DestroyRejected(Box::new(decide_error))
+            }
+            error => Self::command_failed(error),
         }
-        Self::command_failed(error)
     }
 
     fn idempotency_store(error: CredentialCommandIdempotencyStoreError) -> Self {
         warn!(error = %error, "credential management idempotency store failed");
         match error {
             CredentialCommandIdempotencyStoreError::Conflict => Self::IdempotencyInProgress,
-            source => Self::IdempotencyStore(source.to_string()),
+            source => Self::IdempotencyStore(source),
         }
     }
 
-    fn recovery_checkpoint(error: impl fmt::Display) -> Self {
+    fn recovery_checkpoint(error: impl Error + Send + Sync + 'static) -> Self {
         warn!(error = %error, "credential recovery checkpoint status failed");
-        Self::RecoveryCheckpoint(error.to_string())
+        Self::RecoveryCheckpoint(Box::new(error))
     }
 }
 
 impl IntoResponse for CredentialManagementHttpError {
     fn into_response(self) -> Response {
-        let (status, error) = match self {
+        let (status, error) = match &self {
             Self::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),
             Self::MissingIdempotencyKey => (StatusCode::BAD_REQUEST, "missing idempotency key"),
             Self::IdempotencyConflict => (StatusCode::CONFLICT, "idempotency conflict"),
             Self::IdempotencyInProgress => (StatusCode::CONFLICT, "idempotency request is already in progress"),
-            Self::IdempotencyStore(error) => {
-                warn!(error = %error, "credential management idempotency request failed");
+            Self::IdempotencyStore(_) | Self::RequestFingerprint(_) => {
+                warn!(error = %self, "credential management idempotency request failed");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "credential management idempotency failed",
                 )
             }
-            Self::RecoveryCheckpoint(error) => {
-                warn!(error = %error, "credential recovery checkpoint request failed");
+            Self::RecoveryCheckpoint(_) => {
+                warn!(error = %self, "credential recovery checkpoint request failed");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "credential recovery checkpoint failed",
                 )
             }
-            Self::InvalidInput(error) => {
-                warn!(error = %error, "credential management input rejected");
+            Self::InvalidInput(_) => {
+                warn!(error = %self, "credential management input rejected");
                 (StatusCode::BAD_REQUEST, "invalid credential management request")
             }
-            Self::CommandFailed(error) => {
-                warn!(error = %error, "credential management request failed");
+            Self::CommandFailed(_) => {
+                warn!(error = %self, "credential management request failed");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "credential management request failed",
                 )
             }
-            Self::DestroyRejected(error) => {
-                warn!(error = %error, "credential destroy request rejected");
+            Self::DestroyRejected(_) => {
+                warn!(error = %self, "credential destroy request rejected");
                 (StatusCode::CONFLICT, "credential destroy request rejected")
             }
             Self::UnexpectedCredentialState(state) => {
@@ -2062,8 +2091,8 @@ impl IntoResponse for CredentialManagementHttpError {
                     "credential management request failed",
                 )
             }
-            Self::InvalidState(error) => {
-                warn!(error = %error, "credential management persisted state is invalid");
+            Self::InvalidState(_) => {
+                warn!(error = %self, "credential management persisted state is invalid");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "credential management request failed",
@@ -2089,9 +2118,8 @@ fn request_fingerprint(
     admin_token: &SecretString,
     parts: &[&str],
 ) -> Result<RequestFingerprint, CredentialManagementHttpError> {
-    let mut mac = HmacSha256::new_from_slice(admin_token.as_str().as_bytes()).map_err(|error| {
-        CredentialManagementHttpError::IdempotencyStore(format!("request fingerprint hmac: {error}"))
-    })?;
+    let mut mac = HmacSha256::new_from_slice(admin_token.as_str().as_bytes())
+        .map_err(CredentialManagementHttpError::RequestFingerprint)?;
     for part in parts {
         mac.update(&(part.len() as u64).to_be_bytes());
         mac.update(part.as_bytes());

@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use axum::body::{Body, to_bytes};
 use axum::http::{Method, Request};
@@ -13,6 +14,7 @@ use trogon_decider_runtime::{
     StreamWritePrecondition, WriteSnapshotRequest, WriteSnapshotResponse,
 };
 
+use super::idempotency::IdempotencyKeyError;
 use super::*;
 use crate::credential_lifecycle::recovery_worker::{
     CredentialRecoveryCheckpoint, CredentialRecoveryCheckpointStoreError,
@@ -282,8 +284,9 @@ async fn recovery_status_returns_metadata_only_checkpoint_state() {
     assert_eq!(body["consecutive_failure_count"], 3);
     assert_eq!(body["first_failure_unix_seconds"], 0);
     assert_eq!(body["retry_after_unix_seconds"], u64::MAX);
-    assert_eq!(body["retry_delayed"], true);
-    assert_eq!(body["stuck_recovery"], true);
+    assert_eq!(body["status"], "stuck");
+    assert!(body.get("retry_delayed").is_none());
+    assert!(body.get("stuck_recovery").is_none());
     assert!(!body.to_string().contains("secret"));
 }
 
@@ -1802,4 +1805,245 @@ async fn invalid_input_is_rejected_without_recording_credential_events() {
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     assert!(events.decoded_events().await.is_empty());
+}
+
+async fn recovery_status_of(checkpoint: CredentialRecoveryCheckpoint) -> Value {
+    let app = recovery_app(ManagementTestRecoveryCheckpointStore::with_checkpoint(checkpoint).await);
+    let response = app
+        .oneshot(request(Method::GET, "/recovery/status", "", Some("admin-token")))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    response_json(response).await
+}
+
+#[tokio::test]
+async fn recovery_status_is_idle_without_failures() {
+    let body = recovery_status_of(CredentialRecoveryCheckpoint::default()).await;
+
+    assert_eq!(body["status"], "idle");
+}
+
+#[tokio::test]
+async fn recovery_status_is_retry_delayed_before_stuck_threshold() {
+    let now = std::time::UNIX_EPOCH.elapsed().unwrap().as_secs();
+    let body = recovery_status_of(CredentialRecoveryCheckpoint::with_failure_state(
+        7,
+        1,
+        Some(now),
+        Some(u64::MAX),
+    ))
+    .await;
+
+    assert_eq!(body["status"], "retry_delayed");
+}
+
+#[derive(Clone)]
+struct FlakyCompleteIdempotency {
+    inner: CredentialCommandInMemoryIdempotencyLedger,
+    failures_remaining: Arc<AtomicU32>,
+}
+
+impl FlakyCompleteIdempotency {
+    fn failing(times: u32) -> Self {
+        Self {
+            inner: CredentialCommandInMemoryIdempotencyLedger::default(),
+            failures_remaining: Arc::new(AtomicU32::new(times)),
+        }
+    }
+}
+
+impl CredentialCommandIdempotencyStore for FlakyCompleteIdempotency {
+    async fn begin(
+        &self,
+        scope: IdempotencyScope,
+        fingerprint: RequestFingerprint,
+    ) -> Result<IdempotencyDecision, CredentialCommandIdempotencyStoreError> {
+        self.inner.begin(scope, fingerprint).await
+    }
+
+    async fn complete(
+        &self,
+        scope: &IdempotencyScope,
+        response: CredentialCommandResponse,
+    ) -> Result<(), CredentialCommandIdempotencyStoreError> {
+        if self
+            .failures_remaining
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| remaining.checked_sub(1))
+            .is_ok()
+        {
+            return Err(CredentialCommandIdempotencyStoreError::Conflict);
+        }
+        self.inner.complete(scope, response).await
+    }
+
+    async fn abandon(&self, scope: &IdempotencyScope) -> Result<(), CredentialCommandIdempotencyStoreError> {
+        self.inner.abandon(scope).await
+    }
+}
+
+fn app_with_idempotency<Idempotency: CredentialCommandIdempotencyStore>(
+    events: ManagementTestStreamStore,
+    idempotency: Idempotency,
+) -> Router {
+    router(
+        CredentialRuntimeHandler::new(
+            events,
+            MockOpenBaoSecretStore::default(),
+            RuntimeCredentialRegistry::default(),
+        ),
+        SecretString::new("admin-token").unwrap(),
+        idempotency,
+    )
+}
+
+const PUT_BODY: &str = r#"{"owner_id":"tenant-1","secret":"first-secret"}"#;
+
+#[tokio::test]
+async fn put_retries_idempotency_complete_once_and_replays_afterwards() {
+    let events = ManagementTestStreamStore::default();
+    let app = app_with_idempotency(events.clone(), FlakyCompleteIdempotency::failing(1));
+
+    let first = app
+        .clone()
+        .oneshot(request_with_idempotency(
+            Method::PUT,
+            "/github/primary/webhook-secret",
+            PUT_BODY,
+            Some("admin-token"),
+            Some("retry-complete"),
+        ))
+        .await
+        .unwrap();
+    let replay = app
+        .oneshot(request_with_idempotency(
+            Method::PUT,
+            "/github/primary/webhook-secret",
+            PUT_BODY,
+            Some("admin-token"),
+            Some("retry-complete"),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(first.status(), StatusCode::OK);
+    assert_eq!(replay.status(), StatusCode::OK);
+    assert_eq!(events.decoded_events().await.len(), 2);
+}
+
+#[tokio::test]
+async fn put_succeeds_when_idempotency_complete_keeps_failing() {
+    let events = ManagementTestStreamStore::default();
+    let app = app_with_idempotency(events.clone(), FlakyCompleteIdempotency::failing(2));
+
+    let response = app
+        .oneshot(request_with_idempotency(
+            Method::PUT,
+            "/github/primary/webhook-secret",
+            PUT_BODY,
+            Some("admin-token"),
+            Some("always-failing-complete"),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(body["state"], "active");
+}
+
+#[tokio::test]
+async fn empty_secret_does_not_leave_idempotency_key_in_progress() {
+    let app = app(
+        ManagementTestStreamStore::default(),
+        MockOpenBaoSecretStore::default(),
+        RuntimeCredentialRegistry::default(),
+    );
+
+    for _ in 0..2 {
+        let response = app
+            .clone()
+            .oneshot(request_with_idempotency(
+                Method::PUT,
+                "/github/primary/webhook-secret",
+                r#"{"owner_id":"tenant-1","secret":""}"#,
+                Some("admin-token"),
+                Some("empty-secret"),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    let response = app
+        .oneshot(request_with_idempotency(
+            Method::PUT,
+            "/github/primary/webhook-secret",
+            r#"{"owner_id":"tenant-1","secret":""}"#,
+            Some("admin-token"),
+            Some("empty-secret"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn empty_rotate_secret_does_not_leave_idempotency_key_in_progress() {
+    let app = app(
+        ManagementTestStreamStore::default(),
+        MockOpenBaoSecretStore::default(),
+        RuntimeCredentialRegistry::default(),
+    );
+
+    for _ in 0..2 {
+        let response = app
+            .clone()
+            .oneshot(request_with_idempotency(
+                Method::POST,
+                "/github/primary/webhook-secret/rotations",
+                r#"{"owner_id":"tenant-1","version":1,"secret":""}"#,
+                Some("admin-token"),
+                Some("empty-rotate"),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+}
+
+#[tokio::test]
+async fn empty_destroy_reason_does_not_leave_idempotency_key_in_progress() {
+    let app = app(
+        ManagementTestStreamStore::default(),
+        MockOpenBaoSecretStore::default(),
+        RuntimeCredentialRegistry::default(),
+    );
+
+    for _ in 0..2 {
+        let response = app
+            .clone()
+            .oneshot(request_with_idempotency(
+                Method::POST,
+                "/github/primary/webhook-secret/destructions",
+                r#"{"owner_id":"tenant-1","version":1,"reason":""}"#,
+                Some("admin-token"),
+                Some("empty-reason"),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+}
+
+#[test]
+fn http_error_keeps_typed_source_chain() {
+    let error = CredentialManagementHttpError::invalid_input(IdempotencyKeyError::Empty);
+
+    assert_eq!(
+        error.to_string(),
+        "credential management input rejected: idempotency key must not be empty"
+    );
+    let source = Error::source(&error).expect("typed source");
+    assert!(source.downcast_ref::<IdempotencyKeyError>().is_some());
 }

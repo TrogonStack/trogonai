@@ -36,6 +36,7 @@ serde = { workspace = true }
 serde_json = { workspace = true, features = ["raw_value"] }
 sha2 = "0.11"
 subtle = "2.6"
+time = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-tungstenite = { workspace = true, features = ["rustls-tls-native-roots"] }
 tracing = { workspace = true }
@@ -56,7 +57,6 @@ uuid = { workspace = true, features = ["v5"] }
 rustls = { workspace = true }
 tempfile = { workspace = true }
 testcontainers-modules = "0.15"
-time = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 tower = "0.5"
 tracing-subscriber = { workspace = true }
