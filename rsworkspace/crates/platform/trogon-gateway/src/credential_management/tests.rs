@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use axum::body::{Body, to_bytes};
 use axum::http::{Method, Request};
@@ -16,6 +16,11 @@ use trogon_decider_runtime::{
 
 use super::idempotency::IdempotencyKeyError;
 use super::*;
+use crate::credential::commands::domain::{CredentialDestroyReason, CredentialFailureReason, CredentialId};
+use crate::credential::commands::proto::{
+    active_state_to_proto, cleanup_failed_to_proto_state, destroy_requested_to_proto_state, destroyed_to_proto_state,
+    pending_write_to_proto_state, revoked_to_proto_state, rotation_pending_to_proto_state, write_failed_to_proto_state,
+};
 use crate::credential_lifecycle::recovery_worker::{
     CredentialRecoveryCheckpoint, CredentialRecoveryCheckpointStoreError,
 };
@@ -27,6 +32,7 @@ use trogonai_proto::gateway::credentials::v1;
 struct ManagementTestStreamStore {
     events: Arc<Mutex<Vec<StreamEvent>>>,
     snapshots: Arc<Mutex<BTreeMap<String, Snapshot<state_v1::CredentialStateSnapshot>>>>,
+    unavailable: Arc<AtomicBool>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -34,6 +40,17 @@ struct ManagementTestStreamStore {
 struct ManagementTestStreamError;
 
 impl ManagementTestStreamStore {
+    fn become_unavailable(&self) {
+        self.unavailable.store(true, Ordering::SeqCst);
+    }
+
+    fn ensure_available(&self) -> Result<(), ManagementTestStreamError> {
+        if self.unavailable.load(Ordering::SeqCst) {
+            return Err(ManagementTestStreamError);
+        }
+        Ok(())
+    }
+
     async fn decoded_events(&self) -> Vec<v1::CredentialEvent> {
         let events = self.events.lock().await.clone();
         events
@@ -47,6 +64,7 @@ impl StreamRead<str> for ManagementTestStreamStore {
     type Error = ManagementTestStreamError;
 
     async fn read_stream(&self, request: ReadStreamRequest<'_, str>) -> Result<ReadStreamResponse, Self::Error> {
+        self.ensure_available()?;
         let start = match request.from {
             ReadFrom::Beginning => 1,
             ReadFrom::Position(position) => position.as_u64(),
@@ -103,6 +121,7 @@ impl SnapshotRead<state_v1::CredentialStateSnapshot, str> for ManagementTestStre
         &self,
         request: ReadSnapshotRequest<'_, str>,
     ) -> Result<ReadSnapshotResponse<state_v1::CredentialStateSnapshot>, Self::Error> {
+        self.ensure_available()?;
         let snapshots = self.snapshots.lock().await;
         Ok(ReadSnapshotResponse {
             snapshot: snapshots.get(request.snapshot_id).cloned(),
@@ -2046,4 +2065,612 @@ fn http_error_keeps_typed_source_chain() {
     );
     let source = Error::source(&error).expect("typed source");
     assert!(source.downcast_ref::<IdempotencyKeyError>().is_some());
+}
+
+const DESTROYABLE_TARGETS: [(&str, &str, &str); 11] = [
+    ("/discord/bot-token", "discord", "bot_token"),
+    ("/github/primary/webhook-secret", "github", "webhook_secret"),
+    ("/gitlab/primary/signing-token", "gitlab", "signing_token"),
+    ("/incidentio/primary/signing-secret", "incidentio", "signing_secret"),
+    ("/linear/primary/webhook-secret", "linear", "webhook_secret"),
+    (
+        "/microsoft-graph/primary/client-state",
+        "microsoft_graph",
+        "client_state",
+    ),
+    ("/notion/primary/verification-token", "notion", "verification_token"),
+    ("/sentry/primary/client-secret", "sentry", "client_secret"),
+    ("/slack/primary/signing-secret", "slack", "signing_secret"),
+    ("/telegram/primary/webhook-secret", "telegram", "webhook_secret"),
+    ("/twitter/primary/consumer-secret", "twitter", "consumer_secret"),
+];
+
+#[tokio::test]
+async fn destroy_completes_lifecycle_after_revoke_for_every_managed_source() {
+    for (path, source, kind) in DESTROYABLE_TARGETS {
+        let events = ManagementTestStreamStore::default();
+        let app = app(
+            events.clone(),
+            MockOpenBaoSecretStore::default(),
+            RuntimeCredentialRegistry::default(),
+        );
+
+        for (method, suffix, body) in [
+            (Method::PUT, "", r#"{"owner_id":"tenant-1","secret":"super-secret"}"#),
+            (Method::DELETE, "", r#"{"owner_id":"tenant-1","version":1}"#),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(request(method, &format!("{path}{suffix}"), body, Some("admin-token")))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{path}");
+        }
+
+        let response = app
+            .oneshot(request(
+                Method::POST,
+                &format!("{path}/destructions"),
+                r#"{"owner_id":"tenant-1","version":1,"reason":"credential lifecycle cleanup"}"#,
+                Some("admin-token"),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+        let body = response_json(response).await;
+        assert_eq!(body["state"], "destroyed", "{path}");
+        assert_eq!(body["credential_ref"]["source"], source, "{path}");
+        assert_eq!(body["credential_ref"]["kind"], kind, "{path}");
+        assert_eq!(body["credential_ref"]["status"], "destroyed", "{path}");
+        assert!(!body.to_string().contains("super-secret"), "{path}");
+        assert_eq!(events.decoded_events().await.len(), 5, "{path}");
+    }
+}
+
+#[derive(Clone)]
+enum ScriptedBegin {
+    Decision(IdempotencyDecision),
+    StoreConflict,
+    StoreBackendFailure,
+}
+
+#[derive(Clone)]
+struct ScriptedIdempotency {
+    begin: ScriptedBegin,
+}
+
+impl CredentialCommandIdempotencyStore for ScriptedIdempotency {
+    async fn begin(
+        &self,
+        _scope: IdempotencyScope,
+        _fingerprint: RequestFingerprint,
+    ) -> Result<IdempotencyDecision, CredentialCommandIdempotencyStoreError> {
+        match &self.begin {
+            ScriptedBegin::Decision(decision) => Ok(decision.clone()),
+            ScriptedBegin::StoreConflict => Err(CredentialCommandIdempotencyStoreError::Conflict),
+            ScriptedBegin::StoreBackendFailure => Err(CredentialCommandIdempotencyStoreError::Backend {
+                source: Box::new(std::io::Error::other("idempotency backend unavailable")),
+            }),
+        }
+    }
+
+    async fn complete(
+        &self,
+        _scope: &IdempotencyScope,
+        _response: CredentialCommandResponse,
+    ) -> Result<(), CredentialCommandIdempotencyStoreError> {
+        Ok(())
+    }
+
+    async fn abandon(&self, _scope: &IdempotencyScope) -> Result<(), CredentialCommandIdempotencyStoreError> {
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+struct AbandonProbeIdempotency {
+    inner: CredentialCommandInMemoryIdempotencyLedger,
+    abandon_calls: Arc<AtomicU32>,
+    abandon_fails: bool,
+}
+
+impl AbandonProbeIdempotency {
+    fn new(abandon_fails: bool) -> Self {
+        Self {
+            inner: CredentialCommandInMemoryIdempotencyLedger::default(),
+            abandon_calls: Arc::new(AtomicU32::new(0)),
+            abandon_fails,
+        }
+    }
+}
+
+impl CredentialCommandIdempotencyStore for AbandonProbeIdempotency {
+    async fn begin(
+        &self,
+        scope: IdempotencyScope,
+        fingerprint: RequestFingerprint,
+    ) -> Result<IdempotencyDecision, CredentialCommandIdempotencyStoreError> {
+        self.inner.begin(scope, fingerprint).await
+    }
+
+    async fn complete(
+        &self,
+        scope: &IdempotencyScope,
+        response: CredentialCommandResponse,
+    ) -> Result<(), CredentialCommandIdempotencyStoreError> {
+        self.inner.complete(scope, response).await
+    }
+
+    async fn abandon(&self, scope: &IdempotencyScope) -> Result<(), CredentialCommandIdempotencyStoreError> {
+        self.abandon_calls.fetch_add(1, Ordering::SeqCst);
+        if self.abandon_fails {
+            return Err(CredentialCommandIdempotencyStoreError::Conflict);
+        }
+        self.inner.abandon(scope).await
+    }
+}
+
+fn replayed_response() -> CredentialCommandResponse {
+    CredentialCommandResponse {
+        state: "active".to_string(),
+        stream_position: 7,
+        credential_ref: CredentialRefResponse {
+            id: "tenant-1:github/primary:webhook_secret".to_string(),
+            version: 3,
+            owner_id: "tenant-1".to_string(),
+            source: "github".to_string(),
+            scope_key: "github/primary".to_string(),
+            kind: "webhook_secret".to_string(),
+            status: "active".to_string(),
+        },
+    }
+}
+
+fn scripted_app(begin: ScriptedBegin) -> Router {
+    app_with_idempotency(ManagementTestStreamStore::default(), ScriptedIdempotency { begin })
+}
+
+fn command_requests() -> [(&'static str, Method, &'static str, &'static str); 4] {
+    [
+        (
+            "put",
+            Method::PUT,
+            "/github/primary/webhook-secret",
+            r#"{"owner_id":"tenant-1","secret":"super-secret"}"#,
+        ),
+        (
+            "rotate",
+            Method::POST,
+            "/github/primary/webhook-secret/rotations",
+            r#"{"owner_id":"tenant-1","version":1,"secret":"super-secret"}"#,
+        ),
+        (
+            "revoke",
+            Method::DELETE,
+            "/github/primary/webhook-secret",
+            r#"{"owner_id":"tenant-1","version":1}"#,
+        ),
+        (
+            "destroy",
+            Method::POST,
+            "/github/primary/webhook-secret/destructions",
+            r#"{"owner_id":"tenant-1","version":1,"reason":"credential lifecycle cleanup"}"#,
+        ),
+    ]
+}
+
+#[tokio::test]
+async fn every_command_maps_idempotency_decisions_to_responses() {
+    for (name, method, uri, body) in command_requests() {
+        let replay = scripted_app(ScriptedBegin::Decision(
+            IdempotencyDecision::Replay(replayed_response()),
+        ))
+        .oneshot(request(method.clone(), uri, body, Some("admin-token")))
+        .await
+        .unwrap();
+        assert_eq!(replay.status(), StatusCode::OK, "{name}");
+        let replay_body = response_json(replay).await;
+        assert_eq!(replay_body["stream_position"], 7, "{name}");
+        assert_eq!(replay_body["credential_ref"]["version"], 3, "{name}");
+
+        let conflict = scripted_app(ScriptedBegin::Decision(IdempotencyDecision::Conflict))
+            .oneshot(request(method.clone(), uri, body, Some("admin-token")))
+            .await
+            .unwrap();
+        assert_eq!(conflict.status(), StatusCode::CONFLICT, "{name}");
+        assert_eq!(response_json(conflict).await["error"], "idempotency conflict", "{name}");
+
+        let in_progress = scripted_app(ScriptedBegin::Decision(IdempotencyDecision::InProgress))
+            .oneshot(request(method.clone(), uri, body, Some("admin-token")))
+            .await
+            .unwrap();
+        assert_eq!(in_progress.status(), StatusCode::CONFLICT, "{name}");
+        assert_eq!(
+            response_json(in_progress).await["error"],
+            "idempotency request is already in progress",
+            "{name}"
+        );
+
+        let store_conflict = scripted_app(ScriptedBegin::StoreConflict)
+            .oneshot(request(method.clone(), uri, body, Some("admin-token")))
+            .await
+            .unwrap();
+        assert_eq!(store_conflict.status(), StatusCode::CONFLICT, "{name}");
+        assert_eq!(
+            response_json(store_conflict).await["error"],
+            "idempotency request is already in progress",
+            "{name}"
+        );
+
+        let store_failure = scripted_app(ScriptedBegin::StoreBackendFailure)
+            .oneshot(request(method, uri, body, Some("admin-token")))
+            .await
+            .unwrap();
+        assert_eq!(store_failure.status(), StatusCode::INTERNAL_SERVER_ERROR, "{name}");
+        assert_eq!(
+            response_json(store_failure).await["error"],
+            "credential management idempotency failed",
+            "{name}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn failed_commands_abandon_their_idempotency_key() {
+    let failing_requests = [
+        (
+            "put",
+            Method::PUT,
+            "/github/primary/webhook-secret",
+            r#"{"owner_id":"tenant-1","secret":"second-secret"}"#,
+        ),
+        (
+            "rotate",
+            Method::POST,
+            "/github/missing/webhook-secret/rotations",
+            r#"{"owner_id":"tenant-1","version":1,"secret":"super-secret"}"#,
+        ),
+        (
+            "revoke",
+            Method::DELETE,
+            "/github/missing/webhook-secret",
+            r#"{"owner_id":"tenant-1","version":1}"#,
+        ),
+        (
+            "destroy",
+            Method::POST,
+            "/github/missing/webhook-secret/destructions",
+            r#"{"owner_id":"tenant-1","version":1,"reason":"credential lifecycle cleanup"}"#,
+        ),
+    ];
+
+    for abandon_fails in [false, true] {
+        for (name, method, uri, body) in failing_requests.clone() {
+            let events = ManagementTestStreamStore::default();
+            let idempotency = AbandonProbeIdempotency::new(abandon_fails);
+            let app = app_with_idempotency(events.clone(), idempotency.clone());
+            let seeded = app
+                .clone()
+                .oneshot(request_with_idempotency(
+                    Method::PUT,
+                    "/github/primary/webhook-secret",
+                    PUT_BODY,
+                    Some("admin-token"),
+                    Some("seed"),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(seeded.status(), StatusCode::OK);
+            let events_before = events.decoded_events().await.len();
+
+            let response = app
+                .oneshot(request_with_idempotency(
+                    method,
+                    uri,
+                    body,
+                    Some("admin-token"),
+                    Some("failing-command"),
+                ))
+                .await
+                .unwrap();
+
+            assert!(
+                response.status().is_client_error() || response.status().is_server_error(),
+                "{name}: {}",
+                response.status()
+            );
+            assert_eq!(idempotency.abandon_calls.load(Ordering::SeqCst), 1, "{name}");
+            assert_eq!(events.decoded_events().await.len(), events_before, "{name}");
+        }
+    }
+}
+
+struct SnapshotFixture {
+    metadata: crate::credential::commands::domain::CredentialMetadata,
+}
+
+impl SnapshotFixture {
+    async fn new() -> Self {
+        let secrets = MockOpenBaoSecretStore::default();
+        let credential = secrets
+            .put(
+                CredentialScope::integration(
+                    CredentialOwnerId::new("tenant-1").unwrap(),
+                    SourceKind::GitHub,
+                    SourceIntegrationId::new("primary").unwrap(),
+                ),
+                CredentialKind::WebhookSecret,
+                SecretString::new("super-secret").unwrap(),
+            )
+            .await
+            .unwrap();
+        Self {
+            metadata: secrets.metadata(&credential).await.unwrap(),
+        }
+    }
+
+    fn credential(&self) -> &CredentialRef {
+        self.metadata.reference()
+    }
+
+    fn active(&self) -> state_v1::ActiveCredentialState {
+        active_state_to_proto(&self.metadata, &[])
+    }
+}
+
+fn snapshot(case: impl Into<CredentialStateSnapshotCase>) -> state_v1::CredentialStateSnapshot {
+    state_v1::CredentialStateSnapshot {
+        state: Some(case.into()),
+    }
+}
+
+#[tokio::test]
+async fn command_response_reports_every_credential_lifecycle_state() {
+    let fixture = SnapshotFixture::new().await;
+    let reason = CredentialDestroyReason::new("credential lifecycle cleanup").unwrap();
+    let failure = CredentialFailureReason::new("openbao destroy failed").unwrap();
+    let cases = [
+        ("active", snapshot(fixture.active()), "active"),
+        (
+            "rotation_pending",
+            snapshot(rotation_pending_to_proto_state(fixture.active())),
+            "active",
+        ),
+        (
+            "revoked",
+            snapshot(revoked_to_proto_state(fixture.credential())),
+            "revoked",
+        ),
+        (
+            "destroy_requested",
+            snapshot(destroy_requested_to_proto_state(fixture.credential(), &reason)),
+            "revoked",
+        ),
+        (
+            "destroyed",
+            snapshot(destroyed_to_proto_state(fixture.credential())),
+            "destroyed",
+        ),
+        (
+            "cleanup_failed",
+            snapshot(cleanup_failed_to_proto_state(fixture.credential(), &failure)),
+            "revoked",
+        ),
+    ];
+
+    for (expected_state, state, expected_status) in cases {
+        let response = command_response(position(9), state).unwrap();
+
+        assert_eq!(response.state, expected_state);
+        assert_eq!(response.stream_position, 9);
+        assert_eq!(response.credential_ref.id, "tenant-1:github/primary:webhook_secret");
+        assert_eq!(response.credential_ref.version, 1);
+        assert_eq!(response.credential_ref.status, expected_status, "{expected_state}");
+    }
+}
+
+#[tokio::test]
+async fn command_response_rejects_states_a_command_cannot_end_in() {
+    let credential_id = CredentialId::new("tenant-1:github/primary:webhook_secret").unwrap();
+    let scope = CredentialScope::integration(
+        CredentialOwnerId::new("tenant-1").unwrap(),
+        SourceKind::GitHub,
+        SourceIntegrationId::new("primary").unwrap(),
+    );
+    let failure = CredentialFailureReason::new("openbao write failed").unwrap();
+    let cases = [
+        ("missing", state_v1::CredentialStateSnapshot { state: None }),
+        ("missing", snapshot(state_v1::CredentialMissingState {})),
+        (
+            "pending_write",
+            snapshot(pending_write_to_proto_state(
+                &credential_id,
+                &scope,
+                CredentialKind::WebhookSecret,
+            )),
+        ),
+        (
+            "write_failed",
+            snapshot(write_failed_to_proto_state(&credential_id, &failure)),
+        ),
+    ];
+
+    for (expected, state) in cases {
+        let error = command_response(position(1), state).unwrap_err();
+
+        assert!(
+            matches!(error, CredentialManagementHttpError::UnexpectedCredentialState(state) if state == expected),
+            "{expected}"
+        );
+        let response = error.into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            response_json(response).await["error"],
+            "credential management request failed"
+        );
+    }
+}
+
+#[test]
+fn command_response_rejects_undecodable_persisted_state() {
+    let cases = [
+        snapshot(state_v1::ActiveCredentialState::default()),
+        snapshot(state_v1::RotationPendingCredentialState::default()),
+        snapshot(state_v1::RevokedCredentialState::default()),
+        snapshot(state_v1::DestroyRequestedCredentialState::default()),
+        snapshot(state_v1::DestroyedCredentialState::default()),
+        snapshot(state_v1::CleanupFailedCredentialState::default()),
+    ];
+
+    for state in cases {
+        let error = command_response(position(1), state).unwrap_err();
+
+        assert!(matches!(error, CredentialManagementHttpError::InvalidState(_)));
+        assert!(Error::source(&error).is_some());
+    }
+}
+
+#[tokio::test]
+async fn invalid_persisted_state_is_reported_without_internal_detail() {
+    let response = CredentialManagementHttpError::invalid_state(IdempotencyKeyError::Empty).into_response();
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(
+        response_json(response).await["error"],
+        "credential management request failed"
+    );
+}
+
+#[tokio::test]
+async fn every_command_reports_failure_when_the_event_store_is_unavailable() {
+    for (name, method, uri, body) in command_requests() {
+        let events = ManagementTestStreamStore::default();
+        let idempotency = AbandonProbeIdempotency::new(false);
+        let app = app_with_idempotency(events.clone(), idempotency.clone());
+        events.become_unavailable();
+
+        let response = app
+            .oneshot(request(method, uri, body, Some("admin-token")))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR, "{name}");
+        assert_eq!(
+            response_json(response).await["error"],
+            "credential management request failed",
+            "{name}"
+        );
+        assert_eq!(idempotency.abandon_calls.load(Ordering::SeqCst), 1, "{name}");
+    }
+}
+
+#[tokio::test]
+async fn wrong_admin_token_is_rejected_before_mutating_state() {
+    let events = ManagementTestStreamStore::default();
+    let app = app(
+        events.clone(),
+        MockOpenBaoSecretStore::default(),
+        RuntimeCredentialRegistry::default(),
+    );
+
+    let response = app
+        .oneshot(request(
+            Method::PUT,
+            "/github/primary/webhook-secret",
+            PUT_BODY,
+            Some("not-the-admin-token"),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert!(events.decoded_events().await.is_empty());
+}
+
+#[derive(Clone)]
+struct UnavailableRecoveryCheckpointStore;
+
+impl CredentialRecoveryCheckpointStore for UnavailableRecoveryCheckpointStore {
+    async fn load(&self) -> Result<CredentialRecoveryCheckpoint, CredentialRecoveryCheckpointStoreError> {
+        Err(CredentialRecoveryCheckpointStoreError::Conflict)
+    }
+
+    async fn save(
+        &self,
+        _checkpoint: CredentialRecoveryCheckpoint,
+    ) -> Result<(), CredentialRecoveryCheckpointStoreError> {
+        Err(CredentialRecoveryCheckpointStoreError::Conflict)
+    }
+}
+
+#[tokio::test]
+async fn recovery_status_reports_checkpoint_store_failure() {
+    let app = recovery_status_router(
+        SecretString::new("admin-token").unwrap(),
+        UnavailableRecoveryCheckpointStore,
+    );
+
+    let response = app
+        .oneshot(request(Method::GET, "/recovery/status", "", Some("admin-token")))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(
+        response_json(response).await["error"],
+        "credential recovery checkpoint failed"
+    );
+}
+
+#[tokio::test]
+async fn respond_abandons_the_idempotency_key_when_the_outcome_cannot_be_encoded() {
+    let idempotency = AbandonProbeIdempotency::new(false);
+    let state = CredentialManagementState {
+        handler: CredentialRuntimeHandler::new(
+            ManagementTestStreamStore::default(),
+            MockOpenBaoSecretStore::default(),
+            RuntimeCredentialRegistry::default(),
+        ),
+        admin_token: SecretString::new("admin-token").unwrap(),
+        idempotency: idempotency.clone(),
+    };
+    let scope = IdempotencyScope::new(
+        "tenant-1",
+        CommandNamespace::Create.as_str(),
+        "tenant-1:github/primary:webhook_secret",
+        IdempotencyKey::new("corrupt-outcome").unwrap(),
+    );
+
+    let error = state
+        .respond(
+            &scope,
+            position(1),
+            snapshot(state_v1::ActiveCredentialState::default()),
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, CredentialManagementHttpError::InvalidState(_)));
+    assert_eq!(idempotency.abandon_calls.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn request_fingerprint_matches_standard_hmac_for_every_key_length() {
+    for key_length in [1, 63, 64, 65, 200] {
+        let token = "k".repeat(key_length);
+        let mut expected = HmacSha256::new_from_slice(token.as_bytes()).unwrap();
+        for part in ["create", "tenant-1"] {
+            expected.update(&(part.len() as u64).to_be_bytes());
+            expected.update(part.as_bytes());
+        }
+
+        let fingerprint = request_fingerprint(&SecretString::new(token).unwrap(), &["create", "tenant-1"]);
+
+        assert_eq!(
+            fingerprint,
+            RequestFingerprint::new(hex::encode(expected.finalize().into_bytes())),
+            "key length {key_length}"
+        );
+    }
 }

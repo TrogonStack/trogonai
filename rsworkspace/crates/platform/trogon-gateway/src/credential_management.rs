@@ -9,9 +9,10 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
+use hmac::digest::Key;
 use hmac::{Hmac, KeyInit, Mac};
 use serde::{Deserialize, Serialize};
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use tracing::warn;
 use trogon_decider_runtime::{CommandError, SnapshotRead, SnapshotWrite, StreamAppend, StreamPosition, StreamRead};
@@ -663,7 +664,7 @@ where
             target.kind.as_str(),
             secret.as_str(),
         ],
-    )?;
+    );
     let idempotency_scope = IdempotencyScope::new(
         scope.owner_id().as_str(),
         CommandNamespace::Create.as_str(),
@@ -691,15 +692,9 @@ where
         }
     };
 
-    let response = match command_response(outcome.stream_position(), outcome.into_state()) {
-        Ok(response) => response,
-        Err(error) => {
-            state.abandon_idempotency(&idempotency_scope).await;
-            return Err(error);
-        }
-    };
-    state.complete_idempotency(&idempotency_scope, &response).await;
-    Ok(Json(response))
+    state
+        .respond(&idempotency_scope, outcome.stream_position(), outcome.into_state())
+        .await
 }
 
 async fn rotate_discord_bot_token<EventStore, Secrets, Idempotency>(
@@ -1042,7 +1037,7 @@ where
             target.kind.as_str(),
             secret.as_str(),
         ],
-    )?;
+    );
     let idempotency_scope = IdempotencyScope::new(
         scope.owner_id().as_str(),
         CommandNamespace::Rotate.as_str(),
@@ -1070,15 +1065,9 @@ where
         }
     };
 
-    let response = match command_response(outcome.stream_position(), outcome.into_state()) {
-        Ok(response) => response,
-        Err(error) => {
-            state.abandon_idempotency(&idempotency_scope).await;
-            return Err(error);
-        }
-    };
-    state.complete_idempotency(&idempotency_scope, &response).await;
-    Ok(Json(response))
+    state
+        .respond(&idempotency_scope, outcome.stream_position(), outcome.into_state())
+        .await
 }
 
 async fn destroy_discord_bot_token<EventStore, Secrets, Idempotency>(
@@ -1421,7 +1410,7 @@ where
             target.kind.as_str(),
             reason.as_str(),
         ],
-    )?;
+    );
     let idempotency_scope = IdempotencyScope::new(
         scope.owner_id().as_str(),
         CommandNamespace::Destroy.as_str(),
@@ -1449,15 +1438,9 @@ where
         }
     };
 
-    let response = match command_response(outcome.stream_position(), outcome.into_state()) {
-        Ok(response) => response,
-        Err(error) => {
-            state.abandon_idempotency(&idempotency_scope).await;
-            return Err(error);
-        }
-    };
-    state.complete_idempotency(&idempotency_scope, &response).await;
-    Ok(Json(response))
+    state
+        .respond(&idempotency_scope, outcome.stream_position(), outcome.into_state())
+        .await
 }
 
 async fn revoke_discord_bot_token<EventStore, Secrets, Idempotency>(
@@ -1797,7 +1780,7 @@ where
             version.as_str(),
             target.kind.as_str(),
         ],
-    )?;
+    );
     let idempotency_scope = IdempotencyScope::new(
         scope.owner_id().as_str(),
         CommandNamespace::Revoke.as_str(),
@@ -1825,21 +1808,32 @@ where
         }
     };
 
-    let response = match command_response(outcome.stream_position(), outcome.into_state()) {
-        Ok(response) => response,
-        Err(error) => {
-            state.abandon_idempotency(&idempotency_scope).await;
-            return Err(error);
-        }
-    };
-    state.complete_idempotency(&idempotency_scope, &response).await;
-    Ok(Json(response))
+    state
+        .respond(&idempotency_scope, outcome.stream_position(), outcome.into_state())
+        .await
 }
 
 impl<EventStore, Secrets, Idempotency> CredentialManagementState<EventStore, Secrets, Idempotency>
 where
     Idempotency: CredentialCommandIdempotencyStore,
 {
+    async fn respond(
+        &self,
+        scope: &IdempotencyScope,
+        stream_position: StreamPosition,
+        state: state_v1::CredentialStateSnapshot,
+    ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError> {
+        let response = match command_response(stream_position, state) {
+            Ok(response) => response,
+            Err(error) => {
+                self.abandon_idempotency(scope).await;
+                return Err(error);
+            }
+        };
+        self.complete_idempotency(scope, &response).await;
+        Ok(Json(response))
+    }
+
     async fn complete_idempotency(&self, scope: &IdempotencyScope, response: &CredentialCommandResponse) {
         let Err(first) = self.idempotency.complete(scope, response.clone()).await else {
             return;
@@ -1974,8 +1968,6 @@ enum CredentialManagementHttpError {
     IdempotencyInProgress,
     #[error("credential management idempotency store failed: {0}")]
     IdempotencyStore(#[source] CredentialCommandIdempotencyStoreError),
-    #[error("request fingerprint key rejected: {0}")]
-    RequestFingerprint(#[source] hmac::digest::InvalidLength),
     #[error("credential recovery checkpoint failed: {0}")]
     RecoveryCheckpoint(#[source] BoxedSource),
     #[error("credential management input rejected: {0}")]
@@ -2055,7 +2047,7 @@ impl IntoResponse for CredentialManagementHttpError {
             Self::MissingIdempotencyKey => (StatusCode::BAD_REQUEST, "missing idempotency key"),
             Self::IdempotencyConflict => (StatusCode::CONFLICT, "idempotency conflict"),
             Self::IdempotencyInProgress => (StatusCode::CONFLICT, "idempotency request is already in progress"),
-            Self::IdempotencyStore(_) | Self::RequestFingerprint(_) => {
+            Self::IdempotencyStore(_) => {
                 warn!(error = %self, "credential management idempotency request failed");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -2114,17 +2106,24 @@ fn idempotency_key_from_headers(headers: &HeaderMap) -> Result<IdempotencyKey, C
     IdempotencyKey::new(provided).map_err(CredentialManagementHttpError::invalid_input)
 }
 
-fn request_fingerprint(
-    admin_token: &SecretString,
-    parts: &[&str],
-) -> Result<RequestFingerprint, CredentialManagementHttpError> {
-    let mut mac = HmacSha256::new_from_slice(admin_token.as_str().as_bytes())
-        .map_err(CredentialManagementHttpError::RequestFingerprint)?;
+fn request_fingerprint(admin_token: &SecretString, parts: &[&str]) -> RequestFingerprint {
+    let mut mac = HmacSha256::new(&hmac_key_block(admin_token.as_str().as_bytes()));
     for part in parts {
         mac.update(&(part.len() as u64).to_be_bytes());
         mac.update(part.as_bytes());
     }
-    Ok(RequestFingerprint::new(hex::encode(mac.finalize().into_bytes())))
+    RequestFingerprint::new(hex::encode(mac.finalize().into_bytes()))
+}
+
+fn hmac_key_block(key: &[u8]) -> Key<HmacSha256> {
+    let mut block = Key::<HmacSha256>::default();
+    if key.len() > block.len() {
+        let digest = Sha256::digest(key);
+        block[..digest.len()].copy_from_slice(&digest);
+    } else {
+        block[..key.len()].copy_from_slice(key);
+    }
+    block
 }
 
 fn authorize(headers: &HeaderMap, admin_token: &SecretString) -> Result<(), CredentialManagementHttpError> {
