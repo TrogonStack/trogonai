@@ -77,6 +77,8 @@ chk "aud GET data" 403 -H "X-Vault-Token: $AUD" "$BASE/data/$P"
 chk "aud LIST creds" 200 -X LIST -H "X-Vault-Token: $AUD" "$BASE/metadata/trogonai/tenant-2/credentials"
 chk "aud LIST nested" 200 -X LIST -H "X-Vault-Token: $AUD" "$BASE/metadata/trogonai/tenant-2/credentials/openbao:tenant-2:github"
 chk "lwc GET data" 403 -H "X-Vault-Token: $LWC" "$BASE/data/$P"
+chk "lwc GET metadata" 200 -H "X-Vault-Token: $LWC" "$BASE/metadata/$P"
+chk "lwc LIST creds" 200 -X LIST -H "X-Vault-Token: $LWC" "$BASE/metadata/trogonai/tenant-2/credentials"
 chk "lwc POST delete" 204 -X POST -H "X-Vault-Token: $LWC" -d '{"versions":[1]}' "$BASE/delete/$P"
 chk "lwc POST undelete" 403 -X POST -H "X-Vault-Token: $LWC" -d '{"versions":[1]}' "$BASE/undelete/$P"
 chk "bga POST undelete" 204 -X POST -H "X-Vault-Token: $BGA" -d '{"versions":[1]}' "$BASE/undelete/$P"
@@ -86,6 +88,7 @@ echo "--- escape checks ---"
 chk "gwr other subtree" 403 -H "X-Vault-Token: $GWR" "${ADDR}/v1/secret/data/elsewhere/x"
 chk "bga sys/policies" 403 -H "X-Vault-Token: $BGA" "${ADDR}/v1/sys/policies/acl/gateway_read"
 chk "cpw outside creds" 403 -X POST -H "X-Vault-Token: $CPW" -d '{"data":{"value":"x"}}' "${ADDR}/v1/secret/data/trogonai/tenant-2/other/x"
+chk "lwc outside creds" 403 -X POST -H "X-Vault-Token: $LWC" -d '{"versions":[1]}' "${ADDR}/v1/secret/delete/trogonai/tenant-2/other/x"
 
 echo
 if [[ "$fails" -eq 0 ]]; then

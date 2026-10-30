@@ -104,9 +104,10 @@ substitution above is what reconciles the two.
 ```
 
 Starts a throwaway dev OpenBao on port 18201, applies every policy here, mints
-one token per role, and asserts 19 allow/deny outcomes against the real
-percent-encoded paths, including three escape checks (other subtree, `sys/`,
-outside `credentials/`). Needs Docker. Run it after editing any `.hcl` in this
+one token per role, and asserts the allow/deny outcomes against the real
+percent-encoded paths, including escape checks (other subtree, `sys/`, and
+outside `credentials/` for both the control plane and the cleanup worker).
+Needs Docker. Run it after editing any `.hcl` in this
 directory: the first draft of these policies parsed and uploaded cleanly while
 denying every single legitimate request, and only an end-to-end request caught
 it.
