@@ -19,10 +19,12 @@ use crate::source::sentry::SentryClientSecret;
 use crate::source::slack::ack_budget::AckBudget;
 use crate::source::slack::config::{
     SlackApiBaseUrl, SlackAppToken, SlackSigningSecret, SlackSocketModeConfig as SlackSocketModeSourceConfig,
-    SlackSocketModeIntendedUse, SlackSocketModeIntendedUseError, SlackTransportConfig,
-    SlackWebhookConfig as SlackWebhookSourceConfig,
+    SlackTransportConfig, SlackWebhookConfig as SlackWebhookSourceConfig,
 };
 use crate::source::slack::constants::{DEFAULT_API_BASE_URL, DEFAULT_HTTP_BODY_SIZE_MAX};
+use crate::source::slack::slack_socket_mode_intended_use::{
+    SlackSocketModeIntendedUse, SlackSocketModeIntendedUseError,
+};
 use crate::source::telegram::config::{
     TelegramBotToken, TelegramPublicWebhookUrl, TelegramWebhookRegistrationConfig, TelegramWebhookSecret,
 };

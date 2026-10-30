@@ -17,11 +17,12 @@ use trogon_std::time::FixedEpochClock;
 
 use super::ack_budget::AckBudget;
 use super::config::{
-    SlackApiBaseUrl, SlackAppToken, SlackConfig, SlackSigningSecret, SlackSocketModeConfig, SlackSocketModeIntendedUse,
-    SlackTransportConfig, SlackWebhookConfig,
+    SlackApiBaseUrl, SlackAppToken, SlackConfig, SlackSigningSecret, SlackSocketModeConfig, SlackTransportConfig,
+    SlackWebhookConfig,
 };
 use super::constants::NATS_HEADER_CONTENT_TYPE;
 use super::server::{SlackBridge, router_with_clock};
+use super::slack_socket_mode_intended_use::SlackSocketModeIntendedUse;
 use super::socket_mode::{SocketModeError, handle_text_frame};
 
 const REQUEST_NOW_SECONDS: u64 = 1_700_000_000;

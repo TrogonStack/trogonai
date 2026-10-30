@@ -157,6 +157,7 @@ pub mod retry_attempt;
 pub mod retry_reason;
 pub mod server;
 pub mod signature;
+pub mod slack_socket_mode_intended_use;
 pub mod socket_liveness;
 pub mod socket_mode;
 pub mod ssl_check;
