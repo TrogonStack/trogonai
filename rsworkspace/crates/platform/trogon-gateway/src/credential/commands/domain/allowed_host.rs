@@ -166,7 +166,7 @@ fn normalize_candidate(candidate: &str) -> Option<String> {
             .split_once(']')
             .filter(|(_, rest)| rest.is_empty() || rest.strip_prefix(':').is_some_and(is_port))
             .and_then(|(address, _)| address.parse::<Ipv6Addr>().ok());
-        return Some(literal.map_or_else(|| normalize_host(candidate), bracketed));
+        return literal.map(bracketed);
     }
 
     let without_port = match candidate.rsplit_once(':') {
@@ -175,7 +175,7 @@ fn normalize_candidate(candidate: &str) -> Option<String> {
     };
 
     let normalized = normalize_host(without_port);
-    if normalized.is_empty() { None } else { Some(normalized) }
+    validate_labels(&normalized).ok().map(|()| normalized)
 }
 
 fn has_port(value: &str) -> bool {

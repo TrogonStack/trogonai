@@ -54,6 +54,18 @@ fn bracketed_ipv6_candidate_with_trailing_text_does_not_match() {
 }
 
 #[test]
+fn wildcard_does_not_match_a_candidate_that_is_not_a_valid_host() {
+    let host = AllowedHost::new("*.example.com").unwrap();
+
+    assert!(!host.matches("[fe80::1]evil.example.com"));
+    assert!(!host.matches("[notipv6]evil.example.com"));
+    assert!(!host.matches("a:b.example.com"));
+    assert!(!host.matches("a b.example.com"));
+    assert!(!host.matches("*.example.com"));
+    assert!(host.matches("api.example.com"));
+}
+
+#[test]
 fn unbracketed_ipv6_candidate_matches_a_bracketed_pattern() {
     let host = AllowedHost::new("[fe80::1]").unwrap();
 
