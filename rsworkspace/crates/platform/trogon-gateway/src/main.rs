@@ -498,24 +498,104 @@ fn spawn_discord_gateway_with_runtime_credentials<P, S, G, Shutdown, Run, Runnin
     shutdown: Shutdown,
     run: Run,
 ) where
-    P: JetStreamPublisher,
-    S: ObjectStorePut,
+    P: JetStreamPublisher + Clone,
+    S: ObjectStorePut + Clone,
     G: secret_store::SecretStoreGet<Error = secret_store::SecretStoreError> + Send + Sync + 'static,
     Shutdown: std::future::Future<Output = ()> + Send + 'static,
-    Run: FnOnce(ClaimCheckPublisher<P, S>, source::discord::config::DiscordConfig, twilight_gateway::Shard) -> Running
+    Run: Fn(ClaimCheckPublisher<P, S>, source::discord::config::DiscordConfig, twilight_gateway::Shard) -> Running
         + Send
+        + Sync
         + 'static,
     Running: std::future::Future<Output = ()> + Send + 'static,
 {
-    spawn_discord_gateway_with_bot_token(tasks, config, publisher, run, async move {
-        tokio::select! {
-            () = shutdown => None,
-            bot_token = source::discord::gateway_runner::resolve_runtime_bot_token_with_retry(
-                &credentials,
-                DISCORD_BOT_TOKEN_RETRY_BACKOFF,
-            ) => Some(bot_token),
+    if let Some(config) = config {
+        let config = config.clone();
+        tasks.spawn(async move {
+            tokio::select! {
+                () = shutdown => {}
+                () = supervise_discord_runtime_gateway(
+                    credentials,
+                    publisher,
+                    config,
+                    run,
+                    DISCORD_BOT_TOKEN_RETRY_BACKOFF,
+                    CREDENTIAL_RUNTIME_PROJECTION_WORKER_INTERVAL,
+                ) => {}
+            }
+            ("discord-gateway", Ok(()))
+        });
+        info!(source = "discord", "gateway runner spawned");
+    }
+}
+
+async fn supervise_discord_runtime_gateway<P, S, G, Run, Running>(
+    credentials: credential_runtime_projection::RuntimeCredentialResolver<G>,
+    publisher: ClaimCheckPublisher<P, S>,
+    config: source::discord::config::DiscordConfig,
+    run: Run,
+    backoff: crate::supervision::RestartBackoff,
+    credential_poll_interval: std::time::Duration,
+) where
+    P: JetStreamPublisher + Clone,
+    S: ObjectStorePut + Clone,
+    G: secret_store::SecretStoreGet<Error = secret_store::SecretStoreError>,
+    Run: Fn(ClaimCheckPublisher<P, S>, source::discord::config::DiscordConfig, twilight_gateway::Shard) -> Running,
+    Running: std::future::Future<Output = ()>,
+{
+    let key = credential_runtime_projection::RuntimeIntegrationKey::for_source(
+        credential::commands::domain::SourceKind::Discord,
+    );
+    let mut restart_delay = backoff.initial();
+    loop {
+        let before = credentials
+            .active_credential_ref(&key, credential::commands::domain::CredentialKind::BotToken)
+            .await;
+        let bot_token =
+            source::discord::gateway_runner::resolve_runtime_bot_token_with_retry(&credentials, backoff).await;
+        let active = credentials
+            .active_credential_ref(&key, credential::commands::domain::CredentialKind::BotToken)
+            .await;
+        if before != active {
+            continue;
         }
-    });
+        let shard = twilight_gateway::Shard::new(
+            twilight_gateway::ShardId::ONE,
+            bot_token.as_str().to_owned(),
+            config.intents,
+        );
+        tokio::select! {
+            () = run(publisher.clone(), config.clone(), shard) => {
+                warn!(
+                    source = "discord",
+                    retry_in = ?restart_delay,
+                    "Discord gateway shard ended, restarting with the current runtime bot token"
+                );
+                tokio::time::sleep(restart_delay).await;
+                restart_delay = backoff.next(restart_delay);
+            }
+            () = wait_for_credential_change(&credentials, &key, active, credential_poll_interval) => {
+                info!(source = "discord", "Discord runtime bot token changed, restarting the gateway shard");
+                restart_delay = backoff.initial();
+            }
+        }
+    }
+}
+
+async fn wait_for_credential_change<G>(
+    credentials: &credential_runtime_projection::RuntimeCredentialResolver<G>,
+    key: &credential_runtime_projection::RuntimeIntegrationKey,
+    active: Option<credential::commands::domain::CredentialRef>,
+    poll_interval: std::time::Duration,
+) {
+    loop {
+        tokio::time::sleep(poll_interval).await;
+        let current = credentials
+            .active_credential_ref(key, credential::commands::domain::CredentialKind::BotToken)
+            .await;
+        if current != active {
+            return;
+        }
+    }
 }
 
 fn spawn_discord_gateway_with_bot_token<P, S, Run, Running, BotToken>(
