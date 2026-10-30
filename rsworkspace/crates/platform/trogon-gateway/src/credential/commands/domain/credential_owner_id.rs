@@ -21,6 +21,9 @@ impl CredentialOwnerId {
                 return Err(CredentialOwnerIdError::InvalidCharacter(ch));
             }
         }
+        if matches!(value, "." | "..") {
+            return Err(CredentialOwnerIdError::DotSegment);
+        }
         Ok(Self(Arc::from(value)))
     }
 
@@ -53,6 +56,8 @@ pub enum CredentialOwnerIdError {
     InvalidCharacter(char),
     #[error("credential owner id exceeds maximum length: {0}")]
     TooLong(usize),
+    #[error("credential owner id must not be a dot path segment")]
+    DotSegment,
 }
 
 fn is_owner_id_char(ch: char) -> bool {

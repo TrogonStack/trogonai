@@ -21,6 +21,9 @@ impl CredentialId {
                 return Err(CredentialIdError::InvalidCharacter(ch));
             }
         }
+        if value.split('/').any(|segment| matches!(segment, "." | "..")) {
+            return Err(CredentialIdError::DotSegment);
+        }
         Ok(Self(Arc::from(value)))
     }
 
@@ -49,6 +52,8 @@ pub enum CredentialIdError {
     InvalidCharacter(char),
     #[error("credential id exceeds maximum length: {0}")]
     TooLong(usize),
+    #[error("credential id must not contain a dot path segment")]
+    DotSegment,
 }
 
 fn is_credential_id_char(ch: char) -> bool {

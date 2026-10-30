@@ -901,3 +901,9 @@ async fn rotate_returns_the_stored_version_when_custom_metadata_cannot_be_record
     assert_eq!(openbao.posted_to(OpenBaoEndpoint::Data).await.len(), 1);
     assert_eq!(openbao.posted_to(OpenBaoEndpoint::Metadata).await.len(), 1);
 }
+
+#[test]
+fn mount_rejects_dot_path_segments() {
+    assert_eq!(OpenBaoMount::new("."), Err(OpenBaoMountError::DotSegment));
+    assert_eq!(OpenBaoMount::new(".."), Err(OpenBaoMountError::DotSegment));
+}

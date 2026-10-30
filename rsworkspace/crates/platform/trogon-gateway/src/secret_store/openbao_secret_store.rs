@@ -281,6 +281,9 @@ impl OpenBaoMount {
                 return Err(OpenBaoMountError::InvalidCharacter(ch));
             }
         }
+        if matches!(value, "." | "..") {
+            return Err(OpenBaoMountError::DotSegment);
+        }
         Ok(Self(Arc::from(value)))
     }
 
@@ -307,6 +310,8 @@ pub enum OpenBaoMountError {
     Empty,
     #[error("OpenBao mount contains invalid character '{0}'")]
     InvalidCharacter(char),
+    #[error("OpenBao mount must not be a dot path segment")]
+    DotSegment,
 }
 
 fn is_mount_char(ch: char) -> bool {

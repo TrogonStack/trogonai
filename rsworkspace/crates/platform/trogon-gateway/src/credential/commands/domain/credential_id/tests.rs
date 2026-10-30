@@ -36,3 +36,11 @@ fn debug_names_the_type_and_value() {
 
     assert_eq!(format!("{id:?}"), "CredentialId(\"static-config:discord:bot_token\")");
 }
+
+#[test]
+fn rejects_dot_path_segments_so_the_id_stays_inside_its_collection() {
+    for value in [".", "..", "../other", "github/./primary", "github/.."] {
+        assert_eq!(CredentialId::new(value), Err(CredentialIdError::DotSegment), "{value}");
+    }
+    assert!(CredentialId::new("github/.primary").is_ok());
+}

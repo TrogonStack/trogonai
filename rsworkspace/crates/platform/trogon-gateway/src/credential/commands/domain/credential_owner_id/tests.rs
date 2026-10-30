@@ -34,3 +34,10 @@ fn debug_names_the_type_and_value() {
 
     assert_eq!(format!("{owner:?}"), "CredentialOwnerId(\"tenant-1\")");
 }
+
+#[test]
+fn rejects_dot_path_segments_so_the_owner_stays_inside_its_subtree() {
+    assert_eq!(CredentialOwnerId::new("."), Err(CredentialOwnerIdError::DotSegment));
+    assert_eq!(CredentialOwnerId::new(".."), Err(CredentialOwnerIdError::DotSegment));
+    assert!(CredentialOwnerId::new("tenant.1").is_ok());
+}
