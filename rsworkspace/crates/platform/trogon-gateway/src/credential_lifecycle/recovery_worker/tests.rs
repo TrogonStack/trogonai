@@ -561,7 +561,7 @@ async fn worker_records_write_failure_and_advances_checkpoint_when_pending_secre
 }
 
 #[tokio::test]
-async fn worker_recovers_past_undecodable_event_and_holds_checkpoint() {
+async fn worker_recovers_past_undecodable_event_and_advances_checkpoint() {
     let events = WorkerTestStreamStore::default();
     let secrets = MockOpenBaoSecretStore::default();
     let handler = CredentialHandler::new(events.clone(), secrets.clone());
@@ -589,15 +589,15 @@ async fn worker_recovers_past_undecodable_event_and_holds_checkpoint() {
     assert_eq!(report.planned_recoveries(), 1);
     assert_eq!(report.recovered_writes(), 1);
     assert_eq!(report.failed_recoveries(), 0);
-    assert_eq!(report.checkpoint_advanced_to(), None);
-    assert_eq!(report.checkpoint_failure_count(), 1);
-    assert!(report.checkpoint_retry_after_unix_seconds().is_some());
+    assert_eq!(report.checkpoint_advanced_to(), Some(2));
+    assert_eq!(report.checkpoint_failure_count(), 0);
+    assert_eq!(report.checkpoint_retry_after_unix_seconds(), None);
     assert_eq!(stream.raw_message_calls(), vec![1, 2]);
     let calls = kv.create_calls();
     assert_eq!(calls.len(), 1);
     let saved = decode_checkpoint(&calls[0].1).unwrap();
-    assert_eq!(saved.last_scanned_sequence(), 0);
-    assert_eq!(saved.consecutive_failure_count(), 1);
+    assert_eq!(saved.last_scanned_sequence(), 2);
+    assert_eq!(saved.consecutive_failure_count(), 0);
     assert_eq!(
         runtime_credentials
             .resolver(secrets)

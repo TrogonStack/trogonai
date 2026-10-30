@@ -122,11 +122,15 @@ impl CredentialRecoveryReport {
     }
 
     fn has_recovery_activity(&self) -> bool {
-        self.planned_recoveries > 0 || self.has_failures() || self.retry_delayed || self.stuck_recovery
+        self.planned_recoveries > 0
+            || self.has_failures()
+            || self.invalid_events > 0
+            || self.retry_delayed
+            || self.stuck_recovery
     }
 
     fn has_failures(&self) -> bool {
-        self.failed_recoveries > 0 || self.invalid_events > 0
+        self.failed_recoveries > 0
     }
 
     fn metric_outcome(&self) -> &'static str {
