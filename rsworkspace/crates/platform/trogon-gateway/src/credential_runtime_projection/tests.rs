@@ -322,6 +322,36 @@ async fn refresh_rebuilds_runtime_projection_from_persisted_credential_stream() 
 }
 
 #[tokio::test]
+async fn refresh_from_sequence_zero_reads_the_stream_from_its_first_event() {
+    let store = MockOpenBaoSecretStore::default();
+    let credential = put_bot_token(&store, "Bot token").await;
+    let metadata = store.metadata(&credential).await.unwrap();
+    let stream = MockJetStreamPublishMessage::new();
+    append_stream(
+        &stream,
+        StreamSubject::new("credential-a").unwrap(),
+        None,
+        &[
+            runtime_event(1, write_requested(&credential)),
+            runtime_event(
+                2,
+                v1::CredentialEvent {
+                    event: Some(activated_to_proto(&metadata).into()),
+                },
+            ),
+        ],
+    )
+    .await
+    .unwrap();
+    let registry = RuntimeCredentialRegistry::default();
+
+    let report = registry.refresh_from_credential_stream(&stream, 0).await.unwrap();
+
+    assert_eq!(report.scanned_events(), 2);
+    assert_eq!(report.projected_integrations(), 1);
+}
+
+#[tokio::test]
 async fn projection_checkpoint_store_loads_default_when_missing() {
     let kv = MockJetStreamKvStore::new();
     kv.enqueue_entry_none();

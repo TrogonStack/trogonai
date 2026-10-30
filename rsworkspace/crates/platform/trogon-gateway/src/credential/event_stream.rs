@@ -20,7 +20,7 @@ pub enum CredentialEventStreamReadError {
 }
 
 /// Reads all credential events from the JetStream stream starting at a stream
-/// sequence.
+/// sequence. JetStream sequences start at 1, so 0 also reads from the start.
 ///
 /// Sequence-by-sequence raw reads keep this generic over the JetStream access
 /// traits so processors stay testable with mock streams; deleted sequences are
@@ -37,7 +37,8 @@ where
         .await
         .map_err(|source| CredentialEventStreamReadError::QueryStreamInfo { source })?;
     let to_sequence = info.state.last_sequence;
-    if from_sequence == 0 || to_sequence == 0 || from_sequence > to_sequence {
+    let from_sequence = from_sequence.max(1);
+    if from_sequence > to_sequence {
         return Ok(Vec::new());
     }
 
