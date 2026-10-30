@@ -1506,6 +1506,15 @@ where
         Ok(material)
     }
 
+    /// Reads one exact credential version straight from the store.
+    ///
+    /// The cache is skipped on purpose: a version that is no longer the
+    /// projected one is not covered by revocation invalidation, so only the
+    /// store's own status check can fail it closed.
+    pub async fn read_uncached(&self, credential: &CredentialRef) -> Result<SecretMaterial, SecretStoreError> {
+        self.store.get(credential).await
+    }
+
     pub async fn resolve_plaintext(
         &self,
         key: &RuntimeIntegrationKey,

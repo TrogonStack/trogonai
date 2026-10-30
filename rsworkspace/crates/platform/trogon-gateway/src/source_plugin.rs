@@ -65,7 +65,7 @@ pub(crate) struct RuntimeCredentialMounts<G> {
     pub(crate) sentry: Option<RuntimeCredentialResolver<G>>,
     pub(crate) slack: Option<RuntimeCredentialResolver<G>>,
     pub(crate) telegram: Option<RuntimeCredentialResolver<G>>,
-    pub(crate) telegram_registered_secrets: crate::source::telegram::TelegramRegisteredWebhookSecrets,
+    pub(crate) telegram_registered_credentials: crate::source::telegram::TelegramRegisteredWebhookCredentials,
     pub(crate) twitter: Option<RuntimeCredentialResolver<G>>,
     pub(crate) notion: Option<RuntimeCredentialResolver<G>>,
 }
@@ -81,7 +81,7 @@ impl<G> Default for RuntimeCredentialMounts<G> {
             sentry: None,
             slack: None,
             telegram: None,
-            telegram_registered_secrets: Default::default(),
+            telegram_registered_credentials: Default::default(),
             twitter: None,
             notion: None,
         }
@@ -307,7 +307,7 @@ impl TelegramPlugin {
         publisher: ClaimCheckPublisher<P, S>,
         config: &ResolvedConfig,
         credential_resolver: RuntimeCredentialResolver<G>,
-        registered_secrets: crate::source::telegram::TelegramRegisteredWebhookSecrets,
+        registered_credentials: crate::source::telegram::TelegramRegisteredWebhookCredentials,
     ) -> Router
     where
         P: JetStreamPublisher,
@@ -323,7 +323,7 @@ impl TelegramPlugin {
                     &integration.config,
                     integration.id.clone(),
                     credential_resolver.clone(),
-                    registered_secrets.clone(),
+                    registered_credentials.clone(),
                 ),
             );
             let source = self.id();
@@ -933,7 +933,7 @@ where
             publisher.clone(),
             config,
             telegram_credentials,
-            runtime_credentials.telegram_registered_secrets,
+            runtime_credentials.telegram_registered_credentials,
         ),
         None => TelegramPlugin.mount(app, publisher.clone(), requester, config),
     };

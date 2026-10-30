@@ -11,9 +11,12 @@ use trogon_nats::jetstream::{
 };
 use trogon_std::NonZeroDuration;
 
-use crate::credential::commands::domain::{CredentialOwnerId, CredentialScope};
+use crate::credential::commands::domain::{CredentialOwnerId, CredentialRef, CredentialScope};
 use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
-use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
+use crate::secret_store::{
+    MockOpenBaoSecretStore, SecretDestroyReason, SecretStoreDestroy, SecretStorePut, SecretStoreRevoke,
+    SecretStoreRotate,
+};
 
 const TEST_SECRET: &str = "test-secret";
 
@@ -44,43 +47,68 @@ fn mock_app(publisher: MockJetStreamPublisher) -> Router {
     router(wrap_publisher(publisher), &test_config())
 }
 
-async fn runtime_app(publisher: MockJetStreamPublisher, secret: &str) -> Router {
-    runtime_app_with(publisher, secret, TelegramRegisteredWebhookSecrets::default()).await
+struct RuntimeFixture {
+    publisher: MockJetStreamPublisher,
+    store: MockOpenBaoSecretStore,
+    registry: RuntimeCredentialRegistry,
+    integration_id: SourceIntegrationId,
+    registered_credentials: TelegramRegisteredWebhookCredentials,
 }
 
-async fn runtime_app_with(
-    publisher: MockJetStreamPublisher,
-    secret: &str,
-    registered_secrets: TelegramRegisteredWebhookSecrets,
-) -> Router {
-    let config = test_config();
-    let store = MockOpenBaoSecretStore::default();
-    let integration_id = SourceIntegrationId::new("primary").unwrap();
-    let credential = store
-        .put(
-            CredentialScope::integration(
-                CredentialOwnerId::new("tenant-1").unwrap(),
-                SourceKind::Telegram,
-                integration_id.clone(),
-            ),
-            CredentialKind::WebhookSecret,
-            trogon_std::SecretString::new(secret).unwrap(),
-        )
-        .await
-        .unwrap();
-    let registry = RuntimeCredentialRegistry::default();
-    registry
-        .projections()
-        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1).unwrap())
-        .await;
+impl RuntimeFixture {
+    fn new(publisher: MockJetStreamPublisher) -> Self {
+        Self {
+            publisher,
+            store: MockOpenBaoSecretStore::default(),
+            registry: RuntimeCredentialRegistry::default(),
+            integration_id: SourceIntegrationId::new("primary").unwrap(),
+            registered_credentials: TelegramRegisteredWebhookCredentials::default(),
+        }
+    }
 
-    runtime_router(
-        wrap_publisher(publisher),
-        &config,
-        integration_id,
-        registry.resolver(store),
-        registered_secrets,
-    )
+    async fn put(&self, secret: &str) -> CredentialRef {
+        self.store
+            .put(
+                CredentialScope::integration(
+                    CredentialOwnerId::new("tenant-1").unwrap(),
+                    SourceKind::Telegram,
+                    self.integration_id.clone(),
+                ),
+                CredentialKind::WebhookSecret,
+                trogon_std::SecretString::new(secret).unwrap(),
+            )
+            .await
+            .unwrap()
+    }
+
+    async fn activate(&self, credential: CredentialRef, version: u64) {
+        self.registry
+            .projections()
+            .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, version).unwrap())
+            .await;
+    }
+
+    fn app(&self) -> Router {
+        runtime_router(
+            wrap_publisher(self.publisher.clone()),
+            &test_config(),
+            self.integration_id.clone(),
+            self.registry.resolver(self.store.clone()),
+            self.registered_credentials.clone(),
+        )
+    }
+
+    fn register(&self, credential: CredentialRef) {
+        self.registered_credentials
+            .record(self.integration_id.clone(), credential);
+    }
+}
+
+async fn runtime_app(publisher: MockJetStreamPublisher, secret: &str) -> Router {
+    let fixture = RuntimeFixture::new(publisher);
+    let credential = fixture.put(secret).await;
+    fixture.activate(credential, 1).await;
+    fixture.app()
 }
 
 fn webhook_request(body: &[u8], secret: Option<&str>) -> Request<Body> {
@@ -178,34 +206,66 @@ async fn runtime_webhook_secret_publishes_to_nats_and_rejects_static_secret() {
     assert_eq!(messages[0].subject, "telegram.message");
 }
 
+async fn status_of(app: &Router, body: &[u8], token: &str) -> StatusCode {
+    app.clone()
+        .oneshot(webhook_request(body, Some(token)))
+        .await
+        .unwrap()
+        .status()
+}
+
 #[tokio::test]
 async fn runtime_webhook_accepts_the_registered_secret_until_the_rotated_one_is_registered() {
     let _guard = tracing_guard();
     let publisher = MockJetStreamPublisher::new();
-    let registered_secrets = TelegramRegisteredWebhookSecrets::default();
-    registered_secrets.record(
-        SourceIntegrationId::new("primary").unwrap(),
-        TelegramWebhookSecret::new("previous-secret").unwrap(),
-    );
-    let app = runtime_app_with(publisher.clone(), "rotated-secret", registered_secrets.clone()).await;
+    let fixture = RuntimeFixture::new(publisher.clone());
+    let previous = fixture.put("previous-secret").await;
+    let rotated = fixture
+        .store
+        .rotate(&previous, trogon_std::SecretString::new("rotated-secret").unwrap())
+        .await
+        .unwrap();
+    fixture.activate(rotated.clone(), 2).await;
+    fixture.register(previous);
+    let app = fixture.app();
     let body = update_json("message");
-    let status = |token: &'static str| {
-        let app = app.clone();
-        let request = webhook_request(&body, Some(token));
-        async move { app.oneshot(request).await.unwrap().status() }
-    };
 
-    assert_eq!(status("previous-secret").await, StatusCode::OK);
-    assert_eq!(status("rotated-secret").await, StatusCode::OK);
-    assert_eq!(status("unknown-secret").await, StatusCode::UNAUTHORIZED);
+    assert_eq!(status_of(&app, &body, "previous-secret").await, StatusCode::OK);
+    assert_eq!(status_of(&app, &body, "rotated-secret").await, StatusCode::OK);
+    assert_eq!(status_of(&app, &body, "unknown-secret").await, StatusCode::UNAUTHORIZED);
+    assert_eq!(publisher.published_messages().len(), 2);
 
-    registered_secrets.record(
-        SourceIntegrationId::new("primary").unwrap(),
-        TelegramWebhookSecret::new("rotated-secret").unwrap(),
+    fixture.register(rotated);
+
+    assert_eq!(
+        status_of(&app, &body, "previous-secret").await,
+        StatusCode::UNAUTHORIZED
     );
+    assert_eq!(status_of(&app, &body, "rotated-secret").await, StatusCode::OK);
+}
 
-    assert_eq!(status("previous-secret").await, StatusCode::UNAUTHORIZED);
-    assert_eq!(status("rotated-secret").await, StatusCode::OK);
+#[tokio::test]
+async fn runtime_webhook_rejects_a_revoked_registered_secret_when_the_replacement_is_not_registered() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let fixture = RuntimeFixture::new(publisher.clone());
+    let revoked = fixture.put("revoked-secret").await;
+    fixture.register(revoked.clone());
+    fixture.store.revoke(&revoked).await.unwrap();
+    fixture
+        .store
+        .destroy(&revoked, &SecretDestroyReason::new("revoked by operator").unwrap())
+        .await
+        .unwrap();
+    let replacement = fixture.put("replacement-secret").await;
+    fixture.activate(replacement, 2).await;
+    let app = fixture.app();
+    let body = update_json("message");
+
+    assert_eq!(status_of(&app, &body, "revoked-secret").await, StatusCode::UNAUTHORIZED);
+    assert!(publisher.published_messages().is_empty());
+    assert_eq!(status_of(&app, &body, "replacement-secret").await, StatusCode::OK);
+    assert_eq!(publisher.published_messages().len(), 1);
 }
 
 #[tokio::test]

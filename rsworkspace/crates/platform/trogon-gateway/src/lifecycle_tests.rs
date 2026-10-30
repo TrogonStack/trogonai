@@ -230,7 +230,7 @@ async fn telegram_registration_follows_a_rotated_runtime_secret_and_skips_an_unc
         .unwrap();
     registry
         .projections()
-        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(rotated, 2).unwrap())
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(rotated.clone(), 2).unwrap())
         .await;
     register_telegram_webhooks(
         &telegram_integrations(),
@@ -243,11 +243,9 @@ async fn telegram_registration_follows_a_rotated_runtime_secret_and_skips_an_unc
     assert_eq!(*registered.lock().await, ["runtime-first", "runtime-rotated"]);
     assert_eq!(
         registrations
-            .registered_secrets
-            .get(&source_integration_id::SourceIntegrationId::new("first").unwrap())
-            .unwrap()
-            .as_str(),
-        "runtime-rotated"
+            .registered_credentials
+            .get(&source_integration_id::SourceIntegrationId::new("first").unwrap()),
+        Some(rotated)
     );
 }
 
@@ -502,7 +500,7 @@ async fn discord_runtime_gateway_restarts_the_shard_with_a_rotated_bot_token() {
         .unwrap();
     registry
         .projections()
-        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(rotated, 2).unwrap())
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(rotated.clone(), 2).unwrap())
         .await;
     let token = tokio::time::timeout(Duration::from_secs(60), observed_shard_tokens.recv())
         .await

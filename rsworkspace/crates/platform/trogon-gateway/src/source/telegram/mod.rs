@@ -36,11 +36,11 @@
 
 pub mod config;
 pub mod constants;
-pub mod registered_secrets;
+pub mod registered_credentials;
 pub mod registration;
 pub mod server;
 pub mod signature;
 
 pub use config::TelegramSourceConfig;
-pub use registered_secrets::TelegramRegisteredWebhookSecrets;
+pub use registered_credentials::TelegramRegisteredWebhookCredentials;
 pub use server::{provision, router, runtime_router};

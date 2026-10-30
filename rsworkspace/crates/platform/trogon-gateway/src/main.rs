@@ -127,11 +127,11 @@ async fn serve_with_env(
     let telegram_runtime_credentials = source_runtime_credentials
         .as_ref()
         .and_then(|mounts| mounts.telegram.clone());
-    let telegram_registered_secrets = source::telegram::TelegramRegisteredWebhookSecrets::default();
+    let telegram_registered_credentials = source::telegram::TelegramRegisteredWebhookCredentials::default();
     if let Some(mounts) = source_runtime_credentials.as_mut() {
-        mounts.telegram_registered_secrets = telegram_registered_secrets.clone();
+        mounts.telegram_registered_credentials = telegram_registered_credentials.clone();
     }
-    let mut telegram_registrations = TelegramWebhookRegistrations::sharing(telegram_registered_secrets);
+    let mut telegram_registrations = TelegramWebhookRegistrations::sharing(telegram_registered_credentials);
     register_telegram_webhooks(
         &resolved.telegram,
         telegram_runtime_credentials.as_ref(),
@@ -295,7 +295,7 @@ fn log_nats_connection(server_max_payload: usize, max_payload: MaxPayload) {
 
 #[derive(Default)]
 struct TelegramWebhookRegistrations {
-    registered_secrets: source::telegram::TelegramRegisteredWebhookSecrets,
+    registered_credentials: source::telegram::TelegramRegisteredWebhookCredentials,
     by_integration: std::collections::HashMap<
         source_integration_id::SourceIntegrationId,
         Option<credential::commands::domain::CredentialRef>,
@@ -303,9 +303,9 @@ struct TelegramWebhookRegistrations {
 }
 
 impl TelegramWebhookRegistrations {
-    fn sharing(registered_secrets: source::telegram::TelegramRegisteredWebhookSecrets) -> Self {
+    fn sharing(registered_credentials: source::telegram::TelegramRegisteredWebhookCredentials) -> Self {
         Self {
-            registered_secrets,
+            registered_credentials,
             by_integration: Default::default(),
         }
     }
@@ -438,11 +438,11 @@ async fn register_telegram_webhooks<C, E, Register, G>(
                     };
                     match register(&config, &client).await {
                         Ok(()) => {
-                            if current.is_some() {
+                            if let Some(credential) = current {
                                 registrations
-                                    .registered_secrets
-                                    .record(integration.id.clone(), config.webhook_secret.clone());
-                                registrations.record(integration.id.clone(), current);
+                                    .registered_credentials
+                                    .record(integration.id.clone(), credential.clone());
+                                registrations.record(integration.id.clone(), Some(credential));
                             }
                         }
                         Err(error) => {
@@ -932,7 +932,7 @@ fn source_runtime_credentials_from_env(
         sentry: sentry_enabled.then(|| resolver.clone()),
         slack: slack_enabled.then(|| resolver.clone()),
         telegram: telegram_enabled.then(|| resolver.clone()),
-        telegram_registered_secrets: Default::default(),
+        telegram_registered_credentials: Default::default(),
         twitter: twitter_enabled.then_some(resolver),
     }))
 }
