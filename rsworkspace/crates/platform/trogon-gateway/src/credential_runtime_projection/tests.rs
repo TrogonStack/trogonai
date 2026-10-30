@@ -19,7 +19,7 @@ use trogon_decider_runtime::{
     Event, EventEncode, EventId, EventType, Headers, ReadFrom, ReadStreamRequest, ReadStreamResponse, StreamEvent,
     StreamPosition, StreamRead,
 };
-use trogon_nats::jetstream::{MockJetStreamKvStore, MockJetStreamPublishMessage};
+use trogon_nats::jetstream::MockJetStreamPublishMessage;
 use uuid::Uuid;
 
 use super::*;
@@ -352,81 +352,36 @@ async fn refresh_from_sequence_zero_reads_the_stream_from_its_first_event() {
 }
 
 #[tokio::test]
-async fn projection_checkpoint_store_loads_default_when_missing() {
-    let kv = MockJetStreamKvStore::new();
-    kv.enqueue_entry_none();
-    let checkpoints = RuntimeProjectionKvCheckpointStore::new(kv.clone());
-
-    let checkpoint = checkpoints.load().await.unwrap();
-
-    assert_eq!(checkpoint.last_scanned_sequence(), 0);
-    assert_eq!(kv.entry_calls(), vec![RUNTIME_PROJECTION_CHECKPOINT_KEY.to_string()]);
-    assert!(kv.create_calls().is_empty());
-    assert!(kv.update_calls().is_empty());
-}
-
-#[tokio::test]
-async fn projection_checkpoint_store_saves_cursor() {
-    let kv = MockJetStreamKvStore::new();
-    kv.enqueue_entry_none();
-    let checkpoints = RuntimeProjectionKvCheckpointStore::new(kv.clone());
-
-    checkpoints.save(RuntimeProjectionCheckpoint::new(42)).await.unwrap();
-
-    let calls = kv.create_calls();
-    assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].0, RUNTIME_PROJECTION_CHECKPOINT_KEY);
-    assert_eq!(
-        decode_projection_checkpoint(&calls[0].1)
-            .unwrap()
-            .last_scanned_sequence(),
-        42
-    );
-}
-
-#[tokio::test]
-async fn checkpointed_refresh_advances_projection_checkpoint_after_success() {
+async fn tracked_refresh_advances_cursor_and_resumes_after_it() {
     let store = MockOpenBaoSecretStore::default();
     let credential = put_bot_token(&store, "Bot token").await;
     let metadata = store.metadata(&credential).await.unwrap();
     let event_store = ProjectionTestEventStore::default();
     event_store.push(credential.id().as_str(), 1, write_requested(&credential));
-    event_store.push(
-        credential.id().as_str(),
-        2,
-        v1::CredentialEvent {
-            event: Some(activated_to_proto(&metadata).into()),
-        },
-    );
+    event_store.push(credential.id().as_str(), 2, activated(&metadata));
     let stream = raw_stream([
         runtime_event(1, write_requested(&credential)),
-        runtime_event(
-            2,
-            v1::CredentialEvent {
-                event: Some(activated_to_proto(&metadata).into()),
-            },
-        ),
+        runtime_event(2, activated(&metadata)),
     ])
     .await;
-    let kv = MockJetStreamKvStore::new();
-    kv.enqueue_entry_none();
-    kv.enqueue_entry_none();
-    let checkpoints = RuntimeProjectionKvCheckpointStore::new(kv.clone());
     let registry = RuntimeCredentialRegistry::default();
     let resolver = registry.resolver(store);
 
-    let report = registry
-        .refresh_from_credential_stream_checkpointed(&stream, &event_store, &checkpoints)
+    let first = registry
+        .refresh_from_credential_stream_tracked(&stream, &event_store)
+        .await
+        .unwrap();
+    let second = registry
+        .refresh_from_credential_stream_tracked(&stream, &event_store)
         .await
         .unwrap();
 
-    assert_eq!(report.scanned_events(), 2);
-    assert_eq!(report.decoded_events(), 2);
-    assert_eq!(report.changed_credentials(), 1);
-    assert_eq!(report.applied_credentials(), 1);
-    assert_eq!(report.projected_integrations(), 1);
-    assert_eq!(report.checkpoint_loaded_sequence(), 0);
-    assert_eq!(report.checkpoint_advanced_to(), Some(2));
+    assert_eq!(first.scanned_events(), 2);
+    assert_eq!(first.checkpoint_loaded_sequence(), 0);
+    assert_eq!(first.checkpoint_advanced_to(), Some(2));
+    assert_eq!(second.scanned_events(), 0);
+    assert_eq!(second.checkpoint_loaded_sequence(), 2);
+    assert_eq!(second.checkpoint_advanced_to(), None);
     assert_eq!(
         resolver
             .resolve_plaintext(&key(), CredentialKind::BotToken)
@@ -435,101 +390,105 @@ async fn checkpointed_refresh_advances_projection_checkpoint_after_success() {
             .as_str(),
         "Bot token"
     );
-    let calls = kv.create_calls();
-    assert_eq!(calls.len(), 1);
-    assert_eq!(
-        decode_projection_checkpoint(&calls[0].1)
-            .unwrap()
-            .last_scanned_sequence(),
-        2
-    );
 }
 
 #[tokio::test]
-async fn checkpointed_refresh_starts_after_loaded_checkpoint() {
+async fn fresh_registry_projects_credential_activated_before_another_registry_advanced_its_cursor() {
     let store = MockOpenBaoSecretStore::default();
     let credential = put_bot_token(&store, "Bot token").await;
     let metadata = store.metadata(&credential).await.unwrap();
     let event_store = ProjectionTestEventStore::default();
     event_store.push(credential.id().as_str(), 1, write_requested(&credential));
-    event_store.push(
-        credential.id().as_str(),
-        2,
-        v1::CredentialEvent {
-            event: Some(activated_to_proto(&metadata).into()),
-        },
-    );
+    event_store.push(credential.id().as_str(), 2, activated(&metadata));
     let stream = raw_stream([
         runtime_event(1, write_requested(&credential)),
-        runtime_event(
-            2,
-            v1::CredentialEvent {
-                event: Some(activated_to_proto(&metadata).into()),
-            },
-        ),
+        runtime_event(2, activated(&metadata)),
     ])
     .await;
-    let checkpoint = RuntimeProjectionCheckpoint::new(1);
-    let kv = MockJetStreamKvStore::new();
-    kv.enqueue_entry(
-        Bytes::from(encode_projection_checkpoint(checkpoint)),
-        3,
-        kv::Operation::Put,
-    );
-    kv.enqueue_entry(
-        Bytes::from(encode_projection_checkpoint(checkpoint)),
-        4,
-        kv::Operation::Put,
-    );
-    let checkpoints = RuntimeProjectionKvCheckpointStore::new(kv.clone());
-    let registry = RuntimeCredentialRegistry::default();
-
-    let report = registry
-        .refresh_from_credential_stream_checkpointed(&stream, &event_store, &checkpoints)
+    let previous_process = RuntimeCredentialRegistry::default();
+    previous_process
+        .refresh_from_credential_stream_tracked(&stream, &event_store)
         .await
         .unwrap();
 
-    assert_eq!(report.scanned_events(), 1);
-    assert_eq!(report.decoded_events(), 1);
-    assert_eq!(report.changed_credentials(), 1);
+    let restarted = RuntimeCredentialRegistry::default();
+    let resolver = restarted.resolver(store);
+    let report = restarted
+        .refresh_from_credential_stream_tracked(&stream, &event_store)
+        .await
+        .unwrap();
+
+    assert_eq!(report.scanned_events(), 2);
+    assert_eq!(report.checkpoint_loaded_sequence(), 0);
     assert_eq!(report.applied_credentials(), 1);
-    assert_eq!(report.checkpoint_loaded_sequence(), 1);
-    assert_eq!(report.checkpoint_advanced_to(), Some(2));
-    let calls = kv.update_calls();
-    assert_eq!(calls.len(), 1);
     assert_eq!(
-        decode_projection_checkpoint(&calls[0].1)
+        resolver
+            .resolve_plaintext(&key(), CredentialKind::BotToken)
+            .await
             .unwrap()
-            .last_scanned_sequence(),
-        2
+            .as_str(),
+        "Bot token"
     );
-    assert_eq!(calls[0].2, 4);
 }
 
 #[tokio::test]
-async fn checkpointed_refresh_does_not_save_checkpoint_when_no_new_events() {
+async fn independent_registries_each_observe_a_revocation_regardless_of_the_others_progress() {
+    let store = MockOpenBaoSecretStore::default();
+    let credential = put_bot_token(&store, "Bot token").await;
+    let metadata = store.metadata(&credential).await.unwrap();
     let event_store = ProjectionTestEventStore::default();
-    let stream = raw_stream(Vec::new()).await;
-    let checkpoint = RuntimeProjectionCheckpoint::new(2);
-    let kv = MockJetStreamKvStore::new();
-    kv.enqueue_entry(
-        Bytes::from(encode_projection_checkpoint(checkpoint)),
-        3,
-        kv::Operation::Put,
-    );
-    let checkpoints = RuntimeProjectionKvCheckpointStore::new(kv.clone());
-    let registry = RuntimeCredentialRegistry::default();
-
-    let report = registry
-        .refresh_from_credential_stream_checkpointed(&stream, &event_store, &checkpoints)
+    event_store.push(credential.id().as_str(), 1, write_requested(&credential));
+    event_store.push(credential.id().as_str(), 2, activated(&metadata));
+    let stream = raw_stream([
+        runtime_event(1, write_requested(&credential)),
+        runtime_event(2, activated(&metadata)),
+    ])
+    .await;
+    let replica_a = RuntimeCredentialRegistry::default();
+    let replica_b = RuntimeCredentialRegistry::default();
+    let resolver_a = replica_a.resolver(store.clone());
+    let resolver_b = replica_b.resolver(store.clone());
+    replica_a
+        .refresh_from_credential_stream_tracked(&stream, &event_store)
         .await
         .unwrap();
+    replica_b
+        .refresh_from_credential_stream_tracked(&stream, &event_store)
+        .await
+        .unwrap();
+    resolver_b.resolve(&key(), CredentialKind::BotToken).await.unwrap();
 
-    assert_eq!(report.scanned_events(), 0);
-    assert_eq!(report.checkpoint_loaded_sequence(), 2);
-    assert_eq!(report.checkpoint_advanced_to(), None);
-    assert!(kv.create_calls().is_empty());
-    assert!(kv.update_calls().is_empty());
+    store.revoke(&credential).await.unwrap();
+    event_store.push(credential.id().as_str(), 3, revoked(&credential));
+    append_stream(
+        &stream,
+        StreamSubject::new("gateway.credentials.events.v1.raw").unwrap(),
+        None,
+        &[runtime_event(3, revoked(&credential))],
+    )
+    .await
+    .unwrap();
+
+    let report_a = replica_a
+        .refresh_from_credential_stream_tracked(&stream, &event_store)
+        .await
+        .unwrap();
+    assert_eq!(report_a.checkpoint_advanced_to(), Some(3));
+    assert!(matches!(
+        resolver_a.resolve(&key(), CredentialKind::BotToken).await,
+        Err(RuntimeCredentialError::IntegrationNotFound { .. })
+    ));
+
+    let report_b = replica_b
+        .refresh_from_credential_stream_tracked(&stream, &event_store)
+        .await
+        .unwrap();
+    assert_eq!(report_b.scanned_events(), 1);
+    assert_eq!(report_b.checkpoint_loaded_sequence(), 2);
+    assert!(matches!(
+        resolver_b.resolve(&key(), CredentialKind::BotToken).await,
+        Err(RuntimeCredentialError::IntegrationNotFound { .. })
+    ));
 }
 
 #[tokio::test]

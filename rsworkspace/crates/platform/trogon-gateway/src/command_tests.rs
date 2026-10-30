@@ -6,7 +6,7 @@ use std::time::Duration;
 use time::OffsetDateTime;
 use trogon_decider_runtime::{ReadFrom, ReadStreamRequest, ReadStreamResponse, StreamEvent, StreamRead};
 use trogon_nats::MockNatsClient;
-use trogon_nats::jetstream::{MockJetStreamConsumerFactory, MockJetStreamKvStore, MockJetStreamPublishMessage};
+use trogon_nats::jetstream::{MockJetStreamConsumerFactory, MockJetStreamPublishMessage};
 use trogon_nats::test_support::JetStreamTestServer;
 
 #[derive(Clone, Default)]
@@ -46,15 +46,11 @@ impl StreamRead<str> for EmptyCredentialEventStore {
 async fn credential_runtime_projection_refresh_handles_empty_stream() {
     let stream = MockJetStreamPublishMessage::new();
     let event_store = EmptyCredentialEventStore::default();
-    let kv = MockJetStreamKvStore::new();
-    kv.enqueue_entry_none();
-    let checkpoints = credential_runtime_projection::RuntimeProjectionKvCheckpointStore::new(kv);
     let registry = credential_runtime_projection::RuntimeCredentialRegistry::default();
 
-    let (_registry, report) =
-        refresh_credential_runtime_projection_with_checkpoints(&stream, &event_store, &checkpoints, registry)
-            .await
-            .unwrap();
+    let (_registry, report) = refresh_credential_runtime_projection_from_start(&stream, &event_store, registry)
+        .await
+        .unwrap();
 
     assert_eq!(report.scanned_events(), 0);
     assert_eq!(report.decoded_events(), 0);

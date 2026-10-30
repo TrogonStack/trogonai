@@ -27,7 +27,6 @@ use crate::constants::{
     SLACK_RESTART_BACKOFF,
 };
 use anyhow::Context;
-use async_nats::jetstream::kv;
 use futures_util::FutureExt;
 use tokio::task::JoinSet;
 use tracing::{error, info};
@@ -109,7 +108,7 @@ async fn serve(
         snapshot_bucket = credential::constants::CREDENTIAL_SNAPSHOT_BUCKET,
         "credential event store opened"
     );
-    let (runtime_credentials, _credential_projection_refresh_report, runtime_projection_checkpoints) =
+    let (runtime_credentials, _credential_projection_refresh_report) =
         refresh_credential_runtime_projection(&credential_store).await?;
     register_telegram_webhooks(
         &resolved.telegram,
@@ -131,11 +130,10 @@ async fn serve(
         join_set.spawn(async move {
             tokio::select! {
                 () = shutdown => {}
-                () = credential_runtime_projection::run_checkpointed_refresh_worker(
+                () = credential_runtime_projection::run_tracked_refresh_worker(
                     projection_runtime_credentials,
                     projection_event_stream,
                     projection_event_store,
-                    runtime_projection_checkpoints,
                     CREDENTIAL_RUNTIME_PROJECTION_WORKER_INTERVAL,
                 ) => {}
             }
@@ -446,26 +444,18 @@ async fn refresh_credential_runtime_projection(
 ) -> anyhow::Result<(
     credential_runtime_projection::RuntimeCredentialRegistry,
     credential_runtime_projection::RuntimeProjectionRefreshReport,
-    credential_runtime_projection::RuntimeProjectionKvCheckpointStore<kv::Store>,
 )> {
-    let registry = credential_runtime_projection::RuntimeCredentialRegistry::default();
-    let checkpoints =
-        credential_runtime_projection::open_runtime_projection_checkpoint_store(event_store.as_jetstream().clone())
-            .await?;
-    let (registry, report) = refresh_credential_runtime_projection_with_checkpoints(
+    refresh_credential_runtime_projection_from_start(
         event_store.events_stream(),
         event_store,
-        &checkpoints,
-        registry,
+        credential_runtime_projection::RuntimeCredentialRegistry::default(),
     )
-    .await?;
-    Ok((registry, report, checkpoints))
+    .await
 }
 
-async fn refresh_credential_runtime_projection_with_checkpoints<EventStream, EventStore, Checkpoints>(
+async fn refresh_credential_runtime_projection_from_start<EventStream, EventStore>(
     event_stream: &EventStream,
     event_store: &EventStore,
-    checkpoints: &Checkpoints,
     registry: credential_runtime_projection::RuntimeCredentialRegistry,
 ) -> anyhow::Result<(
     credential_runtime_projection::RuntimeCredentialRegistry,
@@ -475,10 +465,9 @@ where
     EventStream: JetStreamGetStreamInfo + JetStreamGetRawMessage,
     EventStore: StreamRead<str>,
     <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    Checkpoints: credential_runtime_projection::RuntimeProjectionCheckpointStore,
 {
     let report = registry
-        .refresh_from_credential_stream_checkpointed(event_stream, event_store, checkpoints)
+        .refresh_from_credential_stream_tracked(event_stream, event_store)
         .await
         .context("credential runtime projection refresh")?;
     info!(

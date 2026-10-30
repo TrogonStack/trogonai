@@ -1,16 +1,12 @@
 #![allow(dead_code)]
 
-mod constants;
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-use async_nats::jetstream::{self, context, kv};
-use buffa::Message as _;
-use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Histogram};
@@ -20,19 +16,13 @@ use trogon_decider_runtime::{
     EventDecodeOutcome, InvalidStreamPositionError, ReadFrom, ReadStreamRequest, StreamEvent, StreamPosition,
     StreamRead,
 };
-use trogon_nats::jetstream::{
-    JetStreamCreateKeyValue, JetStreamGetKeyValue, JetStreamGetRawMessage, JetStreamGetStreamInfo,
-    JetStreamKeyValueStatus, JetStreamKeyValueUpdate, JetStreamKvCreate, JetStreamKvEntry,
-    is_create_key_value_already_exists,
-};
+use trogon_nats::jetstream::{JetStreamGetRawMessage, JetStreamGetStreamInfo};
 use trogon_semconv::{attribute, metric};
 use trogon_std::SecretString;
-use trogonai_proto::gateway::credentials::checkpoints_v1 as proto;
 use trogonai_proto::gateway::credentials::{
     CredentialEventCase, CredentialEventPayloadError, CredentialStateSnapshotCase, state_v1, v1,
 };
 
-use self::constants::{CREDENTIAL_RUNTIME_PROJECTION_CHECKPOINT_BUCKET, RUNTIME_PROJECTION_CHECKPOINT_KEY};
 use crate::constants::METER_NAME;
 use crate::credential::commands::domain::{
     CredentialId, CredentialKind, CredentialOwnerId, CredentialRef, RuntimeReleaseDeniedError, RuntimeReleasePolicy,
@@ -489,31 +479,15 @@ pub enum RuntimeProjectionStreamRefreshError {
     },
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum RuntimeProjectionCheckpointedRefreshError {
-    #[error("runtime projection checkpoint failed: {source}")]
-    Checkpoint {
-        #[source]
-        source: RuntimeProjectionCheckpointStoreError,
-    },
-    #[error("runtime projection stream refresh failed: {source}")]
-    Refresh {
-        #[source]
-        source: RuntimeProjectionStreamRefreshError,
-    },
-}
-
-pub async fn run_checkpointed_refresh_worker<EventStream, EventStore, Checkpoints>(
+pub async fn run_tracked_refresh_worker<EventStream, EventStore>(
     registry: RuntimeCredentialRegistry,
     event_stream: EventStream,
     event_store: EventStore,
-    checkpoints: Checkpoints,
     interval: Duration,
 ) where
     EventStream: JetStreamGetStreamInfo + JetStreamGetRawMessage,
     EventStore: StreamRead<str>,
     <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    Checkpoints: RuntimeProjectionCheckpointStore,
 {
     let mut interval = tokio::time::interval(interval);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -526,7 +500,7 @@ pub async fn run_checkpointed_refresh_worker<EventStream, EventStore, Checkpoint
             }
             _ = interval.tick() => {
                 match registry
-                    .refresh_from_credential_stream_checkpointed(&event_stream, &event_store, &checkpoints)
+                    .refresh_from_credential_stream_tracked(&event_stream, &event_store)
                     .await
                 {
                     Ok(report) if report.has_projection_activity() => {
@@ -573,224 +547,20 @@ impl RuntimeProjectionCheckpoint {
     }
 }
 
-pub trait RuntimeProjectionCheckpointStore: Clone + Send + Sync + 'static {
-    fn load(
-        &self,
-    ) -> impl std::future::Future<Output = Result<RuntimeProjectionCheckpoint, RuntimeProjectionCheckpointStoreError>> + Send;
-
-    fn save(
-        &self,
-        checkpoint: RuntimeProjectionCheckpoint,
-    ) -> impl std::future::Future<Output = Result<(), RuntimeProjectionCheckpointStoreError>> + Send;
+#[derive(Clone, Debug, Default)]
+pub struct RuntimeProjectionCursor {
+    last_scanned_sequence: Arc<AtomicU64>,
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum RuntimeProjectionCheckpointStoreError {
-    #[error("runtime projection checkpoint codec failed: {source}")]
-    Codec {
-        #[source]
-        source: Box<dyn Error + Send + Sync>,
-    },
-    #[error("runtime projection checkpoint backend failed: {source}")]
-    Backend {
-        #[source]
-        source: Box<dyn Error + Send + Sync>,
-    },
-    #[error("runtime projection checkpoint changed concurrently")]
-    Conflict,
-}
-
-impl RuntimeProjectionCheckpointStoreError {
-    fn backend(source: impl Error + Send + Sync + 'static) -> Self {
-        Self::Backend {
-            source: Box::new(source),
-        }
+impl RuntimeProjectionCursor {
+    fn checkpoint(&self) -> RuntimeProjectionCheckpoint {
+        RuntimeProjectionCheckpoint::new(self.last_scanned_sequence.load(Ordering::Acquire))
     }
 
-    fn codec(source: impl Error + Send + Sync + 'static) -> Self {
-        Self::Codec {
-            source: Box::new(source),
-        }
+    fn advance(&self, last_scanned_sequence: u64) {
+        self.last_scanned_sequence
+            .fetch_max(last_scanned_sequence, Ordering::AcqRel);
     }
-}
-
-#[derive(Clone, Debug)]
-pub struct RuntimeProjectionKvCheckpointStore<S> {
-    kv: S,
-}
-
-impl<S> RuntimeProjectionKvCheckpointStore<S>
-where
-    S: JetStreamKvEntry + JetStreamKvCreate + JetStreamKeyValueUpdate,
-{
-    pub fn new(kv: S) -> Self {
-        Self { kv }
-    }
-}
-
-impl<S> RuntimeProjectionCheckpointStore for RuntimeProjectionKvCheckpointStore<S>
-where
-    S: JetStreamKvEntry + JetStreamKvCreate + JetStreamKeyValueUpdate,
-{
-    async fn load(&self) -> Result<RuntimeProjectionCheckpoint, RuntimeProjectionCheckpointStoreError> {
-        let Some(entry) = self
-            .kv
-            .entry(RUNTIME_PROJECTION_CHECKPOINT_KEY.to_string())
-            .await
-            .map_err(RuntimeProjectionCheckpointStoreError::backend)?
-        else {
-            return Ok(RuntimeProjectionCheckpoint::default());
-        };
-
-        if matches!(entry.operation, kv::Operation::Delete | kv::Operation::Purge) {
-            return Ok(RuntimeProjectionCheckpoint::default());
-        }
-
-        decode_projection_checkpoint(&entry.value)
-    }
-
-    async fn save(&self, checkpoint: RuntimeProjectionCheckpoint) -> Result<(), RuntimeProjectionCheckpointStoreError> {
-        let encoded = Bytes::from(encode_projection_checkpoint(checkpoint));
-        for _ in 0..3 {
-            let Some(entry) = self
-                .kv
-                .entry(RUNTIME_PROJECTION_CHECKPOINT_KEY.to_string())
-                .await
-                .map_err(RuntimeProjectionCheckpointStoreError::backend)?
-            else {
-                match self.kv.create(RUNTIME_PROJECTION_CHECKPOINT_KEY, encoded.clone()).await {
-                    Ok(_) => return Ok(()),
-                    Err(source) if source.kind() == kv::CreateErrorKind::AlreadyExists => continue,
-                    Err(source) => return Err(RuntimeProjectionCheckpointStoreError::backend(source)),
-                }
-            };
-
-            if matches!(entry.operation, kv::Operation::Delete | kv::Operation::Purge) {
-                match self.kv.create(RUNTIME_PROJECTION_CHECKPOINT_KEY, encoded.clone()).await {
-                    Ok(_) => return Ok(()),
-                    Err(source) if source.kind() == kv::CreateErrorKind::AlreadyExists => continue,
-                    Err(source) => return Err(RuntimeProjectionCheckpointStoreError::backend(source)),
-                }
-            }
-
-            match self
-                .kv
-                .update(RUNTIME_PROJECTION_CHECKPOINT_KEY, encoded.clone(), entry.revision)
-                .await
-            {
-                Ok(_) => return Ok(()),
-                Err(source) if source.kind() == kv::UpdateErrorKind::WrongLastRevision => continue,
-                Err(source) => return Err(RuntimeProjectionCheckpointStoreError::backend(source)),
-            }
-        }
-
-        Err(RuntimeProjectionCheckpointStoreError::Conflict)
-    }
-}
-
-pub async fn open_runtime_projection_checkpoint_store(
-    context: jetstream::Context,
-) -> Result<RuntimeProjectionKvCheckpointStore<kv::Store>, RuntimeProjectionCheckpointOpenError> {
-    let store = provision_runtime_projection_checkpoint_bucket::<_, kv::Store>(&context).await?;
-    Ok(RuntimeProjectionKvCheckpointStore::new(store))
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum RuntimeProjectionCheckpointOpenError {
-    #[error("failed to create runtime projection checkpoint bucket: {0}")]
-    Create(#[source] Box<context::CreateKeyValueError>),
-    #[error("failed to open existing runtime projection checkpoint bucket: {0}")]
-    OpenExisting(#[source] Box<context::KeyValueError>),
-    #[error("failed to inspect runtime projection checkpoint bucket: {0}")]
-    Inspect(#[source] kv::StatusError),
-    #[error("{source}")]
-    Incompatible {
-        #[source]
-        source: IncompatibleRuntimeProjectionCheckpointBucketError,
-    },
-}
-
-#[derive(Debug, thiserror::Error)]
-#[error(
-    "runtime projection checkpoint bucket is incompatible: expected history {expected_history}, got {actual_history}; expected max age {expected_max_age:?}, got {actual_max_age:?}"
-)]
-pub struct IncompatibleRuntimeProjectionCheckpointBucketError {
-    expected_history: i64,
-    actual_history: i64,
-    expected_max_age: Duration,
-    actual_max_age: Duration,
-}
-
-pub async fn provision_runtime_projection_checkpoint_bucket<C, S>(
-    client: &C,
-) -> Result<S, RuntimeProjectionCheckpointOpenError>
-where
-    C: JetStreamCreateKeyValue<Store = S> + JetStreamGetKeyValue<Store = S>,
-    S: JetStreamKeyValueStatus,
-{
-    let store = match client
-        .create_key_value(runtime_projection_checkpoint_bucket_config())
-        .await
-    {
-        Ok(store) => store,
-        Err(source) if is_create_key_value_already_exists(&source) => client
-            .get_key_value(CREDENTIAL_RUNTIME_PROJECTION_CHECKPOINT_BUCKET)
-            .await
-            .map_err(|source| RuntimeProjectionCheckpointOpenError::OpenExisting(Box::new(source)))?,
-        Err(source) => return Err(RuntimeProjectionCheckpointOpenError::Create(Box::new(source))),
-    };
-
-    validate_runtime_projection_checkpoint_bucket(&store).await?;
-    Ok(store)
-}
-
-pub fn runtime_projection_checkpoint_bucket_config() -> kv::Config {
-    kv::Config {
-        bucket: CREDENTIAL_RUNTIME_PROJECTION_CHECKPOINT_BUCKET.to_string(),
-        history: 1,
-        max_age: Duration::ZERO,
-        ..Default::default()
-    }
-}
-
-async fn validate_runtime_projection_checkpoint_bucket<S>(store: &S) -> Result<(), RuntimeProjectionCheckpointOpenError>
-where
-    S: JetStreamKeyValueStatus,
-{
-    let status = store
-        .status()
-        .await
-        .map_err(RuntimeProjectionCheckpointOpenError::Inspect)?;
-    let history = status.history();
-    let max_age = status.max_age();
-    if history != 1 || max_age != Duration::ZERO {
-        return Err(RuntimeProjectionCheckpointOpenError::Incompatible {
-            source: IncompatibleRuntimeProjectionCheckpointBucketError {
-                expected_history: 1,
-                actual_history: history,
-                expected_max_age: Duration::ZERO,
-                actual_max_age: max_age,
-            },
-        });
-    }
-    Ok(())
-}
-
-fn encode_projection_checkpoint(checkpoint: RuntimeProjectionCheckpoint) -> Vec<u8> {
-    proto::RuntimeProjectionCheckpoint {
-        last_scanned_sequence: Some(checkpoint.last_scanned_sequence()),
-    }
-    .encode_to_vec()
-}
-
-fn decode_projection_checkpoint(
-    value: &[u8],
-) -> Result<RuntimeProjectionCheckpoint, RuntimeProjectionCheckpointStoreError> {
-    let checkpoint = proto::RuntimeProjectionCheckpoint::decode_from_slice(value)
-        .map_err(RuntimeProjectionCheckpointStoreError::codec)?;
-    Ok(RuntimeProjectionCheckpoint::new(
-        checkpoint.last_scanned_sequence.unwrap_or_default(),
-    ))
 }
 
 #[derive(Default)]
@@ -981,6 +751,7 @@ impl InMemoryRuntimeProjectionRepository {
 pub struct RuntimeCredentialRegistry {
     projections: InMemoryRuntimeProjectionRepository,
     cache: RuntimeCredentialCache,
+    cursor: RuntimeProjectionCursor,
 }
 
 impl RuntimeCredentialRegistry {
@@ -1007,24 +778,22 @@ impl RuntimeCredentialRegistry {
         refresh_runtime_projections_from_credential_stream(&self.projections, &self.cache, stream, from_sequence).await
     }
 
-    pub async fn refresh_from_credential_stream_checkpointed<EventStream, EventStore, Checkpoints>(
+    pub async fn refresh_from_credential_stream_tracked<EventStream, EventStore>(
         &self,
         event_stream: &EventStream,
         event_store: &EventStore,
-        checkpoints: &Checkpoints,
-    ) -> Result<RuntimeProjectionRefreshReport, RuntimeProjectionCheckpointedRefreshError>
+    ) -> Result<RuntimeProjectionRefreshReport, RuntimeProjectionStreamRefreshError>
     where
         EventStream: JetStreamGetStreamInfo + JetStreamGetRawMessage,
         EventStore: StreamRead<str>,
         <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-        Checkpoints: RuntimeProjectionCheckpointStore,
     {
-        refresh_runtime_projections_from_credential_stream_checkpointed(
+        refresh_runtime_projections_from_credential_stream_tracked(
             &self.projections,
             &self.cache,
             event_stream,
             event_store,
-            checkpoints,
+            &self.cursor,
         )
         .await
     }
@@ -1083,23 +852,19 @@ where
         .map_err(|source| RuntimeProjectionStreamRefreshError::Refresh { source })
 }
 
-pub async fn refresh_runtime_projections_from_credential_stream_checkpointed<EventStream, EventStore, Checkpoints>(
+pub async fn refresh_runtime_projections_from_credential_stream_tracked<EventStream, EventStore>(
     projections: &InMemoryRuntimeProjectionRepository,
     cache: &RuntimeCredentialCache,
     event_stream: &EventStream,
     event_store: &EventStore,
-    checkpoints: &Checkpoints,
-) -> Result<RuntimeProjectionRefreshReport, RuntimeProjectionCheckpointedRefreshError>
+    cursor: &RuntimeProjectionCursor,
+) -> Result<RuntimeProjectionRefreshReport, RuntimeProjectionStreamRefreshError>
 where
     EventStream: JetStreamGetStreamInfo + JetStreamGetRawMessage,
     EventStore: StreamRead<str>,
     <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    Checkpoints: RuntimeProjectionCheckpointStore,
 {
-    let checkpoint = checkpoints
-        .load()
-        .await
-        .map_err(|source| RuntimeProjectionCheckpointedRefreshError::Checkpoint { source })?;
+    let checkpoint = cursor.checkpoint();
     let mut report = refresh_runtime_projections_from_credential_stream_incremental(
         projections,
         cache,
@@ -1107,15 +872,11 @@ where
         event_store,
         checkpoint.next_sequence(),
     )
-    .await
-    .map_err(|source| RuntimeProjectionCheckpointedRefreshError::Refresh { source })?;
+    .await?;
     report.checkpoint_loaded_sequence = checkpoint.last_scanned_sequence();
 
     if let Some(last_scanned_sequence) = report.checkpoint_advanced_to() {
-        checkpoints
-            .save(RuntimeProjectionCheckpoint::new(last_scanned_sequence))
-            .await
-            .map_err(|source| RuntimeProjectionCheckpointedRefreshError::Checkpoint { source })?;
+        cursor.advance(last_scanned_sequence);
     }
 
     Ok(report)
