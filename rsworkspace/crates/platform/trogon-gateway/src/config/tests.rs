@@ -594,6 +594,26 @@ fn byte_count_input_reads_a_whole_number_from_the_environment() {
 }
 
 #[test]
+fn byte_count_input_decodes_an_encoded_environment_value() {
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set("SLACK_BODY", "base64:MjA0OA==");
+    let input = ByteCountInput::Env {
+        env: "SLACK_BODY".to_string(),
+    };
+    assert_eq!(input.resolve(&env).unwrap().as_usize(), 2048);
+}
+
+#[test]
+fn byte_count_input_rejects_an_invalid_encoded_environment_value() {
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set("SLACK_BODY", "base64:!!!");
+    let input = ByteCountInput::Env {
+        env: "SLACK_BODY".to_string(),
+    };
+    assert!(matches!(input.resolve(&env), Err(ByteCountInputError::InvalidValue(_))));
+}
+
+#[test]
 fn byte_count_input_rejects_text_and_zero_from_the_environment() {
     let env = trogon_std::env::InMemoryEnv::new();
     env.set("SLACK_BODY", "4MiB");

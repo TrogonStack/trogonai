@@ -113,9 +113,13 @@ impl ByteCountInput {
                         ByteCountInputError::InvalidUnicodeEnv { name: name.to_string() }
                     }
                 })?;
-                raw.trim()
+                let value = ConfigValue::parse(raw)
+                    .map(ConfigValue::into_string)
+                    .map_err(ByteCountInputError::InvalidValue)?;
+                value
+                    .trim()
                     .parse::<u64>()
-                    .map_err(|_| ByteCountInputError::NotAWholeNumber { value: raw })?
+                    .map_err(|_| ByteCountInputError::NotAWholeNumber { value })?
             }
         };
         HttpBodySizeMax::new(ByteSize::b(bytes)).ok_or(ByteCountInputError::Zero)
@@ -134,6 +138,8 @@ enum ByteCountInputError {
     NotAWholeNumber { value: String },
     #[error("must not be zero")]
     Zero,
+    #[error(transparent)]
+    InvalidValue(ConfigValueError),
 }
 
 #[derive(Debug, thiserror::Error)]
