@@ -50,6 +50,10 @@ impl CredentialRef {
         self.kind
     }
 
+    pub fn is_scoped_to(&self, scope: &CredentialScope) -> bool {
+        &self.owner_id == scope.owner_id() && self.source == scope.source_kind() && self.scope_key == scope.scope_key()
+    }
+
     pub fn public_id(&self) -> PublicCredentialId {
         PublicCredentialId::new(&self.owner_id, &self.scope_key, self.kind)
     }

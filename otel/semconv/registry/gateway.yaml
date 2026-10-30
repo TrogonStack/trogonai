@@ -1,6 +1,6 @@
 groups:
-  # trogon-gateway: one server span per integration source (spans only, no
-  # metrics). `subject` and `event_type` are defined in common.yaml.
+  # trogon-gateway: one server span per integration source. `subject` and
+  # `event_type` are defined in common.yaml.
   - id: registry.trogonai.gateway
     type: attribute_group
     display_name: Gateway Webhook Attributes
@@ -186,3 +186,182 @@ groups:
     attributes:
       - ref: event_type
       - ref: subject
+
+  # trogon-gateway credential lifecycle, recovery worker, and runtime
+  # projection metrics (meter "trogon-gateway"). The shared `operation`,
+  # `outcome`, and `reason` attributes are defined in common.yaml.
+  - id: registry.trogonai.gateway.credential
+    type: attribute_group
+    display_name: Gateway Credential Attributes
+    brief: Custom attributes emitted by trogon-gateway credential metrics today.
+    attributes:
+      - id: source
+        type: string
+        stability: development
+        brief: Integration source the credential belongs to.
+        examples: ["github", "slack"]
+      - id: status
+        type: string
+        stability: development
+        brief: Credential recovery command status (planned, recovered, failed).
+        examples: ["planned", "recovered"]
+      - id: kind
+        type: string
+        stability: development
+        brief: Credential recovery command kind (all, write, rotation).
+        examples: ["write", "rotation"]
+
+  - id: metric.gateway.credential.store.write.failures
+    type: metric
+    metric_name: gateway.credential.store.write.failures
+    annotations:
+      code_generation:
+        metric_value_type: int
+    brief: Credential secret-store writes that failed, by lifecycle operation.
+    instrument: counter
+    unit: "{failure}"
+    stability: development
+    attributes:
+      - ref: operation
+        requirement_level: required
+        brief: Credential write operation that failed (put, rotate, revoke, destroy).
+      - ref: source
+        requirement_level: required
+
+  - id: metric.gateway.credential.recovery.passes
+    type: metric
+    metric_name: gateway.credential.recovery.passes
+    annotations:
+      code_generation:
+        metric_value_type: int
+    brief: Credential recovery worker passes by outcome.
+    instrument: counter
+    unit: "{pass}"
+    stability: development
+    attributes:
+      - ref: outcome
+        requirement_level: required
+        brief: Recovery pass outcome (advanced, recovered, idle, stuck, retry_delayed, invalid_event, failed_recovery, error).
+
+  - id: metric.gateway.credential.recovery.errors
+    type: metric
+    metric_name: gateway.credential.recovery.errors
+    annotations:
+      code_generation:
+        metric_value_type: int
+    brief: Credential recovery worker pass errors by reason.
+    instrument: counter
+    unit: "{error}"
+    stability: development
+    attributes:
+      - ref: reason
+        requirement_level: required
+        brief: Recovery worker failure reason (worker_error).
+
+  - id: metric.gateway.credential.recovery.scanned_events
+    type: metric
+    metric_name: gateway.credential.recovery.scanned_events
+    annotations:
+      code_generation:
+        metric_value_type: int
+    brief: Raw credential stream events scanned by the recovery worker.
+    instrument: counter
+    unit: "{event}"
+    stability: development
+
+  - id: metric.gateway.credential.recovery.recoveries
+    type: metric
+    metric_name: gateway.credential.recovery.recoveries
+    annotations:
+      code_generation:
+        metric_value_type: int
+    brief: Credential recovery commands by status and kind.
+    instrument: counter
+    unit: "{command}"
+    stability: development
+    attributes:
+      - ref: status
+        requirement_level: required
+      - ref: kind
+        requirement_level: required
+
+  - id: metric.gateway.credential.recovery.stuck_reports
+    type: metric
+    metric_name: gateway.credential.recovery.stuck_reports
+    annotations:
+      code_generation:
+        metric_value_type: int
+    brief: Recovery passes that observed a stuck recovery checkpoint.
+    instrument: counter
+    unit: "{pass}"
+    stability: development
+
+  - id: metric.gateway.credential.revocation.latency
+    type: metric
+    metric_name: gateway.credential.revocation.latency
+    annotations:
+      code_generation:
+        metric_value_type: double
+    brief: Time from a credential revocation event's recorded timestamp to runtime cache invalidation.
+    instrument: histogram
+    unit: "s"
+    stability: development
+
+  - id: metric.gateway.credential.cache.hits
+    type: metric
+    metric_name: gateway.credential.cache.hits
+    annotations:
+      code_generation:
+        metric_value_type: int
+    brief: Credential resolutions served from the runtime cache.
+    instrument: counter
+    unit: "{resolution}"
+    stability: development
+    attributes:
+      - ref: source
+        requirement_level: required
+
+  - id: metric.gateway.credential.cache.misses
+    type: metric
+    metric_name: gateway.credential.cache.misses
+    annotations:
+      code_generation:
+        metric_value_type: int
+    brief: Credential resolutions that had to read the secret store.
+    instrument: counter
+    unit: "{resolution}"
+    stability: development
+    attributes:
+      - ref: source
+        requirement_level: required
+
+  - id: metric.gateway.credential.delivery.denied
+    type: metric
+    metric_name: gateway.credential.delivery.denied
+    annotations:
+      code_generation:
+        metric_value_type: int
+    brief: Credential resolutions refused by the credential's runtime release policy.
+    instrument: counter
+    unit: "{resolution}"
+    stability: development
+    attributes:
+      - ref: source
+        requirement_level: required
+      - ref: reason
+        requirement_level: required
+        brief: Runtime release check that refused delivery (runtime_service, host, injection_location).
+
+  - id: metric.gateway.credential.resolve.failures
+    type: metric
+    metric_name: gateway.credential.resolve.failures
+    annotations:
+      code_generation:
+        metric_value_type: int
+    brief: Credential resolutions that failed to read material from the secret store.
+    instrument: counter
+    unit: "{resolution}"
+    stability: development
+    attributes:
+      - ref: source
+        requirement_level: required

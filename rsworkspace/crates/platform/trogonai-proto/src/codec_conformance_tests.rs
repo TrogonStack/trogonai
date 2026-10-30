@@ -26,6 +26,14 @@ mod decider_retained_tests;
 mod decider_tests;
 #[cfg(feature = "decider")]
 mod fault_codec_tests;
+#[cfg(feature = "gateway")]
+mod gateway_retained_tests;
+#[cfg(feature = "gateway")]
+mod gateway_surface_tests;
+#[cfg(feature = "gateway")]
+mod gateway_tests;
+#[cfg(feature = "gateway")]
+mod gateway_wire_tests;
 #[cfg(any(feature = "decider", feature = "grpc-nats-micro"))]
 mod google_rpc_tests;
 #[cfg(any(feature = "decider", feature = "grpc-nats-micro"))]

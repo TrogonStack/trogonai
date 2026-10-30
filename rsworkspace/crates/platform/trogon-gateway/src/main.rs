@@ -5,6 +5,9 @@ mod cli;
 mod config;
 mod constants;
 mod credential;
+mod credential_lifecycle;
+mod credential_management;
+mod credential_runtime_projection;
 mod http;
 mod secret_store;
 mod source;
@@ -14,24 +17,30 @@ mod source_status;
 mod streams;
 mod supervision;
 
+use std::error::Error;
 use std::io::Write;
 use std::net::SocketAddr;
 
 use crate::constants::{
-    CLAIM_CHECK_TTL_GRACE, NATS_CONNECT_TIMEOUT, NATS_SERVER_INFO_POLL_INTERVAL, SLACK_RESTART_BACKOFF,
+    CLAIM_CHECK_TTL_GRACE, CREDENTIAL_MANAGEMENT_ADMIN_TOKEN, CREDENTIAL_RUNTIME_PROJECTION_WORKER_INTERVAL,
+    CREDENTIAL_WORKER_INTERVAL, NATS_CONNECT_TIMEOUT, NATS_SERVER_INFO_POLL_INTERVAL, OPENBAO_ADDR,
+    OPENBAO_ALLOW_PLAINTEXT, OPENBAO_TOKEN, SLACK_RESTART_BACKOFF,
 };
+use crate::secret_store::openbao_secret_store::OpenBaoTransport;
 use anyhow::Context;
 use futures_util::FutureExt;
 use tokio::task::JoinSet;
 use tracing::{error, info};
+use trogon_decider_runtime::StreamRead;
 use trogon_nats::client::RequestClient;
 use trogon_nats::jetstream::{
-    ClaimBucket, ClaimCheckPublisher, ClaimRetention, JetStreamPublisher, MaxPayload, NatsJetStreamClient,
-    NatsObjectStore, ObjectStorePut,
+    ClaimBucket, ClaimCheckPublisher, ClaimRetention, JetStreamGetRawMessage, JetStreamGetStreamInfo,
+    JetStreamPublisher, MaxPayload, NatsJetStreamClient, NatsObjectStore, ObjectStorePut,
 };
 use trogon_nats::{connect, wait_for_server_info};
+use trogon_std::SecretString;
 use trogon_std::args::{CliArgs, ParseArgs};
-use trogon_std::env::SystemEnv;
+use trogon_std::env::{ReadEnv, SystemEnv};
 use trogon_std::fs::SystemFs;
 
 type SourceResult = (&'static str, anyhow::Result<()>);
@@ -64,6 +73,14 @@ async fn serve(
     resolved: config::ResolvedConfig,
     shutdown: impl std::future::Future<Output = ()> + Send + 'static,
 ) -> anyhow::Result<()> {
+    serve_with_env(resolved, shutdown, &SystemEnv).await
+}
+
+async fn serve_with_env(
+    resolved: config::ResolvedConfig,
+    shutdown: impl std::future::Future<Output = ()> + Send + 'static,
+    env: &impl ReadEnv,
+) -> anyhow::Result<()> {
     if !resolved.has_any_source() {
         anyhow::bail!("no sources configured — provide a config file with at least one source");
     }
@@ -94,6 +111,14 @@ async fn serve(
     let client = NatsJetStreamClient::new(js_context);
 
     streams::provision(&client, &resolved).await?;
+    let credential_store = credential::store::open(client.context().clone()).await?;
+    info!(
+        stream = credential::constants::CREDENTIAL_STREAM,
+        snapshot_bucket = credential::constants::CREDENTIAL_SNAPSHOT_BUCKET,
+        "credential event store opened"
+    );
+    let (runtime_credentials, _credential_projection_refresh_report) =
+        refresh_credential_runtime_projection(&credential_store).await?;
     register_telegram_webhooks(
         &resolved.telegram,
         crate::source::telegram::registration::registration_http_client,
@@ -106,6 +131,24 @@ async fn serve(
     let shutdown = shutdown.shared();
 
     let publisher = ClaimCheckPublisher::new(client.clone(), claim_binding, nats.clone());
+    {
+        let projection_runtime_credentials = runtime_credentials.clone();
+        let projection_event_stream = credential_store.events_stream().clone();
+        let projection_event_store = credential_store.clone();
+        let shutdown = shutdown.clone();
+        join_set.spawn(async move {
+            credential_runtime_projection::run_tracked_refresh_worker(
+                projection_runtime_credentials,
+                projection_event_stream,
+                projection_event_store,
+                CREDENTIAL_RUNTIME_PROJECTION_WORKER_INTERVAL,
+                shutdown,
+            )
+            .await;
+            ("credential-runtime-projection-worker", Ok(()))
+        });
+        info!("credential runtime projection refresh worker spawned");
+    }
 
     spawn_discord_gateway(
         &mut join_set,
@@ -131,7 +174,46 @@ async fn serve(
         crate::source::google_pubsub::streaming_pull::run,
     );
 
-    let app = trogon_std::telemetry::http::instrument_router(http::mount_sources(resolved, publisher, &nats));
+    let app = http::mount_sources(resolved, publisher, &nats);
+    let app = match credential_management_admin_token_from_env(env)? {
+        Some(admin_token) => {
+            let store = openbao_secret_store_from_env(env, CREDENTIAL_MANAGEMENT_ADMIN_TOKEN)?;
+            let idempotency = credential_management::idempotency::open(client.context().clone()).await?;
+            let worker_checkpoints =
+                credential_lifecycle::recovery_worker::open_checkpoint_store(client.context()).await?;
+            let recovery_status_checkpoints = worker_checkpoints.clone();
+            let handler = credential_lifecycle::handler::CredentialRuntimeHandler::new(
+                credential_store.clone(),
+                store,
+                runtime_credentials.clone(),
+            );
+            let worker_event_stream = credential_store.events_stream().clone();
+            let worker_event_store = credential_store.clone();
+            let worker_handler = handler.clone();
+            let worker_shutdown = shutdown.clone();
+            join_set.spawn(async move {
+                credential_lifecycle::recovery_worker::run(
+                    worker_event_stream,
+                    worker_event_store,
+                    worker_handler,
+                    worker_checkpoints,
+                    CREDENTIAL_WORKER_INTERVAL,
+                    worker_shutdown,
+                )
+                .await;
+                ("credential-worker", Ok(()))
+            });
+            info!("credential recovery worker spawned");
+            info!("credential management API enabled");
+            let credential_management_routes =
+                credential_management::router(handler, admin_token.clone(), idempotency).merge(
+                    credential_management::recovery_status_router(admin_token, recovery_status_checkpoints),
+                );
+            app.nest("/-/credentials", credential_management_routes)
+        }
+        None => app,
+    };
+    let app = trogon_std::telemetry::http::instrument_router(app);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -362,6 +444,99 @@ async fn wait_for_sources_with_shutdown<E: std::error::Error>(
     }
 
     Ok(())
+}
+
+async fn refresh_credential_runtime_projection(
+    event_store: &credential::store::CredentialEventStore,
+) -> anyhow::Result<(
+    credential_runtime_projection::RuntimeCredentialRegistry,
+    credential_runtime_projection::RuntimeProjectionRefreshReport,
+)> {
+    refresh_credential_runtime_projection_from_start(
+        event_store.events_stream(),
+        event_store,
+        credential_runtime_projection::RuntimeCredentialRegistry::default(),
+    )
+    .await
+}
+
+async fn refresh_credential_runtime_projection_from_start<EventStream, EventStore>(
+    event_stream: &EventStream,
+    event_store: &EventStore,
+    registry: credential_runtime_projection::RuntimeCredentialRegistry,
+) -> anyhow::Result<(
+    credential_runtime_projection::RuntimeCredentialRegistry,
+    credential_runtime_projection::RuntimeProjectionRefreshReport,
+)>
+where
+    EventStream: JetStreamGetStreamInfo + JetStreamGetRawMessage,
+    EventStore: StreamRead<str>,
+    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
+{
+    let report = registry
+        .refresh_from_credential_stream_tracked(event_stream, event_store)
+        .await
+        .context("credential runtime projection refresh")?;
+    log_projection_refresh(&report);
+
+    Ok((registry, report))
+}
+
+fn log_projection_refresh(report: &credential_runtime_projection::RuntimeProjectionRefreshReport) {
+    let scanned_events = report.scanned_events();
+    let decoded_events = report.decoded_events();
+    let skipped_events = report.skipped_events();
+    let changed_credentials = report.changed_credentials();
+    let applied_credentials = report.applied_credentials();
+    let projected_integrations = report.projected_integrations();
+    let checkpoint_loaded_sequence = report.checkpoint_loaded_sequence();
+    let checkpoint_advanced_to = report.checkpoint_advanced_to();
+    info!(
+        scanned_events,
+        decoded_events,
+        skipped_events,
+        changed_credentials,
+        applied_credentials,
+        projected_integrations,
+        checkpoint_loaded_sequence,
+        checkpoint_advanced_to = ?checkpoint_advanced_to,
+        "credential runtime projection refreshed"
+    );
+}
+
+fn credential_management_admin_token_from_env(env: &impl ReadEnv) -> anyhow::Result<Option<SecretString>> {
+    match env.var(CREDENTIAL_MANAGEMENT_ADMIN_TOKEN) {
+        Ok(value) => SecretString::new(value)
+            .map(Some)
+            .with_context(|| format!("{CREDENTIAL_MANAGEMENT_ADMIN_TOKEN} must not be empty")),
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(source) => Err(source).with_context(|| format!("failed to read {CREDENTIAL_MANAGEMENT_ADMIN_TOKEN}")),
+    }
+}
+
+fn openbao_secret_store_from_env(
+    env: &impl ReadEnv,
+    enabled_by: &str,
+) -> anyhow::Result<secret_store::openbao_secret_store::OpenBaoSecretStore> {
+    let address = env
+        .var(OPENBAO_ADDR)
+        .with_context(|| format!("{OPENBAO_ADDR} must be set when {enabled_by} is enabled"))?;
+    let token = env
+        .var(OPENBAO_TOKEN)
+        .with_context(|| format!("{OPENBAO_TOKEN} must be set when {enabled_by} is enabled"))?;
+    let transport = openbao_transport_from_env(env)?;
+    secret_store::openbao_secret_store::OpenBaoSecretStore::new(address, token, transport)
+        .context("OpenBao secret store configuration")
+}
+
+fn openbao_transport_from_env(env: &impl ReadEnv) -> anyhow::Result<OpenBaoTransport> {
+    match env.var(OPENBAO_ALLOW_PLAINTEXT) {
+        Err(std::env::VarError::NotPresent) => Ok(OpenBaoTransport::TlsRequired),
+        Ok(value) if value == "false" => Ok(OpenBaoTransport::TlsRequired),
+        Ok(value) if value == "true" => Ok(OpenBaoTransport::PlaintextAllowed),
+        Ok(value) => anyhow::bail!("{OPENBAO_ALLOW_PLAINTEXT} must be true or false, got '{value}'"),
+        Err(source) => Err(source).with_context(|| format!("failed to read {OPENBAO_ALLOW_PLAINTEXT}")),
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

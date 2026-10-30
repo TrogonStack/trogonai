@@ -13,6 +13,8 @@ mod static_config_secret_store;
 mod traits;
 
 pub use generated_value_error::GeneratedValueError;
+#[cfg(test)]
+pub(crate) use mock_openbao_secret_store::MockOpenBaoSecretStore;
 pub use secret_destroy_reason::SecretDestroyReason;
 pub use secret_material::SecretMaterial;
 pub use secret_store_error::SecretStoreError;

@@ -11,6 +11,7 @@ workspace = true
 [features]
 default = []
 chrono = ["dep:buffa-types", "dep:chrono"]
+gateway = ["dep:buffa", "dep:buffa-types", "dep:serde", "dep:trogon-decider", "dep:trogon-decider-runtime"]
 schedules = ["dep:buffa", "dep:buffa-types", "dep:serde", "dep:trogon-decider", "chrono"]
 # Generated types for the grpc-nats-micro binding (ADR 0016): google.rpc.Status/Code,
 # the trogon.nats.micro.v1alpha1 options, and the echo conformance fixture. Deliberately

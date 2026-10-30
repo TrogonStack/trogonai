@@ -8,16 +8,24 @@
         reason = "buffa-codegen emits each message's view module beside the message it views, so the generated tree is cyclic by construction and is not edited here"
     )
 )]
-#[cfg(any(feature = "schedules", feature = "decider", feature = "grpc-nats-micro"))]
+#[cfg(any(
+    feature = "gateway",
+    feature = "schedules",
+    feature = "decider",
+    feature = "grpc-nats-micro"
+))]
 mod r#gen;
 
-#[cfg(feature = "schedules")]
+#[cfg(any(feature = "gateway", feature = "schedules"))]
 mod codec;
 
 pub mod constants;
 
 #[cfg(feature = "chrono")]
 pub mod convert;
+
+#[cfg(feature = "gateway")]
+pub mod gateway;
 
 #[cfg(feature = "schedules")]
 pub mod scheduler;

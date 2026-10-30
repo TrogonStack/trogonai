@@ -40,72 +40,6 @@ fn default_mount_is_secret() {
 }
 
 #[test]
-fn parses_integration_scoped_openbao_credential_id() {
-    let id = CredentialId::new("openbao:tenant-1:github/primary:webhook_secret").unwrap();
-
-    let credential = openbao_credential_ref_from_id(id, CredentialVersion::new(2).unwrap()).unwrap();
-
-    assert_eq!(
-        credential.id().as_str(),
-        "openbao:tenant-1:github/primary:webhook_secret"
-    );
-    assert_eq!(credential.version().get(), 2);
-    assert_eq!(credential.owner_id().as_str(), "tenant-1");
-    assert_eq!(credential.source(), SourceKind::GitHub);
-    assert_eq!(credential.scope_key(), "github/primary");
-    assert_eq!(credential.kind(), CredentialKind::WebhookSecret);
-}
-
-#[test]
-fn parses_source_scoped_openbao_credential_id() {
-    let id = CredentialId::new("openbao:tenant-1:discord:bot_token").unwrap();
-
-    let credential = openbao_credential_ref_from_id(id, CredentialVersion::initial()).unwrap();
-
-    assert_eq!(credential.owner_id().as_str(), "tenant-1");
-    assert_eq!(credential.source(), SourceKind::Discord);
-    assert_eq!(credential.scope_key(), "discord");
-    assert_eq!(credential.kind(), CredentialKind::BotToken);
-}
-
-#[test]
-fn parses_datadog_openbao_credential_id() {
-    let id = CredentialId::new("openbao:tenant-1:datadog/primary:webhook_token").unwrap();
-
-    let credential = openbao_credential_ref_from_id(id, CredentialVersion::initial()).unwrap();
-
-    assert_eq!(credential.source(), SourceKind::Datadog);
-    assert_eq!(credential.scope_key(), "datadog/primary");
-    assert_eq!(credential.kind(), CredentialKind::WebhookToken);
-}
-
-#[test]
-fn parses_owner_id_with_colons_from_the_right() {
-    let id = CredentialId::new("openbao:tenant:region:github/primary:webhook_secret").unwrap();
-
-    let credential = openbao_credential_ref_from_id(id, CredentialVersion::initial()).unwrap();
-
-    assert_eq!(credential.owner_id().as_str(), "tenant:region");
-    assert_eq!(credential.scope_key(), "github/primary");
-    assert_eq!(credential.kind(), CredentialKind::WebhookSecret);
-}
-
-#[test]
-fn rejects_unknown_openbao_scope_source() {
-    let id = CredentialId::new("openbao:tenant-1:unknown/primary:webhook_secret").unwrap();
-
-    let error = openbao_credential_ref_from_id(id, CredentialVersion::initial()).unwrap_err();
-
-    assert!(matches!(
-        error,
-        OpenBaoCredentialIdParseError::InvalidScope {
-            source: OpenBaoScopeKeyParseError::UnknownSource,
-            ..
-        }
-    ));
-}
-
-#[test]
 fn rotated_credential_ref_preserves_integration_scope() {
     let scope = CredentialScope::integration(
         CredentialOwnerId::new("tenant-1").unwrap(),
@@ -199,7 +133,12 @@ impl FakeOpenBao {
     }
 
     fn store(&self) -> OpenBaoSecretStore {
-        OpenBaoSecretStore::new(format!("http://{}", self.address), OPENBAO_DEV_ROOT_TOKEN).unwrap()
+        OpenBaoSecretStore::new(
+            format!("http://{}", self.address),
+            OPENBAO_DEV_ROOT_TOKEN,
+            OpenBaoTransport::PlaintextAllowed,
+        )
+        .unwrap()
     }
 
     async fn posted_to(&self, endpoint: OpenBaoEndpoint) -> Vec<Value> {
@@ -344,6 +283,40 @@ async fn revoke_posts_delete_for_every_version() {
 }
 
 #[tokio::test]
+async fn destroy_of_version_absent_from_metadata_is_missing_without_posting_destroy() {
+    let openbao = FakeOpenBao::start(Some(metadata_with_destroyed_first_version())).await;
+    let credential = discord_bot_token(CredentialVersion::new(3).unwrap());
+
+    let error = openbao
+        .store()
+        .destroy(&credential, &SecretDestroyReason::new("operator request").unwrap())
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, SecretStoreError::Missing { credential: missing } if missing == credential));
+    assert!(openbao.posted_to(OpenBaoEndpoint::Destroy).await.is_empty());
+}
+
+#[tokio::test]
+async fn destroy_posts_destroy_for_every_version() {
+    let openbao = FakeOpenBao::start(Some(metadata_with_destroyed_first_version())).await;
+
+    openbao
+        .store()
+        .destroy(
+            &discord_bot_token(CredentialVersion::new(2).unwrap()),
+            &SecretDestroyReason::new("operator request").unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        openbao.posted_to(OpenBaoEndpoint::Destroy).await,
+        vec![json!({ "versions": [1, 2] })]
+    );
+}
+
+#[tokio::test]
 async fn metadata_fingerprints_the_metadata_path_and_version() {
     let openbao = FakeOpenBao::start(Some(json!({
         "current_version": 2,
@@ -389,8 +362,37 @@ fn mount_rejects_path_separators() {
 }
 
 #[test]
+fn tls_required_transport_rejects_a_plaintext_address() {
+    let error = OpenBaoSecretStore::new(
+        "http://openbao.example:8200",
+        OPENBAO_DEV_ROOT_TOKEN,
+        OpenBaoTransport::TlsRequired,
+    )
+    .unwrap_err();
+
+    assert!(matches!(error, OpenBaoSecretStoreConfigError::PlaintextAddress));
+}
+
+#[test]
+fn tls_required_transport_accepts_an_https_address() {
+    assert!(
+        OpenBaoSecretStore::new(
+            "https://openbao.example:8200",
+            OPENBAO_DEV_ROOT_TOKEN,
+            OpenBaoTransport::TlsRequired,
+        )
+        .is_ok()
+    );
+}
+
+#[test]
 fn debug_redacts_the_token() {
-    let store = OpenBaoSecretStore::new("http://openbao.example:8200", "s3cr3t-root-token").unwrap();
+    let store = OpenBaoSecretStore::new(
+        "http://openbao.example:8200",
+        "s3cr3t-root-token",
+        OpenBaoTransport::PlaintextAllowed,
+    )
+    .unwrap();
 
     let debug = format!("{store:?}");
 
@@ -400,42 +402,14 @@ fn debug_redacts_the_token() {
     assert!(!debug.contains("s3cr3t-root-token"));
 }
 
-#[test]
-fn rejects_credential_id_without_the_openbao_prefix() {
-    let id = CredentialId::new("tenant-1:discord:bot_token").unwrap();
-
-    let error = openbao_credential_ref_from_id(id, CredentialVersion::initial()).unwrap_err();
-
-    assert!(matches!(error, OpenBaoCredentialIdParseError::MissingPrefix { .. }));
-}
-
-#[test]
-fn rejects_credential_id_without_owner_scope_and_kind() {
-    let id = CredentialId::new("openbao:discord").unwrap();
-
-    let error = openbao_credential_ref_from_id(id, CredentialVersion::initial()).unwrap_err();
-
-    assert!(matches!(error, OpenBaoCredentialIdParseError::InvalidShape { .. }));
-}
-
-#[test]
-fn rejects_scope_that_is_neither_a_source_nor_an_integration() {
-    let id = CredentialId::new("openbao:tenant-1:primary:webhook_secret").unwrap();
-
-    let error = openbao_credential_ref_from_id(id, CredentialVersion::initial()).unwrap_err();
-
-    assert!(matches!(
-        error,
-        OpenBaoCredentialIdParseError::InvalidScope {
-            source: OpenBaoScopeKeyParseError::MissingSource,
-            ..
-        }
-    ));
-}
-
 #[tokio::test]
 async fn address_that_cannot_be_a_base_is_a_backend_outage() {
-    let store = OpenBaoSecretStore::new("mailto:ops@example.com", OPENBAO_DEV_ROOT_TOKEN).unwrap();
+    let store = OpenBaoSecretStore::new(
+        "mailto:ops@example.com",
+        OPENBAO_DEV_ROOT_TOKEN,
+        OpenBaoTransport::PlaintextAllowed,
+    )
+    .unwrap();
 
     let error = store
         .metadata(&discord_bot_token(CredentialVersion::initial()))
@@ -636,7 +610,12 @@ impl OpenBaoServer {
     }
 
     fn store(&self) -> OpenBaoSecretStore {
-        OpenBaoSecretStore::new(&self.address, OPENBAO_DEV_ROOT_TOKEN).unwrap()
+        OpenBaoSecretStore::new(
+            &self.address,
+            OPENBAO_DEV_ROOT_TOKEN,
+            OpenBaoTransport::PlaintextAllowed,
+        )
+        .unwrap()
     }
 }
 
@@ -771,7 +750,7 @@ async fn openbao_dev_server_roundtrips_precise_value() {
     let token = SystemEnv
         .var("OPENBAO_TOKEN")
         .unwrap_or_else(|_| "local-dev-root-token".to_string());
-    let store = OpenBaoSecretStore::new(address, token).unwrap();
+    let store = OpenBaoSecretStore::new(address, token, OpenBaoTransport::PlaintextAllowed).unwrap();
     let credential = assert_roundtrip(&store).await;
     println!(
         "{}",
@@ -846,7 +825,12 @@ async fn redirects_are_not_followed_so_the_token_stays_with_openbao() {
         }
     });
     tokio::spawn(axum::serve(listener, app).into_future());
-    let store = OpenBaoSecretStore::new(format!("http://{redirector}"), OPENBAO_DEV_ROOT_TOKEN).unwrap();
+    let store = OpenBaoSecretStore::new(
+        format!("http://{redirector}"),
+        OPENBAO_DEV_ROOT_TOKEN,
+        OpenBaoTransport::PlaintextAllowed,
+    )
+    .unwrap();
 
     let error = store
         .metadata(&discord_bot_token(CredentialVersion::initial()))

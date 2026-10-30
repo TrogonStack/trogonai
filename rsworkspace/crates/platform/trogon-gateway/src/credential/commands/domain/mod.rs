@@ -1,4 +1,7 @@
+mod allowed_host;
 mod constants;
+mod credential_destroy_reason;
+mod credential_failure_reason;
 mod credential_fingerprint;
 mod credential_id;
 mod credential_kind;
@@ -9,10 +12,17 @@ mod credential_ref;
 mod credential_scope;
 mod credential_status;
 mod credential_version;
+mod injection_location;
 mod public_credential_id;
+mod runtime_release_policy;
+mod runtime_service_id;
 mod source_kind;
 mod storage_backend;
 
+#[allow(unused_imports)]
+pub use allowed_host::{AllowedHost, AllowedHostError, AllowedHosts};
+pub use credential_destroy_reason::{CredentialDestroyReason, CredentialDestroyReasonError};
+pub use credential_failure_reason::{CredentialFailureReason, CredentialFailureReasonError};
 pub use credential_fingerprint::{CredentialFingerprint, CredentialFingerprintError};
 pub use credential_id::{CredentialId, CredentialIdError};
 pub use credential_kind::CredentialKind;
@@ -22,7 +32,15 @@ pub use credential_path::CredentialPath;
 pub use credential_ref::CredentialRef;
 pub use credential_scope::CredentialScope;
 pub use credential_status::CredentialStatus;
-pub use credential_version::CredentialVersion;
+pub use credential_version::{CredentialVersion, CredentialVersionError};
+#[allow(unused_imports)]
+pub use injection_location::{InjectionLocation, InjectionLocationError, InjectionLocations};
 pub use public_credential_id::PublicCredentialId;
+#[allow(unused_imports)]
+pub use runtime_release_policy::{
+    RuntimeReleaseDeniedError, RuntimeReleasePolicy, RuntimeReleasePolicyError, RuntimeReleaseRequest,
+};
+#[allow(unused_imports)]
+pub use runtime_service_id::{AllowedRuntimeServices, RuntimeServiceId, RuntimeServiceIdError};
 pub use source_kind::SourceKind;
-pub use storage_backend::StorageBackend;
+pub use storage_backend::{StorageBackend, StorageBackendError};

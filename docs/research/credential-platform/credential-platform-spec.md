@@ -589,7 +589,7 @@ There is also `GET /-/credentials/recovery/status` (separately mounted
 `recovery_status_router`, same admin token), returning
 `CredentialRecoveryStatusResponse` (last_scanned_sequence,
 next_scan_sequence, consecutive_failure_count, first_failure_unix_seconds,
-retry_after_unix_seconds, retry_delayed, stuck_recovery). Read-only,
+retry_after_unix_seconds, status of idle, retry_delayed or stuck). Read-only,
 metadata-only, no idempotency key required.
 
 DECISION NEEDED: should the internal /-/credentials admin API adopt the
@@ -1410,10 +1410,11 @@ refresh_from_credential_stream / _incremental
   full or incremental rebuild from raw JetStream events; replays each
   affected credential_id's whole stream through evolve()
 
-refresh_from_credential_stream_checkpointed
-  same as incremental, tracked in a NATS KV checkpoint bucket
-  (GATEWAY_CREDENTIAL_RUNTIME_PROJECTION_CHECKPOINTS, history=1,
-  max_age=0) so the periodic worker resumes where it left off
+refresh_from_credential_stream_tracked
+  same as incremental, resuming from a process-local cursor owned by the
+  registry; a fresh process starts at the first stream sequence so its
+  empty in-memory state is always rebuilt by a full replay, and replicas
+  never share a cursor
 
 apply_state
   synchronous path used by CredentialRuntimeHandler after every
@@ -1737,7 +1738,7 @@ Runtime safety never depends on physical cleanup completing immediately.
 
 ```text
 DB -> Gateway
-  -> implemented, as the checkpointed projection refresh worker
+  -> implemented, as the tracked projection refresh worker
 
 DB -> OpenBao
   -> not built: expected secret exists and has expected metadata
@@ -1784,8 +1785,8 @@ discovery is a raw stream scan, not a query
 the only operator surface reports worker health, not work
   -> GET /-/credentials/recovery/status returns
      CredentialRecoveryStatusResponse (credential_management.rs:1988):
-     checkpoint sequences, consecutive_failure_count, retry_delayed,
-     stuck_recovery. It answers "is the worker healthy", never "which
+     checkpoint sequences, consecutive_failure_count, and a
+     status of idle, retry_delayed or stuck. It answers "is the worker healthy", never "which
      credentials are stuck"
 ```
 

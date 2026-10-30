@@ -258,6 +258,9 @@ impl GuestPhase {
     }
 }
 
+/// Credential recovery command kind (all, write, rotation)
+pub const KIND: &str = "kind";
+
 /// MCP servers configured for a new ACP session
 pub const MCP_SERVERS: &str = "mcp_servers";
 
@@ -348,7 +351,7 @@ pub const NEW_SESSION_ID: &str = "new_session_id";
 /// Microsoft Graph notification batch count
 pub const NOTIFICATION_COUNT: &str = "notification_count";
 
-/// ACP operation where an error occurred
+/// Operation discriminator. OVERLOADED today: the listed values are the ACP operations where an error occurred on acp.errors; the same `operation` key is also emitted with credential write operations by gateway.credential.store.write.failures
 pub const OPERATION: &str = "operation";
 
 /// Allowed values for the `operation` attribute
@@ -387,7 +390,7 @@ impl Operation {
     }
 }
 
-/// Reconciliation outcome for a processed schedule event record
+/// Outcome discriminator. OVERLOADED today: the listed values are the trogon-scheduler reconciliation outcomes for a processed schedule event record; the same `outcome` key is also emitted with credential recovery pass outcomes by gateway.credential.recovery.passes
 pub const OUTCOME: &str = "outcome";
 
 /// Allowed values for the `outcome` attribute
@@ -441,7 +444,7 @@ pub const PAYLOAD_KIND: &str = "payload_kind";
 /// ACP protocol version negotiated on initialize
 pub const PROTOCOL_VERSION: &str = "protocol_version";
 
-/// Reason code for the ACP error
+/// Reason code. OVERLOADED today: the listed values are the ACP error reasons on acp.errors; the same `reason` key is also emitted with credential recovery worker failures by gateway.credential.recovery.errors and with runtime release denials by gateway.credential.delivery.denied
 pub const REASON: &str = "reason";
 
 /// Allowed values for the `reason` attribute
@@ -545,6 +548,12 @@ impl SnapshotOutcome {
 
 /// Whether a decider snapshot write succeeded
 pub const SNAPSHOT_WRITE_SUCCESS: &str = "snapshot_write_success";
+
+/// Integration source the credential belongs to
+pub const SOURCE: &str = "source";
+
+/// Credential recovery command status (planned, recovered, failed)
+pub const STATUS: &str = "status";
 
 /// Identifier of the event stream the schedule record belongs to
 pub const STREAM_ID: &str = "stream_id";
