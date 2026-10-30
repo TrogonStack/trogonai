@@ -15,10 +15,22 @@ scope a leak.
 ## Enable an audit device
 
 Do this before the first real secret is written to a cluster. OpenBao
-refuses to serve requests when every enabled audit device fails to write,
-which is the correct trade and worth understanding before you enable one:
-an audit device with a full disk takes the cluster down. Enable two devices
-on independent paths so one failing does not.
+sends every audit record to all enabled devices, and audit failures can
+prevent it from servicing requests. That is the correct trade, but the two
+failure modes behave differently:
+
+- **Non-blocking failure.** A device returns write errors, for example a
+  file device on a full disk. Requests still complete as long as at least
+  one other device writes the record. If no device succeeds, the cluster
+  stops serving.
+- **Blocking failure.** A write never completes, for example a stalled
+  network mount or an unresponsive socket. OpenBao completes no requests
+  until that device can write again, no matter how many healthy devices are
+  enabled.
+
+Two devices on independent paths therefore protect against the first mode
+only. Write down the expected failure behavior of each destination, and
+treat any destination that can hang as able to take the cluster down.
 
 ```bash
 bao audit enable file file_path=/openbao/audit/audit.log
@@ -32,15 +44,35 @@ bao audit list -detailed
 
 ## What is and is not in it
 
-Audit entries record the request and response for every API call: the
+Audit entries record the request and response for audited API calls: the
 path, the operation, the authenticated identity, the token accessor, the
 client address, and the timestamp.
 
-**Secret values are HMAC'd, not written in plaintext.** The audit log tells
-you a credential was read and by whom; it does not tell you what the value
-was. This is the property that makes shipping the log to a general-purpose
-log store acceptable. It is also why the log cannot answer "was the leaked
-value this one" directly. You compare HMACs, not values.
+**Not every request is audited.** Some paths do not go through the audit
+system, including `sys/init`, `sys/seal-status`, `sys/seal`, `sys/unseal`,
+`sys/leader`, `sys/health`, and the raft bootstrap and join paths. Do not
+read the absence of an entry for one of these as evidence that nothing
+happened. `sys/metrics`, `sys/pprof/*`, and `sys/in-flight-req` are also
+unaudited when listener settings allow unauthenticated access.
+
+**Most string values are HMAC'd, not written in plaintext.** The audit log
+tells you a credential was read and by whom; it does not tell you what the
+value was. This is the property that makes shipping the log to a
+general-purpose log store acceptable. It is also why the log cannot answer
+"was the leaked value this one" directly. You compare HMACs, not values: the
+`/sys/audit-hash` endpoint hashes a candidate value with the device's salt.
+
+The property has exceptions. Only strings that come from or are returned in
+JSON are HMAC'd, so other types such as integers and booleans appear in
+plaintext. OpenBao also exempts some auth and secrets fields from hashing,
+and the exceptions can be changed per mount with the `secrets enable` and
+`secrets tune` commands and their `auth` counterparts. An audit device
+enabled with `log_raw=true` writes sensitive values without hashing at all.
+
+Before you export a log, run `bao audit list -detailed` and confirm no
+device has `log_raw` enabled, and check the mounts for hashing exceptions.
+A log shipped to a general-purpose store on the strength of "values are
+HMAC'd" is only safe if that was verified for this cluster.
 
 The HMAC key is per-cluster. Entries from a restored cluster do not compare
 against entries from the original.

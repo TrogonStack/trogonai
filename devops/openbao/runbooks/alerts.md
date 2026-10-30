@@ -154,7 +154,7 @@ is leaking while you look.
 
 **Signal:** `gateway.credential.store.write.failures`
 **Condition:** more than 3 in a 5 minute window for any one `operation`.
-**Severity:** page for `put` and `rotate`; ticket for `revoke` and `destroy`.
+**Severity:** page for `put`, `rotate` and `revoke`; ticket for `destroy`.
 **Runbook:** [stuck-pending-secret-write.md](stuck-pending-secret-write.md)
 
 A failed `put` leaves the credential in `write_failed`, which the recovery
@@ -170,9 +170,19 @@ this alert makes the failure visible in minutes rather than after the worker's
 this one is the earlier symptom of the same incident, not a second one.
 
 The severity split is deliberate. A failed write blocks a customer action
-right now. A failed revoke or destroy does not: logical revocation already
-took the credential out of runtime use, and physical cleanup is designed to
-be retried. Paging on cleanup teaches responders to ignore the page.
+right now. A failed revoke is worse than that: the credential handler calls the
+secret store to revoke before it appends the revocation event, so when the
+store call fails no event is written, the credential stays active in the event
+stream, and the runtime projection keeps serving it. The customer was told the
+credential is dead and it is not. Treat a revoke failure as a runtime-security
+incident, and repeat the `DELETE` once OpenBao is healthy (see
+[secret-leak-response.md](secret-leak-response.md)); the failed attempt leaves
+nothing recorded to reconcile. A failed destroy is the only one that is
+cleanup: destruction is accepted only for a credential already revoked, so
+logical revocation has already taken it out of runtime use, the failure is
+recorded as `cleanup_failed`, and the destroy can be retried. Paging on that
+cleanup teaches responders to ignore the page, which is why it is the only
+ticket.
 
 Break the metric down by `source` before opening the runbook. One source
 failing points at that integration's path or metadata; every source failing

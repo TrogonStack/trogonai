@@ -20,7 +20,7 @@ condition without anyone noticing.
 
 It keeps a checkpoint. On failure it backs off: 30 seconds initially,
 doubling to a 15 minute ceiling. After 30 minutes of continuous failure it
-reports `stuck_recovery`.
+reports `stuck`.
 
 So a credential in `pending_write` for a few seconds is normal. One stuck
 for half an hour means the recovery worker cannot fix it, which is a
@@ -29,7 +29,7 @@ different problem from the write having failed.
 ## Check the recovery worker first
 
 ```bash
-curl -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+curl -H "x-trogon-admin-token: ${ADMIN_TOKEN}" \
   "${GATEWAY}/-/credentials/recovery/status"
 ```
 
@@ -40,20 +40,26 @@ curl -H "Authorization: Bearer ${ADMIN_TOKEN}" \
   "consecutive_failure_count": 0,
   "first_failure_unix_seconds": null,
   "retry_after_unix_seconds": null,
-  "retry_delayed": false,
-  "stuck_recovery": false
+  "status": "idle"
 }
 ```
 
+`status` is one of `idle`, `retry_delayed` and `stuck`, and the gateway computes
+it on each request, from the checkpoint and the clock. `stuck` wins over
+`retry_delayed`, which wins over `idle`. There are no separate boolean fields.
+
 Read it in this order:
 
-**`stuck_recovery: true`**: the worker has been failing for longer than
-the 30 minute threshold. This is the page-worthy state. Go to "when the
-worker is failing" below.
+**`status: "stuck"`**: the worker has been failing for longer than the 30
+minute threshold. This is the page-worthy state. Go to "when the worker is
+failing" below.
 
-**`retry_delayed: true` with a low `consecutive_failure_count`**: the
+**`status: "retry_delayed"` with a low `consecutive_failure_count`**: the
 worker hit a transient error and is backing off. Check again after
-`retry_after_unix_seconds`. Not actionable yet.
+`retry_after_unix_seconds`. Not actionable yet. Once that time passes the
+status reads `idle` until the next pass runs, so a non-zero
+`consecutive_failure_count` or a non-null `first_failure_unix_seconds` next to
+`idle` means failures are not cleared yet, not that the worker is healthy.
 
 **`next_scan_sequence` not advancing across polls, everything else clean**:
 the worker is running and finding nothing new. If a credential is
@@ -96,7 +102,7 @@ event case, or carries an invalid credential reference is counted in
 event types are skipped by design and counted in `skipped_events`, so an
 invalid event means a genuinely corrupt payload. The pass still recovers every
 other credential, but it does not move the checkpoint past the bad event and
-records a failure with the usual backoff, so `stuck_recovery` turns true after
+records a failure with the usual backoff, so `status` becomes `stuck` after
 30 minutes. Unlike an outage, this does not clear on its own: every retry
 reads the event again. A credential whose own stream fails to read, decode or
 replay is handled the same way, counted in `failed_recoveries` and logged as
@@ -128,7 +134,10 @@ land. The plaintext is gone: it existed only in the original request and is
 never persisted anywhere else, by design
 ([ADR#0048](../../../docs/adr/0048-one-time-plaintext-exposure.md)). The
 credential cannot be recovered, only re-supplied. Ask the owner for a new
-value and `PUT` it.
+value. For `pending_write`, `PUT` it: a write for the same credential is
+accepted again and resumes the pending write. For `pending_rotation`, repeat
+the `POST` to `.../rotations` with the active version; a `PUT` is rejected
+because the credential already exists.
 
 ## What not to do
 

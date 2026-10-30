@@ -15,10 +15,18 @@ live the whole time you spend on it.
 
 ```bash
 curl -X DELETE \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H "x-trogon-admin-token: ${ADMIN_TOKEN}" \
   -H "Idempotency-Key: $(uuidgen)" \
+  -H "Content-Type: application/json" \
+  -d '{"owner_id":"{owner_id}","version":{version}}' \
   "${GATEWAY}/-/credentials/{source}/{integration_id}/{secret}"
 ```
+
+`owner_id` is the credential's owner and `version` is the credential's current
+active version, taken from the event stream or from the `credential_ref.version`
+the last write or rotation returned. A version that is not the active one is
+rejected. A successful response carries the new `state` (`revoked`) and the
+`credential_ref` that was revoked.
 
 The exact path depends on the credential: `/-/credentials/discord/bot-token`,
 `/-/credentials/github/{integration_id}/webhook-secret`,
@@ -68,43 +76,59 @@ secret."
 them. Platform logs will not show it: an attacker with the credential
 talks to the provider, not to us.
 
-## Then re-supply
+## Then destroy the revoked material and re-supply
 
-```bash
-curl -X PUT \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-  -H "Idempotency-Key: $(uuidgen)" \
-  -H "Content-Type: application/json" \
-  -d '{"value":"..."}' \
-  "${GATEWAY}/-/credentials/{source}/{integration_id}/{secret}"
-```
-
-The new value must be genuinely new. Re-supplying the leaked value with a
-new version number leaks it again.
-
-## Destroy, when it is warranted
+A revoked credential cannot be written again. The write is rejected while the
+credential is revoked (the gateway answers `500 credential management request
+failed`), so a `PUT` straight after the `DELETE` cannot provision the
+replacement. The supported flow is to destroy the revoked material first,
+which returns the credential to a state that accepts a new write, and then
+create the replacement.
 
 Revocation soft-deletes: the versions are recoverable by an identity with
-undelete. For a leak where you want the material gone from storage
-entirely:
+undelete. Destruction is the step that removes the material from storage:
 
 ```bash
 curl -X POST \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H "x-trogon-admin-token: ${ADMIN_TOKEN}" \
   -H "Idempotency-Key: $(uuidgen)" \
+  -H "Content-Type: application/json" \
+  -d '{"owner_id":"{owner_id}","version":{version},"reason":"{reason}"}' \
   "${GATEWAY}/-/credentials/{source}/{integration_id}/{secret}/destructions"
 ```
 
-Destroy is irreversible. It removes the version's material while leaving
-the metadata trail. Use it when the concern is the material persisting in
-storage, not merely being served.
+`version` is the revoked version, the one the `DELETE` response reported.
+`reason` is free text, required, at most 512 characters; put the incident id
+in it. Destroy is irreversible. It destroys every version at the credential
+path while leaving the metadata trail. A rejected request answers
+`409 credential destroy request rejected`: the credential is not revoked, or
+the version does not match the one recorded.
+
+Then supply the replacement:
+
+```bash
+curl -X PUT \
+  -H "x-trogon-admin-token: ${ADMIN_TOKEN}" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Content-Type: application/json" \
+  -d '{"owner_id":"{owner_id}","secret":"..."}' \
+  "${GATEWAY}/-/credentials/{source}/{integration_id}/{secret}"
+```
+
+The replacement is stored as the next version after the destroyed one; version
+numbers are not reused, and the response reports it in `credential_ref.version`.
+The new value must be genuinely new. Re-supplying the leaked value leaks it
+again.
+
+If the destruction fails, the credential is recorded as `cleanup_failed` and
+the same `destructions` request can be repeated once OpenBao is healthy. Do
+not skip destruction to save time: nothing else lets the replacement in.
 
 ## Confirm
 
-- The event stream shows the revocation, and the destruction if you ran
-  one.
-- `bao kv metadata get` on the credential path shows the versions
-  soft-deleted (or destroyed).
+- The event stream shows the revocation, the destruction, and the new write.
+- `bao kv metadata get` on the credential path shows the leaked versions
+  destroyed and the replacement as the current version.
 - A resolve attempt against the gateway fails, rather than returning the
   old value. If it still resolves after the TTL window, the cache did not
   invalidate: see [gateway-projection-miss.md](gateway-projection-miss.md).

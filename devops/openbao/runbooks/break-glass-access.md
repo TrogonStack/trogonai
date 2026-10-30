@@ -54,21 +54,58 @@ afterward is written by someone who already knows how it turned out.
 The second person observes and co-signs the record. They are not a rubber
 stamp: their job is to ask whether the normal path was actually tried.
 
-**3. Mint the token.** Today this means generating a root token using the
-recovery-key quorum, because binding the policies to an auth method is an
-open decision and no break-glass auth role exists in any running deployment.
-That gap is real and worth stating plainly: the current procedure grants more
-than `break_glass_admin` does, because root grants everything. Until the auth
-binding exists, the scoping in the policy file is a design, not a control.
+**3. Mint the break-glass token.** Root is used only to issue a
+`break_glass_admin` token, and is revoked before the credential operation
+starts. No break-glass auth role exists in any running deployment, because
+binding the policies to an auth method is an open decision, so the only way
+to create the token is to generate a root token from the recovery-key
+quorum first. Root grants everything; `break_glass_admin` does not. Keeping
+root alive for the operation would turn the scoping in the policy file into
+a design instead of a control.
+
+Generate the root token with the recovery-key holders present. The command
+returns an encoded token that only the one-time password can decode:
+
+```bash
+OTP=$(bao operator generate-root -generate-otp)
+bao operator generate-root -init -otp="$OTP"
+# Each recovery-key holder submits a share until the quorum is reached:
+bao operator generate-root -otp="$OTP"
+# The final submission prints the encoded token. Decode it:
+export BAO_TOKEN=$(bao operator generate-root -decode="<encoded-token>" -otp="$OTP")
+bao token lookup
+```
+
+`bao token lookup` must show the `root` policy before you continue. Then
+issue the scoped token as an orphan, so that revoking root does not revoke
+it, and revoke root:
+
+```bash
+BREAK_GLASS_TOKEN=$(bao token create -orphan \
+  -policy=break_glass_admin \
+  -ttl=30m -explicit-max-ttl=30m \
+  -display-name="<incident-id>" \
+  -field=token)
+bao token revoke -self
+export BAO_TOKEN="$BREAK_GLASS_TOKEN"
+unset BREAK_GLASS_TOKEN OTP
+bao token lookup
+```
+
+The final `bao token lookup` must show `break_glass_admin` and no `root`.
+Without `-orphan`, revoking root also revokes the token created from it.
+Never print either token or paste it into the record.
 
 **4. Do the single operation you recorded.** Not the adjacent one that looks
 useful while you are in there.
 
 **5. Revoke the token immediately.** Not at the end of the incident, at the
-end of the operation.
+end of the operation. The token also expires on its own TTL, which is a
+backstop and not a substitute.
 
 ```bash
 bao token revoke -self
+unset BAO_TOKEN
 ```
 
 **6. Close the record.** What was done, what the result was, and whether

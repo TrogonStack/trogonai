@@ -55,9 +55,40 @@ Three outcomes:
 **Active in the stream.** Not an orphan. Expected state.
 
 **Revoked or destroyed in the stream, versions still live in OpenBao.** This
-is the dangerous kind: material the platform believes is gone. Re-issue the
-revocation through the management API so the event stream records the second
-revocation, rather than deleting in OpenBao directly.
+is the dangerous kind: material the platform believes is gone. Re-issuing the
+revocation does nothing. When the stream already says revoked, the revoke
+handler returns success without calling OpenBao, and when it says destroyed,
+revoke is rejected because only an active or rotation-pending credential can
+be revoked. The live versions stay live. No cleanup job or path exists to do
+this work, so it is manual, and it depends on the state the stream records:
+
+- **Revoked, `cleanup_failed`, or `destroy_requested`.** Request the
+  destruction through the management API so the second removal is recorded in
+  the event stream. Use the version from the stream and a reason that names
+  the incident or reconciliation pass:
+
+  ```bash
+  curl -X POST \
+    -H "x-trogon-admin-token: ${ADMIN_TOKEN}" \
+    -H "Idempotency-Key: $(uuidgen)" \
+    -H "Content-Type: application/json" \
+    -d '{"owner_id":"{owner_id}","version":{version},"reason":"{reason}"}' \
+    "${GATEWAY}/-/credentials/{source}/{integration_id}/{secret}/destructions"
+  ```
+
+  It destroys every version at the path in OpenBao. If it fails, the stream
+  records `cleanup_failed` and the same request can be repeated.
+- **Destroyed.** The destroy request returns the existing destroyed state
+  without calling OpenBao, so the API cannot reach the material. Destroy the
+  live versions directly under `break_glass_admin`
+  ([break-glass-access.md](break-glass-access.md)), for every version up to
+  `current_version`, and record the reconciliation as the evidence, since the
+  stream has nothing new to say:
+
+  ```bash
+  bao kv destroy -mount=secret -versions=1,2,3 \
+    "trogonai/{owner_id}/credentials/{credential_id}"
+  ```
 
 **Absent from the stream entirely.** A true orphan. Confirm before deleting:
 a credential absent from the stream because the stream was rolled back is
