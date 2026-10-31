@@ -7,22 +7,30 @@ use trogon_decider_nats::DuplicateWindow;
 use trogon_decider_runtime::AdmissionLimit;
 use trogon_semconv::attribute::DecisionOutcome;
 use trogonai_proto::decider::v1::DecideRequest;
-use trogonai_proto::google::rpc::ErrorInfo;
+use trogonai_proto::google::rpc::{Code, ErrorInfo};
 
 use crate::config::ModuleStore;
 use crate::constants::{CONTENT_TYPE_HEADER, DEFAULT_EVENTS_STREAM, DEFAULT_SNAPSHOT_BUCKET, DEFAULT_SUBJECT_PREFIX};
-use crate::endpoint::{CommandEndpoint, SubjectPrefix};
+use crate::endpoint::SubjectPrefix;
 use crate::status::{FaultClass, find_detail};
+use crate::tenant_position::TenantPosition;
 
 use super::*;
 
+const PRINCIPAL_SUBJECT: &str = "decider.agent.alice.DeciderService.Decide";
+const FORGED_PRINCIPAL_HEADER: &str = "X-A2a-Caller-Id";
+const UNDECODABLE_PAYLOAD: [u8; 4] = [0xff, 0xff, 0xff, 0xff];
+
 fn endpoint() -> CommandEndpoint {
-    CommandEndpoint::new(SubjectPrefix::new(DEFAULT_SUBJECT_PREFIX).expect("the default prefix is a token"))
-        .expect("the default prefix yields a conformant subject")
+    CommandEndpoint::new(
+        SubjectPrefix::new(DEFAULT_SUBJECT_PREFIX).expect("the default prefix is a token"),
+        TenantPosition::Absent,
+    )
+    .expect("the default prefix yields a conformant subject")
 }
 
 fn router() -> CommandRouter {
-    CommandRouter::new(Arc::new(DeciderRegistryHandle::default()))
+    CommandRouter::new(endpoint(), Arc::new(DeciderRegistryHandle::default()))
 }
 
 fn config() -> ServerConfig {
@@ -106,7 +114,7 @@ fn fault_reason(reply: &CommandReply) -> String {
 #[test]
 fn a_command_no_module_claims_is_unroutable() {
     let reply = router()
-        .route(&request(CREATE_SCHEDULE).encode_to_vec(), None)
+        .route(PRINCIPAL_SUBJECT, &request(CREATE_SCHEDULE).encode_to_vec(), None)
         .expect_err("an empty registry claims nothing");
 
     assert_eq!(reply.decision(), DecisionOutcome::Faulted);
@@ -120,16 +128,64 @@ fn a_command_no_module_claims_is_unroutable() {
 #[test]
 fn a_payload_that_is_not_a_request_is_an_invalid_request() {
     let reply = router()
-        .route(&[0xff, 0xff, 0xff, 0xff], None)
+        .route(PRINCIPAL_SUBJECT, &UNDECODABLE_PAYLOAD, None)
         .expect_err("those bytes are not a DecideRequest");
 
     assert_eq!(fault_reason(&reply), FaultClass::InvalidRequest.reason());
 }
 
 #[test]
+fn a_subject_naming_no_principal_is_refused_before_the_payload_is_read() {
+    for subject in [
+        "decider.robot.alice.DeciderService.Decide",
+        "decider.agent.a*b.DeciderService.Decide",
+    ] {
+        let reply = router()
+            .route(subject, &UNDECODABLE_PAYLOAD, None)
+            .expect_err("the subject names nobody");
+
+        assert_eq!(
+            fault_reason(&reply),
+            "PRINCIPAL_MISSING",
+            "{subject:?} carries bytes that fail decoding, so any other reason means the payload was read first"
+        );
+        assert_eq!(
+            reply.service_error_status().map(|status| status.code),
+            Some(Code::UNAUTHENTICATED as i32)
+        );
+        assert_eq!(reply.decision(), DecisionOutcome::Denied);
+    }
+}
+
+#[test]
+fn a_principal_header_does_not_stand_in_for_the_subject() {
+    let mut headers = HeaderMap::new();
+    headers.insert(FORGED_PRINCIPAL_HEADER, "alice");
+
+    let reply = router()
+        .route(
+            "decider.robot.alice.DeciderService.Decide",
+            &request(CREATE_SCHEDULE).encode_to_vec(),
+            Some(&headers),
+        )
+        .expect_err("the subject names nobody");
+
+    assert_eq!(
+        fault_reason(&reply),
+        "PRINCIPAL_MISSING",
+        "a header is something the caller wrote, and only the subject is something the server checked"
+    );
+}
+
+#[test]
+fn the_router_reads_principals_where_the_host_subscribes() {
+    assert_eq!(router().endpoint(), &endpoint());
+}
+
+#[test]
 fn a_request_naming_no_command_is_an_invalid_request() {
     let reply = router()
-        .route(&DecideRequest::default().encode_to_vec(), None)
+        .route(PRINCIPAL_SUBJECT, &DecideRequest::default().encode_to_vec(), None)
         .expect_err("a request with no command names nothing to route");
 
     assert_eq!(fault_reason(&reply), FaultClass::InvalidRequest.reason());
@@ -141,7 +197,11 @@ fn an_encoding_the_host_does_not_speak_is_refused_before_routing() {
     headers.insert(CONTENT_TYPE_HEADER, "application/json");
 
     let reply = router()
-        .route(&request(CREATE_SCHEDULE).encode_to_vec(), Some(&headers))
+        .route(
+            PRINCIPAL_SUBJECT,
+            &request(CREATE_SCHEDULE).encode_to_vec(),
+            Some(&headers),
+        )
         .expect_err("json is not a decider command encoding");
 
     assert_eq!(
@@ -155,6 +215,7 @@ fn an_encoding_the_host_does_not_speak_is_refused_before_routing() {
 fn an_unparseable_command_id_outranks_an_unroutable_command_type() {
     let reply = router()
         .route(
+            PRINCIPAL_SUBJECT,
             &request(CREATE_SCHEDULE)
                 .with_command_id("not-a-uuid".to_owned())
                 .encode_to_vec(),
@@ -175,12 +236,12 @@ fn no_routing_failure_ever_reports_as_a_decision() {
         request(CREATE_SCHEDULE).encode_to_vec(),
         request("not-a-type-url").encode_to_vec(),
         DecideRequest::default().encode_to_vec(),
-        vec![0xff, 0xff, 0xff, 0xff],
+        UNDECODABLE_PAYLOAD.to_vec(),
     ];
 
     for payload in &payloads {
         let reply = router()
-            .route(payload, None)
+            .route(PRINCIPAL_SUBJECT, payload, None)
             .expect_err("nothing routes in an empty registry");
 
         assert!(
@@ -252,6 +313,28 @@ fn the_snapshot_bucket_keeps_only_the_revision_anyone_reads() {
         bucket.history, 1,
         "a snapshot is a cache of a fold, so every revision but the latest is storage nobody reads"
     );
+}
+
+#[test]
+fn a_host_asked_to_serve_several_tenants_names_the_state_they_would_share() {
+    let mut config = config();
+    config.endpoint = CommandEndpoint::new(
+        SubjectPrefix::new(DEFAULT_SUBJECT_PREFIX).expect("the default prefix is a token"),
+        TenantPosition::Wildcard,
+    )
+    .expect("the default prefix yields a conformant subject");
+    config.events_stream = "SHARED_EVENTS".to_owned();
+    config.snapshot_bucket = "SHARED_SNAPSHOTS".to_owned();
+
+    let Err(StartupError::StateNotScopedByTenant {
+        events_stream,
+        snapshot_bucket,
+    }) = ensure_one_tenant_account(&config)
+    else {
+        panic!("a command principal carries no tenant, so nothing would tell one tenant's streams from another's");
+    };
+    assert_eq!(events_stream, "SHARED_EVENTS");
+    assert_eq!(snapshot_bucket, "SHARED_SNAPSHOTS");
 }
 
 #[tokio::test]

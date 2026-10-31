@@ -6,6 +6,7 @@ use super::*;
 fn args() -> Args {
     Args {
         subject_prefix: None,
+        tenant_position: None,
         queue_group: None,
         events_stream: None,
         snapshot_bucket: None,
@@ -35,6 +36,7 @@ fn the_defaults_are_a_complete_deployment_but_for_the_modules() {
     let config = config(with_module(args()), &InMemoryEnv::new()).expect("defaults resolve");
 
     assert_eq!(config.endpoint.prefix().as_str(), "decider");
+    assert_eq!(config.endpoint.tenant(), TenantPosition::Absent);
     assert_eq!(config.queue_group, "q");
     assert_eq!(config.events_stream, "DECIDER_EVENTS");
     assert_eq!(config.snapshot_bucket, "DECIDER_SNAPSHOTS");
@@ -199,7 +201,44 @@ fn the_prefix_decides_the_subject_the_host_will_answer_on() {
 
     let config = config(with_module(args()), &env).expect("a dotted prefix resolves");
 
-    assert_eq!(config.endpoint.subject(), "acme.decider.DeciderService.Decide");
+    assert_eq!(config.endpoint.subscription(), "acme.decider.*.*.DeciderService.Decide");
+}
+
+#[test]
+fn a_host_in_the_platform_account_subscribes_across_tenants() {
+    let env = InMemoryEnv::new();
+    env.set(ENV_DECIDER_TENANT_POSITION, "wildcard");
+
+    let config = config(with_module(args()), &env).expect("a wildcard tenant position resolves");
+
+    assert_eq!(config.endpoint.tenant(), TenantPosition::Wildcard);
+    assert_eq!(config.endpoint.subscription(), "*.decider.*.*.DeciderService.Decide");
+}
+
+#[test]
+fn the_tenant_position_flag_wins_over_the_environment() {
+    let env = InMemoryEnv::new();
+    env.set(ENV_DECIDER_TENANT_POSITION, "wildcard");
+
+    let mut args = with_module(args());
+    args.tenant_position = Some("absent".to_owned());
+
+    let config = config(args, &env).expect("a flag resolves");
+
+    assert_eq!(config.endpoint.tenant(), TenantPosition::Absent);
+}
+
+#[test]
+fn a_tenant_position_the_host_cannot_subscribe_at_stops_startup() {
+    let env = InMemoryEnv::new();
+    env.set(ENV_DECIDER_TENANT_POSITION, "acme");
+
+    let error = config(with_module(args()), &env).expect_err("a tenant is not a position");
+
+    assert!(
+        matches!(error, ConfigError::TenantPosition(_)),
+        "falling back to either position would subscribe where nobody chose to: {error}"
+    );
 }
 
 #[test]

@@ -10,6 +10,14 @@ struct StoreRejectedError;
 #[error("jetstream is unreachable")]
 struct StorageDownError(#[source] StoreRejectedError);
 
+#[derive(Debug, thiserror::Error)]
+#[error("robot is not a principal kind")]
+struct UnknownKindError;
+
+#[derive(Debug, thiserror::Error)]
+#[error("the subject names no principal")]
+struct NoPrincipalError(#[source] UnknownKindError);
+
 fn error_info_of(status: &Status) -> ErrorInfo {
     find_detail::<ErrorInfo>(status).expect("every decider status names its reason")
 }
@@ -211,6 +219,34 @@ fn a_denial_says_only_what_the_authorizer_said() {
     assert!(
         find_detail::<DebugInfo>(&status).is_none(),
         "a denial names no internals: nothing was read, decided, or appended"
+    );
+}
+
+#[test]
+fn a_subject_naming_no_principal_is_refused_as_a_missing_principal() {
+    let refused = unauthenticated(&NoPrincipalError(UnknownKindError));
+    let missing = denied(&UnauthorizedError::MissingPrincipal);
+
+    assert_eq!(refused.code, Code::UNAUTHENTICATED as i32);
+    assert_eq!(
+        (refused.code, error_info_of(&refused).reason),
+        (missing.code, error_info_of(&missing).reason),
+        "a caller whose subject named nobody and one whose execution lost its principal both have to present who they are"
+    );
+    assert_eq!(error_info_of(&refused).domain, DECIDER_ERROR_DOMAIN);
+}
+
+#[test]
+fn a_subject_naming_no_principal_says_why_in_debug_info() {
+    let status = unauthenticated(&NoPrincipalError(UnknownKindError));
+
+    assert_eq!(status.message, "the subject names no principal");
+    assert_eq!(
+        find_detail::<DebugInfo>(&status)
+            .expect("the refusal has a cause")
+            .stack_entries,
+        vec!["robot is not a principal kind".to_owned()],
+        "an operator reading the refusal needs to know which token named nobody"
     );
 }
 
