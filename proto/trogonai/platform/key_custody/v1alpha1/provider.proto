@@ -1,0 +1,13 @@
+edition = "2024";
+
+package trogonai.platform.key_custody.v1alpha1;
+
+// The built-in key providers. Adding one requires code, conformance tests, and a
+// reviewed capability declaration (ADR#0030), so the set is closed. Unspecified
+// and unknown values are invalid wherever this enum is used.
+enum KeyProvider {
+  KEY_PROVIDER_UNSPECIFIED = 0;
+  KEY_PROVIDER_OPENBAO_TRANSIT = 1;
+  KEY_PROVIDER_AWS_KMS = 2;
+  KEY_PROVIDER_GOOGLE_CLOUD_KMS = 3;
+}

@@ -1,0 +1,121 @@
+edition = "2024";
+
+package trogonai.platform.key_custody.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogon/hierarchy/v1alpha1/node.proto";
+import "trogonai/platform/key_custody/v1alpha1/capability.proto";
+import "trogonai/platform/key_custody/v1alpha1/identity.proto";
+import "trogonai/platform/key_custody/v1alpha1/registration.proto";
+import "trogonai/platform/key_custody/v1alpha1/validation.proto";
+
+// A registration stream's events. Replay rejects unset/unknown events and
+// invalid transitions. Actor identity and occurrence time come from the event
+// envelope. These events record safe configuration and lifecycle facts, never
+// credentials, tokens, provider locators, or provider responses.
+message KeyBackendEvent {
+  oneof event {
+    option (buf.validate.oneof).required = true;
+    KeyBackendRegistered registered = 1;
+    KeyBackendValidated validated = 2;
+    KeyBackendValidationFailed validation_failed = 3;
+    KeyBackendPaused paused = 4;
+    KeyBackendResumed resumed = 5;
+    KeyBackendRetired retired = 6;
+    ExternalKeyBound external_key_bound = 7;
+  }
+}
+
+// Genesis facts only. Fold starts the registration pending validation,
+// ENABLED, with unknown health.
+message KeyBackendRegistered {
+  KeyBackendId key_backend_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  KeyBackendConfiguration configuration = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Only from PENDING_VALIDATION. Fold makes the registration ACTIVE and records
+// the connected observation as its health.
+message KeyBackendValidated {
+  option (buf.validate.message).cel = {
+    id: "validated.connected"
+    message: "a validated registration records a connected observation"
+    expression: "has(this.validation.observation.connected)"
+  };
+
+  KeyBackendId key_backend_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  KeyBackendValidation validation = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Records the failed observation as the registration's health and nothing else.
+// Lifecycle and admission do not change: a failed validation keeps a
+// registration PENDING_VALIDATION, and a failed resume keeps it PAUSED.
+message KeyBackendValidationFailed {
+  option (buf.validate.message).cel = {
+    id: "validation_failed.failed"
+    message: "a failed validation records a failed observation"
+    expression: "has(this.validation.observation.failed)"
+  };
+
+  KeyBackendId key_backend_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  KeyBackendValidation validation = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Only from ENABLED. Fold makes admission PAUSED.
+message KeyBackendPaused {
+  KeyBackendId key_backend_id = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Only from PAUSED. Fold makes admission ENABLED and records the connected
+// observation as the registration's health.
+message KeyBackendResumed {
+  option (buf.validate.message).cel = {
+    id: "resumed.connected"
+    message: "admission resumes only on a connected observation"
+    expression: "has(this.validation.observation.connected)"
+  };
+
+  KeyBackendId key_backend_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  KeyBackendValidation validation = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Terminal. Fold makes the registration RETIRED.
+message KeyBackendRetired {
+  KeyBackendId key_backend_id = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Records that a KeyRef is bound to the registration for a purpose. The
+// provider locator is not part of the event: it stays in service-private
+// binding state and in the owner's binding detail (ADR#0030).
+message ExternalKeyBound {
+  KeyBackendId key_backend_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  KeyRef key_ref = 2 [features.field_presence = LEGACY_REQUIRED];
+  KeyPurpose purpose = 3 [features.field_presence = LEGACY_REQUIRED];
+  repeated KeyCapability required_capabilities = 4 [(buf.validate.field).repeated = {
+    min_items: 1
+    unique: true
+    items: {
+      enum: {
+        defined_only: true
+        not_in: [0]
+      }
+    }
+  }];
+  KeyBindingValidationRef validation = 5 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// A tenant's default-key stream events. The same replay and provenance rules
+// apply.
+message DefaultKeyEvent {
+  oneof event {
+    option (buf.validate.oneof).required = true;
+    DefaultKeySet default_key_set = 1;
+  }
+}
+
+// Policy for future envelopes of the purpose. Existing envelopes keep the KeyRef
+// stored with them.
+message DefaultKeySet {
+  trogon.hierarchy.v1alpha1.NodeId tenant = 1 [features.field_presence = LEGACY_REQUIRED];
+  KeyPurpose purpose = 2 [features.field_presence = LEGACY_REQUIRED];
+  KeyRef key_ref = 3 [features.field_presence = LEGACY_REQUIRED];
+}

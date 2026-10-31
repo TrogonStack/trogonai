@@ -1,0 +1,65 @@
+edition = "2024";
+
+package trogonai.platform.key_custody.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// The full KMS key ARN, never a mutable alias ARN. A multi-Region key binds by
+// the exact ARN of the key in one Region like any other key, and the platform
+// never fails over to a replica (ADR#0030).
+message AwsKmsKeyArn {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.prefix = "arn:",
+    (buf.validate.field).string.not_contains = ":alias/"
+  ];
+}
+
+message AwsKmsKeyLocator {
+  AwsKmsKeyArn key_arn = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// The fully qualified CryptoKey resource name, never a CryptoKeyVersion name.
+// Symmetric decryption selects the version from the ciphertext, so no version
+// is part of the locator (ADR#0030).
+message GoogleCloudKmsCryptoKeyName {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.pattern = "^projects/[^/]+/locations/[^/]+/keyRings/[^/]+/cryptoKeys/[^/]+$"
+  ];
+}
+
+message GoogleCloudKmsKeyLocator {
+  GoogleCloudKmsCryptoKeyName crypto_key = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// The path of the Transit key within the registration's Transit mount. The
+// platform does not claim that an OpenBao path is an immutable native
+// identifier; a stored canary bound to the key proves continuity when
+// connection identity or trust material changes (ADR#0030).
+message OpenBaoTransitKeyPath {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+message OpenBaoTransitKeyLocator {
+  OpenBaoTransitKeyPath key_path = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// One exact native locator. It appears only in the authorized administrative
+// BindExternalKey command and in the owning tenant's detail of its own customer
+// managed binding (CustomerManagedKeyBindingDetail), never in a business
+// entity, an event, a wrap or unwrap request or response, a projection consumed
+// by another service or another tenant, or a platform-owned binding (ADR#0030).
+// The arm is the provider; a locator never changes for a KeyRef, and selecting
+// another native key always requires a new KeyRef and a rewrap migration.
+message ProviderKeyLocator {
+  oneof provider {
+    option (buf.validate.oneof).required = true;
+    OpenBaoTransitKeyLocator open_bao_transit = 1;
+    AwsKmsKeyLocator aws_kms = 2;
+    GoogleCloudKmsKeyLocator google_cloud_kms = 3;
+  }
+}
