@@ -2,7 +2,7 @@
 
 Translates [Agent Client Protocol](https://agentclientprotocol.com) (ACP) messages between stdio and [NATS](https://nats.io), letting IDEs and CLI tools talk to distributed agent backends without a direct network connection from the client.
 
-For managed NATS infrastructure in production, we recommend <a href="https://synadia.com/?utm_source=trogonai&utm_medium=referral&utm_campaign=trogonai&utm_content=acp-nats-stdio"><img src="./assets/synadia-logo.png" alt="Synadia" width="20" style="vertical-align: middle;"> Synadia</a>.
+For managed NATS infrastructure in production, we recommend <a href="https://synadia.com/?utm_source=trogonai&utm_medium=referral&utm_campaign=trogonai&utm_content=acp-nats-stdio" rel="noopener"><img src="./assets/synadia-logo.png" alt="Synadia" width="20" style="vertical-align: middle;"> Synadia</a>.
 
 ```mermaid
 graph LR

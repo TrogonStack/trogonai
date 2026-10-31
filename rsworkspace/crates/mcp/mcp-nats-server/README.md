@@ -3,7 +3,7 @@
 Translates [Model Context Protocol](https://modelcontextprotocol.io) (MCP)
 messages between [NATS](https://nats.io) and Streamable HTTP served on `/mcp`.
 
-For managed NATS infrastructure in production, we recommend <a href="https://synadia.com/?utm_source=trogonai&utm_medium=referral&utm_campaign=trogonai&utm_content=mcp-nats-server"><img src="../acp-nats-stdio/assets/synadia-logo.png" alt="Synadia" width="20" style="vertical-align: middle;"> Synadia</a>.
+For managed NATS infrastructure in production, we recommend <a href="https://synadia.com/?utm_source=trogonai&utm_medium=referral&utm_campaign=trogonai&utm_content=mcp-nats-server" rel="noopener"><img src="../acp-nats-stdio/assets/synadia-logo.png" alt="Synadia" width="20" style="vertical-align: middle;"> Synadia</a>.
 
 ```mermaid
 graph LR
