@@ -21,6 +21,7 @@ pub mod event_subject;
 pub mod module_reference;
 pub mod module_source;
 pub mod outcome;
+pub mod principal_prefix;
 pub mod request;
 pub mod runtime;
 pub mod status;
@@ -37,6 +38,7 @@ pub use module_source::{
     OpenModuleBucketError, ProvisionModuleBucketError, PublishModuleError,
 };
 pub use outcome::CommandReply;
+pub use principal_prefix::{PrincipalPrefix, PrincipalPrefixError};
 pub use request::{CommandRequest, CommandRequestError};
 pub use runtime::{CommandRouter, DeciderHost, RoutedCommand, ServeError, StartupError, serve, serve_until};
 pub use status::{FaultClass, find_detail};

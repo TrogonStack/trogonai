@@ -12,15 +12,19 @@ use std::time::Duration;
 use async_nats::jetstream::{self, message::StreamMessage};
 use async_nats::{HeaderMap, RequestError, RequestErrorKind};
 use buffa::Message as _;
+use grpc_nats_micro::{
+    ContentType, DiscoveryMetadata, EndpointBinding, MethodName, MethodNameInput, ServiceName, ServiceNameInput,
+    SubjectPrefix as MicroSubjectPrefix, SubjectPrefixInput,
+};
 use tokio_util::sync::CancellationToken;
 use trogon_decider_nats::DuplicateWindow;
 use trogon_decider_nats_server::constants::{
-    CONTENT_TYPE_HEADER, DEFAULT_QUEUE_GROUP, DEFAULT_SUBJECT_PREFIX, NATS_SERVICE_ERROR_CODE_HEADER,
-    PROTOBUF_CONTENT_TYPE, TYPE_URL_PREFIX,
+    CONTENT_TYPE_HEADER, DECIDE_METHOD_NAME, DECIDER_SERVICE_NAME, DEFAULT_QUEUE_GROUP, DEFAULT_SUBJECT_PREFIX,
+    NATS_SERVICE_ERROR_CODE_HEADER, PROTOBUF_CONTENT_TYPE, TYPE_URL_PREFIX,
 };
 use trogon_decider_nats_server::{
-    CommandEndpoint, DeciderHost, FaultClass, FileModuleSource, ModuleReference, ModuleStore, ServerConfig,
-    SubjectPrefix, TenantPosition, find_detail, serve_until,
+    CommandEndpoint, DeciderHost, FaultClass, FileModuleSource, ModuleReference, ModuleStore, PrincipalPrefix,
+    ServerConfig, SubjectPrefix, TenantPosition, find_detail, serve_until,
 };
 use trogon_decider_runtime::{
     AdmissionLimit, AuthorizationDeniedError, CommandAuthorizer, CommandPrincipal, PrincipalId, PrincipalKind,
@@ -513,6 +517,40 @@ async fn a_host_serving_several_tenants_reads_the_principal_after_the_tenant_tok
         reached_no_handler(&untenanted),
         "a subject without the tenant token has no tenant for the host to act under: {untenanted}"
     );
+
+    host.stop().await;
+}
+
+#[tokio::test]
+async fn a_client_whose_prefix_ends_in_its_principal_reaches_the_host() {
+    let host = RunningHost::start().await;
+
+    let prefix = PrincipalPrefix::new(
+        endpoint(TenantPosition::Absent).prefix(),
+        PrincipalKind::Agent,
+        &alice_id(),
+    )
+    .expect("alice can be carried in a subject");
+    let binding = EndpointBinding::new(
+        &MicroSubjectPrefix::from_input(&SubjectPrefixInput::new(prefix.as_str())).expect("a micro subject prefix"),
+        &ServiceName::from_input(&ServiceNameInput::new(DECIDER_SERVICE_NAME)).expect("a micro service name"),
+        MethodName::from_input(&MethodNameInput::new(DECIDE_METHOD_NAME)).expect("a micro method name"),
+        DiscoveryMetadata::default(),
+    )
+    .expect("the binding derives its subject");
+
+    let accepted: decider_v1::DecideResponse = grpc_nats_micro::client::request(
+        &host.client,
+        &binding,
+        ContentType::Protobuf,
+        &create_schedule(SCHEDULE_ID),
+        Duration::from_secs(20),
+    )
+    .await
+    .expect("the host decides what the client sends");
+
+    assert_eq!(binding.subject().as_str(), ALICE_SUBJECT);
+    assert_eq!(accepted.stream_position, 1);
 
     host.stop().await;
 }
