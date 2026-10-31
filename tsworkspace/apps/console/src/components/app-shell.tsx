@@ -3,6 +3,7 @@ import {
   BirdIcon,
   FolderKanbanIcon,
   KeyRoundIcon,
+  KeySquareIcon,
   LayersIcon,
   MonitorIcon,
   MoonIcon,
@@ -18,6 +19,7 @@ import { useTheme, type ThemePreference } from '@/components/theme-provider';
 import { Button } from '@/components/ui/button';
 import { Segmented, type SegmentedOption } from '@/components/ui/segmented';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useBackendQuery, useCustodyQuery } from '@/features/custody/queries';
 import { useEnvironmentQuery, useEnvironmentsQuery } from '@/features/environments/queries';
 import type { NodeId } from '@/features/hierarchy/domain/node-id';
 import { useHierarchyView } from '@/features/hierarchy/queries';
@@ -104,6 +106,7 @@ function Sidebar({ collapsed }: { collapsed: boolean }) {
   const connections = useConnectionsQuery();
   const credentials = useCredentialsQuery();
   const environments = useEnvironmentsQuery();
+  const custody = useCustodyQuery();
   const label = collapsed ? 'hidden' : 'hidden lg:inline';
   const block = collapsed ? 'hidden' : 'hidden lg:flex';
   return (
@@ -194,6 +197,25 @@ function Sidebar({ collapsed }: { collapsed: boolean }) {
             <KeyRoundIcon className="size-4 shrink-0" aria-hidden="true" />
             <span className={label}>Secrets</span>
             <NavCount collapsed={collapsed} count={credentials.data?.length} />
+          </Link>
+        </div>
+        <div className="flex flex-col gap-1">
+          <p className={cn('micro flex items-center gap-2 px-2.5 pt-2 pb-1 text-[10px] text-muted-foreground', label)}>
+            <span aria-hidden="true" className="bg-muted-foreground/50 h-px w-2" />
+            Security
+          </p>
+          <Link
+            to="/keys"
+            title="Encryption keys"
+            className="group/nav text-sidebar-foreground hover:bg-foreground/5 focus-visible:ring-sidebar-ring/70 data-[status=active]:bg-sidebar-accent data-[status=active]:text-sidebar-accent-foreground relative flex h-9 items-center gap-2.5 rounded-md px-2.5 text-[13px] font-medium transition-colors outline-none focus-visible:ring-2"
+          >
+            <span
+              aria-hidden="true"
+              className="bg-primary absolute top-1.5 bottom-1.5 -left-2 w-[3px] rounded-r-full opacity-0 shadow-[0_0_10px_1px_var(--primary)] transition-opacity group-data-[status=active]/nav:opacity-100"
+            />
+            <KeySquareIcon className="size-4 shrink-0" aria-hidden="true" />
+            <span className={label}>Encryption keys</span>
+            <NavCount collapsed={collapsed} count={custody.data?.stats.keys} />
           </Link>
         </div>
         <div className="flex flex-col gap-1">
@@ -305,6 +327,38 @@ function CredentialCrumbs({ secretRef }: { secretRef: string }) {
   return <ScopedCrumbs crumbs={[{ label: 'Secrets', to: '/secrets' }, { label: name }]} />;
 }
 
+function BackendCrumb({ backendId }: { backendId: string }) {
+  const query = useBackendQuery(backendId);
+  const name = query.data ? query.data.displayName : backendId;
+  return (
+    <Breadcrumbs
+      crumbs={[{ label: 'Encryption keys', to: '/keys' }, { label: 'Backends', to: '/keys/backends' }, { label: name }]}
+    />
+  );
+}
+
+function KeysCrumbs({ segments }: { segments: readonly string[] }) {
+  if (segments.length === 1) return <Breadcrumbs crumbs={[{ label: 'Encryption keys' }]} />;
+  if (segments[1] === 'backends') {
+    if (segments.length === 2) {
+      return <Breadcrumbs crumbs={[{ label: 'Encryption keys', to: '/keys' }, { label: 'Backends' }]} />;
+    }
+    if (segments[2] === 'new') {
+      return (
+        <Breadcrumbs
+          crumbs={[
+            { label: 'Encryption keys', to: '/keys' },
+            { label: 'Backends', to: '/keys/backends' },
+            { label: 'Register a backend' },
+          ]}
+        />
+      );
+    }
+    return <BackendCrumb backendId={decodeURIComponent(segments[2]!)} />;
+  }
+  return <Breadcrumbs crumbs={[{ label: 'Encryption keys' }]} />;
+}
+
 function Breadcrumbs({ crumbs }: { crumbs: readonly Crumb[] }) {
   return (
     <nav aria-label="Breadcrumb" className="min-w-0">
@@ -361,6 +415,7 @@ function RouteBreadcrumbs() {
     }
     return <ScopedCrumbs crumbs={[{ label: 'Secrets' }]} />;
   }
+  if (segments[0] === 'keys') return <KeysCrumbs segments={segments} />;
   if (segments[0] === 'environments') {
     if (segments[1]) return <EnvironmentCrumbs environmentId={decodeURIComponent(segments[1])} />;
     return <ScopedCrumbs crumbs={[{ label: 'Environments' }]} />;
