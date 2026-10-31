@@ -304,15 +304,19 @@ must read stream state to decide is expressing a domain rule, and a domain rule 
 
 The runtime ships only the seam; the NATS host is where a principal comes from. Per
 [ADR#0082](../adr/0082-bus-principal-from-subject-and-edge-proof-of-possession.md),
-`trogon-decider-nats-server` subscribes on `[{tenant}.]{prefix}.*.*.DeciderService.Decide` and
+`trogon-decider-nats-server` subscribes on `{prefix}.*.*.DeciderService.Decide` and
 reads the principal from the `{kind}.{id}` tokens of the subject the server delivered, before it
 decodes the request. A pair of tokens that names no principal is refused with `UNAUTHENTICATED`
 and `PRINCIPAL_MISSING`, and a subject without those tokens matches no subscription at all, so
 no header or payload field can stand in for them. The derived principal carries no claims and no
 directed principal, because the subject has no position for either. A client acting for a
-principal configures a `PrincipalPrefix`, the host's prefix followed by that principal's tokens,
-and a host serving several tenants is started with `DECIDER_TENANT_POSITION=wildcard` so it
-subscribes at the tenant position as well.
+principal configures a `PrincipalPrefix`, the host's prefix followed by that principal's tokens.
+
+A host serves one tenant account until decider state is scoped by tenant. The derived principal
+carries no tenant, and every command a host runs shares its one events stream and snapshot
+bucket, so a host serving several tenants would let one tenant's commands replay and append to
+another tenant's streams. `DeciderHost::start` therefore refuses `DECIDER_TENANT_POSITION=wildcard`
+before it fetches or provisions anything, and nothing overrides that refusal.
 
 Every execution the host runs is built with `with_principal` and `with_authorizer`. A host given
 no policy of its own authorizes with `AdmitAnyPrincipal`, which admits any derived principal and,

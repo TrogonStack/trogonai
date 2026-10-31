@@ -66,6 +66,8 @@ pub const TENANT_POSITION_ABSENT: &str = "absent";
 
 /// Tenant position of a host in the platform account, whose subjects lead with
 /// the tenant they were published for.
+///
+/// A host refuses to start at it until decider state is scoped by tenant.
 pub const TENANT_POSITION_WILDCARD: &str = "wildcard";
 
 /// The developer-facing description on a service error, per ADR#0016.
@@ -86,6 +88,9 @@ pub const PROTOBUF_CONTENT_TYPE: &str = "application/protobuf";
 pub const ENV_DECIDER_SUBJECT_PREFIX: &str = "DECIDER_SUBJECT_PREFIX";
 
 /// Environment variable naming the tenant position the host subscribes with.
+///
+/// A host serves one tenant account until decider state is scoped by tenant,
+/// so only [`TENANT_POSITION_ABSENT`] starts one.
 pub const ENV_DECIDER_TENANT_POSITION: &str = "DECIDER_TENANT_POSITION";
 
 /// Environment variable naming the queue group.
