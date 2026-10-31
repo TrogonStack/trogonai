@@ -4,8 +4,9 @@ use {
     a2a_auth_callout::XkeyPublic,
     a2a_bridge::{
         AppState, AsyncNatsAuthMintWire, AsyncNatsTokenGatewayUnary, AsyncNatsTokenTaskJetstream,
-        AuthCalloutJsonMintClient, BridgeError, BridgeTenantAccount, CallerConnectTimeout, GatewayInboundPublisher,
-        GatewayRpcTimeout, StubAuthCalloutClient, StubInboundGatewayPublish, StubTaskJetStreamPort, gateway_router,
+        AuthCalloutJsonMintClient, BridgeError, BridgeTenantAccount, CallerConnectTimeout,
+        ENV_AUTH_CALLOUT_XKEY_PUBLIC, GatewayInboundPublisher, GatewayRpcTimeout, StubAuthCalloutClient,
+        StubInboundGatewayPublish, StubTaskJetStreamPort, gateway_router,
     },
     a2a_nats::{A2aPrefix, DEFAULT_A2A_PREFIX, ENV_A2A_PREFIX},
     std::{future::Future, net::SocketAddr, sync::Arc, time::Duration},
@@ -68,7 +69,7 @@ enum BootstrapError {
     NoNatsServers,
     #[error("NATS connect failed: {0}")]
     NatsConnect(#[source] trogon_nats::ConnectError),
-    #[error("AUTH_CALLOUT_XKEY_PUBLIC is not a curve public key: {0}")]
+    #[error("{env_var} is not a curve public key: {0}", env_var = ENV_AUTH_CALLOUT_XKEY_PUBLIC)]
     CalloutXkey(#[source] a2a_auth_callout::AuthCalloutError),
     #[error("bind failed: {0}")]
     Listen(#[source] std::io::Error),
@@ -88,7 +89,7 @@ fn resolve_a2a_prefix(env: &impl ReadEnv) -> Result<A2aPrefix, BridgeError> {
 }
 
 fn resolve_callout_xkey(env: &impl ReadEnv) -> Result<Option<XkeyPublic>, BootstrapError> {
-    match env.var("AUTH_CALLOUT_XKEY_PUBLIC") {
+    match env.var(ENV_AUTH_CALLOUT_XKEY_PUBLIC) {
         Ok(raw) if !raw.trim().is_empty() => XkeyPublic::parse(raw).map(Some).map_err(BootstrapError::CalloutXkey),
         _ => Ok(None),
     }
@@ -156,7 +157,7 @@ async fn bootstrap_nats_transport(
         Some(callout_xkey) => auth_client.sealing_to(callout_xkey),
         None => {
             tracing::warn!(
-                env_var = "AUTH_CALLOUT_XKEY_PUBLIC",
+                env_var = ENV_AUTH_CALLOUT_XKEY_PUBLIC,
                 "no callout xkey is configured, so every caller credential mint is refused"
             );
             auth_client

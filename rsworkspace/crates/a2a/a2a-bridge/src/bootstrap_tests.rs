@@ -232,15 +232,15 @@ async fn stub_bootstrap_returns_an_explicit_authentication_failure() -> Result<(
 fn callout_xkey_input_is_optional_but_must_be_a_curve_public_key_when_set() -> Result<(), TestError> {
     let env = InMemoryEnv::new();
     assert!(resolve_callout_xkey(&env)?.is_none());
-    env.set("AUTH_CALLOUT_XKEY_PUBLIC", "   ");
+    env.set(ENV_AUTH_CALLOUT_XKEY_PUBLIC, "   ");
     assert!(resolve_callout_xkey(&env)?.is_none());
     let callout = callout_xkey()?;
     env.set(
-        "AUTH_CALLOUT_XKEY_PUBLIC",
+        ENV_AUTH_CALLOUT_XKEY_PUBLIC,
         format!(" {} ", callout.public_key().as_str()),
     );
     assert_eq!(resolve_callout_xkey(&env)?, Some(callout.public_key()));
-    env.set("AUTH_CALLOUT_XKEY_PUBLIC", "not-an-xkey");
+    env.set(ENV_AUTH_CALLOUT_XKEY_PUBLIC, "not-an-xkey");
     assert!(matches!(
         resolve_callout_xkey(&env),
         Err(BootstrapError::CalloutXkey(_))
@@ -251,7 +251,7 @@ fn callout_xkey_input_is_optional_but_must_be_a_curve_public_key_when_set() -> R
 #[tokio::test]
 async fn nats_bootstrap_refuses_a_malformed_callout_xkey_before_connecting() -> Result<(), TestError> {
     let env = InMemoryEnv::new();
-    env.set("AUTH_CALLOUT_XKEY_PUBLIC", "not-an-xkey");
+    env.set(ENV_AUTH_CALLOUT_XKEY_PUBLIC, "not-an-xkey");
     let result = bootstrap_nats_transport(
         &env,
         &NatsConfig::from_url("invalid://endpoint"),
@@ -306,9 +306,11 @@ async fn bootstrap_diagnostics_reach_the_log_facade_before_tracing_initializatio
     let unsealed = records
         .iter()
         .find(|record| record.message.contains("no callout xkey is configured"));
-    assert!(unsealed.is_some_and(
-        |record| record.level == LogLevel::Warn && record.message.contains("AUTH_CALLOUT_XKEY_PUBLIC")
-    ));
+    assert!(
+        unsealed.is_some_and(
+            |record| record.level == LogLevel::Warn && record.message.contains(ENV_AUTH_CALLOUT_XKEY_PUBLIC)
+        )
+    );
     let nats = records
         .iter()
         .find(|record| record.message.contains("a2a-bridge NATS transports wired"));
@@ -357,7 +359,7 @@ async fn nats_bootstrap_wires_mint_subject_tenant_and_gateway_namespace() -> Res
         env.set("BRIDGE_CONNECT_TIMEOUT_SECS", "2");
         env.set("BRIDGE_AUTH_MINT_TIMEOUT_SECS", "10");
         env.set("BRIDGE_GATEWAY_RPC_TIMEOUT_SECS", "2");
-        env.set("AUTH_CALLOUT_XKEY_PUBLIC", callout.public_key().as_str());
+        env.set(ENV_AUTH_CALLOUT_XKEY_PUBLIC, callout.public_key().as_str());
         if configured_subject == Some("  custom.mint  ") {
             env.set("NATS_USER", "fixture");
             env.set("NATS_PASSWORD", "fixture");
@@ -471,7 +473,7 @@ async fn nats_bootstrap_bounds_caller_connections_by_the_connect_timeout_not_the
         let env = InMemoryEnv::new();
         env.set("NATS_URL", &proxy.address);
         env.set("NATS_TLS_DISABLED", "true");
-        env.set("AUTH_CALLOUT_XKEY_PUBLIC", callout.public_key().as_str());
+        env.set(ENV_AUTH_CALLOUT_XKEY_PUBLIC, callout.public_key().as_str());
         env.set("BRIDGE_CONNECT_TIMEOUT_SECS", "2");
         env.set("BRIDGE_AUTH_MINT_TIMEOUT_SECS", "10");
         env.set("BRIDGE_GATEWAY_RPC_TIMEOUT_SECS", "3600");
