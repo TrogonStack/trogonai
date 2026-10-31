@@ -3,8 +3,8 @@
 use {
     a2a_bridge::{
         AppState, AsyncNatsAuthMintWire, AsyncNatsTokenGatewayUnary, AsyncNatsTokenTaskJetstream,
-        AuthCalloutJsonMintClient, BridgeError, BridgeTenantAccount, GatewayInboundPublisher, StubAuthCalloutClient,
-        StubInboundGatewayPublish, StubTaskJetStreamPort, gateway_router,
+        AuthCalloutJsonMintClient, BridgeError, BridgeTenantAccount, CallerConnectTimeout, GatewayInboundPublisher,
+        GatewayRpcTimeout, StubAuthCalloutClient, StubInboundGatewayPublish, StubTaskJetStreamPort, gateway_router,
     },
     a2a_nats::{A2aPrefix, DEFAULT_A2A_PREFIX, ENV_A2A_PREFIX},
     std::{future::Future, net::SocketAddr, sync::Arc, time::Duration},
@@ -146,9 +146,11 @@ async fn bootstrap_nats_transport(
         tenant_account,
     ));
 
+    let caller_connect_timeout = CallerConnectTimeout::new(connect_timeout);
     let unary = GatewayInboundPublisher::new(Arc::new(AsyncNatsTokenGatewayUnary::new(
         nats.clone(),
-        gateway_rpc_timeout,
+        caller_connect_timeout,
+        GatewayRpcTimeout::new(gateway_rpc_timeout),
     )));
 
     tracing::info!(
@@ -163,7 +165,7 @@ async fn bootstrap_nats_transport(
     Ok(AppState::new(
         auth_client,
         Arc::new(unary),
-        Arc::new(AsyncNatsTokenTaskJetstream::new(nats.clone(), gateway_rpc_timeout)),
+        Arc::new(AsyncNatsTokenTaskJetstream::new(nats.clone(), caller_connect_timeout)),
         prefix,
     ))
 }
