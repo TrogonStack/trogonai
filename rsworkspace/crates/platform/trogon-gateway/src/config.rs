@@ -39,7 +39,7 @@ use trogon_config_value::{ConfigValue, ConfigValueError};
 use trogon_nats::NatsAuth;
 use trogon_nats::jetstream::StreamMaxAge;
 use trogon_nats::{NatsToken, SubjectTokenViolationError};
-use trogon_service_config::{NatsArgs, NatsConfigSection, load_config, resolve_nats};
+use trogon_service_config::{NatsArgs, NatsArgsError, NatsConfigSection, load_config, resolve_nats};
 use trogon_std::env::{ReadEnv, SystemEnv};
 use trogon_std::{ByteSize, HttpBodySizeMax, NonZeroDuration, ZeroDurationError};
 
@@ -375,6 +375,8 @@ pub enum ConfigError {
     Load(#[source] confique::Error),
     #[error(transparent)]
     Validation(AggregateValidationError),
+    #[error(transparent)]
+    Nats(NatsArgsError),
 }
 
 #[derive(Config)]
@@ -781,7 +783,7 @@ pub fn load_with_overrides(
 }
 
 fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs, env: &impl ReadEnv) -> Result<ResolvedConfig, ConfigError> {
-    let nats = resolve_nats(&cfg.nats, nats_overrides);
+    let nats = resolve_nats(&cfg.nats, nats_overrides).map_err(ConfigError::Nats)?;
     let mut errors = Vec::new();
 
     let github = resolve_github_integrations(cfg.sources.github, env, &mut errors);
