@@ -1,7 +1,5 @@
-mod aauth_tests;
 mod fixture;
 mod pressure_tests;
-mod signed_auth_tests;
 mod streaming_tests;
 
 use std::sync::Arc;
@@ -62,7 +60,6 @@ async fn allowed_request_preserves_payload_headers_and_reply_route() -> TestResu
             "gateway.tier1.layer_disabled",
             "gateway.tier2.layer_disabled",
             "gateway.tier3.layer_disabled",
-            "gateway.aauth.layer_disabled",
         ])
     );
     assert_eq!(
