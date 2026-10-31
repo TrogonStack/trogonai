@@ -1,28 +1,17 @@
 //! JetStream publishes for push dispatcher terminal failures (`A2A_PUSH_DLQ`).
 
 use async_nats::HeaderMap;
+use async_nats::subject::ToSubject;
 use bytes::Bytes;
 use serde::Serialize;
 
-use crate::a2a_prefix::A2aPrefix;
 use crate::constants::NATS_MSG_ID_HEADER;
 pub use crate::constants::PUSH_DLQ_SCHEMA_V1;
-use crate::push::caller_id::CallerId;
+use crate::nats::subjects::push::PushDlqSubject;
 use crate::push::dispatch_error::DispatchError;
 use crate::push::dlq_dedup::PushDlqDedupGate;
 use crate::push::push_idempotency_key::PushIdempotencyKey;
 use crate::push::status_transition_id::StatusTransitionId;
-use crate::task_id::A2aTaskId;
-
-/// `{prefix}.v1.push.dlq.{caller_id}.{task_id}` — trailing tokens match the `A2A_PUSH_DLQ` stream filter `{prefix}.v1.push.dlq.*.*`.
-pub fn push_dlq_publish_subject(prefix: &A2aPrefix, caller_id: &CallerId, task_id: &A2aTaskId) -> String {
-    format!(
-        "{}.v1.push.dlq.{}.{}",
-        prefix.as_str(),
-        caller_id.as_str(),
-        task_id.as_str()
-    )
-}
 
 /// JSON envelope for terminal push delivery failures (`schema`: **`a2a.v1.push.dlq/v1`**).
 ///
@@ -43,13 +32,10 @@ fn notification_body_json(payload: &[u8]) -> serde_json::Value {
         .unwrap_or_else(|_| serde_json::Value::String(String::from_utf8_lossy(payload).into_owned()))
 }
 
-/// Publishes a JSON failure record onto the push DLQ subject (captures **`A2A_PUSH_DLQ`**).
-#[allow(clippy::too_many_arguments)]
+/// Publishes a JSON failure record onto the caller's dead-letter subject (captured by **`A2A_PUSH_DLQ`**).
 pub async fn publish_push_delivery_failure<J>(
     js: &J,
-    prefix: &A2aPrefix,
-    caller_id: &CallerId,
-    task_id: &A2aTaskId,
+    dead_letter: &PushDlqSubject,
     config: &a2a::types::TaskPushNotificationConfig,
     notification_payload: &[u8],
     dispatch_error: &DispatchError,
@@ -58,6 +44,7 @@ pub async fn publish_push_delivery_failure<J>(
 ) where
     J: trogon_nats::jetstream::JetStreamPublisher + Clone + Send + Sync,
 {
+    let task_id = dead_letter.task_id();
     let idempotency_key = PushIdempotencyKey::derive_dlq(task_id, &status_transition_id, config.url.as_str());
 
     let config_id_str = config.id.as_deref().unwrap_or("");
@@ -70,8 +57,6 @@ pub async fn publish_push_delivery_failure<J>(
         );
         return;
     }
-
-    let subject = push_dlq_publish_subject(prefix, caller_id, task_id);
 
     let body = PushDlqMessageV1 {
         schema: PUSH_DLQ_SCHEMA_V1,
@@ -93,20 +78,16 @@ pub async fn publish_push_delivery_failure<J>(
     headers.insert(NATS_MSG_ID_HEADER, idempotency_key.as_str());
 
     match js
-        .publish_with_headers(
-            async_nats::Subject::from(subject.as_str()),
-            headers,
-            Bytes::from(bytes_vec),
-        )
+        .publish_with_headers(dead_letter.to_subject(), headers, Bytes::from(bytes_vec))
         .await
     {
         Ok(fut) => {
             if let Err(e) = fut.await {
-                tracing::warn!(%task_id, %subject, error = %e, "JetStream ack failed for push DLQ publish");
+                tracing::warn!(%task_id, subject = %dead_letter, error = %e, "JetStream ack failed for push DLQ publish");
             }
         }
         Err(e) => {
-            tracing::warn!(%task_id, %subject, error = %e, "failed to publish push DLQ message");
+            tracing::warn!(%task_id, subject = %dead_letter, error = %e, "failed to publish push DLQ message");
         }
     }
 }

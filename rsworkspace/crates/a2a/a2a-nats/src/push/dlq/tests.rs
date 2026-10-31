@@ -2,12 +2,12 @@ use std::sync::{Arc, Mutex};
 
 use super::*;
 use crate::a2a_prefix::A2aPrefix;
-use crate::constants::DEFAULT_PUSH_DLQ_CALLER_SEGMENT;
-use crate::push::caller_id::resolve_push_dlq_caller_id;
 use crate::push::dispatch_error::DispatchError;
 use crate::push::push_notification_target::PushNotificationTargetError;
 use crate::push::terminal_push_task_state::TerminalPushTaskState;
+use crate::task_id::A2aTaskId;
 use bytes::Bytes;
+use trogon_identity_types::SubjectPrincipal;
 use trogon_nats::jetstream::JetStreamPublisher;
 
 #[derive(Clone, Default)]
@@ -75,8 +75,12 @@ impl JetStreamPublisher for AckFailingPublisher {
     }
 }
 
-fn prefix() -> A2aPrefix {
-    A2aPrefix::new("a2a".to_string()).unwrap()
+fn dead_letter(task_id: &str) -> PushDlqSubject {
+    PushDlqSubject::new(
+        &A2aPrefix::new("a2a".to_string()).unwrap(),
+        &SubjectPrincipal::from_tokens("person", "alice").unwrap(),
+        &A2aTaskId::new(task_id).unwrap(),
+    )
 }
 
 fn sample_config() -> a2a::types::TaskPushNotificationConfig {
@@ -91,42 +95,6 @@ fn sample_config() -> a2a::types::TaskPushNotificationConfig {
 }
 
 #[test]
-fn push_dlq_subject_default_caller_round_trips_expected_pattern() {
-    let prefix = A2aPrefix::new("a2a".to_string()).unwrap();
-    let tid = A2aTaskId::new("task7").unwrap();
-    assert_eq!(
-        push_dlq_publish_subject(&prefix, &CallerId::default(), &tid),
-        "a2a.v1.push.dlq._.task7"
-    );
-}
-
-#[test]
-fn push_dlq_subject_includes_derived_principal_caller_segment() {
-    let prefix = A2aPrefix::new("a2a".to_string()).unwrap();
-    let tid = A2aTaskId::new("task7").unwrap();
-    let cid = CallerId::from_principal(&a2a_identity_types::SpiceDbPrincipal(
-        serde_json::json!({"spicedb_subject": "c1-d2"}),
-    ));
-    assert_eq!(
-        push_dlq_publish_subject(&prefix, &cid, &tid),
-        "a2a.v1.push.dlq.c1-d2.task7"
-    );
-}
-
-#[test]
-fn push_dlq_subject_percent_encodes_dotted_principal_caller_segment() {
-    let prefix = A2aPrefix::new("a2a".to_string()).unwrap();
-    let tid = A2aTaskId::new("task7").unwrap();
-    let cid = CallerId::from_principal(&a2a_identity_types::SpiceDbPrincipal(
-        serde_json::json!({"spicedb_subject": "c1.d2"}),
-    ));
-    assert_eq!(
-        push_dlq_publish_subject(&prefix, &cid, &tid),
-        "a2a.v1.push.dlq.c1%2Ed2.task7"
-    );
-}
-
-#[test]
 fn notification_body_json_preserves_objects() {
     let v = notification_body_json(br#"{"a":1}"#);
     assert_eq!(v, serde_json::json!({"a": 1}));
@@ -138,70 +106,42 @@ fn notification_body_json_fallback_to_string_for_non_utfish() {
     assert!(matches!(value, serde_json::Value::String(ref s) if s.contains('\u{fffd}')));
 }
 
-#[test]
-fn resolve_absent_principal_keeps_fallback_caller_segment() {
-    let fallback = CallerId::default();
-    assert_eq!(
-        resolve_push_dlq_caller_id(None, &fallback).as_str(),
-        DEFAULT_PUSH_DLQ_CALLER_SEGMENT
-    );
-}
+#[tokio::test]
+async fn publish_lands_on_the_callers_dead_letter_subject_and_carries_no_caller_header() {
+    let js = RecordingPublisher::default();
+    let dedup = PushDlqDedupGate::with_capacity(32);
+    let err = DispatchError::InvalidTarget(PushNotificationTargetError::UnknownScheme { raw: "bad".into() });
 
-#[test]
-fn resolve_principal_with_spicedb_subject_builds_dlq_subject() {
-    let prefix = A2aPrefix::new("a2a".to_string()).unwrap();
-    let tid = A2aTaskId::new("task7").unwrap();
-    let p = a2a_identity_types::SpiceDbPrincipal(serde_json::json!({"spicedb_subject": "c1-d2"}));
-    let cid = resolve_push_dlq_caller_id(Some(&p), &CallerId::default());
-    assert_eq!(
-        push_dlq_publish_subject(&prefix, &cid, &tid),
-        "a2a.v1.push.dlq.c1-d2.task7"
-    );
-}
+    publish_push_delivery_failure(
+        &js,
+        &dead_letter("task-1"),
+        &sample_config(),
+        br#"{}"#,
+        &err,
+        StatusTransitionId::from_terminal(TerminalPushTaskState::Failed),
+        &dedup,
+    )
+    .await;
 
-#[test]
-fn resolve_principal_without_spicedb_subject_falls_back() {
-    let prefix = A2aPrefix::new("a2a".to_string()).unwrap();
-    let tid = A2aTaskId::new("task7").unwrap();
-    let p = a2a_identity_types::SpiceDbPrincipal(serde_json::json!({}));
-    let cid = resolve_push_dlq_caller_id(Some(&p), &CallerId::default());
-    assert_eq!(push_dlq_publish_subject(&prefix, &cid, &tid), "a2a.v1.push.dlq._.task7");
+    let published = js.publishes.lock().unwrap();
+    let (subject, headers, _) = published.first().expect("one dead letter");
+    assert_eq!(subject, "a2a.v1.push.dlq.person.alice.task-1");
+    let mut names: Vec<String> = headers.iter().map(|(name, _)| name.to_string()).collect();
+    names.sort();
+    assert_eq!(names, ["Content-Type", NATS_MSG_ID_HEADER]);
 }
 
 #[tokio::test]
 async fn second_publish_with_same_key_is_suppressed_by_lru() {
     let js = RecordingPublisher::default();
     let dedup = PushDlqDedupGate::with_capacity(32);
-    let prefix = prefix();
-    let task_id = A2aTaskId::new("task-1").unwrap();
+    let dead_letter = dead_letter("task-1");
     let config = sample_config();
     let transition = StatusTransitionId::from_terminal(TerminalPushTaskState::Failed);
     let err = DispatchError::InvalidTarget(PushNotificationTargetError::UnknownScheme { raw: "bad".into() });
 
-    publish_push_delivery_failure(
-        &js,
-        &prefix,
-        &CallerId::default(),
-        &task_id,
-        &config,
-        br#"{}"#,
-        &err,
-        transition.clone(),
-        &dedup,
-    )
-    .await;
-    publish_push_delivery_failure(
-        &js,
-        &prefix,
-        &CallerId::default(),
-        &task_id,
-        &config,
-        br#"{}"#,
-        &err,
-        transition,
-        &dedup,
-    )
-    .await;
+    publish_push_delivery_failure(&js, &dead_letter, &config, br#"{}"#, &err, transition.clone(), &dedup).await;
+    publish_push_delivery_failure(&js, &dead_letter, &config, br#"{}"#, &err, transition, &dedup).await;
 
     assert_eq!(js.publishes.lock().unwrap().len(), 1);
 }
@@ -210,16 +150,13 @@ async fn second_publish_with_same_key_is_suppressed_by_lru() {
 async fn different_transition_ids_both_publish() {
     let js = RecordingPublisher::default();
     let dedup = PushDlqDedupGate::with_capacity(32);
-    let prefix = prefix();
-    let task_id = A2aTaskId::new("task-1").unwrap();
+    let dead_letter = dead_letter("task-1");
     let config = sample_config();
     let err = DispatchError::InvalidTarget(PushNotificationTargetError::UnknownScheme { raw: "bad".into() });
 
     publish_push_delivery_failure(
         &js,
-        &prefix,
-        &CallerId::default(),
-        &task_id,
+        &dead_letter,
         &config,
         br#"{}"#,
         &err,
@@ -229,9 +166,7 @@ async fn different_transition_ids_both_publish() {
     .await;
     publish_push_delivery_failure(
         &js,
-        &prefix,
-        &CallerId::default(),
-        &task_id,
+        &dead_letter,
         &config,
         br#"{}"#,
         &err,
@@ -247,17 +182,12 @@ async fn different_transition_ids_both_publish() {
 async fn publish_sets_nats_msg_id_header() {
     let js = RecordingPublisher::default();
     let dedup = PushDlqDedupGate::with_capacity(32);
-    let prefix = prefix();
-    let task_id = A2aTaskId::new("task-1").unwrap();
-    let config = sample_config();
     let err = DispatchError::InvalidTarget(PushNotificationTargetError::UnknownScheme { raw: "bad".into() });
 
     publish_push_delivery_failure(
         &js,
-        &prefix,
-        &CallerId::default(),
-        &task_id,
-        &config,
+        &dead_letter("task-1"),
+        &sample_config(),
         br#"{}"#,
         &err,
         StatusTransitionId::from_terminal(TerminalPushTaskState::Failed),
@@ -277,17 +207,12 @@ async fn publish_sets_nats_msg_id_header() {
 async fn publish_path_swallows_transport_error_without_panicking() {
     let js = FailingPublisher;
     let dedup = PushDlqDedupGate::default();
-    let prefix = prefix();
-    let task_id = A2aTaskId::new("task-x").unwrap();
-    let config = sample_config();
     let err = DispatchError::InvalidTarget(PushNotificationTargetError::UnknownScheme { raw: "bad".into() });
 
     publish_push_delivery_failure(
         &js,
-        &prefix,
-        &CallerId::default(),
-        &task_id,
-        &config,
+        &dead_letter("task-x"),
+        &sample_config(),
         br#"{}"#,
         &err,
         StatusTransitionId::from_terminal(TerminalPushTaskState::Failed),
@@ -300,17 +225,12 @@ async fn publish_path_swallows_transport_error_without_panicking() {
 async fn publish_path_swallows_ack_failure_without_panicking() {
     let js = AckFailingPublisher;
     let dedup = PushDlqDedupGate::default();
-    let prefix = prefix();
-    let task_id = A2aTaskId::new("task-y").unwrap();
-    let config = sample_config();
     let err = DispatchError::InvalidTarget(PushNotificationTargetError::UnknownScheme { raw: "bad".into() });
 
     publish_push_delivery_failure(
         &js,
-        &prefix,
-        &CallerId::default(),
-        &task_id,
-        &config,
+        &dead_letter("task-y"),
+        &sample_config(),
         br#"{}"#,
         &err,
         StatusTransitionId::from_terminal(TerminalPushTaskState::Failed),
@@ -323,17 +243,13 @@ async fn publish_path_swallows_ack_failure_without_panicking() {
 async fn publish_uses_empty_push_config_id_when_missing() {
     let js = RecordingPublisher::default();
     let dedup = PushDlqDedupGate::with_capacity(32);
-    let prefix = prefix();
-    let task_id = A2aTaskId::new("task-no-config-id").unwrap();
     let mut config = sample_config();
     config.id = None;
     let err = DispatchError::InvalidTarget(PushNotificationTargetError::UnknownScheme { raw: "bad".into() });
 
     publish_push_delivery_failure(
         &js,
-        &prefix,
-        &CallerId::default(),
-        &task_id,
+        &dead_letter("task-no-config-id"),
         &config,
         br#"{}"#,
         &err,
