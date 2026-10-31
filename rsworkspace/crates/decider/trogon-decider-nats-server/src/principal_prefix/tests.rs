@@ -1,5 +1,6 @@
 use trogon_decider_runtime::{CommandPrincipal, PrincipalId, PrincipalKind};
 use trogon_nats::constants::MAX_NATS_TOKEN_LENGTH;
+use trogon_nats::{MAX_SUBJECT_TOKENS, SubjectTokenViolationError, SubjectViolationError};
 
 use super::{PrincipalPrefix, PrincipalPrefixError};
 use crate::constants::{DECIDE_METHOD_NAME, DECIDER_SERVICE_NAME, DEFAULT_SUBJECT_PREFIX};
@@ -60,11 +61,78 @@ fn an_id_that_is_not_one_subject_token_is_refused() {
 }
 
 #[test]
-fn a_prefix_too_long_to_carry_the_principal_is_refused() {
-    let long = "p".repeat(MAX_NATS_TOKEN_LENGTH);
+fn a_prefix_longer_than_one_token_reaches_the_host_while_each_token_fits() {
+    let endpoint = CommandEndpoint::new(prefix(&"p".repeat(MAX_NATS_TOKEN_LENGTH)), TenantPosition::Absent)
+        .expect("the longest namespace token leaves room for the endpoint subject");
+    let principal = PrincipalPrefix::new(endpoint.prefix(), PrincipalKind::Agent, &id("alice"))
+        .expect("the token limit bounds each token, not the prefix they form");
+
+    assert!(principal.as_str().len() > MAX_NATS_TOKEN_LENGTH);
+    assert_eq!(
+        endpoint
+            .derive_principal(&format!("{principal}.{DECIDER_SERVICE_NAME}.{DECIDE_METHOD_NAME}"))
+            .expect("the subject names a principal"),
+        CommandPrincipal::new(PrincipalKind::Agent, id("alice")),
+        "a client refused a prefix the host serves could never reach that host"
+    );
+}
+
+#[test]
+fn an_id_longer_than_one_token_is_refused() {
+    let namespace = prefix(DEFAULT_SUBJECT_PREFIX);
+
+    assert!(
+        PrincipalPrefix::new(
+            &namespace,
+            PrincipalKind::Agent,
+            &id(&"a".repeat(MAX_NATS_TOKEN_LENGTH))
+        )
+        .is_ok(),
+        "an id of exactly one token's length fits"
+    );
+    assert!(matches!(
+        PrincipalPrefix::new(
+            &namespace,
+            PrincipalKind::Agent,
+            &id(&"a".repeat(MAX_NATS_TOKEN_LENGTH + 1))
+        ),
+        Err(PrincipalPrefixError::Subject {
+            source: SubjectViolationError::Token {
+                index: 2,
+                source: SubjectTokenViolationError::TooLong(_),
+                ..
+            },
+            ..
+        })
+    ));
+}
+
+#[test]
+fn a_subject_over_the_byte_budget_is_refused() {
+    let namespace = prefix(&"p".repeat(MAX_NATS_TOKEN_LENGTH));
 
     assert!(matches!(
-        PrincipalPrefix::new(&prefix(&long), PrincipalKind::Agent, &id("alice")),
-        Err(PrincipalPrefixError::Prefix(_))
+        PrincipalPrefix::new(
+            &namespace,
+            PrincipalKind::Agent,
+            &id(&"a".repeat(MAX_NATS_TOKEN_LENGTH))
+        ),
+        Err(PrincipalPrefixError::Subject {
+            source: SubjectViolationError::TooLong { .. },
+            ..
+        })
+    ));
+}
+
+#[test]
+fn a_subject_over_the_token_budget_is_refused() {
+    let namespace = prefix(&["t"; MAX_SUBJECT_TOKENS - 3].join("."));
+
+    assert!(matches!(
+        PrincipalPrefix::new(&namespace, PrincipalKind::Agent, &id("alice")),
+        Err(PrincipalPrefixError::Subject {
+            source: SubjectViolationError::TooManyTokens { .. },
+            ..
+        })
     ));
 }
