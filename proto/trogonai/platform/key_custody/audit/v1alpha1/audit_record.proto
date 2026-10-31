@@ -34,7 +34,7 @@ message KeyOperationAuditRecord {
   option (buf.validate.message).cel = {
     id: "audit_record.no_attempts_before_provider"
     message: "a failure decided before the provider call lists no provider attempts"
-    expression: "size(this.attempts) == 0 || !has(this.failed) || !(this.failed.category == 4 || (this.failed.category == 1 && (this.failed.denial_reason == 2 || this.failed.denial_reason == 3)))"
+    expression: "size(this.attempts) == 0 || !has(this.failed) || !(this.failed.category == 4 || this.failed.category == 7 || (this.failed.category == 1 && this.failed.denial_reason == 3))"
   };
 
   trogonai.platform.key_custody.v1alpha1.OperationId operation_id = 1 [features.field_presence = LEGACY_REQUIRED];
