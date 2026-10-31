@@ -12,6 +12,7 @@ export interface RegistrationDraft {
   readonly workloadIdentityProvider: string;
   readonly impersonatedServiceAccount: string;
   readonly endpoint: string;
+  readonly namespace: string;
   readonly transitMount: string;
   readonly authMethod: OpenBaoAuthMethod;
   readonly authRole: string;
@@ -28,6 +29,7 @@ export const emptyRegistrationDraft: RegistrationDraft = {
   workloadIdentityProvider: '',
   impersonatedServiceAccount: '',
   endpoint: '',
+  namespace: '',
   transitMount: 'transit',
   authMethod: 'jwt',
   authRole: '',
@@ -53,6 +55,7 @@ export function registrationInputOf(provider: RegistrableProvider, draft: Regist
     provider,
     displayName: draft.displayName,
     endpoint: draft.endpoint,
+    namespace: draft.namespace,
     transitMount: draft.transitMount,
     authMethod: draft.authMethod,
     authRole: draft.authRole,

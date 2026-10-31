@@ -76,4 +76,23 @@ describe('register backend wizard', () => {
     await user.click(screen.getByRole('button', { name: 'Generate setup instructions' }));
     expect(await screen.findByRole('button', { name: 'I have applied these' })).toBeInTheDocument();
   });
+
+  it('scopes the OpenBao setup commands to the namespace the owner enters', async () => {
+    const user = userEvent.setup();
+    renderApp('/keys/backends/new');
+
+    await user.click(await screen.findByRole('radio', { name: /OpenBao/ }));
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+
+    await user.type(screen.getByLabelText('Display name'), 'Acme team OpenBao');
+    await user.type(screen.getByLabelText('Endpoint'), 'https://bao.lab.example:8200');
+    await user.type(screen.getByLabelText('Namespace'), 'team-a');
+    await user.type(screen.getByLabelText('Auth role'), 'trogon-transit');
+    await user.type(screen.getByLabelText('OpenBao version'), '2.6.1');
+    await user.click(screen.getByLabelText('Trust root certificate'));
+    await user.paste(PEM);
+    await user.click(screen.getByRole('button', { name: 'Generate setup instructions' }));
+
+    expect(await screen.findByText(/export BAO_NAMESPACE=team-a/)).toBeInTheDocument();
+  });
 });

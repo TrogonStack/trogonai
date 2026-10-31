@@ -148,6 +148,16 @@ function ProviderFields({
             className="md:col-span-2"
           />
           <TextField
+            id="bao-namespace"
+            label="Namespace"
+            mono
+            value={draft.namespace}
+            onChange={(value) => set('namespace', value)}
+            placeholder="team-a"
+            error={problems.namespace}
+            hint="Leave empty for the root namespace. Changing it later needs a new registration."
+          />
+          <TextField
             id="bao-mount"
             label="Transit mount"
             mono

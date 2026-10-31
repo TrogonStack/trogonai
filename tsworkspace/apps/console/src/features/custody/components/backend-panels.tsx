@@ -268,6 +268,7 @@ function accessFacts(access: KeyBackendAccess | undefined): readonly (readonly [
       return [
         ['Mechanism', method?.case === 'certificate' ? 'Certificate authentication' : 'JWT authentication'],
         ['Endpoint', bao.endpoint?.baseUrl ?? ''],
+        ['Namespace', bao.namespace?.value ?? 'Root namespace'],
         ['Transit mount', bao.transitMount?.value ?? ''],
         ['Auth role', role ?? ''],
         ['Trust roots', String(bao.trustRoots.length)],
