@@ -12,6 +12,7 @@
 pub mod challenge;
 pub mod constants;
 pub mod delegation;
+pub mod freshness;
 pub mod http_pop;
 pub mod jkt;
 pub mod jwks;
@@ -31,7 +32,14 @@ pub use constants::{DEFAULT_NEGATIVE_TTL_SECS, DEFAULT_TTL_SECS, MAX_CHAIN_DEPTH
 pub use delegation::{
     DelegationError, FlattenedActEntry, flatten_act_chain, is_valid_agent_identifier, verify_act_chain,
 };
-pub use http_pop::{HttpPopError, HttpPopVerifier, HttpRequest, VerifiedAuthPresenter, VerifiedPresenter};
+pub use freshness::{
+    ClockTolerance, ClockToleranceError, FreshnessError, SignatureFreshness, SignatureValidity, SignatureValidityError,
+    SignatureWindow,
+};
+pub use http_pop::{
+    HttpPopError, HttpPopVerifier, HttpRequest, InvalidJtiError, Jti, SignatureParameter, VerifiedAuthPresenter,
+    VerifiedPresenter,
+};
 pub use jkt::jwk_thumbprint;
 pub use jwks::{JwksError, JwksResolver, StaticJwks};
 pub use jwks_cache::CachedJwksResolver;

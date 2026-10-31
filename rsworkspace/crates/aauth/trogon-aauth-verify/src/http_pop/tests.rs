@@ -1,7 +1,14 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+
 use super::*;
+use crate::freshness::SignatureValidity;
+use crate::jwks::StaticJwks;
 use crate::replay::InMemoryReplayStore;
-use crate::test_support::{ed25519_fixture, jwks_with_key, p256_fixture, p384_fixture};
+use crate::test_support::{EcFixture, ed25519_fixture, jwks_with_key, p256_fixture, p384_fixture};
+use async_trait::async_trait;
 use jsonwebtoken::crypto::sign;
+use jsonwebtoken::jwk::JwkSet;
 use trogon_identity_types::aauth::{TYP_AGENT, TYP_AUTH};
 
 #[derive(Clone, Copy)]
@@ -13,22 +20,49 @@ impl TimeSource for FixedClock {
     }
 }
 
-fn verifier_at(
-    jwks: crate::jwks::StaticJwks,
-    now: i64,
-    resource_identifier: &str,
-) -> HttpPopVerifier<crate::jwks::StaticJwks, FixedClock, InMemoryReplayStore> {
-    let clock = FixedClock(now);
-    HttpPopVerifier {
-        token_verifier: TokenVerifier::new(jwks, clock),
-        clock,
-        replay: InMemoryReplayStore::default(),
-        max_skew_secs: 60,
-        resource_identifier: resource_identifier.to_string(),
+struct FailingReplayStore;
+
+#[async_trait]
+impl ReplayStore for FailingReplayStore {
+    async fn check_and_insert(&self, _key: &str, _ttl_secs: u32) -> Result<bool, ReplayError> {
+        Err(ReplayError::MutexPoisoned)
     }
 }
 
-fn agent_jwt(fixture: &crate::test_support::EcFixture, kid: &str, iss: &str) -> String {
+#[derive(Default)]
+struct RecordingReplayStore {
+    records: Mutex<Vec<(String, u32)>>,
+}
+
+#[async_trait]
+impl ReplayStore for RecordingReplayStore {
+    async fn check_and_insert(&self, key: &str, ttl_secs: u32) -> Result<bool, ReplayError> {
+        self.records
+            .lock()
+            .expect("records lock")
+            .push((key.to_string(), ttl_secs));
+        Ok(true)
+    }
+}
+
+fn verifier_with<S: ReplayStore>(jwks: StaticJwks, now: i64, replay: S) -> HttpPopVerifier<StaticJwks, FixedClock, S> {
+    HttpPopVerifier::new(jwks, FixedClock(now), replay, "resource.example")
+}
+
+fn verifier_at(
+    jwks: StaticJwks,
+    now: i64,
+    resource_identifier: &str,
+) -> HttpPopVerifier<StaticJwks, FixedClock, InMemoryReplayStore> {
+    HttpPopVerifier::new(
+        jwks,
+        FixedClock(now),
+        InMemoryReplayStore::default(),
+        resource_identifier,
+    )
+}
+
+fn agent_jwt_expiring(fixture: &EcFixture, kid: &str, iss: &str, exp: i64) -> String {
     let mut header = jsonwebtoken::Header::new(fixture.alg);
     header.typ = Some(TYP_AGENT.into());
     header.kid = Some(kid.into());
@@ -37,14 +71,18 @@ fn agent_jwt(fixture: &crate::test_support::EcFixture, kid: &str, iss: &str) -> 
         "sub": "aauth:asst@agent.example",
         "jti": "j1",
         "iat": 1000,
-        "exp": 9_999_999_999_i64,
+        "exp": exp,
         "dwk": "aauth-agent.json",
         "cnf": {"jwk": fixture.jwk_json},
     });
     jsonwebtoken::encode(&header, &claims, &fixture.signing).expect("encode agent jwt")
 }
 
-fn auth_jwt(fixture: &crate::test_support::EcFixture, kid: &str, iss: &str, aud: &str) -> String {
+fn agent_jwt(fixture: &EcFixture, kid: &str, iss: &str) -> String {
+    agent_jwt_expiring(fixture, kid, iss, 9_999_999_999)
+}
+
+fn auth_jwt(fixture: &EcFixture, kid: &str, iss: &str, aud: &str) -> String {
     let mut header = jsonwebtoken::Header::new(fixture.alg);
     header.typ = Some(TYP_AUTH.into());
     header.kid = Some(kid.into());
@@ -67,13 +105,29 @@ fn signature_key_header(jwt: &str) -> String {
     format!("sig=jwt;jwt=\"{jwt}\"")
 }
 
-fn signature_input_header(components: &[&str], created: i64) -> String {
+static NEXT_JTI: AtomicU64 = AtomicU64::new(0);
+
+fn fresh_jti() -> String {
+    format!("jti-{}", NEXT_JTI.fetch_add(1, Ordering::Relaxed))
+}
+
+fn signature_input_with(components: &[&str], created: i64, expires: i64, jti: &str) -> String {
     let list = components
         .iter()
         .map(|c| format!("\"{c}\""))
         .collect::<Vec<_>>()
         .join(" ");
-    format!("sig=({list});created={created}")
+    format!("sig=({list});created={created};expires={expires};nonce=\"{jti}\"")
+}
+
+/// A one-minute window starting at `created`, under a jti no other request in
+/// this test binary uses.
+fn signature_input_header(components: &[&str], created: i64) -> String {
+    signature_input_with(components, created, created + 60, &fresh_jti())
+}
+
+fn empty_body_digest() -> String {
+    format!("sha-256=:{}:", STANDARD.encode(Sha256::digest(b"")))
 }
 
 fn base_request(sig_key: &str) -> HttpRequest {
@@ -81,28 +135,40 @@ fn base_request(sig_key: &str) -> HttpRequest {
         method: "GET".to_string(),
         authority: "resource.example".to_string(),
         path: "/api/documents".to_string(),
-        headers: vec![(headers::SIGNATURE_KEY.to_string(), sig_key.to_string())],
+        headers: vec![
+            (headers::SIGNATURE_KEY.to_string(), sig_key.to_string()),
+            (headers::CONTENT_DIGEST.to_string(), empty_body_digest()),
+        ],
         body: None,
     }
 }
 
-/// Signs `req` with `fixture` over the given covered components at `created`,
-/// inserting/replacing `Signature-Input` and `Signature`.
-fn sign_request(fixture: &crate::test_support::EcFixture, req: &mut HttpRequest, created: i64, components: &[&str]) {
-    let sig_input = signature_input_header(components, created);
-    req.headers
-        .retain(|(k, _)| !k.eq_ignore_ascii_case(headers::SIGNATURE_INPUT));
-    req.headers
-        .push((headers::SIGNATURE_INPUT.to_string(), sig_input.clone()));
-    let parsed = parse_signature_input(&sig_input).expect("parse for test");
-    let base = build_signature_base(req, &parsed).expect("build base");
-    let sig_b64 = sign(base.as_bytes(), &fixture.signing, fixture.alg).expect("sign");
-    let sig_header = format!("sig=:{sig_b64}:");
-    req.headers.retain(|(k, _)| !k.eq_ignore_ascii_case(headers::SIGNATURE));
-    req.headers.push((headers::SIGNATURE.to_string(), sig_header));
+fn replace_header(req: &mut HttpRequest, name: &str, value: String) {
+    req.headers.retain(|(k, _)| !k.eq_ignore_ascii_case(name));
+    req.headers.push((name.to_string(), value));
 }
 
-const REQUIRED_COMPONENTS: [&str; 4] = ["@method", "@authority", "@path", "signature-key"];
+fn remove_header(req: &mut HttpRequest, name: &str) {
+    req.headers.retain(|(k, _)| !k.eq_ignore_ascii_case(name));
+}
+
+/// Signs `req` with `fixture` under `sig_input`, replacing `Signature-Input`
+/// and `Signature`.
+fn sign_request_with_input(fixture: &EcFixture, req: &mut HttpRequest, sig_input: &str) {
+    replace_header(req, headers::SIGNATURE_INPUT, sig_input.to_string());
+    let parsed = SignatureInput::parse(sig_input).expect("parse for test");
+    let base = build_signature_base(req, &parsed).expect("build base");
+    let sig_b64 = sign(base.as_bytes(), &fixture.signing, fixture.alg).expect("sign");
+    replace_header(req, headers::SIGNATURE, format!("sig=:{sig_b64}:"));
+}
+
+/// Signs `req` with `fixture` over `components` in a fresh one-minute window
+/// starting at `created`.
+fn sign_request(fixture: &EcFixture, req: &mut HttpRequest, created: i64, components: &[&str]) {
+    sign_request_with_input(fixture, req, &signature_input_header(components, created));
+}
+
+const REQUIRED_COMPONENTS: [&str; 5] = ["@method", "@authority", "@path", "signature-key", "content-digest"];
 
 #[tokio::test(flavor = "current_thread")]
 async fn verify_accepts_agent_presenter_roundtrip() {
@@ -157,32 +223,24 @@ async fn verify_accepts_ed25519_agent_presenter() {
     let verifier = verifier_at(jwks, 1000, "resource.example");
 
     let mut req = base_request(&signature_key_header(&jwt));
-    let sig_input = signature_input_header(&REQUIRED_COMPONENTS, 1000);
-    req.headers
-        .push((headers::SIGNATURE_INPUT.to_string(), sig_input.clone()));
-    let parsed = parse_signature_input(&sig_input).expect("parse");
+    let sig_input = format!("{};alg=\"ed25519\"", signature_input_header(&REQUIRED_COMPONENTS, 1000));
+    replace_header(&mut req, headers::SIGNATURE_INPUT, sig_input.clone());
+    let parsed = SignatureInput::parse(&sig_input).expect("parse");
     let base = build_signature_base(&req, &parsed).expect("build base");
     let sig_b64 = fixture.sign_pop_base(base.as_bytes());
-    req.headers
-        .push((headers::SIGNATURE.to_string(), format!("sig=:{sig_b64}:")));
+    replace_header(&mut req, headers::SIGNATURE, format!("sig=:{sig_b64}:"));
 
     let result = verifier.verify(&req).await.expect("eddsa agent presenter verifies");
     assert!(matches!(result, VerifiedPresenter::Agent(_)));
 }
 
-/// Signs a request carrying `body` with a matching, covered `Content-Digest`.
-fn signed_body_request(
-    fixture: &crate::test_support::EcFixture,
-    jwt: &str,
-    body: &[u8],
-    digest: String,
-) -> HttpRequest {
+/// Signs a request carrying `body` with `digest` as its covered
+/// `Content-Digest`.
+fn signed_body_request(fixture: &EcFixture, jwt: &str, body: &[u8], digest: String) -> HttpRequest {
     let mut req = base_request(&signature_key_header(jwt));
     req.body = Some(body.to_vec());
-    req.headers.push((headers::CONTENT_DIGEST.to_string(), digest));
-    let mut components = REQUIRED_COMPONENTS.to_vec();
-    components.push("content-digest");
-    sign_request(fixture, &mut req, 1000, &components);
+    replace_header(&mut req, headers::CONTENT_DIGEST, digest);
+    sign_request(fixture, &mut req, 1000, &REQUIRED_COMPONENTS);
     req
 }
 
@@ -249,12 +307,68 @@ async fn verify_rejects_stripped_body_against_covered_content_digest() {
     let digest = crate::nats_pop::content_digest_sha256(body);
     let mut req = signed_body_request(&fixture, &jwt, body, digest);
 
-    // Dropping the body entirely falls out of the has-a-body branch, so a
-    // coverage-only check would let it through.
+    // A removed body digests as an empty one, which the covered digest does
+    // not name.
     req.body = None;
 
     let err = verifier.verify(&req).await.unwrap_err();
     assert!(matches!(err, HttpPopError::ContentDigestMismatch));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_rejects_body_added_to_a_request_signed_as_bodyless() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let verifier = verifier_at(jwks, 1000, "resource.example");
+
+    let mut req = base_request(&signature_key_header(&jwt));
+    sign_request(&fixture, &mut req, 1000, &REQUIRED_COMPONENTS);
+    req.body = Some(br#"{"scope":"data.write"}"#.to_vec());
+
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(err, HttpPopError::ContentDigestMismatch));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_rejects_a_bodyless_request_without_content_digest() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let verifier = verifier_at(jwks, 1000, "resource.example");
+
+    // ADR#0051 Decision 2 binds every request to a digest of its body, so a
+    // bodyless one still has to carry the digest of the empty body.
+    let mut req = base_request(&signature_key_header(&jwt));
+    remove_header(&mut req, headers::CONTENT_DIGEST);
+    sign_request(
+        &fixture,
+        &mut req,
+        1000,
+        &["@method", "@authority", "@path", "signature-key"],
+    );
+
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(err, HttpPopError::MissingContentDigest));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_rejects_content_digest_left_out_of_coverage() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let verifier = verifier_at(jwks, 1000, "resource.example");
+
+    let mut req = base_request(&signature_key_header(&jwt));
+    sign_request(
+        &fixture,
+        &mut req,
+        1000,
+        &["@method", "@authority", "@path", "signature-key"],
+    );
+
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(err, HttpPopError::MissingContentDigest));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -412,22 +526,16 @@ async fn verify_rejects_tampered_content_digest_header() {
     let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
     let verifier = verifier_at(jwks, 1000, "resource.example");
 
-    let body = br#"{"scope":"data.read"}"#.to_vec();
-    let digest = crate::nats_pop::content_digest_sha256(&body);
-    let mut req = base_request(&signature_key_header(&jwt));
-    req.body = Some(body);
-    req.headers.push((headers::CONTENT_DIGEST.to_string(), digest));
-    let mut components = REQUIRED_COMPONENTS.to_vec();
-    components.push("content-digest");
-    sign_request(&fixture, &mut req, 1000, &components);
+    let body = br#"{"scope":"data.read"}"#;
+    let digest = crate::nats_pop::content_digest_sha256(body);
+    let mut req = signed_body_request(&fixture, &jwt, body, digest);
 
     // Tamper with the covered content-digest header value itself.
-    req.headers
-        .retain(|(k, _)| !k.eq_ignore_ascii_case(headers::CONTENT_DIGEST));
-    req.headers.push((
-        headers::CONTENT_DIGEST.to_string(),
+    replace_header(
+        &mut req,
+        headers::CONTENT_DIGEST,
         crate::nats_pop::content_digest_sha256(b"different-payload"),
-    ));
+    );
 
     let err = verifier.verify(&req).await.unwrap_err();
     assert!(matches!(err, HttpPopError::BadSignature));
@@ -451,6 +559,22 @@ async fn verify_rejects_tampered_covered_header() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn verify_rejects_a_signature_made_for_another_authority() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let verifier = verifier_at(jwks, 1000, "resource.example");
+
+    let mut req = base_request(&signature_key_header(&jwt));
+    req.authority = "other-resource.example".to_string();
+    sign_request(&fixture, &mut req, 1000, &REQUIRED_COMPONENTS);
+    req.authority = "resource.example".to_string();
+
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(err, HttpPopError::BadSignature));
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn verify_rejects_tampered_signature_bytes() {
     let fixture = p256_fixture("k1");
     let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
@@ -462,12 +586,33 @@ async fn verify_rejects_tampered_signature_bytes() {
 
     let corrupted =
         "sig=:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA:";
-    req.headers.retain(|(k, _)| !k.eq_ignore_ascii_case(headers::SIGNATURE));
-    req.headers
-        .push((headers::SIGNATURE.to_string(), corrupted.to_string()));
+    replace_header(&mut req, headers::SIGNATURE, corrupted.to_string());
 
     let err = verifier.verify(&req).await.unwrap_err();
     assert!(matches!(err, HttpPopError::BadSignature | HttpPopError::Verify(_)));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_accepts_a_signature_in_the_standard_base64_of_rfc_8941() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let verifier = verifier_at(jwks, 1000, "resource.example");
+
+    let mut req = base_request(&signature_key_header(&jwt));
+    let sig_input = signature_input_header(&REQUIRED_COMPONENTS, 1000);
+    replace_header(&mut req, headers::SIGNATURE_INPUT, sig_input.clone());
+    let parsed = SignatureInput::parse(&sig_input).expect("parse");
+    let base = build_signature_base(&req, &parsed).expect("build base");
+    let url_safe = sign(base.as_bytes(), &fixture.signing, fixture.alg).expect("sign");
+    let bytes = URL_SAFE_NO_PAD.decode(url_safe).expect("decode");
+    replace_header(
+        &mut req,
+        headers::SIGNATURE,
+        format!("sig=:{}:", STANDARD.encode(bytes)),
+    );
+
+    verifier.verify(&req).await.expect("standard base64 signature verifies");
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -475,14 +620,122 @@ async fn verify_rejects_created_outside_skew_window() {
     let fixture = p256_fixture("k1");
     let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
     let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
-    // Signed at t=1000 but verified far outside the 60s window.
+    // Signed at t=1000 but verified far outside the window.
     let verifier = verifier_at(jwks, 100_000, "resource.example");
 
     let mut req = base_request(&signature_key_header(&jwt));
     sign_request(&fixture, &mut req, 1000, &REQUIRED_COMPONENTS);
 
     let err = verifier.verify(&req).await.unwrap_err();
-    assert!(matches!(err, HttpPopError::Skew));
+    assert!(matches!(err, HttpPopError::Freshness(FreshnessError::Expired)));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_tolerates_the_clock_skew_past_expiry_and_no_further() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+
+    let within = verifier_at(
+        jwks_with_key("agent-provider.example", fixture.jwk.clone()),
+        1090,
+        "resource.example",
+    );
+    let mut req = base_request(&signature_key_header(&jwt));
+    sign_request(&fixture, &mut req, 1000, &REQUIRED_COMPONENTS);
+    within.verify(&req).await.expect("expired within the skew verifies");
+
+    let beyond = verifier_at(
+        jwks_with_key("agent-provider.example", fixture.jwk.clone()),
+        1091,
+        "resource.example",
+    );
+    let mut req = base_request(&signature_key_header(&jwt));
+    sign_request(&fixture, &mut req, 1000, &REQUIRED_COMPONENTS);
+    let err = beyond.verify(&req).await.unwrap_err();
+    assert!(matches!(err, HttpPopError::Freshness(FreshnessError::Expired)));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_tolerates_the_clock_skew_ahead_and_no_further() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let verifier = verifier_at(jwks, 1000, "resource.example");
+
+    let mut req = base_request(&signature_key_header(&jwt));
+    sign_request(&fixture, &mut req, 1030, &REQUIRED_COMPONENTS);
+    verifier.verify(&req).await.expect("created within the skew verifies");
+
+    let mut req = base_request(&signature_key_header(&jwt));
+    sign_request(&fixture, &mut req, 1031, &REQUIRED_COMPONENTS);
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(err, HttpPopError::Freshness(FreshnessError::NotYetValid)));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_rejects_a_window_longer_than_the_accepted_validity() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let verifier = verifier_at(jwks, 1000, "resource.example");
+
+    let mut req = base_request(&signature_key_header(&jwt));
+    let sig_input = signature_input_with(&REQUIRED_COMPONENTS, 1000, 1061, &fresh_jti());
+    sign_request_with_input(&fixture, &mut req, &sig_input);
+
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(err, HttpPopError::Freshness(FreshnessError::InvalidWindow)));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_accepts_the_longest_window_when_configured_for_it() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let validity = SignatureValidity::new(crate::constants::MAX_SIGNATURE_VALIDITY_SECS).expect("validity");
+    let verifier = verifier_at(jwks, 1000, "resource.example")
+        .with_freshness(SignatureFreshness::new(validity, ClockTolerance::default()));
+
+    let mut req = base_request(&signature_key_header(&jwt));
+    let sig_input = signature_input_with(&REQUIRED_COMPONENTS, 1000, 1120, &fresh_jti());
+    sign_request_with_input(&fixture, &mut req, &sig_input);
+
+    verifier.verify(&req).await.expect("two-minute window verifies");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn new_bounds_the_presenting_token_expiry_by_the_clock_tolerance() {
+    let fixture = p256_fixture("k1");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let verifier = verifier_at(jwks, 5000, "resource.example");
+
+    let within = agent_jwt_expiring(&fixture, "k1", "agent-provider.example", 4970);
+    let mut req = base_request(&signature_key_header(&within));
+    sign_request(&fixture, &mut req, 5000, &REQUIRED_COMPONENTS);
+    verifier
+        .verify(&req)
+        .await
+        .expect("token expired within the tolerance verifies");
+
+    let beyond = agent_jwt_expiring(&fixture, "k1", "agent-provider.example", 4969);
+    let mut req = base_request(&signature_key_header(&beyond));
+    sign_request(&fixture, &mut req, 5000, &REQUIRED_COMPONENTS);
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(err, HttpPopError::Agent(TokenError::Expired)));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn with_token_leeway_narrows_the_presenting_token_expiry() {
+    let fixture = p256_fixture("k1");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let verifier =
+        verifier_at(jwks, 5000, "resource.example").with_token_leeway(ClockTolerance::new(0).expect("tolerance"));
+
+    let expired = agent_jwt_expiring(&fixture, "k1", "agent-provider.example", 4999);
+    let mut req = base_request(&signature_key_header(&expired));
+    sign_request(&fixture, &mut req, 5000, &REQUIRED_COMPONENTS);
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(err, HttpPopError::Agent(TokenError::Expired)));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -500,6 +753,208 @@ async fn verify_rejects_replayed_signature() {
     assert!(matches!(err, HttpPopError::Replay));
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn verify_rejects_a_jti_reused_under_a_fresh_signature() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let verifier = verifier_at(jwks, 1000, "resource.example");
+
+    let mut first = base_request(&signature_key_header(&jwt));
+    sign_request_with_input(
+        &fixture,
+        &mut first,
+        &signature_input_with(&REQUIRED_COMPONENTS, 1000, 1060, "reused"),
+    );
+    verifier.verify(&first).await.expect("first use verifies");
+
+    // Another request, signed afresh at a later time, still may not reuse it.
+    let mut second = base_request(&signature_key_header(&jwt));
+    second.path = "/api/other-documents".to_string();
+    sign_request_with_input(
+        &fixture,
+        &mut second,
+        &signature_input_with(&REQUIRED_COMPONENTS, 1001, 1061, "reused"),
+    );
+    let err = verifier.verify(&second).await.unwrap_err();
+    assert!(matches!(err, HttpPopError::Replay));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_scopes_a_jti_to_the_key_that_signed_it() {
+    let first_key = p256_fixture("k1");
+    let second_key = p256_fixture("k2");
+    let jwks = StaticJwks::new().with(
+        "agent-provider.example",
+        JwkSet {
+            keys: vec![first_key.jwk.clone(), second_key.jwk.clone()],
+        },
+    );
+    let verifier = verifier_at(jwks, 1000, "resource.example");
+    let sig_input = signature_input_with(&REQUIRED_COMPONENTS, 1000, 1060, "shared");
+
+    let mut first = base_request(&signature_key_header(&agent_jwt(
+        &first_key,
+        "k1",
+        "agent-provider.example",
+    )));
+    sign_request_with_input(&first_key, &mut first, &sig_input);
+    verifier.verify(&first).await.expect("first key verifies");
+
+    let mut second = base_request(&signature_key_header(&agent_jwt(
+        &second_key,
+        "k2",
+        "agent-provider.example",
+    )));
+    sign_request_with_input(&second_key, &mut second, &sig_input);
+    verifier
+        .verify(&second)
+        .await
+        .expect("the same jti from another key verifies");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_records_the_jti_under_the_signing_key_for_the_admissible_window() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let store = Arc::new(RecordingReplayStore::default());
+    let verifier = verifier_with(jwks, 1000, Arc::clone(&store));
+
+    let jti = "a b*c>";
+    let mut req = base_request(&signature_key_header(&jwt));
+    sign_request_with_input(
+        &fixture,
+        &mut req,
+        &signature_input_with(&REQUIRED_COMPONENTS, 1000, 1060, jti),
+    );
+    let VerifiedPresenter::Agent(agent) = verifier.verify(&req).await.expect("verifies") else {
+        panic!("expected agent presenter");
+    };
+
+    let records = store.records.lock().expect("records lock");
+    let expected = format!(
+        "jti.{}.{}",
+        agent.jkt,
+        URL_SAFE_NO_PAD.encode(Sha256::digest(jti.as_bytes()))
+    );
+    assert_eq!(*records, vec![(expected, 120)]);
+    assert!(
+        records[0]
+            .0
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'))
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_fails_closed_when_the_replay_store_errors() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let verifier = verifier_with(jwks, 1000, FailingReplayStore);
+
+    let mut req = base_request(&signature_key_header(&jwt));
+    sign_request(&fixture, &mut req, 1000, &REQUIRED_COMPONENTS);
+
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(err, HttpPopError::Backend(ReplayError::MutexPoisoned)));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_does_not_record_a_jti_for_a_request_that_fails_verification() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let store = Arc::new(RecordingReplayStore::default());
+    let verifier = verifier_with(jwks, 1000, Arc::clone(&store));
+
+    let mut req = base_request(&signature_key_header(&jwt));
+    sign_request(&fixture, &mut req, 1000, &REQUIRED_COMPONENTS);
+    req.path = "/api/other-documents".to_string();
+
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(err, HttpPopError::BadSignature));
+    assert!(store.records.lock().expect("records lock").is_empty());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_accepts_an_alg_naming_the_key_algorithm() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let verifier = verifier_at(jwks, 1000, "resource.example");
+
+    let mut req = base_request(&signature_key_header(&jwt));
+    let sig_input = format!(
+        "{};alg=\"ecdsa-p256-sha256\"",
+        signature_input_header(&REQUIRED_COMPONENTS, 1000)
+    );
+    sign_request_with_input(&fixture, &mut req, &sig_input);
+
+    verifier.verify(&req).await.expect("matching alg verifies");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_rejects_an_alg_naming_another_algorithm() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let verifier = verifier_at(jwks, 1000, "resource.example");
+
+    let mut req = base_request(&signature_key_header(&jwt));
+    let sig_input = format!("{};alg=\"ed25519\"", signature_input_header(&REQUIRED_COMPONENTS, 1000));
+    sign_request_with_input(&fixture, &mut req, &sig_input);
+
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(err, HttpPopError::AlgorithmMismatch));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_rejects_a_signature_input_without_a_jti() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let verifier = verifier_at(jwks, 1000, "resource.example");
+
+    let mut req = base_request(&signature_key_header(&jwt));
+    sign_request(&fixture, &mut req, 1000, &REQUIRED_COMPONENTS);
+    replace_header(
+        &mut req,
+        headers::SIGNATURE_INPUT,
+        r#"sig=("@method" "@authority" "@path" "signature-key" "content-digest");created=1000;expires=1060"#
+            .to_string(),
+    );
+
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(
+        err,
+        HttpPopError::MissingSignatureParameter(SignatureParameter::Nonce)
+    ));
+}
+
+#[test]
+fn build_signature_base_follows_rfc_9421_layout() {
+    let req = base_request("sig=jwt;jwt=\"x\"");
+    let input = SignatureInput::parse(
+        r#"sig=( "@method" "@authority" "@path" "signature-key" "content-digest" );  created=1000;expires=1060;nonce="j""#,
+    )
+    .expect("parse");
+    let base = build_signature_base(&req, &input).expect("build base");
+    let expected = format!(
+        concat!(
+            "\"@method\": GET\n",
+            "\"@authority\": resource.example\n",
+            "\"@path\": /api/documents\n",
+            "\"signature-key\": sig=jwt;jwt=\"x\"\n",
+            "\"content-digest\": {digest}\n",
+            "\"@signature-params\": (\"@method\" \"@authority\" \"@path\" \"signature-key\" \"content-digest\");created=1000;expires=1060;nonce=\"j\"",
+        ),
+        digest = empty_body_digest()
+    );
+    assert_eq!(base, expected);
+}
+
 #[test]
 fn parse_signature_key_jwt_accepts_draft_shape() {
     let header = r#"sig=jwt;jwt="eyJhbGc...""#;
@@ -515,21 +970,21 @@ fn parse_signature_key_jwt_rejects_unsupported_scheme() {
 }
 
 #[test]
-fn parse_signature_input_extracts_components_and_created() {
-    let header = r#"sig=("@method" "@authority" "@path" "signature-key");created=1730217600"#;
-    let parsed = parse_signature_input(header).expect("parses");
-    assert_eq!(
-        parsed.components,
-        vec!["@method", "@authority", "@path", "signature-key"]
-    );
-    assert_eq!(parsed.created, 1_730_217_600);
+fn parse_signature_bytes_extracts_inner_base64() {
+    let sig = parse_signature_bytes("sig=:AAEC:").expect("parses");
+    assert_eq!(sig, "AAEC");
 }
 
 #[test]
-fn parse_signature_bytes_extracts_inner_base64() {
-    let header = "sig=:BASE64URL-SIGNATURE-PLACEHOLDER:";
-    let sig = parse_signature_bytes(header).expect("parses");
-    assert_eq!(sig, "BASE64URL-SIGNATURE-PLACEHOLDER");
+fn parse_signature_bytes_reads_the_standard_alphabet() {
+    let sig = parse_signature_bytes("sig=:+/8=:").expect("parses");
+    assert_eq!(sig, "-_8");
+}
+
+#[test]
+fn parse_signature_bytes_rejects_undecodable_bytes() {
+    let err = parse_signature_bytes("sig=:not base64!:").unwrap_err();
+    assert!(matches!(err, HttpPopError::MalformedSignature));
 }
 
 #[test]
@@ -540,10 +995,12 @@ fn verify_covered_components_rejects_missing_required_component() {
 }
 
 #[test]
-fn verify_covered_components_requires_content_digest_when_body_present() {
-    let mut req = base_request("sig=jwt;jwt=\"x\"");
-    req.body = Some(b"payload".to_vec());
-    let components: Vec<String> = REQUIRED_COMPONENTS.iter().map(|s| s.to_string()).collect();
+fn verify_covered_components_requires_content_digest_coverage() {
+    let req = base_request("sig=jwt;jwt=\"x\"");
+    let components: Vec<String> = ["@method", "@authority", "@path", "signature-key"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
     let err = verify_covered_components(&req, &components).unwrap_err();
     assert!(matches!(err, HttpPopError::MissingContentDigest));
 }
@@ -560,27 +1017,12 @@ fn verify_covered_components_requires_aauth_mission_when_header_present() {
 
 #[test]
 fn http_pop_verifier_new_wires_shared_clock_into_token_verifier() {
-    let jwks = crate::jwks::StaticJwks::new();
+    let jwks = StaticJwks::new();
     let clock = FixedClock(42);
     let verifier = HttpPopVerifier::new(jwks, clock, InMemoryReplayStore::default(), "resource.example");
     assert_eq!(verifier.clock.now(), 42);
-    assert_eq!(verifier.max_skew_secs, 60);
+    assert_eq!(verifier.freshness, SignatureFreshness::default());
     assert_eq!(verifier.resource_identifier, "resource.example");
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn verify_rejects_negative_max_skew() {
-    let fixture = p256_fixture("k1");
-    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
-    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
-    let mut verifier = verifier_at(jwks, 1000, "resource.example");
-    verifier.max_skew_secs = -1;
-
-    let mut req = base_request(&signature_key_header(&jwt));
-    sign_request(&fixture, &mut req, 1000, &REQUIRED_COMPONENTS);
-
-    let err = verifier.verify(&req).await.unwrap_err();
-    assert!(matches!(err, HttpPopError::NegativeMaxSkew(-1)));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -704,26 +1146,6 @@ fn parse_signature_bytes_rejects_missing_colon_wrapper() {
 }
 
 #[test]
-fn parse_signature_input_rejects_empty_component_list() {
-    let header = r#"sig=();created=1000"#;
-    let err = match parse_signature_input(header) {
-        Ok(_) => panic!("expected empty component list to be rejected"),
-        Err(e) => e,
-    };
-    assert!(matches!(err, HttpPopError::MalformedSignatureInput));
-}
-
-#[test]
-fn parse_signature_input_rejects_missing_created() {
-    let header = r#"sig=("@method")"#;
-    let err = match parse_signature_input(header) {
-        Ok(_) => panic!("expected missing created to be rejected"),
-        Err(e) => e,
-    };
-    assert!(matches!(err, HttpPopError::InvalidCreated));
-}
-
-#[test]
 fn extract_quoted_rejects_token_with_interior_quote() {
     assert_eq!(extract_quoted("ab\"cd"), None);
 }
@@ -747,9 +1169,8 @@ fn verify_covered_components_rejects_missing_signature_key_component() {
 #[test]
 fn verify_covered_components_rejects_when_content_digest_header_absent_despite_coverage() {
     let mut req = base_request("sig=jwt;jwt=\"x\"");
-    req.body = Some(b"payload".to_vec());
-    let mut components: Vec<String> = REQUIRED_COMPONENTS.iter().map(|s| s.to_string()).collect();
-    components.push("content-digest".to_string());
+    remove_header(&mut req, headers::CONTENT_DIGEST);
+    let components: Vec<String> = REQUIRED_COMPONENTS.iter().map(|s| s.to_string()).collect();
     let err = verify_covered_components(&req, &components).unwrap_err();
     assert!(matches!(err, HttpPopError::MissingContentDigest));
 }
@@ -788,7 +1209,8 @@ fn component_value_rejects_signature_key_header_absent() {
 
 #[test]
 fn component_value_rejects_content_digest_header_absent() {
-    let req = base_request("sig=jwt;jwt=\"x\"");
+    let mut req = base_request("sig=jwt;jwt=\"x\"");
+    remove_header(&mut req, headers::CONTENT_DIGEST);
     let err = component_value(&req, "content-digest").unwrap_err();
     assert!(matches!(err, HttpPopError::MissingContentDigest));
 }
@@ -822,7 +1244,7 @@ fn component_value_accepts_arbitrary_covered_header() {
 #[test]
 fn verify_signature_with_jwk_rejects_undeserializable_jwk() {
     let jwk_val = serde_json::json!({"kty": "unsupported"});
-    let err = verify_signature_with_jwk(&jwk_val, b"base", "sig").unwrap_err();
+    let err = verify_signature_with_jwk(&jwk_val, None, b"base", "sig").unwrap_err();
     assert!(matches!(
         err,
         HttpPopError::InvalidConfirmationKey(InvalidConfirmationKeyError::Deserialize(_))
@@ -837,7 +1259,7 @@ fn verify_signature_with_jwk_rejects_unsupported_curve() {
         "x": "AAAA",
         "y": "AAAA",
     });
-    let err = verify_signature_with_jwk(&jwk_val, b"base", "sig").unwrap_err();
+    let err = verify_signature_with_jwk(&jwk_val, None, b"base", "sig").unwrap_err();
     assert!(matches!(
         err,
         HttpPopError::InvalidConfirmationKey(InvalidConfirmationKeyError::UnsupportedAlgorithm)
@@ -849,15 +1271,26 @@ fn verify_signature_with_jwk_accepts_p384_key_and_verifies_signature() {
     let fixture = p384_fixture();
     let base = b"some signature base";
     let sig_b64 = jsonwebtoken::crypto::sign(base, &fixture.signing, fixture.alg).expect("sign");
-    verify_signature_with_jwk(&fixture.jwk_json, base, &sig_b64).expect("p384 signature verifies");
+    verify_signature_with_jwk(&fixture.jwk_json, None, base, &sig_b64).expect("p384 signature verifies");
+    verify_signature_with_jwk(&fixture.jwk_json, Some("ecdsa-p384-sha384"), base, &sig_b64)
+        .expect("p384 signature verifies under its alg");
 }
 
 #[test]
 fn verify_signature_with_jwk_rejects_p384_signature_over_wrong_base() {
     let fixture = p384_fixture();
     let sig_b64 = jsonwebtoken::crypto::sign(b"expected base", &fixture.signing, fixture.alg).expect("sign");
-    let err = verify_signature_with_jwk(&fixture.jwk_json, b"different base", &sig_b64).unwrap_err();
+    let err = verify_signature_with_jwk(&fixture.jwk_json, None, b"different base", &sig_b64).unwrap_err();
     assert!(matches!(err, HttpPopError::BadSignature));
+}
+
+#[test]
+fn verify_signature_with_jwk_rejects_a_p384_key_declared_as_p256() {
+    let fixture = p384_fixture();
+    let base = b"some signature base";
+    let sig_b64 = jsonwebtoken::crypto::sign(base, &fixture.signing, fixture.alg).expect("sign");
+    let err = verify_signature_with_jwk(&fixture.jwk_json, Some("ecdsa-p256-sha256"), base, &sig_b64).unwrap_err();
+    assert!(matches!(err, HttpPopError::AlgorithmMismatch));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -881,8 +1314,20 @@ fn http_pop_error_display_messages_are_distinct() {
         format!("{}", HttpPopError::DuplicateHeader("x")),
         format!("{}", HttpPopError::UnsupportedSignatureKeyScheme),
         format!("{}", HttpPopError::MalformedSignatureInput),
+        format!(
+            "{}",
+            HttpPopError::MissingSignatureParameter(SignatureParameter::Created)
+        ),
+        format!(
+            "{}",
+            HttpPopError::InvalidSignatureParameter(SignatureParameter::Created)
+        ),
+        format!("{}", HttpPopError::InvalidJti(InvalidJtiError::Empty)),
         format!("{}", HttpPopError::MalformedSignature),
-        format!("{}", HttpPopError::Skew),
+        format!("{}", HttpPopError::MissingContentDigest),
+        format!("{}", HttpPopError::Freshness(FreshnessError::Expired)),
+        format!("{}", HttpPopError::Freshness(FreshnessError::NotYetValid)),
+        format!("{}", HttpPopError::AlgorithmMismatch),
         format!("{}", HttpPopError::Replay),
         format!("{}", HttpPopError::BadSignature),
     ];

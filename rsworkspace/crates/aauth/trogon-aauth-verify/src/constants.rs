@@ -61,6 +61,11 @@ pub const DEFAULT_CLOCK_SKEW_SECS: u32 = 30;
 /// whole span (ADR#0051 Decision 4).
 pub const REPLAY_RECORD_LIFETIME_SECS: u32 = MAX_SIGNATURE_VALIDITY_SECS + 2 * MAX_CLOCK_SKEW_SECS;
 
+/// Longest `jti` a verifier accepts. Its replay record is keyed by a digest
+/// of the `jti`, so the bound caps the work an unauthenticated request can
+/// ask for rather than the size of the record.
+pub const MAX_JTI_BYTES: usize = 256;
+
 /// Floor for the replay-store TTL. The derived TTL is
 /// `max(MIN_REPLAY_TTL_SECS, max_skew_secs * 2)` so a zero-skew configuration
 /// still keeps nonce entries long enough to refuse the same signed request
