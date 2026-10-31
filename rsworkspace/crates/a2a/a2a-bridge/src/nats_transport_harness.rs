@@ -13,7 +13,9 @@ use a2a_nats::audit::envelope::{AuditEnvelope, AuditOutcome};
 use a2a_nats::nats::subjects::gateway::GatewayIngressSubject;
 use a2a_nats::{A2aMethod, A2aPrefix};
 
-use crate::auth::{AuthCalloutJsonMintClient, InProcessCalloutDispatcherMintWire, harness_callout_dispatcher};
+use crate::auth::{
+    AuthCalloutJsonMintClient, InProcessCalloutDispatcherMintWire, harness_callout_dispatcher, harness_callout_xkey,
+};
 use crate::error::BridgeError;
 use crate::identity::BridgeUserJwt;
 use crate::inbound::{
@@ -131,12 +133,21 @@ pub fn build_nats_transport_app_state(
     ));
 
     let (dispatcher, tenant) = harness_callout_dispatcher(HARNESS_CALLER_ID);
-    let mint_wire = Arc::new(InProcessCalloutDispatcherMintWire::new(dispatcher, tenant.clone()));
-    let auth = Arc::new(AuthCalloutJsonMintClient::with_tenant_account(
-        mint_wire.clone(),
-        AuthCalloutJsonMintClient::<InProcessCalloutDispatcherMintWire>::default_mint_subject(),
-        Some(tenant),
+    let callout_xkey = harness_callout_xkey();
+    let callout_xkey_public = callout_xkey.public_key();
+    let mint_wire = Arc::new(InProcessCalloutDispatcherMintWire::new(
+        dispatcher,
+        tenant.clone(),
+        Some(callout_xkey),
     ));
+    let auth = Arc::new(
+        AuthCalloutJsonMintClient::with_tenant_account(
+            mint_wire.clone(),
+            AuthCalloutJsonMintClient::<InProcessCalloutDispatcherMintWire>::default_mint_subject(),
+            Some(tenant),
+        )
+        .sealing_to(callout_xkey_public),
+    );
 
     let state = AppState::new(auth, Arc::new(publisher), jetstream, prefix);
     (state, harness, mint_wire)

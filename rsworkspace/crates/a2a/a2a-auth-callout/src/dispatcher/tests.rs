@@ -51,15 +51,16 @@ impl Tenant {
     }
 
     fn bridge_request(&self) -> ServerAuthRequestClaims {
-        ServerAuthRequestClaims::from_bridge_mint(BridgeMintRequest {
-            user_nkey: None,
-            user_jwt: None,
-            account: Some(self.account.as_str().to_owned()),
-            client_info: Some(BridgeClientInfo {
-                client_cert_pem: Some(FIXTURE_CLIENT_CERT.to_owned()),
-            }),
-            connect_opts: None,
-        })
+        ServerAuthRequestClaims::from_bridge_mint(
+            BridgeMintRequest {
+                account: Some(self.account.as_str().to_owned()),
+                client_info: Some(BridgeClientInfo {
+                    client_cert_pem: Some(FIXTURE_CLIENT_CERT.to_owned()),
+                }),
+                ..BridgeMintRequest::default()
+            },
+            None,
+        )
         .unwrap()
     }
 }

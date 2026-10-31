@@ -9,10 +9,9 @@ use serde::de::DeserializeOwned;
 
 use super::ServerAuthRequestClaims;
 use crate::account_resolver::RequestedAccount;
-use crate::bridge_mint::{BridgeAuthScheme, BridgeMintRequest};
+use crate::admission_keys::CalloutXkey;
+use crate::bridge_mint::{BridgeCredentialError, BridgeMintRequest};
 use crate::credentials::PresentedCredential;
-use crate::credentials::api_key::ApiKey;
-use crate::credentials::oidc::BearerToken;
 use crate::error::{AuthCalloutError, CredentialError};
 
 /// The `client_tls` section of a synthetic bridge request. [`ClientTLS`] keeps
@@ -43,60 +42,32 @@ fn decode_section<T: DeserializeOwned>(section: &'static str, value: serde_json:
     serde_json::from_value(value).map_err(|source| AuthCalloutError::BridgeWireFormat { section, source })
 }
 
-/// The edge knows which scheme its caller used, so the secret it forwards is
-/// declared with that scheme instead of being classified by shape.
-fn declared_credential(request: &BridgeMintRequest) -> Result<Option<PresentedCredential>, AuthCalloutError> {
-    let user_jwt = request
-        .user_jwt
-        .as_deref()
-        .filter(|jwt| !jwt.trim().is_empty())
-        .map(|jwt| PresentedCredential::BearerToken(BearerToken::new(jwt)));
-    match request.connect_opts.as_ref().and_then(|opts| opts.auth_scheme) {
-        Some(BridgeAuthScheme::Oidc) => {
-            let token = user_jwt.ok_or_else(|| {
-                CredentialError::InvalidRequest("OIDC scheme but user_jwt is missing or blank".into())
-            })?;
-            Ok(Some(token))
-        }
-        Some(BridgeAuthScheme::ApiKey) => {
-            let key = request
-                .connect_opts
-                .as_ref()
-                .and_then(|opts| opts.api_key.as_deref())
-                .filter(|key| !key.trim().is_empty())
-                .ok_or_else(|| {
-                    CredentialError::InvalidRequest(
-                        "API-key scheme but connect_opts.api_key is missing or blank".into(),
-                    )
-                })?;
-            Ok(Some(PresentedCredential::ApiKey(ApiKey::new(key)?)))
-        }
-        Some(BridgeAuthScheme::MTls) => {
-            let has_client_cert = request
-                .client_info
-                .as_ref()
-                .is_some_and(|info| info.client_cert_pem.is_some());
-            if !has_client_cert {
-                return Err(CredentialError::InvalidRequest(
-                    "mTLS scheme but client_info.client_cert_pem is missing".into(),
-                )
-                .into());
-            }
-            Ok(None)
-        }
-        None => Ok(user_jwt),
-    }
+/// The edge knows which scheme its caller used, so the credential it seals is
+/// declared with that scheme instead of being classified by shape. A callout
+/// without an xkey has nothing a credential could have been sealed to.
+fn declared_credential(
+    request: &BridgeMintRequest,
+    callout_xkey: Option<&CalloutXkey>,
+) -> Result<Option<PresentedCredential>, AuthCalloutError> {
+    let Some(sealed) = &request.sealed_credential else {
+        return Ok(None);
+    };
+    let callout_xkey = callout_xkey.ok_or(BridgeCredentialError::NoCalloutXkey)?;
+    Ok(Some(sealed.open(callout_xkey)?.into()))
 }
 
 impl ServerAuthRequestClaims {
     /// Synthetic authorization claims for `a2a.bridge.auth.callout.request` (not server-signed).
-    pub fn from_bridge_mint(request: BridgeMintRequest) -> Result<Self, AuthCalloutError> {
+    pub fn from_bridge_mint(
+        request: BridgeMintRequest,
+        callout_xkey: Option<&CalloutXkey>,
+    ) -> Result<Self, AuthCalloutError> {
         let raw_account = request
             .account
             .as_deref()
             .ok_or_else(|| CredentialError::InvalidRequest("bridge mint request missing account".into()))?;
         let account = RequestedAccount::new(raw_account.trim())?;
-        let declared_credential = declared_credential(&request)?;
+        let declared_credential = declared_credential(&request, callout_xkey)?;
 
         let client_tls = request
             .client_info

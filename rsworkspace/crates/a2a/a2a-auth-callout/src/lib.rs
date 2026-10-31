@@ -37,7 +37,10 @@ pub use admission_keys::{
     TenantSigningKeys, admission_keys_from_env,
 };
 
-pub use bridge_mint::{BridgeAuthScheme, BridgeClientInfo, BridgeConnectOpts, BridgeMintRequest, BridgeMintResponse};
+pub use bridge_mint::{
+    BridgeClientInfo, BridgeCredential, BridgeCredentialError, BridgeMintRequest, BridgeMintResponse,
+    SealedBridgeCredential,
+};
 pub use caller_jwt_header::CallerJwtHeaderValue;
 pub use constants::CALLER_JWT_HEADER_NAME;
 pub use denial_category::DenialCategory;

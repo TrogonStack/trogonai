@@ -3,7 +3,7 @@ use nats_jwt_rs::authorization::AuthRequest;
 use nkeys::KeyPair;
 
 use super::*;
-use crate::bridge_mint::{BridgeAuthScheme, BridgeClientInfo, BridgeConnectOpts, BridgeMintRequest};
+use crate::bridge_mint::{BridgeClientInfo, BridgeMintRequest};
 use crate::error::CredentialError;
 use crate::wire::test_encode::{FixtureServer, verified_client_tls};
 
@@ -135,18 +135,16 @@ fn the_client_certificate_is_presented_when_no_secret_is() {
 
 #[test]
 fn client_tls_pem_certs_reads_from_bridge_mint_payload() {
-    let req = ServerAuthRequestClaims::from_bridge_mint(BridgeMintRequest {
-        user_nkey: None,
-        user_jwt: None,
-        account: Some("tenant-acme".into()),
-        client_info: Some(BridgeClientInfo {
-            client_cert_pem: Some("cert-a".into()),
-        }),
-        connect_opts: Some(BridgeConnectOpts {
-            auth_scheme: Some(BridgeAuthScheme::MTls),
-            api_key: None,
-        }),
-    })
+    let req = ServerAuthRequestClaims::from_bridge_mint(
+        BridgeMintRequest {
+            account: Some("tenant-acme".into()),
+            client_info: Some(BridgeClientInfo {
+                client_cert_pem: Some("cert-a".into()),
+            }),
+            ..BridgeMintRequest::default()
+        },
+        None,
+    )
     .unwrap();
     assert_eq!(req.client_tls_pem_certs().len(), 1);
     assert_eq!(req.primary_client_cert().unwrap().as_str(), "cert-a");
