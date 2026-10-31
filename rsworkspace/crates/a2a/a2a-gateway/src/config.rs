@@ -1,7 +1,7 @@
 //! Env-driven [`Args`] + resolved [`Config`] for the gateway.
 //!
-//! The CLI surface is intentionally small — gateway tuning lives on `NatsConfig`
-//! and per-slice env vars (queue group, JWT audience, trust-caller-headers).
+//! The CLI surface is intentionally small: gateway tuning lives on `NatsConfig`
+//! and per-slice env vars (queue group, JWT audience).
 //! `config_from_args` is the single seam tests and the binary share so the
 //! same env-resolution path is exercised under both.
 
