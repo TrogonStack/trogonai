@@ -10,6 +10,9 @@ use serde::de::DeserializeOwned;
 use super::ServerAuthRequestClaims;
 use crate::account_resolver::RequestedAccount;
 use crate::bridge_mint::{BridgeAuthScheme, BridgeMintRequest};
+use crate::credentials::PresentedCredential;
+use crate::credentials::api_key::ApiKey;
+use crate::credentials::oidc::BearerToken;
 use crate::error::{AuthCalloutError, CredentialError};
 
 /// The `client_tls` section of a synthetic bridge request. [`ClientTLS`] keeps
@@ -40,54 +43,60 @@ fn decode_section<T: DeserializeOwned>(section: &'static str, value: serde_json:
     serde_json::from_value(value).map_err(|source| AuthCalloutError::BridgeWireFormat { section, source })
 }
 
+/// The edge knows which scheme its caller used, so the secret it forwards is
+/// declared with that scheme instead of being classified by shape.
+fn declared_credential(request: &BridgeMintRequest) -> Result<Option<PresentedCredential>, AuthCalloutError> {
+    let user_jwt = request
+        .user_jwt
+        .as_deref()
+        .filter(|jwt| !jwt.trim().is_empty())
+        .map(|jwt| PresentedCredential::BearerToken(BearerToken::new(jwt)));
+    match request.connect_opts.as_ref().and_then(|opts| opts.auth_scheme) {
+        Some(BridgeAuthScheme::Oidc) => {
+            let token = user_jwt.ok_or_else(|| {
+                CredentialError::InvalidRequest("OIDC scheme but user_jwt is missing or blank".into())
+            })?;
+            Ok(Some(token))
+        }
+        Some(BridgeAuthScheme::ApiKey) => {
+            let key = request
+                .connect_opts
+                .as_ref()
+                .and_then(|opts| opts.api_key.as_deref())
+                .filter(|key| !key.trim().is_empty())
+                .ok_or_else(|| {
+                    CredentialError::InvalidRequest(
+                        "API-key scheme but connect_opts.api_key is missing or blank".into(),
+                    )
+                })?;
+            Ok(Some(PresentedCredential::ApiKey(ApiKey::new(key)?)))
+        }
+        Some(BridgeAuthScheme::MTls) => {
+            let has_client_cert = request
+                .client_info
+                .as_ref()
+                .is_some_and(|info| info.client_cert_pem.is_some());
+            if !has_client_cert {
+                return Err(CredentialError::InvalidRequest(
+                    "mTLS scheme but client_info.client_cert_pem is missing".into(),
+                )
+                .into());
+            }
+            Ok(None)
+        }
+        None => Ok(user_jwt),
+    }
+}
+
 impl ServerAuthRequestClaims {
     /// Synthetic authorization claims for `a2a.bridge.auth.callout.request` (not server-signed).
     pub fn from_bridge_mint(request: BridgeMintRequest) -> Result<Self, AuthCalloutError> {
-        // Route the bridge account through the same RequestedAccount value
-        // object the dispatcher uses for the NATS path — keeps the shape
-        // consistent and means a blank/whitespace account is rejected with
-        // a typed AccountResolverError instead of slipping through and
-        // failing later during dispatch.
         let raw_account = request
             .account
+            .as_deref()
             .ok_or_else(|| CredentialError::InvalidRequest("bridge mint request missing account".into()))?;
-        // The validated RequestedAccount is the boundary type; we keep the
-        // string form for the synthetic JSON body but the validation has
-        // happened by the time it gets here.
-        let account = RequestedAccount::new(raw_account.trim())?.as_str().to_owned();
-
-        let (jwt, auth_token) = match request.connect_opts.as_ref().and_then(|o| o.auth_scheme) {
-            Some(BridgeAuthScheme::ApiKey) => {
-                let key = request
-                    .connect_opts
-                    .as_ref()
-                    .and_then(|o| o.api_key.clone())
-                    .filter(|k| !k.trim().is_empty())
-                    .ok_or_else(|| {
-                        CredentialError::InvalidRequest(
-                            "API-key scheme but connect_opts.api_key is missing or blank".into(),
-                        )
-                    })?;
-                (None, Some(key))
-            }
-            Some(BridgeAuthScheme::Oidc) => {
-                // OIDC must carry a user_jwt — otherwise dispatcher's
-                // material-based inference would fall back to mTLS if a
-                // client_cert_pem happens to be present, silently
-                // authenticating the connection via a different scheme
-                // than the caller declared.
-                let jwt = request
-                    .user_jwt
-                    .clone()
-                    .filter(|j| !j.trim().is_empty())
-                    .ok_or_else(|| {
-                        CredentialError::InvalidRequest("OIDC scheme but user_jwt is missing or blank".into())
-                    })?;
-                (Some(jwt), None)
-            }
-            None => (request.user_jwt.clone(), None),
-            Some(BridgeAuthScheme::MTls) => (None, None),
-        };
+        let account = RequestedAccount::new(raw_account.trim())?;
+        let declared_credential = declared_credential(&request)?;
 
         let client_tls = request
             .client_info
@@ -117,14 +126,12 @@ impl ServerAuthRequestClaims {
             client_info: ClientInfo {
                 host: "127.0.0.1".to_owned(),
                 id: 0,
-                user: account,
                 kind: "Client".to_owned(),
                 client_type: "nats".to_owned(),
                 ..ClientInfo::default()
             },
             connect_opts: ConnectOpts {
-                jwt,
-                auth_token,
+                user: Some(account.as_str().to_owned()),
                 protocol: 1,
                 ..ConnectOpts::default()
             },
@@ -157,7 +164,7 @@ impl ServerAuthRequestClaims {
             sub: bridge_issuer.public_key(),
         };
 
-        Ok(Self::from_decoded(inner, nats_json))
+        Ok(Self::declaring(inner, nats_json, declared_credential))
     }
 }
 
