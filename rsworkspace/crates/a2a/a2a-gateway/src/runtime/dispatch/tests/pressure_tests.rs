@@ -23,7 +23,7 @@ async fn a_closed_reply_connection_reports_the_failed_ingress_response() -> Test
     let events = trogon_std::log_capture::CapturedEvents::new();
     let _capture = events.install(trogon_std::log_capture::LevelFilter::DEBUG);
     let mut message = request("unknown.method", json!({}));
-    message.subject = "a2a.v1.gateway.bot.unknown.method".into();
+    message.subject = "a2a.v1.gateway.bot.person.alice.unknown.method".into();
     fixture.dispatch(message).await;
     assert!(
         events

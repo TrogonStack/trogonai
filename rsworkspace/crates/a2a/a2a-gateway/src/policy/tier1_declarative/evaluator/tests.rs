@@ -52,7 +52,7 @@ fn matching_rule_returns_effect() {
         A2aMethod::MessageSend,
         "planner",
         Some("user/alice"),
-        "a2a.v1.gateway.planner.message.send",
+        "a2a.v1.gateway.planner.person.alice.message.send",
     ));
     assert_eq!(
         decision,
@@ -83,7 +83,7 @@ fn partial_match_tries_next_rule() {
         A2aMethod::MessageSend,
         "planner",
         None,
-        "a2a.v1.gateway.planner.message.send",
+        "a2a.v1.gateway.planner.person.alice.message.send",
     ));
     assert_eq!(
         decision,
@@ -114,7 +114,7 @@ fn priority_order_is_respected() {
         A2aMethod::MessageSend,
         "planner",
         None,
-        "a2a.v1.gateway.planner.message.send",
+        "a2a.v1.gateway.planner.person.alice.message.send",
     ));
     assert_eq!(decision, Tier1DeclarativeDecision::Deny { rule: rid("deny-high") });
 }
@@ -125,12 +125,12 @@ fn exact_and_glob_patterns_work() {
     assert!(!pattern_matches("message/send", "message/stream"));
     assert!(pattern_matches("user/*", "user/alice"));
     assert!(pattern_matches(
-        "a2a.v1.gateway.*.message.send",
-        "a2a.v1.gateway.planner.message.send"
+        "a2a.v1.gateway.*.*.*.message.send",
+        "a2a.v1.gateway.planner.person.alice.message.send"
     ));
     assert!(!pattern_matches(
-        "a2a.v1.gateway.*.message.send",
-        "a2a.v1.gateway.planner.message.stream"
+        "a2a.v1.gateway.*.*.*.message.send",
+        "a2a.v1.gateway.planner.person.alice.message.stream"
     ));
 }
 
@@ -147,7 +147,7 @@ fn negate_inverts_match() {
         A2aMethod::MessageSend,
         "planner",
         Some("user/bob"),
-        "a2a.v1.gateway.planner.message.send",
+        "a2a.v1.gateway.planner.person.alice.message.send",
     ));
     assert_eq!(
         denied,
@@ -160,7 +160,7 @@ fn negate_inverts_match() {
         A2aMethod::MessageSend,
         "planner",
         Some("user/alice"),
-        "a2a.v1.gateway.planner.message.send",
+        "a2a.v1.gateway.planner.person.alice.message.send",
     ));
     assert_eq!(allowed, Tier1DeclarativeDecision::Allow { rule: None });
 }
@@ -182,7 +182,7 @@ fn caller_subject_wildcard_does_not_match_unauthenticated_request() {
         A2aMethod::MessageSend,
         "planner",
         None,
-        "a2a.v1.gateway.planner.message.send",
+        "a2a.v1.gateway.planner.person.alice.message.send",
     ));
     assert_eq!(unauthenticated, Tier1DeclarativeDecision::Allow { rule: None });
 
@@ -190,7 +190,7 @@ fn caller_subject_wildcard_does_not_match_unauthenticated_request() {
         A2aMethod::MessageSend,
         "planner",
         Some("user/alice"),
-        "a2a.v1.gateway.planner.message.send",
+        "a2a.v1.gateway.planner.person.alice.message.send",
     ));
     assert_eq!(
         authenticated,
@@ -209,7 +209,7 @@ fn noop_gate_defaults_allow() {
             A2aMethod::MessageSend,
             "planner",
             None,
-            "a2a.v1.gateway.planner.message.send",
+            "a2a.v1.gateway.planner.person.alice.message.send",
         )),
         Tier1DeclarativeDecision::Allow { rule: None }
     );
@@ -336,15 +336,15 @@ fn fixed_clock_returns_configured_instant() {
 #[test]
 fn nats_star_matches_exactly_one_token() {
     // NATS semantics: `*` matches one dot-separated token only. Without
-    // this, a generic glob would let `a2a.v1.gateway.*.message.send` also
-    // match `a2a.v1.gateway.tenant.x.message.send` and skew decisions.
+    // this, a generic glob would let `a2a.v1.gateway.*.*.*.message.send` also
+    // match `a2a.v1.gateway.tenant.x.person.alice.message.send` and skew decisions.
     assert!(nats_subject_matches(
-        "a2a.v1.gateway.*.message.send",
-        "a2a.v1.gateway.planner.message.send"
+        "a2a.v1.gateway.*.*.*.message.send",
+        "a2a.v1.gateway.planner.person.alice.message.send"
     ));
     assert!(!nats_subject_matches(
-        "a2a.v1.gateway.*.message.send",
-        "a2a.v1.gateway.tenant.planner.message.send"
+        "a2a.v1.gateway.*.*.*.message.send",
+        "a2a.v1.gateway.tenant.planner.person.alice.message.send"
     ));
     assert!(!nats_subject_matches("a2a.v1.gateway.*", "a2a.v1.gateway"));
 }

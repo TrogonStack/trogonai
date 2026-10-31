@@ -20,6 +20,7 @@ async fn a_unary_request_does_not_spawn_a_streaming_consumer() {
         br#"{"id":"unary-request","params":{}}"#,
         "_INBOX.unary".into(),
         CallerKey::new("alice").unwrap(),
+        SubjectPrincipal::from_tokens("person", "alice").unwrap(),
         Some(0),
     );
     assert!(matches!(outcome, MaybeStreamingSpawn::NotStreaming));
