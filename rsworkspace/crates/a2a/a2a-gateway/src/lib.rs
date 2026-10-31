@@ -7,10 +7,6 @@
 //! share a single seam.
 //!
 //! Modules:
-//! - [`aauth`] — AAuth (draft-hardt-aauth-protocol) ingress verifier; turns
-//!   inline `aa-agent+jwt` + PoP + optional `aa-auth+jwt` headers into an
-//!   [`aauth::AAuthResolution`] or an [`aauth::AAuthDenyError`] carrying a
-//!   `ResourceChallenge` for the reply.
 //! - [`agent_card_surface`] — schema-validates AgentCard JSON before the
 //!   gateway's discover surface returns it, so a stored card that drifted
 //!   from the spec can't be surfaced unchecked.
@@ -35,7 +31,6 @@
 #![allow(clippy::module_name_repetitions)]
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
-pub mod aauth;
 pub mod agent_card_surface;
 pub mod audit_ingress;
 pub mod caller_jwt_header;

@@ -1,6 +1,6 @@
 //! Crate-wide constants for the A2A gateway: env-var names, defaults,
-//! wire tokens, and tuning values used across the ingress/egress pumps,
-//! AAuth layer, and policy tiers.
+//! wire tokens, and tuning values used across the ingress/egress pumps
+//! and policy tiers.
 
 use std::time::Duration;
 
@@ -59,13 +59,6 @@ pub const MIRROR_MSG_ID_PREFIX: &str = "mirror:";
 pub(crate) const MAX_PUBLISH_RETRIES: u32 = 3;
 pub(crate) const RETRY_BASE_DELAY: Duration = Duration::from_millis(100);
 
-// --- aauth.rs ---
-
-/// Anti-replay code returned on enforce-mode AAuth failure. JSON-RPC clients
-/// see this code; A2A ingress callers see a status reply carrying the
-/// `AAuth-Requirement` header.
-pub const AAUTH_REQUIRED_CODE: i32 = -32_118;
-
 // --- jwt_caller_identity.rs ---
 
 pub const ENV_GATEWAY_TRUST_CALLER_HEADERS: &str = "A2A_GATEWAY_TRUST_CALLER_HEADERS";
@@ -94,13 +87,9 @@ pub(crate) const ATTR_CALLER_ID: &str = "caller_id";
 pub(crate) const ATTR_AGENT_SUBJECT: &str = "agent_subject";
 #[cfg(feature = "spicedb")]
 pub(crate) const ATTR_ROUTING_OUTCOME: &str = "routing_outcome";
-#[cfg(feature = "spicedb")]
-pub(crate) const ATTR_AAUTH_AGENT_ID: &str = "aauth_agent_id";
 
 #[cfg(feature = "spicedb")]
 pub(crate) const ROUTING_IGNORED_NO_REPLY: &str = "ignored_no_reply";
-#[cfg(feature = "spicedb")]
-pub(crate) const ROUTING_AAUTH_DENIED: &str = "aauth_denied";
 #[cfg(feature = "spicedb")]
 pub(crate) const ROUTING_TIER1_DENIED: &str = "tier1_denied";
 #[cfg(feature = "spicedb")]
@@ -141,29 +130,6 @@ pub(crate) const TASKS_RESUBSCRIBE_METHOD_DOTS: &str = "tasks.resubscribe";
 pub(crate) const ENV_POLICY_BUNDLE_DIR: &str = "A2A_GATEWAY_POLICY_BUNDLE_DIR";
 pub(crate) const ENV_POLICY_SKILLS: &str = "A2A_GATEWAY_POLICY_SKILLS";
 pub(crate) const ENV_TIER3_REDACTION_ENABLED: &str = "A2A_GATEWAY_TIER3_REDACTION_ENABLED";
-
-// --- runtime/aauth_env.rs ---
-
-pub const ENV_AAUTH_MODE: &str = "A2A_GATEWAY_AAUTH_MODE";
-pub const ENV_AAUTH_JWKS_PATH: &str = "A2A_GATEWAY_AAUTH_JWKS_PATH";
-pub const ENV_AAUTH_JWKS_DISCOVERY: &str = "A2A_GATEWAY_AAUTH_JWKS_DISCOVERY";
-pub const ENV_AAUTH_JWKS_TTL_SECS: &str = "A2A_GATEWAY_AAUTH_JWKS_TTL_SECS";
-pub const ENV_AAUTH_JWKS_ALLOWED_ISSUERS: &str = "A2A_GATEWAY_AAUTH_JWKS_ALLOWED_ISSUERS";
-pub const ENV_AAUTH_RESOURCE_ISS: &str = "A2A_GATEWAY_AAUTH_RESOURCE_ISS";
-pub const ENV_AAUTH_PERSON_SERVER_AUD: &str = "A2A_GATEWAY_AAUTH_PERSON_SERVER_AUD";
-pub const ENV_AAUTH_CHALLENGE_KID: &str = "A2A_GATEWAY_AAUTH_CHALLENGE_KID";
-pub const ENV_AAUTH_CHALLENGE_KEY_PATH: &str = "A2A_GATEWAY_AAUTH_CHALLENGE_KEY_PATH";
-pub const ENV_AAUTH_LEEWAY_SECS: &str = "A2A_GATEWAY_AAUTH_LEEWAY_SECS";
-pub const ENV_AAUTH_CHALLENGE_TTL_SECS: &str = "A2A_GATEWAY_AAUTH_CHALLENGE_TTL_SECS";
-pub const ENV_AAUTH_MAX_SKEW_SECS: &str = "A2A_GATEWAY_AAUTH_MAX_SKEW_SECS";
-
-/// Audit `caller_source` recorded once a verified `aa-auth+jwt` principal
-/// supersedes the JWT-header caller identity for the remainder of dispatch.
-pub const AAUTH_CALLER_SOURCE: &str = "aauth";
-
-pub(crate) const DEFAULT_LEEWAY_SECS: u64 = 60;
-pub(crate) const DEFAULT_CHALLENGE_TTL_SECS: i64 = 300;
-pub(crate) const DEFAULT_MAX_SKEW_SECS: i64 = 60;
 
 // --- policy/tier1_declarative/evaluator.rs ---
 
