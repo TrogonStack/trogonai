@@ -10,6 +10,7 @@ use axum::http::{Request, StatusCode};
 use bytes::Bytes;
 use futures_util::StreamExt;
 use tower::ServiceExt;
+use trogon_nats::NatsTls;
 use trogon_nats::test_support::CoreTestServer;
 use trogon_std::env::InMemoryEnv;
 use trogon_std::log_capture::{CapturedLogs, LogLevel};
@@ -188,8 +189,12 @@ async fn bootstrap_diagnostics_reach_the_log_facade_before_tracing_initializatio
     env.set("NATS_URL", " nats://stub:4222 ");
     let _stub = bootstrap_stub_transport(&env, &NatsConfig::from_env(&env), resolve_a2a_prefix(&env)?);
     let server = CoreTestServer::start().await;
-    let _state =
-        bootstrap_nats_transport(&env, &NatsConfig::from_url(server.address()), resolve_a2a_prefix(&env)?).await?;
+    let _state = bootstrap_nats_transport(
+        &env,
+        &NatsConfig::from_url(server.address()).with_tls(NatsTls::Disabled),
+        resolve_a2a_prefix(&env)?,
+    )
+    .await?;
 
     let records = logs.records();
     let stub = records
@@ -236,6 +241,7 @@ async fn nats_bootstrap_wires_mint_subject_tenant_and_gateway_namespace() -> Res
     ] {
         let env = InMemoryEnv::new();
         env.set("NATS_URL", server.address());
+        env.set("NATS_TLS_DISABLED", "true");
         env.set(ENV_A2A_PREFIX, "tenant");
         env.set("BRIDGE_CONNECT_TIMEOUT_SECS", "2");
         env.set("BRIDGE_AUTH_MINT_TIMEOUT_SECS", "10");
