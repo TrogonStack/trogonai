@@ -186,6 +186,14 @@ groups:
     attributes:
       - ref: event_type
       - ref: subject
+  - id: span.plaid.webhook
+    type: span
+    span_kind: server
+    stability: development
+    brief: Plaid webhook ingestion.
+    attributes:
+      - ref: event_type
+      - ref: subject
 
   # trogon-gateway credential lifecycle, recovery worker, and runtime
   # projection metrics (meter "trogon-gateway"). The shared `operation`,
