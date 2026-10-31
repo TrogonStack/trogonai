@@ -12,6 +12,7 @@ use std::time::Duration;
 use tracing::{info, instrument, warn};
 use trogon_semconv::span::NATS_CONNECT;
 use trogon_std::env::{ReadEnv, SystemEnv};
+use trogon_std::tls::install_default_crypto_provider;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectError {
@@ -152,6 +153,7 @@ fn invalid_setting(setting: &'static str) -> impl Fn(SettingError) -> ConnectErr
 
 #[instrument(name = NATS_CONNECT, skip(config), fields(servers = ?config.servers, auth = %config.auth.description(), timeout_secs = ?connection_timeout.as_secs()))]
 pub async fn connect(config: &NatsConfig, connection_timeout: Duration) -> Result<Client, ConnectError> {
+    install_default_crypto_provider();
     info!(
         servers = ?config.servers,
         auth = %config.auth.description(),

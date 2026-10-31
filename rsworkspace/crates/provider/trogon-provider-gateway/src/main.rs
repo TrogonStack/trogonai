@@ -17,7 +17,7 @@ use trogon_std::fs::SystemFs;
 async fn main() -> Result<(), error::Error> {
     let cli = cli::Cli::parse();
     let config = config::load(&cli, &SystemEnv)?;
-    trogon_std::tls::install_default_crypto_provider()?;
+    trogon_std::tls::install_default_crypto_provider();
 
     trogon_telemetry::init_logger(
         trogon_telemetry::ServiceName::TrogonProviderGateway,

@@ -1,16 +1,21 @@
+use std::sync::Arc;
+
 use super::install_default_crypto_provider;
 use rustls::crypto::CryptoProvider;
 
 #[test]
 fn installs_a_process_wide_provider() {
-    let _ = install_default_crypto_provider();
+    install_default_crypto_provider();
 
     assert!(CryptoProvider::get_default().is_some());
 }
 
 #[test]
-fn refuses_to_replace_an_installed_provider() {
-    let _ = install_default_crypto_provider();
+fn installing_again_keeps_the_installed_provider() {
+    install_default_crypto_provider();
+    let installed = CryptoProvider::get_default().map(Arc::as_ptr);
 
-    assert!(install_default_crypto_provider().is_err());
+    install_default_crypto_provider();
+
+    assert_eq!(CryptoProvider::get_default().map(Arc::as_ptr), installed);
 }

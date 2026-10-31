@@ -99,7 +99,7 @@ rmcp = { version = "3.0.0", default-features = false, features = ["client", "ser
 
 # Async runtime & networking
 async-compat = "=0.2.6"
-async-nats = { version = "=0.50.0", default-features = false }
+async-nats = { version = "=0.50.0", default-features = false, features = ["aws-lc-rs"] }
 async-trait = "=0.1.92"
 axum = { version = "=0.8.9", features = ["ws"] }
 bytes = "=1.12.1"
