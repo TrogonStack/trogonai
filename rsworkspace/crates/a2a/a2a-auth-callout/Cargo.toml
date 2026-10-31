@@ -42,6 +42,7 @@ tracing = { workspace = true }
 tracing-subscriber = { version = "=0.3.23", features = ["fmt", "env-filter"] }
 trogon-identity-types = { workspace = true }
 trogon-nats = { workspace = true }
+trogon-service-config = { workspace = true }
 trogon-std = { workspace = true }
 uuid = { workspace = true }
 x509-parser = { version = "=0.18.1", features = ["verify"] }
