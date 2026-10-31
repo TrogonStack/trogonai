@@ -27,7 +27,7 @@ impl DenialCategory {
         match error {
             AuthCalloutError::Connect(_) => Self::ServiceUnavailable,
             AuthCalloutError::Subscribe(_) => Self::InternalError,
-            AuthCalloutError::Deserialize(_) => Self::InvalidRequest,
+            AuthCalloutError::Deserialize(_) | AuthCalloutError::BridgeCredential(_) => Self::InvalidRequest,
             AuthCalloutError::Serialize(_) => Self::InternalError,
             AuthCalloutError::Reply(_) => Self::InternalError,
             AuthCalloutError::Jwt(_) => Self::InternalError,

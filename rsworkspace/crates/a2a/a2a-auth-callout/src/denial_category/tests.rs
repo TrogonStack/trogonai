@@ -1,4 +1,5 @@
 use super::*;
+use crate::bridge_mint::BridgeCredentialError;
 
 #[test]
 fn each_auth_callout_error_variant_maps_to_category() {
@@ -115,6 +116,16 @@ fn credential_invalid_request_maps_to_invalid_request() {
         DenialCategory::from_auth_callout_error(&err),
         DenialCategory::InvalidRequest
     );
+}
+
+#[test]
+fn a_refused_bridge_credential_maps_to_invalid_request() {
+    for err in [BridgeCredentialError::NoCalloutXkey, BridgeCredentialError::BlankSecret] {
+        assert_eq!(
+            DenialCategory::from_auth_callout_error(&AuthCalloutError::BridgeCredential(err)),
+            DenialCategory::InvalidRequest
+        );
+    }
 }
 
 #[test]

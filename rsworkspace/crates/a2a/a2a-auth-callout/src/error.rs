@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use crate::admission_keys::AdmissionKeyError;
+use crate::bridge_mint::BridgeCredentialError;
 use crate::jwt::JwtError;
 
 /// Typed reason a credential verifier rejected a caller. Replaces the
@@ -108,6 +109,8 @@ pub enum AuthCalloutError {
     KeyLoadUtf8(#[source] std::str::Utf8Error),
     #[error(transparent)]
     AdmissionKeys(#[from] AdmissionKeyError),
+    #[error(transparent)]
+    BridgeCredential(#[from] BridgeCredentialError),
 }
 
 #[cfg(test)]
