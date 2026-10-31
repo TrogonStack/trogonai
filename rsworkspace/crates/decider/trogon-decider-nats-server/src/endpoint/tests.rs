@@ -1,18 +1,35 @@
+use trogon_decider_runtime::{CommandPrincipal, PrincipalId, PrincipalKind};
 use trogon_nats::{MAX_SUBJECT_TOKENS, SubjectViolationError};
 
-use super::{CommandEndpoint, CommandEndpointError, SubjectPrefix};
+use super::{CommandEndpoint, CommandEndpointError, CommandSubjectError, SubjectPrefix};
 use crate::constants::DEFAULT_SUBJECT_PREFIX;
+use crate::tenant_position::TenantPosition;
 
 fn endpoint(prefix: &str) -> CommandEndpoint {
-    CommandEndpoint::new(SubjectPrefix::new(prefix).expect("a token")).expect("a conformant subject")
+    CommandEndpoint::new(SubjectPrefix::new(prefix).expect("a token"), TenantPosition::Absent)
+        .expect("a conformant subject")
+}
+
+fn tenant_endpoint(prefix: &str) -> CommandEndpoint {
+    CommandEndpoint::new(SubjectPrefix::new(prefix).expect("a token"), TenantPosition::Wildcard)
+        .expect("a conformant subject")
+}
+
+fn principal(kind: PrincipalKind, id: &str) -> CommandPrincipal {
+    CommandPrincipal::new(kind, PrincipalId::new(id).expect("an id"))
+}
+
+fn dotted_prefix(tokens: usize) -> SubjectPrefix {
+    SubjectPrefix::new(core::iter::repeat_n("seg", tokens).collect::<Vec<_>>().join("."))
+        .expect("a short dotted prefix is a token")
 }
 
 #[test]
-fn the_endpoint_answers_on_the_subject_its_service_and_method_name() {
+fn the_endpoint_subscribes_with_wildcards_where_the_principal_sits() {
     assert_eq!(
-        endpoint(DEFAULT_SUBJECT_PREFIX).subject(),
-        "decider.DeciderService.Decide",
-        "the subject is what a generated client derives from the descriptor, so a host answering anywhere else is a host no such client can reach"
+        endpoint(DEFAULT_SUBJECT_PREFIX).subscription(),
+        "decider.*.*.DeciderService.Decide",
+        "a caller's prefix ends in its principal, so the host has to match every principal between its namespace and the method"
     );
 }
 
@@ -20,8 +37,17 @@ fn the_endpoint_answers_on_the_subject_its_service_and_method_name() {
 fn a_configured_prefix_moves_the_endpoint_without_renaming_it() {
     let moved = endpoint("acme.decider");
 
-    assert_eq!(moved.subject(), "acme.decider.DeciderService.Decide");
+    assert_eq!(moved.subscription(), "acme.decider.*.*.DeciderService.Decide");
     assert_eq!(moved.prefix().as_str(), "acme.decider");
+    assert_eq!(moved.tenant(), TenantPosition::Absent);
+}
+
+#[test]
+fn a_host_serving_several_tenants_subscribes_at_the_tenant_position_too() {
+    let shared = tenant_endpoint(DEFAULT_SUBJECT_PREFIX);
+
+    assert_eq!(shared.subscription(), "*.decider.*.*.DeciderService.Decide");
+    assert_eq!(shared.tenant(), TenantPosition::Wildcard);
 }
 
 #[test]
@@ -32,16 +58,10 @@ fn a_prefix_that_is_not_a_nats_token_is_refused() {
 
 #[test]
 fn a_prefix_whose_subject_breaks_the_subject_limits_is_refused_at_startup() {
-    // One token under the subject budget, so the prefix is legal on its own and
-    // only the two tokens the endpoint appends put the subject over.
-    let prefix = SubjectPrefix::new(
-        core::iter::repeat_n("seg", MAX_SUBJECT_TOKENS - 1)
-            .collect::<Vec<_>>()
-            .join("."),
-    )
-    .expect("a short dotted prefix is a token");
-
-    let error = CommandEndpoint::new(prefix).expect_err("the joined subject is over the limit");
+    // The endpoint appends four tokens, so this prefix is legal on its own and
+    // only the appended tokens put the subject one over the budget.
+    let error = CommandEndpoint::new(dotted_prefix(MAX_SUBJECT_TOKENS - 3), TenantPosition::Absent)
+        .expect_err("the joined subject is over the limit");
 
     assert!(
         matches!(
@@ -53,4 +73,140 @@ fn a_prefix_whose_subject_breaks_the_subject_limits_is_refused_at_startup() {
         ),
         "a host that cannot legally publish its own endpoint subject can never receive a command, so it has to fail before it claims to be serving: {error}"
     );
+}
+
+#[test]
+fn the_tenant_token_counts_against_the_subject_budget() {
+    let prefix = dotted_prefix(MAX_SUBJECT_TOKENS - 4);
+
+    assert!(CommandEndpoint::new(prefix.clone(), TenantPosition::Absent).is_ok());
+    assert!(
+        matches!(
+            CommandEndpoint::new(prefix, TenantPosition::Wildcard),
+            Err(CommandEndpointError::Subject {
+                source: SubjectViolationError::TooManyTokens { .. },
+                ..
+            })
+        ),
+        "every subject a shared host receives carries the tenant token, so the budget has to account for it"
+    );
+}
+
+#[test]
+fn every_principal_kind_is_read_from_the_subject() {
+    let endpoint = endpoint(DEFAULT_SUBJECT_PREFIX);
+
+    for (subject, expected) in [
+        (
+            "decider.agent.alice.DeciderService.Decide",
+            principal(PrincipalKind::Agent, "alice"),
+        ),
+        (
+            "decider.person.bob.DeciderService.Decide",
+            principal(PrincipalKind::Person, "bob"),
+        ),
+        (
+            "decider.service.scheduler.DeciderService.Decide",
+            principal(PrincipalKind::Service, "scheduler"),
+        ),
+    ] {
+        assert_eq!(
+            endpoint
+                .derive_principal(subject)
+                .expect("the subject names a principal"),
+            expected,
+            "{subject}"
+        );
+    }
+}
+
+#[test]
+fn the_principal_carries_nothing_the_subject_does_not() {
+    let derived = endpoint(DEFAULT_SUBJECT_PREFIX)
+        .derive_principal("decider.agent.alice.DeciderService.Decide")
+        .expect("the subject names a principal");
+
+    assert!(derived.claims().is_empty(), "the subject grants no claims");
+    assert!(
+        derived.directed_principal().is_none(),
+        "the subject has no position for a directed principal"
+    );
+}
+
+#[test]
+fn a_shared_host_reads_the_principal_after_the_tenant_token() {
+    assert_eq!(
+        tenant_endpoint(DEFAULT_SUBJECT_PREFIX)
+            .derive_principal("acme.decider.agent.alice.DeciderService.Decide")
+            .expect("the subject names a principal"),
+        principal(PrincipalKind::Agent, "alice")
+    );
+}
+
+#[test]
+fn a_kind_token_that_is_no_principal_kind_is_refused() {
+    assert!(matches!(
+        endpoint(DEFAULT_SUBJECT_PREFIX).derive_principal("decider.robot.alice.DeciderService.Decide"),
+        Err(CommandSubjectError::Principal { .. })
+    ));
+}
+
+#[test]
+fn an_id_token_that_is_no_principal_id_is_refused() {
+    let endpoint = endpoint(DEFAULT_SUBJECT_PREFIX);
+
+    for subject in [
+        "decider.agent.a*b.DeciderService.Decide",
+        "decider.agent.a>b.DeciderService.Decide",
+        "decider.agent.a\u{1}b.DeciderService.Decide",
+    ] {
+        assert!(
+            matches!(
+                endpoint.derive_principal(subject),
+                Err(CommandSubjectError::Principal { .. })
+            ),
+            "{subject:?}"
+        );
+    }
+}
+
+#[test]
+fn a_subject_that_is_not_the_endpoint_s_names_no_principal() {
+    let endpoint = endpoint(DEFAULT_SUBJECT_PREFIX);
+
+    for subject in [
+        "decider.DeciderService.Decide",
+        "decider.agent.DeciderService.Decide",
+        "other.agent.alice.DeciderService.Decide",
+        "decider.agent.alice.DeciderService.Describe",
+        "decider.agent.alice.OtherService.Decide",
+        "decider.agent.alice.DeciderService.Decide.extra",
+        "acme.decider.agent.alice.DeciderService.Decide",
+    ] {
+        assert!(
+            matches!(
+                endpoint.derive_principal(subject),
+                Err(CommandSubjectError::OutsideEndpoint { .. })
+            ),
+            "{subject:?}"
+        );
+    }
+}
+
+#[test]
+fn a_shared_host_refuses_a_subject_without_its_tenant_token() {
+    let shared = tenant_endpoint(DEFAULT_SUBJECT_PREFIX);
+
+    for subject in [
+        "decider.agent.alice.DeciderService.Decide",
+        ".decider.agent.alice.DeciderService.Decide",
+    ] {
+        assert!(
+            matches!(
+                shared.derive_principal(subject),
+                Err(CommandSubjectError::OutsideEndpoint { .. })
+            ),
+            "{subject:?}"
+        );
+    }
 }
