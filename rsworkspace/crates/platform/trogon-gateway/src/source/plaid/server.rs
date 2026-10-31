@@ -18,8 +18,8 @@ use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, ProvisionedStreamField, PublishOutcome,
 };
 use trogon_semconv::span::PLAID_WEBHOOK;
-use trogon_std::NonZeroDuration;
 use trogon_std::time::EpochClock;
+use trogon_std::{NonZeroDuration, SystemClock};
 
 use super::PlaidConfig;
 use super::PlaidDeliveryId;
@@ -31,7 +31,7 @@ use super::constants::{
 };
 use super::dedup_window::DedupWindow;
 use super::key_cache::{PlaidKeyCache, PlaidKeyResolveError};
-use super::key_fetcher::PlaidKeyFetcher;
+use super::key_fetcher::{PlaidKeyFetcher, ReqwestPlaidKeyFetcher};
 use super::signature;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,6 +135,14 @@ pub async fn provision<C: JetStreamContext>(js: &C, config: &PlaidConfig) -> Res
         max_age_secs, dedup_window_secs, "JetStream stream ready"
     );
     Ok(())
+}
+
+pub fn router<P: JetStreamPublisher, S: ObjectStorePut>(
+    publisher: ClaimCheckPublisher<P, S>,
+    config: &PlaidConfig,
+) -> Router {
+    let fetcher = ReqwestPlaidKeyFetcher::new(&config.api_base_url, config.client_id.clone(), config.secret.clone());
+    router_with_clock(publisher, config, SystemClock, fetcher)
 }
 
 fn router_with_clock<P: JetStreamPublisher, S: ObjectStorePut, C: EpochClock, F: PlaidKeyFetcher>(
