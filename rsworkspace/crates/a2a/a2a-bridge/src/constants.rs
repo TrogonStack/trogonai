@@ -1,5 +1,9 @@
 pub(crate) const AGENT_ID_HEADER: &str = "x-a2a-agent-id";
 
+/// How the bridge names itself as the presenter in the record it writes for
+/// each request (ADR#0082 Decision 6).
+pub(crate) const BRIDGE_PRESENTER: &str = "a2a-bridge";
+
 pub const ENV_AUTH_CALLOUT_XKEY_PUBLIC: &str = "AUTH_CALLOUT_XKEY_PUBLIC";
 
 /// JSON-RPC 2.0 reserved code for a server-side failure.

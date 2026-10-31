@@ -1,6 +1,7 @@
 #![doc = include_str!("../README.md")]
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
+pub mod audit;
 pub mod auth;
 mod constants;
 pub mod edge_auth;

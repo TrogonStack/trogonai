@@ -299,3 +299,119 @@ async fn shadow_forwards_a_proof_that_fails() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(bridge.mint.minted_for(), vec![bearer.as_str().to_owned()]);
 }
+
+/// How a record names the caller the edge verified for `agent`.
+fn verified_as(agent: &SigningAgent) -> String {
+    format!("{} ({})", agent.subject(), agent.issuer())
+}
+
+#[tokio::test]
+async fn a_verified_request_is_recorded_against_the_minted_caller_and_the_bridge() {
+    let Some(logs) = CapturedLogs::isolated() else {
+        return;
+    };
+    let agent = SigningAgent::new();
+    let bridge = Bridge::behind(enforcing(&agent));
+
+    handle_jsonrpc(
+        signed_rpc(&agent, &Signing::fresh(), agent.bearer().as_str()),
+        &bridge.state,
+    )
+    .await
+    .unwrap();
+
+    let records = logs.records();
+    let presented = records
+        .iter()
+        .find(|log| log.message.contains("presenting the request to the gateway"));
+    assert!(
+        presented.is_some_and(
+            |log| log.level == LogLevel::Info && records_request(log, "person.harness", "subject_principal", "1")
+        ),
+        "{:?}",
+        messages(&records)
+    );
+    assert!(
+        !records.iter().any(|log| log.level == LogLevel::Warn),
+        "{:?}",
+        messages(&records)
+    );
+}
+
+#[tokio::test]
+async fn a_refusal_is_recorded_against_whoever_the_edge_verified_and_the_bridge() {
+    let Some(logs) = CapturedLogs::isolated() else {
+        return;
+    };
+    let agent = SigningAgent::new();
+    let bridge = Bridge::behind(enforcing(&agent));
+    let other = SigningAgent::named(agent.issuer(), "aauth:agent-2@agents.test");
+
+    bridge
+        .refuses(to_planner(HeaderMap::new(), agent.bearer().as_str()))
+        .await;
+    bridge
+        .refuses(signed_rpc(&agent, &Signing::fresh(), other.bearer().as_str()))
+        .await;
+
+    let records = logs.records();
+    let refusals: Vec<&CapturedLog> = records
+        .iter()
+        .filter(|log| log.message.contains("refused the request at the HTTP edge"))
+        .collect();
+    assert_eq!(refusals.len(), 2, "{:?}", messages(&records));
+    assert!(
+        records_request(refusals[0], "unverified", "unverified", "1"),
+        "{}",
+        refusals[0].message
+    );
+    assert!(
+        records_request(refusals[1], &verified_as(&agent), "edge_identity", "1"),
+        "{}",
+        refusals[1].message
+    );
+    assert!(
+        refusals
+            .iter()
+            .all(|log| log.level == LogLevel::Warn && log.message.contains("mode=enforce")),
+        "{:?}",
+        messages(&records)
+    );
+}
+
+#[tokio::test]
+async fn a_proof_shadow_mode_lets_through_is_recorded_against_its_signer_and_then_the_minted_caller() {
+    let Some(logs) = CapturedLogs::isolated() else {
+        return;
+    };
+    let agent = SigningAgent::new();
+    let bridge = Bridge::behind(shadowing(&agent));
+    let other = SigningAgent::named(agent.issuer(), "aauth:agent-2@agents.test");
+
+    handle_jsonrpc(
+        signed_rpc(&agent, &Signing::fresh(), other.bearer().as_str()),
+        &bridge.state,
+    )
+    .await
+    .unwrap();
+
+    let records = logs.records();
+    let shadowed = records
+        .iter()
+        .find(|log| log.message.contains("shadow mode admitted the request"));
+    assert!(
+        shadowed.is_some_and(|log| log.level == LogLevel::Warn
+            && records_request(log, &verified_as(&agent), "edge_identity", "1")
+            && log.message.contains("mode=shadow")),
+        "{:?}",
+        messages(&records)
+    );
+    let presented = records
+        .iter()
+        .find(|log| log.message.contains("presenting the request to the gateway"));
+    assert!(
+        presented.is_some_and(|log| records_request(log, "person.harness", "subject_principal", "1")),
+        "{:?}",
+        messages(&records)
+    );
+}
