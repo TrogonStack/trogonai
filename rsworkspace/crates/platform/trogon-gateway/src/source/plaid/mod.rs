@@ -2,6 +2,7 @@
 
 pub mod body_digest;
 pub mod constants;
+pub mod key_cache;
 pub mod key_fetcher;
 pub mod plaid_api_base_url;
 pub mod plaid_client_id;
