@@ -53,6 +53,21 @@ pub const DECIDER_SERVICE_NAME: &str = "DeciderService";
 /// The one `rpc` that service declares, and so the one endpoint it exposes.
 pub const DECIDE_METHOD_NAME: &str = "Decide";
 
+/// The NATS wildcard matching exactly one subject token.
+pub const SUBJECT_TOKEN_WILDCARD: &str = "*";
+
+/// Stands in for each wildcard when the subscription is checked as the
+/// shortest subject it can match.
+pub const NARROWEST_TOKEN: &str = "_";
+
+/// Tenant position of a host inside a tenant's own account, whose subjects
+/// carry no tenant token.
+pub const TENANT_POSITION_ABSENT: &str = "absent";
+
+/// Tenant position of a host in the platform account, whose subjects lead with
+/// the tenant they were published for.
+pub const TENANT_POSITION_WILDCARD: &str = "wildcard";
+
 /// The developer-facing description on a service error, per ADR#0016.
 pub const NATS_SERVICE_ERROR_HEADER: &str = "Nats-Service-Error";
 
@@ -69,6 +84,9 @@ pub const PROTOBUF_CONTENT_TYPE: &str = "application/protobuf";
 
 /// Environment variable naming the subject namespace.
 pub const ENV_DECIDER_SUBJECT_PREFIX: &str = "DECIDER_SUBJECT_PREFIX";
+
+/// Environment variable naming the tenant position the host subscribes with.
+pub const ENV_DECIDER_TENANT_POSITION: &str = "DECIDER_TENANT_POSITION";
 
 /// Environment variable naming the queue group.
 pub const ENV_DECIDER_QUEUE_GROUP: &str = "DECIDER_QUEUE_GROUP";

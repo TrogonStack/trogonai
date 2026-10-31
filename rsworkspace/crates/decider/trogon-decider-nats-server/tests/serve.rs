@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_nats::HeaderMap;
 use async_nats::jetstream::{self, message::StreamMessage};
+use async_nats::{HeaderMap, RequestError, RequestErrorKind};
 use buffa::Message as _;
 use tokio_util::sync::CancellationToken;
 use trogon_decider_nats::DuplicateWindow;
@@ -20,12 +20,15 @@ use trogon_decider_nats_server::constants::{
 };
 use trogon_decider_nats_server::{
     CommandEndpoint, DeciderHost, FaultClass, FileModuleSource, ModuleReference, ModuleStore, ServerConfig,
-    SubjectPrefix, find_detail, serve_until,
+    SubjectPrefix, TenantPosition, find_detail, serve_until,
 };
-use trogon_decider_runtime::AdmissionLimit;
+use trogon_decider_runtime::{
+    AdmissionLimit, AuthorizationDeniedError, CommandAuthorizer, CommandPrincipal, PrincipalId, PrincipalKind,
+};
+use trogon_decider_wit::host::CommandEnvelope;
 use trogon_nats::test_support::JetStreamTestServer;
 use trogonai_proto::decider::v1 as decider_v1;
-use trogonai_proto::google::rpc::{ErrorInfo, Status};
+use trogonai_proto::google::rpc::{Code, ErrorInfo, Status};
 use trogonai_proto::scheduler::schedules::v1;
 
 const EVENTS_STREAM: &str = "SERVE_TEST_EVENTS";
@@ -33,6 +36,12 @@ const SNAPSHOT_BUCKET: &str = "SERVE_TEST_SNAPSHOTS";
 const CREATE_SCHEDULE: &str = "trogonai.scheduler.schedules.v1.CreateSchedule";
 const MODULE_REFERENCE: &str = "scheduler.schedules@0.1.0";
 const SCHEDULE_ID: &str = "0198be07a38479e1a376f250f9181bec";
+const ALICE: &str = "alice";
+const ALICE_SUBJECT: &str = "decider.agent.alice.DeciderService.Decide";
+const MALLORY_SUBJECT: &str = "decider.agent.mallory.DeciderService.Decide";
+const TENANT_ALICE_SUBJECT: &str = "acme.decider.agent.alice.DeciderService.Decide";
+const FORGED_PRINCIPAL_HEADER: &str = "X-A2a-Caller-Id";
+const UNDECODABLE_PAYLOAD: [u8; 4] = [0xff, 0xff, 0xff, 0xff];
 
 fn module_path() -> PathBuf {
     let relative = "../../../target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm";
@@ -59,14 +68,17 @@ fn module_store() -> tempfile::TempDir {
     root
 }
 
-fn endpoint() -> CommandEndpoint {
-    CommandEndpoint::new(SubjectPrefix::new(DEFAULT_SUBJECT_PREFIX).expect("the default is a token"))
-        .expect("the default prefix yields a conformant subject")
+fn endpoint(tenant: TenantPosition) -> CommandEndpoint {
+    CommandEndpoint::new(
+        SubjectPrefix::new(DEFAULT_SUBJECT_PREFIX).expect("the default is a token"),
+        tenant,
+    )
+    .expect("the default prefix yields a conformant subject")
 }
 
-fn config(root: &Path) -> ServerConfig {
+fn config(root: &Path, tenant: TenantPosition) -> ServerConfig {
     ServerConfig {
-        endpoint: endpoint(),
+        endpoint: endpoint(tenant),
         queue_group: DEFAULT_QUEUE_GROUP.to_owned(),
         events_stream: EVENTS_STREAM.to_owned(),
         snapshot_bucket: SNAPSHOT_BUCKET.to_owned(),
@@ -75,6 +87,31 @@ fn config(root: &Path) -> ServerConfig {
         admission_limit: AdmissionLimit::try_new(4).expect("four is non-zero"),
         replay_limit: None,
         duplicate_window: DuplicateWindow::try_new(Duration::from_secs(120)).expect("two minutes is enforceable"),
+    }
+}
+
+fn alice_id() -> PrincipalId {
+    PrincipalId::new(ALICE).expect("alice is a principal id")
+}
+
+fn alice() -> CommandPrincipal {
+    CommandPrincipal::new(PrincipalKind::Agent, alice_id())
+}
+
+/// Admits one principal and denies every other, the way a host with a real
+/// policy answers a caller that policy does not name.
+struct AdmitOnly(CommandPrincipal);
+
+impl CommandAuthorizer<CommandEnvelope> for AdmitOnly {
+    fn authorize(
+        &self,
+        principal: &CommandPrincipal,
+        _command: &CommandEnvelope,
+    ) -> Result<(), AuthorizationDeniedError> {
+        if principal == &self.0 {
+            return Ok(());
+        }
+        Err(AuthorizationDeniedError::new(format!("only {} may decide", self.0)))
     }
 }
 
@@ -144,17 +181,21 @@ struct RunningHost {
 
 impl RunningHost {
     async fn start() -> Self {
+        Self::start_with(TenantPosition::Absent, |host| host).await
+    }
+
+    async fn start_with(tenant: TenantPosition, customize: impl FnOnce(DeciderHost) -> DeciderHost) -> Self {
         let server = JetStreamTestServer::start().await;
         let client = server.client().await;
         let js = server.jetstream().await;
         let modules = module_store();
-        let config = config(modules.path());
+        let config = config(modules.path(), tenant);
 
-        let host = Arc::new(
+        let host = Arc::new(customize(
             DeciderHost::start(&config, &FileModuleSource::new(modules.path()), js)
                 .await
                 .expect("the host starts"),
-        );
+        ));
         let shutdown = CancellationToken::new();
         let serving = tokio::spawn({
             let client = client.clone();
@@ -179,18 +220,37 @@ impl RunningHost {
     }
 
     async fn decide(&self, request: &decider_v1::DecideRequest) -> async_nats::Message {
-        self.request(request.encode_to_vec(), protobuf_headers()).await
+        self.decide_on(ALICE_SUBJECT, request).await
+    }
+
+    async fn decide_on(&self, subject: &str, request: &decider_v1::DecideRequest) -> async_nats::Message {
+        self.request_on(subject, request.encode_to_vec(), protobuf_headers())
+            .await
     }
 
     async fn request(&self, payload: Vec<u8>, headers: HeaderMap) -> async_nats::Message {
+        self.request_on(ALICE_SUBJECT, payload, headers).await
+    }
+
+    async fn request_on(&self, subject: &str, payload: Vec<u8>, headers: HeaderMap) -> async_nats::Message {
+        self.try_request_on(subject, payload, headers)
+            .await
+            .expect("the request is delivered")
+    }
+
+    async fn try_request_on(
+        &self,
+        subject: &str,
+        payload: Vec<u8>,
+        headers: HeaderMap,
+    ) -> Result<async_nats::Message, RequestError> {
         tokio::time::timeout(
             Duration::from_secs(20),
             self.client
-                .request_with_headers(endpoint().subject().to_owned(), headers, payload.into()),
+                .request_with_headers(subject.to_owned(), headers, payload.into()),
         )
         .await
         .expect("the host replies before the test times out")
-        .expect("the request is delivered")
     }
 
     /// The `Nats-Msg-Id` the first appended event actually landed under.
@@ -255,6 +315,10 @@ fn fault_reason(message: &async_nats::Message) -> String {
     find_detail::<ErrorInfo>(&status)
         .expect("every decider status names its reason")
         .reason
+}
+
+fn reached_no_handler(error: &RequestError) -> bool {
+    matches!(error.kind(), RequestErrorKind::NoResponders)
 }
 
 #[tokio::test]
@@ -328,7 +392,7 @@ async fn recreating_a_schedule_conflicts_instead_of_forking_its_history() {
 async fn a_request_the_host_cannot_read_is_refused_before_the_guest_runs() {
     let host = RunningHost::start().await;
 
-    let reply = host.request(vec![0xff, 0xff, 0xff, 0xff], protobuf_headers()).await;
+    let reply = host.request(UNDECODABLE_PAYLOAD.to_vec(), protobuf_headers()).await;
 
     assert_eq!(fault_reason(&reply), FaultClass::InvalidRequest.reason());
 
@@ -347,6 +411,107 @@ async fn a_zero_expected_revision_is_refused_rather_than_read_as_no_stream() {
         fault_reason(&reply),
         FaultClass::InvalidRequest.reason(),
         "an empty stream is the module's no_stream precondition, not a guard a caller gets to assert"
+    );
+
+    host.stop().await;
+}
+
+#[tokio::test]
+async fn a_subject_without_principal_tokens_reaches_no_handler() {
+    let host = RunningHost::start().await;
+
+    for subject in ["decider.DeciderService.Decide", "decider.agent.DeciderService.Decide"] {
+        let error = host
+            .try_request_on(
+                subject,
+                create_schedule(SCHEDULE_ID).encode_to_vec(),
+                protobuf_headers(),
+            )
+            .await
+            .expect_err("no subscription matches a subject that names nobody");
+
+        assert!(
+            reached_no_handler(&error),
+            "{subject}: a host that received it would have to refuse it, and a subscription that never matches it cannot get that wrong: {error}"
+        );
+    }
+
+    host.stop().await;
+}
+
+#[tokio::test]
+async fn a_subject_naming_no_principal_is_refused_before_the_payload_is_read() {
+    let host = RunningHost::start().await;
+
+    for subject in [
+        "decider.robot.alice.DeciderService.Decide",
+        "decider.agent.a*b.DeciderService.Decide",
+    ] {
+        let reply = host
+            .request_on(subject, UNDECODABLE_PAYLOAD.to_vec(), protobuf_headers())
+            .await;
+
+        assert_eq!(
+            fault_reason(&reply),
+            "PRINCIPAL_MISSING",
+            "{subject}: those bytes fail decoding, so any other reason means the payload was read first"
+        );
+        assert_eq!(error_code(&reply), Some((Code::UNAUTHENTICATED as i32).to_string()));
+    }
+
+    host.stop().await;
+}
+
+#[tokio::test]
+async fn a_principal_the_authorizer_denies_is_refused_whatever_its_headers_claim() {
+    let host = RunningHost::start_with(TenantPosition::Absent, |host| host.with_authorizer(AdmitOnly(alice()))).await;
+
+    let mut forged = protobuf_headers();
+    forged.insert(FORGED_PRINCIPAL_HEADER, ALICE);
+    let denied = host
+        .request_on(MALLORY_SUBJECT, create_schedule(SCHEDULE_ID).encode_to_vec(), forged)
+        .await;
+
+    assert_eq!(
+        fault_reason(&denied),
+        "PRINCIPAL_UNAUTHORIZED",
+        "a header is something the caller wrote, and only the subject is something the server checked"
+    );
+    assert_eq!(error_code(&denied), Some((Code::PERMISSION_DENIED as i32).to_string()));
+
+    let admitted = host.decide(&create_schedule(SCHEDULE_ID)).await;
+    assert_eq!(
+        response(&admitted).stream_position,
+        1,
+        "a denied command appends nothing, so the admitted one is the stream's first write"
+    );
+
+    host.stop().await;
+}
+
+#[tokio::test]
+async fn a_host_serving_several_tenants_reads_the_principal_after_the_tenant_token() {
+    let host = RunningHost::start_with(TenantPosition::Wildcard, |host| {
+        host.with_authorizer(AdmitOnly(alice()))
+    })
+    .await;
+
+    let reply = host
+        .decide_on(TENANT_ALICE_SUBJECT, &create_schedule(SCHEDULE_ID))
+        .await;
+    assert_eq!(response(&reply).stream_position, 1);
+
+    let untenanted = host
+        .try_request_on(
+            ALICE_SUBJECT,
+            create_schedule(SCHEDULE_ID).encode_to_vec(),
+            protobuf_headers(),
+        )
+        .await
+        .expect_err("a shared host subscribes only where a tenant token leads");
+    assert!(
+        reached_no_handler(&untenanted),
+        "a subject without the tenant token has no tenant for the host to act under: {untenanted}"
     );
 
     host.stop().await;
