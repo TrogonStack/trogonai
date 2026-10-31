@@ -49,11 +49,15 @@ Confirm you have:
      availability path for every encrypt and decrypt call against this key.
      If it cannot serve a request, AWS KMS cannot complete the call, and
      neither can the platform.
-3. Create the key as single-region unless you have an independent reason to
-   replicate it. A multi-region replica key has its own key ARN in AWS, and
-   the platform binds one exact key ARN per `KeyRef` ([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) Decision 4).
-   Each replica therefore requires its own bind and becomes a separate
-   binding, not one binding that follows the whole multi-region key.
+3. Create the key as single-Region unless you have an independent reason to
+   replicate it. A multi-Region key binds like any other key: you supply the
+   exact key ARN of the one Region the platform should use, and the `KeyRef`
+   is bound to that ARN alone ([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) Decision 4). The platform never
+   fails over to a replica. Each replica has its own key state and key
+   policy, so disabling the bound key stops use even when a replica in another
+   Region stays enabled. To use a replica, bind its own ARN as a separate
+   `KeyRef` and migrate envelopes to it, as described in
+   [Migrate Between Key Backends](./migrate-key-backends.md).
 
 ## Step 2: Create the IAM role the platform will assume
 
@@ -128,6 +132,24 @@ consistency, so allow for that when you verify the change. A request already
 in flight when you disable the key or revoke access may still complete, and
 plaintext already delivered to a caller before that point cannot be
 recalled, by AWS or by the platform ([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) Decision 6).
+
+### Pausing the registration is not the kill switch
+
+You can also pause the backend registration in the platform console or admin
+API. A pause stops the platform from calling AWS for that registration, probes
+included, and every operation against its keys fails with `KeyUseDenied` and the
+denial reason `BackendPaused` until you resume. A pause is a platform-side
+control that takes effect without waiting on AWS and that you can reverse, but
+it depends on the platform honoring it. If you need the stop to hold regardless
+of the platform, disable the key or revoke the role's access in AWS as described
+above ([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md)
+Decision 6).
+
+Resuming validates the registration's current configuration end to end. The
+registration resumes only when validation succeeds; otherwise it stays paused
+and records the validation reason. Resuming does not re-enable a key or restore
+access in your AWS account, so reverse those actions in AWS yourself if you took
+them.
 
 ## See also
 

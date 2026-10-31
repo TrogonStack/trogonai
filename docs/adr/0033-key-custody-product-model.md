@@ -163,6 +163,12 @@ and it does not change the tier list. Moving the platform's tiers to another
 backend is [ADR#0030](./0030-customer-controlled-key-backend-routing.md)'s
 explicit rewrap migration per `KeyRef`; there is no configuration-only cutover.
 
+The platform may hold more than one platform-owned registration at a time, for
+example while it migrates its tiers from one backend to another. Tenant-facing
+projections are derived after removing the platform registration's identity,
+provider, and locator, so a managed key exposes no key identity and a dedicated
+key exposes only an opaque `KeyRef`.
+
 Which platform tier a tenant lands on, and whether dedicated keys are
 provisioned at tenant creation or on first wrap, is platform policy resolved
 server-side from the authenticated tenant and purpose. Wrap and unwrap requests
@@ -186,7 +192,8 @@ A `KeyRef` is tenant-scoped in every tier. Under the managed tier many
 tenants' `KeyRef`s resolve to one platform key, so the unwrap-time check that
 a `KeyRef`'s bound tenant and purpose match the authenticated operation holds
 unchanged, and moving a tenant between tiers is a rewrap from one of that
-tenant's `KeyRef`s to another.
+tenant's `KeyRef`s to another. The move works in either direction, including
+from a customer managed key back to a managed or dedicated key.
 
 ### 5. Platform boot keys are outside every tier
 
@@ -239,6 +246,15 @@ service serves, and it is not the mechanism for infrastructure encryption at
 rest: encrypting [JetStream](../glossary/jetstream) storage, relational
 projections, and disks is a deployment and infrastructure responsibility,
 outside this product model.
+
+Key purposes are a catalogue declared by the data-plane services that own the
+wrapped payloads. A purpose names one service-owned payload kind. Secrets and
+platform control-plane state are never purposes. Tenant surfaces list purposes
+from the catalogue and never invent them. The owning service declares each
+purpose as a `KeyPurposeDeclaration` in the key custody contract and ships
+the declaration with the code that first wraps that payload, so the catalogue
+is empty until a data-plane service adopts `KeyManagement`. Tenant surfaces
+render an empty catalogue as such and never fill it with example purposes.
 
 ### 7. The secret store is not the pluggable part
 
@@ -353,7 +369,7 @@ deadlock.
   platform may move its own registration to a cloud KMS without a tier change.
 - Deferral stays cheap. Because tiers are resolved server-side behind opaque
   references, a tenant can start on the managed key and move to a dedicated
-  key or a customer managed key later through
+  key or a customer managed key later, and back again, through
   [ADR#0030](./0030-customer-controlled-key-backend-routing.md)'s explicit
   rewrap migration of that tenant's envelopes, without data-plane callers
   changing.
