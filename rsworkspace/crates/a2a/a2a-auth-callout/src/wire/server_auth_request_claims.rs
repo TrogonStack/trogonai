@@ -6,6 +6,7 @@ use serde::Deserialize;
 
 use super::NkeyPublic;
 use crate::account_resolver::RequestedAccount;
+use crate::credentials::PresentedCredential;
 use crate::credentials::mtls::ClientCertPem;
 use crate::error::{AuthCalloutError, CredentialError};
 
@@ -14,11 +15,28 @@ use crate::error::{AuthCalloutError, CredentialError};
 pub struct ServerAuthRequestClaims {
     inner: Claims<AuthRequest>,
     nats_json: serde_json::Value,
+    declared_credential: Option<PresentedCredential>,
 }
 
 impl ServerAuthRequestClaims {
     pub(crate) fn from_decoded(inner: Claims<AuthRequest>, nats_json: serde_json::Value) -> Self {
-        Self { inner, nats_json }
+        Self {
+            inner,
+            nats_json,
+            declared_credential: None,
+        }
+    }
+
+    pub(super) fn declaring(
+        inner: Claims<AuthRequest>,
+        nats_json: serde_json::Value,
+        declared_credential: Option<PresentedCredential>,
+    ) -> Self {
+        Self {
+            inner,
+            nats_json,
+            declared_credential,
+        }
     }
 
     pub fn issuer_nkey(&self) -> Result<NkeyPublic, AuthCalloutError> {
@@ -37,63 +55,44 @@ impl ServerAuthRequestClaims {
         self.inner.nats.server.xkey.as_deref().filter(|xkey| !xkey.is_empty())
     }
 
+    /// A tenant caller connects as the `AUTH` sentinel, so `client_info`
+    /// describes the sentinel and only `connect_opts.user` names the tenant.
     pub fn requested_account(&self) -> Result<RequestedAccount, AuthCalloutError> {
-        let hint = self
+        let user = self
             .inner
             .nats
             .connect_opts
             .user
             .as_deref()
-            .filter(|s| !s.is_empty())
-            .or_else(|| {
-                let u = self.inner.nats.client_info.user.as_str();
-                if u.is_empty() { None } else { Some(u) }
+            .filter(|user| !user.trim().is_empty())
+            .ok_or_else(|| {
+                CredentialError::InvalidCredentials(
+                    "authorization request does not name its tenant account in connect_opts.user".into(),
+                )
+            })?;
+        RequestedAccount::new(user.to_owned()).map_err(AuthCalloutError::from)
+    }
+
+    /// `connect_opts.jwt` always holds the sentinel, so the caller's own
+    /// credential is the secret in `auth_token`, then `pass`, and the client
+    /// certificate only when no secret is presented.
+    pub fn presented_credential(&self) -> Result<PresentedCredential, AuthCalloutError> {
+        if let Some(credential) = &self.declared_credential {
+            return Ok(credential.clone());
+        }
+        let connect_opts = &self.inner.nats.connect_opts;
+        let secret = [&connect_opts.auth_token, &connect_opts.pass]
+            .into_iter()
+            .filter_map(Option::as_deref)
+            .find(|secret| !secret.trim().is_empty());
+        if let Some(secret) = secret {
+            return PresentedCredential::from_secret(secret).map_err(AuthCalloutError::from);
+        }
+        self.primary_client_cert()
+            .map(PresentedCredential::ClientCertificate)
+            .ok_or_else(|| {
+                CredentialError::InvalidRequest("authorization request presents no credential".into()).into()
             })
-            .or_else(|| {
-                let tag = self.inner.nats.client_info.name_tag.as_str();
-                if tag.is_empty() { None } else { Some(tag) }
-            });
-        let hint = hint.ok_or_else(|| {
-            CredentialError::InvalidCredentials(
-                "authorization request missing tenant account hint (connect_opts.user, client_info.user, or name_tag)"
-                    .into(),
-            )
-        })?;
-        RequestedAccount::new(hint.to_owned()).map_err(AuthCalloutError::from)
-    }
-
-    pub fn connect_opts_jwt(&self) -> Option<&str> {
-        non_empty_opt(self.inner.nats.connect_opts.jwt.as_deref()).or_else(|| {
-            self.nats_json
-                .get("connect_opts")?
-                .get("jwt")?
-                .as_str()
-                .filter(|s| !s.is_empty())
-        })
-    }
-
-    pub fn connect_opts_opaque_pass(&self) -> Option<&str> {
-        non_empty_opt(self.inner.nats.connect_opts.pass.as_deref()).or_else(|| {
-            self.nats_json
-                .get("connect_opts")?
-                .get("pass")?
-                .as_str()
-                .filter(|s| !s.is_empty())
-        })
-    }
-
-    pub fn connect_opts_auth_token(&self) -> Option<&str> {
-        // Treat an empty / whitespace-only auth_token as absent so the
-        // dispatcher's `ok_or_else("missing api key")` path triggers
-        // correctly instead of forwarding an empty string into the
-        // verifier where it would mint a CredentialVerification message
-        // farther from the cause.
-        self.inner
-            .nats
-            .connect_opts
-            .auth_token
-            .as_deref()
-            .filter(|s| !s.trim().is_empty())
     }
 
     pub fn client_tls_pem_certs(&self) -> Vec<ClientCertPem> {
@@ -131,10 +130,6 @@ impl ServerAuthRequestClaims {
     pub fn primary_client_cert(&self) -> Option<ClientCertPem> {
         self.client_tls_pem_certs().into_iter().next()
     }
-}
-
-fn non_empty_opt(value: Option<&str>) -> Option<&str> {
-    value.filter(|s| !s.is_empty())
 }
 
 impl fmt::Debug for ServerAuthRequestClaims {

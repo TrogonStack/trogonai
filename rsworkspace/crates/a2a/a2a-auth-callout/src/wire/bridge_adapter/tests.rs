@@ -2,6 +2,33 @@ use super::*;
 use crate::bridge_mint::{BridgeAuthScheme, BridgeClientInfo, BridgeConnectOpts, BridgeMintRequest};
 use crate::error::CredentialError;
 
+fn mint_request(
+    user_jwt: Option<&str>,
+    client_cert_pem: Option<&str>,
+    auth_scheme: Option<BridgeAuthScheme>,
+    api_key: Option<&str>,
+) -> BridgeMintRequest {
+    BridgeMintRequest {
+        user_nkey: None,
+        user_jwt: user_jwt.map(str::to_owned),
+        account: Some("tenant-acme".into()),
+        client_info: client_cert_pem.map(|pem| BridgeClientInfo {
+            client_cert_pem: Some(pem.to_owned()),
+        }),
+        connect_opts: auth_scheme.map(|auth_scheme| BridgeConnectOpts {
+            auth_scheme: Some(auth_scheme),
+            api_key: api_key.map(str::to_owned),
+        }),
+    }
+}
+
+fn is_invalid_request(err: &AuthCalloutError) -> bool {
+    matches!(
+        err,
+        AuthCalloutError::CredentialVerification(CredentialError::InvalidRequest(_))
+    )
+}
+
 #[test]
 fn from_bridge_mint_rejects_missing_account() {
     let err = ServerAuthRequestClaims::from_bridge_mint(BridgeMintRequest {
@@ -12,105 +39,71 @@ fn from_bridge_mint_rejects_missing_account() {
         connect_opts: None,
     })
     .unwrap_err();
-    assert!(matches!(
-        err,
-        AuthCalloutError::CredentialVerification(CredentialError::InvalidRequest(_))
-    ));
+    assert!(is_invalid_request(&err));
 }
 
 #[test]
 fn from_bridge_mint_rejects_api_key_without_key_material() {
-    let err = ServerAuthRequestClaims::from_bridge_mint(BridgeMintRequest {
-        user_nkey: None,
-        user_jwt: None,
-        account: Some("tenant-acme".into()),
-        client_info: None,
-        connect_opts: Some(BridgeConnectOpts {
-            auth_scheme: Some(BridgeAuthScheme::ApiKey),
-            api_key: Some("   ".into()),
-        }),
-    })
-    .unwrap_err();
-    assert!(matches!(
-        err,
-        AuthCalloutError::CredentialVerification(CredentialError::InvalidRequest(_))
-    ));
+    let request = mint_request(None, None, Some(BridgeAuthScheme::ApiKey), Some("   "));
+    let err = ServerAuthRequestClaims::from_bridge_mint(request).unwrap_err();
+    assert!(is_invalid_request(&err));
 }
 
 #[test]
 fn from_bridge_mint_rejects_oidc_without_user_jwt() {
-    let err = ServerAuthRequestClaims::from_bridge_mint(BridgeMintRequest {
-        user_nkey: None,
-        user_jwt: None,
-        account: Some("tenant-acme".into()),
-        client_info: None,
-        connect_opts: Some(BridgeConnectOpts {
-            auth_scheme: Some(BridgeAuthScheme::Oidc),
-            api_key: None,
-        }),
-    })
-    .unwrap_err();
+    let request = mint_request(None, Some("cert-a"), Some(BridgeAuthScheme::Oidc), None);
+    let err = ServerAuthRequestClaims::from_bridge_mint(request).unwrap_err();
+    assert!(is_invalid_request(&err));
+}
+
+#[test]
+fn from_bridge_mint_rejects_mtls_without_a_client_certificate() {
+    let request = mint_request(Some("a.b.c"), None, Some(BridgeAuthScheme::MTls), None);
+    let err = ServerAuthRequestClaims::from_bridge_mint(request).unwrap_err();
+    assert!(is_invalid_request(&err));
+}
+
+#[test]
+fn from_bridge_mint_declares_the_oidc_user_jwt_as_a_bearer_token() {
+    let request = mint_request(Some("a.b.c"), None, Some(BridgeAuthScheme::Oidc), None);
+    let claims = ServerAuthRequestClaims::from_bridge_mint(request).unwrap();
+    assert_eq!(claims.requested_account().unwrap().as_str(), "tenant-acme");
     assert!(matches!(
-        err,
-        AuthCalloutError::CredentialVerification(CredentialError::InvalidRequest(_))
+        claims.presented_credential(),
+        Ok(PresentedCredential::BearerToken(token)) if token.as_str() == "a.b.c"
     ));
 }
 
 #[test]
-fn from_bridge_mint_builds_oidc_claims_with_user_jwt() {
-    let claims = ServerAuthRequestClaims::from_bridge_mint(BridgeMintRequest {
-        user_nkey: None,
-        user_jwt: Some("a.b.c".into()),
-        account: Some("tenant-acme".into()),
-        client_info: None,
-        connect_opts: Some(BridgeConnectOpts {
-            auth_scheme: Some(BridgeAuthScheme::Oidc),
-            api_key: None,
-        }),
-    })
-    .unwrap();
-    assert_eq!(claims.requested_account().unwrap().as_str(), "tenant-acme");
-    assert_eq!(claims.connect_opts_jwt(), Some("a.b.c"));
-    assert!(claims.connect_opts_auth_token().is_none());
+fn from_bridge_mint_without_a_scheme_declares_the_user_jwt_over_the_client_certificate() {
+    let request = mint_request(Some("fixture-token"), Some("cert-a"), None, None);
+    let claims = ServerAuthRequestClaims::from_bridge_mint(request).unwrap();
+    assert!(matches!(
+        claims.presented_credential(),
+        Ok(PresentedCredential::BearerToken(token)) if token.as_str() == "fixture-token"
+    ));
 }
 
 #[test]
-fn from_bridge_mint_builds_mtls_claims_with_client_cert() {
-    let claims = ServerAuthRequestClaims::from_bridge_mint(BridgeMintRequest {
-        user_nkey: None,
-        user_jwt: None,
-        account: Some("tenant-acme".into()),
-        client_info: Some(BridgeClientInfo {
-            client_cert_pem: Some("-----BEGIN CERT-----\n-----END CERT-----".into()),
-        }),
-        connect_opts: Some(BridgeConnectOpts {
-            auth_scheme: Some(BridgeAuthScheme::MTls),
-            api_key: None,
-        }),
-    })
-    .unwrap();
-    assert_eq!(
-        claims.primary_client_cert().unwrap().as_str(),
-        "-----BEGIN CERT-----\n-----END CERT-----"
-    );
+fn from_bridge_mint_presents_the_mtls_client_certificate() {
+    let pem = "-----BEGIN CERT-----\n-----END CERT-----";
+    let request = mint_request(Some("ignored"), Some(pem), Some(BridgeAuthScheme::MTls), None);
+    let claims = ServerAuthRequestClaims::from_bridge_mint(request).unwrap();
+    assert!(matches!(
+        claims.presented_credential(),
+        Ok(PresentedCredential::ClientCertificate(cert)) if cert.as_str() == pem
+    ));
 }
 
 #[test]
-fn from_bridge_mint_builds_api_key_claims() {
-    let claims = ServerAuthRequestClaims::from_bridge_mint(BridgeMintRequest {
-        user_nkey: None,
-        user_jwt: None,
-        account: Some("tenant-acme".into()),
-        client_info: None,
-        connect_opts: Some(BridgeConnectOpts {
-            auth_scheme: Some(BridgeAuthScheme::ApiKey),
-            api_key: Some("secret-key".into()),
-        }),
-    })
-    .unwrap();
+fn from_bridge_mint_declares_the_api_key() {
+    let request = mint_request(None, None, Some(BridgeAuthScheme::ApiKey), Some("secret-key"));
+    let claims = ServerAuthRequestClaims::from_bridge_mint(request).unwrap();
     assert_eq!(claims.requested_account().unwrap().as_str(), "tenant-acme");
-    assert_eq!(claims.connect_opts_auth_token(), Some("secret-key"));
-    assert!(claims.connect_opts_jwt().is_none());
+    assert!(matches!(
+        claims.presented_credential(),
+        Ok(PresentedCredential::ApiKey(key)) if key.as_str() == "secret-key"
+    ));
 }
 
 #[test]
