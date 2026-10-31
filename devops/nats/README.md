@@ -298,6 +298,36 @@ docker compose --profile tools run --rm -e NATS_CREDS= nats-box \
   nats --server "tls://<DEV public key>:@nats:4222" pub not.granted ping
 ```
 
+## Provision the A2A bridge replay bucket
+
+An A2A bridge that enforces AAuth proof of possession records every signed
+request it admits in the PLATFORM key-value bucket `AAUTH_REPLAY`, so a request
+one bridge admitted cannot replay through another. The bridge opens the bucket
+but never creates it, and in enforce it refuses to start unless the bucket
+keeps one revision per key for 180 seconds
+([ADR#0082](../../docs/adr/0082-bus-principal-from-subject-and-edge-proof-of-possession.md),
+Decision 4). Create it as a PLATFORM user before the first bridge starts:
+
+```sh
+nats --server tls://nats.example.internal:4222 \
+  --tlsca ca.pem --tlscert client.pem --tlskey client-key.pem --creds platform-user.creds \
+  kv add AAUTH_REPLAY --history 1 --ttl 180s --storage file
+```
+
+`nats kv info AAUTH_REPLAY` then shows `History Kept: 1` and
+`Maximum Age: 3m0s`. A bridge in enforce that finds the bucket missing or kept
+any other way exits with `replay bucket AAUTH_REPLAY could not be opened` or
+`replay bucket AAUTH_REPLAY keeps <history and max age>, but the edge requires
+history 1 and max age 180s`. To replace a bucket, stop every bridge, remove and
+create it, and start the bridges no sooner than 180 seconds after the last one
+stopped, because the records the old bucket held are what refused a replay of
+a signature that is still valid.
+
+The local compose stack creates the bucket on every `up`. nats-kv-provision
+runs [provision-kv.sh](../docker/compose/services/nats/provision-kv.sh) as the
+PLATFORM user `kv-provisioner` once the accounts are pushed, and fails when the
+bucket already exists with another history or maximum age.
+
 ## Where production keys live
 
 Production NATS material lives in OpenBao. The deployment reads it with its
@@ -457,6 +487,10 @@ plaintext listener, and a deployment never adds one:
 - How a direct caller learns the `{kind}.{id}` its grants name, which it needs
   for its inbox prefix and its task events.
 - A per-caller inbox prefix for the users the callout mints for an A2A bridge.
+- The grants an A2A bridge holds on `AAUTH_REPLAY`.
+  [ADR#0082](../../docs/adr/0082-bus-principal-from-subject-and-edge-proof-of-possession.md)
+  limits them to reading and creating keys, and the bridge's PLATFORM user
+  carries no such limit yet.
 
 ## See also
 
