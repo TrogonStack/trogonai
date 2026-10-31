@@ -22,6 +22,8 @@ use futures_util::stream::{self, BoxStream, Stream};
 use serde::Serialize;
 use serde_json::{Map, Value};
 use tracing::warn;
+use trogon_nats::{CredentialValue, NatsAuth, NatsConfig};
+use trogon_std::secret_string::{EmptySecretError, SecretString};
 
 use a2a_nats::RequestId;
 use a2a_nats::constants::{GATEWAY_CALLER_ID_HEADER, GATEWAY_CALLER_ID_HTTP, REQ_ID_HEADER};
@@ -187,24 +189,48 @@ pub trait GatewayUnaryPublish: Send + Sync {
     ) -> Result<Bytes, BridgeError>;
 }
 
+#[derive(Debug, thiserror::Error)]
+enum CallerConnectError {
+    #[error(transparent)]
+    EmptyToken(#[from] EmptySecretError),
+    #[error(transparent)]
+    Refused(async_nats::ConnectError),
+    #[error(transparent)]
+    Unusable(trogon_nats::ConnectError),
+}
+
+impl From<trogon_nats::ConnectError> for CallerConnectError {
+    fn from(error: trogon_nats::ConnectError) -> Self {
+        match error {
+            // The server list stays out of the message because it reaches HTTP callers.
+            trogon_nats::ConnectError::ConnectionFailed { error, .. } => Self::Refused(error),
+            other => Self::Unusable(other),
+        }
+    }
+}
+
+async fn connect_as_caller(
+    nats: &NatsConfig,
+    caller_jwt: &BridgeUserJwt,
+    timeout: Duration,
+) -> Result<async_nats::Client, CallerConnectError> {
+    let token = CredentialValue::Literal(SecretString::new(caller_jwt.as_str())?);
+    Ok(trogon_nats::connect_once(nats, NatsAuth::Token(token), timeout).await?)
+}
+
 #[derive(Clone)]
 pub struct AsyncNatsTokenGatewayUnary {
-    servers: Arc<[String]>,
+    nats: Arc<NatsConfig>,
     timeout: Duration,
 }
 
 impl AsyncNatsTokenGatewayUnary {
     #[must_use]
-    pub fn new(servers: Vec<String>, timeout: Duration) -> Self {
+    pub fn new(nats: NatsConfig, timeout: Duration) -> Self {
         Self {
-            servers: servers.into_boxed_slice().into(),
+            nats: Arc::new(nats),
             timeout,
         }
-    }
-
-    #[must_use]
-    pub fn from_single_url(server: impl Into<String>, timeout: Duration) -> Self {
-        Self::new(vec![server.into()], timeout)
     }
 }
 
@@ -217,10 +243,7 @@ impl GatewayUnaryPublish for AsyncNatsTokenGatewayUnary {
         headers: async_nats::HeaderMap,
         payload: Bytes,
     ) -> Result<Bytes, BridgeError> {
-        let client = async_nats::ConnectOptions::new()
-            .connection_timeout(self.timeout)
-            .token(caller_jwt.as_str().to_owned())
-            .connect(&self.servers[..])
+        let client = connect_as_caller(&self.nats, caller_jwt, self.timeout)
             .await
             .map_err(|e| BridgeError::NatsPublish(e.to_string()))?;
         // request_with_headers itself has no deadline — without this
@@ -333,29 +356,21 @@ impl TaskJetStreamPort for StubTaskJetStreamPort {
 
 #[derive(Clone)]
 pub struct AsyncNatsTokenTaskJetstream {
-    servers: Arc<[String]>,
+    nats: Arc<NatsConfig>,
     timeout: Duration,
 }
 
 impl AsyncNatsTokenTaskJetstream {
     #[must_use]
-    pub fn new(servers: Vec<String>, timeout: Duration) -> Self {
+    pub fn new(nats: NatsConfig, timeout: Duration) -> Self {
         Self {
-            servers: servers.into_boxed_slice().into(),
+            nats: Arc::new(nats),
             timeout,
         }
     }
 
-    #[must_use]
-    pub fn from_single_url(server: impl Into<String>, timeout: Duration) -> Self {
-        Self::new(vec![server.into()], timeout)
-    }
-
     async fn connect_caller_client(&self, jwt: &BridgeUserJwt) -> Result<async_nats::Client, BridgeError> {
-        async_nats::ConnectOptions::new()
-            .connection_timeout(self.timeout)
-            .token(jwt.as_str().to_owned())
-            .connect(&self.servers[..])
+        connect_as_caller(&self.nats, jwt, self.timeout)
             .await
             .map_err(|e| BridgeError::JetStreamConsume(e.to_string()))
     }

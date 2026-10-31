@@ -147,7 +147,7 @@ async fn bootstrap_nats_transport(
     ));
 
     let unary = GatewayInboundPublisher::new(Arc::new(AsyncNatsTokenGatewayUnary::new(
-        nats.servers.clone(),
+        nats.clone(),
         gateway_rpc_timeout,
     )));
 
@@ -163,10 +163,7 @@ async fn bootstrap_nats_transport(
     Ok(AppState::new(
         auth_client,
         Arc::new(unary),
-        Arc::new(AsyncNatsTokenTaskJetstream::new(
-            nats.servers.clone(),
-            gateway_rpc_timeout,
-        )),
+        Arc::new(AsyncNatsTokenTaskJetstream::new(nats.clone(), gateway_rpc_timeout)),
         prefix,
     ))
 }
