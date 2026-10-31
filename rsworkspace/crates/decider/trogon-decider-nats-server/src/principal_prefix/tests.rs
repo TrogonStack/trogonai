@@ -1,6 +1,7 @@
 use trogon_decider_runtime::{CommandPrincipal, PrincipalId, PrincipalKind};
+use trogon_identity_types::{SubjectPrincipalError, SubjectPrincipalIdError};
 use trogon_nats::constants::MAX_NATS_TOKEN_LENGTH;
-use trogon_nats::{MAX_SUBJECT_TOKENS, SubjectTokenViolationError, SubjectViolationError};
+use trogon_nats::{MAX_SUBJECT_TOKENS, SubjectViolationError};
 
 use super::{PrincipalPrefix, PrincipalPrefixError};
 use crate::constants::{DECIDE_METHOD_NAME, DECIDER_SERVICE_NAME, DEFAULT_SUBJECT_PREFIX};
@@ -13,6 +14,14 @@ fn prefix(value: &str) -> SubjectPrefix {
 
 fn id(value: &str) -> PrincipalId {
     PrincipalId::new(value).expect("an id")
+}
+
+fn id_token(principal: &PrincipalPrefix) -> &str {
+    principal
+        .as_str()
+        .rsplit_once('.')
+        .map(|(_, token)| token)
+        .expect("a prefix ends in the id token")
 }
 
 #[test]
@@ -48,16 +57,45 @@ fn the_host_reads_back_the_principal_the_prefix_names() {
 }
 
 #[test]
-fn an_id_that_is_not_one_subject_token_is_refused() {
+fn an_id_that_is_not_one_subject_token_is_carried_hashed() {
+    let endpoint = CommandEndpoint::new(prefix(DEFAULT_SUBJECT_PREFIX), TenantPosition::Absent).expect("an endpoint");
+
     for unsafe_id in ["alice.smith", "a*b", "a>b", "has space"] {
-        assert!(
-            matches!(
-                PrincipalPrefix::new(&prefix(DEFAULT_SUBJECT_PREFIX), PrincipalKind::Agent, &id(unsafe_id)),
-                Err(PrincipalPrefixError::Principal(_))
-            ),
-            "{unsafe_id:?} would split or widen the subject, naming a different principal or many"
+        let principal = PrincipalPrefix::new(endpoint.prefix(), PrincipalKind::Agent, &id(unsafe_id))
+            .expect("an id that is not one token is hashed rather than refused");
+        let token = id_token(&principal);
+
+        assert!(token.starts_with('~'), "{unsafe_id:?} is carried in its hashed form");
+        assert_eq!(
+            principal.as_str(),
+            format!("decider.agent.{token}"),
+            "{unsafe_id:?} carried as is would split or widen the subject, naming a different principal or many"
+        );
+        assert_eq!(
+            endpoint
+                .derive_principal(&format!("{principal}.{DECIDER_SERVICE_NAME}.{DECIDE_METHOD_NAME}"))
+                .expect("the subject names a principal"),
+            CommandPrincipal::new(PrincipalKind::Agent, id(token)),
+            "the host derives the hashed token, so that is the id an authorizer sees for {unsafe_id:?}"
         );
     }
+}
+
+#[test]
+fn an_id_that_already_has_the_hashed_form_is_refused() {
+    let namespace = prefix(DEFAULT_SUBJECT_PREFIX);
+    let hashed =
+        PrincipalPrefix::new(&namespace, PrincipalKind::Agent, &id("alice.smith")).expect("alice.smith hashes");
+
+    assert!(
+        matches!(
+            PrincipalPrefix::new(&namespace, PrincipalKind::Agent, &id(id_token(&hashed))),
+            Err(PrincipalPrefixError::Principal(SubjectPrincipalError::Id(
+                SubjectPrincipalIdError::AlreadyHashed
+            )))
+        ),
+        "a credential whose id is already a digest would act as whichever principal hashes to it"
+    );
 }
 
 #[test]
@@ -78,50 +116,24 @@ fn a_prefix_longer_than_one_token_reaches_the_host_while_each_token_fits() {
 }
 
 #[test]
-fn an_id_longer_than_one_token_is_refused() {
-    let namespace = prefix(DEFAULT_SUBJECT_PREFIX);
+fn an_id_longer_than_one_token_is_carried_hashed() {
+    let endpoint = CommandEndpoint::new(prefix(DEFAULT_SUBJECT_PREFIX), TenantPosition::Absent).expect("an endpoint");
+    let principal = PrincipalPrefix::new(
+        endpoint.prefix(),
+        PrincipalKind::Agent,
+        &id(&"a".repeat(MAX_NATS_TOKEN_LENGTH + 1)),
+    )
+    .expect("an id too long for one token is hashed rather than refused");
+    let token = id_token(&principal);
 
-    assert!(
-        PrincipalPrefix::new(
-            &namespace,
-            PrincipalKind::Agent,
-            &id(&"a".repeat(MAX_NATS_TOKEN_LENGTH))
-        )
-        .is_ok(),
-        "an id of exactly one token's length fits"
+    assert!(token.starts_with('~') && token.len() <= MAX_NATS_TOKEN_LENGTH);
+    assert_eq!(
+        endpoint
+            .derive_principal(&format!("{principal}.{DECIDER_SERVICE_NAME}.{DECIDE_METHOD_NAME}"))
+            .expect("the subject names a principal"),
+        CommandPrincipal::new(PrincipalKind::Agent, id(token)),
+        "a client refused for the length of its id could never reach the host for that principal"
     );
-    assert!(matches!(
-        PrincipalPrefix::new(
-            &namespace,
-            PrincipalKind::Agent,
-            &id(&"a".repeat(MAX_NATS_TOKEN_LENGTH + 1))
-        ),
-        Err(PrincipalPrefixError::Subject {
-            source: SubjectViolationError::Token {
-                index: 2,
-                source: SubjectTokenViolationError::TooLong(_),
-                ..
-            },
-            ..
-        })
-    ));
-}
-
-#[test]
-fn a_subject_over_the_byte_budget_is_refused() {
-    let namespace = prefix(&"p".repeat(MAX_NATS_TOKEN_LENGTH));
-
-    assert!(matches!(
-        PrincipalPrefix::new(
-            &namespace,
-            PrincipalKind::Agent,
-            &id(&"a".repeat(MAX_NATS_TOKEN_LENGTH))
-        ),
-        Err(PrincipalPrefixError::Subject {
-            source: SubjectViolationError::TooLong { .. },
-            ..
-        })
-    ));
 }
 
 #[test]
