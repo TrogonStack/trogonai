@@ -7,6 +7,20 @@ date: 2026-07-11
 
 # ADR#0023: Secret Management and Key Custody on OpenBao behind a Platform Secrets Service
 
+> **Refined by [ADR#0083](./0083-sealed-content-envelope.md) (2026-10-30).**
+> Under Decision 3, a reply carrying a secret value or a sealing lease is
+> xkey-sealed to the requester's ephemeral xkey, and a submitted value to the
+> secrets service's xkey, so no value crosses the bus or reaches a debug log in
+> plaintext; values still never enter JetStream, and the credential records it
+> does hold are sealed. Under Decision 6, a sealer or opener holds a sealing
+> data key for at most sixty seconds after its provider unwrap rather than for
+> one in-flight operation, invalidation reaches every holder through the
+> `SEALING_KEY_INVALIDATIONS` bucket, and a holder whose watch is down takes no
+> new lease. Destroying a tenant's sealing key follows the scheduled, reviewable
+> destruction of Decision 6, starts only after the business audit record is
+> written, and, once no OpenBao backup still holds the key, erases every copy of
+> the tenant's sealed content.
+
 ## Context
 
 The platform is accumulating credentials it must hold on behalf of [tenants](../glossary/tenant),

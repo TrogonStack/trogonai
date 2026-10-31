@@ -88,3 +88,4 @@ future implementation work.
 - [ADR#0080: A Bolt for JavaScript App Consumes the Gateway's Slack Traffic Through a `NatsReceiver` That Dispatches What the Gateway Already Verified and Stored (Draft)](./0080-slack-bolt-nats-receiver.md)
 - [ADR#0081: Every NATS Connection Uses TLS Unless Explicitly Disabled, and Clients Enter Operator-Mode Accounts Only Through Platform Credentials or the Auth Callout](./0081-nats-tls-by-default-and-operator-mode-admission.md)
 - [ADR#0082: Inside the Bus the Principal Is Derived from the Subject, and Proof of Possession Is Enforced Only at the External Edge](./0082-bus-principal-from-subject-and-edge-proof-of-possession.md)
+- [ADR#0083: Credential Material, Claim-Check Blobs, and Sensitive Tenant Streams Under a Customer Managed Key Are Sealed in an Owned AEAD Envelope, and Nothing Else Is](./0083-sealed-content-envelope.md)
