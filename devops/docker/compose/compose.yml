@@ -25,9 +25,9 @@ services:
       - dev_secrets:/secrets
     restart: on-failure:3
 
-  # Runs to completion on every `up`: issues the dev CA, the NATS server
-  # certificate, and a client certificate for every NATS client nats-bootstrap
-  # created. See services/pki/bootstrap.sh.
+  # Runs to completion on every `up`: issues the dev CA, the NATS and Postgres
+  # server certificates, and a client certificate for every NATS client
+  # nats-bootstrap created. See services/pki/bootstrap.sh.
   pki-bootstrap:
     image: alpine/openssl:3.5.9
     entrypoint:
@@ -144,9 +144,22 @@ services:
 
   # Backing store for the optional Postgres schedules read-model projection
   # (SCHEDULER_PROJECTION_BACKEND=postgres). The default NATS KV projection does
-  # not need this service.
+  # not need this service. Network clients must use TLS (services/postgres/
+  # pg_hba.conf) and should verify the server against the dev CA.
   postgres:
     image: postgres:17-alpine
+    command:
+      - "postgres"
+      - "-c"
+      - "ssl=on"
+      - "-c"
+      - "ssl_cert_file=/run/secrets/postgres/server.pem"
+      - "-c"
+      - "ssl_key_file=/run/secrets/postgres/server-key.pem"
+      - "-c"
+      - "ssl_ca_file=/run/secrets/postgres/ca.pem"
+      - "-c"
+      - "hba_file=/etc/postgresql/pg_hba.conf"
     environment:
       POSTGRES_USER: "${POSTGRES_USER:-trogon}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-trogon}"
@@ -155,6 +168,16 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./services/postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - type: volume
+        source: dev_secrets
+        target: /run/secrets/postgres
+        read_only: true
+        volume:
+          subpath: postgres-server
+    depends_on:
+      pki-bootstrap:
+        condition: service_completed_successfully
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-trogon} -d ${POSTGRES_DB:-trogon_scheduler}"]
@@ -174,11 +197,19 @@ services:
     environment:
       PGHOST: postgres
       PGPASSWORD: "${POSTGRES_PASSWORD:-trogon}"
+      PGSSLMODE: verify-full
+      PGSSLROOTCERT: /run/secrets/dev-ca/ca.pem
       POSTGRES_USER: "${POSTGRES_USER:-trogon}"
       POSTGRES_DB: "${POSTGRES_DB:-trogon_scheduler}"
       OPENBAO_POSTGRES_DB: "${OPENBAO_POSTGRES_DB:-openbao}"
     volumes:
       - ./services/postgres/ensure-openbao-database.sh:/scripts/ensure-openbao-database.sh:ro
+      - type: volume
+        source: dev_secrets
+        target: /run/secrets/dev-ca
+        read_only: true
+        volume:
+          subpath: ca
     depends_on:
       postgres:
         condition: service_healthy
@@ -195,13 +226,19 @@ services:
       - path: .env
         required: false
     environment:
-      BAO_PG_CONNECTION_URL: "postgres://${POSTGRES_USER:-trogon}:${POSTGRES_PASSWORD:-trogon}@postgres:5432/${OPENBAO_POSTGRES_DB:-openbao}?sslmode=disable"
+      BAO_PG_CONNECTION_URL: "postgres://${POSTGRES_USER:-trogon}:${POSTGRES_PASSWORD:-trogon}@postgres:5432/${OPENBAO_POSTGRES_DB:-openbao}?sslmode=verify-full&sslrootcert=/run/secrets/dev-ca/ca.pem"
       BAO_STATIC_SEAL_KEY: "${OPENBAO_STATIC_SEAL_KEY:-bG9jYWwtZGV2LW9ubHktc2VhbC1rZXktMzJieXRlcyE=}"
       BAO_LOG_LEVEL: "${OPENBAO_LOG_LEVEL:-info}"
     # No published port: OrbStack routes to the container directly at
     # http://openbao.trogonai.orb.local:8200.
     volumes:
       - ./services/openbao/openbao.hcl:/openbao/config/openbao.hcl:ro
+      - type: volume
+        source: dev_secrets
+        target: /run/secrets/dev-ca
+        read_only: true
+        volume:
+          subpath: ca
     depends_on:
       openbao-database:
         condition: service_completed_successfully
