@@ -572,6 +572,7 @@ The gateway has multiple credential classes:
 | Linear | `webhook_secret` | Raw secret for signature verification. |
 | Microsoft Graph | `client_state` | Equality-style validation. |
 | Notion | `verification_token` | Equality-style validation. |
+| Plaid | `client_secret` | Raw API secret for fetching the webhook verification key. |
 | Sentry | `client_secret` | Raw secret for signature verification. |
 
 The store must handle two broad shapes:

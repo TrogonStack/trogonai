@@ -1208,6 +1208,101 @@ async fn notion_verification_token_uses_credential_handler_for_put_rotate_and_re
 }
 
 #[tokio::test]
+async fn plaid_client_secret_uses_credential_handler_for_put_rotate_and_revoke() {
+    let events = ManagementTestStreamStore::default();
+    let secrets = MockOpenBaoSecretStore::default();
+    let registry = RuntimeCredentialRegistry::default();
+    let app = app(events.clone(), secrets.clone(), registry.clone());
+
+    let put_response = app
+        .clone()
+        .oneshot(request(
+            Method::PUT,
+            "/plaid/primary/client-secret",
+            r#"{"owner_id":"tenant-1","secret":"old-plaid-secret"}"#,
+            Some("admin-token"),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(put_response.status(), StatusCode::OK);
+    let put_body = response_json(put_response).await;
+    assert_eq!(put_body["state"], "active");
+    assert_eq!(put_body["credential_ref"]["id"], "tenant-1:plaid/primary:client_secret");
+    assert_eq!(put_body["credential_ref"]["source"], "plaid");
+    assert_eq!(put_body["credential_ref"]["kind"], "client_secret");
+    assert!(!put_body.to_string().contains("old-plaid-secret"));
+    assert_eq!(
+        resolved_target_plaintext(
+            &registry,
+            secrets.clone(),
+            SourceKind::Plaid,
+            "primary",
+            CredentialKind::ClientSecret,
+        )
+        .await
+        .unwrap(),
+        "old-plaid-secret"
+    );
+
+    let rotate_response = app
+        .clone()
+        .oneshot(request(
+            Method::POST,
+            "/plaid/primary/client-secret/rotations",
+            r#"{"owner_id":"tenant-1","version":1,"secret":"new-plaid-secret"}"#,
+            Some("admin-token"),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(rotate_response.status(), StatusCode::OK);
+    let rotate_body = response_json(rotate_response).await;
+    assert_eq!(rotate_body["state"], "active");
+    assert_eq!(rotate_body["credential_ref"]["version"], 2);
+    assert!(!rotate_body.to_string().contains("new-plaid-secret"));
+    assert_eq!(
+        resolved_target_plaintext(
+            &registry,
+            secrets.clone(),
+            SourceKind::Plaid,
+            "primary",
+            CredentialKind::ClientSecret,
+        )
+        .await
+        .unwrap(),
+        "new-plaid-secret"
+    );
+
+    let revoke_response = app
+        .oneshot(request(
+            Method::DELETE,
+            "/plaid/primary/client-secret",
+            r#"{"owner_id":"tenant-1","version":2}"#,
+            Some("admin-token"),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(revoke_response.status(), StatusCode::OK);
+    let revoke_body = response_json(revoke_response).await;
+    assert_eq!(revoke_body["state"], "revoked");
+    assert_eq!(revoke_body["credential_ref"]["status"], "revoked");
+    assert!(matches!(
+        resolved_target_plaintext(
+            &registry,
+            secrets,
+            SourceKind::Plaid,
+            "primary",
+            CredentialKind::ClientSecret,
+        )
+        .await,
+        Err(RuntimeCredentialError::IntegrationNotFound { .. })
+    ));
+    assert_eq!(events.decoded_events().await.len(), 5);
+}
+
+#[tokio::test]
 async fn telegram_webhook_secret_uses_credential_handler_for_put_rotate_and_revoke() {
     let events = ManagementTestStreamStore::default();
     let secrets = MockOpenBaoSecretStore::default();
@@ -2067,7 +2162,7 @@ fn http_error_keeps_typed_source_chain() {
     assert!(source.downcast_ref::<IdempotencyKeyError>().is_some());
 }
 
-const DESTROYABLE_TARGETS: [(&str, &str, &str); 11] = [
+const DESTROYABLE_TARGETS: [(&str, &str, &str); 12] = [
     ("/discord/bot-token", "discord", "bot_token"),
     ("/github/primary/webhook-secret", "github", "webhook_secret"),
     ("/gitlab/primary/signing-token", "gitlab", "signing_token"),
@@ -2079,6 +2174,7 @@ const DESTROYABLE_TARGETS: [(&str, &str, &str); 11] = [
         "client_state",
     ),
     ("/notion/primary/verification-token", "notion", "verification_token"),
+    ("/plaid/primary/client-secret", "plaid", "client_secret"),
     ("/sentry/primary/client-secret", "sentry", "client_secret"),
     ("/slack/primary/signing-secret", "slack", "signing_secret"),
     ("/telegram/primary/webhook-secret", "telegram", "webhook_secret"),
