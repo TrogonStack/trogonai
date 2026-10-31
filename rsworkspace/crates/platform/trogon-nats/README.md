@@ -27,6 +27,8 @@ Authentication resolves in this order: `NATS_CREDS`, `NATS_NKEY`, `NATS_USER` pl
 
 Both fail with `ConnectError::NoServers` when `NATS_URL` names no server, such as `,`.
 
+The message of `ConnectError::ConnectionFailed` never names the servers, because callers pass error text on to remote clients. The error keeps them in its `servers` field, and `connect` and `connect_once` log them with the `Failed to connect to NATS` warning.
+
 ## TLS
 
 Every connection uses TLS and verifies the server against the system roots. Nothing turns TLS on; configuration can only turn it off.
