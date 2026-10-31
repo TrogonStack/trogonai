@@ -232,6 +232,7 @@ account, and the xkey seed from nsc's keystore. Then start it with:
 | `AUTH_CALLOUT_XKEY_SEED` | `file:///<dir>/callout-xkey.nk` |
 | `AUTH_CALLOUT_MTLS_TRUST_ANCHORS` | The path of the CA bundle that issues callers' client certificates |
 | `AUTH_CALLOUT_OIDC_ISSUER`, `AUTH_CALLOUT_OIDC_AUDIENCES` | The OIDC issuer whose tokens the callout accepts, and the audiences a token must carry |
+| `A2A_PREFIX` | The A2A subject prefix the gateway and the agents use, `a2a` unless set |
 
 The seed variables hold references, never seeds. Under `file` custody each one
 must be a `file://` reference. `env` custody reads `env://` references and is
@@ -239,6 +240,27 @@ for development only, and `vault` is refused until signing moves behind
 OpenBao Transit. The callout refuses to start without a verifier, so set the
 trust anchors, the OIDC issuer, or both. `AUTH_CALLOUT_USER_JWT_TTL_SECS` sets
 how long a minted user stays valid, 300 seconds unless set.
+
+The callout grants a caller only the A2A subjects that name it as
+`{kind}.{id}`, under `A2A_PREFIX`, and the server denies every other subject.
+`{kind}` is `person` for an OIDC caller and `service` for a certificate caller,
+and `{id}` is the caller id the callout derives from the credential and the
+tenant. A caller that connects through the sentinel holds:
+
+| Direction | Subjects |
+| --- | --- |
+| Publish | `a2a.v1.agents.*.{kind}.{id}.>` |
+| Subscribe | `a2a.v1.tasks.*.{kind}.{id}.events`, `_INBOX.{kind}.{id}.>` |
+
+Its client must set its inbox prefix to `_INBOX.{kind}.{id}`, or its requests
+never see their replies. A user the callout mints for an A2A bridge reaches
+agents only through the gateway, and its inbox grant stays `_INBOX.>` until the
+bridge sets a per-caller inbox prefix:
+
+| Direction | Subjects |
+| --- | --- |
+| Publish | `a2a.v1.gateway.*.{kind}.{id}.>` |
+| Subscribe | `a2a.v1.gateway.{kind}.{id}.events`, `a2a.v1.tasks.*.{kind}.{id}.events`, `_INBOX.>` |
 
 A2A bridges seal a caller's credential to the callout's xkey before it crosses
 the bus, so each bridge takes the xkey's public key as
@@ -432,6 +454,9 @@ plaintext listener, and a deployment never adds one:
   is refused.
 - Subject permissions per workload. PLATFORM users are issued without publish
   or subscribe restrictions.
+- How a direct caller learns the `{kind}.{id}` its grants name, which it needs
+  for its inbox prefix and its task events.
+- A per-caller inbox prefix for the users the callout mints for an A2A bridge.
 
 ## See also
 
