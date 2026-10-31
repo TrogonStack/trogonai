@@ -4,6 +4,7 @@ use trogon_nats::jetstream::mocks::{AckKindSnapshot, AckKindValue};
 use trogon_std::log_capture::{CapturedEvents, LevelFilter};
 
 use super::super::*;
+use super::principal;
 use crate::gateway_test_support::{ObservedMessage, event, event_on};
 
 fn routed_event() -> async_nats::Message {
@@ -117,7 +118,7 @@ async fn unroutable_and_backpressured_ack_failures_preserve_context_and_retry_bu
     let client = AdvancedMockNatsClient::new();
     let attempts = Arc::new(ForwardAttempts::new());
     let gate = Arc::new(CallerInflightGate::new(1));
-    let held = gate.clone().try_acquire("person.alice").unwrap();
+    let held = gate.clone().try_acquire(&principal("person", "alice")).unwrap();
     for (message, expected) in [
         (
             ObservedMessage::with_failing_signals(event(async_nats::HeaderMap::new())),
@@ -152,10 +153,10 @@ async fn unroutable_and_backpressured_ack_failures_preserve_context_and_retry_bu
         assert_eq!(message.signals(), [AckKindSnapshot::AckWith(expected)]);
         assert!(attempts.by_sequence.lock().unwrap().is_empty());
         assert!(client.published_messages().is_empty());
-        assert!(gate.clone().try_acquire("person.bob").is_some());
+        assert!(gate.clone().try_acquire(&principal("person", "bob")).is_some());
     }
     drop(held);
-    assert!(gate.try_acquire("person.alice").is_some());
+    assert!(gate.try_acquire(&principal("person", "alice")).is_some());
 }
 
 #[tokio::test]

@@ -325,7 +325,7 @@ pub fn gateway_events_pull_enabled<E: ReadEnv>(env: &E) -> bool {
 
 struct CallerInflightGate {
     limit: usize,
-    inflight: Mutex<HashMap<String, usize>>,
+    inflight: Mutex<HashMap<SubjectPrincipal, usize>>,
 }
 
 impl CallerInflightGate {
@@ -341,15 +341,14 @@ impl CallerInflightGate {
     /// fetch loop could only hand out borrowed permits and the per-caller
     /// limit would only ever bind one message at a time per caller (i.e. a
     /// no-op once forward work is spawned off the loop).
-    fn try_acquire(self: Arc<Self>, caller_key: &str) -> Option<CallerInflightPermit> {
+    fn try_acquire(self: Arc<Self>, caller: &SubjectPrincipal) -> Option<CallerInflightPermit> {
         // Recover from a poisoned lock — see the matching note in
         // `gw_ingress_stream::CallerInflightGate`.
-        let key = caller_key.to_string();
         let mut guard = match self.inflight.lock() {
             Ok(g) => g,
             Err(p) => p.into_inner(),
         };
-        let count = guard.entry(key.clone()).or_insert(0);
+        let count = guard.entry(caller.clone()).or_insert(0);
         if *count >= self.limit {
             return None;
         }
@@ -357,14 +356,14 @@ impl CallerInflightGate {
         drop(guard);
         Some(CallerInflightPermit {
             gate: self,
-            caller_key: key,
+            caller: caller.clone(),
         })
     }
 }
 
 struct CallerInflightPermit {
     gate: Arc<CallerInflightGate>,
-    caller_key: String,
+    caller: SubjectPrincipal,
 }
 
 impl Drop for CallerInflightPermit {
@@ -377,10 +376,10 @@ impl Drop for CallerInflightPermit {
         // decrements only its own key, so the entry is always present here.
         // Use `entry().or_insert(0)` instead of `if let Some` to avoid a
         // defensive branch that the type system already rules out.
-        let count = guard.entry(self.caller_key.clone()).or_insert(0);
+        let count = guard.entry(self.caller.clone()).or_insert(0);
         *count = count.saturating_sub(1);
         if *count == 0 {
-            guard.remove(&self.caller_key);
+            guard.remove(&self.caller);
         }
     }
 }
@@ -606,7 +605,6 @@ where
         // `req_id`s) and consume the limit per stream, defeating the per-caller
         // cap.
         let caller = event.caller().clone();
-        let caller_key = caller.to_string();
         // `try_acquire` (not wait): when the per-caller gate is full, NAK
         // immediately with a short delay so the JetStream ack-pending slot
         // is freed for other callers. Waiting inside a spawned task would
@@ -614,7 +612,7 @@ where
         // permit-waiting tasks, starving every other caller. The forward
         // retry budget is tracked separately (see `forward_attempts`) so
         // gate redeliveries never tick the planner's attempt counter.
-        let Some(permit) = Arc::clone(&inflight_gate).try_acquire(&caller_key) else {
+        let Some(permit) = Arc::clone(&inflight_gate).try_acquire(&caller) else {
             message
                 .ack_with(AckKind::Nak(Some(GATE_NAK_DELAY)))
                 .await
