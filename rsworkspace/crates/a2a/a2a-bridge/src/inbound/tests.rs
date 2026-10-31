@@ -60,21 +60,6 @@ fn default_a2a_prefix_constructs() {
 }
 
 #[test]
-fn gateway_method_to_subject_dots_replaces_slashes() {
-    assert_eq!(gateway_method_to_subject_dots("message/stream"), "message.stream");
-    assert_eq!(gateway_method_to_subject_dots("tasks/get"), "tasks.get");
-}
-
-#[test]
-fn build_gateway_subject_formats_expected_subject() {
-    let prefix = default_a2a_prefix();
-    assert_eq!(
-        build_gateway_subject(&prefix, "planner", "message/send"),
-        "a2a.v1.gateway.planner.message.send"
-    );
-}
-
-#[test]
 fn is_sse_jsonrpc_method_recognizes_streaming_methods() {
     assert!(is_sse_jsonrpc_method("message/stream"));
     assert!(is_sse_jsonrpc_method("tasks/resubscribe"));
@@ -140,18 +125,21 @@ fn sse_plan_builds_message_stream_and_resubscribe_plans() {
 }
 
 #[test]
-fn plan_consumer_demuxes_a_live_subscription_but_not_a_resume() {
+fn plan_consumer_reads_only_the_callers_events_and_demuxes_a_live_subscription_but_not_a_resume() {
     let prefix = default_a2a_prefix();
     let task_id = A2aTaskId::new("task-7").unwrap();
+    let caller = SubjectPrincipal::from_tokens("person", "harness").unwrap();
 
-    let (_cfg, demux) = SseConsumePlan::MessageStreamBootstrap {
+    let (cfg, demux) = SseConsumePlan::MessageStreamBootstrap {
         task_id: task_id.clone(),
         req_id: ReqId::from_header("req-9"),
     }
-    .consumer(&prefix);
+    .consumer(&prefix, &caller);
+    assert_eq!(cfg.filter_subject, "a2a.v1.tasks.task-7.person.harness.events");
     assert_eq!(demux.map(|r| r.as_str().to_owned()), Some("req-9".to_owned()));
 
-    let (_cfg, demux) = SseConsumePlan::TasksResubscribe { task_id, last_seq: 4 }.consumer(&prefix);
+    let (cfg, demux) = SseConsumePlan::TasksResubscribe { task_id, last_seq: 4 }.consumer(&prefix, &caller);
+    assert_eq!(cfg.filter_subject, "a2a.v1.tasks.task-7.person.harness.events");
     assert!(demux.is_none(), "a resume replays events of the original request");
 }
 
@@ -210,7 +198,7 @@ fn gateway_req_headers_propagate_correlation_and_caller_id() {
 
 #[test]
 fn gateway_publish_headers_include_minted_user_jwt() {
-    let jwt = BridgeUserJwt::new("eyJhbGciOiJub25lIn0.eyJzdWIiOiJoYXJuZXNzIn0.sig").unwrap();
+    let jwt = BridgeUserJwt::new("eyJhbGciOiJub25lIn0.eyJzdWIiOiJoYXJuZXNzIiwiY2FsbGVyX2lkIjoiaGFybmVzcyIsInByaW5jaXBhbF9raW5kIjoicGVyc29uIn0.sig").unwrap();
     let headers = gateway_publish_headers(ReqId::from_header("req-2"), &jwt, None).unwrap();
     assert!(headers.get(CALLER_JWT_HEADER_NAME).is_some());
 }
@@ -297,8 +285,78 @@ async fn handle_jsonrpc_unary_publish_records_gateway_subject() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         publisher.peek_subject().as_deref(),
-        Some("a2a.v1.gateway.planner.tasks.get")
+        Some("a2a.v1.gateway.planner.person.harness.tasks.get")
     );
+}
+
+#[tokio::test]
+async fn handle_jsonrpc_names_the_minted_principal_whatever_the_caller_id_header_claims() {
+    let publisher = Arc::new(RecordingInboundPublisher::new());
+    let state = test_state(publisher.clone());
+    let body = Bytes::from(json!({"jsonrpc": "2.0", "id": 1, "method": "tasks/get", "params": {}}).to_string());
+    handle_jsonrpc(caller_headers("planner", Some("mallory")), body, &state)
+        .await
+        .expect("tasks/get should succeed");
+    assert_eq!(
+        publisher.peek_subject().as_deref(),
+        Some("a2a.v1.gateway.planner.person.harness.tasks.get")
+    );
+}
+
+#[tokio::test]
+async fn handle_jsonrpc_routes_each_method_on_its_ingress_suffix() {
+    for (method, expected) in [
+        ("message/send", "a2a.v1.gateway.planner.person.harness.message.send"),
+        ("agent/card", "a2a.v1.gateway.planner.person.harness.card"),
+        (
+            "tasks/pushNotificationConfig/set",
+            "a2a.v1.gateway.planner.person.harness.push.set",
+        ),
+        (
+            "tasks/pushNotificationConfig/delete",
+            "a2a.v1.gateway.planner.person.harness.push.delete",
+        ),
+    ] {
+        let publisher = Arc::new(RecordingInboundPublisher::new());
+        let state = test_state(publisher.clone());
+        let body = Bytes::from(json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": {}}).to_string());
+        handle_jsonrpc(caller_headers("planner", None), body, &state)
+            .await
+            .unwrap_or_else(|error| panic!("{method} should be forwarded: {error}"));
+        assert_eq!(publisher.peek_subject().as_deref(), Some(expected), "{method}");
+    }
+}
+
+#[tokio::test]
+async fn handle_jsonrpc_rejects_a_method_outside_the_a2a_method_set() {
+    let publisher = Arc::new(RecordingInboundPublisher::new());
+    let state = test_state(publisher.clone());
+    let body = Bytes::from(json!({"jsonrpc": "2.0", "id": 1, "method": "tasks/subscribe", "params": {}}).to_string());
+    let err = handle_jsonrpc(caller_headers("planner", None), body, &state)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, BridgeError::UnknownJsonRpcMethod), "{err}");
+    assert!(publisher.peek_subject().is_none());
+}
+
+#[tokio::test]
+async fn handle_jsonrpc_refuses_a_minted_token_that_names_no_principal() {
+    let publisher = Arc::new(RecordingInboundPublisher::new());
+    let state = AppState::new(
+        Arc::new(
+            StubAuthCalloutMint::new("eyJhbGciOiJub25lIn0.eyJzdWIiOiJoYXJuZXNzIiwiY2FsbGVyX2lkIjoiaGFybmVzcyJ9.sig")
+                .unwrap(),
+        ),
+        publisher.clone(),
+        Arc::new(EmptyTaskJetStream),
+        default_a2a_prefix(),
+    );
+    let body = Bytes::from(json!({"jsonrpc": "2.0", "id": 1, "method": "tasks/get", "params": {}}).to_string());
+    let err = handle_jsonrpc(caller_headers("planner", None), body, &state)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, BridgeError::MintedPrincipal(_)), "{err}");
+    assert!(publisher.peek_subject().is_none());
 }
 
 #[tokio::test]

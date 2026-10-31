@@ -1,3 +1,4 @@
+use a2a_nats::nats::subjects::tasks::TaskEventsSubject;
 use axum::body::{Body, to_bytes};
 use axum::http::Request;
 use tower::ServiceExt;
@@ -64,7 +65,10 @@ async fn caller_jwt() -> BridgeUserJwt {
 async fn unary_port_preserves_headers_payload_and_gateway_reply() {
     let server = CoreTestServer::start().await;
     let client = gateway_client(&plaintext(server.address())).await;
-    let mut gateway = client.subscribe("a2a.v1.gateway.planner.message.send").await.unwrap();
+    let mut gateway = client
+        .subscribe("a2a.v1.gateway.planner.person.harness.message.send")
+        .await
+        .unwrap();
     client.flush().await.unwrap();
     let port = AsyncNatsTokenGatewayUnary::new(plaintext(server.address()), CONNECT, RPC);
     let jwt = caller_jwt().await;
@@ -74,7 +78,7 @@ async fn unary_port_preserves_headers_payload_and_gateway_reply() {
     let (reply, ()) = tokio::join!(
         port.unary_request_gateway(
             &jwt,
-            "a2a.v1.gateway.planner.message.send",
+            "a2a.v1.gateway.planner.person.harness.message.send",
             headers,
             Bytes::from_static(b"request")
         ),
@@ -285,16 +289,69 @@ async fn unary_port_verifies_the_server_against_the_configured_ca() {
     assert_eq!(reply.unwrap(), Bytes::from_static(b"sealed"));
 }
 
+fn fixture_principal() -> SubjectPrincipal {
+    SubjectPrincipal::from_tokens("person", "harness").unwrap()
+}
+
 async fn publish_event(js: &async_nats::jetstream::Context, request: Option<&str>, body: &'static [u8]) {
+    publish_event_for(js, &fixture_principal(), request, body).await;
+}
+
+async fn publish_event_for(
+    js: &async_nats::jetstream::Context,
+    caller: &SubjectPrincipal,
+    request: Option<&str>,
+    body: &'static [u8],
+) {
     let mut headers = async_nats::HeaderMap::new();
     if let Some(request) = request {
         headers.insert(REQ_ID_HEADER, request);
     }
-    js.publish_with_headers("a2a.v1.tasks.task-1.events", headers, Bytes::from_static(body))
+    let subject = TaskEventsSubject::new(&default_a2a_prefix(), &A2aTaskId::new("task-1").unwrap(), caller);
+    js.publish_with_headers(subject, headers, Bytes::from_static(body))
         .await
         .unwrap()
         .await
         .unwrap();
+}
+
+#[tokio::test]
+async fn task_stream_leaves_out_events_published_for_another_principal_on_the_same_task() {
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
+    js.create_stream(a2a_nats::nats::subjects::A2aStream::Events.config(&default_a2a_prefix()))
+        .await
+        .unwrap();
+    let other = SubjectPrincipal::from_tokens("person", "mallory").unwrap();
+    publish_event_for(&js, &other, Some("my-request"), b"another-principal").await;
+    publish_event(&js, Some("my-request"), b"mine").await;
+    let port = AsyncNatsTokenTaskJetstream::new(plaintext(server.address()), CONNECT);
+    let mut payloads = port
+        .task_event_payload_stream(
+            &caller_jwt().await,
+            &default_a2a_prefix(),
+            SseConsumePlan::TasksResubscribe {
+                task_id: A2aTaskId::new("task-1").unwrap(),
+                last_seq: 0,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        tokio::time::timeout(WAIT, payloads.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap()
+            .as_ref(),
+        b"mine"
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), payloads.next())
+            .await
+            .is_err()
+    );
+    drop(payloads);
 }
 
 #[tokio::test]

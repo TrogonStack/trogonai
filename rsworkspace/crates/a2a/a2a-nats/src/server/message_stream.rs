@@ -1,6 +1,7 @@
 use futures::StreamExt;
 use jsonrpc_nats::ResponseId;
 use tracing::{instrument, warn};
+use trogon_identity_types::SubjectPrincipal;
 use trogon_nats::jetstream::JetStreamPublisher;
 use trogon_semconv::span::A2A_SERVER_MESSAGE_STREAM;
 
@@ -24,10 +25,15 @@ use crate::wire::merge_jsonrpc_headers;
 /// the JetStream task-events subject until the stream terminates. Cancellation tracking,
 /// audit emission, and terminal push-notification dispatch are wired in by the Bridge
 /// PR that follows.
+///
+/// `caller` is the principal of the delivery subject the request arrived on; every
+/// event subject carries it, so the events reach only consumers scoped to that caller
+/// (ADR#0082).
 #[instrument(
     name = A2A_SERVER_MESSAGE_STREAM,
-    skip(handler, headers, payload, reply_subject, nats, js, prefix)
+    skip(handler, headers, payload, reply_subject, nats, js, prefix, caller)
 )]
+#[allow(clippy::too_many_arguments)]
 pub async fn handle<H, N, J>(
     handler: &H,
     headers: &async_nats::header::HeaderMap,
@@ -36,6 +42,7 @@ pub async fn handle<H, N, J>(
     nats: &N,
     js: &J,
     prefix: &A2aPrefix,
+    caller: &SubjectPrincipal,
 ) where
     H: A2aExecutor,
     N: trogon_nats::PublishClient,
@@ -93,7 +100,7 @@ pub async fn handle<H, N, J>(
         return;
     }
 
-    let events_subject = TaskEventsSubject::new(prefix, &task_id).to_string();
+    let events_subject = TaskEventsSubject::new(prefix, &task_id, caller).to_string();
     let event_headers = event_headers(headers, &req_id);
     while let Some(item) = events.next().await {
         let event = match item {
@@ -124,12 +131,12 @@ pub async fn handle<H, N, J>(
     }
 }
 
-/// Correlation and caller identity for every event of one subscription.
+/// Correlation for every event of one subscription.
 ///
-/// The subject only names the task, so `Trogon-Req-Id` is what tells concurrent
-/// subscribers of that task apart (ADR#0055) without every hop having to parse the
-/// body. Caller identity rides along because the gateway's egress pump gates per
-/// caller and can no longer recover it from the subject either.
+/// The subject names the task and its caller but not the request, so `Trogon-Req-Id`
+/// is what tells concurrent subscribers of that task apart (ADR#0055) without every
+/// hop having to parse the body. The caller headers still ride along as routing hints;
+/// readers take the caller from the subject (ADR#0082).
 fn event_headers(request_headers: &async_nats::header::HeaderMap, req_id: &ReqId) -> async_nats::header::HeaderMap {
     let mut headers = async_nats::header::HeaderMap::new();
     headers.insert(REQ_ID_HEADER, req_id.as_str());

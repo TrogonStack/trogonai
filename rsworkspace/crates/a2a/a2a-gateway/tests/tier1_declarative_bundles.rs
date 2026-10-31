@@ -44,7 +44,7 @@ fn rule_id(s: &str) -> Tier1DeclarativeRuleId {
 }
 
 fn ingress_subject(agent: &str, method_dots: &str) -> String {
-    format!("a2a.v1.gateway.{agent}.{method_dots}")
+    format!("a2a.v1.gateway.{agent}.person.alice.{method_dots}")
 }
 
 #[test]

@@ -10,42 +10,46 @@ fn tid(s: &str) -> A2aTaskId {
     A2aTaskId::new(s).expect("test task id")
 }
 
+fn alice() -> SubjectPrincipal {
+    SubjectPrincipal::from_tokens("person", "alice").expect("test principal")
+}
+
 #[test]
 fn gateway_events_consumer_uses_durable_full_task_filter() {
     let config = gateway_events_consumer(&p("a2a"), "A2A_GATEWAY_EVENTS", 1024);
     assert_eq!(config.durable_name.as_deref(), Some("A2A_GATEWAY_EVENTS"));
-    assert_eq!(config.filter_subject, "a2a.v1.tasks.*.events");
+    assert_eq!(config.filter_subject, "a2a.v1.tasks.*.*.*.events");
     assert_eq!(config.max_ack_pending, 1024);
     assert_eq!(config.ack_policy, AckPolicy::Explicit);
 }
 
 #[test]
-fn stream_events_consumer_filters_on_one_task() {
-    let config = stream_events_consumer(&p("a2a"), &tid("t1"));
-    assert_eq!(config.filter_subject, "a2a.v1.tasks.t1.events");
+fn stream_events_consumer_filters_on_one_task_of_one_caller() {
+    let config = stream_events_consumer(&p("a2a"), &tid("t1"), &alice());
+    assert_eq!(config.filter_subject, "a2a.v1.tasks.t1.person.alice.events");
 }
 
 #[test]
 fn stream_events_consumer_delivers_all() {
-    let config = stream_events_consumer(&p("a2a"), &tid("t1"));
+    let config = stream_events_consumer(&p("a2a"), &tid("t1"), &alice());
     assert_eq!(config.deliver_policy, DeliverPolicy::All);
     assert_eq!(config.ack_policy, AckPolicy::Explicit);
     assert_eq!(config.replay_policy, ReplayPolicy::Instant);
 }
 
 #[test]
-fn gateway_stream_events_consumer_filters_every_task() {
-    let config = gateway_stream_events_consumer(&p("a2a"), 0, 512);
-    assert_eq!(config.filter_subject, "a2a.v1.tasks.*.events");
+fn gateway_stream_events_consumer_filters_every_task_of_the_caller() {
+    let config = gateway_stream_events_consumer(&p("a2a"), &alice(), 0, 512);
+    assert_eq!(config.filter_subject, "a2a.v1.tasks.*.person.alice.events");
     assert_eq!(config.max_ack_pending, 512);
     assert!(config.durable_name.is_none());
 }
 
 #[test]
 fn gateway_stream_events_consumer_starts_past_the_observed_head() {
-    // The filter spans every task, so replaying from the start of the stream would
-    // make each new subscription walk and ack every other task's history first.
-    let config = gateway_stream_events_consumer(&p("a2a"), 41, 512);
+    // The filter spans every task of the caller, so replaying from the start of the
+    // stream would make each new subscription walk and ack that history first.
+    let config = gateway_stream_events_consumer(&p("a2a"), &alice(), 41, 512);
     assert_eq!(
         config.deliver_policy,
         DeliverPolicy::ByStartSequence { start_sequence: 42 }
@@ -56,7 +60,7 @@ fn gateway_stream_events_consumer_starts_past_the_observed_head() {
 
 #[test]
 fn gateway_stream_events_consumer_starts_at_one_on_an_empty_stream() {
-    let config = gateway_stream_events_consumer(&p("a2a"), 0, 512);
+    let config = gateway_stream_events_consumer(&p("a2a"), &alice(), 0, 512);
     assert_eq!(
         config.deliver_policy,
         DeliverPolicy::ByStartSequence { start_sequence: 1 }
@@ -65,7 +69,7 @@ fn gateway_stream_events_consumer_starts_at_one_on_an_empty_stream() {
 
 #[test]
 fn gateway_stream_events_consumer_saturates_rather_than_wrapping_past_the_head() {
-    let config = gateway_stream_events_consumer(&p("a2a"), u64::MAX, 512);
+    let config = gateway_stream_events_consumer(&p("a2a"), &alice(), u64::MAX, 512);
     assert_eq!(
         config.deliver_policy,
         DeliverPolicy::ByStartSequence {
@@ -75,14 +79,14 @@ fn gateway_stream_events_consumer_saturates_rather_than_wrapping_past_the_head()
 }
 
 #[test]
-fn resubscribe_consumer_filter_is_task_scoped() {
-    let config = resubscribe_consumer(&p("a2a"), &tid("t1"), 100);
-    assert_eq!(config.filter_subject, "a2a.v1.tasks.t1.events");
+fn resubscribe_consumer_filter_is_scoped_to_the_task_and_caller() {
+    let config = resubscribe_consumer(&p("a2a"), &tid("t1"), &alice(), 100);
+    assert_eq!(config.filter_subject, "a2a.v1.tasks.t1.person.alice.events");
 }
 
 #[test]
 fn resubscribe_consumer_starts_at_last_seq_plus_one() {
-    let config = resubscribe_consumer(&p("a2a"), &tid("t1"), 42);
+    let config = resubscribe_consumer(&p("a2a"), &tid("t1"), &alice(), 42);
     assert_eq!(
         config.deliver_policy,
         DeliverPolicy::ByStartSequence { start_sequence: 43 }
@@ -91,7 +95,7 @@ fn resubscribe_consumer_starts_at_last_seq_plus_one() {
 
 #[test]
 fn resubscribe_consumer_handles_zero_seq() {
-    let config = resubscribe_consumer(&p("a2a"), &tid("t1"), 0);
+    let config = resubscribe_consumer(&p("a2a"), &tid("t1"), &alice(), 0);
     assert_eq!(
         config.deliver_policy,
         DeliverPolicy::ByStartSequence { start_sequence: 1 }
@@ -100,7 +104,7 @@ fn resubscribe_consumer_handles_zero_seq() {
 
 #[test]
 fn resubscribe_consumer_saturates_at_u64_max() {
-    let config = resubscribe_consumer(&p("a2a"), &tid("t1"), u64::MAX);
+    let config = resubscribe_consumer(&p("a2a"), &tid("t1"), &alice(), u64::MAX);
     assert_eq!(
         config.deliver_policy,
         DeliverPolicy::ByStartSequence {
@@ -110,9 +114,16 @@ fn resubscribe_consumer_saturates_at_u64_max() {
 }
 
 #[test]
+fn resubscribe_consumer_with_flow_keeps_the_requested_ack_window() {
+    let config = resubscribe_consumer_with_flow(&p("a2a"), &tid("t1"), &alice(), 7, 64);
+    assert_eq!(config.max_ack_pending, 64);
+    assert_eq!(config.filter_subject, "a2a.v1.tasks.t1.person.alice.events");
+}
+
+#[test]
 fn consumers_use_explicit_ack_and_instant_replay() {
-    let stream = stream_events_consumer(&p("a2a"), &tid("t1"));
-    let resub = resubscribe_consumer(&p("a2a"), &tid("t1"), 1);
+    let stream = stream_events_consumer(&p("a2a"), &tid("t1"), &alice());
+    let resub = resubscribe_consumer(&p("a2a"), &tid("t1"), &alice(), 1);
     assert_eq!(stream.ack_policy, AckPolicy::Explicit);
     assert_eq!(stream.replay_policy, ReplayPolicy::Instant);
     assert_eq!(resub.ack_policy, AckPolicy::Explicit);
@@ -121,16 +132,18 @@ fn consumers_use_explicit_ack_and_instant_replay() {
 
 #[test]
 fn custom_prefix_in_consumers() {
-    let stream = stream_events_consumer(&p("myapp"), &tid("t1"));
-    assert_eq!(stream.filter_subject, "myapp.v1.tasks.t1.events");
-    let resub = resubscribe_consumer(&p("myapp"), &tid("t1"), 5);
-    assert_eq!(resub.filter_subject, "myapp.v1.tasks.t1.events");
+    let stream = stream_events_consumer(&p("myapp"), &tid("t1"), &alice());
+    assert_eq!(stream.filter_subject, "myapp.v1.tasks.t1.person.alice.events");
+    let resub = resubscribe_consumer(&p("myapp"), &tid("t1"), &alice(), 5);
+    assert_eq!(resub.filter_subject, "myapp.v1.tasks.t1.person.alice.events");
+    let gateway = gateway_stream_events_consumer(&p("myapp"), &alice(), 5, 1);
+    assert_eq!(gateway.filter_subject, "myapp.v1.tasks.*.person.alice.events");
 }
 
 #[test]
 fn consumers_set_five_minute_inactive_threshold() {
-    let stream = stream_events_consumer(&p("a2a"), &tid("t1"));
-    let resub = resubscribe_consumer(&p("a2a"), &tid("t1"), 0);
+    let stream = stream_events_consumer(&p("a2a"), &tid("t1"), &alice());
+    let resub = resubscribe_consumer(&p("a2a"), &tid("t1"), &alice(), 0);
     assert_eq!(stream.inactive_threshold, Duration::from_secs(300));
     assert_eq!(resub.inactive_threshold, Duration::from_secs(300));
 }
@@ -139,9 +152,9 @@ fn consumers_set_five_minute_inactive_threshold() {
 fn no_consumer_filter_carries_a_request_id() {
     for filter in [
         gateway_events_consumer(&p("a2a"), "D", 1).filter_subject,
-        stream_events_consumer(&p("a2a"), &tid("t1")).filter_subject,
-        gateway_stream_events_consumer(&p("a2a"), 0, 1).filter_subject,
-        resubscribe_consumer(&p("a2a"), &tid("t1"), 0).filter_subject,
+        stream_events_consumer(&p("a2a"), &tid("t1"), &alice()).filter_subject,
+        gateway_stream_events_consumer(&p("a2a"), &alice(), 0, 1).filter_subject,
+        resubscribe_consumer(&p("a2a"), &tid("t1"), &alice(), 0).filter_subject,
     ] {
         for token in filter.split('.') {
             assert!(

@@ -8,45 +8,49 @@ fn agent_id() -> A2aAgentId {
     A2aAgentId::new("test-agent").unwrap()
 }
 
+fn caller() -> SubjectPrincipal {
+    SubjectPrincipal::from_tokens("person", "alice").unwrap()
+}
+
 fn minted_jwt() -> MintedUserJwt {
     MintedUserJwt::new("aaa.bbb.ccc").unwrap()
 }
 
 #[test]
 fn new_uses_agent_subjects_by_default() {
-    let client = A2aClient::new(prefix(), agent_id(), (), ());
+    let client = A2aClient::new(prefix(), agent_id(), caller(), (), ());
     assert!(matches!(client.ingress, ClientIngressTarget::AgentSubjects));
     assert!(client.gateway_caller_jwt().is_none());
 }
 
 #[test]
 fn new_uses_default_operation_timeout() {
-    let client = A2aClient::new(prefix(), agent_id(), (), ());
+    let client = A2aClient::new(prefix(), agent_id(), caller(), (), ());
     assert_eq!(client.operation_timeout(), DEFAULT_OPERATION_TIMEOUT);
 }
 
 #[test]
 fn with_operation_timeout_overrides_default() {
-    let client = A2aClient::new(prefix(), agent_id(), (), ()).with_operation_timeout(Duration::from_secs(7));
+    let client = A2aClient::new(prefix(), agent_id(), caller(), (), ()).with_operation_timeout(Duration::from_secs(7));
     assert_eq!(client.operation_timeout(), Duration::from_secs(7));
 }
 
 #[test]
 fn with_operation_timeout_clamps_below_minimum_to_minimum() {
-    let client = A2aClient::new(prefix(), agent_id(), (), ()).with_operation_timeout(Duration::ZERO);
+    let client = A2aClient::new(prefix(), agent_id(), caller(), (), ()).with_operation_timeout(Duration::ZERO);
     assert_eq!(client.operation_timeout(), Duration::from_secs(MIN_TIMEOUT_SECS));
 }
 
 #[test]
 fn routing_via_gateway_ingress_stores_jwt() {
-    let client = A2aClient::new(prefix(), agent_id(), (), ()).routing_via_gateway_ingress(minted_jwt());
+    let client = A2aClient::new(prefix(), agent_id(), caller(), (), ()).routing_via_gateway_ingress(minted_jwt());
     assert!(matches!(client.ingress, ClientIngressTarget::GatewayIngress(_)));
     assert!(client.gateway_caller_jwt().is_some());
 }
 
 #[test]
 fn routing_to_agent_flips_back_to_agent_subjects() {
-    let client = A2aClient::new(prefix(), agent_id(), (), ())
+    let client = A2aClient::new(prefix(), agent_id(), caller(), (), ())
         .routing_via_gateway_ingress(minted_jwt())
         .routing_to_agent();
     assert!(matches!(client.ingress, ClientIngressTarget::AgentSubjects));
@@ -54,31 +58,31 @@ fn routing_to_agent_flips_back_to_agent_subjects() {
 
 #[test]
 fn agent_id_accessor_returns_constructor_value() {
-    let client = A2aClient::new(prefix(), agent_id(), (), ());
+    let client = A2aClient::new(prefix(), agent_id(), caller(), (), ());
     assert_eq!(client.agent_id().as_str(), "test-agent");
 }
 
 #[test]
 fn outbound_rpc_subject_returns_agent_subject_for_default_routing() {
-    let client = A2aClient::new(prefix(), agent_id(), (), ());
+    let client = A2aClient::new(prefix(), agent_id(), caller(), (), ());
     let subject = client
-        .outbound_rpc_subject("a2a.v1.agents.test-agent.message.send".to_string())
+        .outbound_rpc_subject("a2a.v1.agents.test-agent.person.alice.message.send".to_string())
         .unwrap();
-    assert_eq!(subject, "a2a.v1.agents.test-agent.message.send");
+    assert_eq!(subject, "a2a.v1.agents.test-agent.person.alice.message.send");
 }
 
 #[test]
 fn outbound_rpc_subject_swaps_agents_to_gateway_when_jwt_set() {
-    let client = A2aClient::new(prefix(), agent_id(), (), ()).routing_via_gateway_ingress(minted_jwt());
+    let client = A2aClient::new(prefix(), agent_id(), caller(), (), ()).routing_via_gateway_ingress(minted_jwt());
     let subject = client
-        .outbound_rpc_subject("a2a.v1.agents.test-agent.message.send".to_string())
+        .outbound_rpc_subject("a2a.v1.agents.test-agent.person.alice.message.send".to_string())
         .unwrap();
-    assert_eq!(subject, "a2a.v1.gateway.test-agent.message.send");
+    assert_eq!(subject, "a2a.v1.gateway.test-agent.person.alice.message.send");
 }
 
 #[test]
 fn outbound_rpc_subject_returns_invalid_overlay_for_non_agent_subject() {
-    let client = A2aClient::new(prefix(), agent_id(), (), ()).routing_via_gateway_ingress(minted_jwt());
+    let client = A2aClient::new(prefix(), agent_id(), caller(), (), ()).routing_via_gateway_ingress(minted_jwt());
     let err = client
         .outbound_rpc_subject("wrong.prefix.test-agent.message.send".to_string())
         .unwrap_err();
@@ -87,8 +91,14 @@ fn outbound_rpc_subject_returns_invalid_overlay_for_non_agent_subject() {
 
 #[test]
 fn prefix_accessor_returns_constructor_value() {
-    let client = A2aClient::new(prefix(), agent_id(), (), ());
+    let client = A2aClient::new(prefix(), agent_id(), caller(), (), ());
     assert_eq!(client.prefix().as_str(), "a2a");
+}
+
+#[test]
+fn caller_accessor_returns_constructor_value() {
+    let client = A2aClient::new(prefix(), agent_id(), caller(), (), ());
+    assert_eq!(client.caller(), &caller());
 }
 
 mod agent_card_op_tests;

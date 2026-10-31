@@ -22,6 +22,7 @@ use futures_util::stream::{self, BoxStream, Stream};
 use serde::Serialize;
 use serde_json::{Map, Value};
 use tracing::warn;
+use trogon_identity_types::SubjectPrincipal;
 use trogon_nats::{CredentialValue, NatsAuth, NatsConfig};
 use trogon_std::secret_string::{EmptySecretError, SecretString};
 
@@ -29,7 +30,8 @@ use a2a_nats::RequestId;
 use a2a_nats::constants::{GATEWAY_CALLER_ID_HEADER, GATEWAY_CALLER_ID_HTTP, REQ_ID_HEADER};
 use a2a_nats::jetstream::consumers::{PullConfig, resubscribe_consumer, stream_events_consumer};
 use a2a_nats::jetstream::streams::events_stream_name;
-use a2a_nats::{A2aPrefix, A2aTaskId, ReqId};
+use a2a_nats::nats::subjects::gateway::GatewayIngressSubject;
+use a2a_nats::{A2aMethod, A2aPrefix, A2aTaskId, ReqId};
 
 use a2a_auth_callout::{CALLER_JWT_HEADER_NAME, CallerJwtHeaderValue, MintedUserJwt};
 
@@ -38,26 +40,12 @@ use crate::constants::{AGENT_ID_HEADER, INTERNAL_ERROR, JSONRPC_VERSION, SSE_EVE
 use crate::error::BridgeError;
 use crate::identity::{BridgeAgentId, BridgeUserJwt, CallerHttpsAuth};
 
-pub fn gateway_method_to_subject_dots(method: &str) -> String {
-    method.replace('/', ".")
-}
-
 #[must_use]
 pub fn default_a2a_prefix() -> A2aPrefix {
     // The literal "a2a" is the canonical bridge prefix and is checked by
     // a unit test below; if A2aPrefix ever changes its validator to
     // reject this value we'd rather catch it in CI than at runtime.
     A2aPrefix::new(String::from("a2a")).unwrap_or_else(|_| unreachable!("\"a2a\" is a valid A2aPrefix"))
-}
-
-#[must_use]
-pub fn build_gateway_subject(prefix: &A2aPrefix, agent_id: &str, method: &str) -> String {
-    format!(
-        "{}.v1.gateway.{}.{}",
-        prefix.as_str(),
-        agent_id,
-        gateway_method_to_subject_dots(method)
-    )
 }
 
 pub fn is_sse_jsonrpc_method(method: &str) -> bool {
@@ -340,15 +328,15 @@ pub enum SseConsumePlan {
 }
 
 impl SseConsumePlan {
-    /// The consumer to open, paired with the correlation id an event must carry to
-    /// reach this caller.
-    fn consumer(&self, prefix: &A2aPrefix) -> (PullConfig, Option<ReqId>) {
+    /// The consumer to open on the caller's own task events, paired with the
+    /// correlation id an event must carry to reach this caller.
+    fn consumer(&self, prefix: &A2aPrefix, caller: &SubjectPrincipal) -> (PullConfig, Option<ReqId>) {
         match self {
             SseConsumePlan::MessageStreamBootstrap { task_id, req_id } => {
-                (stream_events_consumer(prefix, task_id), Some(req_id.clone()))
+                (stream_events_consumer(prefix, task_id, caller), Some(req_id.clone()))
             }
             SseConsumePlan::TasksResubscribe { task_id, last_seq } => {
-                (resubscribe_consumer(prefix, task_id, *last_seq), None)
+                (resubscribe_consumer(prefix, task_id, caller, *last_seq), None)
             }
         }
     }
@@ -420,6 +408,7 @@ impl TaskJetStreamPort for AsyncNatsTokenTaskJetstream {
         prefix: &A2aPrefix,
         plan: SseConsumePlan,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<Bytes, BridgeError>> + Send>>, BridgeError> {
+        let caller = caller_jwt.subject_principal()?;
         let client = self.connect_caller_client(caller_jwt).await?;
         let jetstream_ctx = async_nats::jetstream::new(client);
         let stream_name = events_stream_name(prefix);
@@ -427,7 +416,7 @@ impl TaskJetStreamPort for AsyncNatsTokenTaskJetstream {
             .get_stream(stream_name.clone())
             .await
             .map_err(|e| BridgeError::JetStreamConsume(format!("get_stream {stream_name}: {e}")))?;
-        let (pull_cfg, demux_req_id) = plan.consumer(prefix);
+        let (pull_cfg, demux_req_id) = plan.consumer(prefix, &caller);
         let consumer = stream
             .create_consumer(pull_cfg)
             .await
@@ -837,11 +826,13 @@ pub async fn handle_jsonrpc(headers: HeaderMap, body: bytes::Bytes, state: &AppS
     let agent_id = agent_header_parse(&headers)?;
     let caller_id = caller_id_from_headers(&headers);
     let jwt = state.auth.mint(&caller_auth).await?;
+    let caller = jwt.subject_principal()?;
     let v: Value = serde_json::from_slice(&body).map_err(|e: serde_json::Error| BridgeError::Deserialize(e))?;
     let Some(method) = v.get("method").and_then(Value::as_str) else {
         return Err(BridgeError::MissingJsonRpcMethod);
     };
-    let subject = build_gateway_subject(&state.prefix, agent_id.as_str(), method);
+    let a2a_method = A2aMethod::from_jsonrpc_name(method).ok_or(BridgeError::UnknownJsonRpcMethod)?;
+    let subject = GatewayIngressSubject::new(&state.prefix, agent_id.as_agent_id(), &caller, a2a_method).to_string();
     // Computed once per request: when the JSON-RPC id is absent or null this mints a
     // fresh one, so calling it twice would publish under a different correlation id
     // than the one the rest of the request reports.

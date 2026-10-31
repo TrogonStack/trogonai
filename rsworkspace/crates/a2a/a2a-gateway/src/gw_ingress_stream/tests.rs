@@ -278,6 +278,7 @@ fn try_acquire_streaming_permit_passes_when_capacity_available() {
         },
         reply: async_nats::Subject::from_static("reply.x"),
         caller_key: CallerKey::new("bot").unwrap(),
+        caller: SubjectPrincipal::from_tokens("person", "bot").unwrap(),
     };
     let permit = try_acquire_streaming_permit(&gate, &spawn).expect("first permit");
     drop(permit);
@@ -295,6 +296,7 @@ fn try_acquire_streaming_permit_returns_per_caller_limit_when_full() {
         },
         reply: async_nats::Subject::from_static("reply.x"),
         caller_key: CallerKey::new("bot").unwrap(),
+        caller: SubjectPrincipal::from_tokens("person", "bot").unwrap(),
     };
     let _held = try_acquire_streaming_permit(&gate, &spawn).expect("first");
     let err = try_acquire_streaming_permit(&gate, &spawn).expect_err("second");
