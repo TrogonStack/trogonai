@@ -264,6 +264,15 @@ wraps still unwrap, and because an incarnation belongs to the physical stream
 re-sealing under new generations, never rewrapping alone (ADR#0023 Decision 6),
 and `min_decryption_version` never rises while an older wrap exists.
 
+Before the lease service answers the first request for a series, and again
+whenever that series' registration changes, it reconciles the registry entry
+against the backends: the sealing key exists, has the type and purpose the
+series needs, and the oldest live wrap still unwraps. A series that fails the
+check serves no leases; the refusal and the audit record name the key's locator
+and never its material, and every other series keeps serving. No caller falls
+back to plaintext, and a key destroyed under Decision 8 fails this check by
+design.
+
 ### 5. Each series crosses from plaintext to sealed once, at a recorded cutover
 
 A store created sealing-required has its cutover at its start; any other crosses
