@@ -106,6 +106,7 @@ function gcpInstructions(input: GcpRegistrationInput): readonly SetupInstruction
 
 function openBaoInstructions(input: OpenBaoRegistrationInput): readonly SetupInstruction[] {
   const mount = input.transitMount.trim();
+  const namespace = input.namespace.trim();
   return [
     {
       id: 'openbao_policy',
@@ -134,6 +135,7 @@ function openBaoInstructions(input: OpenBaoRegistrationInput): readonly SetupIns
         'With upsert disabled, an encrypt call against a deleted key fails instead of silently creating fresh key material. Run these commands as an administrator.',
       language: 'bash',
       content: [
+        ...(namespace !== '' ? [`export BAO_NAMESPACE=${namespace}`] : []),
         `bao write ${mount}/config/keys disable_upsert=true`,
         'bao policy write trogon-key-custody trogon-key-custody.hcl',
         `bao write auth/${input.authMethod}/role/${input.authRole.trim()} \\`,

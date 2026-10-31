@@ -5,6 +5,7 @@ import {
   KeyBackendLifecycle,
   KeyBackendTrustExpirySchema,
   KeyState,
+  KeyProvider,
   KeyUseDenialReason,
 } from '@trogonai/proto';
 import { describe, expect, it } from 'vitest';
@@ -15,6 +16,7 @@ import { custodyTierDetails, custodyTierSummaries } from './custody';
 import { keyRef, migrationId, parseKeyBackendId, parseKeyRef, parseMigrationId, purposeId } from './identifiers';
 import { canBeDefault, canUnwrap, canWrap, keyStateLabels } from './key-state';
 import { advanceMigration, migrationDirection, type Migration } from './migration';
+import { boundaryKeyOfAccess, buildAccess, registrationProblems, type OpenBaoRegistrationInput } from './registration';
 
 const now = new Date('2026-03-01T12:00:00Z');
 const days = (count: number) => new Date(now.getTime() + count * 86_400_000);
@@ -135,5 +137,35 @@ describe('migrations', () => {
     expect(done.status).toBe('completed');
     expect(done.rewrapped).toBe(10);
     expect(advanceMigration({ ...base, status: 'paused' }, new Date(now.getTime() + 30 * 60_000)).rewrapped).toBe(2);
+  });
+});
+
+describe('OpenBao namespace', () => {
+  const input: OpenBaoRegistrationInput = {
+    provider: KeyProvider.OPENBAO_TRANSIT,
+    displayName: 'Edge',
+    endpoint: 'https://bao.example.com:8200',
+    namespace: '',
+    transitMount: 'transit',
+    authMethod: 'jwt',
+    authRole: 'custody',
+    trustRootPem: '-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----',
+    version: '2.6.1',
+  };
+
+  it('leaves the namespace absent for the root namespace', () => {
+    const access = buildAccess(input, undefined);
+    expect(access.provider.case === 'openBaoTransit' && access.provider.value.namespace).toBeFalsy();
+  });
+
+  it('treats a different namespace as a different security boundary', () => {
+    const root = boundaryKeyOfAccess(buildAccess(input, undefined));
+    const scoped = boundaryKeyOfAccess(buildAccess({ ...input, namespace: 'team-a' }, undefined));
+    expect(scoped).not.toBe(root);
+  });
+
+  it('rejects a malformed namespace', () => {
+    expect(registrationProblems({ ...input, namespace: '/team-a' }).namespace).toBeDefined();
+    expect(registrationProblems({ ...input, namespace: 'team-a/edge' }).namespace).toBeUndefined();
   });
 });

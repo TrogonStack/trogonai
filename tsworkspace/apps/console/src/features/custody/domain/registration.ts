@@ -21,6 +21,7 @@ import {
   OpenBaoEndpointSchema,
   OpenBaoJwtAuthenticationSchema,
   OpenBaoTransitAccessSchema,
+  OpenBaoNamespaceSchema,
   OpenBaoTransitMountSchema,
   TrustRootSchema,
   type KeyBackendAccess,
@@ -56,6 +57,7 @@ export interface OpenBaoRegistrationInput {
   readonly provider: KeyProvider.OPENBAO_TRANSIT;
   readonly displayName: string;
   readonly endpoint: string;
+  readonly namespace: string;
   readonly transitMount: string;
   readonly authMethod: OpenBaoAuthMethod;
   readonly authRole: string;
@@ -80,6 +82,7 @@ const WORKLOAD_PROVIDER =
 const SERVICE_ACCOUNT = /^[a-z][a-z0-9-]{4,28}[a-z0-9]@[a-z][a-z0-9-]{4,28}[a-z0-9]\.iam\.gserviceaccount\.com$/;
 const PROJECT_ID = /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/;
 const LOCATION = /^(?:global|[a-z]+-[a-z]+\d+)$/;
+const NAMESPACE = /^[A-Za-z0-9][A-Za-z0-9_-]*(?:\/[A-Za-z0-9][A-Za-z0-9_-]*)*$/;
 const MOUNT = /^[a-z0-9][a-z0-9_-]*(?:\/[a-z0-9][a-z0-9_-]*)*$/;
 const ROLE = /^[a-z0-9][a-z0-9_-]*$/;
 const PEM = /^-----BEGIN CERTIFICATE-----[\s\S]+-----END CERTIFICATE-----$/;
@@ -148,6 +151,8 @@ export function registrationProblems(input: RegistrationInput): FieldProblems {
   } else {
     const host = hostProblem(input.endpoint.trim());
     if (host) problems.endpoint = host;
+    if (input.namespace.trim() !== '' && !NAMESPACE.test(input.namespace.trim()))
+      problems.namespace = 'Enter the namespace path, such as team-a, or leave it empty for the root namespace.';
     if (!MOUNT.test(input.transitMount.trim()))
       problems.transitMount = 'Enter the Transit mount path, such as transit.';
     if (!ROLE.test(input.authRole.trim())) problems.authRole = 'Enter the auth role the platform logs in with.';
@@ -197,6 +202,7 @@ export function buildAccess(input: RegistrationInput, generatedExternalId: Exter
     });
   }
   const role = create(OpenBaoAuthRoleSchema, { value: input.authRole.trim() });
+  const namespace = input.namespace.trim();
   return create(KeyBackendAccessSchema, {
     provider: {
       case: 'openBaoTransit',
@@ -210,6 +216,7 @@ export function buildAccess(input: RegistrationInput, generatedExternalId: Exter
               : { case: 'certificate', value: create(OpenBaoCertificateAuthenticationSchema, { role }) },
         }),
         trustRoots: [create(TrustRootSchema, { certificate: new TextEncoder().encode(input.trustRootPem.trim()) })],
+        ...(namespace !== '' ? { namespace: create(OpenBaoNamespaceSchema, { value: namespace }) } : {}),
       }),
     },
   });
@@ -223,7 +230,7 @@ export function boundaryKeyOfAccess(access: KeyBackendAccess | undefined): strin
       return `gcp:${access.provider.value.project?.value}`;
     case 'openBaoTransit': {
       const bao = access.provider.value;
-      return `bao:${new URL(bao.endpoint?.baseUrl ?? 'https://unknown.invalid').host}:${bao.transitMount?.value}`;
+      return `bao:${new URL(bao.endpoint?.baseUrl ?? 'https://unknown.invalid').host}:${bao.namespace?.value ?? ''}:${bao.transitMount?.value}`;
     }
     default:
       return 'unknown';

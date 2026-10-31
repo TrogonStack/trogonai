@@ -61,6 +61,7 @@ const openBaoInput: RegistrationInput = {
   provider: KeyProvider.OPENBAO_TRANSIT,
   displayName: 'Acme edge OpenBao',
   endpoint: 'https://bao-edge.acme.example:8200',
+  namespace: '',
   transitMount: 'transit-edge',
   authMethod: 'jwt',
   authRole: 'trogon-key-access',
