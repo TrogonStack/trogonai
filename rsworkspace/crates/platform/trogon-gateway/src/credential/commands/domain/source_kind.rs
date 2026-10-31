@@ -11,6 +11,7 @@ pub enum SourceKind {
     Linear,
     MicrosoftGraph,
     Notion,
+    Plaid,
     Sentry,
     Slack,
     Telegram,
@@ -19,7 +20,7 @@ pub enum SourceKind {
 }
 
 impl SourceKind {
-    const ALL: [Self; 14] = [
+    const ALL: [Self; 15] = [
         Self::Datadog,
         Self::Discord,
         Self::GitHub,
@@ -29,6 +30,7 @@ impl SourceKind {
         Self::Linear,
         Self::MicrosoftGraph,
         Self::Notion,
+        Self::Plaid,
         Self::Sentry,
         Self::Slack,
         Self::Telegram,
@@ -51,6 +53,7 @@ impl SourceKind {
             Self::Linear => "linear",
             Self::MicrosoftGraph => "microsoft_graph",
             Self::Notion => "notion",
+            Self::Plaid => "plaid",
             Self::Sentry => "sentry",
             Self::Slack => "slack",
             Self::Telegram => "telegram",
