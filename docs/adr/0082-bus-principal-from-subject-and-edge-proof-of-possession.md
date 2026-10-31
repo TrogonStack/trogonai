@@ -61,18 +61,21 @@ and the gateway's egress pump picks the caller-scoped fanout subject from
 those headers (`a2a-gateway/src/gw_pull_backpressure.rs:788-799`). Whoever
 publishes a task event decides which caller receives it.
 
-The decider host binds one subject, `{prefix}.DeciderService.Decide`
-(`rsworkspace/crates/decider/trogon-decider-nats-server/src/endpoint.rs:50`),
-decodes each request before anything else (`runtime.rs:65-66`), and builds
-every execution with neither a principal nor an authorizer
-(`runtime.rs:182-187`). `WasmCommandExecution` defaults to
-`WithoutAuthorization`
+Before this decision was implemented, the decider host bound one subject,
+`{prefix}.DeciderService.Decide`
+(`rsworkspace/crates/decider/trogon-decider-nats-server/src/endpoint.rs`),
+decoded each request before anything else, and built every execution with
+neither a principal nor an authorizer (`runtime.rs`). `WasmCommandExecution`
+defaults to `WithoutAuthorization`
 (`rsworkspace/crates/decider/trogon-decider-wasm-runtime/src/execution.rs:306`
-and `342`), so any connection allowed to publish on that subject runs any
+and `342`), so any connection allowed to publish on that subject ran any
 command. [ADR#0026](./0026-command-authorization-principal.md) shipped the
-seam and left its ingress half unbuilt; the module documentation still says
-that its Decision 4 mapping "is not implemented anywhere yet"
-(`rsworkspace/crates/decider/trogon-decider-runtime/src/authorization.rs:18-25`).
+seam and left its ingress half unbuilt, and the module documentation said
+that its Decision 4 mapping was not implemented anywhere. That documentation
+(`rsworkspace/crates/decider/trogon-decider-runtime/src/authorization.rs`)
+now says that the NATS decider host derives each principal from the subject
+the server delivered, so a principal it builds is only as trustworthy as the
+allow list that let the connection publish on that subject.
 
 AAuth exists, but it is off by default and it runs on a bus hop. The gateway
 resolves `A2A_GATEWAY_AAUTH_MODE` to Off when it is unset
@@ -134,6 +137,26 @@ token is mapped to a stable, token-safe id when the callout mints the allow
 list, so the id in the subject, the id in the grant and the id a receiver
 derives are the same string.
 
+The position is the `PrincipalKind` wire name followed by the id token,
+`{kind}.{id}`. The mapping is `SubjectPrincipalId` in `trogon-identity-types`:
+an id of 1 to 64 graphic ASCII characters other than `.`, `*` and `>` that
+does not start with `~` is used verbatim, and any other id, a longer one
+included, becomes `~` followed by the unpadded base64url SHA-256 digest of
+its bytes. The mapping takes no key or configuration, so every edge and
+every receiver produces the same token. An edge that turns a verified
+credential into a grant or a subject maps through
+`SubjectPrincipal::from_credential`, which refuses an id that already has the
+digest form, so no credential can claim the token another id hashes to.
+
+The callout records the principal in the user JWT it mints, as the
+`caller_id` and `principal_kind` claims, and
+`MintedUserJwt::subject_principal()` in `a2a-identity-types` is the one
+decoder that turns those claims into the subject principal; a token that
+lacks either claim, or names a kind that is not a wire name, yields an error
+and never a default principal. Until credentials assert their own kind, the
+callout takes the kind from the scheme it verified: an OIDC token names a
+person, and an mTLS certificate or an API key names a service.
+
 A platform workload that relays (the gateway delivering to an agent, a
 service forwarding a command to the decider) holds a grant that is a
 wildcard over principal positions, because it relays for every caller. It
@@ -151,8 +174,8 @@ routing hints at most. No service reads them as identity.
 
 The decider subject carries the principal as the `PrincipalKind` wire name
 (`agent`, `person` or `service`) followed by the `PrincipalId` of
-[ADR#0026](./0026-command-authorization-principal.md), immediately before the
-service and method:
+[ADR#0026](./0026-command-authorization-principal.md) in the subject form of
+Decision 1, immediately before the service and method:
 
 ```text
 [{tenant}.]{prefix}.{kind}.{id}.DeciderService.Decide
@@ -167,18 +190,34 @@ tail of its configured prefix, so the terminal remains the method name and
 the derivation of
 [ADR#0016](./0016-protobuf-rpc-over-nats-micro-binding.md) is unchanged; a
 client acting for a principal configures a prefix that ends in that
-principal. The host subscribes with wildcards at the principal positions,
-and at the tenant position when it serves several tenants.
+principal. The host subscribes with wildcards at the principal positions.
+`DECIDER_TENANT_POSITION` says whether it also subscribes with one at the
+tenant position: `absent`, the default, subscribes without a tenant token,
+and `wildcard` puts one ahead of the prefix. The events stream, the snapshot
+bucket and the `CommandPrincipal` the host authorizes carry no tenant, so
+every tenant reaching one host would read and append to the same streams.
+Until decider state is scoped by tenant, `DeciderHost::start` refuses
+`wildcard` with `StartupError::StateNotScopedByTenant`, and a host serves one
+tenant account. The refusal is the host's alone: the wildcard over principal
+positions that a relay such as the gateway holds under Decision 1 stands.
 
-For each delivery the host parses the kind token into `PrincipalKind` and the
-id token into `PrincipalId` and builds the `CommandPrincipal` that
+For each delivery the host reads the kind and id tokens through
+`SubjectPrincipal::from_tokens` (`CommandEndpoint::derive_principal` in
+`endpoint.rs`) and builds the `CommandPrincipal` that
 [ADR#0026](./0026-command-authorization-principal.md) Decision 4 maps from
-the identity verified at the edge. It does this before `CommandRequest::parse`
-(`runtime.rs:65-66`) decodes the request. A kind token that is not a wire
-name, or an id token that `PrincipalId` rejects, is answered with
-`UNAUTHENTICATED` and `PRINCIPAL_MISSING` (`status.rs:161`), and the payload
-is never decoded. A subject without principal tokens matches no subscription
-and reaches no host. The subject carries the kind and the id only, so the
+the identity verified at the edge. It does this in `CommandRouter::route`
+(`runtime.rs`), before `CommandRequest::parse` decodes the request. Tokens
+the subject principal grammar rejects, such as a kind token that is not a
+wire name, an id token that is not ASCII or is longer than 64 characters, or
+a lone `~` or any other `~`-led token that is not a whole canonical digest,
+are answered with `UNAUTHENTICATED` and `PRINCIPAL_MISSING`
+(`status::unauthenticated` in `status.rs`), and the payload is never decoded.
+An authorizer receives the id in its subject form, so a principal whose
+credential id the mapping does not carry verbatim, a multi-token or a longer
+one, reaches policy as its `~` digest form and never as the raw id; a policy
+keyed on such a raw id can never match.
+A subject without principal tokens matches no subscription and reaches no
+host. The subject carries the kind and the id only, so the
 derived principal has an empty claims set; an authorizer that needs roles or
 scopes looks them up by principal rather than reading them from the message.
 The `directed_principal` of
@@ -188,10 +227,12 @@ untrusted hint that decision describes; it has no subject position.
 The `authorization.rs` seam is mandatory in the host. Every execution is
 built with `with_principal` and `with_authorizer`, never with
 `WithoutAuthorization`. A deployment without its own policy gets the host's
-default authorizer, which admits any derived principal and refuses an
-execution that has none, as the trait's default `authorize_execution` does
-(`authorization.rs:518-523`); a denial is `PERMISSION_DENIED` and
-`PRINCIPAL_UNAUTHORIZED` (`status.rs:162`). Execution paths the host does not
+default authorizer, `AdmitAnyPrincipal` (`authorizer.rs`), which admits any
+derived principal and refuses an execution that has none, as the trait's
+default `CommandAuthorizer::authorize_execution` does; a deployment's own
+policy replaces it through `DeciderHost::with_authorizer` and never removes
+it. A denial is `PERMISSION_DENIED` and `PRINCIPAL_UNAUTHORIZED`
+(`status::denied` in `status.rs`). Execution paths the host does not
 serve, such as the `trogon-scheduler` worker processor that
 [ADR#0026](./0026-command-authorization-principal.md) cites, are outside this
 decision.
@@ -476,9 +517,11 @@ each of those reopens the per-replica gap that `replay.rs:1-11` describes.
   [ADR#0049](./0049-revocation-latency-target.md) already places outside its
   target.
 - The seam hands the authorizer the principal and the command only
-  (`authorization.rs:509`), so a host that serves several tenants authorizes
-  without the tenant token it parsed. A policy that differs between tenants
-  needs the tenant carried to the authorizer, which is not decided here.
+  (`CommandAuthorizer::authorize`), so a host that served several tenants
+  would authorize without the tenant token it parsed, which is part of why
+  the host refuses the tenant wildcard under Decision 2. A policy that
+  differs between tenants needs the tenant carried to the authorizer, which
+  is not decided here.
 - A workload whose grant is a wildcard over principal positions is trusted to
   write the principal it derived. For platform workloads that is the trust
   their credentials already carry; for a callout-admitted workload the

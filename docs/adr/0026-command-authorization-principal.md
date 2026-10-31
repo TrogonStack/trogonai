@@ -288,10 +288,32 @@ path to an append goes through the gate.
    authorizer implementation are unaffected.
 
 The resolutions above were reached at acceptance time and have not been
-reviewed by a second party. Only the seam described in Decisions 1-3 and 5 is
-implemented. Decision 4 remains unimplemented: no ingress boundary maps an
-AAuth identity into a `CommandPrincipal` yet, so in practice every principal
-the runtime sees today is one a caller constructed directly.
+reviewed by a second party. The seam described in Decisions 1-3 and 5 is
+implemented, and so is the part of Decision 4 that
+[ADR#0082](./0082-bus-principal-from-subject-and-edge-proof-of-possession.md)
+places in the decider host: the host derives each `CommandPrincipal` from the
+subject the server delivered, so a principal it hands the runtime is one the
+caller's allow list admitted rather than one the caller constructed.
+`PrincipalKind` and `PrincipalId` now live in `trogon-identity-types`, and
+`trogon_decider_runtime::authorization` re-exports them. The same crate holds
+`SubjectPrincipalId`, the one mapping from a principal id to its subject
+token: an id it cannot carry verbatim travels as `~` followed by the unpadded
+base64url SHA-256 digest of its bytes, by the rule
+[ADR#0082](./0082-bus-principal-from-subject-and-edge-proof-of-possession.md)
+Decision 1 records. An id that does not come from a subject, such as the one
+a verified credential carries or the one a decider client names in its
+`PrincipalPrefix`, maps through `from_credential`, which refuses an id
+already in that form so that none can claim the token another id hashes to.
+A receiver reads the principal tokens of the subject it was delivered on
+through `SubjectPrincipal::from_tokens`, which accepts only what the mapping
+can produce. Until credentials assert their own kind, the auth callout takes
+the kind from the scheme it verified: an OIDC caller is a person, and an mTLS
+or API key caller is a service. The AAuth mapping of Decision 4, which
+[ADR#0082](./0082-bus-principal-from-subject-and-edge-proof-of-possession.md)
+places at the external edge, is not built yet, and execution paths outside
+the host, such as `trogon-scheduler`'s worker processor, still build their
+executions directly, so any principal they hand an authorizer is one they
+constructed.
 
 ## Consequences
 
@@ -316,10 +338,18 @@ the runtime sees today is one a caller constructed directly.
   policy that must inspect stream state to decide is expressing a domain rule,
   and a domain rule belongs in `decide`, where a rejection is already a
   first-class outcome.
-- The seam ships; the ingress half does not. Decision 4's AAuth mapping is
-  unimplemented, so nothing yet produces a `CommandPrincipal` from a verified
-  identity. Until something does, a configured authorizer is only as
+- The seam ships, and in the decider host so does its ingress half: a
+  principal the host authorizes is only as trustworthy as the allow list that
+  let the connection publish on the subject it came from. Decision 4's AAuth
+  mapping is not built yet, and elsewhere a configured authorizer is only as
   trustworthy as whatever constructed the principal handed to it.
+- `CommandPrincipal` carries no tenant, and neither do the host's event
+  subjects, events stream and snapshot bucket, so until decider state is
+  scoped by tenant a host serves one tenant account and refuses to start with
+  the tenant wildcard; scoping that state is a tracked follow-up. Two
+  single-tenant hosts in one account that use the same stream and bucket
+  names already share state. That predates the subject principal and is part
+  of why the wildcard is refused.
 - Gets harder: the authorizer hook runs on every command execution, including
   hot paths, so a slow or blocking authorizer implementation directly adds
   latency to every command; this ADR does not mandate a cost bound on

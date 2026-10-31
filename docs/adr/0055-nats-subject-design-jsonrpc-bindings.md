@@ -7,6 +7,13 @@ date: 2026-08-08
 
 # ADR#0055: NATS Subject Design for JSON-RPC Protocol Bindings
 
+> **Amended by [ADR#0082](./0082-bus-principal-from-subject-and-edge-proof-of-possession.md)
+> (2026-10-31).** The A2A gateway ingress, agent delivery, task event and
+> caller-scoped egress subjects carry the caller's principal as `{kind}.{id}`,
+> the position that decision fixes. Responders and stream consumers wildcard
+> it, a caller's grant names its own, and its id token is exempt from the
+> lower_snake rule.
+
 ## Context
 
 The repository routes JSON-RPC 2.0 protocols — MCP, ACP, and A2A — over the NATS
@@ -165,11 +172,14 @@ Worked examples (not an exhaustive enum):
   - `acme.mcp.v1.server.{server_id}.tools.call` (tenant `acme` via dotted prefix)
   - responder subscribes `mcp.v1.server.{server_id}.>`
 - **Connection-scoped, single-sided** (e.g. the A2A agent and gateway surfaces):
-  `<routing-segment> = {root}.{peer_id}` with no role token, because only the
-  agent side receives. `agents` and `gateway` are separate routing roots (see
-  Multiple routing roots), not two roles on one root.
-  - `a2a.v1.agents.{agent_id}.message.send`
-  - `a2a.v1.gateway.{agent_id}.message.send` (the ingress hop)
+  `<routing-segment> = {root}.{peer_id}.{kind}.{id}` with no role token, because
+  only the agent side receives. `agents` and `gateway` are separate routing
+  roots (see Multiple routing roots), not two roles on one root. `{kind}.{id}`
+  is the caller's principal (see Authorization and multitenancy).
+  - `a2a.v1.agents.{agent_id}.{kind}.{id}.message.send`
+  - `a2a.v1.gateway.{agent_id}.{kind}.{id}.message.send` (the ingress hop)
+  - an agent subscribes `a2a.v1.agents.{agent_id}.*.*.>`, and the gateway
+    subscribes `a2a.v1.gateway.*.*.*.>`
 - **Session-scoped** (e.g. ACP):
   `<routing-segment> = session.{session_id}.{role}`, with a reserved `global`
   segment for operations that precede any session id.
@@ -179,12 +189,14 @@ Worked examples (not an exhaustive enum):
   - responder subscribes `acp.v1.session.*.agent.>` (or one session's
     `...{id}.agent.>`)
 - **Task-scoped** (e.g. A2A task events):
-  `<routing-segment> = tasks.{task_id}` — a bounded entity without a role token,
-  because the stream is fan-in of events for that task, not a role-split RPC
-  surface.
-  - `a2a.v1.tasks.{task_id}.events`
-  - consumers filter `a2a.v1.tasks.{task_id}.events` (or `a2a.v1.tasks.*.events`
-    for a gateway-wide durable consumer)
+  `<routing-segment> = tasks.{task_id}.{kind}.{id}`, a bounded entity without a
+  role token, because the stream is fan-in of events for that task, not a
+  role-split RPC surface. `{kind}.{id}` is the principal of the request the
+  events answer.
+  - `a2a.v1.tasks.{task_id}.{kind}.{id}.events`
+  - consumers filter `a2a.v1.tasks.{task_id}.*.*.events` (or
+    `a2a.v1.tasks.*.*.*.events` for a gateway-wide durable consumer, or
+    `a2a.v1.tasks.*.{kind}.{id}.events` for one caller's events)
 
 ### Multiple routing roots
 
@@ -354,6 +366,18 @@ replay that emits the same notification.
   `acme.acp.v1.session.*.client.>`.
 - The prefix and `v{major}` are the leftmost structural tokens, so permissions
   within an account are clean prefix rules in either model.
+- The A2A subjects carry the caller's principal as `{kind}.{id}`, the
+  `PrincipalKind` wire name and the token-safe id that
+  [ADR#0082](./0082-bus-principal-from-subject-and-edge-proof-of-possession.md)
+  Decision 1 fixes: right after the agent on gateway ingress and agent
+  delivery, after the task on task events, and as the whole entity of the
+  caller-scoped egress `a2a.v1.gateway.{kind}.{id}.events`. A caller's grant
+  names its own position, and responders and consumers wildcard it: the
+  gateway subscribes `a2a.v1.gateway.*.*.*.>`, an agent subscribes
+  `a2a.v1.agents.{agent_id}.*.*.>`, and the task event stream captures
+  `a2a.v1.tasks.*.*.*.events`. A caller is a long-lived entity, so the
+  position stays within the cardinality rule, and it spends two of the 16
+  tokens under Limits.
 - Within a shared account, reply inboxes use a per-tenant inbox prefix so replies
   cannot cross a tenant boundary; across accounts, the account boundary itself
   isolates inboxes.
@@ -403,7 +427,9 @@ so it is corrected when the ingress audit path is wired rather than ahead of it.
 - At most 16 tokens and 256 bytes per subject (hard ceiling 32 tokens before heap
   escape). Count method arity and any durable suffix against the budget.
 - Tokens are lower_snake and case-consistent; subjects are case-sensitive. The
-  escape encoding defined under Method-to-terminal mapping is the sole exemption.
+  escape encoding defined under Method-to-terminal mapping is exempt, and so is
+  the id token of the principal position, which carries a principal id
+  verbatim or as its `~` digest.
 - Never use flat subjects; always hierarchical.
 
 ### Versioning posture
@@ -459,12 +485,13 @@ non-conformant with this standard; they are not the standard:
   progress rides the client-op subtree.
 - **Request id in A2A task event subjects**
   (`...tasks.{task_id}.events.{req_id}`). Replace with
-  `...tasks.{task_id}.events` plus `Trogon-Req-Id` (A2A ids are peer-supplied). This
-  bounds durable stream subject cardinality to tasks rather than requests.
+  `...tasks.{task_id}.{kind}.{id}.events` plus `Trogon-Req-Id` (A2A ids are
+  peer-supplied). This bounds durable stream subject cardinality to tasks
+  rather than requests.
 - **Per-request gateway egress** (`a2a.gateway.egress.{req_id}`). Remove. Live
   streaming uses the reply inbox and entity-scoped JetStream; a core-NATS
   per-request fanout violates the cardinality rule. If a core fanout is later
-  required, it MUST be caller-scoped (e.g. `a2a.v1.gateway.{caller_id}.events`)
+  required, it MUST be caller-scoped (e.g. `a2a.v1.gateway.{kind}.{id}.events`)
   with `Trogon-Req-Id`, never `{req_id}` in the subject.
 - **ACP substitutes the projected terminal for the real method.** ACP's
   `wire_method()` yields `prompt`, not `session/prompt`, so the method that
@@ -527,6 +554,7 @@ Posture) governs only subject-contract changes made AFTER `v1` is declared stabl
 - [ADR#0051: Fully Bound Request Signing](./0051-fully-bound-request-signing.md)
 - [ADR#0054: NATS Protocol Binding Documentation](./0054-nats-protocol-binding-documentation.md)
 - [ADR#0056: Canonical JSON-RPC Bodies over NATS](./0056-canonical-jsonrpc-bodies-over-nats.md)
+- [ADR#0082: Inside the Bus the Principal Is Derived from the Subject, and Proof of Possession Is Enforced Only at the External Edge](./0082-bus-principal-from-subject-and-edge-proof-of-possession.md)
 - [JSON-RPC 2.0 specification](https://www.jsonrpc.org/specification)
 - [NATS subject-based messaging](https://docs.nats.io/nats-concepts/subjects)
 - [NATS JetStream model](https://docs.nats.io/nats-concepts/jetstream)
