@@ -7,6 +7,7 @@
 
 use std::fmt;
 
+use a2a_nats::nats::subjects::subscriptions::GatewayIngressAllSubject;
 use a2a_nats::{A2aPrefix, A2aPrefixError, NatsConfig};
 use clap::Parser;
 use trogon_std::env::ReadEnv;
@@ -83,7 +84,7 @@ pub struct Args {
     #[arg(long, env = "A2A_PREFIX", default_value = "a2a")]
     pub prefix: String,
 
-    /// Optional NATS queue group for `{prefix}.v1.gateway.>` subscribers.
+    /// Optional NATS queue group for `{prefix}.v1.gateway.*.*.*.>` subscribers.
     #[arg(long, env = "A2A_GATEWAY_QUEUE_GROUP")]
     pub queue_group: Option<String>,
 }
@@ -100,10 +101,10 @@ pub struct Config {
 }
 
 impl Config {
-    /// Subject the gateway subscribes to. Always `{prefix}.v1.gateway.>` so a
-    /// single subscriber serves every agent / method behind the gateway.
-    pub fn gateway_subscribe_subject(&self) -> String {
-        format!("{}.v1.gateway.>", self.a2a_prefix)
+    /// Subject the gateway subscribes to: every agent, caller principal and
+    /// method behind the gateway, and never its own caller-scoped egress fanout.
+    pub fn gateway_subscribe_subject(&self) -> GatewayIngressAllSubject {
+        GatewayIngressAllSubject::new(&self.a2a_prefix)
     }
 }
 

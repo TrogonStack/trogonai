@@ -3,7 +3,7 @@ name = "a2a-gateway"
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
-description = "A2A gateway service: ingress on {prefix}.gateway.> with policy-driven forwarding"
+description = "A2A gateway service: ingress on {prefix}.v1.gateway.*.*.*.> with policy-driven forwarding"
 publish = false
 
 [lib]

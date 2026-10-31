@@ -21,7 +21,7 @@ fn events_stream_normalizes_dotted_prefix() {
 #[test]
 fn events_subjects_cover_all_tasks() {
     let config = A2aStream::Events.config(&p("a2a"));
-    assert_eq!(config.subjects, vec!["a2a.v1.tasks.*.events"]);
+    assert_eq!(config.subjects, vec!["a2a.v1.tasks.*.*.*.events"]);
 }
 
 #[test]

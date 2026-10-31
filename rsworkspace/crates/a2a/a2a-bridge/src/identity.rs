@@ -1,7 +1,8 @@
 use std::fmt;
 
-use a2a_auth_callout::CallerId;
+use a2a_auth_callout::{CallerId, subject_principal_from_minted_jwt};
 use a2a_nats::{A2aAgentId, AgentIdError};
+use trogon_identity_types::SubjectPrincipal;
 
 use crate::error::BridgeError;
 
@@ -89,6 +90,15 @@ impl BridgeUserJwt {
 
     pub fn into_inner(self) -> String {
         self.0
+    }
+
+    /// The caller principal the auth callout minted into this token, which is the
+    /// principal position of every subject the token is granted.
+    ///
+    /// The payload is read without verifying the signature, so only call this on
+    /// a token received from the mint path.
+    pub fn subject_principal(&self) -> Result<SubjectPrincipal, BridgeError> {
+        subject_principal_from_minted_jwt(self.as_str()).map_err(BridgeError::MintedPrincipal)
     }
 }
 

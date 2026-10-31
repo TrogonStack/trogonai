@@ -13,11 +13,12 @@ use tracing::{info, warn};
 use trogon_nats::jetstream::JetStreamPublisher;
 use trogon_nats::{PublishClient, SubscribeClient};
 
+use crate::a2a_method::A2aMethod;
 use crate::a2a_prefix::A2aPrefix;
 use crate::agent_id::A2aAgentId;
 use crate::config::Config;
+use crate::nats::subjects::agents::AgentDeliverySubject;
 use crate::nats::subjects::subscriptions::agent_all::AgentAllSubject;
-use crate::server::dispatch::A2aMethod;
 use crate::server::handler::A2aExecutor;
 use crate::server::{
     agent_card, message_send, message_stream, push_delete, push_get, push_list, push_set, tasks_cancel, tasks_get,
@@ -55,7 +56,7 @@ where
         }
     }
 
-    /// Subscribe to `{prefix}.v1.agents.{agent_id}.>` and dispatch each inbound
+    /// Subscribe to `{prefix}.v1.agents.{agent_id}.*.*.>` and dispatch each inbound
     /// request to the matching per-op handler. Returns when `shutdown` is
     /// cancelled or the subscription terminates.
     pub async fn run_with_agent_id(
@@ -65,7 +66,7 @@ where
     ) -> Result<(), BridgeError> {
         let prefix = self.config.a2a_prefix_ref().clone();
         let subject = AgentAllSubject::new(&prefix, agent_id);
-        let prefix_len = format!("{}.v1.agents.{}", prefix.as_str(), agent_id.as_str()).len();
+        let subscribed_wildcard = subject.to_string();
 
         let mut sub = self
             .nats
@@ -73,7 +74,6 @@ where
             .await
             .map_err(|e| BridgeError::Subscribe(Box::new(e)))?;
 
-        let subscribed_wildcard = format!("{}.v1.agents.{}.>", prefix.as_str(), agent_id.as_str());
         info!(subject = subscribed_wildcard, "a2a-nats bridge subscribed");
 
         loop {
@@ -88,7 +88,7 @@ where
                         return Ok(());
                     }
                     Some(msg) => {
-                        dispatch_message(&prefix, &self.handler, &self.nats, &self.js, msg, prefix_len).await;
+                        dispatch_message(&prefix, &self.handler, &self.nats, &self.js, msg).await;
                     }
                 },
             }
@@ -96,32 +96,37 @@ where
     }
 }
 
-async fn dispatch_message<H, N, J>(
-    prefix: &A2aPrefix,
-    handler: &Arc<H>,
-    nats: &N,
-    js: &J,
-    msg: async_nats::Message,
-    prefix_len: usize,
-) where
+async fn dispatch_message<H, N, J>(prefix: &A2aPrefix, handler: &Arc<H>, nats: &N, js: &J, msg: async_nats::Message)
+where
     H: A2aExecutor,
     N: PublishClient,
     J: JetStreamPublisher,
 {
-    let subject = msg.subject.to_string();
+    let delivery = match AgentDeliverySubject::parse(prefix, msg.subject.as_str()) {
+        Ok(delivery) => delivery,
+        Err(error) => {
+            warn!(subject = %msg.subject, error = %error, "received message on a subject that is not an agent delivery; dropping");
+            return;
+        }
+    };
     let reply = msg.reply.map(|s| s.to_string());
     let headers = msg.headers.clone().unwrap_or_default();
     let payload = msg.payload;
 
-    let Some(method) = A2aMethod::from_subject(&subject, prefix_len) else {
-        warn!(subject = %subject, "received message on unknown subject suffix; dropping");
-        return;
-    };
-
-    match method {
+    match delivery.method() {
         A2aMethod::MessageSend => message_send::handle(handler.as_ref(), &headers, &payload, reply, nats).await,
         A2aMethod::MessageStream => {
-            message_stream::handle(handler.as_ref(), &headers, &payload, reply, nats, js, prefix).await;
+            message_stream::handle(
+                handler.as_ref(),
+                &headers,
+                &payload,
+                reply,
+                nats,
+                js,
+                prefix,
+                delivery.caller(),
+            )
+            .await;
         }
         A2aMethod::TasksGet => tasks_get::handle(handler.as_ref(), &headers, &payload, reply, nats).await,
         A2aMethod::TasksList => tasks_list::handle(handler.as_ref(), &headers, &payload, reply, nats).await,
