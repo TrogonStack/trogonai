@@ -148,6 +148,48 @@ enum ByteCountInputError {
     InvalidValue(ConfigValueError),
 }
 
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(untagged)]
+enum IdentifierInput {
+    Literal(String),
+    Env { env: String },
+}
+
+impl IdentifierInput {
+    fn resolve(self, env: &impl ReadEnv) -> Result<String, IdentifierInputError> {
+        match self {
+            Self::Literal(value) => Ok(value),
+            Self::Env { env: var_name } => {
+                let name = var_name.trim();
+                if name.is_empty() {
+                    return Err(IdentifierInputError::EmptyEnvName);
+                }
+                let raw = env.var(name).map_err(|error| match error {
+                    std::env::VarError::NotPresent => IdentifierInputError::MissingEnv { name: name.to_string() },
+                    std::env::VarError::NotUnicode(_) => {
+                        IdentifierInputError::InvalidUnicodeEnv { name: name.to_string() }
+                    }
+                })?;
+                ConfigValue::parse(raw)
+                    .map(ConfigValue::into_string)
+                    .map_err(IdentifierInputError::InvalidValue)
+            }
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+enum IdentifierInputError {
+    #[error("env var name must not be empty")]
+    EmptyEnvName,
+    #[error("env var '{name}' is not set")]
+    MissingEnv { name: String },
+    #[error("env var '{name}' is not valid unicode")]
+    InvalidUnicodeEnv { name: String },
+    #[error(transparent)]
+    InvalidValue(ConfigValueError),
+}
+
 #[derive(Debug, thiserror::Error)]
 enum SecretInputError {
     #[error(transparent)]
@@ -690,7 +732,7 @@ struct ZoomWebhookConfig {
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PlaidWebhookConfig {
-    client_id: Option<String>,
+    client_id: Option<IdentifierInput>,
     secret: Option<SecretInput>,
     environment: Option<String>,
     api_base_url: Option<String>,
@@ -2150,6 +2192,18 @@ fn resolve_plaid_integrations(
         let Some(raw_client_id) = webhook.client_id else {
             errors.push(ConfigValidationError::missing_integration("plaid", &id, "client_id"));
             continue;
+        };
+        let raw_client_id = match raw_client_id.resolve(env) {
+            Ok(raw_client_id) => raw_client_id,
+            Err(error) => {
+                errors.push(ConfigValidationError::invalid_integration(
+                    "plaid",
+                    &id,
+                    "client_id",
+                    error,
+                ));
+                continue;
+            }
         };
         let client_id = match PlaidClientId::new(raw_client_id) {
             Ok(client_id) => client_id,

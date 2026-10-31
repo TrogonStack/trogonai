@@ -125,7 +125,7 @@ Source-specific extras:
 - Datadog webhooks are not signed. `webhook_token` is a shared secret the operator sends as a custom header (configured in the Datadog webhook's *Custom Headers*), verified in constant time. The header name defaults to `X-Datadog-Webhook-Token` and can be overridden per integration with `webhook_token_header`. Routing keys off an `event_type` field in the payload template, falling back to `.unroutable` when it is absent or invalid; an optional `id` field is used as the NATS message ID for deduplication
 - Datadog `timestamp_tolerance_secs` (optional, disabled by default) enables a freshness/anti-replay check. Datadog sends no timestamp header, so the operator must template a `timestamp` field carrying `$DATE_POSIX` (POSIX seconds) into the payload. When enabled, requests whose `timestamp` is outside the window are rejected (`401`), and requests missing/with an unparseable `timestamp` are rejected (`400`). `0` or unset disables the check
 - Zoom `secret_token` is the app's Secret Token. Requests are verified with `x-zm-signature` over `v0:{x-zm-request-timestamp}:{body}`, and `timestamp_tolerance_secs` (default: `300`) bounds how far `x-zm-request-timestamp` may drift from the gateway clock. Zoom provides no stable per-delivery identifier, so no NATS message ID is set and retries are not deduplicated
-- Plaid `secret` is the API secret for the `client_id` and `environment` (`sandbox` or `production`) that own the webhooks. The gateway verifies the `Plaid-Verification` JWT (ES256 only) against the key Plaid serves for its `kid` from `/webhook_verification_key/get`, caches keys by `kid`, rejects expired keys, and requires `iat` within `timestamp_tolerance_secs` (default: `300`, `0` is rejected) of the gateway clock and `request_body_sha256` to match the SHA-256 of the raw body. `api_base_url` optionally overrides the host derived from `environment`
+- Plaid `client_id` is either a string or `{ env = "VAR" }` naming an environment variable that holds it; it is an identifier, not a secret. Plaid `secret` is the API secret for the `client_id` and `environment` (`sandbox` or `production`) that own the webhooks. The gateway verifies the `Plaid-Verification` JWT (ES256 only) against the key Plaid serves for its `kid` from `/webhook_verification_key/get`, caches keys by `kid`, rejects expired keys, and requires `iat` within `timestamp_tolerance_secs` (default: `300`, `0` is rejected) of the gateway clock and `request_body_sha256` to match the SHA-256 of the raw body. `api_base_url` optionally overrides the host derived from `environment`
 
 ## Config file shape
 
@@ -202,7 +202,7 @@ secret_token = { env = "ZOOM_PRIMARY_SECRET_TOKEN" }
 # timestamp_tolerance_secs = 300  # optional; max drift of x-zm-request-timestamp
 
 [sources.plaid.integrations.primary.webhook]
-client_id = "your-plaid-client-id"
+client_id = "your-plaid-client-id"  # or { env = "PLAID_PRIMARY_CLIENT_ID" }
 secret = { env = "PLAID_PRIMARY_SECRET" }
 environment = "production"  # sandbox or production
 # timestamp_tolerance_secs = 300  # optional; max drift of the JWT iat claim
