@@ -1,0 +1,14 @@
+edition = "2024";
+
+package trogonai.platform.key_custody.v1alpha1;
+
+// The operations that call a provider. Latency and audit group by these kinds
+// (ADR#0030). A rewrap migration is an unwrap under the old KeyRef followed by
+// a wrap under the new one, so it adds no kind of its own. Unspecified and
+// unknown values are invalid.
+enum KeyOperationKind {
+  KEY_OPERATION_KIND_UNSPECIFIED = 0;
+  KEY_OPERATION_KIND_WRAP_DEK = 1;
+  KEY_OPERATION_KIND_UNWRAP_DEK = 2;
+  KEY_OPERATION_KIND_BIND_EXTERNAL_KEY = 3;
+}
