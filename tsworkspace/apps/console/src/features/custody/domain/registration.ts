@@ -254,13 +254,17 @@ export function locatorBoundaryMismatch(
       const account = access.provider.value.account?.value;
       return boundary.account !== account
         ? `The key lives in account ${boundary.account ?? 'unknown'}, but this backend assumes a role in account ${account}.`
-        : undefined;
+        : boundary.region !== access.provider.value.region?.value
+          ? 'The key region does not match the registered backend region.'
+          : undefined;
     }
     case 'googleCloudKms': {
       const project = access.provider.value.project?.value;
       return boundary.project !== project
         ? `The key lives in project ${boundary.project ?? 'unknown'}, but this backend federates into project ${project}.`
-        : undefined;
+        : boundary.location !== access.provider.value.location?.value
+          ? 'The key location does not match the registered backend location.'
+          : undefined;
     }
     case 'openBaoTransit': {
       const mount = access.provider.value.transitMount?.value;

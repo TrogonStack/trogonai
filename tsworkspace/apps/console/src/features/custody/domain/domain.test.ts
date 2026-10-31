@@ -169,3 +169,15 @@ describe('OpenBao namespace', () => {
     expect(registrationProblems({ ...input, namespace: 'team-a/edge' }).namespace).toBeUndefined();
   });
 });
+
+
+describe('locator region boundaries', () => {
+  it('rejects other AWS regions and GCP locations', async () => {
+    const { buildLocator } = await import('./locator');
+    const { locatorBoundaryMismatch } = await import('./registration');
+    const aws = buildAccess({ provider: KeyProvider.AWS_KMS, displayName: 'AWS', region: 'eu-west-1', roleArn: 'arn:aws:iam::512049177301:role/access' }, undefined);
+    expect(locatorBoundaryMismatch(aws, buildLocator(KeyProvider.AWS_KMS, 'arn:aws:kms:us-east-1:512049177301:key/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee')!)).toBeDefined();
+    const gcp = buildAccess({ provider: KeyProvider.GOOGLE_CLOUD_KMS, displayName: 'GCP', projectId: 'acme-prod-kms', location: 'europe-west1', workloadIdentityProvider: '', impersonatedServiceAccount: '' }, undefined);
+    expect(locatorBoundaryMismatch(gcp, buildLocator(KeyProvider.GOOGLE_CLOUD_KMS, 'projects/acme-prod-kms/locations/us-east1/keyRings/ring/cryptoKeys/key')!)).toBeDefined();
+  });
+});
