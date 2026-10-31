@@ -1,6 +1,7 @@
 import { timestampDate } from '@bufbuild/protobuf/wkt';
 import { CredentialPolicyReason, type CredentialEvent, type VaultEvent } from '@trogonai/proto';
 
+import type { CustodyTier } from '@/features/custody/domain/custody';
 import type { EnvironmentId } from '@/features/environments/domain/environment-id';
 
 import type {
@@ -32,6 +33,7 @@ export interface InMemoryClientOptions {
 
 export interface SeedWriter {
   vault(command: VaultCommand, at: Date): Promise<VaultState>;
+  custody(vaultId: string, tier: CustodyTier): void;
   credential(command: CredentialCommand, at: Date): Promise<CredentialDispatchResult>;
 }
 
@@ -54,6 +56,7 @@ function credentialKey(command: CredentialCommand): string {
 export class InMemorySecretsClient implements SecretsClient {
   private readonly vaultStreams = new Map<string, StoredVaultEvent[]>();
   private readonly credentialStreams = new Map<string, StoredCredentialEvent[]>();
+  private readonly vaultCustody = new Map<string, CustodyTier>();
   private readonly latencyMs: number;
   private readonly clock: () => Date;
   private readonly projectId: string;
@@ -72,6 +75,7 @@ export class InMemorySecretsClient implements SecretsClient {
     this.seed = () =>
       populate({
         vault: (command, at) => this.executeVault(command, {}, at, true),
+        custody: (vaultId, tier) => void this.vaultCustody.set(vaultId, tier),
         credential: (command, at) => this.executeCredential(command, {}, at, true),
       });
   }
@@ -223,7 +227,8 @@ export class InMemorySecretsClient implements SecretsClient {
 
   private vaultState(vaultId: string): VaultState | undefined {
     const stream = this.vaultStreams.get(vaultId);
-    return stream ? foldVault(stream.map((stored) => stored.event)) : undefined;
+    const state = stream ? foldVault(stream.map((stored) => stored.event)) : undefined;
+    return state && { ...state, custody: this.vaultCustody.get(vaultId) ?? state.custody };
   }
 
   private credentialState(secret: string): CredentialState | undefined {

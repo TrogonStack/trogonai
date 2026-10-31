@@ -6,6 +6,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { EnvironmentChip, MetaChip, VaultLifecycleBadge } from '@/features/secrets/components/badges';
 import { CredentialsTable, CredentialsTableSkeleton } from '@/features/secrets/components/credentials-table';
 import { VaultActions } from '@/features/secrets/components/vault-actions';
+import { VaultCustodyBadge } from '@/features/secrets/components/vault-custody-badge';
 import { useCredentialsQuery, useVaultQuery, useVaultsQuery } from '@/features/secrets/queries';
 
 function DetailSkeleton() {
@@ -52,6 +53,7 @@ export function VaultDetailScreen({ vaultId }: { vaultId: string }) {
         titleAside={
           <>
             <EnvironmentChip environment={vault.environment} linked />
+            <VaultCustodyBadge tier={vault.custody} linked />
             <MetaChip title="The environment is fixed at creation">Immutable environment</MetaChip>
           </>
         }

@@ -10,6 +10,7 @@ import {
   type SecretPurpose,
 } from '@trogonai/proto';
 
+import type { CustodyTier } from '@/features/custody/domain/custody';
 import type { EnvironmentId } from '@/features/environments/domain/environment-id';
 
 import {
@@ -117,6 +118,7 @@ export interface VaultView {
   readonly revision: number;
   readonly displayName: string;
   readonly environment: EnvironmentId;
+  readonly custody: CustodyTier;
   readonly lifecycle: VaultLifecycle;
   readonly createdAt: Date;
   readonly credentialCount: number;
@@ -363,6 +365,7 @@ export function toVaultView(vault: VaultState, credentials: readonly CredentialS
     revision: vault.revision,
     displayName: vault.displayName,
     environment: vault.environment,
+    custody: vault.custody,
     lifecycle,
     createdAt: vault.createdAt,
     credentialCount: members.length,
