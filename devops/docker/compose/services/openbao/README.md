@@ -20,10 +20,12 @@ docker compose up -d openbao-bootstrap
 
 Name `openbao-bootstrap`, not `openbao`. The server is uninitialized and sealed
 until bootstrap runs against it, and because the dependency points from
-bootstrap to the server, starting `openbao` alone never triggers it. Bootstrap
+bootstrap to the server, starting `openbao` alone never triggers it (the
+gateway waits for bootstrap to complete, so `trogon-gateway` does). Bootstrap
 pulls in `openbao` and `postgres` as its own dependencies, then runs to
 completion: on a fresh database it initializes the server, installs the fixed
-dev root token, and mounts a transit key. Every step is skipped only when the
+dev root token, mounts a transit key, and mounts the KV v2 store the gateway
+reads. Every step is skipped only when the
 thing it creates is already there, so re-running it reconciles rather than
 duplicates, and a run killed partway finishes on the next `up`. A plain
 `docker compose up` starts the whole stack and needs no special casing.
@@ -48,6 +50,7 @@ The UI is at <http://openbao.trogonai.orb.local:8200/ui>.
 | Root token | `local-dev-root-token` | `OPENBAO_DEV_ROOT_TOKEN` |
 | Transit mount | `transit/` | `OPENBAO_DEV_TRANSIT_MOUNT` |
 | Transit key (`aes256-gcm96`) | `local-dev-kek` | `OPENBAO_DEV_TRANSIT_KEY` |
+| KV v2 mount | `secret/` | `OPENBAO_DEV_KV_MOUNT` |
 
 `aes256-gcm96` is the key type the key-custody design needs, because it is the
 type whose transit `associated_data` carries the platform's authenticated
@@ -70,19 +73,12 @@ bao write -field=ciphertext transit/encrypt/local-dev-kek \
 
 ## Storage
 
-OpenBao gets its own database on the shared postgres instance, created by
-`services/postgres/initdb/01-openbao-database.sh`. The name defaults to
+OpenBao gets its own database on the shared postgres instance, created when
+missing by the `openbao-database` one-shot service running
+`services/postgres/ensure-openbao-database.sh`. It runs on every `up`, so a
+postgres volume that predates OpenBao needs no manual step. The name defaults to
 `openbao` and both the connection and the provisioning read the same
 `OPENBAO_POSTGRES_DB`, so overriding it stays consistent.
-
-Postgres only runs that script when its data volume is created from empty, so a
-workspace that already had postgres running before this service existed needs
-the database created once, substituting your own `POSTGRES_USER` and
-`OPENBAO_POSTGRES_DB` if you overrode them:
-
-```bash
-docker compose exec postgres createdb -U trogon openbao
-```
 
 ## Auto-unseal
 
