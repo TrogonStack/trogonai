@@ -294,7 +294,9 @@ expired key returns `401`. Any failure to fetch the key, including the hourly fe
 permanent `4xx` failure. Fetches for a `kid` that is not cached are limited to one every 10 seconds per
 integration, and a cached `kid` whose hourly fetch failed is not fetched again for 10 seconds. Requests over
 either limit get `429` with `Retry-After: 10`, which Plaid waits out instead of backing off exponentially, so the
-webhook is retried once a fetch is allowed again.
+webhook is retried once a fetch is allowed again. With `TROGON_GATEWAY_ENABLE_RUNTIME_PLAID_CREDENTIALS` enabled,
+the gateway resolves the `secret` from the credential store on every request instead of using the configured
+value, so revoking the credential stops ingestion even though verification keys stay cached.
 
 Verified bodies are published unchanged to `{subject_prefix}.{webhook_type}.{webhook_code}`, for example
 `plaid-primary.TRANSACTIONS.SYNC_UPDATES_AVAILABLE`, with `X-Plaid-Event-Type` and, when the payload carries an

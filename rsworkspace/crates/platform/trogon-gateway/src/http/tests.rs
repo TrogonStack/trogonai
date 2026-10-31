@@ -495,7 +495,8 @@ fn every_runtime_credential_mount() -> RuntimeCredentialMounts<MockOpenBaoSecret
         telegram: Some(resolver.clone()),
         telegram_registered_credentials: Default::default(),
         twitter: Some(resolver.clone()),
-        notion: Some(resolver),
+        notion: Some(resolver.clone()),
+        plaid: Some(resolver),
     }
 }
 
