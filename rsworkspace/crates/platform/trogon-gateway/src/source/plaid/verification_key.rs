@@ -70,6 +70,10 @@ impl PlaidVerificationKey {
         &self.key_id
     }
 
+    pub fn decoding_key(&self) -> &DecodingKey {
+        &self.decoding_key
+    }
+
     pub fn is_expired_at(&self, now: SystemTime) -> bool {
         self.expired_at.is_some_and(|expired_at| expired_at <= now)
     }
