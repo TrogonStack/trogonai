@@ -85,7 +85,7 @@ if bao status -format=json 2>/dev/null | grep -q '"initialized": true'; then
   fi
 
   provision
-  echo "openbao-bootstrap: ready (token: ${DEV_ROOT_TOKEN}, transit key: ${TRANSIT_MOUNT}/${TRANSIT_KEY}, kv mount: ${KV_MOUNT}/)"
+  echo "openbao-bootstrap: ready (transit key: ${TRANSIT_MOUNT}/${TRANSIT_KEY}, kv mount: ${KV_MOUNT}/)"
   exit 0
 fi
 
@@ -120,4 +120,4 @@ provision
 # The initial root token has served its purpose; the fixed dev token replaces it.
 bao token revoke "$initial_root_token" >/dev/null
 
-echo "openbao-bootstrap: ready (token: ${DEV_ROOT_TOKEN}, transit key: ${TRANSIT_MOUNT}/${TRANSIT_KEY}, kv mount: ${KV_MOUNT}/)"
+echo "openbao-bootstrap: ready (transit key: ${TRANSIT_MOUNT}/${TRANSIT_KEY}, kv mount: ${KV_MOUNT}/)"
