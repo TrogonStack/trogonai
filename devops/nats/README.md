@@ -222,13 +222,48 @@ the store directory is where those JWTs come from.
 
 ## Rotate the JetStream key
 
-The store key cannot be rotated in place. A different `key` leaves every
-existing stream unreadable. nats-server 2.14.2 accepts the old key as
-`prev_key` and re-encrypts streams under the new one on start, but it drops
-every durable consumer while doing so: each fails with
-`cipher: message authentication failed` and the server removes it. Move the
-store to a new key with a backup and restore instead. This procedure is
-verified on a single server; it is untested on a cluster.
+The key rotates in place. Restart the server with the new key as `key` and the
+key it replaces as `prev_key`, and nats-server re-encrypts every stream under
+the new key on start. A new `key` without `prev_key` leaves every existing
+stream unreadable.
+
+nats-server 2.14.2 drops every durable consumer during that conversion: each
+one fails to restore with `cipher: message authentication failed` and the
+server removes it, while the messages stay. Pick the path by whether the
+consumers must keep their state. Each path is verified on a single server and
+untested on a cluster.
+
+### Rotate in place and create the consumers again
+
+1. Stop every client of the server.
+2. While the server still runs under the old key, save every durable consumer,
+   connected as a user of its account:
+
+   ```sh
+   nats --server tls://nats.example.internal:4222 \
+     --tlsca ca.pem --tlscert client.pem --tlskey client-key.pem --creds platform-user.creds \
+     consumer info <stream> <consumer> --json > <stream>-<consumer>.json
+   ```
+
+3. Stop the server. In `jetstream-key.conf`, set `key` to the new key and
+   `prev_key` to the old one, then start the server.
+4. Check that the log shows `Restored <n> messages for stream` for every
+   stream, and `Error adding consumer` for every consumer the server removed.
+5. In each saved file, set `config.deliver_policy` to `by_start_sequence` and
+   `config.opt_start_seq` to one more than `ack_floor.stream_seq`, so the
+   consumer does not replay the stream. Then create it again as the same user:
+
+   ```sh
+   nats --server tls://nats.example.internal:4222 \
+     --tlsca ca.pem --tlscert client.pem --tlskey client-key.pem --creds platform-user.creds \
+     consumer add <stream> --config <stream>-<consumer>.json
+   ```
+
+6. Stop the server, remove `prev_key` from `jetstream-key.conf`, and start the
+   server. Then start the clients.
+7. Destroy the old key and the saved files.
+
+### Rotate with a backup and keep the consumers
 
 1. Stop every client of the server.
 2. While the server still runs under the old key, back up each account that
@@ -257,6 +292,8 @@ verified on a single server; it is untested on a cluster.
 6. Destroy the backup and the old store. A backup holds the messages in clear,
    because snapshots do not carry the store encryption, so protect it like the
    key until it is gone.
+
+### When the server starts under the wrong key
 
 If the server ever starts under the wrong key, it logs
 `Error decrypting our stream metafile` and leaves those streams unloaded but on
