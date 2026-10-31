@@ -2,6 +2,7 @@ use std::io::Write;
 use std::time::Duration;
 
 use tempfile::NamedTempFile;
+use trogon_identity_types::PrincipalKind;
 use trogon_std::env::InMemoryEnv;
 
 use super::env::test_env_dev_warn_count;
@@ -127,6 +128,7 @@ fn rotation_mint_verify_round_trip() {
         data: SpiceDbPrincipal(serde_json::json!({"spicedb_subject": "subject"})),
         nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
         caller_id,
+        principal_kind: PrincipalKind::Person,
     };
 
     let old_handle = source

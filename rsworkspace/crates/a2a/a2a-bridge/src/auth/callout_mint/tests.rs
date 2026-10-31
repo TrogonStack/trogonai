@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use a2a_auth_callout::caller_id_from_minted_jwt;
 use a2a_auth_callout::{BridgeConnectOpts, BridgeMintRequest};
+use a2a_auth_callout::{caller_id_from_minted_jwt, subject_principal_from_minted_jwt};
 
 use super::*;
 use crate::auth::BytesPayload;
@@ -20,6 +20,10 @@ async fn harness_mint_wire_returns_deterministic_caller_id_jwt() {
         .expect("harness mint");
     let caller = caller_id_from_minted_jwt(jwt.as_str()).expect("caller_id claim");
     assert_eq!(caller.as_str(), "bridge-harness-caller");
+    assert_eq!(
+        subject_principal_from_minted_jwt(jwt.as_str()).expect("principal claims"),
+        trogon_identity_types::SubjectPrincipal::from_tokens("person", "bridge-harness-caller").expect("principal")
+    );
 }
 
 #[test]
