@@ -216,7 +216,10 @@ A generation seals at most 2^30 units, a seal of `len` bytes costing
 800-38D](https://csrc.nist.gov/pubs/sp/800/38/d/final) section 8.3 allows for
 random nonces, with a nonce collision at most 2^60 / 2^97 = 2^-37 likely, and
 volume under 2^46 blocks, bounding the distinguishing advantage at 2^92 /
-2^129 = 2^-37, about 2^-36 together. A generation also ends after 30 days, so
+2^129 = 2^-37, about 2^-36 together. A single seal is at most 2^12 units
+(4 GiB), so one invocation stays under 2^28 blocks, far inside the 2^32 - 2
+blocks the same section allows per invocation; a larger payload is a claim
+blob split across seals, never one. A generation also ends after 30 days, so
 the unit cap binds first only above about 414 units a second.
 
 GCM does not commit to its key, and nothing here needs it to: `key_ref` and the
