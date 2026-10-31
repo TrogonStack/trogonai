@@ -7,6 +7,12 @@ use trogon_nats::{Location, NatsTls};
 use super::*;
 
 const WAIT: Duration = Duration::from_secs(5);
+const BRIEF: Duration = Duration::from_millis(100);
+const CONNECT: CallerConnectTimeout = CallerConnectTimeout::new(WAIT);
+const BRIEF_CONNECT: CallerConnectTimeout = CallerConnectTimeout::new(BRIEF);
+const RPC: GatewayRpcTimeout = GatewayRpcTimeout::new(WAIT);
+const BRIEF_RPC: GatewayRpcTimeout = GatewayRpcTimeout::new(BRIEF);
+const UNREACHABLE_RPC: GatewayRpcTimeout = GatewayRpcTimeout::new(Duration::from_secs(3600));
 
 fn plaintext(address: &str) -> NatsConfig {
     NatsConfig::from_url(address).with_tls(NatsTls::Disabled)
@@ -14,6 +20,31 @@ fn plaintext(address: &str) -> NatsConfig {
 
 fn no_servers() -> NatsConfig {
     NatsConfig::new(Vec::new(), NatsAuth::None)
+}
+
+struct SilentServer {
+    address: String,
+    accepting: tokio::task::JoinHandle<()>,
+}
+
+impl SilentServer {
+    async fn start() -> Self {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let accepting = tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((connection, _)) = listener.accept().await {
+                held.push(connection);
+            }
+        });
+        Self { address, accepting }
+    }
+}
+
+impl Drop for SilentServer {
+    fn drop(&mut self) {
+        self.accepting.abort();
+    }
 }
 
 async fn gateway_client(config: &NatsConfig) -> async_nats::Client {
@@ -34,7 +65,7 @@ async fn unary_port_preserves_headers_payload_and_gateway_reply() {
     let client = gateway_client(&plaintext(server.address())).await;
     let mut gateway = client.subscribe("a2a.v1.gateway.planner.message.send").await.unwrap();
     client.flush().await.unwrap();
-    let port = AsyncNatsTokenGatewayUnary::new(plaintext(server.address()), WAIT);
+    let port = AsyncNatsTokenGatewayUnary::new(plaintext(server.address()), CONNECT, RPC);
     let jwt = caller_jwt().await;
     let mut headers = async_nats::HeaderMap::new();
     headers.insert(REQ_ID_HEADER, "caller-request");
@@ -65,7 +96,7 @@ async fn unary_port_bounds_a_gateway_request_that_never_replies() {
     let client = gateway_client(&plaintext(server.address())).await;
     let mut gateway = client.subscribe("gateway.stalled").await.unwrap();
     client.flush().await.unwrap();
-    let port = AsyncNatsTokenGatewayUnary::new(plaintext(server.address()), Duration::from_millis(100));
+    let port = AsyncNatsTokenGatewayUnary::new(plaintext(server.address()), CONNECT, BRIEF_RPC);
     let jwt = caller_jwt().await;
     let (reply, request) = tokio::join!(
         port.unary_request_gateway(&jwt, "gateway.stalled", async_nats::HeaderMap::new(), Bytes::new()),
@@ -76,12 +107,44 @@ async fn unary_port_bounds_a_gateway_request_that_never_replies() {
 }
 
 #[tokio::test]
+async fn caller_connections_give_up_on_a_silent_server_at_the_connect_timeout_rather_than_the_rpc_timeout() {
+    let silent = SilentServer::start().await;
+    let jwt = caller_jwt().await;
+    let connect = CallerConnectTimeout::new(Duration::from_millis(200));
+    let unary = AsyncNatsTokenGatewayUnary::new(plaintext(&silent.address), connect, UNREACHABLE_RPC);
+    let jetstream = AsyncNatsTokenTaskJetstream::new(plaintext(&silent.address), connect);
+    let prefix = default_a2a_prefix();
+
+    let (reply, stream) = tokio::time::timeout(WAIT, async {
+        tokio::join!(
+            unary.unary_request_gateway(&jwt, "gateway.silent", async_nats::HeaderMap::new(), Bytes::new()),
+            jetstream.task_event_payload_stream(
+                &jwt,
+                &prefix,
+                SseConsumePlan::TasksResubscribe {
+                    task_id: A2aTaskId::new("task-1").unwrap(),
+                    last_seq: 0,
+                },
+            ),
+        )
+    })
+    .await
+    .expect("only the connect timeout may bound a caller connection that the server never answers");
+
+    assert!(
+        matches!(&reply, Err(BridgeError::NatsPublish(message)) if !message.contains("gateway RPC exceeded")),
+        "{reply:?}"
+    );
+    assert!(matches!(stream, Err(BridgeError::JetStreamConsume(_))));
+}
+
+#[tokio::test]
 async fn unary_port_reports_no_responder_and_invalid_connection_configuration() {
     let server = CoreTestServer::start().await;
     let jwt = caller_jwt().await;
     for port in [
-        AsyncNatsTokenGatewayUnary::new(plaintext(server.address()), WAIT),
-        AsyncNatsTokenGatewayUnary::new(no_servers(), Duration::from_millis(100)),
+        AsyncNatsTokenGatewayUnary::new(plaintext(server.address()), CONNECT, RPC),
+        AsyncNatsTokenGatewayUnary::new(no_servers(), BRIEF_CONNECT, BRIEF_RPC),
     ] {
         let error = port
             .unary_request_gateway(&jwt, "gateway.missing", async_nats::HeaderMap::new(), Bytes::new())
@@ -103,7 +166,7 @@ async fn unary_port_authenticates_as_the_caller_rather_than_as_the_bridge() {
     responder.flush().await.unwrap();
     let bridge =
         NatsConfig::new(vec![server.address().to_owned()], token("bridge-service-token")).with_tls(NatsTls::Disabled);
-    let port = AsyncNatsTokenGatewayUnary::new(bridge, WAIT);
+    let port = AsyncNatsTokenGatewayUnary::new(bridge, CONNECT, RPC);
     let (reply, ()) = tokio::join!(
         port.unary_request_gateway(&jwt, "gateway.guarded", async_nats::HeaderMap::new(), Bytes::new()),
         async {
@@ -141,10 +204,10 @@ async fn caller_connections_refuse_a_plaintext_server_unless_tls_is_disabled() {
     let default_tls = NatsConfig::from_url(server.address());
     let jwt = caller_jwt().await;
 
-    let reply = AsyncNatsTokenGatewayUnary::new(default_tls.clone(), WAIT)
+    let reply = AsyncNatsTokenGatewayUnary::new(default_tls.clone(), CONNECT, RPC)
         .unary_request_gateway(&jwt, "gateway.guarded", async_nats::HeaderMap::new(), Bytes::new())
         .await;
-    let stream = AsyncNatsTokenTaskJetstream::new(default_tls, WAIT)
+    let stream = AsyncNatsTokenTaskJetstream::new(default_tls, CONNECT)
         .task_event_payload_stream(
             &jwt,
             &default_a2a_prefix(),
@@ -175,7 +238,7 @@ async fn unary_port_verifies_the_server_against_the_configured_ca() {
     let responder = gateway_client(&trusting).await;
     let mut gateway = responder.subscribe("gateway.sealed").await.unwrap();
     responder.flush().await.unwrap();
-    let port = AsyncNatsTokenGatewayUnary::new(trusting, WAIT);
+    let port = AsyncNatsTokenGatewayUnary::new(trusting, CONNECT, RPC);
     let jwt = caller_jwt().await;
     let (reply, ()) = tokio::join!(
         port.unary_request_gateway(&jwt, "gateway.sealed", async_nats::HeaderMap::new(), Bytes::new()),
@@ -213,7 +276,7 @@ async fn live_task_stream_forwards_only_events_for_its_request_and_acknowledges_
     publish_event(&js, Some("other-request"), b"other").await;
     publish_event(&js, None, b"uncorrelated").await;
     publish_event(&js, Some("my-request"), b"mine").await;
-    let port = AsyncNatsTokenTaskJetstream::new(plaintext(server.address()), WAIT);
+    let port = AsyncNatsTokenTaskJetstream::new(plaintext(server.address()), CONNECT);
     let mut payloads = port
         .task_event_payload_stream(
             &caller_jwt().await,
@@ -265,7 +328,7 @@ async fn resumed_task_stream_replays_after_the_checkpoint_without_request_demult
     publish_event(&js, Some("request-1"), b"before-checkpoint").await;
     publish_event(&js, Some("request-2"), b"after-checkpoint").await;
     publish_event(&js, None, b"uncorrelated-after-checkpoint").await;
-    let port = AsyncNatsTokenTaskJetstream::new(plaintext(server.address()), WAIT);
+    let port = AsyncNatsTokenTaskJetstream::new(plaintext(server.address()), CONNECT);
     let mut payloads = port
         .task_event_payload_stream(
             &caller_jwt().await,
@@ -295,8 +358,8 @@ async fn resumed_task_stream_replays_after_the_checkpoint_without_request_demult
 async fn task_stream_reports_missing_stream_and_invalid_connection_configuration() {
     let server = JetStreamTestServer::start().await;
     for port in [
-        AsyncNatsTokenTaskJetstream::new(plaintext(server.address()), WAIT),
-        AsyncNatsTokenTaskJetstream::new(no_servers(), Duration::from_millis(100)),
+        AsyncNatsTokenTaskJetstream::new(plaintext(server.address()), CONNECT),
+        AsyncNatsTokenTaskJetstream::new(no_servers(), BRIEF_CONNECT),
     ] {
         let result = port
             .task_event_payload_stream(
