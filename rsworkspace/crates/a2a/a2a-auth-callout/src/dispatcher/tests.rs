@@ -8,7 +8,7 @@ use crate::jwt::{
     AudienceAccount, CallerId, ExternalSubject, SpiceDbPrincipal, UserJwtClaims, decode_nats_user_payload,
 };
 use crate::permissions::IssuedPermissions;
-use crate::wire::test_encode::FixtureServer;
+use crate::wire::test_encode::{FixtureServer, verified_client_tls};
 use nats_jwt_rs::Claims;
 use nats_jwt_rs::authorization::AuthRequest;
 use nkeys::KeyPair;
@@ -46,7 +46,6 @@ impl Tenant {
         let account = self.account.as_str().to_owned();
         encode_fixture_request(server, |claims| {
             claims.nats.connect_opts.user = Some(account.clone());
-            claims.nats.client_info.user = account.clone();
             patch(claims);
         })
     }
@@ -179,7 +178,6 @@ async fn dispatch_mints_a_user_the_tenant_signing_key_issues_on_behalf_of_the_te
     let account = tenant.account.as_str().to_owned();
     let req = server.request(&user, |claims| {
         claims.nats.connect_opts.user = Some(account.clone());
-        claims.nats.client_info.user = account.clone();
     });
 
     let minted = d.dispatch(req).await.unwrap();
@@ -218,7 +216,6 @@ async fn dispatch_rejects_unknown_account() {
     let d = dispatcher_with(oidc_stub(), None, None, &[&tenant]);
     let req = encode_fixture_request(&server, |c| {
         c.nats.connect_opts.user = Some("tenant-evil".into());
-        c.nats.client_info.user = "tenant-evil".into();
     });
     let err = d.dispatch(req).await.unwrap_err();
     assert!(matches!(
@@ -235,18 +232,54 @@ async fn dispatch_rejects_request_without_account() {
     let d = dispatcher_with(oidc_stub(), None, None, &[&tenant]);
     let req = encode_fixture_request(&server, |c| {
         c.nats.connect_opts.user = None;
-        c.nats.client_info.user = String::new();
     });
     assert!(d.dispatch(req).await.is_err());
 }
 
 #[tokio::test]
-async fn dispatch_infers_oidc_when_user_jwt_present() {
+async fn dispatch_reads_auth_token_before_pass() {
     let server = FixtureServer::generate();
     let tenant = Tenant::generate();
     let d = dispatcher_with(oidc_stub(), None, None, &[&tenant]);
-    let req = tenant.request(&server, |_| {});
+    let req = tenant.request(&server, |c| {
+        c.nats.connect_opts.pass = Some("k_live_demo".into());
+    });
     assert!(d.dispatch(req).await.is_ok());
+}
+
+#[tokio::test]
+async fn dispatch_verifies_a_secret_instead_of_the_client_certificate() {
+    let server = FixtureServer::generate();
+    let tenant = Tenant::generate();
+    let mtls: Arc<dyn MTlsVerifier> = Arc::new(StubMtlsVerifier);
+    let d = dispatcher_with(oidc_stub(), Some(mtls), None, &[&tenant]);
+    let req = tenant.request(&server, |c| {
+        c.nats.client_tls = Some(verified_client_tls(&[FIXTURE_CLIENT_CERT]));
+    });
+    let minted = d.dispatch(req).await.unwrap();
+    let payload = decode_nats_user_payload(minted.as_str()).unwrap();
+    assert_eq!(
+        payload["nats"]["sub"]["allow"],
+        json!(["_INBOX.usrstub.>", "a2a.v1.push.usrstub.>"])
+    );
+}
+
+#[tokio::test]
+async fn dispatch_verifies_the_client_certificate_when_no_secret_is_presented() {
+    let server = FixtureServer::generate();
+    let tenant = Tenant::generate();
+    let mtls: Arc<dyn MTlsVerifier> = Arc::new(StubMtlsVerifier);
+    let d = dispatcher_with(oidc_stub(), Some(mtls), None, &[&tenant]);
+    let req = tenant.request(&server, |c| {
+        c.nats.connect_opts.auth_token = None;
+        c.nats.client_tls = Some(verified_client_tls(&[FIXTURE_CLIENT_CERT]));
+    });
+    let minted = d.dispatch(req).await.unwrap();
+    let payload = decode_nats_user_payload(minted.as_str()).unwrap();
+    assert_eq!(
+        payload["nats"]["sub"]["allow"],
+        json!(["_INBOX.mtlsstub.>", "a2a.v1.push.mtlsstub.>"])
+    );
 }
 
 #[tokio::test]
@@ -264,7 +297,6 @@ async fn dispatch_api_key_happy_path() {
     let verifier = api_key_verifier_for(AudienceAccount::new(tenant.account.as_str()));
     let d = dispatcher_with(None, None, verifier, &[&tenant]);
     let req = tenant.request(&server, |c| {
-        c.nats.connect_opts.jwt = None;
         c.nats.connect_opts.auth_token = Some("k_live_demo".into());
     });
     assert!(d.dispatch(req).await.is_ok());
@@ -278,19 +310,17 @@ async fn dispatch_api_key_rejects_audience_mismatch() {
     let verifier = api_key_verifier_for(AudienceAccount::new(registered.account.as_str()));
     let d = dispatcher_with(None, None, verifier, &[&tenant, &registered]);
     let req = tenant.request(&server, |c| {
-        c.nats.connect_opts.jwt = None;
         c.nats.connect_opts.auth_token = Some("k_live_demo".into());
     });
     assert!(d.dispatch(req).await.is_err());
 }
 
 #[tokio::test]
-async fn dispatch_rejects_request_without_credential_material() {
+async fn dispatch_rejects_a_request_presenting_only_the_sentinel_jwt() {
     let server = FixtureServer::generate();
     let tenant = Tenant::generate();
     let d = dispatcher_with(oidc_stub(), None, None, &[&tenant]);
     let req = tenant.request(&server, |c| {
-        c.nats.connect_opts.jwt = None;
         c.nats.connect_opts.pass = None;
         c.nats.connect_opts.auth_token = None;
         c.nats.client_tls = None;
@@ -332,7 +362,6 @@ async fn dispatch_api_key_verifier_unavailable() {
     let tenant = Tenant::generate();
     let d = dispatcher_with(None, None, None, &[&tenant]);
     let req = tenant.request(&server, |c| {
-        c.nats.connect_opts.jwt = None;
         c.nats.connect_opts.auth_token = Some("k_live_demo".into());
     });
     let err = d.dispatch(req).await.unwrap_err();
@@ -343,13 +372,26 @@ async fn dispatch_api_key_verifier_unavailable() {
 }
 
 #[tokio::test]
-async fn dispatch_oidc_via_opaque_pass() {
+async fn dispatch_oidc_via_pass() {
     let server = FixtureServer::generate();
     let tenant = Tenant::generate();
     let d = dispatcher_with(oidc_stub(), None, None, &[&tenant]);
     let req = tenant.request(&server, |c| {
-        c.nats.connect_opts.jwt = None;
-        c.nats.connect_opts.pass = Some("opaque-token".into());
+        c.nats.connect_opts.auth_token = None;
+        c.nats.connect_opts.pass = Some("eyJhbGciOiJSUzI1NiJ9.e30.c2ln".into());
+    });
+    assert!(d.dispatch(req).await.is_ok());
+}
+
+#[tokio::test]
+async fn dispatch_api_key_via_pass() {
+    let server = FixtureServer::generate();
+    let tenant = Tenant::generate();
+    let verifier = api_key_verifier_for(AudienceAccount::new(tenant.account.as_str()));
+    let d = dispatcher_with(oidc_stub(), None, verifier, &[&tenant]);
+    let req = tenant.request(&server, |c| {
+        c.nats.connect_opts.auth_token = None;
+        c.nats.connect_opts.pass = Some("k_live_demo".into());
     });
     assert!(d.dispatch(req).await.is_ok());
 }

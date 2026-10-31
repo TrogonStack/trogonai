@@ -1,6 +1,6 @@
 //! Test-only helpers for signing authorization request JWTs.
 
-use nats_jwt_rs::authorization::{AuthRequest, ClientInfo, ConnectOpts, ServerID};
+use nats_jwt_rs::authorization::{AuthRequest, ClientInfo, ClientTLS, ConnectOpts, ServerID};
 use nats_jwt_rs::{ClaimType, Claims};
 use nkeys::{KeyPair, XKey};
 
@@ -70,10 +70,10 @@ impl FixtureServer {
                 nonce: String::new(),
             },
             connect_opts: ConnectOpts {
-                jwt: Some("opaque.jwt.token".into()),
+                jwt: Some("sentinel.user.jwt".into()),
                 nkey: None,
                 sig: None,
-                auth_token: None,
+                auth_token: Some("eyJhbGciOiJSUzI1NiJ9.e30.c2ln".into()),
                 user: Some("tenant-acme".into()),
                 pass: None,
                 name: None,
@@ -138,4 +138,16 @@ impl FixtureServer {
             .decode(&self.auth_account, None, None)
             .expect("fixture authorization request decodes")
     }
+}
+
+/// The `client_tls` section nats-server sends under `verify: true`, where the
+/// presented certificates arrive only as verified chains.
+pub(crate) fn verified_client_tls(chain: &[&str]) -> ClientTLS {
+    serde_json::from_value(serde_json::json!({
+        "version": "1.3",
+        "cipher": "TLS_AES_128_GCM_SHA256",
+        "certs": [],
+        "verified_chains": [chain],
+    }))
+    .expect("fixture client_tls section")
 }
