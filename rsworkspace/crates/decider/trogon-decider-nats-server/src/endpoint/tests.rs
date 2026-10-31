@@ -1,4 +1,6 @@
 use trogon_decider_runtime::{CommandPrincipal, PrincipalId, PrincipalKind};
+use trogon_identity_types::SubjectPrincipalId;
+use trogon_nats::constants::MAX_NATS_TOKEN_LENGTH;
 use trogon_nats::{MAX_SUBJECT_TOKENS, SubjectViolationError};
 
 use super::{CommandEndpoint, CommandEndpointError, CommandSubjectError, SubjectPrefix};
@@ -159,6 +161,7 @@ fn an_id_token_that_is_no_principal_id_is_refused() {
         "decider.agent.a*b.DeciderService.Decide",
         "decider.agent.a>b.DeciderService.Decide",
         "decider.agent.a\u{1}b.DeciderService.Decide",
+        "decider.agent.\u{e5}lice.DeciderService.Decide",
     ] {
         assert!(
             matches!(
@@ -168,6 +171,36 @@ fn an_id_token_that_is_no_principal_id_is_refused() {
             "{subject:?}"
         );
     }
+}
+
+#[test]
+fn an_id_token_no_edge_would_put_in_a_subject_is_refused() {
+    let endpoint = endpoint(DEFAULT_SUBJECT_PREFIX);
+    let one_whole_token = "a".repeat(MAX_NATS_TOKEN_LENGTH);
+
+    for id in [one_whole_token.as_str(), "~", "~not-a-digest"] {
+        assert!(
+            matches!(
+                endpoint.derive_principal(&format!("decider.agent.{id}.DeciderService.Decide")),
+                Err(CommandSubjectError::Principal { .. })
+            ),
+            "{id:?} is not a token ADR#0082's mapping produces, so no edge put it in a subject for a verified principal"
+        );
+    }
+}
+
+#[test]
+fn a_hashed_id_token_is_read_as_the_principal_it_carries() {
+    let hashed = SubjectPrincipalId::from(&PrincipalId::new("alice.smith").expect("an id"));
+
+    assert!(hashed.is_hashed());
+    assert_eq!(
+        endpoint(DEFAULT_SUBJECT_PREFIX)
+            .derive_principal(&format!("decider.agent.{hashed}.DeciderService.Decide"))
+            .expect("an edge carries an id that is not one token in its hashed form"),
+        principal(PrincipalKind::Agent, hashed.as_str()),
+        "the host derives the token itself, so an authorizer sees the hashed id"
+    );
 }
 
 #[test]
