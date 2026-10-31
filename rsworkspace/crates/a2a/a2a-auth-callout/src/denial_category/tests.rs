@@ -143,4 +143,10 @@ fn key_load_variants_map_to_internal_error() {
         DenialCategory::from_auth_callout_error(&AuthCalloutError::KeyLoadUtf8(utf8_err)),
         DenialCategory::InternalError
     );
+    assert_eq!(
+        DenialCategory::from_auth_callout_error(&AuthCalloutError::AdmissionKeys(
+            crate::admission_keys::AdmissionKeyError::MalformedTenantEntry { position: 1 }
+        )),
+        DenialCategory::InternalError
+    );
 }

@@ -12,6 +12,7 @@
 )]
 
 pub mod account_resolver;
+pub mod admission_keys;
 pub mod bridge_mint;
 pub mod caller_jwt_header;
 pub mod constants;
@@ -31,6 +32,10 @@ pub mod wire;
 pub mod test_support;
 
 pub use account_resolver::{AccountResolver, AccountResolverError, RequestedAccount, StaticAccountResolver};
+pub use admission_keys::{
+    AccountSigningKey, AdmissionKeyError, AdmissionKeys, AuthAccount, CalloutXkey, SigningKeyCustody, TenantAccount,
+    TenantSigningKeys, admission_keys_from_env,
+};
 
 pub use bridge_mint::{BridgeAuthScheme, BridgeClientInfo, BridgeConnectOpts, BridgeMintRequest, BridgeMintResponse};
 pub use caller_jwt_header::CallerJwtHeaderValue;

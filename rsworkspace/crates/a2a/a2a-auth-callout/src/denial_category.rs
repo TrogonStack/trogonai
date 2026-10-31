@@ -37,7 +37,8 @@ impl DenialCategory {
             | AuthCalloutError::UnknownSigningKeySource(_)
             | AuthCalloutError::VaultNotConfigured
             | AuthCalloutError::KeyLoadIo { .. }
-            | AuthCalloutError::KeyLoadUtf8(_) => Self::InternalError,
+            | AuthCalloutError::KeyLoadUtf8(_)
+            | AuthCalloutError::AdmissionKeys(_) => Self::InternalError,
             AuthCalloutError::CredentialVerification(e) => Self::from_credential_error(e),
         }
     }
