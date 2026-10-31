@@ -345,6 +345,13 @@ principal from a header there either. The principal is not a token of the
 event stream subject, whose optimistic concurrency is per subject
 (`rsworkspace/crates/decider/trogon-decider-nats/src/store.rs:350-357`).
 
+Where a component holds a caller's credential and acts with it, as the bridge
+does for an HTTP caller under Decision 5, the audit record it writes names
+both the caller and itself as the presenter. Inside the bus a record names the
+derived principal alone and carries the same `Trogon-Req-Id`, so a reader can
+always tell a bridged request from a client that connected on its own, and no
+record reads as if the caller held the connection when the bridge did.
+
 ## Alternatives Considered
 
 ### Keep identity in headers and verify a signed token in them

@@ -434,6 +434,19 @@ for a tenant, but nats-server would then take each user's permissions from the
 scope's template, so per-caller allow lists would have to be expressed through
 template tags. That trade is not taken now.
 
+**A host-local secrets broker that mints the NATS JWTs in place.** A per-host
+daemon such as Basil keeps the operator, account and callout signing seeds in
+its backend, admits a caller by the kernel's uid of the socket peer, and signs
+user JWTs on request, so no service process ever holds a seed. The custody
+shape is the one ADR#0023 and ADR#0033 already chose, with the secrets service
+in the broker's place; what the daemon adds is a uid as the admission
+credential and a second policy language in front of the same OpenBao. A uid
+identifies nothing across containers, which is the only deployment this
+repository ships, and the project is pre-1.0 with an unfrozen API. The
+in-place signing itself is kept as the target: once Decision 4's ordering
+holds, the callout signs through `KeyManagement` and holds no seed, which is
+the evolution ADR#0033 leaves open.
+
 **Rotating the JetStream key by migrating streams.** Copying every stream into
 a new store is unnecessary when the server converts in place with `prev_key`.
 
@@ -524,3 +537,4 @@ a new store is unnecessary when the server converts in place with `prev_key`.
 - [NATS JetStream encryption at rest](https://docs.nats.io/running-a-nats-service/nats_admin/jetstream_admin/encryption_at_rest)
 - [NATS TLS](https://docs.nats.io/running-a-nats-service/configuration/securing_nats/tls)
 - [nsc](https://docs.nats.io/using-nats/nats-tools/nsc)
+- [Basil documentation](https://docs.openbasil.org/)
