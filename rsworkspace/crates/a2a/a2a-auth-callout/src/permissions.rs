@@ -1,4 +1,10 @@
+mod admission_route;
+mod caller_grant;
+
 use serde::{Deserialize, Serialize};
+
+pub use admission_route::AdmissionRoute;
+pub use caller_grant::CallerGrant;
 
 use crate::jwt::CallerId;
 
@@ -28,13 +34,30 @@ pub enum SubjectPatternError {
 impl SubjectPattern {
     pub fn new(pattern: impl Into<String>) -> Result<Self, SubjectPatternError> {
         let s = pattern.into();
-        if s.is_empty() {
-            return Err(SubjectPatternError::Empty);
+        match Self::violation(&s) {
+            Some(violation) => Err(violation),
+            None => Ok(Self(s)),
         }
-        if s.chars().any(char::is_whitespace) {
-            return Err(SubjectPatternError::Whitespace);
+    }
+
+    /// A pattern rendered only from validated subject tokens, which are never
+    /// empty and never hold whitespace.
+    fn from_rendered(pattern: String) -> Self {
+        debug_assert!(
+            Self::violation(&pattern).is_none(),
+            "{pattern:?} is not a subject pattern"
+        );
+        Self(pattern)
+    }
+
+    fn violation(pattern: &str) -> Option<SubjectPatternError> {
+        if pattern.is_empty() {
+            Some(SubjectPatternError::Empty)
+        } else if pattern.chars().any(char::is_whitespace) {
+            Some(SubjectPatternError::Whitespace)
+        } else {
+            None
         }
-        Ok(Self(s))
     }
 
     pub fn as_str(&self) -> &str {
@@ -49,22 +72,25 @@ pub struct IssuedPermissions {
 }
 
 impl IssuedPermissions {
-    /// Caller subject ACL: publish into the gateway namespace, receive replies
-    /// on its own `_INBOX`, and read push deliveries on its own caller-scoped
-    /// push subject. Mirrors `scripts/acl-templates/caller.acl`.
-    // Inputs are either static literals or strings derived from a previously
-    // validated `CallerId`; failure here would mean an upstream invariant
-    // is broken, not a runtime condition we can recover from. The `expect`s
-    // are documented and intentional — clippy denies them by default.
-    #[allow(clippy::expect_used)]
-    pub fn default_for_caller(caller_id: &CallerId) -> Self {
-        let inbox = format!("_INBOX.{}.>", caller_id.as_str());
-        let push = format!("a2a.v1.push.{}.>", caller_id.as_str());
+    /// No subject at all, so the minted user may neither publish nor subscribe.
+    pub fn none() -> Self {
         Self {
-            publish_allow: vec![SubjectPattern::new("a2a.v1.gateway.>").expect("static literal")],
+            publish_allow: Vec::new(),
+            subscribe_allow: Vec::new(),
+        }
+    }
+
+    /// Publish anywhere in the gateway namespace, receive replies on the
+    /// caller's own `_INBOX`, and read push deliveries on its own push subject.
+    /// The mint path grants a [`CallerGrant`] instead, which names the caller's
+    /// principal.
+    pub fn default_for_caller(caller_id: &CallerId) -> Self {
+        let caller = caller_id.as_str();
+        Self {
+            publish_allow: vec![SubjectPattern::from_rendered("a2a.v1.gateway.>".to_owned())],
             subscribe_allow: vec![
-                SubjectPattern::new(inbox).expect("derived from validated caller_id"),
-                SubjectPattern::new(push).expect("derived from validated caller_id"),
+                SubjectPattern::from_rendered(format!("_INBOX.{caller}.>")),
+                SubjectPattern::from_rendered(format!("a2a.v1.push.{caller}.>")),
             ],
         }
     }

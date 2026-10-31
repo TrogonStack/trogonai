@@ -161,3 +161,14 @@ fn key_load_variants_map_to_internal_error() {
         DenialCategory::InternalError
     );
 }
+
+#[test]
+fn a_caller_no_subject_can_name_maps_to_invalid_credentials() {
+    let err = AuthCalloutError::CredentialVerification(CredentialError::UnplaceablePrincipal(
+        crate::jwt::JwtError::InvalidCallerId,
+    ));
+    assert_eq!(
+        DenialCategory::from_auth_callout_error(&err),
+        DenialCategory::InvalidCredentials
+    );
+}

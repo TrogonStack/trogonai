@@ -1,6 +1,8 @@
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+use a2a_nats::A2aPrefix;
+
 use crate::account_resolver::{AccountResolverError, RequestedAccount};
 use crate::admission_keys::{AccountSigningKey, TenantAccount, TenantSigningKeys};
 use crate::credentials::PresentedCredential;
@@ -9,7 +11,8 @@ use crate::credentials::api_key::ApiKeyVerifier;
 use crate::credentials::mtls::MTlsVerifier;
 use crate::credentials::oidc::OidcVerifier;
 use crate::error::{AuthCalloutError, CredentialError};
-use crate::jwt::{AccountName, MintedUserJwt, UserJwtSubject};
+use crate::jwt::{AccountName, MintedUserJwt, UserJwtClaims, UserJwtSubject};
+use crate::permissions::CallerGrant;
 use crate::signing_key_source::MintingMaterial;
 use crate::wire::ServerAuthRequestClaims;
 
@@ -22,6 +25,7 @@ pub trait AuthDispatcher: Send + Sync + 'static {
 pub struct CalloutDispatcherConfig {
     pub tenant_signing_keys: TenantSigningKeys,
     pub user_jwt_ttl: Duration,
+    pub a2a_prefix: A2aPrefix,
     pub oidc: Option<Arc<dyn OidcVerifier>>,
     pub mtls: Option<Arc<dyn MTlsVerifier>>,
     #[allow(deprecated)]
@@ -86,6 +90,14 @@ impl AuthDispatcher for CalloutDispatcher {
                 #[allow(deprecated)]
                 verifier.verify(key.as_str(), &account).await?
             }
+        };
+        let principal = claims
+            .subject_principal()
+            .map_err(CredentialError::UnplaceablePrincipal)?;
+        let claims = UserJwtClaims {
+            nats_permissions: CallerGrant::new(&self.config.a2a_prefix, &principal)
+                .permissions(request.admission_route()),
+            ..claims
         };
 
         let user_nkey = request.user_nkey()?;
