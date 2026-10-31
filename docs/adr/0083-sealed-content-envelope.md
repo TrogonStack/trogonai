@@ -141,7 +141,7 @@ message DekWrap {
 message AadDescriptor { AadLayout layout = 1; }
 ```
 
-`SealingAlgorithm` starts with `SEALING_ALGORITHM_AES_256_GCM_HKDF_SHA256`,
+`SealingAlgorithm` starts with `SEALING_ALGORITHM_AES256_GCM_HKDF_SHA256`,
 `WrappingAlgorithm` with `WRAPPING_ALGORITHM_ENVELOPE_WRAPPING_V1`, and
 `AadLayout` names the layouts of Decision 3, each after an `_UNSPECIFIED` zero;
 `DataKeySeriesId` and `KeyRef` wrap a string. Singular fields are
@@ -241,7 +241,9 @@ ephemeral xkey, carries the data key, a sealer's naming key, the `DataKeyRef`
 and wraps, reserved units, deadline, the issuer's last applied invalidation
 revision and the cutover, never a share. The requester authenticates the
 service's public xkey, boot material under ADR#0033 Decision 5, and checks the
-reply's series and generation. Tenant and workload come from the subject, grants
+reply's series and generation. A request to open carries the envelope's
+`DataKeyRef` and wraps, since the registry keeps only the current generation.
+Tenant and workload come from the subject, grants
 are per workload, tenant, store, and seal or open, and holders are `PLATFORM`
 workloads; one in a tenant account would need an export, left open.
 
