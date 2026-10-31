@@ -10,8 +10,7 @@ use crate::identity::CallerHttpsAuth;
 
 #[tokio::test]
 async fn harness_mint_wire_returns_deterministic_caller_id_jwt() {
-    let tenant = BridgeTenantAccount::new("tenant-harness").unwrap();
-    let dispatcher = Arc::new(harness_callout_dispatcher("bridge-harness-caller"));
+    let (dispatcher, tenant) = harness_callout_dispatcher("bridge-harness-caller");
     let wire = Arc::new(InProcessCalloutDispatcherMintWire::new(dispatcher, tenant.clone()));
     let client = AuthCalloutJsonMintClient::with_tenant_account(wire, "a2a.bridge.auth.callout.request", Some(tenant));
     let jwt = client
@@ -34,8 +33,7 @@ fn bridge_tenant_account_rejects_empty() {
 
 #[tokio::test]
 async fn mint_wire_rejects_malformed_json() {
-    let tenant = BridgeTenantAccount::new("tenant-harness").unwrap();
-    let dispatcher = Arc::new(harness_callout_dispatcher("bridge-harness-caller"));
+    let (dispatcher, tenant) = harness_callout_dispatcher("bridge-harness-caller");
     let wire = InProcessCalloutDispatcherMintWire::new(dispatcher, tenant);
 
     let err = wire
@@ -47,8 +45,7 @@ async fn mint_wire_rejects_malformed_json() {
 
 #[tokio::test]
 async fn mint_wire_increments_mint_count() {
-    let tenant = BridgeTenantAccount::new("tenant-harness").unwrap();
-    let dispatcher = Arc::new(harness_callout_dispatcher("bridge-harness-caller"));
+    let (dispatcher, tenant) = harness_callout_dispatcher("bridge-harness-caller");
     let wire = Arc::new(InProcessCalloutDispatcherMintWire::new(dispatcher, tenant.clone()));
     let client =
         AuthCalloutJsonMintClient::with_tenant_account(wire.clone(), "a2a.bridge.auth.callout.request", Some(tenant));
@@ -66,8 +63,7 @@ async fn mint_wire_fails_when_from_bridge_mint_errors_on_blank_account() {
     // Pass a BridgeMintRequest with account = Some("") (blank, not None).
     // The wire only replaces account when it is None, so the blank account
     // reaches from_bridge_mint which rejects it via RequestedAccount::new("").
-    let tenant = BridgeTenantAccount::new("tenant-harness").unwrap();
-    let dispatcher = Arc::new(harness_callout_dispatcher("bridge-harness-caller"));
+    let (dispatcher, tenant) = harness_callout_dispatcher("bridge-harness-caller");
     let wire = InProcessCalloutDispatcherMintWire::new(dispatcher, tenant);
 
     let request = BridgeMintRequest {
@@ -87,10 +83,7 @@ async fn mint_wire_fails_when_from_bridge_mint_errors_on_blank_account() {
 
 #[tokio::test]
 async fn mint_wire_fails_when_dispatcher_rejects_unknown_account() {
-    // The harness dispatcher only resolves "tenant-harness"; using a different
-    // account causes dispatcher.dispatch to return an error.
-    let tenant = BridgeTenantAccount::new("tenant-harness").unwrap();
-    let dispatcher = Arc::new(harness_callout_dispatcher("bridge-harness-caller"));
+    let (dispatcher, tenant) = harness_callout_dispatcher("bridge-harness-caller");
     let wire = InProcessCalloutDispatcherMintWire::new(dispatcher, tenant);
 
     let request = BridgeMintRequest {

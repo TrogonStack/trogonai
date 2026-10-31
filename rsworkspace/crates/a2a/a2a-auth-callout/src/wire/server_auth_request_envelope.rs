@@ -1,7 +1,8 @@
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 
-use super::{NATS_JWT_PREFIX, NkeyPublic, NkeySeed, ServerAuthRequestClaims, XkeyPublic};
+use super::{NATS_JWT_PREFIX, NkeyPublic, ServerAuthRequestClaims, XkeyPublic};
+use crate::admission_keys::CalloutXkey;
 use crate::error::AuthCalloutError;
 
 /// Raw bytes published by `nats-server` on `$SYS.REQ.USER.AUTH` (JWT or XKey-encrypted JWT).
@@ -21,11 +22,11 @@ impl ServerAuthRequestEnvelope {
     pub fn decode(
         self,
         server_issuer: &NkeyPublic,
-        account_xkey_seed: Option<&NkeySeed>,
+        callout_xkey: Option<&CalloutXkey>,
         server_xkey_public: Option<&XkeyPublic>,
     ) -> Result<ServerAuthRequestClaims, AuthCalloutError> {
         let jwt_bytes = if self.0.starts_with(NATS_JWT_PREFIX) {
-            if account_xkey_seed.is_some() {
+            if callout_xkey.is_some() {
                 return Err(AuthCalloutError::WireFormat(
                     "received unencrypted authorization request but account XKey is configured; \
                      server must set authorization.auth_callout.xkey"
@@ -34,18 +35,16 @@ impl ServerAuthRequestEnvelope {
             }
             self.0
         } else {
-            let seed = account_xkey_seed.ok_or_else(|| {
+            let callout_xkey = callout_xkey.ok_or_else(|| {
                 AuthCalloutError::WireFormat("encrypted authorization request requires AUTH_CALLOUT_XKEY_SEED".into())
             })?;
-            let server_xkey_pub = server_xkey_public.ok_or_else(|| {
+            let server_xkey = server_xkey_public.ok_or_else(|| {
                 AuthCalloutError::WireFormat(
                     "encrypted authorization request requires AUTH_CALLOUT_SERVER_XKEY_PUBLIC".into(),
                 )
             })?;
-            let account_xkey = seed.to_xkey()?;
-            let server_xkey = server_xkey_pub.to_xkey()?;
-            account_xkey
-                .open(&self.0, &server_xkey)
+            callout_xkey
+                .open(&self.0, server_xkey)
                 .map_err(|e| AuthCalloutError::WireFormat(format!("XKey decrypt request: {e}")))?
         };
 
@@ -78,7 +77,7 @@ impl ServerAuthRequestEnvelope {
         payload: Vec<u8>,
         headers: Option<&async_nats::HeaderMap>,
         server_issuer: &NkeyPublic,
-        account_xkey_seed: Option<&NkeySeed>,
+        callout_xkey: Option<&CalloutXkey>,
         server_xkey_public: Option<&XkeyPublic>,
     ) -> Result<ServerAuthRequestClaims, AuthCalloutError> {
         // Encrypted callout requests carry the per-request server XKey on the
@@ -90,7 +89,7 @@ impl ServerAuthRequestEnvelope {
             .map(|v| XkeyPublic::parse(v.as_str()))
             .transpose()?;
         let effective_server_xkey = header_xkey.as_ref().or(server_xkey_public);
-        Self::from_bytes(payload).decode(server_issuer, account_xkey_seed, effective_server_xkey)
+        Self::from_bytes(payload).decode(server_issuer, callout_xkey, effective_server_xkey)
     }
 }
 

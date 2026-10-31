@@ -31,7 +31,7 @@ pub mod wire;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 
-pub use account_resolver::{AccountResolver, AccountResolverError, RequestedAccount, StaticAccountResolver};
+pub use account_resolver::{AccountResolverError, RequestedAccount};
 pub use admission_keys::{
     AccountSigningKey, AdmissionKeyError, AdmissionKeys, AuthAccount, CalloutXkey, SigningKeyCustody, TenantAccount,
     TenantSigningKeys, admission_keys_from_env,
@@ -57,4 +57,4 @@ pub use signing_key_source::{
 };
 pub use subscriber::{DenialPublisherConfig, Subscriber};
 pub use wire::AuthCalloutWireCodec;
-pub use wire::{NkeyPublic, NkeySeed, XkeyPublic};
+pub use wire::{NkeyPublic, XkeyPublic};

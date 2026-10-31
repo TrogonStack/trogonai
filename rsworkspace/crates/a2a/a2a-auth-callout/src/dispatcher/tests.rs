@@ -1,12 +1,13 @@
 use super::*;
-use crate::account_resolver::StaticAccountResolver;
 use crate::bridge_mint::{BridgeClientInfo, BridgeMintRequest};
 use crate::credentials::api_key::{ApiKey, ApiKeyEntry, ApiKeyRegistry, HmacApiKeyVerifier};
 use crate::credentials::mtls::ClientCertPem;
 use crate::credentials::oidc::BearerToken;
-use crate::jwt::{AudienceAccount, CallerId, ExternalSubject, SpiceDbPrincipal, UserJwtClaims};
+use crate::error::CredentialError;
+use crate::jwt::{
+    AudienceAccount, CallerId, ExternalSubject, SpiceDbPrincipal, UserJwtClaims, decode_nats_user_payload,
+};
 use crate::permissions::IssuedPermissions;
-use crate::signing_key_source::{KeyVersion, StaticSigningKeySource};
 use crate::wire::test_encode::signed_auth_request;
 use crate::wire::{NkeyPublic, ServerAuthRequestEnvelope};
 use nats_jwt_rs::Claims;
@@ -15,6 +16,8 @@ use nkeys::KeyPair;
 use serde_json::json;
 use trogon_identity_types::PrincipalKind;
 
+const FIXTURE_CLIENT_CERT: &str = "-----BEGIN CERT-----\n-----END CERT-----";
+
 fn encode_fixture_request(server: &KeyPair, patch: impl FnMut(&mut Claims<AuthRequest>)) -> ServerAuthRequestClaims {
     let user = KeyPair::new_user();
     let token = signed_auth_request(server, &user, patch);
@@ -22,6 +25,43 @@ fn encode_fixture_request(server: &KeyPair, patch: impl FnMut(&mut Claims<AuthRe
     ServerAuthRequestEnvelope::from_bytes(token.into_bytes())
         .decode(&server_pub, None, None)
         .unwrap()
+}
+
+#[derive(Clone)]
+struct Tenant {
+    account: TenantAccount,
+    signing_key: AccountSigningKey,
+}
+
+impl Tenant {
+    fn generate() -> Self {
+        let account = TenantAccount::parse(&KeyPair::new_account().public_key()).expect("tenant account");
+        let seed = KeyPair::new_account().seed().expect("signing key seed");
+        let signing_key = AccountSigningKey::from_seed(&seed).expect("tenant signing key");
+        Self { account, signing_key }
+    }
+
+    fn request(&self, server: &KeyPair, mut patch: impl FnMut(&mut Claims<AuthRequest>)) -> ServerAuthRequestClaims {
+        let account = self.account.as_str().to_owned();
+        encode_fixture_request(server, |claims| {
+            claims.nats.connect_opts.user = Some(account.clone());
+            claims.nats.client_info.user = account.clone();
+            patch(claims);
+        })
+    }
+
+    fn bridge_request(&self) -> ServerAuthRequestClaims {
+        ServerAuthRequestClaims::from_bridge_mint(BridgeMintRequest {
+            user_nkey: None,
+            user_jwt: None,
+            account: Some(self.account.as_str().to_owned()),
+            client_info: Some(BridgeClientInfo {
+                client_cert_pem: Some(FIXTURE_CLIENT_CERT.to_owned()),
+            }),
+            connect_opts: None,
+        })
+        .unwrap()
+    }
 }
 
 pub struct AlwaysDenyDispatcher;
@@ -86,53 +126,116 @@ fn dispatcher_with(
     oidc: Option<Arc<dyn OidcVerifier>>,
     mtls: Option<Arc<dyn MTlsVerifier>>,
     api_key: Option<Arc<dyn ApiKeyVerifier>>,
-    allowed: &[&str],
+    tenants: &[&Tenant],
 ) -> CalloutDispatcher {
-    let resolver: Arc<dyn AccountResolver> =
-        Arc::new(StaticAccountResolver::new(allowed.iter().map(|s| s.to_string())));
-    let account = KeyPair::new_account();
-    let account_seed = account.seed().expect("account seed");
-    let signing_key_source: Arc<dyn SigningKeySource> = Arc::new(
-        StaticSigningKeySource::new(&account_seed, KeyVersion::new("test").expect("test key version"))
-            .expect("static signing source"),
-    );
+    let tenant_signing_keys =
+        TenantSigningKeys::new(tenants.iter().map(|t| (t.account.clone(), t.signing_key.clone()))).unwrap();
     CalloutDispatcher::new(CalloutDispatcherConfig {
-        signing_key_source,
+        tenant_signing_keys,
         user_jwt_ttl: Duration::from_secs(60),
-        account_resolver: resolver,
         oidc,
         mtls,
         api_key,
     })
 }
 
+fn oidc_stub() -> Option<Arc<dyn OidcVerifier>> {
+    Some(Arc::new(StubOidcVerifier { sub: "user-1" }))
+}
+
+fn api_key_verifier_for(audience: AudienceAccount) -> Option<Arc<dyn ApiKeyVerifier>> {
+    let mut registry = ApiKeyRegistry::new(b"hmac-test-secret".to_vec());
+    let key = ApiKey::new("k_live_demo").unwrap();
+    registry.register(
+        &key,
+        ApiKeyEntry {
+            spicedb_principal: SpiceDbPrincipal::new("svc/demo"),
+            audience,
+            external_subject: ExternalSubject::new("svc-demo").unwrap(),
+        },
+    );
+    Some(Arc::new(HmacApiKeyVerifier::new(Arc::new(registry))))
+}
+
 #[tokio::test]
 async fn dispatch_oidc_happy_path_mints_jwt() {
     let server = KeyPair::new_account();
-    let oidc: Arc<dyn OidcVerifier> = Arc::new(StubOidcVerifier { sub: "user-1" });
-    let d = dispatcher_with(Some(oidc), None, None, &["tenant-acme"]);
-    let req = encode_fixture_request(&server, |_| {});
+    let tenant = Tenant::generate();
+    let d = dispatcher_with(oidc_stub(), None, None, &[&tenant]);
+    let req = tenant.request(&server, |_| {});
     let resp = d.dispatch(req).await.unwrap();
     assert_eq!(resp.as_str().split('.').count(), 3);
 }
 
 #[tokio::test]
+async fn dispatch_mints_a_user_the_tenant_signing_key_issues_on_behalf_of_the_tenant() {
+    let server = KeyPair::new_account();
+    let tenant = Tenant::generate();
+    let other = Tenant::generate();
+    let d = dispatcher_with(oidc_stub(), None, None, &[&other, &tenant]);
+    let user = KeyPair::new_user();
+    let user_public = user.public_key();
+    let account = tenant.account.as_str().to_owned();
+    let token = signed_auth_request(&server, &user, |claims| {
+        claims.nats.connect_opts.user = Some(account.clone());
+        claims.nats.client_info.user = account.clone();
+    });
+    let server_pub = NkeyPublic::parse(server.public_key()).unwrap();
+    let req = ServerAuthRequestEnvelope::from_bytes(token.into_bytes())
+        .decode(&server_pub, None, None)
+        .unwrap();
+
+    let minted = d.dispatch(req).await.unwrap();
+
+    let payload = decode_nats_user_payload(minted.as_str()).unwrap();
+    assert_eq!(payload["iss"], tenant.signing_key.public_key());
+    assert_eq!(payload["nats"]["issuer_account"], tenant.account.as_str());
+    assert_eq!(payload["sub"], user_public);
+    assert_eq!(payload["aud"], tenant.account.as_str());
+    assert_eq!(payload["nats"]["pub"]["allow"], json!(["a2a.v1.gateway.>"]));
+    assert_eq!(
+        payload["nats"]["sub"]["allow"],
+        json!(["_INBOX.usrstub.>", "a2a.v1.push.usrstub.>"])
+    );
+}
+
+#[tokio::test]
+async fn dispatch_rejects_a_tenant_account_without_a_signing_key() {
+    let server = KeyPair::new_account();
+    let tenant = Tenant::generate();
+    let unlisted = Tenant::generate();
+    let d = dispatcher_with(oidc_stub(), None, None, &[&tenant]);
+    let req = unlisted.request(&server, |_| {});
+    let err = d.dispatch(req).await.unwrap_err();
+    assert!(matches!(
+        err,
+        AuthCalloutError::CredentialVerification(CredentialError::UnknownAccount(requested))
+            if requested == unlisted.account.as_str()
+    ));
+}
+
+#[tokio::test]
 async fn dispatch_rejects_unknown_account() {
     let server = KeyPair::new_account();
-    let oidc: Arc<dyn OidcVerifier> = Arc::new(StubOidcVerifier { sub: "user-1" });
-    let d = dispatcher_with(Some(oidc), None, None, &["tenant-acme"]);
+    let tenant = Tenant::generate();
+    let d = dispatcher_with(oidc_stub(), None, None, &[&tenant]);
     let req = encode_fixture_request(&server, |c| {
         c.nats.connect_opts.user = Some("tenant-evil".into());
         c.nats.client_info.user = "tenant-evil".into();
     });
-    assert!(d.dispatch(req).await.is_err());
+    let err = d.dispatch(req).await.unwrap_err();
+    assert!(matches!(
+        err,
+        AuthCalloutError::CredentialVerification(CredentialError::UnknownAccount(requested))
+            if requested == "tenant-evil"
+    ));
 }
 
 #[tokio::test]
 async fn dispatch_rejects_request_without_account() {
     let server = KeyPair::new_account();
-    let oidc: Arc<dyn OidcVerifier> = Arc::new(StubOidcVerifier { sub: "user-1" });
-    let d = dispatcher_with(Some(oidc), None, None, &["tenant-acme"]);
+    let tenant = Tenant::generate();
+    let d = dispatcher_with(oidc_stub(), None, None, &[&tenant]);
     let req = encode_fixture_request(&server, |c| {
         c.nats.connect_opts.user = None;
         c.nats.client_info.user = String::new();
@@ -143,45 +246,27 @@ async fn dispatch_rejects_request_without_account() {
 #[tokio::test]
 async fn dispatch_infers_oidc_when_user_jwt_present() {
     let server = KeyPair::new_account();
-    let oidc: Arc<dyn OidcVerifier> = Arc::new(StubOidcVerifier { sub: "user-1" });
-    let d = dispatcher_with(Some(oidc), None, None, &["tenant-acme"]);
-    let req = encode_fixture_request(&server, |_| {});
+    let tenant = Tenant::generate();
+    let d = dispatcher_with(oidc_stub(), None, None, &[&tenant]);
+    let req = tenant.request(&server, |_| {});
     assert!(d.dispatch(req).await.is_ok());
 }
 
 #[tokio::test]
 async fn dispatch_mtls_when_cert_present() {
+    let tenant = Tenant::generate();
     let mtls: Arc<dyn MTlsVerifier> = Arc::new(StubMtlsVerifier);
-    let d = dispatcher_with(None, Some(mtls), None, &["tenant-acme"]);
-    let req = ServerAuthRequestClaims::from_bridge_mint(BridgeMintRequest {
-        user_nkey: None,
-        user_jwt: None,
-        account: Some("tenant-acme".into()),
-        client_info: Some(BridgeClientInfo {
-            client_cert_pem: Some("-----BEGIN CERT-----\n-----END CERT-----".into()),
-        }),
-        connect_opts: None,
-    })
-    .unwrap();
-    assert!(d.dispatch(req).await.is_ok());
+    let d = dispatcher_with(None, Some(mtls), None, &[&tenant]);
+    assert!(d.dispatch(tenant.bridge_request()).await.is_ok());
 }
 
 #[tokio::test]
 async fn dispatch_api_key_happy_path() {
     let server = KeyPair::new_account();
-    let mut registry = ApiKeyRegistry::new(b"hmac-test-secret".to_vec());
-    let key = ApiKey::new("k_live_demo").unwrap();
-    registry.register(
-        &key,
-        ApiKeyEntry {
-            spicedb_principal: SpiceDbPrincipal::new("svc/demo"),
-            audience: AudienceAccount::new("tenant-acme"),
-            external_subject: ExternalSubject::new("svc-demo").unwrap(),
-        },
-    );
-    let verifier: Arc<dyn ApiKeyVerifier> = Arc::new(HmacApiKeyVerifier::new(Arc::new(registry)));
-    let d = dispatcher_with(None, None, Some(verifier), &["tenant-acme"]);
-    let req = encode_fixture_request(&server, |c| {
+    let tenant = Tenant::generate();
+    let verifier = api_key_verifier_for(AudienceAccount::new(tenant.account.as_str()));
+    let d = dispatcher_with(None, None, verifier, &[&tenant]);
+    let req = tenant.request(&server, |c| {
         c.nats.connect_opts.jwt = None;
         c.nats.connect_opts.auth_token = Some("k_live_demo".into());
     });
@@ -191,19 +276,11 @@ async fn dispatch_api_key_happy_path() {
 #[tokio::test]
 async fn dispatch_api_key_rejects_audience_mismatch() {
     let server = KeyPair::new_account();
-    let mut registry = ApiKeyRegistry::new(b"hmac-test-secret".to_vec());
-    let key = ApiKey::new("k_live_demo").unwrap();
-    registry.register(
-        &key,
-        ApiKeyEntry {
-            spicedb_principal: SpiceDbPrincipal::new("svc/demo"),
-            audience: AudienceAccount::new("tenant-foo"),
-            external_subject: ExternalSubject::new("svc-demo").unwrap(),
-        },
-    );
-    let verifier: Arc<dyn ApiKeyVerifier> = Arc::new(HmacApiKeyVerifier::new(Arc::new(registry)));
-    let d = dispatcher_with(None, None, Some(verifier), &["tenant-acme", "tenant-foo"]);
-    let req = encode_fixture_request(&server, |c| {
+    let tenant = Tenant::generate();
+    let registered = Tenant::generate();
+    let verifier = api_key_verifier_for(AudienceAccount::new(registered.account.as_str()));
+    let d = dispatcher_with(None, None, verifier, &[&tenant, &registered]);
+    let req = tenant.request(&server, |c| {
         c.nats.connect_opts.jwt = None;
         c.nats.connect_opts.auth_token = Some("k_live_demo".into());
     });
@@ -213,9 +290,9 @@ async fn dispatch_api_key_rejects_audience_mismatch() {
 #[tokio::test]
 async fn dispatch_rejects_request_without_credential_material() {
     let server = KeyPair::new_account();
-    let oidc: Arc<dyn OidcVerifier> = Arc::new(StubOidcVerifier { sub: "user-1" });
-    let d = dispatcher_with(Some(oidc), None, None, &["tenant-acme"]);
-    let req = encode_fixture_request(&server, |c| {
+    let tenant = Tenant::generate();
+    let d = dispatcher_with(oidc_stub(), None, None, &[&tenant]);
+    let req = tenant.request(&server, |c| {
         c.nats.connect_opts.jwt = None;
         c.nats.connect_opts.pass = None;
         c.nats.connect_opts.auth_token = None;
@@ -224,65 +301,56 @@ async fn dispatch_rejects_request_without_credential_material() {
     let err = d.dispatch(req).await.unwrap_err();
     assert!(matches!(
         err,
-        AuthCalloutError::CredentialVerification(crate::error::CredentialError::InvalidRequest(_))
+        AuthCalloutError::CredentialVerification(CredentialError::InvalidRequest(_))
     ));
 }
 
 #[tokio::test]
 async fn dispatch_oidc_verifier_unavailable() {
     let server = KeyPair::new_account();
-    let d = dispatcher_with(None, None, None, &["tenant-acme"]);
-    let req = encode_fixture_request(&server, |_| {});
+    let tenant = Tenant::generate();
+    let d = dispatcher_with(None, None, None, &[&tenant]);
+    let req = tenant.request(&server, |_| {});
     let err = d.dispatch(req).await.unwrap_err();
     assert!(matches!(
         err,
-        AuthCalloutError::CredentialVerification(crate::error::CredentialError::VerifierUnavailable { scheme: "OIDC" })
+        AuthCalloutError::CredentialVerification(CredentialError::VerifierUnavailable { scheme: "OIDC" })
     ));
 }
 
 #[tokio::test]
 async fn dispatch_mtls_verifier_unavailable() {
-    let d = dispatcher_with(None, None, None, &["tenant-acme"]);
-    let req = ServerAuthRequestClaims::from_bridge_mint(BridgeMintRequest {
-        user_nkey: None,
-        user_jwt: None,
-        account: Some("tenant-acme".into()),
-        client_info: Some(BridgeClientInfo {
-            client_cert_pem: Some("-----BEGIN CERT-----\n-----END CERT-----".into()),
-        }),
-        connect_opts: None,
-    })
-    .unwrap();
-    let err = d.dispatch(req).await.unwrap_err();
+    let tenant = Tenant::generate();
+    let d = dispatcher_with(None, None, None, &[&tenant]);
+    let err = d.dispatch(tenant.bridge_request()).await.unwrap_err();
     assert!(matches!(
         err,
-        AuthCalloutError::CredentialVerification(crate::error::CredentialError::VerifierUnavailable { scheme: "mTLS" })
+        AuthCalloutError::CredentialVerification(CredentialError::VerifierUnavailable { scheme: "mTLS" })
     ));
 }
 
 #[tokio::test]
 async fn dispatch_api_key_verifier_unavailable() {
     let server = KeyPair::new_account();
-    let d = dispatcher_with(None, None, None, &["tenant-acme"]);
-    let req = encode_fixture_request(&server, |c| {
+    let tenant = Tenant::generate();
+    let d = dispatcher_with(None, None, None, &[&tenant]);
+    let req = tenant.request(&server, |c| {
         c.nats.connect_opts.jwt = None;
         c.nats.connect_opts.auth_token = Some("k_live_demo".into());
     });
     let err = d.dispatch(req).await.unwrap_err();
     assert!(matches!(
         err,
-        AuthCalloutError::CredentialVerification(crate::error::CredentialError::VerifierUnavailable {
-            scheme: "API-key"
-        })
+        AuthCalloutError::CredentialVerification(CredentialError::VerifierUnavailable { scheme: "API-key" })
     ));
 }
 
 #[tokio::test]
 async fn dispatch_oidc_via_opaque_pass() {
     let server = KeyPair::new_account();
-    let oidc: Arc<dyn OidcVerifier> = Arc::new(StubOidcVerifier { sub: "user-1" });
-    let d = dispatcher_with(Some(oidc), None, None, &["tenant-acme"]);
-    let req = encode_fixture_request(&server, |c| {
+    let tenant = Tenant::generate();
+    let d = dispatcher_with(oidc_stub(), None, None, &[&tenant]);
+    let req = tenant.request(&server, |c| {
         c.nats.connect_opts.jwt = None;
         c.nats.connect_opts.pass = Some("opaque-token".into());
     });

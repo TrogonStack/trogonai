@@ -34,25 +34,11 @@ impl CalloutXkey {
         XkeyPublic::from_xkey(&self.0)
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "nothing opens a sealed payload until the exchanges adopt the callout xkey"
-        )
-    )]
     pub(crate) fn open(&self, sealed: &[u8], sender: &XkeyPublic) -> Result<Vec<u8>, XkeyExchangeError> {
         let sender = sender.to_xkey().map_err(|_| XkeyExchangeError::InvalidCounterpart)?;
         self.0.open(sealed, &sender).map_err(|_| XkeyExchangeError::CannotOpen)
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "nothing seals a payload until the exchanges adopt the callout xkey"
-        )
-    )]
     pub(crate) fn seal(&self, plain: &[u8], recipient: &XkeyPublic) -> Result<Vec<u8>, XkeyExchangeError> {
         let recipient = recipient.to_xkey().map_err(|_| XkeyExchangeError::InvalidCounterpart)?;
         self.0

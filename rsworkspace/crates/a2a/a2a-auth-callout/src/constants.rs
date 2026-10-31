@@ -39,6 +39,8 @@ pub(crate) const RESPONSE_SIGNING_KEY_VAR: &str = "AUTH_CALLOUT_RESPONSE_SIGNING
 pub(crate) const TENANT_SIGNING_KEYS_VAR: &str = "AUTH_CALLOUT_TENANT_SIGNING_KEYS";
 pub(crate) const CALLOUT_XKEY_VAR: &str = "AUTH_CALLOUT_XKEY_SEED";
 
+pub(crate) const FULL_WILDCARD_SUBJECT: &str = ">";
+
 /// Signature algorithms an inbound OIDC ID token may assert.
 ///
 /// Scoped to the RSA family because [`crate::credentials::oidc`] only builds

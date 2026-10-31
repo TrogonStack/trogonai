@@ -5,7 +5,6 @@
 mod bridge_adapter;
 mod callout_auth_response_claims;
 mod nkey_public;
-mod nkey_seed;
 mod server_auth_request_claims;
 mod server_auth_request_envelope;
 mod wire_codec;
@@ -16,7 +15,6 @@ pub(crate) mod test_encode;
 pub use crate::admission_keys::XkeyPublic;
 pub use callout_auth_response_claims::CalloutAuthResponseClaims;
 pub use nkey_public::NkeyPublic;
-pub use nkey_seed::NkeySeed;
 pub use server_auth_request_claims::ServerAuthRequestClaims;
 pub use server_auth_request_envelope::ServerAuthRequestEnvelope;
 pub use wire_codec::AuthCalloutWireCodec;
