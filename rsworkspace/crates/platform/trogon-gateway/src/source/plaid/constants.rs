@@ -9,3 +9,4 @@ pub const KEY_REFRESH_INTERVAL: Duration = Duration::from_secs(60 * 60);
 pub const KEY_FETCH_THROTTLE_INTERVAL: Duration = Duration::from_secs(10);
 
 pub const KEY_ID_LEN_MAX: usize = 128;
+pub const ITEM_ID_LEN_MAX: usize = 128;
