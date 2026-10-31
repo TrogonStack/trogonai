@@ -117,7 +117,9 @@ pub fn hs256_token(key_id: &str, iat: u64, body: &[u8]) -> String {
 
 #[derive(Clone, Copy)]
 pub enum FakeFailure {
+    Transport,
     Unavailable,
+    Rejected,
 }
 
 #[derive(Clone, Default)]
@@ -156,7 +158,9 @@ impl PlaidKeyFetcher for FakeKeyFetcher {
         self.calls.lock().unwrap().push(key_id.as_str().to_owned());
         if let Some(failure) = *self.failure.lock().unwrap() {
             return Err(match failure {
+                FakeFailure::Transport => PlaidKeyFetchError::Transport("connection refused".into()),
                 FakeFailure::Unavailable => PlaidKeyFetchError::Unavailable(StatusCode::BAD_GATEWAY),
+                FakeFailure::Rejected => PlaidKeyFetchError::Rejected(StatusCode::BAD_REQUEST),
             });
         }
         // Suspends like a real network fetch, so concurrent resolvers queue behind the fetch gate.
