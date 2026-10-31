@@ -1,6 +1,7 @@
 use super::*;
 use crate::credentials::oidc::OidcIssuerUrl;
 use crate::signing_key_source::{KeyVersion, SigningKeyHandle, StaticSigningKeySource};
+use base64::Engine as _;
 use nkeys::KeyPair;
 use serde_json::json;
 
@@ -245,7 +246,6 @@ fn caller_id_from_minted_jwt_unreadable_payload_errors() {
 }
 
 fn unsigned_token(payload: &Value) -> String {
-    use base64::Engine as _;
     let encode =
         |value: &Value| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(serde_json::to_vec(value).unwrap());
     format!("{}.{}.sig", encode(&json!({"alg": "ed25519-nkey"})), encode(payload))
