@@ -1,24 +1,32 @@
-use async_nats::{ClientError, ServerError};
+use async_nats::{ClientError, ConnectErrorKind, ServerError};
 
 use super::*;
 use crate::credential_value::{CredentialValue, Location, NKeySeed};
+use crate::server_info::wait_for_server_info;
 use crate::test_support::CoreTestServer;
 use crate::tls::ClientCertificate;
 use trogon_std::env::InMemoryEnv;
 use trogon_std::log_capture::{CapturedEvents, LevelFilter};
+use trogon_std::secret_string::SecretString;
 
 const TLS_DISABLED_WARNING: &str = "NATS TLS is disabled, which is only for tests and local debugging";
 const PLAINTEXT_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+const FIRST_DIAL_DEADLINE: Duration = Duration::from_secs(1);
+const SERVER_INFO_POLL_INTERVAL: Duration = Duration::from_millis(10);
+const REFUSED_DIAL_TIMEOUT: Duration = Duration::from_secs(1);
+const FAIL_FAST_DEADLINE: Duration = Duration::from_secs(5);
+const REFUSING_SERVER: &str = "127.0.0.1:1";
+const SERVER_TOKEN: &str = "server-token";
+const OTHER_TOKEN: &str = "other-token";
 
 #[test]
-fn test_reconnect_delay_starts_at_one_second() {
-    assert_eq!(reconnect_delay(0).as_secs(), 1);
+fn test_reconnect_delay_skips_the_wait_before_the_first_attempt() {
+    assert_eq!(reconnect_delay(0), Duration::ZERO);
+    assert_eq!(reconnect_delay(1), Duration::ZERO);
 }
 
 #[test]
 fn test_reconnect_delay_exponential_backoff() {
-    assert_eq!(reconnect_delay(0).as_secs(), 1);
-    assert_eq!(reconnect_delay(1).as_secs(), 2);
     assert_eq!(reconnect_delay(2).as_secs(), 4);
     assert_eq!(reconnect_delay(3).as_secs(), 8);
     assert_eq!(reconnect_delay(4).as_secs(), 16);
@@ -393,15 +401,24 @@ fn connect_error_display_invalid_setting() {
     assert_eq!(err.to_string(), "Invalid NATS_TOKEN: scheme `op` is not supported");
 }
 
-async fn connect_without_retry(env: &InMemoryEnv) -> Result<Client, async_nats::ConnectError> {
-    install_default_crypto_provider();
+async fn connect_once_from(env: &InMemoryEnv) -> Result<Client, ConnectError> {
     let config = NatsConfig::from_env(env);
-    build_options(&config, env)
-        .await
-        .unwrap()
-        .connection_timeout(PLAINTEXT_CONNECT_TIMEOUT)
-        .connect(&config.servers)
-        .await
+    connect_once(&config, config.auth.clone(), PLAINTEXT_CONNECT_TIMEOUT).await
+}
+
+fn connection_failure(err: ConnectError) -> async_nats::ConnectError {
+    match err {
+        ConnectError::ConnectionFailed { error, .. } => error,
+        other => panic!("expected a connection failure, got {other:?}"),
+    }
+}
+
+fn token(raw: &str) -> NatsAuth {
+    NatsAuth::Token(CredentialValue::Literal(SecretString::new(raw).unwrap()))
+}
+
+fn token_server_config(server: &CoreTestServer, auth: NatsAuth) -> NatsConfig {
+    NatsConfig::new(vec![server.address().to_owned()], auth).with_tls(NatsTls::Disabled)
 }
 
 fn handshake_error(err: &async_nats::ConnectError) -> Option<&async_nats::rustls::Error> {
@@ -416,7 +433,7 @@ async fn default_settings_cannot_connect_to_a_plaintext_server() {
     let server = CoreTestServer::start().await;
     let env = env_with(&[("NATS_URL", server.address())]);
 
-    let err = connect_without_retry(&env).await.unwrap_err();
+    let err = connection_failure(connect_once_from(&env).await.unwrap_err());
 
     assert!(
         matches!(
@@ -432,9 +449,97 @@ async fn disabling_tls_connects_to_a_plaintext_server() {
     let server = CoreTestServer::start().await;
     let env = env_with(&[("NATS_URL", server.address()), ("NATS_TLS_DISABLED", "true")]);
 
-    let client = connect_without_retry(&env).await.unwrap();
+    let client = connect_once_from(&env).await.unwrap();
 
     client.flush().await.unwrap();
+}
+
+#[tokio::test]
+async fn connect_once_reports_a_tls_misconfiguration_without_connecting() {
+    let env = env_with(&[("NATS_TLS_DISABLED", "off")]);
+
+    let err = connect_once_from(&env).await.unwrap_err();
+
+    assert!(matches!(
+        err,
+        ConnectError::InvalidSetting {
+            setting: "NATS_TLS_DISABLED",
+            error: SettingError::UnrecognizedValue { .. }
+        }
+    ));
+}
+
+#[tokio::test]
+async fn connect_once_fails_after_one_pass_instead_of_retrying() {
+    let config = NatsConfig::from_url(REFUSING_SERVER).with_tls(NatsTls::Disabled);
+
+    let err = tokio::time::timeout(
+        FAIL_FAST_DEADLINE,
+        connect_once(&config, NatsAuth::None, REFUSED_DIAL_TIMEOUT),
+    )
+    .await
+    .expect("connect_once gives up after one pass over the servers")
+    .unwrap_err();
+
+    assert!(matches!(err, ConnectError::ConnectionFailed { .. }), "{err:?}");
+}
+
+#[tokio::test]
+async fn connect_once_authenticates_with_the_auth_it_is_given() {
+    let server = CoreTestServer::start_requiring_token(SERVER_TOKEN).await;
+    let config = token_server_config(&server, token(OTHER_TOKEN));
+
+    let client = connect_once(&config, token(SERVER_TOKEN), PLAINTEXT_CONNECT_TIMEOUT)
+        .await
+        .unwrap();
+
+    client.flush().await.unwrap();
+}
+
+#[tokio::test]
+async fn connect_once_returns_a_rejected_token_as_an_authorization_violation() {
+    let server = CoreTestServer::start_requiring_token(SERVER_TOKEN).await;
+    let config = token_server_config(&server, token(SERVER_TOKEN));
+
+    let err = connect_once(&config, token(OTHER_TOKEN), PLAINTEXT_CONNECT_TIMEOUT)
+        .await
+        .unwrap_err();
+
+    assert_eq!(connection_failure(err).kind(), ConnectErrorKind::AuthorizationViolation);
+}
+
+#[tokio::test]
+async fn connect_once_rejects_an_empty_server_list() {
+    let config = NatsConfig::new(Vec::new(), NatsAuth::None);
+
+    let err = connect_once(&config, NatsAuth::None, PLAINTEXT_CONNECT_TIMEOUT)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, ConnectError::NoServers), "{err:?}");
+}
+
+#[tokio::test]
+async fn connect_rejects_a_server_list_that_names_no_server() {
+    let env = env_with(&[("NATS_URL", " , ")]);
+
+    let err = connect(&NatsConfig::from_env(&env), PLAINTEXT_CONNECT_TIMEOUT)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, ConnectError::NoServers), "{err:?}");
+}
+
+#[tokio::test]
+async fn connect_dials_the_first_server_without_waiting() {
+    let server = CoreTestServer::start().await;
+    let config = NatsConfig::from_url(server.address()).with_tls(NatsTls::Disabled);
+
+    let client = connect(&config, PLAINTEXT_CONNECT_TIMEOUT).await.unwrap();
+
+    wait_for_server_info(&client, FIRST_DIAL_DEADLINE, SERVER_INFO_POLL_INTERVAL)
+        .await
+        .unwrap();
 }
 
 fn tls_disabled_warnings(events: &CapturedEvents) -> usize {

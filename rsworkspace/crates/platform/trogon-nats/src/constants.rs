@@ -16,6 +16,9 @@ pub const DEFAULT_NATS_URL: &str = "localhost:4222";
 
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 pub const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(30);
+/// The number async-nats gives the first dial, both at startup and after every
+/// disconnect, so that dial goes out without waiting.
+pub(crate) const FIRST_CONNECT_ATTEMPT: usize = 1;
 pub const MIN_SERVER_INFO_POLL_INTERVAL: Duration = Duration::from_millis(1);
 
 pub const REQ_ID_HEADER: &str = "Trogon-Req-Id";

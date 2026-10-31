@@ -1,7 +1,8 @@
 use crate::auth::{NatsAuth, NatsConfig};
 use crate::constants::{
     ENV_NATS_CA, ENV_NATS_CERT, ENV_NATS_CREDS, ENV_NATS_JWT, ENV_NATS_KEY, ENV_NATS_NKEY, ENV_NATS_PASSWORD,
-    ENV_NATS_SEED, ENV_NATS_TLS_DISABLED, ENV_NATS_TOKEN, MAX_RECONNECT_DELAY, TLS_DISABLED_VALUES,
+    ENV_NATS_SEED, ENV_NATS_TLS_DISABLED, ENV_NATS_TOKEN, FIRST_CONNECT_ATTEMPT, MAX_RECONNECT_DELAY,
+    TLS_DISABLED_VALUES,
 };
 use crate::credential_value::{CredentialValue, SettingError};
 use crate::tls::{NatsTls, TlsMisconfiguration};
@@ -30,9 +31,14 @@ pub enum ConnectError {
         #[source]
         error: async_nats::ConnectError,
     },
+    #[error("No NATS servers to connect to")]
+    NoServers,
 }
 
 fn reconnect_delay(attempts: usize) -> Duration {
+    if attempts <= FIRST_CONNECT_ATTEMPT {
+        return Duration::ZERO;
+    }
     let delay = Duration::from_secs(std::cmp::min(
         MAX_RECONNECT_DELAY.as_secs(),
         2u64.saturating_pow(attempts as u32),
@@ -170,9 +176,11 @@ fn invalid_tls_setting(misconfiguration: &TlsMisconfiguration) -> ConnectError {
     }
 }
 
-#[instrument(name = NATS_CONNECT, skip(config), fields(servers = ?config.servers, auth = %config.auth.description(), timeout_secs = ?connection_timeout.as_secs()))]
-pub async fn connect(config: &NatsConfig, connection_timeout: Duration) -> Result<Client, ConnectError> {
+async fn prepare(config: &NatsConfig) -> Result<ConnectOptions, ConnectError> {
     install_default_crypto_provider();
+    if config.servers.is_empty() {
+        return Err(ConnectError::NoServers);
+    }
     let tls = tls(config)?;
     info!(
         servers = ?config.servers,
@@ -187,12 +195,11 @@ pub async fn connect(config: &NatsConfig, connection_timeout: Duration) -> Resul
         );
     }
 
-    let opts = build_options(config, &SystemEnv).await?;
-    let connect_result = apply_reconnect_options(opts, connection_timeout)
-        .connect(&config.servers)
-        .await;
+    build_options(config, &SystemEnv).await
+}
 
-    match connect_result {
+fn connected(config: &NatsConfig, result: Result<Client, async_nats::ConnectError>) -> Result<Client, ConnectError> {
+    match result {
         Ok(client) => {
             info!(
                 servers = ?config.servers,
@@ -214,6 +221,38 @@ pub async fn connect(config: &NatsConfig, connection_timeout: Duration) -> Resul
             })
         }
     }
+}
+
+/// Returns before any server answers and keeps dialing, then reconnecting, in
+/// the background, so it only fails on settings it cannot use.
+#[instrument(name = NATS_CONNECT, skip(config), fields(servers = ?config.servers, auth = %config.auth.description(), timeout_secs = ?connection_timeout.as_secs()))]
+pub async fn connect(config: &NatsConfig, connection_timeout: Duration) -> Result<Client, ConnectError> {
+    let opts = prepare(config).await?;
+    let result = apply_reconnect_options(opts, connection_timeout)
+        .connect(&config.servers)
+        .await;
+    connected(config, result)
+}
+
+/// Makes a single pass over the servers with `auth` in place of the configured
+/// authentication and fails once that pass does, for a connection that serves
+/// one request. TLS follows the same settings as [`connect`].
+///
+/// Give a caller's token as [`CredentialValue::Literal`] so it is never read as
+/// a `file://` or `env://` reference.
+#[instrument(name = NATS_CONNECT, skip(config, auth), fields(servers = ?config.servers, auth = %auth.description(), timeout_secs = ?connection_timeout.as_secs()))]
+pub async fn connect_once(
+    config: &NatsConfig,
+    auth: NatsAuth,
+    connection_timeout: Duration,
+) -> Result<Client, ConnectError> {
+    let config = NatsConfig { auth, ..config.clone() };
+    let opts = prepare(&config).await?;
+    let result = opts
+        .connection_timeout(connection_timeout)
+        .connect(&config.servers)
+        .await;
+    connected(&config, result)
 }
 
 #[cfg(test)]
