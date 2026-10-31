@@ -1,12 +1,17 @@
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use jsonwebtoken::{Algorithm, EncodingKey, Header};
 use p256::ecdsa::SigningKey;
 use p256::pkcs8::EncodePrivateKey;
+use reqwest::StatusCode;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
 use super::PlaidKeyId;
+use super::key_fetcher::{PlaidKeyFetchError, PlaidKeyFetcher};
 use super::verification_key::{PlaidJwk, PlaidVerificationKey};
 
 pub struct TestKeyPair {
@@ -108,4 +113,59 @@ pub fn hs256_token(key_id: &str, iat: u64, body: &[u8]) -> String {
         &EncodingKey::from_secret(b"not-the-plaid-key"),
     )
     .unwrap()
+}
+
+#[derive(Clone, Copy)]
+pub enum FakeFailure {
+    Unavailable,
+}
+
+#[derive(Clone, Default)]
+pub struct FakeKeyFetcher {
+    keys: Arc<Mutex<HashMap<String, PlaidVerificationKey>>>,
+    calls: Arc<Mutex<Vec<String>>>,
+    failure: Arc<Mutex<Option<FakeFailure>>>,
+}
+
+impl FakeKeyFetcher {
+    pub fn with_key(self, key_id: &str, key: PlaidVerificationKey) -> Self {
+        self.insert_key(key_id, key);
+        self
+    }
+
+    pub fn failing(self, failure: FakeFailure) -> Self {
+        self.fail_with(failure);
+        self
+    }
+
+    pub fn insert_key(&self, key_id: &str, key: PlaidVerificationKey) {
+        self.keys.lock().unwrap().insert(key_id.to_owned(), key);
+    }
+
+    pub fn fail_with(&self, failure: FakeFailure) {
+        *self.failure.lock().unwrap() = Some(failure);
+    }
+
+    pub fn calls(&self) -> Vec<String> {
+        self.calls.lock().unwrap().clone()
+    }
+}
+
+impl PlaidKeyFetcher for FakeKeyFetcher {
+    async fn fetch(&self, key_id: &PlaidKeyId) -> Result<PlaidVerificationKey, PlaidKeyFetchError> {
+        self.calls.lock().unwrap().push(key_id.as_str().to_owned());
+        if let Some(failure) = *self.failure.lock().unwrap() {
+            return Err(match failure {
+                FakeFailure::Unavailable => PlaidKeyFetchError::Unavailable(StatusCode::BAD_GATEWAY),
+            });
+        }
+        // Suspends like a real network fetch, so concurrent resolvers queue behind the fetch gate.
+        tokio::task::yield_now().await;
+        self.keys
+            .lock()
+            .unwrap()
+            .get(key_id.as_str())
+            .cloned()
+            .ok_or(PlaidKeyFetchError::Rejected(StatusCode::BAD_REQUEST))
+    }
 }
