@@ -108,7 +108,7 @@ scheduler's Postgres projection takes a caller-built `PgPool`
 and the compose OpenBao reaches its Postgres with `sslmode=disable`
 (`compose.yml:108`).
 
-**What this builds on.** ADR#0015 already prefers rustls with aws-lc-rs, and
+**What this builds on.** [ADR#0015](./0015-rust-tls-library.md) already prefers rustls with aws-lc-rs, and
 prefers terminating TLS at the deployment edge with in-process TLS as the
 exception. [ADR#0033](./0033-key-custody-product-model.md) puts the NATS
 operator and account signing seeds, the callout's signing keys, and the NATS
@@ -202,7 +202,7 @@ placement and `allowed_accounts` (`server/auth_callout.go`, and
 token position for services and streams alike (`checkAuth` in
 `server/accounts.go`), renaming imports with `local_subject`
 (`v2/imports.go`), `default_sentinel` (`server/auth.go`), and in-place
-JetStream key rotation (`server/jetstream.go`, `server/filestore.go`). ADR#0042
+JetStream key rotation (`server/jetstream.go`, `server/filestore.go`). [ADR#0042](./0042-nats-trace-context-and-message-path-tracing.md)
 already makes 2.14 the minimum server version.
 
 ### 3. Inside PLATFORM, the tenant token is the importing account's public key
@@ -216,18 +216,18 @@ token at that position is the importing account's own public key (`checkAuth`
 in `server/accounts.go`).
 
 Subjects inside a tenant account therefore stay bare: the prefix is the
-protocol alone, as ADR#0055 intends when the account is the boundary. Inside
-`PLATFORM`, the `{tenant}` component of ADR#0055's `[{tenant}.]{protocol}`
+protocol alone, as [ADR#0055](./0055-nats-subject-design-jsonrpc-bindings.md) intends when the account is the boundary. Inside
+`PLATFORM`, the `{tenant}` component of [ADR#0055](./0055-nats-subject-design-jsonrpc-bindings.md)'s `[{tenant}.]{protocol}`
 prefix is the tenant's account public key. A request that arrives through a
 service import carries a key the server authorized only for the account it
 names, so a `PLATFORM` responder reads the tenant from the subject and no
 tenant can present another tenant's key. A message that `PLATFORM` publishes
 for a tenant can be imported only by the account whose key leads its subject.
 
-This amends ADR#0055. Inside `PLATFORM`, `{tenant}` is the 56-character
+This amends [ADR#0055](./0055-nats-subject-design-jsonrpc-bindings.md). Inside `PLATFORM`, `{tenant}` is the 56-character
 uppercase account public key, exempt from the lower_snake token rule in the
 same way as the escape encoding. It costs 57 of the 256 bytes and one of the
-16 tokens in ADR#0055's budget and keeps the prefix inside its 128-byte limit.
+16 tokens in [ADR#0055](./0055-nats-subject-design-jsonrpc-bindings.md)'s budget and keeps the prefix inside its 128-byte limit.
 The slug form of `{tenant}` remains for single-account test fixtures. A
 decider in `PLATFORM` that serves several tenants builds its
 [ADR#0027](./0027-decider-multi-tenancy-primitive.md) `SubjectScope` from the
@@ -247,9 +247,9 @@ the step that issues those users and their allow lists. The callout service
 connects as the `AUTH` user named in `auth_users`, which the server exempts
 from the callout, and the secrets service connects as a `PLATFORM` workload.
 Both therefore use deployment-provisioned credentials that are not subject to
-callout admission, which is the topology ADR#0033 names as the precondition
+callout admission, which is the topology [ADR#0033](./0033-key-custody-product-model.md) names as the precondition
 for moving the callout's signing keys behind `KeyManagement`. The keys stay
-deployment-provisioned until that ordering is proven, as ADR#0033 requires.
+deployment-provisioned until that ordering is proven, as [ADR#0033](./0033-key-custody-product-model.md) requires.
 
 Every other client is a tenant caller and enters only through the callout. It
 connects as the `AUTH` sentinel, or with no NATS user JWT on servers that set
@@ -279,7 +279,7 @@ when nothing else is presented.
 No static `authorization {}` users or passwords exist outside tests, and
 application code never connects to `SYS`.
 
-ADR#0033 describes the callout's signing keys as the keys "that admit platform
+[ADR#0033](./0033-key-custody-product-model.md) describes the callout's signing keys as the keys "that admit platform
 workloads to NATS". Under this decision `PLATFORM` credentials admit platform
 workloads and the callout's keys admit tenant callers. The keys remain
 platform boot keys under that ADR's rule.
@@ -327,7 +327,7 @@ monitor does not ask for client certificates (`getMonitoringTLSConfig` in
 network. Parties outside it reach the platform through its HTTPS edges, such
 as `trogon-gateway` and `a2a-bridge`.
 
-An agent on ADR#0017's NATS binding is a direct NATS client, and it is
+An agent on [ADR#0017](./0017-aauth-agent-authentication.md)'s NATS binding is a direct NATS client, and it is
 admitted like every other tenant caller: it connects from the platform
 network with a client certificate from the platform CA, and the callout
 places it in its tenant account with its own allow lists. Whether any hop
@@ -349,7 +349,7 @@ through the environment, which the configuration references as
 `key: $JS_KEY`, following [ADR#0007](./0007-configuration-sources.md)'s rule
 that secrets come from the environment or the deployment rather than from
 configuration files. OpenBao does not depend on NATS, so this adds no cycle to
-ADR#0033's boot chain. A JetStream server cannot restart while OpenBao is
+[ADR#0033](./0033-key-custody-product-model.md)'s boot chain. A JetStream server cannot restart while OpenBao is
 unreachable, which is the same restart dependency
 [ADR#0052](./0052-cloud-kms-production-seal.md) accepts for OpenBao's own
 seal.
@@ -388,13 +388,13 @@ crates, the plaintext compose NATS server
 (`devops/docker/compose/compose.yml:4-18`), and the "allow plaintext" framing
 wherever it appears.
 
-It amends ADR#0015: the workspace has one rustls provider, aws-lc-rs, and
+It amends [ADR#0015](./0015-rust-tls-library.md): the workspace has one rustls provider, aws-lc-rs, and
 in-process TLS is the norm for NATS clients rather than the exception. It
-amends ADR#0055: inside `PLATFORM`, `{tenant}` is the account public key,
-exempt from the lower_snake rule. It refines ADR#0033's boot-key rule as the
+amends [ADR#0055](./0055-nats-subject-design-jsonrpc-bindings.md): inside `PLATFORM`, `{tenant}` is the account public key,
+exempt from the lower_snake rule. It refines [ADR#0033](./0033-key-custody-product-model.md)'s boot-key rule as the
 admission decision above describes.
 
-Under ADR#0023, callout-minted tenant JWTs still authenticate tenant callers
+Under [ADR#0023](./0023-secret-management-and-key-custody-direction.md), callout-minted tenant JWTs still authenticate tenant callers
 of the secrets service, and the tenant still comes from the authenticated
 connection, now through the account key the server authorized in the subject.
 Platform consumers connect as `PLATFORM` users, and how they resolve secrets
@@ -427,7 +427,7 @@ is onboarded.
 
 **One shared account with `{tenant}` prefixes in production.** Isolation
 would rest on permissions alone, so one permission mistake would cross
-tenants. ADR#0055 already makes the account the primary boundary.
+tenants. [ADR#0055](./0055-nats-subject-design-jsonrpc-bindings.md) already makes the account the primary boundary.
 
 **A scoped callout signing key.** A scope would cap what the callout can mint
 for a tenant, but nats-server would then take each user's permissions from the
@@ -438,28 +438,28 @@ template tags. That trade is not taken now.
 daemon such as Basil keeps the operator, account and callout signing seeds in
 its backend, admits a caller by the kernel's uid of the socket peer, and signs
 user JWTs on request, so no service process ever holds a seed. The custody
-shape is the one ADR#0023 and ADR#0033 already chose, with the secrets service
+shape is the one [ADR#0023](./0023-secret-management-and-key-custody-direction.md) and [ADR#0033](./0033-key-custody-product-model.md) already chose, with the secrets service
 in the broker's place; what the daemon adds is a uid as the admission
 credential and a second policy language in front of the same OpenBao. A uid
 identifies nothing across containers, which is the only deployment this
 repository ships, and the project is pre-1.0 with an unfrozen API. The
 in-place signing itself is kept as the target: once Decision 4's ordering
 holds, the callout signs through `KeyManagement` and holds no seed, which is
-the evolution ADR#0033 leaves open.
+the evolution [ADR#0033](./0033-key-custody-product-model.md) leaves open.
 
 **Rotating the JetStream key by migrating streams.** Copying every stream into
 a new store is unnecessary when the server converts in place with `prev_key`.
 
 ## Consequences
 
-- The ADR#0015 amendment lands before anything turns TLS on, so no binary can
+- The [ADR#0015](./0015-rust-tls-library.md) amendment lands before anything turns TLS on, so no binary can
   hit the provider panic. The TLS default in `trogon-nats`, the a2a migration
   and the compose topology then land together, so no environment needs
   `NATS_TLS_DISABLED` as a stopgap.
 - The operator signing key and the account signing keys, the callout signing
   key among them, live in a platform-operator OpenBao mount that deployment
   tooling reads outside the `SecretStore` and `KeyManagement` ports, as
-  ADR#0033 requires of boot keys. The operator identity key stays offline.
+  [ADR#0033](./0033-key-custody-product-model.md) requires of boot keys. The operator identity key stays offline.
 - JetStream servers gain a start dependency on OpenBao for their store key.
 - nsc becomes a bootstrap dependency of the dev stack and of deployment
   tooling.
@@ -484,7 +484,7 @@ a new store is unnecessary when the server converts in place with `prev_key`.
   provider themselves, and any other library path that builds a rustls
   configuration from the process default uses the same idempotent install as
   `trogon_nats::connect`.
-- Subjects inside `PLATFORM` spend 57 bytes and one token of ADR#0055's
+- Subjects inside `PLATFORM` spend 57 bytes and one token of [ADR#0055](./0055-nats-subject-design-jsonrpc-bindings.md)'s
   budget on the account key.
 - An import rewrites the subject between the exporting and the importing
   account, which is the subject rewriting that
