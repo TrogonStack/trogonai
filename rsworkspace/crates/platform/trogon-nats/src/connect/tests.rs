@@ -13,8 +13,9 @@ use trogon_std::secret_string::SecretString;
 
 const TLS_DISABLED_WARNING: &str = "NATS TLS is disabled, which is only for tests and local debugging";
 const CONNECT_FAILURE_WARNING: &str = "Failed to connect to NATS";
+const CONNECTOR_DIAL_EVENT: &str = "attempting connection";
 const PLAINTEXT_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
-const FIRST_DIAL_DEADLINE: Duration = Duration::from_secs(1);
+const SERVER_INFO_DEADLINE: Duration = Duration::from_secs(30);
 const SERVER_INFO_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const REFUSED_DIAL_TIMEOUT: Duration = Duration::from_secs(1);
 const FAIL_FAST_DEADLINE: Duration = Duration::from_secs(5);
@@ -632,12 +633,24 @@ async fn connect_rejects_a_server_list_that_names_no_server() {
 async fn connect_dials_the_first_server_without_waiting() {
     let server = CoreTestServer::start().await;
     let config = NatsConfig::from_url(server.address()).with_tls(NatsTls::Disabled);
+    let _registered = keep_another_subscriber_registered(LevelFilter::DEBUG);
+    let events = CapturedEvents::new();
+    let _guard = events.install(LevelFilter::DEBUG);
 
     let client = connect(&config, PLAINTEXT_CONNECT_TIMEOUT).await.unwrap();
 
-    wait_for_server_info(&client, FIRST_DIAL_DEADLINE, SERVER_INFO_POLL_INTERVAL)
+    wait_for_server_info(&client, SERVER_INFO_DEADLINE, SERVER_INFO_POLL_INTERVAL)
         .await
         .unwrap();
+    let first_dial = events
+        .events()
+        .into_iter()
+        .find(|event| event.message() == Some(CONNECTOR_DIAL_EVENT))
+        .expect("the connector reports the dial it makes");
+    let first_attempt = FIRST_CONNECT_ATTEMPT.to_string();
+    assert_eq!(first_dial.field("attempt"), Some(first_attempt.as_str()));
+    assert_eq!(first_dial.field("delay_ms"), Some("0"));
+    assert_eq!(reconnect_delay(FIRST_CONNECT_ATTEMPT), Duration::ZERO);
 }
 
 fn tls_disabled_warnings(events: &CapturedEvents) -> usize {
