@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use a2a_auth_callout::dispatcher::AuthDispatcher;
 use a2a_auth_callout::wire::ServerAuthRequestClaims;
-use a2a_auth_callout::{BridgeAuthScheme, BridgeConnectOpts, BridgeMintRequest, BridgeMintResponse};
+use a2a_auth_callout::{AuthCalloutError, BridgeMintRequest, BridgeMintResponse, CalloutXkey};
 use async_trait::async_trait;
 
 use super::{AuthMintWire, BytesPayload};
@@ -48,14 +48,20 @@ impl BridgeTenantAccount {
 pub struct InProcessCalloutDispatcherMintWire {
     dispatcher: Arc<dyn AuthDispatcher>,
     tenant: BridgeTenantAccount,
+    callout_xkey: Option<CalloutXkey>,
     mint_count: Arc<AtomicUsize>,
 }
 
 impl InProcessCalloutDispatcherMintWire {
-    pub fn new(dispatcher: Arc<dyn AuthDispatcher>, tenant: BridgeTenantAccount) -> Self {
+    pub fn new(
+        dispatcher: Arc<dyn AuthDispatcher>,
+        tenant: BridgeTenantAccount,
+        callout_xkey: Option<CalloutXkey>,
+    ) -> Self {
         Self {
             dispatcher,
             tenant,
+            callout_xkey,
             mint_count: Arc::new(AtomicUsize::new(0)),
         }
     }
@@ -75,14 +81,11 @@ impl AuthMintWire for InProcessCalloutDispatcherMintWire {
         if request.account.is_none() {
             request.account = Some(self.tenant.as_str().to_owned());
         }
-        if request.connect_opts.is_none() && request.user_jwt.is_some() {
-            request.connect_opts = Some(BridgeConnectOpts {
-                auth_scheme: Some(BridgeAuthScheme::Oidc),
-                api_key: None,
-            });
-        }
         let claims =
-            ServerAuthRequestClaims::from_bridge_mint(request).map_err(|e| BridgeError::Mint(e.to_string()))?;
+            ServerAuthRequestClaims::from_bridge_mint(request, self.callout_xkey.as_ref()).map_err(|e| match e {
+                AuthCalloutError::BridgeCredential(refused) => BridgeError::MintCredential(refused),
+                other => BridgeError::Mint(other.to_string()),
+            })?;
         let user_jwt = self
             .dispatcher
             .dispatch(claims)
@@ -93,6 +96,11 @@ impl AuthMintWire for InProcessCalloutDispatcherMintWire {
         };
         serde_json::to_vec(&response).map_err(|e: serde_json::Error| BridgeError::Serialize(e))
     }
+}
+
+#[cfg(test)]
+pub(crate) fn harness_callout_xkey() -> CalloutXkey {
+    CalloutXkey::from_seed(&nkeys::XKey::new().seed().expect("harness xkey seed")).expect("harness callout xkey")
 }
 
 #[cfg(test)]

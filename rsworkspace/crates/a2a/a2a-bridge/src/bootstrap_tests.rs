@@ -3,7 +3,8 @@ use std::io::Write;
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
-use a2a_auth_callout::{BridgeMintRequest, BridgeMintResponse};
+use a2a_auth_callout::admission_keys::CalloutXkeyError;
+use a2a_auth_callout::{BridgeCredential, BridgeCredentialError, BridgeMintRequest, BridgeMintResponse, CalloutXkey};
 use a2a_bridge::{AuthCalloutClient, CallerHttpsAuth, StubAuthCalloutMint};
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
@@ -47,8 +48,20 @@ enum TestError {
     Utf8(#[from] std::string::FromUtf8Error),
     #[error(transparent)]
     Router(#[from] Infallible),
+    #[error(transparent)]
+    Nkeys(#[from] nkeys::error::Error),
+    #[error(transparent)]
+    CalloutXkey(#[from] CalloutXkeyError),
+    #[error(transparent)]
+    SealedCredential(#[from] BridgeCredentialError),
     #[error("request or reply subject missing")]
     MissingMessage,
+    #[error("mint request carries no sealed credential")]
+    MissingSealedCredential,
+}
+
+fn callout_xkey() -> Result<CalloutXkey, TestError> {
+    Ok(CalloutXkey::from_seed(&nkeys::XKey::new().seed()?)?)
 }
 
 #[derive(Clone, Default)]
@@ -215,6 +228,40 @@ async fn stub_bootstrap_returns_an_explicit_authentication_failure() -> Result<(
     Ok(())
 }
 
+#[test]
+fn callout_xkey_input_is_optional_but_must_be_a_curve_public_key_when_set() -> Result<(), TestError> {
+    let env = InMemoryEnv::new();
+    assert!(resolve_callout_xkey(&env)?.is_none());
+    env.set("AUTH_CALLOUT_XKEY_PUBLIC", "   ");
+    assert!(resolve_callout_xkey(&env)?.is_none());
+    let callout = callout_xkey()?;
+    env.set(
+        "AUTH_CALLOUT_XKEY_PUBLIC",
+        format!(" {} ", callout.public_key().as_str()),
+    );
+    assert_eq!(resolve_callout_xkey(&env)?, Some(callout.public_key()));
+    env.set("AUTH_CALLOUT_XKEY_PUBLIC", "not-an-xkey");
+    assert!(matches!(
+        resolve_callout_xkey(&env),
+        Err(BootstrapError::CalloutXkey(_))
+    ));
+    Ok(())
+}
+
+#[tokio::test]
+async fn nats_bootstrap_refuses_a_malformed_callout_xkey_before_connecting() -> Result<(), TestError> {
+    let env = InMemoryEnv::new();
+    env.set("AUTH_CALLOUT_XKEY_PUBLIC", "not-an-xkey");
+    let result = bootstrap_nats_transport(
+        &env,
+        &NatsConfig::from_url("invalid://endpoint"),
+        resolve_a2a_prefix(&env)?,
+    )
+    .await;
+    assert!(matches!(result, Err(BootstrapError::CalloutXkey(_))));
+    Ok(())
+}
+
 #[tokio::test]
 async fn nats_bootstrap_reports_connection_failure() -> Result<(), TestError> {
     let env = InMemoryEnv::new();
@@ -256,6 +303,12 @@ async fn bootstrap_diagnostics_reach_the_log_facade_before_tracing_initializatio
     assert!(stub.is_some_and(|record| record.level == LogLevel::Warn
         && record.message.contains("nats_url=nats://stub:4222")
         && record.message.contains("prefix=tenant")));
+    let unsealed = records
+        .iter()
+        .find(|record| record.message.contains("no callout xkey is configured"));
+    assert!(unsealed.is_some_and(
+        |record| record.level == LogLevel::Warn && record.message.contains("AUTH_CALLOUT_XKEY_PUBLIC")
+    ));
     let nats = records
         .iter()
         .find(|record| record.message.contains("a2a-bridge NATS transports wired"));
@@ -285,6 +338,7 @@ async fn nats_bootstrap_wires_mint_subject_tenant_and_gateway_namespace() -> Res
         Duration::from_secs(5),
     )
     .await?;
+    let callout = callout_xkey()?;
     let caller = CallerHttpsAuth::new("Bearer fixture");
     let jwt = StubAuthCalloutMint::fixture()?.mint(&caller).await?;
     let mint_reply = serde_json::to_vec(&BridgeMintResponse {
@@ -303,6 +357,7 @@ async fn nats_bootstrap_wires_mint_subject_tenant_and_gateway_namespace() -> Res
         env.set("BRIDGE_CONNECT_TIMEOUT_SECS", "2");
         env.set("BRIDGE_AUTH_MINT_TIMEOUT_SECS", "10");
         env.set("BRIDGE_GATEWAY_RPC_TIMEOUT_SECS", "2");
+        env.set("AUTH_CALLOUT_XKEY_PUBLIC", callout.public_key().as_str());
         if configured_subject == Some("  custom.mint  ") {
             env.set("NATS_USER", "fixture");
             env.set("NATS_PASSWORD", "fixture");
@@ -325,7 +380,11 @@ async fn nats_bootstrap_wires_mint_subject_tenant_and_gateway_namespace() -> Res
                 .await?
                 .ok_or(TestError::MissingMessage)?;
             let envelope: BridgeMintRequest = serde_json::from_slice(&request.payload)?;
-            assert_eq!(envelope.user_jwt.as_deref(), Some("caller-fixture"));
+            let sealed = envelope.sealed_credential.ok_or(TestError::MissingSealedCredential)?;
+            assert!(matches!(
+                sealed.open(&callout)?,
+                BridgeCredential::BearerToken(token) if token.as_str() == "caller-fixture"
+            ));
             assert_eq!(envelope.account.as_deref(), account.filter(|value| !value.is_empty()));
             client
                 .publish(
@@ -394,6 +453,7 @@ async fn nats_bootstrap_bounds_caller_connections_by_the_connect_timeout_not_the
     let mut mint = client.subscribe("a2a.bridge.auth.callout.request").await?;
     let mut gateway = client.subscribe("a2a.v1.gateway.planner.>").await?;
     client.flush().await?;
+    let callout = callout_xkey()?;
 
     for (body, relayed_connections, failure) in [
         (
@@ -411,6 +471,7 @@ async fn nats_bootstrap_bounds_caller_connections_by_the_connect_timeout_not_the
         let env = InMemoryEnv::new();
         env.set("NATS_URL", &proxy.address);
         env.set("NATS_TLS_DISABLED", "true");
+        env.set("AUTH_CALLOUT_XKEY_PUBLIC", callout.public_key().as_str());
         env.set("BRIDGE_CONNECT_TIMEOUT_SECS", "2");
         env.set("BRIDGE_AUTH_MINT_TIMEOUT_SECS", "10");
         env.set("BRIDGE_GATEWAY_RPC_TIMEOUT_SECS", "3600");
