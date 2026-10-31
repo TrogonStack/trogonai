@@ -131,6 +131,21 @@ async fn valid_webhook_publishes_raw_body_with_headers_and_delivery_msg_id() {
 }
 
 #[tokio::test]
+async fn static_mode_fetches_the_key_with_the_configured_secret() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let (pair, fetcher) = fixture();
+
+    let resp = app(publisher.clone(), fetcher.clone())
+        .oneshot(signed_request(&pair, WEBHOOK_BODY))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(fetcher.secrets(), vec!["secret-1"]);
+}
+
+#[tokio::test]
 async fn item_id_header_is_omitted_when_the_payload_has_none() {
     let _guard = tracing_guard();
     let publisher = MockJetStreamPublisher::new();
