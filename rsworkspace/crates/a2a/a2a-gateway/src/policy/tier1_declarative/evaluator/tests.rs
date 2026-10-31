@@ -5,11 +5,11 @@ use crate::policy::tier1_declarative::bundle::{
     Tier1DeclarativeEffect, Tier1DeclarativeMatch, Tier1DeclarativeRule, Tier1DeclarativeRuleId, Tier1ResourceKind,
 };
 
-fn ctx(method: A2aMethod, agent: &str, caller: Option<&str>, subject: &str) -> Tier1DeclarativeContext {
+fn ctx(method: A2aMethod, agent: &str, caller: &str, subject: &str) -> Tier1DeclarativeContext {
     Tier1DeclarativeContext::new(
         method,
         A2aAgentId::new(agent).expect("agent id"),
-        caller.map(SpiceDbSubject::new),
+        SpiceDbSubject::new(caller),
         subject,
     )
 }
@@ -51,7 +51,7 @@ fn matching_rule_returns_effect() {
     let decision = gate.evaluate(&ctx(
         A2aMethod::MessageSend,
         "planner",
-        Some("user/alice"),
+        "user/alice",
         "a2a.v1.gateway.planner.person.alice.message.send",
     ));
     assert_eq!(
@@ -82,7 +82,7 @@ fn partial_match_tries_next_rule() {
     let decision = gate.evaluate(&ctx(
         A2aMethod::MessageSend,
         "planner",
-        None,
+        "user/alice",
         "a2a.v1.gateway.planner.person.alice.message.send",
     ));
     assert_eq!(
@@ -113,7 +113,7 @@ fn priority_order_is_respected() {
     let decision = gate.evaluate(&ctx(
         A2aMethod::MessageSend,
         "planner",
-        None,
+        "user/alice",
         "a2a.v1.gateway.planner.person.alice.message.send",
     ));
     assert_eq!(decision, Tier1DeclarativeDecision::Deny { rule: rid("deny-high") });
@@ -146,7 +146,7 @@ fn negate_inverts_match() {
     let denied = gate.evaluate(&ctx(
         A2aMethod::MessageSend,
         "planner",
-        Some("user/bob"),
+        "user/bob",
         "a2a.v1.gateway.planner.person.alice.message.send",
     ));
     assert_eq!(
@@ -159,18 +159,14 @@ fn negate_inverts_match() {
     let allowed = gate.evaluate(&ctx(
         A2aMethod::MessageSend,
         "planner",
-        Some("user/alice"),
+        "user/alice",
         "a2a.v1.gateway.planner.person.alice.message.send",
     ));
     assert_eq!(allowed, Tier1DeclarativeDecision::Allow { rule: None });
 }
 
 #[test]
-fn caller_subject_wildcard_does_not_match_unauthenticated_request() {
-    // `caller_subject = "*"` must only match when the request actually
-    // carries a caller identity. Without this, `None.unwrap_or_default()`
-    // becomes `""` and the wildcard pattern would silently allow/deny
-    // unauthenticated traffic the rule was meant to scope by caller.
+fn caller_subject_wildcard_matches_every_caller() {
     let gate = RealTier1DeclarativeGate::new(Tier1DeclarativeBundle::new(vec![rule(
         "deny-any-caller",
         100,
@@ -178,24 +174,42 @@ fn caller_subject_wildcard_does_not_match_unauthenticated_request() {
         vec![m(Tier1ResourceKind::CallerSubject, "*", false)],
     )]));
 
-    let unauthenticated = gate.evaluate(&ctx(
-        A2aMethod::MessageSend,
-        "planner",
-        None,
-        "a2a.v1.gateway.planner.person.alice.message.send",
-    ));
-    assert_eq!(unauthenticated, Tier1DeclarativeDecision::Allow { rule: None });
+    for caller in ["user/alice", "agent/scout", "service/internal-cron"] {
+        let decision = gate.evaluate(&ctx(
+            A2aMethod::MessageSend,
+            "planner",
+            caller,
+            "a2a.v1.gateway.planner.person.alice.message.send",
+        ));
+        assert_eq!(
+            decision,
+            Tier1DeclarativeDecision::Deny {
+                rule: rid("deny-any-caller")
+            },
+            "{caller}"
+        );
+    }
+}
 
-    let authenticated = gate.evaluate(&ctx(
+#[test]
+fn caller_subject_pattern_tells_principal_kinds_apart() {
+    let gate = RealTier1DeclarativeGate::new(Tier1DeclarativeBundle::new(vec![rule(
+        "deny-non-alice",
+        100,
+        Tier1DeclarativeEffect::Deny,
+        vec![m(Tier1ResourceKind::CallerSubject, "user/alice", true)],
+    )]));
+
+    let decision = gate.evaluate(&ctx(
         A2aMethod::MessageSend,
         "planner",
-        Some("user/alice"),
-        "a2a.v1.gateway.planner.person.alice.message.send",
+        "agent/alice",
+        "a2a.v1.gateway.planner.agent.alice.message.send",
     ));
     assert_eq!(
-        authenticated,
+        decision,
         Tier1DeclarativeDecision::Deny {
-            rule: rid("deny-any-caller")
+            rule: rid("deny-non-alice")
         }
     );
 }
@@ -208,7 +222,7 @@ fn noop_gate_defaults_allow() {
         gate.evaluate(&ctx(
             A2aMethod::MessageSend,
             "planner",
-            None,
+            "user/alice",
             "a2a.v1.gateway.planner.person.alice.message.send",
         )),
         Tier1DeclarativeDecision::Allow { rule: None }

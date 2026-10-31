@@ -18,6 +18,7 @@ use a2a_nats::audit::envelope::{AuditEnvelope, AuditEnvelopeFields, AuditOutcome
 use async_nats::{HeaderMap, Subject};
 use bytes::Bytes;
 use tracing::warn;
+use trogon_identity_types::SubjectPrincipal;
 use trogon_nats::PublishClient;
 
 use crate::runtime::audit_publish::spawn_gateway_audit_publish;
@@ -38,8 +39,7 @@ pub struct Tier1DenialCtx<'a> {
     pub audit_enabled: bool,
     pub started_wall_ms: u64,
     pub started_mono: Instant,
-    pub audit_caller_id: &'a str,
-    pub audit_caller_source: &'a Option<String>,
+    pub caller: &'a SubjectPrincipal,
 }
 
 /// Reply to the caller with the pre-built JSON-RPC denied envelope
@@ -85,8 +85,7 @@ where
                     tier1_decision: Some(Tier1Decision::Deny),
                     ..Default::default()
                 },
-                ctx.audit_caller_id,
-                ctx.audit_caller_source,
+                ctx.caller,
             ),
         ),
     );

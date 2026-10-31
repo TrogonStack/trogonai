@@ -75,7 +75,7 @@ async fn a_saturated_connection_queue_expires_without_forwarding_the_request() -
     );
     let audit = fixture.audit("err").await?;
     assert_eq!(audit["code"], -32800);
-    assert_eq!(audit["caller_id"], "alice");
+    assert_eq!(audit["caller_id"], "person.alice");
     assert_eq!(audit["method"], "message/send");
     assert_eq!(audit["req_id"], "request-7");
     fixture
