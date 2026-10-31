@@ -59,25 +59,11 @@ pub const MIRROR_MSG_ID_PREFIX: &str = "mirror:";
 pub(crate) const MAX_PUBLISH_RETRIES: u32 = 3;
 pub(crate) const RETRY_BASE_DELAY: Duration = Duration::from_millis(100);
 
-// --- jwt_caller_identity.rs ---
+// --- ingress_identity.rs ---
 
-pub const ENV_GATEWAY_TRUST_CALLER_HEADERS: &str = "A2A_GATEWAY_TRUST_CALLER_HEADERS";
 pub const ENV_GATEWAY_JWT_AUDIENCE: &str = "A2A_GATEWAY_JWT_AUDIENCE";
 
-// --- runtime/tier1.rs ---
-
-/// Sentinel slug used when an ingress request carries no caller
-/// identity. Distinct from any real caller value so a deny-anonymous
-/// declarative rule can match on it precisely. Kept as a single
-/// constant so the value matches between the context builder and
-/// the bundle authors who write rules against it.
-#[cfg(feature = "spicedb")]
-pub const ANONYMOUS_CALLER_SLUG: &str = "_";
-
 // --- runtime/dispatch.rs ---
-// The anonymous-caller sentinel and JWT-audience env var are single-sourced
-// as `ANONYMOUS_CALLER_SLUG` and `ENV_GATEWAY_JWT_AUDIENCE` above; dispatch
-// references those rather than redeclaring the literals.
 
 #[cfg(feature = "spicedb")]
 pub(crate) const SPAN_GATEWAY_INGRESS_DISPATCH: &str = "gateway.ingress.dispatch";
@@ -106,6 +92,8 @@ pub(crate) const ROUTING_FORWARD_FAILED: &str = "forward_failed";
 pub(crate) const ROUTING_DEADLINE_EXCEEDED: &str = "deadline_exceeded";
 #[cfg(feature = "spicedb")]
 pub(crate) const ROUTING_INGRESS_ERROR: &str = "ingress_error";
+#[cfg(feature = "spicedb")]
+pub(crate) const ROUTING_CALLER_JWT_REJECTED: &str = "caller_jwt_rejected";
 
 // --- runtime/env.rs ---
 

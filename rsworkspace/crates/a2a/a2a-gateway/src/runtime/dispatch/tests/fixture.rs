@@ -1,7 +1,11 @@
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
-use a2a_auth_callout::{AccountName, KeyVersion, StaticSigningKeySource};
+use a2a_auth_callout::jwt::ExternalSubject;
+use a2a_auth_callout::{
+    AccountName, CallerId, CallerJwtHeaderValue, IssuedPermissions, KeyVersion, NkeyPublic, SigningKeySource,
+    StaticSigningKeySource, UserJwtClaims, UserJwtSubject,
+};
 use a2a_nats::A2aAgentId;
 use a2a_nats::catalog::agent_view::AgentViewCheckOutcome;
 use a2a_nats::catalog::import_gate::SpiceDbPrincipal;
@@ -11,15 +15,16 @@ use bytes::Bytes;
 use futures::StreamExt;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
+use trogon_identity_types::PrincipalKind;
 use trogon_nats::test_support::{CoreTestServer, JetStreamTestServer};
 use trogon_std::env::InMemoryEnv;
 
 use crate::config::{Args, Config, config_from_args};
-use crate::constants::{ENV_GATEWAY_AUDIT_PUBLISH, ENV_GATEWAY_TRUST_CALLER_HEADERS};
+use crate::constants::ENV_GATEWAY_AUDIT_PUBLISH;
 use crate::gw_ingress_stream::{
     GatewayStreamingIngressConfig, StreamingIngressGate, StreamingMaxAckPending, StreamingMaxInflightPerCaller,
 };
-use crate::jwt_caller_identity::{JwtHeaderCallerIdentitySource, gateway_caller_identity_policy};
+use crate::ingress_identity::ForwardedCallerJwtVerifier;
 use crate::policy::spicedb_tier1::{
     NoopSpiceDbTier1Gate, OwnerTupleEmitter, SpiceDbTier1Gate, Tier1AuthorizeOutcome, Tier1OwnerTuple, Tier1SessionKey,
 };
@@ -41,6 +46,8 @@ pub enum FixtureError {
     KeyVersion(#[from] a2a_auth_callout::KeyVersionError),
     #[error("signing key source failed: {0}")]
     AuthCallout(#[from] a2a_auth_callout::AuthCalloutError),
+    #[error("caller JWT minting failed: {0}")]
+    Jwt(#[from] a2a_auth_callout::jwt::JwtError),
     #[error("NATS subscription failed: {0}")]
     NatsSubscribe(#[from] async_nats::SubscribeError),
     #[error("NATS flush failed: {0}")]
@@ -83,7 +90,8 @@ pub struct DispatchFixture<S = CoreTestServer> {
     pub owner: Option<Arc<dyn OwnerTupleEmitter>>,
     pub declarative: Arc<dyn Tier1DeclarativeGate>,
     pub policy: GatewayPolicyStack,
-    identity: JwtHeaderCallerIdentitySource,
+    signing: Arc<StaticSigningKeySource>,
+    caller_jwt: ForwardedCallerJwtVerifier,
     pub shutdown: CancellationToken,
     pub streaming_enabled: bool,
     pub streaming_config: GatewayStreamingIngressConfig,
@@ -119,7 +127,6 @@ impl<S> DispatchFixture<S> {
     async fn with_client(server: S, client: async_nats::Client) -> TestResult<Self> {
         let env = InMemoryEnv::new();
         env.set(ENV_GATEWAY_AUDIT_PUBLISH, "true");
-        env.set(ENV_GATEWAY_TRUST_CALLER_HEADERS, "true");
         let (config, _) = config_from_args(
             Args {
                 nats_url: format!("{}:{}", client.server_info().host, client.server_info().port),
@@ -128,8 +135,11 @@ impl<S> DispatchFixture<S> {
             },
             &env,
         )?;
-        let source = StaticSigningKeySource::new(&nkeys::KeyPair::new_account().seed()?, KeyVersion::new("test")?)?;
-        let identity = JwtHeaderCallerIdentitySource::new(Arc::new(source), AccountName::new("tenant"));
+        let signing = Arc::new(StaticSigningKeySource::new(
+            &nkeys::KeyPair::new_account().seed()?,
+            KeyVersion::new("test")?,
+        )?);
+        let caller_jwt = ForwardedCallerJwtVerifier::new(signing.clone(), AccountName::new(GATEWAY_AUDIENCE));
         let agents = client.subscribe("a2a.v1.agents.>").await?;
         let replies = client.subscribe("_INBOX.dispatch").await?;
         let audits = client.subscribe("a2a.v1.audit.>").await?;
@@ -147,7 +157,8 @@ impl<S> DispatchFixture<S> {
             owner: None,
             declarative: Arc::new(NoopTier1DeclarativeGate),
             policy: GatewayPolicyStack::noop(),
-            identity,
+            signing,
+            caller_jwt,
             shutdown: CancellationToken::new(),
             streaming_enabled: false,
             streaming_config,
@@ -163,8 +174,7 @@ impl<S> DispatchFixture<S> {
             self.owner.as_ref(),
             self.declarative.as_ref(),
             &self.policy,
-            &self.identity,
-            gateway_caller_identity_policy(&self.env),
+            &self.caller_jwt,
             self.streaming_enabled,
             self.streaming_config,
             &self.streaming_gate,
@@ -173,6 +183,29 @@ impl<S> DispatchFixture<S> {
             message,
         )
         .await;
+    }
+
+    /// A caller JWT minted by the gateway's own issuer for `audience`, as the
+    /// bridge would forward it.
+    pub fn caller_jwt(&self, kind: PrincipalKind, caller: &str, audience: &str) -> TestResult<String> {
+        let caller_id = CallerId::new(caller)?;
+        let claims = UserJwtClaims {
+            kid: KeyVersion::new("test")?,
+            sub: ExternalSubject::new(caller)?,
+            aud: AccountName::new(audience),
+            data: a2a_auth_callout::SpiceDbPrincipal::new(format!("user/{caller}")),
+            nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
+            caller_id,
+            principal_kind: kind,
+        };
+        let subject = UserJwtSubject::from_user_nkey(NkeyPublic::parse(nkeys::KeyPair::new_user().public_key())?);
+        let token = claims.mint(
+            &self.signing.current().minting_material(),
+            &subject,
+            SystemTime::now(),
+            Duration::from_secs(300),
+        )?;
+        Ok(CallerJwtHeaderValue::from_minted(&token).as_str().to_owned())
     }
 
     pub async fn audit(&mut self, outcome: &str) -> TestResult<Value> {
@@ -195,9 +228,9 @@ impl<S> DispatchFixture<S> {
     }
 }
 
+pub const GATEWAY_AUDIENCE: &str = "tenant-acme";
+
 pub fn request(method: &str, params: Value) -> Message {
-    let mut headers = HeaderMap::new();
-    headers.insert(a2a_nats::constants::GATEWAY_CALLER_ID_HEADER, "alice");
     Message {
         subject: format!("a2a.v1.gateway.bot.person.alice.{method}").into(),
         reply: Some("_INBOX.dispatch".into()),
@@ -206,7 +239,7 @@ pub fn request(method: &str, params: Value) -> Message {
         }))
         .expect("JSON value serializes")
         .into(),
-        headers: Some(headers),
+        headers: Some(HeaderMap::new()),
         status: None,
         description: None,
         length: 0,

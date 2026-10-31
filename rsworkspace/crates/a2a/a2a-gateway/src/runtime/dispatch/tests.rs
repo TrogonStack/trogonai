@@ -4,11 +4,14 @@ mod streaming_tests;
 
 use std::sync::Arc;
 
-use a2a_nats::constants::GATEWAY_CALLER_ID_HEADER;
+use a2a_auth_callout::CALLER_JWT_HEADER_NAME;
+use a2a_nats::constants::{GATEWAY_CALLER_ID_HEADER, GATEWAY_PRINCIPAL_HEADER};
 use a2a_redaction::{SkillId, WasmBundlePath};
+use async_nats::HeaderValue;
 use serde_json::{Value, json};
+use trogon_identity_types::PrincipalKind;
 
-use crate::constants::{ENV_GATEWAY_JWT_AUDIENCE, ENV_GATEWAY_TRUST_CALLER_HEADERS, ENV_TIER3_REDACTION_ENABLED};
+use crate::constants::{ENV_GATEWAY_JWT_AUDIENCE, ENV_TIER3_REDACTION_ENABLED};
 use crate::gateway_test_support::Diagnostics;
 use crate::policy::spicedb_tier1::Tier1AuthorizeOutcome;
 use crate::policy::tier1_declarative::RealTier1DeclarativeGate;
@@ -23,7 +26,9 @@ use crate::policy::tier3_redaction::{
 };
 use crate::policy::wasmtime_substrate::{Tier2State, WasmtimeSubstrate};
 
-use fixture::{DispatchFixture, RecordingOwner, RecordingTier1, TestResult, assert_empty, receive, request};
+use fixture::{
+    DispatchFixture, GATEWAY_AUDIENCE, RecordingOwner, RecordingTier1, TestResult, assert_empty, receive, request,
+};
 
 #[tokio::test]
 async fn allowed_request_preserves_payload_headers_and_reply_route() -> TestResult {
@@ -52,8 +57,8 @@ async fn allowed_request_preserves_payload_headers_and_reply_route() -> TestResu
     let audit = fixture.audit("ok").await?;
     assert_eq!(audit["req_id"], "request-7");
     assert_eq!(audit["method"], "message/send");
-    assert_eq!(audit["caller_id"], "alice");
-    assert_eq!(audit["caller_source"], "header_trusted");
+    assert_eq!(audit["caller_id"], "person.alice");
+    assert!(audit.get("caller_source").is_none());
     assert_eq!(
         audit["rules_fired"],
         json!([
@@ -82,18 +87,132 @@ async fn allowed_request_preserves_payload_headers_and_reply_route() -> TestResu
 }
 
 #[tokio::test]
-async fn untrusted_caller_headers_cannot_change_audit_attribution() -> TestResult {
+async fn forged_caller_hints_never_change_the_subject_principal() -> TestResult {
     let mut fixture = DispatchFixture::new().await?;
-    fixture.env.set(ENV_GATEWAY_TRUST_CALLER_HEADERS, "false");
-    fixture.dispatch(request("tasks.get", json!({"id": "task-1"}))).await;
+    let gate = Arc::new(RecordingTier1::new(Tier1AuthorizeOutcome::Allowed { zed_token: None }));
+    fixture.tier1 = gate.clone();
+    let mut message = request("tasks.get", json!({"id": "task-1"}));
+    let headers = message.headers.as_mut().expect("headers");
+    headers.insert(GATEWAY_CALLER_ID_HEADER, "mallory");
+    headers.insert("x-a2a-caller-id", "mallory");
+    headers.insert(GATEWAY_PRINCIPAL_HEADER, r#"{"spicedb_subject":"user/mallory"}"#);
+    headers.insert("X-Correlation", "trace-1");
+    fixture.dispatch(message).await;
+
+    let forwarded = receive(&mut fixture.agents).await?;
+    assert_eq!(forwarded.subject.as_str(), "a2a.v1.agents.bot.person.alice.tasks.get");
+    let forwarded_headers = forwarded.headers.unwrap_or_default();
+    assert_eq!(forwarded_headers.len(), 1);
     assert_eq!(
-        receive(&mut fixture.agents).await?.subject.as_str(),
-        "a2a.v1.agents.bot.person.alice.tasks.get"
+        forwarded_headers.get("X-Correlation").map(HeaderValue::as_str),
+        Some("trace-1")
+    );
+    let calls = gate.calls.lock().expect("authorization calls").clone();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].session.sub(), "person.alice");
+    assert_eq!(
+        calls[0].principal.spicedb_subject().expect("principal").as_str(),
+        "user/alice"
     );
     let audit = fixture.audit("ok").await?;
-    assert_eq!(audit["caller_id"], "_");
-    assert!(audit.get("caller_source").is_none());
+    assert_eq!(audit["caller_id"], "person.alice");
+    assert!(!serde_json::to_string(&audit)?.contains("mallory"));
     Ok(())
+}
+
+#[tokio::test]
+async fn caller_jwt_naming_the_subject_principal_is_accepted_and_never_forwarded() -> TestResult {
+    let mut fixture = DispatchFixture::new().await?;
+    let token = fixture.caller_jwt(PrincipalKind::Person, "alice", GATEWAY_AUDIENCE)?;
+    let mut message = request("message.send", json!({}));
+    let headers = message.headers.as_mut().expect("headers");
+    headers.insert(CALLER_JWT_HEADER_NAME, token.as_str());
+    headers.insert("X-Correlation", "trace-1");
+    fixture.dispatch(message).await;
+
+    let forwarded = receive(&mut fixture.agents).await?;
+    assert_eq!(
+        forwarded.subject.as_str(),
+        "a2a.v1.agents.bot.person.alice.message.send"
+    );
+    let forwarded_headers = forwarded.headers.unwrap_or_default();
+    assert_eq!(forwarded_headers.len(), 1);
+    assert_eq!(
+        forwarded_headers.get("X-Correlation").map(HeaderValue::as_str),
+        Some("trace-1")
+    );
+    assert!(!format!("{forwarded_headers:?}").contains(token.as_str()));
+    assert_eq!(fixture.audit("ok").await?["caller_id"], "person.alice");
+    Ok(())
+}
+
+#[tokio::test]
+async fn caller_jwt_that_does_not_prove_the_subject_principal_is_rejected_before_any_tier() -> TestResult {
+    let diagnostics = Diagnostics::both_outputs();
+    let mut fixture = DispatchFixture::new().await?;
+    let gate = Arc::new(RecordingTier1::new(Tier1AuthorizeOutcome::Allowed { zed_token: None }));
+    fixture.tier1 = gate.clone();
+    for (token, rule) in [
+        (
+            fixture.caller_jwt(PrincipalKind::Person, "bob", GATEWAY_AUDIENCE)?,
+            "gateway.caller_jwt.principal_mismatch",
+        ),
+        (
+            fixture.caller_jwt(PrincipalKind::Agent, "alice", GATEWAY_AUDIENCE)?,
+            "gateway.caller_jwt.principal_mismatch",
+        ),
+        (
+            fixture.caller_jwt(PrincipalKind::Person, "alice", "tenant-other")?,
+            "gateway.caller_jwt.unverified",
+        ),
+        ("not-a-jwt".to_owned(), "gateway.caller_jwt.malformed"),
+    ] {
+        let mut message = request("message.send", json!({"id": "task-1"}));
+        message
+            .headers
+            .as_mut()
+            .expect("headers")
+            .insert(CALLER_JWT_HEADER_NAME, token.as_str());
+        fixture.dispatch(message).await;
+        fixture.denied(-32600, json!("request-7")).await?;
+        let audit = fixture.audit("err").await?;
+        assert_eq!(audit["code"], -32600);
+        assert_eq!(audit["caller_id"], "person.alice");
+        assert_eq!(audit["rules_fired"], json!([rule]));
+    }
+    assert!(gate.calls.lock().expect("authorization calls").is_empty());
+    diagnostics.assert_event(
+        "gateway rejected a forwarded caller JWT that does not prove the subject principal",
+        &[
+            ("caller_id", "person.alice"),
+            ("rule", "gateway.caller_jwt.principal_mismatch"),
+        ],
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn subjects_that_name_no_caller_reach_no_tier_agent_or_audit() -> TestResult {
+    let mut fixture = DispatchFixture::new().await?;
+    let gate = Arc::new(RecordingTier1::new(Tier1AuthorizeOutcome::Allowed { zed_token: None }));
+    fixture.tier1 = gate.clone();
+    for subject in [
+        "a2a.v1.gateway.bot.message.send",
+        "a2a.v1.gateway.bot.tasks.pushNotificationConfig.set",
+        "a2a.v1.gateway.bot.person.message.send",
+    ] {
+        let mut message = request("message.send", json!({"id": "task-1"}));
+        message
+            .headers
+            .as_mut()
+            .expect("headers")
+            .insert(GATEWAY_CALLER_ID_HEADER, "alice");
+        message.subject = subject.into();
+        fixture.dispatch(message).await;
+        fixture.denied(-32600, json!("request-7")).await?;
+    }
+    assert!(gate.calls.lock().expect("authorization calls").is_empty());
+    assert_empty(&fixture.client, &mut fixture.audits, "a2a.v1.audit.barrier").await
 }
 
 #[tokio::test]
@@ -158,7 +277,7 @@ async fn tier1_authorizes_the_routed_agent_and_emits_owner() -> TestResult {
     assert_eq!(calls.len(), 1);
     let call = &calls[0];
     assert_eq!(call.session.account(), "tenant-acme");
-    assert_eq!(call.session.sub(), "alice");
+    assert_eq!(call.session.sub(), "person.alice");
     assert_eq!(
         call.principal.spicedb_subject().expect("principal").as_str(),
         "user/alice"
@@ -229,7 +348,7 @@ async fn tier1_denials_and_transport_failures_stop_forwarding_and_owner_writes()
         let audit = fixture.audit("err").await?;
         assert_eq!(audit["code"], -32801);
         assert_eq!(audit["tier1_decision"], "deny");
-        assert_eq!(audit["caller_id"], "alice");
+        assert_eq!(audit["caller_id"], "person.alice");
         assert_eq!(audit["rules_fired"], json!(["gateway.tier1.spicedb_denied"]));
         assert_eq!(gate.calls.lock().expect("authorization calls").len(), 1);
         assert!(owner.calls.lock().expect("owner calls").is_empty());
@@ -248,27 +367,6 @@ async fn tier1_rejects_missing_task_coordinates_before_asking_authorizer() -> Te
     assert_eq!(
         fixture.audit("err").await?["message"],
         "tier-1 resource tuple derivation failed"
-    );
-    Ok(())
-}
-
-#[tokio::test]
-async fn tier1_rejects_caller_without_session_identity() -> TestResult {
-    let mut fixture = DispatchFixture::new().await?;
-    let gate = Arc::new(RecordingTier1::new(Tier1AuthorizeOutcome::Allowed { zed_token: None }));
-    fixture.tier1 = gate.clone();
-    let mut message = request("message.send", json!({}));
-    message
-        .headers
-        .as_mut()
-        .expect("headers")
-        .insert(GATEWAY_CALLER_ID_HEADER, "user/");
-    fixture.dispatch(message).await;
-    fixture.denied(-32801, json!("request-7")).await?;
-    assert!(gate.calls.lock().expect("authorization calls").is_empty());
-    assert_eq!(
-        fixture.audit("err").await?["message"],
-        "tier-1 principal lacks session identity"
     );
     Ok(())
 }
@@ -322,7 +420,7 @@ async fn tier2_denial_stops_dispatch_and_names_the_failed_rule() -> TestResult {
     fixture.dispatch(request("message.send", json!({}))).await;
     fixture.denied(-32801, json!("request-7")).await?;
     let audit = fixture.audit("err").await?;
-    assert_eq!(audit["caller_id"], "alice");
+    assert_eq!(audit["caller_id"], "person.alice");
     assert_eq!(audit["rules_fired"], json!(["gateway.tier2.evaluation_error"]));
     Ok(())
 }
@@ -396,7 +494,11 @@ async fn tier3_rewrites_forwarded_payload_and_records_redaction_with_route() -> 
     assert!(!serde_json::to_string(&audit)?.contains("confidential"));
     diagnostics.assert_event(
         "gateway tier-3 redaction applied before forward",
-        &[("caller_id", "alice"), ("method", "message/send"), ("count", "1")],
+        &[
+            ("caller_id", "person.alice"),
+            ("method", "message/send"),
+            ("count", "1"),
+        ],
     );
     Ok(())
 }
@@ -435,14 +537,23 @@ async fn tier3_refusal_and_engine_failure_fail_closed_with_distinct_protocol_err
         assert_eq!(audit["code"], code);
         assert_eq!(audit["tier3_decision"], tier3);
         assert_eq!(audit["rules_fired"], json!([rule]));
+        assert_eq!(audit["caller_id"], "person.alice");
     }
     diagnostics.assert_event(
         "gateway tier-3 skill refused part redaction",
-        &[("caller_id", "alice"), ("method", "message/send"), ("skill_id", "pii")],
+        &[
+            ("caller_id", "person.alice"),
+            ("method", "message/send"),
+            ("skill_id", "pii"),
+        ],
     );
     diagnostics.assert_event(
         "gateway tier-3 redaction engine failed closed",
-        &[("caller_id", "alice"), ("method", "message/send"), ("skill_id", "pii")],
+        &[
+            ("caller_id", "person.alice"),
+            ("method", "message/send"),
+            ("skill_id", "pii"),
+        ],
     );
     Ok(())
 }

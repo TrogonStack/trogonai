@@ -40,12 +40,12 @@ pub const EVENT_STREAM_QUEUE_CAPACITY: usize = 128;
 /// Defined once in `trogon-nats` (ADR#0013 / RFC 6648 `Trogon-` prefix).
 pub use trogon_nats::REQ_ID_HEADER;
 
-/// Optional correlate external caller identity on gateway ingress (`a2a-gateway` records it on spans /
-/// audits). **`a2a-bridge`** should copy HTTP header [`GATEWAY_CALLER_ID_HTTP`] into this NATS header when
-/// publishing to `{prefix}.v1.gateway.>`.
+/// Optional correlate external caller identity on gateway ingress. **`a2a-bridge`** may copy HTTP header
+/// [`GATEWAY_CALLER_ID_HTTP`] into this NATS header when publishing to `{prefix}.v1.gateway.>`.
 ///
 /// A routing hint at most: inside the bus the caller is the principal the subject carries
-/// (ADR#0082), never this header.
+/// (ADR#0082), never this header. `a2a-gateway` strips it at ingress, so no policy tier, audit,
+/// agent, event or dead letter reads it.
 ///
 /// Stable wire token (case-insensitive matching on ingress); prefer `GatewayCallerId` casing in observability prose.
 pub const GATEWAY_CALLER_ID_HEADER: &str = "X-A2a-Caller-Id";
@@ -53,8 +53,8 @@ pub const GATEWAY_CALLER_ID_HEADER: &str = "X-A2a-Caller-Id";
 /// HTTP correlate for [`GATEWAY_CALLER_ID_HEADER`] on the bridge ingress path (`POST /`).
 pub const GATEWAY_CALLER_ID_HTTP: &str = "x-a2a-caller-id";
 
-/// JSON-encoded minted User JWT `data` claim (SpiceDB principal payload) forwarded by gateway
-/// ingress onto agent-bound NATS messages. Agent `Bridge` reads this for push DLQ `{caller_id}`.
+/// Legacy JSON-encoded SpiceDB principal payload. Never identity (ADR#0082): `a2a-gateway` strips it
+/// at ingress and nothing downstream reads it, so a publisher cannot use it to re-attribute a caller.
 pub const GATEWAY_PRINCIPAL_HEADER: &str = "X-A2a-Spicedb-Principal";
 
 /// Maximum attempts for terminal task push delivery over HTTPS, core NATS (`subject:` URLs), and JetStream (`jetstream:` URLs).
