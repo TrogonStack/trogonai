@@ -15,10 +15,10 @@
 //! never from anything the caller wrote into the message.
 
 use trogon_decider_runtime::CommandPrincipal;
+use trogon_identity_types::{SubjectPrincipal, SubjectPrincipalError};
 use trogon_nats::{DottedNatsToken, SubjectTokenViolationError, SubjectViolationError, validate_published_subject};
 
 use crate::constants::{DECIDE_METHOD_NAME, DECIDER_SERVICE_NAME, NARROWEST_TOKEN, SUBJECT_TOKEN_WILDCARD};
-use crate::subject_principal::{SubjectPrincipal, SubjectPrincipalError};
 use crate::tenant_position::TenantPosition;
 
 /// The configured subject namespace a host answers under.
