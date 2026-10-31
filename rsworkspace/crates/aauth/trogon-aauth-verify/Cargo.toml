@@ -13,9 +13,14 @@ path = "src/lib.rs"
 [lints]
 workspace = true
 
+[features]
+nats-kv = ["dep:async-nats", "dep:bytes"]
+
 [dependencies]
+async-nats = { workspace = true, features = ["jetstream", "kv"], optional = true }
 async-trait = { workspace = true }
 base64 = { workspace = true }
+bytes = { workspace = true, optional = true }
 # AAuth tokens rely on JWS shapes (esp. EC `kid`-based selection) that the
 # crate's parser only models cleanly from jsonwebtoken 10.x; keep the
 # version pin local to this crate so the workspace's other jsonwebtoken
@@ -39,5 +44,6 @@ ed25519-dalek = { version = "=2.2.0", features = ["std", "rand_core", "pkcs8"] }
 p256 = { version = "=0.13.2", features = ["ecdsa", "pkcs8"] }
 pkcs8 = { version = "=0.10.2", features = ["pem"] }
 rand_core = { version = "=0.6.4" }
-tokio = { workspace = true, features = ["rt", "macros", "sync"] }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "sync"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
 wiremock = { workspace = true }

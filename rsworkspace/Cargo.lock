@@ -7130,8 +7130,10 @@ dependencies = [
 name = "trogon-aauth-verify"
 version = "0.0.1"
 dependencies = [
+ "async-nats",
  "async-trait",
  "base64 0.23.1",
+ "bytes",
  "ed25519-dalek",
  "jsonwebtoken 10.4.0",
  "p256",
@@ -7145,6 +7147,7 @@ dependencies = [
  "time",
  "tokio",
  "trogon-identity-types",
+ "trogon-nats",
  "url",
  "wiremock",
 ]

@@ -38,7 +38,11 @@ pub use jwks_cache::CachedJwksResolver;
 pub use jwks_http::{HttpJwksResolver, MaxResponseBytes, RequestTimeout, WellKnownDwk};
 pub use mission::{MissionError, extract_mission_claim, verify_mission_blob_hash, verify_mission_header_matches_claim};
 pub use nats_pop::{NatsHeaders, NatsPopError, NatsPopVerifier, NatsRequest};
-pub use replay::{InMemoryReplayStore, ReplayStore};
+#[cfg(feature = "nats-kv")]
+pub use replay::nats_kv::{
+    IncompatibleReplayBucketError, NatsKvReplayStore, RecordOutlivesBucketError, ReplayBucketError, ReplayBucketSpec,
+};
+pub use replay::{InMemoryReplayStore, ReplayError, ReplayStore};
 pub use time_source::{SystemTimeSource, TimeSource};
 pub use token::{
     InvalidKeyMaterialSourceError, RequestContextError, RequestSigningContext, TokenError, TokenVerifier,
