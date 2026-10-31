@@ -10,6 +10,7 @@
 //! Each tier folds its own error variant into [`error::PolicyError`] so
 //! the runtime keeps a single audit surface across tiers.
 
+pub mod caller_spicedb_subject;
 pub mod error;
 pub mod per_skill;
 #[cfg(feature = "spicedb")]
@@ -20,6 +21,7 @@ pub mod tier2_cel;
 pub mod tier3_redaction;
 pub mod wasmtime_substrate;
 
+pub use caller_spicedb_subject::CallerSpiceDbSubject;
 pub use error::{PolicyError, Tier2EvalError};
 pub use per_skill::{
     PerSkillDecision, PerSkillPolicy, PerSkillPolicyConfig, PerSkillRequest, ResolvedRule, SkillEffect, SkillRule,

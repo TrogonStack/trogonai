@@ -29,14 +29,15 @@ use authzed::v1::{
     CheckBulkPermissionsRequest, CheckBulkPermissionsRequestItem, Consistency, ObjectReference, Relationship,
     RelationshipUpdate, SubjectReference, WriteRelationshipsRequest, ZedToken,
 };
-use serde::Serialize;
 use tonic::Status;
+use trogon_identity_types::SubjectPrincipal;
 use trogon_std::env::ReadEnv;
 
 use crate::constants::DEFAULT_TIER1_ZEDTOKEN_TTL_SECS;
 pub use crate::constants::{
     ENV_TIER1_SPICEDB_ENABLED, ENV_TIER1_SPICEDB_ENDPOINT, ENV_TIER1_SPICEDB_TOKEN, ENV_TIER1_ZEDTOKEN_TTL_SECS,
 };
+use crate::policy::CallerSpiceDbSubject;
 
 pub type Tier1SessionKey = SpiceDbSessionKey;
 pub type SpiceDbTier1SessionCache = SpiceDbSessionCache;
@@ -395,35 +396,12 @@ fn spicedb_tier1_subject_from_principal(principal: &SpiceDbPrincipal) -> Option<
     spicedb_subject_from_principal(principal)
 }
 
-/// Build a Tier-1 session key from a verified principal, falling
-/// back to the supplied account when the principal didn't carry
-/// an explicit account claim. Delegates to the a2a-nats helper so
-/// the Tier-1 and discovery paths agree on the key shape.
-pub fn tier1_session_from_principal(principal: &SpiceDbPrincipal, fallback_account: &str) -> Option<Tier1SessionKey> {
-    a2a_nats::catalog::spicedb_permission::session_from_principal(principal, fallback_account)
+pub fn tier1_principal_from_caller(caller: &CallerSpiceDbSubject) -> SpiceDbPrincipal {
+    SpiceDbPrincipal::new(caller.to_string())
 }
 
-/// Principal document materialised for a caller the gateway resolved itself,
-/// as opposed to one a verified credential carried.
-#[derive(Debug, Serialize)]
-struct Tier1CallerPrincipal {
-    spicedb_subject: String,
-    sub: String,
-    session_account: String,
-}
-
-/// Build a principal payload from a caller slug + session account.
-/// Used by the gateway runtime to materialise a principal from the caller
-/// identity dispatch resolved for this request.
-pub fn tier1_principal_from_caller(caller_slug: &str, account: &str) -> SpiceDbPrincipal {
-    let principal = Tier1CallerPrincipal {
-        spicedb_subject: format!("user/{caller_slug}"),
-        sub: caller_slug.to_owned(),
-        session_account: account.to_owned(),
-    };
-    // The principal is three Strings; serde_json::to_value cannot fail at
-    // runtime, and an authorization path must never panic.
-    SpiceDbPrincipal(serde_json::to_value(principal).unwrap_or(serde_json::Value::Object(Default::default())))
+pub fn tier1_session_from_caller(caller: &SubjectPrincipal, account: &str) -> Tier1SessionKey {
+    Tier1SessionKey::new(caller.to_string(), account)
 }
 
 pub struct Tier1SpiceDbConfig;
