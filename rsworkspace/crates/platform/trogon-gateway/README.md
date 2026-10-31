@@ -92,7 +92,7 @@ Gateway-level settings:
 NATS auth accepts the same values as the `nats` CLI. One method is chosen in this priority order:
 
 1. `NATS_CREDS` (path or `file://path`)
-2. `NATS_NKEY` (an NKey seed, or a seed file as a path or `file://path`)
+2. `NATS_NKEY` (an NKey seed, a seed file as a path or `file://path`, or `env://NAME`)
 3. `NATS_USER` + `NATS_PASSWORD`
 4. `NATS_TOKEN`, or `NATS_USER` set without `NATS_PASSWORD`
 5. `NATS_JWT` + `NATS_SEED`, or `NATS_JWT` alone with an empty signature
@@ -102,6 +102,8 @@ NATS auth accepts the same values as the `nats` CLI. One method is chosen in thi
 TLS is configured with `NATS_CERT` + `NATS_KEY` (setting only one fails the connection) and `NATS_CA`. Setting any of them requires TLS.
 
 The same settings can be given as flags (`--nats-user`, `--nats-password`, `--nats-creds`, `--nats-nkey`, `--nats-jwt`, `--nats-seed`, `--nats-token`, `--nats-tls-cert`, `--nats-tls-key`, `--nats-tls-ca`) or in the `[nats]` TOML section (`tls_cert`, `tls_key`, `tls_ca` for the TLS values).
+
+Every process on the host can read a command line, so `--nats-nkey`, `--nats-password`, `--nats-token`, `--nats-jwt` and `--nats-seed` take only a reference, `env://NAME` or `file:///path`, and reject the secret itself. For the same reason `--nats-user` is rejected when no password or token is configured, because the user would then be sent as a token.
 
 Discord optional tuning is configured in TOML under `[sources.discord]`:
 

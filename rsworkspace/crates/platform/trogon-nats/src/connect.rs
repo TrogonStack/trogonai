@@ -75,7 +75,7 @@ async fn apply_auth<E: ReadEnv>(
             })
         }
         NatsAuth::NKey(seed) => {
-            let seed = seed.resolve().await.map_err(invalid_setting(ENV_NATS_NKEY))?;
+            let seed = seed.resolve(env).await.map_err(invalid_setting(ENV_NATS_NKEY))?;
             Ok(opts.nkey(seed))
         }
         NatsAuth::UserPassword { user, password } => {
