@@ -314,7 +314,9 @@ async fn nats_bootstrap_wires_mint_subject_tenant_and_gateway_namespace() -> Res
             env.set("BRIDGE_TENANT_ACCOUNT", account);
         }
         let mut mint = client.subscribe(expected_subject).await?;
-        let mut gateway = client.subscribe("tenant.v1.gateway.planner.message.send").await?;
+        let mut gateway = client
+            .subscribe("tenant.v1.gateway.planner.person.harness.message.send")
+            .await?;
         client.flush().await?;
         let state = bootstrap_nats_transport(&env, &NatsConfig::from_env(&env), resolve_a2a_prefix(&env)?).await?;
         let handle_request = gateway_router(state).oneshot(rpc_request()?);

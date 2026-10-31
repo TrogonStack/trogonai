@@ -167,6 +167,7 @@ dependencies = [
  "tonic",
  "tracing",
  "tracing-subscriber",
+ "trogon-identity-types",
  "trogon-nats",
  "trogon-semconv",
  "trogon-std",
@@ -200,6 +201,7 @@ dependencies = [
  "tower-http 0.7.1",
  "tracing",
  "tracing-subscriber",
+ "trogon-identity-types",
  "trogon-nats",
  "trogon-std",
 ]
@@ -225,9 +227,11 @@ dependencies = [
 name = "a2a-nats-stdio"
 version = "0.1.0"
 dependencies = [
+ "a2a-identity-types",
  "a2a-lf",
  "a2a-nats",
  "async-nats",
+ "base64 0.23.1",
  "bytes",
  "futures",
  "jsonrpc-nats",
@@ -236,6 +240,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tracing",
+ "trogon-identity-types",
  "trogon-nats",
  "trogon-std",
 ]

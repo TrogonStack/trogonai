@@ -16,6 +16,7 @@ use a2a_nats::jetstream::streams::events_stream_name;
 use async_nats::jetstream::{self, AckKind};
 use futures::{Stream, StreamExt};
 use tracing::{debug, warn};
+use trogon_identity_types::SubjectPrincipal;
 use trogon_nats::jetstream::message::{JsAck, JsAckWith, JsDoubleAck, JsMessageRef};
 
 use crate::constants::STREAMING_INGRESS_MAX_FORWARD_ATTEMPTS;
@@ -157,6 +158,7 @@ pub struct StreamingIngressSpawn {
     pub kind: StreamingIngressKind,
     pub reply: async_nats::Subject,
     pub caller_key: CallerKey,
+    pub caller: SubjectPrincipal,
 }
 
 impl StreamingIngressSpawn {
@@ -372,11 +374,15 @@ async fn run_streaming_ingress_pump(
 
     let consumer_config = match &spawn.kind {
         StreamingIngressKind::MessageStream { last_seq, .. } => {
-            gateway_stream_events_consumer(&prefix, *last_seq, config.max_ack_pending.as_i64())
+            gateway_stream_events_consumer(&prefix, &spawn.caller, *last_seq, config.max_ack_pending.as_i64())
         }
-        StreamingIngressKind::TasksResubscribe { task_id, last_seq, .. } => {
-            resubscribe_consumer_with_flow(&prefix, task_id, *last_seq, config.max_ack_pending.as_i64())
-        }
+        StreamingIngressKind::TasksResubscribe { task_id, last_seq, .. } => resubscribe_consumer_with_flow(
+            &prefix,
+            task_id,
+            &spawn.caller,
+            *last_seq,
+            config.max_ack_pending.as_i64(),
+        ),
     };
 
     let consumer = match stream.create_consumer(consumer_config).await {

@@ -19,6 +19,6 @@ pub use identity::{BridgeAgentId, BridgeUserJwt, CallerHttpsAuth, MintedCallerId
 pub use inbound::{
     AppState, AsyncNatsTokenGatewayUnary, AsyncNatsTokenTaskJetstream, CallerConnectTimeout, GatewayInboundPublisher,
     GatewayRpcTimeout, InboundGatewayPublish, RecordingInboundPublisher, StubInboundGatewayPublish,
-    StubTaskJetStreamPort, build_gateway_subject, default_a2a_prefix, gateway_router,
+    StubTaskJetStreamPort, default_a2a_prefix, gateway_router,
 };
 pub use outbound::{AgentRegistrationId, MethodSegment, OutboundHttpsAgentUpstream, StubOutboundForwarder, forward};

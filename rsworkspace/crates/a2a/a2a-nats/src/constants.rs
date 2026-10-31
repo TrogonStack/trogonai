@@ -4,6 +4,7 @@ use std::time::Duration;
 
 pub const DEFAULT_A2A_PREFIX: &str = "a2a";
 pub const ENV_A2A_PREFIX: &str = "A2A_PREFIX";
+pub const ENV_A2A_CALLER_JWT: &str = "A2A_CALLER_JWT";
 
 pub const ENV_OPERATION_TIMEOUT_SECS: &str = "A2A_OPERATION_TIMEOUT_SECS";
 pub const ENV_TASK_TIMEOUT_SECS: &str = "A2A_TASK_TIMEOUT_SECS";
@@ -42,6 +43,9 @@ pub use trogon_nats::REQ_ID_HEADER;
 /// Optional correlate external caller identity on gateway ingress (`a2a-gateway` records it on spans /
 /// audits). **`a2a-bridge`** should copy HTTP header [`GATEWAY_CALLER_ID_HTTP`] into this NATS header when
 /// publishing to `{prefix}.v1.gateway.>`.
+///
+/// A routing hint at most: inside the bus the caller is the principal the subject carries
+/// (ADR#0082), never this header.
 ///
 /// Stable wire token (case-insensitive matching on ingress); prefer `GatewayCallerId` casing in observability prose.
 pub const GATEWAY_CALLER_ID_HEADER: &str = "X-A2a-Caller-Id";
@@ -153,26 +157,6 @@ pub const VERSION_NOT_SUPPORTED: i32 = -32009;
 
 /// Binding-specific: no agent replicas are reachable on the agent subject (no responders).
 pub const AGENT_UNAVAILABLE: i32 = -32050;
-
-// -- gateway_ingress --
-
-/// Recognized dotted method suffix tokens after `{prefix}.v1.agents.{agent_id}.` /
-/// ingress remainder (same spelling as [`crate::server::dispatch::A2aMethod`] mapping).
-///
-/// Listed longest-first to ensure deterministic matching.
-pub const GATEWAY_INGRESS_METHOD_SUFFIXES: &[&[&str]] = &[
-    &["message", "stream"],
-    &["message", "send"],
-    &["tasks", "resubscribe"],
-    &["tasks", "cancel"],
-    &["tasks", "list"],
-    &["tasks", "get"],
-    &["push", "set"],
-    &["push", "get"],
-    &["push", "list"],
-    &["push", "delete"],
-    &["card"],
-];
 
 // -- jetstream::consumers --
 
