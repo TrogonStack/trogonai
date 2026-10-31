@@ -30,39 +30,47 @@ impl IncompleteClientCertificate {
     }
 }
 
-/// TLS material; a client certificate needs both its certificate and key, and
-/// setting either one alone is reported instead of ignored.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct NatsTls {
-    cert: Option<Location>,
-    key: Option<Location>,
-    root_ca: Option<Location>,
+/// Transport security for a connection. TLS is the default and verifies the
+/// server against the system roots, or against `ca` in their place, and a
+/// client certificate adds mutual TLS. `Disabled` is the only way to connect
+/// without TLS.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NatsTls {
+    Disabled,
+    Enabled {
+        ca: Option<Location>,
+        client_cert: Option<ClientCertificate>,
+    },
+}
+
+impl Default for NatsTls {
+    fn default() -> Self {
+        Self::Enabled {
+            ca: None,
+            client_cert: None,
+        }
+    }
 }
 
 impl NatsTls {
-    pub fn new(cert: Option<Location>, key: Option<Location>, root_ca: Option<Location>) -> Self {
-        Self { cert, key, root_ca }
-    }
-
-    pub fn client_certificate(&self) -> Result<Option<ClientCertificate>, IncompleteClientCertificate> {
-        match (&self.cert, &self.key) {
-            (Some(cert), Some(key)) => Ok(Some(ClientCertificate {
-                cert: cert.clone(),
-                key: key.clone(),
-            })),
-            (Some(_), None) => Err(IncompleteClientCertificate::MissingKey),
-            (None, Some(_)) => Err(IncompleteClientCertificate::MissingCert),
-            (None, None) => Ok(None),
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::Disabled => "disabled",
+            Self::Enabled { client_cert: None, .. } => "TLS",
+            Self::Enabled {
+                client_cert: Some(_), ..
+            } => "mutual TLS",
         }
     }
+}
 
-    pub fn root_ca(&self) -> Option<&Location> {
-        self.root_ca.as_ref()
-    }
-
-    pub fn is_configured(&self) -> bool {
-        self.cert.is_some() || self.key.is_some() || self.root_ca.is_some()
-    }
+/// TLS settings that cannot be honored as written. Connecting reports them
+/// instead of choosing a transport on the caller's behalf.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TlsMisconfiguration {
+    IncompleteClientCertificate(IncompleteClientCertificate),
+    UnrecognizedDisabledValue(String),
+    DisabledAlongside(&'static str),
 }
 
 #[cfg(test)]

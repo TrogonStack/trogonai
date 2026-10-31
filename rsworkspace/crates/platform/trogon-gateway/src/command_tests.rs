@@ -178,7 +178,7 @@ async fn serve_provisions_stream_and_claim_bucket_before_graceful_shutdown() {
     let server = JetStreamTestServer::start().await;
     let mut resolved = resolved_config();
     resolved.http_server.port = 0;
-    resolved.nats = trogon_nats::NatsConfig::from_url(server.address());
+    resolved.nats = trogon_nats::NatsConfig::from_url(server.address()).with_tls(trogon_nats::NatsTls::Disabled);
     tokio::time::timeout(Duration::from_secs(10), serve(resolved, std::future::ready(())))
         .await
         .unwrap()
@@ -206,7 +206,7 @@ app_token = "xapp-fixture-token"
     .unwrap();
     let mut resolved = config::load(Some(file.path())).unwrap();
     resolved.http_server.port = 0;
-    resolved.nats = trogon_nats::NatsConfig::from_url(server.address());
+    resolved.nats = trogon_nats::NatsConfig::from_url(server.address()).with_tls(trogon_nats::NatsTls::Disabled);
     tokio::time::timeout(Duration::from_secs(10), serve(resolved, std::future::ready(())))
         .await
         .unwrap()
@@ -229,7 +229,7 @@ credentials = '{"type":"service_account","project_id":"fake","private_key_id":"f
     .unwrap();
     let mut resolved = config::load(Some(file.path())).unwrap();
     resolved.http_server.port = 0;
-    resolved.nats = trogon_nats::NatsConfig::from_url(server.address());
+    resolved.nats = trogon_nats::NatsConfig::from_url(server.address()).with_tls(trogon_nats::NatsTls::Disabled);
     tokio::time::timeout(Duration::from_secs(10), serve(resolved, std::future::ready(())))
         .await
         .unwrap()
@@ -332,7 +332,7 @@ async fn serve_enables_credential_management_when_the_admin_token_is_configured(
     let server = JetStreamTestServer::start().await;
     let mut resolved = resolved_config();
     resolved.http_server.port = 0;
-    resolved.nats = trogon_nats::NatsConfig::from_url(server.address());
+    resolved.nats = trogon_nats::NatsConfig::from_url(server.address()).with_tls(trogon_nats::NatsTls::Disabled);
     let env = management_env("http://127.0.0.1:1");
 
     tokio::time::timeout(
@@ -354,7 +354,7 @@ async fn serve_does_not_provision_credential_management_without_the_admin_token(
     let server = JetStreamTestServer::start().await;
     let mut resolved = resolved_config();
     resolved.http_server.port = 0;
-    resolved.nats = trogon_nats::NatsConfig::from_url(server.address());
+    resolved.nats = trogon_nats::NatsConfig::from_url(server.address()).with_tls(trogon_nats::NatsTls::Disabled);
 
     tokio::time::timeout(
         Duration::from_secs(10),
@@ -392,7 +392,7 @@ gateway_intents = "guilds,guild_messages"
     .unwrap();
     let mut resolved = config::load(Some(file.path())).unwrap();
     resolved.http_server.port = 0;
-    resolved.nats = trogon_nats::NatsConfig::from_url(server.address());
+    resolved.nats = trogon_nats::NatsConfig::from_url(server.address()).with_tls(trogon_nats::NatsTls::Disabled);
     let env = trogon_std::env::InMemoryEnv::new();
     env.set(OPENBAO_ADDR, "http://127.0.0.1:1");
     env.set(OPENBAO_TOKEN, "openbao-token");
@@ -461,7 +461,7 @@ async fn serve_every_webhook_source(env: &trogon_std::env::InMemoryEnv) {
     file.write_all(EVERY_WEBHOOK_SOURCE.as_bytes()).unwrap();
     let mut resolved = config::load(Some(file.path())).unwrap();
     resolved.http_server.port = 0;
-    resolved.nats = trogon_nats::NatsConfig::from_url(server.address());
+    resolved.nats = trogon_nats::NatsConfig::from_url(server.address()).with_tls(trogon_nats::NatsTls::Disabled);
 
     tokio::time::timeout(
         Duration::from_secs(10),
@@ -512,7 +512,7 @@ async fn serve_requires_openbao_settings_when_credential_management_is_enabled()
     let server = JetStreamTestServer::start().await;
     let mut resolved = resolved_config();
     resolved.http_server.port = 0;
-    resolved.nats = trogon_nats::NatsConfig::from_url(server.address());
+    resolved.nats = trogon_nats::NatsConfig::from_url(server.address()).with_tls(trogon_nats::NatsTls::Disabled);
     let env = trogon_std::env::InMemoryEnv::new();
     env.set(CREDENTIAL_MANAGEMENT_ADMIN_TOKEN, "admin-token");
 

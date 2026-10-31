@@ -86,7 +86,7 @@ pub use subject_conformance::{
     validate_published_subject, validate_subject_pattern,
 };
 pub use subject_token_violation::SubjectTokenViolationError;
-pub use tls::{ClientCertificate, IncompleteClientCertificate, NatsTls};
+pub use tls::{ClientCertificate, IncompleteClientCertificate, NatsTls, TlsMisconfiguration};
 
 #[cfg(any(test, feature = "test-support"))]
 pub use mocks::{AdvancedMockNatsClient, MockNatsClient};

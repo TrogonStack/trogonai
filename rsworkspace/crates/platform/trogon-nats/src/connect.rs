@@ -1,10 +1,10 @@
 use crate::auth::{NatsAuth, NatsConfig};
 use crate::constants::{
     ENV_NATS_CA, ENV_NATS_CERT, ENV_NATS_CREDS, ENV_NATS_JWT, ENV_NATS_KEY, ENV_NATS_NKEY, ENV_NATS_PASSWORD,
-    ENV_NATS_SEED, ENV_NATS_TOKEN, MAX_RECONNECT_DELAY,
+    ENV_NATS_SEED, ENV_NATS_TLS_DISABLED, ENV_NATS_TOKEN, MAX_RECONNECT_DELAY, TLS_DISABLED_VALUES,
 };
 use crate::credential_value::{CredentialValue, SettingError};
-use crate::tls::NatsTls;
+use crate::tls::{NatsTls, TlsMisconfiguration};
 use async_nats::{AuthError, Client, ConnectOptions, Event};
 use nkeys::KeyPair;
 use std::sync::Arc;
@@ -120,46 +120,72 @@ fn jwt_signer(
 }
 
 fn apply_tls(opts: ConnectOptions, tls: &NatsTls) -> Result<ConnectOptions, ConnectError> {
-    if !tls.is_configured() {
+    let NatsTls::Enabled { ca, client_cert } = tls else {
         return Ok(opts);
-    }
+    };
     let mut opts = opts.require_tls(true);
-    let client_certificate = tls
-        .client_certificate()
-        .map_err(|incomplete| ConnectError::InvalidSetting {
-            setting: incomplete.present_setting(),
-            error: SettingError::MissingCompanion(incomplete.missing_setting()),
-        })?;
-    if let Some(client) = client_certificate {
+    if let Some(client) = client_cert {
         let cert = client.cert.path().map_err(invalid_setting(ENV_NATS_CERT))?;
         let key = client.key.path().map_err(invalid_setting(ENV_NATS_KEY))?;
         opts = opts.add_client_certificate(cert.to_path_buf(), key.to_path_buf());
     }
-    if let Some(ca) = tls.root_ca() {
+    if let Some(ca) = ca {
         let ca = ca.path().map_err(invalid_setting(ENV_NATS_CA))?;
         opts = opts.add_root_certificates(ca.to_path_buf());
     }
     Ok(opts)
 }
 
-async fn build_options<E: ReadEnv>(config: &NatsConfig, env: &E) -> Result<ConnectOptions, ConnectError> {
+fn tls(config: &NatsConfig) -> Result<&NatsTls, ConnectError> {
+    config.tls.as_ref().map_err(invalid_tls_setting)
+}
+
+pub(crate) async fn build_options<E: ReadEnv>(config: &NatsConfig, env: &E) -> Result<ConnectOptions, ConnectError> {
+    let tls = tls(config)?;
     let opts = apply_auth(ConnectOptions::new(), &config.auth, env).await?;
-    apply_tls(opts, &config.tls)
+    apply_tls(opts, tls)
 }
 
 fn invalid_setting(setting: &'static str) -> impl Fn(SettingError) -> ConnectError {
     move |error| ConnectError::InvalidSetting { setting, error }
 }
 
+fn invalid_tls_setting(misconfiguration: &TlsMisconfiguration) -> ConnectError {
+    match misconfiguration {
+        TlsMisconfiguration::IncompleteClientCertificate(incomplete) => ConnectError::InvalidSetting {
+            setting: incomplete.present_setting(),
+            error: SettingError::MissingCompanion(incomplete.missing_setting()),
+        },
+        TlsMisconfiguration::UnrecognizedDisabledValue(value) => ConnectError::InvalidSetting {
+            setting: ENV_NATS_TLS_DISABLED,
+            error: SettingError::UnrecognizedValue {
+                value: value.clone(),
+                accepted: &TLS_DISABLED_VALUES,
+            },
+        },
+        TlsMisconfiguration::DisabledAlongside(setting) => ConnectError::InvalidSetting {
+            setting: ENV_NATS_TLS_DISABLED,
+            error: SettingError::ConflictsWith(setting),
+        },
+    }
+}
+
 #[instrument(name = NATS_CONNECT, skip(config), fields(servers = ?config.servers, auth = %config.auth.description(), timeout_secs = ?connection_timeout.as_secs()))]
 pub async fn connect(config: &NatsConfig, connection_timeout: Duration) -> Result<Client, ConnectError> {
     install_default_crypto_provider();
+    let tls = tls(config)?;
     info!(
         servers = ?config.servers,
         auth = %config.auth.description(),
-        tls = config.tls.is_configured(),
+        tls = %tls.description(),
         "Connecting to NATS"
     );
+    if *tls == NatsTls::Disabled {
+        warn!(
+            servers = ?config.servers,
+            "NATS TLS is disabled, which is only for tests and local debugging"
+        );
+    }
 
     let opts = build_options(config, &SystemEnv).await?;
     let connect_result = apply_reconnect_options(opts, connection_timeout)

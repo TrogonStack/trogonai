@@ -11,6 +11,7 @@ pub const ENV_NATS_SEED: &str = "NATS_SEED";
 pub const ENV_NATS_CERT: &str = "NATS_CERT";
 pub const ENV_NATS_KEY: &str = "NATS_KEY";
 pub const ENV_NATS_CA: &str = "NATS_CA";
+pub const ENV_NATS_TLS_DISABLED: &str = "NATS_TLS_DISABLED";
 pub const DEFAULT_NATS_URL: &str = "localhost:4222";
 
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -51,3 +52,7 @@ pub const ESCAPE_TOKEN: &str = "custom";
 
 /// Prefixes of operator, account and user NKey seeds.
 pub const SEED_PREFIXES: [&str; 3] = ["SO", "SA", "SU"];
+
+/// Values of `NATS_TLS_DISABLED` that disable TLS, compared without regard to
+/// letter case. Any other non-empty value is a configuration error.
+pub const TLS_DISABLED_VALUES: [&str; 3] = ["true", "1", "yes"];
