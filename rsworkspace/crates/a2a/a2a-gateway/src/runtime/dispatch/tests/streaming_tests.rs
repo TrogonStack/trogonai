@@ -143,7 +143,7 @@ async fn resubscribe_uses_task_cursor_and_shutdown_releases_caller_capacity() ->
                     last_seq: acknowledged.sequence,
                 },
                 reply: "_INBOX.dispatch".into(),
-                caller_key: CallerKey::new("alice").expect("caller"),
+                caller_key: CallerKey::new(alice().to_string()).expect("caller"),
                 caller: alice(),
             },
             stopped.clone(),

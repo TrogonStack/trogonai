@@ -17,9 +17,9 @@
 //!   streaming ingress (`message/stream`, `tasks/resubscribe`).
 //! - [`gw_pull_backpressure`] — pull consumer for task-event egress
 //!   (`A2A_EVENTS`) with JetStream flow control + per-caller inflight cap.
-//! - [`jwt_caller_identity`] — resolves a verified caller identity from a
-//!   minted NATS User JWT carried on the inbound message, with a
-//!   labs-only header-trust fallback gated behind an env flag.
+//! - [`ingress_identity`]: rejects a forwarded caller JWT that does not name
+//!   the principal of the ingress subject, and strips identity headers so no
+//!   policy tier or agent reads them.
 //! - [`policy`] — shared policy-tier scaffold; later slices layer Tier 1
 //!   declarative, Tier 1 SpiceDB, Tier 2 CEL, and Tier 3 redaction on top.
 //! - [`push_dlq_mirror`] — pull-consumer that mirrors `{prefix}.v1.push.dlq.>`
@@ -38,7 +38,7 @@ pub mod config;
 pub mod constants;
 pub mod gw_ingress_stream;
 pub mod gw_pull_backpressure;
-pub mod jwt_caller_identity;
+pub mod ingress_identity;
 pub mod policy;
 pub mod push_dlq_mirror;
 pub mod runtime;
