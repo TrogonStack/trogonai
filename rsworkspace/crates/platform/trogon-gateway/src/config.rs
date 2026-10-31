@@ -15,6 +15,8 @@ use crate::source::incidentio::incidentio_signing_secret::IncidentioSigningSecre
 use crate::source::linear::config::LinearWebhookSecret;
 use crate::source::microsoft_graph::MicrosoftGraphClientState;
 use crate::source::notion::NotionVerificationToken;
+use crate::source::plaid::config::PlaidConfig as PlaidSourceConfig;
+use crate::source::plaid::{PlaidApiBaseUrl, PlaidClientId, PlaidEnvironment, PlaidSecret};
 use crate::source::sentry::SentryClientSecret;
 use crate::source::slack::ack_budget::AckBudget;
 use crate::source::slack::config::{
@@ -45,8 +47,9 @@ use trogon_std::{ByteSize, HttpBodySizeMax, NonZeroDuration, ZeroDurationError};
 
 use crate::constants::{
     DEFAULT_GITLAB_TIMESTAMP_TOLERANCE_SECS, DEFAULT_INCIDENTIO_TIMESTAMP_TOLERANCE_SECS,
-    DEFAULT_LINEAR_TIMESTAMP_TOLERANCE_SECS, DEFAULT_NATS_ACK_TIMEOUT_SECS, DEFAULT_SLACK_TIMESTAMP_MAX_DRIFT_SECS,
-    DEFAULT_STREAM_MAX_AGE_SECS, DEFAULT_ZOOM_TIMESTAMP_TOLERANCE_SECS, SENTRY_MAX_ACK_TIMEOUT_SECS,
+    DEFAULT_LINEAR_TIMESTAMP_TOLERANCE_SECS, DEFAULT_NATS_ACK_TIMEOUT_SECS, DEFAULT_PLAID_TIMESTAMP_TOLERANCE_SECS,
+    DEFAULT_SLACK_TIMESTAMP_MAX_DRIFT_SECS, DEFAULT_STREAM_MAX_AGE_SECS, DEFAULT_ZOOM_TIMESTAMP_TOLERANCE_SECS,
+    SENTRY_MAX_ACK_TIMEOUT_SECS,
 };
 use crate::source_status::SourceStatus;
 
@@ -423,6 +426,8 @@ struct SourcesConfig {
     datadog: DatadogConfig,
     #[config(nested)]
     zoom: ZoomConfig,
+    #[config(nested)]
+    plaid: PlaidConfig,
 }
 
 #[derive(Config)]
@@ -539,6 +544,14 @@ struct ZoomConfig {
     status: Option<String>,
     #[config(default = {})]
     integrations: BTreeMap<String, SourceIntegrationInput<ZoomWebhookConfig>>,
+}
+
+#[derive(Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
+struct PlaidConfig {
+    status: Option<String>,
+    #[config(default = {})]
+    integrations: BTreeMap<String, SourceIntegrationInput<PlaidWebhookConfig>>,
 }
 
 #[derive(serde::Deserialize)]
@@ -674,6 +687,16 @@ struct ZoomWebhookConfig {
     timestamp_tolerance_secs: Option<u64>,
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PlaidWebhookConfig {
+    client_id: Option<String>,
+    secret: Option<SecretInput>,
+    environment: Option<String>,
+    api_base_url: Option<String>,
+    timestamp_tolerance_secs: Option<u64>,
+}
+
 pub struct ResolvedHttpServerConfig {
     pub port: u16,
 }
@@ -707,6 +730,7 @@ pub struct ResolvedConfig {
     pub sentry: Vec<SourceIntegration<crate::source::sentry::SentryConfig>>,
     pub datadog: Vec<SourceIntegration<crate::source::datadog::DatadogConfig>>,
     pub zoom: Vec<SourceIntegration<crate::source::zoom::ZoomConfig>>,
+    pub plaid: Vec<SourceIntegration<crate::source::plaid::PlaidConfig>>,
 }
 
 impl ResolvedConfig {
@@ -736,6 +760,7 @@ impl ResolvedConfig {
             .chain(self.sentry.iter().map(|i| i.config.stream_max_age))
             .chain(self.datadog.iter().map(|i| i.config.stream_max_age))
             .chain(self.zoom.iter().map(|i| i.config.stream_max_age))
+            .chain(self.plaid.iter().map(|i| i.config.stream_max_age))
     }
 
     pub fn has_any_source(&self) -> bool {
@@ -753,6 +778,7 @@ impl ResolvedConfig {
             || !self.sentry.is_empty()
             || !self.datadog.is_empty()
             || !self.zoom.is_empty()
+            || !self.plaid.is_empty()
     }
 }
 
@@ -798,6 +824,7 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs, env: &impl ReadEnv) ->
     let sentry = resolve_sentry_integrations(cfg.sources.sentry, env, &mut errors);
     let datadog = resolve_datadog_integrations(cfg.sources.datadog, env, &mut errors);
     let zoom = resolve_zoom_integrations(cfg.sources.zoom, env, &mut errors);
+    let plaid = resolve_plaid_integrations(cfg.sources.plaid, env, &mut errors);
 
     if !errors.is_empty() {
         return Err(ConfigError::Validation(AggregateValidationError(errors)));
@@ -822,6 +849,7 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs, env: &impl ReadEnv) ->
         sentry,
         datadog,
         zoom,
+        plaid,
     })
 }
 
@@ -2064,6 +2092,148 @@ fn resolve_zoom_integrations(
             id,
             ZoomSourceConfig {
                 secret_token,
+                subject_prefix,
+                stream_name,
+                stream_max_age,
+                nats_ack_timeout,
+                timestamp_tolerance,
+            },
+        ));
+    }
+    integrations
+}
+
+fn resolve_plaid_integrations(
+    section: PlaidConfig,
+    env: &impl ReadEnv,
+    errors: &mut Vec<ConfigValidationError>,
+) -> Vec<SourceIntegration<PlaidSourceConfig>> {
+    let PlaidConfig {
+        status,
+        integrations: configured_integrations,
+    } = section;
+    let mut integrations = Vec::new();
+    if !resolve_source_status("plaid", status.as_deref(), errors) {
+        return integrations;
+    }
+    for (raw_id, integration) in configured_integrations {
+        let Some(id) = resolve_integration_id("plaid", raw_id, errors) else {
+            continue;
+        };
+        if !resolve_integration_source_status("plaid", &id, integration.status.as_deref(), errors) {
+            continue;
+        }
+        let Some(webhook) = integration.webhook else {
+            errors.push(ConfigValidationError::missing_integration("plaid", &id, "webhook"));
+            continue;
+        };
+        let Some(secret) = require_integration_value(
+            SourceKind::Plaid,
+            &id,
+            "secret",
+            CredentialKind::ClientSecret,
+            webhook.secret,
+            env,
+            errors,
+        ) else {
+            continue;
+        };
+        let secret = match PlaidSecret::new(secret) {
+            Ok(secret) => secret,
+            Err(error) => {
+                errors.push(ConfigValidationError::invalid_integration(
+                    "plaid", &id, "secret", error,
+                ));
+                continue;
+            }
+        };
+        let Some(raw_client_id) = webhook.client_id else {
+            errors.push(ConfigValidationError::missing_integration("plaid", &id, "client_id"));
+            continue;
+        };
+        let client_id = match PlaidClientId::new(raw_client_id) {
+            Ok(client_id) => client_id,
+            Err(error) => {
+                errors.push(ConfigValidationError::invalid_integration(
+                    "plaid",
+                    &id,
+                    "client_id",
+                    error,
+                ));
+                continue;
+            }
+        };
+        let Some(raw_environment) = webhook.environment else {
+            errors.push(ConfigValidationError::missing_integration("plaid", &id, "environment"));
+            continue;
+        };
+        let environment = match PlaidEnvironment::parse(&raw_environment) {
+            Ok(environment) => environment,
+            Err(error) => {
+                errors.push(ConfigValidationError::invalid_integration(
+                    "plaid",
+                    &id,
+                    "environment",
+                    error,
+                ));
+                continue;
+            }
+        };
+        let api_base_url = match PlaidApiBaseUrl::new(
+            webhook
+                .api_base_url
+                .as_deref()
+                .unwrap_or_else(|| environment.default_api_base_url()),
+        ) {
+            Ok(api_base_url) => api_base_url,
+            Err(error) => {
+                errors.push(ConfigValidationError::invalid_integration(
+                    "plaid",
+                    &id,
+                    "api_base_url",
+                    error,
+                ));
+                continue;
+            }
+        };
+        let Some((subject_prefix, stream_name, stream_max_age, nats_ack_timeout)) = resolve_common_integration_fields(
+            CommonIntegrationFieldsInput {
+                source: "plaid",
+                id: &id,
+                subject_source_prefix: "plaid",
+                stream_source_prefix: "PLAID",
+                subject_prefix: integration.subject_prefix,
+                stream_name: integration.stream_name,
+                stream_max_age_secs: integration.stream_max_age_secs,
+                nats_ack_timeout_secs: integration.nats_ack_timeout_secs,
+                default_nats_ack_timeout_secs: DEFAULT_NATS_ACK_TIMEOUT_SECS,
+            },
+            errors,
+        ) else {
+            continue;
+        };
+        let timestamp_tolerance = match NonZeroDuration::from_secs(
+            webhook
+                .timestamp_tolerance_secs
+                .unwrap_or(DEFAULT_PLAID_TIMESTAMP_TOLERANCE_SECS),
+        ) {
+            Ok(duration) => duration,
+            Err(error) => {
+                errors.push(ConfigValidationError::invalid_integration(
+                    "plaid",
+                    &id,
+                    "timestamp_tolerance_secs",
+                    error,
+                ));
+                continue;
+            }
+        };
+        integrations.push(SourceIntegration::new(
+            id,
+            PlaidSourceConfig {
+                client_id,
+                secret,
+                api_base_url,
                 subject_prefix,
                 stream_name,
                 stream_max_age,
