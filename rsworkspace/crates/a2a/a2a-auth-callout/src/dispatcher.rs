@@ -3,14 +3,15 @@ use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
 
-use crate::account_resolver::AccountResolver;
+use crate::account_resolver::{AccountResolverError, RequestedAccount};
+use crate::admission_keys::{AccountSigningKey, TenantAccount, TenantSigningKeys};
 #[allow(deprecated)]
 use crate::credentials::api_key::ApiKeyVerifier;
 use crate::credentials::mtls::MTlsVerifier;
 use crate::credentials::oidc::{BearerToken, OidcVerifier};
 use crate::error::AuthCalloutError;
-use crate::jwt::{MintedUserJwt, UserJwtSubject};
-use crate::signing_key_source::SigningKeySource;
+use crate::jwt::{AccountName, MintedUserJwt, UserJwtSubject};
+use crate::signing_key_source::MintingMaterial;
 use crate::wire::ServerAuthRequestClaims;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -28,9 +29,8 @@ pub trait AuthDispatcher: Send + Sync + 'static {
 }
 
 pub struct CalloutDispatcherConfig {
-    pub signing_key_source: Arc<dyn SigningKeySource>,
+    pub tenant_signing_keys: TenantSigningKeys,
     pub user_jwt_ttl: Duration,
-    pub account_resolver: Arc<dyn AccountResolver>,
     pub oidc: Option<Arc<dyn OidcVerifier>>,
     pub mtls: Option<Arc<dyn MTlsVerifier>>,
     #[allow(deprecated)]
@@ -44,6 +44,20 @@ pub struct CalloutDispatcher {
 impl CalloutDispatcher {
     pub fn new(config: CalloutDispatcherConfig) -> Self {
         Self { config }
+    }
+
+    fn tenant(
+        &self,
+        requested: &RequestedAccount,
+    ) -> Result<(TenantAccount, &AccountSigningKey), AccountResolverError> {
+        let unknown = || AccountResolverError::Unknown(requested.as_str().to_owned());
+        let tenant = TenantAccount::parse(requested.as_str()).map_err(|_| unknown())?;
+        let signing_key = self
+            .config
+            .tenant_signing_keys
+            .signing_key(&tenant)
+            .ok_or_else(unknown)?;
+        Ok((tenant, signing_key))
     }
 
     fn select_scheme(&self, request: &ServerAuthRequestClaims) -> Result<AuthScheme, AuthCalloutError> {
@@ -67,7 +81,8 @@ impl CalloutDispatcher {
 impl AuthDispatcher for CalloutDispatcher {
     async fn dispatch(&self, request: ServerAuthRequestClaims) -> Result<MintedUserJwt, AuthCalloutError> {
         let requested = request.requested_account()?;
-        let account = self.config.account_resolver.resolve(&requested)?;
+        let (tenant, signing_key) = self.tenant(&requested)?;
+        let account = AccountName::new(tenant.as_str());
 
         let scheme = self.select_scheme(&request)?;
         let claims = match scheme {
@@ -120,7 +135,7 @@ impl AuthDispatcher for CalloutDispatcher {
 
         let user_nkey = request.user_nkey()?;
         let user_subject = UserJwtSubject::from_user_nkey(user_nkey);
-        let material = self.config.signing_key_source.current().minting_material();
+        let material = MintingMaterial::on_behalf_of(signing_key, tenant);
         claims
             .mint(&material, &user_subject, SystemTime::now(), self.config.user_jwt_ttl)
             .map_err(AuthCalloutError::from)

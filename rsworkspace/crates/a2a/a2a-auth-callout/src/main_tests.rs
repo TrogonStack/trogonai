@@ -7,16 +7,13 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::{
-    build_mtls_verifier, build_oidc_verifier, env_required, load_nkey_public_env, load_nkey_seed_env, nats_config,
-    split_env_list,
+    build_mtls_verifier, build_oidc_verifier, env_required, load_nkey_public_env, nats_config, split_env_list,
 };
 
 #[derive(Debug, thiserror::Error)]
 enum FixtureError {
     #[error(transparent)]
     Auth(#[from] AuthCalloutError),
-    #[error(transparent)]
-    Nkey(#[from] nkeys::error::Error),
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
@@ -30,14 +27,14 @@ enum FixtureError {
 #[test]
 fn optional_lists_trim_entries_preserve_order_and_discard_blanks() {
     let env = InMemoryEnv::new();
-    assert!(split_env_list(&env, "AUTH_CALLOUT_ALLOWED_ACCOUNTS").is_empty());
-    env.set("AUTH_CALLOUT_ALLOWED_ACCOUNTS", " first, ,second,first,\n ");
+    assert!(split_env_list(&env, "AUTH_CALLOUT_OIDC_AUDIENCES").is_empty());
+    env.set("AUTH_CALLOUT_OIDC_AUDIENCES", " first, ,second,first,\n ");
     assert_eq!(
-        split_env_list(&env, "AUTH_CALLOUT_ALLOWED_ACCOUNTS"),
+        split_env_list(&env, "AUTH_CALLOUT_OIDC_AUDIENCES"),
         ["first", "second", "first"]
     );
-    env.set("AUTH_CALLOUT_ALLOWED_ACCOUNTS", " , \n ");
-    assert!(split_env_list(&env, "AUTH_CALLOUT_ALLOWED_ACCOUNTS").is_empty());
+    env.set("AUTH_CALLOUT_OIDC_AUDIENCES", " , \n ");
+    assert!(split_env_list(&env, "AUTH_CALLOUT_OIDC_AUDIENCES").is_empty());
 }
 
 #[test]
@@ -85,27 +82,12 @@ fn required_variables_preserve_presence_and_report_the_missing_name() -> Result<
 fn nkey_environment_loaders_preserve_valid_material_and_reject_bad_configuration() -> Result<(), FixtureError> {
     let env = InMemoryEnv::new();
     assert!(matches!(
-        load_nkey_seed_env(&env, "SEED"),
-        Err(AuthCalloutError::MissingEnvVar("SEED"))
-    ));
-    assert!(matches!(
         load_nkey_public_env(&env, "PUBLIC"),
         Err(AuthCalloutError::MissingEnvVar("PUBLIC"))
     ));
     let key = nkeys::KeyPair::new_server();
-    let seed = key.seed()?;
-    env.set("SEED", format!(" {seed}\n"));
     env.set("PUBLIC", format!(" {}\n", key.public_key()));
-    assert_eq!(
-        load_nkey_seed_env(&env, "SEED")?.to_signing_keypair()?.public_key(),
-        key.public_key()
-    );
     assert_eq!(load_nkey_public_env(&env, "PUBLIC")?.as_str(), key.public_key());
-    env.set("SEED", " \n ");
-    assert!(matches!(
-        load_nkey_seed_env(&env, "SEED"),
-        Err(AuthCalloutError::WireFormat(_))
-    ));
     env.set("PUBLIC", "invalid-key");
     assert!(matches!(
         load_nkey_public_env(&env, "PUBLIC"),

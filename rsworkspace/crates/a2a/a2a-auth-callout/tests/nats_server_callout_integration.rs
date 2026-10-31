@@ -22,7 +22,8 @@ use a2a_auth_callout::dispatcher::{AuthDispatcher, CalloutDispatcher, CalloutDis
 use a2a_auth_callout::jwt::{ExternalSubject, UserJwtClaims, decode_nats_user_payload};
 use a2a_auth_callout::signing_key_source::{KeyVersion, SigningKeySource, StaticSigningKeySource};
 use a2a_auth_callout::{
-    AccountResolver, AuthCalloutWireCodec, DenialCategory, MintedUserJwt, NkeyPublic, NkeySeed, StaticAccountResolver,
+    AccountSigningKey, AuthCalloutWireCodec, DenialCategory, MintedUserJwt, NkeyPublic, TenantAccount,
+    TenantSigningKeys,
 };
 use a2a_auth_callout::{AudienceAccount, SpiceDbPrincipal};
 use async_nats::Auth;
@@ -53,10 +54,43 @@ const NATS_CLIENT_PORT: u16 = 4222;
 const NATS_SERVER_AUTH_CALLOUT_ISSUER: &str = "ABJHLOVMPA4CI6R5KLNGOB4GSLNIY7IOUPAJC4YFNDLQVIOBYQGUWVLA";
 const CALLOUT_RESPONSE_ISSUER_SEED: &str = "SAANDLKMXL6CUS3CP52WIXBEDN6YJ545GDKC65U5JZPPV6WH6ESWUA6YAI";
 
-const TENANT_ACCOUNT: &str = "tenant-acme";
 const API_KEY_HMAC: &[u8] = b"integration-api-key-hmac-secret--";
 const API_KEY_VALUE: &str = "k_live_integration";
 const OIDC_AUDIENCE: &str = "a2a-client";
+
+struct TenantFixture {
+    account: TenantAccount,
+    signing: nkeys::KeyPair,
+}
+
+impl TenantFixture {
+    fn generate() -> Self {
+        Self {
+            account: TenantAccount::parse(&nkeys::KeyPair::new_account().public_key()).expect("tenant account"),
+            signing: nkeys::KeyPair::new_account(),
+        }
+    }
+
+    fn name(&self) -> String {
+        self.account.as_str().to_owned()
+    }
+
+    fn signing_seed(&self) -> String {
+        self.signing.seed().expect("tenant signing seed")
+    }
+
+    fn signing_keys(&self) -> TenantSigningKeys {
+        let signing_key = AccountSigningKey::from_seed(&self.signing_seed()).expect("tenant signing key");
+        TenantSigningKeys::new([(self.account.clone(), signing_key)]).expect("tenant signing keys")
+    }
+
+    fn verification_source(&self) -> Arc<dyn SigningKeySource> {
+        Arc::new(
+            StaticSigningKeySource::new(&self.signing_seed(), KeyVersion::new("current").expect("key version"))
+                .expect("tenant verification source"),
+        )
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct NatsClientUrl(String);
@@ -169,7 +203,12 @@ async fn connect_callout_service(nats_url: &NatsClientUrl, client_tls: Option<Na
 }
 
 impl NatsCalloutStack {
-    async fn start(config_root: &Path, dispatcher: CalloutDispatcher, client_tls: Option<NatsClientTls>) -> Self {
+    async fn start(
+        config_root: &Path,
+        tenant: &TenantFixture,
+        dispatcher: CalloutDispatcher,
+        client_tls: Option<NatsClientTls>,
+    ) -> Self {
         let image = GenericImage::new(NATS_IMAGE, NATS_TAG)
             .with_exposed_port(NATS_CLIENT_PORT.tcp())
             .with_wait_for(WaitFor::message_on_either_std("Server is ready"))
@@ -189,13 +228,7 @@ impl NatsCalloutStack {
         let scheme = if client_tls.is_some() { "tls" } else { "nats" };
         let nats_url = NatsClientUrl(format!("{scheme}://{host}:{port}"));
 
-        let signing: Arc<dyn SigningKeySource> = Arc::new(
-            StaticSigningKeySource::new(
-                CALLOUT_RESPONSE_ISSUER_SEED,
-                KeyVersion::new("integration").expect("key version"),
-            )
-            .expect("signing source"),
-        );
+        let signing = tenant.verification_source();
 
         // TODO(task #8): pin `server_issuer` to the NATS server's own
         // identity NKey (the key that signs $SYS.REQ.USER.AUTH request
@@ -206,8 +239,10 @@ impl NatsCalloutStack {
         // line or pin it via deterministic config before the
         // ignored Docker tests can pass end-to-end.
         let server_issuer = NkeyPublic::parse(NATS_SERVER_AUTH_CALLOUT_ISSUER).expect("server issuer nkey");
-        let callout_seed = NkeySeed::parse(CALLOUT_RESPONSE_ISSUER_SEED).expect("callout issuer seed");
-        let wire = Arc::new(AuthCalloutWireCodec::new(server_issuer, callout_seed, None, None).expect("wire codec"));
+        let response_signing_key =
+            AccountSigningKey::from_seed(CALLOUT_RESPONSE_ISSUER_SEED).expect("response signing key");
+        let wire =
+            Arc::new(AuthCalloutWireCodec::new(server_issuer, response_signing_key, None, None).expect("wire codec"));
 
         let capture = MintedJwtCapture::new();
         let dispatch_errors = DispatchErrorCapture::default();
@@ -273,16 +308,18 @@ impl NatsCalloutStack {
 
     async fn start_owned(
         config_dir: TempDir,
+        tenant: &TenantFixture,
         dispatcher: CalloutDispatcher,
         client_tls: Option<NatsClientTls>,
     ) -> Self {
-        let mut stack = Self::start(config_dir.path(), dispatcher, client_tls).await;
+        let mut stack = Self::start(config_dir.path(), tenant, dispatcher, client_tls).await;
         stack._config_dir = Some(config_dir);
         stack
     }
 }
 
-fn base_server_config(tls_block: &str) -> String {
+fn base_server_config(tls_block: &str, tenant: &TenantFixture) -> String {
+    let tenant = tenant.account.as_str();
     format!(
         r#"
 port: {NATS_CLIENT_PORT}
@@ -294,7 +331,7 @@ accounts {{
   }}
   APP {{}}
   SYS {{}}
-  {TENANT_ACCOUNT} {{}}
+  {tenant} {{}}
 }}
 system_account: SYS
 
@@ -394,7 +431,7 @@ fn decode_captured(minted: &MintedUserJwt, signing: &dyn SigningKeySource) -> Us
     UserJwtClaims::verify_with_source(minted.as_str(), signing).expect("decode minted user jwt")
 }
 
-fn assert_minted_nats_user_jwt_shape(token: &str) {
+fn assert_minted_nats_user_jwt_shape(token: &str, tenant: &TenantFixture) {
     let parts: Vec<&str> = token.split('.').collect();
     assert_eq!(parts.len(), 3);
     let header: serde_json::Value = serde_json::from_slice(
@@ -406,12 +443,12 @@ fn assert_minted_nats_user_jwt_shape(token: &str) {
     assert_eq!(header["alg"], "ed25519-nkey");
     let payload = decode_nats_user_payload(token).expect("payload");
     assert_eq!(payload["nats"]["type"], "user");
-    assert_eq!(payload["aud"], TENANT_ACCOUNT);
+    assert_eq!(payload["aud"], tenant.account.as_str());
     assert!(!payload["caller_id"].as_str().unwrap_or("").is_empty());
 }
 
-fn assert_tenant_acl(claims: &UserJwtClaims) {
-    assert_eq!(claims.aud.as_str(), TENANT_ACCOUNT);
+fn assert_tenant_acl(claims: &UserJwtClaims, tenant: &TenantFixture) {
+    assert_eq!(claims.aud.as_str(), tenant.account.as_str());
     assert!(!claims.caller_id.as_str().is_empty());
     assert_eq!(claims.nats_permissions.publish_allow.len(), 1);
     assert_eq!(claims.nats_permissions.publish_allow[0].as_str(), "a2a.v1.gateway.>");
@@ -428,7 +465,12 @@ fn assert_tenant_acl(claims: &UserJwtClaims) {
     assert!(subs.contains(&push.as_str()));
 }
 
-fn assert_stable_caller_id(minted: &[MintedUserJwt], signing: &dyn SigningKeySource, dispatch_errors: &[String]) {
+fn assert_stable_caller_id(
+    minted: &[MintedUserJwt],
+    signing: &dyn SigningKeySource,
+    tenant: &TenantFixture,
+    dispatch_errors: &[String],
+) {
     assert!(
         minted.len() >= 2,
         "expected at least two callout mints, got {}; decode/dispatch errors: {dispatch_errors:?}",
@@ -436,10 +478,10 @@ fn assert_stable_caller_id(minted: &[MintedUserJwt], signing: &dyn SigningKeySou
     );
     let first = decode_captured(&minted[0], signing);
     let second = decode_captured(&minted[1], signing);
-    assert_tenant_acl(&first);
-    assert_tenant_acl(&second);
+    assert_tenant_acl(&first, tenant);
+    assert_tenant_acl(&second, tenant);
     assert_eq!(first.caller_id, second.caller_id);
-    assert_minted_nats_user_jwt_shape(minted[0].as_str());
+    assert_minted_nats_user_jwt_shape(minted[0].as_str(), tenant);
 }
 
 async fn assert_connect_admits<F>(nats_url: &NatsClientUrl, client_tls: Option<NatsClientTls>, build_auth: F)
@@ -489,44 +531,26 @@ async fn drive_callout_attempts<F>(
     }
 }
 
-fn dispatcher_with_oidc(issuer: OidcIssuerUrl, jwks: JwkSet) -> CalloutDispatcher {
-    let signing: Arc<dyn SigningKeySource> = Arc::new(
-        StaticSigningKeySource::new(
-            CALLOUT_RESPONSE_ISSUER_SEED,
-            KeyVersion::new("integration").expect("key version"),
-        )
-        .expect("signing source"),
-    );
-    let resolver: Arc<dyn AccountResolver> = Arc::new(StaticAccountResolver::new([TENANT_ACCOUNT.to_owned()]));
+fn dispatcher_with_oidc(tenant: &TenantFixture, issuer: OidcIssuerUrl, jwks: JwkSet) -> CalloutDispatcher {
     let oidc: Arc<dyn OidcVerifier> = Arc::new(JwksOidcVerifier::with_static_jwks(
         issuer,
         vec![OIDC_AUDIENCE.into()],
         jwks,
     ));
     CalloutDispatcher::new(CalloutDispatcherConfig {
-        signing_key_source: signing,
+        tenant_signing_keys: tenant.signing_keys(),
         user_jwt_ttl: Duration::from_secs(300),
-        account_resolver: resolver,
         oidc: Some(oidc),
         mtls: None,
         api_key: None,
     })
 }
 
-fn dispatcher_with_mtls(trust_anchor_pem: String) -> CalloutDispatcher {
-    let signing: Arc<dyn SigningKeySource> = Arc::new(
-        StaticSigningKeySource::new(
-            CALLOUT_RESPONSE_ISSUER_SEED,
-            KeyVersion::new("integration").expect("key version"),
-        )
-        .expect("signing source"),
-    );
-    let resolver: Arc<dyn AccountResolver> = Arc::new(StaticAccountResolver::new([TENANT_ACCOUNT.to_owned()]));
+fn dispatcher_with_mtls(tenant: &TenantFixture, trust_anchor_pem: String) -> CalloutDispatcher {
     let mtls: Arc<dyn MTlsVerifier> = Arc::new(X509MtlsVerifier::new(TrustAnchorPem::new(trust_anchor_pem)));
     CalloutDispatcher::new(CalloutDispatcherConfig {
-        signing_key_source: signing,
+        tenant_signing_keys: tenant.signing_keys(),
         user_jwt_ttl: Duration::from_secs(300),
-        account_resolver: resolver,
         oidc: None,
         mtls: Some(mtls),
         api_key: None,
@@ -534,30 +558,21 @@ fn dispatcher_with_mtls(trust_anchor_pem: String) -> CalloutDispatcher {
 }
 
 #[allow(deprecated)]
-fn dispatcher_with_api_key() -> CalloutDispatcher {
-    let signing: Arc<dyn SigningKeySource> = Arc::new(
-        StaticSigningKeySource::new(
-            CALLOUT_RESPONSE_ISSUER_SEED,
-            KeyVersion::new("integration").expect("key version"),
-        )
-        .expect("signing source"),
-    );
-    let resolver: Arc<dyn AccountResolver> = Arc::new(StaticAccountResolver::new([TENANT_ACCOUNT.to_owned()]));
+fn dispatcher_with_api_key(tenant: &TenantFixture) -> CalloutDispatcher {
     let mut registry = ApiKeyRegistry::new(API_KEY_HMAC.to_vec());
     let key = ApiKey::new(API_KEY_VALUE).expect("api key");
     registry.register(
         &key,
         ApiKeyEntry {
             spicedb_principal: SpiceDbPrincipal::new("svc/integration"),
-            audience: AudienceAccount::new(TENANT_ACCOUNT),
+            audience: AudienceAccount::new(tenant.account.as_str()),
             external_subject: ExternalSubject::new("svc-integration").expect("external subject"),
         },
     );
     let api_key: Arc<dyn ApiKeyVerifier> = Arc::new(HmacApiKeyVerifier::new(Arc::new(registry)));
     CalloutDispatcher::new(CalloutDispatcherConfig {
-        signing_key_source: signing,
+        tenant_signing_keys: tenant.signing_keys(),
         user_jwt_ttl: Duration::from_secs(300),
-        account_resolver: resolver,
         oidc: None,
         mtls: None,
         api_key: Some(api_key),
@@ -572,7 +587,7 @@ struct TlsFixture {
     ca_cert: PathBuf,
 }
 
-fn write_tls_fixture() -> TlsFixture {
+fn write_tls_fixture(tenant: &TenantFixture) -> TlsFixture {
     let dir = tempfile::tempdir().expect("tls tempdir");
     let cert_dir = dir.path().join("certs");
     std::fs::create_dir_all(&cert_dir).expect("certs dir");
@@ -611,7 +626,7 @@ fn write_tls_fixture() -> TlsFixture {
     std::fs::write(cert_dir.join("client.pem"), ee.pem()).expect("client pem");
     std::fs::write(cert_dir.join("client-key.pem"), ee_key.serialize_pem()).expect("client key");
 
-    std::fs::write(dir.path().join("nats.conf"), mtls_server_config()).expect("nats.conf");
+    std::fs::write(dir.path().join("nats.conf"), mtls_server_config(tenant)).expect("nats.conf");
 
     TlsFixture {
         ca_cert: cert_dir.join("ca.pem"),
@@ -622,7 +637,7 @@ fn write_tls_fixture() -> TlsFixture {
     }
 }
 
-fn mtls_server_config() -> String {
+fn mtls_server_config(tenant: &TenantFixture) -> String {
     let tls = r#"
 tls {
   cert_file: "/etc/nats/certs/server.pem"
@@ -631,40 +646,44 @@ tls {
   verify: true
 }
 "#;
-    base_server_config(tls)
+    base_server_config(tls, tenant)
 }
 
 #[tokio::test]
 #[ignore = "requires Docker (task #8)"]
 async fn oidc_bearer_callout_against_nats_server_mints_caller_acl() {
+    let tenant = TenantFixture::generate();
+    let tenant_name = tenant.name();
     let (_oidc_mock, issuer_url, jwks, enc) = mock_oidc_issuer().await;
     let issuer = OidcIssuerUrl::parse(issuer_url.as_str()).expect("issuer url");
-    let dispatcher = dispatcher_with_oidc(issuer, jwks);
-    let config_dir = write_config_dir(&base_server_config(""));
-    let stack = NatsCalloutStack::start_owned(config_dir, dispatcher, None).await;
+    let dispatcher = dispatcher_with_oidc(&tenant, issuer, jwks);
+    let config_dir = write_config_dir(&base_server_config("", &tenant));
+    let stack = NatsCalloutStack::start_owned(config_dir, &tenant, dispatcher, None).await;
 
     let bearer = mint_oidc_bearer(&issuer_url, &enc, "user-integration-oidc");
     drive_callout_attempts(&stack.nats_url, None, &stack.capture, {
         let bearer = bearer.clone();
+        let tenant_name = tenant_name.clone();
         move || {
             let mut auth = Auth::new();
             auth.jwt = Some(bearer.clone());
             auth.password = Some(bearer.clone());
-            auth.username = Some(TENANT_ACCOUNT.into());
+            auth.username = Some(tenant_name.clone());
             auth
         }
     })
     .await;
 
     let errors = stack.dispatch_errors.drain();
-    assert_stable_caller_id(&stack.capture.drain(), stack.signing.as_ref(), &errors);
+    assert_stable_caller_id(&stack.capture.drain(), stack.signing.as_ref(), &tenant, &errors);
     assert_connect_admits(&stack.nats_url, None, {
         let bearer = bearer.clone();
+        let tenant_name = tenant_name.clone();
         move || {
             let mut auth = Auth::new();
             auth.jwt = Some(bearer.clone());
             auth.password = Some(bearer.clone());
-            auth.username = Some(TENANT_ACCOUNT.into());
+            auth.username = Some(tenant_name.clone());
             auth
         }
     })
@@ -674,30 +693,34 @@ async fn oidc_bearer_callout_against_nats_server_mints_caller_acl() {
 #[tokio::test]
 #[ignore = "requires Docker (task #8)"]
 async fn mtls_callout_against_nats_server_mints_caller_acl() {
-    let tls = write_tls_fixture();
-    let dispatcher = dispatcher_with_mtls(tls.trust_anchor_pem.clone());
+    let tenant = TenantFixture::generate();
+    let tenant_name = tenant.name();
+    let tls = write_tls_fixture(&tenant);
+    let dispatcher = dispatcher_with_mtls(&tenant, tls.trust_anchor_pem.clone());
     let client_tls = NatsClientTls {
         ca_cert: tls.ca_cert.clone(),
         client_cert: tls.client_cert.clone(),
         client_key: tls.client_key.clone(),
     };
-    let stack = NatsCalloutStack::start_owned(tls.dir, dispatcher, Some(client_tls.clone())).await;
+    let stack = NatsCalloutStack::start_owned(tls.dir, &tenant, dispatcher, Some(client_tls.clone())).await;
 
     drive_callout_attempts(&stack.nats_url, Some(client_tls.clone()), &stack.capture, {
+        let tenant_name = tenant_name.clone();
         move || {
             let mut auth = Auth::new();
-            auth.username = Some(TENANT_ACCOUNT.into());
+            auth.username = Some(tenant_name.clone());
             auth
         }
     })
     .await;
 
     let errors = stack.dispatch_errors.drain();
-    assert_stable_caller_id(&stack.capture.drain(), stack.signing.as_ref(), &errors);
+    assert_stable_caller_id(&stack.capture.drain(), stack.signing.as_ref(), &tenant, &errors);
     assert_connect_admits(&stack.nats_url, Some(client_tls), {
+        let tenant_name = tenant_name.clone();
         move || {
             let mut auth = Auth::new();
-            auth.username = Some(TENANT_ACCOUNT.into());
+            auth.username = Some(tenant_name.clone());
             auth
         }
     })
@@ -707,29 +730,33 @@ async fn mtls_callout_against_nats_server_mints_caller_acl() {
 #[tokio::test]
 #[ignore = "requires Docker (task #8)"]
 async fn api_key_callout_against_nats_server_mints_caller_acl() {
-    let dispatcher = dispatcher_with_api_key();
-    let config_dir = write_config_dir(&base_server_config(""));
-    let stack = NatsCalloutStack::start_owned(config_dir, dispatcher, None).await;
+    let tenant = TenantFixture::generate();
+    let tenant_name = tenant.name();
+    let dispatcher = dispatcher_with_api_key(&tenant);
+    let config_dir = write_config_dir(&base_server_config("", &tenant));
+    let stack = NatsCalloutStack::start_owned(config_dir, &tenant, dispatcher, None).await;
 
     drive_callout_attempts(&stack.nats_url, None, &stack.capture, {
         let key = API_KEY_VALUE.to_owned();
+        let tenant_name = tenant_name.clone();
         move || {
             let mut auth = Auth::new();
             auth.token = Some(key.clone());
-            auth.username = Some(TENANT_ACCOUNT.into());
+            auth.username = Some(tenant_name.clone());
             auth
         }
     })
     .await;
 
     let errors = stack.dispatch_errors.drain();
-    assert_stable_caller_id(&stack.capture.drain(), stack.signing.as_ref(), &errors);
+    assert_stable_caller_id(&stack.capture.drain(), stack.signing.as_ref(), &tenant, &errors);
     assert_connect_admits(&stack.nats_url, None, {
         let key = API_KEY_VALUE.to_owned();
+        let tenant_name = tenant_name.clone();
         move || {
             let mut auth = Auth::new();
             auth.token = Some(key.clone());
-            auth.username = Some(TENANT_ACCOUNT.into());
+            auth.username = Some(tenant_name.clone());
             auth
         }
     })

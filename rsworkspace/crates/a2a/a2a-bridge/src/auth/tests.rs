@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::*;
-use crate::auth::callout_mint::{BridgeTenantAccount, InProcessCalloutDispatcherMintWire, harness_callout_dispatcher};
+use crate::auth::callout_mint::{InProcessCalloutDispatcherMintWire, harness_callout_dispatcher};
 use crate::identity::CallerHttpsAuth;
 
 #[tokio::test]
@@ -44,8 +44,7 @@ fn default_mint_subject_is_stable() {
 
 #[tokio::test]
 async fn json_mint_client_accepts_lowercase_bearer_prefix() {
-    let tenant = BridgeTenantAccount::new("tenant-harness").unwrap();
-    let dispatcher = Arc::new(harness_callout_dispatcher("lowercase-caller"));
+    let (dispatcher, tenant) = harness_callout_dispatcher("lowercase-caller");
     let wire = Arc::new(InProcessCalloutDispatcherMintWire::new(dispatcher, tenant.clone()));
     let client = AuthCalloutJsonMintClient::with_tenant_account(wire, "subject", Some(tenant));
     let jwt = client
@@ -83,8 +82,7 @@ impl AuthMintWire for ErrMintWire {
 
 #[tokio::test]
 async fn json_mint_client_new_uses_harness_wire_without_explicit_tenant() {
-    let tenant = BridgeTenantAccount::new("tenant-harness").unwrap();
-    let dispatcher = Arc::new(harness_callout_dispatcher("bridge-harness-caller"));
+    let (dispatcher, tenant) = harness_callout_dispatcher("bridge-harness-caller");
     let wire = Arc::new(InProcessCalloutDispatcherMintWire::new(dispatcher, tenant));
     let client = AuthCalloutJsonMintClient::new(wire, "subject");
     let jwt = client
@@ -96,8 +94,7 @@ async fn json_mint_client_new_uses_harness_wire_without_explicit_tenant() {
 
 #[tokio::test]
 async fn json_mint_client_accepts_uppercase_bearer_prefix() {
-    let tenant = BridgeTenantAccount::new("tenant-harness").unwrap();
-    let dispatcher = Arc::new(harness_callout_dispatcher("bridge-harness-caller"));
+    let (dispatcher, tenant) = harness_callout_dispatcher("bridge-harness-caller");
     let wire = Arc::new(InProcessCalloutDispatcherMintWire::new(dispatcher, tenant.clone()));
     let client = AuthCalloutJsonMintClient::with_tenant_account(wire, "subject", Some(tenant));
     let jwt = client
