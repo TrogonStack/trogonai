@@ -56,6 +56,19 @@ impl TryFrom<&str> for PrincipalKind {
     }
 }
 
+impl serde::Serialize for PrincipalKind {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for PrincipalKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let wire = <std::borrow::Cow<'de, str>>::deserialize(deserializer)?;
+        wire.parse().map_err(serde::de::Error::custom)
+    }
+}
+
 /// Error returned when a wire name does not name a [`PrincipalKind`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum PrincipalKindError {

@@ -21,6 +21,7 @@ fn mint_decodes_expected_claims() {
         data: SpiceDbPrincipal(json!({"spicedb_subject": "user/alice"})),
         nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
         caller_id,
+        principal_kind: PrincipalKind::Person,
     };
     let subject = UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(user.public_key()).unwrap());
     let token = claims
@@ -56,6 +57,7 @@ fn mint_rejects_wrong_verification_key() {
         data: SpiceDbPrincipal(json!({})),
         nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
         caller_id,
+        principal_kind: PrincipalKind::Person,
     };
     let subject = UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(user.public_key()).unwrap());
     let token = claims
@@ -166,6 +168,7 @@ fn minted_user_jwt_ensure_fresh_rejects_expired_token() {
         data: SpiceDbPrincipal(json!({})),
         nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
         caller_id,
+        principal_kind: PrincipalKind::Person,
     };
     let subject = UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(user.public_key()).unwrap());
     let token = claims
@@ -194,6 +197,7 @@ fn verify_minted_user_jwt_rejects_wrong_audience() {
         data: SpiceDbPrincipal(json!({})),
         nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
         caller_id,
+        principal_kind: PrincipalKind::Person,
     };
     let subject = UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(user.public_key()).unwrap());
     let token = claims
@@ -222,6 +226,7 @@ fn caller_id_from_minted_jwt_reads_claim() {
         data: SpiceDbPrincipal(json!({})),
         nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
         caller_id: caller_id.clone(),
+        principal_kind: PrincipalKind::Person,
     };
     let subject = UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(user.public_key()).unwrap());
     let token = claims
@@ -234,9 +239,95 @@ fn caller_id_from_minted_jwt_reads_claim() {
 }
 
 #[test]
-fn caller_id_from_minted_jwt_missing_claim_errors() {
+fn caller_id_from_minted_jwt_unreadable_payload_errors() {
     let err = caller_id_from_minted_jwt("a.b.c").unwrap_err();
-    assert!(matches!(err, JwtError::Decode(_)));
+    assert!(matches!(err, JwtError::MintedClaims(MintedUserJwtError::Unreadable(_))));
+}
+
+fn unsigned_token(payload: &Value) -> String {
+    use base64::Engine as _;
+    let encode =
+        |value: &Value| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(serde_json::to_vec(value).unwrap());
+    format!("{}.{}.sig", encode(&json!({"alg": "ed25519-nkey"})), encode(payload))
+}
+
+#[test]
+fn caller_id_from_minted_jwt_missing_claim_errors() {
+    let err = caller_id_from_minted_jwt(&unsigned_token(&json!({"principal_kind": "person"}))).unwrap_err();
+    assert!(matches!(
+        err,
+        JwtError::MintedClaims(MintedUserJwtError::MissingClaim(
+            a2a_identity_types::MintedClaim::CallerId
+        ))
+    ));
+}
+
+#[test]
+fn principal_kind_follows_the_scheme_the_callout_verified() {
+    let issuer = OidcIssuerUrl::parse("https://idp.example").unwrap();
+    for (namespace, kind) in [
+        (CallerNamespace::Oidc { issuer: &issuer }, PrincipalKind::Person),
+        (CallerNamespace::Mtls, PrincipalKind::Service),
+        (CallerNamespace::ApiKey, PrincipalKind::Service),
+    ] {
+        assert_eq!(namespace.principal_kind(), kind, "{namespace:?}");
+    }
+}
+
+#[test]
+fn subject_principal_from_minted_jwt_reads_the_principal_the_callout_minted() {
+    let issuer = KeyPair::new_account();
+    let issuer_seed = issuer.seed().expect("issuer seed");
+    let user = KeyPair::new_user();
+    let material = MintingMaterial::new(
+        SigningKey::from_seed(&issuer_seed).unwrap().keypair().clone(),
+        KeyVersion::new("test").unwrap(),
+    );
+    let subject = UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(user.public_key()).unwrap());
+    for kind in [PrincipalKind::Agent, PrincipalKind::Person, PrincipalKind::Service] {
+        let caller_id = CallerId::new("caller-from-jwt").unwrap();
+        let claims = UserJwtClaims {
+            kid: material.version().clone(),
+            sub: ExternalSubject::new("alice").unwrap(),
+            aud: AccountName::new("tenant-acme"),
+            data: SpiceDbPrincipal(json!({})),
+            nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
+            caller_id,
+            principal_kind: kind,
+        };
+        let token = claims
+            .mint_for_test_ttl(&material, &subject, Duration::from_secs(3600))
+            .unwrap();
+
+        assert_eq!(
+            subject_principal_from_minted_jwt(token.as_str()).unwrap(),
+            SubjectPrincipal::from_tokens(kind.as_str(), "caller-from-jwt").unwrap()
+        );
+    }
+}
+
+#[test]
+fn subject_principal_from_minted_jwt_never_defaults_a_missing_kind() {
+    let err = subject_principal_from_minted_jwt(&unsigned_token(&json!({"caller_id": "c0ffee"}))).unwrap_err();
+    assert!(matches!(
+        err,
+        JwtError::MintedClaims(MintedUserJwtError::MissingClaim(
+            a2a_identity_types::MintedClaim::PrincipalKind
+        ))
+    ));
+}
+
+#[test]
+fn subject_principal_from_minted_jwt_rejects_an_unknown_kind() {
+    let err = subject_principal_from_minted_jwt(&unsigned_token(&json!({
+        "caller_id": "c0ffee",
+        "principal_kind": "user"
+    })))
+    .unwrap_err();
+    assert!(matches!(
+        err,
+        JwtError::MintedClaims(MintedUserJwtError::InvalidPrincipalKind(PrincipalKindError::Unknown))
+    ));
 }
 
 #[test]
@@ -369,6 +460,7 @@ fn minted_user_jwt_ensure_fresh_ok_for_future_exp() {
         data: SpiceDbPrincipal(json!({})),
         nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
         caller_id,
+        principal_kind: PrincipalKind::Person,
     };
     let subject = UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(user.public_key()).unwrap());
     let token = claims
@@ -399,6 +491,7 @@ fn verify_minted_user_jwt_rejects_expired_token() {
         data: SpiceDbPrincipal(json!({})),
         nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
         caller_id,
+        principal_kind: PrincipalKind::Person,
     };
     let subject = UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(user.public_key()).unwrap());
     let token = claims
@@ -427,6 +520,7 @@ fn verify_minted_user_jwt_rejects_not_yet_valid_token() {
         data: SpiceDbPrincipal(json!({})),
         nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
         caller_id,
+        principal_kind: PrincipalKind::Person,
     };
     let subject = UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(user.public_key()).unwrap());
     // Mint with issued_at far in the future so nbf is also in the future while exp is valid.
@@ -457,6 +551,7 @@ fn ensure_fresh_rejects_not_yet_valid_token() {
         data: SpiceDbPrincipal(json!({})),
         nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
         caller_id,
+        principal_kind: PrincipalKind::Person,
     };
     let subject = UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(user.public_key()).unwrap());
     let future_issued_at = std::time::UNIX_EPOCH + Duration::from_secs(9_999_999_999);

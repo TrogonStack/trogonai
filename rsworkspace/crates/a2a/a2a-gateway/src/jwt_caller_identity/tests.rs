@@ -266,6 +266,7 @@ fn jwt_header_source_verifies_minted_token() {
         data: SpiceDbPrincipal(json!({"spicedb_subject": "jwt-header-user"})),
         nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
         caller_id,
+        principal_kind: trogon_identity_types::PrincipalKind::Person,
     };
     let subject = UserJwtSubject::from_user_nkey(a2a_auth_callout::NkeyPublic::parse(user.public_key()).unwrap());
     let handle = source.current();

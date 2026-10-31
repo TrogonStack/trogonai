@@ -41,7 +41,7 @@ pub use error::AuthCalloutError;
 pub use jwt::{
     AccountName, AudienceAccount, CallerId, MintedUserJwt, NatsPermissionClaims, NatsSubjectPermission, SigningKey,
     SpiceDbPrincipal, SpiceDbSubject, UserJwtClaims, UserJwtSubject, caller_id_from_minted_jwt,
-    decode_nats_user_payload,
+    decode_nats_user_payload, subject_principal_from_minted_jwt,
 };
 pub use permissions::{
     IssuedPermissions, SubjectAclContext, SubjectAclTemplate, SubjectPattern, SubjectPatternError, TemplateError,
