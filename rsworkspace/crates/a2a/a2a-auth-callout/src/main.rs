@@ -1,16 +1,14 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 use {
+    a2a_auth_callout::admission_keys::{TenantAccount, admission_keys_from_env},
     a2a_auth_callout::constants::NATS_CONNECT_TIMEOUT,
     a2a_auth_callout::credentials::mtls::MTlsVerifier,
     a2a_auth_callout::credentials::mtls::{TrustAnchorPem, X509MtlsVerifier},
     a2a_auth_callout::credentials::oidc::{JwksOidcVerifier, OidcIssuerUrl, OidcVerifier},
     a2a_auth_callout::dispatcher::{CalloutDispatcher, CalloutDispatcherConfig},
     a2a_auth_callout::error::AuthCalloutError,
-    a2a_auth_callout::signing_key_source::signing_key_source_from_env,
-    a2a_auth_callout::{
-        AccountResolver, AuthCalloutWireCodec, NkeyPublic, NkeySeed, StaticAccountResolver, Subscriber, XkeyPublic,
-    },
+    a2a_auth_callout::{AuthCalloutWireCodec, NkeyPublic, Subscriber, XkeyPublic},
     std::sync::Arc,
     std::time::Duration,
     tracing::{info, warn},
@@ -41,10 +39,6 @@ fn nats_config(env: &impl ReadEnv) -> Option<NatsConfig> {
 
 fn env_required(env: &impl ReadEnv, name: &'static str) -> Result<String, AuthCalloutError> {
     env.var(name).map_err(|_| AuthCalloutError::MissingEnvVar(name))
-}
-
-fn load_nkey_seed_env(env: &impl ReadEnv, name: &'static str) -> Result<NkeySeed, AuthCalloutError> {
-    NkeySeed::parse(env_required(env, name)?)
 }
 
 fn load_nkey_public_env(env: &impl ReadEnv, name: &'static str) -> Result<NkeyPublic, AuthCalloutError> {
@@ -102,18 +96,13 @@ async fn main() {
         tracing::error!("NATS_URL must list at least one server");
         std::process::exit(1);
     };
-    let signing_key_source = match signing_key_source_from_env(&env) {
-        Ok(s) => s,
+    let admission_keys = match admission_keys_from_env(&env).await {
+        Ok(keys) => keys,
         Err(e) => {
-            tracing::error!(error = %e, "invalid signing key source configuration");
+            tracing::error!(error = %e, "invalid admission key configuration");
             std::process::exit(1);
         }
     };
-    let allowed_accounts = split_env_list(&env, "AUTH_CALLOUT_ALLOWED_ACCOUNTS");
-    if allowed_accounts.is_empty() {
-        tracing::error!("AUTH_CALLOUT_ALLOWED_ACCOUNTS must list at least one tenant account");
-        std::process::exit(1);
-    }
     let user_jwt_ttl = match env.var("AUTH_CALLOUT_USER_JWT_TTL_SECS") {
         Ok(raw) => match raw.parse::<u64>() {
             Ok(secs) => Duration::from_secs(secs),
@@ -132,21 +121,6 @@ async fn main() {
             std::process::exit(1);
         }
     };
-    let callout_issuer_seed = match load_nkey_seed_env(&env, "AUTH_CALLOUT_ISSUER_NKEY_SEED") {
-        Ok(k) => k,
-        Err(e) => {
-            tracing::error!(error = %e, "invalid callout issuer NKey seed");
-            std::process::exit(1);
-        }
-    };
-    let account_xkey_seed = match env.var("AUTH_CALLOUT_XKEY_SEED").ok().map(NkeySeed::parse).transpose() {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::error!(error = %e, "invalid AUTH_CALLOUT_XKEY_SEED");
-            std::process::exit(1);
-        }
-    };
-
     let server_xkey_public = match env
         .var("AUTH_CALLOUT_SERVER_XKEY_PUBLIC")
         .ok()
@@ -162,8 +136,8 @@ async fn main() {
 
     let wire = match AuthCalloutWireCodec::new(
         server_issuer,
-        callout_issuer_seed,
-        account_xkey_seed,
+        admission_keys.response_signing_key().clone(),
+        admission_keys.callout_xkey().cloned(),
         server_xkey_public,
     ) {
         Ok(w) => w,
@@ -173,7 +147,6 @@ async fn main() {
         }
     };
 
-    let resolver: Arc<dyn AccountResolver> = Arc::new(StaticAccountResolver::new(allowed_accounts.clone()));
     let oidc = build_oidc_verifier(&env).await;
     let mtls = build_mtls_verifier(&env);
 
@@ -187,7 +160,17 @@ async fn main() {
         std::process::exit(1);
     }
 
-    info!(nats_url = %nats.servers.join(","), accounts = ?allowed_accounts, "connecting to NATS for auth callout");
+    let tenants: Vec<&str> = admission_keys
+        .tenant_signing_keys()
+        .tenants()
+        .map(TenantAccount::as_str)
+        .collect();
+    info!(
+        nats_url = %nats.servers.join(","),
+        auth_account = %admission_keys.auth_account(),
+        tenants = ?tenants,
+        "connecting to NATS for auth callout"
+    );
 
     let client = trogon_nats::connect(&nats, NATS_CONNECT_TIMEOUT)
         .await
@@ -197,9 +180,8 @@ async fn main() {
         });
 
     let dispatcher = CalloutDispatcher::new(CalloutDispatcherConfig {
-        signing_key_source,
+        tenant_signing_keys: admission_keys.tenant_signing_keys().clone(),
         user_jwt_ttl,
-        account_resolver: resolver,
         oidc,
         mtls,
         api_key: None,

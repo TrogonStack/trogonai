@@ -13,9 +13,7 @@ use a2a_nats::audit::envelope::{AuditEnvelope, AuditOutcome};
 use a2a_nats::nats::subjects::gateway::GatewayIngressSubject;
 use a2a_nats::{A2aMethod, A2aPrefix};
 
-use crate::auth::{
-    AuthCalloutJsonMintClient, BridgeTenantAccount, InProcessCalloutDispatcherMintWire, harness_callout_dispatcher,
-};
+use crate::auth::{AuthCalloutJsonMintClient, InProcessCalloutDispatcherMintWire, harness_callout_dispatcher};
 use crate::error::BridgeError;
 use crate::identity::BridgeUserJwt;
 use crate::inbound::{
@@ -24,7 +22,6 @@ use crate::inbound::{
 };
 
 const HARNESS_CALLER_ID: &str = "bridge-harness-caller";
-const HARNESS_TENANT: &str = "tenant-harness";
 
 /// Gateway+agent stub for NATS transport integration tests.
 #[derive(Clone)]
@@ -133,13 +130,12 @@ pub fn build_nats_transport_app_state(
         .to_string(),
     ));
 
-    let tenant = BridgeTenantAccount::new(HARNESS_TENANT).expect("harness tenant");
-    let dispatcher = Arc::new(harness_callout_dispatcher(HARNESS_CALLER_ID));
-    let mint_wire = Arc::new(InProcessCalloutDispatcherMintWire::new(dispatcher, tenant));
+    let (dispatcher, tenant) = harness_callout_dispatcher(HARNESS_CALLER_ID);
+    let mint_wire = Arc::new(InProcessCalloutDispatcherMintWire::new(dispatcher, tenant.clone()));
     let auth = Arc::new(AuthCalloutJsonMintClient::with_tenant_account(
         mint_wire.clone(),
         AuthCalloutJsonMintClient::<InProcessCalloutDispatcherMintWire>::default_mint_subject(),
-        Some(BridgeTenantAccount::new(HARNESS_TENANT).expect("harness tenant")),
+        Some(tenant),
     ));
 
     let state = AppState::new(auth, Arc::new(publisher), jetstream, prefix);

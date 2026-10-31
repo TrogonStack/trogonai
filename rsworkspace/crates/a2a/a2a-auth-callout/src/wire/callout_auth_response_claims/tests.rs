@@ -4,9 +4,13 @@ use super::*;
 use crate::wire::{NATS_JWT_PREFIX, NkeyPublic, ServerAuthRequestEnvelope, test_encode::signed_auth_request};
 use nkeys::{KeyPair, XKey};
 
-fn fixture_request() -> (ServerAuthRequestClaims, KeyPair) {
+fn response_signing_key() -> AccountSigningKey {
+    AccountSigningKey::from_seed(&KeyPair::new_account().seed().unwrap()).unwrap()
+}
+
+fn fixture_request() -> (ServerAuthRequestClaims, AccountSigningKey) {
     let server = KeyPair::new_account();
-    let callout = KeyPair::new_account();
+    let callout = response_signing_key();
     let user = KeyPair::new_user();
     let token = signed_auth_request(&server, &user, |c| {
         c.nats.connect_opts.jwt = None;
@@ -71,8 +75,9 @@ fn into_wire_bytes_returns_plain_jwt_without_server_xkey() {
 #[test]
 fn into_wire_bytes_encrypts_when_server_requests_xkey() {
     let server = KeyPair::new_account();
-    let callout = KeyPair::new_account();
+    let callout = response_signing_key();
     let account_xkey = XKey::new();
+    let callout_xkey = CalloutXkey::from_seed(&account_xkey.seed().unwrap()).unwrap();
     let server_xkey = XKey::new();
     let user = KeyPair::new_user();
     let token = signed_auth_request(&server, &user, |c| {
@@ -88,16 +93,16 @@ fn into_wire_bytes_encrypts_when_server_requests_xkey() {
         &callout,
     )
     .unwrap();
-    let wire = resp.into_wire_bytes(&req, Some(&account_xkey)).unwrap();
+    let wire = resp.into_wire_bytes(&req, Some(&callout_xkey)).unwrap();
     assert!(!wire.starts_with(NATS_JWT_PREFIX));
-    let opened = account_xkey.open(&wire, &server_xkey).unwrap();
+    let opened = server_xkey.open(&wire, &account_xkey).unwrap();
     assert!(opened.starts_with(NATS_JWT_PREFIX));
 }
 
 #[test]
-fn into_wire_bytes_errors_when_server_xkey_but_no_account_xkey() {
+fn into_wire_bytes_errors_when_server_xkey_but_no_callout_xkey() {
     let server = KeyPair::new_account();
-    let callout = KeyPair::new_account();
+    let callout = response_signing_key();
     let server_xkey = XKey::new();
     let user = KeyPair::new_user();
     let token = signed_auth_request(&server, &user, |c| {

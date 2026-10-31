@@ -19,7 +19,7 @@ fn xkey_encrypted_request_roundtrip() {
     let server = KeyPair::new_account();
     let server_pub = NkeyPublic::parse(server.public_key()).unwrap();
     let account_xkey = XKey::new();
-    let account_seed = NkeySeed::parse(account_xkey.seed().unwrap()).unwrap();
+    let callout_xkey = CalloutXkey::from_seed(&account_xkey.seed().unwrap()).unwrap();
 
     let server_xkey = XKey::new();
     let server_xkey_pub = XkeyPublic::parse(server_xkey.public_key()).unwrap();
@@ -28,7 +28,7 @@ fn xkey_encrypted_request_roundtrip() {
     let sealed = server_xkey.seal(token.as_bytes(), &account_xkey).unwrap();
 
     let decoded = ServerAuthRequestEnvelope::from_bytes(sealed)
-        .decode(&server_pub, Some(&account_seed), Some(&server_xkey_pub))
+        .decode(&server_pub, Some(&callout_xkey), Some(&server_xkey_pub))
         .unwrap();
     assert_eq!(decoded.user_nkey().unwrap().as_str(), user.public_key());
 }
@@ -52,12 +52,12 @@ fn rejects_plain_jwt_when_account_xkey_configured() {
     let server = KeyPair::new_account();
     let server_pub = NkeyPublic::parse(server.public_key()).unwrap();
     let account_xkey = XKey::new();
-    let account_seed = NkeySeed::parse(account_xkey.seed().unwrap()).unwrap();
+    let callout_xkey = CalloutXkey::from_seed(&account_xkey.seed().unwrap()).unwrap();
     let user = KeyPair::new_user();
     let token = signed_auth_request(&server, &user, |_| {});
 
     let err = ServerAuthRequestEnvelope::from_bytes(token.into_bytes())
-        .decode(&server_pub, Some(&account_seed), None)
+        .decode(&server_pub, Some(&callout_xkey), None)
         .unwrap_err();
     assert!(matches!(err, AuthCalloutError::WireFormat(_)));
 }
@@ -77,10 +77,10 @@ fn encrypted_request_requires_server_xkey_public() {
     let server = KeyPair::new_account();
     let server_pub = NkeyPublic::parse(server.public_key()).unwrap();
     let account_xkey = XKey::new();
-    let account_seed = NkeySeed::parse(account_xkey.seed().unwrap()).unwrap();
+    let callout_xkey = CalloutXkey::from_seed(&account_xkey.seed().unwrap()).unwrap();
 
     let err = ServerAuthRequestEnvelope::from_bytes(b"not-a-jwt".to_vec())
-        .decode(&server_pub, Some(&account_seed), None)
+        .decode(&server_pub, Some(&callout_xkey), None)
         .unwrap_err();
     assert!(matches!(err, AuthCalloutError::WireFormat(_)));
 }
@@ -90,7 +90,7 @@ fn decode_from_message_prefers_header_server_xkey() {
     let server = KeyPair::new_account();
     let server_pub = NkeyPublic::parse(server.public_key()).unwrap();
     let account_xkey = XKey::new();
-    let account_seed = NkeySeed::parse(account_xkey.seed().unwrap()).unwrap();
+    let callout_xkey = CalloutXkey::from_seed(&account_xkey.seed().unwrap()).unwrap();
     let header_xkey = XKey::new();
     let configured_xkey = XKey::new();
     let configured_pub = XkeyPublic::parse(configured_xkey.public_key()).unwrap();
@@ -105,7 +105,7 @@ fn decode_from_message_prefers_header_server_xkey() {
         sealed,
         Some(&headers),
         &server_pub,
-        Some(&account_seed),
+        Some(&callout_xkey),
         Some(&configured_pub),
     )
     .unwrap();

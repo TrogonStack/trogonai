@@ -8,10 +8,11 @@ use tokio::task::JoinHandle;
 use trogon_nats::test_support::CoreTestServer;
 
 use super::*;
+use crate::admission_keys::AccountSigningKey;
 use crate::error::CredentialError;
 use crate::jwt::MintedUserJwt;
 use crate::wire::test_encode::signed_auth_request;
-use crate::wire::{NkeyPublic, NkeySeed, ServerAuthRequestClaims};
+use crate::wire::{NkeyPublic, ServerAuthRequestClaims};
 
 const WAIT: Duration = Duration::from_secs(5);
 
@@ -131,7 +132,7 @@ async fn start_subscriber(
 ) -> JoinHandle<Result<(), AuthCalloutError>> {
     let wire = AuthCalloutWireCodec::new(
         NkeyPublic::parse(signer.public_key()).unwrap(),
-        NkeySeed::parse(callout.seed().unwrap()).unwrap(),
+        AccountSigningKey::from_seed(&callout.seed().unwrap()).unwrap(),
         None,
         None,
     )

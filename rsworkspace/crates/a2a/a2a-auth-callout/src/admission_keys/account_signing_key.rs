@@ -26,10 +26,6 @@ impl AccountSigningKey {
         self.0.public_key()
     }
 
-    #[expect(
-        dead_code,
-        reason = "nothing signs with an account signing key until the operator-mode mint adopts it"
-    )]
     pub(crate) fn keypair(&self) -> &KeyPair {
         &self.0
     }
