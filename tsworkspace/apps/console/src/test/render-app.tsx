@@ -3,6 +3,7 @@ import { RouterProvider, createMemoryHistory } from '@tanstack/react-router';
 import { render } from '@testing-library/react';
 
 import { createFakeBackend, type FakeBackend } from '@/fake-backend';
+import { TenantCustodyClientProvider } from '@/features/custody/context';
 import { EnvironmentsClientProvider } from '@/features/environments/context';
 import { HierarchyClientProvider } from '@/features/hierarchy/context';
 import { ProjectsClientProvider } from '@/features/projects/context';
@@ -21,7 +22,9 @@ export function renderApp(path: string, backend: FakeBackend = createFakeBackend
           <ProjectsClientProvider client={backend.projects}>
             <EnvironmentsClientProvider clients={backend.environments}>
               <SecretsClientProvider clients={backend.secrets}>
-                <RouterProvider router={router} />
+                <TenantCustodyClientProvider client={backend.keyCustody}>
+                  <RouterProvider router={router} />
+                </TenantCustodyClientProvider>
               </SecretsClientProvider>
             </EnvironmentsClientProvider>
           </ProjectsClientProvider>
@@ -36,6 +39,7 @@ export function renderApp(path: string, backend: FakeBackend = createFakeBackend
     hierarchy: backend.hierarchy,
     secrets: backend.secrets,
     environments: backend.environments,
+    custody: backend.keyCustody,
     queryClient,
     router,
   };
