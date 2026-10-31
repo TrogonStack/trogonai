@@ -33,6 +33,12 @@ pub const DEFAULT_USER_JWT_TTL_SECS: u64 = 300;
 
 pub const NATS_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
+pub(crate) const SIGNING_KEY_SOURCE_VAR: &str = "AUTH_CALLOUT_SIGNING_KEY_SOURCE";
+pub(crate) const AUTH_ACCOUNT_VAR: &str = "AUTH_CALLOUT_AUTH_ACCOUNT";
+pub(crate) const RESPONSE_SIGNING_KEY_VAR: &str = "AUTH_CALLOUT_RESPONSE_SIGNING_KEY";
+pub(crate) const TENANT_SIGNING_KEYS_VAR: &str = "AUTH_CALLOUT_TENANT_SIGNING_KEYS";
+pub(crate) const CALLOUT_XKEY_VAR: &str = "AUTH_CALLOUT_XKEY_SEED";
+
 /// Signature algorithms an inbound OIDC ID token may assert.
 ///
 /// Scoped to the RSA family because [`crate::credentials::oidc`] only builds

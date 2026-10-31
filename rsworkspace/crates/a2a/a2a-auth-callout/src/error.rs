@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use crate::admission_keys::AdmissionKeyError;
 use crate::jwt::JwtError;
 
 /// Typed reason a credential verifier rejected a caller. Replaces the
@@ -105,6 +106,8 @@ pub enum AuthCalloutError {
     /// A signing-key file's bytes weren't valid UTF-8.
     #[error("signing key file must be UTF-8 NKey seed")]
     KeyLoadUtf8(#[source] std::str::Utf8Error),
+    #[error(transparent)]
+    AdmissionKeys(#[from] AdmissionKeyError),
 }
 
 #[cfg(test)]

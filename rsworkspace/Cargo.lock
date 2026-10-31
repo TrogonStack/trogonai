@@ -36,6 +36,7 @@ dependencies = [
  "tracing-subscriber",
  "trogon-identity-types",
  "trogon-nats",
+ "trogon-service-config",
  "trogon-std",
  "uuid",
  "wiremock",
