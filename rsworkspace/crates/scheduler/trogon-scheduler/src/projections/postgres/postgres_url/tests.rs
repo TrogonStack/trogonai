@@ -111,7 +111,10 @@ fn rejects_a_pgsslmode_that_does_not_fully_verify_the_server() {
         matches!(error, PostgresUrlError::EnvSslMode(PostgresTlsError::Unverified(_))),
         "{error}"
     );
-    assert!(error.to_string().starts_with("PGSSLMODE: "), "{error}");
+    assert_eq!(
+        error.to_string(),
+        format!("PGSSLMODE: {}", PostgresTlsError::Unverified(PgSslMode::Require))
+    );
 }
 
 #[test]
@@ -168,7 +171,10 @@ fn malformed_url_error_does_not_repeat_the_password() {
     let error = parse("postgres://scheduler:hunter2@db.internal:notaport/schedules").unwrap_err();
 
     assert!(matches!(error, PostgresUrlError::Malformed(_)));
-    assert!(!error.to_string().contains("hunter2"), "{error}");
+    assert_eq!(
+        error.to_string(),
+        format!("Postgres URL is malformed: {}", url::ParseError::InvalidPort)
+    );
 }
 
 #[test]

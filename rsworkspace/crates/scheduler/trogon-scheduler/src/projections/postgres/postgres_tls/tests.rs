@@ -1,5 +1,7 @@
 use super::*;
 
+const GUIDANCE: &str = "use sslmode=verify-full, or disable TLS explicitly with sslmode=disable";
+
 #[test]
 fn defaults_to_verifying_the_server() {
     assert_eq!(PostgresTls::default(), PostgresTls::VerifyFull);
@@ -23,7 +25,10 @@ fn rejects_modes_that_do_not_fully_verify_the_server() {
         let error = mode.parse::<PostgresTls>().unwrap_err();
 
         assert!(matches!(error, PostgresTlsError::Unverified(_)), "{mode}");
-        assert!(error.to_string().starts_with(&format!("sslmode={mode} ")), "{error}");
+        assert_eq!(
+            error.to_string(),
+            format!("sslmode={mode} does not fully verify the server; {GUIDANCE}")
+        );
     }
 }
 
@@ -39,17 +44,13 @@ fn rejects_modes_it_does_not_know() {
 
 #[test]
 fn rejection_offers_verification_or_disabling_tls_explicitly() {
-    for error in [
-        "require".parse::<PostgresTls>().unwrap_err(),
-        "bogus".parse::<PostgresTls>().unwrap_err(),
+    for (mode, reason) in [
+        ("require", "sslmode=require does not fully verify the server"),
+        ("bogus", "sslmode is not a known mode"),
     ] {
-        let message = error.to_string();
+        let error = mode.parse::<PostgresTls>().unwrap_err();
 
-        assert!(message.contains("use sslmode=verify-full"), "{message}");
-        assert!(
-            message.contains("disable TLS explicitly with sslmode=disable"),
-            "{message}"
-        );
+        assert_eq!(error.to_string(), format!("{reason}; {GUIDANCE}"));
     }
 }
 
