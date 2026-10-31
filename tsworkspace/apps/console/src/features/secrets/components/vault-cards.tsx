@@ -43,7 +43,7 @@ function VaultCard({ vault }: { vault: VaultView }) {
         </div>
         <div className="relative z-10 flex flex-col items-end gap-1.5">
           <EnvironmentChip environment={vault.environment} linked />
-          <VaultCustodyBadge tier={vault.custody} />
+          <VaultCustodyBadge tier={vault.custody} linked />
         </div>
       </div>
       <ul aria-label={`${vault.displayName} credentials by lifecycle`} className="flex flex-wrap gap-x-3 gap-y-1">
