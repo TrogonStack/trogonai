@@ -7,8 +7,7 @@ use {
     a2a_auth_callout::credentials::mtls::{TrustAnchorPem, X509MtlsVerifier},
     a2a_auth_callout::credentials::oidc::{JwksOidcVerifier, OidcIssuerUrl, OidcVerifier},
     a2a_auth_callout::dispatcher::{CalloutDispatcher, CalloutDispatcherConfig},
-    a2a_auth_callout::error::AuthCalloutError,
-    a2a_auth_callout::{AuthCalloutWireCodec, NkeyPublic, Subscriber, XkeyPublic},
+    a2a_auth_callout::{AuthCalloutWireCodec, Subscriber},
     std::sync::Arc,
     std::time::Duration,
     tracing::{info, warn},
@@ -35,14 +34,6 @@ fn split_env_list(env: &impl ReadEnv, name: &str) -> Vec<String> {
 fn nats_config(env: &impl ReadEnv) -> Option<NatsConfig> {
     let config = NatsConfig::from_env(env);
     (!config.servers.is_empty()).then_some(config)
-}
-
-fn env_required(env: &impl ReadEnv, name: &'static str) -> Result<String, AuthCalloutError> {
-    env.var(name).map_err(|_| AuthCalloutError::MissingEnvVar(name))
-}
-
-fn load_nkey_public_env(env: &impl ReadEnv, name: &'static str) -> Result<NkeyPublic, AuthCalloutError> {
-    NkeyPublic::parse(env_required(env, name)?)
 }
 
 async fn build_oidc_verifier(env: &impl ReadEnv) -> Option<Arc<dyn OidcVerifier>> {
@@ -114,38 +105,11 @@ async fn main() {
         Err(_) => Duration::from_secs(a2a_auth_callout::constants::DEFAULT_USER_JWT_TTL_SECS),
     };
 
-    let server_issuer = match load_nkey_public_env(&env, "AUTH_CALLOUT_SERVER_NKEY_PUBLIC") {
-        Ok(k) => k,
-        Err(e) => {
-            tracing::error!(error = %e, "invalid server NKey configuration");
-            std::process::exit(1);
-        }
-    };
-    let server_xkey_public = match env
-        .var("AUTH_CALLOUT_SERVER_XKEY_PUBLIC")
-        .ok()
-        .map(XkeyPublic::parse)
-        .transpose()
-    {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::error!(error = %e, "invalid AUTH_CALLOUT_SERVER_XKEY_PUBLIC");
-            std::process::exit(1);
-        }
-    };
-
-    let wire = match AuthCalloutWireCodec::new(
-        server_issuer,
+    let wire = AuthCalloutWireCodec::new(
+        admission_keys.auth_account().clone(),
         admission_keys.response_signing_key().clone(),
         admission_keys.callout_xkey().cloned(),
-        server_xkey_public,
-    ) {
-        Ok(w) => w,
-        Err(e) => {
-            tracing::error!(error = %e, "failed to build auth callout wire codec");
-            std::process::exit(1);
-        }
-    };
+    );
 
     let oidc = build_oidc_verifier(&env).await;
     let mtls = build_mtls_verifier(&env);

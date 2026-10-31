@@ -1,8 +1,10 @@
 use super::*;
 use crate::jwt::MintedUserJwt;
-use crate::wire::{NATS_JWT_PREFIX, test_encode::signed_auth_request};
+use crate::wire::{NATS_JWT_PREFIX, test_encode::FixtureServer};
 use nats_jwt_rs::authorization::AuthResponse;
 use nkeys::{KeyPair, XKey};
+
+const MINTED: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ4In0.c2ln";
 
 fn signing_key(key: &KeyPair) -> AccountSigningKey {
     AccountSigningKey::from_seed(&key.seed().unwrap()).unwrap()
@@ -13,111 +15,85 @@ fn callout_xkey(key: &XKey) -> CalloutXkey {
 }
 
 #[test]
-fn rejects_partial_xkey_configuration() {
-    let server = KeyPair::new_account();
-    let callout = KeyPair::new_account();
-    let account_xkey = XKey::new();
-    let server_xkey_pub = XkeyPublic::parse(XKey::new().public_key()).unwrap();
-
-    let missing_server = AuthCalloutWireCodec::new(
-        NkeyPublic::parse(server.public_key()).unwrap(),
-        signing_key(&callout),
-        Some(callout_xkey(&account_xkey)),
-        None,
-    );
-    assert!(matches!(missing_server.unwrap_err(), AuthCalloutError::WireFormat(_)));
-
-    let missing_account = AuthCalloutWireCodec::new(
-        NkeyPublic::parse(server.public_key()).unwrap(),
-        signing_key(&callout),
-        None,
-        Some(server_xkey_pub),
-    );
-    assert!(matches!(missing_account.unwrap_err(), AuthCalloutError::WireFormat(_)));
-}
-
-#[test]
 fn decode_and_encode_success_roundtrip() {
-    let server = KeyPair::new_account();
+    let server = FixtureServer::generate();
     let callout = KeyPair::new_account();
     let user = KeyPair::new_user();
-    let codec = AuthCalloutWireCodec::new(
-        NkeyPublic::parse(server.public_key()).unwrap(),
-        signing_key(&callout),
-        None,
-        None,
-    )
-    .unwrap();
+    let codec = AuthCalloutWireCodec::new(server.auth_account().clone(), signing_key(&callout), None);
 
-    let token = signed_auth_request(&server, &user, |_| {});
+    let token = server.sign(&user, |_| {});
     let request = codec.decode_request(token.into_bytes(), None).unwrap();
-    let user_jwt = MintedUserJwt::new("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ4In0.c2ln").unwrap();
-    let wire = codec.encode_success(&request, user_jwt).unwrap();
+    let wire = codec
+        .encode_success(&request, MintedUserJwt::new(MINTED).unwrap())
+        .unwrap();
     assert!(wire.starts_with(NATS_JWT_PREFIX));
 }
 
 #[test]
+fn decode_request_refuses_a_request_issued_for_another_account() {
+    let server = FixtureServer::generate();
+    let elsewhere = FixtureServer::generate();
+    let codec = AuthCalloutWireCodec::new(
+        server.auth_account().clone(),
+        signing_key(&KeyPair::new_account()),
+        None,
+    );
+
+    let token = elsewhere.sign(&KeyPair::new_user(), |_| {});
+    let refusal = codec.decode_request(token.into_bytes(), None).unwrap_err();
+    assert!(matches!(refusal, AuthRequestError::WrongAccount));
+}
+
+#[test]
 fn encode_denial_is_signed_by_the_response_signing_key() {
-    let server = KeyPair::new_account();
+    let server = FixtureServer::generate();
     let callout = KeyPair::new_account();
     let user = KeyPair::new_user();
-    let codec = AuthCalloutWireCodec::new(
-        NkeyPublic::parse(server.public_key()).unwrap(),
-        signing_key(&callout),
-        None,
-        None,
-    )
-    .unwrap();
-    let token = signed_auth_request(&server, &user, |_| {});
+    let codec = AuthCalloutWireCodec::new(server.auth_account().clone(), signing_key(&callout), None);
+    let token = server.sign(&user, |_| {});
     let request = codec.decode_request(token.into_bytes(), None).unwrap();
     let wire = codec.encode_denial(&request, "denied").unwrap();
 
     let decoded = nats_jwt_rs::Claims::<AuthResponse>::decode(std::str::from_utf8(&wire).unwrap()).unwrap();
     assert_eq!(decoded.iss, callout.public_key());
+    assert_eq!(decoded.aud.as_deref(), Some(server.id().as_str()));
     assert_eq!(decoded.nats.error, "denied");
 }
 
 #[test]
 fn xkey_codec_roundtrip_encrypts_request_and_response() {
-    let server = KeyPair::new_account();
+    let server = FixtureServer::generate();
     let callout = KeyPair::new_account();
     let account_xkey = XKey::new();
-    let server_xkey = XKey::new();
-    let server_xkey_pub = XkeyPublic::parse(server_xkey.public_key()).unwrap();
     let codec = AuthCalloutWireCodec::new(
-        NkeyPublic::parse(server.public_key()).unwrap(),
+        server.auth_account().clone(),
         signing_key(&callout),
         Some(callout_xkey(&account_xkey)),
-        Some(server_xkey_pub),
-    )
-    .unwrap();
+    );
 
     let user = KeyPair::new_user();
-    let token = signed_auth_request(&server, &user, |c| {
-        c.nats.server.xkey = Some(server_xkey.public_key());
-    });
-    let sealed = server_xkey.seal(token.as_bytes(), &account_xkey).unwrap();
-    let request = codec.decode_request(sealed, None).unwrap();
-    let user_jwt = MintedUserJwt::new("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ4In0.c2ln").unwrap();
-    let wire = codec.encode_success(&request, user_jwt).unwrap();
+    let (sealed, headers) = server.seal(&user, &callout_xkey(&account_xkey).public_key(), |_| {});
+    let request = codec.decode_request(sealed, Some(&headers)).unwrap();
+    let wire = codec
+        .encode_success(&request, MintedUserJwt::new(MINTED).unwrap())
+        .unwrap();
     assert!(!wire.starts_with(NATS_JWT_PREFIX));
-    let opened = server_xkey.open(&wire, &account_xkey).unwrap();
+    let opened = server.xkey().open(&wire, &account_xkey).unwrap();
     assert!(opened.starts_with(NATS_JWT_PREFIX));
 }
 
 #[test]
 fn debug_names_public_keys_and_hides_seeds() {
-    let server = KeyPair::new_account();
+    let server = FixtureServer::generate();
     let callout = KeyPair::new_account();
     let account_xkey = XKey::new();
     let codec = AuthCalloutWireCodec::new(
-        NkeyPublic::parse(server.public_key()).unwrap(),
+        server.auth_account().clone(),
         signing_key(&callout),
         Some(callout_xkey(&account_xkey)),
-        Some(XkeyPublic::parse(XKey::new().public_key()).unwrap()),
-    )
-    .unwrap();
+    );
     let debug = format!("{codec:?}");
+    assert!(debug.contains(server.auth_account().as_str()), "{debug}");
     assert!(debug.contains(&callout.public_key()), "{debug}");
     assert!(debug.contains(&account_xkey.public_key()), "{debug}");
     assert!(
