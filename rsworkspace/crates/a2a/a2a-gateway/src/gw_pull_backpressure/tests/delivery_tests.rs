@@ -166,11 +166,27 @@ async fn a_caller_header_never_redirects_an_event_away_from_its_subject_principa
     headers.insert(a2a_nats::constants::REQ_ID_HEADER, "request-1");
     headers.insert(a2a_nats::constants::GATEWAY_CALLER_ID_HEADER, "mallory");
     headers.insert(a2a_nats::constants::GATEWAY_PRINCIPAL_HEADER, "mallory");
+    headers.insert(a2a_auth_callout::CALLER_JWT_HEADER_NAME, "a.b.c");
     let message = ObservedMessage::new(event(headers));
 
     deliver(&client, &Arc::new(ForwardAttempts::new()), message.clone(), 41).await;
 
     assert_eq!(client.published_messages(), ["a2a.v1.gateway.person.alice.events"]);
+    let egress = client.published_headers();
+    let [egress] = egress.as_slice() else {
+        panic!("expected one egress publish, got {egress:?}");
+    };
+    assert_eq!(
+        egress.len(),
+        1,
+        "egress carries only the request correlation: {egress:?}"
+    );
+    assert_eq!(
+        egress
+            .get(a2a_nats::constants::REQ_ID_HEADER)
+            .map(async_nats::HeaderValue::as_str),
+        Some("request-1")
+    );
     assert_eq!(message.signals(), [AckKindSnapshot::DoubleAck]);
 }
 
