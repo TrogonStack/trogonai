@@ -25,8 +25,9 @@ pub enum ConnectError {
         #[source]
         error: SettingError,
     },
-    #[error("Failed to connect to NATS servers {servers:?}: {error}")]
+    #[error("Failed to connect to NATS: {error}")]
     ConnectionFailed {
+        /// Kept out of the message because callers forward it to remote clients.
         servers: Vec<String>,
         #[source]
         error: async_nats::ConnectError,

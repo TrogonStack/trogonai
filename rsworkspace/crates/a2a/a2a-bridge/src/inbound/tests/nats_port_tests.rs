@@ -13,6 +13,7 @@ const BRIEF_CONNECT: CallerConnectTimeout = CallerConnectTimeout::new(BRIEF);
 const RPC: GatewayRpcTimeout = GatewayRpcTimeout::new(WAIT);
 const BRIEF_RPC: GatewayRpcTimeout = GatewayRpcTimeout::new(BRIEF);
 const UNREACHABLE_RPC: GatewayRpcTimeout = GatewayRpcTimeout::new(Duration::from_secs(3600));
+const REFUSING_SERVER: &str = "127.0.0.1:1";
 
 fn plaintext(address: &str) -> NatsConfig {
     NatsConfig::from_url(address).with_tls(NatsTls::Disabled)
@@ -150,6 +151,37 @@ async fn unary_port_reports_no_responder_and_invalid_connection_configuration() 
             .unary_request_gateway(&jwt, "gateway.missing", async_nats::HeaderMap::new(), Bytes::new())
             .await;
         assert!(matches!(error, Err(BridgeError::NatsPublish(_))));
+    }
+}
+
+#[tokio::test]
+async fn caller_connection_failures_do_not_tell_the_http_caller_which_servers_were_tried() {
+    let jwt = caller_jwt().await;
+    let refusing = plaintext(REFUSING_SERVER);
+
+    let reply = AsyncNatsTokenGatewayUnary::new(refusing.clone(), CONNECT, RPC)
+        .unary_request_gateway(&jwt, "gateway.refused", async_nats::HeaderMap::new(), Bytes::new())
+        .await;
+    let stream = AsyncNatsTokenTaskJetstream::new(refusing, CONNECT)
+        .task_event_payload_stream(
+            &jwt,
+            &default_a2a_prefix(),
+            SseConsumePlan::TasksResubscribe {
+                task_id: A2aTaskId::new("task-1").unwrap(),
+                last_seq: 0,
+            },
+        )
+        .await;
+
+    let errors = [
+        reply.expect_err("a refused connection fails the unary request"),
+        stream.err().expect("a refused connection fails the stream attach"),
+    ];
+    for error in errors {
+        let (BridgeError::NatsPublish(message) | BridgeError::JetStreamConsume(message)) = &error else {
+            panic!("expected a NATS failure, got {error:?}");
+        };
+        assert!(!message.contains(REFUSING_SERVER), "{message}");
     }
 }
 
