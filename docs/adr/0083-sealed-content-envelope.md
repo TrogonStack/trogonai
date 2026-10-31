@@ -64,7 +64,7 @@ upsert disabled and creates one key, `local-dev-kek`, that every caller shares
 [ADR#0030](./0030-customer-controlled-key-backend-routing.md) leaves the payload
 cipher, nonce construction and envelope to a decision that "must exist before
 implementation", and two-party control to "a separate capability and decision",
-as ADR#0033 Decision 1 repeats. ADR#0033 rejects envelope-encrypting all
+as [ADR#0033](./0033-key-custody-product-model.md) Decision 1 repeats. [ADR#0033](./0033-key-custody-product-model.md) rejects envelope-encrypting all
 platform state and keeps infrastructure encryption out of business key
 management (Decision 6). [ADR#0035](./0035-session-store-decider-aggregate.md)
 Decision 7 defers erasure-grade deletion.
@@ -81,14 +81,14 @@ Decision 5. JetStream's and OpenBao's sealing keep their own meanings.
 
 | Layer | Defeats | Decided by |
 | --- | --- | --- |
-| TLS | A network observer or tamperer | ADR#0081 Decision 1 |
-| Server cipher | A holder of a disk, snapshot or file backup | ADR#0081 Decision 6 |
+| TLS | A network observer or tamperer | [ADR#0081](./0081-nats-tls-by-default-and-operator-mode-admission.md) Decision 1 |
+| Server cipher | A holder of a disk, snapshot or file backup | [ADR#0081](./0081-nats-tls-by-default-and-operator-mode-admission.md) Decision 6 |
 | Sealed content | An admitted reader without a lease, logs, traces and every copy | This decision |
 
 Sealing also binds a customer managed key's veto to every sealed record, and
 destroying a key erases what it sealed. It does not stop an attacker who
 controls the NATS server, which can request a lease as any workload, since a
-requester is known by its subject (ADR#0082 Decision 1), or substitute an xkey;
+requester is known by its subject ([ADR#0082](./0082-bus-principal-from-subject-and-edge-proof-of-possession.md) Decision 1), or substitute an xkey;
 binding an xkey to an identity the server cannot forge is left open.
 
 - **Secret values in transit.** A reply carrying a secret value or a lease is
@@ -102,7 +102,7 @@ binding an xkey to an identity the server cannot forge is left open.
   Decision 1 moves into the secrets service, are sealed under leases it issues
   itself; the gateway's runtime projection becomes an opener and fails closed.
 - **Sensitive streams of customer managed tenants.** Platform code declares a
-  stream sensitive, never a tenant setting; this decision declares the ADR#0035
+  stream sensitive, never a tenant setting; this decision declares the [ADR#0035](./0035-session-store-decider-aggregate.md)
   session streams. Bytes such a stream references are sealed too (Decision 6).
 - **Claim-check blobs, for every tenant**, even when the body is already sealed.
 
@@ -110,9 +110,9 @@ State derived from sealed records is sealed under its own store's series, and a
 store with no layout here, such as a relational projection, holds none. API key
 verifiers, keyed digests that must not wait on OpenBao
 ([ADR#0075](./0075-api-key-format-and-verifier-construction.md) Decision 3),
-cold-start state under ADR#0033 Decision 5, this decision's buckets included,
+cold-start state under [ADR#0033](./0033-key-custody-product-model.md) Decision 5, this decision's buckets included,
 and other platform state stay unsealed, and OpenBao KV v2 values stay outside
-the veto, since ADR#0033 Decision 7 keeps the secret store out of the pluggable
+the veto, since [ADR#0033](./0033-key-custody-product-model.md) Decision 7 keeps the secret store out of the pluggable
 part. Subjects, routing, trace, sequence and batch headers, `Nats-Msg-Id`,
 `Trogon-Event-Type`, ids and claim headers stay plaintext so routing, replay and
 tracing work, and no sensitive value goes in a header, `Trogon-Header-` included
@@ -134,9 +134,9 @@ message SealedContent {
 }
 message DataKeyRef { DataKeySeriesId series_id = 1; uint32 generation = 2; }
 message DekWrap {
-  KeyRef kek_ref = 1; // the opaque KeyRef of ADR#0030
+  KeyRef kek_ref = 1; // the opaque KeyRef of key backend routing
   WrappingAlgorithm wrapping_algorithm = 2;
-  bytes wrapped_dek = 3; // an ADR#0030 WrappedDek
+  bytes wrapped_dek = 3; // a key backend routing WrappedDek
 }
 message AadDescriptor { AadLayout layout = 1; }
 ```
@@ -150,21 +150,32 @@ message AadDescriptor { AadLayout layout = 1; }
 `repeated.min_items = 1`. Openers refuse unknown values and have no fallback
 suite; evolution adds values, never reusing one. Each `DekWrap` persists a
 `KeyRef`, the binding version as `wrapping_algorithm` and a `WrappedDek`
-together (ADR#0030 Decision 2), and only the adapter parses `wrapped_dek`, which
+together ([ADR#0030](./0030-customer-controlled-key-backend-routing.md) Decision 2), and only the adapter parses `wrapped_dek`, which
 holds a share, a port `Dek` in its own right; the data key is derived, never
-wrapped whole. No backend, provider key, version or locator appears (ADR#0030
-Decision 4, ADR#0033 Decision 4). `KeyRef` keeps ADR#0030's name, as `SecretRef`
+wrapped whole. No backend, provider key, version or locator appears ([ADR#0030](./0030-customer-controlled-key-backend-routing.md)
+Decision 4, [ADR#0033](./0033-key-custody-product-model.md) Decision 4). `KeyRef` keeps [ADR#0030](./0030-customer-controlled-key-backend-routing.md)'s name, as `SecretRef`
 does, over the `_id` that
 [ADR#0068](./0068-reference-fields-say-they-are-references.md) and
 [ADR#0040](./0040-contract-field-vocabulary.md) give opaque identifiers. Wraps
 follow tenant-state order, platform share first, and every `kek_ref` is
-authorized against tenant state before any unwrap (ADR#0030 Decision 7).
+authorized against tenant state before any unwrap ([ADR#0030](./0030-customer-controlled-key-backend-routing.md) Decision 7).
+
+Sealing needs generated Rust types, so `sealing/v1` and the `key_custody`
+packages it imports are promoted into code generation, which brings
+`buf/validate/validate.proto` into the generated crate. This promotion is the
+moment [ADR#0064](./0064-schema-constraints-as-documentation.md) Decision 3
+reserves for deciding enforcement, and the decision is that no generated
+validator runs. The constraints are enforced where a message crosses into
+code: `Opener`, the lease client and the lease service parse every field into
+a value object, refuse what fails to parse, and never act on a raw generated
+message. A validator would check the same rules a second time and would still
+not replace the parsing, since the parsing is what the code acts on.
 
 ### 3. AES-256-GCM through aws-lc-rs, a key derived from shares, and a context the opener supplies
 
 Sealing uses aws-lc-rs `aead::RandomizedNonceKey` over `AES_256_GCM`, a random
 96-bit nonce and a 128-bit tag per seal, and HKDF-SHA256 ([RFC
-5869](https://www.rfc-editor.org/rfc/rfc5869)), all from the provider ADR#0015
+5869](https://www.rfc-editor.org/rfc/rfc5869)), all from the provider [ADR#0015](./0015-rust-tls-library.md)
 installs, so aws-lc-rs and zeroize become direct dependencies at their locked
 versions and no new cryptographic library arrives.
 
@@ -192,7 +203,7 @@ references stay out of the derivation, so a rewrap keeps the data key.
 The label versions the layout and the message name the payload schema. An opener
 builds the context from its configuration and the message it holds, never from
 the envelope, taking the tenant from the account public key that leads a subject
-in `PLATFORM` (ADR#0081 Decision 3), a KV key after any version prefix, or an
+in `PLATFORM` ([ADR#0081](./0081-nats-tls-by-default-and-operator-mode-admission.md) Decision 3), a KV key after any version prefix, or an
 object name through its subject. It refuses an envelope whose layout is not its
 store's, whose `series_id` is not `<tenant>.<store>`, or whose wraps are out of
 order. Writers on a sealing-required stream always set both headers, so a record
@@ -217,7 +228,7 @@ candidate keys or opens from a subset of shares must commit.
 
 ### 4. Data keys come in generations, reach workloads only as leases, and need every share their tier requires
 
-The secrets service is the ADR#0030 encryption caller for sealing, and no other
+The secrets service is the [ADR#0030](./0030-customer-controlled-key-backend-routing.md) encryption caller for sealing, and no other
 process holds a share. A series is `<tenant>.<store>`, the store being the
 stream name, `KV_<bucket>` or `OBJ_<bucket>`, with generations from 1, and the
 `SEALING_DATA_KEYS` bucket holds each series' current `DataKeyRef`, wraps,
@@ -230,9 +241,9 @@ Each tenant gets its own sealing Transit key,
 `sealing-<tenant account public key>` behind the adapter-private locator,
 created as `aes256-gcm96` with upsert disabled, as `bootstrap.sh:55-62` does.
 The platform share comes from Transit `datakey/plaintext` on it, the typed
-optional capability of ADR#0030 Decision 2, or else is 32 CSPRNG bytes passed to
+optional capability of [ADR#0030](./0030-customer-controlled-key-backend-routing.md) Decision 2, or else is 32 CSPRNG bytes passed to
 `wrap_dek`; the customer share is 32 CSPRNG bytes wrapped under the customer
-managed `KeyRef`. Each share is wrapped under an ADR#0030 `AuthenticatedBinding`
+managed `KeyRef`. Each share is wrapped under an [ADR#0030](./0030-customer-controlled-key-backend-routing.md) `AuthenticatedBinding`
 of the tenant, the series and generation as resource, the sealing purpose and
 schema version 1, passed to Transit as `associated_data`.
 
@@ -240,30 +251,30 @@ A lease, sent over core request/reply and xkey-sealed to the requester's
 ephemeral xkey, carries the data key, a sealer's naming key, the `DataKeyRef`
 and wraps, reserved units, deadline, the issuer's last applied invalidation
 revision and the cutover, never a share. The requester authenticates the
-service's public xkey, boot material under ADR#0033 Decision 5, and checks the
+service's public xkey, boot material under [ADR#0033](./0033-key-custody-product-model.md) Decision 5, and checks the
 reply's series and generation. A request to open carries the envelope's
 `DataKeyRef` and wraps, since the registry keeps only the current generation.
 Tenant and workload come from the subject, grants
 are per workload, tenant, store, and seal or open, and holders are `PLATFORM`
 workloads; one in a tenant account would need an export, left open.
 
-Sealing has no shared managed key: ADR#0033 Decision 3 makes dedicated keys
+Sealing has no shared managed key: [ADR#0033](./0033-key-custody-product-model.md) Decision 3 makes dedicated keys
 platform policy, free on Transit, so each tenant's platform share is wrapped
 under its own key, for per-tenant rotation, audit and destruction, and a cloud
 KMS's per-key bill is accepted. A customer managed tenant also needs the
 customer share, with no fallback, and no wrap is optional in any tier. Splitting
-the key is the two-party control ADR#0030 and ADR#0033 leave to a separate
+the key is the two-party control [ADR#0030](./0030-customer-controlled-key-backend-routing.md) and [ADR#0033](./0033-key-custody-product-model.md) leave to a separate
 decision, taken here for sealing only: the platform erases without the customer,
 the veto is cryptographic, and every tier runs one code path, while each call
-still routes to exactly one registration (ADR#0033 Decision 5).
+still routes to exactly one registration ([ADR#0033](./0033-key-custody-product-model.md) Decision 5).
 
 Tier and KEK changes apply from the next generation, and KV records rewrap or
-re-seal by compare-and-set (ADR#0030 Decision 4). Stream records cannot be
+re-seal by compare-and-set ([ADR#0030](./0030-customer-controlled-key-backend-routing.md) Decision 4). Stream records cannot be
 rewritten, so moving them is a rebuild into a new
 [ADR#0059](./0059-session-stream-incarnation-fencing.md) incarnation while old
 wraps still unwrap, and because an incarnation belongs to the physical stream
-(ADR#0059 Decision 2), it moves every tenant on it. A compromise means
-re-sealing under new generations, never rewrapping alone (ADR#0023 Decision 6),
+([ADR#0059](./0059-session-stream-incarnation-fencing.md) Decision 2), it moves every tenant on it. A compromise means
+re-sealing under new generations, never rewrapping alone ([ADR#0023](./0023-secret-management-and-key-custody-direction.md) Decision 6),
 and `min_decryption_version` never rises while an older wrap exists.
 
 Before the lease service answers the first request for a series, and again
@@ -279,7 +290,7 @@ design.
 
 A store created sealing-required has its cutover at its start; any other crosses
 once, one way, at a cutover the registry records. Sealed records are marked at
-the ADR#0009 boundary: a stream record by a `Trogon-Sealed` header naming
+the [ADR#0009](./0009-protocol-buffers-wire-contracts.md) boundary: a stream record by a `Trogon-Sealed` header naming
 `trogonai.platform.sealing.v1.SealedContent`, a KV record by its key's version
 prefix, such as `v2.` where plaintext keys use `v1.`, and a claim by
 `Trogon-Claim-Check: v2`. The service starts a crossing by setting the series to
@@ -291,9 +302,9 @@ re-sealed or deleted the tenant's unmarked records. Before the cutover a reader
 decodes by the marker; from it on every record must open, and any failure, an
 unmarked record included, is an `IntegrityFailure`, so no writer can downgrade a
 series. Tenants in a shared stream cross separately, and before any cutover the
-ADR#0057 reply changes to return events as stored or by id.
+[ADR#0057](./0057-decider-command-nats-binding.md) reply changes to return events as stored or by id.
 
-Credential records cross at the ADR#0074 Q4 re-key, whose streams start
+Credential records cross at the [ADR#0074](./0074-credential-platform-extraction-boundary.md) Q4 re-key, whose streams start
 sealing-required with the tenant token ahead of the project id, because the
 secrets service is a `PLATFORM` decider serving several tenants and builds its
 [ADR#0027](./0027-decider-multi-tenancy-primitive.md) `SubjectScope` from it;
@@ -323,7 +334,7 @@ that could publish plaintext anyway.
 Referenced bytes, such as session artifacts, are sealed with the object layout
 under their bucket's series, named by a keyed digest and located by a
 `StorageLocator` that the session `StoredArtifact` gains. For customer managed
-tenants this replaces ADR#0035 Decision 3's plaintext-digest naming, and the
+tenants this replaces [ADR#0035](./0035-session-store-decider-aggregate.md) Decision 3's plaintext-digest naming, and the
 plaintext digest moves inside the sealed event to check the opened bytes.
 
 ### 7. Data keys are cached for at most sixty seconds and evicted on invalidation
@@ -334,9 +345,9 @@ capped by the issuer's entry, which lives at most 60 seconds from its provider
 unwrap; an issuer with under 54 seconds left unwraps again. A holder's deadline
 starts when it sends the request, runs on a monotonic clock and never extends,
 so once provider enforcement is effective a data key opens content for at most
-sixty seconds more. For sealing data keys only, this amends ADR#0030 Decision
+sixty seconds more. For sealing data keys only, this amends [ADR#0030](./0030-customer-controlled-key-backend-routing.md) Decision
 2's rule against reusable caches, Decision 6's no-retention sentence and
-guarantee, Decision 7's cache bullet, and ADR#0023 Decision 6's "Consumers hold
+guarantee, Decision 7's cache bullet, and [ADR#0023](./0023-secret-management-and-key-custody-direction.md) Decision 6's "Consumers hold
 values for the duration of an in-flight operation"; the no-fallback rule stands.
 
 `SEALING_KEY_INVALIDATIONS`, a KV bucket in `PLATFORM` keyed by series id with
@@ -352,8 +363,8 @@ history is enough.
 
 The [ADR#0049](./0049-revocation-latency-target.md) target, p99 at or under five
 seconds, applies per holder from an entry's stored time to eviction, with the
-deadline as backstop. Sixty seconds matches the minute ADR#0030 Decision 6
-records for a typical Google Cloud KMS disablement, sits far inside ADR#0049's
+deadline as backstop. Sixty seconds matches the minute [ADR#0030](./0030-customer-controlled-key-backend-routing.md) Decision 6
+records for a typical Google Cloud KMS disablement, sits far inside [ADR#0049](./0049-revocation-latency-target.md)'s
 330-second backstop, and holds provider load to one unwrap per issuer replica
 per active generation per minute; unwrapping per event would put provider
 latency and quota on every replay and fan-out.
@@ -362,11 +373,11 @@ Data keys, naming keys and shares live in zeroizing buffers, and entries zeroize
 on eviction and drop. `SecretString` becomes an `Arc` over a zeroizing
 `Box<str>`, copied from an owned `String` that is then zeroized; the adapter's
 body and value move into zeroizing buffers, and the debug payload log goes.
-Erasure from memory stays best-effort (ADR#0030 Decision 2).
+Erasure from memory stays best-effort ([ADR#0030](./0030-customer-controlled-key-backend-routing.md) Decision 2).
 
 ### 8. Destroying a tenant's sealing key erases its sealed content
 
-Nothing starts before the business audit record of ADR#0023 Decision 6's dual
+Nothing starts before the business audit record of [ADR#0023](./0023-secret-management-and-key-custody-direction.md) Decision 6's dual
 audit is written. The key is then soft-deleted, Pending destruction in [key
 states](../architecture/key-states.md): OpenBao 2.6.2 refuses every use, the
 service refuses the tenant's leases, and caches are evicted and invalidations
@@ -374,23 +385,23 @@ written (Decision 7). When the review window, whose length key states leaves
 open, passes without a restore, `deletion_allowed` is set in the key's `config`
 and the key deleted, which is Destroyed, and the completion audit record is
 written; upsert stays disabled, so "OpenBao deletion cannot trigger encrypt-path
-key recreation" (ADR#0030 Decision 7).
+key recreation" ([ADR#0030](./0030-customer-controlled-key-backend-routing.md) Decision 7).
 
 Every generation and copy of the tenant's sealed content becomes unreadable,
 retired incarnations, mirrors and backups included, once no OpenBao backup still
 holds the key. For a customer managed tenant either party can shred alone.
 Losing OpenBao for good, as losing its seal key would
 ([ADR#0052](./0052-cloud-kms-production-seal.md)), loses sealed content too.
-Shredding is tenant-granular: it un-defers ADR#0035 Decision 7 at that
+Shredding is tenant-granular: it un-defers [ADR#0035](./0035-session-store-decider-aggregate.md) Decision 7 at that
 granularity, and per-session erasure stays deferred, since a key per session
 multiplies registry entries, leases and provider calls.
 
 ## Alternatives Considered
 
 **Encrypt every stream, bucket and object.** Rejected: it recreates the
-cold-start cycle ADR#0033 Decision 5 removes, puts a lease in front of every
+cold-start cycle [ADR#0033](./0033-key-custody-product-model.md) Decision 5 removes, puts a lease in front of every
 projection, replay and tool, and duplicates the server cipher for content no
-threat here requires; ADR#0033 already rejected it for platform state.
+threat here requires; [ADR#0033](./0033-key-custody-product-model.md) already rejected it for platform state.
 
 **Adopt the AWS Encryption SDK.** Rejected: it has no OpenBao keyring, its key
 hierarchy is KMS-centric rather than the `KeyManagement` port, and its Rust
@@ -428,7 +439,7 @@ serialize and an operation against the customer key depends on a platform key.
 - Backups of sealed content are useless without Transit and, for a customer
   managed tenant, the customer's key.
 - The dev compose adds the dev tenant's sealing key beside `local-dev-kek`, and
-  the ADR#0074 Decision 3 policies gain grants on sealing keys.
+  the [ADR#0074](./0074-credential-platform-extraction-boundary.md) Decision 3 policies gain grants on sealing keys.
 - A FIPS deployment runs without the sealed classes until HPKE is decided,
   keeping TLS and the `aes` server cipher.
 - [Key management](../architecture/key-management.md), [key
@@ -456,6 +467,7 @@ serialize and an operation against the customer key depends on a platform key.
 - [ADR#0052: Cloud KMS Auto-Unseal Is Mandatory for Production OpenBao](./0052-cloud-kms-production-seal.md)
 - [ADR#0057: Decider Command NATS Binding](./0057-decider-command-nats-binding.md)
 - [ADR#0059: Stream Incarnation Fencing by Subject Isolation and Sealing](./0059-session-stream-incarnation-fencing.md)
+- [ADR#0064: Invariants Are Declared in the Schema Before Anything Enforces Them](./0064-schema-constraints-as-documentation.md)
 - [ADR#0068: A Reference Field Says It Is a Reference in Both Its Name and Its Type](./0068-reference-fields-say-they-are-references.md)
 - [ADR#0074: Credential Platform Extraction Boundary](./0074-credential-platform-extraction-boundary.md)
 - [ADR#0075: API Key Format and Bearer Verifier Construction](./0075-api-key-format-and-verifier-construction.md)
