@@ -6,11 +6,13 @@ use crate::credential_value::{CredentialValue, Location, NKeySeed};
 use crate::server_info::wait_for_server_info;
 use crate::test_support::CoreTestServer;
 use crate::tls::ClientCertificate;
+use tracing::subscriber::DefaultGuard;
 use trogon_std::env::InMemoryEnv;
 use trogon_std::log_capture::{CapturedEvents, LevelFilter};
 use trogon_std::secret_string::SecretString;
 
 const TLS_DISABLED_WARNING: &str = "NATS TLS is disabled, which is only for tests and local debugging";
+const CONNECT_FAILURE_WARNING: &str = "Failed to connect to NATS";
 const PLAINTEXT_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const FIRST_DIAL_DEADLINE: Duration = Duration::from_secs(1);
 const SERVER_INFO_POLL_INTERVAL: Duration = Duration::from_millis(10);
@@ -401,6 +403,52 @@ fn connect_error_display_invalid_setting() {
         error: SettingError::UnsupportedScheme("op".into()),
     };
     assert_eq!(err.to_string(), "Invalid NATS_TOKEN: scheme `op` is not supported");
+}
+
+#[test]
+fn connect_error_display_connection_failed_names_no_server() {
+    let err = ConnectError::ConnectionFailed {
+        servers: vec!["nats://nats.internal.example:4222".to_owned()],
+        error: async_nats::ConnectError::new(ConnectErrorKind::TimedOut),
+    };
+
+    assert_eq!(err.to_string(), "Failed to connect to NATS: timed out");
+}
+
+/// While a single subscriber is registered, `tracing` settles a callsite's interest from whichever
+/// thread reaches it first, so a concurrent test that captures nothing would switch the callsite off
+/// for the test that does. A second registered subscriber keeps that from happening.
+fn keep_another_subscriber_registered(max_level: LevelFilter) -> DefaultGuard {
+    CapturedEvents::new().install(max_level)
+}
+
+#[tokio::test]
+async fn connect_once_logs_the_servers_it_could_not_reach_instead_of_naming_them_in_the_error() {
+    let _registered = keep_another_subscriber_registered(LevelFilter::WARN);
+    let events = CapturedEvents::new();
+    let _guard = events.install(LevelFilter::WARN);
+    let config = NatsConfig::from_url(REFUSING_SERVER).with_tls(NatsTls::Disabled);
+
+    let err = connect_once(&config, NatsAuth::None, REFUSED_DIAL_TIMEOUT)
+        .await
+        .unwrap_err();
+
+    let ConnectError::ConnectionFailed { servers, error } = &err else {
+        panic!("expected a connection failure, got {err:?}");
+    };
+    assert_eq!(*servers, config.servers);
+    assert_eq!(err.to_string(), format!("Failed to connect to NATS: {error}"));
+    let failure = events
+        .events()
+        .into_iter()
+        .find(|event| event.message() == Some(CONNECT_FAILURE_WARNING))
+        .expect("the failure is logged where the connection was made");
+    assert!(
+        failure
+            .field("servers")
+            .is_some_and(|servers| servers.contains(REFUSING_SERVER)),
+        "{failure:?}"
+    );
 }
 
 async fn connect_once_from(env: &InMemoryEnv) -> Result<Client, ConnectError> {
