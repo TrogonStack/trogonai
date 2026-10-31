@@ -157,9 +157,9 @@ async fn nats_transport_tasks_resubscribe_bootstraps_sse_stream() {
     assert!(audit_subject.is_some(), "expected resubscribe audit publish");
 }
 
-/// Live NATS smoke — run with `A2A_SMOKE_COMPOSE=1 cargo test -p a2a-bridge -- --ignored nats_transport_live`.
+/// Live NATS smoke against the `devops/docker/compose/compose.yml` stack. Run with `A2A_SMOKE_COMPOSE=1 cargo test -p a2a-bridge -- --ignored nats_transport_live`.
 #[tokio::test]
-#[ignore = "requires compose stack: A2A_SMOKE_COMPOSE=1 and NATS_URL (see devops/docker/compose/compose.a2a.smoke.yml)"]
+#[ignore = "requires the devops/docker/compose/compose.yml stack: A2A_SMOKE_COMPOSE=1, the NATS_* host variables from devops/docker/compose/.env.example, and a bridge listening on BRIDGE_LISTEN_ADDR"]
 async fn nats_transport_live_requires_nats_server() {
     let env = SystemEnv;
     if env.var("A2A_SMOKE_COMPOSE").as_deref() != Ok("1") {
