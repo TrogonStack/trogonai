@@ -111,6 +111,16 @@ message OpenBaoEndpoint {
   ];
 }
 
+// The OpenBao namespace the registration's security boundary lives in. It is
+// part of the KeyBackendId's identity: changing it requires a new registration,
+// never a revision (ADR#0030).
+message OpenBaoNamespace {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
 // The Transit mount whose mount-global disable_upsert setting registration
 // validation requires to be enabled (ADR#0030).
 message OpenBaoTransitMount {
@@ -169,6 +179,8 @@ message OpenBaoTransitAccess {
   OpenBaoTransitMount transit_mount = 2 [features.field_presence = LEGACY_REQUIRED];
   OpenBaoAuthentication authentication = 3 [features.field_presence = LEGACY_REQUIRED];
   repeated TrustRoot trust_roots = 4 [(buf.validate.field).repeated.min_items = 1];
+  // Absent means the root namespace.
+  OpenBaoNamespace namespace = 5;
 }
 
 // Exactly one known provider is required, and the arm is the registration's

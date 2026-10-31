@@ -26,8 +26,8 @@ message KeyBackendEvent {
   }
 }
 
-// Genesis facts only. Fold starts the registration pending validation with
-// unknown health.
+// Genesis facts only. Fold starts the registration pending validation,
+// ENABLED, with unknown health.
 message KeyBackendRegistered {
   KeyBackendId key_backend_id = 1 [features.field_presence = LEGACY_REQUIRED];
   KeyBackendConfiguration configuration = 2 [features.field_presence = LEGACY_REQUIRED];

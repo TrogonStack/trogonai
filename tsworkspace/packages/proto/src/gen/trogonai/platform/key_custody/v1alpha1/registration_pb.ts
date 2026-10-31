@@ -89,7 +89,8 @@ export const KeyBackendConfigurationSchema: GenMessage<KeyBackendConfiguration> 
 /**
  * The current record of one registration. Lifecycle, admission, and health are
  * separate dimensions, and none of them stands in for another. A registration
- * starts PENDING_VALIDATION with unknown health. A tenant-facing query returns
+ * starts PENDING_VALIDATION, ENABLED, and with unknown health: lifecycle alone
+ * keeps it out of use until it validates, so first activation needs no resume. A tenant-facing query returns
  * only registrations owned by that tenant; a platform-owned registration never
  * appears in a tenant-facing projection (ADR#0033).
  *

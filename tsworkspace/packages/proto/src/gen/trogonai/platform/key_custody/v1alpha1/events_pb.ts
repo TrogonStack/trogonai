@@ -88,8 +88,8 @@ export const KeyBackendEventSchema: GenMessage<KeyBackendEvent> = /*@__PURE__*/
   messageDesc(file_trogonai_platform_key_custody_v1alpha1_events, 0);
 
 /**
- * Genesis facts only. Fold starts the registration pending validation with
- * unknown health.
+ * Genesis facts only. Fold starts the registration pending validation,
+ * ENABLED, with unknown health.
  *
  * @generated from message trogonai.platform.key_custody.v1alpha1.KeyBackendRegistered
  */
