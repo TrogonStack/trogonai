@@ -22,7 +22,7 @@ use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1
 use self::constants::{
     ADMIN_TOKEN_HEADER, DISCORD_BOT_TOKEN, GITHUB_WEBHOOK_SECRET, GITLAB_SIGNING_TOKEN, IDEMPOTENCY_KEY_HEADER,
     INCIDENTIO_SIGNING_SECRET, LINEAR_WEBHOOK_SECRET, MICROSOFT_GRAPH_CLIENT_STATE, NOTION_VERIFICATION_TOKEN,
-    SENTRY_CLIENT_SECRET, SLACK_SIGNING_SECRET, TELEGRAM_WEBHOOK_SECRET, TWITTER_CONSUMER_SECRET,
+    PLAID_CLIENT_SECRET, SENTRY_CLIENT_SECRET, SLACK_SIGNING_SECRET, TELEGRAM_WEBHOOK_SECRET, TWITTER_CONSUMER_SECRET,
 };
 #[cfg(test)]
 use self::idempotency::CredentialCommandInMemoryIdempotencyLedger;
@@ -198,6 +198,19 @@ where
         .route(
             "/notion/{integration_id}/verification-token/destructions",
             post(destroy_notion_verification_token::<EventStore, Secrets, Idempotency>),
+        )
+        .route(
+            "/plaid/{integration_id}/client-secret",
+            put(put_plaid_client_secret::<EventStore, Secrets, Idempotency>)
+                .delete(revoke_plaid_client_secret::<EventStore, Secrets, Idempotency>),
+        )
+        .route(
+            "/plaid/{integration_id}/client-secret/rotations",
+            post(rotate_plaid_client_secret::<EventStore, Secrets, Idempotency>),
+        )
+        .route(
+            "/plaid/{integration_id}/client-secret/destructions",
+            post(destroy_plaid_client_secret::<EventStore, Secrets, Idempotency>),
         )
         .route(
             "/sentry/{integration_id}/client-secret",
@@ -530,6 +543,29 @@ where
     Idempotency: CredentialCommandIdempotencyStore,
 {
     put_credential_secret(state, path, headers, request, NOTION_VERIFICATION_TOKEN).await
+}
+
+async fn put_plaid_client_secret<EventStore, Secrets, Idempotency>(
+    State(state): State<CredentialManagementState<EventStore, Secrets, Idempotency>>,
+    Path(path): Path<ManagedCredentialPath>,
+    headers: HeaderMap,
+    Json(request): Json<WriteCredentialSecretRequest>,
+) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
+where
+    EventStore: StreamRead<str>
+        + StreamAppend<str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    Secrets: SecretStorePut<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
+    Idempotency: CredentialCommandIdempotencyStore,
+{
+    put_credential_secret(state, path, headers, request, PLAID_CLIENT_SECRET).await
 }
 
 async fn put_telegram_webhook_secret<EventStore, Secrets, Idempotency>(
@@ -901,6 +937,29 @@ where
     Idempotency: CredentialCommandIdempotencyStore,
 {
     rotate_credential_secret(state, path, headers, request, NOTION_VERIFICATION_TOKEN).await
+}
+
+async fn rotate_plaid_client_secret<EventStore, Secrets, Idempotency>(
+    State(state): State<CredentialManagementState<EventStore, Secrets, Idempotency>>,
+    Path(path): Path<ManagedCredentialPath>,
+    headers: HeaderMap,
+    Json(request): Json<RotateCredentialSecretRequest>,
+) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
+where
+    EventStore: StreamRead<str>
+        + StreamAppend<str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    Secrets: SecretStoreRotate<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
+    Idempotency: CredentialCommandIdempotencyStore,
+{
+    rotate_credential_secret(state, path, headers, request, PLAID_CLIENT_SECRET).await
 }
 
 async fn rotate_telegram_webhook_secret<EventStore, Secrets, Idempotency>(
@@ -1276,6 +1335,29 @@ where
     destroy_credential_secret(state, path, headers, request, NOTION_VERIFICATION_TOKEN).await
 }
 
+async fn destroy_plaid_client_secret<EventStore, Secrets, Idempotency>(
+    State(state): State<CredentialManagementState<EventStore, Secrets, Idempotency>>,
+    Path(path): Path<ManagedCredentialPath>,
+    headers: HeaderMap,
+    Json(request): Json<DestroyCredentialSecretRequest>,
+) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
+where
+    EventStore: StreamRead<str>
+        + StreamAppend<str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    Secrets: SecretStoreDestroy<Error = SecretStoreError>,
+    Idempotency: CredentialCommandIdempotencyStore,
+{
+    destroy_credential_secret(state, path, headers, request, PLAID_CLIENT_SECRET).await
+}
+
 async fn destroy_telegram_webhook_secret<EventStore, Secrets, Idempotency>(
     State(state): State<CredentialManagementState<EventStore, Secrets, Idempotency>>,
     Path(path): Path<ManagedCredentialPath>,
@@ -1647,6 +1729,29 @@ where
     Idempotency: CredentialCommandIdempotencyStore,
 {
     revoke_credential_secret(state, path, headers, request, NOTION_VERIFICATION_TOKEN).await
+}
+
+async fn revoke_plaid_client_secret<EventStore, Secrets, Idempotency>(
+    State(state): State<CredentialManagementState<EventStore, Secrets, Idempotency>>,
+    Path(path): Path<ManagedCredentialPath>,
+    headers: HeaderMap,
+    Json(request): Json<RevokeCredentialSecretRequest>,
+) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
+where
+    EventStore: StreamRead<str>
+        + StreamAppend<str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    Secrets: SecretStoreRevoke<Error = SecretStoreError>,
+    Idempotency: CredentialCommandIdempotencyStore,
+{
+    revoke_credential_secret(state, path, headers, request, PLAID_CLIENT_SECRET).await
 }
 
 async fn revoke_telegram_webhook_secret<EventStore, Secrets, Idempotency>(
