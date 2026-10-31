@@ -15,6 +15,7 @@ import { CredentialActions } from '@/features/secrets/components/credential-acti
 import { LeasesTable } from '@/features/secrets/components/leases-table';
 import { formatCompact, formatTimestamp } from '@/features/secrets/components/time';
 import { UsesTable } from '@/features/secrets/components/uses-table';
+import { VaultCustodyBadge } from '@/features/secrets/components/vault-custody-badge';
 import { VersionLadder } from '@/features/secrets/components/version-ladder';
 import { WriteSaga } from '@/features/secrets/components/write-saga';
 import { kindLabels, originLabels, purposeLabels } from '@/features/secrets/domain/labels';
@@ -74,6 +75,7 @@ export function CredentialDetailScreen({ secretRef }: { secretRef: string }) {
       <DetailHeader
         title={credential.displayName}
         status={<CredentialLifecycleBadge lifecycle={credential.lifecycle} />}
+        titleAside={vault.data ? <VaultCustodyBadge tier={vault.data.custody} linked /> : undefined}
         identifier={
           <span className="min-w-0 truncate font-mono" title={credential.secret}>
             {credential.secret}

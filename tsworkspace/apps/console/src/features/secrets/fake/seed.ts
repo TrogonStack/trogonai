@@ -529,6 +529,8 @@ export async function populateSeed(writer: SeedWriter, now: Date = new Date()): 
     }),
     at(45 * DAY),
   );
+  writer.custody(seedIds.vaults.production, 'dedicated');
+  writer.custody(seedIds.vaults.webhooks, 'customer_managed');
   await seedOpenAi(writer, now);
   await seedGithub(writer, now);
   await seedStripe(writer, now);

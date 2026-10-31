@@ -18,6 +18,15 @@ describe('secrets overview', () => {
     }
   });
 
+  it('shows the custody tier of each vault', async () => {
+    renderApp('/secrets');
+
+    await screen.findByRole('link', { name: 'OpenAI production key' });
+    expect(screen.getAllByText('Managed key').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Dedicated key').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Customer managed key').length).toBeGreaterThan(0);
+  });
+
   it('never renders secret material', async () => {
     renderApp('/secrets');
 
