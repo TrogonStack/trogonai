@@ -44,6 +44,7 @@ async fn verifies_rcgen_chain() {
     assert_eq!(claims.aud.as_str(), "acct-1");
     assert!(claims.sub.as_str().contains("test-service"));
     assert!(!claims.caller_id.as_str().contains('.'));
+    assert_eq!(claims.principal_kind, trogon_identity_types::PrincipalKind::Service);
 }
 
 #[tokio::test]

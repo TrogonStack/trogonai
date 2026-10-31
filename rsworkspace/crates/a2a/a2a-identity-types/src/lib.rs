@@ -17,5 +17,5 @@ pub mod principal;
 pub use caller::CallerId;
 pub use constants::CALLER_JWT_HEADER_NAME;
 pub use error::JwtError;
-pub use jwt::{CallerJwtHeaderValue, MintedUserJwt, decode_nats_user_payload};
+pub use jwt::{CallerJwtHeaderValue, MintedClaim, MintedUserJwt, MintedUserJwtError, decode_nats_user_payload};
 pub use principal::{SpiceDbPrincipal, SpiceDbSubject};

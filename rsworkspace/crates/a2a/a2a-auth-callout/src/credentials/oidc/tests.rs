@@ -109,6 +109,7 @@ async fn verify_happy_path_rs256() {
     assert_eq!(user.sub.as_str(), "user-42");
     assert_eq!(user.aud.as_str(), "nats-acct-1");
     assert!(!user.caller_id.as_str().contains('.'));
+    assert_eq!(user.principal_kind, trogon_identity_types::PrincipalKind::Person);
     let issuer = nkeys::KeyPair::new_account();
     let issuer_seed = issuer.seed().expect("issuer seed");
     let subject_kp = nkeys::KeyPair::new_user();

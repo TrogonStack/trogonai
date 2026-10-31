@@ -49,7 +49,9 @@ impl StubAuthCalloutMint {
         // dev/test stub satisfies the same gate production tokens go
         // through — keeps the smuggling-prevention invariant intact
         // even on fixture paths.
-        Self::new("eyJhbGciOiJub25lIn0.eyJzdWIiOiJoYXJuZXNzIn0.sig")
+        Self::new(
+            "eyJhbGciOiJub25lIn0.eyJzdWIiOiJoYXJuZXNzIiwiY2FsbGVyX2lkIjoiaGFybmVzcyIsInByaW5jaXBhbF9raW5kIjoicGVyc29uIn0.sig",
+        )
     }
 }
 

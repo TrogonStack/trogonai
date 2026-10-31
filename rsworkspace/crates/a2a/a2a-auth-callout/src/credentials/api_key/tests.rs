@@ -40,6 +40,7 @@ async fn verify_known_key_yields_expected_claims() {
     assert_eq!(claims.sub.as_str(), "alice@example.com");
     assert_eq!(claims.aud.as_str(), "nats-acct-1");
     assert_eq!(claims.data.0["spicedb_subject"], "user/alice");
+    assert_eq!(claims.principal_kind, trogon_identity_types::PrincipalKind::Service);
 }
 
 #[tokio::test]
