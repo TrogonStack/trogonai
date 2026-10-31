@@ -30,39 +30,7 @@ cargo run -p trogon-gateway -- serve --config ./gateway.toml
 
 ## Container image
 
-Every push to `main` publishes the image to GitHub Container Registry as an
-image index, currently `linux/amd64` only:
-
-```text
-ghcr.io/trogonstack/images/trogonai/trogon-gateway
-```
-
-| Tag | Points at |
-|---|---|
-| `canary` | The newest build of `main` |
-| `<commit>` | The build of that full commit SHA, never moved |
-
-The manifests and the index carry the `org.opencontainers.image.source` and
-`org.opencontainers.image.revision` annotations, with the SBOM and provenance
-attestations attached to the same repository. Pin deployments by tag and
-digest, `trogon-gateway:<commit>@sha256:<digest>`.
-
-To build locally from the repository root:
-
-```sh
-mise run images:build trogon-gateway
-```
-
-The Dockerfile is in `devops/docker/images/trogon-gateway/`. The compose stack
-in `devops/docker/compose/` builds the same Dockerfile.
-
-### Deprecated image path
-
-`ghcr.io/trogonstack/trogonai/trogon-gateway`, with its `canary` and
-`sha-<short commit>` tags, is deprecated and no longer published. Its existing
-tags stay as they are, so current pulls keep working, but they stop receiving
-builds. Pull `ghcr.io/trogonstack/images/trogonai/trogon-gateway` instead. The
-old package is deleted once nothing pulls it.
+See [Container Images](../../../../docs/reference/container-images.md).
 
 ## Webhook routes
 

@@ -93,6 +93,10 @@ export default async () => {
                 ],
               },
               {
+                text: "Reference",
+                items: [{ text: "Container Images", link: "/reference/container-images" }],
+              },
+              {
                 text: "Explanation",
                 items: [
                   {
