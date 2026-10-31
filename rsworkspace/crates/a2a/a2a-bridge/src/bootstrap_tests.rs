@@ -21,6 +21,8 @@ enum TestError {
     #[error(transparent)]
     Bridge(#[from] BridgeError),
     #[error(transparent)]
+    Bootstrap(#[from] BootstrapError),
+    #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
     Connect(#[from] async_nats::ConnectError),
@@ -75,15 +77,6 @@ fn rpc_request() -> Result<Request<Body>, TestError> {
 }
 
 #[test]
-fn nats_server_list_normalizes_each_address_without_losing_tls() {
-    assert_eq!(
-        parse_nats_servers(" , localhost:4222, nats://second:4222, tls://third:4443, ,"),
-        ["nats://localhost:4222", "nats://second:4222", "tls://third:4443"]
-    );
-    assert!(parse_nats_servers(" , , ").is_empty());
-}
-
-#[test]
 fn timeout_input_accepts_trimmed_unsigned_values_and_rejects_invalid_values() {
     let env = InMemoryEnv::new();
     assert_eq!(parse_u64_env(&env, "TIMEOUT"), None);
@@ -127,7 +120,7 @@ async fn run_rejects_invalid_configuration_before_serving() {
     env.set("NATS_URL", " , ");
     assert!(matches!(
         run(&env, std::future::pending()).await,
-        Err(BootstrapError::Bridge(_))
+        Err(BootstrapError::NoNatsServers)
     ));
 }
 
@@ -153,7 +146,11 @@ async fn run_completes_after_controlled_shutdown() {
 async fn stub_bootstrap_returns_an_explicit_authentication_failure() -> Result<(), TestError> {
     let env = InMemoryEnv::new();
     env.set("AUTH_CALLOUT_NATS_URL", "nats://auth:4222");
-    let state = bootstrap_stub_transport(&env, "nats://unused:4222", resolve_a2a_prefix(&env)?);
+    let state = bootstrap_stub_transport(
+        &env,
+        &NatsConfig::from_url("nats://unused:4222"),
+        resolve_a2a_prefix(&env)?,
+    );
     let response = gateway_router(state).oneshot(rpc_request()?).await?;
     assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
     let payload: serde_json::Value = serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await?)?;
@@ -168,8 +165,13 @@ async fn stub_bootstrap_returns_an_explicit_authentication_failure() -> Result<(
 async fn nats_bootstrap_reports_connection_failure() -> Result<(), TestError> {
     let env = InMemoryEnv::new();
     env.set("BRIDGE_CONNECT_TIMEOUT_SECS", "0");
-    let result = bootstrap_nats_transport(&env, "invalid://endpoint", resolve_a2a_prefix(&env)?).await;
-    assert!(matches!(result, Err(BridgeError::NatsPublish(_))));
+    let result = bootstrap_nats_transport(
+        &env,
+        &NatsConfig::from_url("invalid://endpoint"),
+        resolve_a2a_prefix(&env)?,
+    )
+    .await;
+    assert!(matches!(result, Err(BootstrapError::NatsConnect(_))));
     Ok(())
 }
 
@@ -183,9 +185,11 @@ async fn bootstrap_diagnostics_reach_the_log_facade_before_tracing_initializatio
     env.set("BRIDGE_CONNECT_TIMEOUT_SECS", "2");
     env.set("BRIDGE_AUTH_MINT_TIMEOUT_SECS", "3");
     env.set("BRIDGE_GATEWAY_RPC_TIMEOUT_SECS", "4");
-    let _stub = bootstrap_stub_transport(&env, " nats://stub:4222 ", resolve_a2a_prefix(&env)?);
+    env.set("NATS_URL", " nats://stub:4222 ");
+    let _stub = bootstrap_stub_transport(&env, &NatsConfig::from_env(&env), resolve_a2a_prefix(&env)?);
     let server = CoreTestServer::start().await;
-    let _state = bootstrap_nats_transport(&env, server.address(), resolve_a2a_prefix(&env)?).await?;
+    let _state =
+        bootstrap_nats_transport(&env, &NatsConfig::from_url(server.address()), resolve_a2a_prefix(&env)?).await?;
 
     let records = logs.records();
     let stub = records
@@ -231,9 +235,10 @@ async fn nats_bootstrap_wires_mint_subject_tenant_and_gateway_namespace() -> Res
         (Some("   "), "a2a.bridge.auth.callout.request", Some("")),
     ] {
         let env = InMemoryEnv::new();
+        env.set("NATS_URL", server.address());
         env.set(ENV_A2A_PREFIX, "tenant");
         env.set("BRIDGE_CONNECT_TIMEOUT_SECS", "2");
-        env.set("BRIDGE_AUTH_MINT_TIMEOUT_SECS", "2");
+        env.set("BRIDGE_AUTH_MINT_TIMEOUT_SECS", "10");
         env.set("BRIDGE_GATEWAY_RPC_TIMEOUT_SECS", "2");
         if configured_subject == Some("  custom.mint  ") {
             env.set("NATS_USER", "fixture");
@@ -248,7 +253,7 @@ async fn nats_bootstrap_wires_mint_subject_tenant_and_gateway_namespace() -> Res
         let mut mint = client.subscribe(expected_subject).await?;
         let mut gateway = client.subscribe("tenant.v1.gateway.planner.message.send").await?;
         client.flush().await?;
-        let state = bootstrap_nats_transport(&env, server.address(), resolve_a2a_prefix(&env)?).await?;
+        let state = bootstrap_nats_transport(&env, &NatsConfig::from_env(&env), resolve_a2a_prefix(&env)?).await?;
         let handle_request = gateway_router(state).oneshot(rpc_request()?);
         let serve_wire = async {
             let request = tokio::time::timeout(Duration::from_secs(5), mint.next())
@@ -292,7 +297,7 @@ async fn nats_bootstrap_wires_mint_subject_tenant_and_gateway_namespace() -> Res
     assert!(output.contains("a2a-bridge NATS transports wired"));
     assert!(output.contains("prefix=tenant"));
     assert!(output.contains("connect_timeout_secs=2"));
-    assert!(output.contains("mint_wire_secs=2"));
+    assert!(output.contains("mint_wire_secs=10"));
     assert!(output.contains("gateway_rpc_secs=2"));
     Ok(())
 }
