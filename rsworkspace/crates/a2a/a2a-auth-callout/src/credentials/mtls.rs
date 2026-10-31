@@ -195,7 +195,8 @@ impl X509MtlsVerifier {
         let data = spicedb_bundle_for_opaque(
             serde_json::to_value(principal).map_err(CredentialError::PrincipalSerialization)?,
         );
-        let caller_id = derive_caller_id(CallerNamespace::Mtls, sub.as_str(), account)
+        let namespace = CallerNamespace::Mtls;
+        let caller_id = derive_caller_id(namespace, sub.as_str(), account)
             .map_err(|e| CredentialError::InvalidCredentials(format!("caller_id derivation failed: {e}")))?;
 
         let nats_permissions = crate::permissions::IssuedPermissions::default_for_caller(&caller_id);
@@ -205,6 +206,7 @@ impl X509MtlsVerifier {
             aud: account.clone(),
             data,
             caller_id,
+            principal_kind: namespace.principal_kind(),
             nats_permissions,
         })
     }

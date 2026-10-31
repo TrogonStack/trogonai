@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use nkeys::KeyPair;
 use serde_json::json;
+use trogon_identity_types::PrincipalKind;
 
 use crate::jwt::{
     AudienceAccount, CallerId, ExternalSubject, MintedUserJwt, SigningKey, SpiceDbPrincipal, UserJwtClaims,
@@ -29,6 +30,7 @@ pub fn mint_test_user_jwt(caller_id: &str, audience_account: &str, ttl: Duration
         data: SpiceDbPrincipal(json!({"spicedb_subject": "test-sub"})),
         nats_permissions: IssuedPermissions::default_for_caller(&caller),
         caller_id: caller,
+        principal_kind: PrincipalKind::Person,
     };
     let subject = UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(user.public_key()).unwrap());
     let issued_at = std::time::SystemTime::now();

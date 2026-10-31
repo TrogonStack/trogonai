@@ -6,6 +6,7 @@ version = 4
 name = "a2a-auth-callout"
 version = "0.1.0"
 dependencies = [
+ "a2a-identity-types",
  "async-nats",
  "async-trait",
  "base64 0.23.1",
@@ -33,6 +34,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "trogon-identity-types",
  "trogon-nats",
  "trogon-std",
  "uuid",
@@ -61,6 +63,7 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-subscriber",
+ "trogon-identity-types",
  "trogon-nats",
  "trogon-std",
  "wiremock",
@@ -120,6 +123,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+ "trogon-identity-types",
 ]
 
 [[package]]

@@ -210,7 +210,7 @@ fn gateway_req_headers_propagate_correlation_and_caller_id() {
 
 #[test]
 fn gateway_publish_headers_include_minted_user_jwt() {
-    let jwt = BridgeUserJwt::new("eyJhbGciOiJub25lIn0.eyJzdWIiOiJoYXJuZXNzIn0.sig").unwrap();
+    let jwt = BridgeUserJwt::new("eyJhbGciOiJub25lIn0.eyJzdWIiOiJoYXJuZXNzIiwiY2FsbGVyX2lkIjoiaGFybmVzcyIsInByaW5jaXBhbF9raW5kIjoicGVyc29uIn0.sig").unwrap();
     let headers = gateway_publish_headers(ReqId::from_header("req-2"), &jwt, None).unwrap();
     assert!(headers.get(CALLER_JWT_HEADER_NAME).is_some());
 }

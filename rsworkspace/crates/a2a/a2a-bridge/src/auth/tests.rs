@@ -15,7 +15,10 @@ async fn stub_auth_callout_client_returns_not_configured_error() {
 async fn stub_auth_callout_mint_returns_fixture_jwt() {
     let client = StubAuthCalloutMint::fixture().unwrap();
     let jwt = client.mint(&CallerHttpsAuth::new("Bearer ignored")).await.unwrap();
-    assert_eq!(jwt.as_str(), "eyJhbGciOiJub25lIn0.eyJzdWIiOiJoYXJuZXNzIn0.sig");
+    assert_eq!(
+        jwt.as_str(),
+        "eyJhbGciOiJub25lIn0.eyJzdWIiOiJoYXJuZXNzIiwiY2FsbGVyX2lkIjoiaGFybmVzcyIsInByaW5jaXBhbF9raW5kIjoicGVyc29uIn0.sig"
+    );
 }
 
 #[test]

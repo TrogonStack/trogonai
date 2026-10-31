@@ -7,6 +7,7 @@ use crate::signing_key_source::{KeyVersion, SigningKeyHandle, StaticSigningKeySo
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use nkeys::KeyPair;
 use serde_json::{Value, json};
+use trogon_identity_types::PrincipalKindError;
 
 fn fixture_material() -> (MintingMaterial, String, KeyPair, KeyPair) {
     let issuer = KeyPair::new_account();
@@ -29,6 +30,7 @@ fn fixture_claims(material: &MintingMaterial) -> (UserJwtClaims, UserJwtSubject,
         data: SpiceDbPrincipal(json!({"spicedb_subject": "user/alice"})),
         nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
         caller_id,
+        principal_kind: PrincipalKind::Person,
     };
     let subject = UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(user.public_key()).unwrap());
     (claims, subject, user)
@@ -77,6 +79,7 @@ fn minted_jwt_has_nats_header_and_verifies() {
         data: SpiceDbPrincipal(json!({"spicedb_subject": "user/alice"})),
         nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
         caller_id,
+        principal_kind: PrincipalKind::Service,
     };
     let subject = UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(user.public_key()).unwrap());
     let token = mint_nats_user_jwt(
@@ -97,13 +100,77 @@ fn minted_jwt_has_nats_header_and_verifies() {
     assert_eq!(payload["iss"], issuer.public_key());
     assert_eq!(payload["aud"], "tenant-acme");
     assert_eq!(payload["caller_id"], "caller1");
+    assert_eq!(payload["principal_kind"], "service");
     assert_eq!(payload["nats"]["type"], "user");
     assert_eq!(payload["nats"]["pub"]["allow"][0], "a2a.v1.gateway.>");
 
     let handle = SigningKeyHandle::new(material.version().clone(), SigningKey::from_seed(&issuer_seed).unwrap());
     let verified = verify_with_material(token.as_str(), &handle.minting_material()).unwrap();
     assert_eq!(verified.caller_id.as_str(), "caller1");
+    assert_eq!(verified.principal_kind, PrincipalKind::Service);
     assert_eq!(verified.aud.as_str(), "tenant-acme");
+}
+
+#[test]
+fn verify_with_material_returns_the_principal_kind_that_was_minted() {
+    let (material, issuer_seed, _, _) = fixture_material();
+    let handle = SigningKeyHandle::new(material.version().clone(), SigningKey::from_seed(&issuer_seed).unwrap());
+    for kind in [PrincipalKind::Agent, PrincipalKind::Person, PrincipalKind::Service] {
+        let (mut claims, subject, _) = fixture_claims(&material);
+        claims.principal_kind = kind;
+        let token = mint_token(
+            &claims,
+            &material,
+            &subject,
+            UNIX_EPOCH + Duration::from_secs(2_000),
+            Duration::from_secs(60),
+        );
+
+        let verified = verify_with_material(token.as_str(), &handle.minting_material()).unwrap();
+
+        assert_eq!(verified.principal_kind, kind);
+    }
+}
+
+#[test]
+fn verify_with_material_never_defaults_a_missing_principal_kind() {
+    let (material, issuer_seed, _, _) = fixture_material();
+    let (claims, subject, _) = fixture_claims(&material);
+    let token = mint_token(
+        &claims,
+        &material,
+        &subject,
+        UNIX_EPOCH + Duration::from_secs(2_000),
+        Duration::from_secs(60),
+    );
+    let stripped = resign_nats_user_jwt(&token, &material, |_, payload| {
+        payload.as_object_mut().unwrap().remove("principal_kind");
+    });
+    let handle = SigningKeyHandle::new(material.version().clone(), SigningKey::from_seed(&issuer_seed).unwrap());
+    let err = verify_with_material(stripped.as_str(), &handle.minting_material()).unwrap_err();
+    assert!(decode_err_contains(err, "principal_kind"));
+}
+
+#[test]
+fn verify_with_material_rejects_a_principal_kind_outside_the_closed_set() {
+    let (material, issuer_seed, _, _) = fixture_material();
+    let (claims, subject, _) = fixture_claims(&material);
+    let token = mint_token(
+        &claims,
+        &material,
+        &subject,
+        UNIX_EPOCH + Duration::from_secs(2_000),
+        Duration::from_secs(60),
+    );
+    let tampered = resign_nats_user_jwt(&token, &material, |_, payload| {
+        payload["principal_kind"] = json!("user");
+    });
+    let handle = SigningKeyHandle::new(material.version().clone(), SigningKey::from_seed(&issuer_seed).unwrap());
+    let err = verify_with_material(tampered.as_str(), &handle.minting_material()).unwrap_err();
+    assert!(matches!(
+        err,
+        JwtError::InvalidPrincipalKind(PrincipalKindError::Unknown)
+    ));
 }
 
 #[test]
@@ -134,6 +201,7 @@ fn verify_with_source_uses_accepted_handles() {
         data: SpiceDbPrincipal(json!({"spicedb_subject": "user/alice"})),
         nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
         caller_id,
+        principal_kind: PrincipalKind::Person,
     };
     let subject = UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(user.public_key()).unwrap());
     let token = mint_nats_user_jwt(
