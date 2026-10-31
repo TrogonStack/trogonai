@@ -489,29 +489,28 @@ async fn live_gate_is_enabled() {
     assert!(gate.is_enabled());
 }
 
+fn caller(kind: &str, id: &str) -> SubjectPrincipal {
+    SubjectPrincipal::from_tokens(kind, id).expect("principal")
+}
+
 #[test]
-fn tier1_principal_from_caller_carries_subject_and_account() {
-    let principal = tier1_principal_from_caller("alice", "acme");
+fn tier1_principal_from_caller_carries_only_the_derived_subject() {
+    let principal = tier1_principal_from_caller(&CallerSpiceDbSubject::from(&caller("person", "alice")));
+
+    assert_eq!(principal, SpiceDbPrincipal::new("user/alice"));
     assert_eq!(
-        principal.0.get("spicedb_subject").and_then(serde_json::Value::as_str),
-        Some("user/alice"),
-    );
-    assert_eq!(
-        principal.0.get("sub").and_then(serde_json::Value::as_str),
-        Some("alice"),
-    );
-    assert_eq!(
-        principal.0.get("session_account").and_then(serde_json::Value::as_str),
-        Some("acme"),
+        spicedb_tier1_subject_from_principal(&principal),
+        Some(("user".to_owned(), "alice".to_owned()))
     );
 }
 
 #[test]
-fn tier1_session_from_principal_extracts_session_key() {
-    let principal = tier1_principal_from_caller("alice", "acme");
-    let session = tier1_session_from_principal(&principal, "fallback").expect("present");
-    assert_eq!(session.sub(), "alice");
+fn tier1_session_from_caller_keys_on_the_subject_principal() {
+    let session = tier1_session_from_caller(&caller("person", "alice"), "acme");
+
+    assert_eq!(session.sub(), "person.alice");
     assert_eq!(session.account(), "acme");
+    assert_ne!(session, tier1_session_from_caller(&caller("agent", "alice"), "acme"));
 }
 
 #[test]

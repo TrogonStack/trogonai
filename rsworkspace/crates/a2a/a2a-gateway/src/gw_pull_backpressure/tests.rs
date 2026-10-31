@@ -10,6 +10,10 @@ fn caller() -> SubjectPrincipal {
     SubjectPrincipal::from_tokens("person", "alice").expect("test caller")
 }
 
+fn principal(kind: &str, id: &str) -> SubjectPrincipal {
+    SubjectPrincipal::from_tokens(kind, id).expect("test principal")
+}
+
 #[test]
 fn durable_name_scoped_to_prefix() {
     assert_eq!(
@@ -171,20 +175,28 @@ fn config_from_env_clamps_zero_max_inflight() {
 #[test]
 fn caller_inflight_gate_enforces_limit() {
     let gate = std::sync::Arc::new(CallerInflightGate::new(1));
-    let first = gate.clone().try_acquire("caller-a");
+    let first = gate.clone().try_acquire(&principal("person", "caller-a"));
     assert!(first.is_some());
-    assert!(gate.clone().try_acquire("caller-a").is_none());
+    assert!(gate.clone().try_acquire(&principal("person", "caller-a")).is_none());
     drop(first);
-    assert!(gate.clone().try_acquire("caller-a").is_some());
+    assert!(gate.clone().try_acquire(&principal("person", "caller-a")).is_some());
 }
 
 #[test]
 fn caller_inflight_gate_tracks_callers_independently() {
     let gate = std::sync::Arc::new(CallerInflightGate::new(1));
-    let _a = gate.clone().try_acquire("caller-a").expect("a");
-    let _b = gate.clone().try_acquire("caller-b").expect("b");
-    assert!(gate.clone().try_acquire("caller-a").is_none());
-    assert!(gate.clone().try_acquire("caller-b").is_none());
+    let _a = gate.clone().try_acquire(&principal("person", "caller-a")).expect("a");
+    let _b = gate.clone().try_acquire(&principal("person", "caller-b")).expect("b");
+    assert!(gate.clone().try_acquire(&principal("person", "caller-a")).is_none());
+    assert!(gate.clone().try_acquire(&principal("person", "caller-b")).is_none());
+}
+
+#[test]
+fn caller_inflight_gate_keys_on_the_whole_subject_principal() {
+    let gate = std::sync::Arc::new(CallerInflightGate::new(1));
+    let _person = gate.clone().try_acquire(&principal("person", "alice")).expect("person");
+    assert!(gate.clone().try_acquire(&principal("person", "alice")).is_none());
+    assert!(gate.clone().try_acquire(&principal("agent", "alice")).is_some());
 }
 
 #[test]
@@ -230,17 +242,20 @@ fn caller_inflight_gate_recovers_from_poisoned_lock() {
     .join();
     // The poison-recovery branch returns the inner guard so the gate keeps
     // serving instead of cascading the panic to every caller.
-    let permit = gate.clone().try_acquire("caller-a").expect("recovers from poison");
+    let permit = gate
+        .clone()
+        .try_acquire(&principal("person", "caller-a"))
+        .expect("recovers from poison");
     drop(permit);
 }
 
 #[test]
 fn pull_cycle_error_display_carries_subject() {
     let err = PullCycleError::Ack {
-        subject: "a2a.v1.tasks.t.events.r".to_string(),
+        subject: "a2a.v1.tasks.t.person.alice.events".to_string(),
         source: "boom".into(),
     };
-    assert!(format!("{err}").contains("a2a.v1.tasks.t.events.r"));
+    assert!(format!("{err}").contains("a2a.v1.tasks.t.person.alice.events"));
 }
 
 #[test]
@@ -248,10 +263,24 @@ fn caller_inflight_gate_drop_removes_empty_bucket() {
     // Once a caller drops back to zero permits, the bucket key is removed —
     // important to avoid an unbounded HashMap grow under churn.
     let gate = std::sync::Arc::new(CallerInflightGate::new(1));
-    let permit = gate.clone().try_acquire("caller-a").expect("permit");
-    assert!(gate.inflight.lock().unwrap().contains_key("caller-a"));
+    let permit = gate
+        .clone()
+        .try_acquire(&principal("person", "caller-a"))
+        .expect("permit");
+    assert!(
+        gate.inflight
+            .lock()
+            .unwrap()
+            .contains_key(&principal("person", "caller-a"))
+    );
     drop(permit);
-    assert!(!gate.inflight.lock().unwrap().contains_key("caller-a"));
+    assert!(
+        !gate
+            .inflight
+            .lock()
+            .unwrap()
+            .contains_key(&principal("person", "caller-a"))
+    );
 }
 
 #[test]

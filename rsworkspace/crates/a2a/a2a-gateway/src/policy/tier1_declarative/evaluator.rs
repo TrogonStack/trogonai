@@ -47,7 +47,7 @@ impl Tier1Clock for FixedTier1Clock {
 pub struct Tier1DeclarativeContext {
     pub agent_method: A2aMethod,
     pub agent_id: A2aAgentId,
-    pub caller_subject: Option<SpiceDbSubject>,
+    pub caller_subject: SpiceDbSubject,
     pub nats_subject: String,
 }
 
@@ -55,7 +55,7 @@ impl Tier1DeclarativeContext {
     pub fn new(
         agent_method: A2aMethod,
         agent_id: A2aAgentId,
-        caller_subject: Option<SpiceDbSubject>,
+        caller_subject: SpiceDbSubject,
         nats_subject: impl Into<String>,
     ) -> Self {
         Self {
@@ -129,15 +129,6 @@ fn rule_matches_all(ctx: &Tier1DeclarativeContext, rule: &Tier1DeclarativeRule, 
 fn match_hits(ctx: &Tier1DeclarativeContext, item: &Tier1DeclarativeMatch, clock: &dyn Tier1Clock) -> bool {
     let matched = match item.kind {
         Tier1ResourceKind::TimeOfDay => time_of_day_pattern_matches(&item.pattern, clock.now()).unwrap_or(false),
-        // `caller_subject = "*"` must not match an unauthenticated
-        // request — without this branch `None` becomes `""`, and
-        // `pattern_matches("*", "")` is true, so a rule intended for
-        // any authenticated caller would also fire on requests with no
-        // caller identity at all.
-        Tier1ResourceKind::CallerSubject => ctx
-            .caller_subject
-            .as_ref()
-            .is_some_and(|subject| pattern_matches(&item.pattern, subject.as_str())),
         // NATS subjects are dot-tokenized; `*` matches exactly one token
         // and `>` matches the trailing tail. Without the NATS-aware
         // matcher, a rule like `a2a.v1.gateway.*.*.*.message.send` would also
@@ -189,10 +180,7 @@ fn field_value(ctx: &Tier1DeclarativeContext, kind: Tier1ResourceKind) -> String
     match kind {
         Tier1ResourceKind::AgentMethod => ctx.agent_method.as_str().to_owned(),
         Tier1ResourceKind::AgentId => ctx.agent_id.as_str().to_owned(),
-        // CallerSubject is handled directly in `match_hits` to keep the
-        // "unauthenticated requests never match" invariant local to the
-        // matcher; this arm is unreachable for that kind.
-        Tier1ResourceKind::CallerSubject => String::new(),
+        Tier1ResourceKind::CallerSubject => ctx.caller_subject.as_str().to_owned(),
         Tier1ResourceKind::NatsSubjectPattern => ctx.nats_subject.clone(),
         Tier1ResourceKind::TimeOfDay => String::new(),
     }

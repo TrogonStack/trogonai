@@ -113,30 +113,64 @@ fn settings_ignore_invalid_durable_env_value() {
 }
 
 #[test]
-fn mirror_subject_maps_agent_dlq_shape() {
+fn mirror_subject_keeps_the_callers_principal() {
     assert_eq!(
-        push_dlq_mirror_subject(&prefix(), "a2a.v1.push.dlq.c1.task-9"),
-        Some("a2a.v1.push.dlq.mirror.c1.task-9".to_string())
+        push_dlq_mirror_subject(&prefix(), "a2a.v1.push.dlq.person.c1.task-9").map(|mirror| mirror.to_string()),
+        Ok("a2a.v1.push.dlq.mirror.person.c1.task-9".to_string())
     );
 }
 
 #[test]
-fn mirror_subject_rejects_existing_mirror_and_extra_tokens() {
-    assert!(push_dlq_mirror_subject(&prefix(), "a2a.v1.push.dlq.mirror.c1.task-9").is_none());
-    assert!(push_dlq_mirror_subject(&prefix(), "a2a.v1.push.dlq.c1.task-9.extra").is_none());
+fn mirror_subject_rejects_mirrors_extra_tokens_and_dead_letters_without_a_principal() {
+    for subject in [
+        "a2a.v1.push.dlq.mirror.person.c1.task-9",
+        "a2a.v1.push.dlq.person.c1.task-9.extra",
+        "a2a.v1.push.dlq.c1.task-9",
+    ] {
+        assert_eq!(
+            push_dlq_mirror_subject(&prefix(), subject),
+            Err(PushDlqSubjectError::BadSubjectShape),
+            "{subject}"
+        );
+    }
 }
 
 #[test]
 fn mirror_subject_rejects_unrelated_subject() {
-    assert!(push_dlq_mirror_subject(&prefix(), "different.subject").is_none());
+    assert_eq!(
+        push_dlq_mirror_subject(&prefix(), "different.subject"),
+        Err(PushDlqSubjectError::NotPushDlq)
+    );
 }
 
 #[test]
 fn skip_mirror_loop_markers() {
-    assert!(should_skip_push_dlq_mirror("a2a.v1.push.dlq.mirror.c1.task-9", None));
+    assert!(should_skip_push_dlq_mirror(
+        &prefix(),
+        "a2a.v1.push.dlq.mirror.person.c1.task-9",
+        None
+    ));
+    assert!(should_skip_push_dlq_mirror(
+        &prefix(),
+        "a2a.v1.push.dlq.mirror.c1.task-9",
+        None
+    ));
     let mut headers = HeaderMap::new();
     headers.insert(PUSH_DLQ_MIRROR_HEADER, "true");
-    assert!(should_skip_push_dlq_mirror("a2a.v1.push.dlq.c1.task-9", Some(&headers)));
+    assert!(should_skip_push_dlq_mirror(
+        &prefix(),
+        "a2a.v1.push.dlq.person.c1.task-9",
+        Some(&headers)
+    ));
+}
+
+#[test]
+fn a_caller_whose_id_is_mirror_is_not_mistaken_for_a_mirror() {
+    assert!(!should_skip_push_dlq_mirror(
+        &prefix(),
+        "a2a.v1.push.dlq.person.mirror.task-9",
+        None
+    ));
 }
 
 #[test]
@@ -152,11 +186,19 @@ async fn mirror_publish_adds_header_and_retries() {
     js.fail_next_n(2);
     let dedup = PushDlqDedupGate::with_capacity(32);
     let payload = br#"{"schema":"a2a.v1.push.dlq/v1","idempotency_key":"task-1:failed:https://example.com/hook"}"#;
-    let outcome = mirror_push_dlq_envelope(&js, &prefix(), "a2a.v1.push.dlq.alice.task-1", None, payload, &dedup).await;
+    let outcome = mirror_push_dlq_envelope(
+        &js,
+        &prefix(),
+        "a2a.v1.push.dlq.person.alice.task-1",
+        None,
+        payload,
+        &dedup,
+    )
+    .await;
     assert_eq!(outcome, MirrorDispatchOutcome::Mirrored);
     let published = js.publishes.lock().unwrap();
     assert_eq!(published.len(), 1);
-    assert_eq!(published[0].0, "a2a.v1.push.dlq.mirror.alice.task-1");
+    assert_eq!(published[0].0, "a2a.v1.push.dlq.mirror.person.alice.task-1");
     assert!(published[0].1.get(PUSH_DLQ_MIRROR_HEADER).is_some());
     // Mirror Nats-Msg-Id MUST be prefixed so JetStream doesn't dedup the
     // mirror against the authoritative envelope within its duplicate_window
@@ -178,7 +220,7 @@ async fn mirror_msg_id_is_prefixed_to_avoid_jetstream_dedup_collision() {
     mirror_push_dlq_envelope(
         &js,
         &prefix(),
-        "a2a.v1.push.dlq.alice.task-collide",
+        "a2a.v1.push.dlq.person.alice.task-collide",
         None,
         payload,
         &dedup,
@@ -203,7 +245,44 @@ async fn mirror_skips_already_mirrored_subjects() {
     let outcome = mirror_push_dlq_envelope(
         &js,
         &prefix(),
-        "a2a.v1.push.dlq.mirror.alice.task-1",
+        "a2a.v1.push.dlq.mirror.person.alice.task-1",
+        None,
+        br#"{"idempotency_key":"k1"}"#,
+        &dedup,
+    )
+    .await;
+    assert_eq!(outcome, MirrorDispatchOutcome::Skipped);
+    assert!(js.publishes.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn mirror_republishes_the_dead_letter_of_a_caller_whose_id_is_mirror() {
+    let js = RecordingPublisher::default();
+    let dedup = PushDlqDedupGate::with_capacity(32);
+    let outcome = mirror_push_dlq_envelope(
+        &js,
+        &prefix(),
+        "a2a.v1.push.dlq.person.mirror.task-1",
+        None,
+        br#"{"idempotency_key":"k1"}"#,
+        &dedup,
+    )
+    .await;
+    assert_eq!(outcome, MirrorDispatchOutcome::Mirrored);
+    assert_eq!(
+        js.publishes.lock().unwrap()[0].0,
+        "a2a.v1.push.dlq.mirror.person.mirror.task-1"
+    );
+}
+
+#[tokio::test]
+async fn mirror_skips_a_dead_letter_without_the_principal_position() {
+    let js = RecordingPublisher::default();
+    let dedup = PushDlqDedupGate::with_capacity(32);
+    let outcome = mirror_push_dlq_envelope(
+        &js,
+        &prefix(),
+        "a2a.v1.push.dlq.alice.task-1",
         None,
         br#"{"idempotency_key":"k1"}"#,
         &dedup,
@@ -220,11 +299,27 @@ async fn mirror_second_publish_with_same_key_is_suppressed() {
     let payload = br#"{"schema":"a2a.v1.push.dlq/v1","idempotency_key":"task-1:failed:https://example.com/hook"}"#;
 
     assert_eq!(
-        mirror_push_dlq_envelope(&js, &prefix(), "a2a.v1.push.dlq.alice.task-1", None, payload, &dedup).await,
+        mirror_push_dlq_envelope(
+            &js,
+            &prefix(),
+            "a2a.v1.push.dlq.person.alice.task-1",
+            None,
+            payload,
+            &dedup
+        )
+        .await,
         MirrorDispatchOutcome::Mirrored
     );
     assert_eq!(
-        mirror_push_dlq_envelope(&js, &prefix(), "a2a.v1.push.dlq.alice.task-1", None, payload, &dedup).await,
+        mirror_push_dlq_envelope(
+            &js,
+            &prefix(),
+            "a2a.v1.push.dlq.person.alice.task-1",
+            None,
+            payload,
+            &dedup
+        )
+        .await,
         MirrorDispatchOutcome::Skipped
     );
     assert_eq!(js.publishes.lock().unwrap().len(), 1);
@@ -237,7 +332,15 @@ async fn mirror_publish_failed_when_all_attempts_fail() {
     js.fail_next_n(MAX_PUBLISH_RETRIES + 1);
     let dedup = PushDlqDedupGate::with_capacity(32);
     let payload = br#"{"idempotency_key":"task-2:failed"}"#;
-    let outcome = mirror_push_dlq_envelope(&js, &prefix(), "a2a.v1.push.dlq.bob.task-2", None, payload, &dedup).await;
+    let outcome = mirror_push_dlq_envelope(
+        &js,
+        &prefix(),
+        "a2a.v1.push.dlq.person.bob.task-2",
+        None,
+        payload,
+        &dedup,
+    )
+    .await;
     assert_eq!(outcome, MirrorDispatchOutcome::PublishFailed);
     assert!(js.publishes.lock().unwrap().is_empty());
 }
@@ -254,13 +357,29 @@ async fn mirror_publish_failure_releases_dedup_so_redelivery_can_retry() {
     let dedup = PushDlqDedupGate::with_capacity(32);
     let payload = br#"{"idempotency_key":"task-3:failed"}"#;
     assert_eq!(
-        mirror_push_dlq_envelope(&js, &prefix(), "a2a.v1.push.dlq.alice.task-3", None, payload, &dedup).await,
+        mirror_push_dlq_envelope(
+            &js,
+            &prefix(),
+            "a2a.v1.push.dlq.person.alice.task-3",
+            None,
+            payload,
+            &dedup
+        )
+        .await,
         MirrorDispatchOutcome::PublishFailed
     );
 
     // Second attempt — let publish succeed this time. The redelivery must
     // NOT be dedup-suppressed.
-    let outcome = mirror_push_dlq_envelope(&js, &prefix(), "a2a.v1.push.dlq.alice.task-3", None, payload, &dedup).await;
+    let outcome = mirror_push_dlq_envelope(
+        &js,
+        &prefix(),
+        "a2a.v1.push.dlq.person.alice.task-3",
+        None,
+        payload,
+        &dedup,
+    )
+    .await;
     assert_eq!(outcome, MirrorDispatchOutcome::Mirrored);
     assert_eq!(js.publishes.lock().unwrap().len(), 1);
 }
@@ -272,7 +391,7 @@ async fn mirror_skips_payload_without_idempotency_key() {
     let outcome = mirror_push_dlq_envelope(
         &js,
         &prefix(),
-        "a2a.v1.push.dlq.alice.task-1",
+        "a2a.v1.push.dlq.person.alice.task-1",
         None,
         br#"{"schema":"a2a.v1.push.dlq/v1"}"#,
         &dedup,
@@ -291,7 +410,7 @@ async fn mirror_carries_content_type_header_through() {
     let outcome = mirror_push_dlq_envelope(
         &js,
         &prefix(),
-        "a2a.v1.push.dlq.alice.task-1",
+        "a2a.v1.push.dlq.person.alice.task-1",
         Some(&source_headers),
         payload,
         &dedup,
@@ -310,7 +429,15 @@ async fn mirror_retries_failed_ack_without_changing_message_identity() {
     let dedup = PushDlqDedupGate::with_capacity(32);
     let payload = br#"{"idempotency_key":"task-ack:failed"}"#;
     assert_eq!(
-        mirror_push_dlq_envelope(&js, &prefix(), "a2a.v1.push.dlq.alice.task-ack", None, payload, &dedup).await,
+        mirror_push_dlq_envelope(
+            &js,
+            &prefix(),
+            "a2a.v1.push.dlq.person.alice.task-ack",
+            None,
+            payload,
+            &dedup
+        )
+        .await,
         MirrorDispatchOutcome::Mirrored
     );
     let publishes = js.publishes.lock().unwrap();
@@ -320,7 +447,7 @@ async fn mirror_retries_failed_ack_without_changing_message_identity() {
     diagnostics.assert_event(
         "push DLQ mirror JetStream ack failed",
         &[
-            ("mirror_subject", "a2a.v1.push.dlq.mirror.alice.task-ack"),
+            ("mirror_subject", "a2a.v1.push.dlq.mirror.person.alice.task-ack"),
             ("attempt", "1"),
         ],
     );
@@ -333,11 +460,27 @@ async fn mirror_releases_key_after_ack_failures_so_redelivery_can_recover() {
     let dedup = PushDlqDedupGate::with_capacity(32);
     let payload = br#"{"idempotency_key":"task-ack:failed"}"#;
     assert_eq!(
-        mirror_push_dlq_envelope(&js, &prefix(), "a2a.v1.push.dlq.alice.task-ack", None, payload, &dedup).await,
+        mirror_push_dlq_envelope(
+            &js,
+            &prefix(),
+            "a2a.v1.push.dlq.person.alice.task-ack",
+            None,
+            payload,
+            &dedup
+        )
+        .await,
         MirrorDispatchOutcome::PublishFailed
     );
     assert_eq!(
-        mirror_push_dlq_envelope(&js, &prefix(), "a2a.v1.push.dlq.alice.task-ack", None, payload, &dedup).await,
+        mirror_push_dlq_envelope(
+            &js,
+            &prefix(),
+            "a2a.v1.push.dlq.person.alice.task-ack",
+            None,
+            payload,
+            &dedup
+        )
+        .await,
         MirrorDispatchOutcome::Mirrored
     );
 }
@@ -352,7 +495,15 @@ async fn mirror_skips_invalid_envelopes_and_unrelated_subjects_without_publishin
         br#"{"idempotency_key":42}"#,
     ] {
         assert_eq!(
-            mirror_push_dlq_envelope(&js, &prefix(), "a2a.v1.push.dlq.alice.task-1", None, payload, &dedup).await,
+            mirror_push_dlq_envelope(
+                &js,
+                &prefix(),
+                "a2a.v1.push.dlq.person.alice.task-1",
+                None,
+                payload,
+                &dedup
+            )
+            .await,
             MirrorDispatchOutcome::Skipped
         );
     }

@@ -15,6 +15,7 @@ pub(crate) enum Diagnostics {
     Tracing {
         events: CapturedEvents,
         _guard: tracing::subscriber::DefaultGuard,
+        _interest_peer: tracing::Dispatch,
     },
 }
 
@@ -23,9 +24,16 @@ impl Diagnostics {
         match CapturedLogs::isolated() {
             Some(logs) => Self::Facade(logs),
             None => {
+                // While only one dispatcher is registered, tracing caches a callsite's interest from the
+                // first thread to reach it, so a concurrent test without a subscriber could mute this capture.
+                let interest_peer = tracing::Dispatch::new(tracing::subscriber::NoSubscriber::new());
                 let events = CapturedEvents::new();
                 let guard = events.install(LevelFilter::DEBUG);
-                Self::Tracing { events, _guard: guard }
+                Self::Tracing {
+                    events,
+                    _guard: guard,
+                    _interest_peer: interest_peer,
+                }
             }
         }
     }

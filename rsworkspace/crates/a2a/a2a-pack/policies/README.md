@@ -16,12 +16,13 @@ SpiceDB Tier-1 (`A2A_GATEWAY_TIER1_SPICEDB_ENABLED`) remains the authz floor; de
 | File | Denies | Notes |
 |------|--------|-------|
 | `per-method-allowlist.tier1.toml` | Any `agent_method` outside the common-caller allowlist (`message/send`, `message/stream`, `tasks/get`, `tasks/list`, `tasks/pushNotificationConfig/set`) | Catch-all `agent_method *` deny at priority 100 |
-| `per-agent-allowlist.tier1.toml` | `caller_subject` not in `user/alice`, `user/bob`, `service/internal-*` | Maps gateway caller slug → `user/{slug}` SpiceDB subject |
+| `per-agent-allowlist.tier1.toml` | `caller_subject` not in `user/alice`, `user/bob`, `service/internal-*` | `caller_subject` is the ingress subject's principal: `person.{id}` → `user/{id}`, `agent.{id}` → `agent/{id}`, `service.{id}` → `service/{id}` |
 | `time-of-day.tier1.toml` | Requests outside Mon–Fri 09:00–17:00 UTC | `time_of_day` match with pattern `Mon-Fri\|09:00-17:00\|UTC` and `negate = true` |
 
 ## Schema
 
 - Match kinds: `agent_method`, `agent_id`, `caller_subject`, `nats_subject_pattern`, `time_of_day`
+- `nats_subject_pattern` matches the ingress subject `{prefix}.v1.gateway.{agent_id}.{kind}.{id}.{method…}` with NATS wildcards, so `a2a.v1.gateway.*.*.*.message.send` covers `message/send` from every caller
 - `time_of_day` pattern: `{weekdays}|{HH:MM-HH:MM}|{UTC|Z|±HH:MM}` (weekdays: `Mon-Fri`, `Mon,Wed`, or `*`)
 - Effects: `allow`, `deny`
 - Deny returns JSON-RPC `-32801` on ingress
