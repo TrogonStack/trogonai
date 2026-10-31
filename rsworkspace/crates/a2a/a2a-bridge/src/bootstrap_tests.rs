@@ -69,12 +69,65 @@ impl Write for LogCapture {
 }
 
 fn rpc_request() -> Result<Request<Body>, TestError> {
+    rpc_request_with(r#"{"jsonrpc":"2.0","id":"bootstrap-request","method":"message/send","params":{}}"#)
+}
+
+fn rpc_request_with(body: &str) -> Result<Request<Body>, TestError> {
     Ok(Request::post("/")
         .header("authorization", "Bearer caller-fixture")
         .header("x-a2a-agent-id", "planner")
-        .body(Body::from(
-            r#"{"jsonrpc":"2.0","id":"bootstrap-request","method":"message/send","params":{}}"#,
-        ))?)
+        .body(Body::from(body.to_owned()))?)
+}
+
+struct StallingProxy {
+    address: String,
+    accepting: tokio::task::JoinHandle<()>,
+}
+
+impl StallingProxy {
+    async fn start(upstream: &str, relayed_connections: usize) -> Result<Self, TestError> {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?.to_string();
+        let upstream = upstream.to_owned();
+        let accepting = tokio::spawn(async move {
+            let mut stalled = Vec::new();
+            let mut relayed = 0;
+            while let Ok((mut inbound, _)) = listener.accept().await {
+                if relayed < relayed_connections {
+                    relayed += 1;
+                    let upstream = upstream.clone();
+                    tokio::spawn(async move {
+                        if let Ok(mut outbound) = tokio::net::TcpStream::connect(upstream).await {
+                            let _ = tokio::io::copy_bidirectional(&mut inbound, &mut outbound).await;
+                        }
+                    });
+                } else {
+                    stalled.push(inbound);
+                }
+            }
+        });
+        Ok(Self { address, accepting })
+    }
+}
+
+impl Drop for StallingProxy {
+    fn drop(&mut self) {
+        self.accepting.abort();
+    }
+}
+
+async fn answer_next_request(
+    client: &async_nats::Client,
+    subscription: &mut async_nats::Subscriber,
+    reply: Bytes,
+) -> Result<(), TestError> {
+    let request = tokio::time::timeout(Duration::from_secs(5), subscription.next())
+        .await?
+        .ok_or(TestError::MissingMessage)?;
+    client
+        .publish(request.reply.ok_or(TestError::MissingMessage)?, reply)
+        .await?;
+    Ok(())
 }
 
 #[test]
@@ -309,5 +362,81 @@ async fn nats_bootstrap_wires_mint_subject_tenant_and_gateway_namespace() -> Res
     assert!(output.contains("connect_timeout_secs=2"));
     assert!(output.contains("mint_wire_secs=10"));
     assert!(output.contains("gateway_rpc_secs=2"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn nats_bootstrap_bounds_caller_connections_by_the_connect_timeout_not_the_gateway_rpc_timeout()
+-> Result<(), TestError> {
+    // The first thread to reach a log callsite fixes its interest for the whole process, so a thread
+    // without a subscriber would silence it for the tests that capture those logs.
+    let _logs = tracing::subscriber::set_default(
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::INFO)
+            .with_writer(std::io::sink)
+            .finish(),
+    );
+    let server = CoreTestServer::start().await;
+    let client = trogon_nats::connect(
+        &NatsConfig::from_url(server.address()).with_tls(NatsTls::Disabled),
+        Duration::from_secs(5),
+    )
+    .await?;
+    let jwt = StubAuthCalloutMint::fixture()?
+        .mint(&CallerHttpsAuth::new("Bearer fixture"))
+        .await?;
+    let mint_reply = Bytes::from(serde_json::to_vec(&BridgeMintResponse {
+        user_jwt: jwt.as_str().to_owned(),
+    })?);
+    let gateway_reply = Bytes::from_static(br#"{"jsonrpc":"2.0","id":"bootstrap-request","result":{}}"#);
+    let mut mint = client.subscribe("a2a.bridge.auth.callout.request").await?;
+    let mut gateway = client.subscribe("a2a.v1.gateway.planner.>").await?;
+    client.flush().await?;
+
+    for (body, relayed_connections, failure) in [
+        (
+            r#"{"jsonrpc":"2.0","id":"bootstrap-request","method":"message/send","params":{}}"#,
+            1,
+            "NATS gateway publish failed",
+        ),
+        (
+            r#"{"jsonrpc":"2.0","id":"bootstrap-request","method":"tasks/resubscribe","params":{"id":"task-1"}}"#,
+            2,
+            "JetStream SSE consumer attach failed",
+        ),
+    ] {
+        let proxy = StallingProxy::start(server.address(), relayed_connections).await?;
+        let env = InMemoryEnv::new();
+        env.set("NATS_URL", &proxy.address);
+        env.set("NATS_TLS_DISABLED", "true");
+        env.set("BRIDGE_CONNECT_TIMEOUT_SECS", "2");
+        env.set("BRIDGE_AUTH_MINT_TIMEOUT_SECS", "10");
+        env.set("BRIDGE_GATEWAY_RPC_TIMEOUT_SECS", "3600");
+        let state = bootstrap_nats_transport(&env, &NatsConfig::from_env(&env), resolve_a2a_prefix(&env)?).await?;
+
+        let handle_request = tokio::time::timeout(
+            Duration::from_secs(30),
+            gateway_router(state).oneshot(rpc_request_with(body)?),
+        );
+        let serve_wire = async {
+            answer_next_request(&client, &mut mint, mint_reply.clone()).await?;
+            if relayed_connections > 1 {
+                answer_next_request(&client, &mut gateway, gateway_reply.clone()).await?;
+            }
+            Ok::<(), TestError>(())
+        };
+        let (response, wire) = tokio::join!(handle_request, serve_wire);
+        wire?;
+        let response = response??;
+
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        let payload: serde_json::Value = serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await?)?;
+        assert!(
+            payload["error"]
+                .as_str()
+                .is_some_and(|message| message.starts_with(failure)),
+            "{payload}"
+        );
+    }
     Ok(())
 }
