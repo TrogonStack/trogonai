@@ -107,6 +107,12 @@ impl CoreTestServer {
         Self(TestServer::start(image(&NatsServerCmd::default())).await)
     }
 
+    /// Starts the pinned NATS image so it turns away every client that does not
+    /// present `token`.
+    pub async fn start_requiring_token(token: &str) -> Self {
+        Self(TestServer::start(image(["--auth", token])).await)
+    }
+
     /// The `host:port` this server is reachable on, for tests that connect
     /// through their own configuration rather than a raw client. The server
     /// does not speak TLS, so that configuration has to disable it.

@@ -19,13 +19,21 @@ Authentication resolves in this order: `NATS_CREDS`, `NATS_NKEY`, `NATS_USER` pl
 
 `NatsSettings` holds the raw values and is the single place the precedence is decided, so environment variables, CLI flags and config files resolve identically.
 
+## Connecting
+
+`connect` returns before any server answers and keeps dialing in the background, then reconnects whenever the connection drops, so a service can start before NATS does. The first dial goes out at once and later attempts back off up to 30 seconds.
+
+`connect_once` makes a single pass over the servers and fails once that pass does, for a connection that serves one request. It takes the authentication to use in place of the configured one, so each request can present its caller's token; give that token as `CredentialValue::Literal` so it is never read as a `file://` or `env://` reference. Both apply the same TLS settings.
+
+Both fail with `ConnectError::NoServers` when `NATS_URL` names no server, such as `,`.
+
 ## TLS
 
 Every connection uses TLS and verifies the server against the system roots. Nothing turns TLS on; configuration can only turn it off.
 
 - `NATS_CA`: a private CA certificate, a path or `file://path`. It replaces the system roots rather than adding to them, so the server has to present a certificate issued by this CA.
 - `NATS_CERT` and `NATS_KEY`: a client certificate and its key for mutual TLS, each a path or `file://path`. Setting only one of them fails the connection.
-- `NATS_TLS_DISABLED`: disables TLS when set to `true`, `1` or `yes`, in any letter case. This is only for tests and local debugging, and `connect` logs a warning whenever it is used. An empty value counts as unset. Any other value fails the connection, and so does combining it with `NATS_CA`, `NATS_CERT` or `NATS_KEY`, both with `ConnectError::InvalidSetting`.
+- `NATS_TLS_DISABLED`: disables TLS when set to `true`, `1` or `yes`, in any letter case. This is only for tests and local debugging, and `connect` and `connect_once` log a warning whenever it is used. An empty value counts as unset. Any other value fails the connection, and so does combining it with `NATS_CA`, `NATS_CERT` or `NATS_KEY`, both with `ConnectError::InvalidSetting`.
 
 Only the environment can set `NATS_TLS_DISABLED`. `NatsSettings` has no field for it, so no CLI flag or config file can disable TLS.
 

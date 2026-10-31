@@ -54,8 +54,8 @@ impl NatsAuth {
 }
 
 /// `tls` keeps a misconfiguration as it was read, so
-/// [`connect`](crate::connect()) reports it instead of connecting some other
-/// way.
+/// [`connect`](crate::connect()) and [`connect_once`](crate::connect_once())
+/// report it instead of connecting some other way.
 #[derive(Debug, Clone)]
 pub struct NatsConfig {
     pub servers: Vec<String>,
