@@ -8,9 +8,11 @@ use crate::constants::{TENANT_POSITION_ABSENT, TENANT_POSITION_WILDCARD};
 /// The tenant position a host subscribes with.
 ///
 /// A host inside a tenant's own account has no tenant token to read, so it
-/// subscribes without one. A host in the platform account answers for every
-/// tenant that reaches it, so it subscribes with a wildcard at the leading
-/// token.
+/// subscribes without one. A host in the platform account would answer for
+/// every tenant that reaches it, so it would subscribe with a wildcard at the
+/// leading token. Until decider state is scoped by tenant a host serves one
+/// tenant account, and [`DeciderHost::start`](crate::DeciderHost::start)
+/// refuses [`TenantPosition::Wildcard`].
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum TenantPosition {
     /// The subject starts at the prefix.

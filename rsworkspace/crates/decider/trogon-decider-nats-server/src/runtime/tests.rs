@@ -315,6 +315,28 @@ fn the_snapshot_bucket_keeps_only_the_revision_anyone_reads() {
     );
 }
 
+#[test]
+fn a_host_asked_to_serve_several_tenants_names_the_state_they_would_share() {
+    let mut config = config();
+    config.endpoint = CommandEndpoint::new(
+        SubjectPrefix::new(DEFAULT_SUBJECT_PREFIX).expect("the default prefix is a token"),
+        TenantPosition::Wildcard,
+    )
+    .expect("the default prefix yields a conformant subject");
+    config.events_stream = "SHARED_EVENTS".to_owned();
+    config.snapshot_bucket = "SHARED_SNAPSHOTS".to_owned();
+
+    let Err(StartupError::StateNotScopedByTenant {
+        events_stream,
+        snapshot_bucket,
+    }) = ensure_one_tenant_account(&config)
+    else {
+        panic!("a command principal carries no tenant, so nothing would tell one tenant's streams from another's");
+    };
+    assert_eq!(events_stream, "SHARED_EVENTS");
+    assert_eq!(snapshot_bucket, "SHARED_SNAPSHOTS");
+}
+
 #[tokio::test]
 async fn a_module_the_store_cannot_produce_names_the_store_that_was_searched() {
     let Err(error) = load_modules(
