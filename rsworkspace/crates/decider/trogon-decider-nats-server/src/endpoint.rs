@@ -9,10 +9,11 @@
 //! [ADR#0082](../../../../../docs/adr/0082-bus-principal-from-subject-and-edge-proof-of-possession.md)
 //! puts who is acting into the subject as well: a caller's prefix ends in its
 //! principal's `{kind}.{id}` tokens, so the endpoint is one subscription with
-//! wildcards at those positions, and at the tenant position when the host
-//! serves several tenants. The principal is read back from the subject the
-//! server delivered, which the caller's allow list already constrained, and
-//! never from anything the caller wrote into the message.
+//! wildcards at those positions. `TenantPosition` says whether a tenant token
+//! leads the subject, and the host refuses to start with a wildcard there until
+//! decider state is scoped by tenant. The principal is read back from the
+//! subject the server delivered, which the caller's allow list already
+//! constrained, and never from anything the caller wrote into the message.
 
 use trogon_decider_runtime::CommandPrincipal;
 use trogon_identity_types::{SubjectPrincipal, SubjectPrincipalError};
