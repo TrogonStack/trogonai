@@ -52,7 +52,7 @@ type SourceResult = (&'static str, anyhow::Result<()>);
 #[tokio::main]
 #[cfg_attr(coverage_nightly, coverage(off))]
 async fn main() -> anyhow::Result<()> {
-    trogon_std::tls::install_default_crypto_provider()?;
+    trogon_std::tls::install_default_crypto_provider();
 
     let cli = CliArgs::<cli::Cli>::new().parse_args();
     let resolved = config::load_with_overrides(cli.runtime.config.as_deref(), &cli.runtime.nats)?;
