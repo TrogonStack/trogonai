@@ -50,7 +50,7 @@ export function KeysScreen() {
       {query.data ? (
         <>
           <KeysStats stats={query.data.stats} />
-          <PurposeCustodyPanel purposes={query.data.purposes} />
+          <PurposeCustodyPanel data={query.data} />
           <BackendsTable backends={query.data.backends} />
           <CustodyExplainer />
         </>

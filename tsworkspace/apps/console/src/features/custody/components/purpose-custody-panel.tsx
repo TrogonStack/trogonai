@@ -1,14 +1,18 @@
+import { Link } from '@tanstack/react-router';
 import { ShieldAlertIcon } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 
 import { TableEmptyState } from '@/components/data-table';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
 import { denialReasonMessages } from '../domain/faults';
-import type { PurposeCustodyView } from '../domain/view';
+import type { CustodyView, PurposeCustodyView } from '../domain/view';
+import { ChangeCustodyDialog } from './change-custody-dialog';
 import { CustodyTierBadge } from './custody-tier-badge';
-import { KeyStateBadge, PlatformManagedBadge } from './key-badges';
+import { KeyStateBadge, MigrationStatusBadge, PlatformManagedBadge } from './key-badges';
 import { KeyRefLink } from './key-ref-link';
+import { MigrationProgressBar } from './migration-progress';
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -19,7 +23,8 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function PurposeCard({ purpose }: { purpose: PurposeCustodyView }) {
+function PurposeCard({ data, purpose }: { data: CustodyView; purpose: PurposeCustodyView }) {
+  const [changing, setChanging] = useState(false);
   const key = purpose.key;
   return (
     <li
@@ -60,15 +65,39 @@ function PurposeCard({ purpose }: { purpose: PurposeCustodyView }) {
         </p>
       ) : null}
       {purpose.migration ? (
-        <p className="text-muted-foreground text-xs">
-          A migration is running: {purpose.migration.percent}% of payloads have been rewrapped.
-        </p>
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center gap-2">
+            <MigrationStatusBadge status={purpose.migration.migration.status} />
+            <Link
+              to="/keys/migrations/$migrationId"
+              params={{ migrationId: purpose.migration.migration.id }}
+              className="text-primary-ink font-mono text-xs underline"
+            >
+              {purpose.migration.migration.id}
+            </Link>
+          </div>
+          <MigrationProgressBar view={purpose.migration} compact />
+        </div>
       ) : null}
+      <div className="flex flex-col items-start gap-1.5">
+        <Button
+          type="button"
+          variant="outline"
+          disabled={purpose.migration !== undefined}
+          onClick={() => setChanging(true)}
+        >
+          Change custody
+        </Button>
+        {purpose.migration ? (
+          <p className="text-muted-foreground text-xs">Wait for the running migration to finish first.</p>
+        ) : null}
+      </div>
+      <ChangeCustodyDialog data={data} purpose={purpose.purpose.id} open={changing} onOpenChange={setChanging} />
     </li>
   );
 }
 
-export function PurposeCustodyPanel({ purposes }: { purposes: readonly PurposeCustodyView[] }) {
+export function PurposeCustodyPanel({ data }: { data: CustodyView }) {
   return (
     <Card>
       <CardHeader>
@@ -80,15 +109,15 @@ export function PurposeCustodyPanel({ purposes }: { purposes: readonly PurposeCu
         </div>
       </CardHeader>
       <CardContent>
-        {purposes.length === 0 ? (
+        {data.purposes.length === 0 ? (
           <TableEmptyState
             title="No key purposes yet"
             message="Purposes appear here once a platform service starts encrypting your data with a key."
           />
         ) : (
           <ul className="grid gap-4 lg:grid-cols-2">
-            {purposes.map((purpose) => (
-              <PurposeCard key={purpose.purpose.id} purpose={purpose} />
+            {data.purposes.map((purpose) => (
+              <PurposeCard key={purpose.purpose.id} data={data} purpose={purpose} />
             ))}
           </ul>
         )}

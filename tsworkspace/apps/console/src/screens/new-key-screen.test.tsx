@@ -31,6 +31,7 @@ describe('bind key wizard', () => {
 
     expect(await screen.findByRole('heading', { name: 'Key bound' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'View key' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Migrations' })).toHaveAttribute('href', '/keys/migrations');
   });
 
   it('rejects an alias before anything is prepared', async () => {
