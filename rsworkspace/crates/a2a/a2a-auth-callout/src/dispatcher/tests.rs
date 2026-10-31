@@ -8,8 +8,7 @@ use crate::jwt::{
     AudienceAccount, CallerId, ExternalSubject, SpiceDbPrincipal, UserJwtClaims, decode_nats_user_payload,
 };
 use crate::permissions::IssuedPermissions;
-use crate::wire::test_encode::signed_auth_request;
-use crate::wire::{NkeyPublic, ServerAuthRequestEnvelope};
+use crate::wire::test_encode::FixtureServer;
 use nats_jwt_rs::Claims;
 use nats_jwt_rs::authorization::AuthRequest;
 use nkeys::KeyPair;
@@ -18,13 +17,11 @@ use trogon_identity_types::PrincipalKind;
 
 const FIXTURE_CLIENT_CERT: &str = "-----BEGIN CERT-----\n-----END CERT-----";
 
-fn encode_fixture_request(server: &KeyPair, patch: impl FnMut(&mut Claims<AuthRequest>)) -> ServerAuthRequestClaims {
-    let user = KeyPair::new_user();
-    let token = signed_auth_request(server, &user, patch);
-    let server_pub = NkeyPublic::parse(server.public_key()).unwrap();
-    ServerAuthRequestEnvelope::from_bytes(token.into_bytes())
-        .decode(&server_pub, None, None)
-        .unwrap()
+fn encode_fixture_request(
+    server: &FixtureServer,
+    patch: impl FnMut(&mut Claims<AuthRequest>),
+) -> ServerAuthRequestClaims {
+    server.request(&KeyPair::new_user(), patch)
 }
 
 #[derive(Clone)]
@@ -41,7 +38,11 @@ impl Tenant {
         Self { account, signing_key }
     }
 
-    fn request(&self, server: &KeyPair, mut patch: impl FnMut(&mut Claims<AuthRequest>)) -> ServerAuthRequestClaims {
+    fn request(
+        &self,
+        server: &FixtureServer,
+        mut patch: impl FnMut(&mut Claims<AuthRequest>),
+    ) -> ServerAuthRequestClaims {
         let account = self.account.as_str().to_owned();
         encode_fixture_request(server, |claims| {
             claims.nats.connect_opts.user = Some(account.clone());
@@ -75,7 +76,7 @@ impl AuthDispatcher for AlwaysDenyDispatcher {
 
 #[tokio::test]
 async fn always_deny_returns_err() {
-    let server = KeyPair::new_account();
+    let server = FixtureServer::generate();
     let req = encode_fixture_request(&server, |_| {});
     assert!(AlwaysDenyDispatcher.dispatch(req).await.is_err());
 }
@@ -159,7 +160,7 @@ fn api_key_verifier_for(audience: AudienceAccount) -> Option<Arc<dyn ApiKeyVerif
 
 #[tokio::test]
 async fn dispatch_oidc_happy_path_mints_jwt() {
-    let server = KeyPair::new_account();
+    let server = FixtureServer::generate();
     let tenant = Tenant::generate();
     let d = dispatcher_with(oidc_stub(), None, None, &[&tenant]);
     let req = tenant.request(&server, |_| {});
@@ -169,21 +170,17 @@ async fn dispatch_oidc_happy_path_mints_jwt() {
 
 #[tokio::test]
 async fn dispatch_mints_a_user_the_tenant_signing_key_issues_on_behalf_of_the_tenant() {
-    let server = KeyPair::new_account();
+    let server = FixtureServer::generate();
     let tenant = Tenant::generate();
     let other = Tenant::generate();
     let d = dispatcher_with(oidc_stub(), None, None, &[&other, &tenant]);
     let user = KeyPair::new_user();
     let user_public = user.public_key();
     let account = tenant.account.as_str().to_owned();
-    let token = signed_auth_request(&server, &user, |claims| {
+    let req = server.request(&user, |claims| {
         claims.nats.connect_opts.user = Some(account.clone());
         claims.nats.client_info.user = account.clone();
     });
-    let server_pub = NkeyPublic::parse(server.public_key()).unwrap();
-    let req = ServerAuthRequestEnvelope::from_bytes(token.into_bytes())
-        .decode(&server_pub, None, None)
-        .unwrap();
 
     let minted = d.dispatch(req).await.unwrap();
 
@@ -201,7 +198,7 @@ async fn dispatch_mints_a_user_the_tenant_signing_key_issues_on_behalf_of_the_te
 
 #[tokio::test]
 async fn dispatch_rejects_a_tenant_account_without_a_signing_key() {
-    let server = KeyPair::new_account();
+    let server = FixtureServer::generate();
     let tenant = Tenant::generate();
     let unlisted = Tenant::generate();
     let d = dispatcher_with(oidc_stub(), None, None, &[&tenant]);
@@ -216,7 +213,7 @@ async fn dispatch_rejects_a_tenant_account_without_a_signing_key() {
 
 #[tokio::test]
 async fn dispatch_rejects_unknown_account() {
-    let server = KeyPair::new_account();
+    let server = FixtureServer::generate();
     let tenant = Tenant::generate();
     let d = dispatcher_with(oidc_stub(), None, None, &[&tenant]);
     let req = encode_fixture_request(&server, |c| {
@@ -233,7 +230,7 @@ async fn dispatch_rejects_unknown_account() {
 
 #[tokio::test]
 async fn dispatch_rejects_request_without_account() {
-    let server = KeyPair::new_account();
+    let server = FixtureServer::generate();
     let tenant = Tenant::generate();
     let d = dispatcher_with(oidc_stub(), None, None, &[&tenant]);
     let req = encode_fixture_request(&server, |c| {
@@ -245,7 +242,7 @@ async fn dispatch_rejects_request_without_account() {
 
 #[tokio::test]
 async fn dispatch_infers_oidc_when_user_jwt_present() {
-    let server = KeyPair::new_account();
+    let server = FixtureServer::generate();
     let tenant = Tenant::generate();
     let d = dispatcher_with(oidc_stub(), None, None, &[&tenant]);
     let req = tenant.request(&server, |_| {});
@@ -262,7 +259,7 @@ async fn dispatch_mtls_when_cert_present() {
 
 #[tokio::test]
 async fn dispatch_api_key_happy_path() {
-    let server = KeyPair::new_account();
+    let server = FixtureServer::generate();
     let tenant = Tenant::generate();
     let verifier = api_key_verifier_for(AudienceAccount::new(tenant.account.as_str()));
     let d = dispatcher_with(None, None, verifier, &[&tenant]);
@@ -275,7 +272,7 @@ async fn dispatch_api_key_happy_path() {
 
 #[tokio::test]
 async fn dispatch_api_key_rejects_audience_mismatch() {
-    let server = KeyPair::new_account();
+    let server = FixtureServer::generate();
     let tenant = Tenant::generate();
     let registered = Tenant::generate();
     let verifier = api_key_verifier_for(AudienceAccount::new(registered.account.as_str()));
@@ -289,7 +286,7 @@ async fn dispatch_api_key_rejects_audience_mismatch() {
 
 #[tokio::test]
 async fn dispatch_rejects_request_without_credential_material() {
-    let server = KeyPair::new_account();
+    let server = FixtureServer::generate();
     let tenant = Tenant::generate();
     let d = dispatcher_with(oidc_stub(), None, None, &[&tenant]);
     let req = tenant.request(&server, |c| {
@@ -307,7 +304,7 @@ async fn dispatch_rejects_request_without_credential_material() {
 
 #[tokio::test]
 async fn dispatch_oidc_verifier_unavailable() {
-    let server = KeyPair::new_account();
+    let server = FixtureServer::generate();
     let tenant = Tenant::generate();
     let d = dispatcher_with(None, None, None, &[&tenant]);
     let req = tenant.request(&server, |_| {});
@@ -331,7 +328,7 @@ async fn dispatch_mtls_verifier_unavailable() {
 
 #[tokio::test]
 async fn dispatch_api_key_verifier_unavailable() {
-    let server = KeyPair::new_account();
+    let server = FixtureServer::generate();
     let tenant = Tenant::generate();
     let d = dispatcher_with(None, None, None, &[&tenant]);
     let req = tenant.request(&server, |c| {
@@ -347,7 +344,7 @@ async fn dispatch_api_key_verifier_unavailable() {
 
 #[tokio::test]
 async fn dispatch_oidc_via_opaque_pass() {
-    let server = KeyPair::new_account();
+    let server = FixtureServer::generate();
     let tenant = Tenant::generate();
     let d = dispatcher_with(oidc_stub(), None, None, &[&tenant]);
     let req = tenant.request(&server, |c| {
