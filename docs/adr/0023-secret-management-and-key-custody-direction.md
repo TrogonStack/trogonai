@@ -258,8 +258,9 @@ callers.
   operation, not as ambient state.
 - **Dual audit, built once.** The service records the business context
   (caller, tenant, vault, ref, purpose, outcome) with a correlation ID
-  threaded into the OpenBao request, so the provider's own audit log joins
-  back to who asked and why. Neither log substitutes for the other.
+  threaded into the OpenBao request, so the provider's own audit log can join
+  back to who asked and why once adoption proves the identifier reaches that
+  log. Neither log substitutes for the other.
 - **Key state is explicit** (active, decrypt-only, disabled, pending
   destruction, destroyed), destruction is scheduled and reviewable rather
   than an immediate API operation, and a compromised KEK means re-encryption
@@ -306,8 +307,8 @@ callers.
   cross-tenant and cross-purpose access, rotation with old ciphertext still
   readable, fail-closed startup when the service cannot authenticate to
   OpenBao, a rotation event observed to evict every replica's cache, correct
-  behavior when audit sinks fail, and acceptable latency on the resolve
-  path.
+  behavior when audit sinks fail, the correlation ID observed in OpenBao's
+  own audit log, and acceptable latency on the resolve path.
 
 ## References
 

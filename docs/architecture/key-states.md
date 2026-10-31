@@ -31,7 +31,7 @@ the platform behind the secrets service.
 - **Destroyed**: the key material is gone. The key performs neither
   `wrap_dek` nor `unwrap_dek`, permanently.
 
-Two rules govern transitions into and around these states:
+These rules govern transitions into and around these states:
 
 - Destruction is scheduled and reviewable; it is never an immediate API
   operation ([ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) Decision 6). [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) fixes the existence of a pending

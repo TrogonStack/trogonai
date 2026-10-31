@@ -183,7 +183,9 @@ security boundary. A credential, trust root, authorization principal, or
 OpenBao endpoint update may create a new registration revision under the same
 ID only when validation proves continuity with the same boundary and its bound
 keys. An account, project, or unproven endpoint change requires a new
-`KeyBackendId`. The provider locator associated with a `KeyRef` never changes;
+`KeyBackendId`. An OpenBao namespace is part of that security boundary: a
+registration names at most one namespace, the root namespace when it names
+none, and changing it requires a new `KeyBackendId`. The provider locator associated with a `KeyRef` never changes;
 selecting another native key always requires a new `KeyRef` and migration,
 whether or not its backend ID is shared. Lifecycle, admission, and health fields
 may change without changing identity.
@@ -196,8 +198,10 @@ in for another:
   reason. A new revision takes effect only after it validates, and the current
   revision stays in force until then.
 - Admission is controlled by the registration's owner and is authoritative:
-  `Enabled` or `Paused`. Only the owner may change it. Decision 6 defines what a
-  pause does and does not mean.
+  `Enabled` or `Paused`. Only the owner may change it. A new registration starts
+  `Enabled`: lifecycle alone keeps it out of use until it validates, so first
+  activation needs no separate resume. Decision 6 defines what a pause does and
+  does not mean.
 - Observed connection health is advisory and is never an admission input. Its
   status is `Unknown`, `Connected`, or `Failed`, and a failure carries a typed
   reason: `AuthenticationFailed`, `AccessDenied`, `TlsFailure`, `Unreachable`,

@@ -365,7 +365,7 @@ deadlock.
   platform may move its own registration to a cloud KMS without a tier change.
 - Deferral stays cheap. Because tiers are resolved server-side behind opaque
   references, a tenant can start on the managed key and move to a dedicated
-  key or a customer managed key later through
+  key or a customer managed key later, and back again, through
   [ADR#0030](./0030-customer-controlled-key-backend-routing.md)'s explicit
   rewrap migration of that tenant's envelopes, without data-plane callers
   changing.

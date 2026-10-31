@@ -333,7 +333,7 @@ Decision 7):
 | `UnsupportedCapability` | The bound key lacks the requested typed capability | No | Contract rejection |
 | `InternalFailure` | Unmapped provider error, malformed response, or adapter invariant violation | No | Adapter fault |
 
-Standing rules that hold across all eight categories:
+Standing rules that hold across every category:
 
 - The service fails closed. No wrap or unwrap succeeds without participation
   by the backend bound to the `KeyRef`, and a failure never produces a
