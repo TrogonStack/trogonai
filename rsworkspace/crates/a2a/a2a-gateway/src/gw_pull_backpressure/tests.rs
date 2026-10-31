@@ -252,10 +252,10 @@ fn caller_inflight_gate_recovers_from_poisoned_lock() {
 #[test]
 fn pull_cycle_error_display_carries_subject() {
     let err = PullCycleError::Ack {
-        subject: "a2a.v1.tasks.t.events.r".to_string(),
+        subject: "a2a.v1.tasks.t.person.alice.events".to_string(),
         source: "boom".into(),
     };
-    assert!(format!("{err}").contains("a2a.v1.tasks.t.events.r"));
+    assert!(format!("{err}").contains("a2a.v1.tasks.t.person.alice.events"));
 }
 
 #[test]
