@@ -414,10 +414,7 @@ struct Tier1CallerPrincipal {
 
 /// Build a principal payload from a caller slug + session account.
 /// Used by the gateway runtime to materialise a principal from the caller
-/// identity dispatch resolved for this request -- the JWT-header identity by
-/// default, or the verified `aa-auth+jwt` principal when
-/// `gateway_caller_identity_after_aauth` (in `runtime::aauth_env`) determined
-/// one supersedes it.
+/// identity dispatch resolved for this request.
 pub fn tier1_principal_from_caller(caller_slug: &str, account: &str) -> SpiceDbPrincipal {
     let principal = Tier1CallerPrincipal {
         spicedb_subject: format!("user/{caller_slug}"),

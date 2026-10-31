@@ -14,7 +14,6 @@ use tokio_util::sync::CancellationToken;
 use trogon_nats::test_support::{CoreTestServer, JetStreamTestServer};
 use trogon_std::env::InMemoryEnv;
 
-use crate::aauth::GatewayAAuthIngress;
 use crate::config::{Args, Config, config_from_args};
 use crate::constants::{ENV_GATEWAY_AUDIT_PUBLISH, ENV_GATEWAY_TRUST_CALLER_HEADERS};
 use crate::gw_ingress_stream::{
@@ -62,18 +61,6 @@ pub enum FixtureError {
     SkillId(#[from] a2a_redaction::SkillIdError),
     #[error("redaction rewrite is invalid: {0}")]
     RedactionRewrite(#[from] crate::policy::tier3_redaction::RedactionRewriteError),
-    #[error("PKCS#8 key encoding failed: {0}")]
-    Pkcs8(#[from] p256::pkcs8::Error),
-    #[error("JWT key decoding failed: {0}")]
-    Jwt(#[from] jsonwebtoken::errors::Error),
-    #[error("resource issuer is invalid: {0}")]
-    ResourceIssuer(#[from] crate::aauth::ResourceIssuerError),
-    #[error("person-server audience is invalid: {0}")]
-    PersonServerAudience(#[from] crate::aauth::PersonServerAudienceError),
-    #[error("challenge key identifier is invalid: {0}")]
-    ChallengeKid(#[from] crate::aauth::ChallengeKidError),
-    #[error("authentication time configuration is invalid: {0}")]
-    NonNegativeSecs(#[from] crate::aauth::NonNegativeSecsError),
     #[error("JetStream stream creation failed: {0}")]
     CreateStream(#[from] async_nats::jetstream::context::CreateStreamError),
     #[error("task identifier is invalid: {0}")]
@@ -96,7 +83,6 @@ pub struct DispatchFixture<S = CoreTestServer> {
     pub owner: Option<Arc<dyn OwnerTupleEmitter>>,
     pub declarative: Arc<dyn Tier1DeclarativeGate>,
     pub policy: GatewayPolicyStack,
-    pub aauth: Option<GatewayAAuthIngress>,
     identity: JwtHeaderCallerIdentitySource,
     pub shutdown: CancellationToken,
     pub streaming_enabled: bool,
@@ -161,7 +147,6 @@ impl<S> DispatchFixture<S> {
             owner: None,
             declarative: Arc::new(NoopTier1DeclarativeGate),
             policy: GatewayPolicyStack::noop(),
-            aauth: None,
             identity,
             shutdown: CancellationToken::new(),
             streaming_enabled: false,
@@ -177,7 +162,6 @@ impl<S> DispatchFixture<S> {
             self.tier1.as_ref(),
             self.owner.as_ref(),
             self.declarative.as_ref(),
-            self.aauth.as_ref(),
             &self.policy,
             &self.identity,
             gateway_caller_identity_policy(&self.env),
