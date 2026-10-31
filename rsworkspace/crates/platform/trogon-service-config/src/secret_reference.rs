@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use clap::builder::{TypedValueParser, ValueParserFactory};
-use clap::error::ErrorKind;
+use clap::error::{ContextKind, ContextValue, ErrorKind};
 use trogon_nats::CredentialValue;
 
 use crate::env_var_name::{EnvVarName, EnvVarNameError};
@@ -45,6 +45,14 @@ impl FromStr for SecretReference {
     }
 }
 
+impl TryFrom<&OsStr> for SecretReference {
+    type Error = SecretReferenceError;
+
+    fn try_from(raw: &OsStr) -> Result<Self, Self::Error> {
+        raw.to_str().ok_or(SecretReferenceError::NotUnicode)?.parse()
+    }
+}
+
 impl fmt::Display for SecretReference {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -68,17 +76,17 @@ impl TypedValueParser for SecretReferenceParser {
         arg: Option<&clap::Arg>,
         value: &OsStr,
     ) -> Result<Self::Value, clap::Error> {
-        value
-            .to_str()
-            .ok_or(SecretReferenceError::NotUnicode)
-            .and_then(str::parse)
-            .map_err(|error| {
-                let message = match arg {
-                    Some(arg) => format!("invalid value for '{arg}': {error}"),
-                    None => error.to_string(),
-                };
-                clap::Error::raw(ErrorKind::ValueValidation, message).format(&mut cmd.clone())
-            })
+        SecretReference::try_from(value).map_err(|error| {
+            let message = match arg {
+                Some(arg) => format!("invalid value for '{arg}': {error}"),
+                None => error.to_string(),
+            };
+            let mut rejection = clap::Error::raw(ErrorKind::ValueValidation, message).format(&mut cmd.clone());
+            if let Some(arg) = arg {
+                rejection.insert(ContextKind::InvalidArg, ContextValue::String(arg.to_string()));
+            }
+            rejection
+        })
     }
 }
 

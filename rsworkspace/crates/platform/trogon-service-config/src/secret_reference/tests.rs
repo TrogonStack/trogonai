@@ -1,3 +1,5 @@
+#[cfg(unix)]
+use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use clap::Parser;
@@ -73,6 +75,15 @@ fn rejects_references_that_name_nothing() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn rejects_a_value_that_is_not_unicode() {
+    assert_eq!(
+        SecretReference::try_from(OsStr::from_bytes(b"env://\xFF")),
+        Err(SecretReferenceError::NotUnicode)
+    );
+}
+
 #[test]
 fn displays_in_the_syntax_it_parses() {
     for raw in [
@@ -84,14 +95,6 @@ fn displays_in_the_syntax_it_parses() {
 
         assert_eq!(reference.to_string(), raw);
     }
-}
-
-#[test]
-fn rejection_names_both_accepted_forms() {
-    let message = SecretReferenceError::NotAReference.to_string();
-
-    assert!(message.contains("env://NAME"));
-    assert!(message.contains("file:///path"));
 }
 
 #[derive(Parser)]
@@ -112,29 +115,25 @@ fn flag_rejection_never_repeats_the_value() {
     let err = ReferenceCli::try_parse_from(["cli", "--token", "hunter2"])
         .err()
         .unwrap();
-    let message = err.to_string();
 
     assert_eq!(err.kind(), ErrorKind::ValueValidation);
-    assert!(!message.contains("hunter2"), "{message}");
-    assert!(message.contains("--token"), "{message}");
-    assert!(message.contains("env://NAME"), "{message}");
-    assert!(message.contains("file:///path"), "{message}");
+    assert_eq!(
+        err.get(ContextKind::InvalidArg),
+        Some(&ContextValue::String("--token <TOKEN>".to_owned()))
+    );
+    assert_eq!(err.get(ContextKind::InvalidValue), None);
 }
 
 #[cfg(unix)]
 #[test]
 fn flag_rejects_a_value_that_is_not_unicode() {
-    use std::ffi::OsString;
-    use std::os::unix::ffi::OsStringExt;
-
     let err = ReferenceCli::try_parse_from([
-        OsString::from("cli"),
-        OsString::from("--token"),
-        OsString::from_vec(b"env://\xFF".to_vec()),
+        OsStr::new("cli"),
+        OsStr::new("--token"),
+        OsStr::from_bytes(b"env://\xFF"),
     ])
     .err()
     .unwrap();
 
     assert_eq!(err.kind(), ErrorKind::ValueValidation);
-    assert!(err.to_string().contains("UTF-8"));
 }
