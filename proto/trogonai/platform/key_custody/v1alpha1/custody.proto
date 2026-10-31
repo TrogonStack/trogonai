@@ -7,6 +7,30 @@ import "google/protobuf/empty.proto";
 import "trogonai/platform/key_custody/v1alpha1/identity.proto";
 import "trogonai/platform/key_custody/v1alpha1/provider.proto";
 
+// Names the data-plane service that owns a purpose's wrapped payloads.
+message PurposeOwner {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// One catalogue entry. A data-plane service declares the purposes whose
+// wrapped payloads it owns, and tenant surfaces list only declared purposes
+// (ADR#0033).
+message KeyPurposeDeclaration {
+  KeyPurpose purpose = 1 [features.field_presence = LEGACY_REQUIRED];
+  string display_name = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string description = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  PurposeOwner owner = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
 // A dedicated key exposes only its opaque KeyRef. The platform registration
 // behind it, its provider, and its locator are removed from the projection
 // (ADR#0033).

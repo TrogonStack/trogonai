@@ -17,7 +17,62 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file trogonai/platform/key_custody/v1alpha1/custody.proto.
  */
 export const file_trogonai_platform_key_custody_v1alpha1_custody: GenFile = /*@__PURE__*/
-  fileDesc("CjR0cm9nb25haS9wbGF0Zm9ybS9rZXlfY3VzdG9keS92MWFscGhhMS9jdXN0b2R5LnByb3RvEiZ0cm9nb25haS5wbGF0Zm9ybS5rZXlfY3VzdG9keS52MWFscGhhMSJaChBEZWRpY2F0ZWRDdXN0b2R5EkYKB2tleV9yZWYYASABKAsyLi50cm9nb25haS5wbGF0Zm9ybS5rZXlfY3VzdG9keS52MWFscGhhMS5LZXlSZWZCBaoBAggDIo0CChZDdXN0b21lck1hbmFnZWRDdXN0b2R5EkYKB2tleV9yZWYYASABKAsyLi50cm9nb25haS5wbGF0Zm9ybS5rZXlfY3VzdG9keS52MWFscGhhMS5LZXlSZWZCBaoBAggDElMKDmtleV9iYWNrZW5kX2lkGAIgASgLMjQudHJvZ29uYWkucGxhdGZvcm0ua2V5X2N1c3RvZHkudjFhbHBoYTEuS2V5QmFja2VuZElkQgWqAQIIAxJWCghwcm92aWRlchgDIAEoDjIzLnRyb2dvbmFpLnBsYXRmb3JtLmtleV9jdXN0b2R5LnYxYWxwaGExLktleVByb3ZpZGVyQg+qAQIIA7pIB4IBBBABIAAixAIKDlB1cnBvc2VDdXN0b2R5EkoKB3B1cnBvc2UYASABKAsyMi50cm9nb25haS5wbGF0Zm9ybS5rZXlfY3VzdG9keS52MWFscGhhMS5LZXlQdXJwb3NlQgWqAQIIAxIpCgdtYW5hZ2VkGAIgASgLMhYuZ29vZ2xlLnByb3RvYnVmLkVtcHR5SAASTQoJZGVkaWNhdGVkGAMgASgLMjgudHJvZ29uYWkucGxhdGZvcm0ua2V5X2N1c3RvZHkudjFhbHBoYTEuRGVkaWNhdGVkQ3VzdG9keUgAEloKEGN1c3RvbWVyX21hbmFnZWQYBCABKAsyPi50cm9nb25haS5wbGF0Zm9ybS5rZXlfY3VzdG9keS52MWFscGhhMS5DdXN0b21lck1hbmFnZWRDdXN0b2R5SABCEAoHY3VzdG9keRIFukgCCAFiCGVkaXRpb25zcOkH", [file_buf_validate_validate, file_google_protobuf_empty, file_trogonai_platform_key_custody_v1alpha1_identity, file_trogonai_platform_key_custody_v1alpha1_provider]);
+  fileDesc("CjR0cm9nb25haS9wbGF0Zm9ybS9rZXlfY3VzdG9keS92MWFscGhhMS9jdXN0b2R5LnByb3RvEiZ0cm9nb25haS5wbGF0Zm9ybS5rZXlfY3VzdG9keS52MWFscGhhMSIrCgxQdXJwb3NlT3duZXISGwoFdmFsdWUYASABKAlCDKoBAggDukgEcgIQASL2AQoVS2V5UHVycG9zZURlY2xhcmF0aW9uEkoKB3B1cnBvc2UYASABKAsyMi50cm9nb25haS5wbGF0Zm9ybS5rZXlfY3VzdG9keS52MWFscGhhMS5LZXlQdXJwb3NlQgWqAQIIAxIiCgxkaXNwbGF5X25hbWUYAiABKAlCDKoBAggDukgEcgIQARIhCgtkZXNjcmlwdGlvbhgDIAEoCUIMqgECCAO6SARyAhABEkoKBW93bmVyGAQgASgLMjQudHJvZ29uYWkucGxhdGZvcm0ua2V5X2N1c3RvZHkudjFhbHBoYTEuUHVycG9zZU93bmVyQgWqAQIIAyJaChBEZWRpY2F0ZWRDdXN0b2R5EkYKB2tleV9yZWYYASABKAsyLi50cm9nb25haS5wbGF0Zm9ybS5rZXlfY3VzdG9keS52MWFscGhhMS5LZXlSZWZCBaoBAggDIo0CChZDdXN0b21lck1hbmFnZWRDdXN0b2R5EkYKB2tleV9yZWYYASABKAsyLi50cm9nb25haS5wbGF0Zm9ybS5rZXlfY3VzdG9keS52MWFscGhhMS5LZXlSZWZCBaoBAggDElMKDmtleV9iYWNrZW5kX2lkGAIgASgLMjQudHJvZ29uYWkucGxhdGZvcm0ua2V5X2N1c3RvZHkudjFhbHBoYTEuS2V5QmFja2VuZElkQgWqAQIIAxJWCghwcm92aWRlchgDIAEoDjIzLnRyb2dvbmFpLnBsYXRmb3JtLmtleV9jdXN0b2R5LnYxYWxwaGExLktleVByb3ZpZGVyQg+qAQIIA7pIB4IBBBABIAAixAIKDlB1cnBvc2VDdXN0b2R5EkoKB3B1cnBvc2UYASABKAsyMi50cm9nb25haS5wbGF0Zm9ybS5rZXlfY3VzdG9keS52MWFscGhhMS5LZXlQdXJwb3NlQgWqAQIIAxIpCgdtYW5hZ2VkGAIgASgLMhYuZ29vZ2xlLnByb3RvYnVmLkVtcHR5SAASTQoJZGVkaWNhdGVkGAMgASgLMjgudHJvZ29uYWkucGxhdGZvcm0ua2V5X2N1c3RvZHkudjFhbHBoYTEuRGVkaWNhdGVkQ3VzdG9keUgAEloKEGN1c3RvbWVyX21hbmFnZWQYBCABKAsyPi50cm9nb25haS5wbGF0Zm9ybS5rZXlfY3VzdG9keS52MWFscGhhMS5DdXN0b21lck1hbmFnZWRDdXN0b2R5SABCEAoHY3VzdG9keRIFukgCCAFiCGVkaXRpb25zcOkH", [file_buf_validate_validate, file_google_protobuf_empty, file_trogonai_platform_key_custody_v1alpha1_identity, file_trogonai_platform_key_custody_v1alpha1_provider]);
+
+/**
+ * Names the data-plane service that owns a purpose's wrapped payloads.
+ *
+ * @generated from message trogonai.platform.key_custody.v1alpha1.PurposeOwner
+ */
+export type PurposeOwner = Message<"trogonai.platform.key_custody.v1alpha1.PurposeOwner"> & {
+  /**
+   * @generated from field: string value = 1 [features.field_presence = LEGACY_REQUIRED];
+   */
+  value: string;
+};
+
+/**
+ * Describes the message trogonai.platform.key_custody.v1alpha1.PurposeOwner.
+ * Use `create(PurposeOwnerSchema)` to create a new message.
+ */
+export const PurposeOwnerSchema: GenMessage<PurposeOwner> = /*@__PURE__*/
+  messageDesc(file_trogonai_platform_key_custody_v1alpha1_custody, 0);
+
+/**
+ * One catalogue entry. A data-plane service declares the purposes whose
+ * wrapped payloads it owns, and tenant surfaces list only declared purposes
+ * (ADR#0033).
+ *
+ * @generated from message trogonai.platform.key_custody.v1alpha1.KeyPurposeDeclaration
+ */
+export type KeyPurposeDeclaration = Message<"trogonai.platform.key_custody.v1alpha1.KeyPurposeDeclaration"> & {
+  /**
+   * @generated from field: trogonai.platform.key_custody.v1alpha1.KeyPurpose purpose = 1 [features.field_presence = LEGACY_REQUIRED];
+   */
+  purpose?: KeyPurpose | undefined;
+
+  /**
+   * @generated from field: string display_name = 2 [features.field_presence = LEGACY_REQUIRED];
+   */
+  displayName: string;
+
+  /**
+   * @generated from field: string description = 3 [features.field_presence = LEGACY_REQUIRED];
+   */
+  description: string;
+
+  /**
+   * @generated from field: trogonai.platform.key_custody.v1alpha1.PurposeOwner owner = 4 [features.field_presence = LEGACY_REQUIRED];
+   */
+  owner?: PurposeOwner | undefined;
+};
+
+/**
+ * Describes the message trogonai.platform.key_custody.v1alpha1.KeyPurposeDeclaration.
+ * Use `create(KeyPurposeDeclarationSchema)` to create a new message.
+ */
+export const KeyPurposeDeclarationSchema: GenMessage<KeyPurposeDeclaration> = /*@__PURE__*/
+  messageDesc(file_trogonai_platform_key_custody_v1alpha1_custody, 1);
 
 /**
  * A dedicated key exposes only its opaque KeyRef. The platform registration
@@ -38,7 +93,7 @@ export type DedicatedCustody = Message<"trogonai.platform.key_custody.v1alpha1.D
  * Use `create(DedicatedCustodySchema)` to create a new message.
  */
 export const DedicatedCustodySchema: GenMessage<DedicatedCustody> = /*@__PURE__*/
-  messageDesc(file_trogonai_platform_key_custody_v1alpha1_custody, 0);
+  messageDesc(file_trogonai_platform_key_custody_v1alpha1_custody, 2);
 
 /**
  * A customer managed key names the registration the tenant owns and that
@@ -70,7 +125,7 @@ export type CustomerManagedCustody = Message<"trogonai.platform.key_custody.v1al
  * Use `create(CustomerManagedCustodySchema)` to create a new message.
  */
 export const CustomerManagedCustodySchema: GenMessage<CustomerManagedCustody> = /*@__PURE__*/
-  messageDesc(file_trogonai_platform_key_custody_v1alpha1_custody, 1);
+  messageDesc(file_trogonai_platform_key_custody_v1alpha1_custody, 3);
 
 /**
  * The tenant-facing custody summary for one purpose. Tenant projections are
@@ -118,5 +173,5 @@ export type PurposeCustody = Message<"trogonai.platform.key_custody.v1alpha1.Pur
  * Use `create(PurposeCustodySchema)` to create a new message.
  */
 export const PurposeCustodySchema: GenMessage<PurposeCustody> = /*@__PURE__*/
-  messageDesc(file_trogonai_platform_key_custody_v1alpha1_custody, 2);
+  messageDesc(file_trogonai_platform_key_custody_v1alpha1_custody, 4);
 
