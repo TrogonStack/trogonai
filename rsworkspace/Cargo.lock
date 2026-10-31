@@ -7271,6 +7271,7 @@ dependencies = [
  "trogon-decider-runtime",
  "trogon-decider-wasm-runtime",
  "trogon-decider-wit",
+ "trogon-identity-types",
  "trogon-nats",
  "trogon-semconv",
  "trogon-std",

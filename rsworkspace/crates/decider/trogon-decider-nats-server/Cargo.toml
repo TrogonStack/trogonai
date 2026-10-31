@@ -33,6 +33,7 @@ trogon-decider-nats = { workspace = true }
 trogon-decider-runtime = { workspace = true }
 trogon-decider-wasm-runtime = { workspace = true }
 trogon-decider-wit = { workspace = true }
+trogon-identity-types = { workspace = true }
 trogon-nats = { workspace = true }
 trogon-semconv = { workspace = true }
 trogon-std = { workspace = true, features = ["clap", "signal"] }
