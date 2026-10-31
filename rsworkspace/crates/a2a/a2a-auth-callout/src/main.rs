@@ -8,6 +8,7 @@ use {
     a2a_auth_callout::credentials::oidc::{JwksOidcVerifier, OidcIssuerUrl, OidcVerifier},
     a2a_auth_callout::dispatcher::{CalloutDispatcher, CalloutDispatcherConfig},
     a2a_auth_callout::{AuthCalloutWireCodec, Subscriber},
+    a2a_nats::{A2aPrefix, A2aPrefixError, DEFAULT_A2A_PREFIX, ENV_A2A_PREFIX},
     std::sync::Arc,
     std::time::Duration,
     tracing::{info, warn},
@@ -29,6 +30,13 @@ fn split_env_list(env: &impl ReadEnv, name: &str) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn resolve_a2a_prefix(env: &impl ReadEnv) -> Result<A2aPrefix, A2aPrefixError> {
+    A2aPrefix::new(
+        env.var(ENV_A2A_PREFIX)
+            .unwrap_or_else(|_| DEFAULT_A2A_PREFIX.to_owned()),
+    )
 }
 
 fn nats_config(env: &impl ReadEnv) -> Option<NatsConfig> {
@@ -104,6 +112,13 @@ async fn main() {
         },
         Err(_) => Duration::from_secs(a2a_auth_callout::constants::DEFAULT_USER_JWT_TTL_SECS),
     };
+    let a2a_prefix = match resolve_a2a_prefix(&env) {
+        Ok(prefix) => prefix,
+        Err(e) => {
+            tracing::error!(error = %e, variable = ENV_A2A_PREFIX, "invalid A2A prefix");
+            std::process::exit(1);
+        }
+    };
 
     let wire = AuthCalloutWireCodec::new(
         admission_keys.auth_account().clone(),
@@ -133,6 +148,7 @@ async fn main() {
         nats_url = %nats.servers.join(","),
         auth_account = %admission_keys.auth_account(),
         tenants = ?tenants,
+        a2a_prefix = %a2a_prefix,
         "connecting to NATS for auth callout"
     );
 
@@ -146,6 +162,7 @@ async fn main() {
     let dispatcher = CalloutDispatcher::new(CalloutDispatcherConfig {
         tenant_signing_keys: admission_keys.tenant_signing_keys().clone(),
         user_jwt_ttl,
+        a2a_prefix,
         oidc,
         mtls,
         api_key: None,

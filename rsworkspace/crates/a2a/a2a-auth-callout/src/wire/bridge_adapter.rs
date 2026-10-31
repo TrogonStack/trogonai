@@ -135,7 +135,7 @@ impl ServerAuthRequestClaims {
             sub: bridge_issuer.public_key(),
         };
 
-        Ok(Self::declaring(inner, nats_json, declared_credential))
+        Ok(Self::bridge_routed(inner, nats_json, declared_credential))
     }
 }
 

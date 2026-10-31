@@ -13,7 +13,7 @@ use nats_jwt_rs::Claims;
 use nats_jwt_rs::authorization::AuthRequest;
 use nkeys::KeyPair;
 use serde_json::json;
-use trogon_identity_types::PrincipalKind;
+use trogon_identity_types::{PrincipalId, PrincipalKind, SubjectPrincipal};
 
 const FIXTURE_CLIENT_CERT: &str = "-----BEGIN CERT-----\n-----END CERT-----";
 
@@ -83,19 +83,19 @@ async fn always_deny_returns_err() {
 
 struct StubOidcVerifier {
     sub: &'static str,
+    caller: CallerId,
 }
 
 #[async_trait::async_trait]
 impl OidcVerifier for StubOidcVerifier {
     async fn verify(&self, _token: &BearerToken, account: &AudienceAccount) -> Result<UserJwtClaims, AuthCalloutError> {
-        let caller_id = CallerId::new("usrstub").unwrap();
         Ok(UserJwtClaims {
             kid: crate::signing_key_source::unminted_placeholder(),
             sub: ExternalSubject::new(self.sub).unwrap(),
             aud: account.clone(),
             data: SpiceDbPrincipal(json!({"spicedb_subject": self.sub})),
-            nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
-            caller_id,
+            nats_permissions: IssuedPermissions::default_for_caller(&self.caller),
+            caller_id: self.caller.clone(),
             principal_kind: PrincipalKind::Person,
         })
     }
@@ -123,25 +123,46 @@ impl MTlsVerifier for StubMtlsVerifier {
     }
 }
 
+fn config_with(
+    oidc: Option<Arc<dyn OidcVerifier>>,
+    mtls: Option<Arc<dyn MTlsVerifier>>,
+    api_key: Option<Arc<dyn ApiKeyVerifier>>,
+    tenants: &[&Tenant],
+) -> CalloutDispatcherConfig {
+    let tenant_signing_keys =
+        TenantSigningKeys::new(tenants.iter().map(|t| (t.account.clone(), t.signing_key.clone()))).unwrap();
+    CalloutDispatcherConfig {
+        tenant_signing_keys,
+        user_jwt_ttl: Duration::from_secs(60),
+        a2a_prefix: A2aPrefix::new("a2a").unwrap(),
+        oidc,
+        mtls,
+        api_key,
+    }
+}
+
 fn dispatcher_with(
     oidc: Option<Arc<dyn OidcVerifier>>,
     mtls: Option<Arc<dyn MTlsVerifier>>,
     api_key: Option<Arc<dyn ApiKeyVerifier>>,
     tenants: &[&Tenant],
 ) -> CalloutDispatcher {
-    let tenant_signing_keys =
-        TenantSigningKeys::new(tenants.iter().map(|t| (t.account.clone(), t.signing_key.clone()))).unwrap();
-    CalloutDispatcher::new(CalloutDispatcherConfig {
-        tenant_signing_keys,
-        user_jwt_ttl: Duration::from_secs(60),
-        oidc,
-        mtls,
-        api_key,
-    })
+    CalloutDispatcher::new(config_with(oidc, mtls, api_key, tenants))
+}
+
+fn oidc_stub_for(caller: &str) -> Option<Arc<dyn OidcVerifier>> {
+    Some(Arc::new(StubOidcVerifier {
+        sub: "user-1",
+        caller: CallerId::new(caller).unwrap(),
+    }))
 }
 
 fn oidc_stub() -> Option<Arc<dyn OidcVerifier>> {
-    Some(Arc::new(StubOidcVerifier { sub: "user-1" }))
+    oidc_stub_for("usrstub")
+}
+
+fn person(id: &str) -> SubjectPrincipal {
+    SubjectPrincipal::from_credential(PrincipalKind::Person, &PrincipalId::new(id).unwrap()).unwrap()
 }
 
 fn api_key_verifier_for(audience: AudienceAccount) -> Option<Arc<dyn ApiKeyVerifier>> {
@@ -188,10 +209,13 @@ async fn dispatch_mints_a_user_the_tenant_signing_key_issues_on_behalf_of_the_te
     assert_eq!(payload["nats"]["issuer_account"], tenant.account.as_str());
     assert_eq!(payload["sub"], user_public);
     assert_eq!(payload["aud"], tenant.account.as_str());
-    assert_eq!(payload["nats"]["pub"]["allow"], json!(["a2a.v1.gateway.>"]));
+    assert_eq!(
+        payload["nats"]["pub"]["allow"],
+        json!(["a2a.v1.agents.*.person.usrstub.>"])
+    );
     assert_eq!(
         payload["nats"]["sub"]["allow"],
-        json!(["_INBOX.usrstub.>", "a2a.v1.push.usrstub.>"])
+        json!(["a2a.v1.tasks.*.person.usrstub.events", "_INBOX.person.usrstub.>"])
     );
 }
 
@@ -261,7 +285,7 @@ async fn dispatch_verifies_a_secret_instead_of_the_client_certificate() {
     let payload = decode_nats_user_payload(minted.as_str()).unwrap();
     assert_eq!(
         payload["nats"]["sub"]["allow"],
-        json!(["_INBOX.usrstub.>", "a2a.v1.push.usrstub.>"])
+        json!(["a2a.v1.tasks.*.person.usrstub.events", "_INBOX.person.usrstub.>"])
     );
 }
 
@@ -279,7 +303,7 @@ async fn dispatch_verifies_the_client_certificate_when_no_secret_is_presented() 
     let payload = decode_nats_user_payload(minted.as_str()).unwrap();
     assert_eq!(
         payload["nats"]["sub"]["allow"],
-        json!(["_INBOX.mtlsstub.>", "a2a.v1.push.mtlsstub.>"])
+        json!(["a2a.v1.tasks.*.service.mtlsstub.events", "_INBOX.service.mtlsstub.>"])
     );
 }
 
@@ -395,4 +419,69 @@ async fn dispatch_api_key_via_pass() {
         c.nats.connect_opts.pass = Some("k_live_demo".into());
     });
     assert!(d.dispatch(req).await.is_ok());
+}
+
+#[tokio::test]
+async fn dispatch_grants_a_bridge_routed_caller_the_gateway_and_its_own_events() {
+    let tenant = Tenant::generate();
+    let mtls: Arc<dyn MTlsVerifier> = Arc::new(StubMtlsVerifier);
+    let d = dispatcher_with(None, Some(mtls), None, &[&tenant]);
+    let minted = d.dispatch(tenant.bridge_request()).await.unwrap();
+    let payload = decode_nats_user_payload(minted.as_str()).unwrap();
+    assert_eq!(
+        payload["nats"]["pub"]["allow"],
+        json!(["a2a.v1.gateway.*.service.mtlsstub.>"])
+    );
+    assert_eq!(
+        payload["nats"]["sub"]["allow"],
+        json!([
+            "a2a.v1.gateway.service.mtlsstub.events",
+            "a2a.v1.tasks.*.service.mtlsstub.events",
+            "_INBOX.>"
+        ])
+    );
+}
+
+#[tokio::test]
+async fn dispatch_names_a_caller_whose_id_is_not_token_safe_by_its_hashed_id() {
+    let server = FixtureServer::generate();
+    let tenant = Tenant::generate();
+    let d = dispatcher_with(oidc_stub_for("jos\u{e9}"), None, None, &[&tenant]);
+    let minted = d.dispatch(tenant.request(&server, |_| {})).await.unwrap();
+    let caller = person("jos\u{e9}");
+    assert!(caller.id().is_hashed());
+    let payload = decode_nats_user_payload(minted.as_str()).unwrap();
+    assert_eq!(
+        payload["nats"]["pub"]["allow"],
+        json!([format!("a2a.v1.agents.*.{caller}.>")])
+    );
+}
+
+#[tokio::test]
+async fn dispatch_refuses_a_caller_whose_id_already_takes_the_hashed_form() {
+    let server = FixtureServer::generate();
+    let tenant = Tenant::generate();
+    let hashed = person("alice.smith");
+    let d = dispatcher_with(oidc_stub_for(hashed.id().as_str()), None, None, &[&tenant]);
+    let err = d.dispatch(tenant.request(&server, |_| {})).await.unwrap_err();
+    assert!(matches!(
+        err,
+        AuthCalloutError::CredentialVerification(CredentialError::UnplaceablePrincipal(_))
+    ));
+}
+
+#[tokio::test]
+async fn dispatch_grants_subjects_under_the_configured_prefix() {
+    let server = FixtureServer::generate();
+    let tenant = Tenant::generate();
+    let d = CalloutDispatcher::new(CalloutDispatcherConfig {
+        a2a_prefix: A2aPrefix::new("acme.a2a").unwrap(),
+        ..config_with(oidc_stub(), None, None, &[&tenant])
+    });
+    let minted = d.dispatch(tenant.request(&server, |_| {})).await.unwrap();
+    let payload = decode_nats_user_payload(minted.as_str()).unwrap();
+    assert_eq!(
+        payload["nats"]["pub"]["allow"],
+        json!(["acme.a2a.v1.agents.*.person.usrstub.>"])
+    );
 }

@@ -4,6 +4,7 @@ use super::*;
 use crate::bridge_mint::{BridgeClientInfo, BridgeCredential, SealedBridgeCredential};
 use crate::credentials::api_key::ApiKey;
 use crate::credentials::oidc::BearerToken;
+use crate::permissions::AdmissionRoute;
 
 const CLIENT_CERT_PEM: &str = "-----BEGIN CERT-----\n-----END CERT-----";
 
@@ -129,4 +130,10 @@ fn a_section_that_does_not_read_back_as_its_wire_type_names_itself() {
             ..
         }
     ));
+}
+
+#[test]
+fn a_bridge_mint_request_admits_a_bridge_routed_caller() {
+    let claims = ServerAuthRequestClaims::from_bridge_mint(mint_request(None, Some(CLIENT_CERT_PEM)), None).unwrap();
+    assert_eq!(claims.admission_route(), AdmissionRoute::BridgeRouted);
 }

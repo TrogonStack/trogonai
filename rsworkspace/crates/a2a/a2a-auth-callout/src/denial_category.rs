@@ -55,7 +55,8 @@ impl DenialCategory {
             // learn which check refused it.
             CredentialError::InvalidCredentials(_)
             | CredentialError::UnsupportedTokenAlgorithm { .. }
-            | CredentialError::JwkNotPublishedForVerification { .. } => Self::InvalidCredentials,
+            | CredentialError::JwkNotPublishedForVerification { .. }
+            | CredentialError::UnplaceablePrincipal(_) => Self::InvalidCredentials,
         }
     }
 }
