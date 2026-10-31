@@ -1,4 +1,4 @@
-import { KeyState } from '@trogonai/proto';
+import { KeyBackendAdmission, KeyState } from '@trogonai/proto';
 
 import { deriveRefId, seedIds } from '@/features/secrets/fake/seed';
 
@@ -208,7 +208,7 @@ export function populateSeed(now: Date = new Date()): readonly IntegrationState[
       displayName: 'Sentry production',
       slots: [runtime(sentry, 'client_secret', 'active', 2)],
       registration: { status: 'not_applicable' },
-      custody: { tier: 'customer_managed', keyState: KeyState.DISABLED },
+      custody: { tier: 'customer_managed', keyState: KeyState.DISABLED, admission: KeyBackendAdmission.ENABLED },
       traffic: { base: 18, rejectedPerHundred: 1, lockedOutHours: 5 },
       recent: { lastAgoMs: 3 * MINUTE, stepMs: 9 * MINUTE, rejection: 'key_unavailable' },
       createdDaysAgo: 210,
@@ -238,7 +238,7 @@ export function populateSeed(now: Date = new Date()): readonly IntegrationState[
       displayName: 'Datadog monitors',
       slots: [runtime(datadog, 'webhook_secret', 'active', 1)],
       registration: registered('webhook_secret', 1, 24 * 14),
-      custody: { tier: 'customer_managed', keyState: KeyState.ACTIVE },
+      custody: { tier: 'customer_managed', keyState: KeyState.ACTIVE, admission: KeyBackendAdmission.PAUSED },
       traffic: { base: 7, rejectedPerHundred: 0 },
       recent: { lastAgoMs: 12 * MINUTE, stepMs: 70 * MINUTE },
       createdDaysAgo: 72,

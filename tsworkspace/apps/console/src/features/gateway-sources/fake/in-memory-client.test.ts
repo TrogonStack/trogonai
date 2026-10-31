@@ -46,6 +46,7 @@ describe('seed', () => {
     expect(views.get(seedIntegrationIds.discord)?.slots[0]?.state).toBe('write_failed');
     expect(views.get(seedIntegrationIds.linear)?.status).toBe('paused');
     expect(views.get(seedIntegrationIds.sentry)).toMatchObject({ status: 'misconfigured', tier: 'customer_managed' });
+    expect(views.get(seedIntegrationIds.datadog)).toMatchObject({ status: 'misconfigured', tier: 'customer_managed' });
     expect(views.get(seedIntegrationIds.gitlab)?.tier).toBe('dedicated');
   });
 });

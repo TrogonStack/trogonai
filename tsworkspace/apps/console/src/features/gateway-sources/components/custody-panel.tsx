@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { CustodyTierBadge } from '@/features/custody/components/custody-tier-badge';
-import { KeyStateBadge, PlatformManagedBadge } from '@/features/custody/components/key-badges';
+import { AdmissionBadge, KeyStateBadge, PlatformManagedBadge } from '@/features/custody/components/key-badges';
 import { custodyTierDetails } from '@/features/custody/domain/custody';
 
 import { failClosedReason, type SourceCustody } from '../domain/source-custody';
@@ -29,9 +29,14 @@ export function CustodyPanel({ custody }: { custody: SourceCustody }) {
         <p className="text-muted-foreground text-[13px]">{custodyTierDetails[custody.tier]}</p>
         <dl className="grid gap-4">
           {custody.tier === 'customer_managed' ? (
-            <Fact label="Key status">
-              <KeyStateBadge state={custody.keyState} />
-            </Fact>
+            <>
+              <Fact label="Key status">
+                <KeyStateBadge state={custody.keyState} />
+              </Fact>
+              <Fact label="Backend admission">
+                <AdmissionBadge admission={custody.admission} />
+              </Fact>
+            </>
           ) : (
             <Fact label="Operated by">
               <PlatformManagedBadge />
