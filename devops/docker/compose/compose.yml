@@ -28,7 +28,7 @@ services:
       - path: .env
         required: false
     environment:
-      TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET: "${TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET:-local-dev-secret}"
+      TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET: "${TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET:?set it in devops/docker/compose/.env, for example with `openssl rand -hex 32`}"
       NATS_URL: "nats://nats:4222"
       OPENBAO_ADDR: "http://openbao:8200"
       OPENBAO_TOKEN: "${OPENBAO_DEV_ROOT_TOKEN:-local-dev-root-token}"
@@ -153,6 +153,8 @@ services:
         condition: service_started
     restart: on-failure:3
 
+  # Publishes the gateway on a public ngrok URL, so anyone holding the URL
+  # reaches it. Start it only while a provider needs to call in.
   ngrok:
     image: ngrok/ngrok:3.39.6-alpine
     env_file:
@@ -164,6 +166,7 @@ services:
       - /bin/sh
       - -c
       - |
+        echo "ngrok: WARNING: this exposes the local stack to the public internet; anyone with the tunnel URL can reach trogon-gateway." >&2
         cat > /tmp/ngrok.yml <<EOF
         version: 3
         tunnels:
