@@ -35,6 +35,10 @@ use super::dedup_window::DedupWindow;
 use super::key_cache::{PlaidKeyCache, PlaidKeyResolveError};
 use super::key_fetcher::{PlaidKeyFetcher, ReqwestPlaidKeyFetcher};
 use super::signature;
+use crate::credential::commands::domain::{CredentialKind, SourceKind};
+use crate::credential_runtime_projection::{RuntimeCredentialResolver, RuntimeIntegrationKey};
+use crate::secret_store::{SecretStoreError, SecretStoreGet};
+use crate::source_integration_id::SourceIntegrationId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RejectReason {
@@ -115,6 +119,13 @@ struct AppState<P: JetStreamPublisher, S: ObjectStorePut, C: EpochClock, F: Plai
     secret: PlaidSecret,
 }
 
+#[derive(Clone)]
+struct RuntimeAppState<P: JetStreamPublisher, S: ObjectStorePut, C: EpochClock, F: PlaidKeyFetcher, G> {
+    ingest: Ingest<P, S, C, F>,
+    credential_resolver: RuntimeCredentialResolver<G>,
+    runtime_key: RuntimeIntegrationKey,
+}
+
 pub async fn provision<C: JetStreamContext>(js: &C, config: &PlaidConfig) -> Result<(), C::Error> {
     // A token verifies for the tolerance on either side of its `iat`, so replays
     // of one delivery can arrive up to twice the tolerance apart.
@@ -170,6 +181,34 @@ fn router_with_clock<P: JetStreamPublisher, S: ObjectStorePut, C: EpochClock, F:
         .with_state(state)
 }
 
+#[allow(dead_code, reason = "unused until the gateway mounts the Plaid runtime router")]
+fn runtime_router_with_clock<P, S, C, F, G>(
+    publisher: ClaimCheckPublisher<P, S>,
+    config: &PlaidConfig,
+    integration_id: SourceIntegrationId,
+    credential_resolver: RuntimeCredentialResolver<G>,
+    clock: C,
+    fetcher: F,
+) -> Router
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    C: EpochClock,
+    F: PlaidKeyFetcher,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    let state = RuntimeAppState {
+        ingest: Ingest::new(publisher, config, clock, fetcher),
+        credential_resolver,
+        runtime_key: RuntimeIntegrationKey::new(SourceKind::Plaid, &integration_id),
+    };
+
+    Router::new()
+        .route("/webhook", post(handle_runtime_webhook::<P, S, C, F, G>))
+        .layer(DefaultBodyLimit::max(HTTP_BODY_SIZE_MAX.as_usize()))
+        .with_state(state)
+}
+
 fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     headers.get(name).and_then(|value| value.to_str().ok())
 }
@@ -211,6 +250,46 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut, C: EpochClock,
         .ingest
         .verify_and_publish(token, &key_id, &state.secret, body)
         .await
+}
+
+#[instrument(
+    name = PLAID_WEBHOOK,
+    skip_all,
+    fields(
+        event_type = tracing::field::Empty,
+        subject = tracing::field::Empty,
+    )
+)]
+async fn handle_runtime_webhook<P, S, C, F, G>(
+    State(state): State<RuntimeAppState<P, S, C, F, G>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    C: EpochClock,
+    F: PlaidKeyFetcher,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    let (token, key_id) = match verification_token(&headers) {
+        Ok(verification) => verification,
+        Err(status) => return status.into_response(),
+    };
+
+    let secret = match state
+        .credential_resolver
+        .resolve_plaintext(&state.runtime_key, CredentialKind::ClientSecret)
+        .await
+    {
+        Ok(secret) => PlaidSecret::from(secret),
+        Err(error) => {
+            warn!(reason = %error, "Plaid runtime credential resolution failed");
+            return error.http_status().into_response();
+        }
+    };
+
+    state.ingest.verify_and_publish(token, &key_id, &secret, body).await
 }
 
 impl<P: JetStreamPublisher, S: ObjectStorePut, C: EpochClock, F: PlaidKeyFetcher> Ingest<P, S, C, F> {
