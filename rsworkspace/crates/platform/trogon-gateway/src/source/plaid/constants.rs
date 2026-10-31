@@ -1,5 +1,15 @@
 use std::time::Duration;
 
+use trogon_std::{ByteSize, HttpBodySizeMax};
+
+pub const HTTP_BODY_SIZE_MAX: HttpBodySizeMax = HttpBodySizeMax::new(ByteSize::mib(2)).unwrap();
+
+pub const HEADER_VERIFICATION: &str = "plaid-verification";
+
+pub const NATS_HEADER_EVENT_TYPE: &str = "X-Plaid-Event-Type";
+pub const NATS_HEADER_ITEM_ID: &str = "X-Plaid-Item-Id";
+pub const NATS_HEADER_REJECT_REASON: &str = "X-Plaid-Reject-Reason";
+
 pub const SANDBOX_API_BASE_URL: &str = "https://sandbox.plaid.com";
 pub const PRODUCTION_API_BASE_URL: &str = "https://production.plaid.com";
 
