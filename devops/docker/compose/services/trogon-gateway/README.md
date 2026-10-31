@@ -284,6 +284,143 @@ This starts ngrok alongside the gateway. Check `docker compose logs ngrok`
 for the public URL. Append the integration path when configuring each platform's
 webhook settings (for example, `https://<ngrok-url>/sources/github/acme-main/webhook`).
 
+## OpenBao local secret store
+
+The compose stack runs a local OpenBao at:
+
+```bash
+http://openbao.trogonai.orb.local:8200
+```
+
+The local dev token is:
+
+```bash
+local-dev-root-token
+```
+
+This OpenBao instance is local-only, auto-unsealed from a checked-in static
+seal key. Do not use it for production or for any secret that matters outside
+the dev stack.
+
+### Copy-in and copy-out smoke test
+
+From `devops/docker/compose`:
+
+```bash
+docker compose up -d openbao
+docker compose exec -e BAO_ADDR=http://127.0.0.1:8200 -e BAO_TOKEN=local-dev-root-token openbao \
+  bao kv put -mount=secret trogonai/manual/copy-in-out value=copy-this-value-in-and-out
+docker compose exec -e BAO_ADDR=http://127.0.0.1:8200 -e BAO_TOKEN=local-dev-root-token openbao \
+  bao kv get -format=json -mount=secret trogonai/manual/copy-in-out
+```
+
+The JSON output should include:
+
+```json
+{
+  "data": {
+    "data": {
+      "value": "copy-this-value-in-and-out"
+    }
+  }
+}
+```
+
+Automated Rust tests start their own OpenBao container with Testcontainers:
+
+```bash
+cd ../../../rsworkspace
+mise exec -- cargo test -p trogon-gateway openbao_testcontainer_roundtrips_precise_value
+mise exec -- cargo test -p trogon-gateway runtime_handler_with_openbao_testcontainer_applies_state_and_resolves_precise_value
+```
+
+To run the same gateway adapter round trip against this compose service:
+
+```bash
+cd ../../../rsworkspace
+OPENBAO_ADDR=http://openbao.trogonai.orb.local:8200 OPENBAO_TOKEN=local-dev-root-token mise exec -- cargo test -p trogon-gateway openbao_dev_server_roundtrips_precise_value -- --ignored --nocapture
+```
+
+The adapter tests write `copy-this-value-in-and-out` into OpenBao and read it
+back through `OpenBaoSecretStore`. The lifecycle-runtime test writes that same
+value through `CredentialRuntimeHandler`, resolves it through the
+runtime registry, rotates it to `rotated-copy-this-value-in-and-out`, revokes
+it, and verifies lifecycle events do not contain plaintext. The compose-backed
+ignored test also prints the credential ref plus the API data and metadata
+paths.
+
+### Management API smoke test
+
+Enable the internal management API and one runtime source in `.env`:
+
+```bash
+TROGON_GATEWAY_CREDENTIAL_MANAGEMENT_ADMIN_TOKEN=local-admin-token
+TROGON_GATEWAY_ENABLE_RUNTIME_GITHUB_CREDENTIALS=true
+```
+
+The flag switches every configured GitHub integration to runtime credential
+resolution, so the shipped `gateway.toml` integration `local` stops reading its
+webhook secret from `TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET` and resolves it
+from OpenBao instead. The examples below create that credential for `local`.
+
+Then start the stack:
+
+```bash
+docker compose up --build --remove-orphans
+```
+
+Create a GitHub webhook secret:
+
+```bash
+curl -sS -X PUT "http://trogon-gateway.trogonai.orb.local:8080/-/credentials/github/local/webhook-secret" \
+  -H "content-type: application/json" \
+  -H "x-trogon-admin-token: local-admin-token" \
+  -H "Idempotency-Key: local-github-local-webhook-secret-create-1" \
+  -d '{"owner_id":"tenant-1","secret":"copy-this-value-in-and-out"}'
+```
+
+Rotate it:
+
+```bash
+curl -sS -X POST "http://trogon-gateway.trogonai.orb.local:8080/-/credentials/github/local/webhook-secret/rotations" \
+  -H "content-type: application/json" \
+  -H "x-trogon-admin-token: local-admin-token" \
+  -H "Idempotency-Key: local-github-local-webhook-secret-rotate-1" \
+  -d '{"owner_id":"tenant-1","version":1,"secret":"rotated-copy-this-value-in-and-out"}'
+```
+
+Revoke the rotated version:
+
+```bash
+curl -sS -X DELETE "http://trogon-gateway.trogonai.orb.local:8080/-/credentials/github/local/webhook-secret" \
+  -H "content-type: application/json" \
+  -H "x-trogon-admin-token: local-admin-token" \
+  -H "Idempotency-Key: local-github-local-webhook-secret-revoke-1" \
+  -d '{"owner_id":"tenant-1","version":2}'
+```
+
+Check recovery worker status:
+
+```bash
+curl -sS "http://trogon-gateway.trogonai.orb.local:8080/-/credentials/recovery/status" \
+  -H "x-trogon-admin-token: local-admin-token"
+```
+
+The create, rotate, and revoke responses return credential refs, lifecycle
+state, and stream position. They must not echo the submitted secret value.
+
+To inspect an API-created value directly in local OpenBao, use the logical
+credential id from the response as the final path segment:
+
+```bash
+docker compose exec -e BAO_ADDR=http://127.0.0.1:8200 -e BAO_TOKEN=local-dev-root-token openbao \
+  bao kv get -format=json -mount=secret \
+  "trogonai/tenant-1/credentials/openbao:tenant-1:github/local:webhook_secret"
+```
+
+Do not percent-encode this value for the `bao` CLI. The HTTP adapter URL-encodes
+path segments internally when it calls OpenBao.
+
 ## Verify
 
 Subscribe to NATS to see events flowing:
