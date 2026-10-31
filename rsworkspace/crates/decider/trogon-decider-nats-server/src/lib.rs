@@ -25,7 +25,6 @@ pub mod principal_prefix;
 pub mod request;
 pub mod runtime;
 pub mod status;
-mod subject_principal;
 pub mod tenant_position;
 
 pub use authorizer::AdmitAnyPrincipal;
