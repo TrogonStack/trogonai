@@ -34,9 +34,7 @@ use trogon_std::env::ReadEnv;
 use uuid::Uuid;
 
 use crate::config::Config;
-use crate::gw_ingress_stream::{
-    CallerKey, GatewayStreamingIngressConfig, StreamingIngressGate, events_stream_last_seq,
-};
+use crate::gw_ingress_stream::{GatewayStreamingIngressConfig, StreamingIngressGate, events_stream_last_seq};
 use crate::ingress_identity::{ForwardedCallerJwtVerifier, without_identity_headers};
 use crate::policy::CallerSpiceDbSubject;
 use crate::policy::spicedb_tier1::{
@@ -553,7 +551,7 @@ async fn dispatch_routed<E: ReadEnv>(
     match disposition {
         ForwardDisposition::Ok => {
             tracing::Span::current().record(ATTR_ROUTING_OUTCOME, ROUTING_FORWARDED);
-            if streaming_ingress_enabled && let Ok(caller_key) = CallerKey::new(caller.to_string()) {
+            if streaming_ingress_enabled {
                 let _ = maybe_spawn_streaming_ingress_pump(
                     client,
                     &config.a2a_prefix,
@@ -564,7 +562,6 @@ async fn dispatch_routed<E: ReadEnv>(
                     &headers_owned,
                     payload.as_ref(),
                     reply.clone(),
-                    caller_key,
                     caller.clone(),
                     events_last_seq,
                 );
