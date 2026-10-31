@@ -21,19 +21,17 @@ use a2a_nats::A2aMethod;
 use a2a_nats::audit::envelope::{AuditEnvelope, AuditEnvelopeFields, AuditOutcome, Tier1Decision, Tier3Decision};
 use a2a_nats::nats::subjects::gateway::GatewayIngressSubject;
 use a2a_nats::{
-    ingress_error_response_wire, ingress_gateway_deadline_exceeded_response_bytes,
-    ingress_gateway_declarative_denied_response_bytes, ingress_gateway_policy_denied_response_bytes,
-    ingress_gateway_tier3_refused_response_bytes, ingress_invalid_request_response_bytes,
+    ingress_gateway_deadline_exceeded_response_bytes, ingress_gateway_declarative_denied_response_bytes,
+    ingress_gateway_policy_denied_response_bytes, ingress_gateway_tier3_refused_response_bytes,
+    ingress_invalid_request_response_bytes,
 };
 use async_nats::HeaderMap;
 use bytes::Bytes;
 use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, debug, error, info, warn};
-use trogon_identity_types::aauth::headers as aauth_headers;
 use trogon_std::env::ReadEnv;
 use uuid::Uuid;
 
-use crate::aauth::{AAuthMode, GatewayAAuthIngress};
 use crate::config::Config;
 use crate::gw_ingress_stream::{
     CallerKey, GatewayStreamingIngressConfig, StreamingIngressGate, events_stream_last_seq,
@@ -57,7 +55,6 @@ use crate::policy::tier3_redaction::{
     Tier3EvaluationContext, Tier3RedactionDecision, gateway_tier3_redaction_enabled, merge_forward_audit_rewrites,
     tier3_redaction_audit_rewrites,
 };
-use crate::runtime::aauth_env::{GatewayCallerIdentity, aauth_deny_rule_fired, gateway_caller_identity_after_aauth};
 use crate::runtime::audit_publish::spawn_gateway_audit_publish;
 use crate::runtime::env::{
     gateway_audit_publish_enabled, json_rpc_audit_req_id, json_rpc_params, unary_deadline_for_method, unix_epoch_ms,
@@ -70,10 +67,10 @@ use crate::runtime::tier1_denial::{Tier1DenialCtx, deny_tier1};
 
 use crate::constants::MESSAGE_STREAM_METHOD_DOTS;
 use crate::constants::{
-    ANONYMOUS_CALLER_SLUG, ATTR_AAUTH_AGENT_ID, ATTR_AGENT_SUBJECT, ATTR_CALLER_ID, ATTR_ROUTING_OUTCOME,
-    ENV_GATEWAY_JWT_AUDIENCE, ROUTING_AAUTH_DENIED, ROUTING_DEADLINE_EXCEEDED, ROUTING_FORWARD_FAILED,
-    ROUTING_FORWARDED, ROUTING_IGNORED_NO_REPLY, ROUTING_INGRESS_ERROR, ROUTING_POLICY_DENIED, ROUTING_TIER1_DENIED,
-    ROUTING_TIER3_ENGINE_ERROR, ROUTING_TIER3_REFUSED, SPAN_GATEWAY_INGRESS_DISPATCH,
+    ANONYMOUS_CALLER_SLUG, ATTR_AGENT_SUBJECT, ATTR_CALLER_ID, ATTR_ROUTING_OUTCOME, ENV_GATEWAY_JWT_AUDIENCE,
+    ROUTING_DEADLINE_EXCEEDED, ROUTING_FORWARD_FAILED, ROUTING_FORWARDED, ROUTING_IGNORED_NO_REPLY,
+    ROUTING_INGRESS_ERROR, ROUTING_POLICY_DENIED, ROUTING_TIER1_DENIED, ROUTING_TIER3_ENGINE_ERROR,
+    ROUTING_TIER3_REFUSED, SPAN_GATEWAY_INGRESS_DISPATCH,
 };
 
 /// Run a single ingress envelope through the full gateway dispatch
@@ -92,7 +89,6 @@ pub async fn dispatch_gateway_ingress<E: ReadEnv>(
     tier1: &dyn SpiceDbTier1Gate,
     tier1_owner: Option<&Arc<dyn OwnerTupleEmitter>>,
     tier1_declarative: &dyn Tier1DeclarativeGate,
-    aauth: Option<&GatewayAAuthIngress>,
     policy: &GatewayPolicyStack,
     message_caller_identity: &JwtHeaderCallerIdentitySource,
     caller_identity_policy: GatewayCallerIdentityPolicy,
@@ -121,7 +117,6 @@ pub async fn dispatch_gateway_ingress<E: ReadEnv>(
         caller_id = tracing::field::Empty,
         agent_subject = tracing::field::Empty,
         routing_outcome = tracing::field::Empty,
-        aauth_agent_id = tracing::field::Empty,
     );
 
     async {
@@ -151,7 +146,6 @@ pub async fn dispatch_gateway_ingress<E: ReadEnv>(
                     tier1,
                     tier1_owner,
                     tier1_declarative,
-                    aauth,
                     policy,
                     streaming_ingress_enabled,
                     streaming_ingress_config,
@@ -183,7 +177,6 @@ async fn dispatch_routed<E: ReadEnv>(
     tier1: &dyn SpiceDbTier1Gate,
     tier1_owner: Option<&Arc<dyn OwnerTupleEmitter>>,
     tier1_declarative: &dyn Tier1DeclarativeGate,
-    aauth: Option<&GatewayAAuthIngress>,
     policy: &GatewayPolicyStack,
     streaming_ingress_enabled: bool,
     streaming_ingress_config: GatewayStreamingIngressConfig,
@@ -194,14 +187,14 @@ async fn dispatch_routed<E: ReadEnv>(
     reply: async_nats::Subject,
     ingress_subject: &str,
     ingress: GatewayIngressSubject,
-    mut audit_caller_id: String,
-    mut audit_caller_source: Option<String>,
+    audit_caller_id: String,
+    audit_caller_source: Option<String>,
 ) {
     let agent_id = ingress.agent_id().clone();
     let method = ingress.method().clone();
     let method_dots = method.as_dotted_suffix().to_owned();
     let agent_subject = ingress.agent_delivery().to_string();
-    let mut headers_owned = msg.headers.clone().unwrap_or_default();
+    let headers_owned = msg.headers.clone().unwrap_or_default();
     tracing::Span::current().record(ATTR_AGENT_SUBJECT, tracing::field::display(&agent_subject));
 
     let mut payload: Bytes = msg.payload.clone();
@@ -212,123 +205,8 @@ async fn dispatch_routed<E: ReadEnv>(
     let method_slashes = method_dots.replace('.', "/");
     let _unary_deadline_guard = unary_deadline_for_method(env, method_dots.as_str());
 
-    let mut caller_slug = caller_slug_from_audit_id(audit_caller_id.as_str());
+    let caller_slug = caller_slug_from_audit_id(audit_caller_id.as_str());
     let mut tier1_zed_token: Option<String> = None;
-    // Carries the verified `aa-auth+jwt`'s `jti` past the AAuth block below so
-    // it can be attached as the forwarded message's `AAuth-Access` header
-    // (draft "AAuth-Access Response Header") once the allow path is reached.
-    let mut aauth_access_jti: Option<String> = None;
-
-    // AAuth verifies caller identity before any authorization tier runs --
-    // authentication must precede authorization.
-    if let Some(aauth) = aauth
-        && aauth.mode != AAuthMode::Off
-    {
-        let header_pairs: Vec<(String, String)> = headers_owned
-            .iter()
-            .flat_map(|(name, values)| values.iter().map(move |value| (name.to_string(), value.to_string())))
-            .collect();
-        let auth_token = headers_owned
-            .get(aauth_headers::NATS_AUTH_TOKEN)
-            .map(std::string::ToString::to_string);
-        match aauth
-            .resolve_nats(
-                ingress_subject,
-                Some(reply.as_str()),
-                payload.as_ref(),
-                &header_pairs,
-                auth_token.as_deref(),
-                method_dots.as_str(),
-            )
-            .await
-        {
-            Ok(resolution) => {
-                if let Some(agent_id) = resolution.agent_id.as_deref() {
-                    tracing::Span::current().record(ATTR_AAUTH_AGENT_ID, agent_id);
-                }
-                // A verified `aa-auth+jwt` principal supersedes the
-                // JWT-header caller identity for everything downstream
-                // (Tier-1 authorization + audit attribution). Absent a
-                // principal, the agent authenticated on its own behalf and
-                // the existing caller identity is left untouched.
-                let identity = gateway_caller_identity_after_aauth(
-                    GatewayCallerIdentity {
-                        audit_caller_id,
-                        audit_caller_source,
-                        caller_slug,
-                    },
-                    resolution.principal.as_deref(),
-                );
-                audit_caller_id = identity.audit_caller_id;
-                audit_caller_source = identity.audit_caller_source;
-                caller_slug = identity.caller_slug;
-                aauth_access_jti = resolution.auth_jti;
-            }
-            Err(deny) => {
-                tracing::Span::current().record(ATTR_ROUTING_OUTCOME, ROUTING_AAUTH_DENIED);
-                warn!(
-                    ingress.subject = %ingress_subject,
-                    agent_subject = %agent_subject,
-                    routing_outcome = ROUTING_AAUTH_DENIED,
-                    reason = %deny.reason,
-                    "gateway aauth verification rejected ingress envelope",
-                );
-                // Emit the full wire encoding: body is authoritative (ADR#0056);
-                // derived Jsonrpc-Id / Jsonrpc-Error-Code projections stay for
-                // routing and metrics so clients that only inspect headers still
-                // see -32118.
-                let encoded = ingress_error_response_wire(
-                    &headers_owned,
-                    payload.as_ref(),
-                    deny.code,
-                    "aauth verification rejected envelope",
-                    None,
-                );
-                let mut reply_headers = encoded.headers;
-                if let Some((name, value)) = deny.to_requirement_header() {
-                    reply_headers.insert(name.as_str(), value.as_str());
-                }
-                reply_error(client, reply, reply_headers, encoded.body).await;
-                spawn_gateway_audit_publish(
-                    audit_enabled,
-                    client.clone(),
-                    config.a2a_prefix.clone(),
-                    agent_id.clone(),
-                    AuditEnvelope::new(
-                        &agent_id,
-                        method_slashes.clone(),
-                        json_rpc_audit_req_id(payload.as_ref()),
-                        started_wall_ms,
-                        elapsed_ms(started_mono),
-                        AuditOutcome::Err {
-                            code: -32_118,
-                            message: "aauth verification rejected envelope".into(),
-                        },
-                        Some(payload.as_ref()),
-                        enrich_audit_caller(
-                            AuditEnvelopeFields {
-                                trace_id: Some(trace_id.clone()),
-                                rules_fired: Some(vec![aauth_deny_rule_fired(&deny.reason).to_string()]),
-                                ..Default::default()
-                            },
-                            audit_caller_id.as_str(),
-                            &audit_caller_source,
-                        ),
-                    ),
-                );
-                return;
-            }
-        }
-    }
-
-    // AAuth-Access (draft "AAuth-Access Response Header"): once an
-    // `aa-auth+jwt` has been verified, the resource echoes back an opaque
-    // access identifier -- here, the auth token's `jti` -- so the forwarded
-    // agent can correlate this delivery with the access grant that produced
-    // it. Absent a verified auth token, no header is attached.
-    if let Some(jti) = aauth_access_jti.as_deref() {
-        headers_owned.insert(aauth_headers::ACCESS, jti);
-    }
 
     if audit_caller_id != ANONYMOUS_CALLER_SLUG {
         tracing::Span::current().record(ATTR_CALLER_ID, audit_caller_id.as_str());
@@ -638,7 +516,7 @@ async fn dispatch_routed<E: ReadEnv>(
     )
     .await;
 
-    let rules_fired = build_rules_fired(tier1, policy, &tier3_rewrites, env, aauth.map(|a| a.mode));
+    let rules_fired = build_rules_fired(tier1, policy, &tier3_rewrites, env);
     let (rewrites, stream_consumer) = merge_forward_audit_rewrites(
         &tier3_rewrites,
         ingress_subject,
@@ -1023,9 +901,8 @@ fn build_rules_fired<E: ReadEnv>(
     policy: &GatewayPolicyStack,
     tier3_rewrites: &[crate::policy::tier3_redaction::RedactionRewrite],
     env: &E,
-    aauth_mode: Option<crate::aauth::AAuthMode>,
 ) -> Vec<String> {
-    let mut rules_fired = Vec::with_capacity(4);
+    let mut rules_fired = Vec::with_capacity(3);
     rules_fired.push(if tier1.is_enabled() {
         "gateway.tier1.spicedb_allowed".into()
     } else {
@@ -1044,11 +921,6 @@ fn build_rules_fired<E: ReadEnv>(
         }
     } else {
         "gateway.tier3.layer_disabled".into()
-    });
-    rules_fired.push(match aauth_mode {
-        Some(AAuthMode::Enforce) => "gateway.aauth.enforced_allow".into(),
-        Some(AAuthMode::Shadow) => "gateway.aauth.shadow".into(),
-        Some(AAuthMode::Off) | None => "gateway.aauth.layer_disabled".into(),
     });
     rules_fired
 }
