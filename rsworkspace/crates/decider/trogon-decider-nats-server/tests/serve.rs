@@ -12,6 +12,7 @@ use std::time::Duration;
 use async_nats::jetstream::{self, message::StreamMessage};
 use async_nats::{HeaderMap, RequestError, RequestErrorKind};
 use buffa::Message as _;
+use futures::TryStreamExt as _;
 use grpc_nats_micro::{
     ContentType, DiscoveryMetadata, EndpointBinding, MethodName, MethodNameInput, ServiceName, ServiceNameInput,
     SubjectPrefix as MicroSubjectPrefix, SubjectPrefixInput,
@@ -24,7 +25,7 @@ use trogon_decider_nats_server::constants::{
 };
 use trogon_decider_nats_server::{
     CommandEndpoint, DeciderHost, FaultClass, FileModuleSource, ModuleReference, ModuleStore, PrincipalPrefix,
-    ServerConfig, SubjectPrefix, TenantPosition, find_detail, serve_until,
+    ServerConfig, StartupError, SubjectPrefix, TenantPosition, find_detail, serve_until,
 };
 use trogon_decider_runtime::{
     AdmissionLimit, AuthorizationDeniedError, CommandAuthorizer, CommandPrincipal, PrincipalId, PrincipalKind,
@@ -43,7 +44,6 @@ const SCHEDULE_ID: &str = "0198be07a38479e1a376f250f9181bec";
 const ALICE: &str = "alice";
 const ALICE_SUBJECT: &str = "decider.agent.alice.DeciderService.Decide";
 const MALLORY_SUBJECT: &str = "decider.agent.mallory.DeciderService.Decide";
-const TENANT_ALICE_SUBJECT: &str = "acme.decider.agent.alice.DeciderService.Decide";
 const FORGED_PRINCIPAL_HEADER: &str = "X-A2a-Caller-Id";
 const UNDECODABLE_PAYLOAD: [u8; 4] = [0xff, 0xff, 0xff, 0xff];
 
@@ -185,15 +185,15 @@ struct RunningHost {
 
 impl RunningHost {
     async fn start() -> Self {
-        Self::start_with(TenantPosition::Absent, |host| host).await
+        Self::start_with(|host| host).await
     }
 
-    async fn start_with(tenant: TenantPosition, customize: impl FnOnce(DeciderHost) -> DeciderHost) -> Self {
+    async fn start_with(customize: impl FnOnce(DeciderHost) -> DeciderHost) -> Self {
         let server = JetStreamTestServer::start().await;
         let client = server.client().await;
         let js = server.jetstream().await;
         let modules = module_store();
-        let config = config(modules.path(), tenant);
+        let config = config(modules.path(), TenantPosition::Absent);
 
         let host = Arc::new(customize(
             DeciderHost::start(&config, &FileModuleSource::new(modules.path()), js)
@@ -468,7 +468,7 @@ async fn a_subject_naming_no_principal_is_refused_before_the_payload_is_read() {
 
 #[tokio::test]
 async fn a_principal_the_authorizer_denies_is_refused_whatever_its_headers_claim() {
-    let host = RunningHost::start_with(TenantPosition::Absent, |host| host.with_authorizer(AdmitOnly(alice()))).await;
+    let host = RunningHost::start_with(|host| host.with_authorizer(AdmitOnly(alice()))).await;
 
     let mut forged = protobuf_headers();
     forged.insert(FORGED_PRINCIPAL_HEADER, ALICE);
@@ -494,31 +494,34 @@ async fn a_principal_the_authorizer_denies_is_refused_whatever_its_headers_claim
 }
 
 #[tokio::test]
-async fn a_host_serving_several_tenants_reads_the_principal_after_the_tenant_token() {
-    let host = RunningHost::start_with(TenantPosition::Wildcard, |host| {
-        host.with_authorizer(AdmitOnly(alice()))
-    })
-    .await;
+async fn a_host_asked_to_serve_several_tenants_refuses_to_start_and_provisions_nothing() {
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
+    let modules = module_store();
 
-    let reply = host
-        .decide_on(TENANT_ALICE_SUBJECT, &create_schedule(SCHEDULE_ID))
-        .await;
-    assert_eq!(response(&reply).stream_position, 1);
+    let Err(error) = DeciderHost::start(
+        &config(modules.path(), TenantPosition::Wildcard),
+        &FileModuleSource::new(modules.path()),
+        js.clone(),
+    )
+    .await
+    else {
+        panic!("a command principal carries no tenant, so every tenant's commands would share one set of streams");
+    };
 
-    let untenanted = host
-        .try_request_on(
-            ALICE_SUBJECT,
-            create_schedule(SCHEDULE_ID).encode_to_vec(),
-            protobuf_headers(),
-        )
-        .await
-        .expect_err("a shared host subscribes only where a tenant token leads");
     assert!(
-        reached_no_handler(&untenanted),
-        "a subject without the tenant token has no tenant for the host to act under: {untenanted}"
+        matches!(error, StartupError::StateNotScopedByTenant { .. }),
+        "the refusal names the state the tenants would share: {error}"
     );
-
-    host.stop().await;
+    let provisioned = js
+        .stream_names()
+        .try_collect::<Vec<_>>()
+        .await
+        .expect("the server lists its streams");
+    assert!(
+        provisioned.is_empty(),
+        "a refused host leaves no stream or bucket behind for a later start to inherit: {provisioned:?}"
+    );
 }
 
 #[tokio::test]

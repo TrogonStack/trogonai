@@ -38,7 +38,8 @@ use trogon_decider_wit::host::CommandEnvelope;
 use crate::authorizer::AdmitAnyPrincipal;
 use crate::config::ServerConfig;
 use crate::constants::{
-    CONTENT_TYPE_HEADER, NATS_SERVICE_ERROR_CODE_HEADER, NATS_SERVICE_ERROR_HEADER, PROTOBUF_CONTENT_TYPE,
+    CONTENT_TYPE_HEADER, ENV_DECIDER_TENANT_POSITION, NATS_SERVICE_ERROR_CODE_HEADER, NATS_SERVICE_ERROR_HEADER,
+    PROTOBUF_CONTENT_TYPE, TENANT_POSITION_ABSENT,
 };
 use crate::endpoint::CommandEndpoint;
 use crate::event_subject::{EventSubjectError, ModuleEventSubjects};
@@ -46,6 +47,7 @@ use crate::module_reference::ModuleReference;
 use crate::module_source::ModuleSource;
 use crate::outcome::CommandReply;
 use crate::request::CommandRequest;
+use crate::tenant_position::TenantPosition;
 
 /// Resolves one inbound message onto the module that owns it.
 ///
@@ -166,11 +168,17 @@ impl DeciderHost {
     /// union, and [`ensure_stream`] refuses an existing stream that does not
     /// already cover it, so the mismatch surfaces at startup rather than as a
     /// command whose events land nowhere.
+    ///
+    /// A host configured to serve several tenants is refused before anything
+    /// is fetched or provisioned. Its events stream, its snapshot bucket and
+    /// the principal it authorizes carry no tenant, so every tenant reaching
+    /// it would read and append to the same streams.
     pub async fn start<S: ModuleSource>(
         config: &ServerConfig,
         modules: &S,
         js: jetstream::Context,
     ) -> Result<Self, StartupError> {
+        ensure_one_tenant_account(config)?;
         let engine = WasmDeciderEngine::new(WasmEngineConfig::default())?;
         let modules = load_modules(&engine, modules, &config.modules).await?;
         let module_names = modules.iter().map(|module| module.name().clone()).collect::<Vec<_>>();
@@ -400,6 +408,16 @@ async fn load_modules<S: ModuleSource>(
     Ok(modules)
 }
 
+fn ensure_one_tenant_account(config: &ServerConfig) -> Result<(), StartupError> {
+    match config.endpoint.tenant() {
+        TenantPosition::Absent => Ok(()),
+        TenantPosition::Wildcard => Err(StartupError::StateNotScopedByTenant {
+            events_stream: config.events_stream.clone(),
+            snapshot_bucket: config.snapshot_bucket.clone(),
+        }),
+    }
+}
+
 fn events_stream_config(
     config: &ServerConfig,
     module_names: &[ModuleName],
@@ -432,6 +450,17 @@ fn snapshot_bucket_config(config: &ServerConfig) -> jetstream::kv::Config {
 /// Why the host could not be assembled from its configuration.
 #[derive(Debug, thiserror::Error)]
 pub enum StartupError {
+    /// The host was configured to serve several tenants, and nothing it would
+    /// store or authorize is scoped by tenant.
+    #[error(
+        "a host cannot serve several tenants: events stream '{events_stream}', snapshot bucket '{snapshot_bucket}' \
+         and the command principal are not scoped by tenant, so every tenant would read and append to the same \
+         streams; serve one tenant account per host with {ENV_DECIDER_TENANT_POSITION}={TENANT_POSITION_ABSENT}"
+    )]
+    StateNotScopedByTenant {
+        events_stream: String,
+        snapshot_bucket: String,
+    },
     /// The shared wasmtime engine could not be built.
     #[error("failed to build the wasm engine: {0}")]
     Engine(#[from] WasmEngineError),
