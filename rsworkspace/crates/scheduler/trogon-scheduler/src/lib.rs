@@ -36,7 +36,9 @@ pub use config::ScheduleWriteCondition;
 pub use constants::{SCHEDULES_BUCKET, SCHEDULES_CHECKPOINT_KEY};
 pub use error::{ScheduleSpecError, SchedulerError};
 #[cfg(feature = "postgres")]
-pub use projections::{PostgresSchedulesProjection, SchedulesProjector};
+pub use projections::{
+    PostgresSchedulesProjection, PostgresTls, PostgresTlsError, PostgresUrl, PostgresUrlError, SchedulesProjector,
+};
 
 /// Query entry points for the Postgres projection.
 #[cfg(feature = "postgres")]
