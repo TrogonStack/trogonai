@@ -1,7 +1,7 @@
 use a2a_auth_callout::AudienceAccount;
 use a2a_auth_callout::credentials::mtls::ClientCertPem;
 use a2a_auth_callout::error::AuthCalloutError;
-use trogon_nats::{ClientCertificate, Location};
+use trogon_nats::{ClientCertificate, Location, NatsTls};
 use trogon_std::env::InMemoryEnv;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -53,11 +53,14 @@ fn nats_settings_keep_every_server_and_the_shared_client_certificate() -> Result
     let config = nats_config(&env).ok_or(FixtureError::MissingNatsConfig)?;
     assert_eq!(config.servers, ["tls://one:4443", "tls://two:4443"]);
     assert_eq!(
-        config.tls.client_certificate(),
-        Ok(Some(ClientCertificate {
-            cert: Location::Path("certs/callout.crt".into()),
-            key: Location::Path("certs/callout.key".into()),
-        }))
+        config.tls,
+        Ok(NatsTls::Enabled {
+            ca: None,
+            client_cert: Some(ClientCertificate {
+                cert: Location::Path("certs/callout.crt".into()),
+                key: Location::Path("certs/callout.key".into()),
+            }),
+        })
     );
     env.set("NATS_URL", " , ");
     assert!(nats_config(&env).is_none());
