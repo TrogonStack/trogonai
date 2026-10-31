@@ -239,8 +239,8 @@ export function populateSeed(now: Date = new Date()): readonly IntegrationState[
       slots: [runtime(datadog, 'webhook_secret', 'active', 1)],
       registration: registered('webhook_secret', 1, 24 * 14),
       custody: { tier: 'customer_managed', keyState: KeyState.ACTIVE, admission: KeyBackendAdmission.PAUSED },
-      traffic: { base: 7, rejectedPerHundred: 0 },
-      recent: { lastAgoMs: 12 * MINUTE, stepMs: 70 * MINUTE },
+      traffic: { base: 7, rejectedPerHundred: 0, lockedOutHours: 12 },
+      recent: { lastAgoMs: 12 * MINUTE, stepMs: 70 * MINUTE, rejection: 'key_unavailable' },
       createdDaysAgo: 72,
     }),
     build(now, {
