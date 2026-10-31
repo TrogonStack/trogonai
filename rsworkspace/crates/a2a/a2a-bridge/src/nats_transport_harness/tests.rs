@@ -10,6 +10,7 @@ use trogon_std::env::{ReadEnv, SystemEnv};
 use a2a_nats::constants::GATEWAY_CALLER_ID_HTTP;
 
 use super::*;
+use crate::edge_signing_harness::post;
 use crate::inbound::handle_jsonrpc;
 
 fn caller_headers(agent_id: &str, caller_id: Option<&str>) -> HeaderMap {
@@ -51,7 +52,7 @@ async fn nats_transport_callout_mint_per_request_and_jwt_caller_id() {
         .to_string(),
     );
 
-    let response = handle_jsonrpc(caller_headers("planner", None), body, &state)
+    let response = handle_jsonrpc(post(caller_headers("planner", None), body), &state)
         .await
         .expect("message/send should succeed");
     assert_eq!(response.status(), StatusCode::OK);
@@ -73,7 +74,7 @@ async fn nats_transport_message_send_round_trips_caller_jwt_and_audit() {
         .to_string(),
     );
 
-    let response = handle_jsonrpc(caller_headers("planner", Some("caller-abc")), body, &state)
+    let response = handle_jsonrpc(post(caller_headers("planner", Some("caller-abc")), body), &state)
         .await
         .expect("message/send should succeed");
     assert_eq!(response.status(), StatusCode::OK);
@@ -110,7 +111,7 @@ async fn nats_transport_tasks_resubscribe_bootstraps_sse_stream() {
         .to_string(),
     );
 
-    let response = handle_jsonrpc(caller_headers("planner", Some("caller-sse")), body, &state)
+    let response = handle_jsonrpc(post(caller_headers("planner", Some("caller-sse")), body), &state)
         .await
         .expect("tasks/resubscribe should succeed");
     assert_eq!(response.status(), StatusCode::OK);

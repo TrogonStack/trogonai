@@ -8,8 +8,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use axum::{
     Router,
-    extract::State,
-    http::{HeaderMap, StatusCode},
+    extract::{OriginalUri, State},
+    http::{HeaderMap, Method, StatusCode, header::WWW_AUTHENTICATE},
     response::{
         IntoResponse, Response,
         sse::{Event, KeepAlive, Sse},
@@ -22,7 +22,10 @@ use futures_util::stream::{self, BoxStream, Stream};
 use serde::Serialize;
 use serde_json::{Map, Value};
 use tracing::warn;
+use trogon_aauth_verify::constants::SERVER_NONCE_HEADER;
 use trogon_identity_types::SubjectPrincipal;
+use trogon_identity_types::aauth::Requirement;
+use trogon_identity_types::constants::REQUIREMENT;
 use trogon_nats::{CredentialValue, NatsAuth, NatsConfig};
 use trogon_std::secret_string::{EmptySecretError, SecretString};
 
@@ -36,9 +39,14 @@ use a2a_nats::{A2aMethod, A2aPrefix, A2aTaskId, ReqId};
 use a2a_auth_callout::{CALLER_JWT_HEADER_NAME, CallerJwtHeaderValue, MintedUserJwt};
 
 use crate::auth::AuthCalloutClient;
-use crate::constants::{AGENT_ID_HEADER, INTERNAL_ERROR, JSONRPC_VERSION, SSE_EVENT_QUEUE_CAPACITY};
-use crate::error::BridgeError;
+use crate::constants::{
+    AGENT_ID_HEADER, INTERNAL_ERROR, JSONRPC_VERSION, SSE_EVENT_QUEUE_CAPACITY, WWW_AUTHENTICATE_BEARER,
+    WWW_AUTHENTICATE_INVALID_BEARER,
+};
+use crate::edge_auth::{EdgeAdmission, EdgeGuard};
+use crate::error::{BridgeError, EdgeAuthError};
 use crate::identity::{BridgeAgentId, BridgeUserJwt, CallerHttpsAuth};
+use crate::request::InboundRequest;
 
 #[must_use]
 pub fn default_a2a_prefix() -> A2aPrefix {
@@ -58,6 +66,7 @@ pub struct AppState {
     pub(crate) publisher: Arc<dyn InboundGatewayPublish>,
     pub(crate) jetstream: Arc<dyn TaskJetStreamPort>,
     pub(crate) prefix: A2aPrefix,
+    pub(crate) edge: Arc<dyn EdgeGuard>,
 }
 
 impl AppState {
@@ -67,12 +76,14 @@ impl AppState {
         publisher: Arc<dyn InboundGatewayPublish>,
         jetstream: Arc<dyn TaskJetStreamPort>,
         prefix: A2aPrefix,
+        edge: Arc<dyn EdgeGuard>,
     ) -> Self {
         Self {
             auth,
             publisher,
             jetstream,
             prefix,
+            edge,
         }
     }
 }
@@ -801,8 +812,14 @@ pub fn gateway_router(state: AppState) -> Router {
     Router::new().route("/", post(a2a_post)).with_state(state)
 }
 
-async fn a2a_post(State(state): State<AppState>, headers: HeaderMap, body: bytes::Bytes) -> Response {
-    match handle_jsonrpc(headers, body, &state).await {
+async fn a2a_post(
+    State(state): State<AppState>,
+    method: Method,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    match handle_jsonrpc(InboundRequest::new(method, uri, headers, body), &state).await {
         Ok(r) => r,
         Err(e) => bridge_error_into_response(e),
     }
@@ -816,18 +833,84 @@ struct BridgeErrorBody {
 }
 
 fn bridge_error_into_response(e: BridgeError) -> Response {
-    let status = StatusCode::BAD_GATEWAY;
-    let payload = BridgeErrorBody { error: e.to_string() };
-    (status, axum::Json(payload)).into_response()
+    let payload = axum::Json(BridgeErrorBody { error: e.to_string() });
+    match &e {
+        BridgeError::MissingAuthorization => (
+            StatusCode::UNAUTHORIZED,
+            [(WWW_AUTHENTICATE, WWW_AUTHENTICATE_BEARER.to_owned())],
+            payload,
+        )
+            .into_response(),
+        BridgeError::EdgeAuth(error) => edge_refusal_response(error, payload),
+        _ => (StatusCode::BAD_GATEWAY, payload).into_response(),
+    }
 }
 
-pub async fn handle_jsonrpc(headers: HeaderMap, body: bytes::Bytes, state: &AppState) -> Result<Response, BridgeError> {
-    let caller_auth = caller_auth_from(&headers)?;
-    let agent_id = agent_header_parse(&headers)?;
-    let caller_id = caller_id_from_headers(&headers);
+/// Tells a refused caller what to fix: sign with an agent token, bind the
+/// nonce it is handed, present a bearer naming the caller that signed, or
+/// retry once the edge can check proofs again.
+fn edge_refusal_response(error: &EdgeAuthError, payload: axum::Json<BridgeErrorBody>) -> Response {
+    match error {
+        EdgeAuthError::NonceRequired(challenge) => (
+            StatusCode::UNAUTHORIZED,
+            [(SERVER_NONCE_HEADER, challenge.nonce().as_str().to_owned())],
+            payload,
+        )
+            .into_response(),
+        EdgeAuthError::Unavailable(_) => (StatusCode::SERVICE_UNAVAILABLE, payload).into_response(),
+        EdgeAuthError::Unsigned(_) | EdgeAuthError::Unverified(_) | EdgeAuthError::UnidentifiedPresenter(_) => (
+            StatusCode::UNAUTHORIZED,
+            [(REQUIREMENT, Requirement::AgentToken.to_header_value())],
+            payload,
+        )
+            .into_response(),
+        EdgeAuthError::BearerMismatch { .. } | EdgeAuthError::UnidentifiedBearer(_) => (
+            StatusCode::UNAUTHORIZED,
+            [(WWW_AUTHENTICATE, WWW_AUTHENTICATE_INVALID_BEARER.to_owned())],
+            payload,
+        )
+            .into_response(),
+    }
+}
+
+/// Holds the request to the edge's proof of possession before anything is
+/// minted for it, logging every refusal and every proof shadow mode lets
+/// through.
+async fn admit_at_edge(
+    state: &AppState,
+    request: &InboundRequest,
+    caller: &CallerHttpsAuth,
+) -> Result<EdgeAdmission, EdgeAuthError> {
+    match state.edge.admit(request, caller).await {
+        Ok(EdgeAdmission::Shadowed(error)) => {
+            warn!(
+                mode = %state.edge.mode(),
+                reason = %error.detail(),
+                "AAuth proof of possession failed and shadow mode admitted the request"
+            );
+            Ok(EdgeAdmission::Shadowed(error))
+        }
+        Ok(admission) => Ok(admission),
+        Err(error) => {
+            warn!(
+                mode = %state.edge.mode(),
+                reason = %error.detail(),
+                "refused the request at the HTTP edge before minting for it"
+            );
+            Err(error)
+        }
+    }
+}
+
+pub async fn handle_jsonrpc(request: InboundRequest, state: &AppState) -> Result<Response, BridgeError> {
+    let caller_auth = caller_auth_from(request.headers())?;
+    let agent_id = agent_header_parse(request.headers())?;
+    let caller_id = caller_id_from_headers(request.headers());
+    admit_at_edge(state, &request, &caller_auth).await?;
     let jwt = state.auth.mint(&caller_auth).await?;
     let caller = jwt.subject_principal()?;
-    let v: Value = serde_json::from_slice(&body).map_err(|e: serde_json::Error| BridgeError::Deserialize(e))?;
+    let body = request.body();
+    let v: Value = serde_json::from_slice(body).map_err(|e: serde_json::Error| BridgeError::Deserialize(e))?;
     let Some(method) = v.get("method").and_then(Value::as_str) else {
         return Err(BridgeError::MissingJsonRpcMethod);
     };

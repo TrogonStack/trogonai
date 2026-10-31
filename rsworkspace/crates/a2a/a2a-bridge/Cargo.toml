@@ -20,14 +20,19 @@ workspace = true
 [dependencies]
 a2a-auth-callout = { workspace = true }
 a2a-nats = { workspace = true }
+trogon-aauth-verify = { workspace = true, features = ["nats-kv"] }
 trogon-identity-types = { workspace = true }
 trogon-nats = { workspace = true }
 trogon-std = { workspace = true }
 async-nats = { workspace = true, features = ["jetstream"] }
 async-trait = { workspace = true }
 axum = { workspace = true }
+base64 = { workspace = true }
 bytes = { workspace = true }
 futures-util = { workspace = true }
+# Has to stay the version trogon-aauth-verify links, since the static JWKS
+# file is parsed into its JwkSet.
+jsonwebtoken = { version = "=10.4.0", features = ["rust_crypto"] }
 reqwest = { workspace = true, features = ["json", "rustls-tls"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -38,9 +43,14 @@ tracing-subscriber = { version = "=0.3.23", features = ["fmt", "env-filter"] }
 
 [dev-dependencies]
 a2a = { workspace = true }
+async-nats = { workspace = true, features = ["jetstream", "kv"] }
 futures-util = { workspace = true }
 nkeys = { workspace = true }
+p256 = { version = "=0.13.2", features = ["ecdsa", "pkcs8"] }
+pkcs8 = { version = "=0.10.2", features = ["pem"] }
+rand_core = { version = "=0.6.4" }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-std = { workspace = true, features = ["test-support"] }

@@ -529,6 +529,7 @@ async fn router_finishes_a_message_only_stream_without_opening_a_task_consumer()
         Arc::new(FixedPublisher(bootstrap_bare_message().into())),
         Arc::new(StubTaskJetStreamPort),
         default_a2a_prefix(),
+        Arc::new(BearerOnlyGuard),
     );
     let response = gateway_router(state)
         .oneshot(http_request(Bytes::from_static(
