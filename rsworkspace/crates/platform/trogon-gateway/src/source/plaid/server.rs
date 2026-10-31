@@ -164,6 +164,28 @@ pub fn router<P: JetStreamPublisher, S: ObjectStorePut>(
     router_with_clock(publisher, config, SystemClock, fetcher)
 }
 
+pub fn runtime_router<P, S, G>(
+    publisher: ClaimCheckPublisher<P, S>,
+    config: &PlaidConfig,
+    integration_id: SourceIntegrationId,
+    credential_resolver: RuntimeCredentialResolver<G>,
+) -> Router
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    let fetcher = ReqwestPlaidKeyFetcher::new(&config.api_base_url, config.client_id.clone());
+    runtime_router_with_clock(
+        publisher,
+        config,
+        integration_id,
+        credential_resolver,
+        SystemClock,
+        fetcher,
+    )
+}
+
 fn router_with_clock<P: JetStreamPublisher, S: ObjectStorePut, C: EpochClock, F: PlaidKeyFetcher>(
     publisher: ClaimCheckPublisher<P, S>,
     config: &PlaidConfig,
@@ -181,7 +203,6 @@ fn router_with_clock<P: JetStreamPublisher, S: ObjectStorePut, C: EpochClock, F:
         .with_state(state)
 }
 
-#[allow(dead_code, reason = "unused until the gateway mounts the Plaid runtime router")]
 fn runtime_router_with_clock<P, S, C, F, G>(
     publisher: ClaimCheckPublisher<P, S>,
     config: &PlaidConfig,

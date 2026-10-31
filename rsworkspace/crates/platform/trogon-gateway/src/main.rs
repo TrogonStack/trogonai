@@ -26,9 +26,9 @@ use crate::constants::{
     CREDENTIAL_WORKER_INTERVAL, DISCORD_BOT_TOKEN_RETRY_BACKOFF, ENABLE_RUNTIME_DISCORD_CREDENTIALS,
     ENABLE_RUNTIME_GITHUB_CREDENTIALS, ENABLE_RUNTIME_GITLAB_CREDENTIALS, ENABLE_RUNTIME_INCIDENTIO_CREDENTIALS,
     ENABLE_RUNTIME_LINEAR_CREDENTIALS, ENABLE_RUNTIME_MICROSOFT_GRAPH_CREDENTIALS, ENABLE_RUNTIME_NOTION_CREDENTIALS,
-    ENABLE_RUNTIME_SENTRY_CREDENTIALS, ENABLE_RUNTIME_SLACK_CREDENTIALS, ENABLE_RUNTIME_TELEGRAM_CREDENTIALS,
-    ENABLE_RUNTIME_TWITTER_CREDENTIALS, NATS_CONNECT_TIMEOUT, NATS_SERVER_INFO_POLL_INTERVAL, OPENBAO_ADDR,
-    OPENBAO_ALLOW_PLAINTEXT, OPENBAO_TOKEN, SLACK_RESTART_BACKOFF,
+    ENABLE_RUNTIME_PLAID_CREDENTIALS, ENABLE_RUNTIME_SENTRY_CREDENTIALS, ENABLE_RUNTIME_SLACK_CREDENTIALS,
+    ENABLE_RUNTIME_TELEGRAM_CREDENTIALS, ENABLE_RUNTIME_TWITTER_CREDENTIALS, NATS_CONNECT_TIMEOUT,
+    NATS_SERVER_INFO_POLL_INTERVAL, OPENBAO_ADDR, OPENBAO_ALLOW_PLAINTEXT, OPENBAO_TOKEN, SLACK_RESTART_BACKOFF,
 };
 use crate::secret_store::openbao_secret_store::OpenBaoTransport;
 use anyhow::Context;
@@ -853,6 +853,7 @@ fn source_runtime_credentials_from_env(
     let linear_enabled = env_flag_enabled(env, ENABLE_RUNTIME_LINEAR_CREDENTIALS);
     let microsoft_graph_enabled = env_flag_enabled(env, ENABLE_RUNTIME_MICROSOFT_GRAPH_CREDENTIALS);
     let notion_enabled = env_flag_enabled(env, ENABLE_RUNTIME_NOTION_CREDENTIALS);
+    let plaid_enabled = env_flag_enabled(env, ENABLE_RUNTIME_PLAID_CREDENTIALS);
     let sentry_enabled = env_flag_enabled(env, ENABLE_RUNTIME_SENTRY_CREDENTIALS);
     let slack_enabled = env_flag_enabled(env, ENABLE_RUNTIME_SLACK_CREDENTIALS);
     let telegram_enabled = env_flag_enabled(env, ENABLE_RUNTIME_TELEGRAM_CREDENTIALS);
@@ -863,6 +864,7 @@ fn source_runtime_credentials_from_env(
         && !linear_enabled
         && !microsoft_graph_enabled
         && !notion_enabled
+        && !plaid_enabled
         && !sentry_enabled
         && !slack_enabled
         && !telegram_enabled
@@ -878,23 +880,45 @@ fn source_runtime_credentials_from_env(
         linear_enabled,
         microsoft_graph_enabled,
         notion_enabled,
+        plaid_enabled,
         sentry_enabled,
         slack_enabled,
         telegram_enabled,
         twitter_enabled,
     ) {
-        (true, false, false, false, false, false, false, false, false, false) => ENABLE_RUNTIME_GITHUB_CREDENTIALS,
-        (false, true, false, false, false, false, false, false, false, false) => ENABLE_RUNTIME_GITLAB_CREDENTIALS,
-        (false, false, true, false, false, false, false, false, false, false) => ENABLE_RUNTIME_INCIDENTIO_CREDENTIALS,
-        (false, false, false, true, false, false, false, false, false, false) => ENABLE_RUNTIME_LINEAR_CREDENTIALS,
-        (false, false, false, false, true, false, false, false, false, false) => {
+        (true, false, false, false, false, false, false, false, false, false, false) => {
+            ENABLE_RUNTIME_GITHUB_CREDENTIALS
+        }
+        (false, true, false, false, false, false, false, false, false, false, false) => {
+            ENABLE_RUNTIME_GITLAB_CREDENTIALS
+        }
+        (false, false, true, false, false, false, false, false, false, false, false) => {
+            ENABLE_RUNTIME_INCIDENTIO_CREDENTIALS
+        }
+        (false, false, false, true, false, false, false, false, false, false, false) => {
+            ENABLE_RUNTIME_LINEAR_CREDENTIALS
+        }
+        (false, false, false, false, true, false, false, false, false, false, false) => {
             ENABLE_RUNTIME_MICROSOFT_GRAPH_CREDENTIALS
         }
-        (false, false, false, false, false, true, false, false, false, false) => ENABLE_RUNTIME_NOTION_CREDENTIALS,
-        (false, false, false, false, false, false, true, false, false, false) => ENABLE_RUNTIME_SENTRY_CREDENTIALS,
-        (false, false, false, false, false, false, false, true, false, false) => ENABLE_RUNTIME_SLACK_CREDENTIALS,
-        (false, false, false, false, false, false, false, false, true, false) => ENABLE_RUNTIME_TELEGRAM_CREDENTIALS,
-        (false, false, false, false, false, false, false, false, false, true) => ENABLE_RUNTIME_TWITTER_CREDENTIALS,
+        (false, false, false, false, false, true, false, false, false, false, false) => {
+            ENABLE_RUNTIME_NOTION_CREDENTIALS
+        }
+        (false, false, false, false, false, false, true, false, false, false, false) => {
+            ENABLE_RUNTIME_PLAID_CREDENTIALS
+        }
+        (false, false, false, false, false, false, false, true, false, false, false) => {
+            ENABLE_RUNTIME_SENTRY_CREDENTIALS
+        }
+        (false, false, false, false, false, false, false, false, true, false, false) => {
+            ENABLE_RUNTIME_SLACK_CREDENTIALS
+        }
+        (false, false, false, false, false, false, false, false, false, true, false) => {
+            ENABLE_RUNTIME_TELEGRAM_CREDENTIALS
+        }
+        (false, false, false, false, false, false, false, false, false, false, true) => {
+            ENABLE_RUNTIME_TWITTER_CREDENTIALS
+        }
         _ => "runtime source credential flags",
     };
     let store = openbao_secret_store_from_env(env, enabled_by)?;
@@ -918,6 +942,9 @@ fn source_runtime_credentials_from_env(
     if notion_enabled {
         info!("Notion webhook runtime credentials enabled");
     }
+    if plaid_enabled {
+        info!("Plaid webhook runtime credentials enabled");
+    }
     if sentry_enabled {
         info!("Sentry webhook runtime credentials enabled");
     }
@@ -938,6 +965,7 @@ fn source_runtime_credentials_from_env(
         linear: linear_enabled.then(|| resolver.clone()),
         microsoft_graph: microsoft_graph_enabled.then(|| resolver.clone()),
         notion: notion_enabled.then(|| resolver.clone()),
+        plaid: plaid_enabled.then(|| resolver.clone()),
         sentry: sentry_enabled.then(|| resolver.clone()),
         slack: slack_enabled.then(|| resolver.clone()),
         telegram: telegram_enabled.then(|| resolver.clone()),
