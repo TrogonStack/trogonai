@@ -1,10 +1,10 @@
 //! Push-DLQ mirror.
 //!
 //! A pull-consumer that observes `{prefix}.v1.push.dlq.>` and republishes each
-//! envelope to `{prefix}.v1.push.dlq.mirror.<caller_id>.<task_id>` so a tenant
-//! audit surface can subscribe to its own DLQ without needing access to the
-//! authoritative stream. Loop markers (`X-A2a-Dlq-Mirrored` header and the
-//! `.mirror.` subject infix) plus a `PushDlqDedupGate` keep redelivery from
+//! caller's dead letter to `{prefix}.v1.push.dlq.mirror.{kind}.{id}.{task_id}`
+//! so a tenant audit surface can subscribe to its own DLQ without needing access
+//! to the authoritative stream. Loop markers (`X-A2a-Dlq-Mirrored` header and the
+//! mirror lane of the subject) plus a `PushDlqDedupGate` keep redelivery from
 //! producing duplicate mirror publishes.
 
 use std::sync::Arc;
@@ -16,6 +16,7 @@ use a2a_nats::push::push_idempotency_key::PushIdempotencyKey;
 use async_nats::HeaderMap;
 use async_nats::jetstream::consumer::pull::Config;
 use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy, ReplayPolicy};
+use async_nats::subject::ToSubject;
 use bytes::Bytes;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
@@ -23,6 +24,10 @@ use trogon_nats::jetstream::JetStreamPublisher;
 use trogon_std::env::ReadEnv;
 
 use a2a_nats::nats::subjects::A2aStream;
+use a2a_nats::nats::subjects::push::{
+    PushDlqMirrorSubject, PushDlqMirrorSubjectError, PushDlqSubject, PushDlqSubjectError,
+};
+use a2a_nats::nats::subjects::subscriptions::PushDlqAllSubject;
 use futures::StreamExt;
 
 pub use crate::constants::{
@@ -93,7 +98,7 @@ pub fn push_dlq_mirror_settings<E: ReadEnv>(env: &E) -> PushDlqMirrorSettings {
 pub fn push_dlq_mirror_pull_config(prefix: &A2aPrefix, durable: &PushDlqMirrorDurable) -> Config {
     Config {
         durable_name: Some(durable.as_str().to_owned()),
-        filter_subject: format!("{}.v1.push.dlq.>", prefix.as_str()),
+        filter_subject: PushDlqAllSubject::new(prefix).to_string(),
         deliver_policy: DeliverPolicy::All,
         ack_policy: AckPolicy::Explicit,
         replay_policy: ReplayPolicy::Instant,
@@ -101,33 +106,19 @@ pub fn push_dlq_mirror_pull_config(prefix: &A2aPrefix, durable: &PushDlqMirrorDu
     }
 }
 
-pub fn should_skip_push_dlq_mirror(source_subject: &str, headers: Option<&HeaderMap>) -> bool {
-    if source_subject.contains(".mirror.") {
-        return true;
-    }
-    headers.is_some_and(|hdrs| hdrs.get(PUSH_DLQ_MIRROR_HEADER).is_some())
+pub fn should_skip_push_dlq_mirror(prefix: &A2aPrefix, source_subject: &str, headers: Option<&HeaderMap>) -> bool {
+    let in_mirror_lane = !matches!(
+        PushDlqMirrorSubject::parse(prefix, source_subject),
+        Err(PushDlqMirrorSubjectError::NotPushDlqMirror)
+    );
+    in_mirror_lane || headers.is_some_and(|hdrs| hdrs.get(PUSH_DLQ_MIRROR_HEADER).is_some())
 }
 
-pub fn push_dlq_mirror_subject(prefix: &A2aPrefix, source_subject: &str) -> Option<String> {
-    if should_skip_push_dlq_mirror(source_subject, None) {
-        return None;
-    }
-
-    let head = format!("{}.v1.push.dlq.", prefix.as_str());
-    let rest = source_subject.strip_prefix(&head)?;
-    let mut segments = rest.split('.');
-    let caller_id = segments.next()?;
-    let task_id = segments.next()?;
-    if segments.next().is_some() || caller_id == "mirror" {
-        return None;
-    }
-
-    Some(format!(
-        "{}.v1.push.dlq.mirror.{}.{}",
-        prefix.as_str(),
-        caller_id,
-        task_id
-    ))
+pub fn push_dlq_mirror_subject(
+    prefix: &A2aPrefix,
+    source_subject: &str,
+) -> Result<PushDlqMirrorSubject, PushDlqSubjectError> {
+    PushDlqSubject::parse(prefix, source_subject).map(|dead_letter| dead_letter.mirror())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -148,16 +139,20 @@ pub async fn mirror_push_dlq_envelope<J>(
 where
     J: JetStreamPublisher + Clone + Send + Sync,
 {
-    if should_skip_push_dlq_mirror(source_subject, headers) {
+    if should_skip_push_dlq_mirror(prefix, source_subject, headers) {
         return MirrorDispatchOutcome::Skipped;
     }
 
-    let Some(mirror_subject) = push_dlq_mirror_subject(prefix, source_subject) else {
-        warn!(
-            source_subject,
-            "push DLQ mirror: source subject does not match expected agent DLQ shape; skipping"
-        );
-        return MirrorDispatchOutcome::Skipped;
+    let mirror_subject = match push_dlq_mirror_subject(prefix, source_subject) {
+        Ok(mirror_subject) => mirror_subject,
+        Err(error) => {
+            warn!(
+                source_subject,
+                error = %error,
+                "push DLQ mirror: source subject is not a caller's dead letter; skipping"
+            );
+            return MirrorDispatchOutcome::Skipped;
+        }
     };
 
     let Some(idempotency_key) = idempotency_key_from_dlq_payload(payload) else {
@@ -198,18 +193,14 @@ where
     let payload = Bytes::copy_from_slice(payload);
     for attempt in 1..=MAX_PUBLISH_RETRIES {
         match js
-            .publish_with_headers(
-                async_nats::Subject::from(mirror_subject.as_str()),
-                mirror_headers.clone(),
-                payload.clone(),
-            )
+            .publish_with_headers(mirror_subject.to_subject(), mirror_headers.clone(), payload.clone())
             .await
         {
             Ok(ack_fut) => match ack_fut.await {
                 Ok(_) => {
                     info!(
                         source_subject,
-                        mirror_subject = mirror_subject.as_str(),
+                        mirror_subject = %mirror_subject,
                         "push DLQ mirror publish acknowledged"
                     );
                     return MirrorDispatchOutcome::Mirrored;
@@ -217,7 +208,7 @@ where
                 Err(error) => {
                     warn!(
                         source_subject,
-                        mirror_subject = mirror_subject.as_str(),
+                        mirror_subject = %mirror_subject,
                         attempt,
                         error = %error,
                         "push DLQ mirror JetStream ack failed"
@@ -227,7 +218,7 @@ where
             Err(error) => {
                 warn!(
                     source_subject,
-                    mirror_subject = mirror_subject.as_str(),
+                    mirror_subject = %mirror_subject,
                     attempt,
                     error = %error,
                     "push DLQ mirror publish failed"
