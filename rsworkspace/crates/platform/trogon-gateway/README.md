@@ -30,8 +30,8 @@ cargo run -p trogon-gateway -- serve --config ./gateway.toml
 
 ## Container image
 
-Every push to `main` publishes the image to GitHub Container Registry as a
-`linux/amd64` and `linux/arm64` image index:
+Every push to `main` publishes the image to GitHub Container Registry as an
+image index, currently `linux/amd64` only:
 
 ```text
 ghcr.io/trogonstack/images/trogonai/trogon-gateway
