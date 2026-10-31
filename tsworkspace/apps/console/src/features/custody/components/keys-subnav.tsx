@@ -17,6 +17,9 @@ export function KeysSubnav({ className }: { className?: string }) {
       <Link to="/keys/backends" className={linkClass}>
         Backends
       </Link>
+      <Link to="/keys/migrations" className={linkClass}>
+        Migrations
+      </Link>
     </nav>
   );
 }

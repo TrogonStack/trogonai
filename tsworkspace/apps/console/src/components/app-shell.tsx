@@ -381,6 +381,20 @@ function KeysCrumbs({ segments }: { segments: readonly string[] }) {
     }
     return <KeyCrumb keyRef={decodeURIComponent(segments[2]!)} />;
   }
+  if (segments[1] === 'migrations') {
+    if (segments.length === 2) {
+      return <Breadcrumbs crumbs={[{ label: 'Encryption keys', to: '/keys' }, { label: 'Migrations' }]} />;
+    }
+    return (
+      <Breadcrumbs
+        crumbs={[
+          { label: 'Encryption keys', to: '/keys' },
+          { label: 'Migrations', to: '/keys/migrations' },
+          { label: decodeURIComponent(segments[2]!) },
+        ]}
+      />
+    );
+  }
   return <Breadcrumbs crumbs={[{ label: 'Encryption keys' }]} />;
 }
 
