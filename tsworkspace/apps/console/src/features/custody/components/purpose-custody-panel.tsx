@@ -1,6 +1,7 @@
 import { ShieldAlertIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 
+import { TableEmptyState } from '@/components/data-table';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
 import { denialReasonMessages } from '../domain/faults';
@@ -79,11 +80,18 @@ export function PurposeCustodyPanel({ purposes }: { purposes: readonly PurposeCu
         </div>
       </CardHeader>
       <CardContent>
-        <ul className="grid gap-4 lg:grid-cols-2">
-          {purposes.map((purpose) => (
-            <PurposeCard key={purpose.purpose.id} purpose={purpose} />
-          ))}
-        </ul>
+        {purposes.length === 0 ? (
+          <TableEmptyState
+            title="No key purposes yet"
+            message="Purposes appear here once a platform service starts encrypting your data with a key."
+          />
+        ) : (
+          <ul className="grid gap-4 lg:grid-cols-2">
+            {purposes.map((purpose) => (
+              <PurposeCard key={purpose.purpose.id} purpose={purpose} />
+            ))}
+          </ul>
+        )}
       </CardContent>
     </Card>
   );
