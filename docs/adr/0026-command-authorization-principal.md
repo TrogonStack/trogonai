@@ -7,6 +7,14 @@ date: 2026-07-15
 
 # ADR#0026: Command Authorization Principal and Authorizer Hook for Decider Execution
 
+> **Amended by [ADR#0082](./0082-bus-principal-from-subject-and-edge-proof-of-possession.md)
+> (2026-10-30).** The seam is mandatory in the decider host: the host derives
+> the `CommandPrincipal` from subject tokens through Decision 4's mapping,
+> rejects a request without one before decoding it, and never executes with
+> `WithoutAuthorization`. Decision 5's "behavior is unchanged" default and the
+> opt-in enforcement in Consequences no longer apply to the host; execution
+> paths outside the host are unaffected.
+
 ## Context
 
 `trogon_decider_runtime::execution::CommandExecution` is the single entry

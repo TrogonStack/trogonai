@@ -85,6 +85,16 @@ something else.
   [`openssl`](https://crates.io/crates/openssl) crate, or a vendor TLS SDK as
   the primary TLS boundary when rustls can satisfy the requirement.
 
+> Amended 2026-10-30: the workspace has one rustls crypto provider,
+> aws-lc-rs. async-nats is built with its `aws-lc-rs` feature instead of
+> `ring`. Third-party crates such as reqwest, hyper-rustls and bollard can
+> still compile `ring` into the same rustls, and rustls panics rather than
+> choose between two compiled-in providers, so the provider is installed
+> rather than inferred: `trogon_nats::connect` installs aws-lc-rs as the
+> process default, idempotently, before it builds a TLS configuration, and
+> binaries do not install providers themselves. See
+> [ADR#0081](./0081-nats-tls-by-default-and-operator-mode-admission.md).
+
 Prefer terminating TLS at the deployment edge (ingress, load balancer, or
 service mesh) when the platform provides it, so that certificate lifecycle and
 cipher policy stay centralized. In-process TLS is the deliberate exception, for
@@ -92,6 +102,14 @@ when the deployment does not terminate TLS in the path, when end-to-end
 encryption with no plaintext hop is required, or when a compliance requirement
 demands encryption into the process. When in-process TLS is used, it uses
 rustls per this decision.
+
+> Amended 2026-10-30: for NATS clients, in-process TLS is the norm rather
+> than the exception. Every NATS connection terminates TLS in the client
+> process, and no sidecar or service mesh is assumed, because nats-server
+> needs the client's own certificate for `verify: true` and for the auth
+> callout's certificate scheme, and because deployments such as the compose
+> stack have no mesh. See
+> [ADR#0081](./0081-nats-tls-by-default-and-operator-mode-admission.md).
 
 ## Exceptions
 

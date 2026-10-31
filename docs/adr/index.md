@@ -86,3 +86,5 @@ future implementation work.
 - [ADR#0078: API Key Rotation Grace and the First-Release Audit Set](./0078-api-key-rotation-grace-and-audit-set.md)
 - [ADR#0079: External Secret Sources Resolve Behind the Secrets Service (Draft)](./0079-external-secret-sources.md)
 - [ADR#0080: A Bolt for JavaScript App Consumes the Gateway's Slack Traffic Through a `NatsReceiver` That Dispatches What the Gateway Already Verified and Stored (Draft)](./0080-slack-bolt-nats-receiver.md)
+- [ADR#0081: Every NATS Connection Uses TLS Unless Explicitly Disabled, and Clients Enter Operator-Mode Accounts Only Through Platform Credentials or the Auth Callout](./0081-nats-tls-by-default-and-operator-mode-admission.md)
+- [ADR#0082: Inside the Bus the Principal Is Derived from the Subject, and Proof of Possession Is Enforced Only at the External Edge](./0082-bus-principal-from-subject-and-edge-proof-of-possession.md)
