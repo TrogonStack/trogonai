@@ -250,7 +250,11 @@ outside this product model.
 Key purposes are a catalogue declared by the data-plane services that own the
 wrapped payloads. A purpose names one service-owned payload kind. Secrets and
 platform control-plane state are never purposes. Tenant surfaces list purposes
-from the catalogue and never invent them.
+from the catalogue and never invent them. The owning service declares each
+purpose as a `KeyPurposeDeclaration` in the key custody contract and ships
+the declaration with the code that first wraps that payload, so the catalogue
+is empty until a data-plane service adopts `KeyManagement`. Tenant surfaces
+render an empty catalogue as such and never fill it with example purposes.
 
 ### 7. The secret store is not the pluggable part
 

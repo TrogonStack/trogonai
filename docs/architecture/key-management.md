@@ -180,7 +180,9 @@ Purposes come from a catalogue declared by the data-plane services that own the
 wrapped payloads. A purpose names one service-owned payload kind. Secrets and
 platform control-plane state are never purposes, and tenant surfaces list
 purposes from the catalogue rather than inventing them
-([ADR#0033](../adr/0033-key-custody-product-model.md) Decision 6).
+([ADR#0033](../adr/0033-key-custody-product-model.md) Decision 6). Each
+declaration ships with the code that first wraps its payload, so the catalogue
+stays empty until a data-plane service adopts `KeyManagement`.
 
 ## Operations
 
