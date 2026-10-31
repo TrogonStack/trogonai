@@ -311,6 +311,8 @@ and `PRINCIPAL_MISSING`, and a subject without those tokens matches no subscript
 no header or payload field can stand in for them. The derived principal carries no claims and no
 directed principal, because the subject has no position for either. A client acting for a
 principal configures a `PrincipalPrefix`, the host's prefix followed by that principal's tokens.
+An id that cannot be one subject token travels in the hashed form every edge maps it to, and that
+hashed token is the id the host derives and an authorizer sees.
 
 A host serves one tenant account until decider state is scoped by tenant. The derived principal
 carries no tenant, and every command a host runs shares its one events stream and snapshot

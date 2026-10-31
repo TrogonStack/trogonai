@@ -8,12 +8,11 @@
 //! alone.
 
 use trogon_decider_runtime::{PrincipalId, PrincipalKind};
-use trogon_nats::constants::MAX_NATS_TOKEN_LENGTH;
-use trogon_nats::{SubjectTokenViolationError, SubjectViolationError, validate_published_subject};
+use trogon_identity_types::{SubjectPrincipal, SubjectPrincipalError};
+use trogon_nats::{SubjectViolationError, validate_published_subject};
 
 use crate::constants::{DECIDE_METHOD_NAME, DECIDER_SERVICE_NAME};
 use crate::endpoint::SubjectPrefix;
-use crate::subject_principal::{SubjectPrincipal, SubjectPrincipalError};
 
 /// A subject prefix that ends in the principal a client acts for.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,17 +21,16 @@ pub struct PrincipalPrefix(String);
 impl PrincipalPrefix {
     /// Appends a principal's subject tokens to the namespace a host answers under.
     ///
-    /// The prefix answers to the limits of the `Decide` subject a client derives
-    /// under it: each token within one token's length, and the whole subject
-    /// within ADR#0055's token and byte budget.
+    /// The id is mapped the way every edge maps a verified credential's id, so
+    /// one that cannot be a single subject token is carried in its hashed form,
+    /// and that form is the id the host derives. The prefix answers to
+    /// ADR#0055's token and byte budget for the `Decide` subject a client
+    /// derives under it.
     pub fn new(prefix: &SubjectPrefix, kind: PrincipalKind, id: &PrincipalId) -> Result<Self, PrincipalPrefixError> {
-        let principal =
-            SubjectPrincipal::from_tokens(kind.as_str(), id.as_str()).map_err(PrincipalPrefixError::Principal)?;
-        let value = format!("{prefix}.{}.{}", principal.kind(), principal.principal_id());
+        let principal = SubjectPrincipal::from_credential(kind, id).map_err(PrincipalPrefixError::Principal)?;
+        let value = format!("{prefix}.{principal}");
         let subject = format!("{value}.{DECIDER_SERVICE_NAME}.{DECIDE_METHOD_NAME}");
-        validate_published_subject(&subject)
-            .and_then(|()| validate_token_lengths(&subject))
-            .map_err(|source| PrincipalPrefixError::Subject { subject, source })?;
+        validate_published_subject(&subject).map_err(|source| PrincipalPrefixError::Subject { subject, source })?;
 
         Ok(Self(value))
     }
@@ -49,24 +47,11 @@ impl std::fmt::Display for PrincipalPrefix {
     }
 }
 
-fn validate_token_lengths(subject: &str) -> Result<(), SubjectViolationError> {
-    subject
-        .split('.')
-        .enumerate()
-        .find(|(_, token)| token.len() > MAX_NATS_TOKEN_LENGTH)
-        .map_or(Ok(()), |(index, token)| {
-            Err(SubjectViolationError::Token {
-                index,
-                token: token.to_owned(),
-                source: SubjectTokenViolationError::TooLong(token.len()),
-            })
-        })
-}
-
 /// Why a principal does not yield a prefix a client can configure.
 #[derive(Debug, thiserror::Error)]
 pub enum PrincipalPrefixError {
-    /// The principal cannot be carried as subject tokens.
+    /// The id already has the hashed form the mapping reserves for its own
+    /// output, so carrying it would claim whichever principal hashes to it.
     #[error("principal cannot be carried in a subject: {0}")]
     Principal(#[source] SubjectPrincipalError),
     /// The subject a client derives under the prefix breaks ADR#0055's shape or limits.
