@@ -448,6 +448,11 @@ webhook_token = "datadog-webhook-token"
 
 [sources.zoom.integrations.primary.webhook]
 secret_token = "zoom-secret-token"
+
+[sources.plaid.integrations.primary.webhook]
+client_id = "plaid-client-id"
+secret = "plaid-secret"
+environment = "sandbox"
 "#;
 
 async fn serve_every_webhook_source(env: &trogon_std::env::InMemoryEnv) {
@@ -467,7 +472,7 @@ async fn serve_every_webhook_source(env: &trogon_std::env::InMemoryEnv) {
     .unwrap();
 
     let js = server.jetstream().await;
-    for stream in ["GITHUB_PRIMARY", "SLACK_PRIMARY", "ZOOM_PRIMARY"] {
+    for stream in ["GITHUB_PRIMARY", "SLACK_PRIMARY", "ZOOM_PRIMARY", "PLAID_PRIMARY"] {
         js.get_stream(stream).await.unwrap();
     }
 }

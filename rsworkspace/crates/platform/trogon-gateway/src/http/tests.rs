@@ -94,6 +94,11 @@ webhook_token = "datadog-webhook-token"
 
 [sources.zoom.integrations.primary.webhook]
 secret_token = "zoom-secret-token"
+
+[sources.plaid.integrations.primary.webhook]
+client_id = "plaid-client-id"
+secret = "plaid-secret"
+environment = "sandbox"
 "#
     .to_string()
 }
