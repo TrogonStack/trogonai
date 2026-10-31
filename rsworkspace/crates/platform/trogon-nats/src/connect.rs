@@ -238,6 +238,10 @@ pub async fn connect(config: &NatsConfig, connection_timeout: Duration) -> Resul
 /// authentication and fails once that pass does, for a connection that serves
 /// one request. TLS follows the same settings as [`connect`].
 ///
+/// A connection that drops after it was made redials at most once per configured
+/// server and then closes for good, so it cannot go on dialing with the caller's
+/// token after its request is over.
+///
 /// Give a caller's token as [`CredentialValue::Literal`] so it is never read as
 /// a `file://` or `env://` reference.
 #[instrument(name = NATS_CONNECT, skip(config, auth), fields(servers = ?config.servers, auth = %auth.description(), timeout_secs = ?connection_timeout.as_secs()))]
@@ -250,6 +254,7 @@ pub async fn connect_once(
     let opts = prepare(&config).await?;
     let result = opts
         .connection_timeout(connection_timeout)
+        .max_reconnects(config.servers.len())
         .connect(&config.servers)
         .await;
     connected(&config, result)

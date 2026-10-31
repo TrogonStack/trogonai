@@ -1,3 +1,4 @@
+use async_nats::connection::State;
 use async_nats::{ClientError, ConnectErrorKind, ServerError};
 
 use super::*;
@@ -15,6 +16,7 @@ const FIRST_DIAL_DEADLINE: Duration = Duration::from_secs(1);
 const SERVER_INFO_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const REFUSED_DIAL_TIMEOUT: Duration = Duration::from_secs(1);
 const FAIL_FAST_DEADLINE: Duration = Duration::from_secs(5);
+const SHUFFLED_PASSES: usize = 32;
 const REFUSING_SERVER: &str = "127.0.0.1:1";
 const SERVER_TOKEN: &str = "server-token";
 const OTHER_TOKEN: &str = "other-token";
@@ -482,6 +484,54 @@ async fn connect_once_fails_after_one_pass_instead_of_retrying() {
     .unwrap_err();
 
     assert!(matches!(err, ConnectError::ConnectionFailed { .. }), "{err:?}");
+}
+
+#[tokio::test]
+async fn connect_once_reaches_a_live_server_listed_after_an_unreachable_one() {
+    let server = CoreTestServer::start().await;
+    let config = NatsConfig::new(
+        vec![REFUSING_SERVER.to_owned(), server.address().to_owned()],
+        NatsAuth::None,
+    )
+    .with_tls(NatsTls::Disabled);
+
+    // The servers are tried in a fresh random order on every pass, so run enough
+    // passes for the unreachable one to come first in at least one of them.
+    for _ in 0..SHUFFLED_PASSES {
+        let client = connect_once(&config, NatsAuth::None, REFUSED_DIAL_TIMEOUT)
+            .await
+            .unwrap();
+
+        client.flush().await.unwrap();
+    }
+}
+
+async fn wait_until_disconnected(client: &Client) {
+    tokio::time::timeout(FAIL_FAST_DEADLINE, async {
+        while client.connection_state() != State::Disconnected {
+            tokio::time::sleep(SERVER_INFO_POLL_INTERVAL).await;
+        }
+    })
+    .await
+    .expect("the client notices that its server is gone");
+}
+
+#[tokio::test]
+async fn connect_once_closes_for_good_after_one_pass_once_its_connection_drops() {
+    let server = CoreTestServer::start().await;
+    let config = NatsConfig::from_url(server.address()).with_tls(NatsTls::Disabled);
+    let client = connect_once(&config, NatsAuth::None, REFUSED_DIAL_TIMEOUT)
+        .await
+        .unwrap();
+    client.flush().await.unwrap();
+
+    drop(server);
+    wait_until_disconnected(&client).await;
+
+    tokio::time::timeout(FAIL_FAST_DEADLINE, client.flush())
+        .await
+        .expect("a dropped connection gives up after one pass instead of redialing forever")
+        .unwrap_err();
 }
 
 #[tokio::test]
