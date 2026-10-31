@@ -1,5 +1,5 @@
 use super::*;
-use clap::error::ErrorKind;
+use clap::error::{ContextKind, ContextValue, ErrorKind};
 use clap::{CommandFactory, Parser};
 use trogon_nats::{CredentialValue, Location, NKeySeed, NatsAuth};
 
@@ -426,13 +426,14 @@ fn nats_args_reject_literal_secrets_for_every_secret_flag() {
         let err = NatsCli::try_parse_from(["cli", flag, "literal-secret-value"])
             .err()
             .unwrap();
-        let message = err.to_string();
 
         assert_eq!(err.kind(), ErrorKind::ValueValidation, "{flag}");
-        assert!(!message.contains("literal-secret-value"), "{message}");
-        assert!(message.contains(flag), "{message}");
-        assert!(message.contains("env://NAME"), "{message}");
-        assert!(message.contains("file:///path"), "{message}");
+        assert_eq!(
+            err.get(ContextKind::InvalidArg),
+            Some(&ContextValue::String(format!("{flag} <REFERENCE>"))),
+            "{flag}"
+        );
+        assert_eq!(err.get(ContextKind::InvalidValue), None, "{flag}");
     }
 }
 
