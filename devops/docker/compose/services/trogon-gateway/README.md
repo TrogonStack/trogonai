@@ -41,6 +41,7 @@ All commands below run from the compose directory (`devops/docker/compose`):
 ```bash
 cd devops/docker/compose
 cp .env.example .env
+printf 'TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET=%s\n' "$(openssl rand -hex 32)" >> .env
 # edit .env for gateway, NATS, source secrets, logging, or ngrok settings
 docker compose up --build --remove-orphans
 ```
@@ -48,7 +49,8 @@ docker compose up --build --remove-orphans
 The compose stack mounts `./services/trogon-gateway/gateway.toml` into the
 gateway container. The default file enables a local GitHub receiver at
 `/sources/github/local/webhook` using `TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET`
-from `.env`.
+from `.env`. It has no default, and every `docker compose` command for this
+stack, `down` included, fails until it is set.
 That variable is only for this local compose config; other environments only
 need the environment variables referenced by their deployed gateway TOML.
 
@@ -277,13 +279,24 @@ pulling and returns messages it has not handled to Pub/Sub.
 
 ## Exposing webhooks with ngrok
 
+The `dev` profile publishes the gateway on a public ngrok URL. Anyone who has
+the URL reaches the whole gateway, including the `/-/credentials` API when
+`TROGON_GATEWAY_CREDENTIAL_MANAGEMENT_ADMIN_TOKEN` is set, so run it only while
+a provider needs to call in.
+
 ```bash
 docker compose --profile dev up
 ```
 
-This starts ngrok alongside the gateway. Check `docker compose logs ngrok`
+This starts ngrok alongside the gateway, and ngrok logs a warning that the
+stack is public. Check `docker compose logs ngrok`
 for the public URL. Append the integration path when configuring each platform's
 webhook settings (for example, `https://<ngrok-url>/sources/github/acme-main/webhook`).
+Close the tunnel as soon as you are done:
+
+```bash
+docker compose --profile dev stop ngrok
+```
 
 ## OpenBao local secret store
 
