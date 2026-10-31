@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router';
-import { PauseCircleIcon, ServerIcon } from 'lucide-react';
+import { KeyRoundIcon, PauseCircleIcon, ServerIcon } from 'lucide-react';
 
 import { FaultAlert } from '@/components/fault-alert';
 import { PageHeader } from '@/components/page-header';
@@ -9,6 +9,7 @@ import { BackendsTable } from '@/features/custody/components/backends-table';
 import { CustodyExplainer } from '@/features/custody/components/custody-explainer';
 import { KeysStats, KeysStatsSkeleton } from '@/features/custody/components/keys-stats';
 import { KeysSubnav } from '@/features/custody/components/keys-subnav';
+import { PurposeCustodyPanel } from '@/features/custody/components/purpose-custody-panel';
 import { useCustodyQuery } from '@/features/custody/queries';
 
 function PausedBadge({ count }: { count: number }) {
@@ -32,10 +33,16 @@ export function KeysScreen() {
         description="Which backends the platform may reach to protect your data, and what happens when you pause one."
         badge={paused > 0 ? <PausedBadge count={paused} /> : undefined}
         actions={
-          <Link to="/keys/backends/new" className={buttonVariants({ size: 'lg' })}>
-            <ServerIcon data-icon="inline-start" />
-            Register a backend
-          </Link>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link to="/keys/keys/new" className={buttonVariants({ variant: 'outline', size: 'lg' })}>
+              <KeyRoundIcon data-icon="inline-start" />
+              Bind a key
+            </Link>
+            <Link to="/keys/backends/new" className={buttonVariants({ size: 'lg' })}>
+              <ServerIcon data-icon="inline-start" />
+              Register a backend
+            </Link>
+          </div>
         }
       />
       <KeysSubnav />
@@ -43,6 +50,7 @@ export function KeysScreen() {
       {query.data ? (
         <>
           <KeysStats stats={query.data.stats} />
+          <PurposeCustodyPanel purposes={query.data.purposes} />
           <BackendsTable backends={query.data.backends} />
           <CustodyExplainer />
         </>
