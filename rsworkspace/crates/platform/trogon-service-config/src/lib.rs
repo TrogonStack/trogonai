@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use clap::Args;
 use confique::Config;
 use trogon_nats::{NatsAuth, NatsConfig, NatsSettings};
+use trogon_std::env::ReadEnv;
 use trogon_std::secret_string::SecretString;
 
 pub use env_var_name::{EnvVarName, EnvVarNameError};
@@ -96,7 +97,13 @@ pub fn load_config<T: Config>(config_path: Option<&Path>) -> Result<T, confique:
     builder.env().load()
 }
 
-pub fn resolve_nats(section: &NatsConfigSection, overrides: &NatsArgs) -> Result<NatsConfig, NatsArgsError> {
+/// `overrides` win over `section`. `NATS_TLS_DISABLED` is read from `env`
+/// alone, so neither a config file nor a CLI flag can disable TLS.
+pub fn resolve_nats<E: ReadEnv>(
+    section: &NatsConfigSection,
+    overrides: &NatsArgs,
+    env: &E,
+) -> Result<NatsConfig, NatsArgsError> {
     let pick = |primary: &Option<String>, fallback: &Option<String>| {
         first_non_empty(primary.as_ref(), fallback.as_ref()).cloned()
     };
@@ -123,7 +130,7 @@ pub fn resolve_nats(section: &NatsConfigSection, overrides: &NatsArgs) -> Result
     let user_from_flag = overrides.nats_user.as_deref().is_some_and(|user| !user.is_empty());
     let user_sent_as_token = user_from_flag && settings.password.is_none() && settings.token.is_none();
 
-    let config = settings.resolve();
+    let config = settings.resolve(env);
     if user_sent_as_token && matches!(config.auth, NatsAuth::Token(_)) {
         return Err(NatsArgsError::UserSentAsToken);
     }

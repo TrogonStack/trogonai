@@ -5,6 +5,11 @@ use std::time::Duration;
 use async_nats::jetstream;
 use testcontainers_modules::nats::{Nats, NatsServerCmd};
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
+use trogon_std::env::SystemEnv;
+
+use crate::auth::NatsConfig;
+use crate::connect::build_options;
+use crate::tls::NatsTls;
 
 const NATS_IMAGE_TAG: &str = "2.10.14";
 const NATS_CLIENT_PORT: u16 = 4222;
@@ -39,7 +44,10 @@ impl TestServer {
     }
 
     async fn client(&self) -> async_nats::Client {
-        async_nats::ConnectOptions::new()
+        let config = NatsConfig::from_url(&self.address).with_tls(NatsTls::Disabled);
+        build_options(&config, &SystemEnv)
+            .await
+            .expect("build NATS testcontainer client options")
             .connection_timeout(CONNECT_TIMEOUT)
             .connect(&self.address)
             .await
@@ -52,6 +60,8 @@ pub struct JetStreamTestServer(TestServer);
 
 impl JetStreamTestServer {
     /// The mapped host and port for clients that manage their own connections.
+    /// The server does not speak TLS, so a configuration that connects here
+    /// has to disable it.
     pub fn address(&self) -> &str {
         &self.0.address
     }
@@ -87,7 +97,8 @@ impl CoreTestServer {
     }
 
     /// The `host:port` this server is reachable on, for tests that connect
-    /// through their own configuration rather than a raw client.
+    /// through their own configuration rather than a raw client. The server
+    /// does not speak TLS, so that configuration has to disable it.
     pub fn address(&self) -> &str {
         &self.0.address
     }

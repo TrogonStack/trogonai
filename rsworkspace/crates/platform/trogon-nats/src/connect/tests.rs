@@ -2,7 +2,13 @@ use async_nats::{ClientError, ServerError};
 
 use super::*;
 use crate::credential_value::{CredentialValue, Location, NKeySeed};
+use crate::test_support::CoreTestServer;
+use crate::tls::ClientCertificate;
 use trogon_std::env::InMemoryEnv;
+use trogon_std::log_capture::{CapturedEvents, LevelFilter};
+
+const TLS_DISABLED_WARNING: &str = "NATS TLS is disabled, which is only for tests and local debugging";
+const PLAINTEXT_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[test]
 fn test_reconnect_delay_starts_at_one_second() {
@@ -203,13 +209,32 @@ async fn build_options_rejects_unset_env_reference() {
     ));
 }
 
+fn client_cert(cert: &str, key: &str) -> Option<ClientCertificate> {
+    Some(ClientCertificate {
+        cert: Location::parse(cert).unwrap(),
+        key: Location::parse(key).unwrap(),
+    })
+}
+
+fn env_with(pairs: &[(&str, &str)]) -> InMemoryEnv {
+    let env = InMemoryEnv::new();
+    for (name, value) in pairs {
+        env.set(*name, *value);
+    }
+    env
+}
+
+async fn build_options_error(pairs: &[(&str, &str)]) -> ConnectError {
+    let env = env_with(pairs);
+    build_options(&NatsConfig::from_env(&env), &env).await.unwrap_err()
+}
+
 #[tokio::test]
 async fn build_options_applies_tls_paths() {
-    let tls = NatsTls::new(
-        Location::parse("/c.pem"),
-        Location::parse("file:///k.pem"),
-        Location::parse("/ca.pem"),
-    );
+    let tls = NatsTls::Enabled {
+        ca: Location::parse("/ca.pem"),
+        client_cert: client_cert("/c.pem", "file:///k.pem"),
+    };
 
     build_options(&config_with(NatsAuth::None).with_tls(tls), &InMemoryEnv::new())
         .await
@@ -218,7 +243,10 @@ async fn build_options_applies_tls_paths() {
 
 #[tokio::test]
 async fn build_options_applies_client_certificate_without_ca() {
-    let tls = NatsTls::new(Location::parse("/c.pem"), Location::parse("/k.pem"), None);
+    let tls = NatsTls::Enabled {
+        ca: None,
+        client_cert: client_cert("/c.pem", "/k.pem"),
+    };
 
     build_options(&config_with(NatsAuth::None).with_tls(tls), &InMemoryEnv::new())
         .await
@@ -226,8 +254,21 @@ async fn build_options_applies_client_certificate_without_ca() {
 }
 
 #[tokio::test]
+async fn build_options_accepts_disabled_tls() {
+    build_options(
+        &config_with(NatsAuth::None).with_tls(NatsTls::Disabled),
+        &InMemoryEnv::new(),
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
 async fn build_options_rejects_unsupported_tls_scheme() {
-    let tls = NatsTls::new(None, None, Location::parse("op://vault/ca"));
+    let tls = NatsTls::Enabled {
+        ca: Location::parse("op://vault/ca"),
+        client_cert: None,
+    };
 
     let err = build_options(&config_with(NatsAuth::None).with_tls(tls), &InMemoryEnv::new())
         .await
@@ -238,30 +279,65 @@ async fn build_options_rejects_unsupported_tls_scheme() {
 
 #[tokio::test]
 async fn build_options_rejects_cert_without_key() {
-    let tls = NatsTls::new(Location::parse("/c.pem"), None, None);
-
-    let err = build_options(&config_with(NatsAuth::None).with_tls(tls), &InMemoryEnv::new())
-        .await
-        .unwrap_err();
+    let err = build_options_error(&[("NATS_CERT", "/c.pem")]).await;
 
     assert_eq!(err.to_string(), "Invalid NATS_CERT: must be set together with NATS_KEY");
 }
 
 #[tokio::test]
 async fn build_options_rejects_key_without_cert() {
-    let tls = NatsTls::new(None, Location::parse("/k.pem"), Location::parse("/ca.pem"));
-
-    let err = build_options(&config_with(NatsAuth::None).with_tls(tls), &InMemoryEnv::new())
-        .await
-        .unwrap_err();
+    let err = build_options_error(&[("NATS_KEY", "/k.pem"), ("NATS_CA", "/ca.pem")]).await;
 
     assert_eq!(err.to_string(), "Invalid NATS_KEY: must be set together with NATS_CERT");
 }
 
 #[tokio::test]
+async fn build_options_rejects_an_unrecognized_tls_disabled_value() {
+    let err = build_options_error(&[("NATS_TLS_DISABLED", "false")]).await;
+
+    assert_eq!(
+        err.to_string(),
+        "Invalid NATS_TLS_DISABLED: `false` is not one of true, 1, yes"
+    );
+}
+
+#[tokio::test]
+async fn build_options_rejects_disabling_tls_alongside_a_tls_setting() {
+    let err = build_options_error(&[("NATS_TLS_DISABLED", "true"), ("NATS_CA", "/ca.pem")]).await;
+
+    assert_eq!(
+        err.to_string(),
+        "Invalid NATS_TLS_DISABLED: cannot be combined with NATS_CA"
+    );
+}
+
+#[tokio::test]
+async fn connect_reports_a_tls_misconfiguration_without_connecting() {
+    let env = env_with(&[("NATS_TLS_DISABLED", "off")]);
+
+    let err = connect(&NatsConfig::from_env(&env), Duration::from_millis(100))
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        err,
+        ConnectError::InvalidSetting {
+            setting: "NATS_TLS_DISABLED",
+            error: SettingError::UnrecognizedValue { .. }
+        }
+    ));
+}
+
+#[tokio::test]
 async fn build_options_rejects_unsupported_client_certificate_scheme() {
-    let cert = NatsTls::new(Location::parse("op://vault/cert"), Location::parse("/k.pem"), None);
-    let key = NatsTls::new(Location::parse("/c.pem"), Location::parse("op://vault/key"), None);
+    let cert = NatsTls::Enabled {
+        ca: None,
+        client_cert: client_cert("op://vault/cert", "/k.pem"),
+    };
+    let key = NatsTls::Enabled {
+        ca: None,
+        client_cert: client_cert("/c.pem", "op://vault/key"),
+    };
 
     let cert_err = build_options(&config_with(NatsAuth::None).with_tls(cert), &InMemoryEnv::new())
         .await
@@ -315,4 +391,82 @@ fn connect_error_display_invalid_setting() {
         error: SettingError::UnsupportedScheme("op".into()),
     };
     assert_eq!(err.to_string(), "Invalid NATS_TOKEN: scheme `op` is not supported");
+}
+
+async fn connect_without_retry(env: &InMemoryEnv) -> Result<Client, async_nats::ConnectError> {
+    install_default_crypto_provider();
+    let config = NatsConfig::from_env(env);
+    build_options(&config, env)
+        .await
+        .unwrap()
+        .connection_timeout(PLAINTEXT_CONNECT_TIMEOUT)
+        .connect(&config.servers)
+        .await
+}
+
+fn handshake_error(err: &async_nats::ConnectError) -> Option<&async_nats::rustls::Error> {
+    std::error::Error::source(err)?
+        .downcast_ref::<std::io::Error>()?
+        .get_ref()?
+        .downcast_ref::<async_nats::rustls::Error>()
+}
+
+#[tokio::test]
+async fn default_settings_cannot_connect_to_a_plaintext_server() {
+    let server = CoreTestServer::start().await;
+    let env = env_with(&[("NATS_URL", server.address())]);
+
+    let err = connect_without_retry(&env).await.unwrap_err();
+
+    assert!(
+        matches!(
+            handshake_error(&err),
+            Some(async_nats::rustls::Error::InvalidMessage(_))
+        ),
+        "{err:?}"
+    );
+}
+
+#[tokio::test]
+async fn disabling_tls_connects_to_a_plaintext_server() {
+    let server = CoreTestServer::start().await;
+    let env = env_with(&[("NATS_URL", server.address()), ("NATS_TLS_DISABLED", "true")]);
+
+    let client = connect_without_retry(&env).await.unwrap();
+
+    client.flush().await.unwrap();
+}
+
+fn tls_disabled_warnings(events: &CapturedEvents) -> usize {
+    events
+        .events()
+        .iter()
+        .filter(|event| event.message() == Some(TLS_DISABLED_WARNING))
+        .count()
+}
+
+#[tokio::test]
+async fn connect_warns_once_when_tls_is_disabled() {
+    let events = CapturedEvents::new();
+    let _guard = events.install(LevelFilter::WARN);
+    let env = env_with(&[("NATS_URL", "127.0.0.1:1"), ("NATS_TLS_DISABLED", "true")]);
+
+    connect(&NatsConfig::from_env(&env), Duration::from_millis(100))
+        .await
+        .unwrap();
+
+    assert_eq!(tls_disabled_warnings(&events), 1);
+}
+
+#[tokio::test]
+async fn connect_does_not_warn_when_tls_is_on() {
+    let events = CapturedEvents::new();
+    let _guard = events.install(LevelFilter::WARN);
+    let env = env_with(&[("NATS_URL", "127.0.0.1:1")]);
+
+    connect(&NatsConfig::from_env(&env), Duration::from_millis(100))
+        .await
+        .unwrap();
+
+    assert_eq!(tls_disabled_warnings(&events), 0);
 }

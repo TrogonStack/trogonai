@@ -783,7 +783,7 @@ pub fn load_with_overrides(
 }
 
 fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs, env: &impl ReadEnv) -> Result<ResolvedConfig, ConfigError> {
-    let nats = resolve_nats(&cfg.nats, nats_overrides).map_err(ConfigError::Nats)?;
+    let nats = resolve_nats(&cfg.nats, nats_overrides, env).map_err(ConfigError::Nats)?;
     let mut errors = Vec::new();
 
     let github = resolve_github_integrations(cfg.sources.github, env, &mut errors);
