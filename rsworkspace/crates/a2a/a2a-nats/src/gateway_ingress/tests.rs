@@ -1,149 +1,52 @@
 use async_nats::header::HeaderMap;
 use jsonrpc_nats::{Direction, decode, to_json_value};
+use trogon_identity_types::{PrincipalId, PrincipalKind, SubjectPrincipal};
 
 use super::*;
+use crate::a2a_method::A2aMethod;
 use crate::a2a_prefix::A2aPrefix;
+use crate::agent_id::A2aAgentId;
+use crate::nats::subjects::agents::AgentDeliverySubject;
+use crate::nats::subjects::gateway::GatewayIngressSubject;
 
 fn pfx() -> A2aPrefix {
     A2aPrefix::new("a2a").unwrap()
 }
 
 #[test]
-fn message_send() {
+fn ingress_from_agent_subject_keeps_the_principal_position() {
     assert_eq!(
-        resolve_gateway_ingress_subject("a2a.v1.gateway.bot.message.send", &pfx()).unwrap(),
-        "a2a.v1.agents.bot.message.send"
-    );
-}
-
-#[test]
-fn legacy_two_segment_identity_area_rejected() {
-    assert!(matches!(
-        resolve_gateway_ingress_subject("a2a.v1.gateway.acme.bot.message.send", &pfx()),
-        Err(GatewayIngressError::UnknownMethodSuffix)
-    ));
-}
-
-#[test]
-fn push_set_two_token_suffix() {
-    assert_eq!(
-        resolve_gateway_ingress_subject("a2a.v1.gateway.planner.push.set", &pfx()).unwrap(),
-        "a2a.v1.agents.planner.push.set"
-    );
-}
-
-#[test]
-fn dotted_prefix() {
-    let p = A2aPrefix::new("my.app").unwrap();
-    assert_eq!(
-        resolve_gateway_ingress_subject("my.app.v1.gateway.planner.tasks.get", &p).unwrap(),
-        "my.app.v1.agents.planner.tasks.get"
-    );
-}
-
-#[test]
-fn wrong_prefix_returns_not_gateway() {
-    assert!(matches!(
-        resolve_gateway_ingress_subject("other.gateway.bot.message.send", &pfx()),
-        Err(GatewayIngressError::NotGatewayIngress)
-    ));
-}
-
-#[test]
-fn invalid_agent_id_rejected_instead_of_silent_typo_subject() {
-    assert!(matches!(
-        resolve_gateway_ingress_subject("a2a.v1.gateway.bad*agent.message.send", &pfx()),
-        Err(GatewayIngressError::InvalidAgentId)
-    ));
-}
-
-#[test]
-fn too_many_segments_before_suffix_rejected() {
-    assert!(matches!(
-        resolve_gateway_ingress_subject("a2a.v1.gateway.t1.t2.bot.message.send", &pfx()),
-        Err(GatewayIngressError::UnknownMethodSuffix)
-    ));
-}
-
-#[test]
-fn compose_then_resolve_round_trips() {
-    let p = pfx();
-    let aid = A2aAgentId::new("planner").unwrap();
-    let g = compose_gateway_ingress_subject(&p, &aid, "message.send").unwrap();
-    assert_eq!(g, "a2a.v1.gateway.planner.message.send");
-    assert_eq!(
-        resolve_gateway_ingress_subject(&g, &p).unwrap(),
-        "a2a.v1.agents.planner.message.send"
-    );
-}
-
-#[test]
-fn ingress_from_agent_subject_transform() {
-    let p = pfx();
-    assert_eq!(
-        gateway_ingress_subject_from_agent_subject("a2a.v1.agents.planner.message.stream", &p).unwrap(),
-        "a2a.v1.gateway.planner.message.stream"
+        gateway_ingress_subject_from_agent_subject("a2a.v1.agents.planner.person.alice.message.stream", &pfx())
+            .unwrap(),
+        "a2a.v1.gateway.planner.person.alice.message.stream"
     );
 }
 
 #[test]
 fn ingress_from_agent_wrong_leader_returns_none() {
-    assert!(gateway_ingress_subject_from_agent_subject("a2a.v1.gateway.x.message.send", &pfx()).is_none());
+    assert!(gateway_ingress_subject_from_agent_subject("a2a.v1.gateway.x.person.alice.message.send", &pfx()).is_none());
     assert!(gateway_ingress_subject_from_agent_subject("wrong.agent.x.message.send", &pfx()).is_none());
+    assert!(gateway_ingress_subject_from_agent_subject("a2a.v1.agents.", &pfx()).is_none());
 }
 
 #[test]
-fn ingress_agent_method_matches_resolve_subject() {
-    let p = pfx();
-    for suffix in GATEWAY_INGRESS_METHOD_SUFFIXES {
-        let expected_method = suffix.join(".");
-        let subject = format!("a2a.v1.gateway.planner.{expected_method}");
-        let (agent, method) = gateway_ingress_agent_and_method(&subject, &p).unwrap();
-        let (legacy_agent, method_dots) = gateway_ingress_agent_and_method_dots(&subject, &p).unwrap();
-        assert_eq!(agent.as_str(), "planner");
-        assert_eq!(legacy_agent, agent);
-        assert_eq!(method.as_dotted_suffix(), expected_method);
-        assert_eq!(method_dots, expected_method);
-        assert_eq!(
-            resolve_gateway_ingress_subject(&subject, &p).unwrap(),
-            format!("a2a.v1.agents.planner.{expected_method}")
-        );
+fn the_gateway_relays_an_overlaid_subject_back_to_the_agent_subject_it_came_from() {
+    let agent = A2aAgentId::new("planner").unwrap();
+    let callers = [
+        SubjectPrincipal::from_tokens("person", "alice").unwrap(),
+        SubjectPrincipal::from_principal(PrincipalKind::Service, &PrincipalId::new("svc.billing").unwrap()),
+    ];
+    for prefix in [pfx(), A2aPrefix::new("my.app").unwrap()] {
+        for caller in &callers {
+            for method in A2aMethod::ALL {
+                let delivery = AgentDeliverySubject::new(&prefix, &agent, caller, method);
+                let ingress = gateway_ingress_subject_from_agent_subject(&delivery.to_string(), &prefix).unwrap();
+                let parsed = GatewayIngressSubject::parse(&prefix, &ingress).unwrap();
+                assert_eq!(parsed.caller(), caller);
+                assert_eq!(parsed.agent_delivery(), delivery, "{ingress}");
+            }
+        }
     }
-}
-
-#[test]
-fn typed_ingress_preserves_subject_validation_and_error_precedence() {
-    for subject in [
-        "other.v1.gateway.planner.message.send",
-        "a2a.v1.gateway.",
-        "a2a.v1.gateway...",
-        "a2a.v1.gateway.planner",
-        "a2a.v1.gateway.planner.unknown",
-        "a2a.v1.gateway.acme.planner.message.send",
-        "a2a.v1.gateway.bad*agent.message.send",
-        "a2a.v1.gateway.bad*agent.unknown",
-    ] {
-        let expected = resolve_gateway_ingress_subject(subject, &pfx()).unwrap_err();
-        assert_eq!(gateway_ingress_agent_and_method(subject, &pfx()).unwrap_err(), expected);
-        assert_eq!(
-            gateway_ingress_agent_and_method_dots(subject, &pfx()).unwrap_err(),
-            expected
-        );
-    }
-}
-
-#[test]
-fn compose_rejects_blank_method_suffix() {
-    let p = pfx();
-    let aid = A2aAgentId::new("b").unwrap();
-    assert!(matches!(
-        compose_gateway_ingress_subject(&p, &aid, ""),
-        Err(GatewayComposeError::EmptyMethodTail)
-    ));
-    assert!(matches!(
-        compose_gateway_ingress_subject(&p, &aid, "..."),
-        Err(GatewayComposeError::EmptyMethodTail)
-    ));
 }
 
 #[test]
@@ -156,68 +59,6 @@ fn invalid_request_payload_produces_stable_jsonrpc_wrapper() {
     assert_eq!(value["id"], "x");
     assert_eq!(value["error"]["code"], -32600);
     assert!(value["error"]["message"].as_str().unwrap().contains("bad ingress"));
-}
-
-#[test]
-fn empty_rest_after_gateway_leader_is_bad_shape() {
-    assert!(matches!(
-        resolve_gateway_ingress_subject("a2a.v1.gateway.", &pfx()),
-        Err(GatewayIngressError::BadSubjectShape)
-    ));
-    assert!(matches!(
-        gateway_ingress_agent_and_method_dots("a2a.v1.gateway.", &pfx()),
-        Err(GatewayIngressError::BadSubjectShape)
-    ));
-}
-
-#[test]
-fn no_known_suffix_matches_returns_unknown_method() {
-    assert!(matches!(
-        resolve_gateway_ingress_subject("a2a.v1.gateway.bot.foo.bar", &pfx()),
-        Err(GatewayIngressError::UnknownMethodSuffix)
-    ));
-}
-
-#[test]
-fn compose_rejects_unknown_method_suffix() {
-    let p = pfx();
-    let aid = A2aAgentId::new("b").unwrap();
-    assert!(matches!(
-        compose_gateway_ingress_subject(&p, &aid, "message.sned"),
-        Err(GatewayComposeError::UnknownMethodSuffix)
-    ));
-    assert!(matches!(
-        compose_gateway_ingress_subject(&p, &aid, "tasks"),
-        Err(GatewayComposeError::UnknownMethodSuffix)
-    ));
-}
-
-#[test]
-fn ingress_error_display_covers_every_variant() {
-    assert_eq!(
-        GatewayIngressError::NotGatewayIngress.to_string(),
-        "subject does not start with '{prefix}.v1.gateway.' for the configured prefix"
-    );
-    assert_eq!(
-        GatewayIngressError::BadSubjectShape.to_string(),
-        "expected '{prefix}.v1.gateway.{agent_id}.{method…}'"
-    );
-    assert_eq!(
-        GatewayIngressError::UnknownMethodSuffix.to_string(),
-        "unknown method suffix after gateway segment"
-    );
-    assert_eq!(
-        GatewayIngressError::InvalidAgentId.to_string(),
-        "agent id segment fails NATS token validation"
-    );
-    assert_eq!(
-        GatewayComposeError::EmptyMethodTail.to_string(),
-        "gateway ingress method suffix is empty"
-    );
-    assert_eq!(
-        GatewayComposeError::UnknownMethodSuffix.to_string(),
-        "gateway ingress method suffix is not a recognised A2A operation"
-    );
 }
 
 fn parse_error_code(encoded: &jsonrpc_nats::Encoded) -> i64 {

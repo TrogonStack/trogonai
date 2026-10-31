@@ -6,6 +6,10 @@ fn test_prefix() -> A2aPrefix {
     A2aPrefix::new("a2a".to_string()).unwrap()
 }
 
+fn test_caller() -> SubjectPrincipal {
+    SubjectPrincipal::from_tokens("person", "alice").unwrap()
+}
+
 fn test_task_id() -> A2aTaskId {
     A2aTaskId::new("task-resub-1").unwrap()
 }
@@ -16,7 +20,7 @@ async fn open_resubscribe_stream_succeeds_with_valid_consumer() {
     let (consumer, _tx) = MockJetStreamConsumer::new();
     js.add_consumer(consumer);
 
-    let stream = open_resubscribe_stream(&js, &test_prefix(), &test_task_id(), 42).await;
+    let stream = open_resubscribe_stream(&js, &test_prefix(), &test_task_id(), &test_caller(), 42).await;
     assert!(stream.is_ok());
 }
 
@@ -26,7 +30,7 @@ async fn returned_stream_has_last_seq_initialized_to_provided_value() {
     let (consumer, _tx) = MockJetStreamConsumer::new();
     js.add_consumer(consumer);
 
-    let stream = open_resubscribe_stream(&js, &test_prefix(), &test_task_id(), 99)
+    let stream = open_resubscribe_stream(&js, &test_prefix(), &test_task_id(), &test_caller(), 99)
         .await
         .unwrap();
     assert_eq!(stream.last_seq(), 99);
@@ -37,7 +41,7 @@ async fn get_stream_failure_returns_consumer_setup_error() {
     let js = MockJetStreamConsumerFactory::new();
     js.fail_get_stream_at(1);
 
-    let result = open_resubscribe_stream(&js, &test_prefix(), &test_task_id(), 0).await;
+    let result = open_resubscribe_stream(&js, &test_prefix(), &test_task_id(), &test_caller(), 0).await;
     assert!(matches!(result, Err(ClientError::ConsumerSetup(_))));
 }
 
@@ -45,7 +49,7 @@ async fn get_stream_failure_returns_consumer_setup_error() {
 async fn no_available_consumer_returns_consumer_setup_error() {
     let js = MockJetStreamConsumerFactory::new();
 
-    let result = open_resubscribe_stream(&js, &test_prefix(), &test_task_id(), 0).await;
+    let result = open_resubscribe_stream(&js, &test_prefix(), &test_task_id(), &test_caller(), 0).await;
     assert!(matches!(result, Err(ClientError::ConsumerSetup(_))));
 }
 
@@ -55,7 +59,7 @@ async fn last_seq_zero_succeeds() {
     let (consumer, _tx) = MockJetStreamConsumer::new();
     js.add_consumer(consumer);
 
-    let stream = open_resubscribe_stream(&js, &test_prefix(), &test_task_id(), 0).await;
+    let stream = open_resubscribe_stream(&js, &test_prefix(), &test_task_id(), &test_caller(), 0).await;
     assert!(stream.is_ok());
     assert_eq!(stream.unwrap().last_seq(), 0);
 }

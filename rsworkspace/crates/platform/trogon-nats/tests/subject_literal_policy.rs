@@ -33,19 +33,14 @@ const SCANNED_ROOTS: [&str; 3] = ["crates/a2a", "crates/acp", "crates/mcp"];
 ///
 /// Never add a row. Lower a count when a site moves onto a subject value
 /// object, and delete the row when it reaches zero.
-const KNOWN_SITES: [(&str, usize); 13] = [
+const KNOWN_SITES: [(&str, usize); 8] = [
     ("crates/a2a/a2a-auth-callout/src/permissions.rs", 2),
-    ("crates/a2a/a2a-bridge/src/inbound.rs", 1),
-    ("crates/a2a/a2a-gateway/src/config.rs", 1),
-    ("crates/a2a/a2a-gateway/src/gw_pull_backpressure.rs", 4),
     ("crates/a2a/a2a-gateway/src/push_dlq_mirror.rs", 3),
-    ("crates/a2a/a2a-gateway/src/runtime/dispatch.rs", 1),
     ("crates/a2a/a2a-nats/src/audit/emitter.rs", 2),
     ("crates/a2a/a2a-nats/src/catalog/registrar.rs", 5),
     ("crates/a2a/a2a-nats/src/constants.rs", 1),
-    ("crates/a2a/a2a-nats/src/gateway_ingress.rs", 8),
+    ("crates/a2a/a2a-nats/src/gateway_ingress.rs", 2),
     ("crates/a2a/a2a-nats/src/push/dlq.rs", 1),
-    ("crates/a2a/a2a-nats/src/server/bridge.rs", 2),
     ("crates/acp/acp-nats/src/jetstream/consumers.rs", 1),
 ];
 

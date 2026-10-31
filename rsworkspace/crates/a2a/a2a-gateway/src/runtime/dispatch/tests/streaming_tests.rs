@@ -10,12 +10,21 @@ use async_nats::jetstream::{self, stream};
 use bytes::Bytes;
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
+use trogon_identity_types::SubjectPrincipal;
 
 use crate::gw_ingress_stream::{
     CallerKey, StreamingIngressKind, StreamingIngressSpawn, StreamingIngressSpawnError, spawn_streaming_ingress_pump,
 };
 
 use super::fixture::{DispatchFixture, TestResult, assert_empty, receive, request};
+
+fn alice() -> SubjectPrincipal {
+    SubjectPrincipal::from_tokens("person", "alice").expect("ingress principal")
+}
+
+fn bob() -> SubjectPrincipal {
+    SubjectPrincipal::from_tokens("person", "bob").expect("other principal")
+}
 
 #[tokio::test]
 async fn message_stream_anchors_before_forward_and_delivers_only_matching_new_events() -> TestResult {
@@ -28,7 +37,8 @@ async fn message_stream_anchors_before_forward_and_delivers_only_matching_new_ev
             ..Default::default()
         })
         .await?;
-    let event_subject = TaskEventsSubject::new(&fixture.config.a2a_prefix, &A2aTaskId::new("task-1")?).to_string();
+    let task_id = A2aTaskId::new("task-1")?;
+    let event_subject = TaskEventsSubject::new(&fixture.config.a2a_prefix, &task_id, &alice()).to_string();
     let mut matching_headers = HeaderMap::new();
     matching_headers.insert(REQ_ID_HEADER, "request-7");
     jetstream
@@ -43,7 +53,7 @@ async fn message_stream_anchors_before_forward_and_delivers_only_matching_new_ev
     fixture.dispatch(request("message.stream", json!({}))).await;
     assert_eq!(
         receive(&mut fixture.agents).await?.subject.as_str(),
-        "a2a.v1.agents.bot.message.stream"
+        "a2a.v1.agents.bot.person.alice.message.stream"
     );
     let audit = fixture.audit("ok").await?;
     assert_eq!(audit["stream_consumer"], "gateway.bot.message.stream");
@@ -54,6 +64,14 @@ async fn message_stream_anchors_before_forward_and_delivers_only_matching_new_ev
             event_subject.clone(),
             other_headers,
             Bytes::from_static(b"other-caller"),
+        )
+        .await?
+        .await?;
+    jetstream
+        .publish_with_headers(
+            TaskEventsSubject::new(&fixture.config.a2a_prefix, &task_id, &bob()),
+            matching_headers.clone(),
+            Bytes::from_static(b"other-principal"),
         )
         .await?
         .await?;
@@ -78,7 +96,7 @@ async fn resubscribe_uses_task_cursor_and_shutdown_releases_caller_capacity() ->
         })
         .await?;
     let task_id = A2aTaskId::new("task-1")?;
-    let event_subject = TaskEventsSubject::new(&fixture.config.a2a_prefix, &task_id).to_string();
+    let event_subject = TaskEventsSubject::new(&fixture.config.a2a_prefix, &task_id, &alice()).to_string();
     let acknowledged = jetstream
         .publish(event_subject.clone(), Bytes::from_static(b"already-seen"))
         .await?
@@ -91,9 +109,17 @@ async fn resubscribe_uses_task_cursor_and_shutdown_releases_caller_capacity() ->
         .await;
     receive(&mut fixture.agents).await?;
     fixture.audit("ok").await?;
-    let other_subject = TaskEventsSubject::new(&fixture.config.a2a_prefix, &A2aTaskId::new("other-task")?).to_string();
+    let other_subject =
+        TaskEventsSubject::new(&fixture.config.a2a_prefix, &A2aTaskId::new("other-task")?, &alice()).to_string();
     jetstream
         .publish(other_subject, Bytes::from_static(b"other-task"))
+        .await?
+        .await?;
+    jetstream
+        .publish(
+            TaskEventsSubject::new(&fixture.config.a2a_prefix, &task_id, &bob()),
+            Bytes::from_static(b"other-principal"),
+        )
         .await?
         .await?;
     jetstream
@@ -118,6 +144,7 @@ async fn resubscribe_uses_task_cursor_and_shutdown_releases_caller_capacity() ->
                 },
                 reply: "_INBOX.dispatch".into(),
                 caller_key: CallerKey::new("alice").expect("caller"),
+                caller: alice(),
             },
             stopped.clone(),
         )

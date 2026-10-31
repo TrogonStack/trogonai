@@ -1,13 +1,15 @@
-//! `{prefix}.v1.gateway.>` ingress dispatch orchestrator.
+//! `{prefix}.v1.gateway.{agent}.{kind}.{id}.{method}` ingress dispatch orchestrator.
 //!
 //! Runs each ingress request through the full policy stack in
 //! order: caller-identity resolution -> Tier-1 SpiceDB ->
 //! Tier-1 declarative -> Tier-2 CEL -> Tier-3 redaction. Each
 //! denial path replies on the caller inbox with the matching
 //! JSON-RPC error code and publishes an audit envelope; the
-//! allow path forwards to `{prefix}.v1.global.agent.{agent}.{method}` and
-//! (when configured) spawns a streaming pump for stream-shaped
-//! methods.
+//! allow path forwards to `{prefix}.v1.agents.{agent}.{kind}.{id}.{method}`
+//! and (when configured) spawns a streaming pump for stream-shaped
+//! methods. Both write the principal the ingress subject carried and no
+//! other, so a header or payload can never re-attribute a relayed request
+//! (ADR#0082).
 
 #![cfg(feature = "spicedb")]
 
@@ -17,8 +19,9 @@ use std::time::Instant;
 use a2a_auth_callout::SpiceDbSubject;
 use a2a_nats::A2aMethod;
 use a2a_nats::audit::envelope::{AuditEnvelope, AuditEnvelopeFields, AuditOutcome, Tier1Decision, Tier3Decision};
+use a2a_nats::nats::subjects::gateway::GatewayIngressSubject;
 use a2a_nats::{
-    gateway_ingress_agent_and_method, ingress_error_response_wire, ingress_gateway_deadline_exceeded_response_bytes,
+    ingress_error_response_wire, ingress_gateway_deadline_exceeded_response_bytes,
     ingress_gateway_declarative_denied_response_bytes, ingress_gateway_policy_denied_response_bytes,
     ingress_gateway_tier3_refused_response_bytes, ingress_invalid_request_response_bytes,
 };
@@ -140,8 +143,8 @@ pub async fn dispatch_gateway_ingress<E: ReadEnv>(
             return;
         };
 
-        match gateway_ingress_agent_and_method(ingress_subject.as_str(), &config.a2a_prefix) {
-            Ok((agent_id, method)) => {
+        match GatewayIngressSubject::parse(&config.a2a_prefix, ingress_subject.as_str()) {
+            Ok(ingress) => {
                 dispatch_routed(
                     client,
                     config,
@@ -158,8 +161,7 @@ pub async fn dispatch_gateway_ingress<E: ReadEnv>(
                     &msg,
                     reply,
                     ingress_subject.as_str(),
-                    agent_id,
-                    method,
+                    ingress,
                     audit_caller_id,
                     audit_caller_source,
                 )
@@ -191,18 +193,14 @@ async fn dispatch_routed<E: ReadEnv>(
     msg: &async_nats::Message,
     reply: async_nats::Subject,
     ingress_subject: &str,
-    agent_id: a2a_nats::A2aAgentId,
-    method: A2aMethod,
+    ingress: GatewayIngressSubject,
     mut audit_caller_id: String,
     mut audit_caller_source: Option<String>,
 ) {
+    let agent_id = ingress.agent_id().clone();
+    let method = ingress.method().clone();
     let method_dots = method.as_dotted_suffix().to_owned();
-    let agent_subject = format!(
-        "{}.v1.agents.{}.{}",
-        config.a2a_prefix.as_str(),
-        agent_id.as_str(),
-        method_dots
-    );
+    let agent_subject = ingress.agent_delivery().to_string();
     let mut headers_owned = msg.headers.clone().unwrap_or_default();
     tracing::Span::current().record(ATTR_AGENT_SUBJECT, tracing::field::display(&agent_subject));
 
@@ -664,6 +662,7 @@ async fn dispatch_routed<E: ReadEnv>(
                     payload.as_ref(),
                     reply.clone(),
                     caller_key,
+                    ingress.caller().clone(),
                     events_last_seq,
                 );
             }

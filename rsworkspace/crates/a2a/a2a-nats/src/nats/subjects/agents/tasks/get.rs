@@ -1,3 +1,5 @@
+use trogon_identity_types::SubjectPrincipal;
+
 use crate::a2a_prefix::A2aPrefix;
 use crate::agent_id::A2aAgentId;
 
@@ -6,13 +8,15 @@ use crate::agent_id::A2aAgentId;
 pub struct TasksGetSubject {
     prefix: A2aPrefix,
     agent_id: A2aAgentId,
+    caller: SubjectPrincipal,
 }
 
 impl TasksGetSubject {
-    pub fn new(prefix: &A2aPrefix, agent_id: &A2aAgentId) -> Self {
+    pub fn new(prefix: &A2aPrefix, agent_id: &A2aAgentId, caller: &SubjectPrincipal) -> Self {
         Self {
             prefix: prefix.clone(),
             agent_id: agent_id.clone(),
+            caller: caller.clone(),
         }
     }
 }
@@ -21,9 +25,10 @@ impl std::fmt::Display for TasksGetSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.v1.agents.{}.tasks.get",
+            "{}.v1.agents.{}.{}.tasks.get",
             self.prefix.as_str(),
-            self.agent_id.as_str()
+            self.agent_id.as_str(),
+            self.caller
         )
     }
 }

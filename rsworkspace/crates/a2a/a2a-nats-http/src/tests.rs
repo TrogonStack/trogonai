@@ -11,6 +11,7 @@ use bytes::Bytes;
 use jsonrpc_nats::{Message, ResponseId, encode};
 use serde_json::{Value, json};
 use tower::ServiceExt;
+use trogon_identity_types::SubjectPrincipal;
 use trogon_nats::AdvancedMockNatsClient;
 use trogon_nats::jetstream::mocks::MockJetStreamConsumerFactory;
 
@@ -28,13 +29,15 @@ pub(super) fn test_agent_id() -> A2aAgentId {
 }
 
 fn mint_test_user_jwt(_agent_id: &str, _prefix: &str, ttl: Duration) -> MintedUserJwt {
-    // The HTTP runtime only inspects shape + `exp`; minting via the real auth-callout
-    // crate would pull in jsonwebtoken/nkeys here, so we hand-craft a token with a
-    // future `exp` and an opaque signature segment that validate_compact_jwt_shape
-    // accepts.
+    // The HTTP runtime only inspects shape, `exp` and the caller principal claims;
+    // minting via the real auth-callout crate would pull in jsonwebtoken/nkeys here,
+    // so we hand-craft a token with a future `exp` and an opaque signature segment
+    // that validate_compact_jwt_shape accepts.
     let exp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() + ttl.as_secs();
     let header = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(br#"{"alg":"HS256","typ":"JWT"}"#);
-    let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(format!(r#"{{"exp":{exp}}}"#));
+    let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(format!(
+        r#"{{"exp":{exp},"caller_id":"alice","principal_kind":"person"}}"#
+    ));
     let signature = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"test-signature");
     MintedUserJwt::new(format!("{header}.{payload}.{signature}")).unwrap()
 }
@@ -43,9 +46,13 @@ fn gateway_test_caller_jwt() -> MintedUserJwt {
     mint_test_user_jwt("test-agent", "a2a", Duration::from_secs(3600))
 }
 
+pub(super) fn test_caller() -> SubjectPrincipal {
+    gateway_test_caller_jwt().subject_principal().unwrap()
+}
+
 pub(super) fn build_app(nats: AdvancedMockNatsClient) -> axum::Router {
     let js = MockJetStreamConsumerFactory::new();
-    let client = A2aClient::new(test_config(), test_agent_id(), nats, js);
+    let client = A2aClient::new(test_config(), test_agent_id(), test_caller(), nats, js);
     router::build(client)
 }
 
@@ -99,7 +106,7 @@ pub(super) fn error_response_bytes(code: i32, msg: &str) -> (async_nats::HeaderM
 async fn message_send_returns_jsonrpc_result() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = send_message_response_bytes("t1");
-    nats.set_response_wire("a2a.v1.agents.test-agent.message.send", headers, body);
+    nats.set_response_wire("a2a.v1.agents.test-agent.person.alice.message.send", headers, body);
 
     let app = build_app(nats);
     let response = app
@@ -120,7 +127,7 @@ async fn message_send_returns_jsonrpc_result() {
 async fn tasks_get_returns_jsonrpc_result() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = task_response_bytes("task-1");
-    nats.set_response_wire("a2a.v1.agents.test-agent.tasks.get", headers, body);
+    nats.set_response_wire("a2a.v1.agents.test-agent.person.alice.tasks.get", headers, body);
 
     let app = build_app(nats);
     let response = app
@@ -140,7 +147,7 @@ async fn tasks_get_returns_jsonrpc_result() {
 async fn tasks_get_not_found_returns_jsonrpc_error() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = error_response_bytes(-32001, "not found");
-    nats.set_response_wire("a2a.v1.agents.test-agent.tasks.get", headers, body);
+    nats.set_response_wire("a2a.v1.agents.test-agent.person.alice.tasks.get", headers, body);
 
     let app = build_app(nats);
     let response = app
@@ -160,7 +167,7 @@ async fn tasks_get_not_found_returns_jsonrpc_error() {
 async fn tasks_cancel_returns_jsonrpc_result() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = task_response_bytes("task-c");
-    nats.set_response_wire("a2a.v1.agents.test-agent.tasks.cancel", headers, body);
+    nats.set_response_wire("a2a.v1.agents.test-agent.person.alice.tasks.cancel", headers, body);
 
     let app = build_app(nats);
     let response = app
@@ -246,7 +253,11 @@ async fn tasks_list_returns_jsonrpc_result() {
         result: list_resp,
     })
     .unwrap();
-    nats.set_response_wire("a2a.v1.agents.test-agent.tasks.list", encoded.headers, encoded.body);
+    nats.set_response_wire(
+        "a2a.v1.agents.test-agent.person.alice.tasks.list",
+        encoded.headers,
+        encoded.body,
+    );
 
     let app = build_app(nats);
     let response = app
@@ -287,10 +298,14 @@ async fn agent_card_endpoint_returns_json() {
         result: serde_json::json!(card),
     })
     .unwrap();
-    nats.set_response_wire("a2a.v1.agents.test-agent.card", encoded.headers, encoded.body);
+    nats.set_response_wire(
+        "a2a.v1.agents.test-agent.person.alice.card",
+        encoded.headers,
+        encoded.body,
+    );
 
     let js = MockJetStreamConsumerFactory::new();
-    let client = A2aClient::new(test_config(), test_agent_id(), nats, js);
+    let client = A2aClient::new(test_config(), test_agent_id(), test_caller(), nats, js);
     let app = router::build(client);
 
     let response = app
@@ -313,13 +328,13 @@ async fn agent_card_endpoint_returns_json() {
 async fn message_stream_returns_sse_content_type() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = send_message_response_bytes("ts1");
-    nats.set_response_wire("a2a.v1.agents.test-agent.message.stream", headers, body);
+    nats.set_response_wire("a2a.v1.agents.test-agent.person.alice.message.stream", headers, body);
 
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, _tx) = trogon_nats::jetstream::mocks::MockJetStreamConsumer::new();
     js.add_consumer(consumer);
 
-    let client = A2aClient::new(test_config(), test_agent_id(), nats, js);
+    let client = A2aClient::new(test_config(), test_agent_id(), test_caller(), nats, js);
     let app = router::build(client);
 
     let response = app
@@ -338,10 +353,10 @@ async fn message_stream_returns_sse_content_type() {
 async fn agent_card_unavailable_returns_503() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = error_response_bytes(-32050, "unavailable");
-    nats.set_response_wire("a2a.v1.agents.test-agent.card", headers, body);
+    nats.set_response_wire("a2a.v1.agents.test-agent.person.alice.card", headers, body);
 
     let js = MockJetStreamConsumerFactory::new();
-    let client = A2aClient::new(test_config(), test_agent_id(), nats, js);
+    let client = A2aClient::new(test_config(), test_agent_id(), test_caller(), nats, js);
     let app = router::build(client);
 
     let response = app
@@ -362,7 +377,7 @@ async fn agent_card_unavailable_returns_503() {
 async fn jsonrpc_string_id_is_forwarded() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = task_response_bytes("t99");
-    nats.set_response_wire("a2a.v1.agents.test-agent.tasks.get", headers, body);
+    nats.set_response_wire("a2a.v1.agents.test-agent.person.alice.tasks.get", headers, body);
 
     let app = build_app(nats);
     let response = app
@@ -380,7 +395,7 @@ async fn jsonrpc_string_id_is_forwarded() {
 async fn push_set_not_supported_maps_to_correct_error_code() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = error_response_bytes(-32003, "not supported");
-    nats.set_response_wire("a2a.v1.agents.test-agent.push.set", headers, body);
+    nats.set_response_wire("a2a.v1.agents.test-agent.person.alice.push.set", headers, body);
 
     let app = build_app(nats);
     let response = app
@@ -401,17 +416,21 @@ fn runtime_error_display_shows_env_var_name() {
         RuntimeError::MissingAgentId.to_string(),
         "A2A_AGENT_ID environment variable is required"
     );
+    assert_eq!(
+        RuntimeError::MissingCallerJwt.to_string(),
+        "A2A_CALLER_JWT environment variable is required"
+    );
 }
 
 #[tokio::test]
 async fn gateway_routed_message_send_targets_gateway_subject() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = send_message_response_bytes("t-gw");
-    nats.set_response_wire("a2a.v1.gateway.test-agent.message.send", headers, body);
+    nats.set_response_wire("a2a.v1.gateway.test-agent.person.alice.message.send", headers, body);
 
     let js = MockJetStreamConsumerFactory::new();
-    let client =
-        A2aClient::new(test_config(), test_agent_id(), nats, js).routing_via_gateway_ingress(gateway_test_caller_jwt());
+    let client = A2aClient::new(test_config(), test_agent_id(), test_caller(), nats, js)
+        .routing_via_gateway_ingress(gateway_test_caller_jwt());
     let app = router::build(client);
 
     let response = app
@@ -430,11 +449,11 @@ async fn gateway_routed_message_send_targets_gateway_subject() {
 async fn agent_routed_subject_unanswered_when_gateway_routing_enabled() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = task_response_bytes("should-not-be-hit");
-    nats.set_response_wire("a2a.v1.agents.test-agent.tasks.get", headers, body);
+    nats.set_response_wire("a2a.v1.agents.test-agent.person.alice.tasks.get", headers, body);
 
     let js = MockJetStreamConsumerFactory::new();
-    let client =
-        A2aClient::new(test_config(), test_agent_id(), nats, js).routing_via_gateway_ingress(gateway_test_caller_jwt());
+    let client = A2aClient::new(test_config(), test_agent_id(), test_caller(), nats, js)
+        .routing_via_gateway_ingress(gateway_test_caller_jwt());
     let app = router::build(client);
 
     let response = app

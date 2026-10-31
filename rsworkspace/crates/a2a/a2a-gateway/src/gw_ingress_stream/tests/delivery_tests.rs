@@ -4,13 +4,14 @@ use trogon_nats::jetstream::mocks::{AckKindSnapshot, AckKindValue};
 use trogon_std::log_capture::{CapturedEvents, LevelFilter};
 
 use super::super::*;
-use crate::gateway_test_support::{Diagnostics, ObservedMessage, event};
+use crate::gateway_test_support::{Diagnostics, ObservedMessage, event, event_caller};
 
 fn spawn(kind: StreamingIngressKind) -> StreamingIngressSpawn {
     StreamingIngressSpawn {
         kind,
         reply: "_INBOX.stream".into(),
         caller_key: CallerKey::new("alice").unwrap(),
+        caller: event_caller(),
     }
 }
 

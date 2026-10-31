@@ -11,14 +11,14 @@ use trogon_nats::jetstream::mocks::MockJetStreamConsumerFactory;
 use crate::headers::{A2A_EXTENSIONS_HEADER, A2A_MEDIA_TYPE, A2A_VERSION_HEADER, SpecNegotiationConfig};
 use crate::router;
 
-use super::{send_message_response_bytes, test_agent_id, test_config};
+use super::{send_message_response_bytes, test_agent_id, test_caller, test_config};
 
 fn build_app_with_negotiation(config: SpecNegotiationConfig) -> axum::Router {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = send_message_response_bytes("t1");
-    nats.set_response_wire("a2a.v1.agents.test-agent.message.send", headers, body);
+    nats.set_response_wire("a2a.v1.agents.test-agent.person.alice.message.send", headers, body);
     let js = MockJetStreamConsumerFactory::new();
-    let client = A2aClient::new(test_config(), test_agent_id(), nats, js);
+    let client = A2aClient::new(test_config(), test_agent_id(), test_caller(), nats, js);
     router::build_with_negotiation(client, Arc::new(config))
 }
 
