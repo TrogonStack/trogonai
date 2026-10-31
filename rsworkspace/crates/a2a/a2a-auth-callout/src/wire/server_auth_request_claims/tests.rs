@@ -5,21 +5,15 @@ use nkeys::KeyPair;
 use super::*;
 use crate::bridge_mint::{BridgeAuthScheme, BridgeClientInfo, BridgeConnectOpts, BridgeMintRequest};
 use crate::error::CredentialError;
-use crate::wire::test_encode::signed_auth_request;
-use crate::wire::{NkeyPublic, ServerAuthRequestEnvelope};
+use crate::wire::test_encode::FixtureServer;
 
-fn decode_request(server: &KeyPair, patch: impl FnMut(&mut Claims<AuthRequest>)) -> ServerAuthRequestClaims {
-    let user = KeyPair::new_user();
-    let token = signed_auth_request(server, &user, patch);
-    let server_pub = NkeyPublic::parse(server.public_key()).unwrap();
-    ServerAuthRequestEnvelope::from_bytes(token.into_bytes())
-        .decode(&server_pub, None, None)
-        .unwrap()
+fn decode_request(server: &FixtureServer, patch: impl FnMut(&mut Claims<AuthRequest>)) -> ServerAuthRequestClaims {
+    server.request(&KeyPair::new_user(), patch)
 }
 
 #[test]
 fn requested_account_prefers_connect_opts_user() {
-    let server = KeyPair::new_account();
+    let server = FixtureServer::generate();
     let req = decode_request(&server, |c| {
         c.nats.connect_opts.user = Some("tenant-from-connect".into());
         c.nats.client_info.user = "tenant-from-client".into();
@@ -30,7 +24,7 @@ fn requested_account_prefers_connect_opts_user() {
 
 #[test]
 fn requested_account_falls_back_to_client_info_user() {
-    let server = KeyPair::new_account();
+    let server = FixtureServer::generate();
     let req = decode_request(&server, |c| {
         c.nats.connect_opts.user = None;
         c.nats.client_info.user = "tenant-from-client".into();
@@ -41,7 +35,7 @@ fn requested_account_falls_back_to_client_info_user() {
 
 #[test]
 fn requested_account_falls_back_to_name_tag() {
-    let server = KeyPair::new_account();
+    let server = FixtureServer::generate();
     let req = decode_request(&server, |c| {
         c.nats.connect_opts.user = None;
         c.nats.client_info.user = String::new();
@@ -52,7 +46,7 @@ fn requested_account_falls_back_to_name_tag() {
 
 #[test]
 fn requested_account_rejects_missing_hints() {
-    let server = KeyPair::new_account();
+    let server = FixtureServer::generate();
     let req = decode_request(&server, |c| {
         c.nats.connect_opts.user = None;
         c.nats.client_info.user = String::new();
@@ -67,7 +61,7 @@ fn requested_account_rejects_missing_hints() {
 
 #[test]
 fn connect_opts_auth_token_ignores_blank_values() {
-    let server = KeyPair::new_account();
+    let server = FixtureServer::generate();
     let req = decode_request(&server, |c| {
         c.nats.connect_opts.auth_token = Some("   ".into());
     });
@@ -76,7 +70,7 @@ fn connect_opts_auth_token_ignores_blank_values() {
 
 #[test]
 fn connect_opts_jwt_reads_from_decoded_claims() {
-    let server = KeyPair::new_account();
+    let server = FixtureServer::generate();
     let req = decode_request(&server, |c| {
         c.nats.connect_opts.jwt = Some("opaque.jwt.token".into());
     });
@@ -85,7 +79,7 @@ fn connect_opts_jwt_reads_from_decoded_claims() {
 
 #[test]
 fn connect_opts_opaque_pass_ignores_empty_values() {
-    let server = KeyPair::new_account();
+    let server = FixtureServer::generate();
     let req = decode_request(&server, |c| {
         c.nats.connect_opts.pass = Some("".into());
     });
@@ -113,7 +107,7 @@ fn client_tls_pem_certs_reads_from_bridge_mint_payload() {
 
 #[test]
 fn debug_includes_user_nkey_and_server_id() {
-    let server = KeyPair::new_account();
+    let server = FixtureServer::generate();
     let req = decode_request(&server, |_| {});
     let debug = format!("{req:?}");
     assert!(debug.contains("user_nkey"));
@@ -121,20 +115,16 @@ fn debug_includes_user_nkey_and_server_id() {
 }
 
 fn decode_request_with_extra_nats_json(
-    server: &KeyPair,
+    server: &FixtureServer,
     patch: impl FnMut(&mut Claims<AuthRequest>),
     nats_json_override: serde_json::Value,
 ) -> ServerAuthRequestClaims {
-    let user = KeyPair::new_user();
-    let token = signed_auth_request(server, &user, patch);
-    let server_pub = NkeyPublic::parse(server.public_key()).unwrap();
-    let inner = server_pub.verify_jwt_issuer(&token).unwrap();
-    ServerAuthRequestClaims::from_decoded(inner, nats_json_override)
+    ServerAuthRequestClaims::from_decoded(server.claims(&KeyPair::new_user(), patch), nats_json_override)
 }
 
 #[test]
 fn connect_opts_jwt_falls_back_to_nats_json() {
-    let server = KeyPair::new_account();
+    let server = FixtureServer::generate();
     let nats_json = serde_json::json!({
         "connect_opts": {
             "jwt": "fallback.jwt.token"
@@ -152,7 +142,7 @@ fn connect_opts_jwt_falls_back_to_nats_json() {
 
 #[test]
 fn connect_opts_opaque_pass_falls_back_to_nats_json() {
-    let server = KeyPair::new_account();
+    let server = FixtureServer::generate();
     let nats_json = serde_json::json!({
         "connect_opts": {
             "pass": "fallback-pass"
@@ -170,7 +160,7 @@ fn connect_opts_opaque_pass_falls_back_to_nats_json() {
 
 #[test]
 fn client_tls_pem_certs_reads_verified_chains_from_nats_json() {
-    let server = KeyPair::new_account();
+    let server = FixtureServer::generate();
     let nats_json = serde_json::json!({
         "client_tls": {
             "verified_chains": [["chain-cert-1", "chain-cert-2"]]

@@ -22,7 +22,7 @@ use a2a_auth_callout::dispatcher::{AuthDispatcher, CalloutDispatcher, CalloutDis
 use a2a_auth_callout::jwt::{ExternalSubject, UserJwtClaims, decode_nats_user_payload};
 use a2a_auth_callout::signing_key_source::{KeyVersion, SigningKeySource, StaticSigningKeySource};
 use a2a_auth_callout::{
-    AccountSigningKey, AuthCalloutWireCodec, DenialCategory, MintedUserJwt, NkeyPublic, TenantAccount,
+    AccountSigningKey, AuthAccount, AuthCalloutWireCodec, DenialCategory, MintedUserJwt, TenantAccount,
     TenantSigningKeys,
 };
 use a2a_auth_callout::{AudienceAccount, SpiceDbPrincipal};
@@ -230,19 +230,10 @@ impl NatsCalloutStack {
 
         let signing = tenant.verification_source();
 
-        // TODO(task #8): pin `server_issuer` to the NATS server's own
-        // identity NKey (the key that signs $SYS.REQ.USER.AUTH request
-        // JWTs), not to `auth_callout.issuer` from nats.conf — the
-        // latter is the callout service's own response-signing key.
-        // `nats-server` 2.14 auto-generates the server NKey per boot,
-        // so this harness needs to read it from the connection INFO
-        // line or pin it via deterministic config before the
-        // ignored Docker tests can pass end-to-end.
-        let server_issuer = NkeyPublic::parse(NATS_SERVER_AUTH_CALLOUT_ISSUER).expect("server issuer nkey");
+        let auth_account = AuthAccount::parse(NATS_SERVER_AUTH_CALLOUT_ISSUER).expect("auth callout issuer account");
         let response_signing_key =
             AccountSigningKey::from_seed(CALLOUT_RESPONSE_ISSUER_SEED).expect("response signing key");
-        let wire =
-            Arc::new(AuthCalloutWireCodec::new(server_issuer, response_signing_key, None, None).expect("wire codec"));
+        let wire = Arc::new(AuthCalloutWireCodec::new(auth_account, response_signing_key, None));
 
         let capture = MintedJwtCapture::new();
         let dispatch_errors = DispatchErrorCapture::default();

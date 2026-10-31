@@ -1,50 +1,34 @@
-use super::{CalloutAuthResponseClaims, NkeyPublic, ServerAuthRequestClaims, ServerAuthRequestEnvelope, XkeyPublic};
-use crate::admission_keys::{AccountSigningKey, CalloutXkey};
+use super::{AuthRequestError, CalloutAuthResponseClaims, ServerAuthRequestClaims, ServerAuthRequestEnvelope};
+use crate::admission_keys::{AccountSigningKey, AuthAccount, CalloutXkey};
 use crate::error::AuthCalloutError;
 use crate::jwt::MintedUserJwt;
 
 /// Configuration for NATS `$SYS.REQ.USER.AUTH` encode/decode.
 pub struct AuthCalloutWireCodec {
-    server_issuer: NkeyPublic,
+    auth_account: AuthAccount,
     response_signing_key: AccountSigningKey,
     callout_xkey: Option<CalloutXkey>,
-    server_xkey_public: Option<XkeyPublic>,
 }
 
 impl AuthCalloutWireCodec {
     pub fn new(
-        server_issuer: NkeyPublic,
+        auth_account: AuthAccount,
         response_signing_key: AccountSigningKey,
         callout_xkey: Option<CalloutXkey>,
-        server_xkey_public: Option<XkeyPublic>,
-    ) -> Result<Self, AuthCalloutError> {
-        if callout_xkey.is_some() != server_xkey_public.is_some() {
-            return Err(AuthCalloutError::WireFormat(
-                "AuthCalloutWireCodec XKey config is partial: the callout xkey and server_xkey_public must both be \
-                 set or both unset"
-                    .into(),
-            ));
-        }
-        Ok(Self {
-            server_issuer,
+    ) -> Self {
+        Self {
+            auth_account,
             response_signing_key,
             callout_xkey,
-            server_xkey_public,
-        })
+        }
     }
 
     pub fn decode_request(
         &self,
         payload: Vec<u8>,
         headers: Option<&async_nats::HeaderMap>,
-    ) -> Result<ServerAuthRequestClaims, AuthCalloutError> {
-        ServerAuthRequestEnvelope::decode_from_message(
-            payload,
-            headers,
-            &self.server_issuer,
-            self.callout_xkey.as_ref(),
-            self.server_xkey_public.as_ref(),
-        )
+    ) -> Result<ServerAuthRequestClaims, AuthRequestError> {
+        ServerAuthRequestEnvelope::decode_from_message(payload, headers, &self.auth_account, self.callout_xkey.as_ref())
     }
 
     pub fn encode_success(
@@ -69,7 +53,7 @@ impl AuthCalloutWireCodec {
 impl std::fmt::Debug for AuthCalloutWireCodec {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AuthCalloutWireCodec")
-            .field("server_issuer", &self.server_issuer)
+            .field("auth_account", &self.auth_account)
             .field("response_signing_key", &self.response_signing_key)
             .field("callout_xkey", &self.callout_xkey)
             .finish()

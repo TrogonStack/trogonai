@@ -34,7 +34,7 @@ impl ServerAuthRequestClaims {
     }
 
     pub fn server_one_time_xkey(&self) -> Option<&str> {
-        self.inner.nats.server.xkey.as_deref()
+        self.inner.nats.server.xkey.as_deref().filter(|xkey| !xkey.is_empty())
     }
 
     pub fn requested_account(&self) -> Result<RequestedAccount, AuthCalloutError> {

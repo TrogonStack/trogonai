@@ -2,6 +2,7 @@
 //!
 //! Pinned against NATS server **2.14.x**.
 
+mod auth_request_error;
 mod bridge_adapter;
 mod callout_auth_response_claims;
 mod nkey_public;
@@ -13,6 +14,7 @@ mod wire_codec;
 pub(crate) mod test_encode;
 
 pub use crate::admission_keys::XkeyPublic;
+pub use auth_request_error::AuthRequestError;
 pub use callout_auth_response_claims::CalloutAuthResponseClaims;
 pub use nkey_public::NkeyPublic;
 pub use server_auth_request_claims::ServerAuthRequestClaims;

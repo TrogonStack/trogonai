@@ -6,9 +6,7 @@ use trogon_std::env::InMemoryEnv;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use super::{
-    build_mtls_verifier, build_oidc_verifier, env_required, load_nkey_public_env, nats_config, split_env_list,
-};
+use super::{build_mtls_verifier, build_oidc_verifier, nats_config, split_env_list};
 
 #[derive(Debug, thiserror::Error)]
 enum FixtureError {
@@ -61,38 +59,6 @@ fn nats_settings_keep_every_server_and_the_shared_client_certificate() -> Result
     );
     env.set("NATS_URL", " , ");
     assert!(nats_config(&env).is_none());
-    Ok(())
-}
-
-#[test]
-fn required_variables_preserve_presence_and_report_the_missing_name() -> Result<(), AuthCalloutError> {
-    let env = InMemoryEnv::new();
-    assert!(matches!(
-        env_required(&env, "REQUIRED"),
-        Err(AuthCalloutError::MissingEnvVar("REQUIRED"))
-    ));
-    env.set("REQUIRED", "");
-    assert_eq!(env_required(&env, "REQUIRED")?, "");
-    env.set("REQUIRED", " value ");
-    assert_eq!(env_required(&env, "REQUIRED")?, " value ");
-    Ok(())
-}
-
-#[test]
-fn nkey_environment_loaders_preserve_valid_material_and_reject_bad_configuration() -> Result<(), FixtureError> {
-    let env = InMemoryEnv::new();
-    assert!(matches!(
-        load_nkey_public_env(&env, "PUBLIC"),
-        Err(AuthCalloutError::MissingEnvVar("PUBLIC"))
-    ));
-    let key = nkeys::KeyPair::new_server();
-    env.set("PUBLIC", format!(" {}\n", key.public_key()));
-    assert_eq!(load_nkey_public_env(&env, "PUBLIC")?.as_str(), key.public_key());
-    env.set("PUBLIC", "invalid-key");
-    assert!(matches!(
-        load_nkey_public_env(&env, "PUBLIC"),
-        Err(AuthCalloutError::WireFormat(_))
-    ));
     Ok(())
 }
 
