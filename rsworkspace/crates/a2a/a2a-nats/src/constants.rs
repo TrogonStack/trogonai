@@ -64,12 +64,6 @@ pub const GATEWAY_PRINCIPAL_HEADER: &str = "X-A2a-Spicedb-Principal";
 /// [`crate::push::JetStreamPublishPushDispatcher`].
 pub const HTTP_PUSH_WEBHOOK_MAX_ATTEMPTS: u32 = 3;
 
-/// Default `{caller_id}` segment for `{prefix}.v1.push.dlq.{caller_id}.{task_id}` when the agent
-/// bridge has no authenticated external caller identity (until gateway/auth-callout propagates one).
-pub const DEFAULT_PUSH_DLQ_CALLER_SEGMENT: &str = "_";
-
-pub const ENV_PUSH_DLQ_CALLER_SEGMENT: &str = "A2A_PUSH_DLQ_CALLER_SEGMENT";
-
 /// In-process LRU capacity for push DLQ publish dedupe (agent + gateway mirror).
 pub const ENV_PUSH_DLQ_DEDUP_LRU_SIZE: &str = "A2A_PUSH_DLQ_DEDUP_LRU_SIZE";
 

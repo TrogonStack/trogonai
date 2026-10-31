@@ -4,7 +4,7 @@
 //! [`markers::Publishable`], [`markers::Subscribable`], or [`markers::JetStreamEvents`]
 //! so call-sites can't accidentally `request()` a fire-and-forget subject. Per-operation
 //! subject types (`MessageSendSubject`, `TaskEventsSubject`, …) land in their dedicated
-//! PRs under [`agents`], [`gateway`], [`tasks`], and [`subscriptions`].
+//! PRs under [`agents`], [`gateway`], [`push`], [`tasks`], and [`subscriptions`].
 
 #![cfg_attr(
     dylint_lib = "trogon_dylint_lints",
@@ -17,6 +17,7 @@
 pub mod agents;
 pub mod gateway;
 pub mod markers;
+pub mod push;
 mod routed;
 pub mod stream;
 pub mod subscriptions;
