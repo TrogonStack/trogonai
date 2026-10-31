@@ -209,27 +209,63 @@ impl From<trogon_nats::ConnectError> for CallerConnectError {
     }
 }
 
+/// How long a per-request caller connection may take to come up. A distinct type
+/// from [`GatewayRpcTimeout`] so a reply budget cannot be passed where a connect
+/// budget belongs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CallerConnectTimeout(Duration);
+
+impl CallerConnectTimeout {
+    #[must_use]
+    pub const fn new(timeout: Duration) -> Self {
+        Self(timeout)
+    }
+
+    #[must_use]
+    pub const fn get(self) -> Duration {
+        self.0
+    }
+}
+
+/// How long a gateway request may wait for its reply once the caller connection is up.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GatewayRpcTimeout(Duration);
+
+impl GatewayRpcTimeout {
+    #[must_use]
+    pub const fn new(timeout: Duration) -> Self {
+        Self(timeout)
+    }
+
+    #[must_use]
+    pub const fn get(self) -> Duration {
+        self.0
+    }
+}
+
 async fn connect_as_caller(
     nats: &NatsConfig,
     caller_jwt: &BridgeUserJwt,
-    timeout: Duration,
+    timeout: CallerConnectTimeout,
 ) -> Result<async_nats::Client, CallerConnectError> {
     let token = CredentialValue::Literal(SecretString::new(caller_jwt.as_str())?);
-    Ok(trogon_nats::connect_once(nats, NatsAuth::Token(token), timeout).await?)
+    Ok(trogon_nats::connect_once(nats, NatsAuth::Token(token), timeout.get()).await?)
 }
 
 #[derive(Clone)]
 pub struct AsyncNatsTokenGatewayUnary {
     nats: Arc<NatsConfig>,
-    timeout: Duration,
+    connect_timeout: CallerConnectTimeout,
+    rpc_timeout: GatewayRpcTimeout,
 }
 
 impl AsyncNatsTokenGatewayUnary {
     #[must_use]
-    pub fn new(nats: NatsConfig, timeout: Duration) -> Self {
+    pub fn new(nats: NatsConfig, connect_timeout: CallerConnectTimeout, rpc_timeout: GatewayRpcTimeout) -> Self {
         Self {
             nats: Arc::new(nats),
-            timeout,
+            connect_timeout,
+            rpc_timeout,
         }
     }
 }
@@ -243,7 +279,7 @@ impl GatewayUnaryPublish for AsyncNatsTokenGatewayUnary {
         headers: async_nats::HeaderMap,
         payload: Bytes,
     ) -> Result<Bytes, BridgeError> {
-        let client = connect_as_caller(&self.nats, caller_jwt, self.timeout)
+        let client = connect_as_caller(&self.nats, caller_jwt, self.connect_timeout)
             .await
             .map_err(|e| BridgeError::NatsPublish(e.to_string()))?;
         // request_with_headers itself has no deadline — without this
@@ -251,11 +287,11 @@ impl GatewayUnaryPublish for AsyncNatsTokenGatewayUnary {
         // request indefinitely and the configured RPC timeout is silently
         // ignored.
         tokio::time::timeout(
-            self.timeout,
+            self.rpc_timeout.get(),
             client.request_with_headers(subject.to_owned(), headers, payload),
         )
         .await
-        .map_err(|_| BridgeError::NatsPublish(format!("gateway RPC exceeded {:?}", self.timeout)))?
+        .map_err(|_| BridgeError::NatsPublish(format!("gateway RPC exceeded {:?}", self.rpc_timeout.get())))?
         .map_err(|e| BridgeError::NatsPublish(e.to_string()))
         .map(|reply| reply.payload)
     }
@@ -357,20 +393,20 @@ impl TaskJetStreamPort for StubTaskJetStreamPort {
 #[derive(Clone)]
 pub struct AsyncNatsTokenTaskJetstream {
     nats: Arc<NatsConfig>,
-    timeout: Duration,
+    connect_timeout: CallerConnectTimeout,
 }
 
 impl AsyncNatsTokenTaskJetstream {
     #[must_use]
-    pub fn new(nats: NatsConfig, timeout: Duration) -> Self {
+    pub fn new(nats: NatsConfig, connect_timeout: CallerConnectTimeout) -> Self {
         Self {
             nats: Arc::new(nats),
-            timeout,
+            connect_timeout,
         }
     }
 
     async fn connect_caller_client(&self, jwt: &BridgeUserJwt) -> Result<async_nats::Client, BridgeError> {
-        connect_as_caller(&self.nats, jwt, self.timeout)
+        connect_as_caller(&self.nats, jwt, self.connect_timeout)
             .await
             .map_err(|e| BridgeError::JetStreamConsume(e.to_string()))
     }
