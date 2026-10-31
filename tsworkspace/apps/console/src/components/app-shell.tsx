@@ -11,6 +11,7 @@ import {
   PanelLeftIcon,
   PlugZapIcon,
   SunIcon,
+  WebhookIcon,
   type LucideIcon,
 } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
@@ -21,6 +22,7 @@ import { Segmented, type SegmentedOption } from '@/components/ui/segmented';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useBackendQuery, useCustodyQuery } from '@/features/custody/queries';
 import { useEnvironmentQuery, useEnvironmentsQuery } from '@/features/environments/queries';
+import { useSourceQuery, useSourcesQuery } from '@/features/gateway-sources/queries';
 import type { NodeId } from '@/features/hierarchy/domain/node-id';
 import { useHierarchyView } from '@/features/hierarchy/queries';
 import { ProjectSwitcher } from '@/features/projects/components/project-switcher';
@@ -107,6 +109,7 @@ function Sidebar({ collapsed }: { collapsed: boolean }) {
   const credentials = useCredentialsQuery();
   const environments = useEnvironmentsQuery();
   const custody = useCustodyQuery();
+  const sources = useSourcesQuery();
   const label = collapsed ? 'hidden' : 'hidden lg:inline';
   const block = collapsed ? 'hidden' : 'hidden lg:flex';
   return (
@@ -216,6 +219,25 @@ function Sidebar({ collapsed }: { collapsed: boolean }) {
             <KeySquareIcon className="size-4 shrink-0" aria-hidden="true" />
             <span className={label}>Encryption keys</span>
             <NavCount collapsed={collapsed} count={custody.data?.stats.keys} />
+          </Link>
+        </div>
+        <div className="flex flex-col gap-1">
+          <p className={cn('micro flex items-center gap-2 px-2.5 pt-2 pb-1 text-[10px] text-muted-foreground', label)}>
+            <span aria-hidden="true" className="bg-muted-foreground/50 h-px w-2" />
+            Gateway
+          </p>
+          <Link
+            to="/sources"
+            title="Sources"
+            className="group/nav text-sidebar-foreground hover:bg-foreground/5 focus-visible:ring-sidebar-ring/70 data-[status=active]:bg-sidebar-accent data-[status=active]:text-sidebar-accent-foreground relative flex h-9 items-center gap-2.5 rounded-md px-2.5 text-[13px] font-medium transition-colors outline-none focus-visible:ring-2"
+          >
+            <span
+              aria-hidden="true"
+              className="bg-primary absolute top-1.5 bottom-1.5 -left-2 w-[3px] rounded-r-full opacity-0 shadow-[0_0_10px_1px_var(--primary)] transition-opacity group-data-[status=active]/nav:opacity-100"
+            />
+            <WebhookIcon className="size-4 shrink-0" aria-hidden="true" />
+            <span className={label}>Sources</span>
+            <NavCount collapsed={collapsed} count={sources.data?.length} />
           </Link>
         </div>
         <div className="flex flex-col gap-1">
@@ -398,6 +420,12 @@ function KeysCrumbs({ segments }: { segments: readonly string[] }) {
   return <Breadcrumbs crumbs={[{ label: 'Encryption keys' }]} />;
 }
 
+function SourceCrumbs({ integrationId }: { integrationId: string }) {
+  const query = useSourceQuery(integrationId);
+  const name = query.data ? query.data.displayName : integrationId;
+  return <ScopedCrumbs crumbs={[{ label: 'Sources', to: '/sources' }, { label: name }]} />;
+}
+
 function Breadcrumbs({ crumbs }: { crumbs: readonly Crumb[] }) {
   return (
     <nav aria-label="Breadcrumb" className="min-w-0">
@@ -453,6 +481,10 @@ function RouteBreadcrumbs() {
       return <CredentialCrumbs secretRef={decodeURIComponent(segments[2])} />;
     }
     return <ScopedCrumbs crumbs={[{ label: 'Secrets' }]} />;
+  }
+  if (segments[0] === 'sources') {
+    if (segments[1]) return <SourceCrumbs integrationId={decodeURIComponent(segments[1])} />;
+    return <ScopedCrumbs crumbs={[{ label: 'Sources' }]} />;
   }
   if (segments[0] === 'keys') return <KeysCrumbs segments={segments} />;
   if (segments[0] === 'environments') {
