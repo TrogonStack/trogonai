@@ -13,6 +13,7 @@ CA_DIR="$SECRETS/pki"
 CA_DAYS=3650
 LEAF_DAYS=365
 RENEW_WITHIN_SECONDS=2592000
+POSTGRES_UID=70
 
 umask 077
 
@@ -92,12 +93,18 @@ install_ca() {
   chmod 0444 "$1/ca.pem"
 }
 
-mkdir -p "$SECRETS/nats-server"
+mkdir -p "$SECRETS/ca" "$SECRETS/nats-server" "$SECRETS/postgres-server"
+chmod 0755 "$SECRETS/ca"
+chown "$POSTGRES_UID" "$SECRETS/postgres-server"
 
 issue "$SECRETS/nats-server" server nats serverAuth \
   "DNS:nats,DNS:localhost,DNS:nats.trogonai.orb.local,IP:127.0.0.1,IP:::1"
+issue "$SECRETS/postgres-server" server postgres serverAuth \
+  "DNS:postgres,DNS:localhost,DNS:postgres.trogonai.orb.local,IP:127.0.0.1,IP:::1"
 
+install_ca "$SECRETS/ca"
 install_ca "$SECRETS/nats-server"
+install_ca "$SECRETS/postgres-server"
 
 for dir in "$SECRETS"/clients/*/; do
   [ -d "$dir" ] || continue
