@@ -27,6 +27,10 @@ describe('register backend wizard', () => {
     await waitFor(() => expect(within(checks).getAllByLabelText('Passed')).toHaveLength(4));
     expect(within(checks).getByText('AssumeRole without an external ID is denied')).toBeInTheDocument();
 
+    await user.click(screen.getByRole('button', { name: 'Back to instructions' }));
+    await user.click(screen.getByRole('button', { name: 'I have applied these' }));
+    expect(within(screen.getByRole('list', { name: 'Validation checks' })).getAllByLabelText('Passed')).toHaveLength(4);
+    expect(screen.queryByRole('button', { name: 'Run checks' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Register backend' }));
 
     expect(await screen.findByRole('heading', { name: 'Backend registered' })).toBeInTheDocument();

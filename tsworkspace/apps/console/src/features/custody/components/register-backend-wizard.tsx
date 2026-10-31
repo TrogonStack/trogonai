@@ -25,7 +25,7 @@ import { registrationChecks, type RegistrationPlan } from '../domain/validation'
 import { useCompleteRegistration, usePrepareRegistration } from '../queries';
 import { SetupInstructionsPanel } from './setup-instructions-panel';
 import { StepIndicator } from './step-indicator';
-import { useStagedChecks, ValidationChecklist } from './validation-checklist';
+import { useStagedChecks, ValidationChecklist, type StagedChecks } from './validation-checklist';
 
 const steps = ['Provider', 'Details', 'Set up access', 'Validate', 'Done'] as const;
 
@@ -221,14 +221,15 @@ function ProviderFields({
 
 function ValidateStep({
   plan,
+  staged,
   onBack,
   onDone,
 }: {
   plan: RegistrationPlan;
+  staged: StagedChecks;
   onBack: () => void;
   onDone: (id: KeyBackendId) => void;
 }) {
-  const staged = useStagedChecks(plan.attemptId, plan.checks);
   const complete = useCompleteRegistration();
   const notify = useNotify();
 
@@ -279,6 +280,7 @@ export function RegisterBackendWizard() {
   const [draft, setDraft] = useState<RegistrationDraft>(emptyRegistrationDraft);
   const [showProblems, setShowProblems] = useState(false);
   const [plan, setPlan] = useState<RegistrationPlan>();
+  const staged = useStagedChecks(plan?.attemptId, plan?.checks ?? []);
   const [registeredId, setRegisteredId] = useState<KeyBackendId>();
 
   const set = <K extends keyof RegistrationDraft>(key: K, value: RegistrationDraft[K]) =>
@@ -291,6 +293,10 @@ export function RegisterBackendWizard() {
   const submitDetails = async () => {
     setShowProblems(true);
     if (hasProblems) return;
+    if (plan && JSON.stringify(plan.input) === JSON.stringify(input)) {
+      setStep(2);
+      return;
+    }
     prepare.reset();
     try {
       setPlan(await prepare.mutateAsync(input));
@@ -409,6 +415,7 @@ export function RegisterBackendWizard() {
         <ValidateStep
           key={plan.attemptId}
           plan={plan}
+          staged={staged}
           onBack={() => setStep(2)}
           onDone={(id) => {
             setRegisteredId(id);

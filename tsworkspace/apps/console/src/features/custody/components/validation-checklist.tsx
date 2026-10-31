@@ -10,9 +10,10 @@ import type { CheckDefinition, CheckResult } from '../domain/validation';
 import { useRunCheck } from '../queries';
 import { FailureReasonBadge } from './key-badges';
 
-export function useStagedChecks(attemptId: AttemptId, checks: readonly CheckDefinition[]) {
+export function useStagedChecks(attemptId: AttemptId | undefined, checks: readonly CheckDefinition[]) {
   const runCheck = useRunCheck();
-  const [results, setResults] = useState<Readonly<Record<string, CheckResult>>>({});
+  const [attemptResults, setAttemptResults] = useState<Readonly<Record<string, Readonly<Record<string, CheckResult>>>>>({});
+  const results = attemptResults[attemptId ?? ''] ?? {};
   const [active, setActive] = useState<string>();
   const [error, setError] = useState<unknown>();
 
@@ -20,13 +21,13 @@ export function useStagedChecks(attemptId: AttemptId, checks: readonly CheckDefi
   const failed = checks.some((check) => results[check.id]?.outcome === 'fail');
 
   const run = async () => {
+    if (!attemptId) return;
     setError(undefined);
-    const first = checks.findIndex((check) => results[check.id]?.outcome !== 'pass');
-    for (const check of checks.slice(Math.max(first, 0))) {
+    for (const check of checks.filter((check) => results[check.id]?.outcome !== 'pass')) {
       setActive(check.id);
       try {
         const result = await runCheck.mutateAsync({ attemptId, checkId: check.id });
-        setResults((previous) => ({ ...previous, [check.id]: result }));
+        setAttemptResults((previous) => ({ ...previous, [attemptId]: { ...previous[attemptId], [check.id]: result } }));
         if (result.outcome !== 'pass') break;
       } catch (caught) {
         setError(caught);

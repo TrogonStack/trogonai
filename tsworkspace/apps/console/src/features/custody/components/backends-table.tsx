@@ -139,12 +139,16 @@ export function BackendsTable({ backends }: { backends: readonly BackendView[] }
         />
       }
       empty={
+        backends.length === 0 ? (
+          <TableEmptyState title="No backends registered" message="Register a backend to use keys you control." />
+        ) : (
         <TableEmptyState title="No matches" message="No backend matches the current filters.">
           <Button type="button" variant="outline" size="sm" onClick={() => setFilters(emptyFilterState)}>
             <XIcon data-icon="inline-start" />
             Clear filters
           </Button>
         </TableEmptyState>
+        )
       }
       footer={<TableFooter shown={visible.length} total={backends.length} noun="backend" />}
       onOpen={(backend) => void navigate({ to: '/keys/backends/$backendId', params: { backendId: backend.id } })}
