@@ -18,9 +18,11 @@ use std::collections::HashSet;
 use buffa::{MessageField, ProtoBox};
 use buffa_types::google::protobuf::{Duration, Timestamp};
 use chrono::{DateTime, TimeZone, Utc};
-use sqlx::postgres::PgRow;
+use sqlx::postgres::{PgPoolOptions, PgRow};
 use sqlx::{PgPool, Row};
 
+use super::postgres_tls::PostgresTls;
+use super::postgres_url::PostgresUrl;
 use crate::constants::{SCHEDULES_CHECKPOINT_ID, SELECT_ALL_PROJECTIONS, SELECT_PROJECTION_BY_ID};
 use crate::queries::ScheduleId;
 use crate::{error::SchedulerError, projections_v1};
@@ -43,6 +45,21 @@ impl PostgresSchedulesProjection {
     pub async fn new(pool: PgPool) -> Result<Self, SchedulerError> {
         Self::run_migrations(&pool).await?;
         Ok(Self { pool })
+    }
+
+    pub async fn connect(url: &PostgresUrl, pool_options: PgPoolOptions) -> Result<Self, SchedulerError> {
+        let options = url.connect_options();
+        if url.tls() == PostgresTls::Disabled {
+            tracing::warn!(
+                host = options.get_host(),
+                port = options.get_port(),
+                "Postgres TLS is disabled explicitly with sslmode=disable; the server is not verified and traffic is not encrypted"
+            );
+        }
+        let pool = pool_options.connect_with(options.clone()).await.map_err(|source| {
+            SchedulerError::kv_source("failed to connect to the schedules Postgres database", source)
+        })?;
+        Self::new(pool).await
     }
 
     /// Applies the embedded schema migrations to `pool`.

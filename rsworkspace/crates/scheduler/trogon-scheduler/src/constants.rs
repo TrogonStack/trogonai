@@ -135,6 +135,18 @@ pub(crate) const SELECT_PROJECTION_BY_ID: &str = concat!(select_columns!(), " WH
 #[cfg(feature = "postgres")]
 pub(crate) const SELECT_ALL_PROJECTIONS: &str = concat!(select_columns!(), " ORDER BY schedule_id");
 
+// projections::postgres::postgres_url
+#[cfg(feature = "postgres")]
+pub(crate) const POSTGRES_URL_SCHEMES: [&str; 2] = ["postgres", "postgresql"];
+#[cfg(feature = "postgres")]
+pub(crate) const ENV_PGSSLMODE: &str = "PGSSLMODE";
+#[cfg(feature = "postgres")]
+pub(crate) const ENV_PGSSLROOTCERT: &str = "PGSSLROOTCERT";
+#[cfg(feature = "postgres")]
+pub(crate) const SSL_MODE_QUERY_KEYS: [&str; 2] = ["sslmode", "ssl-mode"];
+#[cfg(feature = "postgres")]
+pub(crate) const SSL_ROOT_CERT_QUERY_KEYS: [&str; 3] = ["sslrootcert", "ssl-root-cert", "ssl-ca"];
+
 // commands::schedule_next_occurrence
 /// Occurrences whose due instant is at most this far in the past are still armed,
 /// absorbing scheduling/processing latency around recently due occurrences.
