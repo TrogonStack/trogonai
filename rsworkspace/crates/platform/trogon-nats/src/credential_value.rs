@@ -86,13 +86,15 @@ impl Location {
     }
 }
 
-/// An NKey seed given either inline or as a seed file location. A value that
-/// parses as a seed is used inline; anything else is a bare or `file://` path,
-/// which is how the `nats` CLI reads `NATS_NKEY`.
+/// An NKey seed given inline, as a seed file location, or as an `env://NAME`
+/// reference to the variable holding it. A value that parses as a seed is used
+/// inline; any other value that is not an `env://` reference is a bare or
+/// `file://` path, which is how the `nats` CLI reads `NATS_NKEY`.
 #[derive(Clone)]
 pub enum NKeySeed {
     Inline(SecretString),
     File(Location),
+    Env(String),
 }
 
 impl NKeySeed {
@@ -101,13 +103,22 @@ impl NKeySeed {
         if nkeys::KeyPair::from_seed(trimmed).is_ok() {
             return SecretString::new(trimmed).ok().map(Self::Inline);
         }
-        Location::parse(trimmed).map(Self::File)
+        match split_scheme(trimmed) {
+            Some((scheme, name)) if scheme.eq_ignore_ascii_case("env") => Some(Self::Env(name.to_owned())),
+            _ => Location::parse(trimmed).map(Self::File),
+        }
     }
 
-    pub async fn resolve(&self) -> Result<String, SettingError> {
+    pub async fn resolve<E: ReadEnv>(&self, env: &E) -> Result<String, SettingError> {
         match self {
             Self::Inline(seed) => Ok(seed.as_str().to_owned()),
             Self::File(location) => location.read_seed().await,
+            Self::Env(name) => {
+                let value = env.var(name).map_err(|_| SettingError::EnvUnset(name.clone()))?;
+                let seed = value.trim();
+                nkeys::KeyPair::from_seed(seed).map_err(SettingError::InvalidSeed)?;
+                Ok(seed.to_owned())
+            }
         }
     }
 }
@@ -117,6 +128,7 @@ impl fmt::Debug for NKeySeed {
         match self {
             Self::Inline(_) => f.debug_tuple("Inline").field(&"<redacted>").finish(),
             Self::File(_) => f.debug_tuple("File").field(&"<redacted>").finish(),
+            Self::Env(name) => f.debug_tuple("Env").field(name).finish(),
         }
     }
 }
