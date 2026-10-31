@@ -66,7 +66,7 @@ pub mod mocks;
 pub use async_nats::subject::ToSubject;
 pub use auth::{NatsAuth, NatsConfig};
 pub use client::{FlushClient, PublishClient, RequestClient, SubscribeClient};
-pub use connect::{ConnectError, connect};
+pub use connect::{ConnectError, connect, connect_once};
 pub use constants::{MAX_SUBJECT_BYTES, MAX_SUBJECT_TOKENS, REQ_ID_HEADER};
 pub use credential_value::{CredentialValue, Location, NKeySeed, SettingError};
 pub use lease::{
@@ -86,7 +86,7 @@ pub use subject_conformance::{
     validate_published_subject, validate_subject_pattern,
 };
 pub use subject_token_violation::SubjectTokenViolationError;
-pub use tls::{ClientCertificate, IncompleteClientCertificate, NatsTls};
+pub use tls::{ClientCertificate, IncompleteClientCertificate, NatsTls, TlsMisconfiguration};
 
 #[cfg(any(test, feature = "test-support"))]
 pub use mocks::{AdvancedMockNatsClient, MockNatsClient};

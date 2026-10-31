@@ -16,3 +16,4 @@ trogon-std = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+trogon-std = { workspace = true, features = ["test-support"] }

@@ -50,6 +50,7 @@ async fn gateway_subscribes_dispatches_and_stops_for_both_subscription_modes() -
                 )
             }))
             .env("AUTH_CALLOUT_SIGNING_SECRET", &signing_key)
+            .env("NATS_TLS_DISABLED", "true")
             .args(["--nats-url", server.address(), "--prefix", "a2a"])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());

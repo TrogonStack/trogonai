@@ -11,10 +11,14 @@ pub const ENV_NATS_SEED: &str = "NATS_SEED";
 pub const ENV_NATS_CERT: &str = "NATS_CERT";
 pub const ENV_NATS_KEY: &str = "NATS_KEY";
 pub const ENV_NATS_CA: &str = "NATS_CA";
+pub const ENV_NATS_TLS_DISABLED: &str = "NATS_TLS_DISABLED";
 pub const DEFAULT_NATS_URL: &str = "localhost:4222";
 
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 pub const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(30);
+/// The number async-nats gives the first dial, both at startup and after every
+/// disconnect, so that dial goes out without waiting.
+pub(crate) const FIRST_CONNECT_ATTEMPT: usize = 1;
 pub const MIN_SERVER_INFO_POLL_INTERVAL: Duration = Duration::from_millis(1);
 
 pub const REQ_ID_HEADER: &str = "Trogon-Req-Id";
@@ -51,3 +55,7 @@ pub const ESCAPE_TOKEN: &str = "custom";
 
 /// Prefixes of operator, account and user NKey seeds.
 pub const SEED_PREFIXES: [&str; 3] = ["SO", "SA", "SU"];
+
+/// Values of `NATS_TLS_DISABLED` that disable TLS, compared without regard to
+/// letter case. Any other non-empty value is a configuration error.
+pub const TLS_DISABLED_VALUES: [&str; 3] = ["true", "1", "yes"];

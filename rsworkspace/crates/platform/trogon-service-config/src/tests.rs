@@ -1,7 +1,11 @@
 use super::*;
 use clap::error::{ContextKind, ContextValue, ErrorKind};
 use clap::{CommandFactory, Parser};
-use trogon_nats::{CredentialValue, Location, NKeySeed, NatsAuth};
+use trogon_nats::{
+    ClientCertificate, CredentialValue, IncompleteClientCertificate, Location, NKeySeed, NatsAuth, NatsTls,
+    TlsMisconfiguration,
+};
+use trogon_std::env::InMemoryEnv;
 
 const SECRET_FLAGS: [&str; 5] = [
     "--nats-nkey",
@@ -41,7 +45,7 @@ fn resolve_nats_uses_section_when_no_overrides() {
         tls_ca: None,
     };
 
-    let resolved = resolve_nats(&section, &NatsArgs::default()).unwrap();
+    let resolved = resolve_nats(&section, &NatsArgs::default(), &InMemoryEnv::new()).unwrap();
 
     assert_eq!(resolved.servers, vec!["host1:4222", "host2:4222"]);
     assert!(
@@ -70,7 +74,7 @@ fn resolve_nats_prefers_cli_overrides() {
         ..Default::default()
     };
 
-    let resolved = resolve_nats(&section, &overrides).unwrap();
+    let resolved = resolve_nats(&section, &overrides, &InMemoryEnv::new()).unwrap();
 
     assert_eq!(resolved.servers, vec!["override1:4222", "override2:4222"]);
     assert!(matches!(resolved.auth, NatsAuth::Token(CredentialValue::Env(ref name)) if name == "OVERRIDE_TOKEN"));
@@ -97,7 +101,7 @@ fn resolve_nats_keeps_auth_priority_with_overrides() {
         ..Default::default()
     };
 
-    let resolved = resolve_nats(&section, &overrides).unwrap();
+    let resolved = resolve_nats(&section, &overrides, &InMemoryEnv::new()).unwrap();
 
     assert!(
         matches!(resolved.auth, NatsAuth::Credentials(Location::Path(ref path)) if path == Path::new("/tmp/nats.creds"))
@@ -154,7 +158,7 @@ fn resolve_nats_nkey_beats_user_password() {
         ..empty_section()
     };
 
-    let resolved = resolve_nats(&section, &NatsArgs::default()).unwrap();
+    let resolved = resolve_nats(&section, &NatsArgs::default(), &InMemoryEnv::new()).unwrap();
 
     assert!(matches!(resolved.auth, NatsAuth::NKey(_)));
 }
@@ -167,7 +171,7 @@ fn resolve_nats_token_beats_user_without_password() {
         ..empty_section()
     };
 
-    let resolved = resolve_nats(&section, &NatsArgs::default()).unwrap();
+    let resolved = resolve_nats(&section, &NatsArgs::default(), &InMemoryEnv::new()).unwrap();
 
     assert!(
         matches!(resolved.auth, NatsAuth::Token(CredentialValue::Literal(ref token)) if token.as_str() == "section-token")
@@ -181,7 +185,7 @@ fn resolve_nats_nkey_accepts_a_seed_file_location() {
         ..Default::default()
     };
 
-    let resolved = resolve_nats(&empty_section(), &overrides).unwrap();
+    let resolved = resolve_nats(&empty_section(), &overrides, &InMemoryEnv::new()).unwrap();
 
     assert!(
         matches!(resolved.auth, NatsAuth::NKey(NKeySeed::File(Location::Path(ref path))) if path == Path::new("/seed.nk"))
@@ -195,7 +199,7 @@ fn resolve_nats_nkey_accepts_an_env_reference() {
         ..Default::default()
     };
 
-    let resolved = resolve_nats(&empty_section(), &overrides).unwrap();
+    let resolved = resolve_nats(&empty_section(), &overrides, &InMemoryEnv::new()).unwrap();
 
     assert!(matches!(resolved.auth, NatsAuth::NKey(NKeySeed::Env(ref name)) if name == "NKEY_SEED"));
 }
@@ -211,7 +215,7 @@ fn resolve_nats_jwt_and_seed_from_section_and_overrides() {
         ..Default::default()
     };
 
-    let resolved = resolve_nats(&section, &overrides).unwrap();
+    let resolved = resolve_nats(&section, &overrides, &InMemoryEnv::new()).unwrap();
 
     assert!(matches!(
         resolved.auth,
@@ -227,7 +231,7 @@ fn resolve_nats_jwt_accepts_a_file_reference() {
         ..Default::default()
     };
 
-    let resolved = resolve_nats(&empty_section(), &overrides).unwrap();
+    let resolved = resolve_nats(&empty_section(), &overrides, &InMemoryEnv::new()).unwrap();
 
     assert!(matches!(
         resolved.auth,
@@ -243,7 +247,7 @@ fn resolve_nats_rejects_a_cli_user_that_would_be_sent_as_a_token() {
     };
 
     assert_eq!(
-        resolve_nats(&empty_section(), &overrides).err(),
+        resolve_nats(&empty_section(), &overrides, &InMemoryEnv::new()).err(),
         Some(NatsArgsError::UserSentAsToken)
     );
 }
@@ -259,7 +263,7 @@ fn resolve_nats_accepts_a_cli_user_with_a_section_password() {
         ..Default::default()
     };
 
-    let resolved = resolve_nats(&section, &overrides).unwrap();
+    let resolved = resolve_nats(&section, &overrides, &InMemoryEnv::new()).unwrap();
 
     assert!(matches!(resolved.auth, NatsAuth::UserPassword { ref user, .. } if user == "alice"));
 }
@@ -272,7 +276,7 @@ fn resolve_nats_accepts_a_cli_user_with_a_password_reference() {
         ..Default::default()
     };
 
-    let resolved = resolve_nats(&empty_section(), &overrides).unwrap();
+    let resolved = resolve_nats(&empty_section(), &overrides, &InMemoryEnv::new()).unwrap();
 
     assert!(matches!(
         resolved.auth,
@@ -292,7 +296,7 @@ fn resolve_nats_ignores_a_cli_user_when_a_token_is_set() {
         ..Default::default()
     };
 
-    let resolved = resolve_nats(&section, &overrides).unwrap();
+    let resolved = resolve_nats(&section, &overrides, &InMemoryEnv::new()).unwrap();
 
     assert!(
         matches!(resolved.auth, NatsAuth::Token(CredentialValue::Literal(ref token)) if token.as_str() == "section-token")
@@ -307,7 +311,7 @@ fn resolve_nats_ignores_a_cli_user_when_creds_win() {
         ..Default::default()
     };
 
-    let resolved = resolve_nats(&empty_section(), &overrides).unwrap();
+    let resolved = resolve_nats(&empty_section(), &overrides, &InMemoryEnv::new()).unwrap();
 
     assert!(matches!(resolved.auth, NatsAuth::Credentials(_)));
 }
@@ -319,7 +323,7 @@ fn resolve_nats_keeps_a_section_user_without_password_as_a_token() {
         ..empty_section()
     };
 
-    let resolved = resolve_nats(&section, &NatsArgs::default()).unwrap();
+    let resolved = resolve_nats(&section, &NatsArgs::default(), &InMemoryEnv::new()).unwrap();
 
     assert!(
         matches!(resolved.auth, NatsAuth::Token(CredentialValue::Literal(ref token)) if token.as_str() == "section-user-token")
@@ -340,12 +344,18 @@ fn resolve_nats_tls_overrides_section() {
         ..Default::default()
     };
 
-    let resolved = resolve_nats(&section, &overrides).unwrap();
-    let client = resolved.tls.client_certificate().unwrap().unwrap();
+    let resolved = resolve_nats(&section, &overrides, &InMemoryEnv::new()).unwrap();
 
-    assert_eq!(client.cert, Location::Path("/override.crt".into()));
-    assert_eq!(client.key, Location::Path("/section.key".into()));
-    assert_eq!(resolved.tls.root_ca(), Some(&Location::Path("/override-ca.pem".into())));
+    assert_eq!(
+        resolved.tls,
+        Ok(NatsTls::Enabled {
+            ca: Some(Location::Path("/override-ca.pem".into())),
+            client_cert: Some(ClientCertificate {
+                cert: Location::Path("/override.crt".into()),
+                key: Location::Path("/section.key".into()),
+            }),
+        })
+    );
 }
 
 #[test]
@@ -356,11 +366,29 @@ fn resolve_nats_tls_needs_cert_and_key() {
     };
 
     assert_eq!(
-        resolve_nats(&section, &NatsArgs::default())
+        resolve_nats(&section, &NatsArgs::default(), &InMemoryEnv::new())
             .unwrap()
-            .tls
-            .client_certificate(),
-        Err(trogon_nats::IncompleteClientCertificate::MissingKey)
+            .tls,
+        Err(TlsMisconfiguration::IncompleteClientCertificate(
+            IncompleteClientCertificate::MissingKey
+        ))
+    );
+}
+
+#[test]
+fn resolve_nats_keeps_tls_on_unless_the_environment_disables_it() {
+    let env = InMemoryEnv::new();
+    env.set("NATS_TLS_DISABLED", "true");
+
+    assert_eq!(
+        resolve_nats(&empty_section(), &NatsArgs::default(), &InMemoryEnv::new())
+            .unwrap()
+            .tls,
+        Ok(NatsTls::default())
+    );
+    assert_eq!(
+        resolve_nats(&empty_section(), &NatsArgs::default(), &env).unwrap().tls,
+        Ok(NatsTls::Disabled)
     );
 }
 

@@ -334,7 +334,7 @@ async fn failed_telegram_client_skips_registration_and_empty_sources_skip_client
 
 #[tokio::test]
 async fn discord_task_receives_configured_shard_and_reports_normal_completion() {
-    let _ = trogon_std::tls::install_default_crypto_provider();
+    trogon_std::tls::install_default_crypto_provider();
     let resolved = configuration(
         r#"
 [sources.discord]
@@ -425,7 +425,7 @@ async fn put_discord_bot_token(
 
 #[tokio::test(start_paused = true)]
 async fn discord_runtime_gateway_starts_once_the_bot_token_projection_catches_up_and_restarts_an_ended_shard() {
-    let _ = trogon_std::tls::install_default_crypto_provider();
+    trogon_std::tls::install_default_crypto_provider();
     let resolved = discord_without_static_bot_token();
     let store = MockOpenBaoSecretStore::default();
     let registry = RuntimeCredentialRegistry::default();
@@ -468,7 +468,7 @@ async fn discord_runtime_gateway_starts_once_the_bot_token_projection_catches_up
 
 #[tokio::test(start_paused = true)]
 async fn discord_runtime_gateway_restarts_the_shard_with_a_rotated_bot_token() {
-    let _ = trogon_std::tls::install_default_crypto_provider();
+    trogon_std::tls::install_default_crypto_provider();
     let resolved = discord_without_static_bot_token();
     let store = MockOpenBaoSecretStore::default();
     let registry = RuntimeCredentialRegistry::default();
@@ -513,7 +513,7 @@ async fn discord_runtime_gateway_restarts_the_shard_with_a_rotated_bot_token() {
 
 #[tokio::test(start_paused = true)]
 async fn discord_runtime_gateway_resets_the_restart_delay_after_a_healthy_shard_run() {
-    let _ = trogon_std::tls::install_default_crypto_provider();
+    trogon_std::tls::install_default_crypto_provider();
     let resolved = discord_without_static_bot_token();
     let store = MockOpenBaoSecretStore::default();
     let registry = RuntimeCredentialRegistry::default();
