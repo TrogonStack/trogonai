@@ -1,4 +1,5 @@
-//! Replay-protection store: dedup `jti` and PoP nonces with TTLs.
+//! Replay-protection store: records with TTLs that admit a `jti` or PoP nonce
+//! once, and record which server nonces were issued.
 //!
 //! [`ReplayStore`] has two implementations. [`InMemoryReplayStore`] is
 //! process-local, so a multi-replica deployment accepts the same record once
@@ -18,12 +19,19 @@ pub trait ReplayStore: Send + Sync {
     /// Returns `Ok(true)` if `key` was newly inserted and is fresh, `Ok(false)`
     /// if it was already seen. `ttl_secs` is the maximum lifetime of the record.
     async fn check_and_insert(&self, key: &str, ttl_secs: u32) -> Result<bool, ReplayError>;
+
+    /// Returns whether a live record exists under `key`, without creating one.
+    async fn contains(&self, key: &str) -> Result<bool, ReplayError>;
 }
 
 #[async_trait]
 impl<T: ReplayStore + ?Sized> ReplayStore for Arc<T> {
     async fn check_and_insert(&self, key: &str, ttl_secs: u32) -> Result<bool, ReplayError> {
         (**self).check_and_insert(key, ttl_secs).await
+    }
+
+    async fn contains(&self, key: &str) -> Result<bool, ReplayError> {
+        (**self).contains(key).await
     }
 }
 
@@ -97,6 +105,12 @@ impl ReplayStore for InMemoryReplayStore {
         }
         map.insert(key.to_string(), expires_at);
         Ok(true)
+    }
+
+    async fn contains(&self, key: &str) -> Result<bool, ReplayError> {
+        let mut map = self.inner.lock().map_err(|_| ReplayError::MutexPoisoned)?;
+        self.gc(&mut map);
+        Ok(map.contains_key(key))
     }
 }
 

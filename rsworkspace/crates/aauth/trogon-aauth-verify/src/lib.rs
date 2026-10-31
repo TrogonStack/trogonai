@@ -21,6 +21,7 @@ pub mod jwks_http;
 pub mod mission;
 pub mod nats_pop;
 pub mod replay;
+pub mod server_nonce;
 pub mod time_source;
 pub mod token;
 pub mod upstream;
@@ -51,6 +52,10 @@ pub use replay::nats_kv::{
     IncompatibleReplayBucketError, NatsKvReplayStore, RecordOutlivesBucketError, ReplayBucketError, ReplayBucketSpec,
 };
 pub use replay::{InMemoryReplayStore, ReplayError, ReplayStore};
+pub use server_nonce::{
+    ChallengeKey, ChallengeKeyError, ChallengeKid, EmptyChallengeKidError, NonceChallenge, NonceError, NonceIssueError,
+    NonceRequirement, NonceTtl, NonceTtlError, ServerNonce, ServerNonces,
+};
 pub use time_source::{SystemTimeSource, TimeSource};
 pub use token::{
     InvalidKeyMaterialSourceError, RequestContextError, RequestSigningContext, TokenError, TokenVerifier,

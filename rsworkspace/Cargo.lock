@@ -7149,6 +7149,7 @@ dependencies = [
  "trogon-identity-types",
  "trogon-nats",
  "url",
+ "uuid",
  "wiremock",
 ]
 

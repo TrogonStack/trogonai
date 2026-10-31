@@ -136,3 +136,39 @@ async fn unreachable_bucket_fails_closed() {
 
     assert!(matches!(err, ReplayError::Backend(_)), "got {err:?}");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn contains_reports_a_recorded_key_without_creating_one() {
+    let (_server, _jetstream, store) = provisioned_store().await;
+
+    assert!(!store.contains("nonce.issued").await.unwrap());
+    assert!(store.check_and_insert("nonce.issued", 150).await.unwrap());
+    assert!(store.contains("nonce.issued").await.unwrap());
+    assert!(!store.contains("nonce.other").await.unwrap());
+    assert!(store.check_and_insert("nonce.other", 150).await.unwrap());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn contains_honors_a_record_another_instance_created() {
+    let (_server, jetstream, store) = provisioned_store().await;
+    let other = NatsKvReplayStore::open(&jetstream)
+        .await
+        .expect("second instance opens the bucket");
+
+    assert!(store.check_and_insert("nonce.shared", 150).await.unwrap());
+
+    assert!(other.contains("nonce.shared").await.unwrap());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn contains_fails_closed_when_the_bucket_is_unreachable() {
+    let (_server, jetstream, store) = provisioned_store().await;
+    jetstream
+        .delete_key_value(AAUTH_REPLAY_BUCKET)
+        .await
+        .expect("remove replay bucket");
+
+    let err = store.contains("nonce.gone").await.unwrap_err();
+
+    assert!(matches!(err, ReplayError::Backend(_)), "got {err:?}");
+}

@@ -27,6 +27,8 @@
 //!   the empty body.
 //! - `aauth-mission` (OPTIONAL): the raw `AAuth-Mission` header field value,
 //!   required to be covered only when the request carries that header.
+//! - `aauth-nonce` (OPTIONAL): the raw `AAuth-Nonce` header field value,
+//!   required to be covered only when the request carries that header.
 //!
 //! ## Body integrity
 //!
@@ -71,6 +73,22 @@
 //! `jti` is therefore admitted once per key for as long as any signature
 //! carrying it could still be fresh, whatever request it is attached to,
 //! and a store that cannot be consulted refuses the request.
+//!
+//! ## Server nonces
+//!
+//! With [`ServerNonces`] configured, a nonce a request binds in `AAuth-Nonce`
+//! has to be one this resource issued to the request's signing key, still
+//! usable and still recorded in the [`ReplayStore`]. When the policy is
+//! [`NonceRequirement::Required`], a request binding no nonce, or one that
+//! does not verify, is refused with [`HttpPopError::NonceRequired`], whose
+//! [`NonceChallenge`] carries a fresh nonce issued to its signing key for the
+//! retry, as RFC 9449 does for a missing or stale DPoP nonce. Under
+//! [`NonceRequirement::Optional`] a bound nonce that does not verify is
+//! refused with [`HttpPopError::InvalidNonce`]. Nonces are only ever issued
+//! to a request whose signature has verified and whose `jti` was just
+//! recorded, so neither an unauthenticated request nor a replayed one can
+//! make the resource write a nonce record. Without [`ServerNonces`], a
+//! request binding a nonce is refused, since this resource issued none.
 
 use base64::Engine;
 use base64::engine::general_purpose::{STANDARD, STANDARD_NO_PAD, URL_SAFE_NO_PAD};
@@ -79,10 +97,11 @@ use jsonwebtoken::{Algorithm, DecodingKey, crypto::verify};
 use sha2::{Digest, Sha256};
 use trogon_identity_types::aauth::headers;
 
-use crate::constants::HTTP_SECURITY_HEADERS;
+use crate::constants::{HTTP_SECURITY_HEADERS, SERVER_NONCE_COMPONENT, SERVER_NONCE_HEADER};
 use crate::freshness::{ClockTolerance, FreshnessError, SignatureFreshness};
 use crate::jwks::JwksResolver;
 use crate::replay::{ReplayError, ReplayStore};
+use crate::server_nonce::{NonceChallenge, NonceError, NonceIssueError, NonceRequirement, ServerNonce, ServerNonces};
 use crate::time_source::TimeSource;
 use crate::token::{TokenError, TokenVerifier, VerifiedAgent, VerifiedAuth};
 
@@ -211,6 +230,19 @@ pub enum HttpPopError {
     /// claim is expected -- see [`crate::mission`] for claim-level checks.
     #[error("aauth-mission header required but missing")]
     MissingMissionHeader,
+    /// The `AAuth-Nonce` header is present but not covered by the signature,
+    /// or covered but absent.
+    #[error("aauth-nonce header is not covered by the signature, or is covered but absent")]
+    UnboundNonce,
+    /// The resource demands a server nonce and the request bound none, or
+    /// one that does not verify. Carries a fresh nonce, issued to the
+    /// request's signing key, for the retry.
+    #[error("request binds no usable server nonce, which this resource demands")]
+    NonceRequired(NonceChallenge),
+    #[error("server nonce does not verify: {0}")]
+    InvalidNonce(#[source] NonceError),
+    #[error("server nonce could not be issued")]
+    NonceIssue(#[source] NonceIssueError),
     /// The signature's `created`/`expires` window is malformed or not fresh
     /// at the verifier's clock.
     #[error("signature is not fresh: {0}")]
@@ -274,11 +306,13 @@ pub struct HttpPopVerifier<R: JwksResolver, C: TimeSource, S: ReplayStore> {
     pub clock: C,
     pub replay: S,
     pub freshness: SignatureFreshness,
-    /// The resource's own identifier (its `aud`), used only to verify an
+    /// The resource's own identifier (its `aud`), used to verify an
     /// auth-token presenter's `aud` claim (mirrors "Request-Context Binding"
     /// rule 5, folded in here because [`Self::verify`] already has the
-    /// verified auth claims and signing context in hand).
+    /// verified auth claims and signing context in hand), and named as the
+    /// issuer of the server nonces this resource hands out.
     pub resource_identifier: String,
+    pub nonces: Option<ServerNonces>,
 }
 
 impl<R: JwksResolver + Clone, C: TimeSource + Clone, S: ReplayStore> HttpPopVerifier<R, C, S> {
@@ -292,6 +326,7 @@ impl<R: JwksResolver + Clone, C: TimeSource + Clone, S: ReplayStore> HttpPopVeri
             replay,
             freshness,
             resource_identifier: resource_identifier.into(),
+            nonces: None,
         }
     }
 }
@@ -311,13 +346,20 @@ impl<R: JwksResolver, C: TimeSource, S: ReplayStore> HttpPopVerifier<R, C, S> {
         self
     }
 
+    #[must_use]
+    pub fn with_server_nonces(mut self, nonces: ServerNonces) -> Self {
+        self.nonces = Some(nonces);
+        self
+    }
+
     /// Verify an HTTP request's proof-of-possession per "Verification
     /// (Server)" (#verification): extracts `Signature-Key`, `Signature-Input`,
     /// `Signature`; verifies required component coverage and the freshness of
     /// the signature window; verifies the JWT layer of the presented token
     /// (agent or auth); verifies the HTTP Message Signature against the
-    /// token's `cnf.jwk`; recomputes `Content-Digest` over the body; and
-    /// records the signing key's `jti` so it is admitted once.
+    /// token's `cnf.jwk`; recomputes `Content-Digest` over the body; records
+    /// the signing key's `jti` so it is admitted once; and checks the server
+    /// nonce the request binds, or demands one.
     pub async fn verify(&self, req: &HttpRequest) -> Result<VerifiedPresenter, HttpPopError> {
         ensure_no_duplicate_security_headers(req)?;
 
@@ -354,7 +396,74 @@ impl<R: JwksResolver, C: TimeSource, S: ReplayStore> HttpPopVerifier<R, C, S> {
             return Err(HttpPopError::Replay);
         }
 
+        self.verify_server_nonce(req, &jkt).await?;
+
         Ok(presenter)
+    }
+
+    async fn verify_server_nonce(&self, req: &HttpRequest, jkt: &str) -> Result<(), HttpPopError> {
+        let presented = req.header(SERVER_NONCE_HEADER);
+        let Some(nonces) = &self.nonces else {
+            return match presented {
+                Some(_) => Err(HttpPopError::InvalidNonce(NonceError::NotIssued)),
+                None => Ok(()),
+            };
+        };
+        let refused = match presented {
+            Some(raw) => match self.nonce_refusal(nonces, raw.trim(), jkt).await? {
+                None => return Ok(()),
+                refusal => refusal,
+            },
+            None => None,
+        };
+        match nonces.requirement() {
+            NonceRequirement::Required => {
+                let nonce = self.issue_nonce(nonces, jkt).await?;
+                Err(HttpPopError::NonceRequired(NonceChallenge::new(nonce, refused)))
+            }
+            NonceRequirement::Optional => refused.map_or(Ok(()), |err| Err(HttpPopError::InvalidNonce(err))),
+        }
+    }
+
+    /// Why `raw` is not a usable nonce this resource issued to the key with
+    /// thumbprint `jkt`, or `None` when it is one.
+    async fn nonce_refusal(
+        &self,
+        nonces: &ServerNonces,
+        raw: &str,
+        jkt: &str,
+    ) -> Result<Option<NonceError>, HttpPopError> {
+        let record = match nonces.check(
+            raw,
+            &self.resource_identifier,
+            jkt,
+            self.clock.now(),
+            self.freshness.skew(),
+        ) {
+            Ok(record) => record,
+            Err(err) => return Ok(Some(err)),
+        };
+        let issued = self
+            .replay
+            .contains(record.key())
+            .await
+            .map_err(HttpPopError::Backend)?;
+        Ok((!issued).then_some(NonceError::NotIssued))
+    }
+
+    async fn issue_nonce(&self, nonces: &ServerNonces, jkt: &str) -> Result<ServerNonce, HttpPopError> {
+        let issued = nonces
+            .mint(&self.resource_identifier, jkt, self.clock.now())
+            .map_err(HttpPopError::NonceIssue)?;
+        let recorded = self
+            .replay
+            .check_and_insert(issued.record.key(), nonces.record_ttl_secs(self.freshness.skew()))
+            .await
+            .map_err(HttpPopError::Backend)?;
+        if !recorded {
+            return Err(HttpPopError::NonceIssue(NonceIssueError::Collision));
+        }
+        Ok(issued.nonce)
     }
 
     async fn verify_presenter(
@@ -482,8 +591,8 @@ fn extract_quoted(tok: &str) -> Option<String> {
 }
 
 /// Checks that the required covered components (#covered-components) and
-/// `content-digest` are present in `components`, plus `aauth-mission`
-/// exactly when the request carries that header.
+/// `content-digest` are present in `components`, plus `aauth-mission` and
+/// `aauth-nonce` each exactly when the request carries that header.
 fn verify_covered_components(req: &HttpRequest, components: &[String]) -> Result<(), HttpPopError> {
     let has = |name: &str| components.iter().any(|c| c == name);
 
@@ -499,6 +608,10 @@ fn verify_covered_components(req: &HttpRequest, components: &[String]) -> Result
 
     if has("aauth-mission") != req.header(headers::MISSION).is_some() {
         return Err(HttpPopError::MissingMissionHeader);
+    }
+
+    if has(SERVER_NONCE_COMPONENT) != req.header(SERVER_NONCE_HEADER).is_some() {
+        return Err(HttpPopError::UnboundNonce);
     }
 
     Ok(())
@@ -618,6 +731,10 @@ fn component_value(req: &HttpRequest, component: &str) -> Result<String, HttpPop
             .header(headers::MISSION)
             .map(normalize_field_value)
             .ok_or(HttpPopError::MissingMissionHeader),
+        SERVER_NONCE_COMPONENT => req
+            .header(SERVER_NONCE_HEADER)
+            .map(normalize_field_value)
+            .ok_or(HttpPopError::UnboundNonce),
         other => req
             .header(other)
             .map(normalize_field_value)

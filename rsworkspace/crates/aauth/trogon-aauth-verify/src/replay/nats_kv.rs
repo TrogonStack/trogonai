@@ -137,6 +137,13 @@ impl ReplayStore for NatsKvReplayStore {
             Err(err) => Err(ReplayError::Backend(Box::new(err))),
         }
     }
+
+    async fn contains(&self, key: &str) -> Result<bool, ReplayError> {
+        match self.store.get(key).await {
+            Ok(record) => Ok(record.is_some()),
+            Err(err) => Err(ReplayError::Backend(Box::new(err))),
+        }
+    }
 }
 
 #[cfg(test)]

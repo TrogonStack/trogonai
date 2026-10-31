@@ -5,7 +5,10 @@ use super::*;
 use crate::freshness::SignatureValidity;
 use crate::jwks::StaticJwks;
 use crate::replay::InMemoryReplayStore;
-use crate::test_support::{EcFixture, ed25519_fixture, jwks_with_key, p256_fixture, p384_fixture};
+use crate::server_nonce::NonceTtl;
+use crate::test_support::{
+    EcFixture, challenge_key_from, challenge_key_pem, ed25519_fixture, jwks_with_key, p256_fixture, p384_fixture,
+};
 use async_trait::async_trait;
 use jsonwebtoken::crypto::sign;
 use jsonwebtoken::jwk::JwkSet;
@@ -27,6 +30,39 @@ impl ReplayStore for FailingReplayStore {
     async fn check_and_insert(&self, _key: &str, _ttl_secs: u32) -> Result<bool, ReplayError> {
         Err(ReplayError::MutexPoisoned)
     }
+
+    async fn contains(&self, _key: &str) -> Result<bool, ReplayError> {
+        Err(ReplayError::MutexPoisoned)
+    }
+}
+
+/// Records every `jti`, but cannot look up whether a nonce was issued.
+#[derive(Default)]
+struct LookupFailingReplayStore(InMemoryReplayStore);
+
+#[async_trait]
+impl ReplayStore for LookupFailingReplayStore {
+    async fn check_and_insert(&self, key: &str, ttl_secs: u32) -> Result<bool, ReplayError> {
+        self.0.check_and_insert(key, ttl_secs).await
+    }
+
+    async fn contains(&self, _key: &str) -> Result<bool, ReplayError> {
+        Err(ReplayError::MutexPoisoned)
+    }
+}
+
+/// Admits every `jti`, but finds every nonce record already taken.
+struct CollidingNonceStore;
+
+#[async_trait]
+impl ReplayStore for CollidingNonceStore {
+    async fn check_and_insert(&self, key: &str, _ttl_secs: u32) -> Result<bool, ReplayError> {
+        Ok(!key.starts_with("nonce."))
+    }
+
+    async fn contains(&self, _key: &str) -> Result<bool, ReplayError> {
+        Ok(false)
+    }
 }
 
 #[derive(Default)]
@@ -42,6 +78,15 @@ impl ReplayStore for RecordingReplayStore {
             .expect("records lock")
             .push((key.to_string(), ttl_secs));
         Ok(true)
+    }
+
+    async fn contains(&self, key: &str) -> Result<bool, ReplayError> {
+        Ok(self
+            .records
+            .lock()
+            .expect("records lock")
+            .iter()
+            .any(|(recorded, _)| recorded == key))
     }
 }
 
@@ -1223,6 +1268,30 @@ fn component_value_rejects_aauth_mission_header_absent() {
 }
 
 #[test]
+fn verify_covered_components_requires_aauth_nonce_coverage_when_header_present() {
+    let mut req = base_request("sig=jwt;jwt=\"x\"");
+    req.headers.push((SERVER_NONCE_HEADER.to_string(), "n".to_string()));
+    let components: Vec<String> = REQUIRED_COMPONENTS.iter().map(|s| s.to_string()).collect();
+    let err = verify_covered_components(&req, &components).unwrap_err();
+    assert!(matches!(err, HttpPopError::UnboundNonce));
+}
+
+#[test]
+fn verify_covered_components_rejects_a_covered_aauth_nonce_that_is_absent() {
+    let req = base_request("sig=jwt;jwt=\"x\"");
+    let components: Vec<String> = NONCE_COMPONENTS.iter().map(|s| s.to_string()).collect();
+    let err = verify_covered_components(&req, &components).unwrap_err();
+    assert!(matches!(err, HttpPopError::UnboundNonce));
+}
+
+#[test]
+fn component_value_rejects_aauth_nonce_header_absent() {
+    let req = base_request("sig=jwt;jwt=\"x\"");
+    let err = component_value(&req, SERVER_NONCE_COMPONENT).unwrap_err();
+    assert!(matches!(err, HttpPopError::UnboundNonce));
+}
+
+#[test]
 fn component_value_rejects_unsupported_component_name() {
     let req = base_request("sig=jwt;jwt=\"x\"");
     let err = component_value(&req, "x-custom-header").unwrap_err();
@@ -1309,6 +1378,9 @@ async fn verify_accepts_es384_agent_presenter() {
 
 #[test]
 fn http_pop_error_display_messages_are_distinct() {
+    let issued = server_nonces(&challenge_key_pem(), NonceRequirement::Required)
+        .mint("resource.example", "jkt", 1000)
+        .expect("mint");
     let cases = [
         format!("{}", HttpPopError::MissingHeader("x")),
         format!("{}", HttpPopError::DuplicateHeader("x")),
@@ -1330,10 +1402,497 @@ fn http_pop_error_display_messages_are_distinct() {
         format!("{}", HttpPopError::AlgorithmMismatch),
         format!("{}", HttpPopError::Replay),
         format!("{}", HttpPopError::BadSignature),
+        format!("{}", HttpPopError::UnboundNonce),
+        format!(
+            "{}",
+            HttpPopError::NonceRequired(NonceChallenge::new(issued.nonce, None))
+        ),
+        format!("{}", HttpPopError::InvalidNonce(NonceError::NotIssued)),
+        format!("{}", HttpPopError::NonceIssue(NonceIssueError::Collision)),
     ];
     for i in 0..cases.len() {
         for j in (i + 1)..cases.len() {
             assert_ne!(cases[i], cases[j]);
         }
     }
+}
+
+const NONCE_COMPONENTS: [&str; 6] = [
+    "@method",
+    "@authority",
+    "@path",
+    "signature-key",
+    "content-digest",
+    SERVER_NONCE_COMPONENT,
+];
+
+fn server_nonces(pem: &str, requirement: NonceRequirement) -> ServerNonces {
+    ServerNonces::new(challenge_key_from(pem, "nonce-k1"), NonceTtl::default(), requirement)
+}
+
+fn nonce_verifier<S: ReplayStore>(
+    jwks: StaticJwks,
+    now: i64,
+    replay: S,
+    pem: &str,
+    requirement: NonceRequirement,
+) -> HttpPopVerifier<StaticJwks, FixedClock, S> {
+    verifier_with(jwks, now, replay).with_server_nonces(server_nonces(pem, requirement))
+}
+
+/// An agent signing key, its presenting token and the JWKS that verifies it.
+fn agent(kid: &str) -> (EcFixture, String, StaticJwks) {
+    let fixture = p256_fixture(kid);
+    let jwt = agent_jwt(&fixture, kid, "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    (fixture, jwt, jwks)
+}
+
+/// A request signed at `created` under a fresh `jti`, binding `nonce` when
+/// one is given.
+fn nonce_request(fixture: &EcFixture, jwt: &str, created: i64, nonce: Option<&ServerNonce>) -> HttpRequest {
+    let mut req = base_request(&signature_key_header(jwt));
+    match nonce {
+        Some(nonce) => {
+            req.headers
+                .push((SERVER_NONCE_HEADER.to_string(), nonce.as_str().to_string()));
+            sign_request(fixture, &mut req, created, &NONCE_COMPONENTS);
+        }
+        None => sign_request(fixture, &mut req, created, &REQUIRED_COMPONENTS),
+    }
+    req
+}
+
+fn expect_challenge(err: HttpPopError) -> NonceChallenge {
+    let HttpPopError::NonceRequired(challenge) = err else {
+        panic!("expected a nonce challenge, got {err:?}");
+    };
+    challenge
+}
+
+/// The challenge a request binding no nonce draws from `verifier`.
+async fn challenge<S: ReplayStore>(
+    verifier: &HttpPopVerifier<StaticJwks, FixedClock, S>,
+    fixture: &EcFixture,
+    jwt: &str,
+    created: i64,
+) -> NonceChallenge {
+    let err = verifier
+        .verify(&nonce_request(fixture, jwt, created, None))
+        .await
+        .unwrap_err();
+    expect_challenge(err)
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_demands_a_nonce_and_admits_the_retry_that_binds_it() {
+    let (fixture, jwt, jwks) = agent("k1");
+    let verifier = nonce_verifier(
+        jwks,
+        1000,
+        InMemoryReplayStore::default(),
+        &challenge_key_pem(),
+        NonceRequirement::Required,
+    );
+
+    let challenge = challenge(&verifier, &fixture, &jwt, 1000).await;
+    assert!(challenge.refused().is_none());
+
+    let retry = nonce_request(&fixture, &jwt, 1000, Some(challenge.nonce()));
+    let result = verifier.verify(&retry).await.expect("retry binding the nonce verifies");
+    assert!(matches!(result, VerifiedPresenter::Agent(_)));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_admits_a_nonce_on_every_request_while_it_lives() {
+    let (fixture, jwt, jwks) = agent("k1");
+    let verifier = nonce_verifier(
+        jwks,
+        1000,
+        InMemoryReplayStore::default(),
+        &challenge_key_pem(),
+        NonceRequirement::Required,
+    );
+    let challenge = challenge(&verifier, &fixture, &jwt, 1000).await;
+
+    for _ in 0..2 {
+        let retry = nonce_request(&fixture, &jwt, 1000, Some(challenge.nonce()));
+        verifier
+            .verify(&retry)
+            .await
+            .expect("a request under a fresh jti verifies");
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_rejects_an_aauth_nonce_left_out_of_coverage() {
+    let (fixture, jwt, jwks) = agent("k1");
+    let verifier = nonce_verifier(
+        jwks,
+        1000,
+        InMemoryReplayStore::default(),
+        &challenge_key_pem(),
+        NonceRequirement::Required,
+    );
+    let challenge = challenge(&verifier, &fixture, &jwt, 1000).await;
+
+    let mut req = base_request(&signature_key_header(&jwt));
+    req.headers
+        .push((SERVER_NONCE_HEADER.to_string(), challenge.nonce().as_str().to_string()));
+    sign_request(&fixture, &mut req, 1000, &REQUIRED_COMPONENTS);
+
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(err, HttpPopError::UnboundNonce), "got {err:?}");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_rejects_a_covered_aauth_nonce_that_was_stripped() {
+    let (fixture, jwt, jwks) = agent("k1");
+    let verifier = nonce_verifier(
+        jwks,
+        1000,
+        InMemoryReplayStore::default(),
+        &challenge_key_pem(),
+        NonceRequirement::Required,
+    );
+    let challenge = challenge(&verifier, &fixture, &jwt, 1000).await;
+
+    let mut req = nonce_request(&fixture, &jwt, 1000, Some(challenge.nonce()));
+    remove_header(&mut req, SERVER_NONCE_HEADER);
+
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(err, HttpPopError::UnboundNonce), "got {err:?}");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_rejects_a_duplicated_aauth_nonce() {
+    let (fixture, jwt, jwks) = agent("k1");
+    let verifier = nonce_verifier(
+        jwks,
+        1000,
+        InMemoryReplayStore::default(),
+        &challenge_key_pem(),
+        NonceRequirement::Required,
+    );
+    let challenge = challenge(&verifier, &fixture, &jwt, 1000).await;
+
+    let mut req = nonce_request(&fixture, &jwt, 1000, Some(challenge.nonce()));
+    req.headers
+        .push((SERVER_NONCE_HEADER.to_string(), challenge.nonce().as_str().to_string()));
+
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(
+        matches!(err, HttpPopError::DuplicateHeader(SERVER_NONCE_HEADER)),
+        "got {err:?}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_rechallenges_a_nonce_issued_to_another_key() {
+    let first = p256_fixture("k1");
+    let second = p256_fixture("k2");
+    let jwks = StaticJwks::new().with(
+        "agent-provider.example",
+        JwkSet {
+            keys: vec![first.jwk.clone(), second.jwk.clone()],
+        },
+    );
+    let first_jwt = agent_jwt(&first, "k1", "agent-provider.example");
+    let second_jwt = agent_jwt(&second, "k2", "agent-provider.example");
+    let verifier = nonce_verifier(
+        jwks,
+        1000,
+        InMemoryReplayStore::default(),
+        &challenge_key_pem(),
+        NonceRequirement::Required,
+    );
+    let issued_to_first = challenge(&verifier, &first, &first_jwt, 1000).await;
+
+    let borrowed = nonce_request(&second, &second_jwt, 1000, Some(issued_to_first.nonce()));
+    let rechallenge = expect_challenge(verifier.verify(&borrowed).await.unwrap_err());
+
+    assert!(
+        matches!(rechallenge.refused(), Some(NonceError::KeyMismatch)),
+        "got {:?}",
+        rechallenge.refused()
+    );
+    let retry = nonce_request(&second, &second_jwt, 1000, Some(rechallenge.nonce()));
+    verifier
+        .verify(&retry)
+        .await
+        .expect("the nonce issued to the second key verifies");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_rechallenges_a_nonce_another_challenge_key_signed() {
+    let (fixture, jwt, jwks) = agent("k1");
+    let verifier = nonce_verifier(
+        jwks.clone(),
+        1000,
+        InMemoryReplayStore::default(),
+        &challenge_key_pem(),
+        NonceRequirement::Required,
+    );
+    let impostor = nonce_verifier(
+        jwks,
+        1000,
+        InMemoryReplayStore::default(),
+        &challenge_key_pem(),
+        NonceRequirement::Required,
+    );
+    let forged = challenge(&impostor, &fixture, &jwt, 1000).await;
+
+    let req = nonce_request(&fixture, &jwt, 1000, Some(forged.nonce()));
+    let rechallenge = expect_challenge(verifier.verify(&req).await.unwrap_err());
+
+    assert!(
+        matches!(rechallenge.refused(), Some(NonceError::Rejected(_))),
+        "got {:?}",
+        rechallenge.refused()
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_rechallenges_an_expired_nonce() {
+    let (fixture, jwt, jwks) = agent("k1");
+    let pem = challenge_key_pem();
+    let store = Arc::new(InMemoryReplayStore::default());
+    let at_issue = nonce_verifier(jwks.clone(), 1000, Arc::clone(&store), &pem, NonceRequirement::Required);
+    let past_expiry = nonce_verifier(jwks, 1091, Arc::clone(&store), &pem, NonceRequirement::Required);
+    let stale = challenge(&at_issue, &fixture, &jwt, 1000).await;
+
+    let req = nonce_request(&fixture, &jwt, 1091, Some(stale.nonce()));
+    let rechallenge = expect_challenge(past_expiry.verify(&req).await.unwrap_err());
+
+    assert!(
+        matches!(rechallenge.refused(), Some(NonceError::Expired)),
+        "got {:?}",
+        rechallenge.refused()
+    );
+    assert_ne!(rechallenge.nonce(), stale.nonce());
+    let retry = nonce_request(&fixture, &jwt, 1091, Some(rechallenge.nonce()));
+    past_expiry.verify(&retry).await.expect("the fresh nonce verifies");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_honors_a_nonce_another_instance_issued() {
+    let (fixture, jwt, jwks) = agent("k1");
+    let pem = challenge_key_pem();
+    let store = Arc::new(InMemoryReplayStore::default());
+    let issuing = nonce_verifier(jwks.clone(), 1000, Arc::clone(&store), &pem, NonceRequirement::Required);
+    let other = nonce_verifier(jwks, 1000, Arc::clone(&store), &pem, NonceRequirement::Required);
+    let challenge = challenge(&issuing, &fixture, &jwt, 1000).await;
+
+    let retry = nonce_request(&fixture, &jwt, 1000, Some(challenge.nonce()));
+    other
+        .verify(&retry)
+        .await
+        .expect("an instance sharing the store and key honors the nonce");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_refuses_a_nonce_no_shared_record_shows_was_issued() {
+    let (fixture, jwt, jwks) = agent("k1");
+    let pem = challenge_key_pem();
+    let issuing = nonce_verifier(
+        jwks.clone(),
+        1000,
+        InMemoryReplayStore::default(),
+        &pem,
+        NonceRequirement::Required,
+    );
+    let optional = nonce_verifier(
+        jwks.clone(),
+        1000,
+        InMemoryReplayStore::default(),
+        &pem,
+        NonceRequirement::Optional,
+    );
+    let required = nonce_verifier(
+        jwks,
+        1000,
+        InMemoryReplayStore::default(),
+        &pem,
+        NonceRequirement::Required,
+    );
+    let challenge = challenge(&issuing, &fixture, &jwt, 1000).await;
+
+    let req = nonce_request(&fixture, &jwt, 1000, Some(challenge.nonce()));
+    let err = optional.verify(&req).await.unwrap_err();
+    assert!(
+        matches!(err, HttpPopError::InvalidNonce(NonceError::NotIssued)),
+        "got {err:?}"
+    );
+
+    let rechallenge = expect_challenge(required.verify(&req).await.unwrap_err());
+    assert!(
+        matches!(rechallenge.refused(), Some(NonceError::NotIssued)),
+        "got {:?}",
+        rechallenge.refused()
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_admits_a_request_binding_no_nonce_when_nonces_are_optional() {
+    let (fixture, jwt, jwks) = agent("k1");
+    let verifier = nonce_verifier(
+        jwks,
+        1000,
+        InMemoryReplayStore::default(),
+        &challenge_key_pem(),
+        NonceRequirement::Optional,
+    );
+
+    let req = nonce_request(&fixture, &jwt, 1000, None);
+    verifier.verify(&req).await.expect("an optional nonce may be left out");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_refuses_an_unusable_nonce_when_nonces_are_optional() {
+    let (fixture, jwt, jwks) = agent("k1");
+    let verifier = nonce_verifier(
+        jwks,
+        1000,
+        InMemoryReplayStore::default(),
+        &challenge_key_pem(),
+        NonceRequirement::Optional,
+    );
+    let mut req = base_request(&signature_key_header(&jwt));
+    req.headers
+        .push((SERVER_NONCE_HEADER.to_string(), "not-a-nonce".to_string()));
+    sign_request(&fixture, &mut req, 1000, &NONCE_COMPONENTS);
+
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(
+        matches!(err, HttpPopError::InvalidNonce(NonceError::Malformed(_))),
+        "got {err:?}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_refuses_a_bound_nonce_when_the_resource_issues_none() {
+    let (fixture, jwt, jwks) = agent("k1");
+    let store = Arc::new(InMemoryReplayStore::default());
+    let issuing = nonce_verifier(
+        jwks.clone(),
+        1000,
+        Arc::clone(&store),
+        &challenge_key_pem(),
+        NonceRequirement::Required,
+    );
+    let without_nonces = verifier_with(jwks, 1000, Arc::clone(&store));
+    let challenge = challenge(&issuing, &fixture, &jwt, 1000).await;
+
+    let req = nonce_request(&fixture, &jwt, 1000, Some(challenge.nonce()));
+    let err = without_nonces.verify(&req).await.unwrap_err();
+    assert!(
+        matches!(err, HttpPopError::InvalidNonce(NonceError::NotIssued)),
+        "got {err:?}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_fails_closed_when_the_nonce_record_cannot_be_looked_up() {
+    let (fixture, jwt, jwks) = agent("k1");
+    let pem = challenge_key_pem();
+    let issuing = nonce_verifier(
+        jwks.clone(),
+        1000,
+        InMemoryReplayStore::default(),
+        &pem,
+        NonceRequirement::Required,
+    );
+    let blind = nonce_verifier(
+        jwks,
+        1000,
+        LookupFailingReplayStore::default(),
+        &pem,
+        NonceRequirement::Required,
+    );
+    let challenge = challenge(&issuing, &fixture, &jwt, 1000).await;
+
+    let req = nonce_request(&fixture, &jwt, 1000, Some(challenge.nonce()));
+    let err = blind.verify(&req).await.unwrap_err();
+    assert!(
+        matches!(err, HttpPopError::Backend(ReplayError::MutexPoisoned)),
+        "got {err:?}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_refuses_a_replayed_request_before_demanding_a_nonce() {
+    let (fixture, jwt, jwks) = agent("k1");
+    let verifier = nonce_verifier(
+        jwks,
+        1000,
+        InMemoryReplayStore::default(),
+        &challenge_key_pem(),
+        NonceRequirement::Required,
+    );
+    let req = nonce_request(&fixture, &jwt, 1000, None);
+
+    expect_challenge(verifier.verify(&req).await.unwrap_err());
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(err, HttpPopError::Replay), "got {err:?}");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_records_an_issued_nonce_for_its_lifetime_plus_the_skew_on_either_side() {
+    let (fixture, jwt, jwks) = agent("k1");
+    let store = Arc::new(RecordingReplayStore::default());
+    let verifier = nonce_verifier(
+        jwks,
+        1000,
+        Arc::clone(&store),
+        &challenge_key_pem(),
+        NonceRequirement::Required,
+    );
+
+    challenge(&verifier, &fixture, &jwt, 1000).await;
+
+    let records = store.records.lock().expect("records lock");
+    assert_eq!(records.len(), 2);
+    assert!(records[0].0.starts_with("jti."));
+    assert!(records[1].0.starts_with("nonce."));
+    assert_eq!(records[1].1, 120);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_reports_a_nonce_record_that_already_exists() {
+    let (fixture, jwt, jwks) = agent("k1");
+    let verifier = nonce_verifier(
+        jwks,
+        1000,
+        CollidingNonceStore,
+        &challenge_key_pem(),
+        NonceRequirement::Required,
+    );
+
+    let err = verifier
+        .verify(&nonce_request(&fixture, &jwt, 1000, None))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, HttpPopError::NonceIssue(NonceIssueError::Collision)),
+        "got {err:?}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_issues_no_nonce_to_a_request_that_fails_verification() {
+    let (fixture, jwt, jwks) = agent("k1");
+    let store = Arc::new(RecordingReplayStore::default());
+    let verifier = nonce_verifier(
+        jwks,
+        1000,
+        Arc::clone(&store),
+        &challenge_key_pem(),
+        NonceRequirement::Required,
+    );
+    let mut req = nonce_request(&fixture, &jwt, 1000, None);
+    req.path = "/api/other-documents".to_string();
+
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(err, HttpPopError::BadSignature), "got {err:?}");
+    assert!(store.records.lock().expect("records lock").is_empty());
 }
