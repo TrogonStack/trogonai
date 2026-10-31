@@ -52,7 +52,8 @@ pub use jwt::{
     decode_nats_user_payload, subject_principal_from_minted_jwt,
 };
 pub use permissions::{
-    IssuedPermissions, SubjectAclContext, SubjectAclTemplate, SubjectPattern, SubjectPatternError, TemplateError,
+    AdmissionRoute, CallerGrant, IssuedPermissions, SubjectAclContext, SubjectAclTemplate, SubjectPattern,
+    SubjectPatternError, TemplateError,
 };
 pub use signing_key_source::{
     EnvSigningKeySource, FileSigningKeySource, KeyVersion, KeyVersionError, MintingMaterial, SigningKeyHandle,

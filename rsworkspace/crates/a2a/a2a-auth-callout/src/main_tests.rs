@@ -6,7 +6,9 @@ use trogon_std::env::InMemoryEnv;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use super::{build_mtls_verifier, build_oidc_verifier, nats_config, split_env_list};
+use a2a_nats::{A2aPrefixError, ENV_A2A_PREFIX};
+
+use super::{build_mtls_verifier, build_oidc_verifier, nats_config, resolve_a2a_prefix, split_env_list};
 
 #[derive(Debug, thiserror::Error)]
 enum FixtureError {
@@ -33,6 +35,17 @@ fn optional_lists_trim_entries_preserve_order_and_discard_blanks() {
     );
     env.set("AUTH_CALLOUT_OIDC_AUDIENCES", " , \n ");
     assert!(split_env_list(&env, "AUTH_CALLOUT_OIDC_AUDIENCES").is_empty());
+}
+
+#[test]
+fn the_grant_prefix_is_the_default_namespace_unless_a_valid_one_is_configured() -> Result<(), A2aPrefixError> {
+    let env = InMemoryEnv::new();
+    assert_eq!(resolve_a2a_prefix(&env)?.as_str(), "a2a");
+    env.set(ENV_A2A_PREFIX, "acme.a2a");
+    assert_eq!(resolve_a2a_prefix(&env)?.as_str(), "acme.a2a");
+    env.set(ENV_A2A_PREFIX, "invalid.*");
+    assert!(resolve_a2a_prefix(&env).is_err());
+    Ok(())
 }
 
 #[test]

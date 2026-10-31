@@ -25,11 +25,18 @@ use a2a_auth_callout::credentials::oidc::{JwksOidcVerifier, OidcIssuerUrl, OidcV
 use a2a_auth_callout::dispatcher::{AuthDispatcher, CalloutDispatcher, CalloutDispatcherConfig};
 use a2a_auth_callout::jwt::{ExternalSubject, UserJwtClaims, decode_nats_user_payload};
 use a2a_auth_callout::signing_key_source::{KeyVersion, SigningKeySource, StaticSigningKeySource};
+use a2a_auth_callout::wire::ServerAuthRequestClaims;
 use a2a_auth_callout::{
     AccountSigningKey, AuthAccount, AuthCalloutWireCodec, CalloutXkey, DenialCategory, MintedUserJwt, TenantAccount,
     TenantSigningKeys,
 };
 use a2a_auth_callout::{AudienceAccount, SpiceDbPrincipal};
+use a2a_auth_callout::{BridgeClientInfo, BridgeMintRequest, SubjectPattern, subject_principal_from_minted_jwt};
+use a2a_nats::nats::subjects::agents::MessageSendSubject;
+use a2a_nats::nats::subjects::gateway::{GatewayEgressEventsSubject, GatewayIngressSubject};
+use a2a_nats::nats::subjects::subscriptions::CallerTaskEventsSubject;
+use a2a_nats::nats::subjects::tasks::TaskEventsSubject;
+use a2a_nats::{A2aAgentId, A2aMethod, A2aPrefix, A2aTaskId};
 use async_nats::{Auth, AuthError, ConnectOptions, Event, ServerError};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -52,6 +59,7 @@ use tempfile::TempDir;
 use testcontainers::core::{IntoContainerPort, Mount, WaitFor};
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, GenericImage, ImageExt};
+use trogon_identity_types::{PrincipalId, PrincipalKind, SubjectPrincipal};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -60,6 +68,7 @@ const NATS_TAG: &str = "2.14.1";
 const NATS_CLIENT_PORT: u16 = 4222;
 const NATS_CONFIG_ROOT: &str = "/etc/nats";
 const AUTH_CALLOUT_SUBJECT: &str = "$SYS.REQ.USER.AUTH";
+const A2A_PREFIX: &str = "a2a";
 const TENANT_OBSERVED_SUBJECTS: &str = "a2a.v1.>";
 
 const API_KEY_HMAC: &[u8] = b"integration-api-key-hmac-secret--";
@@ -412,6 +421,10 @@ impl NatsClientTls {
             .add_root_certificates(self.ca_cert.clone())
             .add_client_certificate(self.client_cert.clone(), self.client_key.clone())
     }
+
+    fn certificate_pem(&self) -> String {
+        std::fs::read_to_string(&self.client_cert).expect("client certificate pem")
+    }
 }
 
 struct TlsFixture {
@@ -509,17 +522,92 @@ impl Caller {
     }
 }
 
-struct PublishProbe {
-    inside_grant: String,
-    outside_grant: String,
+fn probe_agent() -> A2aAgentId {
+    A2aAgentId::new("it").expect("probe agent id")
 }
 
-impl PublishProbe {
-    fn coarse_grant() -> Self {
+fn someone_else() -> SubjectPrincipal {
+    let id = PrincipalId::new("someone-else").expect("principal id");
+    SubjectPrincipal::from_credential(PrincipalKind::Service, &id).expect("subject principal")
+}
+
+struct SubscribeProbe {
+    pattern: String,
+    delivered: String,
+}
+
+impl SubscribeProbe {
+    fn task_events(prefix: &A2aPrefix, caller: &SubjectPrincipal) -> Self {
+        let task = A2aTaskId::new("task-1").expect("probe task id");
         Self {
-            inside_grant: "a2a.v1.gateway.it.message.send".to_owned(),
-            outside_grant: "a2a.v1.agents.it.message.send".to_owned(),
+            pattern: CallerTaskEventsSubject::new(prefix, caller).to_string(),
+            delivered: TaskEventsSubject::new(prefix, &task, caller).to_string(),
         }
+    }
+
+    fn gateway_events(prefix: &A2aPrefix, caller: &SubjectPrincipal) -> Self {
+        let events = GatewayEgressEventsSubject::new(prefix, caller).to_string();
+        Self {
+            pattern: events.clone(),
+            delivered: events,
+        }
+    }
+}
+
+struct GrantProbe {
+    request_inside: String,
+    publish_outside: Vec<String>,
+    subscribe_inside: Vec<SubscribeProbe>,
+    subscribe_outside: Vec<String>,
+}
+
+impl GrantProbe {
+    fn direct(prefix: &A2aPrefix, caller: &SubjectPrincipal) -> Self {
+        let (agent, other) = (probe_agent(), someone_else());
+        Self {
+            request_inside: MessageSendSubject::new(prefix, &agent, caller).to_string(),
+            publish_outside: vec![
+                GatewayIngressSubject::new(prefix, &agent, caller, A2aMethod::MessageSend).to_string(),
+                MessageSendSubject::new(prefix, &agent, &other).to_string(),
+            ],
+            subscribe_inside: vec![SubscribeProbe::task_events(prefix, caller)],
+            subscribe_outside: vec![
+                GatewayEgressEventsSubject::new(prefix, caller).to_string(),
+                CallerTaskEventsSubject::new(prefix, &other).to_string(),
+                "_INBOX.>".to_owned(),
+            ],
+        }
+    }
+
+    fn bridge_routed(prefix: &A2aPrefix, caller: &SubjectPrincipal) -> Self {
+        let (agent, other) = (probe_agent(), someone_else());
+        Self {
+            request_inside: GatewayIngressSubject::new(prefix, &agent, caller, A2aMethod::MessageSend).to_string(),
+            publish_outside: vec![
+                MessageSendSubject::new(prefix, &agent, caller).to_string(),
+                GatewayIngressSubject::new(prefix, &agent, &other, A2aMethod::MessageSend).to_string(),
+            ],
+            subscribe_inside: vec![
+                SubscribeProbe::gateway_events(prefix, caller),
+                SubscribeProbe::task_events(prefix, caller),
+            ],
+            subscribe_outside: vec![
+                GatewayEgressEventsSubject::new(prefix, &other).to_string(),
+                CallerTaskEventsSubject::new(prefix, &other).to_string(),
+            ],
+        }
+    }
+
+    fn refusals(&self) -> BTreeSet<String> {
+        let publish = self
+            .publish_outside
+            .iter()
+            .map(|subject| format!("Permissions Violation for Publish to \"{subject}\""));
+        let subscribe = self
+            .subscribe_outside
+            .iter()
+            .map(|subject| format!("Permissions Violation for Subscription to \"{subject}\""));
+        publish.chain(subscribe).collect()
     }
 }
 
@@ -634,15 +722,64 @@ impl NatsCalloutStack {
         }
     }
 
-    async fn assert_admits_with_only_the_minted_grant(&self, caller: &Caller, tenant: &TenantFixture) {
+    async fn assert_admits_with_only_the_minted_grant(
+        &self,
+        caller: &Caller,
+        tenant: &TenantFixture,
+        kind: PrincipalKind,
+    ) {
         self.drive_callout_attempts(caller).await;
         let errors = self.dispatch_errors.drain();
-        assert_stable_caller_id(&self.capture.drain(), self.signing.as_ref(), tenant, &errors);
-        self.assert_server_enforces_the_grant(caller, &PublishProbe::coarse_grant())
-            .await;
+        let principal = assert_stable_caller_id(&self.capture.drain(), self.signing.as_ref(), tenant, &errors, kind);
+        self.assert_server_enforces_the_grant(
+            caller
+                .connect_options(&self.client_tls)
+                .custom_inbox_prefix(format!("_INBOX.{principal}")),
+            &GrantProbe::direct(&grant_prefix(), &principal),
+        )
+        .await;
     }
 
-    async fn assert_server_enforces_the_grant(&self, caller: &Caller, probe: &PublishProbe) {
+    async fn assert_bridge_routed_caller_holds_only_its_grant(
+        &self,
+        bridge: &CalloutDispatcher,
+        tenant: &TenantFixture,
+    ) {
+        let user = nkeys::KeyPair::new_user();
+        let request = ServerAuthRequestClaims::from_bridge_mint(
+            BridgeMintRequest {
+                user_nkey: Some(user.public_key()),
+                account: Some(tenant.name()),
+                client_info: Some(BridgeClientInfo {
+                    client_cert_pem: Some(self.client_tls.certificate_pem()),
+                }),
+                sealed_credential: None,
+            },
+            None,
+        )
+        .expect("bridge mint request");
+        let minted = bridge
+            .dispatch(request)
+            .await
+            .expect("the callout mints the bridge-routed caller");
+        assert_minted_nats_user_jwt_shape(minted.as_str(), tenant);
+        let principal = subject_principal_from_minted_jwt(minted.as_str()).expect("the minted user names a principal");
+        assert_eq!(principal.kind(), PrincipalKind::Service);
+        ExpectedGrant::bridge_routed(&principal)
+            .assert_minted(&decode_captured(&minted, self.signing.as_ref()), tenant);
+
+        let caller = NatsUser {
+            jwt: minted.as_str().to_owned(),
+            key: Arc::new(user),
+        };
+        self.assert_server_enforces_the_grant(
+            self.client_tls.apply(caller.connect_options()),
+            &GrantProbe::bridge_routed(&grant_prefix(), &principal),
+        )
+        .await;
+    }
+
+    async fn assert_server_enforces_the_grant(&self, caller: ConnectOptions, probe: &GrantProbe) {
         let observer = self
             .client_tls
             .apply(self.tenant_observer.connect_options())
@@ -655,9 +792,8 @@ impl NatsCalloutStack {
             .expect("tenant observer subscribes");
         observer.flush().await.expect("tenant observer flush");
 
-        let (events_tx, mut events) = tokio::sync::mpsc::channel(16);
+        let (events_tx, mut events) = tokio::sync::mpsc::channel(64);
         let client = caller
-            .connect_options(&self.client_tls)
             .event_callback(move |event| {
                 let _ = events_tx.try_send(event);
                 async {}
@@ -671,37 +807,82 @@ impl NatsCalloutStack {
                 )
             });
 
-        client
-            .publish(probe.outside_grant.clone(), "outside".into())
-            .await
-            .expect("publish outside the grant");
-        client
-            .publish(probe.inside_grant.clone(), "inside".into())
-            .await
-            .expect("publish inside the grant");
+        for subject in &probe.publish_outside {
+            client
+                .publish(subject.clone(), "outside".into())
+                .await
+                .expect("publish outside the grant");
+        }
+        for subject in &probe.subscribe_outside {
+            let _refused = client
+                .subscribe(subject.clone())
+                .await
+                .expect("subscribe outside the grant");
+        }
         client.flush().await.expect("caller flush");
 
-        let delivered = tokio::time::timeout(Duration::from_secs(5), observed.next())
-            .await
-            .expect("the tenant observer receives the publish inside the grant")
-            .expect("tenant observer subscription stays open");
-        assert_eq!(delivered.subject.as_str(), probe.inside_grant);
+        let (reply, ()) = tokio::join!(client.request(probe.request_inside.clone(), "inside".into()), async {
+            let request = tokio::time::timeout(Duration::from_secs(5), observed.next())
+                .await
+                .expect("the tenant observer receives the request inside the grant")
+                .expect("tenant observer subscription stays open");
+            assert_eq!(request.subject.as_str(), probe.request_inside);
+            let inbox = request.reply.expect("the request names a reply inbox");
+            observer.publish(inbox, "reply".into()).await.expect("observer replies");
+            observer.flush().await.expect("observer flush");
+        });
+        let reply = reply.expect("the caller receives the reply on an inbox it may read");
+        assert_eq!(reply.payload, "reply");
 
-        let refusal = format!("Permissions Violation for Publish to \"{}\"", probe.outside_grant);
-        let refused = tokio::time::timeout(Duration::from_secs(5), async {
-            while let Some(event) = events.recv().await {
-                if matches!(&event, Event::ServerError(ServerError::Other(message)) if *message == refusal) {
-                    return true;
+        for inside in &probe.subscribe_inside {
+            let mut subscription = client
+                .subscribe(inside.pattern.clone())
+                .await
+                .expect("subscribe inside the grant");
+            client.flush().await.expect("caller flush");
+            let delivery = tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    observer
+                        .publish(inside.delivered.clone(), "event".into())
+                        .await
+                        .expect("observer publishes inside the grant");
+                    observer.flush().await.expect("observer flush");
+                    if let Ok(delivered) = tokio::time::timeout(Duration::from_millis(200), subscription.next()).await {
+                        return delivered;
+                    }
+                }
+            })
+            .await;
+            let Ok(delivered) = delivery else {
+                panic!(
+                    "{} never reached the caller through {}; the caller saw {:?}",
+                    inside.delivered,
+                    inside.pattern,
+                    drain_events(&mut events)
+                );
+            };
+            let delivered = delivered.expect("caller subscription stays open");
+            assert_eq!(delivered.subject.as_str(), inside.delivered);
+        }
+
+        let mut unrefused = probe.refusals();
+        let mut reported = Vec::new();
+        let _ = tokio::time::timeout(Duration::from_secs(5), async {
+            while !unrefused.is_empty() {
+                match events.recv().await {
+                    Some(Event::ServerError(ServerError::Other(message))) => {
+                        unrefused.remove(&message);
+                        reported.push(message);
+                    }
+                    Some(_) => {}
+                    None => break,
                 }
             }
-            false
         })
-        .await
-        .unwrap_or(false);
+        .await;
         assert!(
-            refused,
-            "nats-server did not refuse the publish to {}",
-            probe.outside_grant
+            unrefused.is_empty(),
+            "nats-server did not refuse {unrefused:?}; it reported {reported:?}"
         );
     }
 
@@ -712,6 +893,12 @@ impl NatsCalloutStack {
             .await;
         assert!(attempt.is_err(), "nats-server admitted a caller the callout refused");
     }
+}
+
+fn drain_events(events: &mut tokio::sync::mpsc::Receiver<Event>) -> Vec<String> {
+    std::iter::from_fn(|| events.try_recv().ok())
+        .map(|event| event.to_string())
+        .collect()
 }
 
 fn b64url_uint_be(bytes: &[u8]) -> String {
@@ -810,22 +997,39 @@ fn assert_minted_nats_user_jwt_shape(token: &str, tenant: &TenantFixture) {
     assert!(!payload["caller_id"].as_str().unwrap_or("").is_empty());
 }
 
-fn assert_tenant_acl(claims: &UserJwtClaims, tenant: &TenantFixture) {
-    assert_eq!(claims.aud.as_str(), tenant.account.as_str());
-    assert!(!claims.caller_id.as_str().is_empty());
-    assert_eq!(claims.nats_permissions.publish_allow.len(), 1);
-    assert_eq!(claims.nats_permissions.publish_allow[0].as_str(), "a2a.v1.gateway.>");
-    let subs: Vec<&str> = claims
-        .nats_permissions
-        .subscribe_allow
-        .iter()
-        .map(|p| p.as_str())
-        .collect();
-    assert_eq!(subs.len(), 2);
-    let inbox = format!("_INBOX.{}.>", claims.caller_id.as_str());
-    let push = format!("a2a.v1.push.{}.>", claims.caller_id.as_str());
-    assert!(subs.contains(&inbox.as_str()));
-    assert!(subs.contains(&push.as_str()));
+struct ExpectedGrant {
+    publish: Vec<String>,
+    subscribe: Vec<String>,
+}
+
+impl ExpectedGrant {
+    fn direct(caller: &SubjectPrincipal) -> Self {
+        Self {
+            publish: vec![format!("{A2A_PREFIX}.v1.agents.*.{caller}.>")],
+            subscribe: vec![
+                format!("{A2A_PREFIX}.v1.tasks.*.{caller}.events"),
+                format!("_INBOX.{caller}.>"),
+            ],
+        }
+    }
+
+    fn bridge_routed(caller: &SubjectPrincipal) -> Self {
+        Self {
+            publish: vec![format!("{A2A_PREFIX}.v1.gateway.*.{caller}.>")],
+            subscribe: vec![
+                format!("{A2A_PREFIX}.v1.gateway.{caller}.events"),
+                format!("{A2A_PREFIX}.v1.tasks.*.{caller}.events"),
+                "_INBOX.>".to_owned(),
+            ],
+        }
+    }
+
+    fn assert_minted(&self, claims: &UserJwtClaims, tenant: &TenantFixture) {
+        let rendered = |patterns: &[SubjectPattern]| patterns.iter().map(|p| p.as_str().to_owned()).collect::<Vec<_>>();
+        assert_eq!(claims.aud.as_str(), tenant.account.as_str());
+        assert_eq!(rendered(&claims.nats_permissions.publish_allow), self.publish);
+        assert_eq!(rendered(&claims.nats_permissions.subscribe_allow), self.subscribe);
+    }
 }
 
 fn assert_stable_caller_id(
@@ -833,7 +1037,8 @@ fn assert_stable_caller_id(
     signing: &dyn SigningKeySource,
     tenant: &TenantFixture,
     dispatch_errors: &[String],
-) {
+    kind: PrincipalKind,
+) -> SubjectPrincipal {
     assert!(
         minted.len() >= 2,
         "expected at least two callout mints, got {}; decode/dispatch errors: {dispatch_errors:?}",
@@ -841,10 +1046,18 @@ fn assert_stable_caller_id(
     );
     let first = decode_captured(&minted[0], signing);
     let second = decode_captured(&minted[1], signing);
-    assert_tenant_acl(&first, tenant);
-    assert_tenant_acl(&second, tenant);
     assert_eq!(first.caller_id, second.caller_id);
     assert_minted_nats_user_jwt_shape(minted[0].as_str(), tenant);
+    let principal = subject_principal_from_minted_jwt(minted[0].as_str()).expect("the minted user names a principal");
+    assert_eq!(principal.kind(), kind);
+    let grant = ExpectedGrant::direct(&principal);
+    grant.assert_minted(&first, tenant);
+    grant.assert_minted(&second, tenant);
+    principal
+}
+
+fn grant_prefix() -> A2aPrefix {
+    A2aPrefix::new(A2A_PREFIX).expect("a2a prefix")
 }
 
 fn dispatcher_with_oidc(tenant: &TenantFixture, issuer: OidcIssuerUrl, jwks: JwkSet) -> CalloutDispatcher {
@@ -856,6 +1069,7 @@ fn dispatcher_with_oidc(tenant: &TenantFixture, issuer: OidcIssuerUrl, jwks: Jwk
     CalloutDispatcher::new(CalloutDispatcherConfig {
         tenant_signing_keys: tenant.signing_keys(),
         user_jwt_ttl: Duration::from_secs(300),
+        a2a_prefix: grant_prefix(),
         oidc: Some(oidc),
         mtls: None,
         api_key: None,
@@ -867,6 +1081,7 @@ fn dispatcher_with_mtls(tenant: &TenantFixture, trust_anchor_pem: String) -> Cal
     CalloutDispatcher::new(CalloutDispatcherConfig {
         tenant_signing_keys: tenant.signing_keys(),
         user_jwt_ttl: Duration::from_secs(300),
+        a2a_prefix: grant_prefix(),
         oidc: None,
         mtls: Some(mtls),
         api_key: None,
@@ -889,6 +1104,7 @@ fn dispatcher_with_api_key(tenant: &TenantFixture) -> CalloutDispatcher {
     CalloutDispatcher::new(CalloutDispatcherConfig {
         tenant_signing_keys: tenant.signing_keys(),
         user_jwt_ttl: Duration::from_secs(300),
+        a2a_prefix: grant_prefix(),
         oidc: None,
         mtls: None,
         api_key: Some(api_key),
@@ -914,7 +1130,9 @@ async fn an_oidc_caller_behind_the_sentinel_lands_in_its_tenant_with_only_the_mi
             bearer: mint_oidc_bearer(&issuer_url, &enc, "user-integration-oidc"),
         },
     };
-    stack.assert_admits_with_only_the_minted_grant(&caller, &tenant).await;
+    stack
+        .assert_admits_with_only_the_minted_grant(&caller, &tenant, PrincipalKind::Person)
+        .await;
 }
 
 #[tokio::test]
@@ -928,7 +1146,9 @@ async fn a_client_certificate_caller_lands_in_its_tenant_with_only_the_minted_gr
         tenant: tenant.account.clone(),
         credential: CallerCredential::ClientCertificateOnly,
     };
-    stack.assert_admits_with_only_the_minted_grant(&caller, &tenant).await;
+    stack
+        .assert_admits_with_only_the_minted_grant(&caller, &tenant, PrincipalKind::Service)
+        .await;
 }
 
 #[tokio::test]
@@ -940,11 +1160,26 @@ async fn an_api_key_caller_lands_in_its_tenant_with_only_the_minted_grant() {
         tenant: tenant.account.clone(),
         credential: CallerCredential::ApiKeyToken(API_KEY_VALUE.to_owned()),
     };
-    stack.assert_admits_with_only_the_minted_grant(&caller, &tenant).await;
+    stack
+        .assert_admits_with_only_the_minted_grant(&caller, &tenant, PrincipalKind::Service)
+        .await;
 
     let impostor = Caller {
         tenant: tenant.account.clone(),
         credential: CallerCredential::ApiKeyToken("k_live_unknown".to_owned()),
     };
     stack.assert_refuses(&impostor).await;
+}
+
+#[tokio::test]
+async fn a_bridge_routed_caller_reaches_agents_only_through_the_gateway() {
+    let tenant = TenantFixture::generate();
+    let tls = TlsFixture::generate();
+    let bridge = dispatcher_with_mtls(&tenant, tls.trust_anchor_pem.clone());
+    let dispatcher = dispatcher_with_mtls(&tenant, tls.trust_anchor_pem.clone());
+    let stack = NatsCalloutStack::start(&tenant, tls, dispatcher).await;
+
+    stack
+        .assert_bridge_routed_caller_holds_only_its_grant(&bridge, &tenant)
+        .await;
 }

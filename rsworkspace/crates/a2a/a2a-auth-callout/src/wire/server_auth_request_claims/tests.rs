@@ -177,3 +177,12 @@ fn client_tls_pem_certs_reads_verified_chains_from_nats_json() {
     assert_eq!(certs[0].as_str(), "chain-cert-1");
     assert_eq!(certs[1].as_str(), "chain-cert-2");
 }
+
+#[test]
+fn a_request_from_nats_server_admits_the_callers_own_connection() {
+    let server = FixtureServer::generate();
+    assert_eq!(
+        decode_request(&server, |_| {}).admission_route(),
+        AdmissionRoute::Direct
+    );
+}

@@ -9,7 +9,9 @@ use a2a_identity_types::MintedUserJwtError;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
-use trogon_identity_types::{PrincipalKind, PrincipalKindError, SubjectPrincipal};
+use trogon_identity_types::{
+    PrincipalId, PrincipalIdError, PrincipalKind, PrincipalKindError, SubjectPrincipal, SubjectPrincipalError,
+};
 
 pub use nats_permission_claims::{NatsPermissionClaims, NatsSubjectPermission};
 pub use nats_user_jwt::decode_nats_user_payload;
@@ -337,6 +339,10 @@ pub enum JwtError {
     InvalidSigningSeed(String),
     #[error("principal_kind is not a principal kind")]
     InvalidPrincipalKind(#[source] PrincipalKindError),
+    #[error("caller_id is not a principal id")]
+    InvalidPrincipalId(#[source] PrincipalIdError),
+    #[error("caller cannot take a subject principal position")]
+    InvalidSubjectPrincipal(#[source] SubjectPrincipalError),
     #[error(transparent)]
     MintedClaims(#[from] MintedUserJwtError),
 }
@@ -407,6 +413,13 @@ impl UserJwtClaims {
             return Err(JwtError::Decode("user JWT not yet valid".into()));
         }
         Ok(claims)
+    }
+
+    /// The principal the caller stands for in a subject, built the way a reader
+    /// of the minted user JWT builds it.
+    pub fn subject_principal(&self) -> Result<SubjectPrincipal, JwtError> {
+        let id = PrincipalId::new(self.caller_id.as_str()).map_err(JwtError::InvalidPrincipalId)?;
+        SubjectPrincipal::from_credential(self.principal_kind, &id).map_err(JwtError::InvalidSubjectPrincipal)
     }
 
     #[cfg(test)]

@@ -139,6 +139,7 @@ pub(crate) fn harness_callout_dispatcher(caller_id: &str) -> (Arc<CalloutDispatc
     let dispatcher = CalloutDispatcher::new(CalloutDispatcherConfig {
         tenant_signing_keys,
         user_jwt_ttl: Duration::from_secs(60),
+        a2a_prefix: a2a_nats::A2aPrefix::new(a2a_nats::DEFAULT_A2A_PREFIX).expect("harness prefix"),
         oidc: Some(oidc),
         mtls: None,
         api_key: None,

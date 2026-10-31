@@ -9,6 +9,7 @@ use crate::account_resolver::RequestedAccount;
 use crate::credentials::PresentedCredential;
 use crate::credentials::mtls::ClientCertPem;
 use crate::error::{AuthCalloutError, CredentialError};
+use crate::permissions::AdmissionRoute;
 
 /// Decoded inner authorization-request JWT (`nats` claims + standard JWT fields).
 #[derive(Clone)]
@@ -16,6 +17,7 @@ pub struct ServerAuthRequestClaims {
     inner: Claims<AuthRequest>,
     nats_json: serde_json::Value,
     declared_credential: Option<PresentedCredential>,
+    route: AdmissionRoute,
 }
 
 impl ServerAuthRequestClaims {
@@ -24,10 +26,11 @@ impl ServerAuthRequestClaims {
             inner,
             nats_json,
             declared_credential: None,
+            route: AdmissionRoute::Direct,
         }
     }
 
-    pub(super) fn declaring(
+    pub(super) fn bridge_routed(
         inner: Claims<AuthRequest>,
         nats_json: serde_json::Value,
         declared_credential: Option<PresentedCredential>,
@@ -36,7 +39,12 @@ impl ServerAuthRequestClaims {
             inner,
             nats_json,
             declared_credential,
+            route: AdmissionRoute::BridgeRouted,
         }
+    }
+
+    pub fn admission_route(&self) -> AdmissionRoute {
+        self.route
     }
 
     pub fn issuer_nkey(&self) -> Result<NkeyPublic, AuthCalloutError> {
@@ -137,6 +145,7 @@ impl fmt::Debug for ServerAuthRequestClaims {
         f.debug_struct("ServerAuthRequestClaims")
             .field("user_nkey", &self.inner.nats.user_nkey)
             .field("server_id", &self.inner.nats.server.id)
+            .field("route", &self.route)
             .finish()
     }
 }
