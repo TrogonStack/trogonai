@@ -7262,6 +7262,7 @@ dependencies = [
  "bytes",
  "clap",
  "futures",
+ "grpc-nats-micro",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
