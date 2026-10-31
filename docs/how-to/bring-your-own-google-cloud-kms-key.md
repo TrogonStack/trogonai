@@ -136,6 +136,24 @@ already in flight when you revoke access or disable a version may still
 complete, and plaintext already delivered to a caller before that point
 cannot be recalled, by Google Cloud or by the platform ([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) Decision 6).
 
+### Pausing the registration is not the kill switch
+
+You can also pause the backend registration in the platform console or admin
+API. A pause stops the platform from calling Google Cloud for that
+registration, probes included, and every operation against its keys fails with
+`KeyUseDenied` and the denial reason `BackendPaused` until you resume. A pause
+is a platform-side control that takes effect without waiting on Google Cloud
+and that you can reverse, but it depends on the platform honoring it. If you need the stop to hold regardless of
+the platform, remove the access and disable the CryptoKeyVersions in Google
+Cloud as described above
+([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) Decision 6).
+
+Resuming validates the registration's current configuration end to end. The
+registration resumes only when validation succeeds; otherwise it stays paused
+and records the validation reason. Resuming does not restore IAM access or
+re-enable a CryptoKeyVersion in your Google Cloud project, so reverse those
+actions there yourself if you took them.
+
 ## See also
 
 - [Key Management](../architecture/key-management.md)
