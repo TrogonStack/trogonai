@@ -26,7 +26,7 @@ enum TestError {
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
-    Connect(#[from] async_nats::ConnectError),
+    Connect(#[from] trogon_nats::ConnectError),
     #[error(transparent)]
     Subscribe(#[from] async_nats::SubscribeError),
     #[error(transparent)]
@@ -227,7 +227,11 @@ async fn nats_bootstrap_wires_mint_subject_tenant_and_gateway_namespace() -> Res
         .finish();
     let _subscriber = tracing::subscriber::set_default(subscriber);
     let server = CoreTestServer::start().await;
-    let client = async_nats::connect(server.address()).await?;
+    let client = trogon_nats::connect(
+        &NatsConfig::from_url(server.address()).with_tls(NatsTls::Disabled),
+        Duration::from_secs(5),
+    )
+    .await?;
     let caller = CallerHttpsAuth::new("Bearer fixture");
     let jwt = StubAuthCalloutMint::fixture()?.mint(&caller).await?;
     let mint_reply = serde_json::to_vec(&BridgeMintResponse {
