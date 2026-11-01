@@ -359,32 +359,42 @@ The guarantee is deliberately bounded by the external provider:
 > operations and plaintext already delivered cannot be revoked.
 
 A registration's owner can also pause it. A pause is a platform-side admission
-control that takes effect without waiting on the provider and that the owner can
-reverse. It is not the veto above: the provider-side action stays the
-authoritative stop, because the customer's guarantee must not depend on the
-platform honoring its own flag. While a registration is paused, the platform
-makes no provider call for it, probes included, so its observed health is not
-refreshed until it resumes. Wrap, unwrap, `BindExternalKey`, set-as-default,
-migration source use, and migration target use all fail.
+control that the owner can reverse. It is not the veto above: the provider-side
+action stays the authoritative stop, because the customer's guarantee must not
+depend on the platform honoring its own flag. After a service instance observes
+the pause, it makes no provider call for the registration, probes included, so
+observed health is not refreshed until resume. Wrap, unwrap, `BindExternalKey`,
+set-as-default, migration source use, and migration target use all fail on that
+instance.
 
 The failure is the existing `KeyUseDenied` category with the denial reason
 `BackendPaused`, not a new category. The retry rule is unchanged: there is no
 automatic retry, and the owner must resume the registration first. The public
 service may coarsen the denial like any other.
 
-Every operation checks in a fixed order. The service authenticates the caller
-and resolves the `KeyRef`, including the tenant and purpose binding check, then
-checks the registration's admission, then applies the key-state matrix in
-[Key States](../architecture/key-states.md), and only then calls the provider.
-Every retry inside the operation deadline repeats the admission check before its
-next attempt.
+An operation against an existing `KeyRef` checks in a fixed order. The service
+authenticates the caller and resolves the reference, including its tenant and
+purpose binding, checks the registration's admission, applies the key-state
+matrix in [Key States](../architecture/key-states.md), and only then calls the
+provider. Every retry inside the operation deadline repeats the admission check
+before its next attempt.
 
-A pause is acknowledged once the admission fact is durably committed. Service
-instances enforce it through pushed invalidation of their admission view with a
-hard time-to-live backstop, the same shape as
-[ADR#0049](./0049-revocation-latency-target.md). The target number is recorded
-after measurement, as that ADR did. A provider request already in flight may
-complete.
+`BindExternalKey` has no existing `KeyRef` to resolve. It authenticates the
+caller, authorizes the tenant's use of the supplied `KeyBackendId`, locator,
+purpose, and capabilities, checks that backend registration's admission, and
+only then performs provider validation and applies the discovered key-state and
+capability gates before creating a `KeyRef`.
+
+A pause is acknowledged once the admission fact is durably committed; that
+acknowledgement does not claim that every service instance has observed it.
+Instances enforce the pause through pushed invalidation of their admission view
+with a hard time-to-live backstop, the same shape as
+[ADR#0049](./0049-revocation-latency-target.md). Until measurement establishes
+and records that propagation target, the platform publishes no bounded
+pause-enforcement time. A stale instance may admit and start a provider request
+after acknowledgement but before it observes the pause, and a request already
+in flight may complete. The no-provider-call guarantee begins when the serving
+instance observes the pause.
 
 The platform never pauses a customer registration automatically from health
 signals. That would turn a transient provider fault into a platform-initiated
