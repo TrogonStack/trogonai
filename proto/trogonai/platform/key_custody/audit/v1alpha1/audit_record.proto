@@ -34,12 +34,12 @@ message KeyOperationAuditRecord {
   option (buf.validate.message).cel = {
     id: "audit_record.no_attempts_before_provider"
     message: "a failure decided before the provider call lists no provider attempts"
-    expression: "size(this.attempts) == 0 || !has(this.failed) || !(this.failed.category == trogonai.platform.key_custody.v1alpha1.OperationFailureCategory.OPERATION_FAILURE_CATEGORY_BINDING_MISMATCH || this.failed.category == trogonai.platform.key_custody.v1alpha1.OperationFailureCategory.OPERATION_FAILURE_CATEGORY_UNSUPPORTED_CAPABILITY || (this.failed.category == trogonai.platform.key_custody.v1alpha1.OperationFailureCategory.OPERATION_FAILURE_CATEGORY_KEY_USE_DENIED && this.failed.denial_reason == trogonai.platform.key_custody.v1alpha1.KeyUseDenialReason.KEY_USE_DENIAL_REASON_KEY_STATE))"
+    expression: "size(this.attempts) == 0 || !has(this.failed) || !(this.failed.category == trogonai.platform.key_custody.v1alpha1.OperationFailureCategory.OPERATION_FAILURE_CATEGORY_BINDING_MISMATCH || (this.operation != trogonai.platform.key_custody.v1alpha1.KeyOperationKind.KEY_OPERATION_KIND_BIND_EXTERNAL_KEY && (this.failed.category == trogonai.platform.key_custody.v1alpha1.OperationFailureCategory.OPERATION_FAILURE_CATEGORY_UNSUPPORTED_CAPABILITY || (this.failed.category == trogonai.platform.key_custody.v1alpha1.OperationFailureCategory.OPERATION_FAILURE_CATEGORY_KEY_USE_DENIED && this.failed.denial_reason == trogonai.platform.key_custody.v1alpha1.KeyUseDenialReason.KEY_USE_DENIAL_REASON_KEY_STATE))))"
   };
   option (buf.validate.message).cel = {
     id: "audit_record.provider_outcome_has_attempt"
     message: "a provider outcome lists at least one provider attempt"
-    expression: "size(this.attempts) > 0 || (has(this.failed) && (this.failed.category == trogonai.platform.key_custody.v1alpha1.OperationFailureCategory.OPERATION_FAILURE_CATEGORY_BINDING_MISMATCH || this.failed.category == trogonai.platform.key_custody.v1alpha1.OperationFailureCategory.OPERATION_FAILURE_CATEGORY_UNSUPPORTED_CAPABILITY || (this.failed.category == trogonai.platform.key_custody.v1alpha1.OperationFailureCategory.OPERATION_FAILURE_CATEGORY_KEY_USE_DENIED && (this.failed.denial_reason == trogonai.platform.key_custody.v1alpha1.KeyUseDenialReason.KEY_USE_DENIAL_REASON_BACKEND_PAUSED || this.failed.denial_reason == trogonai.platform.key_custody.v1alpha1.KeyUseDenialReason.KEY_USE_DENIAL_REASON_KEY_STATE || this.failed.denial_reason == trogonai.platform.key_custody.v1alpha1.KeyUseDenialReason.KEY_USE_DENIAL_REASON_BACKEND_NOT_ACTIVE))))"
+    expression: "size(this.attempts) > 0 || (has(this.failed) && (this.failed.category == trogonai.platform.key_custody.v1alpha1.OperationFailureCategory.OPERATION_FAILURE_CATEGORY_BINDING_MISMATCH || (this.operation != trogonai.platform.key_custody.v1alpha1.KeyOperationKind.KEY_OPERATION_KIND_BIND_EXTERNAL_KEY && this.failed.category == trogonai.platform.key_custody.v1alpha1.OperationFailureCategory.OPERATION_FAILURE_CATEGORY_UNSUPPORTED_CAPABILITY) || (this.failed.category == trogonai.platform.key_custody.v1alpha1.OperationFailureCategory.OPERATION_FAILURE_CATEGORY_KEY_USE_DENIED && (this.failed.denial_reason == trogonai.platform.key_custody.v1alpha1.KeyUseDenialReason.KEY_USE_DENIAL_REASON_BACKEND_PAUSED || (this.operation != trogonai.platform.key_custody.v1alpha1.KeyOperationKind.KEY_OPERATION_KIND_BIND_EXTERNAL_KEY && this.failed.denial_reason == trogonai.platform.key_custody.v1alpha1.KeyUseDenialReason.KEY_USE_DENIAL_REASON_KEY_STATE) || this.failed.denial_reason == trogonai.platform.key_custody.v1alpha1.KeyUseDenialReason.KEY_USE_DENIAL_REASON_BACKEND_NOT_ACTIVE))))"
   };
   option (buf.validate.message).cel = {
     id: "audit_record.success_has_successful_attempt"
@@ -48,8 +48,8 @@ message KeyOperationAuditRecord {
   };
   option (buf.validate.message).cel = {
     id: "audit_record.failure_has_no_successful_attempt"
-    message: "a failed operation lists no successful provider attempt"
-    expression: "!has(this.failed) || !this.attempts.exists(attempt, has(attempt.succeeded))"
+    message: "only post-validation bind discovery may end a failed operation with one successful provider attempt"
+    expression: "!has(this.failed) || ((this.operation == trogonai.platform.key_custody.v1alpha1.KeyOperationKind.KEY_OPERATION_KIND_BIND_EXTERNAL_KEY && (this.failed.category == trogonai.platform.key_custody.v1alpha1.OperationFailureCategory.OPERATION_FAILURE_CATEGORY_UNSUPPORTED_CAPABILITY || (this.failed.category == trogonai.platform.key_custody.v1alpha1.OperationFailureCategory.OPERATION_FAILURE_CATEGORY_KEY_USE_DENIED && this.failed.denial_reason == trogonai.platform.key_custody.v1alpha1.KeyUseDenialReason.KEY_USE_DENIAL_REASON_KEY_STATE))) ? (this.attempts.filter(attempt, has(attempt.succeeded)).size() == 1 && has(this.attempts[this.attempts.size() - 1].succeeded)) : !this.attempts.exists(attempt, has(attempt.succeeded)))"
   };
   option (buf.validate.message).cel = {
     id: "audit_record.attempt_sequence"
