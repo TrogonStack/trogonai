@@ -355,7 +355,8 @@ export class InMemoryTenantCustodyClient implements TenantCustodyClient {
     const locator = buildLocator(provider, input.locator)!;
     const text = locatorText(locator);
     const bound = this.state.keys.some(
-      (key) => key.binding.kind === 'customer_managed' &&
+      (key) =>
+        key.binding.kind === 'customer_managed' &&
         keyBackendIdOf(key.binding.detail.keyBackendId) === parsed &&
         locatorText(key.binding.detail.locator) === text,
     );
