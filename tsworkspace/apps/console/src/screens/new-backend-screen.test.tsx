@@ -10,7 +10,17 @@ const PEM = '-----BEGIN CERTIFICATE-----\nMIIBszCCAVmgAwIBAgIUQ0\n-----END CERTI
 describe('register backend wizard', () => {
   it('registers an AWS KMS backend after every check passes', async () => {
     const user = userEvent.setup();
-    renderApp('/keys/backends/new');
+    const backend = createFakeBackend({ latencyMs: 0 });
+    const completeRegistration = backend.keyCustody.completeRegistration.bind(backend.keyCustody);
+    let releaseCompletion!: () => void;
+    const completionGate = new Promise<void>((resolve) => {
+      releaseCompletion = resolve;
+    });
+    backend.keyCustody.completeRegistration = async (attemptId) => {
+      await completionGate;
+      return completeRegistration(attemptId);
+    };
+    renderApp('/keys/backends/new', backend);
 
     await user.click(await screen.findByRole('radio', { name: /AWS KMS/ }));
     await user.click(screen.getByRole('button', { name: 'Continue' }));
@@ -33,9 +43,37 @@ describe('register backend wizard', () => {
     expect(within(screen.getByRole('list', { name: 'Validation checks' })).getAllByLabelText('Passed')).toHaveLength(4);
     expect(screen.queryByRole('button', { name: 'Run checks' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Register backend' }));
+    expect(screen.getByRole('button', { name: 'Back to instructions' })).toBeDisabled();
+    releaseCompletion();
 
     expect(await screen.findByRole('heading', { name: 'Backend registered' })).toBeInTheDocument();
+    expect(screen.getByText(/AWS KMS/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'View backend' })).toBeInTheDocument();
+  });
+
+  it('keeps the owner on backend details while setup preparation is pending', async () => {
+    const user = userEvent.setup();
+    const backend = createFakeBackend({ latencyMs: 0 });
+    const prepareRegistration = backend.keyCustody.prepareRegistration.bind(backend.keyCustody);
+    let releasePreparation!: () => void;
+    const preparationGate = new Promise<void>((resolve) => {
+      releasePreparation = resolve;
+    });
+    backend.keyCustody.prepareRegistration = async (input) => {
+      await preparationGate;
+      return prepareRegistration(input);
+    };
+    renderApp('/keys/backends/new', backend);
+
+    await user.click(await screen.findByRole('radio', { name: /AWS KMS/ }));
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.type(screen.getByLabelText('Display name'), 'Acme AWS staging');
+    await user.type(screen.getByLabelText('Role ARN'), 'arn:aws:iam::381204965517:role/trogon-key-access');
+    await user.click(screen.getByRole('button', { name: 'Generate setup instructions' }));
+
+    expect(screen.getByRole('button', { name: 'Back' })).toBeDisabled();
+    releasePreparation();
+    expect(await screen.findByText('Your external ID')).toBeInTheDocument();
   });
 
   it('stops at the failing check and explains it', async () => {

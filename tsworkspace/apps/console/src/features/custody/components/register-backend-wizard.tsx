@@ -261,7 +261,7 @@ function ValidateStep({
       ) : null}
       <FaultAlert error={complete.error} title="The registration was rejected" />
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <Button type="button" variant="outline" onClick={onBack} disabled={staged.running}>
+        <Button type="button" variant="outline" onClick={onBack} disabled={staged.running || complete.isPending}>
           <ArrowLeftIcon data-icon="inline-start" />
           Back to instructions
         </Button>
@@ -363,7 +363,7 @@ export function RegisterBackendWizard() {
               <ProviderFields provider={provider} draft={draft} problems={showProblems ? problems : {}} set={set} />
               <FaultAlert error={prepare.error} title="The backend could not be prepared" />
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <Button type="button" variant="outline" onClick={() => setStep(0)}>
+                <Button type="button" variant="outline" onClick={() => setStep(0)} disabled={prepare.isPending}>
                   <ArrowLeftIcon data-icon="inline-start" />
                   Back
                 </Button>
@@ -432,8 +432,8 @@ export function RegisterBackendWizard() {
               <h2 className="text-lg font-semibold">Backend registered</h2>
             </div>
             <p className="text-muted-foreground max-w-xl text-[13px]">
-              The platform can now reach {keyProviderLabels[provider]}. No key is bound yet, so nothing is encrypted
-              under it.
+              The platform can now reach {keyProviderLabels[plan?.input.provider ?? provider]}. No key is bound yet, so
+              nothing is encrypted under it.
             </p>
             <div className="flex flex-wrap items-center gap-2">
               <Link
