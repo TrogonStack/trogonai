@@ -32,7 +32,7 @@ export function BackendDetailScreen({ backendId }: { backendId: string }) {
   const query = useBackendQuery(backendId);
   const back = <BackLink to="/keys/backends">All backends</BackLink>;
 
-  if (query.isPending) return <DetailSkeleton />;
+  if (query.isPending || (query.isFetching && query.data == null)) return <DetailSkeleton />;
   if (query.isError) return <FaultAlert error={query.error} title="Could not load the backend" />;
 
   const backend = query.data;
