@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { KeyBackendFailureReason } from '@trogonai/proto';
 import { describe, expect, it } from 'vitest';
 
+import { createFakeBackend } from '@/fake-backend';
 import { keyBackendId } from '@/features/custody/domain/identifiers';
 import { renderApp } from '@/test/render-app';
 
@@ -18,6 +19,27 @@ describe('backend detail', () => {
     expect(within(connection).getByText('Connected')).toBeInTheDocument();
     expect(screen.getAllByText('Not reported').length).toBeGreaterThan(0);
     expect(screen.getByText('512049177301')).toBeInTheDocument();
+  });
+
+  it('keeps cached backend details visible when a background refresh fails', async () => {
+    const backend = createFakeBackend({ latencyMs: 0 });
+    const load = backend.keyCustody.load.bind(backend.keyCustody);
+    let failRefresh = false;
+    backend.keyCustody.load = async () => {
+      if (failRefresh) throw new Error('Custody refresh failed.');
+      return load();
+    };
+    const { queryClient } = renderApp('/keys/backends/kbe_aws_acme_prod', backend);
+
+    expect(await screen.findByRole('heading', { name: 'Acme AWS production' })).toBeInTheDocument();
+
+    failRefresh = true;
+    await queryClient.invalidateQueries({ queryKey: ['key-custody'] });
+
+    const alert = await screen.findByRole('alert');
+    expect(screen.getByRole('heading', { name: 'Acme AWS production' })).toBeInTheDocument();
+    expect(alert).toHaveTextContent('Could not refresh the backend');
+    expect(alert).toHaveTextContent('Custody refresh failed.');
   });
 
   it('shows the typed failure reason and the expiry warning', async () => {
