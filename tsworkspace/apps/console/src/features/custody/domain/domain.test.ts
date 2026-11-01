@@ -179,6 +179,20 @@ describe('OpenBao namespace', () => {
     expect(registrationProblems({ ...input, namespace: '/team-a' }).namespace).toBeDefined();
     expect(registrationProblems({ ...input, namespace: 'team-a/edge' }).namespace).toBeUndefined();
   });
+
+  it('rejects endpoint forms outside the OpenBao access contract', () => {
+    for (const endpoint of [
+      'https://operator@192.0.2.1:8200',
+      'https://bao.example.com:8200/v1?standbyok=true',
+      'https://bao.example.com:8200/v1#transit',
+      'https://[::1]:8200',
+      'https://[fe80::1]:8200',
+      'https://[fc00::1]:8200',
+    ]) {
+      expect(registrationProblems({ ...input, endpoint }).endpoint, endpoint).toBeDefined();
+    }
+    expect(registrationProblems({ ...input, endpoint: 'https://bao.example.com:8200/v1/' }).endpoint).toBeUndefined();
+  });
 });
 
 describe('Google Cloud locations', () => {
