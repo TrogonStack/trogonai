@@ -4,10 +4,10 @@ use std::time::SystemTime;
 
 use tokio::sync::{Mutex, RwLock};
 
-use super::PlaidKeyId;
 use super::constants::{KEY_FETCH_THROTTLE_INTERVAL, KEY_REFRESH_INTERVAL};
 use super::key_fetcher::{PlaidKeyFetchError, PlaidKeyFetcher};
 use super::verification_key::PlaidVerificationKey;
+use super::{PlaidKeyId, PlaidSecret};
 
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -58,6 +58,7 @@ impl<F: PlaidKeyFetcher> PlaidKeyCache<F> {
     pub async fn resolve(
         &self,
         key_id: &PlaidKeyId,
+        secret: &PlaidSecret,
         now: SystemTime,
     ) -> Result<Arc<PlaidVerificationKey>, PlaidKeyResolveError> {
         if let Lookup::Fresh(key) = self.lookup(key_id, now).await {
@@ -80,7 +81,7 @@ impl<F: PlaidKeyFetcher> PlaidKeyCache<F> {
             }
         }
 
-        let key = match self.fetcher.fetch(key_id).await {
+        let key = match self.fetcher.fetch(key_id, secret).await {
             Ok(key) => Arc::new(key),
             Err(err) => {
                 if let Some(cached) = self.keys.write().await.get_mut(key_id) {

@@ -55,6 +55,7 @@ pub struct NotionPlugin;
 pub struct SentryPlugin;
 pub struct DatadogPlugin;
 pub struct ZoomPlugin;
+pub struct PlaidPlugin;
 
 pub(crate) struct RuntimeCredentialMounts<G> {
     pub(crate) github: Option<RuntimeCredentialResolver<G>>,
@@ -68,6 +69,7 @@ pub(crate) struct RuntimeCredentialMounts<G> {
     pub(crate) telegram_registered_credentials: crate::source::telegram::TelegramRegisteredWebhookCredentials,
     pub(crate) twitter: Option<RuntimeCredentialResolver<G>>,
     pub(crate) notion: Option<RuntimeCredentialResolver<G>>,
+    pub(crate) plaid: Option<RuntimeCredentialResolver<G>>,
 }
 
 impl<G> Default for RuntimeCredentialMounts<G> {
@@ -84,6 +86,7 @@ impl<G> Default for RuntimeCredentialMounts<G> {
             telegram_registered_credentials: Default::default(),
             twitter: None,
             notion: None,
+            plaid: None,
         }
     }
 }
@@ -858,6 +861,70 @@ impl SourcePlugin for ZoomPlugin {
     }
 }
 
+impl SourcePlugin for PlaidPlugin {
+    fn id(&self) -> SourceId {
+        "plaid"
+    }
+
+    async fn provision<C: JetStreamContext>(&self, client: &C, config: &ResolvedConfig) -> Result<(), C::Error> {
+        provision_integrations(&config.plaid, self.id(), client, crate::source::plaid::provision).await
+    }
+
+    fn mount<P, S, R>(
+        &self,
+        app: Router,
+        publisher: ClaimCheckPublisher<P, S>,
+        _requester: &R,
+        config: &ResolvedConfig,
+    ) -> Router
+    where
+        P: JetStreamPublisher,
+        S: ObjectStorePut,
+        R: RequestClient,
+    {
+        mount_integrations(
+            &config.plaid,
+            app,
+            publisher,
+            self.id(),
+            &self.path_prefix(),
+            |p, cfg| crate::source::plaid::router(p, cfg),
+        )
+    }
+}
+
+impl PlaidPlugin {
+    fn mount_runtime<P, S, G>(
+        &self,
+        mut app: Router,
+        publisher: ClaimCheckPublisher<P, S>,
+        config: &ResolvedConfig,
+        credential_resolver: RuntimeCredentialResolver<G>,
+    ) -> Router
+    where
+        P: JetStreamPublisher,
+        S: ObjectStorePut,
+        G: SecretStoreGet<Error = SecretStoreError>,
+    {
+        for integration in &config.plaid {
+            let path = format!("{}/{}", self.path_prefix(), integration.id);
+            app = app.nest(
+                &path,
+                crate::source::plaid::runtime_router(
+                    publisher.clone(),
+                    &integration.config,
+                    integration.id.clone(),
+                    credential_resolver.clone(),
+                ),
+            );
+            let source = self.id();
+            let integration_id = integration.id.as_str();
+            info!(source, integration = integration_id, path, "mounted source integration");
+        }
+        app
+    }
+}
+
 /// Provision JetStream streams for every webhook source. Discord is provisioned separately by the caller.
 pub async fn provision_webhook_sources<C: JetStreamContext>(
     client: &C,
@@ -875,6 +942,7 @@ pub async fn provision_webhook_sources<C: JetStreamContext>(
     SentryPlugin.provision(client, config).await?;
     DatadogPlugin.provision(client, config).await?;
     ZoomPlugin.provision(client, config).await?;
+    PlaidPlugin.provision(client, config).await?;
     Ok(())
 }
 
@@ -901,7 +969,8 @@ where
     app = NotionPlugin.mount(app, publisher.clone(), requester, config);
     app = SentryPlugin.mount(app, publisher.clone(), requester, config);
     app = DatadogPlugin.mount(app, publisher.clone(), requester, config);
-    ZoomPlugin.mount(app, publisher, requester, config)
+    app = ZoomPlugin.mount(app, publisher.clone(), requester, config);
+    PlaidPlugin.mount(app, publisher, requester, config)
 }
 
 pub(crate) fn mount_webhook_sources_with_runtime_credentials<P, S, R, G>(
@@ -970,5 +1039,9 @@ where
         None => SentryPlugin.mount(app, publisher.clone(), requester, config),
     };
     app = DatadogPlugin.mount(app, publisher.clone(), requester, config);
-    ZoomPlugin.mount(app, publisher, requester, config)
+    app = ZoomPlugin.mount(app, publisher.clone(), requester, config);
+    match runtime_credentials.plaid {
+        Some(plaid_credentials) => PlaidPlugin.mount_runtime(app, publisher, config, plaid_credentials),
+        None => PlaidPlugin.mount(app, publisher, requester, config),
+    }
 }

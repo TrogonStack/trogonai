@@ -31,4 +31,4 @@ pub use plaid_event_type::PlaidEventType;
 pub use plaid_item_id::PlaidItemId;
 pub use plaid_key_id::PlaidKeyId;
 pub use plaid_secret::PlaidSecret;
-pub use server::provision;
+pub use server::{provision, router, runtime_router};
