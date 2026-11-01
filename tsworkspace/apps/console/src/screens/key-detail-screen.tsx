@@ -35,7 +35,8 @@ export function KeyDetailScreen({ keyRef }: { keyRef: string }) {
   const back = <BackLink to="/keys/keys">All keys</BackLink>;
 
   if (query.isPending) return <DetailSkeleton />;
-  if (query.isError) return <FaultAlert error={query.error} title="Could not load the key" />;
+  if (query.isError && query.data === undefined)
+    return <FaultAlert error={query.error} title="Could not load the key" />;
 
   const view = query.data;
   if (!view) {
@@ -48,6 +49,7 @@ export function KeyDetailScreen({ keyRef }: { keyRef: string }) {
 
   return (
     <div className="flex flex-col gap-6">
+      {query.error ? <FaultAlert error={query.error} title="Could not refresh the key" /> : null}
       <div>{back}</div>
       <DetailHeader
         title={view.keyRef}
