@@ -141,7 +141,11 @@ function hostProblem(endpoint: string): string | undefined {
     return 'Enter a complete https URL.';
   }
   if (url.protocol !== 'https:') return 'The endpoint must use authenticated HTTPS.';
-  const host = url.hostname;
+  if (url.username !== '' || url.password !== '' || url.search !== '' || url.hash !== '') {
+    return 'Use a credential-free base URL without a query or fragment.';
+  }
+  const host = url.hostname.toLowerCase();
+  const ipv6 = host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : '';
   if (
     host === 'localhost' ||
     host.startsWith('127.') ||
@@ -149,7 +153,10 @@ function hostProblem(endpoint: string): string | undefined {
     host.startsWith('192.168.') ||
     /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
     host.startsWith('169.254.') ||
-    host.endsWith('.internal')
+    host.endsWith('.internal') ||
+    ipv6 === '::1' ||
+    /^fe[89ab][0-9a-f]:/.test(ipv6) ||
+    /^f[cd][0-9a-f]{2}:/.test(ipv6)
   ) {
     return 'The egress policy rejects loopback, link-local, metadata and undeclared internal destinations.';
   }
