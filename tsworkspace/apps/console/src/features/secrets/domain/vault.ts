@@ -2,6 +2,7 @@ import { create } from '@bufbuild/protobuf';
 import { timestampDate, timestampFromDate } from '@bufbuild/protobuf/wkt';
 import { VaultEventSchema, VaultLifecycle, type VaultEvent } from '@trogonai/proto';
 
+import type { CustodyTier } from '@/features/custody/domain/custody';
 import { environmentIdFromStored, type EnvironmentId } from '@/features/environments/domain/environment-id';
 
 import type { VaultCommand, VaultTransition } from './commands';
@@ -16,6 +17,7 @@ export interface VaultState {
   readonly projectId: string;
   readonly displayName: string;
   readonly environment: EnvironmentId;
+  readonly custody: CustodyTier;
   readonly lifecycle: VaultLifecycle;
   readonly createdAt: Date;
   readonly updatedAt: Date;
@@ -142,6 +144,7 @@ export function evolveVault(state: VaultState | undefined, event: VaultEvent): V
         projectId: event.projectId,
         displayName: event.fact.value.displayName,
         environment: environmentIdFromStored(event.fact.value.environment),
+        custody: 'managed',
         lifecycle: VaultLifecycle.ACTIVE,
         createdAt: at,
         updatedAt: at,

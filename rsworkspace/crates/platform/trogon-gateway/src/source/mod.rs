@@ -7,6 +7,7 @@ pub mod incidentio;
 pub mod linear;
 pub mod microsoft_graph;
 pub mod notion;
+pub mod plaid;
 pub mod sentry;
 pub mod slack;
 mod standard_webhooks;

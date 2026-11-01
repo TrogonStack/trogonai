@@ -1,0 +1,111 @@
+edition = "2024";
+
+package trogonai.platform.key_custody.v1alpha1;
+
+import "trogon/error/v1alpha1/options.proto";
+
+// Schema-only Decider error templates, never encoded. External validation and
+// authorization failures are distinguished from fold lifecycle rejections.
+// Admission and key-state denials are operation failures decided by the service
+// before any provider call, not Decider faults. Credentials, tokens, provider
+// locators, headers, and provider errors are never copied into public error
+// detail. Concurrency faults use the Decider channel.
+message KeyCustodyCommandInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "platform.key_custody"
+    reason: "KEY_CUSTODY_COMMAND_INVALID"
+    message: "The command violates the key custody contract."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message KeyBackendAlreadyExistsError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "platform.key_custody"
+    reason: "KEY_BACKEND_ALREADY_EXISTS"
+    message: "The registration identity has already been registered."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message KeyBackendNotFoundError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "platform.key_custody"
+    reason: "KEY_BACKEND_NOT_FOUND"
+    message: "The registration has not been registered."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message KeyBackendNotPendingError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "platform.key_custody"
+    reason: "KEY_BACKEND_NOT_PENDING"
+    message: "Validation requires a registration pending validation."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message KeyBackendNotActiveError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "platform.key_custody"
+    reason: "KEY_BACKEND_NOT_ACTIVE"
+    message: "The operation requires an active registration."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message KeyBackendRetiredError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "platform.key_custody"
+    reason: "KEY_BACKEND_RETIRED"
+    message: "The registration has been permanently retired."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message KeyBackendAlreadyPausedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "platform.key_custody"
+    reason: "KEY_BACKEND_ALREADY_PAUSED"
+    message: "The registration is already paused."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message KeyBackendNotPausedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "platform.key_custody"
+    reason: "KEY_BACKEND_NOT_PAUSED"
+    message: "Resume requires a paused registration."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message KeyBackendRevisionMismatchError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "platform.key_custody"
+    reason: "KEY_BACKEND_REVISION_MISMATCH"
+    message: "The validation does not cover the current registration revision."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message KeyRefAlreadyBoundError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "platform.key_custody"
+    reason: "KEY_REF_ALREADY_BOUND"
+    message: "The key reference identity has already been used."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}

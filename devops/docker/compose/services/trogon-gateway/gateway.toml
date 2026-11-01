@@ -105,6 +105,18 @@ webhook_secret = { env = "TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET" }
 # secret_token = { env = "ZOOM_PRIMARY_SECRET_TOKEN" }
 # timestamp_tolerance_secs = 300  # optional; max drift of x-zm-request-timestamp
 #
+# [sources.plaid.integrations.primary]
+# subject_prefix = "plaid-primary"
+# stream_name = "PLAID_PRIMARY"
+# stream_max_age_secs = 604800
+# nats_ack_timeout_secs = 10
+#
+# [sources.plaid.integrations.primary.webhook]
+# client_id = "your-plaid-client-id"  # or { env = "PLAID_PRIMARY_CLIENT_ID" }
+# secret = { env = "PLAID_PRIMARY_SECRET" }
+# environment = "production"  # sandbox or production
+# timestamp_tolerance_secs = 300  # optional; max drift of the JWT iat claim
+#
 # [sources.discord]
 # bot_token = { env = "DISCORD_BOT_TOKEN" }
 # gateway_intents = "guilds,guild_members,guild_messages,guild_message_reactions,direct_messages,message_content,guild_voice_states"

@@ -21,7 +21,7 @@ shapes ([ADR#0033](../adr/0033-key-custody-product-model.md) Non-Goals).
 
 | Category | Likely cause | Who acts | Action |
 | --- | --- | --- | --- |
-| `KeyUseDenied` | The customer disabled, revoked, or destroyed the key in the owning provider, or the platform disabled a managed key. | The key owner: the tenant for a customer managed key, the platform operator for a managed key. | Confirm whether the denial is intended. If it is, the system is working as designed. If it is not, the key owner re-enables the key or restores access in the owning provider, and operations resume without platform intervention once provider enforcement clears. There is no automatic retry. |
+| `KeyUseDenied` | The customer disabled, revoked, or destroyed the key in the owning provider, the platform disabled a managed key, or the owner paused the backend registration (denial reason `BackendPaused`). | The key owner: the tenant for a customer managed key, the platform operator for a managed key. | Confirm whether the denial is intended. If it is, the system is working as designed. If it is not, the key owner re-enables the key or restores access in the owning provider, and operations resume without platform intervention once provider enforcement clears. For a paused registration, the owner resumes it, as described in [If a registration is paused](#if-a-registration-is-paused). There is no automatic retry. |
 | `ProviderUnavailable` | Transport failure, timeout, or a provider service failure. | Platform operators. | Bounded backoff already runs inside the operation deadline. Check backend health and provider status. |
 | `ProviderThrottled` | An explicit provider quota or rate limit. | Platform operators. | Bounded, provider-directed backoff already runs. Review request volume and provider quotas. |
 | `BindingMismatch` | A caller presented a `KeyRef` whose tenant or purpose does not match the authenticated operation. | Platform operators. | Security violation. There is no retry. Treat this as an incident. |
@@ -29,6 +29,29 @@ shapes ([ADR#0033](../adr/0033-key-custody-product-model.md) Non-Goals).
 | `IntegrityFailure` | Cryptographic authenticated-data or ciphertext validation failed. | Platform operators. | There is no retry. Treat this as an incident. |
 | `UnsupportedCapability` | The bound key does not support the required typed capability (for example, `EnvelopeWrapping`). | The key owner or administrator. | Rebind to a key that supports the required capability: select a different managed key, or register a new customer managed key through `BindExternalKey`. |
 | `InternalFailure` | An unmapped provider error, a malformed response, or an adapter fault. | Platform operators. | Escalate to platform operators. |
+
+## If a registration is paused
+
+A `KeyUseDenied` failure with the denial reason `BackendPaused` means the owner
+of the backend registration paused it. The platform never pauses a registration
+automatically, so a pause always traces to an owner action. While a registration
+is paused, every operation against its keys is denied, and the platform makes no
+call to the provider, probes included, so the registration's observed connection
+health shows what the platform last observed
+([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md), Decision
+6). A public response may coarsen the denial, so confirm the reason in the audit
+record.
+
+1. Confirm whether the pause is intended. If it is, the system is working as
+   designed.
+2. If it is not, the registration's owner resumes it. Resume validates the
+   registration's current configuration end to end. The registration resumes
+   only when validation succeeds; otherwise it stays paused and records the
+   validation reason, so address that reason and resume again.
+3. After the resume, each key's state still applies. A key that was disabled,
+   or whose access was revoked, in the owning provider keeps denying use until
+   the owner reverses that in the provider. See
+   [Key States](../architecture/key-states.md).
 
 ## If you suspect key compromise
 
@@ -87,6 +110,20 @@ another tenant's key state
 Decision 6). Operators diagnosing an incident see the exact internal
 category, one of the eight listed above, in the audit record. Do not infer
 the internal category from a caller-visible error alone.
+
+## Read the provider attempts in the audit record
+
+The audit record for an operation lists every provider attempt, including the
+retries that ran inside the operation deadline. Each attempt shows its attempt
+number, start time, duration, and outcome category, plus either the request
+identifier the provider returned or an explicit absence reason,
+`NotProvidedByProvider` or `NoResponse`. The platform never creates a request
+identifier of its own.
+
+A recorded identifier is the one the provider returned. This page does not
+claim that it matches an entry in the provider's own audit log, such as
+CloudTrail or an OpenBao audit device
+([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md), Decision 7).
 
 ## See also
 

@@ -1,8 +1,12 @@
 import { VaultLifecycle } from '@trogonai/proto';
 
+import { createFakeTenantCustodyClient } from './features/custody/fake';
+import type { InMemoryTenantCustodyClient } from './features/custody/fake/in-memory-client';
 import { createFakeEnvironmentsClient } from './features/environments/fake';
 import type { InMemoryEnvironmentsClient } from './features/environments/fake/in-memory-client';
 import { populateBuiltInEnvironmentSeed } from './features/environments/fake/seed';
+import { createFakeSourcesClient } from './features/gateway-sources/fake';
+import type { InMemorySourcesClient } from './features/gateway-sources/fake/in-memory-client';
 import { createFakeHierarchyClient } from './features/hierarchy/fake';
 import type { InMemoryHierarchyClient } from './features/hierarchy/fake/in-memory-client';
 import { workspaceNodeDirectory } from './features/hierarchy/fake/workspace-nodes';
@@ -29,11 +33,14 @@ export interface FakeBackend {
   readonly projects: InMemoryProjectsClient;
   readonly secrets: { forProject(projectId: ProjectId): InMemorySecretsClient };
   readonly environments: { forProject(projectId: ProjectId): InMemoryEnvironmentsClient };
+  readonly gatewaySources: { forProject(projectId: ProjectId): InMemorySourcesClient };
+  readonly keyCustody: InMemoryTenantCustodyClient;
 }
 
 interface ProjectWorkspace {
   readonly secrets: InMemorySecretsClient;
   readonly environments: InMemoryEnvironmentsClient;
+  readonly gatewaySources: InMemorySourcesClient;
 }
 
 export function createFakeBackend(options: FakeBackendOptions = {}): FakeBackend {
@@ -70,7 +77,13 @@ export function createFakeBackend(options: FakeBackendOptions = {}): FakeBackend
     });
     registry.environments = environments;
 
-    const workspace = { secrets, environments };
+    const gatewaySources = createFakeSourcesClient({
+      ...options,
+      projectId,
+      seeded: (options.seeded ?? true) && isDemo,
+    });
+
+    const workspace = { secrets, environments, gatewaySources };
     workspaces.set(projectId, workspace);
     return workspace;
   };
@@ -107,5 +120,7 @@ export function createFakeBackend(options: FakeBackendOptions = {}): FakeBackend
     projects,
     secrets: { forProject: (projectId) => workspaceOf(projectId).secrets },
     environments: { forProject: (projectId) => workspaceOf(projectId).environments },
+    gatewaySources: { forProject: (projectId) => workspaceOf(projectId).gatewaySources },
+    keyCustody: createFakeTenantCustodyClient(options),
   };
 }

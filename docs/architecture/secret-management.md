@@ -286,8 +286,8 @@ rather than a restatement of an existing model.
 
 [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) commits to dual audit: a business-context record (caller,
 tenant, vault, ref, purpose, outcome) with a correlation ID threaded into
-the OpenBao request, so the provider's own audit log joins back to who
-asked and why ([ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) Decision 6). What the service does when an audit
+the OpenBao request, so the provider's own audit log can join back to who
+asked and why once adoption proves the identifier reaches that log ([ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) Decision 6). What the service does when an audit
 sink itself fails to accept a record is not fixed; [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) lists correct
 behavior when audit sinks fail among the proofs required before adoption,
 which means this behavior must be answered before adoption, not assumed.

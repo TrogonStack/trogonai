@@ -9,7 +9,7 @@ import { useCurrentProject } from '../current-project';
 import type { ProjectId } from '../domain/project-id';
 import { activeFirst } from '../domain/view';
 
-const scopedSections = { secrets: '/secrets', environments: '/environments' } as const;
+const scopedSections = { secrets: '/secrets', environments: '/environments', sources: '/sources' } as const;
 
 export function ProjectSwitcher({ collapsed }: { collapsed: boolean }) {
   const navigate = useNavigate();
@@ -19,7 +19,8 @@ export function ProjectSwitcher({ collapsed }: { collapsed: boolean }) {
 
   const name = project?.displayName ?? 'Loading project';
   const label = collapsed ? 'hidden' : 'hidden lg:flex';
-  const to = section === 'secrets' || section === 'environments' ? scopedSections[section] : '.';
+  const to =
+    section === 'secrets' || section === 'environments' || section === 'sources' ? scopedSections[section] : '.';
 
   const choose = (projectId: ProjectId) => {
     setOpen(false);

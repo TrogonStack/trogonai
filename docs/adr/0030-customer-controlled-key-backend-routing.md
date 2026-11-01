@@ -82,9 +82,16 @@ The platform secrets service remains the only provider client. `KeyRef` is an
 opaque platform reference to the key-encryption key (KEK) that wraps DEKs.
 Data-plane callers cannot select a provider, supply a provider resource name,
 or parse provider ciphertext. A provider locator appears only in the authorized
-administrative bind operation in Decision 4 and in service-private binding
-state, never in a business entity or ordinary operation request. Provider SDK
+administrative bind operation in Decision 4, in service-private binding state,
+and in the owner's read-back of its own customer managed binding described
+below, never in a business entity or ordinary operation request. Provider SDK
 types and protocols do not cross the service boundary.
+
+The tenant that owns a customer managed binding may read back that binding's
+locator in the binding's detail, so it can match the binding to the key in its
+provider's console and audit log. The locator never appears in a wrap or unwrap
+request or response, in a projection consumed by another service or another
+tenant, or for a platform-owned binding.
 
 The `KeyRef` shown in the provider-neutral port is a service-owned internal
 argument after authorization, not an authoritative caller choice. For wrap, the
@@ -175,11 +182,11 @@ provision every tenant backend or decide where every key lives.
 A `KeyBackendRegistration` is durable product state owned by one tenant or by
 the platform. It owns connection, authentication, and trust configuration, but
 no key locator. It has an opaque `KeyBackendId`, a typed provider variant,
-ownership, lifecycle status, provider access parameters, and a non-secret
-authentication profile. Raw credentials never appear in configuration, events,
-or the registration. Workload identity and short-lived credentials are
-preferred; an unavoidable secret is represented by a `CredentialRef` and
-remains behind `SecretStore`.
+ownership, lifecycle status, admission, observed connection health, provider
+access parameters, and a non-secret authentication profile. Raw credentials
+never appear in configuration, events, or the registration. Workload identity
+and short-lived credentials are preferred; an unavoidable secret is represented
+by a `CredentialRef` and remains behind `SecretStore`.
 
 Platform-owned registrations back the managed and dedicated tiers of
 [ADR#0033](./0033-key-custody-product-model.md) and are subject to every rule
@@ -193,10 +200,40 @@ security boundary. A credential, trust root, authorization principal, or
 OpenBao endpoint update may create a new registration revision under the same
 ID only when validation proves continuity with the same boundary and its bound
 keys. An account, project, or unproven endpoint change requires a new
-`KeyBackendId`. The provider locator associated with a `KeyRef` never changes;
+`KeyBackendId`. An OpenBao namespace is part of that security boundary: a
+registration names at most one namespace, the root namespace when it names
+none, and changing it requires a new `KeyBackendId`. The provider locator associated with a `KeyRef` never changes;
 selecting another native key always requires a new `KeyRef` and migration,
-whether or not its backend ID is shared. Lifecycle and health fields may change
-without changing identity.
+whether or not its backend ID is shared. Lifecycle, admission, and health fields
+may change without changing identity.
+
+A registration's state is held in separate dimensions, and none of them stands
+in for another:
+
+- Lifecycle is owned by the platform: `PendingValidation`, `Active`, or
+  `Retired`. A failed validation keeps the registration pending and records the
+  reason. A new revision takes effect only after it validates, and the current
+  revision stays in force until then.
+- Admission is controlled by the registration's owner and is authoritative:
+  `Enabled` or `Paused`. Only the owner may change it. A new registration starts
+  `Enabled`: lifecycle alone keeps it out of use until it validates, so first
+  activation needs no separate resume. Decision 6 defines what a pause does and
+  does not mean.
+- Observed connection health is advisory and is never an admission input. Its
+  status is `Unknown`, `Connected`, or `Failed`, and a failure carries a typed
+  reason: `AuthenticationFailed`, `AccessDenied`, `TlsFailure`, `Unreachable`,
+  `Timeout`, `InvalidResponse`, or `CapabilityMissing`. Health also carries the
+  observation time, trust expiry signals, and latency observations. The
+  provider call itself fails closed, so health never needs to block anything.
+
+Trust expiry signals are timestamps, one for each piece of trust material the
+registration depends on: the endpoint's server certificate not-after, the client
+certificate not-after, and the trust root not-after. When a `CredentialRef` is in
+use, health also carries that credential's issued-at or expiry time. A value that
+is not known stays absent and is never recorded as zero. Warning thresholds are
+product policy and are not fixed by this ADR. Expiry never blocks admission.
+When a certificate or trust root actually expires, the TLS handshake fails
+closed.
 
 A tenant may choose a previously bound `KeyRef` as the default wrapping key for
 new envelopes of a given purpose. That default is policy for future envelopes,
@@ -221,7 +258,8 @@ beneath the same logical provider resource when the provider guarantees old
 ciphertext remains decryptable, but a default-key or deployment-config change
 cannot move an existing `KeyRef`.
 
-The provider locators remain adapter-private:
+Apart from the owner read-back in Decision 1, the provider locators remain
+adapter-private:
 
 - OpenBao stores the registered endpoint and namespace plus the Transit mount
   and key path. The platform does not claim that an OpenBao path is an
@@ -236,6 +274,12 @@ The provider locators remain adapter-private:
   contract. Symmetric decryption selects the version from the ciphertext and
   does not return the exact version used, so the adapter does not claim to
   verify that version from the decrypt response.
+
+A multi-Region AWS key binds by the exact ARN of the key in one Region, like any
+other key. The platform never fails over to a replica automatically: each
+replica has its own key state and key policy, so a failover could bypass a
+customer's disabling of the bound key. Moving to a replica is a new `KeyRef` and
+a rewrap migration.
 
 Moving ciphertext to another backend is an explicit migration. It creates a
 new `KeyRef` bound to the new backend, unwraps with the old `KeyRef`, wraps with
@@ -331,6 +375,60 @@ The guarantee is deliberately bounded by the external provider:
 > provider request already executing before enforcement may complete. Completed
 > operations and plaintext already delivered cannot be revoked.
 
+A registration's owner can also pause it. A pause is a platform-side admission
+control that the owner can reverse. It is not the veto above: the provider-side
+action stays the authoritative stop, because the customer's guarantee must not
+depend on the platform honoring its own flag. After a service instance observes
+the pause, it makes no provider call for the registration, probes included, so
+observed health is not refreshed until resume. Wrap, unwrap, `BindExternalKey`,
+set-as-default, migration source use, and migration target use all fail on that
+instance.
+
+The failure is the existing `KeyUseDenied` category with the denial reason
+`BackendPaused`, not a new category. The retry rule is unchanged: there is no
+automatic retry, and the owner must resume the registration first. The public
+service may coarsen the denial like any other.
+
+An operation against an existing `KeyRef` checks in a fixed order. The service
+authenticates the caller and resolves the reference, including its tenant and
+purpose binding, requires the registration lifecycle to be `Active`, checks the
+registration's admission, applies the key-state and capability matrix in
+[Key States](../architecture/key-states.md), and only then calls the provider.
+`PendingValidation` and `Retired` registrations stop before provider access even
+when admission is `Enabled`. Every retry inside the operation deadline repeats
+the lifecycle and admission checks before its next attempt.
+
+`BindExternalKey` has no existing `KeyRef` to resolve. It authenticates the
+caller, authorizes the tenant's use of the supplied `KeyBackendId`, locator,
+purpose, and capabilities, requires that backend registration's lifecycle be
+`Active`, checks its admission, and only then performs provider validation and
+applies the discovered key-state and capability gates before creating a
+`KeyRef`.
+
+A pause is acknowledged once the admission fact is durably committed; that
+acknowledgement does not claim that every service instance has observed it.
+Instances enforce the pause through pushed invalidation of their admission view
+with a hard time-to-live backstop, the same shape as
+[ADR#0049](./0049-revocation-latency-target.md). Until measurement establishes
+and records that propagation target, the platform publishes no bounded
+pause-enforcement time. A stale instance may admit and start a provider request
+after acknowledgement but before it observes the pause, and a request already
+in flight may complete. The no-provider-call guarantee begins when the serving
+instance observes the pause.
+
+The platform never pauses a customer registration automatically from health
+signals. That would turn a transient provider fault into a platform-initiated
+denial and hide the real failure category.
+
+A registration update submitted while paused is staged without validation,
+because validating it would call the provider. Resume validates the newest
+staged revision end to end, or the current revision when none is staged, so an
+owner can replace expired trust material during a pause and resume onto it.
+Admission resumes, and a staged revision becomes current, only when that
+validation succeeds; otherwise the registration stays paused on its current
+revision and records the validation reason. After a resume the key-state matrix
+still applies.
+
 Provider unavailability, denial, disabled keys, binding mismatch, integrity
 failure, and throttling produce typed failure outcomes and never a successful
 degraded mode.
@@ -339,7 +437,7 @@ The stable domain failure categories preserve security and retry semantics:
 
 | Category | Includes | Automatic retry | Audit classification |
 | --- | --- | --- | --- |
-| `KeyUseDenied` | Customer authorization denial or a disabled, destroyed, or missing key | No; external customer action must change first | Security denial |
+| `KeyUseDenied` | Customer authorization denial, a disabled, destroyed, or missing key, or a paused registration (denial reason `BackendPaused`) | No; external customer action, or the owner's resume of a pause, must change first | Security denial |
 | `ProviderUnavailable` | Transport failure, timeout, or provider service failure | Bounded backoff within the operation deadline | Operational failure |
 | `ProviderThrottled` | Explicit provider quota or rate limit | Bounded provider-directed backoff | Capacity failure |
 | `BindingMismatch` | `KeyRef` tenant or purpose does not match the authenticated operation | No | Security violation |
@@ -352,6 +450,13 @@ The public service may coarsen denied, missing, and disabled outcomes to avoid a
 cross-tenant resource oracle, while retaining the internal category and audit
 record. Operational unavailability and throttling never collapse into a
 security denial, and retries never switch providers.
+
+Each provider attempt has a timeout no larger than the remaining operation
+deadline, and an attempt timeout maps to `ProviderUnavailable`. Latency is
+recorded per registration and operation kind. A published per-call latency
+budget for customer backends is deferred until it is measured against real
+providers, and it is then recorded the way
+[ADR#0049](./0049-revocation-latency-target.md) records its target.
 
 For a customer-controlled key, platform lifecycle state is desired and observed
 state; the provider is authoritative. `Active` never asserts that the customer
@@ -380,6 +485,15 @@ implemented:
   backend fallback.
 - Each provider error maps to the stable category, retry rule, and audit
   classification above without string matching or resource-oracle leakage.
+- Every provider attempt runs under a timeout no larger than the remaining
+  operation deadline, an attempt timeout maps to `ProviderUnavailable`, and
+  latency is recorded per registration and operation kind.
+- A paused registration fails every gated operation with `KeyUseDenied` and the
+  denial reason `BackendPaused` without calling the provider, a retry that
+  starts after an instance observes the pause repeats admission and fails the
+  same way, an update staged during the pause is validated by resume and
+  becomes current only if it passes, and resume admits operations again only
+  after that validation succeeds.
 - AWS cross-account setup denies `AssumeRole` from an unexpected principal and
   with a missing or incorrect tenant-unique external ID, then limits the
   resulting session to the exact key.
@@ -398,6 +512,16 @@ implemented:
 - Audit and telemetry identify the tenant, `KeyRef`, `KeyBackendId`, purpose,
   provider, outcome, and correlation ID without recording DEKs or credentials;
   they record only the approved non-secret projection of authenticated binding.
+- Each operation produces one audit record that lists every provider attempt
+  with its attempt number, start time, duration, outcome category, and either
+  the request identifier the provider returned or an explicit absence reason,
+  `NotProvidedByProvider` or `NoResponse`. The platform never synthesizes a
+  request identifier, and no per-attempt value enters the authenticated binding,
+  which must be identical at wrap and unwrap.
+- Documentation and product copy describe a recorded identifier as joining a
+  provider's own audit log, such as CloudTrail or an OpenBao audit device, only
+  after a conformance case proves that join for that provider. Until then they
+  say only that it is the identifier the provider returned.
 
 Provider-specific integration tests run against supported provider
 configurations in addition to contract tests. OpenBao support does not assume
@@ -413,11 +537,13 @@ the platform from using it.
 
 ### Double-wrap every DEK with a platform key and a customer key
 
-Rejected as the default. Requiring the customer backend on the only unwrap path
-already provides the customer's operational veto. A second layer adds another
-rotation, migration, outage, audit, and recovery surface without strengthening
-that requirement. Deliberate two-party cryptographic control may justify
-double wrapping later, but it is a separate capability and decision.
+Rejected for the built-in adapters. Requiring the customer backend on the only
+unwrap path already provides the customer's operational veto. A second layer
+adds another rotation, migration, outage, audit, and recovery surface without
+strengthening that requirement. Deliberate two-party cryptographic control may
+justify double wrapping later, but it is a separate capability and decision, and
+any reconsideration belongs to the ADR reserved for an XKS proxy adapter,
+described below.
 
 ### Make OpenBao Transit dynamically pluggable
 
@@ -450,6 +576,19 @@ OpenBao reads. It spreads high-value provider identities and authorization
 logic into every workload, exposes provider details to business code, and
 prevents one enforceable audit, cache, and fail-closed boundary.
 
+### Adopt the AWS XKS proxy API as a fourth adapter
+
+Deferred, not rejected. It belongs to its own ADR, which must include a vendor
+interoperability proof. The known obstacles are that proxy authentication is a
+static SigV4 credential pair, which would need a `CredentialRef` and runs
+against the preference for short-lived credentials in Decisions 3 and 5, and
+that a vendor's proxy may accept only AWS as the caller.
+
+Until that ADR exists, an AWS KMS key backed by an AWS external key store, or a
+Google Cloud KMS key protected by Cloud EKM, is addressed through the existing
+adapter and passes the same validation. The platform makes no claim about where
+its material lives.
+
 ## Non-Goals
 
 - Changing OpenBao KV v2 as the `SecretStore` selected by
@@ -462,12 +601,26 @@ prevents one enforceable audit, cache, and fail-closed boundary.
 - Choosing the payload cipher, nonce construction, or complete versioned
   envelope format. That decision must exist before implementation and supplies
   the DEK size validated by this contract.
-- Adding Azure Key Vault or an unreviewed provider in this decision.
+- Adding Azure Key Vault, an XKS proxy adapter, or an unreviewed provider in this
+  decision.
 - Promising zero-latency revocation, cancellation of provider-accepted work, or
   recall of plaintext already delivered.
 - Claiming an HSM, FIPS boundary, AWS external key store, Google Cloud EKM, or
   customer-hosted exclusive custody merely because a customer-owned cloud key
-  is used.
+  is used. This holds for product copy as well: no surface describes a tier or
+  backend as HSM-backed, FIPS-validated, XKS custody, or EKM custody.
+
+## Open Questions
+
+These are intentionally unresolved:
+
+- Whether a `KeyRef` may model an explicit, customer-approved replica set of a
+  multi-Region AWS key. Until that is decided, each replica is a separate
+  `KeyRef` and the platform never fails over between them.
+- How private connectivity to a customer endpoint is provided. One constraint
+  is already fixed: any private path is operator-provisioned and declared per
+  registration, never a free-form customer-supplied private address, because the
+  egress policy in Decision 5 rejects undeclared internal destinations.
 
 ## Consequences
 
@@ -491,8 +644,11 @@ prevents one enforceable audit, cache, and fail-closed boundary.
   outcome, which is both the purpose and the operational cost of independent
   customer control.
 - Customer-operated OpenBao introduces a customer-selected network dependency.
-  Private connectivity, trust-root lifecycle, egress policy, DNS safety, and
-  endpoint availability become part of onboarding and operations.
+  Trust-root lifecycle, egress policy, DNS safety, and endpoint availability
+  become part of onboarding and operations. Certificate and trust-root expiry
+  times are carried in observed health so owners can be warned in advance, and
+  an actual expiry still fails the TLS handshake closed. Private connectivity is
+  listed under Open Questions.
 - AWS audit logs expose the non-secret encryption context. Authenticated binding
   design and logging review must continue to treat provider audit behavior as
   part of the external contract.
@@ -502,6 +658,7 @@ prevents one enforceable audit, cache, and fail-closed boundary.
 - [ADR#0002: Rust Crate Boundaries](./0002-rust-crate-boundaries.md)
 - [ADR#0007: Configuration Sources](./0007-configuration-sources.md)
 - [ADR#0023: Secret Management and Key Custody on OpenBao behind a Platform Secrets Service](./0023-secret-management-and-key-custody-direction.md)
+- [ADR#0049: Revocation Propagation Latency Target](./0049-revocation-latency-target.md)
 - [OpenBao Transit API](https://openbao.org/api-docs/secret/transit/)
 - [OpenBao JWT authentication](https://openbao.org/docs/auth/jwt/)
 - [AWS KMS Encrypt API](https://docs.aws.amazon.com/kms/latest/APIReference/API_Encrypt.html)

@@ -4,6 +4,7 @@ inputs:
   - directory: ../../..
     paths:
       - ../../../proto/trogonai/model_access/provider_connections
+      - ../../../proto/trogonai/platform/key_custody
       - ../../../proto/trogonai/projects
   - git_repo: https://github.com/TrogonStack/trogonai.git
     branch: yordis/feat-connector-webhook-contracts

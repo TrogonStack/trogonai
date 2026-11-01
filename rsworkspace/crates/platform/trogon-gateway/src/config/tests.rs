@@ -139,6 +139,17 @@ webhook_token = "{token}"
     )
 }
 
+fn plaid_toml(secret: &str) -> String {
+    format!(
+        r#"
+[sources.plaid.integrations.primary.webhook]
+client_id = "plaid-client-id"
+secret = "{secret}"
+environment = "sandbox"
+"#
+    )
+}
+
 fn zoom_toml(token: &str) -> String {
     format!(
         r#"
@@ -3224,6 +3235,395 @@ fn google_pubsub_reports_credentials_and_subscription_errors_together() {
 }
 
 #[test]
+fn plaid_resolves_with_defaults() {
+    let f = write_toml(&plaid_toml("plaid-secret"));
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert_eq!(cfg.plaid.len(), 1);
+    let plaid = &cfg.plaid[0].config;
+    assert_eq!(plaid.subject_prefix.as_str(), "plaid-primary");
+    assert_eq!(plaid.stream_name.as_str(), "PLAID_PRIMARY");
+    assert_eq!(std::time::Duration::from(plaid.timestamp_tolerance).as_secs(), 300);
+    assert_eq!(plaid.client_id.as_str(), "plaid-client-id");
+    assert_eq!(plaid.secret.as_str(), "plaid-secret");
+    assert_eq!(
+        plaid.api_base_url.webhook_verification_key_url().as_str(),
+        "https://sandbox.plaid.com/webhook_verification_key/get"
+    );
+}
+
+#[test]
+fn plaid_production_environment_uses_the_production_api() {
+    let toml = r#"
+[sources.plaid.integrations.primary.webhook]
+client_id = "plaid-client-id"
+secret = "plaid-secret"
+environment = "production"
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert_eq!(
+        cfg.plaid[0].config.api_base_url.webhook_verification_key_url().as_str(),
+        "https://production.plaid.com/webhook_verification_key/get"
+    );
+}
+
+#[test]
+fn plaid_accepts_an_api_base_url_override() {
+    let toml = r#"
+[sources.plaid.integrations.primary.webhook]
+client_id = "plaid-client-id"
+secret = "plaid-secret"
+environment = "sandbox"
+api_base_url = "http://127.0.0.1:9999"
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert_eq!(
+        cfg.plaid[0].config.api_base_url.webhook_verification_key_url().as_str(),
+        "http://127.0.0.1:9999/webhook_verification_key/get"
+    );
+}
+
+#[test]
+fn plaid_invalid_api_base_url_is_invalid() {
+    let toml = r#"
+[sources.plaid.integrations.primary.webhook]
+client_id = "plaid-client-id"
+secret = "plaid-secret"
+environment = "sandbox"
+api_base_url = "ftp://example.com"
+"#;
+    let errs = validation_messages(toml);
+    assert!(
+        errs.iter().any(|e| e.contains("plaid/primary: invalid api_base_url")),
+        "{errs:?}"
+    );
+}
+
+#[test]
+fn plaid_accepts_custom_timestamp_tolerance() {
+    let toml = r#"
+[sources.plaid.integrations.primary.webhook]
+client_id = "plaid-client-id"
+secret = "plaid-secret"
+environment = "sandbox"
+timestamp_tolerance_secs = 60
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert_eq!(
+        std::time::Duration::from(cfg.plaid[0].config.timestamp_tolerance).as_secs(),
+        60
+    );
+}
+
+#[test]
+fn plaid_resolves_secret_from_env_table() {
+    let toml = r#"
+[sources.plaid.integrations.primary.webhook]
+client_id = "plaid-client-id"
+secret = { env = "PATH" }
+environment = "sandbox"
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert!(!cfg.plaid[0].config.secret.as_str().is_empty());
+}
+
+#[test]
+fn plaid_disabled_returns_none() {
+    let toml = r#"
+[sources.plaid]
+status = "disabled"
+
+[sources.plaid.integrations.primary.webhook]
+client_id = "plaid-client-id"
+secret = "plaid-secret"
+environment = "sandbox"
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert!(cfg.plaid.is_empty());
+}
+
+#[test]
+fn plaid_integration_disabled_is_skipped() {
+    let toml = r#"
+[sources.plaid.integrations.primary]
+status = "disabled"
+
+[sources.plaid.integrations.primary.webhook]
+client_id = "plaid-client-id"
+secret = "plaid-secret"
+environment = "sandbox"
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert!(cfg.plaid.is_empty());
+}
+
+#[test]
+fn plaid_missing_secret_is_invalid() {
+    let toml = r#"
+[sources.plaid.integrations.primary.webhook]
+client_id = "plaid-client-id"
+environment = "sandbox"
+"#;
+    let errs = validation_messages(toml);
+    assert!(
+        errs.iter().any(|e| e.contains("plaid/primary") && e.contains("secret")),
+        "{errs:?}"
+    );
+}
+
+#[test]
+fn plaid_empty_secret_is_invalid() {
+    let errs = validation_messages(&plaid_toml(""));
+    assert!(
+        errs.iter().any(|e| e.contains("plaid/primary: invalid secret")),
+        "{errs:?}"
+    );
+}
+
+#[test]
+fn plaid_missing_client_id_is_invalid() {
+    let toml = r#"
+[sources.plaid.integrations.primary.webhook]
+secret = "plaid-secret"
+environment = "sandbox"
+"#;
+    let errs = validation_messages(toml);
+    assert!(
+        errs.iter()
+            .any(|e| e.contains("plaid/primary") && e.contains("client_id")),
+        "{errs:?}"
+    );
+}
+
+#[test]
+fn plaid_empty_client_id_is_invalid() {
+    let toml = r#"
+[sources.plaid.integrations.primary.webhook]
+client_id = "  "
+secret = "plaid-secret"
+environment = "sandbox"
+"#;
+    let errs = validation_messages(toml);
+    assert!(
+        errs.iter().any(|e| e.contains("plaid/primary: invalid client_id")),
+        "{errs:?}"
+    );
+}
+
+#[test]
+fn plaid_resolves_client_id_from_env_table() {
+    let toml = r#"
+[sources.plaid.integrations.primary.webhook]
+client_id = { env = "TROGON_GATEWAY_TEST_PLAID_CLIENT_ID" }
+secret = "plaid-secret"
+environment = "sandbox"
+"#;
+    let f = write_toml(toml);
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set("TROGON_GATEWAY_TEST_PLAID_CLIENT_ID", "plaid-client-id-from-env");
+    let gateway_config = load_config::<GatewayConfig>(Some(f.path())).expect("load failed");
+    let cfg = resolve(gateway_config, &NatsArgs::default(), &env).expect("resolve failed");
+    assert_eq!(cfg.plaid[0].config.client_id.as_str(), "plaid-client-id-from-env");
+}
+
+#[test]
+fn plaid_missing_client_id_env_is_reported_against_client_id() {
+    let toml = r#"
+[sources.plaid.integrations.primary.webhook]
+client_id = { env = "TROGON_GATEWAY_TEST_PLAID_CLIENT_ID_NOT_SET" }
+secret = "plaid-secret"
+environment = "sandbox"
+"#;
+    let errs = validation_messages(toml);
+    assert!(
+        errs.iter().any(|e| e.contains("plaid/primary: invalid client_id")
+            && e.contains("TROGON_GATEWAY_TEST_PLAID_CLIENT_ID_NOT_SET")),
+        "{errs:?}"
+    );
+}
+
+#[test]
+fn plaid_empty_client_id_env_name_is_invalid() {
+    let toml = r#"
+[sources.plaid.integrations.primary.webhook]
+client_id = { env = "  " }
+secret = "plaid-secret"
+environment = "sandbox"
+"#;
+    let errs = validation_messages(toml);
+    assert!(
+        errs.iter().any(|e| e.contains("plaid/primary: invalid client_id")),
+        "{errs:?}"
+    );
+}
+
+#[test]
+fn identifier_input_returns_a_literal_unchanged() {
+    let env = trogon_std::env::InMemoryEnv::new();
+    let input = IdentifierInput::Literal("plaid-client-id".to_string());
+    assert_eq!(input.resolve(&env).unwrap(), "plaid-client-id");
+}
+
+#[test]
+fn identifier_input_reads_and_decodes_the_environment() {
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set("PLAID_CLIENT_ID", "plain-id");
+    env.set("PLAID_CLIENT_ID_ENCODED", "base64:cGxhaW4taWQ=");
+    let plain = IdentifierInput::Env {
+        env: " PLAID_CLIENT_ID ".to_string(),
+    };
+    let encoded = IdentifierInput::Env {
+        env: "PLAID_CLIENT_ID_ENCODED".to_string(),
+    };
+    assert_eq!(plain.resolve(&env).unwrap(), "plain-id");
+    assert_eq!(encoded.resolve(&env).unwrap(), "plain-id");
+}
+
+#[test]
+fn identifier_input_rejects_a_blank_missing_or_invalid_environment() {
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set("PLAID_CLIENT_ID_BAD", "base64:!!!");
+    let blank = IdentifierInput::Env { env: "  ".to_string() };
+    let missing = IdentifierInput::Env {
+        env: "PLAID_CLIENT_ID_MISSING".to_string(),
+    };
+    let invalid = IdentifierInput::Env {
+        env: "PLAID_CLIENT_ID_BAD".to_string(),
+    };
+    assert!(matches!(blank.resolve(&env), Err(IdentifierInputError::EmptyEnvName)));
+    match missing.resolve(&env) {
+        Err(IdentifierInputError::MissingEnv { name }) => assert_eq!(name, "PLAID_CLIENT_ID_MISSING"),
+        other => panic!("expected MissingEnv, got {other:?}"),
+    }
+    assert!(matches!(
+        invalid.resolve(&env),
+        Err(IdentifierInputError::InvalidValue(_))
+    ));
+}
+
+#[test]
+fn identifier_input_rejects_a_non_unicode_environment_variable() {
+    let input = IdentifierInput::Env {
+        env: "PLAID_CLIENT_ID".to_string(),
+    };
+    match input.resolve(&NonUnicodeEnv) {
+        Err(IdentifierInputError::InvalidUnicodeEnv { name }) => assert_eq!(name, "PLAID_CLIENT_ID"),
+        other => panic!("expected InvalidUnicodeEnv, got {other:?}"),
+    }
+}
+
+#[test]
+fn plaid_missing_environment_is_invalid() {
+    let toml = r#"
+[sources.plaid.integrations.primary.webhook]
+client_id = "plaid-client-id"
+secret = "plaid-secret"
+"#;
+    let errs = validation_messages(toml);
+    assert!(
+        errs.iter()
+            .any(|e| e.contains("plaid/primary") && e.contains("environment")),
+        "{errs:?}"
+    );
+}
+
+#[test]
+fn plaid_invalid_environment_is_invalid() {
+    let toml = r#"
+[sources.plaid.integrations.primary.webhook]
+client_id = "plaid-client-id"
+secret = "plaid-secret"
+environment = "development"
+"#;
+    let errs = validation_messages(toml);
+    assert!(
+        errs.iter().any(|e| e.contains("plaid/primary: invalid environment")),
+        "{errs:?}"
+    );
+}
+
+#[test]
+fn plaid_invalid_subject_prefix() {
+    let toml = r#"
+[sources.plaid.integrations.primary]
+subject_prefix = "bad prefix"
+
+[sources.plaid.integrations.primary.webhook]
+client_id = "plaid-client-id"
+secret = "plaid-secret"
+environment = "sandbox"
+"#;
+    let errs = validation_messages(toml);
+    assert!(
+        errs.iter().any(|e| e.contains("plaid/primary: invalid subject_prefix")),
+        "{errs:?}"
+    );
+}
+
+#[test]
+fn plaid_zero_timestamp_tolerance_is_error() {
+    let toml = r#"
+[sources.plaid.integrations.primary.webhook]
+client_id = "plaid-client-id"
+secret = "plaid-secret"
+environment = "sandbox"
+timestamp_tolerance_secs = 0
+"#;
+    let errs = validation_messages(toml);
+    assert!(
+        errs.iter()
+            .any(|e| e.contains("plaid/primary: timestamp_tolerance_secs must not be zero")),
+        "{errs:?}"
+    );
+}
+
+#[test]
+fn plaid_enabled_integration_without_webhook_is_invalid() {
+    let toml = r#"
+[sources.plaid.integrations.primary]
+stream_max_age_secs = 3600
+"#;
+    let errs = validation_messages(toml);
+    assert!(
+        errs.iter().any(|e| e.contains("plaid/primary: missing webhook")),
+        "{errs:?}"
+    );
+}
+
+#[test]
+fn plaid_invalid_integration_id_is_invalid() {
+    let toml = r#"
+[sources.plaid.integrations."bad/id".webhook]
+client_id = "plaid-client-id"
+secret = "plaid-secret"
+environment = "sandbox"
+"#;
+    let errs = validation_messages(toml);
+    assert!(
+        errs.iter().any(|e| e.contains("plaid/bad/id: invalid integration id")),
+        "{errs:?}"
+    );
+}
+
+#[test]
+fn plaid_unknown_webhook_field_is_rejected() {
+    let toml = r#"
+[sources.plaid.integrations.primary.webhook]
+client_id = "plaid-client-id"
+secret = "plaid-secret"
+environment = "sandbox"
+verification_key = "nope"
+"#;
+    let f = write_toml(toml);
+    assert!(load(Some(f.path())).is_err());
+}
+
+#[test]
 fn zoom_resolves_with_defaults() {
     let f = write_toml(&zoom_toml("zoom-token"));
     let cfg = load(Some(f.path())).expect("load failed");
@@ -3392,7 +3792,7 @@ fn byte_count_input_rejects_a_non_unicode_environment_variable() {
     }
 }
 
-const WEBHOOK_INTEGRATION_SOURCES: [(&str, &str); 12] = [
+const WEBHOOK_INTEGRATION_SOURCES: [(&str, &str); 13] = [
     ("github", "webhook_secret"),
     ("slack", "signing_secret"),
     ("telegram", "webhook_secret"),
@@ -3402,6 +3802,7 @@ const WEBHOOK_INTEGRATION_SOURCES: [(&str, &str); 12] = [
     ("microsoft_graph", "client_state"),
     ("incidentio", "signing_secret"),
     ("zoom", "secret_token"),
+    ("plaid", "secret"),
     ("notion", "verification_token"),
     ("sentry", "client_secret"),
     ("datadog", "webhook_token"),

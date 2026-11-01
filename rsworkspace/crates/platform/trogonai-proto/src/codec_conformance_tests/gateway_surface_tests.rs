@@ -235,7 +235,7 @@ where
 
 #[test]
 fn enum_json_accepts_names_numbers_and_null_and_rejects_everything_else() {
-    assert_enum_json::<v1::CredentialSource>("CREDENTIAL_SOURCE_ZOOM", 14, 99);
+    assert_enum_json::<v1::CredentialSource>("CREDENTIAL_SOURCE_PLAID", 15, 99);
     assert_enum_json::<v1::CredentialKind>("CREDENTIAL_KIND_WEBHOOK_SECRET", 9, 99);
     assert_enum_json::<v1::CredentialStatus>("CREDENTIAL_STATUS_PREVIOUS", 3, 99);
     assert_enum_json::<state_v1::StorageBackend>("STORAGE_BACKEND_OPENBAO", 2, 99);

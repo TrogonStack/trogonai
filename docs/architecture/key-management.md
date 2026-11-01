@@ -28,10 +28,10 @@ Decision 2).
 
 JetStream carries only the metadata that surrounds key material, never the
 material itself: rotation, revocation, and invalidation events, plus the
-correlation metadata that ties a business-context audit record to the
-provider's own audit log
+correlation metadata recorded with a business-context audit record
 ([ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md)
-Decision 3 and Decision 6).
+Decision 3 and Decision 6). [Audit records](#audit-records) states what that
+metadata does and does not claim about a provider's own audit log.
 
 ## Ports
 
@@ -117,22 +117,54 @@ Decision 2.)
 
 A `KeyBackendRegistration` is durable product state owned by one tenant or by
 the platform. It owns connection, authentication, and trust configuration for
-one backend, but no key locator. It has an opaque `KeyBackendId`, a typed provider variant,
-ownership, lifecycle status, provider access parameters, and a non-secret
-authentication profile. Raw credentials never appear in configuration, an
-event, or the registration itself; an unavoidable secret is represented by a
-`CredentialRef` and stays behind `SecretStore`. Platform-owned registrations
-back the managed and dedicated tiers of
-[ADR#0033](../adr/0033-key-custody-product-model.md) and follow every rule on
-this page.
+one backend, but no key locator. It has an opaque `KeyBackendId`, a typed
+provider variant, ownership, lifecycle status, admission, observed connection
+health, provider access parameters, and a non-secret authentication profile. Raw
+credentials never appear in configuration, an event, or the registration
+itself; an unavoidable secret is represented by a `CredentialRef` and stays
+behind `SecretStore`. Platform-owned registrations back the managed and
+dedicated tiers of [ADR#0033](../adr/0033-key-custody-product-model.md) and
+follow every rule on this page. The platform may hold more than one
+platform-owned registration at a time, for example while it migrates its tiers
+to another backend. Tenant-facing projections drop the platform registration's
+identity, provider, and locator, so a managed key exposes no key identity and a
+dedicated key exposes only an opaque `KeyRef`
+([ADR#0033](../adr/0033-key-custody-product-model.md) Decision 3).
 
 `KeyBackendId` identifies an immutable provider account, project, or OpenBao
 security boundary. A credential, trust root, authorization principal, or
 OpenBao endpoint update may create a new registration revision under the
 same `KeyBackendId` only when validation proves continuity with the same
 boundary and its already-bound keys. An account, project, or unproven
-endpoint change requires a new `KeyBackendId` instead. Lifecycle and health
-fields may change without changing identity
+endpoint change requires a new `KeyBackendId` instead. Lifecycle, admission,
+and health fields may change without changing identity
+([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md)
+Decision 3).
+
+A registration's state is held in separate dimensions, and none of them stands
+in for another:
+
+- **Lifecycle** is owned by the platform: `PendingValidation`, `Active`, or
+  `Retired`. A failed validation keeps the registration pending and records the
+  reason. A new revision takes effect only after it validates, and the current
+  revision stays in force until then.
+- **Admission** is controlled by the registration's owner and is authoritative:
+  `Enabled` or `Paused`. Only the owner may change it. See
+  [Pause and resume](#pause-and-resume).
+- **Observed connection health** is advisory and is never an admission input.
+  Its status is `Unknown`, `Connected`, or `Failed`, and a failure carries a
+  typed reason: `AuthenticationFailed`, `AccessDenied`, `TlsFailure`,
+  `Unreachable`, `Timeout`, `InvalidResponse`, or `CapabilityMissing`. Health
+  also carries the observation time, trust expiry signals, and latency
+  observations. The provider call itself fails closed, so health never needs to
+  block anything.
+
+Trust expiry signals are not-after timestamps for the endpoint's server
+certificate, the client certificate, and the trust root, plus the credential's
+issued-at or expiry time when a `CredentialRef` is in use. A value that is not
+known stays absent and is never reported as zero. Warning thresholds are product
+policy. Expiry never blocks admission, and the TLS handshake fails closed when a
+certificate or trust root actually expires
 ([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md)
 Decision 3).
 
@@ -143,6 +175,14 @@ service resolves a `KeyRef` from the authenticated tenant, the purpose, and
 tenant policy. On `unwrap_dek` and inside every `AuthenticatedBinding`, the
 purpose must match what was bound at wrap time, or the operation fails
 closed.
+
+Purposes come from a catalogue declared by the data-plane services that own the
+wrapped payloads. A purpose names one service-owned payload kind. Secrets and
+platform control-plane state are never purposes, and tenant surfaces list
+purposes from the catalogue rather than inventing them
+([ADR#0033](../adr/0033-key-custody-product-model.md) Decision 6). Each
+declaration ships with the code that first wraps its payload, so the catalogue
+stays empty until a data-plane service adopts `KeyManagement`.
 
 ## Operations
 
@@ -183,6 +223,14 @@ Provider and locator selection are allowed only here, never on `wrap_dek` or
 ([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md)
 Decision 4).
 
+The tenant that owns a customer managed binding may read back that binding's
+locator in the binding's detail, so it can match the binding to the key in its
+provider's console and audit log. The locator never appears in a `wrap_dek` or
+`unwrap_dek` request or response, in a projection consumed by another service or
+another tenant, or for a platform-owned binding
+([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md)
+Decision 1).
+
 ### Rewrap migration
 
 Moving ciphertext to another backend is an explicit migration, not a
@@ -193,7 +241,10 @@ mutation against the envelope's expected version, recording a stable
 migration operation ID. If provider wrapping succeeds but the mutation
 conflicts, no partial pair is committed, and the currently committed pair
 remains authoritative. Both backends must be available for the duration of
-the migration, and there is no fallback from one backend to the other.
+the migration, and there is no fallback from one backend to the other. The same
+flow moves a tenant between custody tiers in either direction, including from a
+customer managed key back to a managed or dedicated key
+([ADR#0033](../adr/0033-key-custody-product-model.md) Decision 4).
 
 This rewrap flow applies only to a custody migration when the old
 key-encryption key is not compromised. A suspected compromise requires new
@@ -202,6 +253,60 @@ DEKs and payload re-encryption under
 reuse of the existing DEKs
 ([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md)
 Decision 4).
+
+### Pause and resume
+
+The owner of a registration can pause it and resume it. A pause is a
+platform-side admission control that takes effect without waiting on the
+provider and can be reversed. It is not the customer's veto: disabling the key or revoking access in
+the provider remains the authoritative stop, because the customer's guarantee
+must not depend on the platform honoring its own flag
+([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md)
+Decision 6).
+
+After a service instance observes that a registration is paused:
+
+- The platform makes no provider call for it, probes included.
+- `wrap_dek`, `unwrap_dek`, `BindExternalKey`, set-as-default, migration source
+  use, and migration target use all fail with `KeyUseDenied` and the denial
+  reason `BackendPaused`. A public response may coarsen the denial like any
+  other.
+
+An operation against an existing `KeyRef` checks in a fixed order: authenticate
+the caller and resolve the reference, including the tenant and purpose binding
+check, require the registration lifecycle to be `Active`, check the
+registration's admission, apply the key-state and capability matrix in
+[Key States](./key-states.md), and only then call the provider.
+`PendingValidation` and `Retired` registrations stop before provider access even
+when admission is `Enabled`. Every retry inside the operation deadline repeats
+the lifecycle and admission checks before its next attempt.
+
+`BindExternalKey` has no existing `KeyRef` to resolve. It authenticates the
+caller, authorizes the tenant's use of the supplied backend, locator, purpose,
+and capabilities, requires the registration lifecycle to be `Active`, checks
+the registration's admission, and only then performs provider validation and
+applies the discovered key-state and capability gates before creating the
+reference.
+
+A pause is acknowledged once the admission fact is durably committed, not once
+every service instance has observed it. Instances enforce it through pushed
+invalidation of their admission view with a hard time-to-live backstop. Until a
+measured propagation target is published, a stale instance may admit and start
+a provider request after acknowledgement but before it observes the pause, and
+a request already in flight may complete. The no-provider-call guarantee begins
+when the serving instance observes the pause.
+
+The platform never pauses a customer registration automatically from health
+signals. That would turn a transient provider fault into a platform-initiated
+denial and hide the real failure category.
+
+An update submitted while paused is staged without validation, because
+validating it would call the provider. Resume validates the newest staged
+revision end to end, or the current revision when none is staged, so renewed
+trust material submitted during a pause takes effect on resume. Admission
+resumes, and a staged revision becomes current, only when validation succeeds;
+otherwise the registration stays paused on its current revision and records the
+validation reason. The key-state matrix still applies after a resume.
 
 ## Custody tiers
 
@@ -236,7 +341,7 @@ Decision 7):
 
 | Category | Includes | Automatic retry | Audit classification |
 | --- | --- | --- | --- |
-| `KeyUseDenied` | Customer authorization denial, or a disabled, destroyed, or missing key | No; external customer action must change first | Security denial |
+| `KeyUseDenied` | Customer authorization denial, a disabled, destroyed, or missing key, or a paused registration (denial reason `BackendPaused`) | No; external customer action, or the owner's resume of a pause, must change first | Security denial |
 | `ProviderUnavailable` | Transport failure, timeout, or provider service failure | Bounded backoff within the operation deadline | Operational failure |
 | `ProviderThrottled` | Explicit provider quota or rate limit | Bounded provider-directed backoff | Capacity failure |
 | `BindingMismatch` | `KeyRef` tenant or purpose does not match the authenticated operation | No | Security violation |
@@ -245,7 +350,7 @@ Decision 7):
 | `UnsupportedCapability` | The bound key lacks the requested typed capability | No | Contract rejection |
 | `InternalFailure` | Unmapped provider error, malformed response, or adapter invariant violation | No | Adapter fault |
 
-Standing rules that hold across all eight categories:
+Standing rules that hold across every category:
 
 - The service fails closed. No wrap or unwrap succeeds without participation
   by the backend bound to the `KeyRef`, and a failure never produces a
@@ -253,9 +358,39 @@ Standing rules that hold across all eight categories:
 - There is no fallback between backends, at any category, for any tenant.
 - A retry never switches providers; a `ProviderUnavailable` or
   `ProviderThrottled` retry stays bounded and stays on the same backend.
+- Each provider attempt has a timeout no larger than the remaining operation
+  deadline, and an attempt timeout maps to `ProviderUnavailable`. Latency is
+  recorded per registration and operation kind. The published per-call budget
+  for customer backends is deferred until it is measured against real providers
+  ([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md)
+  Decision 6).
 - A public response may coarsen denied, missing, and disabled outcomes to
   avoid giving an unauthenticated or cross-tenant caller a resource oracle,
   while the internal category and audit record retain the full detail.
+
+## Audit records
+
+Each operation produces one audit record. It identifies the tenant, `KeyRef`,
+`KeyBackendId`, purpose, provider, outcome, and correlation ID, and it lists
+every provider attempt the operation made. Each attempt entry carries:
+
+- The attempt number.
+- The start time and the duration.
+- The outcome category.
+- The request identifier the provider returned, or an explicit absence reason:
+  `NotProvidedByProvider` when the provider responded without one, and
+  `NoResponse` when the attempt received no response.
+
+The platform never synthesizes a request identifier. A per-attempt value never
+enters the `AuthenticatedBinding`, which must be identical at `wrap_dek` and
+`unwrap_dek`
+([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md)
+Decision 7).
+
+A recorded identifier is the identifier the provider returned, and nothing more
+is claimed for it. This page and the product surfaces describe it as joining a
+provider's own audit log, such as CloudTrail or an OpenBao audit device, only
+after a conformance case proves that join for that provider.
 
 ## What the service never does
 
@@ -266,7 +401,8 @@ Standing rules that hold across all eight categories:
   fails.
 - Let a provider artifact (a path, a token, a policy name, a ciphertext
   version marker, an SDK type) cross the service boundary outside the opaque
-  payload carried inside a `WrappedDek`.
+  payload carried inside a `WrappedDek`, apart from the owner's read-back of its
+  own customer managed binding's locator.
 - Accept backend or locator selection from a caller on `wrap_dek` or
   `unwrap_dek`.
 
@@ -289,6 +425,22 @@ Standing rules that hold across all eight categories:
   vocabulary and boundaries those surfaces must respect
   ([ADR#0033](../adr/0033-key-custody-product-model.md)
   Non-Goals).
+- **Multi-Region replica sets.** Whether a `KeyRef` may model an explicit,
+  customer-approved replica set of a multi-Region AWS key is undecided. Until it
+  is, each replica is a separate `KeyRef` and the platform never fails over
+  between them
+  ([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md)
+  Open Questions).
+- **Private connectivity.** How private connectivity to a customer endpoint is
+  provided is undecided. Any private path must be operator-provisioned and
+  declared per registration, never a free-form customer-supplied private address
+  ([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md)
+  Open Questions).
+- **Measured numbers.** The pause enforcement target and the published per-call
+  latency budget for customer backends are recorded after measurement against
+  real providers
+  ([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md)
+  Decision 6).
 
 ## See also
 

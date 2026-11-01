@@ -19,6 +19,7 @@ pub enum CredentialSource {
     CREDENTIAL_SOURCE_DATADOG = 12i32,
     CREDENTIAL_SOURCE_GOOGLE_PUBSUB = 13i32,
     CREDENTIAL_SOURCE_ZOOM = 14i32,
+    CREDENTIAL_SOURCE_PLAID = 15i32,
 }
 impl CredentialSource {
     ///Idiomatic alias for [`Self::CREDENTIAL_SOURCE_UNSPECIFIED`]; `Debug` prints the variant name.
@@ -66,6 +67,9 @@ impl CredentialSource {
     ///Idiomatic alias for [`Self::CREDENTIAL_SOURCE_ZOOM`]; `Debug` prints the variant name.
     #[allow(non_upper_case_globals)]
     pub const Zoom: Self = Self::CREDENTIAL_SOURCE_ZOOM;
+    ///Idiomatic alias for [`Self::CREDENTIAL_SOURCE_PLAID`]; `Debug` prints the variant name.
+    #[allow(non_upper_case_globals)]
+    pub const Plaid: Self = Self::CREDENTIAL_SOURCE_PLAID;
 }
 impl ::core::default::Default for CredentialSource {
     fn default() -> Self {
@@ -178,6 +182,7 @@ impl ::buffa::Enumeration for CredentialSource {
             12i32 => ::core::option::Option::Some(Self::CREDENTIAL_SOURCE_DATADOG),
             13i32 => ::core::option::Option::Some(Self::CREDENTIAL_SOURCE_GOOGLE_PUBSUB),
             14i32 => ::core::option::Option::Some(Self::CREDENTIAL_SOURCE_ZOOM),
+            15i32 => ::core::option::Option::Some(Self::CREDENTIAL_SOURCE_PLAID),
             _ => ::core::option::Option::None,
         }
     }
@@ -203,6 +208,7 @@ impl ::buffa::Enumeration for CredentialSource {
             Self::CREDENTIAL_SOURCE_DATADOG => "CREDENTIAL_SOURCE_DATADOG",
             Self::CREDENTIAL_SOURCE_GOOGLE_PUBSUB => "CREDENTIAL_SOURCE_GOOGLE_PUBSUB",
             Self::CREDENTIAL_SOURCE_ZOOM => "CREDENTIAL_SOURCE_ZOOM",
+            Self::CREDENTIAL_SOURCE_PLAID => "CREDENTIAL_SOURCE_PLAID",
         }
     }
     fn from_proto_name(name: &str) -> ::core::option::Option<Self> {
@@ -252,6 +258,9 @@ impl ::buffa::Enumeration for CredentialSource {
             "CREDENTIAL_SOURCE_ZOOM" => {
                 ::core::option::Option::Some(Self::CREDENTIAL_SOURCE_ZOOM)
             }
+            "CREDENTIAL_SOURCE_PLAID" => {
+                ::core::option::Option::Some(Self::CREDENTIAL_SOURCE_PLAID)
+            }
             _ => ::core::option::Option::None,
         }
     }
@@ -272,6 +281,7 @@ impl ::buffa::Enumeration for CredentialSource {
             Self::CREDENTIAL_SOURCE_DATADOG,
             Self::CREDENTIAL_SOURCE_GOOGLE_PUBSUB,
             Self::CREDENTIAL_SOURCE_ZOOM,
+            Self::CREDENTIAL_SOURCE_PLAID,
         ]
     }
 }
