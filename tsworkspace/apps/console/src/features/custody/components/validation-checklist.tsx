@@ -17,14 +17,15 @@ export function useStagedChecks(attemptId: AttemptId | undefined, checks: readon
   );
   const results = attemptResults[attemptId ?? ''] ?? {};
   const [active, setActive] = useState<string>();
-  const [error, setError] = useState<unknown>();
+  const [attemptErrors, setAttemptErrors] = useState<Readonly<Record<string, unknown>>>({});
+  const error = attemptErrors[attemptId ?? ''];
 
   const allPassed = checks.every((check) => results[check.id]?.outcome === 'pass');
   const failed = checks.some((check) => results[check.id]?.outcome === 'fail');
 
   const run = async () => {
     if (!attemptId) return;
-    setError(undefined);
+    setAttemptErrors((previous) => ({ ...previous, [attemptId]: undefined }));
     for (const check of checks.filter((check) => results[check.id]?.outcome !== 'pass')) {
       setActive(check.id);
       try {
@@ -32,7 +33,7 @@ export function useStagedChecks(attemptId: AttemptId | undefined, checks: readon
         setAttemptResults((previous) => ({ ...previous, [attemptId]: { ...previous[attemptId], [check.id]: result } }));
         if (result.outcome !== 'pass') break;
       } catch (caught) {
-        setError(caught);
+        setAttemptErrors((previous) => ({ ...previous, [attemptId]: caught }));
         break;
       }
     }
