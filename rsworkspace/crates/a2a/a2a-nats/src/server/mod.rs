@@ -5,7 +5,6 @@
 
 pub mod agent_card;
 pub mod bridge;
-pub mod dispatch;
 pub mod handler;
 pub mod message_send;
 pub mod message_stream;
@@ -21,7 +20,7 @@ pub mod tasks_resubscribe;
 pub mod test_support;
 pub mod wire;
 
+pub use crate::a2a_method::A2aMethod;
 pub use bridge::{Bridge, BridgeError};
-pub use dispatch::A2aMethod;
 pub use handler::{A2aError, A2aExecutor, TaskEventStream};
 pub use wire::{encode_error_reply, encode_success_reply, is_notification, parse_request_params, publish_reply};

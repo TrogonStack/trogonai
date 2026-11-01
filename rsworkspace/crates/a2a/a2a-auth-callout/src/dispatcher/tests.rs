@@ -13,6 +13,7 @@ use nats_jwt_rs::Claims;
 use nats_jwt_rs::authorization::AuthRequest;
 use nkeys::KeyPair;
 use serde_json::json;
+use trogon_identity_types::PrincipalKind;
 
 fn encode_fixture_request(server: &KeyPair, patch: impl FnMut(&mut Claims<AuthRequest>)) -> ServerAuthRequestClaims {
     let user = KeyPair::new_user();
@@ -54,6 +55,7 @@ impl OidcVerifier for StubOidcVerifier {
             data: SpiceDbPrincipal(json!({"spicedb_subject": self.sub})),
             nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
             caller_id,
+            principal_kind: PrincipalKind::Person,
         })
     }
 }
@@ -75,6 +77,7 @@ impl MTlsVerifier for StubMtlsVerifier {
             data: SpiceDbPrincipal(json!({"spicedb_subject": "svc"})),
             nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
             caller_id,
+            principal_kind: PrincipalKind::Service,
         })
     }
 }

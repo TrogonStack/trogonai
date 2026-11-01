@@ -5,6 +5,7 @@ use bytes::Bytes;
 use jsonrpc_nats::{Message as JrpcMessage, ResponseId, encode};
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
+use trogon_identity_types::SubjectPrincipal;
 use trogon_nats::AdvancedMockNatsClient;
 use trogon_nats::jetstream::mocks::MockJetStreamConsumerFactory;
 
@@ -16,7 +17,13 @@ fn make_client<N: RequestClient>(
 ) -> A2aClient<N, MockJetStreamConsumerFactory> {
     let prefix = A2aPrefix::new("a2a").unwrap();
     let agent_id = A2aAgentId::new("bot").unwrap();
-    A2aClient::new(prefix, agent_id, nats, js)
+    A2aClient::new(
+        prefix,
+        agent_id,
+        SubjectPrincipal::from_tokens("person", "alice").unwrap(),
+        nats,
+        js,
+    )
 }
 
 #[derive(Clone)]
@@ -86,7 +93,7 @@ async fn io_loop_exits_on_shutdown_signal() {
 async fn io_loop_skips_blank_lines() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = task_response("t-blank");
-    nats.set_response_wire("a2a.v1.agents.bot.tasks.get", headers, body);
+    nats.set_response_wire("a2a.v1.agents.bot.person.alice.tasks.get", headers, body);
     let client = make_client(nats, MockJetStreamConsumerFactory::new());
 
     let (stdin_reader, mut stdin_writer) = tokio::io::duplex(4096);
@@ -114,7 +121,7 @@ async fn io_loop_skips_blank_lines() {
 async fn io_loop_handles_valid_request() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = task_response("t1");
-    nats.set_response_wire("a2a.v1.agents.bot.tasks.get", headers, body);
+    nats.set_response_wire("a2a.v1.agents.bot.person.alice.tasks.get", headers, body);
     let client = make_client(nats, MockJetStreamConsumerFactory::new());
 
     let (stdin_reader, mut stdin_writer) = tokio::io::duplex(4096);
@@ -256,7 +263,7 @@ impl tokio::io::AsyncWrite for FailingWriter {
 async fn run_with_failing_writer(writes_until_fail: usize, fail_on_flush: bool) -> std::io::Result<()> {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = task_response("t-fw");
-    nats.set_response_wire("a2a.v1.agents.bot.tasks.get", headers, body);
+    nats.set_response_wire("a2a.v1.agents.bot.person.alice.tasks.get", headers, body);
     let client = make_client(nats, MockJetStreamConsumerFactory::new());
 
     let (stdin_reader, mut stdin_writer) = tokio::io::duplex(4096);

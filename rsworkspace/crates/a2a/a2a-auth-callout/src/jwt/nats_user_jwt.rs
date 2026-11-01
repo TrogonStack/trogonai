@@ -9,6 +9,7 @@ use nats_jwt_rs::user::User;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha512_256};
+use trogon_identity_types::PrincipalKind;
 
 use super::nats_permission_claims::NatsPermissionClaims;
 use super::{
@@ -41,6 +42,7 @@ struct NatsUserJwtPayload<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     nbf: Option<i64>,
     caller_id: &'a str,
+    principal_kind: PrincipalKind,
     /// Caller-asserted external subject (Stytch/OIDC sub, mTLS DN, etc.).
     /// `sub` above is the NATS user NKey identity for the connection; this
     /// field preserves the input subject so verify can return what was minted.
@@ -58,6 +60,7 @@ struct VerifiedPayload {
     #[allow(dead_code)]
     sub: String,
     caller_id: String,
+    principal_kind: String,
     /// Caller-asserted external subject; preserved separately from `sub` (which
     /// is the NATS user NKey for the connection). Older tokens minted before
     /// this field existed fall back to `data.spicedb_subject`.
@@ -138,6 +141,7 @@ pub(crate) fn mint_nats_user_jwt(
         sub: user_subject.as_str(),
         nbf: Some(iat_secs),
         caller_id: claims.caller_id.as_str(),
+        principal_kind: claims.principal_kind,
         ext_sub: claims.sub.as_str(),
         kid: material.version().as_str(),
         data: &claims.data.0,
@@ -239,6 +243,10 @@ fn verify_with_material(token: &str, material: &MintingMaterial) -> Result<UserJ
             .ok_or_else(|| JwtError::Decode("minted user JWT missing ext_sub / spicedb_subject".into())),
     }?;
     let caller_id = CallerId::new(payload.caller_id)?;
+    let principal_kind = payload
+        .principal_kind
+        .parse::<PrincipalKind>()
+        .map_err(JwtError::InvalidPrincipalKind)?;
     let aud = AccountName::new(
         payload
             .aud
@@ -272,6 +280,7 @@ fn verify_with_material(token: &str, material: &MintingMaterial) -> Result<UserJ
         aud,
         data,
         caller_id,
+        principal_kind,
         nats_permissions,
     })
 }

@@ -215,7 +215,7 @@ pub fn request(method: &str, params: Value) -> Message {
     let mut headers = HeaderMap::new();
     headers.insert(a2a_nats::constants::GATEWAY_CALLER_ID_HEADER, "alice");
     Message {
-        subject: format!("a2a.v1.gateway.bot.{method}").into(),
+        subject: format!("a2a.v1.gateway.bot.person.alice.{method}").into(),
         reply: Some("_INBOX.dispatch".into()),
         payload: serde_json::to_vec(&json!({
             "jsonrpc": "2.0", "id": "request-7", "method": method.replace('.', "/"), "params": params,

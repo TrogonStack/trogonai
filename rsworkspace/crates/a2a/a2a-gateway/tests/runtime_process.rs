@@ -62,7 +62,7 @@ async fn gateway_subscribes_dispatches_and_stops_for_both_subscription_modes() -
             loop {
                 let reply = client
                     .request(
-                        "a2a.v1.gateway.worker.unknown",
+                        "a2a.v1.gateway.worker.person.alice.unknown",
                         br#"{"jsonrpc":"2.0","id":"startup","method":"unknown"}"#.as_slice().into(),
                     )
                     .await;
