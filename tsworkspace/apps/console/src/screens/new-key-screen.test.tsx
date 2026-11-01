@@ -34,6 +34,32 @@ describe('bind key wizard', () => {
     expect(screen.getByRole('link', { name: 'Migrations' })).toHaveAttribute('href', '/keys/migrations');
   });
 
+  it('keeps the bound key visible when the custody refresh fails', async () => {
+    const user = userEvent.setup();
+    const backend = createFakeBackend({ latencyMs: 0 });
+    const load = backend.keyCustody.load.bind(backend.keyCustody);
+    let failRefresh = false;
+    backend.keyCustody.load = async () => {
+      if (failRefresh) throw new Error('Custody refresh failed.');
+      return load();
+    };
+    renderApp('/keys/keys/new?backend=kbe_aws_acme_prod', backend);
+
+    await user.click(await screen.findByRole('button', { name: 'Continue' }));
+    await user.type(screen.getByLabelText(/key locator/), NEW_ARN);
+    await user.click(screen.getByRole('radio', { name: /Session artifacts/ }));
+    await user.click(screen.getByRole('button', { name: 'Continue to validation' }));
+    await user.click(await screen.findByRole('button', { name: 'Run checks' }));
+    const checks = await screen.findByRole('list', { name: 'Validation checks' });
+    await waitFor(() => expect(within(checks).getAllByLabelText('Passed')).toHaveLength(3));
+
+    failRefresh = true;
+    await user.click(screen.getByRole('button', { name: 'Bind key' }));
+
+    expect(await screen.findByText('Could not refresh backends')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'View key' })).toBeInTheDocument();
+  });
+
   it('rejects an alias before anything is prepared', async () => {
     const user = userEvent.setup();
     renderApp('/keys/keys/new?backend=kbe_aws_acme_prod');
