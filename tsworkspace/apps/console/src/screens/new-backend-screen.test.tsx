@@ -12,10 +12,20 @@ describe('register backend wizard', () => {
     const user = userEvent.setup();
     const backend = createFakeBackend({ latencyMs: 0 });
     const completeRegistration = backend.keyCustody.completeRegistration.bind(backend.keyCustody);
+    const load = backend.keyCustody.load.bind(backend.keyCustody);
     let releaseCompletion!: () => void;
+    let releaseRefresh!: () => void;
     const completionGate = new Promise<void>((resolve) => {
       releaseCompletion = resolve;
     });
+    const refreshGate = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    let holdRefresh = false;
+    backend.keyCustody.load = async () => {
+      if (holdRefresh) await refreshGate;
+      return load();
+    };
     backend.keyCustody.completeRegistration = async (attemptId) => {
       await completionGate;
       return completeRegistration(attemptId);
@@ -44,11 +54,19 @@ describe('register backend wizard', () => {
     expect(screen.queryByRole('button', { name: 'Run checks' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Register backend' }));
     expect(screen.getByRole('button', { name: 'Back to instructions' })).toBeDisabled();
+    holdRefresh = true;
     releaseCompletion();
 
     expect(await screen.findByRole('heading', { name: 'Backend registered' })).toBeInTheDocument();
     expect(screen.getByText(/AWS KMS/)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'View backend' })).toBeInTheDocument();
+    await user.click(screen.getByRole('link', { name: 'View backend' }));
+
+    expect(await screen.findByText('Loading backend')).toBeInTheDocument();
+    expect(screen.queryByText('Backend not found')).not.toBeInTheDocument();
+
+    holdRefresh = false;
+    releaseRefresh();
+    expect(await screen.findByRole('heading', { name: 'Acme AWS staging' })).toBeInTheDocument();
   });
 
   it('keeps the owner on backend details while setup preparation is pending', async () => {

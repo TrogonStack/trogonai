@@ -20,4 +20,4 @@ do
 done
 
 cd "$package_dir"
-exec mise exec -- buf generate --template buf.key-custody.gen.yaml
+exec env MISE_EXEC_AUTO_INSTALL=false mise exec -- buf generate --template buf.key-custody.gen.yaml
