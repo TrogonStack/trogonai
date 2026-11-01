@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { KeyState } from '@trogonai/proto';
 import { describe, expect, it } from 'vitest';
@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { createFakeBackend } from '@/fake-backend';
 import { keyBackendId, purposeId } from '@/features/custody/domain/identifiers';
 import { seedKeyRefs } from '@/features/custody/fake/seed-ids';
+import { custodyKeys } from '@/features/custody/queries';
 import { renderApp } from '@/test/render-app';
 
 const artifacts = purposeId('session_artifacts');
@@ -83,9 +84,27 @@ describe('migration detail', () => {
   });
 
   it('says so when the migration does not exist', async () => {
-    renderApp('/keys/migrations/mig_missing');
+    const backend = createFakeBackend({ latencyMs: 0 });
+    const { queryClient } = renderApp('/keys/migrations/mig_missing', backend);
 
     expect(await screen.findByText('Migration not found')).toBeInTheDocument();
+
+    const load = backend.keyCustody.load.bind(backend.keyCustody);
+    let finishRefetch: (() => void) | undefined;
+    backend.keyCustody.load = async () => {
+      await new Promise<void>((resolve) => {
+        finishRefetch = resolve;
+      });
+      return load();
+    };
+
+    void queryClient.invalidateQueries({ queryKey: custodyKeys.state });
+    await waitFor(() => expect(queryClient.getQueryState(custodyKeys.state)?.fetchStatus).toBe('fetching'));
+
+    expect(screen.getByText('Migration not found')).toBeInTheDocument();
+    expect(screen.queryByText('Loading migration')).not.toBeInTheDocument();
+
+    await act(async () => finishRefetch?.());
   });
 });
 
@@ -161,7 +180,11 @@ describe('change custody', () => {
 
   it('surfaces a migration that started while the dialog was open', async () => {
     const user = userEvent.setup();
-    const backend = createFakeBackend({ latencyMs: 0 });
+    let now = new Date('2026-11-01T00:00:00Z');
+    const backend = createFakeBackend({ latencyMs: 0, clock: () => now });
+    await backend.keyCustody.load();
+    now = new Date('2026-11-01T01:00:00Z');
+    await backend.keyCustody.load();
     renderApp('/keys', backend);
 
     const dialog = await openChangeCustody(user, 'Session artifacts');
@@ -170,6 +193,8 @@ describe('change custody', () => {
 
     const alert = (await within(dialog).findByText('The change was rejected')).closest('[role="alert"]');
     expect(alert).toHaveTextContent('MIGRATION_IN_FLIGHT');
+    expect(await within(dialog).findByText(/A migration is already running/)).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Change custody' })).toBeDisabled();
   });
 
   it('disables change custody while a migration runs for that purpose', async () => {

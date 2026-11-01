@@ -112,6 +112,7 @@ export function useStartMigration() {
       queryClient.setQueryData(custodyKeys.state, toCustodyView(await client.load()));
       return result;
     },
+    onError: () => queryClient.invalidateQueries({ queryKey: custodyKeys.state }),
   });
 }
 
