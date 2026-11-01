@@ -13,8 +13,8 @@ import "buf/validate/validate.proto";
 enum OperationFailureCategory {
   OPERATION_FAILURE_CATEGORY_UNSPECIFIED = 0;
   // Customer authorization denial, a disabled, destroyed, or missing key, or a
-  // paused registration. No automatic retry: an external customer action, or
-  // the owner's resume of a pause, must change first.
+  // paused or non-active registration. No automatic retry: an external
+  // customer action or registration lifecycle change must happen first.
   OPERATION_FAILURE_CATEGORY_KEY_USE_DENIED = 1;
   // Transport failure, timeout, or provider service failure. Bounded backoff
   // within the operation deadline.
@@ -53,6 +53,9 @@ enum KeyUseDenialReason {
   // The key-state matrix denies the operation for the key's state, decided
   // before any provider call.
   KEY_USE_DENIAL_REASON_KEY_STATE = 3;
+  // The registration lifecycle is not ACTIVE. Pending-validation and retired
+  // registrations are rejected before any provider call (ADR#0030).
+  KEY_USE_DENIAL_REASON_BACKEND_NOT_ACTIVE = 4;
 }
 
 // A failed operation's category and, for a denial, why.
