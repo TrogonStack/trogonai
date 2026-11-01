@@ -19,7 +19,8 @@ export function ProjectSwitcher({ collapsed }: { collapsed: boolean }) {
 
   const name = project?.displayName ?? 'Loading project';
   const label = collapsed ? 'hidden' : 'hidden lg:flex';
-  const to = section === 'secrets' || section === 'environments' || section === 'sources' ? scopedSections[section] : '.';
+  const to =
+    section === 'secrets' || section === 'environments' || section === 'sources' ? scopedSections[section] : '.';
 
   const choose = (projectId: ProjectId) => {
     setOpen(false);

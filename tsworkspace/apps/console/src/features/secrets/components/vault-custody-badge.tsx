@@ -7,7 +7,11 @@ export function VaultCustodyBadge({ tier, linked }: { tier: CustodyTier; linked?
   const badge = <CustodyTierBadge tier={tier} />;
   if (!linked) return badge;
   return (
-    <Link to="/keys" aria-label={`${custodyTierLabels[tier]}: Encryption keys`} className="outline-none focus-visible:underline">
+    <Link
+      to="/keys"
+      aria-label={`${custodyTierLabels[tier]}: Encryption keys`}
+      className="outline-none focus-visible:underline"
+    >
       {badge}
     </Link>
   );

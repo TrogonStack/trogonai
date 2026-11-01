@@ -98,7 +98,6 @@ describe('secrets overview', () => {
   });
 });
 
-
 it('makes vault custody chips links with tier-specific accessible names', async () => {
   renderApp('/secrets');
   await screen.findByRole('link', { name: 'OpenAI production key' });
