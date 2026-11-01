@@ -294,6 +294,7 @@ export function RegisterBackendWizard() {
     setShowProblems(true);
     if (hasProblems) return;
     if (plan && JSON.stringify(plan.input) === JSON.stringify(input)) {
+      prepare.reset();
       setStep(2);
       return;
     }
