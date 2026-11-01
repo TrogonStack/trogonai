@@ -1,3 +1,4 @@
+import type { GatedOperation } from '@/features/custody/domain/admission';
 import type { SecretRefId } from '@/features/secrets/domain/secret-ref';
 
 import type { SourceCommand } from './commands';
@@ -5,7 +6,7 @@ import type { DeliveryRecord, HourlyDeliveries } from './delivery';
 import { SourceFault } from './faults';
 import type { IntegrationId, NatsSubjectPrefix } from './integration-id';
 import { nextVersion, type SecretVersion } from './secret-version';
-import { failsClosed, type SourceCustody } from './source-custody';
+import { sourceKeyUnavailable, type SourceCustody } from './source-custody';
 import type { SlotName, SourceKind } from './source-kind';
 
 export type SlotState =
@@ -95,9 +96,9 @@ function replaceSlot(
   );
 }
 
-function guard(state: IntegrationState): void {
+function guard(state: IntegrationState, operation: GatedOperation): void {
   if (state.settlement) throw new SourceFault('OPERATION_IN_PROGRESS');
-  if (failsClosed(state.custody)) throw new SourceFault('KEY_UNAVAILABLE');
+  if (sourceKeyUnavailable(state.custody, operation)) throw new SourceFault('KEY_UNAVAILABLE');
 }
 
 function advance(state: IntegrationState, change: Partial<IntegrationState>): IntegrationState {
@@ -113,7 +114,7 @@ export function decideSource(state: IntegrationState, command: SourceCommand, se
       if (!state.paused) throw new SourceFault('NOT_PAUSED');
       return advance(state, { paused: false });
     case 'rotateSlot': {
-      guard(state);
+      guard(state, 'wrap');
       const slot = state.slots.find((candidate) => candidate.name === command.slot);
       if (!slot) throw new SourceFault('SLOT_NOT_FOUND');
       if (!isRotatable(slot)) throw new SourceFault('SLOT_NOT_ROTATABLE');
@@ -132,7 +133,7 @@ export function decideSource(state: IntegrationState, command: SourceCommand, se
       });
     }
     case 'reregisterWebhook': {
-      guard(state);
+      guard(state, 'unwrap');
       const registration = state.registration;
       if (registration.status === 'not_applicable') throw new SourceFault('REGISTRATION_NOT_APPLICABLE');
       return advance(state, {
