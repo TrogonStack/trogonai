@@ -1,5 +1,7 @@
 import { VaultLifecycle } from '@trogonai/proto';
 
+import { createFakeTenantCustodyClient } from './features/custody/fake';
+import type { InMemoryTenantCustodyClient } from './features/custody/fake/in-memory-client';
 import { createFakeEnvironmentsClient } from './features/environments/fake';
 import type { InMemoryEnvironmentsClient } from './features/environments/fake/in-memory-client';
 import { populateBuiltInEnvironmentSeed } from './features/environments/fake/seed';
@@ -29,6 +31,7 @@ export interface FakeBackend {
   readonly projects: InMemoryProjectsClient;
   readonly secrets: { forProject(projectId: ProjectId): InMemorySecretsClient };
   readonly environments: { forProject(projectId: ProjectId): InMemoryEnvironmentsClient };
+  readonly keyCustody: InMemoryTenantCustodyClient;
 }
 
 interface ProjectWorkspace {
@@ -107,5 +110,6 @@ export function createFakeBackend(options: FakeBackendOptions = {}): FakeBackend
     projects,
     secrets: { forProject: (projectId) => workspaceOf(projectId).secrets },
     environments: { forProject: (projectId) => workspaceOf(projectId).environments },
+    keyCustody: createFakeTenantCustodyClient(options),
   };
 }

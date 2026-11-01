@@ -3,6 +3,7 @@ import { RouterProvider } from '@tanstack/react-router';
 import ReactDOM from 'react-dom/client';
 
 import { createFakeBackend } from './fake-backend';
+import { TenantCustodyClientProvider } from './features/custody/context';
 import { EnvironmentsClientProvider } from './features/environments/context';
 import { HierarchyClientProvider } from './features/hierarchy/context';
 import { ProjectsClientProvider } from './features/projects/context';
@@ -25,7 +26,9 @@ if (!rootElement.innerHTML) {
           <ProjectsClientProvider client={backend.projects}>
             <EnvironmentsClientProvider clients={backend.environments}>
               <SecretsClientProvider clients={backend.secrets}>
-                <RouterProvider router={router} />
+                <TenantCustodyClientProvider client={backend.keyCustody}>
+                  <RouterProvider router={router} />
+                </TenantCustodyClientProvider>
               </SecretsClientProvider>
             </EnvironmentsClientProvider>
           </ProjectsClientProvider>
