@@ -1,6 +1,6 @@
 use super::*;
 
-const ALL_SOURCES: [SourceKind; 14] = [
+const ALL_SOURCES: [SourceKind; 15] = [
     SourceKind::Datadog,
     SourceKind::Discord,
     SourceKind::GitHub,
@@ -10,6 +10,7 @@ const ALL_SOURCES: [SourceKind; 14] = [
     SourceKind::Linear,
     SourceKind::MicrosoftGraph,
     SourceKind::Notion,
+    SourceKind::Plaid,
     SourceKind::Sentry,
     SourceKind::Slack,
     SourceKind::Telegram,
