@@ -162,7 +162,15 @@ export function BindKeyWizard({ initialBackendId }: { initialBackendId?: string 
               />
             )}
             <div className="flex justify-end">
-              <Button type="button" disabled={!backend} onClick={() => setStep(1)}>
+              <Button
+                type="button"
+                disabled={!backend}
+                onClick={() => {
+                  if (!backend) return;
+                  setChosenBackend(backend.id);
+                  setStep(1);
+                }}
+              >
                 Continue
                 <ArrowRightIcon data-icon="inline-end" />
               </Button>
