@@ -1,3 +1,4 @@
+import { KeyBackendAdmission, KeyState } from '@trogonai/proto';
 import { describe, expect, it } from 'vitest';
 
 import { sourceCommands } from '../domain/commands';
@@ -155,6 +156,46 @@ describe('rotating a credential slot', () => {
       }),
     );
     expect(fault.reason).toBe('KEY_UNAVAILABLE');
+  });
+
+  it('refuses to rotate a credential that cannot be wrapped by its customer managed key', async () => {
+    const client = createFakeSourcesClient({
+      latencyMs: 0,
+      clock: () => start,
+      populate: (now) =>
+        populateSeed(now).map((source) =>
+          source.id === seedIntegrationIds.github
+            ? {
+                ...source,
+                custody: {
+                  tier: 'customer_managed' as const,
+                  keyState: KeyState.DECRYPT_ONLY,
+                  admission: KeyBackendAdmission.ENABLED,
+                },
+              }
+            : source,
+        ),
+    });
+    const state = (await client.get(seedIntegrationIds.github))!;
+    const view = toSourceView(state);
+    let fault: SourceFault | undefined;
+
+    try {
+      await client.dispatch(sourceCommands.rotateSlot(seedIntegrationIds.github, 'webhook_secret'), {
+        expectedRevision: state.revision,
+      });
+    } catch (error) {
+      if (error instanceof SourceFault) fault = error;
+      else throw error;
+    }
+
+    expect({ availability: view.actions.rotate, fault: fault?.reason }).toEqual({
+      availability: {
+        available: false,
+        reason: 'The customer managed key cannot be used, so credentials cannot be rotated.',
+      },
+      fault: 'KEY_UNAVAILABLE',
+    });
   });
 });
 

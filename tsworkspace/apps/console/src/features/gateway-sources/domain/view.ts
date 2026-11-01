@@ -12,7 +12,7 @@ import {
 } from './integration';
 import type { IntegrationId, NatsSubjectPrefix } from './integration-id';
 import { formatVersion, type SecretVersion } from './secret-version';
-import { failsClosed, type SourceCustody } from './source-custody';
+import { failsClosed, sourceKeyUnavailable, type SourceCustody } from './source-custody';
 import { slotLabels, type SlotName, type SourceKind } from './source-kind';
 
 export type IntegrationStatus = 'receiving' | 'degraded' | 'paused' | 'misconfigured';
@@ -183,6 +183,7 @@ export function toSourceView(state: IntegrationState): SourceView {
   const { status, attention } = diagnose(state, slots, registration);
   const settling = state.settlement !== undefined;
   const closed = failsClosed(state.custody);
+  const cannotWrap = sourceKeyUnavailable(state.custody, 'wrap');
   const busy = settling ? 'Another change is still settling.' : undefined;
   const rotatable = slots.some((slot) => slot.rotatable);
   return {
@@ -208,7 +209,7 @@ export function toSourceView(state: IntegrationState): SourceView {
     actions: {
       pause: state.paused ? no('The integration is already paused.') : yes,
       resume: state.paused ? yes : no('The integration is not paused.'),
-      rotate: closed
+      rotate: cannotWrap
         ? no('The customer managed key cannot be used, so credentials cannot be rotated.')
         : busy
           ? no(busy)
