@@ -236,3 +236,55 @@ fn nkey_seed_path_ignores_surrounding_whitespace() {
 
     assert!(matches!(seed, NKeySeed::File(Location::Path(ref path)) if path == Path::new("/run/user.nk")));
 }
+
+#[test]
+fn nkey_seed_env_scheme_names_a_variable() {
+    assert!(matches!(
+        NKeySeed::parse("env://NATS_NKEY_SEED"),
+        Some(NKeySeed::Env(ref name)) if name == "NATS_NKEY_SEED"
+    ));
+}
+
+#[test]
+fn nkey_seed_debug_shows_env_references_by_name() {
+    assert_eq!(
+        format!("{:?}", NKeySeed::parse("env://NATS_NKEY_SEED").unwrap()),
+        r#"Env("NATS_NKEY_SEED")"#
+    );
+}
+
+#[tokio::test]
+async fn nkey_seed_resolve_env_reads_the_named_variable() {
+    let seed = nkeys::KeyPair::new_user().seed().unwrap();
+    let env = InMemoryEnv::new();
+    env.set("NATS_NKEY_SEED", format!(" {seed}\n"));
+
+    let resolved = NKeySeed::parse("env://NATS_NKEY_SEED").unwrap().resolve(&env).await;
+
+    assert_eq!(resolved.unwrap(), seed);
+}
+
+#[tokio::test]
+async fn nkey_seed_resolve_unset_env_fails() {
+    let err = NKeySeed::parse("env://MISSING")
+        .unwrap()
+        .resolve(&InMemoryEnv::new())
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, SettingError::EnvUnset(ref name) if name == "MISSING"));
+}
+
+#[tokio::test]
+async fn nkey_seed_resolve_env_rejects_a_malformed_seed() {
+    let env = InMemoryEnv::new();
+    env.set("NATS_NKEY_SEED", "SUNOTAVALIDSEED");
+
+    let err = NKeySeed::parse("env://NATS_NKEY_SEED")
+        .unwrap()
+        .resolve(&env)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, SettingError::InvalidSeed(_)));
+}
