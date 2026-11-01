@@ -122,12 +122,49 @@ def unknown_fields(payload, message_type, messages, path=""):
     return unknown
 
 
+def load_fixtures(suite_path):
+    fixtures = []
+    for path in sorted((suite_path / "fixtures").glob("*.json")):
+        group = json.loads(path.read_text())
+        if isinstance(group, list):
+            for case in group:
+                fixtures.append(
+                    {
+                        "name": case["name"],
+                        "type": case["type"],
+                        "payload": case["message"],
+                        "invalid": not case["valid"],
+                        "violations": [],
+                    }
+                )
+            continue
+        templates = group["templates"]
+        for case in group["cases"]:
+            fixture = copy.deepcopy(case)
+            template = templates[fixture["template"]]
+            fixture["type"] = template["type"]
+            fixture["payload"] = patched_payload(
+                template["payload"], fixture.get("patch", [])
+            )
+            fixture["invalid"] = bool(fixture.get("violations"))
+            fixtures.append(fixture)
+    names = [fixture["name"] for fixture in fixtures]
+    if len(set(names)) != len(names):
+        fail(f"Fixture names in {suite_path.name} must be unique.")
+    return fixtures
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Validate workflow protobuf fixtures")
+    parser = argparse.ArgumentParser(description="Validate protobuf contract fixtures")
+    parser.add_argument(
+        "--suite",
+        action="append",
+        help="Validate only this suite. May be supplied more than once.",
+    )
     parser.add_argument("--case", help="Run only case names containing this text")
     parser.add_argument("--buf", help="Override the Buf executable selected by mise")
     args = parser.parse_args()
-    root = Path(__file__).resolve().parents[3]
+    root = Path(__file__).resolve().parents[2]
     pinned_buf = tomllib.loads((root / ".mise.toml").read_text())["tools"]["buf"]
     buf = args.buf
     if not buf:
@@ -139,38 +176,38 @@ def main():
     if version.returncode or version.stdout.strip() != pinned_buf:
         fail(f"Run with the repository's pinned Buf {pinned_buf} through mise.")
 
+    suites = sorted(
+        path for path in Path(__file__).parent.iterdir() if (path / "fixtures").is_dir()
+    )
+    available = {suite.name for suite in suites}
+    requested = set(args.suite or available)
+    unknown = requested - available
+    if unknown:
+        fail(
+            f"Unknown fixture suites: {', '.join(sorted(unknown))}. "
+            f"Available suites: {', '.join(sorted(available))}."
+        )
+    suites = [suite for suite in suites if suite.name in requested]
     fixtures = []
-    for path in sorted((Path(__file__).parent / "fixtures").glob("*.json")):
-        group = json.loads(path.read_text())
-        templates = group["templates"]
-        for case in group["cases"]:
-            fixture = copy.deepcopy(case)
-            template = templates[fixture["template"]]
-            fixture["type"] = template["type"]
-            fixture["payload"] = patched_payload(
-                template["payload"], fixture.get("patch", [])
-            )
+    for suite in suites:
+        for fixture in load_fixtures(suite):
+            fixture["suite"] = suite.name
             fixtures.append(fixture)
-    names = [fixture["name"] for fixture in fixtures]
-    if len(set(names)) != len(names):
-        fail("Fixture names must be unique.")
     if args.case:
         fixtures = [fixture for fixture in fixtures if args.case in fixture["name"]]
     if not fixtures:
-        fail("No workflow fixtures selected.")
+        fail("No protobuf fixtures selected.")
 
     failures = []
     valid = 0
     invalid = 0
-    with tempfile.TemporaryDirectory(prefix="workflow-proto-") as directory:
-        image = Path(directory) / "workflows.json"
+    with tempfile.TemporaryDirectory(prefix="proto-contracts-") as directory:
+        image = Path(directory) / "contracts.json"
         build = run(
             [
                 buf,
                 "build",
                 str(root),
-                "--path",
-                str(root / "proto/trogonai/workflows"),
                 "--as-file-descriptor-set",
                 "--exclude-source-info",
                 "-o",
@@ -181,11 +218,10 @@ def main():
             fail(build.stderr)
         messages = descriptor_messages(json.loads(image.read_text()))
         for fixture in fixtures:
+            label = f"{fixture['suite']}/{fixture['name']}"
             unknown = unknown_fields(fixture["payload"], fixture["type"], messages)
             if unknown:
-                failures.append(
-                    f"{fixture['name']}: unknown fixture fields: {', '.join(unknown)}"
-                )
+                failures.append(f"{label}: unknown fixture fields: {', '.join(unknown)}")
                 continue
             command = [
                 buf,
@@ -199,38 +235,32 @@ def main():
             payload = json.dumps(fixture["payload"])
             parsed = run(command, payload)
             if parsed.returncode:
-                failures.append(f"{fixture['name']}: fixture cannot parse: {parsed.stderr}")
+                failures.append(f"{label}: fixture cannot parse: {parsed.stderr}")
                 continue
             validated = run([*command, "--validate"], payload)
-            expected = fixture.get("violations", [])
-            if not expected:
+            if not fixture["invalid"]:
                 valid += 1
                 if validated.returncode:
-                    failures.append(
-                        f"{fixture['name']}: valid payload rejected: {validated.stderr}"
-                    )
+                    failures.append(f"{label}: valid payload rejected: {validated.stderr}")
+                continue
+            invalid += 1
+            if not validated.returncode:
+                failures.append(f"{label}: invalid payload accepted")
+            elif not any(
+                category in validated.stderr
+                for category in ("validation error:", "validation errors:")
+            ):
+                failures.append(f"{label}: validation did not run: {validated.stderr}")
             else:
-                invalid += 1
-                if not validated.returncode:
-                    failures.append(f"{fixture['name']}: invalid payload accepted")
-                elif not any(
-                    category in validated.stderr
-                    for category in ("validation error:", "validation errors:")
-                ):
-                    failures.append(
-                        f"{fixture['name']}: validation did not run: {validated.stderr}"
-                    )
-                else:
-                    for violation in expected:
-                        if violation not in validated.stderr:
-                            failures.append(
-                                f"{fixture['name']}: expected {violation!r}: "
-                                f"{validated.stderr}"
-                            )
+                for violation in fixture.get("violations", []):
+                    if violation not in validated.stderr:
+                        failures.append(
+                            f"{label}: expected {violation!r}: {validated.stderr}"
+                        )
     for failure in failures:
         print(failure, file=sys.stderr)
     print(
-        f"Workflow protobuf fixtures: {valid} valid, {invalid} invalid, "
+        f"Protobuf contract fixtures: {valid} valid, {invalid} invalid, "
         f"{len(failures)} failures"
     )
     return bool(failures)
