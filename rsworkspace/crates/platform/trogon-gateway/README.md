@@ -28,6 +28,10 @@ Use a config file if needed:
 cargo run -p trogon-gateway -- serve --config ./gateway.toml
 ```
 
+## Container image
+
+See [Container Images](../../../../docs/reference/container-images.md).
+
 ## Webhook routes
 
 All webhook sources share one HTTP port (`TROGON_GATEWAY_PORT`, default `8080`). Every webhook source is
