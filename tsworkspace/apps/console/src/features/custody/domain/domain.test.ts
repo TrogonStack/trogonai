@@ -182,7 +182,7 @@ describe('OpenBao namespace', () => {
 
   it('rejects endpoint forms outside the OpenBao access contract', () => {
     for (const endpoint of [
-      'https://operator@bao.example.com:8200',
+      'https://operator@192.0.2.1:8200',
       'https://bao.example.com:8200/v1?standbyok=true',
       'https://bao.example.com:8200/v1#transit',
       'https://[::1]:8200',
