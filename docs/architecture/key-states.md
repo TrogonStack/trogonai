@@ -83,18 +83,21 @@ An operation against an existing `KeyRef` checks in this order
 
 1. Authenticate the caller and resolve the `KeyRef`, including the tenant and
    purpose binding check.
-2. Check the registration's admission.
-3. Apply the state and operation matrix below.
-4. Call the provider.
+2. Require the registration lifecycle to be `Active`.
+3. Check the registration's admission.
+4. Apply the state, capability, and operation matrix below.
+5. Call the provider.
 
-A retry inside the operation deadline repeats the admission check before its
-next attempt.
+`PendingValidation` and `Retired` registrations stop before provider access even
+when admission is `Enabled`. A retry inside the operation deadline repeats the
+lifecycle and admission checks before its next attempt.
 
 `BindExternalKey` has no existing `KeyRef` to resolve. It authenticates the
 caller, authorizes the tenant's use of the supplied backend, locator, purpose,
-and capabilities, checks the registration's admission, and only then performs
-provider validation and applies the discovered key-state and capability gates
-before creating the reference.
+and capabilities, requires the registration lifecycle to be `Active`, checks
+the registration's admission, and only then performs provider validation and
+applies the discovered key-state and capability gates before creating the
+reference.
 
 After a service instance observes a paused registration, it denies every
 operation in every column of the matrix with `KeyUseDenied` and the denial reason
