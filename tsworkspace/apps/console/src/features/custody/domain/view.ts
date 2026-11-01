@@ -126,6 +126,7 @@ export interface PurposeCustodyView {
   readonly tier: CustodyTier;
   readonly key: KeyView | undefined;
   readonly payloadCount: number;
+  readonly migrationPayloadCount: number;
   readonly migration: MigrationView | undefined;
   readonly denial: KeyUseDenialReason | undefined;
 }
@@ -310,6 +311,9 @@ export function toCustodyView(state: TenantCustodyState, now: Date = new Date())
       tier: custody ? tierOfCustody(custody) : 'managed',
       key,
       payloadCount: sum(state.payloads.filter((set) => set.purpose === purpose.id).map((set) => set.count)),
+      migrationPayloadCount: sum(
+        state.payloads.filter((set) => set.purpose === purpose.id && set.keyRef === ref).map((set) => set.count),
+      ),
       migration: migrations.find((view) => view.purpose === purpose.id && view.inFlight),
       denial: key?.unwrapDenial,
     };

@@ -4,6 +4,7 @@ import { StatusPill, type Tone } from '@/components/lifecycle-badge';
 
 import { admissionLabels, failureReasonLabels, lifecycleLabels, type ConnectionStatus } from '../domain/backend';
 import { keyStateLabels, keyStateTone } from '../domain/key-state';
+import { migrationStatusLabels, type MigrationStatus } from '../domain/migration';
 
 const lifecycleTones: Record<KeyBackendLifecycle, Tone> = {
   [KeyBackendLifecycle.UNSPECIFIED]: 'neutral',
@@ -54,4 +55,16 @@ export function KeyStateBadge({ state }: { state: KeyState }) {
 
 export function PlatformManagedBadge() {
   return <StatusPill tone="neutral" label="Managed by the platform" className="normal-case" />;
+}
+
+const migrationTones: Record<MigrationStatus, Tone> = {
+  running: 'info',
+  paused: 'warning',
+  completed: 'success',
+};
+
+export function MigrationStatusBadge({ status }: { status: MigrationStatus }) {
+  return (
+    <StatusPill tone={migrationTones[status]} blink={status === 'running'} label={migrationStatusLabels[status]} />
+  );
 }

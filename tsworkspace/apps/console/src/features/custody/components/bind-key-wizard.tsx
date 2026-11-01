@@ -317,17 +317,23 @@ export function BindKeyWizard({ initialBackendId }: { initialBackendId?: string 
               </span>
             </div>
             <p className="text-muted-foreground max-w-xl text-[13px]">
-              The key is bound but not yet used. Make it the default for its purpose to wrap new payloads.
+              The key is bound but not yet used. Make it the default for its purpose to wrap new payloads, or change
+              custody to move existing ones.
             </p>
-            {canViewBoundKey ? (
-              <Link to="/keys/keys/$keyRef" params={{ keyRef: boundRef }} className={buttonVariants({ size: 'lg' })}>
-                View key
+            <div className="flex flex-wrap items-center gap-2">
+              {canViewBoundKey ? (
+                <Link to="/keys/keys/$keyRef" params={{ keyRef: boundRef }} className={buttonVariants({ size: 'lg' })}>
+                  View key
+                </Link>
+              ) : (
+                <Button type="button" size="lg" disabled>
+                  {query.isFetching ? 'Refreshing key...' : 'View key unavailable'}
+                </Button>
+              )}
+              <Link to="/keys/migrations" className={buttonVariants({ variant: 'outline', size: 'lg' })}>
+                Migrations
               </Link>
-            ) : (
-              <Button type="button" size="lg" disabled>
-                {query.isFetching ? 'Refreshing key...' : 'View key unavailable'}
-              </Button>
-            )}
+            </div>
           </CardContent>
         </Card>
       ) : null}
