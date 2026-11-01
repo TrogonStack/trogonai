@@ -309,16 +309,20 @@ export class InMemoryTenantCustodyClient implements TenantCustodyClient {
     return projectForTenant(this.state);
   }
 
-  async prepareRegistration(input: RegistrationInput): Promise<RegistrationPlan> {
-    await this.pause();
-    const problems = Object.values(registrationProblems(input));
-    if (problems.length > 0) throw new KeyFault('COMMAND_INVALID', problems[0]);
+  private requireRegistrationAvailable(input: RegistrationInput): void {
     const boundary = boundaryKeyOfAccess(buildAccess(input, undefined));
     const taken = this.state.backends.some(
       (record) =>
         !isPlatformOwned(record) && boundaryKeyOfAccess(record.registration.configuration?.access) === boundary,
     );
     if (taken) throw new KeyFault('BACKEND_ALREADY_REGISTERED');
+  }
+
+  async prepareRegistration(input: RegistrationInput): Promise<RegistrationPlan> {
+    await this.pause();
+    const problems = Object.values(registrationProblems(input));
+    if (problems.length > 0) throw new KeyFault('COMMAND_INVALID', problems[0]);
+    this.requireRegistrationAvailable(input);
     const id = attemptId(`att_${hexOf(this.next('registration'))}`);
     const generated =
       input.provider === KeyProvider.AWS_KMS
@@ -338,6 +342,16 @@ export class InMemoryTenantCustodyClient implements TenantCustodyClient {
     return { attemptId: id, input, externalId: generated, instructions: instructionsFor(input, generated), checks };
   }
 
+  private requireBindingAvailable(backendId: KeyBackendId, locator: string): void {
+    const bound = this.state.keys.some(
+      (key) =>
+        key.binding.kind === 'customer_managed' &&
+        keyBackendIdOf(key.binding.detail.keyBackendId) === backendId &&
+        locatorText(key.binding.detail.locator) === locator,
+    );
+    if (bound) throw new KeyFault('KEY_ALREADY_BOUND');
+  }
+
   async prepareBinding(input: BindingInput): Promise<BindingPlan> {
     await this.pause();
     const parsed = parseKeyBackendId(input.backendId);
@@ -354,23 +368,18 @@ export class InMemoryTenantCustodyClient implements TenantCustodyClient {
     if (problem) throw new KeyFault('COMMAND_INVALID', problem);
     const locator = buildLocator(provider, input.locator)!;
     const text = locatorText(locator);
-    const bound = this.state.keys.some(
-      (key) =>
-        key.binding.kind === 'customer_managed' &&
-        keyBackendIdOf(key.binding.detail.keyBackendId) === parsed &&
-        locatorText(key.binding.detail.locator) === text,
-    );
-    if (bound) throw new KeyFault('KEY_ALREADY_BOUND');
+    const backendId = keyBackendIdOf(record.registration.keyBackendId);
+    this.requireBindingAvailable(backendId, text);
     const id = attemptId(`att_${hexOf(this.next('binding'))}`);
     this.attempts.set(id, {
       kind: 'binding',
-      backendId: keyBackendIdOf(record.registration.keyBackendId),
+      backendId,
       input: { ...input, locator: text },
       checks: bindingChecks,
       results: new Map(),
       runs: new Map(),
     });
-    return { attemptId: id, backendId: keyBackendIdOf(record.registration.keyBackendId), checks: bindingChecks };
+    return { attemptId: id, backendId, checks: bindingChecks };
   }
 
   private requireBindable(record: BackendRecord): void {
@@ -429,6 +438,7 @@ export class InMemoryTenantCustodyClient implements TenantCustodyClient {
     const attempt = this.attemptOf(id);
     if (attempt.kind !== 'registration') throw new KeyFault('ATTEMPT_NOT_FOUND');
     this.assertPassed(attempt);
+    this.requireRegistrationAvailable(attempt.input);
     const now = this.clock();
     const input = attempt.input;
     const shortcut =
@@ -457,6 +467,7 @@ export class InMemoryTenantCustodyClient implements TenantCustodyClient {
     if (attempt.kind !== 'binding') throw new KeyFault('ATTEMPT_NOT_FOUND');
     this.requireBindable(this.tenantBackend(attempt.backendId));
     this.assertPassed(attempt);
+    this.requireBindingAvailable(attempt.backendId, attempt.input.locator);
     const now = this.clock();
     const record = this.tenantBackend(attempt.backendId);
     const provider = providerOfAccess(record.registration.configuration?.access);
