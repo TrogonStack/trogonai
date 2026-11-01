@@ -40,6 +40,22 @@ async fn serve(status: AxumStatus, body: Value) -> (PlaidApiBaseUrl, Arc<Mutex<V
     (PlaidApiBaseUrl::new(format!("http://{addr}")).unwrap(), requests)
 }
 
+async fn serve_raw(status: AxumStatus, body: &'static str) -> (PlaidApiBaseUrl, Arc<Mutex<Vec<Value>>>) {
+    let app = Router::new().route(
+        "/webhook_verification_key/get",
+        post(move || async move { (status, body) }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (
+        PlaidApiBaseUrl::new(format!("http://{addr}")).unwrap(),
+        Arc::new(Mutex::new(Vec::new())),
+    )
+}
+
 fn fetcher(url: &PlaidApiBaseUrl) -> ReqwestPlaidKeyFetcher {
     ReqwestPlaidKeyFetcher::new(url, PlaidClientId::new("client-1").unwrap())
 }
@@ -123,6 +139,30 @@ async fn client_errors_are_rejected() {
         serde_json::json!({"error_code": "INVALID_API_KEYS"}),
     )
     .await;
+
+    let err = fetcher(&url).fetch(&pair.key_id(), &secret()).await.unwrap_err();
+
+    assert!(matches!(&err, PlaidKeyFetchError::Rejected(status) if *status == StatusCode::BAD_REQUEST));
+}
+
+#[tokio::test]
+async fn unknown_verification_key_id_is_unknown_key() {
+    let pair = TestKeyPair::generate("kid-1");
+    let (url, _) = serve(
+        AxumStatus::BAD_REQUEST,
+        serde_json::json!({"error_type": "INVALID_INPUT", "error_code": "INVALID_WEBHOOK_VERIFICATION_KEY_ID"}),
+    )
+    .await;
+
+    let err = fetcher(&url).fetch(&pair.key_id(), &secret()).await.unwrap_err();
+
+    assert!(matches!(err, PlaidKeyFetchError::UnknownKey));
+}
+
+#[tokio::test]
+async fn client_error_with_a_non_json_body_is_rejected() {
+    let pair = TestKeyPair::generate("kid-1");
+    let (url, _) = serve_raw(AxumStatus::BAD_REQUEST, "not json").await;
 
     let err = fetcher(&url).fetch(&pair.key_id(), &secret()).await.unwrap_err();
 
