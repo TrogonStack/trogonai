@@ -1,0 +1,62 @@
+[
+  {
+    "name": "success with provider response but no request id",
+    "type": "trogonai.platform.key_custody.audit.v1alpha1.ProviderAttempt",
+    "valid": true,
+    "message": {
+      "attemptNumber": 1,
+      "startedAt": "2026-11-01T00:00:00Z",
+      "duration": "0.100s",
+      "succeeded": {},
+      "absence": "PROVIDER_REQUEST_ABSENCE_NOT_PROVIDED_BY_PROVIDER"
+    }
+  },
+  {
+    "name": "provider unavailable with no response",
+    "type": "trogonai.platform.key_custody.audit.v1alpha1.ProviderAttempt",
+    "valid": true,
+    "message": {
+      "attemptNumber": 1,
+      "startedAt": "2026-11-01T00:00:00Z",
+      "duration": "0.100s",
+      "failed": "OPERATION_FAILURE_CATEGORY_PROVIDER_UNAVAILABLE",
+      "absence": "PROVIDER_REQUEST_ABSENCE_NO_RESPONSE"
+    }
+  },
+  {
+    "name": "success without provider response",
+    "type": "trogonai.platform.key_custody.audit.v1alpha1.ProviderAttempt",
+    "valid": false,
+    "message": {
+      "attemptNumber": 1,
+      "startedAt": "2026-11-01T00:00:00Z",
+      "duration": "0.100s",
+      "succeeded": {},
+      "absence": "PROVIDER_REQUEST_ABSENCE_NO_RESPONSE"
+    }
+  },
+  {
+    "name": "attempt with binding mismatch",
+    "type": "trogonai.platform.key_custody.audit.v1alpha1.ProviderAttempt",
+    "valid": false,
+    "message": {
+      "attemptNumber": 1,
+      "startedAt": "2026-11-01T00:00:00Z",
+      "duration": "0.100s",
+      "failed": "OPERATION_FAILURE_CATEGORY_BINDING_MISMATCH",
+      "absence": "PROVIDER_REQUEST_ABSENCE_NOT_PROVIDED_BY_PROVIDER"
+    }
+  },
+  {
+    "name": "attempt with unsupported capability",
+    "type": "trogonai.platform.key_custody.audit.v1alpha1.ProviderAttempt",
+    "valid": false,
+    "message": {
+      "attemptNumber": 1,
+      "startedAt": "2026-11-01T00:00:00Z",
+      "duration": "0.100s",
+      "failed": "OPERATION_FAILURE_CATEGORY_UNSUPPORTED_CAPABILITY",
+      "absence": "PROVIDER_REQUEST_ABSENCE_NOT_PROVIDED_BY_PROVIDER"
+    }
+  }
+]
