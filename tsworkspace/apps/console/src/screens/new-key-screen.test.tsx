@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from '@testing-library/react';
-import { KeyBackendLifecycle } from '@trogonai/proto';
 import userEvent from '@testing-library/user-event';
+import { KeyBackendLifecycle } from '@trogonai/proto';
 import { describe, expect, it } from 'vitest';
 
 import { createFakeBackend } from '@/fake-backend';
