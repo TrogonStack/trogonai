@@ -185,10 +185,4 @@ jobs:
         working-directory: tsworkspace
 
       - name: Assert TypeScript key custody bindings match proto sources
-        run: |
-          target=tsworkspace/packages/proto/src/gen/trogonai/platform/key_custody
-          drift=$(git status --short --untracked-files=all -- "$target")
-          if [[ -n "$drift" ]]; then
-            printf '%s\n' "$drift"
-            exit 1
-          fi
+        run: mise run --skip-tools github-actions:assert-key-custody-proto-generated
