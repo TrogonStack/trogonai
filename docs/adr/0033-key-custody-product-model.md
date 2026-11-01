@@ -7,6 +7,24 @@ date: 2026-07-20
 
 # ADR#0033: Key Custody Product Model
 
+> **Refined by [ADR#0083](./0083-sealed-content-envelope.md) (2026-10-30).**
+> Under Decision 6, the envelope contract also covers, for the sealing purpose,
+> credential records, every claim-check blob, the `PLATFORM` account's own
+> included, and the sensitive streams of customer managed tenants with the bytes
+> they reference; state that must be readable before the secrets service serves
+> stays unsealed, and the
+> [ADR#0081](./0081-nats-tls-by-default-and-operator-mode-admission.md) server
+> cipher remains infrastructure encryption outside this model. The sealing
+> purpose has no shared managed key: every tenant's platform share is wrapped
+> under a dedicated key, free on Transit (Decision 3), which makes dedicated
+> keys for every tenant the fixed rule for this purpose alone, a cloud KMS
+> registration's per-key bill accepted. A customer managed tenant adds a
+> customer share, the deliberate two-party control Decision 1 leaves to a
+> separate decision. Each wrap and unwrap still routes to exactly one
+> registration (Decision 5), so unwrapping the customer share never depends on a
+> platform-owned key, while opening sealed content needs every share; the
+> secrets service's xkey is boot material under Decision 5.
+
 ## Context
 
 [ADR#0023](./0023-secret-management-and-key-custody-direction.md) put OpenBao

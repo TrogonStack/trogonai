@@ -7,6 +7,23 @@ date: 2026-07-18
 
 # ADR#0030: Customer-Controlled Key Backend Routing
 
+> **Refined by [ADR#0083](./0083-sealed-content-envelope.md) (2026-10-30).** The
+> Non-Goal on the payload cipher, nonce construction and envelope format is
+> settled for the sealing purpose: AES-256-GCM with random nonces through
+> aws-lc-rs, in a `SealedContent` envelope that persists, beside the ciphertext,
+> a `KeyRef`, the binding version and a `WrappedDek` per wrap, as Decision 2
+> requires; every wrapped `Dek` is 32 bytes. The secrets service is the
+> encryption caller, and Transit `datakey/plaintext` is the typed optional
+> capability for provider-side generation that Decision 2 anticipates. A data
+> key is derived from shares, and a customer managed tenant's needs a platform
+> share and a customer share: the separate decision on deliberate two-party
+> control that the double-wrap alternative anticipates, taken with a split key
+> rather than a double wrap. For sealing data keys only, Decision 2's rule
+> against reusable caches, Decision 6's no-retention sentence and guarantee, and
+> the Decision 7 cache bullet are amended to a zeroizing cache that holds a data
+> key at most sixty seconds after its provider unwrap; the rule against fallback
+> is unchanged.
+
 ## Context
 
 [ADR#0023](./0023-secret-management-and-key-custody-direction.md) chose
