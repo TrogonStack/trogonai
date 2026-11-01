@@ -14,6 +14,8 @@ pub enum PlaidKeyFetchError {
     Transport(#[source] Box<dyn std::error::Error + Send + Sync>),
     #[error("Plaid key service unavailable: status {0}")]
     Unavailable(StatusCode),
+    #[error("Plaid does not know the verification key id")]
+    UnknownKey,
     #[error("Plaid rejected the key request: status {0}")]
     Rejected(StatusCode),
     #[error("Plaid returned an unusable key")]
@@ -68,6 +70,13 @@ struct KeyResponse {
     key: PlaidJwk,
 }
 
+#[derive(Deserialize)]
+struct ErrorResponse {
+    error_code: String,
+}
+
+const UNKNOWN_KEY_ERROR_CODE: &str = "INVALID_WEBHOOK_VERIFICATION_KEY_ID";
+
 fn is_transient(status: StatusCode) -> bool {
     status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS || status == StatusCode::REQUEST_TIMEOUT
 }
@@ -97,7 +106,10 @@ impl PlaidKeyFetcher for ReqwestPlaidKeyFetcher {
             return Err(PlaidKeyFetchError::Unavailable(status));
         }
         if !status.is_success() {
-            return Err(PlaidKeyFetchError::Rejected(status));
+            return Err(match response.json::<ErrorResponse>().await {
+                Ok(body) if body.error_code == UNKNOWN_KEY_ERROR_CODE => PlaidKeyFetchError::UnknownKey,
+                _ => PlaidKeyFetchError::Rejected(status),
+            });
         }
 
         let body: KeyResponse = response

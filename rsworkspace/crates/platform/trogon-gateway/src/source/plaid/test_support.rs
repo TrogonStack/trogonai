@@ -164,6 +164,7 @@ pub enum FakeFailure {
     Transport,
     Unavailable,
     Rejected,
+    UnknownKey,
 }
 
 #[derive(Clone, Default)]
@@ -215,6 +216,7 @@ impl PlaidKeyFetcher for FakeKeyFetcher {
                 FakeFailure::Transport => PlaidKeyFetchError::Transport("connection refused".into()),
                 FakeFailure::Unavailable => PlaidKeyFetchError::Unavailable(StatusCode::BAD_GATEWAY),
                 FakeFailure::Rejected => PlaidKeyFetchError::Rejected(StatusCode::BAD_REQUEST),
+                FakeFailure::UnknownKey => PlaidKeyFetchError::UnknownKey,
             });
         }
         // Suspends like a real network fetch, so concurrent resolvers queue behind the fetch gate.

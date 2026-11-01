@@ -369,17 +369,18 @@ async fn token_without_key_id_returns_401() {
 }
 
 #[tokio::test]
-async fn unknown_key_id_returns_503() {
+async fn unknown_key_id_returns_401() {
     let _guard = tracing_guard();
     let publisher = MockJetStreamPublisher::new();
     let stranger = TestKeyPair::generate("kid-unknown");
+    let fetcher = FakeKeyFetcher::default().failing(FakeFailure::UnknownKey);
 
-    let resp = app(publisher.clone(), FakeKeyFetcher::default())
+    let resp = app(publisher.clone(), fetcher)
         .oneshot(signed_request(&stranger, WEBHOOK_BODY))
         .await
         .unwrap();
 
-    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     assert!(publisher.published_messages().is_empty());
 }
 
@@ -387,7 +388,7 @@ async fn unknown_key_id_returns_503() {
 async fn unknown_key_ids_past_the_fetch_limit_return_429_with_retry_after_without_fetching() {
     let _guard = tracing_guard();
     let publisher = MockJetStreamPublisher::new();
-    let fetcher = FakeKeyFetcher::default();
+    let fetcher = FakeKeyFetcher::default().failing(FakeFailure::UnknownKey);
     let router = app(publisher.clone(), fetcher.clone());
 
     let fetched = router
@@ -400,7 +401,7 @@ async fn unknown_key_ids_past_the_fetch_limit_return_429_with_retry_after_withou
         .await
         .unwrap();
 
-    assert_eq!(fetched.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(fetched.status(), StatusCode::UNAUTHORIZED);
     assert_eq!(throttled.status(), StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(throttled.headers().get(header::RETRY_AFTER).unwrap(), "10");
     assert_eq!(fetcher.calls(), vec!["kid-unknown-1"]);
