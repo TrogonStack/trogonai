@@ -26,12 +26,13 @@ fn callout_xkey() -> (CalloutXkey, String) {
 fn account_public_keys_accept_an_account_key_and_drop_surrounding_whitespace() {
     let account = KeyPair::new_account().public_key();
 
-    let tenant = TenantAccount::parse(&format!("  {account}\n")).expect("tenant account");
+    let tenant: TenantAccount = format!("  {account}\n").parse().expect("tenant account");
     let auth: AuthAccount = account.parse().expect("auth account");
 
     assert_eq!(tenant.as_str(), account);
     assert_eq!(auth.as_str(), account);
     assert_eq!(tenant.to_string(), account);
+    assert_eq!(auth.to_string(), account);
 }
 
 #[test]
@@ -234,6 +235,19 @@ fn custody_reads_the_env_and_file_sources() {
 
     env.set(SIGNING_KEY_SOURCE_VAR, "file");
     assert!(matches!(SigningKeyCustody::from_env(&env), Ok(SigningKeyCustody::File)));
+    assert_eq!(SigningKeyCustody::Env.to_string(), "env");
+    assert_eq!(SigningKeyCustody::File.to_string(), "file");
+}
+
+#[test]
+fn a_tenant_signing_key_slot_names_its_account() {
+    let tenant = tenant_account();
+
+    assert_eq!(AdmissionKeySlot::CalloutXkey.to_string(), "AUTH_CALLOUT_XKEY_SEED");
+    assert_eq!(
+        AdmissionKeySlot::TenantSigningKey(tenant.clone()).to_string(),
+        format!("AUTH_CALLOUT_TENANT_SIGNING_KEYS entry for {tenant}")
+    );
 }
 
 #[test]

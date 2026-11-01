@@ -32,9 +32,12 @@ fn a_secret_without_a_jose_header_in_three_segments_is_an_api_key() {
         format!("{}.extra", compact(r#"{"alg":"RS256"}"#)),
         format!("{}.only-two", URL_SAFE_NO_PAD.encode(r#"{"alg":"RS256"}"#)),
     ];
-    for secret in &secrets {
+    for (case, secret) in secrets.iter().enumerate() {
         let credential = PresentedCredential::from_secret(secret).unwrap();
-        assert!(matches!(credential, PresentedCredential::ApiKey(_)), "{secret}");
+        assert!(
+            matches!(credential, PresentedCredential::ApiKey(_)),
+            "credential shape case {case} should be classified as an API key"
+        );
     }
 }
 
