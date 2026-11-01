@@ -84,6 +84,7 @@ export const denialReasonLabels: Record<KeyUseDenialReason, string> = {
   [KeyUseDenialReason.PROVIDER_DENIED]: 'Provider denied',
   [KeyUseDenialReason.BACKEND_PAUSED]: 'Backend paused',
   [KeyUseDenialReason.KEY_STATE]: 'Key state',
+  [KeyUseDenialReason.BACKEND_NOT_ACTIVE]: 'Backend not active',
 };
 
 export function failureLabel(failure: OperationFailure): string {
