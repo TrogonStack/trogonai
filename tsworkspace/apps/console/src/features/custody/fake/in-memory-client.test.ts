@@ -203,6 +203,19 @@ describe('registering a backend', () => {
     expect((await rejection(client.prepareRegistration(awsInput))).reason).toBe('BACKEND_ALREADY_REGISTERED');
   });
 
+  it('refuses to complete a concurrent registration for the same boundary', async () => {
+    const { client } = newClient();
+    const plans = await Promise.all([client.prepareRegistration(awsInput), client.prepareRegistration(awsInput)]);
+    for (const plan of plans) {
+      for (const check of plan.checks) await client.runCheck(plan.attemptId, check.id);
+    }
+
+    await client.completeRegistration(plans[0]!.attemptId);
+    expect((await rejection(client.completeRegistration(plans[1]!.attemptId))).reason).toBe(
+      'BACKEND_ALREADY_REGISTERED',
+    );
+  });
+
   it('fails the OpenBao capability check once, with a typed reason', async () => {
     const { client } = newClient();
     const plan = await client.prepareRegistration(openBaoInput);
@@ -456,6 +469,23 @@ describe('binding a key', () => {
     );
 
     expect(fault.reason).toBe('KEY_ALREADY_BOUND');
+  });
+
+  it('refuses to complete a concurrent binding for the same locator', async () => {
+    const { client } = newClient();
+    const input = {
+      backendId: seedBackendIds.aws,
+      locator: newAwsKey,
+      purpose: messages,
+      capabilities: [KeyCapability.ENVELOPE_WRAPPING],
+    };
+    const plans = await Promise.all([client.prepareBinding(input), client.prepareBinding(input)]);
+    for (const plan of plans) {
+      for (const check of plan.checks) await client.runCheck(plan.attemptId, check.id);
+    }
+
+    await client.completeBinding(plans[0]!.attemptId);
+    expect((await rejection(client.completeBinding(plans[1]!.attemptId))).reason).toBe('KEY_ALREADY_BOUND');
   });
 });
 
