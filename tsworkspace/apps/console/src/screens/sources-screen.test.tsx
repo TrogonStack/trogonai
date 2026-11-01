@@ -15,7 +15,7 @@ describe('sources overview', () => {
     expect(screen.getByRole('link', { name: 'Sentry production' })).toBeInTheDocument();
 
     const summary = screen.getByRole('group', { name: 'Sources summary' });
-    for (const label of ['Integrations', 'Receiving', 'Needs attention', 'Rejected signatures']) {
+    for (const label of ['Integrations', 'Receiving', 'Needs attention', 'Rejected deliveries']) {
       expect(within(summary).getByText(label)).toBeInTheDocument();
     }
   });
