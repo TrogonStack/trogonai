@@ -1,4 +1,5 @@
 import { screen, waitFor, within } from '@testing-library/react';
+import { KeyBackendLifecycle } from '@trogonai/proto';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 
@@ -144,6 +145,32 @@ describe('bind key wizard', () => {
 
     expect(screen.getByText('No key purposes are available.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Continue to validation' })).toBeDisabled();
+  });
+
+  it('explains when registered backends cannot accept new keys', async () => {
+    const backend = createFakeBackend({ latencyMs: 0 });
+    const load = backend.keyCustody.load.bind(backend.keyCustody);
+    backend.keyCustody.load = async () => {
+      const state = await load();
+      return {
+        ...state,
+        backends: state.backends.map((candidate) => ({
+          ...candidate,
+          registration: {
+            ...candidate.registration,
+            lifecycle: KeyBackendLifecycle.PENDING_VALIDATION,
+          },
+        })),
+      };
+    };
+    renderApp('/keys/keys/new', backend);
+
+    await screen.findByRole('heading', { name: 'Choose a backend' });
+    expect(screen.queryAllByRole('radio')).toHaveLength(0);
+    const emptyState = (await screen.findByRole('link', { name: 'Register a backend' })).closest('p');
+    expect(emptyState).toHaveTextContent('No registered backend is active.');
+    expect(emptyState).not.toHaveTextContent('No backend is registered yet.');
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
   });
 
   it('denies a paused backend with BackendPaused and does not prepare the key', async () => {
