@@ -49,6 +49,16 @@ describe('migrations list', () => {
     expect(within(dialog).getByRole('radio', { name: /Managed/ })).toBeInTheDocument();
     expect(within(dialog).queryByRole('radio', { name: /Dedicated/ })).not.toBeInTheDocument();
   });
+
+  it('explains when no key purpose is available and prevents starting a migration', async () => {
+    const backend = createFakeBackend({ latencyMs: 0 });
+    const load = backend.keyCustody.load.bind(backend.keyCustody);
+    backend.keyCustody.load = async () => ({ ...(await load()), purposes: [] });
+    renderApp('/keys/migrations', backend);
+
+    expect(await screen.findByText('No key purposes are available to migrate.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start a migration' })).toBeDisabled();
+  });
 });
 
 describe('migration detail', () => {
