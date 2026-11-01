@@ -374,16 +374,19 @@ service may coarsen the denial like any other.
 
 An operation against an existing `KeyRef` checks in a fixed order. The service
 authenticates the caller and resolves the reference, including its tenant and
-purpose binding, checks the registration's admission, applies the key-state
-matrix in [Key States](../architecture/key-states.md), and only then calls the
-provider. Every retry inside the operation deadline repeats the admission check
-before its next attempt.
+purpose binding, requires the registration lifecycle to be `Active`, checks the
+registration's admission, applies the key-state and capability matrix in
+[Key States](../architecture/key-states.md), and only then calls the provider.
+`PendingValidation` and `Retired` registrations stop before provider access even
+when admission is `Enabled`. Every retry inside the operation deadline repeats
+the lifecycle and admission checks before its next attempt.
 
 `BindExternalKey` has no existing `KeyRef` to resolve. It authenticates the
 caller, authorizes the tenant's use of the supplied `KeyBackendId`, locator,
-purpose, and capabilities, checks that backend registration's admission, and
-only then performs provider validation and applies the discovered key-state and
-capability gates before creating a `KeyRef`.
+purpose, and capabilities, requires that backend registration's lifecycle be
+`Active`, checks its admission, and only then performs provider validation and
+applies the discovered key-state and capability gates before creating a
+`KeyRef`.
 
 A pause is acknowledged once the admission fact is durably committed; that
 acknowledgement does not claim that every service instance has observed it.
