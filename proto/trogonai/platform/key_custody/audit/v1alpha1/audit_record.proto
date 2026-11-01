@@ -43,8 +43,8 @@ message KeyOperationAuditRecord {
   };
   option (buf.validate.message).cel = {
     id: "audit_record.success_has_successful_attempt"
-    message: "a successful operation lists at least one successful provider attempt"
-    expression: "!has(this.succeeded) || this.attempts.exists(attempt, has(attempt.succeeded))"
+    message: "a successful operation ends with its only successful provider attempt"
+    expression: "!has(this.succeeded) || (this.attempts.filter(attempt, has(attempt.succeeded)).size() == 1 && has(this.attempts[this.attempts.size() - 1].succeeded))"
   };
   option (buf.validate.message).cel = {
     id: "audit_record.failure_has_no_successful_attempt"
