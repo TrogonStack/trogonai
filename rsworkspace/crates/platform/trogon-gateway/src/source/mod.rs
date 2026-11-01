@@ -7,11 +7,6 @@ pub mod incidentio;
 pub mod linear;
 pub mod microsoft_graph;
 pub mod notion;
-#[allow(
-    dead_code,
-    unused_imports,
-    reason = "unused until the gateway mounts the Plaid source"
-)]
 pub mod plaid;
 pub mod sentry;
 pub mod slack;
