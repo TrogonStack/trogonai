@@ -104,6 +104,7 @@ export function BindKeyWizard({ initialBackendId }: { initialBackendId?: string 
   const backend = bindable.find((candidate) => candidate.id === (chosenBackend ?? bindable[0]?.id));
   const catalogue = query.data.catalogue;
   const purpose = chosenPurpose ?? catalogue[0]?.id;
+  const canViewBoundKey = boundRef ? query.data.keys.some((key) => key.keyRef === boundRef) : false;
 
   const backendOptions: readonly RadioCardOption<string>[] = bindable.map((candidate) => ({
     value: candidate.id,
@@ -283,9 +284,15 @@ export function BindKeyWizard({ initialBackendId }: { initialBackendId?: string 
             <p className="text-muted-foreground max-w-xl text-[13px]">
               The key is bound but not yet used. Make it the default for its purpose to wrap new payloads.
             </p>
-            <Link to="/keys/keys/$keyRef" params={{ keyRef: boundRef }} className={buttonVariants({ size: 'lg' })}>
-              View key
-            </Link>
+            {canViewBoundKey ? (
+              <Link to="/keys/keys/$keyRef" params={{ keyRef: boundRef }} className={buttonVariants({ size: 'lg' })}>
+                View key
+              </Link>
+            ) : (
+              <Button type="button" size="lg" disabled>
+                {query.isFetching ? 'Refreshing key...' : 'View key unavailable'}
+              </Button>
+            )}
           </CardContent>
         </Card>
       ) : null}
