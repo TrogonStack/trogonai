@@ -3,14 +3,14 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use a2a_auth_callout::dispatcher::AuthDispatcher;
 use a2a_auth_callout::wire::ServerAuthRequestClaims;
-use a2a_auth_callout::{BridgeAuthScheme, BridgeConnectOpts, BridgeMintRequest, BridgeMintResponse};
+use a2a_auth_callout::{AuthCalloutError, BridgeMintRequest, BridgeMintResponse, CalloutXkey};
 use async_trait::async_trait;
 
 use super::{AuthMintWire, BytesPayload};
 use crate::error::BridgeError;
 
 #[cfg(test)]
-use a2a_auth_callout::StaticAccountResolver;
+use a2a_auth_callout::admission_keys::{AccountSigningKey, TenantAccount, TenantSigningKeys};
 #[cfg(test)]
 use a2a_auth_callout::credentials::oidc::{BearerToken, OidcVerifier};
 #[cfg(test)]
@@ -20,7 +20,7 @@ use a2a_auth_callout::jwt::{AudienceAccount, CallerId, ExternalSubject, SpiceDbP
 #[cfg(test)]
 use a2a_auth_callout::permissions::IssuedPermissions;
 #[cfg(test)]
-use a2a_auth_callout::signing_key_source::{KeyVersion, SigningKeySource, StaticSigningKeySource};
+use a2a_auth_callout::signing_key_source::KeyVersion;
 #[cfg(test)]
 use serde_json::json;
 #[cfg(test)]
@@ -48,14 +48,20 @@ impl BridgeTenantAccount {
 pub struct InProcessCalloutDispatcherMintWire {
     dispatcher: Arc<dyn AuthDispatcher>,
     tenant: BridgeTenantAccount,
+    callout_xkey: Option<CalloutXkey>,
     mint_count: Arc<AtomicUsize>,
 }
 
 impl InProcessCalloutDispatcherMintWire {
-    pub fn new(dispatcher: Arc<dyn AuthDispatcher>, tenant: BridgeTenantAccount) -> Self {
+    pub fn new(
+        dispatcher: Arc<dyn AuthDispatcher>,
+        tenant: BridgeTenantAccount,
+        callout_xkey: Option<CalloutXkey>,
+    ) -> Self {
         Self {
             dispatcher,
             tenant,
+            callout_xkey,
             mint_count: Arc::new(AtomicUsize::new(0)),
         }
     }
@@ -75,14 +81,11 @@ impl AuthMintWire for InProcessCalloutDispatcherMintWire {
         if request.account.is_none() {
             request.account = Some(self.tenant.as_str().to_owned());
         }
-        if request.connect_opts.is_none() && request.user_jwt.is_some() {
-            request.connect_opts = Some(BridgeConnectOpts {
-                auth_scheme: Some(BridgeAuthScheme::Oidc),
-                api_key: None,
-            });
-        }
         let claims =
-            ServerAuthRequestClaims::from_bridge_mint(request).map_err(|e| BridgeError::Mint(e.to_string()))?;
+            ServerAuthRequestClaims::from_bridge_mint(request, self.callout_xkey.as_ref()).map_err(|e| match e {
+                AuthCalloutError::BridgeCredential(refused) => BridgeError::MintCredential(refused),
+                other => BridgeError::Mint(other.to_string()),
+            })?;
         let user_jwt = self
             .dispatcher
             .dispatch(claims)
@@ -96,7 +99,12 @@ impl AuthMintWire for InProcessCalloutDispatcherMintWire {
 }
 
 #[cfg(test)]
-pub(crate) fn harness_callout_dispatcher(caller_id: &str) -> a2a_auth_callout::dispatcher::CalloutDispatcher {
+pub(crate) fn harness_callout_xkey() -> CalloutXkey {
+    CalloutXkey::from_seed(&nkeys::XKey::new().seed().expect("harness xkey seed")).expect("harness callout xkey")
+}
+
+#[cfg(test)]
+pub(crate) fn harness_callout_dispatcher(caller_id: &str) -> (Arc<CalloutDispatcher>, BridgeTenantAccount) {
     struct HarnessOidcVerifier {
         caller_id: CallerId,
     }
@@ -122,22 +130,21 @@ pub(crate) fn harness_callout_dispatcher(caller_id: &str) -> a2a_auth_callout::d
 
     let caller = CallerId::new(caller_id).expect("harness caller_id");
     let oidc: Arc<dyn OidcVerifier> = Arc::new(HarnessOidcVerifier { caller_id: caller });
-    let resolver: Arc<dyn a2a_auth_callout::AccountResolver> =
-        Arc::new(StaticAccountResolver::new(["tenant-harness".to_string()]));
-    let issuer = nkeys::KeyPair::new_account();
-    let issuer_seed = issuer.seed().expect("issuer seed");
-    let signing_key_source: Arc<dyn SigningKeySource> = Arc::new(
-        StaticSigningKeySource::new(&issuer_seed, KeyVersion::new("test").expect("harness version"))
-            .expect("harness signing source"),
-    );
-    CalloutDispatcher::new(CalloutDispatcherConfig {
-        signing_key_source,
+    let tenant = TenantAccount::parse(&nkeys::KeyPair::new_account().public_key()).expect("harness tenant account");
+    let signing_key =
+        AccountSigningKey::from_seed(&nkeys::KeyPair::new_account().seed().expect("harness signing seed"))
+            .expect("harness signing key");
+    let bridge_tenant = BridgeTenantAccount::new(tenant.as_str()).expect("harness bridge tenant");
+    let tenant_signing_keys = TenantSigningKeys::new([(tenant, signing_key)]).expect("harness tenant signing keys");
+    let dispatcher = CalloutDispatcher::new(CalloutDispatcherConfig {
+        tenant_signing_keys,
         user_jwt_ttl: Duration::from_secs(60),
-        account_resolver: resolver,
+        a2a_prefix: a2a_nats::A2aPrefix::new(a2a_nats::DEFAULT_A2A_PREFIX).expect("harness prefix"),
         oidc: Some(oidc),
         mtls: None,
         api_key: None,
-    })
+    });
+    (Arc::new(dispatcher), bridge_tenant)
 }
 
 #[cfg(test)]

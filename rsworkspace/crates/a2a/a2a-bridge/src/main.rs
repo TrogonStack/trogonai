@@ -1,10 +1,12 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 use {
+    a2a_auth_callout::XkeyPublic,
     a2a_bridge::{
         AppState, AsyncNatsAuthMintWire, AsyncNatsTokenGatewayUnary, AsyncNatsTokenTaskJetstream,
-        AuthCalloutJsonMintClient, BridgeError, BridgeTenantAccount, CallerConnectTimeout, GatewayInboundPublisher,
-        GatewayRpcTimeout, StubAuthCalloutClient, StubInboundGatewayPublish, StubTaskJetStreamPort, gateway_router,
+        AuthCalloutJsonMintClient, BridgeError, BridgeTenantAccount, CallerConnectTimeout,
+        ENV_AUTH_CALLOUT_XKEY_PUBLIC, GatewayInboundPublisher, GatewayRpcTimeout, StubAuthCalloutClient,
+        StubInboundGatewayPublish, StubTaskJetStreamPort, gateway_router,
     },
     a2a_nats::{A2aPrefix, DEFAULT_A2A_PREFIX, ENV_A2A_PREFIX},
     std::{future::Future, net::SocketAddr, sync::Arc, time::Duration},
@@ -67,6 +69,8 @@ enum BootstrapError {
     NoNatsServers,
     #[error("NATS connect failed: {0}")]
     NatsConnect(#[source] trogon_nats::ConnectError),
+    #[error("{env_var} is not a curve public key: {0}", env_var = ENV_AUTH_CALLOUT_XKEY_PUBLIC)]
+    CalloutXkey(#[source] a2a_auth_callout::AuthCalloutError),
     #[error("bind failed: {0}")]
     Listen(#[source] std::io::Error),
     #[error("{0}")]
@@ -82,6 +86,13 @@ fn resolve_a2a_prefix(env: &impl ReadEnv) -> Result<A2aPrefix, BridgeError> {
         .var(ENV_A2A_PREFIX)
         .unwrap_or_else(|_| DEFAULT_A2A_PREFIX.to_string());
     A2aPrefix::new(raw).map_err(|e| BridgeError::NatsPublish(format!("{ENV_A2A_PREFIX} is invalid: {e}")))
+}
+
+fn resolve_callout_xkey(env: &impl ReadEnv) -> Result<Option<XkeyPublic>, BootstrapError> {
+    match env.var(ENV_AUTH_CALLOUT_XKEY_PUBLIC) {
+        Ok(raw) if !raw.trim().is_empty() => XkeyPublic::parse(raw).map(Some).map_err(BootstrapError::CalloutXkey),
+        _ => Ok(None),
+    }
 }
 
 fn bootstrap_stub_transport(env: &impl ReadEnv, nats: &NatsConfig, prefix: A2aPrefix) -> AppState {
@@ -119,6 +130,7 @@ async fn bootstrap_nats_transport(
             .unwrap_or(180)
             .max(1),
     );
+    let callout_xkey = resolve_callout_xkey(env)?;
 
     let client = trogon_nats::connect(nats, connect_timeout)
         .await
@@ -140,11 +152,17 @@ async fn bootstrap_nats_transport(
         _ => None,
     };
 
-    let auth_client = Arc::new(AuthCalloutJsonMintClient::with_tenant_account(
-        Arc::new(wire),
-        mint_subject,
-        tenant_account,
-    ));
+    let auth_client = AuthCalloutJsonMintClient::with_tenant_account(Arc::new(wire), mint_subject, tenant_account);
+    let auth_client = Arc::new(match callout_xkey {
+        Some(callout_xkey) => auth_client.sealing_to(callout_xkey),
+        None => {
+            tracing::warn!(
+                env_var = ENV_AUTH_CALLOUT_XKEY_PUBLIC,
+                "no callout xkey is configured, so every caller credential mint is refused"
+            );
+            auth_client
+        }
+    });
 
     let caller_connect_timeout = CallerConnectTimeout::new(connect_timeout);
     let unary = GatewayInboundPublisher::new(Arc::new(AsyncNatsTokenGatewayUnary::new(

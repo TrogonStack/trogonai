@@ -7,6 +7,7 @@ name = "a2a-auth-callout"
 version = "0.1.0"
 dependencies = [
  "a2a-identity-types",
+ "a2a-nats",
  "async-nats",
  "async-trait",
  "base64 0.23.1",
@@ -36,6 +37,7 @@ dependencies = [
  "tracing-subscriber",
  "trogon-identity-types",
  "trogon-nats",
+ "trogon-service-config",
  "trogon-std",
  "uuid",
  "wiremock",

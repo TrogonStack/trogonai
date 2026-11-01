@@ -6,17 +6,14 @@ use trogon_std::env::InMemoryEnv;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use super::{
-    build_mtls_verifier, build_oidc_verifier, env_required, load_nkey_public_env, load_nkey_seed_env, nats_config,
-    split_env_list,
-};
+use a2a_nats::{A2aPrefixError, ENV_A2A_PREFIX};
+
+use super::{build_mtls_verifier, build_oidc_verifier, nats_config, resolve_a2a_prefix, split_env_list};
 
 #[derive(Debug, thiserror::Error)]
 enum FixtureError {
     #[error(transparent)]
     Auth(#[from] AuthCalloutError),
-    #[error(transparent)]
-    Nkey(#[from] nkeys::error::Error),
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
@@ -30,14 +27,25 @@ enum FixtureError {
 #[test]
 fn optional_lists_trim_entries_preserve_order_and_discard_blanks() {
     let env = InMemoryEnv::new();
-    assert!(split_env_list(&env, "AUTH_CALLOUT_ALLOWED_ACCOUNTS").is_empty());
-    env.set("AUTH_CALLOUT_ALLOWED_ACCOUNTS", " first, ,second,first,\n ");
+    assert!(split_env_list(&env, "AUTH_CALLOUT_OIDC_AUDIENCES").is_empty());
+    env.set("AUTH_CALLOUT_OIDC_AUDIENCES", " first, ,second,first,\n ");
     assert_eq!(
-        split_env_list(&env, "AUTH_CALLOUT_ALLOWED_ACCOUNTS"),
+        split_env_list(&env, "AUTH_CALLOUT_OIDC_AUDIENCES"),
         ["first", "second", "first"]
     );
-    env.set("AUTH_CALLOUT_ALLOWED_ACCOUNTS", " , \n ");
-    assert!(split_env_list(&env, "AUTH_CALLOUT_ALLOWED_ACCOUNTS").is_empty());
+    env.set("AUTH_CALLOUT_OIDC_AUDIENCES", " , \n ");
+    assert!(split_env_list(&env, "AUTH_CALLOUT_OIDC_AUDIENCES").is_empty());
+}
+
+#[test]
+fn the_grant_prefix_is_the_default_namespace_unless_a_valid_one_is_configured() -> Result<(), A2aPrefixError> {
+    let env = InMemoryEnv::new();
+    assert_eq!(resolve_a2a_prefix(&env)?.as_str(), "a2a");
+    env.set(ENV_A2A_PREFIX, "acme.a2a");
+    assert_eq!(resolve_a2a_prefix(&env)?.as_str(), "acme.a2a");
+    env.set(ENV_A2A_PREFIX, "invalid.*");
+    assert!(resolve_a2a_prefix(&env).is_err());
+    Ok(())
 }
 
 #[test]
@@ -64,53 +72,6 @@ fn nats_settings_keep_every_server_and_the_shared_client_certificate() -> Result
     );
     env.set("NATS_URL", " , ");
     assert!(nats_config(&env).is_none());
-    Ok(())
-}
-
-#[test]
-fn required_variables_preserve_presence_and_report_the_missing_name() -> Result<(), AuthCalloutError> {
-    let env = InMemoryEnv::new();
-    assert!(matches!(
-        env_required(&env, "REQUIRED"),
-        Err(AuthCalloutError::MissingEnvVar("REQUIRED"))
-    ));
-    env.set("REQUIRED", "");
-    assert_eq!(env_required(&env, "REQUIRED")?, "");
-    env.set("REQUIRED", " value ");
-    assert_eq!(env_required(&env, "REQUIRED")?, " value ");
-    Ok(())
-}
-
-#[test]
-fn nkey_environment_loaders_preserve_valid_material_and_reject_bad_configuration() -> Result<(), FixtureError> {
-    let env = InMemoryEnv::new();
-    assert!(matches!(
-        load_nkey_seed_env(&env, "SEED"),
-        Err(AuthCalloutError::MissingEnvVar("SEED"))
-    ));
-    assert!(matches!(
-        load_nkey_public_env(&env, "PUBLIC"),
-        Err(AuthCalloutError::MissingEnvVar("PUBLIC"))
-    ));
-    let key = nkeys::KeyPair::new_server();
-    let seed = key.seed()?;
-    env.set("SEED", format!(" {seed}\n"));
-    env.set("PUBLIC", format!(" {}\n", key.public_key()));
-    assert_eq!(
-        load_nkey_seed_env(&env, "SEED")?.to_signing_keypair()?.public_key(),
-        key.public_key()
-    );
-    assert_eq!(load_nkey_public_env(&env, "PUBLIC")?.as_str(), key.public_key());
-    env.set("SEED", " \n ");
-    assert!(matches!(
-        load_nkey_seed_env(&env, "SEED"),
-        Err(AuthCalloutError::WireFormat(_))
-    ));
-    env.set("PUBLIC", "invalid-key");
-    assert!(matches!(
-        load_nkey_public_env(&env, "PUBLIC"),
-        Err(AuthCalloutError::WireFormat(_))
-    ));
     Ok(())
 }
 

@@ -8,10 +8,11 @@ use tokio::task::JoinHandle;
 use trogon_nats::test_support::CoreTestServer;
 
 use super::*;
+use crate::admission_keys::AccountSigningKey;
 use crate::error::CredentialError;
 use crate::jwt::MintedUserJwt;
-use crate::wire::test_encode::signed_auth_request;
-use crate::wire::{NkeyPublic, NkeySeed, ServerAuthRequestClaims};
+use crate::wire::ServerAuthRequestClaims;
+use crate::wire::test_encode::FixtureServer;
 
 const WAIT: Duration = Duration::from_secs(5);
 
@@ -56,7 +57,7 @@ impl AuthDispatcher for RecordingDispatcher {
 struct SubscriberFixture {
     _server: CoreTestServer,
     client: async_nats::Client,
-    signer: KeyPair,
+    signer: FixtureServer,
     callout: KeyPair,
     user: KeyPair,
     minted: MintedUserJwt,
@@ -69,7 +70,7 @@ impl SubscriberFixture {
     async fn new(outcome: DispatchOutcome) -> Self {
         let server = CoreTestServer::start().await;
         let client = async_nats::connect(server.address()).await.unwrap();
-        let signer = KeyPair::new_server();
+        let signer = FixtureServer::generate();
         let callout = KeyPair::new_account();
         let user = KeyPair::new_user();
         let minted = MintedUserJwt::new(
@@ -106,7 +107,7 @@ impl SubscriberFixture {
     }
 
     fn request_token(&self) -> String {
-        signed_auth_request(&self.signer, &self.user, |_| {})
+        self.signer.sign(&self.user, |_| {})
     }
 
     async fn request(&self, token: String) -> async_nats::Message {
@@ -124,18 +125,16 @@ impl SubscriberFixture {
 
 async fn start_subscriber(
     client: &async_nats::Client,
-    signer: &KeyPair,
+    signer: &FixtureServer,
     callout: &KeyPair,
     dispatcher: RecordingDispatcher,
     readiness: &Path,
 ) -> JoinHandle<Result<(), AuthCalloutError>> {
     let wire = AuthCalloutWireCodec::new(
-        NkeyPublic::parse(signer.public_key()).unwrap(),
-        NkeySeed::parse(callout.seed().unwrap()).unwrap(),
+        signer.auth_account().clone(),
+        AccountSigningKey::from_seed(&callout.seed().unwrap()).unwrap(),
         None,
-        None,
-    )
-    .unwrap();
+    );
     let subscriber = Subscriber::new(client.clone(), dispatcher, wire);
     let env = SubscriberEnv {
         readiness: readiness.to_owned(),
@@ -176,7 +175,7 @@ async fn subscriber_signs_grants_and_discards_requests_without_a_reply() {
     let reply = fixture.request(fixture.request_token()).await;
     let claims = verified_response(&reply, &fixture.callout);
     assert_eq!(claims["sub"], fixture.user.public_key());
-    assert_eq!(claims["aud"], fixture.signer.public_key());
+    assert_eq!(claims["aud"], fixture.signer.id());
     assert_eq!(claims["iss"], fixture.callout.public_key());
     assert_eq!(claims["nats"]["jwt"], fixture.minted.as_str());
     assert!(claims["nats"]["error"].as_str().unwrap_or_default().is_empty());
@@ -192,7 +191,7 @@ async fn subscriber_denial_exposes_only_the_opaque_category() {
     assert_eq!(claims["nats"]["error"], "invalid_credentials");
     assert!(claims["nats"]["jwt"].as_str().unwrap_or_default().is_empty());
     assert_eq!(claims["sub"], fixture.user.public_key());
-    assert_eq!(claims["aud"], fixture.signer.public_key());
+    assert_eq!(claims["aud"], fixture.signer.id());
     assert_eq!(fixture.calls.load(Ordering::SeqCst), 1);
     fixture.stop().await;
 }
@@ -200,8 +199,10 @@ async fn subscriber_denial_exposes_only_the_opaque_category() {
 #[tokio::test]
 async fn subscriber_rejects_malformed_and_untrusted_requests_without_dispatching() {
     let fixture = SubscriberFixture::new(DispatchOutcome::Grant).await;
-    let untrusted = signed_auth_request(&KeyPair::new_server(), &fixture.user, |_| {});
-    for payload in ["malformed-request".to_owned(), untrusted] {
+    let other_account = FixtureServer::generate().sign(&fixture.user, |_| {});
+    let not_a_server = FixtureServer::signing_with(KeyPair::new_account(), fixture.signer.auth_account().clone())
+        .sign(&fixture.user, |_| {});
+    for payload in ["malformed-request".to_owned(), other_account, not_a_server] {
         assert!(fixture.request(payload).await.payload.is_empty());
     }
     assert_eq!(fixture.calls.load(Ordering::SeqCst), 0);
@@ -209,10 +210,10 @@ async fn subscriber_rejects_malformed_and_untrusted_requests_without_dispatching
 }
 
 #[tokio::test]
-async fn subscriber_returns_empty_fallback_when_response_encryption_is_unavailable() {
+async fn subscriber_returns_empty_fallback_when_the_response_cannot_be_encoded() {
     let fixture = SubscriberFixture::new(DispatchOutcome::Grant).await;
-    let request = signed_auth_request(&fixture.signer, &fixture.user, |claims| {
-        claims.nats.server.xkey = Some(nkeys::XKey::new().public_key());
+    let request = fixture.signer.sign(&fixture.user, |claims| {
+        claims.nats.user_nkey = "not-a-user-key".into();
     });
     assert!(fixture.request(request).await.payload.is_empty());
     assert_eq!(fixture.calls.load(Ordering::SeqCst), 1);

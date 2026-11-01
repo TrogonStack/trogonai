@@ -1,4 +1,5 @@
 use super::*;
+use crate::bridge_mint::BridgeCredentialError;
 
 #[test]
 fn each_auth_callout_error_variant_maps_to_category() {
@@ -118,6 +119,16 @@ fn credential_invalid_request_maps_to_invalid_request() {
 }
 
 #[test]
+fn a_refused_bridge_credential_maps_to_invalid_request() {
+    for err in [BridgeCredentialError::NoCalloutXkey, BridgeCredentialError::BlankSecret] {
+        assert_eq!(
+            DenialCategory::from_auth_callout_error(&AuthCalloutError::BridgeCredential(err)),
+            DenialCategory::InvalidRequest
+        );
+    }
+}
+
+#[test]
 fn key_load_variants_map_to_internal_error() {
     assert_eq!(
         DenialCategory::from_auth_callout_error(&AuthCalloutError::MissingEnvVar("SIGNING_KEY")),
@@ -142,5 +153,22 @@ fn key_load_variants_map_to_internal_error() {
     assert_eq!(
         DenialCategory::from_auth_callout_error(&AuthCalloutError::KeyLoadUtf8(utf8_err)),
         DenialCategory::InternalError
+    );
+    assert_eq!(
+        DenialCategory::from_auth_callout_error(&AuthCalloutError::AdmissionKeys(
+            crate::admission_keys::AdmissionKeyError::MalformedTenantEntry { position: 1 }
+        )),
+        DenialCategory::InternalError
+    );
+}
+
+#[test]
+fn a_caller_no_subject_can_name_maps_to_invalid_credentials() {
+    let err = AuthCalloutError::CredentialVerification(CredentialError::UnplaceablePrincipal(
+        crate::jwt::JwtError::InvalidCallerId,
+    ));
+    assert_eq!(
+        DenialCategory::from_auth_callout_error(&err),
+        DenialCategory::InvalidCredentials
     );
 }

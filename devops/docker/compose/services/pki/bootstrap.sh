@@ -58,6 +58,7 @@ issue() {
   if [ -s "$cert" ] && [ -s "$key" ] \
     && openssl verify -CAfile "$CA_DIR/ca.pem" "$cert" >/dev/null 2>&1 \
     && openssl x509 -in "$cert" -noout -checkend "$RENEW_WITHIN_SECONDS" >/dev/null; then
+    chown "$owner" "$cert" "$key"
     return 0
   fi
 

@@ -97,3 +97,15 @@ fn display_covers_remaining_variants() {
     );
     assert_eq!(AuthCalloutError::Internal("x".into()).to_string(), "internal error: x");
 }
+
+#[test]
+fn admission_key_errors_keep_their_own_message_and_source() {
+    let e = AuthCalloutError::from(crate::admission_keys::AdmissionKeyError::InvalidAuthAccount(
+        crate::admission_keys::AccountPublicKeyError::NotAnAccount,
+    ));
+    assert_eq!(
+        e.to_string(),
+        "AUTH_CALLOUT_AUTH_ACCOUNT is an NKey public key that names something other than an account"
+    );
+    assert!(Error::source(&e).is_some());
+}

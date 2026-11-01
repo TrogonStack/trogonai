@@ -19,7 +19,7 @@ Every procedure here preserves these properties of a deployed server:
 ## Before you start
 
 - `nsc` and the `nats` CLI on the machine allowed to hold the operator signing
-  seed. The `natsio/nats-box` image carries both, and `jq`.
+  seed. The `natsio/nats-box` image carries both, along with `nk` and `jq`.
 - `openssl`, for the JetStream key.
 - A CA that issues the server certificate and a client certificate for every
   process that connects, including the one that pushes account JWTs.
@@ -81,12 +81,27 @@ nsc edit authcallout --account AUTH \
   --curve generate
 ```
 
-`a2a-auth-callout` cannot serve this role yet. It connects with a user and
-password rather than credentials, pins a server key that nats-server
-regenerates on every start, and signs user JWTs whose issuer is not a signing
-key of the target account. Until it can, nothing connects with AUTH
-credentials except the callout's own user. PLATFORM and tenant users
-authenticate with their own credentials and never reach the callout.
+Issue the sentinel. The server presents its JWT on behalf of every client that
+connects without a user JWT of its own, so such a client is admitted only
+through the callout, and only as the user the callout mints for it. The
+sentinel itself may neither publish nor subscribe:
+
+```sh
+nsc add user --account AUTH --name sentinel --bearer --deny-pubsub '>'
+```
+
+Give the callout an AUTH signing key for its authorization responses. Generate
+the seed with `nk` rather than nsc, so it exists only where the callout reads
+it, and register its public key on AUTH:
+
+```sh
+nk -gen account > auth-response.nk
+nsc edit account --name AUTH --sk "$(nk -inkey auth-response.nk -pubout)"
+```
+
+PLATFORM users authenticate with their own credentials and never reach the
+callout. Every other client is a caller the callout admits into a tenant
+account, as [Run the auth callout](#run-the-auth-callout) describes.
 
 Move every `.creds` file and every seed into OpenBao as
 [Where production keys live](#where-production-keys-live) describes, then
@@ -102,7 +117,7 @@ before the server starts and mounts the directory read-only:
 | File | Contents | Produced by |
 | --- | --- | --- |
 | `operator.jwt` | The operator JWT | `nsc describe operator --raw` |
-| `identity.conf` | The system account's public key and its JWT, preloaded so the server trusts SYS before any push | The snippet below |
+| `identity.conf` | The system account's public key and its JWT, preloaded so the server trusts SYS before any push, and the sentinel's JWT for `default_sentinel` | The snippet below |
 | `jetstream-key.conf` | `key: "<64 hex characters>"`, the store encryption key | `openssl rand -hex 32`, generated once per store |
 | `server.pem`, `server-key.pem` | The server certificate chain and key, with a SAN for every name clients dial | The deployment's CA |
 | `ca.pem` | The CA bundle that verifies client certificates | The deployment's CA |
@@ -114,11 +129,12 @@ SYSTEM_ACCOUNT: "$sys"
 SYSTEM_ACCOUNT_PRELOAD: {
   $sys: "$(nsc describe account --name SYS --raw)"
 }
+DEFAULT_SENTINEL: "$(nsc describe user --account AUTH --name sentinel --raw)"
 EOF
 ```
 
-Render `identity.conf` again whenever the SYS JWT changes. Check the result
-before the server starts:
+Render `identity.conf` again whenever the SYS JWT or the sentinel changes.
+Check the result before the server starts:
 
 ```sh
 nats-server -t -c /etc/nats/nats-server.conf
@@ -137,13 +153,20 @@ nsc edit account --name ACME \
   --js-mem-storage 256m --js-disk-storage 10g --js-streams -1 --js-consumer -1
 ```
 
-When the auth callout will place users in the account, add it to AUTH's
-allowed accounts:
+When the auth callout will place users in the account, give the callout a
+signing key on it and add the account to AUTH's allowed accounts. Register the
+key without a scope: the server gives a user signed by a scoped key the scope's
+permissions in place of the ones the callout minted.
 
 ```sh
+nk -gen account > acme-callout.nk
+nsc edit account --name ACME --sk "$(nk -inkey acme-callout.nk -pubout)"
 nsc edit authcallout --account AUTH \
   --allowed-account "$(nsc describe account --name ACME --json | jq -r .sub)"
 ```
+
+Then hand the seed to the callout through `AUTH_CALLOUT_TENANT_SIGNING_KEYS`,
+and restart it once the account is pushed.
 
 Push the account as `sys`, and push AUTH too whenever its callout settings
 changed:
@@ -168,8 +191,10 @@ nsc push --account ACME --account-jwt-server-url nats://nats.example.internal:42
   --system-user sys --ca-cert ca.pem --client-cert pusher.pem --client-key pusher-key.pem
 ```
 
-Issue the account's users the same way as PLATFORM's, then confirm the server
-serves the account by connecting as one of them:
+An account the callout serves gets no users of its own; check it the way
+[Run the auth callout](#run-the-auth-callout) does. Any other account gets its
+users the same way as PLATFORM's. Confirm the server serves the account by
+connecting as one of them:
 
 ```sh
 nsc add user --account ACME --name acme-worker
@@ -181,6 +206,97 @@ nats --server tls://nats.example.internal:4222 \
 
 Every later change to an account, such as its limits, signing keys or user
 revocations, goes out the same way: edit it with nsc, then push it.
+
+## Run the auth callout
+
+`a2a-auth-callout` connects as the AUTH user `auth-callout` and answers every
+authorization request the server sends for AUTH. A caller connects without a
+user JWT, sends its tenant account's public key as its user name, and presents
+its own credential: an OIDC token as its token or password, or else the client
+certificate it connected with. The callout verifies the credential and answers
+with a user of the tenant account that may publish and subscribe only on the
+subjects the callout grants it. The binary has no API key verifier yet, so it
+refuses any other secret.
+
+Render the callout's seeds into its filesystem as files only the callout can
+read: the AUTH response signing seed, the callout signing seed of every tenant
+account, and the xkey seed from nsc's keystore. Then start it with:
+
+| Variable | Value |
+| --- | --- |
+| `NATS_URL`, `NATS_CREDS`, `NATS_CA`, `NATS_CERT`, `NATS_KEY` | The connection of the `auth-callout` user, as for any workload |
+| `AUTH_CALLOUT_SIGNING_KEY_SOURCE` | `file` |
+| `AUTH_CALLOUT_AUTH_ACCOUNT` | The AUTH account's public key |
+| `AUTH_CALLOUT_RESPONSE_SIGNING_KEY` | `file:///<dir>/auth-response.nk` |
+| `AUTH_CALLOUT_TENANT_SIGNING_KEYS` | `<tenant account public key>=file:///<dir>/<tenant>-callout.nk`, comma separated, with an entry for every allowed account |
+| `AUTH_CALLOUT_XKEY_SEED` | `file:///<dir>/callout-xkey.nk` |
+| `AUTH_CALLOUT_MTLS_TRUST_ANCHORS` | The path of the CA bundle that issues callers' client certificates |
+| `AUTH_CALLOUT_OIDC_ISSUER`, `AUTH_CALLOUT_OIDC_AUDIENCES` | The OIDC issuer whose tokens the callout accepts, and the audiences a token must carry |
+| `A2A_PREFIX` | The A2A subject prefix the gateway and the agents use, `a2a` unless set |
+
+The seed variables hold references, never seeds. Under `file` custody each one
+must be a `file://` reference. `env` custody reads `env://` references and is
+for development only, and `vault` is refused until signing moves behind
+OpenBao Transit. The callout refuses to start without a verifier, so set the
+trust anchors, the OIDC issuer, or both. `AUTH_CALLOUT_USER_JWT_TTL_SECS` sets
+how long a minted user stays valid, 300 seconds unless set.
+
+The callout grants a caller only the A2A subjects that name it as
+`{kind}.{id}`, under `A2A_PREFIX`, and the server denies every other subject.
+`{kind}` is `person` for an OIDC caller and `service` for a certificate caller,
+and `{id}` is the caller id the callout derives from the credential and the
+tenant. A caller that connects through the sentinel holds:
+
+| Direction | Subjects |
+| --- | --- |
+| Publish | `a2a.v1.agents.*.{kind}.{id}.>` |
+| Subscribe | `a2a.v1.tasks.*.{kind}.{id}.events`, `_INBOX.{kind}.{id}.>` |
+
+Its client must set its inbox prefix to `_INBOX.{kind}.{id}`, or its requests
+never see their replies. A user the callout mints for an A2A bridge reaches
+agents only through the gateway, and its inbox grant stays `_INBOX.>` until the
+bridge sets a per-caller inbox prefix:
+
+| Direction | Subjects |
+| --- | --- |
+| Publish | `a2a.v1.gateway.*.{kind}.{id}.>` |
+| Subscribe | `a2a.v1.gateway.{kind}.{id}.events`, `a2a.v1.tasks.*.{kind}.{id}.events`, `_INBOX.>` |
+
+A2A bridges seal a caller's credential to the callout's xkey before it crosses
+the bus, so each bridge takes the xkey's public key as
+`AUTH_CALLOUT_XKEY_PUBLIC`:
+
+```sh
+nsc describe account --name AUTH --json | jq -r .nats.authorization.xkey
+```
+
+Check the callout by connecting as a caller and publishing outside every grant.
+Name the tenant account as the URL's user with an empty password, because the
+`nats` CLI sends a user name without a password as a token, which the callout
+does not read as an account:
+
+```sh
+nats --server "tls://$(nsc describe account --name ACME --json | jq -r .sub):@nats.example.internal:4222" \
+  --tlsca ca.pem --tlscert caller.pem --tlskey caller-key.pem \
+  pub not.granted ping
+```
+
+`Permissions Violation for Publish to "not.granted"` means the callout admitted
+the caller into ACME and the server holds it to the grants the callout minted.
+`Authorization Violation` means the callout refused it, and the callout's log
+says why.
+
+The local compose stack runs the callout this way. nats-bootstrap writes its
+settings to `clients/auth-callout/callout.env` in the `dev_secrets` volume,
+next to its seeds under `keys/`, and the matching xkey public key to
+`clients/a2a-bridge/bridge.env`. The callout trusts the dev CA, so any dev
+client certificate admits a caller into DEV, whose public key nats-bootstrap
+logs as `nats-bootstrap: account DEV <key>`:
+
+```sh
+docker compose --profile tools run --rm -e NATS_CREDS= nats-box \
+  nats --server "tls://<DEV public key>:@nats:4222" pub not.granted ping
+```
 
 ## Where production keys live
 
@@ -204,9 +320,12 @@ Decision 3), and even its NATS credentials come from the deployment.
 | SYS signing seed | nsc, to issue `sys` | The machine running nsc, for that session only |
 | `sys.creds` and a client certificate | Pushing account JWTs and reading server state | The pusher |
 | Account identity seeds | Nothing once the account has a signing key | Nowhere. Strict signing-key mode rejects users they sign |
-| Account signing seeds | nsc, to issue users, and the auth callout once it signs users in operator mode | The machine running nsc, and later the callout. They are platform boot keys for tenant accounts too, never tenant-tier keys |
+| Account signing seeds | nsc, to issue users | The machine running nsc, for that session only |
+| Callout signing seeds: the AUTH response key and the callout's key on every tenant account | The auth callout, to sign authorization responses and the users it mints | The callout only, as the files its `AUTH_CALLOUT_*` references name. They are platform boot keys for tenant accounts too, never tenant-tier keys |
 | Workload `.creds`, client certificate and key | Each workload, through `NATS_CREDS`, `NATS_CERT` and `NATS_KEY` | That workload only |
-| Callout xkey seed | The auth callout | The callout |
+| Callout xkey seed | The auth callout | The callout only, as the file `AUTH_CALLOUT_XKEY_SEED` names |
+| Callout xkey public key | A2A bridges, to seal callers' credentials to the callout | Each bridge's `AUTH_CALLOUT_XKEY_PUBLIC`. Not secret |
+| Sentinel JWT | nats-server, as `default_sentinel` | `/etc/nats/secrets/identity.conf`. Not secret: the sentinel may neither publish nor subscribe |
 | Server certificate and key, CA bundle | nats-server | `/etc/nats/secrets` |
 | JetStream key | nats-server | `/etc/nats/secrets/jetstream-key.conf` |
 | Operator and account JWTs | nats-server and nsc | Not secret. The server keeps pushed account JWTs in its resolver directory |
@@ -330,10 +449,14 @@ plaintext listener, and a deployment never adds one:
 
 - How the deployment renders NATS material from OpenBao, and the mount and
   paths that hold it.
-- `a2a-auth-callout` in operator mode. Until it signs users for tenant
-  accounts, tenants connect with users issued by nsc.
+- Moving the callout's signing behind OpenBao Transit. Until then its seeds
+  are files the deployment renders, and `AUTH_CALLOUT_SIGNING_KEY_SOURCE=vault`
+  is refused.
 - Subject permissions per workload. PLATFORM users are issued without publish
   or subscribe restrictions.
+- How a direct caller learns the `{kind}.{id}` its grants name, which it needs
+  for its inbox prefix and its task events.
+- A per-caller inbox prefix for the users the callout mints for an A2A bridge.
 
 ## See also
 

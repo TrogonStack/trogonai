@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use crate::admission_keys::AdmissionKeyError;
+use crate::bridge_mint::BridgeCredentialError;
 use crate::jwt::JwtError;
 
 /// Typed reason a credential verifier rejected a caller. Replaces the
@@ -28,6 +30,10 @@ pub enum CredentialError {
     /// serde error rather than a rendering of it.
     #[error("principal serialization failed")]
     PrincipalSerialization(#[source] serde_json::Error),
+    /// The caller verified, but its id cannot stand at the principal position
+    /// of a subject, so no grant could name it.
+    #[error("credential principal cannot be placed in a subject")]
+    UnplaceablePrincipal(#[source] JwtError),
     /// The token nominated an `alg` outside the verifier's allowlist. Kept
     /// apart from [`Self::InvalidCredentials`] because an algorithm-confusion
     /// attempt is a different signal from a merely bad signature, and a
@@ -105,6 +111,10 @@ pub enum AuthCalloutError {
     /// A signing-key file's bytes weren't valid UTF-8.
     #[error("signing key file must be UTF-8 NKey seed")]
     KeyLoadUtf8(#[source] std::str::Utf8Error),
+    #[error(transparent)]
+    AdmissionKeys(#[from] AdmissionKeyError),
+    #[error(transparent)]
+    BridgeCredential(#[from] BridgeCredentialError),
 }
 
 #[cfg(test)]
