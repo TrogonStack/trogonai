@@ -17,6 +17,7 @@
 pub mod agents;
 pub mod gateway;
 pub mod markers;
+pub mod permissions;
 pub mod push;
 mod routed;
 pub mod stream;

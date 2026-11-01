@@ -1,5 +1,6 @@
 use a2a_nats::A2aPrefix;
 use a2a_nats::nats::subjects::gateway::GatewayEgressEventsSubject;
+use a2a_nats::nats::subjects::permissions::{CallerAgentRequestsSubject, CallerGatewayRequestsSubject};
 use a2a_nats::nats::subjects::subscriptions::CallerTaskEventsSubject;
 use trogon_identity_types::SubjectPrincipal;
 
@@ -27,12 +28,11 @@ impl CallerGrant {
     /// prefix of its own, so its replies may land on any inbox. A direct caller
     /// addresses agents itself and takes replies under `_INBOX.{kind}.{id}`.
     pub fn permissions(&self, route: AdmissionRoute) -> IssuedPermissions {
-        let prefix = self.prefix.as_str();
         let caller = &self.caller;
         let task_events = CallerTaskEventsSubject::new(&self.prefix, caller).to_string();
         let (publish, subscribe) = match route {
             AdmissionRoute::BridgeRouted => (
-                vec![format!("{prefix}.v1.gateway.*.{caller}.>")],
+                vec![CallerGatewayRequestsSubject::new(&self.prefix, caller).to_string()],
                 vec![
                     GatewayEgressEventsSubject::new(&self.prefix, caller).to_string(),
                     task_events,
@@ -40,7 +40,7 @@ impl CallerGrant {
                 ],
             ),
             AdmissionRoute::Direct => (
-                vec![format!("{prefix}.v1.agents.*.{caller}.>")],
+                vec![CallerAgentRequestsSubject::new(&self.prefix, caller).to_string()],
                 vec![task_events, format!("_INBOX.{caller}.>")],
             ),
         };
