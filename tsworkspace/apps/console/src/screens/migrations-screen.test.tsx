@@ -119,6 +119,57 @@ describe('migration detail', () => {
 });
 
 describe('change custody', () => {
+  it('describes only payloads wrapped under the current source key', async () => {
+    const user = userEvent.setup();
+    const backend = createFakeBackend({ latencyMs: 0 });
+    const load = backend.keyCustody.load.bind(backend.keyCustody);
+    backend.keyCustody.load = async () => {
+      const state = await load();
+      return {
+        ...state,
+        payloads: [
+          ...state.payloads,
+          {
+            id: 'pl_left_behind',
+            purpose: artifacts,
+            label: 'Left behind',
+            keyRef: seedKeyRefs.openbaoArtifacts,
+            count: 7,
+          },
+        ],
+      };
+    };
+    renderApp('/keys', backend);
+
+    const dialog = await openChangeCustody(user, 'Session artifacts');
+
+    expect(within(dialog).getByText(/rewraps the 21 existing payloads/)).toBeInTheDocument();
+    expect(within(dialog).queryByText(/rewraps the 28 existing payloads/)).not.toBeInTheDocument();
+  });
+
+  it('explains when changing custody will not start a migration', async () => {
+    const user = userEvent.setup();
+    const backend = createFakeBackend({ latencyMs: 0 });
+    const load = backend.keyCustody.load.bind(backend.keyCustody);
+    backend.keyCustody.load = async () => {
+      const state = await load();
+      return {
+        ...state,
+        payloads: state.payloads.map((payload) =>
+          payload.purpose === artifacts && payload.keyRef === seedKeyRefs.dedicatedArtifacts
+            ? { ...payload, keyRef: seedKeyRefs.openbaoArtifacts }
+            : payload,
+        ),
+      };
+    };
+    renderApp('/keys', backend);
+
+    const dialog = await openChangeCustody(user, 'Session artifacts');
+
+    expect(within(dialog).getByText(/no background migration will start/i)).toBeInTheDocument();
+    expect(within(dialog).queryByText(/pause and resume it/i)).not.toBeInTheDocument();
+  });
+
   it('moves a dedicated purpose into customer managed custody and opens the migration', async () => {
     const user = userEvent.setup();
     renderApp('/keys');

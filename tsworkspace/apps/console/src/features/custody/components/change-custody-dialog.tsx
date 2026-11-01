@@ -52,9 +52,14 @@ function Consequences({ from, to, count }: { from: CustodyTier; to: CustodyTier;
         <h3 className="micro text-muted-foreground text-[10px]">What changes</h3>
         <ul className="text-muted-foreground flex list-disc flex-col gap-1 pl-4 text-xs">
           <li>The new key becomes the default for new payloads immediately.</li>
-          <li>
-            A migration rewraps the {count} existing payloads to it in the background. You can pause and resume it.
-          </li>
+          {count === 0 ? (
+            <li>No existing payloads are wrapped under the current key, so no background migration will start.</li>
+          ) : (
+            <li>
+              A migration rewraps the {count} existing payloads under the current key in the background. You can pause
+              and resume it.
+            </li>
+          )}
           {to === 'dedicated' ? <li>The platform creates the dedicated key when you confirm.</li> : null}
           <li>
             {leaving
@@ -216,7 +221,7 @@ export function ChangeCustodyDialog({ data, purpose: fixedPurpose, open, onOpenC
               />
             )
           ) : null}
-          <Consequences from={view.tier} to={target} count={view.payloadCount} />
+          <Consequences from={view.tier} to={target} count={view.migrationPayloadCount} />
           <CustodyMigrationNote />
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => close(false)}>
