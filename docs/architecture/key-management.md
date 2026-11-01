@@ -264,7 +264,7 @@ must not depend on the platform honoring its own flag
 ([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md)
 Decision 6).
 
-While a registration is paused:
+After a service instance observes that a registration is paused:
 
 - The platform makes no provider call for it, probes included.
 - `wrap_dek`, `unwrap_dek`, `BindExternalKey`, set-as-default, migration source
@@ -272,17 +272,26 @@ While a registration is paused:
   reason `BackendPaused`. A public response may coarsen the denial like any
   other.
 
-Every operation checks in a fixed order: authenticate the caller and resolve the
-`KeyRef`, including the tenant and purpose binding check, then check the
-registration's admission, then apply the key-state matrix in
+An operation against an existing `KeyRef` checks in a fixed order: authenticate
+the caller and resolve the reference, including the tenant and purpose binding
+check, check the registration's admission, apply the key-state matrix in
 [Key States](./key-states.md), and only then call the provider. Every retry
 inside the operation deadline repeats the admission check before its next
 attempt.
 
-A pause is acknowledged once the admission fact is durably committed. Service
-instances enforce it through pushed invalidation of their admission view with a
-hard time-to-live backstop, and a provider request already in flight may
-complete.
+`BindExternalKey` has no existing `KeyRef` to resolve. It authenticates the
+caller, authorizes the tenant's use of the supplied backend, locator, purpose,
+and capabilities, checks the registration's admission, and only then performs
+provider validation and applies the discovered key-state and capability gates
+before creating the reference.
+
+A pause is acknowledged once the admission fact is durably committed, not once
+every service instance has observed it. Instances enforce it through pushed
+invalidation of their admission view with a hard time-to-live backstop. Until a
+measured propagation target is published, a stale instance may admit and start
+a provider request after acknowledgement but before it observes the pause, and
+a request already in flight may complete. The no-provider-call guarantee begins
+when the serving instance observes the pause.
 
 The platform never pauses a customer registration automatically from health
 signals. That would turn a transient provider fault into a platform-initiated
