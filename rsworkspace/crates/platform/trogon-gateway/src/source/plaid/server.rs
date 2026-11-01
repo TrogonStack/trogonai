@@ -33,7 +33,7 @@ use super::constants::{
 };
 use super::dedup_window::DedupWindow;
 use super::key_cache::{PlaidKeyCache, PlaidKeyResolveError};
-use super::key_fetcher::{PlaidKeyFetcher, ReqwestPlaidKeyFetcher};
+use super::key_fetcher::{PlaidKeyFetchError, PlaidKeyFetcher, ReqwestPlaidKeyFetcher};
 use super::signature;
 use crate::credential::commands::domain::{CredentialKind, SourceKind};
 use crate::credential_runtime_projection::{RuntimeCredentialResolver, RuntimeIntegrationKey};
@@ -335,6 +335,10 @@ impl<P: JetStreamPublisher, S: ObjectStorePut, C: EpochClock, F: PlaidKeyFetcher
         let now = self.clock.system_time();
         let key = match self.keys.resolve(key_id, secret, now).await {
             Ok(key) => key,
+            Err(PlaidKeyResolveError::Fetch(PlaidKeyFetchError::UnknownKey)) => {
+                warn!(%key_id, "Plaid does not know the verification key id");
+                return StatusCode::UNAUTHORIZED.into_response();
+            }
             Err(PlaidKeyResolveError::Fetch(err)) => {
                 warn!(error = %err, %key_id, "Plaid verification key fetch failed");
                 return StatusCode::SERVICE_UNAVAILABLE.into_response();
