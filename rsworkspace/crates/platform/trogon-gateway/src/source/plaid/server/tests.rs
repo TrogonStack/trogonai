@@ -2,7 +2,10 @@ use super::*;
 use crate::credential::commands::domain::{CredentialOwnerId, CredentialRef, CredentialScope, StorageBackend};
 use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
 use crate::secret_store::{MockOpenBaoSecretStore, SecretMaterial, SecretStorePut};
-use crate::source::plaid::test_support::{FakeFailure, FakeKeyFetcher, TestKeyPair, hs256_token};
+use crate::source::plaid::constants::KEY_ID_LEN_MAX;
+use crate::source::plaid::test_support::{
+    FakeFailure, FakeKeyFetcher, TestKeyPair, claims_segment, hs256_token, unsigned_token,
+};
 use crate::source::plaid::{PlaidApiBaseUrl, PlaidClientId, PlaidSecret};
 use axum::body::Body;
 use axum::http::Request;
@@ -366,17 +369,18 @@ async fn token_without_key_id_returns_401() {
 }
 
 #[tokio::test]
-async fn unknown_key_id_returns_503() {
+async fn unknown_key_id_returns_401() {
     let _guard = tracing_guard();
     let publisher = MockJetStreamPublisher::new();
     let stranger = TestKeyPair::generate("kid-unknown");
+    let fetcher = FakeKeyFetcher::default().failing(FakeFailure::UnknownKey);
 
-    let resp = app(publisher.clone(), FakeKeyFetcher::default())
+    let resp = app(publisher.clone(), fetcher)
         .oneshot(signed_request(&stranger, WEBHOOK_BODY))
         .await
         .unwrap();
 
-    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     assert!(publisher.published_messages().is_empty());
 }
 
@@ -384,7 +388,7 @@ async fn unknown_key_id_returns_503() {
 async fn unknown_key_ids_past_the_fetch_limit_return_429_with_retry_after_without_fetching() {
     let _guard = tracing_guard();
     let publisher = MockJetStreamPublisher::new();
-    let fetcher = FakeKeyFetcher::default();
+    let fetcher = FakeKeyFetcher::default().failing(FakeFailure::UnknownKey);
     let router = app(publisher.clone(), fetcher.clone());
 
     let fetched = router
@@ -397,7 +401,7 @@ async fn unknown_key_ids_past_the_fetch_limit_return_429_with_retry_after_withou
         .await
         .unwrap();
 
-    assert_eq!(fetched.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(fetched.status(), StatusCode::UNAUTHORIZED);
     assert_eq!(throttled.status(), StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(throttled.headers().get(header::RETRY_AFTER).unwrap(), "10");
     assert_eq!(fetcher.calls(), vec!["kid-unknown-1"]);
@@ -467,6 +471,97 @@ async fn body_that_differs_from_the_signed_hash_returns_401() {
 
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     assert!(publisher.published_messages().is_empty());
+}
+
+#[tokio::test]
+async fn alg_none_token_returns_401_without_fetching() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let (_, fetcher) = fixture();
+    let token = unsigned_token(
+        &serde_json::json!({"alg": "none", "kid": KEY_ID}),
+        TEST_NOW,
+        WEBHOOK_BODY,
+    );
+
+    let resp = app(publisher.clone(), fetcher.clone())
+        .oneshot(request(WEBHOOK_BODY, Some(&token)))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    assert!(publisher.published_messages().is_empty());
+    assert!(fetcher.calls().is_empty());
+}
+
+#[tokio::test]
+async fn embedded_attacker_jwk_header_is_ignored() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let (_, fetcher) = fixture();
+    let attacker = TestKeyPair::generate(KEY_ID);
+    let token = attacker.token_with_embedded_key(TEST_NOW, WEBHOOK_BODY, "https://attacker.example/keys");
+
+    let resp = app(publisher.clone(), fetcher.clone())
+        .oneshot(request(WEBHOOK_BODY, Some(&token)))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    assert!(publisher.published_messages().is_empty());
+    assert_eq!(fetcher.calls(), vec![KEY_ID.to_owned()]);
+}
+
+#[tokio::test]
+async fn resigned_claims_spliced_onto_a_real_signature_returns_401() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let (pair, fetcher) = fixture();
+    let genuine = pair.token(TEST_NOW, WEBHOOK_BODY);
+    let forged_body = br#"{"webhook_type":"TRANSACTIONS","webhook_code":"DEFAULT_UPDATE","item_id":"item-999"}"#;
+    let parts: Vec<&str> = genuine.split('.').collect();
+    let token = format!("{}.{}.{}", parts[0], claims_segment(TEST_NOW, forged_body), parts[2]);
+
+    let resp = app(publisher.clone(), fetcher)
+        .oneshot(request(forged_body, Some(&token)))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    assert!(publisher.published_messages().is_empty());
+}
+
+#[tokio::test]
+async fn issued_at_too_far_in_the_future_returns_401() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let (pair, fetcher) = fixture();
+    let token = pair.token(TEST_NOW + 301, WEBHOOK_BODY);
+
+    let resp = app(publisher.clone(), fetcher)
+        .oneshot(request(WEBHOOK_BODY, Some(&token)))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    assert!(publisher.published_messages().is_empty());
+}
+
+#[tokio::test]
+async fn oversized_key_id_returns_401_without_fetching() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let (_, fetcher) = fixture();
+    let oversized = TestKeyPair::generate(&"k".repeat(KEY_ID_LEN_MAX + 1));
+
+    let resp = app(publisher.clone(), fetcher.clone())
+        .oneshot(signed_request(&oversized, WEBHOOK_BODY))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    assert!(publisher.published_messages().is_empty());
+    assert!(fetcher.calls().is_empty());
 }
 
 #[tokio::test]
