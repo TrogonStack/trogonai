@@ -43,6 +43,32 @@
     }
   },
   {
+    "name": "successful operation with only a failed provider attempt",
+    "type": "trogonai.platform.key_custody.audit.v1alpha1.KeyOperationAuditRecord",
+    "valid": false,
+    "message": {
+      "operationId": { "value": "operation-7" },
+      "correlationId": { "value": "correlation-7" },
+      "operation": "KEY_OPERATION_KIND_WRAP_DEK",
+      "tenant": { "value": "tenant-1" },
+      "keyRef": { "value": "key-1" },
+      "keyBackendId": { "value": "backend-1" },
+      "purpose": { "value": "payload" },
+      "provider": "KEY_PROVIDER_AWS_KMS",
+      "occurredAt": "2026-11-01T00:00:00Z",
+      "succeeded": {},
+      "attempts": [
+        {
+          "attemptNumber": 1,
+          "startedAt": "2026-11-01T00:00:00Z",
+          "duration": "0.100s",
+          "failed": "OPERATION_FAILURE_CATEGORY_PROVIDER_UNAVAILABLE",
+          "absence": "PROVIDER_REQUEST_ABSENCE_NO_RESPONSE"
+        }
+      ]
+    }
+  },
+  {
     "name": "provider unavailable with one provider attempt",
     "type": "trogonai.platform.key_custody.audit.v1alpha1.KeyOperationAuditRecord",
     "valid": true,

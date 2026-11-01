@@ -41,6 +41,11 @@ message KeyOperationAuditRecord {
     message: "a provider outcome lists at least one provider attempt"
     expression: "size(this.attempts) > 0 || (has(this.failed) && (this.failed.category == trogonai.platform.key_custody.v1alpha1.OperationFailureCategory.OPERATION_FAILURE_CATEGORY_BINDING_MISMATCH || this.failed.category == trogonai.platform.key_custody.v1alpha1.OperationFailureCategory.OPERATION_FAILURE_CATEGORY_UNSUPPORTED_CAPABILITY || (this.failed.category == trogonai.platform.key_custody.v1alpha1.OperationFailureCategory.OPERATION_FAILURE_CATEGORY_KEY_USE_DENIED && (this.failed.denial_reason == trogonai.platform.key_custody.v1alpha1.KeyUseDenialReason.KEY_USE_DENIAL_REASON_BACKEND_PAUSED || this.failed.denial_reason == trogonai.platform.key_custody.v1alpha1.KeyUseDenialReason.KEY_USE_DENIAL_REASON_KEY_STATE))))"
   };
+  option (buf.validate.message).cel = {
+    id: "audit_record.success_has_successful_attempt"
+    message: "a successful operation lists at least one successful provider attempt"
+    expression: "!has(this.succeeded) || this.attempts.exists(attempt, has(attempt.succeeded))"
+  };
 
   trogonai.platform.key_custody.v1alpha1.OperationId operation_id = 1 [features.field_presence = LEGACY_REQUIRED];
   CorrelationId correlation_id = 2 [features.field_presence = LEGACY_REQUIRED];
