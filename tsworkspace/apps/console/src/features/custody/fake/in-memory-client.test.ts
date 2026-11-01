@@ -228,6 +228,21 @@ describe('registering a backend', () => {
     expect((await client.runCheck(plan.attemptId, 'disable_upsert')).outcome).toBe('pass');
   });
 
+  it('accepts a padded valid OpenBao version during validation', async () => {
+    const { client } = newClient();
+    const plan = await client.prepareRegistration({ ...openBaoInput, version: ' 2.6.1 ' });
+    let versionResult;
+    for (const check of plan.checks) {
+      const result = await client.runCheck(plan.attemptId, check.id);
+      if (check.id === 'version') {
+        versionResult = result;
+        break;
+      }
+    }
+
+    expect(versionResult).toMatchObject({ outcome: 'pass' });
+  });
+
   it('rejects invalid input', async () => {
     const { client } = newClient();
     expect((await rejection(client.prepareRegistration({ ...awsInput, roleArn: 'nope' }))).reason).toBe(

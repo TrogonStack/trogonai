@@ -62,13 +62,15 @@ function evaluate(input: RegistrationInput, checkId: string, priorRuns: number):
       return pass('The certificate chain verified against the trust root you supplied.');
     case 'authentication':
       return pass('A token was issued with a 10 minute lifetime.');
-    case 'version':
-      return versionAtLeast(input.version, MIN_OPENBAO_VERSION)
-        ? pass(`OpenBao ${input.version} is at least ${MIN_OPENBAO_VERSION}.`)
+    case 'version': {
+      const version = input.version.trim();
+      return versionAtLeast(version, MIN_OPENBAO_VERSION)
+        ? pass(`OpenBao ${version} is at least ${MIN_OPENBAO_VERSION}.`)
         : fail(
-            `OpenBao ${input.version} is older than ${MIN_OPENBAO_VERSION}, which the platform requires.`,
+            `OpenBao ${version} is older than ${MIN_OPENBAO_VERSION}, which the platform requires.`,
             KeyBackendFailureReason.CAPABILITY_MISSING,
           );
+    }
     case 'disable_upsert':
       return priorRuns === 0
         ? fail(
