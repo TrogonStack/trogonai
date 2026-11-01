@@ -21,8 +21,12 @@
 //! boundary that built this claims it verified this actor", and this crate has
 //! no way to tell a principal an authenticating gateway minted from one a
 //! caller typed by hand. Constructing principals from verified credentials is
-//! the boundary's job, and ADR#0026's Decision 4 covers it; it is not
-//! implemented anywhere yet.
+//! the boundary's job, and ADR#0026's Decision 4 covers it. Per
+//! [ADR#0082](https://github.com/TrogonStack/trogonai/blob/main/docs/adr/0082-bus-principal-from-subject-and-edge-proof-of-possession.md),
+//! the NATS decider host, `trogon-decider-nats-server`, derives each principal
+//! from the subject the server delivered, so a principal it builds is only as
+//! trustworthy as the allow list that let the connection publish on that
+//! subject.
 
 use std::borrow::{Borrow, Cow};
 use std::collections::BTreeSet;

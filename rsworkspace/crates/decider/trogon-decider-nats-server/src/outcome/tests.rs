@@ -242,6 +242,19 @@ fn a_command_with_no_principal_is_unauthenticated_rather_than_permission_denied(
 }
 
 #[test]
+fn a_subject_naming_no_principal_is_denied_as_unauthenticated() {
+    let reply = CommandReply::unauthenticated(&StorageDownError);
+
+    assert_eq!(
+        reply.decision(),
+        DecisionOutcome::Denied,
+        "refusing who the subject named is a denial, not a fault the host or the guest answers for"
+    );
+    assert_eq!(faulted(&reply).code, Code::UNAUTHENTICATED as i32);
+    assert_eq!(fault_reason(&reply), "PRINCIPAL_MISSING");
+}
+
+#[test]
 fn an_unroutable_command_type_is_a_fault_of_its_own_class() {
     let reply = CommandReply::unroutable(&StorageDownError);
 
@@ -388,6 +401,7 @@ fn every_reply_shape() -> Vec<CommandReply> {
         ),
         CommandReply::unroutable(&StorageDownError),
         CommandReply::internal(&StorageDownError),
+        CommandReply::unauthenticated(&StorageDownError),
     ]
 }
 

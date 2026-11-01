@@ -7,6 +7,11 @@
 //! produce a host. What remains at request time is only what a caller can get
 //! wrong, and every one of those answers with a reply rather than with
 //! silence.
+//!
+//! Who a command runs for is read from the subject it arrived on, per
+//! [ADR#0082](../../../../../docs/adr/0082-bus-principal-from-subject-and-edge-proof-of-possession.md),
+//! and every execution answers to an authorizer. A deployment that configures
+//! no policy of its own gets [`AdmitAnyPrincipal`], never the absence of one.
 
 use std::collections::HashMap;
 use std::error::Error as StdError;
@@ -21,35 +26,50 @@ use trogon_decider_nats::{
     ensure_bucket, ensure_stream,
 };
 use trogon_decider_runtime::{
-    ConcurrencyAdmission, DrainableSnapshotTaskScheduler, ReplayLimit, SnapshotTaskScheduler as _,
+    CommandAuthorizer, CommandPrincipal, ConcurrencyAdmission, DrainableSnapshotTaskScheduler, ReplayLimit,
+    SnapshotTaskScheduler as _,
 };
 use trogon_decider_wasm_runtime::{
     CommandType, DeciderRegistry, DeciderRegistryHandle, LoadWasmDeciderError, ModuleName, RegisterModuleError,
     WasmCommandExecution, WasmDeciderEngine, WasmDeciderModule, WasmEngineConfig, WasmEngineError,
 };
+use trogon_decider_wit::host::CommandEnvelope;
 
+use crate::authorizer::AdmitAnyPrincipal;
 use crate::config::ServerConfig;
 use crate::constants::{
-    CONTENT_TYPE_HEADER, NATS_SERVICE_ERROR_CODE_HEADER, NATS_SERVICE_ERROR_HEADER, PROTOBUF_CONTENT_TYPE,
+    CONTENT_TYPE_HEADER, ENV_DECIDER_TENANT_POSITION, NATS_SERVICE_ERROR_CODE_HEADER, NATS_SERVICE_ERROR_HEADER,
+    PROTOBUF_CONTENT_TYPE, TENANT_POSITION_ABSENT,
 };
+use crate::endpoint::CommandEndpoint;
 use crate::event_subject::{EventSubjectError, ModuleEventSubjects};
 use crate::module_reference::ModuleReference;
 use crate::module_source::ModuleSource;
 use crate::outcome::CommandReply;
 use crate::request::CommandRequest;
+use crate::tenant_position::TenantPosition;
 
 /// Resolves one inbound message onto the module that owns it.
 ///
 /// Separate from the execution side so every way a request can fail to route
 /// is exercisable without a NATS server or a loaded module.
 pub struct CommandRouter {
+    endpoint: CommandEndpoint,
     registry: Arc<DeciderRegistryHandle>,
 }
 
 impl CommandRouter {
-    /// Binds a router to the routable set.
-    pub const fn new(registry: Arc<DeciderRegistryHandle>) -> Self {
-        Self { registry }
+    /// Binds a router to the endpoint whose subjects name the principal, and
+    /// to the routable set.
+    pub const fn new(endpoint: CommandEndpoint, registry: Arc<DeciderRegistryHandle>) -> Self {
+        Self { endpoint, registry }
+    }
+
+    /// The endpoint this router reads principals against, and the one the
+    /// host subscribes on, so the two cannot disagree about where the
+    /// principal sits.
+    pub const fn endpoint(&self) -> &CommandEndpoint {
+        &self.endpoint
     }
 
     /// The routable set this router reads. Shared, so a later activation is visible here.
@@ -57,12 +77,25 @@ impl CommandRouter {
         &self.registry
     }
 
-    /// Resolves a delivery into the module and inputs one execution needs.
+    /// Resolves a delivery into the principal, the module and the inputs one
+    /// execution needs.
     ///
+    /// The principal is read from the subject first, and a subject that names
+    /// nobody is refused without its payload ever being decoded: nothing a
+    /// caller wrote is worth reading once it is known that nobody is acting.
     /// The request is decoded before the route is resolved: a caller that sent
     /// an unreadable envelope learns that, rather than learning "unroutable"
     /// and going to look at a deployment that is fine.
-    pub fn route(&self, payload: &[u8], headers: Option<&HeaderMap>) -> Result<RoutedCommand, CommandReply> {
+    pub fn route(
+        &self,
+        subject: &str,
+        payload: &[u8],
+        headers: Option<&HeaderMap>,
+    ) -> Result<RoutedCommand, CommandReply> {
+        let principal = self
+            .endpoint
+            .derive_principal(subject)
+            .map_err(|error| CommandReply::unauthenticated(&error))?;
         let request = CommandRequest::parse(payload, headers).map_err(|error| CommandReply::invalid_request(&error))?;
         let command_type =
             CommandType::new(request.command().type_.clone()).map_err(|error| CommandReply::invalid_request(&error))?;
@@ -71,7 +104,11 @@ impl CommandRouter {
             .route(&command_type)
             .map_err(|error| CommandReply::unroutable(&error))?;
 
-        Ok(RoutedCommand { module, request })
+        Ok(RoutedCommand {
+            principal,
+            module,
+            request,
+        })
     }
 }
 
@@ -80,6 +117,7 @@ impl CommandRouter {
 /// Holds the resolved `Arc` for the rest of the dispatch, so a concurrent
 /// activation cannot move this command to a different module partway through.
 pub struct RoutedCommand {
+    principal: CommandPrincipal,
     module: Arc<WasmDeciderModule>,
     request: CommandRequest,
 }
@@ -87,6 +125,7 @@ pub struct RoutedCommand {
 impl std::fmt::Debug for RoutedCommand {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RoutedCommand")
+            .field("principal", &self.principal)
             .field("module", self.module.name())
             .field("command_type", &self.request.command().type_)
             .finish_non_exhaustive()
@@ -94,6 +133,11 @@ impl std::fmt::Debug for RoutedCommand {
 }
 
 impl RoutedCommand {
+    /// Who the subject named as acting.
+    pub const fn principal(&self) -> &CommandPrincipal {
+        &self.principal
+    }
+
     /// The module this command resolved to.
     pub fn module(&self) -> &WasmDeciderModule {
         &self.module
@@ -109,6 +153,7 @@ impl RoutedCommand {
 /// every execution runs under.
 pub struct DeciderHost {
     router: CommandRouter,
+    authorizer: Box<dyn CommandAuthorizer<CommandEnvelope> + Send + Sync>,
     stores: HashMap<ModuleName, JetStreamStore<ModuleEventSubjects>>,
     snapshots: DrainableSnapshotTaskScheduler,
     admission: ConcurrencyAdmission,
@@ -123,11 +168,17 @@ impl DeciderHost {
     /// union, and [`ensure_stream`] refuses an existing stream that does not
     /// already cover it, so the mismatch surfaces at startup rather than as a
     /// command whose events land nowhere.
+    ///
+    /// A host configured to serve several tenants is refused before anything
+    /// is fetched or provisioned. Its events stream, its snapshot bucket and
+    /// the principal it authorizes carry no tenant, so every tenant reaching
+    /// it would read and append to the same streams.
     pub async fn start<S: ModuleSource>(
         config: &ServerConfig,
         modules: &S,
         js: jetstream::Context,
     ) -> Result<Self, StartupError> {
+        ensure_one_tenant_account(config)?;
         let engine = WasmDeciderEngine::new(WasmEngineConfig::default())?;
         let modules = load_modules(&engine, modules, &config.modules).await?;
         let module_names = modules.iter().map(|module| module.name().clone()).collect::<Vec<_>>();
@@ -152,12 +203,26 @@ impl DeciderHost {
         }
 
         Ok(Self {
-            router: CommandRouter::new(Arc::new(registry.build_handle())),
+            router: CommandRouter::new(config.endpoint.clone(), Arc::new(registry.build_handle())),
+            authorizer: Box::new(AdmitAnyPrincipal),
             stores,
             snapshots: DrainableSnapshotTaskScheduler::new(),
             admission: ConcurrencyAdmission::new(config.admission_limit),
             replay_limit: config.replay_limit,
         })
+    }
+
+    /// Replaces the default authorizer with a deployment's own policy.
+    ///
+    /// Replaces rather than disables: no host runs an execution that skips
+    /// its authorizer, so a policy is all a deployment can choose.
+    #[must_use]
+    pub fn with_authorizer<A>(mut self, authorizer: A) -> Self
+    where
+        A: CommandAuthorizer<CommandEnvelope> + Send + Sync + 'static,
+    {
+        self.authorizer = Box::new(authorizer);
+        self
     }
 
     /// The router this host dispatches through.
@@ -184,7 +249,9 @@ impl DeciderHost {
             .with_expected_revision(routed.request.expected_revision())
             .with_replay_limit(self.replay_limit)
             .with_command_id(routed.request.command_id())
-            .with_admission(&self.admission);
+            .with_admission(&self.admission)
+            .with_principal(routed.principal)
+            .with_authorizer(&*self.authorizer);
 
         match execution.execute().await {
             Ok(result) => CommandReply::decided(&result),
@@ -198,7 +265,7 @@ impl DeciderHost {
     }
 }
 
-/// Subscribes on the host's subject subtree and answers until a shutdown signal.
+/// Subscribes on the host's endpoint and answers until a shutdown signal.
 pub async fn serve(host: Arc<DeciderHost>, client: Client, config: &ServerConfig) -> Result<(), ServeError> {
     let shutdown = CancellationToken::new();
     let shutdown_for_signal = shutdown.clone();
@@ -210,7 +277,7 @@ pub async fn serve(host: Arc<DeciderHost>, client: Client, config: &ServerConfig
     serve_until(host, client, config, shutdown).await
 }
 
-/// Subscribes on the host's subject subtree and answers until `shutdown` is cancelled.
+/// Subscribes on the host's endpoint and answers until `shutdown` is cancelled.
 ///
 /// Each delivery is handled on its own task so the admission limit, not the
 /// receive loop, is what bounds concurrency: a serialized loop would cap the
@@ -221,17 +288,17 @@ pub async fn serve_until(
     config: &ServerConfig,
     shutdown: CancellationToken,
 ) -> Result<(), ServeError> {
-    let subject = config.endpoint.subject().to_owned();
+    let subscription = host.router.endpoint().subscription().to_owned();
     let mut ingress = client
-        .queue_subscribe(subject.clone(), config.queue_group.clone())
+        .queue_subscribe(subscription.clone(), config.queue_group.clone())
         .await
         .map_err(|source| ServeError::Subscribe {
-            pattern: subject.clone(),
+            pattern: subscription.clone(),
             source,
         })?;
 
     info!(
-        subject = %subject,
+        subject = %subscription,
         queue_group = %config.queue_group,
         routes = host.router.registry().routes().len(),
         "decider host subscribed",
@@ -279,7 +346,7 @@ async fn handle(host: &DeciderHost, client: &Client, message: Message) {
         return;
     };
 
-    let reply = match host.router.route(&payload, headers.as_ref()) {
+    let reply = match host.router.route(subject.as_str(), &payload, headers.as_ref()) {
         Ok(routed) => host.execute(routed).await,
         Err(reply) => reply,
     };
@@ -341,6 +408,16 @@ async fn load_modules<S: ModuleSource>(
     Ok(modules)
 }
 
+fn ensure_one_tenant_account(config: &ServerConfig) -> Result<(), StartupError> {
+    match config.endpoint.tenant() {
+        TenantPosition::Absent => Ok(()),
+        TenantPosition::Wildcard => Err(StartupError::StateNotScopedByTenant {
+            events_stream: config.events_stream.clone(),
+            snapshot_bucket: config.snapshot_bucket.clone(),
+        }),
+    }
+}
+
 fn events_stream_config(
     config: &ServerConfig,
     module_names: &[ModuleName],
@@ -373,6 +450,17 @@ fn snapshot_bucket_config(config: &ServerConfig) -> jetstream::kv::Config {
 /// Why the host could not be assembled from its configuration.
 #[derive(Debug, thiserror::Error)]
 pub enum StartupError {
+    /// The host was configured to serve several tenants, and nothing it would
+    /// store or authorize is scoped by tenant.
+    #[error(
+        "a host cannot serve several tenants: events stream '{events_stream}', snapshot bucket '{snapshot_bucket}' \
+         and the command principal are not scoped by tenant, so every tenant would read and append to the same \
+         streams; serve one tenant account per host with {ENV_DECIDER_TENANT_POSITION}={TENANT_POSITION_ABSENT}"
+    )]
+    StateNotScopedByTenant {
+        events_stream: String,
+        snapshot_bucket: String,
+    },
     /// The shared wasmtime engine could not be built.
     #[error("failed to build the wasm engine: {0}")]
     Engine(#[from] WasmEngineError),
