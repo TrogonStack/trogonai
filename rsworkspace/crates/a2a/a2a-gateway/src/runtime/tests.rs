@@ -42,6 +42,7 @@ async fn startup_preserves_enabled_policy_configuration_failures() {
         ("A2A_GATEWAY_AAUTH_MODE", "invalid"),
     ] {
         let env = InMemoryEnv::new();
+        env.set("NATS_TLS_DISABLED", "true");
         env.set(
             "AUTH_CALLOUT_SIGNING_SECRET",
             nkeys::KeyPair::new_account().seed().unwrap(),
@@ -97,6 +98,7 @@ async fn run_with_args_surfaces_config_error() {
 async fn run_with_args_preserves_subscription_error_source() {
     let server = trogon_nats::test_support::CoreTestServer::start().await;
     let env = InMemoryEnv::new();
+    env.set("NATS_TLS_DISABLED", "true");
     env.set(
         "AUTH_CALLOUT_SIGNING_SECRET",
         nkeys::KeyPair::new_account().seed().expect("account signing seed"),

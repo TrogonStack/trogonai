@@ -1,6 +1,5 @@
 use super::*;
 use crate::credential_value::{CredentialValue, NKeySeed};
-use crate::tls::IncompleteClientCertificate;
 use trogon_std::env::InMemoryEnv;
 
 fn literal_text(value: &CredentialValue) -> Option<&str> {
@@ -10,16 +9,24 @@ fn literal_text(value: &CredentialValue) -> Option<&str> {
     }
 }
 
-fn settings(pairs: &[(&str, &str)]) -> NatsSettings {
+fn env_with(pairs: &[(&str, &str)]) -> InMemoryEnv {
     let env = InMemoryEnv::new();
     for &(name, value) in pairs {
         env.set(name, value);
     }
-    NatsSettings::from_env(&env)
+    env
+}
+
+fn settings(pairs: &[(&str, &str)]) -> NatsSettings {
+    NatsSettings::from_env(&env_with(pairs))
 }
 
 fn config(pairs: &[(&str, &str)]) -> NatsConfig {
-    settings(pairs).resolve()
+    NatsConfig::from_env(&env_with(pairs))
+}
+
+fn tls(pairs: &[(&str, &str)]) -> Result<NatsTls, TlsMisconfiguration> {
+    config(pairs).tls
 }
 
 #[test]
@@ -28,7 +35,6 @@ fn defaults_to_localhost_without_auth() {
 
     assert_eq!(config.servers, vec!["localhost:4222"]);
     assert!(matches!(config.auth, NatsAuth::None));
-    assert!(!config.tls.is_configured());
 }
 
 #[test]
@@ -203,7 +209,7 @@ fn secret_values_may_reference_files_and_variables() {
         NatsAuth::UserPassword { password: CredentialValue::Env(ref name), .. } if name == "PW"
     ));
     assert!(matches!(
-        settings(&[("NATS_TOKEN", "file:///run/token")]).resolve().auth,
+        NatsConfig::from_env(&env_with(&[("NATS_TOKEN", "file:///run/token")])).auth,
         NatsAuth::Token(CredentialValue::File(_))
     ));
 }
@@ -216,25 +222,97 @@ fn unsupported_value_scheme_is_kept_for_connect_time() {
 }
 
 #[test]
+fn tls_is_on_by_default() {
+    assert_eq!(tls(&[]), Ok(NatsTls::default()));
+}
+
+#[test]
 fn tls_needs_cert_and_key_together() {
     assert_eq!(
-        config(&[("NATS_CERT", "/c.pem")]).tls.client_certificate(),
-        Err(IncompleteClientCertificate::MissingKey)
+        tls(&[("NATS_CERT", "/c.pem")]),
+        Err(TlsMisconfiguration::IncompleteClientCertificate(
+            IncompleteClientCertificate::MissingKey
+        ))
     );
     assert_eq!(
-        config(&[("NATS_KEY", "/k.pem")]).tls.client_certificate(),
-        Err(IncompleteClientCertificate::MissingCert)
+        tls(&[("NATS_KEY", "/k.pem")]),
+        Err(TlsMisconfiguration::IncompleteClientCertificate(
+            IncompleteClientCertificate::MissingCert
+        ))
     );
+}
 
-    let both = config(&[("NATS_CERT", "/c.pem"), ("NATS_KEY", "file:///k.pem")]);
-    assert!(both.tls.client_certificate().unwrap().is_some());
+#[test]
+fn tls_reads_the_client_certificate() {
+    assert_eq!(
+        tls(&[("NATS_CERT", "/c.pem"), ("NATS_KEY", "file:///k.pem")]),
+        Ok(NatsTls::Enabled {
+            ca: None,
+            client_cert: Some(ClientCertificate {
+                cert: Location::Path("/c.pem".into()),
+                key: Location::Path("/k.pem".into()),
+            }),
+        })
+    );
 }
 
 #[test]
 fn tls_ca_is_read() {
-    let config = config(&[("NATS_CA", "/ca.pem")]);
+    assert_eq!(
+        tls(&[("NATS_CA", "/ca.pem")]),
+        Ok(NatsTls::Enabled {
+            ca: Some(Location::Path("/ca.pem".into())),
+            client_cert: None,
+        })
+    );
+}
 
-    assert_eq!(config.tls.root_ca(), Some(&Location::Path("/ca.pem".into())));
+#[test]
+fn tls_disabled_accepts_true_one_and_yes_in_any_case() {
+    for value in ["true", "TRUE", "True", "1", "yes", "YES", "Yes"] {
+        assert_eq!(tls(&[("NATS_TLS_DISABLED", value)]), Ok(NatsTls::Disabled), "{value}");
+    }
+}
+
+#[test]
+fn empty_tls_disabled_leaves_tls_on() {
+    assert_eq!(tls(&[("NATS_TLS_DISABLED", "")]), Ok(NatsTls::default()));
+}
+
+#[test]
+fn tls_disabled_rejects_every_other_value() {
+    for value in ["false", "0", "no", "off", "on", "enabled", " true"] {
+        assert_eq!(
+            tls(&[("NATS_TLS_DISABLED", value)]),
+            Err(TlsMisconfiguration::UnrecognizedDisabledValue(value.to_owned())),
+            "{value}"
+        );
+    }
+}
+
+#[test]
+fn tls_disabled_conflicts_with_every_tls_setting() {
+    for setting in [ENV_NATS_CA, ENV_NATS_CERT, ENV_NATS_KEY] {
+        assert_eq!(
+            tls(&[("NATS_TLS_DISABLED", "true"), (setting, "/x.pem")]),
+            Err(TlsMisconfiguration::DisabledAlongside(setting)),
+            "{setting}"
+        );
+    }
+}
+
+#[test]
+fn resolve_reads_tls_disabled_only_from_the_environment_it_is_given() {
+    let settings = NatsSettings {
+        url: Some("nats://x:4222".into()),
+        ..NatsSettings::default()
+    };
+
+    assert_eq!(settings.resolve(&InMemoryEnv::new()).tls, Ok(NatsTls::default()));
+    assert_eq!(
+        settings.resolve(&env_with(&[("NATS_TLS_DISABLED", "yes")])).tls,
+        Ok(NatsTls::Disabled)
+    );
 }
 
 #[test]

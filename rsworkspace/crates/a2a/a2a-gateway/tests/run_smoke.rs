@@ -42,6 +42,7 @@ async fn run_rejects_missing_signing_credentials() {
     // Startup connects to NATS before loading the signing credentials.
     let server = CoreTestServer::start().await;
     let env = InMemoryEnv::new();
+    env.set("NATS_TLS_DISABLED", "true");
     let args = Args {
         nats_url: server.address().to_string(),
         prefix: "a2a".to_string(),
