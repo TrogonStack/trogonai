@@ -59,7 +59,10 @@ message LatencyObservation {
     }
   ];
   google.protobuf.Duration duration = 2 [features.field_presence = LEGACY_REQUIRED];
-  google.protobuf.Timestamp observed_at = 3 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp observed_at = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
 }
 
 // Advisory observed connection health, never an admission input. The provider
