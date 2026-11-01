@@ -134,7 +134,7 @@ def load_fixtures(suite_path):
                         "type": case["type"],
                         "payload": case["message"],
                         "invalid": not case["valid"],
-                        "violations": [],
+                        "violations": case.get("violations", []),
                     }
                 )
             continue

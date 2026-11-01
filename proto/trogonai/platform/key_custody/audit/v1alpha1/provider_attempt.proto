@@ -41,7 +41,10 @@ message ProviderAttempt {
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).timestamp.gt = {seconds: 0}
   ];
-  google.protobuf.Duration duration = 3 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Duration duration = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).duration.gte = {}
+  ];
 
   oneof outcome {
     option (buf.validate.oneof).required = true;
