@@ -7,7 +7,7 @@
   },
   "scripts": {
     "generate": "mise exec -- buf generate --template buf.gen.yaml",
-    "generate:key-custody": "mise exec -- buf generate --template buf.key-custody.gen.yaml",
+    "generate:key-custody": "mise run proto:generate-key-custody-typescript",
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint ."
