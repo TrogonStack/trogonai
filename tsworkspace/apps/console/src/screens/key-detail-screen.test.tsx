@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { createFakeBackend } from '@/fake-backend';
 import { keyBackendId, keyRef, purposeId } from '@/features/custody/domain/identifiers';
 import { seedKeyRefs, seedLocators } from '@/features/custody/fake/seed-ids';
+import { custodyKeys } from '@/features/custody/queries';
 import { renderApp } from '@/test/render-app';
 
 describe('key detail', () => {
@@ -98,5 +99,20 @@ describe('key detail', () => {
   it('reports a missing key', async () => {
     renderApp(`/keys/keys/${keyRef('kr_00000000')}`);
     expect(await screen.findByText('Key not found')).toBeInTheDocument();
+  });
+
+  it('keeps cached key details visible when a background refresh fails', async () => {
+    const backend = createFakeBackend({ latencyMs: 0 });
+    const { queryClient } = renderApp(`/keys/keys/${seedKeyRefs.awsMessages}`, backend);
+
+    expect(await screen.findByRole('heading', { name: seedKeyRefs.awsMessages })).toBeInTheDocument();
+    backend.keyCustody.load = async () => {
+      throw new Error('Custody refresh failed.');
+    };
+    await queryClient.invalidateQueries({ queryKey: custodyKeys.state });
+
+    expect(await screen.findByText('Could not refresh the key')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: seedKeyRefs.awsMessages })).toBeInTheDocument();
+    expect(screen.getByText('Usage records')).toBeInTheDocument();
   });
 });
