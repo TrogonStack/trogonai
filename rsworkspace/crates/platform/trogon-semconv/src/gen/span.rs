@@ -198,6 +198,9 @@ pub const NATS_REQUEST: &str = "nats.request";
 /// Notion webhook ingestion
 pub const NOTION_WEBHOOK: &str = "notion.webhook";
 
+/// Plaid webhook ingestion
+pub const PLAID_WEBHOOK: &str = "plaid.webhook";
+
 /// MCP transport receive. Span name is `receive` (no namespace) today
 pub const RECEIVE: &str = "receive";
 
