@@ -12,7 +12,9 @@ import { FailureReasonBadge } from './key-badges';
 
 export function useStagedChecks(attemptId: AttemptId | undefined, checks: readonly CheckDefinition[]) {
   const runCheck = useRunCheck();
-  const [attemptResults, setAttemptResults] = useState<Readonly<Record<string, Readonly<Record<string, CheckResult>>>>>({});
+  const [attemptResults, setAttemptResults] = useState<Readonly<Record<string, Readonly<Record<string, CheckResult>>>>>(
+    {},
+  );
   const results = attemptResults[attemptId ?? ''] ?? {};
   const [active, setActive] = useState<string>();
   const [error, setError] = useState<unknown>();

@@ -45,6 +45,19 @@ describe('bind key wizard', () => {
     expect(await screen.findByText(/This is an alias/)).toBeInTheDocument();
   });
 
+  it('explains when no key purpose is available and prevents validation', async () => {
+    const user = userEvent.setup();
+    const backend = createFakeBackend({ latencyMs: 0 });
+    const load = backend.keyCustody.load.bind(backend.keyCustody);
+    backend.keyCustody.load = async () => ({ ...(await load()), purposes: [] });
+    renderApp('/keys/keys/new?backend=kbe_aws_acme_prod', backend);
+
+    await user.click(await screen.findByRole('button', { name: 'Continue' }));
+
+    expect(screen.getByText('No key purposes are available.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Continue to validation' })).toBeDisabled();
+  });
+
   it('denies a paused backend with BackendPaused and does not prepare the key', async () => {
     const user = userEvent.setup();
     const backend = createFakeBackend({ latencyMs: 0 });
