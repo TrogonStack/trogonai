@@ -5,8 +5,12 @@ set -euo pipefail
 ROOT="${GITHUB_WORKSPACE:-$(git rev-parse --show-toplevel)}"
 cd "$ROOT"
 
-target=tsworkspace/packages/proto/src/gen/trogonai/platform/key_custody
-drift=$(git status --short --untracked-files=all -- "$target")
+targets=(
+  tsworkspace/packages/proto/src/gen/trogonai/platform/key_custody
+  tsworkspace/packages/proto/src/gen/buf/validate/validate_pb.ts
+  tsworkspace/packages/proto/src/gen/trogon/hierarchy/v1alpha1/node_pb.ts
+)
+drift=$(git status --short --untracked-files=all -- "${targets[@]}")
 if [[ -n "$drift" ]]; then
   printf '%s\n' "$drift"
   exit 1
