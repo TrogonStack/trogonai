@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+#MISE description="Generate TypeScript key custody bindings from a clean output set"
+set -euo pipefail
+
+repo_root="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
+package_dir="$repo_root/tsworkspace/packages/proto"
+output="$package_dir/src/gen"
+
+if [[ -d "$output/trogonai/platform/key_custody" ]]; then
+  find "$output/trogonai/platform/key_custody" -type f -delete
+fi
+
+for imported_binding in \
+  "$output/buf/validate/validate_pb.ts" \
+  "$output/trogon/hierarchy/v1alpha1/node_pb.ts"
+do
+  if [[ -f "$imported_binding" ]]; then
+    unlink "$imported_binding"
+  fi
+done
+
+cd "$package_dir"
+exec mise exec -- buf generate --template buf.key-custody.gen.yaml
