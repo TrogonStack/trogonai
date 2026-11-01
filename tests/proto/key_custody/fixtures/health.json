@@ -1,0 +1,22 @@
+[
+  {
+    "name": "latency observed after epoch",
+    "type": "trogonai.platform.key_custody.v1alpha1.LatencyObservation",
+    "valid": true,
+    "message": {
+      "operation": "KEY_OPERATION_KIND_WRAP_DEK",
+      "duration": "0.100s",
+      "observedAt": "2026-11-01T00:00:00Z"
+    }
+  },
+  {
+    "name": "latency observed at epoch",
+    "type": "trogonai.platform.key_custody.v1alpha1.LatencyObservation",
+    "valid": false,
+    "message": {
+      "operation": "KEY_OPERATION_KIND_WRAP_DEK",
+      "duration": "0.100s",
+      "observedAt": "1970-01-01T00:00:00Z"
+    }
+  }
+]
