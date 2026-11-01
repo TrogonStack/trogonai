@@ -58,7 +58,10 @@ message LatencyObservation {
       not_in: [0]
     }
   ];
-  google.protobuf.Duration duration = 2 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Duration duration = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).duration.gte = {}
+  ];
   google.protobuf.Timestamp observed_at = 3 [
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).timestamp.gt = {seconds: 0}

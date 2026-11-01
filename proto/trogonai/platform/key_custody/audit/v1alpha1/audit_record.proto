@@ -46,6 +46,16 @@ message KeyOperationAuditRecord {
     message: "a successful operation lists at least one successful provider attempt"
     expression: "!has(this.succeeded) || this.attempts.exists(attempt, has(attempt.succeeded))"
   };
+  option (buf.validate.message).cel = {
+    id: "audit_record.failure_has_no_successful_attempt"
+    message: "a failed operation lists no successful provider attempt"
+    expression: "!has(this.failed) || !this.attempts.exists(attempt, has(attempt.succeeded))"
+  };
+  option (buf.validate.message).cel = {
+    id: "audit_record.attempt_sequence"
+    message: "provider attempt numbers form the ordered sequence from one"
+    expression: "this.attempts.all(attempt, attempt.attempt_number > 0u && attempt.attempt_number <= uint(this.attempts.size()) && this.attempts[int(attempt.attempt_number) - 1].attempt_number == attempt.attempt_number)"
+  };
 
   trogonai.platform.key_custody.v1alpha1.OperationId operation_id = 1 [features.field_presence = LEGACY_REQUIRED];
   CorrelationId correlation_id = 2 [features.field_presence = LEGACY_REQUIRED];
