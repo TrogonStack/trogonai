@@ -182,6 +182,30 @@ export function BindKeyWizard({ initialBackendId }: { initialBackendId?: string 
         </Card>
       ) : null}
 
+      {step === 1 && !backend ? (
+        <Card>
+          <CardHeader>
+            <div className="flex flex-col gap-1">
+              <CardTitle>Backend unavailable</CardTitle>
+              <CardDescription>The selected backend is no longer active.</CardDescription>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setChosenBackend(undefined);
+                setStep(0);
+              }}
+            >
+              <ArrowLeftIcon data-icon="inline-start" />
+              Choose another backend
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
+
       {step === 1 && backend ? (
         <form
           noValidate

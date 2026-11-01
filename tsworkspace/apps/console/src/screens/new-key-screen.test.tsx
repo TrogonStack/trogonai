@@ -96,6 +96,42 @@ describe('bind key wizard', () => {
     expect(screen.getByLabelText('AWS KMS key locator')).toBeInTheDocument();
   });
 
+  it('lets the owner choose another backend when the selected backend becomes inactive', async () => {
+    const user = userEvent.setup();
+    const backend = createFakeBackend({ latencyMs: 0 });
+    const load = backend.keyCustody.load.bind(backend.keyCustody);
+    let retireSelectedBackend = false;
+    let loadCount = 0;
+    backend.keyCustody.load = async () => {
+      loadCount += 1;
+      const state = await load();
+      return {
+        ...state,
+        backends: state.backends.map((candidate) =>
+          retireSelectedBackend && candidate.registration.keyBackendId?.value === keyBackendId('kbe_aws_acme_prod')
+            ? {
+                ...candidate,
+                registration: { ...candidate.registration, lifecycle: KeyBackendLifecycle.RETIRED },
+              }
+            : candidate,
+        ),
+      };
+    };
+    const { queryClient } = renderApp('/keys/keys/new?backend=kbe_aws_acme_prod', backend);
+
+    await user.click(await screen.findByRole('button', { name: 'Continue' }));
+    expect(screen.getByRole('heading', { name: 'Key in Acme AWS production' })).toBeInTheDocument();
+
+    retireSelectedBackend = true;
+    const previousLoadCount = loadCount;
+    await queryClient.invalidateQueries({ queryKey: ['key-custody'] });
+    await waitFor(() => expect(loadCount).toBeGreaterThan(previousLoadCount));
+
+    expect(screen.getByText('The selected backend is no longer active.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Choose another backend' }));
+    expect(screen.getByRole('heading', { name: 'Choose a backend' })).toBeInTheDocument();
+  });
+
   it('keeps the displayed default purpose when custody data is reordered', async () => {
     const user = userEvent.setup();
     const backend = createFakeBackend({ latencyMs: 0 });
