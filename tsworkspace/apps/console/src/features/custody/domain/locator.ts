@@ -11,7 +11,8 @@ import {
   type ProviderKeyLocator,
 } from '@trogonai/proto';
 
-const AWS_KEY_ARN = /^arn:aws[a-z-]*:kms:([a-z0-9-]+):(\d{12}):key\/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
+const AWS_KEY_ARN =
+  /^arn:aws[a-z-]*:kms:([a-z0-9-]+):(\d{12}):key\/(?:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|mrk-[0-9a-f]{32})$/;
 const GCP_CRYPTO_KEY =
   /^projects\/([a-z][a-z0-9-]{4,28}[a-z0-9])\/locations\/([a-z0-9-]+)\/keyRings\/([\w-]+)\/cryptoKeys\/([\w-]+)$/;
 const OPENBAO_KEY = /^([a-z0-9][a-z0-9_-]*(?:\/[a-z0-9][a-z0-9_-]*)*)\/keys\/([a-z0-9][a-z0-9_-]*)$/;

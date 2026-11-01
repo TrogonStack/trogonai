@@ -211,6 +211,17 @@ describe('Google Cloud locations', () => {
 });
 
 describe('locator region boundaries', () => {
+  it('accepts an AWS multi-Region key ARN', async () => {
+    const { boundaryOf, buildLocator, locatorProblem } = await import('./locator');
+    const arn = 'arn:aws:kms:us-east-1:512049177301:key/mrk-0123456789abcdef0123456789abcdef';
+
+    expect(locatorProblem(KeyProvider.AWS_KMS, arn)).toBeUndefined();
+    expect(boundaryOf(buildLocator(KeyProvider.AWS_KMS, arn))).toEqual({
+      account: '512049177301',
+      region: 'us-east-1',
+    });
+  });
+
   it('rejects other AWS regions and GCP locations', async () => {
     const { buildLocator } = await import('./locator');
     const { locatorBoundaryMismatch } = await import('./registration');
