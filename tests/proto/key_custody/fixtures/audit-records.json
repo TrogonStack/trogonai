@@ -31,7 +31,7 @@
     "valid": false,
     "violations": [
       "a provider outcome lists at least one provider attempt",
-      "a successful operation lists at least one successful provider attempt"
+      "a successful operation ends with its only successful provider attempt"
     ],
     "message": {
       "operationId": { "value": "operation-2" },
@@ -50,7 +50,7 @@
     "name": "successful operation with only a failed provider attempt",
     "type": "trogonai.platform.key_custody.audit.v1alpha1.KeyOperationAuditRecord",
     "valid": false,
-    "violations": ["a successful operation lists at least one successful provider attempt"],
+    "violations": ["a successful operation ends with its only successful provider attempt"],
     "message": {
       "operationId": { "value": "operation-7" },
       "correlationId": { "value": "correlation-7" },
@@ -66,6 +66,40 @@
         {
           "attemptNumber": 1,
           "startedAt": "2026-11-01T00:00:00Z",
+          "duration": "0.100s",
+          "failed": "OPERATION_FAILURE_CATEGORY_PROVIDER_UNAVAILABLE",
+          "absence": "PROVIDER_REQUEST_ABSENCE_NO_RESPONSE"
+        }
+      ]
+    }
+  },
+  {
+    "name": "successful operation followed by a failed provider attempt",
+    "type": "trogonai.platform.key_custody.audit.v1alpha1.KeyOperationAuditRecord",
+    "valid": false,
+    "violations": ["a successful operation ends with its only successful provider attempt"],
+    "message": {
+      "operationId": { "value": "operation-15" },
+      "correlationId": { "value": "correlation-15" },
+      "operation": "KEY_OPERATION_KIND_WRAP_DEK",
+      "tenant": { "value": "tenant-1" },
+      "keyRef": { "value": "key-1" },
+      "keyBackendId": { "value": "backend-1" },
+      "purpose": { "value": "payload" },
+      "provider": "KEY_PROVIDER_AWS_KMS",
+      "occurredAt": "2026-11-01T00:00:00Z",
+      "succeeded": {},
+      "attempts": [
+        {
+          "attemptNumber": 1,
+          "startedAt": "2026-11-01T00:00:00Z",
+          "duration": "0.100s",
+          "succeeded": {},
+          "absence": "PROVIDER_REQUEST_ABSENCE_NOT_PROVIDED_BY_PROVIDER"
+        },
+        {
+          "attemptNumber": 2,
+          "startedAt": "2026-11-01T00:00:01Z",
           "duration": "0.100s",
           "failed": "OPERATION_FAILURE_CATEGORY_PROVIDER_UNAVAILABLE",
           "absence": "PROVIDER_REQUEST_ABSENCE_NO_RESPONSE"
