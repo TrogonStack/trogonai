@@ -1,5 +1,5 @@
 import { screen, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { createFakeBackend } from '@/fake-backend';
 import { keyBackendId } from '@/features/custody/domain/identifiers';
@@ -39,4 +39,14 @@ describe('key backends', () => {
 
     expect(await screen.findByText('1 paused')).toBeInTheDocument();
   });
+});
+
+
+it('offers registration when there are no tenant backends', async () => {
+  const backend = createFakeBackend({ latencyMs: 0 });
+  const state = await backend.keyCustody.load();
+  vi.spyOn(backend.keyCustody, 'load').mockResolvedValue({ ...state, backends: [] });
+  renderApp('/keys/backends', backend);
+  expect(await screen.findByText('No backends registered')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Clear filters' })).not.toBeInTheDocument();
 });

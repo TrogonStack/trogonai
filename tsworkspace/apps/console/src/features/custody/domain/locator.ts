@@ -115,6 +115,8 @@ export function providerOfLocator(locator: ProviderKeyLocator | undefined): KeyP
 
 export interface LocatorBoundary {
   readonly account?: string;
+  readonly region?: string;
+  readonly location?: string;
   readonly project?: string;
   readonly mount?: string;
 }
@@ -123,9 +125,9 @@ export function boundaryOf(locator: ProviderKeyLocator | undefined): LocatorBoun
   const text = locatorText(locator);
   switch (locator?.provider.case) {
     case 'awsKms':
-      return { account: AWS_KEY_ARN.exec(text)?.[2] };
+      return { account: AWS_KEY_ARN.exec(text)?.[2], region: AWS_KEY_ARN.exec(text)?.[1] };
     case 'googleCloudKms':
-      return { project: GCP_CRYPTO_KEY.exec(text)?.[1] };
+      return { project: GCP_CRYPTO_KEY.exec(text)?.[1], location: GCP_CRYPTO_KEY.exec(text)?.[2] };
     case 'openBaoTransit':
       return { mount: OPENBAO_KEY.exec(text)?.[1] };
     default:

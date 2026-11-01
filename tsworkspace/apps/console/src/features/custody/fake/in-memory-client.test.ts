@@ -557,3 +557,33 @@ describe('migrations', () => {
     expect((await rejection(client.pauseMigration(migrationId('mig_00000000')))).reason).toBe('MIGRATION_NOT_FOUND');
   });
 });
+
+
+describe('review regressions', () => {
+  it('blocks default switches during a migration', async () => {
+    const { client } = newClient();
+    const bound = await bindAndValidate(client, {
+      backendId: seedBackendIds.aws, locator: newAwsKey, purpose: messages,
+      capabilities: [KeyCapability.ENVELOPE_WRAPPING],
+    });
+    expect((await rejection(client.setDefaultKey(bound.keyRef))).reason).toBe('MIGRATION_IN_FLIGHT');
+  });
+
+  it('allows the same relative path on a different OpenBao backend', async () => {
+    const { client } = newClient();
+    const plan = await client.prepareRegistration({ ...openBaoInput, transitMount: 'transit' });
+    for (const check of plan.checks) {
+      if ((await client.runCheck(plan.attemptId, check.id)).outcome !== 'pass') await client.runCheck(plan.attemptId, check.id);
+    }
+    const backend = await client.completeRegistration(plan.attemptId);
+    const state = await client.load();
+    const original = state.keys.find((key) => key.keyRef === seedKeyRefs.openbaoArtifacts)!;
+    if (original.binding.kind !== 'customer_managed') throw new Error('Expected customer key');
+    const { locatorText } = await import('../domain/locator');
+    await expect(client.prepareBinding({
+      backendId: backend.registration.keyBackendId!.value,
+      locator: locatorText(original.binding.detail.locator), purpose: artifacts,
+      capabilities: [KeyCapability.ENVELOPE_WRAPPING],
+    })).resolves.toBeDefined();
+  });
+});
