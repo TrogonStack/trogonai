@@ -81,15 +81,10 @@ fn the_detail_names_both_callers_of_a_mismatch_and_every_cause() {
         verified: subject("aauth:agent-1@agents.test"),
         bearer: subject("aauth:agent-2@agents.test"),
     };
-    let detail = mismatch.detail();
-    assert!(detail.starts_with(&mismatch.to_string()), "{detail}");
-    assert!(
-        detail.contains("verified aauth:agent-1@agents.test (https://agents.test)"),
-        "{detail}"
-    );
-    assert!(
-        detail.contains("bearer aauth:agent-2@agents.test (https://agents.test)"),
-        "{detail}"
+    assert_eq!(
+        mismatch.detail(),
+        "bearer credential does not name the caller that signed the request: verified aauth:agent-1@agents.test \
+         (https://agents.test), bearer aauth:agent-2@agents.test (https://agents.test)"
     );
 
     let unavailable = EdgeAuthError::Unavailable(HttpPopError::Backend(ReplayError::MutexPoisoned));

@@ -109,11 +109,8 @@ impl EdgeAuthError {
         };
         let mut cause = self.source();
         while let Some(error) = cause {
-            let text = error.to_string();
-            if !detail.contains(&text) {
-                detail.push_str(": ");
-                detail.push_str(&text);
-            }
+            detail.push_str(": ");
+            detail.push_str(&error.to_string());
             cause = error.source();
         }
         detail

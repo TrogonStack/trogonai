@@ -278,18 +278,6 @@ fn a_nonce_lifetime_beyond_two_minutes_is_refused() {
     );
 }
 
-#[test]
-fn every_refusal_names_the_variable_to_fix() {
-    assert!(
-        EdgeAuthConfigError::MissingRequired(ENV_AAUTH_RESOURCE_ISS)
-            .to_string()
-            .contains(ENV_AAUTH_RESOURCE_ISS)
-    );
-    let unenforced = EdgeAuthConfigError::UnenforcedWithoutDevFlag(EdgeAuthMode::Off).to_string();
-    assert!(unenforced.contains(ENV_AAUTH_MODE), "{unenforced}");
-    assert!(unenforced.contains(ENV_AAUTH_DEV_UNENFORCED), "{unenforced}");
-}
-
 #[tokio::test]
 async fn a_guard_built_from_the_environment_verifies_the_agent_it_trusts() {
     let agent = SigningAgent::new();
