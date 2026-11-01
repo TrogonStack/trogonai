@@ -34,7 +34,12 @@ message KeyOperationAuditRecord {
   option (buf.validate.message).cel = {
     id: "audit_record.no_attempts_before_provider"
     message: "a failure decided before the provider call lists no provider attempts"
-    expression: "size(this.attempts) == 0 || !has(this.failed) || !(this.failed.category == 4 || this.failed.category == 7 || (this.failed.category == 1 && this.failed.denial_reason == 3))"
+    expression: "size(this.attempts) == 0 || !has(this.failed) || !(this.failed.category == trogonai.platform.key_custody.v1alpha1.OperationFailureCategory.OPERATION_FAILURE_CATEGORY_BINDING_MISMATCH || this.failed.category == trogonai.platform.key_custody.v1alpha1.OperationFailureCategory.OPERATION_FAILURE_CATEGORY_UNSUPPORTED_CAPABILITY || (this.failed.category == trogonai.platform.key_custody.v1alpha1.OperationFailureCategory.OPERATION_FAILURE_CATEGORY_KEY_USE_DENIED && this.failed.denial_reason == trogonai.platform.key_custody.v1alpha1.KeyUseDenialReason.KEY_USE_DENIAL_REASON_KEY_STATE))"
+  };
+  option (buf.validate.message).cel = {
+    id: "audit_record.provider_outcome_has_attempt"
+    message: "a provider outcome lists at least one provider attempt"
+    expression: "size(this.attempts) > 0 || (has(this.failed) && (this.failed.category == trogonai.platform.key_custody.v1alpha1.OperationFailureCategory.OPERATION_FAILURE_CATEGORY_BINDING_MISMATCH || this.failed.category == trogonai.platform.key_custody.v1alpha1.OperationFailureCategory.OPERATION_FAILURE_CATEGORY_UNSUPPORTED_CAPABILITY || (this.failed.category == trogonai.platform.key_custody.v1alpha1.OperationFailureCategory.OPERATION_FAILURE_CATEGORY_KEY_USE_DENIED && (this.failed.denial_reason == trogonai.platform.key_custody.v1alpha1.KeyUseDenialReason.KEY_USE_DENIAL_REASON_BACKEND_PAUSED || this.failed.denial_reason == trogonai.platform.key_custody.v1alpha1.KeyUseDenialReason.KEY_USE_DENIAL_REASON_KEY_STATE))))"
   };
 
   trogonai.platform.key_custody.v1alpha1.OperationId operation_id = 1 [features.field_presence = LEGACY_REQUIRED];
