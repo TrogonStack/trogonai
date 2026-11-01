@@ -159,8 +159,10 @@ Expiry does not block anything on the platform's side, and the platform never
 pauses a registration because of it. When a certificate or trust root actually
 expires, the TLS handshake fails closed. Connection health then reports a TLS
 failure (`TlsFailure`), and every operation against a key bound to this
-registration fails until you renew. Resuming a paused registration validates it
-end to end, so renew expired trust material before you resume.
+registration fails until you renew. A paused registration makes no provider
+call, so an update you submit while it is paused waits unvalidated; resuming
+validates that update end to end and switches to it only if it passes. Submit
+the renewed trust material first, then resume.
 
 ## Your kill switch
 
