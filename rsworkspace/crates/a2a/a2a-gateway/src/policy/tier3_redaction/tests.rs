@@ -407,8 +407,8 @@ fn merge_forward_audit_rewrites_with_only_tier3_returns_tier3_array() {
     let agent_id = a2a_nats::A2aAgentId::new("planner").expect("agent");
     let (audit, _stream_consumer) = super::merge_forward_audit_rewrites(
         &[rewrite],
-        "a2a.v1.gateway.bot.message.send",
-        "a2a.agent.planner.message.send",
+        "a2a.v1.gateway.planner.person.alice.message.send",
+        "a2a.v1.agents.planner.person.alice.message.send",
         &agent_id,
         "message.send",
     );

@@ -366,7 +366,7 @@ async fn invalid_task_id_from_handler_returns_invalid_agent_response() {
 }
 
 #[tokio::test]
-async fn events_carry_the_caller_headers_forward_as_routing_hints() {
+async fn events_name_their_caller_only_in_the_subject_and_carry_no_caller_header() {
     let nats = AdvancedMockNatsClient::new();
     let js = MockJetStreamPublisher::new();
     let handler = stub();
@@ -375,8 +375,12 @@ async fn events_carry_the_caller_headers_forward_as_routing_hints() {
     handler.lock().unwrap().message_stream_result = Some(Ok((task("task-1"), events)));
 
     let (mut headers, payload) = stream_payload("call-1");
-    headers.insert(crate::constants::GATEWAY_CALLER_ID_HEADER, "bot");
-    headers.insert(crate::constants::GATEWAY_PRINCIPAL_HEADER, "principal");
+    headers.insert(crate::constants::GATEWAY_CALLER_ID_HEADER, "mallory");
+    headers.insert(
+        crate::constants::GATEWAY_PRINCIPAL_HEADER,
+        r#"{"spicedb_subject":"user/mallory"}"#,
+    );
+    headers.insert(a2a_identity_types::constants::CALLER_JWT_HEADER_NAME, "a.b.c");
     handle(
         &handler,
         &headers,
@@ -391,18 +395,16 @@ async fn events_carry_the_caller_headers_forward_as_routing_hints() {
 
     let published = js.published_messages();
     let event = published.first().expect("one event");
+    assert_eq!(event.subject, "a2a.v1.tasks.task-1.person.alice.events");
     assert_eq!(
-        event
-            .headers
-            .get(crate::constants::GATEWAY_CALLER_ID_HEADER)
-            .map(|v| v.as_str()),
-        Some("bot")
+        event.headers.get(REQ_ID_HEADER).map(async_nats::HeaderValue::as_str),
+        Some("call-1")
     );
-    assert_eq!(
-        event
-            .headers
-            .get(crate::constants::GATEWAY_PRINCIPAL_HEADER)
-            .map(|v| v.as_str()),
-        Some("principal")
-    );
+    for hint in [
+        crate::constants::GATEWAY_CALLER_ID_HEADER,
+        crate::constants::GATEWAY_PRINCIPAL_HEADER,
+        a2a_identity_types::constants::CALLER_JWT_HEADER_NAME,
+    ] {
+        assert!(event.headers.get(hint).is_none(), "{hint} rode along on an event");
+    }
 }

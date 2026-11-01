@@ -39,25 +39,28 @@ async fn consumer_mirrors_once_and_acknowledges_duplicate_invalid_and_loop_marke
     let mut headers = HeaderMap::new();
     headers.insert(NATS_MSG_ID_HEADER, "task-1:failed");
     headers.insert("Content-Type", "application/json");
-    js.publish_with_headers("a2a.v1.push.dlq.alice.task-1", headers, payload.clone())
+    js.publish_with_headers("a2a.v1.push.dlq.person.alice.task-1", headers, payload.clone())
         .await
         .unwrap()
         .await
         .unwrap();
-    js.publish("a2a.v1.push.dlq.alice.task-1", payload.clone())
+    js.publish("a2a.v1.push.dlq.person.alice.task-1", payload.clone())
         .await
         .unwrap()
         .await
         .unwrap();
-    js.publish("a2a.v1.push.dlq.alice.task-2", Bytes::from_static(b"invalid-json"))
-        .await
-        .unwrap()
-        .await
-        .unwrap();
+    js.publish(
+        "a2a.v1.push.dlq.person.alice.task-2",
+        Bytes::from_static(b"invalid-json"),
+    )
+    .await
+    .unwrap()
+    .await
+    .unwrap();
     let mut loop_headers = HeaderMap::new();
     loop_headers.insert(PUSH_DLQ_MIRROR_HEADER, "true");
     js.publish_with_headers(
-        "a2a.v1.push.dlq.alice.task-3",
+        "a2a.v1.push.dlq.person.alice.task-3",
         loop_headers,
         Bytes::from_static(br#"{"idempotency_key":"task-3:failed"}"#),
     )
@@ -76,7 +79,7 @@ async fn consumer_mirrors_once_and_acknowledges_duplicate_invalid_and_loop_marke
         Arc::new(PushDlqDedupGate::with_capacity(32)),
     ));
     let mirror = tokio::time::timeout(WAIT, mirrors.next()).await.unwrap().unwrap();
-    assert_eq!(mirror.subject.as_str(), "a2a.v1.push.dlq.mirror.alice.task-1");
+    assert_eq!(mirror.subject.as_str(), "a2a.v1.push.dlq.mirror.person.alice.task-1");
     assert_eq!(mirror.payload, payload);
     let mirror_headers = mirror.headers.as_ref().unwrap();
     assert_eq!(
@@ -97,7 +100,7 @@ async fn consumer_mirrors_once_and_acknowledges_duplicate_invalid_and_loop_marke
     diagnostics.assert_event("push DLQ mirror shutting down", &[("durable", durable.as_str())]);
     diagnostics.assert_event(
         "push DLQ mirror publish acknowledged",
-        &[("mirror_subject", "a2a.v1.push.dlq.mirror.alice.task-1")],
+        &[("mirror_subject", "a2a.v1.push.dlq.mirror.person.alice.task-1")],
     );
 }
 
@@ -113,7 +116,7 @@ async fn consumer_naks_full_stream_and_mirrors_redelivery_when_capacity_recovers
     let mut mirrors = client.subscribe("a2a.v1.push.dlq.mirror.>").await.unwrap();
     client.flush().await.unwrap();
     let payload = Bytes::from_static(br#"{"idempotency_key":"recover:failed"}"#);
-    js.publish("a2a.v1.push.dlq.alice.recover", payload.clone())
+    js.publish("a2a.v1.push.dlq.person.alice.recover", payload.clone())
         .await
         .unwrap()
         .await
@@ -146,7 +149,7 @@ async fn consumer_naks_full_stream_and_mirrors_redelivery_when_capacity_recovers
     config.max_messages = 10;
     js.update_stream(config).await.unwrap();
     let mirror = tokio::time::timeout(WAIT, mirrors.next()).await.unwrap().unwrap();
-    assert_eq!(mirror.subject.as_str(), "a2a.v1.push.dlq.mirror.alice.recover");
+    assert_eq!(mirror.subject.as_str(), "a2a.v1.push.dlq.mirror.person.alice.recover");
     assert_eq!(mirror.payload, payload);
     wait_for_acknowledged(&stream, &durable, 2).await;
     shutdown.cancel();

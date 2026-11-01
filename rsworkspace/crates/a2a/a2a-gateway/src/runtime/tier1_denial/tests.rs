@@ -5,6 +5,7 @@ use a2a_nats::A2aPrefix;
 use a2a_nats::agent_id::A2aAgentId;
 use async_nats::Subject;
 use bytes::Bytes;
+use trogon_identity_types::SubjectPrincipal;
 use trogon_nats::mocks::MockNatsClient;
 
 use super::*;
@@ -36,6 +37,10 @@ fn well_formed_payload() -> Bytes {
     Bytes::from_static(br#"{"jsonrpc":"2.0","id":"req-1","method":"message/send","params":{}}"#)
 }
 
+fn alice() -> SubjectPrincipal {
+    SubjectPrincipal::from_tokens("person", "alice").expect("principal")
+}
+
 fn denial_body() -> Bytes {
     Bytes::from_static(br#"{"jsonrpc":"2.0","id":"req-1","error":{"code":-32801,"message":"denied"}}"#)
 }
@@ -57,7 +62,7 @@ fn ctx<'a>(
     prefix: &'a A2aPrefix,
     agent: &'a A2aAgentId,
     payload: &'a Bytes,
-    caller_source: &'a Option<String>,
+    caller: &'a SubjectPrincipal,
     audit_enabled: bool,
 ) -> Tier1DenialCtx<'a> {
     Tier1DenialCtx {
@@ -69,8 +74,7 @@ fn ctx<'a>(
         audit_enabled,
         started_wall_ms: 1_700_000_000_000,
         started_mono: Instant::now(),
-        audit_caller_id: "user/alice",
-        audit_caller_source: caller_source,
+        caller,
     }
 }
 
@@ -84,12 +88,12 @@ async fn deny_tier1_writes_reply_and_audit_when_publishing_enabled() {
     let pre = prefix();
     let agent = agent();
     let payload = well_formed_payload();
-    let caller_source = Some("jwt-mint".to_owned());
+    let caller = alice();
     deny_tier1(
         &nats,
         Subject::from("_INBOX.reply"),
         denial_body(),
-        ctx(&pre, &agent, &payload, &caller_source, true),
+        ctx(&pre, &agent, &payload, &caller, true),
         "denied",
     )
     .await;
@@ -108,12 +112,12 @@ async fn deny_tier1_skips_audit_when_publishing_disabled() {
     let pre = prefix();
     let agent = agent();
     let payload = well_formed_payload();
-    let caller_source: Option<String> = None;
+    let caller = alice();
     deny_tier1(
         &nats,
         Subject::from("_INBOX.reply"),
         denial_body(),
-        ctx(&pre, &agent, &payload, &caller_source, false),
+        ctx(&pre, &agent, &payload, &caller, false),
         "denied",
     )
     .await;
@@ -123,18 +127,18 @@ async fn deny_tier1_skips_audit_when_publishing_disabled() {
 }
 
 #[tokio::test]
-async fn deny_tier1_audit_envelope_stamps_caller_pair_and_tier1_decision() {
+async fn deny_tier1_audit_envelope_stamps_subject_principal_and_tier1_decision() {
     init_tracing_capture();
     let nats = MockNatsClient::new();
     let pre = prefix();
     let agent = agent();
     let payload = well_formed_payload();
-    let caller_source = Some("jwt-mint".to_owned());
+    let caller = alice();
     deny_tier1(
         &nats,
         Subject::from("_INBOX.reply"),
         denial_body(),
-        ctx(&pre, &agent, &payload, &caller_source, true),
+        ctx(&pre, &agent, &payload, &caller, true),
         "denied",
     )
     .await;
@@ -147,8 +151,8 @@ async fn deny_tier1_audit_envelope_stamps_caller_pair_and_tier1_decision() {
         .find_map(|(s, p)| (s != "_INBOX.reply").then(|| p.clone()))
         .expect("audit envelope published");
     let json: serde_json::Value = serde_json::from_slice(&audit_payload).expect("audit envelope is json");
-    assert_eq!(json["caller_id"], "user/alice");
-    assert_eq!(json["caller_source"], "jwt-mint");
+    assert_eq!(json["caller_id"], "person.alice");
+    assert!(json.get("caller_source").is_none());
     assert_eq!(json["tier1_decision"], "deny");
     assert_eq!(json["trace_id"], "trace-1");
     assert_eq!(json["outcome"], "err");

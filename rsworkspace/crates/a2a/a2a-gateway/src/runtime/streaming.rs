@@ -15,7 +15,7 @@ use serde_json::Value;
 use trogon_identity_types::SubjectPrincipal;
 
 use crate::gw_ingress_stream::{
-    CallerKey, GatewayStreamingIngressConfig, StreamingIngressGate, StreamingIngressSpawn, spawn_streaming_ingress_pump,
+    GatewayStreamingIngressConfig, StreamingIngressGate, StreamingIngressSpawn, spawn_streaming_ingress_pump,
 };
 use crate::gw_ingress_stream::{StreamingIngressKind, StreamingIngressSpawnError, req_id_from_headers_or_payload};
 use crate::runtime::env::json_rpc_params;
@@ -132,7 +132,6 @@ pub fn maybe_spawn_streaming_ingress_pump(
     headers: &async_nats::HeaderMap,
     payload: &[u8],
     reply: async_nats::Subject,
-    caller_key: CallerKey,
     caller: SubjectPrincipal,
     events_last_seq: Option<u64>,
 ) -> MaybeStreamingSpawn {
@@ -140,12 +139,7 @@ pub fn maybe_spawn_streaming_ingress_pump(
     else {
         return MaybeStreamingSpawn::NotStreaming;
     };
-    let spawn = StreamingIngressSpawn {
-        kind,
-        reply,
-        caller_key,
-        caller,
-    };
+    let spawn = StreamingIngressSpawn { kind, reply, caller };
     MaybeStreamingSpawn::Spawned(spawn_streaming_ingress_pump(
         client.clone(),
         prefix.clone(),

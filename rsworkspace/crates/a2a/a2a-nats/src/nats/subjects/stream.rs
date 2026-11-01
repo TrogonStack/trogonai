@@ -34,7 +34,10 @@ impl A2aStream {
         let p = prefix.as_str();
         match self {
             Self::Events => vec![super::subscriptions::TaskAllEventsSubject::new(prefix).to_string()],
-            Self::PushDlq => vec![format!("{p}.v1.push.dlq.*.*"), format!("{p}.v1.push.dlq.mirror.*.*")],
+            Self::PushDlq => vec![
+                format!("{p}.v1.push.dlq.*.*.*"),
+                format!("{p}.v1.push.dlq.mirror.*.*.*"),
+            ],
         }
     }
 

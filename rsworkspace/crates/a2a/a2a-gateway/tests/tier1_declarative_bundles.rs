@@ -30,11 +30,11 @@ fn load_reference_bundle(filename: &str) -> Tier1DeclarativeBundle {
     Tier1DeclarativeBundle::load_from_dir(dir.path()).expect("load bundle")
 }
 
-fn ctx(method: A2aMethod, agent: &str, caller_subject: Option<&str>, nats_subject: &str) -> Tier1DeclarativeContext {
+fn ctx(method: A2aMethod, agent: &str, caller_subject: &str, nats_subject: &str) -> Tier1DeclarativeContext {
     Tier1DeclarativeContext::new(
         method,
         A2aAgentId::new(agent).expect("agent id"),
-        caller_subject.map(SpiceDbSubject::new),
+        SpiceDbSubject::new(caller_subject),
         nats_subject,
     )
 }
@@ -65,7 +65,7 @@ fn per_method_allowlist_allows_enumerated_methods() {
         A2aMethod::TasksList,
         A2aMethod::PushNotificationSet,
     ] {
-        let decision = gate.evaluate(&ctx(method, "planner", Some("user/alice"), &subject));
+        let decision = gate.evaluate(&ctx(method, "planner", "user/alice", &subject));
         assert!(
             matches!(decision, Tier1DeclarativeDecision::Allow { .. }),
             "expected allow, got {decision:?}"
@@ -79,7 +79,7 @@ fn per_method_allowlist_denies_other_methods() {
     let decision = gate.evaluate(&ctx(
         A2aMethod::TasksCancel,
         "planner",
-        Some("user/alice"),
+        "user/alice",
         &ingress_subject("planner", "tasks.cancel"),
     ));
     assert_eq!(
@@ -98,7 +98,7 @@ fn per_method_allowlist_deny_emits_policy_denied_response_shape() {
     let decision = gate.evaluate(&ctx(
         A2aMethod::TasksCancel,
         "planner",
-        Some("user/alice"),
+        "user/alice",
         &ingress_subject("planner", "tasks.cancel"),
     ));
     assert!(matches!(decision, Tier1DeclarativeDecision::Deny { .. }));
@@ -147,7 +147,7 @@ fn per_agent_allowlist_allows_configured_callers() {
     let subject = ingress_subject("planner", "message.send");
 
     for caller in ["user/alice", "user/bob", "service/internal-bot"] {
-        let decision = gate.evaluate(&ctx(A2aMethod::MessageSend, "planner", Some(caller), &subject));
+        let decision = gate.evaluate(&ctx(A2aMethod::MessageSend, "planner", caller, &subject));
         assert_eq!(decision, Tier1DeclarativeDecision::Allow { rule: None });
     }
 }
@@ -158,7 +158,7 @@ fn per_agent_allowlist_denies_other_callers() {
     let decision = gate.evaluate(&ctx(
         A2aMethod::MessageSend,
         "planner",
-        Some("user/charlie"),
+        "user/charlie",
         &ingress_subject("planner", "message.send"),
     ));
     assert_eq!(
@@ -170,12 +170,12 @@ fn per_agent_allowlist_denies_other_callers() {
 }
 
 #[test]
-fn per_agent_allowlist_denies_anonymous_callers() {
+fn per_agent_allowlist_denies_a_caller_of_another_kind_with_an_allowlisted_id() {
     let gate = RealTier1DeclarativeGate::new(load_reference_bundle("per-agent-allowlist.tier1.toml"));
     let decision = gate.evaluate(&ctx(
         A2aMethod::MessageSend,
         "planner",
-        None,
+        "agent/alice",
         &ingress_subject("planner", "message.send"),
     ));
     assert_eq!(
@@ -209,7 +209,7 @@ fn time_of_day_after_hours_profile_denies_outside_window() {
     let decision = gate.evaluate(&ctx(
         A2aMethod::MessageSend,
         "planner",
-        Some("user/alice"),
+        "user/alice",
         &ingress_subject("planner", "message.send"),
     ));
     assert_eq!(
@@ -228,7 +228,7 @@ fn time_of_day_inside_business_hours_defaults_allow() {
     let decision = gate.evaluate(&ctx(
         A2aMethod::MessageSend,
         "planner",
-        Some("user/alice"),
+        "user/alice",
         &ingress_subject("planner", "message.send"),
     ));
     assert_eq!(decision, Tier1DeclarativeDecision::Allow { rule: None });
