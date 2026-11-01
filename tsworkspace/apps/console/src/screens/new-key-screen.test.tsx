@@ -11,7 +11,17 @@ const NEW_ARN = 'arn:aws:kms:eu-west-1:512049177301:key/1c0e7d52-9b4a-4f6e-8a31-
 describe('bind key wizard', () => {
   it('binds a key against a purpose from the catalogue after every check passes', async () => {
     const user = userEvent.setup();
-    renderApp('/keys/keys/new?backend=kbe_aws_acme_prod');
+    const backend = createFakeBackend({ latencyMs: 0 });
+    const completeBinding = backend.keyCustody.completeBinding.bind(backend.keyCustody);
+    let releaseCompletion!: () => void;
+    const completionGate = new Promise<void>((resolve) => {
+      releaseCompletion = resolve;
+    });
+    backend.keyCustody.completeBinding = async (attemptId) => {
+      await completionGate;
+      return completeBinding(attemptId);
+    };
+    renderApp('/keys/keys/new?backend=kbe_aws_acme_prod', backend);
 
     expect(await screen.findByRole('radio', { name: /Acme AWS production/ })).toBeChecked();
     await user.click(screen.getByRole('button', { name: 'Continue' }));
@@ -28,9 +38,35 @@ describe('bind key wizard', () => {
     const checks = await screen.findByRole('list', { name: 'Validation checks' });
     await waitFor(() => expect(within(checks).getAllByLabelText('Passed')).toHaveLength(3));
     await user.click(screen.getByRole('button', { name: 'Bind key' }));
+    expect(screen.getByRole('button', { name: 'Back' })).toBeDisabled();
+    releaseCompletion();
 
     expect(await screen.findByRole('heading', { name: 'Key bound' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'View key' })).toBeInTheDocument();
+  });
+
+  it('keeps the owner on key details while preparation is pending', async () => {
+    const user = userEvent.setup();
+    const backend = createFakeBackend({ latencyMs: 0 });
+    const prepareBinding = backend.keyCustody.prepareBinding.bind(backend.keyCustody);
+    let releasePreparation!: () => void;
+    const preparationGate = new Promise<void>((resolve) => {
+      releasePreparation = resolve;
+    });
+    backend.keyCustody.prepareBinding = async (input) => {
+      await preparationGate;
+      return prepareBinding(input);
+    };
+    renderApp('/keys/keys/new?backend=kbe_aws_acme_prod', backend);
+
+    await user.click(await screen.findByRole('button', { name: 'Continue' }));
+    await user.type(screen.getByLabelText(/key locator/), NEW_ARN);
+    await user.click(screen.getByRole('radio', { name: /Session artifacts/ }));
+    await user.click(screen.getByRole('button', { name: 'Continue to validation' }));
+
+    expect(screen.getByRole('button', { name: 'Back' })).toBeDisabled();
+    releasePreparation();
+    expect(await screen.findByRole('button', { name: 'Run checks' })).toBeInTheDocument();
   });
 
   it('keeps the bound key visible when the custody refresh fails', async () => {
