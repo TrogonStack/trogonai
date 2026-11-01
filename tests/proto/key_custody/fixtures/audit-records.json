@@ -1,0 +1,131 @@
+[
+  {
+    "name": "successful operation with one provider attempt",
+    "type": "trogonai.platform.key_custody.audit.v1alpha1.KeyOperationAuditRecord",
+    "valid": true,
+    "message": {
+      "operationId": { "value": "operation-1" },
+      "correlationId": { "value": "correlation-1" },
+      "operation": "KEY_OPERATION_KIND_WRAP_DEK",
+      "tenant": { "value": "tenant-1" },
+      "keyRef": { "value": "key-1" },
+      "keyBackendId": { "value": "backend-1" },
+      "purpose": { "value": "payload" },
+      "provider": "KEY_PROVIDER_AWS_KMS",
+      "occurredAt": "2026-11-01T00:00:00Z",
+      "succeeded": {},
+      "attempts": [
+        {
+          "attemptNumber": 1,
+          "startedAt": "2026-11-01T00:00:00Z",
+          "duration": "0.100s",
+          "succeeded": {},
+          "absence": "PROVIDER_REQUEST_ABSENCE_NOT_PROVIDED_BY_PROVIDER"
+        }
+      ]
+    }
+  },
+  {
+    "name": "successful operation without a provider attempt",
+    "type": "trogonai.platform.key_custody.audit.v1alpha1.KeyOperationAuditRecord",
+    "valid": false,
+    "message": {
+      "operationId": { "value": "operation-2" },
+      "correlationId": { "value": "correlation-2" },
+      "operation": "KEY_OPERATION_KIND_WRAP_DEK",
+      "tenant": { "value": "tenant-1" },
+      "keyRef": { "value": "key-1" },
+      "keyBackendId": { "value": "backend-1" },
+      "purpose": { "value": "payload" },
+      "provider": "KEY_PROVIDER_AWS_KMS",
+      "occurredAt": "2026-11-01T00:00:00Z",
+      "succeeded": {}
+    }
+  },
+  {
+    "name": "provider unavailable with one provider attempt",
+    "type": "trogonai.platform.key_custody.audit.v1alpha1.KeyOperationAuditRecord",
+    "valid": true,
+    "message": {
+      "operationId": { "value": "operation-3" },
+      "correlationId": { "value": "correlation-3" },
+      "operation": "KEY_OPERATION_KIND_UNWRAP_DEK",
+      "tenant": { "value": "tenant-1" },
+      "keyRef": { "value": "key-1" },
+      "keyBackendId": { "value": "backend-1" },
+      "purpose": { "value": "payload" },
+      "provider": "KEY_PROVIDER_AWS_KMS",
+      "occurredAt": "2026-11-01T00:00:00Z",
+      "failed": {
+        "category": "OPERATION_FAILURE_CATEGORY_PROVIDER_UNAVAILABLE"
+      },
+      "attempts": [
+        {
+          "attemptNumber": 1,
+          "startedAt": "2026-11-01T00:00:00Z",
+          "duration": "0.100s",
+          "failed": "OPERATION_FAILURE_CATEGORY_PROVIDER_UNAVAILABLE",
+          "absence": "PROVIDER_REQUEST_ABSENCE_NO_RESPONSE"
+        }
+      ]
+    }
+  },
+  {
+    "name": "provider unavailable without a provider attempt",
+    "type": "trogonai.platform.key_custody.audit.v1alpha1.KeyOperationAuditRecord",
+    "valid": false,
+    "message": {
+      "operationId": { "value": "operation-4" },
+      "correlationId": { "value": "correlation-4" },
+      "operation": "KEY_OPERATION_KIND_UNWRAP_DEK",
+      "tenant": { "value": "tenant-1" },
+      "keyRef": { "value": "key-1" },
+      "keyBackendId": { "value": "backend-1" },
+      "purpose": { "value": "payload" },
+      "provider": "KEY_PROVIDER_AWS_KMS",
+      "occurredAt": "2026-11-01T00:00:00Z",
+      "failed": {
+        "category": "OPERATION_FAILURE_CATEGORY_PROVIDER_UNAVAILABLE"
+      }
+    }
+  },
+  {
+    "name": "binding mismatch without a provider attempt",
+    "type": "trogonai.platform.key_custody.audit.v1alpha1.KeyOperationAuditRecord",
+    "valid": true,
+    "message": {
+      "operationId": { "value": "operation-5" },
+      "correlationId": { "value": "correlation-5" },
+      "operation": "KEY_OPERATION_KIND_WRAP_DEK",
+      "tenant": { "value": "tenant-1" },
+      "keyRef": { "value": "key-1" },
+      "keyBackendId": { "value": "backend-1" },
+      "purpose": { "value": "payload" },
+      "provider": "KEY_PROVIDER_AWS_KMS",
+      "occurredAt": "2026-11-01T00:00:00Z",
+      "failed": {
+        "category": "OPERATION_FAILURE_CATEGORY_BINDING_MISMATCH"
+      }
+    }
+  },
+  {
+    "name": "backend paused before the first provider attempt",
+    "type": "trogonai.platform.key_custody.audit.v1alpha1.KeyOperationAuditRecord",
+    "valid": true,
+    "message": {
+      "operationId": { "value": "operation-6" },
+      "correlationId": { "value": "correlation-6" },
+      "operation": "KEY_OPERATION_KIND_WRAP_DEK",
+      "tenant": { "value": "tenant-1" },
+      "keyRef": { "value": "key-1" },
+      "keyBackendId": { "value": "backend-1" },
+      "purpose": { "value": "payload" },
+      "provider": "KEY_PROVIDER_AWS_KMS",
+      "occurredAt": "2026-11-01T00:00:00Z",
+      "failed": {
+        "category": "OPERATION_FAILURE_CATEGORY_KEY_USE_DENIED",
+        "denialReason": "KEY_USE_DENIAL_REASON_BACKEND_PAUSED"
+      }
+    }
+  }
+]
