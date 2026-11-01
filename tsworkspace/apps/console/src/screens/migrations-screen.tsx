@@ -13,6 +13,7 @@ import { useCustodyQuery } from '@/features/custody/queries';
 export function MigrationsScreen() {
   const query = useCustodyQuery();
   const [starting, setStarting] = useState(false);
+  const noPurposes = query.data?.purposes.length === 0;
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
@@ -20,7 +21,7 @@ export function MigrationsScreen() {
         title="Migrations"
         description="Rewrap payloads from one key to another, into or out of customer managed custody. Only the data keys are rewrapped, and the encrypted data is untouched."
         actions={
-          <Button type="button" size="lg" disabled={!query.data} onClick={() => setStarting(true)}>
+          <Button type="button" size="lg" disabled={!query.data || noPurposes} onClick={() => setStarting(true)}>
             <ArrowRightLeftIcon data-icon="inline-start" />
             Start a migration
           </Button>
@@ -28,6 +29,9 @@ export function MigrationsScreen() {
       />
       <KeysSubnav />
       <CustodyMigrationNote />
+      {noPurposes ? (
+        <p className="text-muted-foreground text-[13px]">No key purposes are available to migrate.</p>
+      ) : null}
       {query.error ? <FaultAlert error={query.error} title="Could not load migrations" /> : null}
       {query.data ? (
         <>
