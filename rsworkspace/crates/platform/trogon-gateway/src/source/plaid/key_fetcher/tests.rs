@@ -41,11 +41,11 @@ async fn serve(status: AxumStatus, body: Value) -> (PlaidApiBaseUrl, Arc<Mutex<V
 }
 
 fn fetcher(url: &PlaidApiBaseUrl) -> ReqwestPlaidKeyFetcher {
-    ReqwestPlaidKeyFetcher::new(
-        url,
-        PlaidClientId::new("client-1").unwrap(),
-        PlaidSecret::new("secret-1").unwrap(),
-    )
+    ReqwestPlaidKeyFetcher::new(url, PlaidClientId::new("client-1").unwrap())
+}
+
+fn secret() -> PlaidSecret {
+    PlaidSecret::new("secret-1").unwrap()
 }
 
 #[tokio::test]
@@ -53,7 +53,7 @@ async fn posts_credentials_and_key_id_and_parses_the_key() {
     let pair = TestKeyPair::generate("kid-1");
     let (url, requests) = serve(AxumStatus::OK, pair.jwk_json(None)).await;
 
-    let key = fetcher(&url).fetch(&pair.key_id()).await.unwrap();
+    let key = fetcher(&url).fetch(&pair.key_id(), &secret()).await.unwrap();
 
     assert_eq!(key.key_id().as_str(), "kid-1");
     assert!(!key.is_expired_at(std::time::SystemTime::now()));
@@ -65,11 +65,32 @@ async fn posts_credentials_and_key_id_and_parses_the_key() {
 }
 
 #[tokio::test]
+async fn posts_the_secret_given_to_each_call() {
+    let pair = TestKeyPair::generate("kid-1");
+    let (url, requests) = serve(AxumStatus::OK, pair.jwk_json(None)).await;
+    let fetcher = fetcher(&url);
+
+    fetcher
+        .fetch(&pair.key_id(), &PlaidSecret::new("secret-first").unwrap())
+        .await
+        .unwrap();
+    fetcher
+        .fetch(&pair.key_id(), &PlaidSecret::new("secret-second").unwrap())
+        .await
+        .unwrap();
+
+    let requests = requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0]["secret"], "secret-first");
+    assert_eq!(requests[1]["secret"], "secret-second");
+}
+
+#[tokio::test]
 async fn carries_the_expiry_of_the_returned_key() {
     let pair = TestKeyPair::generate("kid-1");
     let (url, _) = serve(AxumStatus::OK, pair.jwk_json(Some(1_000))).await;
 
-    let key = fetcher(&url).fetch(&pair.key_id()).await.unwrap();
+    let key = fetcher(&url).fetch(&pair.key_id(), &secret()).await.unwrap();
 
     assert!(key.is_expired_at(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000)));
 }
@@ -79,7 +100,7 @@ async fn server_errors_are_unavailable() {
     let pair = TestKeyPair::generate("kid-1");
     let (url, _) = serve(AxumStatus::BAD_GATEWAY, serde_json::json!({})).await;
 
-    let err = fetcher(&url).fetch(&pair.key_id()).await.unwrap_err();
+    let err = fetcher(&url).fetch(&pair.key_id(), &secret()).await.unwrap_err();
 
     assert!(matches!(&err, PlaidKeyFetchError::Unavailable(status) if *status == StatusCode::BAD_GATEWAY));
 }
@@ -89,7 +110,7 @@ async fn rate_limiting_is_unavailable() {
     let pair = TestKeyPair::generate("kid-1");
     let (url, _) = serve(AxumStatus::TOO_MANY_REQUESTS, serde_json::json!({})).await;
 
-    let err = fetcher(&url).fetch(&pair.key_id()).await.unwrap_err();
+    let err = fetcher(&url).fetch(&pair.key_id(), &secret()).await.unwrap_err();
 
     assert!(matches!(err, PlaidKeyFetchError::Unavailable(_)));
 }
@@ -103,7 +124,7 @@ async fn client_errors_are_rejected() {
     )
     .await;
 
-    let err = fetcher(&url).fetch(&pair.key_id()).await.unwrap_err();
+    let err = fetcher(&url).fetch(&pair.key_id(), &secret()).await.unwrap_err();
 
     assert!(matches!(&err, PlaidKeyFetchError::Rejected(status) if *status == StatusCode::BAD_REQUEST));
 }
@@ -113,7 +134,7 @@ async fn unparseable_success_body_is_a_transport_failure() {
     let pair = TestKeyPair::generate("kid-1");
     let (url, _) = serve(AxumStatus::OK, serde_json::json!({"unexpected": true})).await;
 
-    let err = fetcher(&url).fetch(&pair.key_id()).await.unwrap_err();
+    let err = fetcher(&url).fetch(&pair.key_id(), &secret()).await.unwrap_err();
 
     assert!(matches!(err, PlaidKeyFetchError::Transport(_)));
 }
@@ -124,7 +145,7 @@ async fn a_key_for_a_different_kid_is_invalid() {
     let (url, _) = serve(AxumStatus::OK, served.jwk_json(None)).await;
 
     let err = fetcher(&url)
-        .fetch(&PlaidKeyId::new("kid-1").unwrap())
+        .fetch(&PlaidKeyId::new("kid-1").unwrap(), &secret())
         .await
         .unwrap_err();
 
@@ -142,7 +163,7 @@ async fn connection_failure_is_a_transport_error() {
     let url = PlaidApiBaseUrl::new(format!("http://{addr}")).unwrap();
 
     let err = fetcher(&url)
-        .fetch(&PlaidKeyId::new("kid-1").unwrap())
+        .fetch(&PlaidKeyId::new("kid-1").unwrap(), &secret())
         .await
         .unwrap_err();
 

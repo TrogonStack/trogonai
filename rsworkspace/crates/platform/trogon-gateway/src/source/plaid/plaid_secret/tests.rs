@@ -12,6 +12,12 @@ fn rejects_empty_secret() {
 }
 
 #[test]
+fn converts_from_a_secret_string() {
+    let secret = PlaidSecret::from(SecretString::new("test-secret").unwrap());
+    assert_eq!(secret.as_str(), "test-secret");
+}
+
+#[test]
 fn debug_redacts() {
     let secret = PlaidSecret::new("test-secret").unwrap();
     assert_eq!(format!("{secret:?}"), "PlaidSecret(****)");

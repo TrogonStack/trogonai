@@ -964,7 +964,7 @@ fn runtime_credential_env(flags: &[&str]) -> trogon_std::env::InMemoryEnv {
 
 type OpenBaoMounts = source_plugin::RuntimeCredentialMounts<secret_store::openbao_secret_store::OpenBaoSecretStore>;
 
-fn mounted_sources(mounts: &OpenBaoMounts) -> [bool; 10] {
+fn mounted_sources(mounts: &OpenBaoMounts) -> [bool; 11] {
     [
         mounts.github.is_some(),
         mounts.gitlab.is_some(),
@@ -972,6 +972,7 @@ fn mounted_sources(mounts: &OpenBaoMounts) -> [bool; 10] {
         mounts.linear.is_some(),
         mounts.microsoft_graph.is_some(),
         mounts.notion.is_some(),
+        mounts.plaid.is_some(),
         mounts.sentry.is_some(),
         mounts.slack.is_some(),
         mounts.telegram.is_some(),
@@ -988,6 +989,7 @@ fn each_runtime_credential_flag_mounts_only_its_own_source() {
         ENABLE_RUNTIME_LINEAR_CREDENTIALS,
         ENABLE_RUNTIME_MICROSOFT_GRAPH_CREDENTIALS,
         ENABLE_RUNTIME_NOTION_CREDENTIALS,
+        ENABLE_RUNTIME_PLAID_CREDENTIALS,
         ENABLE_RUNTIME_SENTRY_CREDENTIALS,
         ENABLE_RUNTIME_SLACK_CREDENTIALS,
         ENABLE_RUNTIME_TELEGRAM_CREDENTIALS,
@@ -1000,7 +1002,7 @@ fn each_runtime_credential_flag_mounts_only_its_own_source() {
             .unwrap()
             .unwrap();
 
-        let mut expected = [false; 10];
+        let mut expected = [false; 11];
         expected[index] = true;
         assert_eq!(mounted_sources(&mounts), expected, "{flag}");
     }
@@ -1017,6 +1019,7 @@ fn several_runtime_credential_flags_mount_every_flagged_source_and_log_each() {
         ENABLE_RUNTIME_LINEAR_CREDENTIALS,
         ENABLE_RUNTIME_MICROSOFT_GRAPH_CREDENTIALS,
         ENABLE_RUNTIME_NOTION_CREDENTIALS,
+        ENABLE_RUNTIME_PLAID_CREDENTIALS,
         ENABLE_RUNTIME_SENTRY_CREDENTIALS,
         ENABLE_RUNTIME_SLACK_CREDENTIALS,
         ENABLE_RUNTIME_TELEGRAM_CREDENTIALS,
@@ -1028,7 +1031,7 @@ fn several_runtime_credential_flags_mount_every_flagged_source_and_log_each() {
             .unwrap()
             .unwrap();
 
-    assert_eq!(mounted_sources(&mounts), [true; 10]);
+    assert_eq!(mounted_sources(&mounts), [true; 11]);
     let enabled = events
         .events()
         .iter()
@@ -1038,7 +1041,7 @@ fn several_runtime_credential_flags_mount_every_flagged_source_and_log_each() {
                 .is_some_and(|message| message.ends_with("webhook runtime credentials enabled"))
         })
         .count();
-    assert_eq!(enabled, 10);
+    assert_eq!(enabled, 11);
 }
 
 #[test]

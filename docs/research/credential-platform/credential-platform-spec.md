@@ -502,10 +502,10 @@ per-caller identity; the token is the only authorization boundary, and
 owner_id is caller-supplied in the request body rather than derived from an
 authenticated identity (see AUTHORIZATION_MATRIX for the consequences).
 
-Eleven of the twelve declared `SourceKind` variants have routes wired
-(discord, github, gitlab, incidentio, linear, microsoft-graph, notion,
-sentry, slack, telegram, twitter); `Datadog` exists as a domain value with
-no admin route at all. Each wired source exposes:
+Routes are wired for discord, github, gitlab, incidentio, linear,
+microsoft-graph, notion, plaid, sentry, slack, telegram, and twitter;
+`Datadog`, `GooglePubSub`, and `Zoom` exist as `SourceKind` domain values
+with no admin route at all. Each wired source exposes:
 
 ```text
 PUT    <base>              create (or replay, if idempotent)
@@ -1011,7 +1011,7 @@ rotation saga's "validate if the provider supports validation" step)?
 recommendation: none today, and that should be stated plainly rather than
 implied. `SecretVerifier` exists as a value-object wrapper
 (`secret_store/secret_verifier.rs`) but it only wraps a string; there is no
-per-provider validation call anywhere in the eleven wired sources today.
+per-provider validation call anywhere in the wired sources today.
 Prioritize adding first-class validation for the providers that already
 have a working write/rotate/revoke path through the internal admin API
 before adding it for anything not yet wired.
@@ -1220,7 +1220,7 @@ break_glass_admin
 
 The internal `/-/credentials` admin API has its own, separate
 authorization boundary: one shared admin token, constant-time compared,
-applied uniformly across create/rotate/revoke for all eleven wired sources
+applied uniformly across create/rotate/revoke for every wired source
 plus the recovery-status endpoint. Caller-supplied owner_id is trusted as
 given; there is no separate per-owner authorization check layered on top.
 The admin token is the entire authorization boundary for this API today.
@@ -1491,7 +1491,7 @@ Enforcement lives on `RuntimeCredentialResolver::resolve_for`, which takes
 a `RuntimeReleaseRequest` and denies before the secret store is touched,
 so a denied caller cannot warm the cache or distinguish a present
 credential from an absent one. The existing `resolve` delegates with an
-empty request, which the permissive default admits, so the twelve shipped
+empty request, which the permissive default admits, so the shipped
 source paths are unchanged.
 `RuntimeReleasePolicy::effective_cache_ttl` clamps an override to the
 configured TTL, so a policy can only narrow the [ADR#0049](../../adr/0049-revocation-latency-target.md) staleness bound,
@@ -1670,7 +1670,7 @@ recommendation: ship the kinds already wired through the internal
 /-/credentials admin API first (bot_token, webhook_secret, signing_token,
 signing_secret, client_state, verification_token, client_secret,
 consumer_secret, across discord, github, gitlab, incidentio, linear,
-microsoft-graph, notion, sentry, slack, telegram, twitter), since those
+microsoft-graph, notion, plaid, sentry, slack, telegram, twitter), since those
 already have a working write/rotate/revoke path end to end. Do not include
 app_token or webhook_token in the first UI: neither is reachable through
 any admin route today, and webhook_token specifically is not even

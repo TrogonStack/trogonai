@@ -94,6 +94,11 @@ webhook_token = "datadog-webhook-token"
 
 [sources.zoom.integrations.primary.webhook]
 secret_token = "zoom-secret-token"
+
+[sources.plaid.integrations.primary.webhook]
+client_id = "plaid-client-id"
+secret = "plaid-secret"
+environment = "sandbox"
 "#
     .to_string()
 }
@@ -490,7 +495,8 @@ fn every_runtime_credential_mount() -> RuntimeCredentialMounts<MockOpenBaoSecret
         telegram: Some(resolver.clone()),
         telegram_registered_credentials: Default::default(),
         twitter: Some(resolver.clone()),
-        notion: Some(resolver),
+        notion: Some(resolver.clone()),
+        plaid: Some(resolver),
     }
 }
 
