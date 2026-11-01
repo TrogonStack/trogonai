@@ -289,7 +289,10 @@ verification key for the token's `kid` with the configured `client_id` and `secr
 checks `iat` against `timestamp_tolerance_secs`, and compares `request_body_sha256` with the SHA-256 of the raw
 body in constant time. Keys are cached per `kid` and fetched again after an hour, so a key that Plaid marks
 expired stops verifying within the hour. A missing or invalid token, a stale `iat`, a body hash mismatch, or an
-expired key returns `401`. Any failure to fetch the key, including the hourly fetch of a cached key, returns
+expired key returns `401`, and so does a `kid` that Plaid reports as unknown, so a made-up `kid` cannot pose as
+an outage. Plaid also reports a genuine `kid` as unknown when it belongs to a different Plaid environment, and that
+`401` is a permanent failure, so if every webhook is rejected with an unknown `kid` warning, check that
+`environment` matches the environment the webhooks come from. Any other failure to fetch the key, including the hourly fetch of a cached key, returns
 `503`, so a misconfigured `secret` makes Plaid retry for up to 24 hours instead of dropping the webhook as a
 permanent `4xx` failure. Fetches for a `kid` that is not cached are limited to one every 10 seconds per
 integration, and a cached `kid` whose hourly fetch failed is not fetched again for 10 seconds. Requests over
