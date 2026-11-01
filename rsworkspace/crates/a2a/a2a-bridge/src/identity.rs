@@ -50,9 +50,8 @@ impl CallerHttpsAuth {
     /// callout, so what the edge binds is what the callout mints for.
     #[must_use]
     pub fn bearer_token(&self) -> Option<&str> {
-        self.0
-            .strip_prefix("Bearer ")
-            .or_else(|| self.0.strip_prefix("bearer "))
+        let (scheme, token) = self.0.split_once(' ')?;
+        scheme.eq_ignore_ascii_case("Bearer").then_some(token)
     }
 
     /// The issuer and subject the bearer token names, read without verifying

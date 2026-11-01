@@ -87,14 +87,16 @@ fn unverified_jwt_refuses_missing_or_repeated_claims() {
         CredentialSubject::from_unverified_jwt(&missing),
         Err(BearerSubjectError::Claims(_))
     ));
-    let repeated = format!(
-        "h.{}.s",
-        URL_SAFE_NO_PAD.encode(br#"{"iss":"https://idp.test","sub":"alice","sub":"mallory"}"#)
-    );
-    assert!(matches!(
-        CredentialSubject::from_unverified_jwt(&repeated),
-        Err(BearerSubjectError::Claims(_))
-    ));
+    for repeated in [
+        br#"{"iss":"https://idp.test","iss":"https://attacker.test","sub":"alice"}"#.as_slice(),
+        br#"{"iss":"https://idp.test","sub":"alice","sub":"mallory"}"#.as_slice(),
+    ] {
+        let repeated = format!("h.{}.s", URL_SAFE_NO_PAD.encode(repeated));
+        assert!(matches!(
+            CredentialSubject::from_unverified_jwt(&repeated),
+            Err(BearerSubjectError::Claims(_))
+        ));
+    }
 }
 
 #[test]
