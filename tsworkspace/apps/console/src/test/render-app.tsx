@@ -5,6 +5,7 @@ import { render } from '@testing-library/react';
 import { createFakeBackend, type FakeBackend } from '@/fake-backend';
 import { TenantCustodyClientProvider } from '@/features/custody/context';
 import { EnvironmentsClientProvider } from '@/features/environments/context';
+import { SourcesClientProvider } from '@/features/gateway-sources/context';
 import { HierarchyClientProvider } from '@/features/hierarchy/context';
 import { ProjectsClientProvider } from '@/features/projects/context';
 import { ProviderConnectionsClientProvider } from '@/features/provider-connections/context';
@@ -22,9 +23,11 @@ export function renderApp(path: string, backend: FakeBackend = createFakeBackend
           <ProjectsClientProvider client={backend.projects}>
             <EnvironmentsClientProvider clients={backend.environments}>
               <SecretsClientProvider clients={backend.secrets}>
-                <TenantCustodyClientProvider client={backend.keyCustody}>
-                  <RouterProvider router={router} />
-                </TenantCustodyClientProvider>
+                <SourcesClientProvider clients={backend.gatewaySources}>
+                  <TenantCustodyClientProvider client={backend.keyCustody}>
+                    <RouterProvider router={router} />
+                  </TenantCustodyClientProvider>
+                </SourcesClientProvider>
               </SecretsClientProvider>
             </EnvironmentsClientProvider>
           </ProjectsClientProvider>
@@ -39,6 +42,7 @@ export function renderApp(path: string, backend: FakeBackend = createFakeBackend
     hierarchy: backend.hierarchy,
     secrets: backend.secrets,
     environments: backend.environments,
+    sources: backend.gatewaySources,
     custody: backend.keyCustody,
     queryClient,
     router,
