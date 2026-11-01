@@ -66,7 +66,7 @@ function ValidateStep({
       ) : null}
       <FaultAlert error={complete.error} title="The binding was rejected" />
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <Button type="button" variant="outline" disabled={staged.running} onClick={onBack}>
+        <Button type="button" variant="outline" disabled={staged.running || complete.isPending} onClick={onBack}>
           <ArrowLeftIcon data-icon="inline-start" />
           Back
         </Button>
@@ -239,7 +239,7 @@ export function BindKeyWizard({ initialBackendId }: { initialBackendId?: string 
               </fieldset>
               <FaultAlert error={prepare.error} title="The key could not be prepared" />
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <Button type="button" variant="outline" onClick={() => setStep(0)}>
+                <Button type="button" variant="outline" disabled={prepare.isPending} onClick={() => setStep(0)}>
                   <ArrowLeftIcon data-icon="inline-start" />
                   Back
                 </Button>
