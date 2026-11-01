@@ -26,7 +26,7 @@ export type KeyFaultReason =
   | 'NOT_PAUSED'
   | 'ALREADY_COMPLETED';
 
-const messages: Record<KeyFaultReason, string> = {
+export const keyFaultMessages: Record<KeyFaultReason, string> = {
   COMMAND_INVALID: 'The command is malformed.',
   BACKEND_NOT_FOUND: 'The key backend does not exist.',
   KEY_NOT_FOUND: 'The key reference does not exist.',
@@ -68,7 +68,8 @@ export class KeyFault extends Error {
     readonly detail?: string,
     readonly denial?: KeyUseDenialReason,
   ) {
-    const base = reason === 'KEY_USE_DENIED' && denial !== undefined ? denialReasonMessages[denial] : messages[reason];
+    const base =
+      reason === 'KEY_USE_DENIED' && denial !== undefined ? denialReasonMessages[denial] : keyFaultMessages[reason];
     super(detail ? `${base} ${detail}` : base);
     this.name = 'KeyFault';
   }
