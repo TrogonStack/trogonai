@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 import { credentialLifecycleLabels, credentialLifecycleTones } from '../domain/labels';
 import type { VaultView } from '../domain/view';
 import { EnvironmentChip, VaultLifecycleBadge } from './badges';
+import { VaultCustodyBadge } from './vault-custody-badge';
 
 function VaultCard({ vault }: { vault: VaultView }) {
   const counts = [...vault.byLifecycle.entries()].sort((left, right) => right[1] - left[1]);
@@ -40,7 +41,10 @@ function VaultCard({ vault }: { vault: VaultView }) {
             {vault.credentialCount === 1 ? 'Credential' : 'Credentials'}
           </span>
         </div>
-        <EnvironmentChip environment={vault.environment} linked className="relative z-10" />
+        <div className="relative z-10 flex flex-col items-end gap-1.5">
+          <EnvironmentChip environment={vault.environment} linked />
+          <VaultCustodyBadge tier={vault.custody} linked />
+        </div>
       </div>
       <ul aria-label={`${vault.displayName} credentials by lifecycle`} className="flex flex-wrap gap-x-3 gap-y-1">
         {counts.length === 0 ? (

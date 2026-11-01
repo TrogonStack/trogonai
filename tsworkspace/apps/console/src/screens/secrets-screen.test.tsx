@@ -18,6 +18,15 @@ describe('secrets overview', () => {
     }
   });
 
+  it('shows the custody tier of each vault', async () => {
+    renderApp('/secrets');
+
+    await screen.findByRole('link', { name: 'OpenAI production key' });
+    expect(screen.getAllByText('Managed key').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Dedicated key').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Customer managed key').length).toBeGreaterThan(0);
+  });
+
   it('never renders secret material', async () => {
     renderApp('/secrets');
 
@@ -87,4 +96,14 @@ describe('secrets overview', () => {
 
     expect((await screen.findAllByRole('link', { name: /Sandbox/ })).length).toBeGreaterThan(0);
   });
+});
+
+it('makes vault custody chips links with tier-specific accessible names', async () => {
+  renderApp('/secrets');
+  await screen.findByRole('link', { name: 'OpenAI production key' });
+  const cards = screen.getByRole('region', { name: 'Vaults' });
+  for (const tier of ['Managed key', 'Dedicated key', 'Customer managed key']) {
+    const links = within(cards).getAllByRole('link', { name: `${tier}: Encryption keys` });
+    for (const link of links) expect(link).toHaveAttribute('href', '/keys');
+  }
 });
