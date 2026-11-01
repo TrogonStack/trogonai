@@ -15,8 +15,17 @@ to another. This is a custody change, not an incident response. Typical
 reasons to migrate: a tenant adopts a
 [customer managed key](../glossary/customer-managed-key) after starting on
 the [managed key](../glossary/managed-key) tier, a tenant moves between two
-customer managed backends, or a tenant leaves a customer managed key and
-returns to the managed tier.
+customer managed backends, a tenant leaves a customer managed key and returns
+to the managed tier or the [dedicated key](../glossary/dedicated-key) tier, or
+a tenant moves to a replica of a multi-Region AWS key. Migration works in
+either direction between tiers
+([ADR#0033](../adr/0033-key-custody-product-model.md) Decision 4).
+
+A replica of a multi-Region AWS key has its own key state and key policy, and
+the platform never fails over to it. Moving to a replica is always an explicit
+migration: bind the replica's own key ARN as a new `KeyRef` and follow this
+procedure ([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md)
+Decision 4).
 
 Do not use this procedure if you suspect the old key-encryption key (KEK) is
 compromised. Rewrapping under a new key does not change who already had
@@ -32,10 +41,21 @@ Before you start a migration, confirm all of the following:
 - Both the old backend and the new backend must be available for the entire
   migration. There is no partial-availability path: if either backend cannot
   serve `wrap_dek` or `unwrap_dek` requests, the migration cannot proceed.
+- Neither the old backend registration nor the new one is paused. A paused
+  registration denies migration source use and migration target use with
+  `KeyUseDenied` and the denial reason `BackendPaused`, and the platform makes
+  no provider call for it. If a registration is paused partway through, the
+  migration cannot continue until its owner resumes it, and resume validates
+  the registration's current configuration end to end (per
+  [ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md)
+  Decision 6).
 - The new key does not need to be bound ahead of time through a separate
-  procedure. Binding it through `BindExternalKey` is the first step of the
-  migration flow described below, and it must complete before any envelope's
-  `Dek` is rewrapped under the new `KeyRef` (per [ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) Decision 4).
+  procedure. When the new key is a customer managed key, binding it through
+  `BindExternalKey` is the first step of the migration flow described below,
+  and it must complete before any envelope's `Dek` is rewrapped under the new
+  `KeyRef` (per [ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) Decision 4). When the new key is a managed or
+  dedicated key, the platform operates it, so you do not bind it yourself: the
+  platform supplies the tenant's `KeyRef` for that tier.
 - If a customer disables the old key before migration completes, they have
   chosen unavailability over recoverability. The platform cannot unwrap the
   envelopes still referencing a disabled old key, and it cannot recover them
@@ -53,8 +73,9 @@ console and API request shapes that trigger it are an open decision that
 later work; what follows is the operation sequence the implementation must
 satisfy, not a concrete request format:
 
-1. Bind the new key, producing a new `KeyRef`. This step must complete before
-   any envelope migrates.
+1. Bind the new key, producing a new `KeyRef`. For a managed or dedicated
+   target, the platform supplies the tenant's `KeyRef` for that tier instead.
+   This step must complete before any envelope migrates.
 2. Cut over new writes before rewrapping anything: set the new `KeyRef` as
    the default wrapping key for every purpose whose default is currently the
    old `KeyRef`. Defaults are resolved server-side on wrap
@@ -107,6 +128,10 @@ satisfy, not a concrete request format:
 - Expect the audit record for each migrated envelope to carry the tenant,
   the `KeyRef`, the `KeyBackendId`, the purpose, the provider, the outcome,
   and a correlation ID (per [ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) Decision 7).
+  The record also lists each provider attempt with the request identifier the
+  provider returned, or an explicit absence reason, `NotProvidedByProvider` or
+  `NoResponse`. This page does not claim that a recorded identifier matches an
+  entry in the provider's own audit log.
 
 ## See also
 

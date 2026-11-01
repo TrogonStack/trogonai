@@ -9,7 +9,8 @@ None of it is implemented yet. It is the model the implementation must
 satisfy, not current behavior.
 
 This page defines the states a `KeyRef` can occupy, the rules governing state
-changes and destruction, and which operations each state allows.
+changes and destruction, which operations each state allows, and where
+registration admission sits relative to those states.
 
 ## Platform-managed key states
 
@@ -30,7 +31,7 @@ the platform behind the secrets service.
 - **Destroyed**: the key material is gone. The key performs neither
   `wrap_dek` nor `unwrap_dek`, permanently.
 
-Two rules govern transitions into and around these states:
+These rules govern transitions into and around these states:
 
 - Destruction is scheduled and reviewable; it is never an immediate API
   operation ([ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) Decision 6). [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) fixes the existence of a pending
@@ -70,9 +71,51 @@ that the five platform-managed states do not name: a provider-side denial
 observed on the next attempted operation, rather than a state the platform
 itself set.
 
+## Registration admission is checked first
+
+A pause is not a key state. It belongs to the backend registration and applies
+to every `KeyRef` bound to that registration. Each registration has an
+admission setting, `Enabled` or `Paused`, that only its owner changes
+([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) Decision 3).
+
+An operation against an existing `KeyRef` checks in this order
+([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) Decision 6):
+
+1. Authenticate the caller and resolve the `KeyRef`, including the tenant and
+   purpose binding check.
+2. Require the registration lifecycle to be `Active`.
+3. Check the registration's admission.
+4. Apply the state, capability, and operation matrix below.
+5. Call the provider.
+
+`PendingValidation` and `Retired` registrations stop before provider access even
+when admission is `Enabled`. A retry inside the operation deadline repeats the
+lifecycle and admission checks before its next attempt.
+
+`BindExternalKey` has no existing `KeyRef` to resolve. It authenticates the
+caller, authorizes the tenant's use of the supplied backend, locator, purpose,
+and capabilities, requires the registration lifecycle to be `Active`, checks
+the registration's admission, and only then performs provider validation and
+applies the discovered key-state and capability gates before creating the
+reference.
+
+After a service instance observes a paused registration, it denies every
+operation in every column of the matrix with `KeyUseDenied` and the denial reason
+`BackendPaused`, whatever state the key is in. It makes no provider call for the
+registration, probes included, so what it last observed about a customer managed
+key's state is not refreshed until the registration resumes. Resume validates
+the newest staged revision end to end, or the current revision when none is
+staged. Admission resumes only when validation succeeds, and the matrix applies
+as usual afterward.
+
+A pause does not replace the provider-side kill switch. Disabling the key or
+revoking access in the provider remains the authoritative stop
+([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) Decision 6).
+
 ## State and operation matrix
 
-The table applies each state to the operations a `KeyRef` participates in:
+The table applies each provider key state to operations that use an existing
+`KeyRef` and to the provider key proposed for binding:
 
 - **wrap_dek**: create a new envelope.
 - **unwrap_dek**: read an existing envelope.
@@ -86,7 +129,9 @@ The table applies each state to the operations a `KeyRef` participates in:
   migration, wrapping the migrated `Dek`.
 
 Each cell is `allowed` or the exact typed failure category from [ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md)
-Decision 6.
+Decision 6. The matrix applies only after registration admission. For
+`BindExternalKey`, it gates the provider key discovered during validation before
+the service creates a `KeyRef`.
 
 | State | wrap_dek (new envelopes) | unwrap_dek (existing envelopes) | BindExternalKey / set-as-default | Migration source | Migration target |
 | --- | --- | --- | --- | --- | --- |
@@ -133,6 +178,15 @@ document different timing:
 - Google Cloud documents IAM access changes as consistent within seconds,
   and CryptoKeyVersion disablement as typically taking up to one minute, but
   exceptionally several hours.
+
+A pause is a platform-side control, so the platform sets its timing. It is
+acknowledged once the admission fact is durably committed, not once every
+service instance has observed it. Instances enforce it through pushed
+invalidation of their admission view with a hard time-to-live backstop. Until a
+measured propagation target is published, a stale instance may admit and start
+a provider request after acknowledgement but before it observes the pause, and
+a request already in flight may complete. The no-provider-call guarantee begins
+when the serving instance observes the pause.
 
 ## Effects on stored data
 

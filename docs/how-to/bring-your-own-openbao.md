@@ -129,6 +129,41 @@ endpoint:
    wrapped under. Moving them to the new key is a separate, explicit
    action. See [Migrate Between Key Backends](./migrate-key-backends.md).
 
+## Keep trust material current
+
+The registration's observed connection health reports when the trust material
+it depends on expires, as not-after timestamps for your endpoint's server
+certificate, the client certificate if you use certificate authentication, and
+the trust root. If the registration uses a `CredentialRef`, health also
+reports that credential's issued-at or expiry time. A value the platform
+cannot determine is shown as absent, never as zero
+([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) Decision 3).
+
+To keep the connection working:
+
+1. Check those timestamps on a schedule you set. Warning thresholds are product
+   policy and the platform does not promise a particular lead time, so track
+   your own renewal dates.
+2. Renew the server certificate, the client certificate, or the trust root
+   before its not-after time.
+3. If the renewal changes what the registration stores, such as a new trust
+   root, submit it as an update to the registration. The update takes effect
+   only after it validates, and the current configuration stays in force until
+   then, so a rejected update does not interrupt use. Validation must prove
+   the update is continuous with the same OpenBao deployment and its bound
+   keys; an update it cannot prove continuous requires a new registration
+   ([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md)
+   Decision 3).
+
+Expiry does not block anything on the platform's side, and the platform never
+pauses a registration because of it. When a certificate or trust root actually
+expires, the TLS handshake fails closed. Connection health then reports a TLS
+failure (`TlsFailure`), and every operation against a key bound to this
+registration fails until you renew. A paused registration makes no provider
+call, so an update you submit while it is paused waits unvalidated; resuming
+validates that update end to end and switches to it only if it passes. Submit
+the renewed trust material first, then resume.
+
 ## Your kill switch
 
 You bring a key under the customer managed tier specifically so you can
@@ -156,6 +191,22 @@ Destroying the key material, as distinct from soft-delete, is permanent
 loss. It is not a kill switch you can reverse: every envelope still bound
 to the key becomes permanently unrecoverable, and the platform cannot
 override that outcome ([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) Consequences).
+
+### Pausing the registration is not the kill switch
+
+You can also pause the backend registration in the platform console or admin
+API. A pause stops the platform from calling your OpenBao for that
+registration, probes included, and every operation against its keys fails with
+`KeyUseDenied` and the denial reason `BackendPaused` until you resume. A pause
+is a platform-side control that takes effect without waiting on your OpenBao
+and that you can reverse, but it depends on the platform honoring it. If you need the stop to hold regardless of
+the platform, soft-delete the Transit key as described above
+([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) Decision 6).
+
+Resuming validates the registration's current configuration end to end. The
+registration resumes only when validation succeeds; otherwise it stays paused
+and records the validation reason. Resuming does not undo a soft-delete in
+your OpenBao deployment, so reverse it there yourself if you took that action.
 
 ## See also
 
