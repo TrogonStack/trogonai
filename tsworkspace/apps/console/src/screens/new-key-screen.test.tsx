@@ -57,7 +57,8 @@ describe('bind key wizard', () => {
     await user.click(screen.getByRole('button', { name: 'Bind key' }));
 
     expect(await screen.findByText('Could not refresh backends')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'View key' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'View key' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'View key unavailable' })).toBeDisabled();
   });
 
   it('rejects an alias before anything is prepared', async () => {
