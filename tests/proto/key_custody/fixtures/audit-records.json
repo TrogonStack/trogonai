@@ -289,6 +289,40 @@
     }
   },
   {
+    "name": "provider attempts repeat a sequence number",
+    "type": "trogonai.platform.key_custody.audit.v1alpha1.KeyOperationAuditRecord",
+    "valid": false,
+    "violations": ["provider attempt numbers form the ordered sequence from one"],
+    "message": {
+      "operationId": { "value": "operation-14" },
+      "correlationId": { "value": "correlation-14" },
+      "operation": "KEY_OPERATION_KIND_UNWRAP_DEK",
+      "tenant": { "value": "tenant-1" },
+      "keyRef": { "value": "key-1" },
+      "keyBackendId": { "value": "backend-1" },
+      "purpose": { "value": "payload" },
+      "provider": "KEY_PROVIDER_AWS_KMS",
+      "occurredAt": "2026-11-01T00:00:00Z",
+      "failed": { "category": "OPERATION_FAILURE_CATEGORY_PROVIDER_UNAVAILABLE" },
+      "attempts": [
+        {
+          "attemptNumber": 1,
+          "startedAt": "2026-11-01T00:00:00Z",
+          "duration": "0.100s",
+          "failed": "OPERATION_FAILURE_CATEGORY_PROVIDER_UNAVAILABLE",
+          "absence": "PROVIDER_REQUEST_ABSENCE_NO_RESPONSE"
+        },
+        {
+          "attemptNumber": 1,
+          "startedAt": "2026-11-01T00:00:01Z",
+          "duration": "0.100s",
+          "failed": "OPERATION_FAILURE_CATEGORY_PROVIDER_UNAVAILABLE",
+          "absence": "PROVIDER_REQUEST_ABSENCE_NO_RESPONSE"
+        }
+      ]
+    }
+  },
+  {
     "name": "key state denial before a provider attempt",
     "type": "trogonai.platform.key_custody.audit.v1alpha1.KeyOperationAuditRecord",
     "valid": true,
