@@ -54,7 +54,7 @@ message KeyOperationAuditRecord {
   option (buf.validate.message).cel = {
     id: "audit_record.attempt_sequence"
     message: "provider attempt numbers form the ordered sequence from one"
-    expression: "this.attempts.all(attempt, attempt.attempt_number > 0u && attempt.attempt_number <= uint(this.attempts.size()) && this.attempts[int(attempt.attempt_number) - 1].attempt_number == attempt.attempt_number)"
+    expression: "this.attempts.map(attempt, attempt.attempt_number).unique() && this.attempts.all(attempt, attempt.attempt_number > 0u && attempt.attempt_number <= uint(this.attempts.size()) && this.attempts[int(attempt.attempt_number) - 1].attempt_number == attempt.attempt_number)"
   };
 
   trogonai.platform.key_custody.v1alpha1.OperationId operation_id = 1 [features.field_presence = LEGACY_REQUIRED];
