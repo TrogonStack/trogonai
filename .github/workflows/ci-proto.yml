@@ -105,7 +105,7 @@ jobs:
           push: false
           archive: false
 
-  workflow-validation:
+  contract-validation:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -118,24 +118,8 @@ jobs:
         with:
           install_args: buf python
 
-      - name: Validate workflow contract fixtures
-        run: mise run --skip-tools proto:validate-workflows
-
-  key-custody-validation:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install contract validation tools via mise
-        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
-        with:
-          install_args: buf python
-
-      - name: Validate key custody contract fixtures
-        run: mise run --skip-tools proto:validate-key-custody
+      - name: Validate protobuf contract fixtures
+        run: mise run --skip-tools proto:validate
 
   generate:
     runs-on: ubuntu-latest
