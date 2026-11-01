@@ -46,6 +46,11 @@ pub(super) const NOTION_VERIFICATION_TOKEN: ManagedCredentialTarget = ManagedCre
     kind: CredentialKind::VerificationToken,
 };
 
+pub(super) const PLAID_CLIENT_SECRET: ManagedCredentialTarget = ManagedCredentialTarget {
+    source: SourceKind::Plaid,
+    kind: CredentialKind::ClientSecret,
+};
+
 pub(super) const SENTRY_CLIENT_SECRET: ManagedCredentialTarget = ManagedCredentialTarget {
     source: SourceKind::Sentry,
     kind: CredentialKind::ClientSecret,

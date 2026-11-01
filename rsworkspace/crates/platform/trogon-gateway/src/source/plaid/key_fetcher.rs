@@ -24,6 +24,7 @@ pub trait PlaidKeyFetcher: Clone + Send + Sync + 'static {
     fn fetch(
         &self,
         key_id: &PlaidKeyId,
+        secret: &PlaidSecret,
     ) -> impl Future<Output = Result<PlaidVerificationKey, PlaidKeyFetchError>> + Send;
 }
 
@@ -32,7 +33,6 @@ pub struct ReqwestPlaidKeyFetcher {
     client: reqwest::Client,
     url: Url,
     client_id: PlaidClientId,
-    secret: PlaidSecret,
 }
 
 impl ReqwestPlaidKeyFetcher {
@@ -44,7 +44,7 @@ impl ReqwestPlaidKeyFetcher {
         )
     )]
     #[allow(clippy::expect_used)]
-    pub fn new(api_base_url: &PlaidApiBaseUrl, client_id: PlaidClientId, secret: PlaidSecret) -> Self {
+    pub fn new(api_base_url: &PlaidApiBaseUrl, client_id: PlaidClientId) -> Self {
         Self {
             client: reqwest::Client::builder()
                 .redirect(reqwest::redirect::Policy::none())
@@ -52,7 +52,6 @@ impl ReqwestPlaidKeyFetcher {
                 .expect("reqwest client with rustls-tls backend must build"),
             url: api_base_url.webhook_verification_key_url().clone(),
             client_id,
-            secret,
         }
     }
 }
@@ -74,10 +73,14 @@ fn is_transient(status: StatusCode) -> bool {
 }
 
 impl PlaidKeyFetcher for ReqwestPlaidKeyFetcher {
-    async fn fetch(&self, key_id: &PlaidKeyId) -> Result<PlaidVerificationKey, PlaidKeyFetchError> {
+    async fn fetch(
+        &self,
+        key_id: &PlaidKeyId,
+        secret: &PlaidSecret,
+    ) -> Result<PlaidVerificationKey, PlaidKeyFetchError> {
         let request = KeyRequest {
             client_id: self.client_id.as_str(),
-            secret: self.secret.as_str(),
+            secret: secret.as_str(),
             key_id: key_id.as_str(),
         };
         let response = self
