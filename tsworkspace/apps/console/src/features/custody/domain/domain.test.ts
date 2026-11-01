@@ -234,7 +234,6 @@ describe('Google Cloud locations', () => {
     expect(multiRegion).not.toBe(regional);
   });
 });
-
 describe('locator region boundaries', () => {
   it('accepts an AWS multi-Region key ARN', async () => {
     const { boundaryOf, buildLocator, locatorProblem } = await import('./locator');
