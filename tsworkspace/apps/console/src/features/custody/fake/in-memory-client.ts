@@ -355,7 +355,9 @@ export class InMemoryTenantCustodyClient implements TenantCustodyClient {
     const locator = buildLocator(provider, input.locator)!;
     const text = locatorText(locator);
     const bound = this.state.keys.some(
-      (key) => key.binding.kind === 'customer_managed' && locatorText(key.binding.detail.locator) === text,
+      (key) => key.binding.kind === 'customer_managed' &&
+        keyBackendIdOf(key.binding.detail.keyBackendId) === parsed &&
+        locatorText(key.binding.detail.locator) === text,
     );
     if (bound) throw new KeyFault('KEY_ALREADY_BOUND');
     const id = attemptId(`att_${hexOf(this.next('binding'))}`);
@@ -529,6 +531,9 @@ export class InMemoryTenantCustodyClient implements TenantCustodyClient {
   async setDefaultKey(ref: KeyRef): Promise<void> {
     await this.pause();
     const key = this.keyOf(ref);
+    if (this.state.migrations.some((migration) => migration.purpose === key.purpose && isInFlight(migration))) {
+      throw new KeyFault('MIGRATION_IN_FLIGHT');
+    }
     const current = this.endpointOf(key.purpose);
     if (endpointKeyRef(current) === ref) throw new KeyFault('ALREADY_DEFAULT');
     this.requireUse(ref, 'wrap');
