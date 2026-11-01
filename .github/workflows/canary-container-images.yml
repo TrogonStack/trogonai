@@ -82,11 +82,16 @@ jobs:
           sbom: true
           provenance: mode=max
 
+      - name: Resolve image digest
+        id: image
+        env:
+          DIGEST: ${{ steps.published.outputs.digest || steps.build_image.outputs.digest }}
+        run: echo "digest=${DIGEST}" >>"$GITHUB_OUTPUT"
+
       - name: Scan image for vulnerabilities
-        if: steps.published.outputs.published == 'false'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: ${{ env.IMAGE }}@${{ steps.build_image.outputs.digest }}
+          image-ref: ${{ env.IMAGE }}@${{ steps.image.outputs.digest }}
           scanners: vuln
           format: table
           output: trivy-results.txt
@@ -94,19 +99,17 @@ jobs:
           exit-code: 0
 
       - name: Generate SBOM
-        if: steps.published.outputs.published == 'false'
         uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
-          image: ${{ env.IMAGE }}@${{ steps.build_image.outputs.digest }}
+          image: ${{ env.IMAGE }}@${{ steps.image.outputs.digest }}
           artifact-name: sbom-${{ matrix.service }}-spdx
           format: spdx-json
 
       - name: Document image security audit
-        if: steps.published.outputs.published == 'false'
         shell: bash
         env:
           SERVICE: ${{ matrix.service }}
           IMAGE_NAME: ${{ env.IMAGE }}
-          IMAGE_DIGEST: ${{ steps.build_image.outputs.digest }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
           RUNTIME_BASE: debian:bookworm-20260518-slim
         run: mise run --skip-tools github-actions:image-audit-summary
