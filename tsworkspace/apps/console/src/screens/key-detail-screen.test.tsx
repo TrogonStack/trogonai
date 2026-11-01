@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 
 import { createFakeBackend } from '@/fake-backend';
-import { keyBackendId, keyRef } from '@/features/custody/domain/identifiers';
+import { keyBackendId, keyRef, purposeId } from '@/features/custody/domain/identifiers';
 import { seedKeyRefs, seedLocators } from '@/features/custody/fake/seed-ids';
 import { renderApp } from '@/test/render-app';
 
@@ -67,6 +67,16 @@ describe('key detail', () => {
     const toggle = await screen.findByRole('switch', { name: /Default key for/ });
     expect(toggle).toBeDisabled();
     expect(screen.getAllByText('Decrypt only').length).toBeGreaterThan(0);
+  });
+
+  it('disables set as default while the purpose is being migrated', async () => {
+    const backend = createFakeBackend({ latencyMs: 0 });
+    await backend.keyCustody.startMigration({ purpose: purposeId('session_artifacts'), target: { tier: 'managed' } });
+    renderApp(`/keys/keys/${seedKeyRefs.openbaoArtifacts}`, backend);
+
+    const toggle = await screen.findByRole('switch', { name: /Default key for/ });
+    expect(toggle).toBeDisabled();
+    expect(screen.getByText('A migration is already moving payloads for this purpose.')).toBeInTheDocument();
   });
 
   it('shows the fail closed notice for a disabled key', async () => {

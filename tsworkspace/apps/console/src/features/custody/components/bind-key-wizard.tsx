@@ -95,8 +95,10 @@ export function BindKeyWizard({ initialBackendId }: { initialBackendId?: string 
   const [plan, setPlan] = useState<BindingPlan>();
   const [boundRef, setBoundRef] = useState<KeyRef>();
 
-  if (query.error) return <FaultAlert error={query.error} title="Could not load backends" />;
-  if (!query.data) return <p className="text-muted-foreground text-sm">Loading backends...</p>;
+  if (!query.data) {
+    if (query.error) return <FaultAlert error={query.error} title="Could not load backends" />;
+    return <p className="text-muted-foreground text-sm">Loading backends...</p>;
+  }
 
   const bindable = query.data.backends.filter((candidate) => candidate.lifecycle === KeyBackendLifecycle.ACTIVE);
   const backend = bindable.find((candidate) => candidate.id === (chosenBackend ?? bindable[0]?.id));
@@ -129,6 +131,7 @@ export function BindKeyWizard({ initialBackendId }: { initialBackendId?: string 
 
   return (
     <div className="flex flex-col gap-6">
+      <FaultAlert error={query.error} title="Could not refresh backends" />
       <StepIndicator steps={steps} current={step} />
 
       {step === 0 ? (
