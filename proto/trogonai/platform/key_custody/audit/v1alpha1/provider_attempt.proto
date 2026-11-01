@@ -27,6 +27,12 @@ enum ProviderRequestAbsence {
 // join. No per-attempt value ever enters the authenticated binding, which must
 // be identical at wrap and unwrap (ADR#0030).
 message ProviderAttempt {
+  option (buf.validate.message).cel = {
+    id: "provider_attempt.success_response"
+    message: "a successful attempt received a provider response"
+    expression: "!has(this.succeeded) || this.absence != trogonai.platform.key_custody.audit.v1alpha1.ProviderRequestAbsence.PROVIDER_REQUEST_ABSENCE_NO_RESPONSE"
+  };
+
   uint32 attempt_number = 1 [
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).uint32.gt = 0
@@ -42,7 +48,11 @@ message ProviderAttempt {
     google.protobuf.Empty succeeded = 4;
     trogonai.platform.key_custody.v1alpha1.OperationFailureCategory failed = 5 [(buf.validate.field).enum = {
       defined_only: true
-      not_in: [0]
+      not_in: [
+        0,
+        4,
+        7
+      ]
     }];
   }
 
