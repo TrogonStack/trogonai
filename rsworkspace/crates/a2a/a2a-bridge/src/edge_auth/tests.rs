@@ -312,7 +312,12 @@ async fn a_required_nonce_is_handed_out_and_admits_the_retry_that_binds_it() {
 #[tokio::test]
 async fn a_nonce_the_edge_never_issued_is_answered_with_one_it_did() {
     let agent = SigningAgent::new();
-    let signing = Signing::fresh().server_nonce("not-a-nonce-this-edge-issued");
+    let elsewhere = nonce_guard(&agent);
+    let error = refusal(&elsewhere, &agent.signed(b"{}", &Signing::fresh()), &agent.bearer()).await;
+    let EdgeAuthError::NonceRequired(challenge) = error else {
+        panic!("expected a nonce challenge, got {error:?}");
+    };
+    let signing = Signing::fresh().server_nonce(challenge.nonce().as_str());
     let error = refusal(&nonce_guard(&agent), &agent.signed(b"{}", &signing), &agent.bearer()).await;
     let EdgeAuthError::NonceRequired(challenge) = error else {
         panic!("expected a nonce challenge, got {error:?}");
