@@ -7,6 +7,19 @@ date: 2026-07-07
 
 # ADR#0017: AAuth Agent Authentication over a Trogon NATS PoP Binding
 
+> **Superseded in part by [ADR#0082](./0082-bus-principal-from-subject-and-edge-proof-of-possession.md)
+> (2026-10-30).** AAuth runs only at the external HTTP edge and defaults to
+> `enforce` in release builds; `shadow` and `off` require an explicit
+> development flag and log a warning, and `shadow` no longer admits a request
+> as anonymous (Decision 6). No NATS hop runs the binding of Decision 2,
+> including the first hop of a client that connects to NATS directly. Replay
+> moves to the shared `AAUTH_REPLAY` NATS KV bucket keyed by key id and
+> `jti`, with server-issued nonces and the skew and validity bounds of
+> [ADR#0051](./0051-fully-bound-request-signing.md). The JWT-header identity
+> that Decision 5 supersedes no longer exists, and the verified identity
+> reaches the bus as the subject principal that
+> [ADR#0026](./0026-command-authorization-principal.md) Decision 4 maps.
+
 ## Context
 
 The [A2A](../glossary/a2a) gateway is the ingress boundary for agent-to-agent traffic on the mesh
