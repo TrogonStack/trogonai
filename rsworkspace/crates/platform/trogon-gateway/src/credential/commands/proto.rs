@@ -364,6 +364,7 @@ fn proto_source_kind(value: SourceKind) -> v1::CredentialSource {
         SourceKind::Datadog => v1::CredentialSource::CREDENTIAL_SOURCE_DATADOG,
         SourceKind::GooglePubSub => v1::CredentialSource::CREDENTIAL_SOURCE_GOOGLE_PUBSUB,
         SourceKind::Zoom => v1::CredentialSource::CREDENTIAL_SOURCE_ZOOM,
+        SourceKind::Plaid => v1::CredentialSource::CREDENTIAL_SOURCE_PLAID,
     }
 }
 
@@ -415,6 +416,7 @@ fn decode_source_kind(
         v1::CredentialSource::CREDENTIAL_SOURCE_DATADOG => Ok(SourceKind::Datadog),
         v1::CredentialSource::CREDENTIAL_SOURCE_GOOGLE_PUBSUB => Ok(SourceKind::GooglePubSub),
         v1::CredentialSource::CREDENTIAL_SOURCE_ZOOM => Ok(SourceKind::Zoom),
+        v1::CredentialSource::CREDENTIAL_SOURCE_PLAID => Ok(SourceKind::Plaid),
         v1::CredentialSource::CREDENTIAL_SOURCE_UNSPECIFIED => Err(invalid_field(
             field,
             CredentialFieldInvalidError::UnspecifiedEnum(UnspecifiedEnumKind::SourceKind),
