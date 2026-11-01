@@ -1,4 +1,7 @@
 use super::*;
+use crate::credential::commands::domain::{CredentialOwnerId, CredentialRef, CredentialScope, StorageBackend};
+use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
+use crate::secret_store::{MockOpenBaoSecretStore, SecretMaterial, SecretStorePut};
 use crate::source::plaid::test_support::{FakeFailure, FakeKeyFetcher, TestKeyPair, hs256_token};
 use crate::source::plaid::{PlaidApiBaseUrl, PlaidClientId, PlaidSecret};
 use axum::body::Body;
@@ -14,6 +17,7 @@ use trogon_std::time::FixedEpochClock;
 
 const TEST_NOW: u64 = 1_700_000_000;
 const KEY_ID: &str = "kid-1";
+const RUNTIME_SECRET: &str = "runtime-secret";
 const WEBHOOK_BODY: &[u8] = br#"{"webhook_type":"TRANSACTIONS","webhook_code":"SYNC_UPDATES_AVAILABLE","item_id":"item-123","environment":"production"}"#;
 
 fn wrap_publisher(publisher: MockJetStreamPublisher) -> ClaimCheckPublisher<MockJetStreamPublisher, MockObjectStore> {
@@ -87,6 +91,61 @@ fn assert_unroutable(publisher: &MockJetStreamPublisher, expected_reason: &str, 
     assert_eq!(messages[0].payload.as_ref(), body);
 }
 
+fn primary() -> SourceIntegrationId {
+    SourceIntegrationId::new("primary").unwrap()
+}
+
+async fn registry_with_runtime_secret(store: &MockOpenBaoSecretStore) -> RuntimeCredentialRegistry {
+    let credential = store
+        .put(
+            CredentialScope::integration(
+                CredentialOwnerId::new("tenant-1").unwrap(),
+                SourceKind::Plaid,
+                primary(),
+            ),
+            CredentialKind::ClientSecret,
+            trogon_std::SecretString::new(RUNTIME_SECRET).unwrap(),
+        )
+        .await
+        .unwrap();
+    let registry = RuntimeCredentialRegistry::default();
+    registry
+        .projections()
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1).unwrap())
+        .await;
+    registry
+}
+
+fn runtime_app<G: SecretStoreGet<Error = SecretStoreError>>(
+    publisher: MockJetStreamPublisher,
+    fetcher: FakeKeyFetcher,
+    registry: &RuntimeCredentialRegistry,
+    store: G,
+) -> Router {
+    runtime_router_with_clock(
+        wrap_publisher(publisher),
+        &test_config(),
+        primary(),
+        registry.resolver(store),
+        FixedEpochClock::from_secs(TEST_NOW),
+        fetcher,
+    )
+}
+
+#[derive(Clone)]
+struct UnavailableSecretStore;
+
+impl SecretStoreGet for UnavailableSecretStore {
+    type Error = SecretStoreError;
+
+    async fn get(&self, _: &CredentialRef) -> Result<SecretMaterial, SecretStoreError> {
+        Err(SecretStoreError::BackendUnavailable {
+            backend: StorageBackend::OpenBao,
+            message: "store is down".to_owned(),
+        })
+    }
+}
+
 #[tokio::test]
 async fn provision_creates_stream_with_dedup_window_spanning_both_sides_of_the_tolerance() {
     let _guard = tracing_guard();
@@ -128,6 +187,21 @@ async fn valid_webhook_publishes_raw_body_with_headers_and_delivery_msg_id() {
         header(&messages[0].headers, "Nats-Msg-Id"),
         Some(PlaidDeliveryId::of(&token).as_str())
     );
+}
+
+#[tokio::test]
+async fn static_mode_fetches_the_key_with_the_configured_secret() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let (pair, fetcher) = fixture();
+
+    let resp = app(publisher.clone(), fetcher.clone())
+        .oneshot(signed_request(&pair, WEBHOOK_BODY))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(fetcher.secrets(), vec!["secret-1"]);
 }
 
 #[tokio::test]
@@ -588,4 +662,157 @@ async fn oversized_body_is_rejected() {
 
     assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
     assert!(publisher.published_messages().is_empty());
+}
+
+#[tokio::test]
+async fn runtime_secret_verifies_and_publishes_instead_of_the_configured_secret() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let (pair, fetcher) = fixture();
+    let store = MockOpenBaoSecretStore::default();
+    let registry = registry_with_runtime_secret(&store).await;
+
+    let resp = runtime_app(publisher.clone(), fetcher.clone(), &registry, store)
+        .oneshot(signed_request(&pair, WEBHOOK_BODY))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let messages = publisher.published_messages();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].subject, "plaid.TRANSACTIONS.SYNC_UPDATES_AVAILABLE");
+    assert_eq!(messages[0].payload.as_ref(), WEBHOOK_BODY);
+    assert_eq!(fetcher.secrets(), vec![RUNTIME_SECRET]);
+}
+
+#[tokio::test]
+async fn runtime_unknown_integration_returns_the_resolver_status() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let (pair, fetcher) = fixture();
+
+    let resp = runtime_app(
+        publisher.clone(),
+        fetcher.clone(),
+        &RuntimeCredentialRegistry::default(),
+        MockOpenBaoSecretStore::default(),
+    )
+    .oneshot(signed_request(&pair, WEBHOOK_BODY))
+    .await
+    .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    assert!(publisher.published_messages().is_empty());
+    assert!(fetcher.calls().is_empty());
+}
+
+#[tokio::test]
+async fn runtime_secret_store_outage_returns_the_resolver_status() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let (pair, fetcher) = fixture();
+    let registry = registry_with_runtime_secret(&MockOpenBaoSecretStore::default()).await;
+
+    let resp = runtime_app(publisher.clone(), fetcher.clone(), &registry, UnavailableSecretStore)
+        .oneshot(signed_request(&pair, WEBHOOK_BODY))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(publisher.published_messages().is_empty());
+    assert!(fetcher.calls().is_empty());
+}
+
+#[tokio::test]
+async fn runtime_request_without_a_usable_token_returns_401_before_the_credential_is_resolved() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let (_, fetcher) = fixture();
+    let registry = registry_with_runtime_secret(&MockOpenBaoSecretStore::default()).await;
+    let router = runtime_app(publisher.clone(), fetcher.clone(), &registry, UnavailableSecretStore);
+
+    for token in [None, Some("not-a-jwt")] {
+        let resp = router.clone().oneshot(request(WEBHOOK_BODY, token)).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    assert!(publisher.published_messages().is_empty());
+    assert!(fetcher.calls().is_empty());
+}
+
+#[tokio::test]
+async fn runtime_key_fetch_failure_returns_503() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let (pair, _) = fixture();
+    let fetcher = FakeKeyFetcher::default().failing(FakeFailure::Unavailable);
+    let store = MockOpenBaoSecretStore::default();
+    let registry = registry_with_runtime_secret(&store).await;
+
+    let resp = runtime_app(publisher.clone(), fetcher.clone(), &registry, store)
+        .oneshot(signed_request(&pair, WEBHOOK_BODY))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(fetcher.secrets(), vec![RUNTIME_SECRET]);
+    assert!(publisher.published_messages().is_empty());
+}
+
+#[tokio::test]
+async fn runtime_unknown_key_ids_past_the_fetch_limit_return_429_with_retry_after_without_fetching() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let fetcher = FakeKeyFetcher::default();
+    let store = MockOpenBaoSecretStore::default();
+    let registry = registry_with_runtime_secret(&store).await;
+    let router = runtime_app(publisher.clone(), fetcher.clone(), &registry, store);
+
+    let fetched = router
+        .clone()
+        .oneshot(signed_request(&TestKeyPair::generate("kid-unknown-1"), WEBHOOK_BODY))
+        .await
+        .unwrap();
+    let throttled = router
+        .oneshot(signed_request(&TestKeyPair::generate("kid-unknown-2"), WEBHOOK_BODY))
+        .await
+        .unwrap();
+
+    assert_eq!(fetched.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(throttled.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(throttled.headers().get(header::RETRY_AFTER).unwrap(), "10");
+    assert_eq!(fetcher.calls(), vec!["kid-unknown-1"]);
+    assert_eq!(fetcher.secrets(), vec![RUNTIME_SECRET]);
+    assert!(publisher.published_messages().is_empty());
+}
+
+#[tokio::test]
+async fn runtime_revocation_stops_ingestion_while_the_key_is_still_cached() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let (pair, fetcher) = fixture();
+    let store = MockOpenBaoSecretStore::default();
+    let registry = registry_with_runtime_secret(&store).await;
+    let router = runtime_app(publisher.clone(), fetcher.clone(), &registry, store);
+
+    let accepted = router
+        .clone()
+        .oneshot(signed_request(&pair, WEBHOOK_BODY))
+        .await
+        .unwrap();
+    assert_eq!(accepted.status(), StatusCode::OK);
+
+    let retired = registry
+        .projections()
+        .remove_credential(
+            &RuntimeIntegrationKey::new(SourceKind::Plaid, &primary()),
+            CredentialKind::ClientSecret,
+        )
+        .await;
+    assert!(retired.is_some());
+
+    let rejected = router.oneshot(signed_request(&pair, WEBHOOK_BODY)).await.unwrap();
+    assert_eq!(rejected.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(publisher.published_messages().len(), 1);
+    assert_eq!(fetcher.calls(), vec![KEY_ID]);
 }

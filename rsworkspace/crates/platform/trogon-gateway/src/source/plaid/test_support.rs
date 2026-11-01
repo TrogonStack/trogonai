@@ -11,6 +11,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 
 use super::PlaidKeyId;
+use super::PlaidSecret;
 use super::key_fetcher::{PlaidKeyFetchError, PlaidKeyFetcher};
 use super::verification_key::{PlaidJwk, PlaidVerificationKey};
 
@@ -126,6 +127,7 @@ pub enum FakeFailure {
 pub struct FakeKeyFetcher {
     keys: Arc<Mutex<HashMap<String, PlaidVerificationKey>>>,
     calls: Arc<Mutex<Vec<String>>>,
+    secrets: Arc<Mutex<Vec<String>>>,
     failure: Arc<Mutex<Option<FakeFailure>>>,
 }
 
@@ -151,11 +153,20 @@ impl FakeKeyFetcher {
     pub fn calls(&self) -> Vec<String> {
         self.calls.lock().unwrap().clone()
     }
+
+    pub fn secrets(&self) -> Vec<String> {
+        self.secrets.lock().unwrap().clone()
+    }
 }
 
 impl PlaidKeyFetcher for FakeKeyFetcher {
-    async fn fetch(&self, key_id: &PlaidKeyId) -> Result<PlaidVerificationKey, PlaidKeyFetchError> {
+    async fn fetch(
+        &self,
+        key_id: &PlaidKeyId,
+        secret: &PlaidSecret,
+    ) -> Result<PlaidVerificationKey, PlaidKeyFetchError> {
         self.calls.lock().unwrap().push(key_id.as_str().to_owned());
+        self.secrets.lock().unwrap().push(secret.as_str().to_owned());
         if let Some(failure) = *self.failure.lock().unwrap() {
             return Err(match failure {
                 FakeFailure::Transport => PlaidKeyFetchError::Transport("connection refused".into()),
