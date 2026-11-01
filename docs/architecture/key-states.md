@@ -78,7 +78,7 @@ to every `KeyRef` bound to that registration. Each registration has an
 admission setting, `Enabled` or `Paused`, that only its owner changes
 ([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) Decision 3).
 
-Every operation checks in this order
+An operation against an existing `KeyRef` checks in this order
 ([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) Decision 6):
 
 1. Authenticate the caller and resolve the `KeyRef`, including the tenant and
@@ -90,13 +90,20 @@ Every operation checks in this order
 A retry inside the operation deadline repeats the admission check before its
 next attempt.
 
-A paused registration denies every operation in every column of the matrix with
-`KeyUseDenied` and the denial reason `BackendPaused`, whatever state the key is
-in. The platform makes no provider call for a paused registration, probes
-included, so what it last observed about a customer managed key's state is not
-refreshed until the registration resumes. Resume validates the registration's
-current revision end to end. Admission resumes only when validation succeeds,
-and the matrix applies as usual afterward.
+`BindExternalKey` has no existing `KeyRef` to resolve. It authenticates the
+caller, authorizes the tenant's use of the supplied backend, locator, purpose,
+and capabilities, checks the registration's admission, and only then performs
+provider validation and applies the discovered key-state and capability gates
+before creating the reference.
+
+After a service instance observes a paused registration, it denies every
+operation in every column of the matrix with `KeyUseDenied` and the denial reason
+`BackendPaused`, whatever state the key is in. It makes no provider call for the
+registration, probes included, so what it last observed about a customer managed
+key's state is not refreshed until the registration resumes. Resume validates
+the newest staged revision end to end, or the current revision when none is
+staged. Admission resumes only when validation succeeds, and the matrix applies
+as usual afterward.
 
 A pause does not replace the provider-side kill switch. Disabling the key or
 revoking access in the provider remains the authoritative stop
@@ -104,7 +111,8 @@ revoking access in the provider remains the authoritative stop
 
 ## State and operation matrix
 
-The table applies each state to the operations a `KeyRef` participates in:
+The table applies each provider key state to operations that use an existing
+`KeyRef` and to the provider key proposed for binding:
 
 - **wrap_dek**: create a new envelope.
 - **unwrap_dek**: read an existing envelope.
@@ -118,8 +126,9 @@ The table applies each state to the operations a `KeyRef` participates in:
   migration, wrapping the migrated `Dek`.
 
 Each cell is `allowed` or the exact typed failure category from [ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md)
-Decision 6. The matrix applies only to an operation that has already passed
-registration admission.
+Decision 6. The matrix applies only after registration admission. For
+`BindExternalKey`, it gates the provider key discovered during validation before
+the service creates a `KeyRef`.
 
 | State | wrap_dek (new envelopes) | unwrap_dek (existing envelopes) | BindExternalKey / set-as-default | Migration source | Migration target |
 | --- | --- | --- | --- | --- | --- |
@@ -168,10 +177,13 @@ document different timing:
   exceptionally several hours.
 
 A pause is a platform-side control, so the platform sets its timing. It is
-acknowledged once the admission fact is durably committed. Service instances
-enforce it through pushed invalidation of their admission view with a hard
-time-to-live backstop, and a provider request already in flight may complete.
-The target number is recorded after measurement.
+acknowledged once the admission fact is durably committed, not once every
+service instance has observed it. Instances enforce it through pushed
+invalidation of their admission view with a hard time-to-live backstop. Until a
+measured propagation target is published, a stale instance may admit and start
+a provider request after acknowledgement but before it observes the pause, and
+a request already in flight may complete. The no-provider-call guarantee begins
+when the serving instance observes the pause.
 
 ## Effects on stored data
 
