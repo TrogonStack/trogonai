@@ -197,19 +197,23 @@ export function BindKeyWizard({ initialBackendId }: { initialBackendId?: string 
                 hint={locatorHints[backend.provider]}
                 error={showProblems ? locatorError : undefined}
               />
-              <RadioCards
-                name="key-purpose"
-                label="Purpose"
-                value={purpose ?? ''}
-                options={catalogue.map((entry) => ({
-                  value: entry.id as string,
-                  label: entry.label,
-                  description: `${entry.description} Owned by the ${entry.owningService}.`,
-                }))}
-                onChange={(value) => setChosenPurpose(catalogue.find((entry) => entry.id === value)?.id)}
-                columns={2}
-                hint="A key serves one purpose. Binding it does not make it the default."
-              />
+              {catalogue.length === 0 ? (
+                <p className="text-muted-foreground text-[13px]">No key purposes are available.</p>
+              ) : (
+                <RadioCards
+                  name="key-purpose"
+                  label="Purpose"
+                  value={purpose ?? ''}
+                  options={catalogue.map((entry) => ({
+                    value: entry.id as string,
+                    label: entry.label,
+                    description: `${entry.description} Owned by the ${entry.owningService}.`,
+                  }))}
+                  onChange={(value) => setChosenPurpose(catalogue.find((entry) => entry.id === value)?.id)}
+                  columns={2}
+                  hint="A key serves one purpose. Binding it does not make it the default."
+                />
+              )}
               <fieldset className="flex flex-col gap-2">
                 <legend className="micro text-muted-foreground mb-1.5">Capabilities</legend>
                 {requestableCapabilities.map((capability) => (
@@ -235,7 +239,7 @@ export function BindKeyWizard({ initialBackendId }: { initialBackendId?: string 
                   <ArrowLeftIcon data-icon="inline-start" />
                   Back
                 </Button>
-                <Button type="submit" disabled={prepare.isPending}>
+                <Button type="submit" disabled={!purpose || prepare.isPending}>
                   {prepare.isPending ? 'Preparing...' : 'Continue to validation'}
                   <ArrowRightIcon data-icon="inline-end" />
                 </Button>
