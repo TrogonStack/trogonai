@@ -69,6 +69,12 @@ fn parse_rejects_a_member_not_labelled_sig() {
 }
 
 #[test]
+fn parse_rejects_a_member_key_that_cannot_start_an_http_dictionary_key() {
+    let err = parse_err(r#"@sig=("@method");created=1;expires=2;nonce="n""#);
+    assert!(matches!(err, HttpPopError::MalformedSignatureInput));
+}
+
+#[test]
 fn parse_rejects_parameters_on_a_component() {
     let err = parse_err(r#"sig=("@query-param";name="q" "@method");created=1;expires=2;nonce="n""#);
     assert!(matches!(err, HttpPopError::MalformedSignatureInput));

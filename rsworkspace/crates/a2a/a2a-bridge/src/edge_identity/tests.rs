@@ -117,6 +117,7 @@ fn verified_caller_takes_the_agent_token_identity() {
         &CredentialSubject::new("https://agents.test", "agent-1").expect("subject")
     );
     assert_eq!(caller.token(), PresentedToken::Agent);
+    assert_eq!(caller.token().as_str(), "agent");
     assert_eq!(caller.key_thumbprint().as_str(), "agent-thumbprint");
 }
 

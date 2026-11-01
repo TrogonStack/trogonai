@@ -6,7 +6,7 @@ use bytes::Bytes;
 use trogon_aauth_verify::constants::AAUTH_REPLAY_BUCKET;
 use trogon_aauth_verify::{
     ChallengeKey, ChallengeKid, FreshnessError, HttpPopError, InMemoryReplayStore, NatsKvReplayStore, NonceRequirement,
-    NonceTtl, ReplayBucketSpec, ServerNonces, SystemTimeSource,
+    NonceTtl, ReplayBucketSpec, ReplayError, ServerNonces, SystemTimeSource,
 };
 use trogon_identity_types::aauth::headers::SIGNATURE;
 use trogon_nats::test_support::JetStreamTestServer;
@@ -300,6 +300,15 @@ async fn a_required_nonce_is_handed_out_and_admits_the_retry_that_binds_it() {
         panic!("expected a nonce challenge, got {error:?}");
     };
     assert!(challenge.refused().is_none());
+    assert_eq!(
+        EdgeAuthError::NonceRequired(challenge).detail(),
+        "request has to bind a server nonce issued for it"
+    );
+
+    let error = refusal(&guard, &agent.signed(b"{}", &Signing::fresh()), &agent.bearer()).await;
+    let EdgeAuthError::NonceRequired(challenge) = error else {
+        panic!("expected a nonce challenge, got {error:?}");
+    };
 
     let retry = Signing::fresh().server_nonce(challenge.nonce().as_str());
     let admission = guard
@@ -323,6 +332,8 @@ async fn a_nonce_the_edge_never_issued_is_answered_with_one_it_did() {
         panic!("expected a nonce challenge, got {error:?}");
     };
     assert!(challenge.refused().is_some());
+    let detail = EdgeAuthError::NonceRequired(challenge).detail();
+    assert!(detail.starts_with("request has to bind a server nonce issued for it: "));
 }
 
 #[tokio::test]
@@ -435,10 +446,9 @@ async fn bearer_only_guard_admits_every_request_unchecked() {
 
 #[test]
 fn an_authority_is_a_lowercased_host_and_optional_port() {
-    assert_eq!(
-        EdgeAuthority::new(" Bridge.Test:8443 ").unwrap().as_str(),
-        "bridge.test:8443"
-    );
+    let authority = EdgeAuthority::new(" Bridge.Test:8443 ").unwrap();
+    assert_eq!(authority.as_str(), "bridge.test:8443");
+    assert_eq!(authority.to_string(), "bridge.test:8443");
 }
 
 #[test]
@@ -463,6 +473,26 @@ fn an_authority_carries_nothing_beyond_a_host_and_port() {
 fn a_resource_identifier_is_never_empty() {
     assert_eq!(ResourceIdentifier::new(" "), Err(EmptyResourceIdentifierError));
     assert_eq!(ResourceIdentifier::new(EDGE_RESOURCE).unwrap().as_str(), EDGE_RESOURCE);
+    assert_eq!(
+        ResourceIdentifier::new(EDGE_RESOURCE).unwrap().to_string(),
+        EDGE_RESOURCE
+    );
+}
+
+#[test]
+fn a_guard_debug_value_names_its_authority_and_policy() {
+    let agent = SigningAgent::new();
+    let rendered = format!("{:?}", guard(&agent, ProofPolicy::Shadow));
+    assert!(rendered.contains(EDGE_AUTHORITY));
+    assert!(rendered.contains("Shadow"));
+}
+
+#[tokio::test]
+async fn a_failed_replay_store_fails_closed_when_asked_about_a_record() {
+    assert!(matches!(
+        FailingReplayStore.contains("jti.key.record").await,
+        Err(ReplayError::MutexPoisoned)
+    ));
 }
 
 #[test]

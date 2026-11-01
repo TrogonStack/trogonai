@@ -243,6 +243,18 @@ async fn run_warns_when_proof_of_possession_is_not_enforced() {
 }
 
 #[tokio::test]
+async fn run_allows_explicit_shadow_mode_with_local_stub_replay() {
+    let _tracing = test_tracing();
+    let env = InMemoryEnv::new();
+    let fs = MemFs::new();
+    env.set("BRIDGE_LISTEN_ADDR", "127.0.0.1:0");
+    proof_settings(&env, &fs, "shadow");
+    env.set(ENV_AAUTH_DEV_UNENFORCED, "true");
+
+    assert!(run(&env, &fs, std::future::ready(())).await.is_ok());
+}
+
+#[tokio::test]
 async fn stub_bootstrap_refuses_enforce_without_a_shared_replay_store() -> Result<(), TestError> {
     let env = InMemoryEnv::new();
     let fs = MemFs::new();
@@ -301,11 +313,44 @@ async fn nats_bootstrap_refuses_enforce_until_the_replay_bucket_is_provisioned()
     Ok(())
 }
 
+#[tokio::test]
+async fn nats_shadow_bootstrap_falls_back_to_local_replay_when_the_bucket_is_absent() -> Result<(), TestError> {
+    let _tracing = test_tracing();
+    let server = JetStreamTestServer::start().await;
+    let env = InMemoryEnv::new();
+    let fs = MemFs::new();
+    proof_settings(&env, &fs, "shadow");
+    env.set(ENV_AAUTH_DEV_UNENFORCED, "true");
+    env.set("BRIDGE_CONNECT_TIMEOUT_SECS", "5");
+    env.set(ENV_AUTH_CALLOUT_XKEY_PUBLIC, callout_xkey()?.public_key().as_str());
+    let nats = NatsConfig::from_url(server.address()).with_tls(NatsTls::Disabled);
+
+    let state = bootstrap_nats_transport(
+        &env,
+        &nats,
+        resolve_a2a_prefix(&env)?,
+        EdgeAuthConfig::from_env(&env, &fs).map_err(BootstrapError::EdgeAuth)?,
+    )
+    .await?;
+    let response = gateway_router(state).oneshot(rpc_request()?).await?;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    Ok(())
+}
+
 /// Opts the bridge out of enforcing proof of possession, which every test
 /// that is not about the edge does to reach the part it is about.
 fn unenforced(env: &InMemoryEnv) {
     env.set(ENV_AAUTH_MODE, EdgeAuthMode::Off.as_str());
     env.set(ENV_AAUTH_DEV_UNENFORCED, "true");
+}
+
+fn test_tracing() -> tracing::subscriber::DefaultGuard {
+    tracing::subscriber::set_default(
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::WARN)
+            .with_writer(std::io::sink)
+            .finish(),
+    )
 }
 
 /// The least an enforcing edge needs: who it is, where it is reached, and an

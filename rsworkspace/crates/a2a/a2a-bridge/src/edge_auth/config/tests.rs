@@ -43,6 +43,10 @@ fn signatures_are_held_to_one_minute_and_thirty_seconds_of_skew_by_default() {
     assert_eq!(settings.freshness().skew().secs(), 30);
     assert_eq!(settings.leeway().secs(), 30);
     assert!(settings.nonces().is_none());
+    let rendered = format!("{settings:?}");
+    assert!(rendered.contains(EDGE_RESOURCE));
+    assert!(rendered.contains(EDGE_AUTHORITY));
+    assert!(rendered.contains("Enforce"));
 }
 
 #[test]
@@ -153,6 +157,11 @@ fn exactly_one_source_of_issuer_keys_is_accepted() {
         )
         .set(ENV_AAUTH_JWKS_TTL_SECS, "120");
     assert_eq!(settings(&discovered).policy(), ProofPolicy::Enforce);
+
+    let unrestricted_discovery = trusting()
+        .unset(ENV_AAUTH_JWKS_PATH)
+        .set(ENV_AAUTH_JWKS_DISCOVERY, "true");
+    assert_eq!(settings(&unrestricted_discovery).policy(), ProofPolicy::Enforce);
 }
 
 #[test]

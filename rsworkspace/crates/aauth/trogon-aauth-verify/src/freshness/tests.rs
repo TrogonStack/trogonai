@@ -52,6 +52,8 @@ fn clock_tolerance_defaults_to_thirty_seconds() {
 fn check_accepts_a_window_up_to_the_skew_past_its_expiry() {
     let freshness = freshness(60, 30);
     let window = SignatureWindow::new(1000, 1060);
+    assert_eq!(window.created(), 1000);
+    assert_eq!(window.expires(), 1060);
     assert_eq!(freshness.check(window, 1000), Ok(()));
     assert_eq!(freshness.check(window, 1090), Ok(()));
     assert_eq!(freshness.check(window, 1091), Err(FreshnessError::Expired));

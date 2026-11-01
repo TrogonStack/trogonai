@@ -61,6 +61,18 @@ async fn nats_transport_callout_mint_per_request_and_jwt_caller_id() {
 }
 
 #[tokio::test]
+async fn nats_transport_harness_refuses_a_subject_outside_gateway_ingress() {
+    let nats = AdvancedMockNatsClient::new();
+    let (_state, harness, _mint_wire) = build_nats_transport_app_state(nats, "planner");
+    let caller = BridgeUserJwt::new("fixture.user.jwt").expect("fixture jwt");
+    let error = harness
+        .unary_request_gateway(&caller, "invalid.*", async_nats::HeaderMap::new(), Bytes::new())
+        .await
+        .expect_err("invalid subject refused");
+    assert!(matches!(error, BridgeError::NatsPublish(_)), "got {error:?}");
+}
+
+#[tokio::test]
 async fn nats_transport_message_send_round_trips_caller_jwt_and_audit() {
     let nats = AdvancedMockNatsClient::new();
     let (state, harness, mint_wire) = build_nats_transport_app_state(nats.clone(), "planner");

@@ -35,6 +35,7 @@ async fn provisioned_store() -> (JetStreamTestServer, jetstream::Context, NatsKv
 fn required_spec_keeps_one_revision_for_three_minutes() {
     assert_eq!(ReplayBucketSpec::REQUIRED.history(), 1);
     assert_eq!(ReplayBucketSpec::REQUIRED.max_age(), Duration::from_secs(180));
+    assert_eq!(ReplayBucketSpec::REQUIRED.to_string(), "history 1 and max age 180s");
 }
 
 #[tokio::test(flavor = "multi_thread")]

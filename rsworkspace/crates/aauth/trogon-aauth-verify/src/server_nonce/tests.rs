@@ -70,7 +70,9 @@ fn challenge_key_refuses_a_key_on_another_curve() {
 
 #[test]
 fn challenge_key_debug_names_only_its_kid() {
-    let rendered = format!("{:?}", challenge_key("nonce-k1"));
+    let key = challenge_key("nonce-k1");
+    assert_eq!(key.kid().as_str(), "nonce-k1");
+    let rendered = format!("{key:?}");
     assert!(rendered.contains("nonce-k1"));
     assert!(!rendered.contains("encoding"));
 }
