@@ -41,7 +41,6 @@ describe('key backends', () => {
   });
 });
 
-
 it('offers registration when there are no tenant backends', async () => {
   const backend = createFakeBackend({ latencyMs: 0 });
   const state = await backend.keyCustody.load();
