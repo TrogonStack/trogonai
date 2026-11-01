@@ -390,10 +390,14 @@ The platform never pauses a customer registration automatically from health
 signals. That would turn a transient provider fault into a platform-initiated
 denial and hide the real failure category.
 
-Resume validates the registration's current revision end to end. Admission
-resumes only when validation succeeds; otherwise the registration stays paused
-and records the validation reason. After a resume the key-state matrix still
-applies.
+A registration update submitted while paused is staged without validation,
+because validating it would call the provider. Resume validates the newest
+staged revision end to end, or the current revision when none is staged, so an
+owner can replace expired trust material during a pause and resume onto it.
+Admission resumes, and a staged revision becomes current, only when that
+validation succeeds; otherwise the registration stays paused on its current
+revision and records the validation reason. After a resume the key-state matrix
+still applies.
 
 Provider unavailability, denial, disabled keys, binding mismatch, integrity
 failure, and throttling produce typed failure outcomes and never a successful
@@ -457,8 +461,9 @@ implemented:
 - A paused registration fails every gated operation with `KeyUseDenied` and the
   denial reason `BackendPaused` without calling the provider, a retry that
   starts after an instance observes the pause repeats admission and fails the
-  same way, and resume admits operations again only after the current revision
-  validates.
+  same way, an update staged during the pause is validated by resume and
+  becomes current only if it passes, and resume admits operations again only
+  after that validation succeeds.
 - AWS cross-account setup denies `AssumeRole` from an unexpected principal and
   with a missing or incorrect tenant-unique external ID, then limits the
   resulting session to the exact key.

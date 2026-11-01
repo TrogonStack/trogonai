@@ -104,7 +104,15 @@ export function useSetDefaultKey() {
 
 export function useStartMigration() {
   const client = useTenantCustodyClient();
-  return useInvalidatingMutation((input: StartMigrationInput) => client.startMigration(input));
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: StartMigrationInput) => {
+      const result = await client.startMigration(input);
+      await queryClient.cancelQueries({ queryKey: custodyKeys.state });
+      queryClient.setQueryData(custodyKeys.state, toCustodyView(await client.load()));
+      return result;
+    },
+  });
 }
 
 export function usePauseMigration() {

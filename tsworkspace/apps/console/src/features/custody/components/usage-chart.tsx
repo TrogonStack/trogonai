@@ -27,7 +27,7 @@ export function UsageChart({ usage }: { usage: readonly DailyUsage[] }) {
         })}
       </ol>
       <div className="micro text-muted-foreground flex items-center justify-between text-[10px]">
-        <span>{USAGE_DAYS} days ago</span>
+        <span>{usage.length - 1} days ago</span>
         <span className="flex items-center gap-3">
           <span className="flex items-center gap-1.5">
             <span aria-hidden="true" className="bg-primary/70 size-2 rounded-xs" />

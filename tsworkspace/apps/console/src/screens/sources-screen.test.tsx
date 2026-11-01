@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 
@@ -51,4 +51,15 @@ describe('sources overview', () => {
 
     expect(await screen.findByRole('heading', { name: 'GitHub local' })).toBeInTheDocument();
   });
+});
+
+
+it('returns to the source list when switching projects from a detail', async () => {
+  const user = userEvent.setup();
+  const { router } = renderApp('/sources/github%2Flocal');
+  await screen.findByRole('heading', { name: 'GitHub local' });
+  await user.click(screen.getByRole('button', { name: /Switch project/ }));
+  await user.click(await screen.findByRole('button', { name: 'Beacon' }));
+  await waitFor(() => expect(router.state.location.pathname).toBe('/sources'));
+  expect(router.state.location.search).toMatchObject({ project: 'proj-beacon' });
 });

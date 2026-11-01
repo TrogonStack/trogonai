@@ -145,8 +145,10 @@ export enum KeyUseDenialReason {
   PROVIDER_DENIED = 1,
 
   /**
-   * The registration's admission is PAUSED. The platform made no provider call,
-   * and the owner must resume the registration first (ADR#0030).
+   * The registration's admission is PAUSED. Admission is checked again before
+   * every retry, so the operation may already list attempts made before the
+   * pause was observed, but none after it. The owner must resume the
+   * registration first (ADR#0030).
    *
    * @generated from enum value: KEY_USE_DENIAL_REASON_BACKEND_PAUSED = 2;
    */

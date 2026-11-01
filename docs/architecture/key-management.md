@@ -288,10 +288,13 @@ The platform never pauses a customer registration automatically from health
 signals. That would turn a transient provider fault into a platform-initiated
 denial and hide the real failure category.
 
-Resume validates the registration's current revision end to end. Admission
-resumes only when validation succeeds; otherwise the registration stays paused
-and records the validation reason. The key-state matrix still applies after a
-resume.
+An update submitted while paused is staged without validation, because
+validating it would call the provider. Resume validates the newest staged
+revision end to end, or the current revision when none is staged, so renewed
+trust material submitted during a pause takes effect on resume. Admission
+resumes, and a staged revision becomes current, only when validation succeeds;
+otherwise the registration stays paused on its current revision and records the
+validation reason. The key-state matrix still applies after a resume.
 
 ## Custody tiers
 
