@@ -3402,6 +3402,108 @@ environment = "sandbox"
 }
 
 #[test]
+fn plaid_resolves_client_id_from_env_table() {
+    let toml = r#"
+[sources.plaid.integrations.primary.webhook]
+client_id = { env = "TROGON_GATEWAY_TEST_PLAID_CLIENT_ID" }
+secret = "plaid-secret"
+environment = "sandbox"
+"#;
+    let f = write_toml(toml);
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set("TROGON_GATEWAY_TEST_PLAID_CLIENT_ID", "plaid-client-id-from-env");
+    let gateway_config = load_config::<GatewayConfig>(Some(f.path())).expect("load failed");
+    let cfg = resolve(gateway_config, &NatsArgs::default(), &env).expect("resolve failed");
+    assert_eq!(cfg.plaid[0].config.client_id.as_str(), "plaid-client-id-from-env");
+}
+
+#[test]
+fn plaid_missing_client_id_env_is_reported_against_client_id() {
+    let toml = r#"
+[sources.plaid.integrations.primary.webhook]
+client_id = { env = "TROGON_GATEWAY_TEST_PLAID_CLIENT_ID_NOT_SET" }
+secret = "plaid-secret"
+environment = "sandbox"
+"#;
+    let errs = validation_messages(toml);
+    assert!(
+        errs.iter().any(|e| e.contains("plaid/primary: invalid client_id")
+            && e.contains("TROGON_GATEWAY_TEST_PLAID_CLIENT_ID_NOT_SET")),
+        "{errs:?}"
+    );
+}
+
+#[test]
+fn plaid_empty_client_id_env_name_is_invalid() {
+    let toml = r#"
+[sources.plaid.integrations.primary.webhook]
+client_id = { env = "  " }
+secret = "plaid-secret"
+environment = "sandbox"
+"#;
+    let errs = validation_messages(toml);
+    assert!(
+        errs.iter().any(|e| e.contains("plaid/primary: invalid client_id")),
+        "{errs:?}"
+    );
+}
+
+#[test]
+fn identifier_input_returns_a_literal_unchanged() {
+    let env = trogon_std::env::InMemoryEnv::new();
+    let input = IdentifierInput::Literal("plaid-client-id".to_string());
+    assert_eq!(input.resolve(&env).unwrap(), "plaid-client-id");
+}
+
+#[test]
+fn identifier_input_reads_and_decodes_the_environment() {
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set("PLAID_CLIENT_ID", "plain-id");
+    env.set("PLAID_CLIENT_ID_ENCODED", "base64:cGxhaW4taWQ=");
+    let plain = IdentifierInput::Env {
+        env: " PLAID_CLIENT_ID ".to_string(),
+    };
+    let encoded = IdentifierInput::Env {
+        env: "PLAID_CLIENT_ID_ENCODED".to_string(),
+    };
+    assert_eq!(plain.resolve(&env).unwrap(), "plain-id");
+    assert_eq!(encoded.resolve(&env).unwrap(), "plain-id");
+}
+
+#[test]
+fn identifier_input_rejects_a_blank_missing_or_invalid_environment() {
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set("PLAID_CLIENT_ID_BAD", "base64:!!!");
+    let blank = IdentifierInput::Env { env: "  ".to_string() };
+    let missing = IdentifierInput::Env {
+        env: "PLAID_CLIENT_ID_MISSING".to_string(),
+    };
+    let invalid = IdentifierInput::Env {
+        env: "PLAID_CLIENT_ID_BAD".to_string(),
+    };
+    assert!(matches!(blank.resolve(&env), Err(IdentifierInputError::EmptyEnvName)));
+    match missing.resolve(&env) {
+        Err(IdentifierInputError::MissingEnv { name }) => assert_eq!(name, "PLAID_CLIENT_ID_MISSING"),
+        other => panic!("expected MissingEnv, got {other:?}"),
+    }
+    assert!(matches!(
+        invalid.resolve(&env),
+        Err(IdentifierInputError::InvalidValue(_))
+    ));
+}
+
+#[test]
+fn identifier_input_rejects_a_non_unicode_environment_variable() {
+    let input = IdentifierInput::Env {
+        env: "PLAID_CLIENT_ID".to_string(),
+    };
+    match input.resolve(&NonUnicodeEnv) {
+        Err(IdentifierInputError::InvalidUnicodeEnv { name }) => assert_eq!(name, "PLAID_CLIENT_ID"),
+        other => panic!("expected InvalidUnicodeEnv, got {other:?}"),
+    }
+}
+
+#[test]
 fn plaid_missing_environment_is_invalid() {
     let toml = r#"
 [sources.plaid.integrations.primary.webhook]

@@ -109,7 +109,7 @@ webhook_secret = { env = "TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET" }
 # nats_ack_timeout_secs = 10
 #
 # [sources.plaid.integrations.primary.webhook]
-# client_id = "your-plaid-client-id"
+# client_id = "your-plaid-client-id"  # or { env = "PLAID_PRIMARY_CLIENT_ID" }
 # secret = { env = "PLAID_PRIMARY_SECRET" }
 # environment = "production"  # sandbox or production
 # timestamp_tolerance_secs = 300  # optional; max drift of the JWT iat claim
