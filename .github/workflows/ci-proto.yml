@@ -177,9 +177,18 @@ jobs:
       - name: Assert generated output matches proto sources
         run: mise run --skip-tools github-actions:assert-proto-generated
 
+      - name: Clear TypeScript key custody bindings
+        run: find tsworkspace/packages/proto/src/gen/trogonai/platform/key_custody -type f -delete
+
       - name: Regenerate TypeScript key custody bindings
         run: pnpm --filter @trogonai/proto generate:key-custody
         working-directory: tsworkspace
 
       - name: Assert TypeScript key custody bindings match proto sources
-        run: git diff --exit-code -- tsworkspace/packages/proto/src/gen/trogonai/platform/key_custody
+        run: |
+          target=tsworkspace/packages/proto/src/gen/trogonai/platform/key_custody
+          drift=$(git status --short --untracked-files=all -- "$target")
+          if [[ -n "$drift" ]]; then
+            printf '%s\n' "$drift"
+            exit 1
+          fi
