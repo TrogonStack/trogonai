@@ -25,6 +25,7 @@ fn every_source_kind_is_in_all_and_round_trips_through_as_str_and_parse() {
         Linear,
         MicrosoftGraph,
         Notion,
+        Plaid,
         Sentry,
         Slack,
         Telegram,
