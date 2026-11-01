@@ -76,6 +76,36 @@ describe('register backend wizard', () => {
     expect(await screen.findByText('Your external ID')).toBeInTheDocument();
   });
 
+  it('clears a preparation error when reusing a valid plan', async () => {
+    const user = userEvent.setup();
+    const backend = createFakeBackend({ latencyMs: 0 });
+    const prepareRegistration = backend.keyCustody.prepareRegistration.bind(backend.keyCustody);
+    backend.keyCustody.prepareRegistration = async (input) => {
+      if (input.displayName === 'Broken AWS') throw new Error('Preparation failed.');
+      return prepareRegistration(input);
+    };
+    renderApp('/keys/backends/new', backend);
+
+    await user.click(await screen.findByRole('radio', { name: /AWS KMS/ }));
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.type(screen.getByLabelText('Display name'), 'Acme AWS staging');
+    await user.type(screen.getByLabelText('Role ARN'), 'arn:aws:iam::381204965517:role/trogon-key-access');
+    await user.click(screen.getByRole('button', { name: 'Generate setup instructions' }));
+    await user.click(await screen.findByRole('button', { name: 'Back' }));
+
+    await user.clear(screen.getByLabelText('Display name'));
+    await user.type(screen.getByLabelText('Display name'), 'Broken AWS');
+    await user.click(screen.getByRole('button', { name: 'Generate setup instructions' }));
+    expect(await screen.findByText('The backend could not be prepared')).toBeInTheDocument();
+
+    await user.clear(screen.getByLabelText('Display name'));
+    await user.type(screen.getByLabelText('Display name'), 'Acme AWS staging');
+    await user.click(screen.getByRole('button', { name: 'Generate setup instructions' }));
+    await user.click(await screen.findByRole('button', { name: 'Back' }));
+
+    expect(screen.queryByText('The backend could not be prepared')).not.toBeInTheDocument();
+  });
+
   it('stops at the failing check and explains it', async () => {
     const user = userEvent.setup();
     renderApp('/keys/backends/new');
