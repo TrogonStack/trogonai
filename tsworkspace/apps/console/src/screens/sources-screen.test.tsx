@@ -53,7 +53,6 @@ describe('sources overview', () => {
   });
 });
 
-
 it('returns to the source list when switching projects from a detail', async () => {
   const user = userEvent.setup();
   const { router } = renderApp('/sources/github%2Flocal');

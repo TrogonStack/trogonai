@@ -187,7 +187,6 @@ describe('re-registering the webhook', () => {
   });
 });
 
-
 it('rejects Datadog deliveries while its custody backend is paused', () => {
   const source = populateSeed(start).find((entry) => entry.id === seedIntegrationIds.datadog)!;
   expect(source.hourly.slice(-12).every((hour) => hour.accepted === 0 && hour.rejected > 0)).toBe(true);
