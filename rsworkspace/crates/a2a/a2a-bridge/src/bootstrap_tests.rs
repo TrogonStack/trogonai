@@ -9,10 +9,21 @@ use async_nats::jetstream::kv;
 use async_nats::jetstream::stream::StorageType;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
+use base64::Engine as _;
+use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use bytes::Bytes;
 use futures_util::StreamExt;
+use jsonwebtoken::{Algorithm, EncodingKey, Header};
+use p256::ecdsa::SigningKey;
+use p256::pkcs8::LineEnding;
+use pkcs8::EncodePrivateKey as _;
+use rand_core::{OsRng, RngCore as _};
+use serde_json::json;
+use sha2::{Digest, Sha256};
 use tower::ServiceExt;
-use trogon_aauth_verify::ReplayBucketSpec;
+use trogon_aauth_verify::{ReplayBucketSpec, SystemTimeSource, TimeSource};
+use trogon_identity_types::aauth::TYP_AGENT;
+use trogon_identity_types::aauth::headers::{CONTENT_DIGEST, SIGNATURE, SIGNATURE_INPUT, SIGNATURE_KEY};
 use trogon_nats::NatsTls;
 use trogon_nats::test_support::{CoreTestServer, JetStreamTestServer};
 use trogon_std::env::InMemoryEnv;
@@ -44,6 +55,10 @@ enum TestError {
     #[error(transparent)]
     Json(#[from] serde_json::Error),
     #[error(transparent)]
+    Jwt(#[from] jsonwebtoken::errors::Error),
+    #[error(transparent)]
+    Pkcs8(#[from] p256::pkcs8::Error),
+    #[error(transparent)]
     Http(#[from] axum::http::Error),
     #[error(transparent)]
     Body(#[from] axum::Error),
@@ -61,6 +76,8 @@ enum TestError {
     MissingMessage,
     #[error("mint request carries no sealed credential")]
     MissingSealedCredential,
+    #[error("generated signing key has no affine coordinates")]
+    MissingSigningCoordinate,
 }
 
 fn callout_xkey() -> Result<CalloutXkey, TestError> {
@@ -76,6 +93,91 @@ fn rpc_request_with(body: &str) -> Result<Request<Body>, TestError> {
         .header("authorization", "Bearer caller-fixture")
         .header("x-a2a-agent-id", "planner")
         .body(Body::from(body.to_owned()))?)
+}
+
+struct SigningFixture {
+    provider: EncodingKey,
+    provider_jwk: serde_json::Value,
+    key: EncodingKey,
+    key_jwk: serde_json::Value,
+}
+
+impl SigningFixture {
+    fn new() -> Result<Self, TestError> {
+        let (provider, provider_jwk) = signing_key("provider-1")?;
+        let (key, key_jwk) = signing_key("agent-key")?;
+        Ok(Self {
+            provider,
+            provider_jwk,
+            key,
+            key_jwk,
+        })
+    }
+
+    fn jwks_document(&self) -> String {
+        json!({"https://agents.test": {"keys": [self.provider_jwk]}}).to_string()
+    }
+
+    fn agent_token(&self) -> Result<String, TestError> {
+        let mut header = Header::new(Algorithm::ES256);
+        header.typ = Some(TYP_AGENT.into());
+        header.kid = Some("provider-1".into());
+        let issued = SystemTimeSource.now();
+        Ok(jsonwebtoken::encode(
+            &header,
+            &json!({
+                "iss": "https://agents.test",
+                "sub": "aauth:agent-1@agents.test",
+                "jti": URL_SAFE_NO_PAD.encode(OsRng.next_u64().to_be_bytes()),
+                "iat": issued - 10,
+                "exp": issued + 3600,
+                "dwk": "aauth-agent.json",
+                "cnf": {"jwk": self.key_jwk},
+            }),
+            &self.provider,
+        )?)
+    }
+
+    fn request(&self) -> Result<Request<Body>, TestError> {
+        let body = br#"{"jsonrpc":"2.0","id":"bootstrap-request","method":"message/send","params":{}}"#;
+        let agent_token = self.agent_token()?;
+        let signature_key = format!("sig=jwt;jwt=\"{agent_token}\"");
+        let digest = format!("sha-256=:{}:", STANDARD.encode(Sha256::digest(body)));
+        let created = SystemTimeSource.now();
+        let jti = URL_SAFE_NO_PAD.encode(OsRng.next_u64().to_be_bytes());
+        let params = format!(
+            "(\"@method\" \"@authority\" \"@path\" \"signature-key\" \"content-digest\");created={created};expires={};nonce=\"{jti}\"",
+            created + 60,
+        );
+        let base = format!(
+            "\"@method\": POST\n\"@authority\": bridge.test\n\"@path\": /\n\"signature-key\": {signature_key}\n\"content-digest\": {digest}\n\"@signature-params\": {params}"
+        );
+        let signature = jsonwebtoken::crypto::sign(base.as_bytes(), &self.key, Algorithm::ES256)?;
+        Ok(Request::post("/")
+            .header("authorization", format!("Bearer {agent_token}"))
+            .header("x-a2a-agent-id", "planner")
+            .header(SIGNATURE_KEY, signature_key)
+            .header(SIGNATURE_INPUT, format!("sig={params}"))
+            .header(SIGNATURE, format!("sig=:{signature}:"))
+            .header(CONTENT_DIGEST, digest)
+            .body(Body::from(body.as_slice()))?)
+    }
+}
+
+fn signing_key(kid: &str) -> Result<(EncodingKey, serde_json::Value), TestError> {
+    let signing = SigningKey::random(&mut OsRng);
+    let point = signing.verifying_key().to_encoded_point(false);
+    let (Some(x), Some(y)) = (point.x(), point.y()) else {
+        return Err(TestError::MissingSigningCoordinate);
+    };
+    let x = URL_SAFE_NO_PAD.encode(x);
+    let y = URL_SAFE_NO_PAD.encode(y);
+    let pem = signing.to_pkcs8_pem(LineEnding::LF)?.to_string();
+    let encoding = EncodingKey::from_ec_pem(pem.as_bytes())?;
+    Ok((
+        encoding,
+        json!({"kty": "EC", "crv": "P-256", "x": x, "y": y, "kid": kid, "alg": "ES256"}),
+    ))
 }
 
 struct StallingProxy {
@@ -272,11 +374,19 @@ async fn stub_bootstrap_refuses_enforce_without_a_shared_replay_store() -> Resul
 #[tokio::test]
 async fn nats_bootstrap_refuses_enforce_until_the_replay_bucket_is_provisioned() -> Result<(), TestError> {
     let server = JetStreamTestServer::start().await;
+    let client = trogon_nats::connect(
+        &NatsConfig::from_url(server.address()).with_tls(NatsTls::Disabled),
+        Duration::from_secs(5),
+    )
+    .await?;
     let env = InMemoryEnv::new();
     let fs = MemFs::new();
     proof_settings(&env, &fs, "enforce");
+    let signer = SigningFixture::new()?;
+    fs.insert("/etc/aauth/jwks.json", signer.jwks_document());
     env.set("BRIDGE_CONNECT_TIMEOUT_SECS", "5");
-    env.set(ENV_AUTH_CALLOUT_XKEY_PUBLIC, callout_xkey()?.public_key().as_str());
+    let callout = callout_xkey()?;
+    env.set(ENV_AUTH_CALLOUT_XKEY_PUBLIC, callout.public_key().as_str());
     let nats = NatsConfig::from_url(server.address()).with_tls(NatsTls::Disabled);
     let refused = bootstrap_nats_transport(
         &env,
@@ -308,8 +418,31 @@ async fn nats_bootstrap_refuses_enforce_until_the_replay_bucket_is_provisioned()
         EdgeAuthConfig::from_env(&env, &fs).map_err(BootstrapError::EdgeAuth)?,
     )
     .await?;
-    let response = gateway_router(state).oneshot(rpc_request()?).await?;
+    let app = gateway_router(state);
+    let response = app.clone().oneshot(rpc_request()?).await?;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let mut mint = client.subscribe("a2a.bridge.auth.callout.request").await?;
+    let mut gateway = client.subscribe("a2a.v1.gateway.planner.>").await?;
+    client.flush().await?;
+    let minted = StubAuthCalloutMint::fixture()?
+        .mint(&CallerHttpsAuth::new("Bearer fixture"))
+        .await?;
+    let mint_reply = Bytes::from(serde_json::to_vec(&BridgeMintResponse {
+        user_jwt: minted.as_str().to_owned(),
+    })?);
+    let gateway_reply = Bytes::from_static(br#"{"jsonrpc":"2.0","id":"bootstrap-request","result":{}}"#);
+    let handle_request = app.oneshot(signer.request()?);
+    let serve_wire = async {
+        answer_next_request(&client, &mut mint, mint_reply).await?;
+        answer_next_request(&client, &mut gateway, gateway_reply.clone()).await?;
+        Ok::<(), TestError>(())
+    };
+    let (response, wire) = tokio::join!(handle_request, serve_wire);
+    wire?;
+    let response = response?;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(to_bytes(response.into_body(), usize::MAX).await?, gateway_reply);
     Ok(())
 }
 
