@@ -560,12 +560,16 @@ describe('migrations', () => {
 
 describe('review regressions', () => {
   it('blocks default switches during a migration', async () => {
-    const { client } = newClient();
+    const { client, view } = newClient();
     const bound = await bindAndValidate(client, {
       backendId: seedBackendIds.aws,
       locator: newAwsKey,
       purpose: messages,
       capabilities: [KeyCapability.ENVELOPE_WRAPPING],
+    });
+    expect((await view()).keys.find((key) => key.keyRef === bound.keyRef)?.makeDefault).toEqual({
+      available: false,
+      reason: 'A migration is already moving payloads for this purpose.',
     });
     expect((await rejection(client.setDefaultKey(bound.keyRef))).reason).toBe('MIGRATION_IN_FLIGHT');
   });

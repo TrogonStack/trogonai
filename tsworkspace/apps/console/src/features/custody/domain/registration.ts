@@ -81,7 +81,37 @@ const WORKLOAD_PROVIDER =
   /^\/\/iam\.googleapis\.com\/projects\/\d+\/locations\/global\/workloadIdentityPools\/[\w-]+\/providers\/[\w-]+$/;
 const SERVICE_ACCOUNT = /^[a-z][a-z0-9-]{4,28}[a-z0-9]@[a-z][a-z0-9-]{4,28}[a-z0-9]\.iam\.gserviceaccount\.com$/;
 const PROJECT_ID = /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/;
-const LOCATION = /^(?:global|[a-z]+-[a-z]+\d+)$/;
+const REGION = /^[a-z]+-[a-z]+\d+$/;
+const MULTI_REGION_LOCATIONS = new Set([
+  'global',
+  'ca',
+  'nam3',
+  'nam4',
+  'nam6',
+  'nam7',
+  'nam8',
+  'nam9',
+  'nam10',
+  'nam11',
+  'nam12',
+  'us',
+  'asia',
+  'asia1',
+  'au',
+  'in',
+  'jp',
+  'de',
+  'eu',
+  'eur3',
+  'eur4',
+  'eur5',
+  'eur6',
+  'eur7',
+  'eur8',
+  'europe',
+  'it',
+  'nam-eur-asia1',
+]);
 const NAMESPACE = /^[A-Za-z0-9][A-Za-z0-9_-]*(?:\/[A-Za-z0-9][A-Za-z0-9_-]*)*$/;
 const MOUNT = /^[a-z0-9][a-z0-9_-]*(?:\/[a-z0-9][a-z0-9_-]*)*$/;
 const ROLE = /^[a-z0-9][a-z0-9_-]*$/;
@@ -136,7 +166,7 @@ export function registrationProblems(input: RegistrationInput): FieldProblems {
     }
   } else if (input.provider === KeyProvider.GOOGLE_CLOUD_KMS) {
     if (!PROJECT_ID.test(input.projectId.trim())) problems.projectId = 'Enter the Google Cloud project id.';
-    if (!LOCATION.test(input.location.trim()))
+    if (!REGION.test(input.location.trim()) && !MULTI_REGION_LOCATIONS.has(input.location.trim()))
       problems.location = 'Enter the location of the keys, such as europe-west1.';
     if (!WORKLOAD_PROVIDER.test(input.workloadIdentityProvider.trim())) {
       problems.workloadIdentityProvider =
@@ -227,7 +257,7 @@ export function boundaryKeyOfAccess(access: KeyBackendAccess | undefined): strin
     case 'awsKms':
       return `aws:${access.provider.value.account?.value}:${access.provider.value.region?.value}`;
     case 'googleCloudKms':
-      return `gcp:${access.provider.value.project?.value}`;
+      return `gcp:${access.provider.value.project?.value}:${access.provider.value.location?.value}`;
     case 'openBaoTransit': {
       const bao = access.provider.value;
       return `bao:${new URL(bao.endpoint?.baseUrl ?? 'https://unknown.invalid').host}:${bao.namespace?.value ?? ''}:${bao.transitMount?.value}`;
