@@ -80,6 +80,10 @@ postgres volume that predates OpenBao needs no manual step. The name defaults to
 `openbao` and both the connection and the provisioning read the same
 `OPENBAO_POSTGRES_DB`, so overriding it stays consistent.
 
+Both connect over TLS with `sslmode=verify-full` against the dev CA that
+`pki-bootstrap` issues into the `dev_secrets` volume, and postgres rejects any
+network client that does not use TLS (`services/postgres/pg_hba.conf`).
+
 ## Auto-unseal
 
 `seal "static"` keeps the root key under a symmetric key read from
