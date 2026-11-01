@@ -11,7 +11,10 @@ if output="$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "$
         echo "digest=${output}"
     } >>"$GITHUB_OUTPUT"
     echo "::notice title=Image already published::${IMAGE_REF} is ${output}; skipping the build"
-else
+elif [[ "$output" =~ ": not found"|"403 Forbidden"|"denied"|"NAME_UNKNOWN"|"MANIFEST_UNKNOWN" ]]; then
     echo "published=false" >>"$GITHUB_OUTPUT"
     echo "::notice title=Image not published yet::${IMAGE_REF}: ${output}"
+else
+    echo "::error title=Image lookup failed::${IMAGE_REF}: ${output}"
+    exit 1
 fi
