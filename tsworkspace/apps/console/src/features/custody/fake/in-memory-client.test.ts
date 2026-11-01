@@ -243,6 +243,18 @@ describe('registering a backend', () => {
     expect(versionResult).toMatchObject({ outcome: 'pass' });
   });
 
+  it('generates certificate-auth setup commands for OpenBao', async () => {
+    const { client } = newClient();
+    const plan = await client.prepareRegistration({ ...openBaoInput, authMethod: 'certificate' });
+    const setup = plan.instructions.find((instruction) => instruction.id === 'openbao_disable_upsert');
+
+    expect(setup?.content).toContain('bao write auth/cert/certs/trogon-key-access \\');
+    expect(setup?.content).toContain('  certificate=@trogon-key-custody-client-ca.pem \\');
+    expect(setup?.content).not.toContain('auth/certificate/role');
+    expect(setup?.content).not.toContain('bound_audiences');
+    expect(setup?.content).not.toContain('bound_subject');
+  });
+
   it('rejects invalid input', async () => {
     const { client } = newClient();
     expect((await rejection(client.prepareRegistration({ ...awsInput, roleArn: 'nope' }))).reason).toBe(

@@ -107,6 +107,22 @@ function gcpInstructions(input: GcpRegistrationInput): readonly SetupInstruction
 function openBaoInstructions(input: OpenBaoRegistrationInput): readonly SetupInstruction[] {
   const mount = input.transitMount.trim();
   const namespace = input.namespace.trim();
+  const role = input.authRole.trim();
+  const authentication =
+    input.authMethod === 'jwt'
+      ? [
+          `bao write auth/jwt/role/${role} \\`,
+          `  bound_audiences=${PLATFORM_AUDIENCE} \\`,
+          `  bound_subject=${PLATFORM_WORKLOAD_SUBJECT} \\`,
+          '  token_policies=trogon-key-custody \\',
+          '  token_max_ttl=10m',
+        ]
+      : [
+          `bao write auth/cert/certs/${role} \\`,
+          '  certificate=@trogon-key-custody-client-ca.pem \\',
+          '  token_policies=trogon-key-custody \\',
+          '  token_max_ttl=10m',
+        ];
   return [
     {
       id: 'openbao_policy',
@@ -138,11 +154,7 @@ function openBaoInstructions(input: OpenBaoRegistrationInput): readonly SetupIns
         ...(namespace !== '' ? [`export BAO_NAMESPACE=${namespace}`] : []),
         `bao write ${mount}/config/keys disable_upsert=true`,
         'bao policy write trogon-key-custody trogon-key-custody.hcl',
-        `bao write auth/${input.authMethod}/role/${input.authRole.trim()} \\`,
-        `  bound_audiences=${PLATFORM_AUDIENCE} \\`,
-        `  bound_subject=${PLATFORM_WORKLOAD_SUBJECT} \\`,
-        '  token_policies=trogon-key-custody \\',
-        '  token_max_ttl=10m',
+        ...authentication,
       ].join('\n'),
     },
   ];
