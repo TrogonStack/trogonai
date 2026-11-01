@@ -274,16 +274,19 @@ After a service instance observes that a registration is paused:
 
 An operation against an existing `KeyRef` checks in a fixed order: authenticate
 the caller and resolve the reference, including the tenant and purpose binding
-check, check the registration's admission, apply the key-state matrix in
-[Key States](./key-states.md), and only then call the provider. Every retry
-inside the operation deadline repeats the admission check before its next
-attempt.
+check, require the registration lifecycle to be `Active`, check the
+registration's admission, apply the key-state and capability matrix in
+[Key States](./key-states.md), and only then call the provider.
+`PendingValidation` and `Retired` registrations stop before provider access even
+when admission is `Enabled`. Every retry inside the operation deadline repeats
+the lifecycle and admission checks before its next attempt.
 
 `BindExternalKey` has no existing `KeyRef` to resolve. It authenticates the
 caller, authorizes the tenant's use of the supplied backend, locator, purpose,
-and capabilities, checks the registration's admission, and only then performs
-provider validation and applies the discovered key-state and capability gates
-before creating the reference.
+and capabilities, requires the registration lifecycle to be `Active`, checks
+the registration's admission, and only then performs provider validation and
+applies the discovered key-state and capability gates before creating the
+reference.
 
 A pause is acknowledged once the admission fact is durably committed, not once
 every service instance has observed it. Instances enforce it through pushed
