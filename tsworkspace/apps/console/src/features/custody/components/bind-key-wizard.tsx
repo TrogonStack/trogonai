@@ -146,7 +146,9 @@ export function BindKeyWizard({ initialBackendId }: { initialBackendId?: string 
           <CardContent className="flex flex-col gap-4">
             {bindable.length === 0 ? (
               <p className="text-muted-foreground text-[13px]">
-                No backend is registered yet.{' '}
+                {query.data.backends.length === 0
+                  ? 'No backend is registered yet.'
+                  : 'No registered backend is active.'}{' '}
                 <Link to="/keys/backends/new" className="text-primary-ink underline">
                   Register a backend
                 </Link>{' '}
