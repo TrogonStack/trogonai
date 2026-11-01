@@ -20,7 +20,10 @@ it('makes the new migration available in cache before reporting success', async 
   );
   const { result, unmount } = renderHook(() => useStartMigration(), { wrapper });
   await act(async () => {
-    const started = await result.current.mutateAsync({ purpose: purposeId('session_artifacts'), target: { tier: 'managed' } });
+    const started = await result.current.mutateAsync({
+      purpose: purposeId('session_artifacts'),
+      target: { tier: 'managed' },
+    });
     expect(started.migration).toBeDefined();
     const cached = queryClient.getQueryData<CustodyView>(custodyKeys.state);
     expect(cached?.migrations.some((entry) => entry.migration.id === started.migration?.id)).toBe(true);

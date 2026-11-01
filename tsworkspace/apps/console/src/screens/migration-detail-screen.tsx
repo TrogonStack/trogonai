@@ -27,7 +27,7 @@ export function MigrationDetailScreen({ migrationId }: { migrationId: string }) 
   const query = useMigrationQuery(migrationId);
   const back = <BackLink to="/keys/migrations">All migrations</BackLink>;
 
-  if (query.isPending || (!query.data && query.isFetching)) return <DetailSkeleton />;
+  if (query.isPending) return <DetailSkeleton />;
   if (query.isError) return <FaultAlert error={query.error} title="Could not load the migration" />;
 
   const view = query.data;
