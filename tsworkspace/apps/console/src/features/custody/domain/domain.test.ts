@@ -13,6 +13,8 @@ import { describe, expect, it } from 'vitest';
 import { canPause, canResume, keyUseDenial, registrationDenial } from './admission';
 import { expiryWarnings } from './backend';
 import { custodyTierDetails, custodyTierSummaries } from './custody';
+import { denialReasonLabels } from './failures';
+import { denialReasonMessages } from './faults';
 import { keyRef, migrationId, parseKeyBackendId, parseKeyRef, parseMigrationId, purposeId } from './identifiers';
 import { canBeDefault, canUnwrap, canWrap, keyStateLabels } from './key-state';
 import { advanceMigration, migrationDirection, type Migration } from './migration';
@@ -54,6 +56,15 @@ describe('admission', () => {
     expect(canPause(KeyBackendLifecycle.PENDING_VALIDATION, KeyBackendAdmission.ENABLED)).toBe(false);
     expect(canResume(KeyBackendLifecycle.ACTIVE, KeyBackendAdmission.PAUSED)).toBe(true);
     expect(canResume(KeyBackendLifecycle.RETIRED, KeyBackendAdmission.PAUSED)).toBe(false);
+  });
+});
+
+describe('denial copy', () => {
+  it('explains that a non-active registration cannot be used', () => {
+    expect(denialReasonLabels[KeyUseDenialReason.BACKEND_NOT_ACTIVE]).toBe('Backend not active');
+    expect(denialReasonMessages[KeyUseDenialReason.BACKEND_NOT_ACTIVE]).toBe(
+      'The backend registration is not active. Use an active backend before the platform can use its keys.',
+    );
   });
 });
 
