@@ -1,0 +1,40 @@
+edition = "2024";
+
+package trogonai.platform.key_custody.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+// The five explicit key states of ADR#0023 Decision 6. For a platform-managed
+// key they describe the key the platform operates. For a customer managed key
+// they describe desired and observed state, never enforced state: the bound
+// provider is authoritative, so ACTIVE never asserts that the customer has not
+// disabled or revoked the key out of band (ADR#0030). A provider-side denial is
+// observed on the next attempted operation and is not a sixth state, and a
+// paused registration is not a key state either. Unspecified and unknown values
+// are invalid.
+enum KeyState {
+  KEY_STATE_UNSPECIFIED = 0;
+  KEY_STATE_ACTIVE = 1;
+  KEY_STATE_DECRYPT_ONLY = 2;
+  KEY_STATE_DISABLED = 3;
+  KEY_STATE_PENDING_DESTRUCTION = 4;
+  KEY_STATE_DESTROYED = 5;
+}
+
+// A customer managed key's state as last observed. Reconciliation records it
+// after a provider-side change has already taken effect, so it is never a
+// control the platform enforces before the fact.
+message KeyStateObservation {
+  KeyState state = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  google.protobuf.Timestamp observed_at = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+}

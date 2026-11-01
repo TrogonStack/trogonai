@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+#MISE description="Assert regenerated TypeScript key custody bindings match what's committed"
+set -euo pipefail
+
+ROOT="${GITHUB_WORKSPACE:-$(git rev-parse --show-toplevel)}"
+cd "$ROOT"
+
+target=tsworkspace/packages/proto/src/gen
+drift=$(git status --short --untracked-files=all -- "$target")
+if [[ -n "$drift" ]]; then
+  printf '%s\n' "$drift"
+  exit 1
+fi

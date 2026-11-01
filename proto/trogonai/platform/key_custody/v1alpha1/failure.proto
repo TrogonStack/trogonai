@@ -1,0 +1,80 @@
+edition = "2024";
+
+package trogonai.platform.key_custody.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// The stable domain failure categories of ADR#0030 Decision 6, which preserve
+// security and retry semantics. Operational unavailability and throttling never
+// collapse into a security denial, and retries never switch providers. The
+// public service may coarsen denied, missing, and disabled outcomes while the
+// internal category stays in the audit record. Unspecified and unknown values
+// are invalid.
+enum OperationFailureCategory {
+  OPERATION_FAILURE_CATEGORY_UNSPECIFIED = 0;
+  // Customer authorization denial, a disabled, destroyed, or missing key, or a
+  // paused or non-active registration. No automatic retry: an external
+  // customer action or registration lifecycle change must happen first.
+  OPERATION_FAILURE_CATEGORY_KEY_USE_DENIED = 1;
+  // Transport failure, timeout, or provider service failure. Bounded backoff
+  // within the operation deadline.
+  OPERATION_FAILURE_CATEGORY_PROVIDER_UNAVAILABLE = 2;
+  // Explicit provider quota or rate limit. Bounded provider-directed backoff.
+  OPERATION_FAILURE_CATEGORY_PROVIDER_THROTTLED = 3;
+  // The KeyRef's tenant or purpose does not match the authenticated operation.
+  // No automatic retry.
+  OPERATION_FAILURE_CATEGORY_BINDING_MISMATCH = 4;
+  // Provider request checksum rejection or response checksum mismatch. Limited
+  // same-provider retry; a persistent mismatch is terminal.
+  OPERATION_FAILURE_CATEGORY_TRANSPORT_INTEGRITY_MISMATCH = 5;
+  // Cryptographic authenticated-data or ciphertext validation fails. No
+  // automatic retry.
+  OPERATION_FAILURE_CATEGORY_INTEGRITY_FAILURE = 6;
+  // The bound key lacks the requested typed capability. No automatic retry.
+  OPERATION_FAILURE_CATEGORY_UNSUPPORTED_CAPABILITY = 7;
+  // Unmapped provider error, malformed response, or adapter invariant
+  // violation. No automatic retry.
+  OPERATION_FAILURE_CATEGORY_INTERNAL_FAILURE = 8;
+}
+
+// Why a KEY_USE_DENIED failure denied use. A new reason is not a new category.
+// The public service may coarsen it like any denial. Unspecified and unknown
+// values are invalid.
+enum KeyUseDenialReason {
+  KEY_USE_DENIAL_REASON_UNSPECIFIED = 0;
+  // The provider denies use of a customer managed key, observed on an attempted
+  // operation rather than set by the platform.
+  KEY_USE_DENIAL_REASON_PROVIDER_DENIED = 1;
+  // The registration's admission is PAUSED. Admission is checked again before
+  // every retry, so the operation may already list attempts made before the
+  // pause was observed, but none after it. The owner must resume the
+  // registration first (ADR#0030).
+  KEY_USE_DENIAL_REASON_BACKEND_PAUSED = 2;
+  // The key-state matrix denies the operation for the key's state, decided
+  // before any provider call.
+  KEY_USE_DENIAL_REASON_KEY_STATE = 3;
+  // The registration lifecycle is not ACTIVE. Pending-validation and retired
+  // registrations are rejected before any provider call (ADR#0030).
+  KEY_USE_DENIAL_REASON_BACKEND_NOT_ACTIVE = 4;
+}
+
+// A failed operation's category and, for a denial, why.
+message OperationFailure {
+  option (buf.validate.message).cel = {
+    id: "operation_failure.denial_reason"
+    message: "a denial reason accompanies KEY_USE_DENIED and no other category"
+    expression: "(this.category == 1) == has(this.denial_reason)"
+  };
+
+  OperationFailureCategory category = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  KeyUseDenialReason denial_reason = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}

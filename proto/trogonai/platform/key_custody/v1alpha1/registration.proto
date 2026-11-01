@@ -1,0 +1,59 @@
+edition = "2024";
+
+package trogonai.platform.key_custody.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "trogon/hierarchy/v1alpha1/node.proto";
+import "trogonai/platform/key_custody/v1alpha1/access.proto";
+import "trogonai/platform/key_custody/v1alpha1/health.proto";
+import "trogonai/platform/key_custody/v1alpha1/identity.proto";
+import "trogonai/platform/key_custody/v1alpha1/lifecycle.proto";
+
+// Owned by one tenant or by the platform, never both. The tenant is identified
+// by the root node of its hierarchy; admission, not this message, checks that
+// the node is that root. Platform-owned registrations back the managed and
+// dedicated tiers (ADR#0033), and a tenant-facing projection never carries one.
+message KeyBackendOwner {
+  oneof owner {
+    option (buf.validate.oneof).required = true;
+    trogon.hierarchy.v1alpha1.NodeId tenant = 1;
+    google.protobuf.Empty platform = 2;
+  }
+}
+
+// Genesis facts only, not proof of successful validation. The configuration
+// owns connection, authentication, and trust, and no key locator. It never
+// carries raw credentials; an unavoidable secret would be a CredentialRef that
+// stays behind the secrets service (ADR#0030).
+message KeyBackendConfiguration {
+  KeyBackendOwner owner = 1 [features.field_presence = LEGACY_REQUIRED];
+  KeyBackendAccess access = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// The current record of one registration. Lifecycle, admission, and health are
+// separate dimensions, and none of them stands in for another. A registration
+// starts PENDING_VALIDATION, ENABLED, and with unknown health: lifecycle alone
+// keeps it out of use until it validates, so first activation needs no resume. A tenant-facing query returns
+// only registrations owned by that tenant; a platform-owned registration never
+// appears in a tenant-facing projection (ADR#0033).
+message KeyBackendRegistration {
+  KeyBackendId key_backend_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  RegistrationRevision revision = 2 [features.field_presence = LEGACY_REQUIRED];
+  KeyBackendConfiguration configuration = 3 [features.field_presence = LEGACY_REQUIRED];
+  KeyBackendLifecycle lifecycle = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  KeyBackendAdmission admission = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  KeyBackendHealth health = 6 [features.field_presence = LEGACY_REQUIRED];
+}
