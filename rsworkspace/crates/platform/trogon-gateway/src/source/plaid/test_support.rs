@@ -84,6 +84,34 @@ impl TestKeyPair {
         }))
     }
 
+    pub fn token_with_embedded_key(&self, iat: u64, body: &[u8], attacker_url: &str) -> String {
+        let mut header = Header::new(Algorithm::ES256);
+        header.kid = Some(self.key_id.clone());
+        header.jwk = Some(
+            serde_json::from_value(json!({
+                "kty": "EC",
+                "crv": "P-256",
+                "alg": "ES256",
+                "use": "sig",
+                "kid": self.key_id,
+                "x": self.x,
+                "y": self.y,
+            }))
+            .unwrap(),
+        );
+        header.jku = Some(attacker_url.to_owned());
+        header.x5u = Some(attacker_url.to_owned());
+        jsonwebtoken::encode(
+            &header,
+            &json!({
+                "iat": iat,
+                "request_body_sha256": body_sha256(body),
+            }),
+            &self.encoding_key,
+        )
+        .unwrap()
+    }
+
     pub fn token_without_key_id(&self, iat: u64, body: &[u8]) -> String {
         let header = Header::new(Algorithm::ES256);
         jsonwebtoken::encode(
@@ -100,6 +128,21 @@ impl TestKeyPair {
 
 fn body_sha256(body: &[u8]) -> String {
     hex::encode(Sha256::digest(body))
+}
+
+pub fn claims_segment(iat: u64, body: &[u8]) -> String {
+    segment(&json!({
+        "iat": iat,
+        "request_body_sha256": body_sha256(body),
+    }))
+}
+
+pub fn unsigned_token(header: &serde_json::Value, iat: u64, body: &[u8]) -> String {
+    format!("{}.{}.", segment(header), claims_segment(iat, body))
+}
+
+fn segment(value: &serde_json::Value) -> String {
+    URL_SAFE_NO_PAD.encode(serde_json::to_vec(value).unwrap())
 }
 
 pub fn hs256_token(key_id: &str, iat: u64, body: &[u8]) -> String {
@@ -121,6 +164,7 @@ pub enum FakeFailure {
     Transport,
     Unavailable,
     Rejected,
+    UnknownKey,
 }
 
 #[derive(Clone, Default)]
@@ -172,6 +216,7 @@ impl PlaidKeyFetcher for FakeKeyFetcher {
                 FakeFailure::Transport => PlaidKeyFetchError::Transport("connection refused".into()),
                 FakeFailure::Unavailable => PlaidKeyFetchError::Unavailable(StatusCode::BAD_GATEWAY),
                 FakeFailure::Rejected => PlaidKeyFetchError::Rejected(StatusCode::BAD_REQUEST),
+                FakeFailure::UnknownKey => PlaidKeyFetchError::UnknownKey,
             });
         }
         // Suspends like a real network fetch, so concurrent resolvers queue behind the fetch gate.
