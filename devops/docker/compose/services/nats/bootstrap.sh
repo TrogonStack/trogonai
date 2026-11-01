@@ -11,6 +11,8 @@
 # only in the callout's own directory and never in nsc's keystore.
 set -eu
 
+. /bootstrap/install-seed.sh
+
 SECRETS=/secrets
 NSC_HOME="$SECRETS/nsc"
 OPERATOR=trogonai-dev
@@ -169,8 +171,7 @@ ensure_callout_signing_key AUTH auth-response
 ensure_callout_signing_key DEV tenant-dev
 
 xkey=$(nsc describe account --name AUTH --json | jq -r '.nats.authorization.xkey')
-seed_of "$xkey" > "$CALLOUT_KEYS_DIR/callout-xkey.nk"
-if [ ! -s "$CALLOUT_KEYS_DIR/callout-xkey.nk" ]; then
+if ! install_seed "$CALLOUT_KEYS_DIR/callout-xkey.nk" seed_of "$xkey"; then
   echo "nats-bootstrap: nsc holds no seed for the callout xkey $xkey" >&2
   exit 1
 fi
