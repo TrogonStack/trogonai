@@ -58,6 +58,8 @@ export const denialReasonMessages: Record<KeyUseDenialReason, string> = {
   [KeyUseDenialReason.PROVIDER_DENIED]: 'The provider denied the request.',
   [KeyUseDenialReason.BACKEND_PAUSED]: 'The backend is paused. Resume it before the platform can use its keys.',
   [KeyUseDenialReason.KEY_STATE]: 'The key state does not allow this operation.',
+  [KeyUseDenialReason.BACKEND_NOT_ACTIVE]:
+    'The backend registration is not active. Use an active backend before the platform can use its keys.',
 };
 
 export class KeyFault extends Error {
