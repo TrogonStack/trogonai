@@ -12,6 +12,10 @@ fi
 
 for imported_binding in \
   "$output/buf/validate/validate_pb.ts" \
+  "$output/trogon/elixirpb_pb.ts" \
+  "$output/trogon/error/v1alpha1/code_pb.ts" \
+  "$output/trogon/error/v1alpha1/options_pb.ts" \
+  "$output/trogon/error/v1alpha1/visibility_pb.ts" \
   "$output/trogon/hierarchy/v1alpha1/node_pb.ts"
 do
   if [[ -f "$imported_binding" ]]; then
