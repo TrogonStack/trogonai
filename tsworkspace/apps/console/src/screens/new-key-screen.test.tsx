@@ -70,6 +70,31 @@ describe('bind key wizard', () => {
     expect(await screen.findByRole('button', { name: 'Run checks' })).toBeInTheDocument();
   });
 
+  it('keeps the default backend selected when custody data is reordered', async () => {
+    const user = userEvent.setup();
+    const backend = createFakeBackend({ latencyMs: 0 });
+    const load = backend.keyCustody.load.bind(backend.keyCustody);
+    let reverseBackends = false;
+    let loadCount = 0;
+    backend.keyCustody.load = async () => {
+      loadCount += 1;
+      const state = await load();
+      return reverseBackends ? { ...state, backends: [...state.backends].reverse() } : state;
+    };
+    const { queryClient } = renderApp('/keys/keys/new', backend);
+
+    expect(await screen.findByRole('radio', { name: /Acme AWS production/ })).toBeChecked();
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(screen.getByRole('heading', { name: 'Key in Acme AWS production' })).toBeInTheDocument();
+
+    reverseBackends = true;
+    await queryClient.invalidateQueries({ queryKey: ['key-custody'] });
+    await waitFor(() => expect(loadCount).toBeGreaterThan(1));
+
+    expect(screen.getByRole('heading', { name: 'Key in Acme AWS production' })).toBeInTheDocument();
+    expect(screen.getByLabelText('AWS KMS key locator')).toBeInTheDocument();
+  });
+
   it('keeps the bound key visible when the custody refresh fails', async () => {
     const user = userEvent.setup();
     const backend = createFakeBackend({ latencyMs: 0 });
