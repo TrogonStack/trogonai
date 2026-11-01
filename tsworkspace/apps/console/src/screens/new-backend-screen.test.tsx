@@ -2,6 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 
+import { createFakeBackend } from '@/fake-backend';
 import { renderApp } from '@/test/render-app';
 
 const PEM = '-----BEGIN CERTIFICATE-----\nMIIBszCCAVmgAwIBAgIUQ0\n-----END CERTIFICATE-----';
@@ -55,6 +56,37 @@ describe('register backend wizard', () => {
     expect(within(checks).getAllByLabelText('Not run').length).toBeGreaterThan(0);
     expect(within(checks).getByRole('alert')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Backend registered' })).not.toBeInTheDocument();
+  });
+
+  it('clears a check error when preparing a new registration attempt', async () => {
+    const user = userEvent.setup();
+    const backend = createFakeBackend({ latencyMs: 0 });
+    const runCheck = backend.keyCustody.runCheck.bind(backend.keyCustody);
+    let failCheck = true;
+    backend.keyCustody.runCheck = async (...args) => {
+      if (failCheck) throw new Error('Check transport failed.');
+      return runCheck(...args);
+    };
+    renderApp('/keys/backends/new', backend);
+
+    await user.click(await screen.findByRole('radio', { name: /AWS KMS/ }));
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.type(screen.getByLabelText('Display name'), 'Acme AWS first');
+    await user.type(screen.getByLabelText('Role ARN'), 'arn:aws:iam::381204965517:role/trogon-key-access');
+    await user.click(screen.getByRole('button', { name: 'Generate setup instructions' }));
+    await user.click(await screen.findByRole('button', { name: 'I have applied these' }));
+    await user.click(await screen.findByRole('button', { name: 'Run checks' }));
+    expect(await screen.findByText('A check could not run')).toBeInTheDocument();
+
+    failCheck = false;
+    await user.click(screen.getByRole('button', { name: 'Back to instructions' }));
+    await user.click(screen.getByRole('button', { name: 'Back' }));
+    await user.clear(screen.getByLabelText('Display name'));
+    await user.type(screen.getByLabelText('Display name'), 'Acme AWS second');
+    await user.click(screen.getByRole('button', { name: 'Generate setup instructions' }));
+    await user.click(await screen.findByRole('button', { name: 'I have applied these' }));
+
+    expect(screen.queryByText('A check could not run')).not.toBeInTheDocument();
   });
 
   it('asks for a trust root when registering OpenBao and uses the plain product name', async () => {
