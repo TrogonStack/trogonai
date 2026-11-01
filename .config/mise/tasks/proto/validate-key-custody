@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-#MISE description="Validate key custody contract fixtures with Protovalidate"
-set -euo pipefail
-
-repo_root="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
-exec python3 "$repo_root/tests/proto/key_custody/validate.py" "$@"
