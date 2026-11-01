@@ -170,14 +170,87 @@ describe('OpenBao namespace', () => {
   });
 });
 
+describe('Google Cloud locations', () => {
+  const input = {
+    provider: KeyProvider.GOOGLE_CLOUD_KMS,
+    displayName: 'Google Cloud',
+    projectId: 'acme-prod-kms',
+    location: 'europe-west1',
+    workloadIdentityProvider:
+      '//iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/trogon/providers/console',
+    impersonatedServiceAccount: '',
+  } as const;
+
+  it('accepts documented regional, multi-region and dual-region locations', () => {
+    for (const location of [
+      'global',
+      'europe-west1',
+      'us',
+      'eu',
+      'asia',
+      'ca',
+      'europe',
+      'nam4',
+      'eur4',
+      'asia1',
+      'nam-eur-asia1',
+    ]) {
+      expect(registrationProblems({ ...input, location }).location).toBeUndefined();
+    }
+    for (const location of ['unknown', 'abc1', 'nam999', 'eur999', 'us_east1', 'us-east']) {
+      expect(registrationProblems({ ...input, location }).location).toBeDefined();
+    }
+  });
+
+  it('treats locations in the same project as distinct security boundaries', () => {
+    const regional = boundaryKeyOfAccess(buildAccess(input, undefined));
+    const multiRegion = boundaryKeyOfAccess(buildAccess({ ...input, location: 'us' }, undefined));
+
+    expect(multiRegion).not.toBe(regional);
+  });
+});
 
 describe('locator region boundaries', () => {
   it('rejects other AWS regions and GCP locations', async () => {
     const { buildLocator } = await import('./locator');
     const { locatorBoundaryMismatch } = await import('./registration');
-    const aws = buildAccess({ provider: KeyProvider.AWS_KMS, displayName: 'AWS', region: 'eu-west-1', roleArn: 'arn:aws:iam::512049177301:role/access' }, undefined);
-    expect(locatorBoundaryMismatch(aws, buildLocator(KeyProvider.AWS_KMS, 'arn:aws:kms:us-east-1:512049177301:key/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee')!)).toBeDefined();
-    const gcp = buildAccess({ provider: KeyProvider.GOOGLE_CLOUD_KMS, displayName: 'GCP', projectId: 'acme-prod-kms', location: 'europe-west1', workloadIdentityProvider: '', impersonatedServiceAccount: '' }, undefined);
-    expect(locatorBoundaryMismatch(gcp, buildLocator(KeyProvider.GOOGLE_CLOUD_KMS, 'projects/acme-prod-kms/locations/us-east1/keyRings/ring/cryptoKeys/key')!)).toBeDefined();
+    const aws = buildAccess(
+      {
+        provider: KeyProvider.AWS_KMS,
+        displayName: 'AWS',
+        region: 'eu-west-1',
+        roleArn: 'arn:aws:iam::512049177301:role/access',
+      },
+      undefined,
+    );
+    expect(
+      locatorBoundaryMismatch(
+        aws,
+        buildLocator(
+          KeyProvider.AWS_KMS,
+          'arn:aws:kms:us-east-1:512049177301:key/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+        )!,
+      ),
+    ).toBeDefined();
+    const gcp = buildAccess(
+      {
+        provider: KeyProvider.GOOGLE_CLOUD_KMS,
+        displayName: 'GCP',
+        projectId: 'acme-prod-kms',
+        location: 'europe-west1',
+        workloadIdentityProvider: '',
+        impersonatedServiceAccount: '',
+      },
+      undefined,
+    );
+    expect(
+      locatorBoundaryMismatch(
+        gcp,
+        buildLocator(
+          KeyProvider.GOOGLE_CLOUD_KMS,
+          'projects/acme-prod-kms/locations/us-east1/keyRings/ring/cryptoKeys/key',
+        )!,
+      ),
+    ).toBeDefined();
   });
 });

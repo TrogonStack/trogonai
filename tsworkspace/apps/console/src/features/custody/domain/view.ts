@@ -20,7 +20,7 @@ import {
   type RevisionNote,
 } from './backend';
 import { keyRefOfCustody, purposeOfCustody, tierOfCustody, type CustodyTier } from './custody';
-import { denialReasonMessages } from './faults';
+import { denialReasonMessages, keyFaultMessages } from './faults';
 import { keyBackendIdOf, type KeyBackendId, type KeyRef, type PurposeId } from './identifiers';
 import type { DailyUsage, TenantKey } from './key';
 import { canBeDefault } from './key-state';
@@ -179,13 +179,16 @@ function toKeyView(
   const inbound = sum(flights.filter((m) => endpointKeyRef(m.to) === key.keyRef).map((m) => m.rewrapped));
   const payloadCount = Math.max(0, sum(payloads.map((set) => set.count)) - outbound) + inbound;
   const isDefault = defaults.get(key.purpose) === key.keyRef;
-  const makeDefault: ActionAvailability = isDefault
-    ? no('This key is already the default for its purpose.')
-    : wrapDenial === KeyUseDenialReason.BACKEND_PAUSED
-      ? no(denialReasonMessages[KeyUseDenialReason.BACKEND_PAUSED])
-      : !canBeDefault(key.state.state)
-        ? no('Only an active key can become the default, because the default wraps new payloads.')
-        : yes;
+  const migrationInFlight = flights.some((migration) => migration.purpose === key.purpose);
+  const makeDefault: ActionAvailability = migrationInFlight
+    ? no(keyFaultMessages.MIGRATION_IN_FLIGHT)
+    : isDefault
+      ? no('This key is already the default for its purpose.')
+      : wrapDenial === KeyUseDenialReason.BACKEND_PAUSED
+        ? no(denialReasonMessages[KeyUseDenialReason.BACKEND_PAUSED])
+        : !canBeDefault(key.state.state)
+          ? no('Only an active key can become the default, because the default wraps new payloads.')
+          : yes;
   const usage = key.usage;
   return {
     keyRef: key.keyRef,

@@ -558,13 +558,18 @@ describe('migrations', () => {
   });
 });
 
-
 describe('review regressions', () => {
   it('blocks default switches during a migration', async () => {
-    const { client } = newClient();
+    const { client, view } = newClient();
     const bound = await bindAndValidate(client, {
-      backendId: seedBackendIds.aws, locator: newAwsKey, purpose: messages,
+      backendId: seedBackendIds.aws,
+      locator: newAwsKey,
+      purpose: messages,
       capabilities: [KeyCapability.ENVELOPE_WRAPPING],
+    });
+    expect((await view()).keys.find((key) => key.keyRef === bound.keyRef)?.makeDefault).toEqual({
+      available: false,
+      reason: 'A migration is already moving payloads for this purpose.',
     });
     expect((await rejection(client.setDefaultKey(bound.keyRef))).reason).toBe('MIGRATION_IN_FLIGHT');
   });
@@ -573,17 +578,21 @@ describe('review regressions', () => {
     const { client } = newClient();
     const plan = await client.prepareRegistration({ ...openBaoInput, transitMount: 'transit' });
     for (const check of plan.checks) {
-      if ((await client.runCheck(plan.attemptId, check.id)).outcome !== 'pass') await client.runCheck(plan.attemptId, check.id);
+      if ((await client.runCheck(plan.attemptId, check.id)).outcome !== 'pass')
+        await client.runCheck(plan.attemptId, check.id);
     }
     const backend = await client.completeRegistration(plan.attemptId);
     const state = await client.load();
     const original = state.keys.find((key) => key.keyRef === seedKeyRefs.openbaoArtifacts)!;
     if (original.binding.kind !== 'customer_managed') throw new Error('Expected customer key');
     const { locatorText } = await import('../domain/locator');
-    await expect(client.prepareBinding({
-      backendId: backend.registration.keyBackendId!.value,
-      locator: locatorText(original.binding.detail.locator), purpose: artifacts,
-      capabilities: [KeyCapability.ENVELOPE_WRAPPING],
-    })).resolves.toBeDefined();
+    await expect(
+      client.prepareBinding({
+        backendId: backend.registration.keyBackendId!.value,
+        locator: locatorText(original.binding.detail.locator),
+        purpose: artifacts,
+        capabilities: [KeyCapability.ENVELOPE_WRAPPING],
+      }),
+    ).resolves.toBeDefined();
   });
 });
