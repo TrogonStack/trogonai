@@ -31,7 +31,7 @@ export function SourcesStats({ sources }: { sources: readonly SourceView[] }) {
         blink={overview.needsAttention > 0}
       />
       <Stat
-        label="Rejected signatures"
+        label="Rejected deliveries"
         value={overview.rejected24h}
         caption="Last 24 hours"
         icon={ShieldXIcon}
