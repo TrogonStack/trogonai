@@ -37,7 +37,9 @@ export function BackendDetailScreen({ backendId }: { backendId: string }) {
   const back = <BackLink to="/keys/backends">All backends</BackLink>;
 
   if (query.isPending || (query.isFetching && query.data == null)) return <DetailSkeleton />;
-  if (query.isError) return <FaultAlert error={query.error} title="Could not load the backend" />;
+  if (query.isError && query.data == null) {
+    return <FaultAlert error={query.error} title="Could not load the backend" />;
+  }
 
   const backend = query.data;
   if (!backend) {
@@ -51,6 +53,7 @@ export function BackendDetailScreen({ backendId }: { backendId: string }) {
   return (
     <div className="flex flex-col gap-6">
       <div>{back}</div>
+      {query.error ? <FaultAlert error={query.error} title="Could not refresh the backend" /> : null}
       <DetailHeader
         title={backend.displayName}
         status={<LifecycleBadge lifecycle={backend.lifecycle} />}
