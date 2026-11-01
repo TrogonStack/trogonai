@@ -15,6 +15,12 @@ impl PlaidSecret {
     }
 }
 
+impl From<SecretString> for PlaidSecret {
+    fn from(secret: SecretString) -> Self {
+        Self(secret)
+    }
+}
+
 impl fmt::Debug for PlaidSecret {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("PlaidSecret(****)")
