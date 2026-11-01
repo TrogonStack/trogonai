@@ -1,8 +1,9 @@
-import { KeyBackendAdmission, KeyBackendLifecycle, type KeyBackendFailureReason } from '@trogonai/proto';
+import { KeyBackendAdmission, KeyBackendLifecycle, type KeyBackendFailureReason, type KeyState } from '@trogonai/proto';
 
 import { StatusPill, type Tone } from '@/components/lifecycle-badge';
 
 import { admissionLabels, failureReasonLabels, lifecycleLabels, type ConnectionStatus } from '../domain/backend';
+import { keyStateLabels, keyStateTone } from '../domain/key-state';
 
 const lifecycleTones: Record<KeyBackendLifecycle, Tone> = {
   [KeyBackendLifecycle.UNSPECIFIED]: 'neutral',
@@ -45,4 +46,12 @@ export function ConnectionBadge({ connection }: { connection: ConnectionStatus }
 
 export function FailureReasonBadge({ reason }: { reason: KeyBackendFailureReason }) {
   return <StatusPill tone="danger" label={failureReasonLabels[reason]} className="normal-case" />;
+}
+
+export function KeyStateBadge({ state }: { state: KeyState }) {
+  return <StatusPill tone={keyStateTone(state)} label={keyStateLabels[state]} />;
+}
+
+export function PlatformManagedBadge() {
+  return <StatusPill tone="neutral" label="Managed by the platform" className="normal-case" />;
 }

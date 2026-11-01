@@ -337,6 +337,14 @@ function BackendCrumb({ backendId }: { backendId: string }) {
   );
 }
 
+function KeyCrumb({ keyRef }: { keyRef: string }) {
+  return (
+    <Breadcrumbs
+      crumbs={[{ label: 'Encryption keys', to: '/keys' }, { label: 'Keys', to: '/keys/keys' }, { label: keyRef }]}
+    />
+  );
+}
+
 function KeysCrumbs({ segments }: { segments: readonly string[] }) {
   if (segments.length === 1) return <Breadcrumbs crumbs={[{ label: 'Encryption keys' }]} />;
   if (segments[1] === 'backends') {
@@ -355,6 +363,23 @@ function KeysCrumbs({ segments }: { segments: readonly string[] }) {
       );
     }
     return <BackendCrumb backendId={decodeURIComponent(segments[2]!)} />;
+  }
+  if (segments[1] === 'keys') {
+    if (segments.length === 2) {
+      return <Breadcrumbs crumbs={[{ label: 'Encryption keys', to: '/keys' }, { label: 'Keys' }]} />;
+    }
+    if (segments[2] === 'new') {
+      return (
+        <Breadcrumbs
+          crumbs={[
+            { label: 'Encryption keys', to: '/keys' },
+            { label: 'Keys', to: '/keys/keys' },
+            { label: 'Bind a key' },
+          ]}
+        />
+      );
+    }
+    return <KeyCrumb keyRef={decodeURIComponent(segments[2]!)} />;
   }
   return <Breadcrumbs crumbs={[{ label: 'Encryption keys' }]} />;
 }

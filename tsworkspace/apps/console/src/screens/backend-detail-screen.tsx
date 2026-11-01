@@ -1,7 +1,11 @@
+import { Link } from '@tanstack/react-router';
+import { KeyRoundIcon } from 'lucide-react';
+
 import { BackLink } from '@/components/back-link';
 import { DetailHeader } from '@/components/detail-header';
 import { FaultAlert } from '@/components/fault-alert';
 import { NotFoundState } from '@/components/not-found-state';
+import { buttonVariants } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   AccessPanel,
@@ -58,7 +62,12 @@ export function BackendDetailScreen({ backendId }: { backendId: string }) {
         copyValue={backend.id}
         copyLabel="backend id"
         facts={[`Revision ${backend.revision}`, keyProviderLabels[backend.provider]]}
-        actions={null}
+        actions={
+          <Link to="/keys/keys/new" search={{ backend: backend.id }} className={buttonVariants({ size: 'lg' })}>
+            <KeyRoundIcon data-icon="inline-start" />
+            Bind a key
+          </Link>
+        }
       />
       <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
         <div className="flex min-w-0 flex-col gap-4">

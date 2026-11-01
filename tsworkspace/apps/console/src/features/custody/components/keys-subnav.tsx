@@ -11,6 +11,9 @@ export function KeysSubnav({ className }: { className?: string }) {
       <Link to="/keys" activeOptions={{ exact: true }} className={linkClass}>
         Overview
       </Link>
+      <Link to="/keys/keys" className={linkClass}>
+        Keys
+      </Link>
       <Link to="/keys/backends" className={linkClass}>
         Backends
       </Link>

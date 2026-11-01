@@ -21,7 +21,8 @@ import {
 } from '../domain/backend';
 import type { BackendView } from '../domain/view';
 import { usePauseBackend, useResumeBackend, useValidateBackend } from '../queries';
-import { AdmissionBadge, ConnectionBadge } from './key-badges';
+import { AdmissionBadge, ConnectionBadge, KeyStateBadge } from './key-badges';
+import { KeyRefLink } from './key-ref-link';
 
 export function ConnectionPanel({ backend }: { backend: BackendView }) {
   const validate = useValidateBackend();
@@ -350,8 +351,9 @@ export function BoundKeysPanel({ backend }: { backend: BackendView }) {
           <ul className="divide-border divide-y" aria-label="Bound keys">
             {backend.keys.map((key) => (
               <li key={key.keyRef} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5 first:pt-0 last:pb-0">
-                <span className="font-mono text-[13px]">{key.keyRef}</span>
+                <KeyRefLink keyRef={key.keyRef} className="text-[13px]" />
                 <span className="text-muted-foreground text-xs">{key.purposeLabel}</span>
+                <KeyStateBadge state={key.state} />
               </li>
             ))}
           </ul>
