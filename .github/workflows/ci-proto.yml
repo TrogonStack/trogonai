@@ -14,6 +14,9 @@ on:
       - '.config/mise/tasks/**'
       - 'tests/proto/**'
       - 'rsworkspace/crates/platform/trogonai-proto/src/gen/**'
+      - 'tsworkspace/packages/proto/buf.key-custody.gen.yaml'
+      - 'tsworkspace/packages/proto/package.json'
+      - 'tsworkspace/packages/proto/src/gen/trogonai/platform/key_custody/**'
       - '.github/workflows/ci-proto.yml'
 
 concurrency:
@@ -147,6 +150,22 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: tsworkspace/package.json
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 26
+          cache: pnpm
+          cache-dependency-path: tsworkspace/pnpm-lock.yaml
+
+      - name: Install TypeScript proto generator
+        run: pnpm install --frozen-lockfile --filter @trogonai/proto...
+        working-directory: tsworkspace
+
       - name: Install proto codegen toolchain via mise
         uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
         with:
@@ -157,3 +176,10 @@ jobs:
 
       - name: Assert generated output matches proto sources
         run: mise run --skip-tools github-actions:assert-proto-generated
+
+      - name: Regenerate TypeScript key custody bindings
+        run: pnpm --filter @trogonai/proto generate:key-custody
+        working-directory: tsworkspace
+
+      - name: Assert TypeScript key custody bindings match proto sources
+        run: git diff --exit-code -- tsworkspace/packages/proto/src/gen/trogonai/platform/key_custody
