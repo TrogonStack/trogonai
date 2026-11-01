@@ -251,7 +251,9 @@
     "name": "failed operation with successful provider attempt",
     "type": "trogonai.platform.key_custody.audit.v1alpha1.KeyOperationAuditRecord",
     "valid": false,
-    "violations": ["a failed operation lists no successful provider attempt"],
+    "violations": [
+      "only post-validation bind discovery may end a failed operation with one successful provider attempt"
+    ],
     "message": {
       "operationId": { "value": "operation-8" },
       "correlationId": { "value": "correlation-8" },
@@ -394,6 +396,79 @@
         "category": "OPERATION_FAILURE_CATEGORY_KEY_USE_DENIED",
         "denialReason": "KEY_USE_DENIAL_REASON_KEY_STATE"
       }
+    }
+  },
+  {
+    "name": "bind discovery finds denied key state after provider validation",
+    "type": "trogonai.platform.key_custody.audit.v1alpha1.KeyOperationAuditRecord",
+    "valid": true,
+    "message": {
+      "operationId": { "value": "operation-17" },
+      "correlationId": { "value": "correlation-17" },
+      "operation": "KEY_OPERATION_KIND_BIND_EXTERNAL_KEY",
+      "tenant": { "value": "tenant-1" },
+      "keyRef": { "value": "key-1" },
+      "keyBackendId": { "value": "backend-1" },
+      "purpose": { "value": "payload" },
+      "provider": "KEY_PROVIDER_AWS_KMS",
+      "occurredAt": "2026-11-01T00:00:00Z",
+      "failed": {
+        "category": "OPERATION_FAILURE_CATEGORY_KEY_USE_DENIED",
+        "denialReason": "KEY_USE_DENIAL_REASON_KEY_STATE"
+      },
+      "attempts": [
+        {
+          "attemptNumber": 1,
+          "startedAt": "2026-11-01T00:00:00Z",
+          "duration": "0.100s",
+          "succeeded": {},
+          "absence": "PROVIDER_REQUEST_ABSENCE_NOT_PROVIDED_BY_PROVIDER"
+        }
+      ]
+    }
+  },
+  {
+    "name": "bind discovery finds unsupported capability after provider validation",
+    "type": "trogonai.platform.key_custody.audit.v1alpha1.KeyOperationAuditRecord",
+    "valid": true,
+    "message": {
+      "operationId": { "value": "operation-18" },
+      "correlationId": { "value": "correlation-18" },
+      "operation": "KEY_OPERATION_KIND_BIND_EXTERNAL_KEY",
+      "tenant": { "value": "tenant-1" },
+      "keyRef": { "value": "key-1" },
+      "keyBackendId": { "value": "backend-1" },
+      "purpose": { "value": "payload" },
+      "provider": "KEY_PROVIDER_AWS_KMS",
+      "occurredAt": "2026-11-01T00:00:00Z",
+      "failed": { "category": "OPERATION_FAILURE_CATEGORY_UNSUPPORTED_CAPABILITY" },
+      "attempts": [
+        {
+          "attemptNumber": 1,
+          "startedAt": "2026-11-01T00:00:00Z",
+          "duration": "0.100s",
+          "succeeded": {},
+          "absence": "PROVIDER_REQUEST_ABSENCE_NOT_PROVIDED_BY_PROVIDER"
+        }
+      ]
+    }
+  },
+  {
+    "name": "bind discovery cannot omit provider validation",
+    "type": "trogonai.platform.key_custody.audit.v1alpha1.KeyOperationAuditRecord",
+    "valid": false,
+    "violations": ["a provider outcome lists at least one provider attempt"],
+    "message": {
+      "operationId": { "value": "operation-19" },
+      "correlationId": { "value": "correlation-19" },
+      "operation": "KEY_OPERATION_KIND_BIND_EXTERNAL_KEY",
+      "tenant": { "value": "tenant-1" },
+      "keyRef": { "value": "key-1" },
+      "keyBackendId": { "value": "backend-1" },
+      "purpose": { "value": "payload" },
+      "provider": "KEY_PROVIDER_AWS_KMS",
+      "occurredAt": "2026-11-01T00:00:00Z",
+      "failed": { "category": "OPERATION_FAILURE_CATEGORY_UNSUPPORTED_CAPABILITY" }
     }
   },
   {
