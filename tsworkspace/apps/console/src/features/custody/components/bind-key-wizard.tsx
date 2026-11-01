@@ -170,6 +170,7 @@ export function BindKeyWizard({ initialBackendId }: { initialBackendId?: string 
                 onClick={() => {
                   if (!backend) return;
                   setChosenBackend(backend.id);
+                  setChosenPurpose((current) => current ?? catalogue[0]?.id);
                   setStep(1);
                 }}
               >

@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 
 import { createFakeBackend } from '@/fake-backend';
-import { keyBackendId } from '@/features/custody/domain/identifiers';
+import { keyBackendId, purposeId, type PurposeId } from '@/features/custody/domain/identifiers';
 import { renderApp } from '@/test/render-app';
 
 const NEW_ARN = 'arn:aws:kms:eu-west-1:512049177301:key/1c0e7d52-9b4a-4f6e-8a31-6d2f90b7c418';
@@ -93,6 +93,38 @@ describe('bind key wizard', () => {
 
     expect(screen.getByRole('heading', { name: 'Key in Acme AWS production' })).toBeInTheDocument();
     expect(screen.getByLabelText('AWS KMS key locator')).toBeInTheDocument();
+  });
+
+  it('keeps the displayed default purpose when custody data is reordered', async () => {
+    const user = userEvent.setup();
+    const backend = createFakeBackend({ latencyMs: 0 });
+    const load = backend.keyCustody.load.bind(backend.keyCustody);
+    const prepareBinding = backend.keyCustody.prepareBinding.bind(backend.keyCustody);
+    let reversePurposes = false;
+    let loadCount = 0;
+    let preparedPurpose: PurposeId | undefined;
+    backend.keyCustody.load = async () => {
+      loadCount += 1;
+      const state = await load();
+      return reversePurposes ? { ...state, purposes: [...state.purposes].reverse() } : state;
+    };
+    backend.keyCustody.prepareBinding = async (input) => {
+      preparedPurpose = input.purpose;
+      return prepareBinding(input);
+    };
+    const { queryClient } = renderApp('/keys/keys/new?backend=kbe_aws_acme_prod', backend);
+
+    await user.click(await screen.findByRole('button', { name: 'Continue' }));
+    expect(screen.getByRole('radio', { name: /Session messages/ })).toBeChecked();
+
+    reversePurposes = true;
+    await queryClient.invalidateQueries({ queryKey: ['key-custody'] });
+    await waitFor(() => expect(loadCount).toBeGreaterThan(1));
+
+    await user.type(screen.getByLabelText(/key locator/), NEW_ARN);
+    await user.click(screen.getByRole('button', { name: 'Continue to validation' }));
+
+    await waitFor(() => expect(preparedPurpose).toBe(purposeId('session_messages')));
   });
 
   it('keeps the bound key visible when the custody refresh fails', async () => {
