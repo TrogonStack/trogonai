@@ -24,9 +24,22 @@
     }
   },
   {
+    "name": "success with provider request id",
+    "type": "trogonai.platform.key_custody.audit.v1alpha1.ProviderAttempt",
+    "valid": true,
+    "message": {
+      "attemptNumber": 1,
+      "startedAt": "2026-11-01T00:00:00Z",
+      "duration": "0.100s",
+      "succeeded": {},
+      "providerRequestId": { "value": "provider-request-1" }
+    }
+  },
+  {
     "name": "success without provider response",
     "type": "trogonai.platform.key_custody.audit.v1alpha1.ProviderAttempt",
     "valid": false,
+    "violations": ["a successful attempt received a provider response"],
     "message": {
       "attemptNumber": 1,
       "startedAt": "2026-11-01T00:00:00Z",
@@ -39,6 +52,7 @@
     "name": "attempt with binding mismatch",
     "type": "trogonai.platform.key_custody.audit.v1alpha1.ProviderAttempt",
     "valid": false,
+    "violations": ["failed: must not be in list [0, 4, 7]"],
     "message": {
       "attemptNumber": 1,
       "startedAt": "2026-11-01T00:00:00Z",
@@ -51,12 +65,77 @@
     "name": "attempt with unsupported capability",
     "type": "trogonai.platform.key_custody.audit.v1alpha1.ProviderAttempt",
     "valid": false,
+    "violations": ["failed: must not be in list [0, 4, 7]"],
     "message": {
       "attemptNumber": 1,
       "startedAt": "2026-11-01T00:00:00Z",
       "duration": "0.100s",
       "failed": "OPERATION_FAILURE_CATEGORY_UNSUPPORTED_CAPABILITY",
       "absence": "PROVIDER_REQUEST_ABSENCE_NOT_PROVIDED_BY_PROVIDER"
+    }
+  },
+  {
+    "name": "attempt without outcome",
+    "type": "trogonai.platform.key_custody.audit.v1alpha1.ProviderAttempt",
+    "valid": false,
+    "violations": ["outcome: exactly one field is required in oneof"],
+    "message": {
+      "attemptNumber": 1,
+      "startedAt": "2026-11-01T00:00:00Z",
+      "duration": "0.100s",
+      "absence": "PROVIDER_REQUEST_ABSENCE_NOT_PROVIDED_BY_PROVIDER"
+    }
+  },
+  {
+    "name": "attempt numbered zero",
+    "type": "trogonai.platform.key_custody.audit.v1alpha1.ProviderAttempt",
+    "valid": false,
+    "violations": ["attempt_number: must be greater than 0"],
+    "message": {
+      "attemptNumber": 0,
+      "startedAt": "2026-11-01T00:00:00Z",
+      "duration": "0.100s",
+      "succeeded": {},
+      "absence": "PROVIDER_REQUEST_ABSENCE_NOT_PROVIDED_BY_PROVIDER"
+    }
+  },
+  {
+    "name": "attempt started at epoch",
+    "type": "trogonai.platform.key_custody.audit.v1alpha1.ProviderAttempt",
+    "valid": false,
+    "violations": ["started_at: must be greater than 1970-01-01T00:00:00Z"],
+    "message": {
+      "attemptNumber": 1,
+      "startedAt": "1970-01-01T00:00:00Z",
+      "duration": "0.100s",
+      "succeeded": {},
+      "absence": "PROVIDER_REQUEST_ABSENCE_NOT_PROVIDED_BY_PROVIDER"
+    }
+  },
+  {
+    "name": "attempt with unspecified request absence",
+    "type": "trogonai.platform.key_custody.audit.v1alpha1.ProviderAttempt",
+    "valid": false,
+    "violations": ["absence: must not be in list [0]"],
+    "message": {
+      "attemptNumber": 1,
+      "startedAt": "2026-11-01T00:00:00Z",
+      "duration": "0.100s",
+      "succeeded": {},
+      "absence": "PROVIDER_REQUEST_ABSENCE_UNSPECIFIED"
+    }
+  },
+  {
+    "name": "attempt with negative duration",
+    "type": "trogonai.platform.key_custody.audit.v1alpha1.ProviderAttempt",
+    "valid": false,
+    "violations": ["duration: must be greater than or equal to 0s"],
+    "message": {
+      "attemptNumber": 1,
+      "startedAt": "2026-11-01T00:00:00Z",
+      "duration": "-0.100s",
+      "failed": "OPERATION_FAILURE_CATEGORY_PROVIDER_UNAVAILABLE",
+      "absence": "PROVIDER_REQUEST_ABSENCE_NO_RESPONSE"
     }
   }
 ]
