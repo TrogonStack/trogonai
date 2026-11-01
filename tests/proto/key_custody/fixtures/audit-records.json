@@ -228,6 +228,26 @@
     }
   },
   {
+    "name": "registration not active before the first provider attempt",
+    "type": "trogonai.platform.key_custody.audit.v1alpha1.KeyOperationAuditRecord",
+    "valid": true,
+    "message": {
+      "operationId": { "value": "operation-16" },
+      "correlationId": { "value": "correlation-16" },
+      "operation": "KEY_OPERATION_KIND_UNWRAP_DEK",
+      "tenant": { "value": "tenant-1" },
+      "keyRef": { "value": "key-1" },
+      "keyBackendId": { "value": "backend-1" },
+      "purpose": { "value": "payload" },
+      "provider": "KEY_PROVIDER_AWS_KMS",
+      "occurredAt": "2026-11-01T00:00:00Z",
+      "failed": {
+        "category": "OPERATION_FAILURE_CATEGORY_KEY_USE_DENIED",
+        "denialReason": "KEY_USE_DENIAL_REASON_BACKEND_NOT_ACTIVE"
+      }
+    }
+  },
+  {
     "name": "failed operation with successful provider attempt",
     "type": "trogonai.platform.key_custody.audit.v1alpha1.KeyOperationAuditRecord",
     "valid": false,
