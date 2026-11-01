@@ -3,7 +3,7 @@ use std::future::Future;
 use reqwest::{StatusCode, Url};
 use serde::{Deserialize, Serialize};
 
-use super::constants::KEY_FETCH_TIMEOUT;
+use super::constants::{KEY_FETCH_TIMEOUT, UNKNOWN_KEY_ERROR_CODE};
 use super::verification_key::{PlaidJwk, PlaidVerificationKey, PlaidVerificationKeyError};
 use super::{PlaidApiBaseUrl, PlaidClientId, PlaidKeyId, PlaidSecret};
 
@@ -74,8 +74,6 @@ struct KeyResponse {
 struct ErrorResponse {
     error_code: String,
 }
-
-const UNKNOWN_KEY_ERROR_CODE: &str = "INVALID_WEBHOOK_VERIFICATION_KEY_ID";
 
 fn is_transient(status: StatusCode) -> bool {
     status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS || status == StatusCode::REQUEST_TIMEOUT
