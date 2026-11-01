@@ -47,6 +47,7 @@ configured as a named integration and mounted at its integration path.
 | Sentry | `/sources/sentry/{integration}/webhook` |
 | Datadog | `/sources/datadog/{integration}/webhook` |
 | Zoom | `/sources/zoom/{integration}/webhook` |
+| Plaid | `/sources/plaid/{integration}/webhook` |
 
 Integration IDs must contain only ASCII letters, numbers, `_`, or `-`. They cannot be empty, contain path
 separators, or exceed 64 characters.
@@ -75,6 +76,7 @@ or explicit environment reference shape.
 | Sentry | `client_secret` |
 | Datadog | `webhook_token` |
 | Zoom | `secret_token` |
+| Plaid | `client_id`, `secret`, `environment` |
 
 ## Core configuration
 
@@ -123,6 +125,7 @@ Source-specific extras:
 - Datadog webhooks are not signed. `webhook_token` is a shared secret the operator sends as a custom header (configured in the Datadog webhook's *Custom Headers*), verified in constant time. The header name defaults to `X-Datadog-Webhook-Token` and can be overridden per integration with `webhook_token_header`. Routing keys off an `event_type` field in the payload template, falling back to `.unroutable` when it is absent or invalid; an optional `id` field is used as the NATS message ID for deduplication
 - Datadog `timestamp_tolerance_secs` (optional, disabled by default) enables a freshness/anti-replay check. Datadog sends no timestamp header, so the operator must template a `timestamp` field carrying `$DATE_POSIX` (POSIX seconds) into the payload. When enabled, requests whose `timestamp` is outside the window are rejected (`401`), and requests missing/with an unparseable `timestamp` are rejected (`400`). `0` or unset disables the check
 - Zoom `secret_token` is the app's Secret Token. Requests are verified with `x-zm-signature` over `v0:{x-zm-request-timestamp}:{body}`, and `timestamp_tolerance_secs` (default: `300`) bounds how far `x-zm-request-timestamp` may drift from the gateway clock. Zoom provides no stable per-delivery identifier, so no NATS message ID is set and retries are not deduplicated
+- Plaid `client_id` is either a string or `{ env = "VAR" }` naming an environment variable that holds it; it is an identifier, not a secret. Plaid `secret` is the API secret for the `client_id` and `environment` (`sandbox` or `production`) that own the webhooks. The gateway verifies the `Plaid-Verification` JWT (ES256 only) against the key Plaid serves for its `kid` from `/webhook_verification_key/get`, caches keys by `kid`, rejects expired keys, and requires `iat` within `timestamp_tolerance_secs` (default: `300`, `0` is rejected) of the gateway clock and `request_body_sha256` to match the SHA-256 of the raw body. `api_base_url` optionally overrides the host derived from `environment`
 
 ## Config file shape
 
@@ -197,6 +200,12 @@ webhook_token = { env = "DATADOG_PRIMARY_WEBHOOK_TOKEN" }
 [sources.zoom.integrations.primary.webhook]
 secret_token = { env = "ZOOM_PRIMARY_SECRET_TOKEN" }
 # timestamp_tolerance_secs = 300  # optional; max drift of x-zm-request-timestamp
+
+[sources.plaid.integrations.primary.webhook]
+client_id = "your-plaid-client-id"  # or { env = "PLAID_PRIMARY_CLIENT_ID" }
+secret = { env = "PLAID_PRIMARY_SECRET" }
+environment = "production"  # sandbox or production
+# timestamp_tolerance_secs = 300  # optional; max drift of the JWT iat claim
 ```
 
 Configure the matching Datadog webhook (Integrations > Webhooks) with a custom header and a payload template, for example:
@@ -271,6 +280,32 @@ names become subject tokens, so `recording.transcript_completed` lands on
 are not JSON, lack `event`, or carry an event name that is not a valid subject go to `{subject_prefix}.unroutable`
 with an `X-Zoom-Reject-Reason` header. This source does not call the Zoom API; consumers fetch recordings or
 transcripts themselves.
+
+## Plaid
+
+Set the webhook URL of a Plaid Item or Link token to `https://<gateway-host>/sources/plaid/{integration}/webhook`.
+Every request carries a `Plaid-Verification` JWT. The gateway requires `alg` to be `ES256`, fetches the
+verification key for the token's `kid` with the configured `client_id` and `secret`, verifies the signature,
+checks `iat` against `timestamp_tolerance_secs`, and compares `request_body_sha256` with the SHA-256 of the raw
+body in constant time. Keys are cached per `kid` and fetched again after an hour, so a key that Plaid marks
+expired stops verifying within the hour. A missing or invalid token, a stale `iat`, a body hash mismatch, or an
+expired key returns `401`. Any failure to fetch the key, including the hourly fetch of a cached key, returns
+`503`, so a misconfigured `secret` makes Plaid retry for up to 24 hours instead of dropping the webhook as a
+permanent `4xx` failure. Fetches for a `kid` that is not cached are limited to one every 10 seconds per
+integration, and a cached `kid` whose hourly fetch failed is not fetched again for 10 seconds. Requests over
+either limit get `429` with `Retry-After: 10`, which Plaid waits out instead of backing off exponentially, so the
+webhook is retried once a fetch is allowed again. With `TROGON_GATEWAY_ENABLE_RUNTIME_PLAID_CREDENTIALS` enabled,
+the gateway resolves the `secret` from the credential store on every request instead of using the configured
+value, so revoking the credential stops ingestion even though verification keys stay cached.
+
+Verified bodies are published unchanged to `{subject_prefix}.{webhook_type}.{webhook_code}`, for example
+`plaid-primary.TRANSACTIONS.SYNC_UPDATES_AVAILABLE`, with `X-Plaid-Event-Type` and, when the payload carries an
+`item_id`, `X-Plaid-Item-Id`. `Nats-Msg-Id` is the SHA-256 of the `Plaid-Verification` token, which Plaid signs for
+every delivery attempt, and the stream `duplicate_window` is twice `timestamp_tolerance_secs`, or the stream
+`max_age` when that is shorter. Replays of one signed request are dropped, while retries and distinct webhooks with
+identical bodies are all published, so consumers should treat Plaid webhooks as at-least-once. Bodies that are not
+JSON, lack `webhook_type` or `webhook_code`, or produce an invalid subject go to `{subject_prefix}.unroutable` with
+an `X-Plaid-Reject-Reason` header.
 
 ## Microsoft Graph change notifications
 
