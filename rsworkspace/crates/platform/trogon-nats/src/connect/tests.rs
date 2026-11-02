@@ -8,7 +8,7 @@ use crate::test_support::CoreTestServer;
 use crate::tls::ClientCertificate;
 use tracing::subscriber::DefaultGuard;
 use trogon_std::env::InMemoryEnv;
-use trogon_std::log_capture::{CapturedEvents, LevelFilter};
+use trogon_std::log_capture::{CapturedEvents, CapturedLogs, LevelFilter, LogLevel};
 use trogon_std::secret_string::SecretString;
 
 const TLS_DISABLED_WARNING: &str = "NATS TLS is disabled, which is only for tests and local debugging";
@@ -462,6 +462,29 @@ async fn connect_once_logs_the_servers_it_could_not_reach_instead_of_naming_them
         "{failure:?}"
     );
     assert_eq!(failure.field("auth"), Some("none"));
+}
+
+#[tokio::test]
+async fn connect_once_reports_failures_to_log_only_consumers() {
+    let Some(logs) = CapturedLogs::isolated() else {
+        return;
+    };
+    let config = NatsConfig::from_url(REFUSING_SERVER).with_tls(NatsTls::Disabled);
+
+    assert!(
+        connect_once(&config, NatsAuth::None, REFUSED_DIAL_TIMEOUT)
+            .await
+            .is_err()
+    );
+
+    let records = logs.records();
+    let failure = records
+        .iter()
+        .find(|record| record.message.contains(CONNECT_FAILURE_WARNING))
+        .expect("the connection failure reaches the log facade");
+    assert_eq!(failure.level, LogLevel::Warn);
+    assert!(failure.message.contains(REFUSING_SERVER), "{}", failure.message);
+    assert!(failure.message.contains("auth=none"), "{}", failure.message);
 }
 
 async fn connect_once_from(env: &InMemoryEnv) -> Result<Client, ConnectError> {

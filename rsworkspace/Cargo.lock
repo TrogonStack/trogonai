@@ -7488,6 +7488,7 @@ dependencies = [
  "bytes",
  "futures",
  "hex",
+ "log",
  "nkeys",
  "opentelemetry",
  "rcgen",

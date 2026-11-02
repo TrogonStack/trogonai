@@ -220,6 +220,8 @@ fn connected(config: &NatsConfig, result: Result<Client, async_nats::ConnectErro
 }
 
 fn log_connect_failure(error: &async_nats::ConnectError, config: &NatsConfig) {
+    log_connect_failure_to_facade(error, config);
+
     static METADATA: tracing::Metadata<'static> = tracing::metadata! {
         name: "event crates/platform/trogon-nats/src/connect.rs:212",
         target: module_path!(),
@@ -242,6 +244,30 @@ fn log_connect_failure(error: &async_nats::ConnectError, config: &NatsConfig) {
     let auth = config.auth.description();
     let values: [Option<&dyn Value>; 4] = [Some(&message), Some(&error), Some(&servers), Some(&auth)];
     TraceEvent::dispatch(&METADATA, &METADATA.fields().value_set_all(&values));
+}
+
+fn log_connect_failure_to_facade(error: &async_nats::ConnectError, config: &NatsConfig) {
+    if tracing::dispatcher::has_been_set() {
+        return;
+    }
+    let metadata = log::Metadata::builder()
+        .level(log::Level::Warn)
+        .target(module_path!())
+        .build();
+    let logger = log::logger();
+    if log::max_level() < log::LevelFilter::Warn || !logger.enabled(&metadata) {
+        return;
+    }
+    logger.log(
+        &log::Record::builder()
+            .metadata(metadata)
+            .args(format_args!(
+                "Failed to connect to NATS error={error} servers={:?} auth={}",
+                config.servers,
+                config.auth.description()
+            ))
+            .build(),
+    );
 }
 
 /// Returns before any server answers and keeps dialing, then reconnecting, in
