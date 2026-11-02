@@ -10,7 +10,7 @@ use async_nats::{AuthError, Client, ConnectOptions, Event};
 use nkeys::KeyPair;
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::{info, instrument, warn};
+use tracing::{Event as TraceEvent, Level, Value, info, instrument, warn};
 use trogon_semconv::span::NATS_CONNECT;
 use trogon_std::env::{ReadEnv, SystemEnv};
 use trogon_std::tls::install_default_crypto_provider;
@@ -210,18 +210,64 @@ fn connected(config: &NatsConfig, result: Result<Client, async_nats::ConnectErro
             Ok(client)
         }
         Err(e) => {
-            warn!(
-                error = %e,
-                servers = ?config.servers,
-                auth = %config.auth.description(),
-                "Failed to connect to NATS"
-            );
+            log_connect_failure(&e, config);
             Err(ConnectError::ConnectionFailed {
                 servers: config.servers.clone(),
                 error: e,
             })
         }
     }
+}
+
+fn log_connect_failure(error: &async_nats::ConnectError, config: &NatsConfig) {
+    log_connect_failure_to_facade(error, config);
+
+    static METADATA: tracing::Metadata<'static> = tracing::metadata! {
+        name: "event crates/platform/trogon-nats/src/connect.rs:212",
+        target: module_path!(),
+        level: Level::WARN,
+        fields: &["message", "error", "servers", "auth"],
+        callsite: &CALLSITE,
+        kind: tracing::metadata::Kind::EVENT,
+    };
+    static CALLSITE: tracing::__macro_support::MacroCallsite = tracing::__macro_support::MacroCallsite::new(&METADATA);
+
+    let interest = CALLSITE.interest();
+    if interest.is_never()
+        || (interest.is_sometimes() && !tracing::dispatcher::get_default(|subscriber| subscriber.enabled(&METADATA)))
+    {
+        return;
+    }
+    let message = "Failed to connect to NATS";
+    let error = tracing::field::display(error);
+    let servers = tracing::field::debug(&config.servers);
+    let auth = config.auth.description();
+    let values: [Option<&dyn Value>; 4] = [Some(&message), Some(&error), Some(&servers), Some(&auth)];
+    TraceEvent::dispatch(&METADATA, &METADATA.fields().value_set_all(&values));
+}
+
+fn log_connect_failure_to_facade(error: &async_nats::ConnectError, config: &NatsConfig) {
+    if tracing::dispatcher::has_been_set() {
+        return;
+    }
+    let metadata = log::Metadata::builder()
+        .level(log::Level::Warn)
+        .target(module_path!())
+        .build();
+    let logger = log::logger();
+    if log::max_level() < log::LevelFilter::Warn || !logger.enabled(&metadata) {
+        return;
+    }
+    logger.log(
+        &log::Record::builder()
+            .metadata(metadata)
+            .args(format_args!(
+                "Failed to connect to NATS error={error} servers={:?} auth={}",
+                config.servers,
+                config.auth.description()
+            ))
+            .build(),
+    );
 }
 
 /// Returns before any server answers and keeps dialing, then reconnecting, in

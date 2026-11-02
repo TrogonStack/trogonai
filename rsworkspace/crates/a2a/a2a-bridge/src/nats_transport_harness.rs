@@ -16,6 +16,7 @@ use a2a_nats::{A2aMethod, A2aPrefix};
 use crate::auth::{
     AuthCalloutJsonMintClient, InProcessCalloutDispatcherMintWire, harness_callout_dispatcher, harness_callout_xkey,
 };
+use crate::edge_auth::BearerOnlyGuard;
 use crate::error::BridgeError;
 use crate::identity::BridgeUserJwt;
 use crate::inbound::{
@@ -149,7 +150,7 @@ pub fn build_nats_transport_app_state(
         .sealing_to(callout_xkey_public),
     );
 
-    let state = AppState::new(auth, Arc::new(publisher), jetstream, prefix);
+    let state = AppState::new(auth, Arc::new(publisher), jetstream, prefix, Arc::new(BearerOnlyGuard));
     (state, harness, mint_wire)
 }
 

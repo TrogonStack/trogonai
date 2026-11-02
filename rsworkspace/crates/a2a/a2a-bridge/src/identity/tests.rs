@@ -8,6 +8,14 @@ fn caller_https_auth_display_redacts() {
 }
 
 #[test]
+fn caller_https_auth_accepts_bearer_scheme_without_case() {
+    for scheme in ["Bearer", "bearer", "BEARER", "bEaReR"] {
+        let auth = CallerHttpsAuth::new(format!("{scheme} secret-token"));
+        assert_eq!(auth.bearer_token(), Some("secret-token"), "{scheme}");
+    }
+}
+
+#[test]
 fn bridge_user_jwt_rejects_empty_and_non_three_segment() {
     assert!(BridgeUserJwt::new("").is_err());
     assert!(BridgeUserJwt::new("a.b").is_err());

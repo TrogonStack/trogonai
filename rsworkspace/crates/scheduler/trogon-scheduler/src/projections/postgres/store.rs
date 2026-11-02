@@ -50,9 +50,11 @@ impl PostgresSchedulesProjection {
     pub async fn connect(url: &PostgresUrl, pool_options: PgPoolOptions) -> Result<Self, SchedulerError> {
         let options = url.connect_options();
         if url.tls() == PostgresTls::Disabled {
+            let host = options.get_host();
+            let port = options.get_port();
             tracing::warn!(
-                host = options.get_host(),
-                port = options.get_port(),
+                host,
+                port,
                 "Postgres TLS is disabled explicitly with sslmode=disable; the server is not verified and traffic is not encrypted"
             );
         }
@@ -74,6 +76,9 @@ impl PostgresSchedulesProjection {
         &self.pool
     }
 }
+
+#[cfg(test)]
+mod tests;
 
 fn malformed(context: &'static str) -> SchedulerError {
     SchedulerError::kv_source(

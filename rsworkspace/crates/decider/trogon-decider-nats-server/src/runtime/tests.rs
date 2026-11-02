@@ -20,6 +20,7 @@ use super::*;
 const PRINCIPAL_SUBJECT: &str = "decider.agent.alice.DeciderService.Decide";
 const FORGED_PRINCIPAL_HEADER: &str = "X-A2a-Caller-Id";
 const UNDECODABLE_PAYLOAD: [u8; 4] = [0xff, 0xff, 0xff, 0xff];
+const ROUTING_COMMAND: &str = "type.googleapis.com/trogon.decider.wasm_runtime.fixtures.act_chain.v1.RunTwoStepPlan";
 
 fn endpoint() -> CommandEndpoint {
     CommandEndpoint::new(
@@ -53,6 +54,12 @@ fn module_name(value: &str) -> ModuleName {
 
 fn engine() -> WasmDeciderEngine {
     WasmDeciderEngine::new(WasmEngineConfig::default()).expect("the default engine config builds")
+}
+
+fn routing_module() -> WasmDeciderModule {
+    // Keep library tests independent of release artifacts under the ignored target directory.
+    let bytes = include_bytes!("fixtures/act_chain_decider.wasm");
+    WasmDeciderModule::load(engine(), bytes).expect("the routing fixture loads")
 }
 
 /// A store whose every fetch fails, so the startup path that reports an
@@ -180,6 +187,22 @@ fn a_principal_header_does_not_stand_in_for_the_subject() {
 #[test]
 fn the_router_reads_principals_where_the_host_subscribes() {
     assert_eq!(router().endpoint(), &endpoint());
+}
+
+#[test]
+fn a_routed_command_keeps_the_principal_derived_from_its_subject() {
+    let registry = DeciderRegistry::builder()
+        .register(routing_module())
+        .expect("the routing fixture registers")
+        .build_handle();
+    let router = CommandRouter::new(endpoint(), Arc::new(registry));
+
+    let routed = router
+        .route(PRINCIPAL_SUBJECT, &request(ROUTING_COMMAND).encode_to_vec(), None)
+        .expect("the routing fixture claims the command");
+
+    assert_eq!(routed.principal().to_string(), "agent:alice");
+    assert!(format!("{routed:?}").contains("principal: CommandPrincipal"));
 }
 
 #[test]

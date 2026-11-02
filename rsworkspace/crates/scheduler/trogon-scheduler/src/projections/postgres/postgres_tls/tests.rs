@@ -78,3 +78,9 @@ fn converts_into_the_sqlx_mode() {
     ));
     assert!(matches!(PgSslMode::from(PostgresTls::Disabled), PgSslMode::Disable));
 }
+
+#[test]
+fn names_every_accepted_libpq_mode() {
+    assert_eq!(libpq_name(&PgSslMode::Disable), "disable");
+    assert_eq!(libpq_name(&PgSslMode::VerifyFull), "verify-full");
+}

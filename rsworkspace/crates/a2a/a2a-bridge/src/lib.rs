@@ -1,21 +1,28 @@
 #![doc = include_str!("../README.md")]
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
+pub mod audit;
 pub mod auth;
 mod constants;
+pub mod edge_auth;
+pub mod edge_identity;
+#[cfg(test)]
+mod edge_signing_harness;
 pub mod error;
 pub mod identity;
 pub mod inbound;
 #[cfg(test)]
 mod nats_transport_harness;
 pub mod outbound;
+pub mod request;
 
 pub use auth::{
     AsyncNatsAuthMintWire, AuthCalloutClient, AuthCalloutJsonMintClient, BridgeTenantAccount,
     InProcessCalloutDispatcherMintWire, StubAuthCalloutClient, StubAuthCalloutMint,
 };
 pub use constants::ENV_AUTH_CALLOUT_XKEY_PUBLIC;
-pub use error::BridgeError;
+pub use edge_auth::{BearerOnlyGuard, EdgeAdmission, EdgeAuthConfig, EdgeAuthMode, EdgeGuard, PopEdgeGuard};
+pub use error::{BridgeError, EdgeAuthError};
 pub use identity::{BridgeAgentId, BridgeUserJwt, CallerHttpsAuth, MintedCallerId};
 pub use inbound::{
     AppState, AsyncNatsTokenGatewayUnary, AsyncNatsTokenTaskJetstream, CallerConnectTimeout, GatewayInboundPublisher,
@@ -23,3 +30,4 @@ pub use inbound::{
     StubTaskJetStreamPort, default_a2a_prefix, gateway_router,
 };
 pub use outbound::{AgentRegistrationId, MethodSegment, OutboundHttpsAgentUpstream, StubOutboundForwarder, forward};
+pub use request::InboundRequest;

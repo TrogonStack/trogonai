@@ -12,6 +12,7 @@ thiserror = { workspace = true }
 async-nats = { workspace = true, features = ["nkeys", "jetstream", "kv", "object-store", "server_2_10", "server_2_11", "server_2_12"] }
 bytes = { workspace = true }
 nkeys = { workspace = true }
+log = { version = "=0.4.29", features = ["std"] }
 futures = { workspace = true }
 opentelemetry = { workspace = true }
 trogon-semconv = { workspace = true }

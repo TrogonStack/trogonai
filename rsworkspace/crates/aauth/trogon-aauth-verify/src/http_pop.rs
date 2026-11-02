@@ -1,6 +1,7 @@
 //! HTTP proof-of-possession verifier per draft "HTTP Message Signatures
 //! Profile" (#http-message-signatures-profile), profiling RFC 9421 HTTP
-//! Message Signatures for AAuth.
+//! Message Signatures for AAuth, with the binding, freshness and replay
+//! rules of ADR#0051.
 //!
 //! This crate has no HTTP framework dependency: [`HttpRequest`] models the
 //! inbound request as owned, transport-agnostic data (method, authority,
@@ -20,56 +21,94 @@
 //!   lowercased.
 //! - `@path` (RFC 9421 Section 2.2.6): the absolute path (no query).
 //! - `signature-key`: the raw `Signature-Key` header field value.
-//! - `content-digest` (RFC 9530, OPTIONAL): the raw `Content-Digest` header
-//!   field value, required to be covered only when the request has a body.
+//! - `content-digest` (RFC 9530): the raw `Content-Digest` header field
+//!   value. Always covered, because ADR#0051 Decision 2 binds every request
+//!   to SHA-256 over its exact body; a bodyless request carries the digest of
+//!   the empty body.
 //! - `aauth-mission` (OPTIONAL): the raw `AAuth-Mission` header field value,
+//!   required to be covered only when the request carries that header.
+//! - `aauth-nonce` (OPTIONAL): the raw `AAuth-Nonce` header field value,
 //!   required to be covered only when the request carries that header.
 //!
 //! ## Body integrity
 //!
 //! Covering `content-digest` binds the *header value* to the signature; on
-//! its own that says nothing about the bytes in `body`. Whenever the header
-//! is present this verifier therefore also recomputes SHA-256 over the
-//! request body and compares, exactly as [`crate::nats_pop`] does for its
-//! own profile. Without that second half a captured request could have its
-//! body replaced (or removed entirely, which drops it out of the
-//! has-a-body branch) while the untouched digest header kept the signature
-//! valid.
+//! its own that says nothing about the bytes in `body`. This verifier
+//! therefore also recomputes SHA-256 over the request body and compares,
+//! exactly as [`crate::nats_pop`] does for its own profile. Without that
+//! second half a captured request could have its body replaced or removed
+//! while the untouched digest header kept the signature valid.
 //!
-//! `Signature-Input`, `Signature`, and `Signature-Key` are parsed only in the
-//! single-member Dictionary shape the draft's examples use throughout
-//! (`sig=(...)`, `sig=:...:`, `sig=jwt;jwt="..."`) -- this verifier does not
-//! implement the full RFC 8941 Structured Fields grammar or multi-signature
-//! requests. Header component values are taken as the raw field value with
-//! leading/trailing OWS trimmed and internal whitespace normalized to a
-//! single space (RFC 9421 Section 2.1's "combined field value" for a
-//! non-list, non-dictionary field), which is sufficient because none of the
-//! covered headers here are defined as RFC 9421 structured-field-aware
-//! components.
+//! ## Signature parameters
+//!
+//! `Signature-Input` is read under the RFC 8941 grammar as exactly one
+//! member, `sig`, and anything outside this profile is refused rather than
+//! skipped: a second member, parameters on a component, a repeated component
+//! or parameter, or a parameter the profile does not define.
+//!
+//! - `created` and `expires` (Integers, required) bound the window in which
+//!   the signature is fresh, checked by [`SignatureFreshness`].
+//! - `nonce` (String, required) carries the client-generated [`Jti`].
+//! - `alg` (String, optional) has to name the algorithm of `cnf.jwk`.
+//! - `keyid` and `tag` (Strings, optional) are signed over but not
+//!   interpreted.
+//!
+//! `@signature-params` is rebuilt from the parsed parameters in their RFC
+//! 8941 serialization, so the signer and this verifier agree on it whatever
+//! optional whitespace the field carried.
+//!
+//! `Signature` and `Signature-Key` are read only in the single-member shapes
+//! the draft's examples use (`sig=:...:`, `sig=jwt;jwt="..."`). Header
+//! component values are taken as the raw field value with leading/trailing
+//! OWS trimmed and internal whitespace normalized to a single space (RFC
+//! 9421 Section 2.1's "combined field value" for a non-list, non-dictionary
+//! field), which is sufficient because none of the covered headers here are
+//! defined as RFC 9421 structured-field-aware components.
 //!
 //! ## Replay
 //!
-//! Per "Freshness and Replay" (#freshness-and-replay), this HTTP profile
-//! defines no nonce mechanism -- `created` freshness is the primary replay
-//! defense, and the draft suggests an optional cache keyed by
-//! `(signing-key-thumbprint, created, @method, @authority, @path)`. This
-//! verifier builds that exact key and checks it against the caller-supplied
-//! [`ReplayStore`], so a captured-and-replayed signature within the
-//! freshness window is still rejected. This deliberately differs from the
-//! NATS PoP profile ([`crate::nats_pop`]), which mints an explicit nonce
-//! header -- the HTTP profile has none to reuse.
+//! Every admitted signature records its signing key's thumbprint and its
+//! [`Jti`] in the caller-supplied [`ReplayStore`] with one atomic
+//! conditional create, kept for [`SignatureFreshness::record_ttl_secs`]. A
+//! `jti` is therefore admitted once per key for as long as any signature
+//! carrying it could still be fresh, whatever request it is attached to,
+//! and a store that cannot be consulted refuses the request.
+//!
+//! ## Server nonces
+//!
+//! With [`ServerNonces`] configured, a nonce a request binds in `AAuth-Nonce`
+//! has to be one this resource issued to the request's signing key, still
+//! usable and still recorded in the [`ReplayStore`]. When the policy is
+//! [`NonceRequirement::Required`], a request binding no nonce, or one that
+//! does not verify, is refused with [`HttpPopError::NonceRequired`], whose
+//! [`NonceChallenge`] carries a fresh nonce issued to its signing key for the
+//! retry, as RFC 9449 does for a missing or stale DPoP nonce. Under
+//! [`NonceRequirement::Optional`] a bound nonce that does not verify is
+//! refused with [`HttpPopError::InvalidNonce`]. Nonces are only ever issued
+//! to a request whose signature has verified and whose `jti` was just
+//! recorded, so neither an unauthenticated request nor a replayed one can
+//! make the resource write a nonce record. Without [`ServerNonces`], a
+//! request binding a nonce is refused, since this resource issued none.
 
 use base64::Engine;
 use base64::engine::general_purpose::{STANDARD, STANDARD_NO_PAD, URL_SAFE_NO_PAD};
-use jsonwebtoken::{Algorithm, DecodingKey, crypto::verify, jwk::Jwk};
+use jsonwebtoken::jwk::{AlgorithmParameters, EllipticCurve, Jwk};
+use jsonwebtoken::{Algorithm, DecodingKey, crypto::verify};
 use sha2::{Digest, Sha256};
 use trogon_identity_types::aauth::headers;
 
-use crate::constants::HTTP_SECURITY_HEADERS;
+use crate::constants::{HTTP_SECURITY_HEADERS, SERVER_NONCE_COMPONENT, SERVER_NONCE_HEADER};
+use crate::freshness::{ClockTolerance, FreshnessError, SignatureFreshness};
 use crate::jwks::JwksResolver;
 use crate::replay::{ReplayError, ReplayStore};
+use crate::server_nonce::{NonceChallenge, NonceError, NonceIssueError, NonceRequirement, ServerNonce, ServerNonces};
 use crate::time_source::TimeSource;
 use crate::token::{TokenError, TokenVerifier, VerifiedAgent, VerifiedAuth};
+
+mod signature_input;
+
+use signature_input::SignatureInput;
+pub use signature_input::{InvalidJtiError, Jti, SignatureParameter};
 
 /// Transport-agnostic view of an inbound HTTP request. Callers adapt from
 /// their HTTP framework's request type into this struct; this crate does not
@@ -80,7 +119,9 @@ pub struct HttpRequest {
     /// building `@method` (RFC 9421 canonicalizes to uppercase).
     pub method: String,
     /// Request authority (host, optionally `:port`), without scheme --
-    /// RFC 9421 `@authority` (Section 2.2.3).
+    /// RFC 9421 `@authority` (Section 2.2.3). A caller serving one resource
+    /// passes its own authority here rather than the request's `Host`, so a
+    /// signature made for any other resource does not verify.
     pub authority: String,
     /// Absolute request path, no query string -- RFC 9421 `@path`
     /// (Section 2.2.6).
@@ -88,8 +129,7 @@ pub struct HttpRequest {
     /// Header fields as `(name, value)` pairs, in wire order. Names are
     /// matched case-insensitively per RFC 9421 Section 2.1.
     pub headers: Vec<(String, String)>,
-    /// Request body, if any. `None` and `Some(&[])` are both treated as "no
-    /// body" for the purpose of requiring `content-digest` coverage.
+    /// Request body, if any. `None` digests the same as an empty body.
     pub body: Option<Vec<u8>>,
 }
 
@@ -106,10 +146,6 @@ impl HttpRequest {
             .iter()
             .filter(|(k, _)| k.eq_ignore_ascii_case(name))
             .count()
-    }
-
-    fn has_body(&self) -> bool {
-        self.body.as_ref().is_some_and(|b| !b.is_empty())
     }
 }
 
@@ -158,10 +194,18 @@ pub enum HttpPopError {
     /// `scheme=jwt`).
     #[error("signature-key header is not in the supported sig=jwt;jwt=\"...\" shape")]
     UnsupportedSignatureKeyScheme,
-    /// `Signature-Input` was present but not in the supported
-    /// `sig=(...);created=...` shape.
+    /// `Signature-Input` was present but is not a single `sig` member this
+    /// profile can read.
     #[error("signature-input header is not in the supported sig=(...) shape")]
     MalformedSignatureInput,
+    /// A signature parameter this profile requires is absent.
+    #[error("signature-input is missing the {0} parameter")]
+    MissingSignatureParameter(SignatureParameter),
+    /// A signature parameter carries no value, or a value of the wrong type.
+    #[error("signature-input {0} parameter is not of the type it requires")]
+    InvalidSignatureParameter(SignatureParameter),
+    #[error("signature-input nonce is not a usable jti: {0}")]
+    InvalidJti(#[source] InvalidJtiError),
     /// `Signature` was present but not in the supported `sig=:...:` shape.
     #[error("signature header is not in the supported sig=:...: shape")]
     MalformedSignature,
@@ -169,8 +213,7 @@ pub enum HttpPopError {
     /// covered by `Signature-Input`.
     #[error("signature-input does not cover required component: {0}")]
     MissingCoveredComponent(&'static str),
-    /// The request has a body but `content-digest` is not covered, or vice
-    /// versa the header is covered but absent.
+    /// `content-digest` is not covered, or is covered but absent.
     #[error("content-digest header required but missing")]
     MissingContentDigest,
     /// `Content-Digest` was present but carried no `sha-256` entry, or that
@@ -187,19 +230,23 @@ pub enum HttpPopError {
     /// claim is expected -- see [`crate::mission`] for claim-level checks.
     #[error("aauth-mission header required but missing")]
     MissingMissionHeader,
-    /// `Signature-Input`'s `created` parameter is missing or not an integer.
-    #[error("signature-input created parameter is missing or invalid")]
-    InvalidCreated,
-    /// Configured `max_skew_secs` was negative -- operator misconfiguration.
-    #[error("configured max_skew_secs must be non-negative, got {0}")]
-    NegativeMaxSkew(i64),
-    /// The arithmetic to compare `now` and `created` overflowed `i64`.
-    #[error("skew arithmetic overflowed (now={now}, created={created})")]
-    SkewOverflow { now: i64, created: i64 },
-    /// `created` falls outside the verifier's freshness window
-    /// (#freshness-and-replay, default 60 seconds).
-    #[error("signature created timestamp is outside the freshness window")]
-    Skew,
+    /// The `AAuth-Nonce` header is present but not covered by the signature,
+    /// or covered but absent.
+    #[error("aauth-nonce header is not covered by the signature, or is covered but absent")]
+    UnboundNonce,
+    /// The resource demands a server nonce and the request bound none, or
+    /// one that does not verify. Carries a fresh nonce, issued to the
+    /// request's signing key, for the retry.
+    #[error("request binds no usable server nonce, which this resource demands")]
+    NonceRequired(NonceChallenge),
+    #[error("server nonce does not verify: {0}")]
+    InvalidNonce(#[source] NonceError),
+    #[error("server nonce could not be issued")]
+    NonceIssue(#[source] NonceIssueError),
+    /// The signature's `created`/`expires` window is malformed or not fresh
+    /// at the verifier's clock.
+    #[error("signature is not fresh: {0}")]
+    Freshness(#[source] FreshnessError),
     /// The presenting token was neither an `aa-agent+jwt` nor an
     /// `aa-auth+jwt`.
     #[error("presenting token typ is not supported for HTTP PoP: {0}")]
@@ -212,14 +259,17 @@ pub enum HttpPopError {
     /// verifier doesn't support.
     #[error("invalid cnf.jwk")]
     InvalidConfirmationKey(#[source] InvalidConfirmationKeyError),
+    /// The `alg` signature parameter names another algorithm than the one
+    /// `cnf.jwk` signs with.
+    #[error("signature-input alg does not name the algorithm of cnf.jwk")]
+    AlgorithmMismatch,
     /// The signature did not verify against `cnf.jwk` over the RFC 9421
     /// canonical signature base.
     #[error("signature did not verify")]
     BadSignature,
     #[error("signature verification: {0}")]
     Verify(#[source] jsonwebtoken::errors::Error),
-    /// Replay per (signing-key-thumbprint, created, @method, @authority,
-    /// @path) as suggested by (#freshness-and-replay).
+    /// The signing key already presented this `jti`.
     #[error("signature replay detected")]
     Replay,
     #[error("replay store backend failure")]
@@ -255,38 +305,62 @@ pub struct HttpPopVerifier<R: JwksResolver, C: TimeSource, S: ReplayStore> {
     pub token_verifier: TokenVerifier<R, C>,
     pub clock: C,
     pub replay: S,
-    pub max_skew_secs: i64,
-    /// The resource's own identifier (its `aud`), used only to verify an
+    pub freshness: SignatureFreshness,
+    /// The resource's own identifier (its `aud`), used to verify an
     /// auth-token presenter's `aud` claim (mirrors "Request-Context Binding"
     /// rule 5, folded in here because [`Self::verify`] already has the
-    /// verified auth claims and signing context in hand).
+    /// verified auth claims and signing context in hand), and named as the
+    /// issuer of the server nonces this resource hands out.
     pub resource_identifier: String,
+    pub nonces: Option<ServerNonces>,
 }
 
 impl<R: JwksResolver + Clone, C: TimeSource + Clone, S: ReplayStore> HttpPopVerifier<R, C, S> {
+    /// A verifier with the default [`SignatureFreshness`], whose clock
+    /// tolerance also bounds the presenting token's expiry leeway.
     pub fn new(jwks: R, clock: C, replay: S, resource_identifier: impl Into<String>) -> Self {
+        let freshness = SignatureFreshness::default();
         Self {
-            token_verifier: TokenVerifier::new(jwks, clock.clone()),
+            token_verifier: TokenVerifier::new(jwks, clock.clone()).with_leeway(u64::from(freshness.skew().secs())),
             clock,
             replay,
-            max_skew_secs: 60,
+            freshness,
             resource_identifier: resource_identifier.into(),
+            nonces: None,
         }
     }
 }
 
 impl<R: JwksResolver, C: TimeSource, S: ReplayStore> HttpPopVerifier<R, C, S> {
+    #[must_use]
+    pub fn with_freshness(mut self, freshness: SignatureFreshness) -> Self {
+        self.freshness = freshness;
+        self
+    }
+
+    /// Bounds how far past `exp`, or ahead of `iat`, the presenting token is
+    /// still accepted.
+    #[must_use]
+    pub fn with_token_leeway(mut self, leeway: ClockTolerance) -> Self {
+        self.token_verifier = self.token_verifier.with_leeway(u64::from(leeway.secs()));
+        self
+    }
+
+    #[must_use]
+    pub fn with_server_nonces(mut self, nonces: ServerNonces) -> Self {
+        self.nonces = Some(nonces);
+        self
+    }
+
     /// Verify an HTTP request's proof-of-possession per "Verification
     /// (Server)" (#verification): extracts `Signature-Key`, `Signature-Input`,
-    /// `Signature`; verifies required component coverage; verifies the JWT
-    /// layer of the presented token (agent or auth); verifies the HTTP
-    /// Message Signature against the token's `cnf.jwk`; recomputes
-    /// `Content-Digest` over the body; and enforces freshness plus the replay
-    /// tuple from (#freshness-and-replay).
+    /// `Signature`; verifies required component coverage and the freshness of
+    /// the signature window; verifies the JWT layer of the presented token
+    /// (agent or auth); verifies the HTTP Message Signature against the
+    /// token's `cnf.jwk`; recomputes `Content-Digest` over the body; records
+    /// the signing key's `jti` so it is admitted once; and checks the server
+    /// nonce the request binds, or demands one.
     pub async fn verify(&self, req: &HttpRequest) -> Result<VerifiedPresenter, HttpPopError> {
-        if self.max_skew_secs < 0 {
-            return Err(HttpPopError::NegativeMaxSkew(self.max_skew_secs));
-        }
         ensure_no_duplicate_security_headers(req)?;
 
         let sig_key_raw = req
@@ -300,38 +374,117 @@ impl<R: JwksResolver, C: TimeSource, S: ReplayStore> HttpPopVerifier<R, C, S> {
             .ok_or(HttpPopError::MissingHeader(headers::SIGNATURE))?;
 
         let jwt = parse_signature_key_jwt(sig_key_raw)?;
-        let parsed_input = parse_signature_input(sig_input_raw)?;
-
-        verify_covered_components(req, &parsed_input.components)?;
-
-        let now = self.clock.now();
-        let delta = now
-            .checked_sub(parsed_input.created)
-            .ok_or(HttpPopError::SkewOverflow {
-                now,
-                created: parsed_input.created,
-            })?;
-        if delta.unsigned_abs() > self.max_skew_secs.unsigned_abs() {
-            return Err(HttpPopError::Skew);
-        }
-
+        let input = SignatureInput::parse(sig_input_raw)?;
+        verify_covered_components(req, input.components())?;
+        self.freshness
+            .check(input.window(), self.clock.now())
+            .map_err(HttpPopError::Freshness)?;
         let sig_b64 = parse_signature_bytes(sig_raw)?;
 
-        let (cnf_jwk, jkt, presenter) = match presenter_kind(&jwt)? {
+        let (cnf_jwk, jkt, presenter) = self.verify_presenter(&jwt).await?;
+
+        let base = build_signature_base(req, &input)?;
+        verify_signature_with_jwk(&cnf_jwk, input.alg(), base.as_bytes(), &sig_b64)?;
+        verify_content_digest(req)?;
+
+        let fresh = self
+            .replay
+            .check_and_insert(&replay_key(&jkt, input.jti()), self.freshness.record_ttl_secs())
+            .await
+            .map_err(HttpPopError::Backend)?;
+        if !fresh {
+            return Err(HttpPopError::Replay);
+        }
+
+        self.verify_server_nonce(req, &jkt).await?;
+
+        Ok(presenter)
+    }
+
+    async fn verify_server_nonce(&self, req: &HttpRequest, jkt: &str) -> Result<(), HttpPopError> {
+        let presented = req.header(SERVER_NONCE_HEADER);
+        let Some(nonces) = &self.nonces else {
+            return match presented {
+                Some(_) => Err(HttpPopError::InvalidNonce(NonceError::NotIssued)),
+                None => Ok(()),
+            };
+        };
+        let refused = match presented {
+            Some(raw) => match self.nonce_refusal(nonces, raw.trim(), jkt).await? {
+                None => return Ok(()),
+                refusal => refusal,
+            },
+            None => None,
+        };
+        match nonces.requirement() {
+            NonceRequirement::Required => {
+                let nonce = self.issue_nonce(nonces, jkt).await?;
+                Err(HttpPopError::NonceRequired(NonceChallenge::new(nonce, refused)))
+            }
+            NonceRequirement::Optional => refused.map_or(Ok(()), |err| Err(HttpPopError::InvalidNonce(err))),
+        }
+    }
+
+    /// Why `raw` is not a usable nonce this resource issued to the key with
+    /// thumbprint `jkt`, or `None` when it is one.
+    async fn nonce_refusal(
+        &self,
+        nonces: &ServerNonces,
+        raw: &str,
+        jkt: &str,
+    ) -> Result<Option<NonceError>, HttpPopError> {
+        let record = match nonces.check(
+            raw,
+            &self.resource_identifier,
+            jkt,
+            self.clock.now(),
+            self.freshness.skew(),
+        ) {
+            Ok(record) => record,
+            Err(err) => return Ok(Some(err)),
+        };
+        let issued = self
+            .replay
+            .contains(record.key())
+            .await
+            .map_err(HttpPopError::Backend)?;
+        Ok((!issued).then_some(NonceError::NotIssued))
+    }
+
+    async fn issue_nonce(&self, nonces: &ServerNonces, jkt: &str) -> Result<ServerNonce, HttpPopError> {
+        let issued = nonces
+            .mint(&self.resource_identifier, jkt, self.clock.now())
+            .map_err(HttpPopError::NonceIssue)?;
+        let recorded = self
+            .replay
+            .check_and_insert(issued.record.key(), nonces.record_ttl_secs(self.freshness.skew()))
+            .await
+            .map_err(HttpPopError::Backend)?;
+        if !recorded {
+            return Err(HttpPopError::NonceIssue(NonceIssueError::Collision));
+        }
+        Ok(issued.nonce)
+    }
+
+    async fn verify_presenter(
+        &self,
+        jwt: &str,
+    ) -> Result<(serde_json::Value, String, VerifiedPresenter), HttpPopError> {
+        match presenter_kind(jwt)? {
             PresenterKind::Agent => {
                 let verified = self
                     .token_verifier
-                    .verify_agent(&jwt)
+                    .verify_agent(jwt)
                     .await
                     .map_err(HttpPopError::Agent)?;
                 let cnf_jwk = verified.claims.cnf.jwk().clone();
                 let jkt = verified.jkt.clone();
-                (cnf_jwk, jkt, VerifiedPresenter::Agent(verified))
+                Ok((cnf_jwk, jkt, VerifiedPresenter::Agent(verified)))
             }
             PresenterKind::Auth => {
                 let verified = self
                     .token_verifier
-                    .verify_auth(&jwt, &self.resource_identifier)
+                    .verify_auth(jwt, &self.resource_identifier)
                     .await
                     .map_err(HttpPopError::Auth)?;
                 let cnf = verified.claims.cnf.clone().ok_or(HttpPopError::InvalidConfirmationKey(
@@ -344,31 +497,17 @@ impl<R: JwksResolver, C: TimeSource, S: ReplayStore> HttpPopVerifier<R, C, S> {
                     auth: verified,
                     jkt: jkt.clone(),
                 });
-                (cnf.jwk().clone(), jkt, presenter)
+                Ok((cnf.jwk().clone(), jkt, presenter))
             }
-        };
-
-        let base = build_signature_base(req, &parsed_input)?;
-        verify_signature_with_jwk(&cnf_jwk, base.as_bytes(), &sig_b64)?;
-        verify_content_digest(req)?;
-
-        let replay_key = format!(
-            "http-pop:{jkt}:{}:{}:{}:{}",
-            parsed_input.created, req.method, req.authority, req.path
-        );
-        let ttl_secs = self.max_skew_secs.saturating_mul(2).max(1);
-        let ttl_u32 = u32::try_from(ttl_secs).unwrap_or(u32::MAX);
-        let fresh = self
-            .replay
-            .check_and_insert(&replay_key, ttl_u32)
-            .await
-            .map_err(HttpPopError::Backend)?;
-        if !fresh {
-            return Err(HttpPopError::Replay);
         }
-
-        Ok(presenter)
     }
+}
+
+/// The record that admits `jti` once for the key with thumbprint `jkt`. The
+/// `jti` is digested so a client-chosen value always yields a valid KV key.
+fn replay_key(jkt: &str, jti: &Jti) -> String {
+    let digest = URL_SAFE_NO_PAD.encode(Sha256::digest(jti.as_str().as_bytes()));
+    format!("jti.{jkt}.{digest}")
 }
 
 fn ensure_no_duplicate_security_headers(req: &HttpRequest) -> Result<(), HttpPopError> {
@@ -418,8 +557,10 @@ fn parse_signature_key_jwt(raw: &str) -> Result<String, HttpPopError> {
     Ok(token)
 }
 
-/// Parsed `Signature: sig=:BASE64:` header, returning the base64 (padded or
-/// unpadded per RFC 9421 Byte Sequence encoding) signature payload.
+/// Parsed `Signature: sig=:...:` header. An RFC 8941 Byte Sequence is
+/// standard base64, while `jsonwebtoken` verifies URL-safe unpadded
+/// signatures, so the bytes are decoded in either alphabet and returned in
+/// the latter.
 fn parse_signature_bytes(raw: &str) -> Result<String, HttpPopError> {
     let raw = raw.trim();
     let rest = raw.strip_prefix("sig=").ok_or(HttpPopError::MalformedSignature)?;
@@ -431,50 +572,8 @@ fn parse_signature_bytes(raw: &str) -> Result<String, HttpPopError> {
     if inner.is_empty() {
         return Err(HttpPopError::MalformedSignature);
     }
-    Ok(inner.to_string())
-}
-
-struct ParsedSignatureInput {
-    components: Vec<String>,
-    created: i64,
-}
-
-/// Parses `Signature-Input: sig=("@method" "@authority" ...);created=NNN`
-/// into the ordered component identifier list and the `created` parameter.
-/// Only the single-member-dictionary shape used throughout the draft's
-/// examples is supported; other RFC 9421 parameters (`expires`, `nonce`,
-/// `keyid`, `alg`, `tag`) are ignored if present since AAuth conveys the
-/// equivalent information via `Signature-Key`'s embedded JWT instead.
-fn parse_signature_input(raw: &str) -> Result<ParsedSignatureInput, HttpPopError> {
-    let raw = raw.trim();
-    let rest = raw.strip_prefix("sig=").ok_or(HttpPopError::MalformedSignatureInput)?;
-    let rest = rest.trim_start();
-    let rest = rest.strip_prefix('(').ok_or(HttpPopError::MalformedSignatureInput)?;
-    let close = rest.find(')').ok_or(HttpPopError::MalformedSignatureInput)?;
-    let (list_body, after) = rest.split_at(close);
-    let after = &after[1..]; // drop ')'
-
-    let components: Vec<String> = list_body
-        .split_whitespace()
-        .map(|tok| extract_quoted(tok).ok_or(HttpPopError::MalformedSignatureInput))
-        .collect::<Result<_, _>>()?;
-    if components.is_empty() {
-        return Err(HttpPopError::MalformedSignatureInput);
-    }
-
-    let mut created = None;
-    for param in after.split(';') {
-        let param = param.trim();
-        if param.is_empty() {
-            continue;
-        }
-        if let Some(value) = param.strip_prefix("created=") {
-            created = value.trim().parse::<i64>().ok();
-        }
-    }
-    let created = created.ok_or(HttpPopError::InvalidCreated)?;
-
-    Ok(ParsedSignatureInput { components, created })
+    let bytes = decode_base64_any_alphabet(inner).ok_or(HttpPopError::MalformedSignature)?;
+    Ok(URL_SAFE_NO_PAD.encode(bytes))
 }
 
 /// Extracts the interior of a `"quoted-string"` token, or returns the token
@@ -491,55 +590,39 @@ fn extract_quoted(tok: &str) -> Option<String> {
     }
 }
 
-/// Checks that the required covered components (#covered-components) are
-/// present in `components`, plus `content-digest` when the request has a
-/// body and `aauth-mission` when the request carries that header.
+/// Checks that the required covered components (#covered-components) and
+/// `content-digest` are present in `components`, plus `aauth-mission` and
+/// `aauth-nonce` each exactly when the request carries that header.
 fn verify_covered_components(req: &HttpRequest, components: &[String]) -> Result<(), HttpPopError> {
-    let has = |name: &str| components.iter().any(|c| c.eq_ignore_ascii_case(name));
+    let has = |name: &str| components.iter().any(|c| c == name);
 
     for required in ["@method", "@authority", "@path", "signature-key"] {
         if !has(required) {
-            return Err(HttpPopError::MissingCoveredComponent(match required {
-                "@method" => "@method",
-                "@authority" => "@authority",
-                "@path" => "@path",
-                _ => "signature-key",
-            }));
+            return Err(HttpPopError::MissingCoveredComponent(required));
         }
     }
 
-    if req.has_body() {
-        if !has("content-digest") {
-            return Err(HttpPopError::MissingContentDigest);
-        }
-        if req.header(headers::CONTENT_DIGEST).is_none() {
-            return Err(HttpPopError::MissingContentDigest);
-        }
+    if !has("content-digest") || req.header(headers::CONTENT_DIGEST).is_none() {
+        return Err(HttpPopError::MissingContentDigest);
     }
 
-    if req.header(headers::MISSION).is_some() && !has("aauth-mission") {
+    if has("aauth-mission") != req.header(headers::MISSION).is_some() {
         return Err(HttpPopError::MissingMissionHeader);
     }
-    if has("aauth-mission") && req.header(headers::MISSION).is_none() {
-        return Err(HttpPopError::MissingMissionHeader);
+
+    if has(SERVER_NONCE_COMPONENT) != req.header(SERVER_NONCE_HEADER).is_some() {
+        return Err(HttpPopError::UnboundNonce);
     }
 
     Ok(())
 }
 
-/// Recomputes SHA-256 over the request body and compares it against the
-/// `Content-Digest` header.
-///
-/// Keyed on the header being *present* rather than on
-/// [`HttpRequest::has_body`], so that stripping the body from a captured
-/// request does not slip past by falling out of the has-a-body branch. The
-/// header cannot itself be stripped: [`verify_covered_components`] requires it
-/// to be covered whenever a body is present, and [`build_signature_base`]
-/// fails to reconstruct the base for a covered field that is missing.
+/// Recomputes SHA-256 over the request body, empty when there is none, and
+/// compares it against the `Content-Digest` header.
 fn verify_content_digest(req: &HttpRequest) -> Result<(), HttpPopError> {
-    let Some(raw) = req.header(headers::CONTENT_DIGEST) else {
-        return Ok(());
-    };
+    let raw = req
+        .header(headers::CONTENT_DIGEST)
+        .ok_or(HttpPopError::MissingContentDigest)?;
     let supplied = parse_sha256_content_digest(raw).ok_or(HttpPopError::UnsupportedContentDigest)?;
     let expected = Sha256::digest(req.body.as_deref().unwrap_or(&[]));
     if supplied.as_slice() != expected.as_slice() {
@@ -616,9 +699,9 @@ fn decode_base64_any_alphabet(encoded: &str) -> Option<Vec<u8>> {
 /// order given by `Signature-Input`, appends `"<id>": <value>\n`; then a
 /// final `"@signature-params": <inner-list-serialization>` line with no
 /// trailing newline, per RFC 9421 Section 2.5.
-fn build_signature_base(req: &HttpRequest, parsed: &ParsedSignatureInput) -> Result<String, HttpPopError> {
+fn build_signature_base(req: &HttpRequest, input: &SignatureInput) -> Result<String, HttpPopError> {
     let mut base = String::new();
-    for component in &parsed.components {
+    for component in input.components() {
         let value = component_value(req, component)?;
         base.push('"');
         base.push_str(component);
@@ -626,16 +709,8 @@ fn build_signature_base(req: &HttpRequest, parsed: &ParsedSignatureInput) -> Res
         base.push_str(&value);
         base.push('\n');
     }
-    let quoted_components = parsed
-        .components
-        .iter()
-        .map(|c| format!("\"{c}\""))
-        .collect::<Vec<_>>()
-        .join(" ");
-    base.push_str(&format!(
-        "\"@signature-params\": ({quoted_components});created={}",
-        parsed.created
-    ));
+    base.push_str("\"@signature-params\": ");
+    base.push_str(&input.serialize());
     Ok(base)
 }
 
@@ -656,6 +731,10 @@ fn component_value(req: &HttpRequest, component: &str) -> Result<String, HttpPop
             .header(headers::MISSION)
             .map(normalize_field_value)
             .ok_or(HttpPopError::MissingMissionHeader),
+        SERVER_NONCE_COMPONENT => req
+            .header(SERVER_NONCE_HEADER)
+            .map(normalize_field_value)
+            .ok_or(HttpPopError::UnboundNonce),
         other => req
             .header(other)
             .map(normalize_field_value)
@@ -670,34 +749,60 @@ fn normalize_field_value(raw: &str) -> String {
     raw.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn verify_signature_with_jwk(jwk_val: &serde_json::Value, base: &[u8], sig_b64: &str) -> Result<(), HttpPopError> {
+/// The algorithms a `cnf.jwk` can sign a request with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SignatureAlgorithm {
+    EcdsaP256Sha256,
+    EcdsaP384Sha384,
+    Ed25519,
+}
+
+impl SignatureAlgorithm {
+    fn of(jwk: &Jwk) -> Option<Self> {
+        match &jwk.algorithm {
+            AlgorithmParameters::EllipticCurve(ec) if ec.curve == EllipticCurve::P256 => Some(Self::EcdsaP256Sha256),
+            AlgorithmParameters::EllipticCurve(ec) if ec.curve == EllipticCurve::P384 => Some(Self::EcdsaP384Sha384),
+            AlgorithmParameters::OctetKeyPair(okp) if okp.curve == EllipticCurve::Ed25519 => Some(Self::Ed25519),
+            _ => None,
+        }
+    }
+
+    fn jws(self) -> Algorithm {
+        match self {
+            Self::EcdsaP256Sha256 => Algorithm::ES256,
+            Self::EcdsaP384Sha384 => Algorithm::ES384,
+            Self::Ed25519 => Algorithm::EdDSA,
+        }
+    }
+
+    /// The name RFC 9421 Section 6.2.2 registers, as the `alg` parameter
+    /// carries it.
+    fn rfc9421_name(self) -> &'static str {
+        match self {
+            Self::EcdsaP256Sha256 => "ecdsa-p256-sha256",
+            Self::EcdsaP384Sha384 => "ecdsa-p384-sha384",
+            Self::Ed25519 => "ed25519",
+        }
+    }
+}
+
+fn verify_signature_with_jwk(
+    jwk_val: &serde_json::Value,
+    declared_alg: Option<&str>,
+    base: &[u8],
+    sig_b64: &str,
+) -> Result<(), HttpPopError> {
     let jwk: Jwk = serde_json::from_value(jwk_val.clone())
         .map_err(|source| HttpPopError::InvalidConfirmationKey(InvalidConfirmationKeyError::Deserialize(source)))?;
-    let alg = match &jwk.algorithm {
-        jsonwebtoken::jwk::AlgorithmParameters::EllipticCurve(ec)
-            if ec.curve == jsonwebtoken::jwk::EllipticCurve::P256 =>
-        {
-            Algorithm::ES256
-        }
-        jsonwebtoken::jwk::AlgorithmParameters::EllipticCurve(ec)
-            if ec.curve == jsonwebtoken::jwk::EllipticCurve::P384 =>
-        {
-            Algorithm::ES384
-        }
-        jsonwebtoken::jwk::AlgorithmParameters::OctetKeyPair(okp)
-            if okp.curve == jsonwebtoken::jwk::EllipticCurve::Ed25519 =>
-        {
-            Algorithm::EdDSA
-        }
-        _ => {
-            return Err(HttpPopError::InvalidConfirmationKey(
-                InvalidConfirmationKeyError::UnsupportedAlgorithm,
-            ));
-        }
-    };
+    let algorithm = SignatureAlgorithm::of(&jwk).ok_or(HttpPopError::InvalidConfirmationKey(
+        InvalidConfirmationKeyError::UnsupportedAlgorithm,
+    ))?;
+    if declared_alg.is_some_and(|declared| declared != algorithm.rfc9421_name()) {
+        return Err(HttpPopError::AlgorithmMismatch);
+    }
     let key = DecodingKey::from_jwk(&jwk)
         .map_err(|source| HttpPopError::InvalidConfirmationKey(InvalidConfirmationKeyError::DecodingKey(source)))?;
-    let ok = verify(sig_b64, base, &key, alg).map_err(HttpPopError::Verify)?;
+    let ok = verify(sig_b64, base, &key, algorithm.jws()).map_err(HttpPopError::Verify)?;
     if !ok {
         return Err(HttpPopError::BadSignature);
     }

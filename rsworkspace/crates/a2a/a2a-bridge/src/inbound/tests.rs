@@ -1,5 +1,5 @@
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
@@ -7,17 +7,22 @@ use axum::response::IntoResponse;
 use bytes::Bytes;
 use futures_util::stream::{self, Stream};
 use serde_json::json;
+use trogon_std::log_capture::{CapturedLog, CapturedLogs, LogLevel};
 
 use a2a_auth_callout::CALLER_JWT_HEADER_NAME;
 use a2a_nats::ReqId;
 use a2a_nats::constants::{GATEWAY_CALLER_ID_HEADER, GATEWAY_CALLER_ID_HTTP, REQ_ID_HEADER};
 
 use crate::auth::StubAuthCalloutMint;
+use crate::constants::BRIDGE_PRESENTER;
+use crate::edge_auth::BearerOnlyGuard;
+use crate::edge_signing_harness::post;
 use crate::error::BridgeError;
 use crate::identity::BridgeUserJwt;
 
 use super::*;
 
+mod edge_tests;
 mod nats_port_tests;
 
 /// Bootstrap replies are built from the SDK response type rather than hand-written
@@ -52,6 +57,31 @@ fn bootstrap_bare_message() -> Vec<u8> {
         a2a::types::Role::Agent,
         vec![a2a::types::Part::text("done")],
     )))
+}
+
+/// The record of a stream the fixture principal opened as `corr-1`.
+fn stream_record() -> BridgedRequestRecord {
+    BridgedRequestRecord::new(
+        RecordedCaller::SubjectPrincipal(SubjectPrincipal::from_tokens("person", "harness").unwrap()),
+        ReqId::from_header("corr-1"),
+    )
+}
+
+/// Whether `log` names `caller` by `source`, the bridge as the presenter, and
+/// `req_id`.
+fn records_request(log: &CapturedLog, caller: &str, source: &str, req_id: &str) -> bool {
+    [
+        format!("caller={caller:?}"),
+        format!("caller_source={source:?}"),
+        format!("presenter={BRIDGE_PRESENTER:?}"),
+        format!("req_id={req_id:?}"),
+    ]
+    .iter()
+    .all(|field| log.message.contains(field.as_str()))
+}
+
+fn messages(logs: &[CapturedLog]) -> Vec<&str> {
+    logs.iter().map(|log| log.message.as_str()).collect()
 }
 
 #[test]
@@ -242,13 +272,14 @@ fn test_state(publisher: Arc<dyn InboundGatewayPublish>) -> AppState {
         publisher,
         Arc::new(EmptyTaskJetStream),
         default_a2a_prefix(),
+        Arc::new(BearerOnlyGuard),
     )
 }
 
 #[tokio::test]
 async fn handle_jsonrpc_missing_authorization_errors() {
     let state = test_state(Arc::new(RecordingInboundPublisher::new()));
-    let err = handle_jsonrpc(HeaderMap::new(), Bytes::new(), &state)
+    let err = handle_jsonrpc(post(HeaderMap::new(), Bytes::new()), &state)
         .await
         .unwrap_err();
     assert!(matches!(err, BridgeError::MissingAuthorization));
@@ -262,7 +293,7 @@ async fn handle_jsonrpc_missing_agent_header_errors() {
         axum::http::header::AUTHORIZATION,
         HeaderValue::from_static("Bearer fixture-token"),
     );
-    let err = handle_jsonrpc(headers, Bytes::new(), &state).await.unwrap_err();
+    let err = handle_jsonrpc(post(headers, Bytes::new()), &state).await.unwrap_err();
     assert!(matches!(err, BridgeError::MissingAgentHeader));
 }
 
@@ -279,7 +310,7 @@ async fn handle_jsonrpc_unary_publish_records_gateway_subject() {
         })
         .to_string(),
     );
-    let response = handle_jsonrpc(caller_headers("planner", None), body, &state)
+    let response = handle_jsonrpc(post(caller_headers("planner", None), body), &state)
         .await
         .expect("tasks/get should succeed");
     assert_eq!(response.status(), StatusCode::OK);
@@ -294,7 +325,7 @@ async fn handle_jsonrpc_names_the_minted_principal_whatever_the_caller_id_header
     let publisher = Arc::new(RecordingInboundPublisher::new());
     let state = test_state(publisher.clone());
     let body = Bytes::from(json!({"jsonrpc": "2.0", "id": 1, "method": "tasks/get", "params": {}}).to_string());
-    handle_jsonrpc(caller_headers("planner", Some("mallory")), body, &state)
+    handle_jsonrpc(post(caller_headers("planner", Some("mallory")), body), &state)
         .await
         .expect("tasks/get should succeed");
     assert_eq!(
@@ -320,7 +351,7 @@ async fn handle_jsonrpc_routes_each_method_on_its_ingress_suffix() {
         let publisher = Arc::new(RecordingInboundPublisher::new());
         let state = test_state(publisher.clone());
         let body = Bytes::from(json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": {}}).to_string());
-        handle_jsonrpc(caller_headers("planner", None), body, &state)
+        handle_jsonrpc(post(caller_headers("planner", None), body), &state)
             .await
             .unwrap_or_else(|error| panic!("{method} should be forwarded: {error}"));
         assert_eq!(publisher.peek_subject().as_deref(), Some(expected), "{method}");
@@ -332,7 +363,7 @@ async fn handle_jsonrpc_rejects_a_method_outside_the_a2a_method_set() {
     let publisher = Arc::new(RecordingInboundPublisher::new());
     let state = test_state(publisher.clone());
     let body = Bytes::from(json!({"jsonrpc": "2.0", "id": 1, "method": "tasks/subscribe", "params": {}}).to_string());
-    let err = handle_jsonrpc(caller_headers("planner", None), body, &state)
+    let err = handle_jsonrpc(post(caller_headers("planner", None), body), &state)
         .await
         .unwrap_err();
     assert!(matches!(err, BridgeError::UnknownJsonRpcMethod), "{err}");
@@ -350,9 +381,10 @@ async fn handle_jsonrpc_refuses_a_minted_token_that_names_no_principal() {
         publisher.clone(),
         Arc::new(EmptyTaskJetStream),
         default_a2a_prefix(),
+        Arc::new(BearerOnlyGuard),
     );
     let body = Bytes::from(json!({"jsonrpc": "2.0", "id": 1, "method": "tasks/get", "params": {}}).to_string());
-    let err = handle_jsonrpc(caller_headers("planner", None), body, &state)
+    let err = handle_jsonrpc(post(caller_headers("planner", None), body), &state)
         .await
         .unwrap_err();
     assert!(matches!(err, BridgeError::MintedPrincipal(_)), "{err}");
@@ -366,7 +398,7 @@ async fn handle_jsonrpc_rejects_a_streaming_request_without_a_usable_id() {
         let state = test_state(publisher.clone());
         let body =
             Bytes::from(json!({ "jsonrpc": "2.0", "id": id, "method": "message/stream", "params": {} }).to_string());
-        let err = handle_jsonrpc(caller_headers("planner", None), body, &state)
+        let err = handle_jsonrpc(post(caller_headers("planner", None), body), &state)
             .await
             .unwrap_err();
         assert!(matches!(err, BridgeError::MissingJsonRpcId), "id {id} was accepted");
@@ -422,7 +454,7 @@ fn gateway_req_headers_omits_caller_id_when_none() {
 #[tokio::test]
 async fn handle_jsonrpc_invalid_json_returns_deserialize() {
     let state = test_state(Arc::new(RecordingInboundPublisher::new()));
-    let err = handle_jsonrpc(caller_headers("planner", None), Bytes::from("not-json"), &state)
+    let err = handle_jsonrpc(post(caller_headers("planner", None), Bytes::from("not-json")), &state)
         .await
         .unwrap_err();
     assert!(matches!(err, BridgeError::Deserialize(_)));
@@ -431,7 +463,7 @@ async fn handle_jsonrpc_invalid_json_returns_deserialize() {
 #[tokio::test]
 async fn handle_jsonrpc_missing_method_returns_error() {
     let state = test_state(Arc::new(RecordingInboundPublisher::new()));
-    let err = handle_jsonrpc(caller_headers("planner", None), Bytes::from("{}"), &state)
+    let err = handle_jsonrpc(post(caller_headers("planner", None), Bytes::from("{}")), &state)
         .await
         .unwrap_err();
     assert!(matches!(err, BridgeError::MissingJsonRpcMethod));
@@ -449,7 +481,7 @@ async fn handle_jsonrpc_invalid_agent_header_errors() {
         axum::http::HeaderName::from_static(AGENT_ID_HEADER),
         HeaderValue::from_static("bad agent"),
     );
-    let err = handle_jsonrpc(headers, Bytes::new(), &state).await.unwrap_err();
+    let err = handle_jsonrpc(post(headers, Bytes::new()), &state).await.unwrap_err();
     assert!(matches!(err, BridgeError::InvalidAgent(_)));
 }
 
@@ -475,6 +507,7 @@ async fn every_sse_frame_is_a_json_rpc_response_carrying_the_caller_id() {
         bootstrap,
         Box::pin(tail),
         json!("corr-1"),
+        stream_record(),
     ))
     .await;
 
@@ -510,6 +543,7 @@ async fn a_json_object_that_answers_nothing_leaves_as_an_error_frame() {
             )),
         ])),
         json!("corr-1"),
+        stream_record(),
     ))
     .await;
 
@@ -543,6 +577,7 @@ async fn an_event_an_older_agent_published_reaches_the_caller_as_a_response() {
         serde_json::to_vec(&json!({"jsonrpc":"2.0","id":"transport-9","result":{"taskId":"t-1"}})).unwrap(),
         Box::pin(stream::iter(vec![Ok(Bytes::from(legacy))])),
         json!("corr-1"),
+        stream_record(),
     ))
     .await;
 
@@ -550,4 +585,80 @@ async fn an_event_an_older_agent_published_reaches_the_caller_as_a_response() {
     assert_eq!(event["jsonrpc"], "2.0");
     assert_eq!(event["id"], "corr-1");
     assert_eq!(event["result"]["statusUpdate"]["taskId"], "t-1");
+}
+
+#[tokio::test]
+async fn an_undecodable_stream_payload_is_recorded_against_the_caller_and_the_bridge() {
+    let Some(logs) = CapturedLogs::isolated() else {
+        return;
+    };
+    sse_frames(sse_from_bootstrap_and_payloads(
+        serde_json::to_vec(&json!({"jsonrpc":"2.0","id":"transport-9","result":{"taskId":"t-1"}})).unwrap(),
+        Box::pin(stream::iter(vec![Ok(Bytes::from_static(b"not-an-envelope"))])),
+        json!("corr-1"),
+        stream_record(),
+    ))
+    .await;
+
+    let records = logs.records();
+    let undecodable = records
+        .iter()
+        .find(|log| log.message.contains("stream payload is not a JSON-RPC envelope"));
+    assert!(
+        undecodable.is_some_and(|log| log.level == LogLevel::Warn
+            && records_request(log, "person.harness", "subject_principal", "corr-1")
+            && log.message.contains(r#"payload="not-an-envelope""#)),
+        "{:?}",
+        messages(&records)
+    );
+}
+
+/// Remembers the `Trogon-Req-Id` a request was published under.
+#[derive(Default)]
+struct ReqIdRecordingPublisher(Mutex<Option<String>>);
+
+impl ReqIdRecordingPublisher {
+    fn published_under(&self) -> Option<String> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
+#[async_trait]
+impl InboundGatewayPublish for ReqIdRecordingPublisher {
+    async fn publish_unary_to_gateway(
+        &self,
+        _subject: &str,
+        _jwt: &BridgeUserJwt,
+        headers: async_nats::HeaderMap,
+        _payload: &[u8],
+    ) -> Result<Bytes, BridgeError> {
+        *self.0.lock().unwrap() = headers.get(REQ_ID_HEADER).map(|value| value.as_str().to_owned());
+        Ok(Bytes::from(static_json_ok()))
+    }
+}
+
+#[tokio::test]
+async fn a_request_without_an_id_is_recorded_under_the_id_it_is_published_with() {
+    let Some(logs) = CapturedLogs::isolated() else {
+        return;
+    };
+    let publisher = Arc::new(ReqIdRecordingPublisher::default());
+    let state = test_state(publisher.clone());
+    let body = Bytes::from(json!({"jsonrpc": "2.0", "method": "tasks/get", "params": {}}).to_string());
+
+    handle_jsonrpc(post(caller_headers("planner", None), body), &state)
+        .await
+        .unwrap();
+
+    let published = publisher.published_under().unwrap();
+    let records = logs.records();
+    let presented = records
+        .iter()
+        .find(|log| log.message.contains("presenting the request to the gateway"));
+    assert!(
+        presented.is_some_and(|log| log.level == LogLevel::Info
+            && records_request(log, "person.harness", "subject_principal", &published)),
+        "published under {published}: {:?}",
+        messages(&records)
+    );
 }

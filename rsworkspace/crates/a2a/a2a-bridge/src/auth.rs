@@ -147,9 +147,7 @@ impl<W: AuthMintWire + 'static> AuthCalloutJsonMintClient<W> {
             .as_ref()
             .ok_or(BridgeError::MintCredential(BridgeCredentialError::NoCalloutXkey))?;
         let token = caller_auth
-            .as_str()
-            .strip_prefix("Bearer ")
-            .or_else(|| caller_auth.as_str().strip_prefix("bearer "))
+            .bearer_token()
             .ok_or_else(|| BridgeError::Mint("the Authorization header presents no bearer token".into()))?;
         SealedBridgeCredential::seal(&BridgeCredential::BearerToken(BearerToken::new(token)), callout_xkey)
             .map_err(BridgeError::MintCredential)
