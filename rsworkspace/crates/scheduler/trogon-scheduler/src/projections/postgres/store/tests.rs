@@ -23,5 +23,13 @@ async fn an_explicit_tls_disable_reaches_the_connection_attempt() {
         panic!("the discarded local port has no Postgres server");
     };
 
-    assert!(error.to_string().contains("failed to connect"));
+    let SchedulerError::Kv { context, source } = error else {
+        panic!("a failed Postgres connection must remain a KV infrastructure error");
+    };
+
+    assert_eq!(context, "failed to connect to the schedules Postgres database");
+    assert!(matches!(
+        source.as_ref().downcast_ref::<sqlx::Error>(),
+        Some(sqlx::Error::PoolTimedOut)
+    ));
 }

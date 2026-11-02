@@ -1,4 +1,4 @@
-use std::{fs, path::Path, time::Duration};
+use std::time::Duration;
 
 use buffa::{Message as _, MessageField};
 use buffa_types::google::protobuf::Any;
@@ -20,6 +20,7 @@ use super::*;
 const PRINCIPAL_SUBJECT: &str = "decider.agent.alice.DeciderService.Decide";
 const FORGED_PRINCIPAL_HEADER: &str = "X-A2a-Caller-Id";
 const UNDECODABLE_PAYLOAD: [u8; 4] = [0xff, 0xff, 0xff, 0xff];
+const ROUTING_COMMAND: &str = "type.googleapis.com/trogon.decider.wasm_runtime.fixtures.act_chain.v1.RunTwoStepPlan";
 
 fn endpoint() -> CommandEndpoint {
     CommandEndpoint::new(
@@ -55,11 +56,10 @@ fn engine() -> WasmDeciderEngine {
     WasmDeciderEngine::new(WasmEngineConfig::default()).expect("the default engine config builds")
 }
 
-fn schedules_module() -> WasmDeciderModule {
-    let relative = "../../../target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm";
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(relative);
-    let bytes = fs::read(&path).unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
-    WasmDeciderModule::load(engine(), &bytes).expect("the schedules module loads")
+fn routing_module() -> WasmDeciderModule {
+    // Keep library tests independent of release artifacts under the ignored target directory.
+    let bytes = include_bytes!("fixtures/act_chain_decider.wasm");
+    WasmDeciderModule::load(engine(), bytes).expect("the routing fixture loads")
 }
 
 /// A store whose every fetch fails, so the startup path that reports an
@@ -192,14 +192,14 @@ fn the_router_reads_principals_where_the_host_subscribes() {
 #[test]
 fn a_routed_command_keeps_the_principal_derived_from_its_subject() {
     let registry = DeciderRegistry::builder()
-        .register(schedules_module())
-        .expect("the schedules module registers")
+        .register(routing_module())
+        .expect("the routing fixture registers")
         .build_handle();
     let router = CommandRouter::new(endpoint(), Arc::new(registry));
 
     let routed = router
-        .route(PRINCIPAL_SUBJECT, &request(CREATE_SCHEDULE).encode_to_vec(), None)
-        .expect("the schedules module claims the command");
+        .route(PRINCIPAL_SUBJECT, &request(ROUTING_COMMAND).encode_to_vec(), None)
+        .expect("the routing fixture claims the command");
 
     assert_eq!(routed.principal().to_string(), "agent:alice");
     assert!(format!("{routed:?}").contains("principal: CommandPrincipal"));

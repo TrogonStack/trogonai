@@ -131,7 +131,7 @@ fn parser_without_an_argument_still_redacts_the_rejected_value() {
         .expect_err("a literal is not a secret reference");
 
     assert_eq!(error.kind(), ErrorKind::ValueValidation);
-    assert!(!error.to_string().contains("literal-value"));
+    assert_eq!(error.get(ContextKind::InvalidValue), None);
 }
 
 #[cfg(unix)]
