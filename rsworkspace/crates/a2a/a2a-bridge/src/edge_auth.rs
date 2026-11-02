@@ -8,7 +8,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use trogon_aauth_verify::{HttpPopVerifier, HttpRequest, JwksResolver, ReplayStore, TimeSource};
+use trogon_aauth_verify::{HttpPopBindingError, HttpPopVerifier, HttpRequest, JwksResolver, ReplayStore, TimeSource};
 
 use crate::edge_identity::VerifiedEdgeCaller;
 use crate::error::EdgeAuthError;
@@ -152,19 +152,23 @@ impl PopEdgeGuard {
         caller: &CallerHttpsAuth,
     ) -> Result<VerifiedEdgeCaller, EdgeAuthError> {
         let bearer = caller.bearer_subject().map_err(EdgeAuthError::UnidentifiedBearer)?;
-        let presenter = self
-            .verifier
-            .verify(&signed_request(request, &self.authority))
+        self.verifier
+            .verify_bound(&signed_request(request, &self.authority), |presenter| {
+                let verified =
+                    VerifiedEdgeCaller::from_presenter(presenter).map_err(EdgeAuthError::UnidentifiedPresenter)?;
+                if verified.subject() != &bearer {
+                    return Err(EdgeAuthError::BearerMismatch {
+                        verified: verified.subject().clone(),
+                        bearer,
+                    });
+                }
+                Ok(verified)
+            })
             .await
-            .map_err(EdgeAuthError::from_pop)?;
-        let verified = VerifiedEdgeCaller::from_presenter(&presenter).map_err(EdgeAuthError::UnidentifiedPresenter)?;
-        if verified.subject() != &bearer {
-            return Err(EdgeAuthError::BearerMismatch {
-                verified: verified.subject().clone(),
-                bearer,
-            });
-        }
-        Ok(verified)
+            .map_err(|error| match error {
+                HttpPopBindingError::Verification(error) => EdgeAuthError::from_pop(error),
+                HttpPopBindingError::Binding(error) => error,
+            })
     }
 }
 

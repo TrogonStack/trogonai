@@ -46,8 +46,8 @@ pub use freshness::{
     SignatureWindow,
 };
 pub use http_pop::{
-    HttpPopError, HttpPopVerifier, HttpRequest, InvalidJtiError, Jti, SignatureParameter, VerifiedAuthPresenter,
-    VerifiedPresenter,
+    HttpPopBindingError, HttpPopError, HttpPopVerifier, HttpRequest, InvalidJtiError, Jti, SignatureParameter,
+    VerifiedAuthPresenter, VerifiedPresenter,
 };
 pub use jkt::jwk_thumbprint;
 pub use jwks::{JwksError, JwksResolver, StaticJwks};

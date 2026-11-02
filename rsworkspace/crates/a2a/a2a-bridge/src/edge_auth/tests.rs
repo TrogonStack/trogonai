@@ -205,6 +205,20 @@ async fn enforce_refuses_a_proof_for_another_caller_than_the_bearer_names() {
 }
 
 #[tokio::test]
+async fn a_mismatched_bearer_does_not_spend_the_signature_jti() {
+    let agent = SigningAgent::new();
+    let other = SigningAgent::named(agent.issuer(), "aauth:agent-2@agents.test");
+    let guard = guard(&agent, ProofPolicy::Enforce);
+    let request = agent.signed(b"{}", &Signing::fresh());
+
+    let error = refusal(&guard, &request, &other.bearer()).await;
+    assert!(matches!(error, EdgeAuthError::BearerMismatch { .. }), "got {error:?}");
+
+    let admission = guard.admit(&request, &agent.bearer()).await.unwrap();
+    assert!(matches!(admission, EdgeAdmission::Verified(_)), "got {admission:?}");
+}
+
+#[tokio::test]
 async fn enforce_refuses_a_bearer_whose_issuer_differs_from_the_verified_one() {
     let agent = SigningAgent::new();
     let elsewhere = SigningAgent::named("https://elsewhere.test", agent.subject());

@@ -180,6 +180,16 @@ pub enum VerifiedPresenter {
     Auth(VerifiedAuthPresenter),
 }
 
+/// A request failed proof verification, or its verified presenter failed a
+/// caller-specific binding before replay state was recorded.
+#[derive(Debug, thiserror::Error)]
+pub enum HttpPopBindingError<E> {
+    #[error(transparent)]
+    Verification(#[from] HttpPopError),
+    #[error("verified presenter did not satisfy its caller binding")]
+    Binding(E),
+}
+
 /// Errors verifying an HTTP request's proof-of-possession.
 #[derive(Debug, thiserror::Error)]
 pub enum HttpPopError {
@@ -361,6 +371,29 @@ impl<R: JwksResolver, C: TimeSource, S: ReplayStore> HttpPopVerifier<R, C, S> {
     /// the signing key's `jti` so it is admitted once; and checks the server
     /// nonce the request binds, or demands one.
     pub async fn verify(&self, req: &HttpRequest) -> Result<VerifiedPresenter, HttpPopError> {
+        match self
+            .verify_bound(req, |presenter| Ok::<_, std::convert::Infallible>(presenter.clone()))
+            .await
+        {
+            Ok(presenter) => Ok(presenter),
+            Err(HttpPopBindingError::Verification(error)) => Err(error),
+            Err(HttpPopBindingError::Binding(never)) => match never {},
+        }
+    }
+
+    /// Verifies the request and applies a caller-specific binding to the
+    /// verified presenter before atomically recording its replay key.
+    ///
+    /// # Errors
+    ///
+    /// [`HttpPopBindingError::Verification`] when proof verification fails,
+    /// and [`HttpPopBindingError::Binding`] when `bind` rejects the verified
+    /// presenter.
+    pub async fn verify_bound<T, E>(
+        &self,
+        req: &HttpRequest,
+        bind: impl FnOnce(&VerifiedPresenter) -> Result<T, E>,
+    ) -> Result<T, HttpPopBindingError<E>> {
         ensure_no_duplicate_security_headers(req)?;
 
         let sig_key_raw = req
@@ -387,18 +420,20 @@ impl<R: JwksResolver, C: TimeSource, S: ReplayStore> HttpPopVerifier<R, C, S> {
         verify_signature_with_jwk(&cnf_jwk, input.alg(), base.as_bytes(), &sig_b64)?;
         verify_content_digest(req)?;
 
+        let bound = bind(&presenter).map_err(HttpPopBindingError::Binding)?;
+
         let fresh = self
             .replay
             .check_and_insert(&replay_key(&jkt, input.jti()), self.freshness.record_ttl_secs())
             .await
             .map_err(HttpPopError::Backend)?;
         if !fresh {
-            return Err(HttpPopError::Replay);
+            return Err(HttpPopError::Replay.into());
         }
 
         self.verify_server_nonce(req, &jkt).await?;
 
-        Ok(presenter)
+        Ok(bound)
     }
 
     async fn verify_server_nonce(&self, req: &HttpRequest, jkt: &str) -> Result<(), HttpPopError> {
