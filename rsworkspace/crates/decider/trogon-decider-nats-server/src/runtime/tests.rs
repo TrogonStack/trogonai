@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{fs, path::Path, time::Duration};
 
 use buffa::{Message as _, MessageField};
 use buffa_types::google::protobuf::Any;
@@ -53,6 +53,13 @@ fn module_name(value: &str) -> ModuleName {
 
 fn engine() -> WasmDeciderEngine {
     WasmDeciderEngine::new(WasmEngineConfig::default()).expect("the default engine config builds")
+}
+
+fn schedules_module() -> WasmDeciderModule {
+    let relative = "../../../target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm";
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(relative);
+    let bytes = fs::read(&path).unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+    WasmDeciderModule::load(engine(), &bytes).expect("the schedules module loads")
 }
 
 /// A store whose every fetch fails, so the startup path that reports an
@@ -180,6 +187,22 @@ fn a_principal_header_does_not_stand_in_for_the_subject() {
 #[test]
 fn the_router_reads_principals_where_the_host_subscribes() {
     assert_eq!(router().endpoint(), &endpoint());
+}
+
+#[test]
+fn a_routed_command_keeps_the_principal_derived_from_its_subject() {
+    let registry = DeciderRegistry::builder()
+        .register(schedules_module())
+        .expect("the schedules module registers")
+        .build_handle();
+    let router = CommandRouter::new(endpoint(), Arc::new(registry));
+
+    let routed = router
+        .route(PRINCIPAL_SUBJECT, &request(CREATE_SCHEDULE).encode_to_vec(), None)
+        .expect("the schedules module claims the command");
+
+    assert_eq!(routed.principal().to_string(), "agent:alice");
+    assert!(format!("{routed:?}").contains("principal: CommandPrincipal"));
 }
 
 #[test]
