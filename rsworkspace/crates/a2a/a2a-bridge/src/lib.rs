@@ -4,17 +4,21 @@
 pub mod audit;
 pub mod auth;
 mod constants;
+mod credential_subject;
 pub mod edge_auth;
+mod edge_authority;
 pub mod edge_identity;
 #[cfg(test)]
 mod edge_signing_harness;
 pub mod error;
 pub mod identity;
 pub mod inbound;
+mod key_thumbprint;
 #[cfg(test)]
 mod nats_transport_harness;
 pub mod outbound;
 pub mod request;
+mod resource_identifier;
 
 pub use auth::{
     AsyncNatsAuthMintWire, AuthCalloutClient, AuthCalloutJsonMintClient, BridgeTenantAccount,

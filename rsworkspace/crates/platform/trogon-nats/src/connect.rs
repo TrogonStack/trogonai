@@ -220,7 +220,8 @@ fn connected(config: &NatsConfig, result: Result<Client, async_nats::ConnectErro
 }
 
 fn log_connect_failure(error: &async_nats::ConnectError, config: &NatsConfig) {
-    log_connect_failure_to_facade(error, config);
+    let servers = servers_for_logging(&config.servers);
+    log_connect_failure_to_facade(error, config, &servers);
 
     static METADATA: tracing::Metadata<'static> = tracing::metadata! {
         name: "event crates/platform/trogon-nats/src/connect.rs:212",
@@ -240,13 +241,30 @@ fn log_connect_failure(error: &async_nats::ConnectError, config: &NatsConfig) {
     }
     let message = "Failed to connect to NATS";
     let error = tracing::field::display(error);
-    let servers = tracing::field::debug(&config.servers);
+    let servers = tracing::field::debug(&servers);
     let auth = config.auth.description();
     let values: [Option<&dyn Value>; 4] = [Some(&message), Some(&error), Some(&servers), Some(&auth)];
     TraceEvent::dispatch(&METADATA, &METADATA.fields().value_set_all(&values));
 }
 
-fn log_connect_failure_to_facade(error: &async_nats::ConnectError, config: &NatsConfig) {
+fn servers_for_logging(servers: &[String]) -> Vec<String> {
+    servers.iter().map(|server| redact_server_userinfo(server)).collect()
+}
+
+fn redact_server_userinfo(server: &str) -> String {
+    let authority_start = server.find("://").map_or(0, |scheme_end| scheme_end + 3);
+    let authority = &server[authority_start..];
+    let authority_end = authority.find(['/', '?', '#']).unwrap_or(authority.len());
+    let authority = &authority[..authority_end];
+    let Some(userinfo_end) = authority.rfind('@') else {
+        return server.to_owned();
+    };
+    let userinfo_end = authority_start + userinfo_end;
+
+    format!("{}<redacted>{}", &server[..authority_start], &server[userinfo_end..])
+}
+
+fn log_connect_failure_to_facade(error: &async_nats::ConnectError, config: &NatsConfig, servers: &[String]) {
     if tracing::dispatcher::has_been_set() {
         return;
     }
@@ -263,7 +281,7 @@ fn log_connect_failure_to_facade(error: &async_nats::ConnectError, config: &Nats
             .metadata(metadata)
             .args(format_args!(
                 "Failed to connect to NATS error={error} servers={:?} auth={}",
-                config.servers,
+                servers,
                 config.auth.description()
             ))
             .build(),

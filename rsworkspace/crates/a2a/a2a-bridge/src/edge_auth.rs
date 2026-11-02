@@ -23,6 +23,8 @@ pub use crate::constants::{
     ENV_AAUTH_LEEWAY_SECS, ENV_AAUTH_MAX_SKEW_SECS, ENV_AAUTH_MODE, ENV_AAUTH_NONCE, ENV_AAUTH_NONCE_TTL_SECS,
     ENV_AAUTH_RESOURCE_ISS, ENV_AAUTH_SIGNATURE_VALIDITY_SECS,
 };
+pub use crate::edge_authority::{EdgeAuthority, EdgeAuthorityError};
+pub use crate::resource_identifier::{EmptyResourceIdentifierError, ResourceIdentifier};
 pub use config::{EdgeAuthConfig, EdgeAuthConfigError, ProofSettings};
 
 /// How strictly the edge holds a request to its AAuth proof of possession.
@@ -77,84 +79,6 @@ impl fmt::Display for ProofPolicy {
         self.mode().fmt(f)
     }
 }
-
-/// The host, and optional port, clients reach the edge at. Every signature
-/// covers it as `@authority`, so a request signed for another host does not
-/// verify here.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EdgeAuthority(String);
-
-impl EdgeAuthority {
-    /// # Errors
-    ///
-    /// [`EdgeAuthorityError`] when `raw` is empty or carries anything beyond
-    /// a host and port, such as a scheme, path or user info.
-    pub fn new(raw: impl AsRef<str>) -> Result<Self, EdgeAuthorityError> {
-        let trimmed = raw.as_ref().trim();
-        if trimmed.is_empty() {
-            return Err(EdgeAuthorityError::Empty);
-        }
-        if trimmed
-            .chars()
-            .any(|ch| ch.is_whitespace() || matches!(ch, '/' | '?' | '#' | '@'))
-        {
-            return Err(EdgeAuthorityError::NotAnAuthority(trimmed.to_owned()));
-        }
-        Ok(Self(trimmed.to_ascii_lowercase()))
-    }
-
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Display for EdgeAuthority {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.pad(&self.0)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum EdgeAuthorityError {
-    #[error("authority is empty")]
-    Empty,
-    #[error("{0:?} is not a host with an optional port")]
-    NotAnAuthority(String),
-}
-
-/// The edge's own identifier: the audience an auth token has to name and the
-/// issuer of the nonces the edge hands out.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResourceIdentifier(String);
-
-impl ResourceIdentifier {
-    /// # Errors
-    ///
-    /// [`EmptyResourceIdentifierError`] when `raw` is empty.
-    pub fn new(raw: impl AsRef<str>) -> Result<Self, EmptyResourceIdentifierError> {
-        let trimmed = raw.as_ref().trim();
-        if trimmed.is_empty() {
-            return Err(EmptyResourceIdentifierError);
-        }
-        Ok(Self(trimmed.to_owned()))
-    }
-
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Display for ResourceIdentifier {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.pad(&self.0)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("resource identifier is empty")]
-pub struct EmptyResourceIdentifierError;
 
 /// Why the edge let a request through to the mint.
 #[derive(Debug)]

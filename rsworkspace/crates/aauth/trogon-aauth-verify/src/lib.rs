@@ -10,18 +10,26 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 pub mod challenge;
+mod challenge_kid;
+mod clock_tolerance;
 pub mod constants;
 pub mod delegation;
 pub mod freshness;
 pub mod http_pop;
 pub mod jkt;
+mod jti;
 pub mod jwks;
 pub mod jwks_cache;
 pub mod jwks_http;
 pub mod mission;
 pub mod nats_pop;
+mod nonce_ttl;
 pub mod replay;
 pub mod server_nonce;
+mod server_nonces;
+mod signature_freshness;
+mod signature_validity;
+mod signature_window;
 pub mod time_source;
 pub mod token;
 pub mod upstream;

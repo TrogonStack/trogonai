@@ -21,6 +21,7 @@ const REFUSED_DIAL_TIMEOUT: Duration = Duration::from_secs(1);
 const FAIL_FAST_DEADLINE: Duration = Duration::from_secs(5);
 const SHUFFLED_PASSES: usize = 32;
 const REFUSING_SERVER: &str = "127.0.0.1:1";
+const REFUSING_SERVER_WITH_USERINFO: &str = "nats://test-user:redaction-test-secret@127.0.0.1:1";
 const SERVER_TOKEN: &str = "server-token";
 const OTHER_TOKEN: &str = "other-token";
 
@@ -485,6 +486,59 @@ async fn connect_once_reports_failures_to_log_only_consumers() {
     assert_eq!(failure.level, LogLevel::Warn);
     assert!(failure.message.contains(REFUSING_SERVER), "{}", failure.message);
     assert!(failure.message.contains("auth=none"), "{}", failure.message);
+}
+
+#[tokio::test]
+async fn connect_once_redacts_server_userinfo_from_failure_diagnostics() {
+    let _registered = keep_another_subscriber_registered(LevelFilter::WARN);
+    let events = CapturedEvents::new();
+    let _guard = events.install(LevelFilter::WARN);
+    let config = NatsConfig::from_url(REFUSING_SERVER_WITH_USERINFO).with_tls(NatsTls::Disabled);
+
+    let err = connect_once(&config, NatsAuth::None, REFUSED_DIAL_TIMEOUT)
+        .await
+        .unwrap_err();
+
+    let ConnectError::ConnectionFailed { servers, .. } = &err else {
+        panic!("expected a connection failure, got {err:?}");
+    };
+    assert_eq!(*servers, config.servers);
+    let failure = events
+        .events()
+        .into_iter()
+        .find(|event| event.message() == Some(CONNECT_FAILURE_WARNING))
+        .expect("the connection failure is logged");
+    let logged_servers = failure.field("servers").expect("the failed servers are logged");
+    assert!(logged_servers.contains("127.0.0.1:1"), "{logged_servers}");
+    assert!(!logged_servers.contains("test-user"), "{logged_servers}");
+    assert!(!logged_servers.contains("redaction-test-secret"), "{logged_servers}");
+}
+
+#[tokio::test]
+async fn connect_once_redacts_server_userinfo_from_log_facade_diagnostics() {
+    let Some(logs) = CapturedLogs::isolated() else {
+        return;
+    };
+    let config = NatsConfig::from_url(REFUSING_SERVER_WITH_USERINFO).with_tls(NatsTls::Disabled);
+
+    assert!(
+        connect_once(&config, NatsAuth::None, REFUSED_DIAL_TIMEOUT)
+            .await
+            .is_err()
+    );
+
+    let records = logs.records();
+    let failure = records
+        .iter()
+        .find(|record| record.message.contains(CONNECT_FAILURE_WARNING))
+        .expect("the connection failure reaches the log facade");
+    assert!(failure.message.contains("127.0.0.1:1"), "{}", failure.message);
+    assert!(!failure.message.contains("test-user"), "{}", failure.message);
+    assert!(
+        !failure.message.contains("redaction-test-secret"),
+        "{}",
+        failure.message
+    );
 }
 
 async fn connect_once_from(env: &InMemoryEnv) -> Result<Client, ConnectError> {
