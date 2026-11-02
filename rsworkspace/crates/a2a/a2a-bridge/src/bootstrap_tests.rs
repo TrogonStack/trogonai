@@ -28,7 +28,7 @@ use trogon_nats::NatsTls;
 use trogon_nats::test_support::{CoreTestServer, JetStreamTestServer};
 use trogon_std::env::InMemoryEnv;
 use trogon_std::fs::MemFs;
-use trogon_std::log_capture::{CapturedLogs, LogLevel};
+use trogon_std::log_capture::{CapturedEvents, CapturedLogs, LevelFilter, LogLevel};
 
 use super::*;
 
@@ -330,23 +330,47 @@ async fn run_refuses_a_mode_below_enforce_without_the_dev_flag() {
 
 #[tokio::test]
 async fn run_warns_when_proof_of_possession_is_not_enforced() {
-    let Some(logs) = CapturedLogs::isolated() else {
-        return;
-    };
+    {
+        let quiet = CapturedEvents::new();
+        let _guard = quiet.install(LevelFilter::ERROR);
+        let env = InMemoryEnv::new();
+        env.set("BRIDGE_LISTEN_ADDR", "127.0.0.1:0");
+        unenforced(&env);
+        assert!(run(&env, &MemFs::new(), std::future::ready(())).await.is_ok());
+        assert!(quiet.events().is_empty());
+    }
+    let events = CapturedEvents::new();
+    let _guard = events.install(LevelFilter::WARN);
     let env = InMemoryEnv::new();
     env.set("BRIDGE_LISTEN_ADDR", "127.0.0.1:0");
     unenforced(&env);
     assert!(run(&env, &MemFs::new(), std::future::ready(())).await.is_ok());
-    let records = logs.records();
-    let warning = records.iter().find(|record| record.message.contains("not enforced"));
-    assert!(warning.is_some_and(|record| record.level == LogLevel::Warn
-        && record.message.contains("mode=off")
-        && record.message.contains(ENV_AAUTH_DEV_UNENFORCED)));
+    let warning = events.events().into_iter().find(|event| {
+        event.message()
+            == Some("AAuth proof of possession is not enforced at the HTTP edge, which is only for development")
+    });
+    assert!(warning.is_some(), "the unenforced edge is diagnosed");
+    if let Some(warning) = warning {
+        assert_eq!(warning.field("mode"), Some("off"));
+        assert_eq!(warning.field("flag"), Some(ENV_AAUTH_DEV_UNENFORCED));
+    }
 }
 
 #[tokio::test]
 async fn run_allows_explicit_shadow_mode_with_local_stub_replay() {
-    let _tracing = test_tracing();
+    {
+        let quiet = CapturedEvents::new();
+        let _guard = quiet.install(LevelFilter::ERROR);
+        let env = InMemoryEnv::new();
+        let fs = MemFs::new();
+        env.set("BRIDGE_LISTEN_ADDR", "127.0.0.1:0");
+        proof_settings(&env, &fs, "shadow");
+        env.set(ENV_AAUTH_DEV_UNENFORCED, "true");
+        assert!(run(&env, &fs, std::future::ready(())).await.is_ok());
+        assert!(quiet.events().is_empty());
+    }
+    let events = CapturedEvents::new();
+    let _guard = events.install(LevelFilter::WARN);
     let env = InMemoryEnv::new();
     let fs = MemFs::new();
     env.set("BRIDGE_LISTEN_ADDR", "127.0.0.1:0");
@@ -354,6 +378,14 @@ async fn run_allows_explicit_shadow_mode_with_local_stub_replay() {
     env.set(ENV_AAUTH_DEV_UNENFORCED, "true");
 
     assert!(run(&env, &fs, std::future::ready(())).await.is_ok());
+    let warning = events
+        .events()
+        .into_iter()
+        .find(|event| event.message() == Some("AAuth replay records stay in this process on the stub transport"));
+    assert!(warning.is_some(), "the stub replay scope is diagnosed");
+    if let Some(warning) = warning {
+        assert_eq!(warning.field("mode"), Some("shadow"));
+    }
 }
 
 #[tokio::test]
@@ -448,7 +480,8 @@ async fn nats_bootstrap_refuses_enforce_until_the_replay_bucket_is_provisioned()
 
 #[tokio::test]
 async fn nats_shadow_bootstrap_falls_back_to_local_replay_when_the_bucket_is_absent() -> Result<(), TestError> {
-    let _tracing = test_tracing();
+    let events = CapturedEvents::new();
+    let _guard = events.install(LevelFilter::WARN);
     let server = JetStreamTestServer::start().await;
     let env = InMemoryEnv::new();
     let fs = MemFs::new();
@@ -457,6 +490,21 @@ async fn nats_shadow_bootstrap_falls_back_to_local_replay_when_the_bucket_is_abs
     env.set("BRIDGE_CONNECT_TIMEOUT_SECS", "5");
     env.set(ENV_AUTH_CALLOUT_XKEY_PUBLIC, callout_xkey()?.public_key().as_str());
     let nats = NatsConfig::from_url(server.address()).with_tls(NatsTls::Disabled);
+
+    {
+        let quiet = CapturedEvents::new();
+        let _guard = quiet.install(LevelFilter::ERROR);
+        let state = bootstrap_nats_transport(
+            &env,
+            &nats,
+            resolve_a2a_prefix(&env)?,
+            EdgeAuthConfig::from_env(&env, &fs).map_err(BootstrapError::EdgeAuth)?,
+        )
+        .await?;
+        let response = gateway_router(state).oneshot(rpc_request()?).await?;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert!(quiet.events().is_empty());
+    }
 
     let state = bootstrap_nats_transport(
         &env,
@@ -467,6 +515,14 @@ async fn nats_shadow_bootstrap_falls_back_to_local_replay_when_the_bucket_is_abs
     .await?;
     let response = gateway_router(state).oneshot(rpc_request()?).await?;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let warning = events.events().into_iter().find(|event| {
+        event.message() == Some("AAuth replay records stay in this process, since the shared replay bucket is unusable")
+    });
+    assert!(warning.is_some(), "the NATS replay fallback is diagnosed");
+    if let Some(warning) = warning {
+        assert_eq!(warning.field("mode"), Some("shadow"));
+        assert!(warning.field("error").is_some());
+    }
     Ok(())
 }
 
@@ -475,15 +531,6 @@ async fn nats_shadow_bootstrap_falls_back_to_local_replay_when_the_bucket_is_abs
 fn unenforced(env: &InMemoryEnv) {
     env.set(ENV_AAUTH_MODE, EdgeAuthMode::Off.as_str());
     env.set(ENV_AAUTH_DEV_UNENFORCED, "true");
-}
-
-fn test_tracing() -> tracing::subscriber::DefaultGuard {
-    tracing::subscriber::set_default(
-        tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::WARN)
-            .with_writer(std::io::sink)
-            .finish(),
-    )
 }
 
 /// The least an enforcing edge needs: who it is, where it is reached, and an

@@ -12,6 +12,7 @@ use {
     },
     a2a_nats::{A2aPrefix, DEFAULT_A2A_PREFIX, ENV_A2A_PREFIX},
     std::{future::Future, net::SocketAddr, sync::Arc, time::Duration},
+    tracing::{Event as TraceEvent, Level, Value},
     trogon_aauth_verify::{
         InMemoryReplayStore, NatsKvReplayStore, ReplayBucketError, ReplayStore, constants::AAUTH_REPLAY_BUCKET,
     },
@@ -56,10 +57,11 @@ async fn run(
 
     let edge = EdgeAuthConfig::from_env(env, fs).map_err(BootstrapError::EdgeAuth)?;
     if edge.mode() != EdgeAuthMode::Enforce {
-        tracing::warn!(
-            mode = %edge.mode(),
-            flag = ENV_AAUTH_DEV_UNENFORCED,
-            "AAuth proof of possession is not enforced at the HTTP edge, which is only for development"
+        emit_bootstrap_warning(
+            "AAuth proof of possession is not enforced at the HTTP edge, which is only for development",
+            edge.mode().as_str(),
+            Some(ENV_AAUTH_DEV_UNENFORCED),
+            None,
         );
     }
 
@@ -136,9 +138,11 @@ fn bootstrap_stub_transport(
         EdgeAuthConfig::Proof(settings) => match settings.policy() {
             ProofPolicy::Enforce => return Err(BootstrapError::EnforcedWithoutReplayStore),
             ProofPolicy::Shadow => {
-                tracing::warn!(
-                    mode = %settings.policy(),
-                    "AAuth replay records stay in this process on the stub transport"
+                emit_bootstrap_warning(
+                    "AAuth replay records stay in this process on the stub transport",
+                    settings.policy().mode().as_str(),
+                    None,
+                    None,
                 );
                 Arc::new(settings.guard(Arc::new(InMemoryReplayStore::default())))
             }
@@ -178,10 +182,12 @@ async fn nats_edge_guard(
         (Ok(store), _) => Arc::new(store),
         (Err(error), ProofPolicy::Enforce) => return Err(BootstrapError::ReplayBucket(error)),
         (Err(error), ProofPolicy::Shadow) => {
-            tracing::warn!(
-                mode = %settings.policy(),
-                %error,
-                "AAuth replay records stay in this process, since the shared replay bucket is unusable"
+            let error = error.to_string();
+            emit_bootstrap_warning(
+                "AAuth replay records stay in this process, since the shared replay bucket is unusable",
+                settings.policy().mode().as_str(),
+                None,
+                Some(error.as_str()),
             );
             Arc::new(InMemoryReplayStore::default())
         }
@@ -265,6 +271,32 @@ async fn bootstrap_nats_transport(
         prefix,
         edge,
     ))
+}
+
+fn emit_bootstrap_warning(message: &str, mode: &str, flag: Option<&str>, error: Option<&str>) {
+    static METADATA: tracing::Metadata<'static> = tracing::metadata! {
+        name: "event crates/a2a/a2a-bridge/src/main.rs:bootstrap_warning",
+        target: module_path!(),
+        level: Level::WARN,
+        fields: &["message", "mode", "flag", "error"],
+        callsite: &CALLSITE,
+        kind: tracing::metadata::Kind::EVENT,
+    };
+    static CALLSITE: tracing::__macro_support::MacroCallsite = tracing::__macro_support::MacroCallsite::new(&METADATA);
+
+    let interest = CALLSITE.interest();
+    if interest.is_never()
+        || (interest.is_sometimes() && !tracing::dispatcher::get_default(|subscriber| subscriber.enabled(&METADATA)))
+    {
+        return;
+    }
+    let values: [Option<&dyn Value>; 4] = [
+        Some(&message),
+        Some(&mode),
+        flag.as_ref().map(|value| value as &dyn Value),
+        error.as_ref().map(|value| value as &dyn Value),
+    ];
+    TraceEvent::dispatch(&METADATA, &METADATA.fields().value_set_all(&values));
 }
 
 fn parse_u64_env(env: &impl ReadEnv, key: &str) -> Option<u64> {

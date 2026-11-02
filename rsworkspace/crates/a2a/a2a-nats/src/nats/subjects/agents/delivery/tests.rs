@@ -22,6 +22,10 @@ fn parse(subject: &str) -> Result<AgentDeliverySubject, AgentDeliverySubjectErro
 fn renders_the_caller_between_the_agent_and_the_method() {
     let subject = AgentDeliverySubject::new(&prefix(), &agent(), &caller(), A2aMethod::MessageSend);
     assert_eq!(subject.to_string(), "a2a.v1.agents.planner.person.alice.message.send");
+    assert_eq!(
+        async_nats::subject::ToSubject::to_subject(&subject).as_str(),
+        "a2a.v1.agents.planner.person.alice.message.send"
+    );
 }
 
 #[test]

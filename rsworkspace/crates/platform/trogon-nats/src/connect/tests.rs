@@ -425,6 +425,17 @@ fn keep_another_subscriber_registered(max_level: LevelFilter) -> DefaultGuard {
 
 #[tokio::test]
 async fn connect_once_logs_the_servers_it_could_not_reach_instead_of_naming_them_in_the_error() {
+    {
+        let quiet = CapturedEvents::new();
+        let _guard = quiet.install(LevelFilter::ERROR);
+        let config = NatsConfig::from_url(REFUSING_SERVER).with_tls(NatsTls::Disabled);
+        assert!(
+            connect_once(&config, NatsAuth::None, REFUSED_DIAL_TIMEOUT)
+                .await
+                .is_err()
+        );
+        assert!(quiet.events().is_empty());
+    }
     let _registered = keep_another_subscriber_registered(LevelFilter::WARN);
     let events = CapturedEvents::new();
     let _guard = events.install(LevelFilter::WARN);
@@ -450,6 +461,7 @@ async fn connect_once_logs_the_servers_it_could_not_reach_instead_of_naming_them
             .is_some_and(|servers| servers.contains(REFUSING_SERVER)),
         "{failure:?}"
     );
+    assert_eq!(failure.field("auth"), Some("none"));
 }
 
 async fn connect_once_from(env: &InMemoryEnv) -> Result<Client, ConnectError> {
