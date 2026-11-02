@@ -133,8 +133,8 @@ fn parser_rejection_without_an_arg_never_repeats_the_value() {
         .unwrap_err();
 
     assert_eq!(err.kind(), ErrorKind::ValueValidation);
-    assert!(err.to_string().contains("must be a reference"));
-    assert!(!err.to_string().contains("hunter2"));
+    assert_eq!(err.get(ContextKind::InvalidArg), None);
+    assert_eq!(err.get(ContextKind::InvalidValue), None);
 }
 
 #[cfg(unix)]
