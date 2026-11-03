@@ -2,8 +2,9 @@
 
 This library implements the `peer_prompt_hook` MCP tool for native
 `UserPromptSubmit` delivery. It uses the repository's locked rmcp SDK and accepts
-an injected backend implementing `EnrollPeer` and `PreparePeerBatch` with the
-generated peer request/reply contracts. It provides no network backend, executable,
+an injected backend implementing the typed enrollment, preparation, roster,
+send, status, and application-acknowledgment ports with generated peer
+request/reply contracts. It provides no network backend, executable,
 credential provisioning, heartbeat loop, or installed host configuration.
 
 `PeerMcp::new` validates installation, connector, collaboration and display-name
@@ -33,10 +34,26 @@ durability, current authorization, generation fencing, content retrieval and
 digest verification. Retry content unavailability preserves the backend's
 existing preparation record.
 
-The current library advertises only the prompt hook. Model-facing roster, send,
-status and acknowledgment operations, best-effort detach, and stdio executable
-wiring belong to subsequent layers. Those operations fail closed here; the
-adapter never fabricates a successful send or acknowledgment.
+Model-facing `peer_roster`, `peer_send`, `peer_status`, and
+`peer_acknowledge_batch` require a native hook binding. Their arguments cannot
+replace its attachment, sender, principal, native session, or collaboration.
+Core value objects validate peer identities, idempotency keys, reply references,
+and batch identifiers; message text is bounded to 2 KiB of UTF-8 bytes and has
+redacted `Debug` output. Pagination fields remain opaque service query inputs;
+the backend validates cursor ownership and current visibility.
+
+These tools return metadata only. Message bodies, internal content references,
+digests, and hook context are excluded from their results. Send/status receipts
+must name the bound sender and configured collaboration, and send receipts must
+match the requested recipient and byte count. Application acknowledgment succeeds
+only after the backend returns the requested batch with an acknowledgment fact.
+An unconfirmed send or acknowledgment is reported explicitly; retries retain
+the original key or batch. No local success or stronger delivery fact is invented.
+
+A local attachment reference is routing state, not proof of current authority.
+The backend checks policy and live attachment generation for every operation.
+Best-effort detach, a heartbeat loop, and stdio executable wiring belong to
+subsequent layers. There is no separate body-pulling tool in this adapter.
 
 Native IDs are observations from an owner-controlled client connection. This
 adapter does not attest that a call originated in a particular host hook or

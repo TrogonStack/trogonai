@@ -12,6 +12,8 @@ use trogon_peer_context::{PeerContext, PeerContextError};
 use trogonai_proto::peers::v1alpha1 as v1;
 
 use crate::connector_config::ConnectorConfig;
+use crate::model_tool_definitions::model_tool;
+use crate::model_tools;
 use crate::native_binding::NativeBinding;
 use crate::prompt_hook_context::PromptHookContext;
 use crate::prompt_hook_event::PromptHookEvent;
@@ -52,11 +54,20 @@ where
         match request.name.as_ref() {
             "peer_prompt_hook" => self.prompt_hook(request).await,
             "peer_roster" | "peer_send" | "peer_status" | "peer_acknowledge_batch" => {
-                let binding = self.binding.lock().await;
-                if binding.as_ref().and_then(NativeBinding::attachment).is_none() {
-                    Err(PeerMcpError::Unbound)
-                } else {
-                    Err(PeerMcpError::UnsupportedTool)
+                let attachment = self
+                    .binding
+                    .lock()
+                    .await
+                    .as_ref()
+                    .and_then(NativeBinding::attachment)
+                    .cloned()
+                    .ok_or(PeerMcpError::Unbound)?;
+                match request.name.as_ref() {
+                    "peer_roster" => model_tools::roster(&self.backend, request, &attachment).await,
+                    "peer_send" => model_tools::send(&self.backend, request, &attachment, &self.config).await,
+                    "peer_status" => model_tools::status(&self.backend, request, &attachment, &self.config).await,
+                    "peer_acknowledge_batch" => model_tools::acknowledge(&self.backend, request, &attachment).await,
+                    _ => Err(PeerMcpError::UnsupportedTool),
                 }
             }
             _ => Err(PeerMcpError::UnsupportedTool),
@@ -154,7 +165,11 @@ where
     }
 
     fn get_tool(&self, name: &str) -> Option<Tool> {
-        (name == "peer_prompt_hook").then(prompt_tool)
+        if name == "peer_prompt_hook" {
+            Some(prompt_tool())
+        } else {
+            model_tool(name)
+        }
     }
 
     async fn list_tools(
@@ -162,7 +177,13 @@ where
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
-        Ok(ListToolsResult::with_all_items(vec![prompt_tool()]))
+        let mut tools = vec![prompt_tool()];
+        tools.extend(
+            ["peer_roster", "peer_send", "peer_status", "peer_acknowledge_batch"]
+                .into_iter()
+                .filter_map(model_tool),
+        );
+        Ok(ListToolsResult::with_all_items(tools))
     }
 
     async fn call_tool(
