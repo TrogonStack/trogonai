@@ -7491,6 +7491,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-policy-eval"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.21",
+ "trogon-decider-runtime",
+ "trogon-std",
+]
+
+[[package]]
 name = "trogon-provider-gateway"
 version = "0.0.1"
 dependencies = [
