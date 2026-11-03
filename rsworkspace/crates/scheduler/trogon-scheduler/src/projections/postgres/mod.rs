@@ -13,12 +13,16 @@
 //! (testcontainers) rather than unit-covered, and compiled only behind the
 //! `postgres` feature.
 
+mod postgres_root_cert;
 mod postgres_tls;
 mod postgres_url;
 mod projector;
 mod store;
+mod unverified_ssl_mode;
 
-pub use postgres_tls::{PostgresTls, PostgresTlsError, UnverifiedSslMode};
-pub use postgres_url::{PostgresRootCert, PostgresUrl, PostgresUrlError};
+pub use postgres_root_cert::PostgresRootCert;
+pub use postgres_tls::{PostgresTls, PostgresTlsError};
+pub use postgres_url::{PostgresUrl, PostgresUrlError};
 pub use projector::SchedulesProjector;
 pub use store::PostgresSchedulesProjection;
+pub use unverified_ssl_mode::UnverifiedSslMode;

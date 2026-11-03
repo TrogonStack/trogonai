@@ -1,4 +1,3 @@
-use std::ffi::OsString;
 use std::fmt;
 use std::path::PathBuf;
 
@@ -7,10 +6,10 @@ use sqlx::postgres::PgConnectOptions;
 use trogon_std::env::ReadEnv;
 use url::Url;
 
+use super::postgres_root_cert::PostgresRootCert;
 use super::postgres_tls::{PostgresTls, PostgresTlsError};
 use crate::constants::{
-    ENV_PGSSLMODE, ENV_PGSSLROOTCERT, PEM_BEGIN_MARKER, PEM_END_MARKER, POSTGRES_URL_SCHEMES, SSL_MODE_QUERY_KEYS,
-    SSL_ROOT_CERT_QUERY_KEYS,
+    ENV_PGSSLMODE, ENV_PGSSLROOTCERT, POSTGRES_URL_SCHEMES, SSL_MODE_QUERY_KEYS, SSL_ROOT_CERT_QUERY_KEYS,
 };
 
 #[derive(Clone)]
@@ -18,14 +17,6 @@ pub struct PostgresUrl {
     options: PgConnectOptions,
     tls: PostgresTls,
     root_cert: Option<PostgresRootCert>,
-}
-
-/// The CA that verifies the server: a file path, or (from `PGSSLROOTCERT` only,
-/// as SQLx reads it) the PEM text itself.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum PostgresRootCert {
-    File(PathBuf),
-    Pem(String),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -102,17 +93,6 @@ impl fmt::Debug for PostgresUrl {
             .field("tls", &self.tls)
             .field("root_cert", &self.root_cert)
             .finish_non_exhaustive()
-    }
-}
-
-impl PostgresRootCert {
-    fn from_env(value: OsString) -> Self {
-        match value.to_str().map(str::trim) {
-            Some(text) if text.starts_with(PEM_BEGIN_MARKER) && text.ends_with(PEM_END_MARKER) => {
-                Self::Pem(value.to_string_lossy().into_owned())
-            }
-            _ => Self::File(PathBuf::from(value)),
-        }
     }
 }
 

@@ -1,7 +1,8 @@
-use std::fmt;
 use std::str::FromStr;
 
 use sqlx::postgres::PgSslMode;
+
+use super::unverified_ssl_mode::UnverifiedSslMode;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum PostgresTls {
@@ -49,26 +50,6 @@ impl From<PostgresTls> for PgSslMode {
             PostgresTls::VerifyFull => Self::VerifyFull,
             PostgresTls::Disabled => Self::Disable,
         }
-    }
-}
-
-/// A libpq `sslmode` that connects without fully verifying the server.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum UnverifiedSslMode {
-    Allow,
-    Prefer,
-    Require,
-    VerifyCa,
-}
-
-impl fmt::Display for UnverifiedSslMode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Allow => "allow",
-            Self::Prefer => "prefer",
-            Self::Require => "require",
-            Self::VerifyCa => "verify-ca",
-        })
     }
 }
 
