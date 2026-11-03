@@ -2,6 +2,14 @@ use super::{HeartbeatError, state::EvolveError};
 use trogonai_proto::peers::v1alpha1 as proto;
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum MessageError {
+    #[error("assigned batch does not exist")]
+    BatchNotFound,
+    #[error("accepted message does not exist")]
+    MessageNotFound,
+    #[error("batch already acknowledged by application")]
+    AlreadyAcknowledged(Box<proto::PeerBatch>),
+    #[error("message already settled")]
+    AlreadySettled(Box<proto::RecipientReceipt>),
     #[error("oldest prepared batch awaits application acknowledgment")]
     AlreadyPrepared(Box<proto::PeerBatch>),
     #[error("batch selection or rendered budget is invalid")]

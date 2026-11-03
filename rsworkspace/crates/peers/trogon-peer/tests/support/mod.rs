@@ -101,3 +101,7 @@ pub fn inbox(indices: &[usize], size: u32) -> PeerState {
         .iter()
         .fold(enrolled("recipient", 0), |state, i| run(state, &intake(*i, size)))
 }
+
+pub fn acknowledge(batch: &str, seconds: i64) -> AcknowledgeBatch {AcknowledgeBatch::new(identity("recipient").owner().clone(),reference("recipient",1),BatchId::new(batch).unwrap(),time(seconds))}
+pub fn receipt(state: &PeerState, index: usize) -> AuthoritativeReceipt {AuthoritativeReceipt::from_recipient_history(state,&MessageId::new(format!("message_{index}")).unwrap()).unwrap()}
+pub fn settle(state: &PeerState,index: usize) -> SettleMessage {SettleMessage::new(identity("sender").peer_id().clone(),receipt(state,index))}

@@ -47,3 +47,6 @@ pub use terminal_disposition::TerminalDisposition;
 
 mod trusted_batch_plan;
 pub use trusted_batch_plan::TrustedBatchPlan;
+
+mod authoritative_receipt;
+pub use authoritative_receipt::AuthoritativeReceipt;
