@@ -1,3 +1,4 @@
+use super::authoritative_receipt::AuthoritativeReceipt;
 use super::domain::*;
 use super::{EvolveError, MessageError, state};
 use trogon_decider::{Decider, Decision, WritePrecondition};

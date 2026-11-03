@@ -39,5 +39,8 @@ pub use prepare_batch::PrepareBatch;
 mod acknowledge_batch;
 pub use acknowledge_batch::AcknowledgeBatch;
 
+mod authoritative_receipt;
+pub use authoritative_receipt::AuthoritativeReceipt;
+
 mod settle_message;
 pub use settle_message::SettleMessage;

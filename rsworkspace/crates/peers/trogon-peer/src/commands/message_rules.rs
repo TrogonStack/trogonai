@@ -402,9 +402,9 @@ pub(super) fn receipt_matches_message(
     if receipt.message_id != message.message_id || receipt.recipient_peer_id != message.recipient_peer_id {
         return Err(EvolveError::InvalidMessageTransition);
     }
-    let at = state::read_time(receipt.decided_at.as_option(), "decided_at")?;
-    let accepted = state::read_time(message.accepted_at.as_option(), "accepted_at")?;
-    let expires = state::read_time(message.expires_at.as_option(), "expires_at")?;
+    let at = state_values::read_time(receipt.decided_at.as_option(), "decided_at")?;
+    let accepted = state_values::read_time(message.accepted_at.as_option(), "accepted_at")?;
+    let expires = state_values::read_time(message.expires_at.as_option(), "expires_at")?;
     if at < accepted
         || (outcome == proto::PreparationOutcome::PREPARATION_OUTCOME_EXPIRED && at < expires)
         || (outcome == proto::PreparationOutcome::PREPARATION_OUTCOME_BATCH_PREPARED && at >= expires)
@@ -417,15 +417,18 @@ pub(super) fn fold_acknowledged(
     state: &mut PeerState,
     event: &proto::PeerBatchAcknowledged,
 ) -> Result<(), EvolveError> {
-    value(BatchId::new(state::required(&event.batch_id, "batch_id")?), "batch_id")?;
-    let now = state::read_time(event.acknowledged_at.as_option(), "acknowledged_at")?;
+    value(
+        BatchId::new(state_values::required(&event.batch_id, "batch_id")?),
+        "batch_id",
+    )?;
+    let now = state_values::read_time(event.acknowledged_at.as_option(), "acknowledged_at")?;
     let enrollment = state.enrollment.as_option().ok_or(EvolveError::MissingEnrollment)?;
-    state::parse_enrollment(enrollment)?;
+    state_values::parse_enrollment(enrollment)?;
     let attachment = state.attachment.as_option().ok_or(EvolveError::InvalidAttachment)?;
-    state::validate_attachment(enrollment, attachment)?;
+    state_values::validate_attachment(enrollment, attachment)?;
     if attachment.status.and_then(|s| s.as_known()) != Some(proto::AttachmentStatus::ATTACHMENT_STATUS_ATTACHED)
-        || now < state::read_time(attachment.observed_at.as_option(), "observed_at")?
-        || now >= state::read_time(attachment.expires_at.as_option(), "expires_at")?
+        || now < state_values::read_time(attachment.observed_at.as_option(), "observed_at")?
+        || now >= state_values::read_time(attachment.expires_at.as_option(), "expires_at")?
     {
         return Err(EvolveError::InvalidMessageTransition);
     }
@@ -434,7 +437,7 @@ pub(super) fn fold_acknowledged(
         .iter_mut()
         .find(|b| b.batch_id == event.batch_id)
         .ok_or(EvolveError::InvalidMessageTransition)?;
-    if batch.acknowledged_at.is_set() || now < state::read_time(batch.prepared_at.as_option(), "prepared_at")? {
+    if batch.acknowledged_at.is_set() || now < state_values::read_time(batch.prepared_at.as_option(), "prepared_at")? {
         return Err(EvolveError::InvalidMessageTransition);
     }
     batch.acknowledged_at = event.acknowledged_at.clone();
@@ -442,7 +445,7 @@ pub(super) fn fold_acknowledged(
 }
 pub(super) fn fold_settled(state: &mut PeerState, event: &proto::PeerMessageSettled) -> Result<(), EvolveError> {
     let enrollment = state.enrollment.as_option().ok_or(EvolveError::MissingEnrollment)?;
-    state::parse_enrollment(enrollment)?;
+    state_values::parse_enrollment(enrollment)?;
     let receipt = event
         .receipt
         .as_option()
