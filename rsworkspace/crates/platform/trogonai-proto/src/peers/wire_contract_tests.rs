@@ -6,13 +6,13 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
-mod boundaries;
-mod builders;
-mod events;
+mod boundaries_tests;
+mod builders_tests;
+mod events_tests;
 mod fixtures;
-mod messages;
-mod public_apis;
-mod rpc;
+mod messages_tests;
+mod public_apis_tests;
+mod rpc_tests;
 mod writer_failures;
 
 fn assert_wire_codec<M>(wire: &[u8], expected: &M)
