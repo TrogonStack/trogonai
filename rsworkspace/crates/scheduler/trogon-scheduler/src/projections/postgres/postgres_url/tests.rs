@@ -7,6 +7,7 @@ use super::*;
 
 const BASE: &str = "postgres://scheduler:hunter2@db.internal:5433/schedules";
 const INLINE_CA: &str = "-----BEGIN CERTIFICATE-----\nMIIBszCCAVmgAwIBAgIUQ0E=\n-----END CERTIFICATE-----\n";
+const PRIVATE_KEY_PATH: &str = "-----BEGIN PRIVATE KEY-----\nnot-a-certificate\n-----END PRIVATE KEY-----\n";
 
 fn parse(raw: &str) -> Result<PostgresUrl, PostgresUrlError> {
     PostgresUrl::parse(raw, &InMemoryEnv::new())
@@ -154,6 +155,19 @@ fn trusts_the_inline_ca_given_by_pgsslrootcert() {
     let url = PostgresUrl::parse(BASE, &env).unwrap();
 
     assert_eq!(url.root_cert(), Some(&PostgresRootCert::Pem(INLINE_CA.to_owned())));
+}
+
+#[test]
+fn keeps_a_non_certificate_pem_as_a_pgsslrootcert_path() {
+    let env = InMemoryEnv::new();
+    env.set("PGSSLROOTCERT", PRIVATE_KEY_PATH);
+
+    let url = PostgresUrl::parse(BASE, &env).unwrap();
+
+    assert_eq!(
+        url.root_cert(),
+        Some(&PostgresRootCert::File(PathBuf::from(PRIVATE_KEY_PATH)))
+    );
 }
 
 #[test]
