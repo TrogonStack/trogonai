@@ -8,6 +8,10 @@ use super::{InstallationId, NativeSessionId, TrustedPeerOwner};
 pub struct PeerId(String);
 
 impl PeerId {
+    pub fn parse(value: impl Into<String>) -> Result<Self, super::PeerValueError> {
+        Ok(Self(value.into()))
+    }
+
     pub(crate) fn derive(
         owner: &TrustedPeerOwner,
         installation: &InstallationId,
