@@ -2,20 +2,18 @@ use serde::Deserialize;
 use trogon_peer::NativeSessionId;
 
 use crate::PeerMcpError;
+use crate::prompt_hook_event::PromptHookEvent;
 use crate::prompt_id::PromptId;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct PromptHookInput {
+    #[schemars(length(min = 1, max = 256))]
     session_id: String,
+    #[schemars(length(max = 256))]
     prompt_id: Option<String>,
     #[serde(rename = "hook_event_name")]
     _hook_event_name: PromptHookEvent,
-}
-
-#[derive(Deserialize)]
-enum PromptHookEvent {
-    UserPromptSubmit,
 }
 
 impl PromptHookInput {

@@ -8,6 +8,7 @@ license = "Apache-2.0"
 workspace = true
 
 [dependencies]
+schemars = "=1.2.1"
 rmcp = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

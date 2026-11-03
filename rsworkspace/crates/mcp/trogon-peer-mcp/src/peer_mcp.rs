@@ -6,14 +6,17 @@ use rmcp::model::{
     PaginatedRequestParams, ServerCapabilities, ServerConfig, Tool,
 };
 use rmcp::service::{RequestContext, RoleServer};
-use serde_json::{Value, json};
+use serde_json::Value;
 use tokio::sync::Mutex;
 use trogon_peer_context::{PeerContext, PeerContextError};
 use trogonai_proto::peers::v1alpha1 as v1;
 
 use crate::connector_config::ConnectorConfig;
 use crate::native_binding::NativeBinding;
+use crate::prompt_hook_context::PromptHookContext;
+use crate::prompt_hook_event::PromptHookEvent;
 use crate::prompt_hook_input::PromptHookInput;
+use crate::prompt_hook_output::PromptHookOutput;
 use crate::prompt_tool::prompt_tool;
 use crate::{ConnectorConfigInput, EnrollPeer, PeerMcpError, PreparePeerBatch};
 
@@ -120,8 +123,14 @@ impl<B: EnrollPeer + PreparePeerBatch> PeerMcp<B> {
                     .to_owned()
             }
         };
-        let output = json!({"hookSpecificOutput": {"hookEventName":"UserPromptSubmit", "additionalContext":context}});
-        let text = serde_json::to_string(&output).map_err(PeerMcpError::Encode)?;
+        let output = PromptHookOutput {
+            hook_specific_output: PromptHookContext {
+                hook_event_name: PromptHookEvent::UserPromptSubmit,
+                additional_context: &context,
+            },
+        };
+        let value = serde_json::to_value(output).map_err(PeerMcpError::Encode)?;
+        let text = serde_json::to_string(&value).map_err(PeerMcpError::Encode)?;
         Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
     }
 }

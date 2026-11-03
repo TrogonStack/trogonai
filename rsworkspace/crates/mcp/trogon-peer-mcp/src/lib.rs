@@ -4,7 +4,10 @@ mod connector_config_input;
 mod native_binding;
 mod peer_mcp;
 mod peer_mcp_error;
+mod prompt_hook_context;
+mod prompt_hook_event;
 mod prompt_hook_input;
+mod prompt_hook_output;
 mod prompt_id;
 mod prompt_tool;
 
