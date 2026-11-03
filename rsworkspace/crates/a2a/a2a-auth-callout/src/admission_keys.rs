@@ -7,7 +7,7 @@ mod signing_key_custody;
 mod tenant_signing_keys;
 mod xkey_public;
 
-pub use account_public_key::{AccountPublicKeyError, AuthAccount, TenantAccount};
+pub use account_public_key::{AccountPublicKeyError, AuthAccount, IssuerPublicKey, TenantAccount};
 pub use account_signing_key::{AccountSigningKey, AccountSigningKeyError};
 pub use admission_key_error::{AdmissionKeyError, AdmissionKeySlot};
 pub use callout_xkey::{CalloutXkey, CalloutXkeyError, XkeyExchangeError};

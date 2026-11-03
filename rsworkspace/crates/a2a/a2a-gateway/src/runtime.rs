@@ -5,7 +5,8 @@
 //! [`dispatch::dispatch_gateway_ingress`]. Sibling modules carry the
 //! per-tier helpers the orchestrator composes.
 
-use a2a_auth_callout::signing_key_source_from_env;
+use std::sync::Arc;
+
 use a2a_nats::NatsConfig;
 use futures::StreamExt;
 use tokio_util::sync::CancellationToken;
@@ -16,7 +17,9 @@ use crate::config::{Args, Config, ConfigError, config_from_args};
 use crate::gw_ingress_stream::{
     GatewayStreamingIngressConfig, StreamingIngressGate, gateway_streaming_ingress_enabled,
 };
-use crate::ingress_identity::{ForwardedCallerJwtVerifier, gateway_jwt_audience};
+use crate::ingress_identity::{
+    CallerJwtIssuerKeysError, ForwardedCallerJwtVerifier, caller_jwt_issuer_keys_from_env, gateway_jwt_audience,
+};
 use crate::policy::Tier1SpiceDbConfig;
 use crate::policy::tier1_declarative::Tier1DeclarativeConfig;
 
@@ -49,8 +52,8 @@ pub enum RuntimeError {
     #[error("tier-1 declarative config: {0}")]
     Tier1DeclarativeConfig(#[from] crate::policy::tier1_declarative::Tier1DeclarativeBuildError),
 
-    #[error("gateway signing key source: {0}")]
-    SigningKeySource(#[from] a2a_auth_callout::AuthCalloutError),
+    #[error("gateway caller JWT issuer keys: {0}")]
+    CallerJwtIssuerKeys(#[from] CallerJwtIssuerKeysError),
 }
 
 /// Resolve config from `args` + `env` and run the gateway.
@@ -65,7 +68,7 @@ pub async fn run_with_config<E: ReadEnv>(config: Config, nats_config: NatsConfig
 
     let policy_stack = crate::runtime::policy_stack::gateway_policy_stack_from_env(env)?;
     let caller_jwt = ForwardedCallerJwtVerifier::new(
-        signing_key_source_from_env(env)?,
+        Arc::new(caller_jwt_issuer_keys_from_env(env)?),
         gateway_jwt_audience(env, config.a2a_prefix.as_str()),
     );
     let tier1_layer = Tier1SpiceDbConfig::from_env(env).await?;

@@ -1,8 +1,10 @@
 use std::time::{Duration, SystemTime};
 
+use a2a_auth_callout::SigningKeySource;
 use a2a_auth_callout::jwt::ExternalSubject;
 use a2a_auth_callout::{
-    CallerId, IssuedPermissions, KeyVersion, NkeyPublic, SpiceDbPrincipal, StaticSigningKeySource, UserJwtSubject,
+    CallerId, IssuedPermissions, IssuerPublicKeys, KeyVersion, NkeyPublic, SpiceDbPrincipal, StaticSigningKeySource,
+    UserJwtSubject,
 };
 use nkeys::KeyPair;
 use trogon_identity_types::PrincipalKind;
@@ -23,8 +25,16 @@ impl Issuer {
         }
     }
 
+    fn public_key(&self) -> String {
+        self.source.current().minting_material().issuer_public()
+    }
+
+    /// A verifier configured the way the gateway is: with the public key alone.
     fn verifier(&self) -> ForwardedCallerJwtVerifier {
-        ForwardedCallerJwtVerifier::new(self.source.clone(), AccountName::new("tenant-acme"))
+        ForwardedCallerJwtVerifier::new(
+            Arc::new(IssuerPublicKeys::parse(&self.public_key()).expect("issuer public key")),
+            AccountName::new("tenant-acme"),
+        )
     }
 
     fn mint(&self, kind: PrincipalKind, caller: &str) -> String {
@@ -260,4 +270,84 @@ fn gateway_jwt_audience_ignores_whitespace_only_env_value() {
     }
     let aud = gateway_jwt_audience(&OnlySpaces, "fallback-account");
     assert_eq!(aud.as_str(), "fallback-account");
+}
+
+fn env_with_issuer_keys(value: &str) -> trogon_std::env::InMemoryEnv {
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set(ENV_GATEWAY_CALLER_JWT_ISSUER_KEYS, value);
+    env
+}
+
+#[test]
+fn issuer_keys_load_from_public_keys_and_verify_without_a_seed() {
+    let issuer = Issuer::new();
+    let env = env_with_issuer_keys(&issuer.public_key());
+
+    let keys = caller_jwt_issuer_keys_from_env(&env).expect("issuer keys");
+    let verifier = ForwardedCallerJwtVerifier::new(Arc::new(keys), AccountName::new("tenant-acme"));
+    let headers = headers_with(CALLER_JWT_HEADER_NAME, &issuer.mint(PrincipalKind::Person, "alice"));
+
+    assert!(verifier.check(&headers, &alice()).is_ok());
+}
+
+#[test]
+fn issuer_keys_accept_the_previous_key_while_a_rotation_overlaps() {
+    let current = Issuer::new();
+    let previous = Issuer::new();
+    let retired = Issuer::new();
+    let env = env_with_issuer_keys(&format!("{}, {}", current.public_key(), previous.public_key()));
+    let verifier = ForwardedCallerJwtVerifier::new(
+        Arc::new(caller_jwt_issuer_keys_from_env(&env).expect("issuer keys")),
+        AccountName::new("tenant-acme"),
+    );
+
+    for accepted in [&current, &previous] {
+        let headers = headers_with(CALLER_JWT_HEADER_NAME, &accepted.mint(PrincipalKind::Person, "alice"));
+        assert!(verifier.check(&headers, &alice()).is_ok());
+    }
+    let headers = headers_with(CALLER_JWT_HEADER_NAME, &retired.mint(PrincipalKind::Person, "alice"));
+    assert!(matches!(
+        verifier.check(&headers, &alice()).unwrap_err(),
+        ForwardedCallerJwtError::Unverified(_)
+    ));
+}
+
+#[test]
+fn issuer_keys_are_required() {
+    let unset = trogon_std::env::InMemoryEnv::new();
+
+    assert!(matches!(
+        caller_jwt_issuer_keys_from_env(&unset),
+        Err(CallerJwtIssuerKeysError::Missing)
+    ));
+    for blank in ["", "  ", " , "] {
+        assert!(
+            matches!(
+                caller_jwt_issuer_keys_from_env(&env_with_issuer_keys(blank)),
+                Err(CallerJwtIssuerKeysError::Invalid(IssuerPublicKeysError::Empty))
+            ),
+            "{blank:?}"
+        );
+    }
+}
+
+#[test]
+fn a_seed_or_a_user_key_is_not_an_issuer_key() {
+    let seed = KeyPair::new_account().seed().expect("seed");
+    let rejected = caller_jwt_issuer_keys_from_env(&env_with_issuer_keys(&seed)).unwrap_err();
+
+    assert!(matches!(
+        rejected,
+        CallerJwtIssuerKeysError::Invalid(IssuerPublicKeysError::Invalid { position: 1, .. })
+    ));
+    assert!(!rejected.to_string().contains(&seed));
+
+    let user = KeyPair::new_user().public_key();
+    assert!(matches!(
+        caller_jwt_issuer_keys_from_env(&env_with_issuer_keys(&user)),
+        Err(CallerJwtIssuerKeysError::Invalid(IssuerPublicKeysError::Invalid {
+            position: 1,
+            ..
+        }))
+    ));
 }
