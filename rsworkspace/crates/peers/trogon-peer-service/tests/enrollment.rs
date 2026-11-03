@@ -262,3 +262,78 @@ impl CommandAuthorizer<trogon_peer::Attach> for EnrollmentPolicy {
         Ok(())
     }
 }
+
+impl CommandAuthorizer<trogon_peer_service::PeerAccess> for EnrollmentPolicy {
+    fn authorize(
+        &self,
+        principal: &CommandPrincipal,
+        access: &trogon_peer_service::PeerAccess,
+    ) -> Result<(), AuthorizationDeniedError> {
+        if access.owner() != &self.owner || principal.id().as_str() != self.owner.caller().as_str() {
+            return Err(AuthorizationDeniedError::new("outside owner grant"));
+        }
+        Ok(())
+    }
+}
+#[tokio::test]
+async fn heartbeat_renews_then_detach_is_idempotent_and_old_generation_is_fenced() {
+    let store = ObservedStore::default();
+    let service = PeerService::new(store.clone(), policy(), FixedClock(now()));
+    let first = service.enroll(&owner(), request("collaboration_alpha")).await.unwrap();
+    let reference = first.attachment.attachment.clone();
+    let later = PeerService::new(
+        store.clone(),
+        policy(),
+        FixedClock(now() + chrono::Duration::seconds(2)),
+    );
+    let renewed = later
+        .heartbeat(
+            &owner(),
+            proto::HeartbeatRequest {
+                attachment: reference.clone(),
+                availability: Some(proto::PeerAvailability::PEER_AVAILABILITY_BUSY.into()),
+                ..Default::default()
+            },
+        )
+        .await;
+    assert!(renewed.is_ok(), "heartbeat should renew: {renewed:?}");
+    assert_eq!(
+        renewed.unwrap().attachment.expires_at.as_option(),
+        Some(&timestamp_from_datetime(&(now() + chrono::Duration::seconds(12))))
+    );
+    later
+        .detach(
+            &owner(),
+            proto::DetachRequest {
+                attachment: reference.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    let appends = store.appends.load(Ordering::SeqCst);
+    later
+        .detach(
+            &owner(),
+            proto::DetachRequest {
+                attachment: reference.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(store.appends.load(Ordering::SeqCst), appends);
+    let replacement = later.enroll(&owner(), request("collaboration_alpha")).await.unwrap();
+    assert_eq!(replacement.attachment.attachment.generation, Some(2));
+    assert!(
+        later
+            .heartbeat(
+                &owner(),
+                proto::HeartbeatRequest {
+                    attachment: reference,
+                    availability: Some(proto::PeerAvailability::PEER_AVAILABILITY_READY.into()),
+                    ..Default::default()
+                }
+            )
+            .await
+            .is_err()
+    );
+}
