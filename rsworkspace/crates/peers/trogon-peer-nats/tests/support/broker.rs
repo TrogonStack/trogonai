@@ -1,5 +1,6 @@
 use super::constants::PROBE_TIMEOUT;
 use async_nats::{Client, ServerError};
+use futures::StreamExt as _;
 use serde::Serialize;
 use std::{collections::BTreeMap, sync::Arc};
 use tempfile::TempDir;
@@ -97,7 +98,6 @@ impl Broker {
 }
 
 pub async fn observed_barrier(client: &Client) -> TestResult {
-    use futures::StreamExt as _;
     let subject = client.new_inbox();
     let mut incoming = client.subscribe(subject.clone()).await?;
     client.publish(subject, vec![0].into()).await?;
