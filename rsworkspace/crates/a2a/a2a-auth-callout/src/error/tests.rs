@@ -20,6 +20,15 @@ fn display_subscribe() {
 }
 
 #[test]
+fn display_flush() {
+    let e = AuthCalloutError::Flush(async_nats::client::FlushError::new(
+        async_nats::client::FlushErrorKind::FlushError,
+    ));
+    assert_eq!(e.to_string(), "auth callout subscription never reached a NATS server");
+    assert!(Error::source(&e).is_some());
+}
+
+#[test]
 fn display_credential_verification() {
     let e = AuthCalloutError::CredentialVerification(CredentialError::InvalidCredentials("bad token".into()));
     assert_eq!(e.to_string(), "credential verification failed: bad token");
