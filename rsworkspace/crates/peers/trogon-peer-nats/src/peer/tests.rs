@@ -271,20 +271,9 @@ async fn concurrent_writers_with_the_same_observed_position_contend_at_the_broke
         vec![Some(initial.stream_position), Some(initial.stream_position)]
     );
     assert_ne!(left_result.is_ok(), right_result.is_ok());
-    let (winner, conflict, winner_id, loser_id) = if left_result.is_ok() {
-        (
-            left_result.unwrap(),
-            right_result.unwrap_err(),
-            event(2).id,
-            event(3).id,
-        )
-    } else {
-        (
-            right_result.unwrap(),
-            left_result.unwrap_err(),
-            event(3).id,
-            event(2).id,
-        )
+    let (winner, conflict, winner_id, loser_id) = match left_result {
+        Ok(winner) => (winner, right_result.unwrap_err(), event(2).id, event(3).id),
+        Err(conflict) => (right_result.unwrap(), conflict, event(3).id, event(2).id),
     };
     assert!(matches!(
         conflict,
