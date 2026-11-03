@@ -118,6 +118,29 @@ pub async fn serve(
     Ok(service)
 }
 
+pub async fn dispatch_admitted<P: PublishClient>(
+    client: &P,
+    message: &async_nats::Message,
+    policy: &ServiceOptions,
+    _admission: &dyn crate::EndpointAdmission,
+) {
+    let (content_type, outcome) =
+        resolve(message.headers.as_ref(), &message.payload, policy, &PlaceholderHandler).await;
+    let fault = outcome.err().unwrap_or_else(|| ServiceFault::internal("unimplemented"));
+    let _ = reply_error(client, message.reply.clone(), fault, content_type).await;
+}
+
+struct PlaceholderHandler;
+impl EndpointHandler for PlaceholderHandler {
+    fn handle<'a>(
+        &'a self,
+        _request_bytes: &'a [u8],
+        _content_type: ContentType,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, ServiceFault>> + Send + 'a>> {
+        Box::pin(async { Err(ServiceFault::internal("unimplemented")) })
+    }
+}
+
 async fn dispatch<P: PublishClient>(
     client: &P,
     request: &async_nats::service::Request,

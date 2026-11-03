@@ -51,3 +51,10 @@ pub use service_version_input::ServiceVersionInput;
 pub use status_codec::{EncodedReply, Outcome, ReplyError, ServiceError};
 pub use subject_prefix::{SubjectPrefix, SubjectPrefixError};
 pub use subject_prefix_input::SubjectPrefixInput;
+
+pub mod endpoint_admission;
+pub mod request_metadata;
+pub mod server_subject_pattern;
+pub use endpoint_admission::EndpointAdmission;
+pub use request_metadata::RequestMetadata;
+pub use server_subject_pattern::{ServerSubjectPattern, ServerSubjectPatternError};
