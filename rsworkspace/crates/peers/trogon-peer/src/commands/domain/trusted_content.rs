@@ -6,7 +6,18 @@ pub struct TrustedContent {
     pub(crate) digest: Vec<u8>,
 }
 impl TrustedContent {
-    pub fn from_sealed_port(reference: SealedContentRef, size: u32, digest: Vec<u8>) -> Result<Self, super::PeerValueError> {
-        Ok(Self { reference, size, digest })
+    pub fn from_sealed_port(
+        reference: SealedContentRef,
+        size: u32,
+        digest: Vec<u8>,
+    ) -> Result<Self, super::PeerValueError> {
+        if !(1..=2048).contains(&size) || digest.len() != 32 {
+            return Err(super::PeerValueError::InvalidContent);
+        }
+        Ok(Self {
+            reference,
+            size,
+            digest,
+        })
     }
 }

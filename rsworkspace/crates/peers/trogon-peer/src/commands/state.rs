@@ -11,6 +11,8 @@ use super::domain::{
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EvolveError {
+    #[error("invalid message history transition")]
+    InvalidMessageTransition,
     #[error("peer event has no event case")]
     MissingEvent,
     #[error("peer event case is not supported by the enrollment fold")]
@@ -166,6 +168,9 @@ pub fn evolve(mut state: PeerState, event: &proto::PeerEvent) -> Result<PeerStat
                 observed_at: event.detached_at.clone(),
                 expires_at: event.detached_at.clone(),
             });
+        }
+        PeerEventCase::PeerMessageAccepted(event) => {
+            super::message_rules::fold_accepted(&mut state, event)?;
         }
         _ => return Err(EvolveError::UnsupportedEvent),
     }

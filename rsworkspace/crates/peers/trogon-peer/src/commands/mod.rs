@@ -18,3 +18,5 @@ mod message_error;
 pub use message_error::MessageError;
 mod send_message;
 pub use send_message::SendMessage;
+
+mod message_rules;

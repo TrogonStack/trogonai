@@ -13,5 +13,5 @@ pub use commands::{Heartbeat, HeartbeatError};
 
 pub use commands::{Detach, DetachError};
 
-pub use commands::{SendMessage, MessageError};
-pub use commands::domain::{MessageId, BatchId, IdempotencyKey, SealedContentRef, TrustedContent};
+pub use commands::domain::{BatchId, IdempotencyKey, MessageId, SealedContentRef, TrustedContent};
+pub use commands::{MessageError, SendMessage};
