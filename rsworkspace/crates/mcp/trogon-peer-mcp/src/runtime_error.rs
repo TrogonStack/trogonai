@@ -1,0 +1,22 @@
+use std::fmt;
+
+#[derive(thiserror::Error)]
+pub enum RuntimeError {
+    #[error("peer connection startup deadline elapsed")]
+    StartupDeadline,
+    #[error("peer connection failed")]
+    Connect(#[source] trogon_nats::ConnectError),
+    #[error("peer MCP initialization failed")]
+    Initialize(#[source] Box<rmcp::service::ServerInitializeError>),
+    #[error("peer connector configuration failed")]
+    Connector(#[source] crate::peer_mcp_error::PeerMcpError),
+    #[error("peer MCP shutdown failed")]
+    Shutdown(#[source] tokio::task::JoinError),
+    #[error("peer MCP shutdown deadline elapsed")]
+    ShutdownDeadline,
+}
+impl fmt::Debug for RuntimeError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self, formatter)
+    }
+}
