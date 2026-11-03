@@ -7597,6 +7597,7 @@ dependencies = [
  "clap",
  "confique",
  "tempfile",
+ "thiserror 2.0.21",
  "trogon-nats",
  "trogon-std",
 ]

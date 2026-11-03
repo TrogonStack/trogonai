@@ -9,7 +9,7 @@ These variables accept the same values as the `nats` CLI.
 - `NATS_URL`: comma-separated server list. Defaults to `localhost:4222`.
 - `NATS_USER` and `NATS_PASSWORD`: user/password authentication.
 - `NATS_CREDS`: credentials file, a path or `file://path`.
-- `NATS_NKEY`: an NKey seed, or a seed file as a path or `file://path`. A seed file may be plain or decorated (a `.creds` file works); the first line starting with a seed prefix is used, and the file is read at connect time.
+- `NATS_NKEY`: an NKey seed, a seed file as a path or `file://path`, or `env://NAME` naming the variable that holds the seed. A seed file may be plain or decorated (a `.creds` file works); the first line starting with a seed prefix is used, and the file is read at connect time.
 - `NATS_JWT` and `NATS_SEED`: user JWT signed with the seed. `NATS_JWT` alone sends an empty signature.
 - `NATS_TOKEN`: token.
 - `NATS_CERT` and `NATS_KEY`: client certificate and key. Setting only one of them fails the connection.

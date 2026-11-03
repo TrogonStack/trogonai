@@ -110,6 +110,13 @@ fn nkey_accepts_a_seed_file_location() {
 }
 
 #[test]
+fn nkey_accepts_an_env_reference() {
+    let config = config(&[("NATS_NKEY", "env://NKEY_SEED")]);
+
+    assert!(matches!(config.auth, NatsAuth::NKey(NKeySeed::Env(ref name)) if name == "NKEY_SEED"));
+}
+
+#[test]
 fn user_password_wins_over_token_and_jwt() {
     let config = config(&[
         ("NATS_USER", "alice"),

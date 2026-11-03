@@ -98,6 +98,7 @@ async fn build_options_accepts_every_auth_method() {
     std::fs::write(seed_file.path(), format!("{seed}\n")).unwrap();
     let env = InMemoryEnv::new();
     env.set("JWT_SEED", &seed);
+    env.set("NKEY_SEED", &seed);
 
     let methods = [
         NatsAuth::None,
@@ -107,6 +108,7 @@ async fn build_options_accepts_every_auth_method() {
         },
         NatsAuth::NKey(NKeySeed::parse(&format!("file://{}", seed_file.path().display())).unwrap()),
         NatsAuth::NKey(NKeySeed::parse(&seed).unwrap()),
+        NatsAuth::NKey(NKeySeed::parse("env://NKEY_SEED").unwrap()),
         NatsAuth::Token(value("tok")),
         NatsAuth::Jwt {
             jwt: value("jwt"),
