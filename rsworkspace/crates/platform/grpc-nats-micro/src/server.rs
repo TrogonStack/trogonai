@@ -128,13 +128,9 @@ async fn serve_registered(
                         dispatch(&client, &request, &content_type_policy, handler.as_ref()).await
                     }
                     RegisteredHandler::Admitted(endpoint) => {
-                        dispatch_admitted(
-                            &client,
-                            &request.message,
-                            &content_type_policy,
-                            endpoint.admission.as_ref(),
-                        )
-                        .await
+                        if let Some(handler) = admitted_handler(&request.message, endpoint.admission.as_ref()) {
+                            dispatch(&client, &request, &content_type_policy, handler.as_ref()).await;
+                        }
                     }
                 }
             }
@@ -151,11 +147,7 @@ pub async fn dispatch_admitted<P: PublishClient>(
     policy: &ServiceOptions,
     admission: &dyn crate::EndpointAdmission,
 ) {
-    let metadata = crate::RequestMetadata {
-        subject: message.subject.as_str(),
-        reply: message.reply.as_ref().map(|reply| reply.as_str()),
-    };
-    let Some(handler) = admission.admit(metadata) else {
+    let Some(handler) = admitted_handler(message, admission) else {
         return;
     };
     let Some(reply) = message.reply.clone() else {
@@ -174,6 +166,17 @@ pub async fn dispatch_admitted<P: PublishClient>(
             let _ = published.inspect_err(warn_unencodable);
         }
     }
+}
+
+fn admitted_handler<'a>(
+    message: &async_nats::Message,
+    admission: &'a dyn crate::EndpointAdmission,
+) -> Option<Box<dyn EndpointHandler + 'a>> {
+    let reply = message.reply.as_ref()?;
+    admission.admit(crate::RequestMetadata {
+        subject: message.subject.as_str(),
+        reply: Some(reply.as_str()),
+    })
 }
 
 async fn dispatch<P: PublishClient>(
