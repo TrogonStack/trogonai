@@ -464,6 +464,29 @@ async fn a_json_object_that_answers_nothing_leaves_as_an_error_frame() {
 }
 
 #[tokio::test]
+async fn a_json_value_that_is_no_object_leaves_as_an_error_frame() {
+    // Valid JSON is not yet an envelope. An array or a bare number has no field to
+    // stamp the caller's id onto, so it answers nothing either.
+    let frames = sse_frames(sse_from_bootstrap_and_payloads(
+        serde_json::to_vec(&json!({"jsonrpc":"2.0","id":"transport-9","result":{"taskId":"t-1"}})).unwrap(),
+        Box::pin(stream::iter(vec![
+            Ok(Bytes::from(serde_json::to_vec(&json!([{"result":{}}])).unwrap())),
+            Ok(Bytes::from_static(b"42")),
+        ])),
+        json!("corr-1"),
+    ))
+    .await;
+
+    assert_eq!(frames.len(), 3);
+    for frame in &frames[1..] {
+        let value: serde_json::Value = serde_json::from_str(frame).unwrap();
+        assert_eq!(value["id"], "corr-1");
+        assert_eq!(value["error"]["code"], INTERNAL_ERROR, "{value}");
+        assert!(value["result"].is_null(), "{value}");
+    }
+}
+
+#[tokio::test]
 async fn an_event_an_older_agent_published_reaches_the_caller_as_a_response() {
     // The events stream retains by limits and a rolling upgrade runs both agent
     // releases at once, so this edge still meets bare events. Stamping an id onto
