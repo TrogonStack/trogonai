@@ -13,7 +13,7 @@ pub struct PeerJetStreamStore {
 }
 impl PeerJetStreamStore {
     pub fn new(inner: JetStreamStore<PeerSubjectResolver>) -> Result<Self, PeerValueError> {
-        let tenant = TenantId::new("unscoped")?;
+        let tenant = TenantId::new(inner.subject_resolver().tenant().as_str())?;
         Ok(Self { inner, tenant })
     }
 }
