@@ -58,10 +58,7 @@ fn retry_ignores_proposed_identity_time_and_content_location() {
             reply,
             time(2),
         );
-        assert!(matches!(
-            error(state.clone(), &changed),
-            MessageError::Conflict | MessageError::CollaborationMismatch
-        ));
+        assert_eq!(error(state.clone(), &changed), MessageError::Conflict);
     }
 }
 #[test]
@@ -172,4 +169,15 @@ fn malformed_acceptance_events_are_rejected_on_replay() {
             .is_err()
         );
     }
+}
+
+#[test]
+fn exact_retry_does_not_require_a_new_representable_lifetime() {
+    use chrono::TimeZone;
+    let state=run(enrolled("sender",0),&send(0,1,1));
+    let original=state.outbox[0].clone();
+    let now=chrono::Utc.with_ymd_and_hms(9999,12,31,23,59,30).unwrap();
+    let state=run(state,&Attach::new(identity("sender"),ConnectorId::new("connector").unwrap(),CollaborationRef::new("collaboration").unwrap(),now));
+    let retry=SendMessage::new(identity("sender").owner().clone(),reference("sender",2),IdempotencyKey::new("key_0").unwrap(),MessageId::new("replacement_proposal").unwrap(),identity("recipient").peer_id().clone(),CollaborationRef::new("collaboration").unwrap(),content(1,1),None,now+chrono::Duration::seconds(1));
+    trogon_decider::testing::TestCase::<SendMessage>::new().given_state(state).when(retry).then_error(MessageError::AlreadyAccepted(Box::new(original)));
 }
