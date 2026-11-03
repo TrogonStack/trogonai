@@ -1,17 +1,20 @@
 use serde::Serialize;
-use serde_json::{Value, json};
+use serde_json::Value;
 use trogon_peer::{AttachmentRef, BatchId, MessageId, PeerDisplayName, PeerId};
 use trogon_peer_context::{MAX_MESSAGE_BYTES, MAX_MESSAGES};
 use trogonai_proto::peers::v1alpha1 as v1;
 
 use crate::PeerMcpError;
+use crate::acknowledgment_metadata_projection::AcknowledgmentMetadataProjection;
+use crate::application_acknowledgment::ApplicationAcknowledgment;
 use crate::connector_config::ConnectorConfig;
+use crate::message_metadata_projection::MessageMetadataProjection;
 
 pub(crate) fn message_metadata(
     metadata: Option<&v1::MessageMetadata>,
     attachment: &AttachmentRef,
     config: &ConnectorConfig,
-) -> Result<Value, PeerMcpError> {
+) -> Result<MessageMetadataProjection, PeerMcpError> {
     let metadata = metadata.ok_or(PeerMcpError::InvalidMetadata)?;
     let message_id = metadata.message_id.as_deref().ok_or(PeerMcpError::InvalidMetadata)?;
     let message_id = MessageId::new(message_id).map_err(|_| PeerMcpError::InvalidMetadata)?;
@@ -37,13 +40,13 @@ pub(crate) fn message_metadata(
     if (expires.seconds, expires.nanos) <= (accepted.seconds, accepted.nanos) {
         return Err(PeerMcpError::InvalidMetadata);
     }
-    Ok(json!({
-        "message_id": message_id.as_str(),
-        "sender_peer_id": sender,
-        "recipient_peer_id": recipient.as_str(),
-        "accepted_at": timestamp_metadata(Some(accepted))?,
-        "expires_at": timestamp_metadata(Some(expires))?,
-    }))
+    Ok(MessageMetadataProjection {
+        message_id: message_id.as_str().to_owned(),
+        sender_peer_id: sender.to_owned(),
+        recipient_peer_id: recipient.as_str().to_owned(),
+        accepted_at: timestamp_metadata(Some(accepted))?,
+        expires_at: timestamp_metadata(Some(expires))?,
+    })
 }
 
 pub(crate) fn roster_metadata(response: v1::RosterResponse) -> Result<Value, PeerMcpError> {
@@ -87,7 +90,7 @@ pub(crate) fn roster_metadata(response: v1::RosterResponse) -> Result<Value, Pee
 pub(crate) fn acknowledgment_metadata(
     response: &v1::AcknowledgeBatchResponse,
     requested: &BatchId,
-) -> Result<Value, PeerMcpError> {
+) -> Result<AcknowledgmentMetadataProjection, PeerMcpError> {
     let batch = response.batch.as_option().ok_or(PeerMcpError::InvalidMetadata)?;
     if batch.batch_id.as_deref() != Some(requested.as_str())
         || batch.message_ids.is_empty()
@@ -108,14 +111,17 @@ pub(crate) fn acknowledgment_metadata(
     }
     timestamp_metadata(Some(prepared))?;
     timestamp_metadata(Some(acknowledged))?;
-    Ok(json!({"batch_id": requested.as_str(), "acknowledgment":"APPLICATION_ACKNOWLEDGED"}))
+    Ok(AcknowledgmentMetadataProjection {
+        batch_id: requested.as_str().to_owned(),
+        acknowledgment: ApplicationAcknowledgment::ApplicationAcknowledged,
+    })
 }
 
-pub(crate) fn timestamp_metadata<T: Serialize>(value: Option<&T>) -> Result<Value, PeerMcpError> {
+pub(crate) fn timestamp_metadata<T: Serialize>(value: Option<&T>) -> Result<String, PeerMcpError> {
     let value = value.ok_or(PeerMcpError::InvalidMetadata)?;
     let encoded = serde_json::to_value(value).map_err(PeerMcpError::MetadataEncoding)?;
-    if !encoded.is_string() {
-        return Err(PeerMcpError::InvalidMetadata);
+    match encoded {
+        Value::String(timestamp) => Ok(timestamp),
+        _ => Err(PeerMcpError::InvalidMetadata),
     }
-    Ok(encoded)
 }

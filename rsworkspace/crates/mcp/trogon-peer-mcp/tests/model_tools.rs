@@ -25,7 +25,7 @@ enum ObservedCall {
 
 #[derive(Debug, thiserror::Error)]
 #[error("batch is not assigned to this test recipient")]
-struct UnknownBatch;
+struct UnknownBatchError;
 
 #[derive(Clone)]
 struct Backend {
@@ -161,7 +161,7 @@ impl ReadPeerMessageStatus for Backend {
 }
 
 impl AcknowledgePeerBatch for Backend {
-    type Error = UnknownBatch;
+    type Error = UnknownBatchError;
 
     async fn acknowledge_batch(
         &self,
@@ -173,7 +173,7 @@ impl AcknowledgePeerBatch for Backend {
             .expect("recorder")
             .push(ObservedCall::Acknowledge(request));
         if !known {
-            return Err(UnknownBatch);
+            return Err(UnknownBatchError);
         }
         self.acknowledged.store(true, Ordering::SeqCst);
         Ok(self.acknowledge_response.clone())

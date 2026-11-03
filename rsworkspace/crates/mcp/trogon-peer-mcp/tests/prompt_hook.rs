@@ -27,40 +27,40 @@ struct Backend {
 
 #[derive(Debug, thiserror::Error)]
 #[error("operation is not configured in the prompt-hook fixture")]
-struct UnconfiguredOperation;
+struct UnconfiguredOperationError;
 
 impl ReadPeerRoster for Backend {
-    type Error = UnconfiguredOperation;
+    type Error = UnconfiguredOperationError;
 
     async fn roster(&self, _request: v1::RosterRequest) -> Result<v1::RosterResponse, Self::Error> {
-        Err(UnconfiguredOperation)
+        Err(UnconfiguredOperationError)
     }
 }
 
 impl SendPeerMessage for Backend {
-    type Error = UnconfiguredOperation;
+    type Error = UnconfiguredOperationError;
 
     async fn send(&self, _request: v1::SendRequest) -> Result<v1::SendResponse, Self::Error> {
-        Err(UnconfiguredOperation)
+        Err(UnconfiguredOperationError)
     }
 }
 
 impl ReadPeerMessageStatus for Backend {
-    type Error = UnconfiguredOperation;
+    type Error = UnconfiguredOperationError;
 
     async fn status(&self, _request: v1::StatusRequest) -> Result<v1::StatusResponse, Self::Error> {
-        Err(UnconfiguredOperation)
+        Err(UnconfiguredOperationError)
     }
 }
 
 impl AcknowledgePeerBatch for Backend {
-    type Error = UnconfiguredOperation;
+    type Error = UnconfiguredOperationError;
 
     async fn acknowledge_batch(
         &self,
         _request: v1::AcknowledgeBatchRequest,
     ) -> Result<v1::AcknowledgeBatchResponse, Self::Error> {
-        Err(UnconfiguredOperation)
+        Err(UnconfiguredOperationError)
     }
 }
 

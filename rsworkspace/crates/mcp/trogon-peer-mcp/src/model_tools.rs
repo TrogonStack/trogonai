@@ -1,5 +1,5 @@
 use rmcp::model::{CallToolRequestParams, CallToolResult, ContentBlock};
-use serde::de::DeserializeOwned;
+use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use trogon_peer::{AttachmentRef, BatchId, IdempotencyKey, MessageId, PeerId};
 use trogonai_proto::peers::v1alpha1 as v1;
@@ -8,6 +8,7 @@ use crate::connector_config::ConnectorConfig;
 use crate::model_inputs::{AcknowledgeInput, RosterInput, SendInput, StatusInput};
 use crate::operation_metadata::{acknowledgment_metadata, message_metadata, roster_metadata, timestamp_metadata};
 use crate::peer_message_text::PeerMessageText;
+use crate::status_metadata_projection::StatusMetadataProjection;
 use crate::{AcknowledgePeerBatch, PeerMcpError, ReadPeerMessageStatus, ReadPeerRoster, SendPeerMessage};
 
 pub(crate) async fn roster<B: ReadPeerRoster>(
@@ -76,7 +77,7 @@ pub(crate) async fn status<B: ReadPeerMessageStatus>(
         })
         .await
         .map_err(|error| PeerMcpError::Status(Box::new(error)))?;
-    let mut output = message_metadata(response.message.as_option(), attachment, config)?;
+    let message = message_metadata(response.message.as_option(), attachment, config)?;
     let status = response
         .status
         .as_ref()
@@ -85,15 +86,11 @@ pub(crate) async fn status<B: ReadPeerMessageStatus>(
     if status == v1::MessageStatus::MESSAGE_STATUS_UNSPECIFIED {
         return Err(PeerMcpError::InvalidMetadata);
     }
-    let object = output.as_object_mut().ok_or(PeerMcpError::InvalidMetadata)?;
-    object.insert(
-        "status".into(),
-        serde_json::to_value(status).map_err(PeerMcpError::MetadataEncoding)?,
-    );
-    object.insert(
-        "observed_at".into(),
-        timestamp_metadata(response.observed_at.as_option())?,
-    );
+    let output = StatusMetadataProjection {
+        message,
+        status,
+        observed_at: timestamp_metadata(response.observed_at.as_option())?,
+    };
     metadata_result(output)
 }
 
@@ -126,7 +123,8 @@ fn parse_input<T: DeserializeOwned>(request: CallToolRequestParams) -> Result<T,
     serde_json::from_value(Value::Object(request.arguments.unwrap_or_default())).map_err(PeerMcpError::InvalidArguments)
 }
 
-fn metadata_result(value: Value) -> Result<CallToolResult, PeerMcpError> {
+fn metadata_result<T: Serialize>(projection: T) -> Result<CallToolResult, PeerMcpError> {
+    let value = serde_json::to_value(projection).map_err(PeerMcpError::MetadataEncoding)?;
     let text = serde_json::to_string(&value).map_err(PeerMcpError::Encode)?;
     Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
 }

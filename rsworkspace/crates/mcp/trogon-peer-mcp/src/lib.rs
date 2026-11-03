@@ -1,6 +1,9 @@
+mod acknowledgment_metadata_projection;
+mod application_acknowledgment;
 mod backend;
 mod connector_config;
 mod connector_config_input;
+mod message_metadata_projection;
 mod model_inputs;
 mod model_tool_definitions;
 mod model_tools;
@@ -15,6 +18,7 @@ mod prompt_hook_input;
 mod prompt_hook_output;
 mod prompt_id;
 mod prompt_tool;
+mod status_metadata_projection;
 
 pub use backend::{
     AcknowledgePeerBatch, EnrollPeer, PreparePeerBatch, ReadPeerMessageStatus, ReadPeerRoster, SendPeerMessage,
