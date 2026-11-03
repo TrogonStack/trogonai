@@ -21,11 +21,11 @@ workspace = true
 # Enables the SpiceDB-backed Tier-1 gate. Off by default so
 # deployments without an external authoriser don't pay the
 # authzed/tonic/moka compile cost.
-spicedb = ["a2a-nats/spicedb", "dep:async-trait", "dep:authzed", "dep:tonic"]
+spicedb = ["a2a-nats/spicedb", "dep:authzed", "dep:tonic"]
 
 [dependencies]
 a2a = { workspace = true }
-async-trait = { workspace = true, optional = true }
+async-trait = { workspace = true }
 authzed = { workspace = true, optional = true }
 tonic = { workspace = true, optional = true }
 a2a-auth-callout = { workspace = true }

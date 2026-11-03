@@ -12,8 +12,6 @@
 //! and no other, so a header or payload can never re-attribute a relayed
 //! request (ADR#0082).
 
-#![cfg(feature = "spicedb")]
-
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -37,12 +35,12 @@ use crate::config::Config;
 use crate::gw_ingress_stream::{GatewayStreamingIngressConfig, StreamingIngressGate, events_stream_last_seq};
 use crate::ingress_identity::{ForwardedCallerJwtVerifier, without_identity_headers};
 use crate::policy::CallerSpiceDbSubject;
-use crate::policy::spicedb_tier1::{
-    OwnerTupleEmitter, SpiceDbTier1Gate, Tier1AuthorizeOutcome, Tier1OwnerTuple, derive_tuple,
-    tier1_principal_from_caller, tier1_session_from_caller,
-};
 use crate::policy::tier1_declarative::{
     Tier1DeclarativeDecision, Tier1DeclarativeGate, tier1_declarative_audit_rule_fired,
+};
+use crate::policy::tier1_gate::{
+    OwnerTupleEmitter, SpiceDbTier1Gate, Tier1AuthorizeOutcome, Tier1OwnerTuple, derive_tuple,
+    tier1_principal_from_caller, tier1_session_from_caller,
 };
 use crate::policy::tier2::Tier2Decision;
 use crate::policy::tier2_cel::tier2_evaluation_context_from_ingress;
