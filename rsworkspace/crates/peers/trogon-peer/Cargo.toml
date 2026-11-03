@@ -8,11 +8,14 @@ license = "Apache-2.0"
 workspace = true
 
 [dependencies]
+buffa = { workspace = true }
+buffa-types = { workspace = true }
+hex = { workspace = true }
+sha2 = { workspace = true }
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 thiserror = { workspace = true }
 trogon-decider = { path = "../../decider/trogon-decider" }
 trogonai-proto = { path = "../../platform/trogonai-proto", features = ["peers", "chrono"] }
 
 [dev-dependencies]
-buffa = { workspace = true }
 trogon-decider = { path = "../../decider/trogon-decider", features = ["test-support"] }

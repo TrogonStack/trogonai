@@ -9,16 +9,13 @@ pub struct EnrollmentIdentity {
 }
 
 impl EnrollmentIdentity {
-    pub fn new(
-        owner: TrustedPeerOwner,
-        installation: InstallationId,
-        native_session: NativeSessionId,
-    ) -> Self {
+    pub fn new(owner: TrustedPeerOwner, installation: InstallationId, native_session: NativeSessionId) -> Self {
+        let peer_id = PeerId::derive(&owner, &installation, &native_session);
         Self {
             owner,
             installation,
             native_session,
-            peer_id: PeerId::pending(),
+            peer_id,
         }
     }
 

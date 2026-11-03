@@ -4,8 +4,8 @@ use buffa::MessageField;
 use chrono::{TimeZone, Utc};
 use trogon_decider::testing::TestCase;
 use trogon_peer::{
-    CallerId, CollaborationRef, ConnectorId, Enroll, EnrollmentIdentity, InstallationId,
-    NativeSessionId, PeerDisplayName, TenantId, TrustedPeerOwner,
+    CallerId, CollaborationRef, ConnectorId, Enroll, EnrollmentIdentity, InstallationId, NativeSessionId,
+    PeerDisplayName, TenantId, TrustedPeerOwner,
 };
 use trogonai_proto::convert::timestamp_from_datetime;
 use trogonai_proto::peers::{state_v1alpha1::PeerState, v1alpha1 as proto};
@@ -55,14 +55,20 @@ fn fresh_enrollment_records_trusted_owner_and_a_ten_second_attachment() {
         .when(command)
         .then([
             proto::PeerEvent {
-                event: Some(proto::PeerEnrolled {
-                    enrollment: MessageField::some(enrollment.clone()),
-                }.into()),
+                event: Some(
+                    proto::PeerEnrolled {
+                        enrollment: MessageField::some(enrollment.clone()),
+                    }
+                    .into(),
+                ),
             },
             proto::PeerEvent {
-                event: Some(proto::PeerAttached {
-                    attachment: MessageField::some(attachment.clone()),
-                }.into()),
+                event: Some(
+                    proto::PeerAttached {
+                        attachment: MessageField::some(attachment.clone()),
+                    }
+                    .into(),
+                ),
             },
         ])
         .then_state(PeerState {
