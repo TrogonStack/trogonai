@@ -1,5 +1,7 @@
 #[derive(thiserror::Error)]
 pub enum PeerMcpError {
+    #[error("peer request was cancelled; remote outcome is uncertain")]
+    RequestCancelled,
     #[error("peer connector is terminally detached")]
     Detached,
     #[error("peer detach outcome was not confirmed")]
@@ -53,6 +55,9 @@ pub enum PeerMcpError {
 impl PeerMcpError {
     pub(crate) fn public_message(&self) -> &'static str {
         match self {
+            Self::RequestCancelled => {
+                "Peer request was cancelled; remote outcome is uncertain. Retry with the same identifiers."
+            }
             Self::Detached => "Peer connector is detached; start a new connector runtime.",
             Self::Detach(_) | Self::DetachDeadline => {
                 "Peer detach was not confirmed; lease expiry remains the fallback."
