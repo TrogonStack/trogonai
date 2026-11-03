@@ -85,8 +85,9 @@ invalid identity, routing, availability and anonymous authentication settings.
 [NATS configuration reference](../../platform/trogon-nats/README.md).
 Secret values and opaque secret references remain on that factory's path.
 TLS remains the default; disabling it is only for explicit local debugging or
-tests. The executable installs no tracing subscriber and prints only static
-failure diagnostics to stderr. Stdout carries MCP protocol only.
+tests. The executable installs a stderr tracing layer that accepts only its static
+connector diagnostics. Dependency events and environment-selected trace levels
+are excluded. Stdout carries MCP protocol only.
 
 The issuer must actually restrict the configured credential to its caller and
 connection grants. Configuration does not establish credential authority.
