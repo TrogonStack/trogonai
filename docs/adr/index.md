@@ -90,3 +90,4 @@ future implementation work.
 - [ADR#0082: Inside the Bus the Principal Is Derived from the Subject, and Proof of Possession Is Enforced Only at the External Edge](./0082-bus-principal-from-subject-and-edge-proof-of-possession.md)
 - [ADR#0083: Credential Material, Claim-Check Blobs, and Sensitive Tenant Streams Under a Customer Managed Key Are Sealed in an Owned AEAD Envelope, and Nothing Else Is](./0083-sealed-content-envelope.md)
 - [ADR#0084: Every Policy Enforcement Point Enforces by Default and Refuses to Start Unenforced (Draft)](./0084-policy-enforcement-posture.md)
+- [ADR#0085: Agent Outbound HTTP(S) Goes Through a Dedicated Egress Proxy That Admits by Exact Destination and Intercepts TLS Only to Inject a Credential (Draft)](./0085-agent-egress-proxy.md)
