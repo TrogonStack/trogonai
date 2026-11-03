@@ -16,5 +16,5 @@ pub use commands::{Detach, DetachError};
 pub use commands::domain::{BatchId, IdempotencyKey, MessageId, SealedContentRef, TrustedContent};
 pub use commands::{MessageError, SendMessage};
 
-pub use commands::{IntakeMessage, DisposeMessage};
 pub use commands::domain::{AcceptedMessage, TerminalDisposition};
+pub use commands::{DisposeMessage, IntakeMessage};

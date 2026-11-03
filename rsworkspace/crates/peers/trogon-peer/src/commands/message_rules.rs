@@ -131,3 +131,200 @@ pub(super) fn fold_accepted(state: &mut PeerState, event: &proto::PeerMessageAcc
     state.outbox.push(entry.clone());
     Ok(())
 }
+
+pub(super) fn recipient_evidence(
+    state: &PeerState,
+    evidence: &AcceptedMessage,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<(), super::MessageError> {
+    let enrollment = state.enrollment.as_option().ok_or(EvolveError::MissingEnrollment)?;
+    let identity = state::parse_enrollment(enrollment)?;
+    if identity.peer_id() != &evidence.recipient {
+        return Err(super::MessageError::RecipientMismatch);
+    }
+    if identity.owner().tenant() != &evidence.tenant {
+        return Err(super::MessageError::TenantMismatch);
+    }
+    if enrollment.collaboration_ref != evidence.message.collaboration_ref {
+        return Err(super::MessageError::CollaborationMismatch);
+    }
+    let accepted = state::read_time(evidence.message.accepted_at.as_option(), "accepted_at")?;
+    if now < accepted || !(-62_135_596_800..=253_402_300_799).contains(&now.timestamp()) {
+        return Err(super::MessageError::InvalidTransition);
+    }
+    Ok(())
+}
+pub(super) fn prior_intake(state: &PeerState, evidence: &AcceptedMessage) -> Result<(), super::MessageError> {
+    let prior = state
+        .inbox
+        .iter()
+        .find(|e| e.message.message_id == evidence.message.message_id);
+    if prior.is_some_and(|e| e.message.as_option() != Some(&evidence.message)) {
+        return Err(super::MessageError::Conflict);
+    }
+    if let Some(receipt) = state
+        .dispositions
+        .iter()
+        .find(|r| r.message_id == evidence.message.message_id)
+    {
+        return Err(super::MessageError::AlreadyDisposed(Box::new(receipt.clone())));
+    }
+    if let Some(entry) = prior {
+        return Err(super::MessageError::AlreadyIntaken(Box::new(entry.clone())));
+    }
+    Ok(())
+}
+pub(super) fn pending_inbox(state: &PeerState) -> Result<(usize, u64), EvolveError> {
+    let mut count = 0;
+    let mut bytes = 0;
+    for entry in &state.inbox {
+        metadata(
+            entry
+                .message
+                .as_option()
+                .ok_or(EvolveError::MissingField { field: "inbox.message" })?,
+        )?;
+        if !entry.disposition.is_set() {
+            count += 1;
+            bytes += u64::from(entry.message.content_size_bytes.unwrap_or(0));
+        }
+    }
+    Ok((count, bytes))
+}
+pub(super) fn make_receipt(
+    state: &PeerState,
+    message: &proto::MessageMetadata,
+    outcome: proto::PreparationOutcome,
+    batch_id: Option<String>,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<proto::RecipientReceipt, EvolveError> {
+    let revision = u64::try_from(state.dispositions.len())
+        .ok()
+        .and_then(|n| n.checked_add(1))
+        .ok_or(EvolveError::InvalidMessageTransition)?;
+    let receipt = proto::RecipientReceipt {
+        message_id: message.message_id.clone(),
+        recipient_peer_id: message.recipient_peer_id.clone(),
+        outcome: Some(outcome.into()),
+        batch_id,
+        recipient_revision: Some(revision),
+        decided_at: buffa::MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&now)),
+    };
+    validate_receipt(&receipt)?;
+    Ok(receipt)
+}
+pub(super) fn validate_receipt(receipt: &proto::RecipientReceipt) -> Result<proto::PreparationOutcome, EvolveError> {
+    value(
+        MessageId::new(state::required(&receipt.message_id, "receipt.message_id")?),
+        "receipt.message_id",
+    )?;
+    value(
+        PeerId::parse(state::required(
+            &receipt.recipient_peer_id,
+            "receipt.recipient_peer_id",
+        )?),
+        "receipt.recipient_peer_id",
+    )?;
+    if receipt.recipient_revision.unwrap_or(0) == 0 {
+        return Err(EvolveError::InvalidMessageTransition);
+    }
+    state::read_time(receipt.decided_at.as_option(), "receipt.decided_at")?;
+    let outcome = receipt
+        .outcome
+        .and_then(|o| o.as_known())
+        .ok_or(EvolveError::InvalidMessageTransition)?;
+    match outcome {
+        proto::PreparationOutcome::PREPARATION_OUTCOME_BATCH_PREPARED => {
+            value(
+                BatchId::new(state::required(&receipt.batch_id, "receipt.batch_id")?),
+                "receipt.batch_id",
+            )?;
+        }
+        proto::PreparationOutcome::PREPARATION_OUTCOME_EXPIRED
+        | proto::PreparationOutcome::PREPARATION_OUTCOME_UNAVAILABLE
+            if receipt.batch_id.is_none() => {}
+        _ => return Err(EvolveError::InvalidMessageTransition),
+    }
+    Ok(outcome)
+}
+pub(super) fn fold_intake(state: &mut PeerState, event: &proto::PeerMessageIntakeRecorded) -> Result<(), EvolveError> {
+    let enrollment = state.enrollment.as_option().ok_or(EvolveError::MissingEnrollment)?;
+    state::parse_enrollment(enrollment)?;
+    let entry = event
+        .entry
+        .as_option()
+        .ok_or(EvolveError::MissingField { field: "inbox.entry" })?;
+    let message = entry
+        .message
+        .as_option()
+        .ok_or(EvolveError::MissingField { field: "inbox.message" })?;
+    metadata(message)?;
+    if message.recipient_peer_id != enrollment.peer_id
+        || message.collaboration_ref != enrollment.collaboration_ref
+        || entry.disposition.is_set()
+        || entry.intake_ordinal.unwrap_or(0) == 0
+        || entry.intake_ordinal != state.next_intake_ordinal
+        || state.inbox.iter().any(|e| e.message.message_id == message.message_id)
+        || state.dispositions.iter().any(|r| r.message_id == message.message_id)
+    {
+        return Err(EvolveError::InvalidMessageTransition);
+    }
+    let (count, bytes) = pending_inbox(state)?;
+    if count >= 64 || bytes + u64::from(message.content_size_bytes.unwrap_or(0)) > 131072 {
+        return Err(EvolveError::InvalidMessageTransition);
+    }
+    let next = entry
+        .intake_ordinal
+        .and_then(|n| n.checked_add(1))
+        .ok_or(EvolveError::InvalidMessageTransition)?;
+    state.inbox.push(entry.clone());
+    state.next_intake_ordinal = Some(next);
+    Ok(())
+}
+pub(super) fn fold_receipt(state: &mut PeerState, receipt: &proto::RecipientReceipt) -> Result<(), EvolveError> {
+    let outcome = validate_receipt(receipt)?;
+    let enrollment = state.enrollment.as_option().ok_or(EvolveError::MissingEnrollment)?;
+    state::parse_enrollment(enrollment)?;
+    let next = u64::try_from(state.dispositions.len())
+        .ok()
+        .and_then(|n| n.checked_add(1));
+    if receipt.recipient_peer_id != enrollment.peer_id
+        || receipt.recipient_revision != next
+        || state.dispositions.iter().any(|r| r.message_id == receipt.message_id)
+    {
+        return Err(EvolveError::InvalidMessageTransition);
+    }
+    if let Some(entry) = state
+        .inbox
+        .iter_mut()
+        .find(|e| e.message.message_id == receipt.message_id)
+    {
+        if entry.disposition.is_set() {
+            return Err(EvolveError::InvalidMessageTransition);
+        }
+        let at = state::read_time(receipt.decided_at.as_option(), "receipt.decided_at")?;
+        let accepted = state::read_time(entry.message.accepted_at.as_option(), "accepted_at")?;
+        let expires = state::read_time(entry.message.expires_at.as_option(), "expires_at")?;
+        if at < accepted
+            || (outcome == proto::PreparationOutcome::PREPARATION_OUTCOME_EXPIRED && at < expires)
+            || (outcome == proto::PreparationOutcome::PREPARATION_OUTCOME_BATCH_PREPARED && at >= expires)
+        {
+            return Err(EvolveError::InvalidMessageTransition);
+        }
+        entry.disposition = buffa::MessageField::some(receipt.clone());
+    } else if outcome == proto::PreparationOutcome::PREPARATION_OUTCOME_BATCH_PREPARED {
+        return Err(EvolveError::InvalidMessageTransition);
+    }
+    state.dispositions.push(receipt.clone());
+    Ok(())
+}
+pub(super) fn fold_disposed(state: &mut PeerState, event: &proto::PeerMessageDisposed) -> Result<(), EvolveError> {
+    let receipt = event
+        .receipt
+        .as_option()
+        .ok_or(EvolveError::MissingField { field: "receipt" })?;
+    if validate_receipt(receipt)? == proto::PreparationOutcome::PREPARATION_OUTCOME_BATCH_PREPARED {
+        return Err(EvolveError::InvalidMessageTransition);
+    }
+    fold_receipt(state, receipt)
+}
