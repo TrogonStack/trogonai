@@ -8,6 +8,7 @@ license = "Apache-2.0"
 workspace = true
 
 [dependencies]
+serde = { workspace = true }
 buffa = { workspace = true }
 buffa-types = { workspace = true }
 serde_json = { workspace = true }
