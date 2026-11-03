@@ -7651,6 +7651,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-peer-service"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "thiserror 2.0.21",
+ "tokio",
+ "trogon-decider-runtime",
+ "trogon-peer",
+ "trogonai-proto",
+]
+
+[[package]]
 name = "trogon-semconv"
 version = "0.1.0"
 dependencies = [
