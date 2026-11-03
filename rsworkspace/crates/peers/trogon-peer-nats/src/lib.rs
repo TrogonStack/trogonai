@@ -49,3 +49,5 @@ mod rpc_application;
 mod rpc_backend;
 pub use rpc_application::PeerRpcApplication;
 pub use rpc_backend::PeerRpcBackend;
+
+mod rpc_fault;

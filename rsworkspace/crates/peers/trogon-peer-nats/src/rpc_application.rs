@@ -1,6 +1,11 @@
 use crate::rpc_operation::PeerRpcOperation;
 use grpc_nats_micro::ServiceFault;
-use trogon_peer::TrustedPeerOwner;
+use trogon_decider_runtime::{CommandAuthorizer, StreamAppend, StreamRead};
+use trogon_peer::{PeerId, TrustedPeerOwner};
+use trogon_peer_service::{
+    BatchIdGenerator, ContentOpen, ContentSeal, MessageIdGenerator, PeerAccess, PeerCatalog, PeerClock,
+    PresentationInsert, PresentationOrphan, PresentationRead, ScopedPeerStore,
+};
 use trogon_peer_service::{PeerApplication, PeerService};
 use trogonai_proto::peers::v1alpha1 as proto;
 
@@ -22,9 +27,9 @@ impl<S, P, C, Content, Cache, Ids, Catalog> PeerRpcApplication<S, P, C, Content,
 impl<S, P, C, Content, Cache, Ids, Catalog> PeerRpcOperation<proto::EnrollRequest>
     for PeerRpcApplication<S, P, C, Content, Cache, Ids, Catalog>
 where
-    S: Send + Sync,
-    P: Send + Sync,
-    C: Send + Sync,
+    S: StreamRead<PeerId> + StreamAppend<PeerId> + ScopedPeerStore,
+    P: Send + Sync + CommandAuthorizer<trogon_peer::Enroll> + CommandAuthorizer<trogon_peer::Attach>,
+    C: PeerClock,
     Content: Send + Sync,
     Cache: Send + Sync,
     Ids: Send + Sync,
@@ -33,19 +38,21 @@ where
     type Response = proto::EnrollResponse;
     async fn execute(
         &self,
-        _owner: &TrustedPeerOwner,
-        _request: proto::EnrollRequest,
+        owner: &TrustedPeerOwner,
+        request: proto::EnrollRequest,
     ) -> Result<Self::Response, ServiceFault> {
-        let _ = &self.service;
-        Err(ServiceFault::internal("unimplemented"))
+        self.service
+            .enroll(owner, request)
+            .await
+            .map_err(crate::rpc_fault::enrollment)
     }
 }
 impl<S, P, C, Content, Cache, Ids, Catalog> PeerRpcOperation<proto::HeartbeatRequest>
     for PeerRpcApplication<S, P, C, Content, Cache, Ids, Catalog>
 where
-    S: Send + Sync,
-    P: Send + Sync,
-    C: Send + Sync,
+    S: StreamRead<PeerId> + StreamAppend<PeerId> + ScopedPeerStore,
+    P: Send + Sync + CommandAuthorizer<trogon_peer::Heartbeat> + CommandAuthorizer<trogon_peer::Detach>,
+    C: PeerClock,
     Content: Send + Sync,
     Cache: Send + Sync,
     Ids: Send + Sync,
@@ -54,19 +61,21 @@ where
     type Response = proto::HeartbeatResponse;
     async fn execute(
         &self,
-        _owner: &TrustedPeerOwner,
-        _request: proto::HeartbeatRequest,
+        owner: &TrustedPeerOwner,
+        request: proto::HeartbeatRequest,
     ) -> Result<Self::Response, ServiceFault> {
-        let _ = &self.service;
-        Err(ServiceFault::internal("unimplemented"))
+        self.service
+            .heartbeat(owner, request)
+            .await
+            .map_err(crate::rpc_fault::application)
     }
 }
 impl<S, P, C, Content, Cache, Ids, Catalog> PeerRpcOperation<proto::DetachRequest>
     for PeerRpcApplication<S, P, C, Content, Cache, Ids, Catalog>
 where
-    S: Send + Sync,
-    P: Send + Sync,
-    C: Send + Sync,
+    S: StreamRead<PeerId> + StreamAppend<PeerId> + ScopedPeerStore,
+    P: Send + Sync + CommandAuthorizer<trogon_peer::Heartbeat> + CommandAuthorizer<trogon_peer::Detach>,
+    C: PeerClock,
     Content: Send + Sync,
     Cache: Send + Sync,
     Ids: Send + Sync,
@@ -75,103 +84,121 @@ where
     type Response = proto::DetachResponse;
     async fn execute(
         &self,
-        _owner: &TrustedPeerOwner,
-        _request: proto::DetachRequest,
+        owner: &TrustedPeerOwner,
+        request: proto::DetachRequest,
     ) -> Result<Self::Response, ServiceFault> {
-        let _ = &self.service;
-        Err(ServiceFault::internal("unimplemented"))
+        self.service
+            .detach(owner, request)
+            .await
+            .map_err(crate::rpc_fault::application)
     }
 }
 impl<S, P, C, Content, Cache, Ids, Catalog> PeerRpcOperation<proto::RosterRequest>
     for PeerRpcApplication<S, P, C, Content, Cache, Ids, Catalog>
 where
-    S: Send + Sync,
-    P: Send + Sync,
-    C: Send + Sync,
+    S: StreamRead<PeerId> + StreamAppend<PeerId> + ScopedPeerStore,
+    P: Send + Sync + CommandAuthorizer<PeerAccess>,
+    C: PeerClock,
     Content: Send + Sync,
     Cache: Send + Sync,
     Ids: Send + Sync,
     Catalog: Send + Sync,
+    Catalog: PeerCatalog,
 {
     type Response = proto::RosterResponse;
     async fn execute(
         &self,
-        _owner: &TrustedPeerOwner,
-        _request: proto::RosterRequest,
+        owner: &TrustedPeerOwner,
+        request: proto::RosterRequest,
     ) -> Result<Self::Response, ServiceFault> {
-        let _ = &self.service;
-        Err(ServiceFault::internal("unimplemented"))
+        self.application
+            .roster(owner, request)
+            .await
+            .map_err(crate::rpc_fault::application)
     }
 }
 impl<S, P, C, Content, Cache, Ids, Catalog> PeerRpcOperation<proto::SendRequest>
     for PeerRpcApplication<S, P, C, Content, Cache, Ids, Catalog>
 where
-    S: Send + Sync,
-    P: Send + Sync,
-    C: Send + Sync,
+    S: StreamRead<PeerId> + StreamAppend<PeerId> + ScopedPeerStore,
+    P: Send + Sync + CommandAuthorizer<trogon_peer::SendMessage> + CommandAuthorizer<PeerAccess>,
+    C: PeerClock,
     Content: Send + Sync,
     Cache: Send + Sync,
     Ids: Send + Sync,
     Catalog: Send + Sync,
+    Content: ContentSeal,
+    Ids: MessageIdGenerator,
 {
     type Response = proto::SendResponse;
     async fn execute(
         &self,
-        _owner: &TrustedPeerOwner,
-        _request: proto::SendRequest,
+        owner: &TrustedPeerOwner,
+        request: proto::SendRequest,
     ) -> Result<Self::Response, ServiceFault> {
-        let _ = &self.service;
-        Err(ServiceFault::internal("unimplemented"))
+        self.application
+            .send(owner, request)
+            .await
+            .map_err(crate::rpc_fault::application)
     }
 }
 impl<S, P, C, Content, Cache, Ids, Catalog> PeerRpcOperation<proto::StatusRequest>
     for PeerRpcApplication<S, P, C, Content, Cache, Ids, Catalog>
 where
-    S: Send + Sync,
-    P: Send + Sync,
-    C: Send + Sync,
+    S: StreamRead<PeerId> + StreamAppend<PeerId> + ScopedPeerStore,
+    P: Send + Sync + CommandAuthorizer<trogon_peer::SendMessage> + CommandAuthorizer<PeerAccess>,
+    C: PeerClock,
     Content: Send + Sync,
     Cache: Send + Sync,
     Ids: Send + Sync,
     Catalog: Send + Sync,
+    Content: ContentSeal,
+    Ids: MessageIdGenerator,
 {
     type Response = proto::StatusResponse;
     async fn execute(
         &self,
-        _owner: &TrustedPeerOwner,
-        _request: proto::StatusRequest,
+        owner: &TrustedPeerOwner,
+        request: proto::StatusRequest,
     ) -> Result<Self::Response, ServiceFault> {
-        let _ = &self.service;
-        Err(ServiceFault::internal("unimplemented"))
+        self.application
+            .status(owner, request)
+            .await
+            .map_err(crate::rpc_fault::application)
     }
 }
 impl<S, P, C, Content, Cache, Ids, Catalog> PeerRpcOperation<proto::PrepareBatchRequest>
     for PeerRpcApplication<S, P, C, Content, Cache, Ids, Catalog>
 where
-    S: Send + Sync,
-    P: Send + Sync,
-    C: Send + Sync,
+    S: StreamRead<PeerId> + StreamAppend<PeerId> + ScopedPeerStore,
+    P: Send + Sync + CommandAuthorizer<trogon_peer::PrepareBatch> + CommandAuthorizer<PeerAccess>,
+    C: PeerClock,
     Content: Send + Sync,
     Cache: Send + Sync,
     Ids: Send + Sync,
     Catalog: Send + Sync,
+    Content: ContentOpen,
+    Cache: PresentationRead + PresentationInsert + PresentationOrphan,
+    Ids: BatchIdGenerator,
 {
     type Response = proto::PrepareBatchResponse;
     async fn execute(
         &self,
-        _owner: &TrustedPeerOwner,
-        _request: proto::PrepareBatchRequest,
+        owner: &TrustedPeerOwner,
+        request: proto::PrepareBatchRequest,
     ) -> Result<Self::Response, ServiceFault> {
-        let _ = &self.service;
-        Err(ServiceFault::internal("unimplemented"))
+        self.application
+            .prepare_batch(owner, request)
+            .await
+            .map_err(crate::rpc_fault::application)
     }
 }
 impl<S, P, C, Content, Cache, Ids, Catalog> PeerRpcOperation<proto::AcknowledgeBatchRequest>
     for PeerRpcApplication<S, P, C, Content, Cache, Ids, Catalog>
 where
-    S: Send + Sync,
-    P: Send + Sync,
-    C: Send + Sync,
+    S: StreamRead<PeerId> + StreamAppend<PeerId> + ScopedPeerStore,
+    P: Send + Sync + CommandAuthorizer<trogon_peer::AcknowledgeBatch> + CommandAuthorizer<PeerAccess>,
+    C: PeerClock,
     Content: Send + Sync,
     Cache: Send + Sync,
     Ids: Send + Sync,
@@ -180,10 +207,12 @@ where
     type Response = proto::AcknowledgeBatchResponse;
     async fn execute(
         &self,
-        _owner: &TrustedPeerOwner,
-        _request: proto::AcknowledgeBatchRequest,
+        owner: &TrustedPeerOwner,
+        request: proto::AcknowledgeBatchRequest,
     ) -> Result<Self::Response, ServiceFault> {
-        let _ = &self.service;
-        Err(ServiceFault::internal("unimplemented"))
+        self.application
+            .acknowledge_batch(owner, request)
+            .await
+            .map_err(crate::rpc_fault::application)
     }
 }
