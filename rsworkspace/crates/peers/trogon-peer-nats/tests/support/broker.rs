@@ -95,3 +95,15 @@ impl Broker {
         self.files.path().exists()
     }
 }
+
+pub async fn observed_barrier(client: &Client) -> TestResult {
+    use futures::StreamExt as _;
+    let subject = client.new_inbox();
+    let mut incoming = client.subscribe(subject.clone()).await?;
+    client.publish(subject, vec![0].into()).await?;
+    let message = tokio::time::timeout(PROBE_TIMEOUT, incoming.next())
+        .await?
+        .ok_or("fixture broker readiness barrier was not observed")?;
+    assert_eq!(message.payload.as_ref(), &[0]);
+    Ok(())
+}
