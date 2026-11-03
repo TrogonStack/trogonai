@@ -13,3 +13,8 @@ pub use heartbeat::{Heartbeat, HeartbeatError};
 
 mod detach;
 pub use detach::{Detach, DetachError};
+
+mod message_error;
+pub use message_error::MessageError;
+mod send_message;
+pub use send_message::SendMessage;
