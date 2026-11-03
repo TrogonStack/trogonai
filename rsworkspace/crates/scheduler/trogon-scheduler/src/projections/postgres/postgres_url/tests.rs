@@ -1,9 +1,12 @@
 use sqlx::postgres::PgSslMode;
 use trogon_std::env::InMemoryEnv;
 
+use crate::projections::postgres::UnverifiedSslMode;
+
 use super::*;
 
 const BASE: &str = "postgres://scheduler:hunter2@db.internal:5433/schedules";
+const INLINE_CA: &str = "-----BEGIN CERTIFICATE-----\nMIIBszCCAVmgAwIBAgIUQ0E=\n-----END CERTIFICATE-----\n";
 
 fn parse(raw: &str) -> Result<PostgresUrl, PostgresUrlError> {
     PostgresUrl::parse(raw, &InMemoryEnv::new())
@@ -113,7 +116,10 @@ fn rejects_a_pgsslmode_that_does_not_fully_verify_the_server() {
     );
     assert_eq!(
         error.to_string(),
-        format!("PGSSLMODE: {}", PostgresTlsError::Unverified(PgSslMode::Require))
+        format!(
+            "PGSSLMODE: {}",
+            PostgresTlsError::Unverified(UnverifiedSslMode::Require)
+        )
     );
 }
 
@@ -134,7 +140,20 @@ fn trusts_the_ca_named_by_pgsslrootcert() {
 
     let url = PostgresUrl::parse(BASE, &env).unwrap();
 
-    assert_eq!(url.root_cert(), Some(Path::new("/etc/scheduler/postgres-ca.pem")));
+    assert_eq!(
+        url.root_cert(),
+        Some(&PostgresRootCert::File(PathBuf::from("/etc/scheduler/postgres-ca.pem")))
+    );
+}
+
+#[test]
+fn trusts_the_inline_ca_given_by_pgsslrootcert() {
+    let env = InMemoryEnv::new();
+    env.set("PGSSLROOTCERT", INLINE_CA);
+
+    let url = PostgresUrl::parse(BASE, &env).unwrap();
+
+    assert_eq!(url.root_cert(), Some(&PostgresRootCert::Pem(INLINE_CA.to_owned())));
 }
 
 #[test]
@@ -144,7 +163,10 @@ fn prefers_the_url_sslrootcert_over_pgsslrootcert() {
 
     let url = PostgresUrl::parse(&format!("{BASE}?sslrootcert=/run/secrets/ca.pem"), &env).unwrap();
 
-    assert_eq!(url.root_cert(), Some(Path::new("/run/secrets/ca.pem")));
+    assert_eq!(
+        url.root_cert(),
+        Some(&PostgresRootCert::File(PathBuf::from("/run/secrets/ca.pem")))
+    );
 }
 
 #[test]

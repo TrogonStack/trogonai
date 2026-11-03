@@ -18,7 +18,7 @@ mod postgres_url;
 mod projector;
 mod store;
 
-pub use postgres_tls::{PostgresTls, PostgresTlsError};
-pub use postgres_url::{PostgresUrl, PostgresUrlError};
+pub use postgres_tls::{PostgresTls, PostgresTlsError, UnverifiedSslMode};
+pub use postgres_url::{PostgresRootCert, PostgresUrl, PostgresUrlError};
 pub use projector::SchedulesProjector;
 pub use store::PostgresSchedulesProjection;

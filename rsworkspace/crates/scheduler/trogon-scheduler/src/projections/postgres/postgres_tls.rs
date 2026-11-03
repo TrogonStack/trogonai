@@ -1,3 +1,4 @@
+use std::fmt;
 use std::str::FromStr;
 
 use sqlx::postgres::PgSslMode;
@@ -12,10 +13,9 @@ pub enum PostgresTls {
 #[derive(Debug, thiserror::Error)]
 pub enum PostgresTlsError {
     #[error(
-        "sslmode={} does not fully verify the server; use sslmode=verify-full, or disable TLS explicitly with sslmode=disable",
-        libpq_name(.0)
+        "sslmode={0} does not fully verify the server; use sslmode=verify-full, or disable TLS explicitly with sslmode=disable"
     )]
-    Unverified(PgSslMode),
+    Unverified(UnverifiedSslMode),
     #[error("sslmode is not a known mode; use sslmode=verify-full, or disable TLS explicitly with sslmode=disable")]
     Unknown(#[source] sqlx::Error),
 }
@@ -27,9 +27,10 @@ impl TryFrom<PgSslMode> for PostgresTls {
         match mode {
             PgSslMode::VerifyFull => Ok(Self::VerifyFull),
             PgSslMode::Disable => Ok(Self::Disabled),
-            PgSslMode::Allow | PgSslMode::Prefer | PgSslMode::Require | PgSslMode::VerifyCa => {
-                Err(PostgresTlsError::Unverified(mode))
-            }
+            PgSslMode::Allow => Err(PostgresTlsError::Unverified(UnverifiedSslMode::Allow)),
+            PgSslMode::Prefer => Err(PostgresTlsError::Unverified(UnverifiedSslMode::Prefer)),
+            PgSslMode::Require => Err(PostgresTlsError::Unverified(UnverifiedSslMode::Require)),
+            PgSslMode::VerifyCa => Err(PostgresTlsError::Unverified(UnverifiedSslMode::VerifyCa)),
         }
     }
 }
@@ -51,14 +52,23 @@ impl From<PostgresTls> for PgSslMode {
     }
 }
 
-fn libpq_name(mode: &PgSslMode) -> &'static str {
-    match mode {
-        PgSslMode::Disable => "disable",
-        PgSslMode::Allow => "allow",
-        PgSslMode::Prefer => "prefer",
-        PgSslMode::Require => "require",
-        PgSslMode::VerifyCa => "verify-ca",
-        PgSslMode::VerifyFull => "verify-full",
+/// A libpq `sslmode` that connects without fully verifying the server.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UnverifiedSslMode {
+    Allow,
+    Prefer,
+    Require,
+    VerifyCa,
+}
+
+impl fmt::Display for UnverifiedSslMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Allow => "allow",
+            Self::Prefer => "prefer",
+            Self::Require => "require",
+            Self::VerifyCa => "verify-ca",
+        })
     }
 }
 

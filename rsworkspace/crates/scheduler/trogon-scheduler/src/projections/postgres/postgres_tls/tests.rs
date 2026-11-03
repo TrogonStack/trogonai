@@ -66,7 +66,7 @@ fn converts_from_the_sqlx_mode() {
     );
     assert!(matches!(
         PostgresTls::try_from(PgSslMode::Prefer),
-        Err(PostgresTlsError::Unverified(PgSslMode::Prefer))
+        Err(PostgresTlsError::Unverified(UnverifiedSslMode::Prefer))
     ));
 }
 
