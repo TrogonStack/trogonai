@@ -206,3 +206,60 @@ fn peer_reference_and_observation_reject_invalid_boundary_values() {
         .is_err()
     );
 }
+
+#[test]
+fn heartbeat_preserves_reported_activity_across_connectivity_only_renewals() {
+    let start = Utc.with_ymd_and_hms(2026, 11, 2, 12, 0, 0).unwrap();
+    let now = start + chrono::Duration::seconds(2);
+    let mut before = state(start);
+    before.active_at = MessageField::some(timestamp_from_datetime(&start));
+    let renewed = attachment(&identity(), "old_connector", 1, now);
+    let event = proto::PeerEvent {
+        event: Some(
+            proto::PeerHeartbeatRecorded {
+                attachment: MessageField::some(renewed.clone()),
+                availability: Some(proto::PeerAvailability::PEER_AVAILABILITY_BUSY.into()),
+                active_at: before.active_at.clone(),
+                ..Default::default()
+            }
+            .into(),
+        ),
+    };
+    let mut expected = before.clone();
+    expected.attachment = MessageField::some(renewed);
+    TestCase::<Heartbeat>::new()
+        .given_state(before)
+        .when(heartbeat("old_connector", 1, now, None))
+        .then([event])
+        .then_state(expected);
+}
+
+#[test]
+fn heartbeat_replay_rejects_unknown_observations_or_loss_of_progress() {
+    let start = Utc.with_ymd_and_hms(2026, 11, 2, 12, 0, 0).unwrap();
+    let now = start + chrono::Duration::seconds(2);
+    let mut before = state(start);
+    before.active_at = MessageField::some(timestamp_from_datetime(&start));
+    for mutation in 0..3 {
+        let mut recorded = proto::PeerHeartbeatRecorded {
+            attachment: MessageField::some(attachment(&identity(), "old_connector", 1, now)),
+            availability: Some(proto::PeerAvailability::PEER_AVAILABILITY_BUSY.into()),
+            active_at: before.active_at.clone(),
+            ..Default::default()
+        };
+        match mutation {
+            0 => recorded.availability = Some(buffa::EnumValue::from(91)),
+            1 => recorded.condition = Some(buffa::EnumValue::from(91)),
+            _ => recorded.active_at = MessageField::default(),
+        }
+        assert!(
+            trogon_peer::commands::state::evolve(
+                before.clone(),
+                &proto::PeerEvent {
+                    event: Some(recorded.into())
+                }
+            )
+            .is_err()
+        );
+    }
+}

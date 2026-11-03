@@ -9,6 +9,9 @@ pub struct AttachmentRef {
 
 impl AttachmentRef {
     pub fn new(peer_id: PeerId, connector_id: ConnectorId, generation: u64) -> Result<Self, PeerValueError> {
+        if generation == 0 {
+            return Err(PeerValueError::InvalidGeneration);
+        }
         Ok(Self {
             peer_id,
             connector_id,
