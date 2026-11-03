@@ -337,3 +337,36 @@ async fn heartbeat_renews_then_detach_is_idempotent_and_old_generation_is_fenced
             .is_err()
     );
 }
+
+impl CommandAuthorizer<trogon_peer::Heartbeat> for EnrollmentPolicy {
+    fn authorize(
+        &self,
+        principal: &CommandPrincipal,
+        command: &trogon_peer::Heartbeat,
+    ) -> Result<(), AuthorizationDeniedError> {
+        self.authorize(
+            principal,
+            &trogon_peer_service::PeerAccess::new(
+                command.owner().clone(),
+                command.attachment().peer_id().clone(),
+                trogon_peer_service::PeerOperation::Heartbeat,
+            ),
+        )
+    }
+}
+impl CommandAuthorizer<trogon_peer::Detach> for EnrollmentPolicy {
+    fn authorize(
+        &self,
+        principal: &CommandPrincipal,
+        command: &trogon_peer::Detach,
+    ) -> Result<(), AuthorizationDeniedError> {
+        self.authorize(
+            principal,
+            &trogon_peer_service::PeerAccess::new(
+                command.owner().clone(),
+                command.attachment().peer_id().clone(),
+                trogon_peer_service::PeerOperation::Detach,
+            ),
+        )
+    }
+}
