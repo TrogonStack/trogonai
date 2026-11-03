@@ -3,6 +3,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use clap::Parser;
+use clap::builder::{TypedValueParser, ValueParserFactory};
 
 use super::*;
 
@@ -121,6 +122,18 @@ fn flag_rejection_never_repeats_the_value() {
         err.get(ContextKind::InvalidArg),
         Some(&ContextValue::String("--token <TOKEN>".to_owned()))
     );
+    assert_eq!(err.get(ContextKind::InvalidValue), None);
+}
+
+#[test]
+fn parser_rejection_without_an_arg_never_repeats_the_value() {
+    let parser = <SecretReference as ValueParserFactory>::value_parser();
+    let err = parser
+        .parse_ref(&clap::Command::new("cli"), None, OsStr::new("hunter2"))
+        .unwrap_err();
+
+    assert_eq!(err.kind(), ErrorKind::ValueValidation);
+    assert_eq!(err.get(ContextKind::InvalidArg), None);
     assert_eq!(err.get(ContextKind::InvalidValue), None);
 }
 
