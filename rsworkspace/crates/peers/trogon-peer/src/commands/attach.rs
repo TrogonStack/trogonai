@@ -1,14 +1,17 @@
+use buffa::MessageField;
 use chrono::{DateTime, Utc};
 use trogon_decider::{Decider, Decision, WritePrecondition};
-use trogonai_proto::peers::{state_v1alpha1::PeerState, v1alpha1::PeerEvent};
+use trogonai_proto::convert::timestamp_from_datetime;
+use trogonai_proto::peers::{
+    state_v1alpha1::PeerState,
+    v1alpha1::{self as proto, PeerEvent},
+};
 
 use super::domain::{CollaborationRef, ConnectorId, EnrollmentIdentity, PeerId};
 use super::state::{self, EvolveError};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum AttachError {
-    #[error("peer attachment replacement is not implemented")]
-    NotImplemented,
     #[error("peer communication identity is not enrolled")]
     MissingEnrollment,
     #[error("peer enrollment identity does not match")]
@@ -82,7 +85,65 @@ impl Decider for Attach {
     fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
         state::evolve(state, event)
     }
-    fn decide(_state: &Self::State, _command: &Self) -> Result<Decision<Self>, Self::DecideError> {
-        Err(AttachError::NotImplemented)
+    fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
+        let enrollment = state.enrollment.as_option().ok_or(AttachError::MissingEnrollment)?;
+        if state::parse_enrollment(enrollment)? != command.identity {
+            return Err(AttachError::IdentityMismatch);
+        }
+        if state::required(&enrollment.collaboration_ref, "enrollment.collaboration_ref")?
+            != command.collaboration.as_str()
+        {
+            return Err(AttachError::CollaborationMismatch);
+        }
+        let previous = state
+            .attachment
+            .as_option()
+            .ok_or(EvolveError::MissingField { field: "attachment" })?;
+        state::validate_attachment(enrollment, previous)?;
+        let observed = state::read_time(previous.observed_at.as_option(), "attachment.observed_at")?;
+        let expires = state::read_time(previous.expires_at.as_option(), "attachment.expires_at")?;
+        if command.now < observed {
+            return Err(AttachError::ClockRegression);
+        }
+        if previous.status.and_then(|status| status.as_known())
+            == Some(proto::AttachmentStatus::ATTACHMENT_STATUS_ATTACHED)
+            && command.now < expires
+        {
+            return Err(
+                if previous.attachment.connector_id.as_deref() == Some(command.connector_id.as_str()) {
+                    AttachError::AlreadyAttached
+                } else {
+                    AttachError::InUse
+                },
+            );
+        }
+        let generation = previous
+            .attachment
+            .generation
+            .and_then(|generation| generation.checked_add(1))
+            .ok_or(AttachError::GenerationOverflow)?;
+        let expires_at = command
+            .now
+            .checked_add_signed(chrono::Duration::seconds(10))
+            .filter(|at| (-62_135_596_800..=253_402_300_799).contains(&at.timestamp()))
+            .ok_or(AttachError::LeaseDeadlineOverflow)?;
+        let attachment = proto::PeerAttachment {
+            attachment: MessageField::some(proto::AttachmentRef {
+                peer_id: Some(command.identity.peer_id().to_string()),
+                connector_id: Some(command.connector_id.as_str().to_owned()),
+                generation: Some(generation),
+            }),
+            status: Some(proto::AttachmentStatus::ATTACHMENT_STATUS_ATTACHED.into()),
+            observed_at: MessageField::some(timestamp_from_datetime(&command.now)),
+            expires_at: MessageField::some(timestamp_from_datetime(&expires_at)),
+        };
+        Ok(Decision::event(PeerEvent {
+            event: Some(
+                proto::PeerAttached {
+                    attachment: MessageField::some(attachment),
+                }
+                .into(),
+            ),
+        }))
     }
 }

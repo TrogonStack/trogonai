@@ -4,8 +4,8 @@ use buffa::MessageField;
 use chrono::{DateTime, TimeZone, Utc};
 use trogon_decider::testing::TestCase;
 use trogon_peer::{
-    Attach, AttachError, CallerId, CollaborationRef, ConnectorId, EnrollmentIdentity, InstallationId, NativeSessionId, TenantId,
-    TrustedPeerOwner,
+    Attach, AttachError, CallerId, CollaborationRef, ConnectorId, EnrollmentIdentity, InstallationId, NativeSessionId,
+    TenantId, TrustedPeerOwner,
 };
 use trogonai_proto::convert::timestamp_from_datetime;
 use trogonai_proto::peers::{state_v1alpha1::PeerState, v1alpha1 as proto};
@@ -89,43 +89,95 @@ fn an_expired_attachment_advances_generation_without_replacing_mailbox_history()
         .then_state(expected);
 }
 
-
 fn command(connector: &str, collaboration: &str, now: DateTime<Utc>) -> Attach {
-    Attach::new(identity(), ConnectorId::new(connector).unwrap(), CollaborationRef::new(collaboration).unwrap(), now)
+    Attach::new(
+        identity(),
+        ConnectorId::new(connector).unwrap(),
+        CollaborationRef::new(collaboration).unwrap(),
+        now,
+    )
 }
 
 #[test]
 fn active_attachment_is_idempotent_for_its_owner_and_excludes_other_connectors() {
-    let start=Utc.with_ymd_and_hms(2026,11,2,12,0,0).unwrap();
-    let now=start+chrono::Duration::seconds(2);
-    TestCase::<Attach>::new().given_state(state(start)).when(command("old_connector","collaboration",now)).then_error(AttachError::AlreadyAttached);
-    TestCase::<Attach>::new().given_state(state(start)).when(command("new_connector","collaboration",now)).then_error(AttachError::InUse);
+    let start = Utc.with_ymd_and_hms(2026, 11, 2, 12, 0, 0).unwrap();
+    let now = start + chrono::Duration::seconds(2);
+    TestCase::<Attach>::new()
+        .given_state(state(start))
+        .when(command("old_connector", "collaboration", now))
+        .then_error(AttachError::AlreadyAttached);
+    TestCase::<Attach>::new()
+        .given_state(state(start))
+        .when(command("new_connector", "collaboration", now))
+        .then_error(AttachError::InUse);
 }
 
 #[test]
 fn attachment_cannot_change_immutable_identity_or_collaboration() {
-    let start=Utc.with_ymd_and_hms(2026,11,2,12,0,0).unwrap();
-    let now=start+chrono::Duration::seconds(10);
-    TestCase::<Attach>::new().given_state(state(start)).when(command("new_connector","other",now)).then_error(AttachError::CollaborationMismatch);
-    let other=EnrollmentIdentity::new(TrustedPeerOwner::new(TenantId::new("tenant").unwrap(), CallerId::new("other").unwrap()),InstallationId::new("installation").unwrap(),NativeSessionId::new("session").unwrap());
-    TestCase::<Attach>::new().given_state(state(start)).when(Attach::new(other,ConnectorId::new("new_connector").unwrap(),CollaborationRef::new("collaboration").unwrap(),now)).then_error(AttachError::IdentityMismatch);
-    TestCase::<Attach>::new().given_no_history().when(command("new_connector","collaboration",now)).then_error(AttachError::MissingEnrollment);
+    let start = Utc.with_ymd_and_hms(2026, 11, 2, 12, 0, 0).unwrap();
+    let now = start + chrono::Duration::seconds(10);
+    TestCase::<Attach>::new()
+        .given_state(state(start))
+        .when(command("new_connector", "other", now))
+        .then_error(AttachError::CollaborationMismatch);
+    let other = EnrollmentIdentity::new(
+        TrustedPeerOwner::new(TenantId::new("tenant").unwrap(), CallerId::new("other").unwrap()),
+        InstallationId::new("installation").unwrap(),
+        NativeSessionId::new("session").unwrap(),
+    );
+    TestCase::<Attach>::new()
+        .given_state(state(start))
+        .when(Attach::new(
+            other,
+            ConnectorId::new("new_connector").unwrap(),
+            CollaborationRef::new("collaboration").unwrap(),
+            now,
+        ))
+        .then_error(AttachError::IdentityMismatch);
+    TestCase::<Attach>::new()
+        .given_no_history()
+        .when(command("new_connector", "collaboration", now))
+        .then_error(AttachError::MissingEnrollment);
 }
 
 #[test]
 fn attachment_rejects_clock_regression_and_exhausted_generation() {
-    let start=Utc.with_ymd_and_hms(2026,11,2,12,0,0).unwrap();
-    TestCase::<Attach>::new().given_state(state(start)).when(command("new_connector","collaboration",start-chrono::Duration::seconds(1))).then_error(AttachError::ClockRegression);
-    let mut exhausted=state(start);
-    exhausted.attachment=MessageField::some(attachment(&identity(),"old_connector",u64::MAX,start));
-    TestCase::<Attach>::new().given_state(exhausted).when(command("new_connector","collaboration",start+chrono::Duration::seconds(10))).then_error(AttachError::GenerationOverflow);
+    let start = Utc.with_ymd_and_hms(2026, 11, 2, 12, 0, 0).unwrap();
+    TestCase::<Attach>::new()
+        .given_state(state(start))
+        .when(command(
+            "new_connector",
+            "collaboration",
+            start - chrono::Duration::seconds(1),
+        ))
+        .then_error(AttachError::ClockRegression);
+    let mut exhausted = state(start);
+    exhausted.attachment = MessageField::some(attachment(&identity(), "old_connector", u64::MAX, start));
+    TestCase::<Attach>::new()
+        .given_state(exhausted)
+        .when(command(
+            "new_connector",
+            "collaboration",
+            start + chrono::Duration::seconds(10),
+        ))
+        .then_error(AttachError::GenerationOverflow);
 }
 
 #[test]
 fn replacement_replay_rejects_gaps_and_overlap_with_a_live_attachment() {
-    let start=Utc.with_ymd_and_hms(2026,11,2,12,0,0).unwrap();
-    for (generation,at) in [(3,start+chrono::Duration::seconds(10)),(2,start+chrono::Duration::seconds(9))] {
-        let event=proto::PeerEvent { event: Some(proto::PeerAttached { attachment: MessageField::some(attachment(&identity(),"new_connector",generation,at)) }.into()) };
-        assert!(trogon_peer::commands::state::evolve(state(start),&event).is_err());
+    let start = Utc.with_ymd_and_hms(2026, 11, 2, 12, 0, 0).unwrap();
+    for (generation, at) in [
+        (3, start + chrono::Duration::seconds(10)),
+        (2, start + chrono::Duration::seconds(9)),
+    ] {
+        let event = proto::PeerEvent {
+            event: Some(
+                proto::PeerAttached {
+                    attachment: MessageField::some(attachment(&identity(), "new_connector", generation, at)),
+                }
+                .into(),
+            ),
+        };
+        assert!(trogon_peer::commands::state::evolve(state(start), &event).is_err());
     }
 }
