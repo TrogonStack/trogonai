@@ -182,10 +182,12 @@ async fn prepare(config: &NatsConfig) -> Result<ConnectOptions, ConnectError> {
         return Err(ConnectError::NoServers);
     }
     let tls = tls(config)?;
+    let auth = config.auth.description();
+    let transport = tls.description();
     info!(
         servers = ?config.servers,
-        auth = %config.auth.description(),
-        tls = %tls.description(),
+        auth,
+        tls = transport,
         "Connecting to NATS"
     );
     if *tls == NatsTls::Disabled {
@@ -199,20 +201,17 @@ async fn prepare(config: &NatsConfig) -> Result<ConnectOptions, ConnectError> {
 }
 
 fn connected(config: &NatsConfig, result: Result<Client, async_nats::ConnectError>) -> Result<Client, ConnectError> {
+    let auth = config.auth.description();
     match result {
         Ok(client) => {
-            info!(
-                servers = ?config.servers,
-                auth = %config.auth.description(),
-                "Connected to NATS"
-            );
+            info!(servers = ?config.servers, auth, "Connected to NATS");
             Ok(client)
         }
         Err(e) => {
             warn!(
                 error = %e,
                 servers = ?config.servers,
-                auth = %config.auth.description(),
+                auth,
                 "Failed to connect to NATS"
             );
             Err(ConnectError::ConnectionFailed {
