@@ -320,8 +320,8 @@ pub(super) fn eligible_inbox(
         if entry.intake_ordinal.unwrap_or(0) == 0 {
             return Err(EvolveError::InvalidMessageTransition);
         }
-        let accepted = state::read_time(entry.message.accepted_at.as_option(), "accepted_at")?;
-        let expires = state::read_time(entry.message.expires_at.as_option(), "expires_at")?;
+        let accepted = state_values::read_time(entry.message.accepted_at.as_option(), "accepted_at")?;
+        let expires = state_values::read_time(entry.message.expires_at.as_option(), "expires_at")?;
         if !entry.disposition.is_set() && now >= accepted && now < expires {
             eligible.push(entry);
         }
@@ -349,8 +349,11 @@ pub(super) fn fold_prepared(state: &mut PeerState, event: &proto::PeerBatchPrepa
         .batch
         .as_option()
         .ok_or(EvolveError::MissingField { field: "batch" })?;
-    value(BatchId::new(state::required(&batch.batch_id, "batch_id")?), "batch_id")?;
-    let now = state::read_time(batch.prepared_at.as_option(), "prepared_at")?;
+    value(
+        BatchId::new(state_values::required(&batch.batch_id, "batch_id")?),
+        "batch_id",
+    )?;
+    let now = state_values::read_time(batch.prepared_at.as_option(), "prepared_at")?;
     if batch.acknowledged_at.is_set()
         || state
             .batches
@@ -361,12 +364,12 @@ pub(super) fn fold_prepared(state: &mut PeerState, event: &proto::PeerBatchPrepa
         return Err(EvolveError::InvalidMessageTransition);
     }
     let enrollment = state.enrollment.as_option().ok_or(EvolveError::MissingEnrollment)?;
-    state::parse_enrollment(enrollment)?;
+    state_values::parse_enrollment(enrollment)?;
     let attachment = state.attachment.as_option().ok_or(EvolveError::InvalidAttachment)?;
-    state::validate_attachment(enrollment, attachment)?;
+    state_values::validate_attachment(enrollment, attachment)?;
     if attachment.status.and_then(|s| s.as_known()) != Some(proto::AttachmentStatus::ATTACHMENT_STATUS_ATTACHED)
-        || now < state::read_time(attachment.observed_at.as_option(), "observed_at")?
-        || now >= state::read_time(attachment.expires_at.as_option(), "attachment.expires_at")?
+        || now < state_values::read_time(attachment.observed_at.as_option(), "observed_at")?
+        || now >= state_values::read_time(attachment.expires_at.as_option(), "attachment.expires_at")?
     {
         return Err(EvolveError::InvalidMessageTransition);
     }
