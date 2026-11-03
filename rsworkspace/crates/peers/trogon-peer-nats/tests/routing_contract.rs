@@ -162,3 +162,23 @@ fn connector_grants_cannot_cross_configured_tenant() {
         Err(PeerIngressError::TenantMismatch)
     );
 }
+
+#[test]
+fn composed_subjects_cannot_exceed_the_routing_budget() {
+    let owner = principal(&"t".repeat(128), &"c".repeat(128));
+    let ingress = PeerIngress::new(PeerAccount::SharedFixture {
+        tenant: owner.tenant().clone(),
+    });
+    let route = PeerRoute::new(owner.clone(), PeerMethod::Send);
+    let oversized = format!("{}.peer.v1.{}.PeerService.Send", owner.tenant().as_str(), owner.caller().as_str());
+    assert!(ingress.subject(&route).is_err());
+    assert!(ingress.parse(&oversized).is_err());
+    let connection = PeerConnectionId::new("connection_1").expect("valid connection");
+    assert!(PeerPermissions::for_connection(ingress.account(), &owner, &connection).is_err());
+
+    let tenant_account = PeerAccount::TenantAccount { tenant: owner.tenant().clone() };
+    assert!(PeerPermissions::for_connection(&tenant_account, &owner, &connection).is_err());
+    let short_owner = principal("tenant_a", "caller_a");
+    let oversized_reply = format!("_INBOX.tenant_a.caller_a.{}.{}", "c".repeat(128), "n".repeat(128));
+    assert!(PeerReplySubject::parse_for(&short_owner, &oversized_reply).is_err());
+}
