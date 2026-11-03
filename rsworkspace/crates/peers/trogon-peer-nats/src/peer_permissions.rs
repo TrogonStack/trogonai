@@ -1,3 +1,4 @@
+use crate::constants::MAX_SUBJECT_BYTES;
 use crate::{PeerAccount, PeerConnectionId, PeerIngress, PeerIngressError, PeerMethod, PeerPrincipal, PeerRoute};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,14 +18,18 @@ impl PeerPermissions {
             .into_iter()
             .map(|method| ingress.subject(&PeerRoute::new(principal.clone(), method)))
             .collect::<Result<_, _>>()?;
+        let reply_filter = format!(
+            "_INBOX.{}.{}.{}.>",
+            principal.tenant().as_str(),
+            principal.caller().as_str(),
+            connection.as_str(),
+        );
+        if reply_filter.len() > MAX_SUBJECT_BYTES {
+            return Err(PeerIngressError::SubjectTooLong);
+        }
         Ok(Self {
             publish_allow,
-            subscribe_allow: vec![format!(
-                "_INBOX.{}.{}.{}.>",
-                principal.tenant().as_str(),
-                principal.caller().as_str(),
-                connection.as_str(),
-            )],
+            subscribe_allow: vec![reply_filter],
         })
     }
 

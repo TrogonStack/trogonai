@@ -1,3 +1,4 @@
+use crate::constants::MAX_SUBJECT_BYTES;
 use crate::routing_token::RoutingToken;
 use crate::{PeerPrincipal, RoutingTokenError};
 
@@ -6,6 +7,8 @@ pub struct PeerReplySubject(String);
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum PeerReplySubjectError {
+    #[error("peer response destination exceeds 256 bytes")]
+    SubjectTooLong,
     #[error("peer response destination is outside the authenticated requester inbox")]
     OutsideRequesterInbox,
     #[error("peer response destination contains an invalid token: {0}")]
@@ -14,6 +17,9 @@ pub enum PeerReplySubjectError {
 
 impl PeerReplySubject {
     pub fn parse_for(principal: &PeerPrincipal, subject: &str) -> Result<Self, PeerReplySubjectError> {
+        if subject.len() > MAX_SUBJECT_BYTES {
+            return Err(PeerReplySubjectError::SubjectTooLong);
+        }
         let parts: Vec<_> = subject.split('.').collect();
         let ["_INBOX", tenant, caller, connection, nonce] = parts.as_slice() else {
             return Err(PeerReplySubjectError::OutsideRequesterInbox);

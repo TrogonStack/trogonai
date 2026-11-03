@@ -1,3 +1,4 @@
+use crate::constants::MAX_SUBJECT_BYTES;
 use crate::{PeerAccount, PeerCaller, PeerMethod, PeerPrincipal, PeerRoute, PeerTenant, RoutingTokenError};
 
 #[derive(Debug, Clone)]
@@ -7,6 +8,8 @@ pub struct PeerIngress {
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum PeerIngressError {
+    #[error("peer routing subject exceeds 256 bytes")]
+    SubjectTooLong,
     #[error("peer request subject is outside the configured routing contract")]
     InvalidSubject,
     #[error("peer request tenant differs from the configured account")]
@@ -27,6 +30,9 @@ impl PeerIngress {
     }
 
     pub fn parse(&self, subject: &str) -> Result<PeerRoute, PeerIngressError> {
+        if subject.len() > MAX_SUBJECT_BYTES {
+            return Err(PeerIngressError::SubjectTooLong);
+        }
         let parts: Vec<_> = subject.split('.').collect();
         let (tenant, caller, terminal) = match (&self.account, parts.as_slice()) {
             (PeerAccount::SharedFixture { .. }, [tenant, "peer", "v1", caller, "PeerService", terminal]) => {
@@ -52,11 +58,15 @@ impl PeerIngress {
         }
         let caller = route.principal().caller().as_str();
         let terminal = route.method().as_str();
-        Ok(match &self.account {
+        let subject = match &self.account {
             PeerAccount::SharedFixture { tenant } => {
                 format!("{}.peer.v1.{caller}.PeerService.{terminal}", tenant.as_str())
             }
             PeerAccount::TenantAccount { .. } => format!("peer.v1.{caller}.PeerService.{terminal}"),
-        })
+        };
+        if subject.len() > MAX_SUBJECT_BYTES {
+            return Err(PeerIngressError::SubjectTooLong);
+        }
+        Ok(subject)
     }
 }
