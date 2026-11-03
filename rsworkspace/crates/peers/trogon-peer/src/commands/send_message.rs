@@ -60,14 +60,7 @@ impl Decider for SendMessage {
     fn decide(state: &PeerState, command: &Self) -> Result<Decision<Self>, MessageError> {
         super::heartbeat::guard_live_attachment(state, &command.owner, &command.attachment, command.now)?;
         let enrollment = state.enrollment.as_option().ok_or(EvolveError::MissingEnrollment)?;
-        if enrollment.collaboration_ref.as_deref() != Some(command.collaboration.as_str()) {
-            return Err(MessageError::CollaborationMismatch);
-        }
-        let expires = command
-            .now
-            .checked_add_signed(chrono::Duration::hours(1))
-            .ok_or(EvolveError::InvalidMessageTransition)?;
-        let message = trogonai_proto::peers::v1alpha1::MessageMetadata {
+        let mut message = trogonai_proto::peers::v1alpha1::MessageMetadata {
             message_id: Some(command.message_id.as_str().to_owned()),
             sender_peer_id: Some(command.attachment.peer_id().to_string()),
             recipient_peer_id: Some(command.recipient.to_string()),
@@ -76,10 +69,8 @@ impl Decider for SendMessage {
             content_size_bytes: Some(command.content.size),
             content_digest: Some(command.content.digest.clone()),
             reply_to_message_id: command.reply_to.as_ref().map(|id| id.as_str().to_owned()),
-            accepted_at: buffa::MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&command.now)),
-            expires_at: buffa::MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&expires)),
+            ..Default::default()
         };
-        super::message_rules::metadata(&message)?;
         let digest = super::message_rules::semantic_digest(&message);
         for old in &state.outbox {
             super::message_rules::outbox_entry(old)?;
@@ -91,6 +82,16 @@ impl Decider for SendMessage {
                 };
             }
         }
+        if enrollment.collaboration_ref.as_deref() != Some(command.collaboration.as_str()) {
+            return Err(MessageError::CollaborationMismatch);
+        }
+        let expires = command
+            .now
+            .checked_add_signed(chrono::Duration::hours(1))
+            .ok_or(EvolveError::InvalidMessageTransition)?;
+        message.accepted_at = buffa::MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&command.now));
+        message.expires_at = buffa::MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&expires));
+        super::message_rules::metadata(&message)?;
         if state
             .outbox
             .iter()
