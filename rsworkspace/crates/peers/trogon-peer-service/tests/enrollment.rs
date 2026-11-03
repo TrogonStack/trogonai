@@ -1,6 +1,8 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::{future::Future, pin::Pin};
+type ReadInterleave = (usize, Pin<Box<dyn Future<Output = ()> + Send>>);
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, TimeZone, Utc};
@@ -22,13 +24,25 @@ struct ObservedStore {
     inner: InMemoryStore,
     reads: Arc<AtomicUsize>,
     appends: Arc<AtomicUsize>,
+    before_read: Arc<Mutex<Option<ReadInterleave>>>,
 }
 
 impl StreamRead<PeerId> for ObservedStore {
     type Error = <InMemoryStore as StreamRead<str>>::Error;
 
     async fn read_stream(&self, request: ReadStreamRequest<'_, PeerId>) -> Result<ReadStreamResponse, Self::Error> {
-        self.reads.fetch_add(1, Ordering::SeqCst);
+        let ordinal = self.reads.fetch_add(1, Ordering::SeqCst) + 1;
+        let action = {
+            let mut pending = self.before_read.lock().unwrap();
+            if pending.as_ref().is_some_and(|(at, _)| *at == ordinal) {
+                pending.take().map(|(_, action)| action)
+            } else {
+                None
+            }
+        };
+        if let Some(action) = action {
+            action.await;
+        }
         self.inner
             .read_stream(ReadStreamRequest {
                 stream_id: request.stream_id.as_str(),
@@ -390,4 +404,36 @@ async fn second_live_connector_is_refused_and_different_native_identity_gets_a_n
     assert_ne!(first.peer_id, different.peer_id);
     assert_eq!(first.attachment.attachment.generation, Some(1));
     assert_eq!(different.attachment.attachment.generation, Some(1));
+}
+
+#[tokio::test]
+async fn resume_does_not_return_a_competing_connector_that_won_during_the_response_read() {
+    let store = ObservedStore::default();
+    let service = PeerService::new(store.clone(), policy(), FixedClock(now()));
+    let first = service.enroll(&owner(), request("collaboration_alpha")).await.unwrap();
+    let other = ObservedStore {
+        inner: store.inner.clone(),
+        ..Default::default()
+    };
+    let action = async move {
+        let competing = PeerService::new(other, policy(), FixedClock(now()));
+        competing
+            .detach(
+                &owner(),
+                proto::DetachRequest {
+                    attachment: first.attachment.attachment.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        let mut request = request("collaboration_alpha");
+        request.connector_id = Some("competing_connector".into());
+        competing.enroll(&owner(), request).await.unwrap();
+    };
+    *store.before_read.lock().unwrap() = Some((store.reads.load(Ordering::SeqCst) + 3, Box::pin(action)));
+    let resumed = service.enroll(&owner(), request("collaboration_alpha")).await;
+    assert!(
+        resumed.is_err(),
+        "resume must refuse a connector that changed after the decision: {resumed:?}"
+    );
 }
