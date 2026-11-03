@@ -7,7 +7,10 @@ use buffa::MessageField;
 use rmcp::ServiceExt;
 use rmcp::model::{CallToolRequestParams, CallToolResult};
 use serde_json::{Value, json};
-use trogon_peer_mcp::{ConnectorConfigInput, EnrollPeer, PeerMcp, PeerMcpError, PreparePeerBatch};
+use trogon_peer_mcp::{
+    AcknowledgePeerBatch, ConnectorConfigInput, EnrollPeer, PeerMcp, PeerMcpError, PreparePeerBatch,
+    ReadPeerMessageStatus, ReadPeerRoster, SendPeerMessage,
+};
 use trogonai_proto::peers::v1alpha1 as v1;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -20,6 +23,45 @@ enum ObservedCall {
 struct Backend {
     calls: Arc<Mutex<Vec<ObservedCall>>>,
     response: v1::PrepareBatchResponse,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("operation is not configured in the prompt-hook fixture")]
+struct UnconfiguredOperation;
+
+impl ReadPeerRoster for Backend {
+    type Error = UnconfiguredOperation;
+
+    async fn roster(&self, _request: v1::RosterRequest) -> Result<v1::RosterResponse, Self::Error> {
+        Err(UnconfiguredOperation)
+    }
+}
+
+impl SendPeerMessage for Backend {
+    type Error = UnconfiguredOperation;
+
+    async fn send(&self, _request: v1::SendRequest) -> Result<v1::SendResponse, Self::Error> {
+        Err(UnconfiguredOperation)
+    }
+}
+
+impl ReadPeerMessageStatus for Backend {
+    type Error = UnconfiguredOperation;
+
+    async fn status(&self, _request: v1::StatusRequest) -> Result<v1::StatusResponse, Self::Error> {
+        Err(UnconfiguredOperation)
+    }
+}
+
+impl AcknowledgePeerBatch for Backend {
+    type Error = UnconfiguredOperation;
+
+    async fn acknowledge_batch(
+        &self,
+        _request: v1::AcknowledgeBatchRequest,
+    ) -> Result<v1::AcknowledgeBatchResponse, Self::Error> {
+        Err(UnconfiguredOperation)
+    }
 }
 
 fn sender_peer_id() -> String {

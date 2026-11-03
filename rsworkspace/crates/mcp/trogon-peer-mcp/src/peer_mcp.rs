@@ -18,7 +18,10 @@ use crate::prompt_hook_event::PromptHookEvent;
 use crate::prompt_hook_input::PromptHookInput;
 use crate::prompt_hook_output::PromptHookOutput;
 use crate::prompt_tool::prompt_tool;
-use crate::{ConnectorConfigInput, EnrollPeer, PeerMcpError, PreparePeerBatch};
+use crate::{
+    AcknowledgePeerBatch, ConnectorConfigInput, EnrollPeer, PeerMcpError, PreparePeerBatch, ReadPeerMessageStatus,
+    ReadPeerRoster, SendPeerMessage,
+};
 
 pub struct PeerMcp<B> {
     backend: B,
@@ -32,7 +35,10 @@ impl<B> fmt::Debug for PeerMcp<B> {
     }
 }
 
-impl<B: EnrollPeer + PreparePeerBatch> PeerMcp<B> {
+impl<B> PeerMcp<B>
+where
+    B: EnrollPeer + PreparePeerBatch + ReadPeerRoster + SendPeerMessage + ReadPeerMessageStatus + AcknowledgePeerBatch,
+{
     pub fn new(backend: B, config: ConnectorConfigInput) -> Result<Self, PeerMcpError> {
         let config = ConnectorConfig::try_from(config).map_err(PeerMcpError::InvalidConfig)?;
         Ok(Self {
@@ -139,7 +145,10 @@ fn contract_error() -> PeerMcpError {
     PeerMcpError::InvalidBatch(PeerContextError::ContractViolation)
 }
 
-impl<B: EnrollPeer + PreparePeerBatch> ServerHandler for PeerMcp<B> {
+impl<B> ServerHandler for PeerMcp<B>
+where
+    B: EnrollPeer + PreparePeerBatch + ReadPeerRoster + SendPeerMessage + ReadPeerMessageStatus + AcknowledgePeerBatch,
+{
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
     }

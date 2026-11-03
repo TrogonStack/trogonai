@@ -11,7 +11,9 @@ mod prompt_hook_output;
 mod prompt_id;
 mod prompt_tool;
 
-pub use backend::{EnrollPeer, PreparePeerBatch};
+pub use backend::{
+    AcknowledgePeerBatch, EnrollPeer, PreparePeerBatch, ReadPeerMessageStatus, ReadPeerRoster, SendPeerMessage,
+};
 pub use connector_config_input::ConnectorConfigInput;
 pub use peer_mcp::PeerMcp;
 pub use peer_mcp_error::PeerMcpError;

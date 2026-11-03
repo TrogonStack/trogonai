@@ -12,6 +12,10 @@ pub enum PeerMcpError {
     InvalidConfig(#[source] trogon_peer::PeerValueError),
     #[error("native hook identity is invalid")]
     InvalidHostIdentity(#[source] trogon_peer::PeerValueError),
+    #[error("peer model operation input is invalid")]
+    InvalidModelInput(#[source] trogon_peer::PeerValueError),
+    #[error("peer backend returned invalid operation metadata")]
+    InvalidMetadata,
     #[error("peer backend returned an invalid enrollment")]
     InvalidEnrollment,
     #[error("peer backend returned an invalid enrollment identity")]
@@ -26,6 +30,8 @@ pub enum PeerMcpError {
     Enroll(#[source] Box<dyn std::error::Error + Send + Sync>),
     #[error("peer batch preparation failed")]
     Prepare(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("peer batch acknowledgment failed")]
+    Acknowledge(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
 impl PeerMcpError {
@@ -35,7 +41,10 @@ impl PeerMcpError {
             Self::NativeSessionChanged => {
                 "This connector belongs to another native session; reconnect it for this session."
             }
-            Self::InvalidArguments(_) | Self::InvalidHostIdentity(_) => "Peer tool arguments are invalid.",
+            Self::InvalidArguments(_) | Self::InvalidHostIdentity(_) | Self::InvalidModelInput(_) => {
+                "Peer tool arguments are invalid."
+            }
+            Self::InvalidMetadata => "Peer service returned invalid operation metadata.",
             Self::InvalidBatch(_) => "Peer service returned an invalid delivery assignment.",
             Self::InvalidConfig(_) => "Peer connector configuration is invalid.",
             Self::InvalidEnrollment | Self::InvalidEnrollmentIdentity(_) => {
@@ -45,7 +54,9 @@ impl PeerMcpError {
             Self::RetryContentUnavailable => {
                 "Peer batch retry content is unavailable; its original preparation record is retained."
             }
-            Self::Enroll(_) | Self::Prepare(_) => "Peer service is unavailable; pending delivery remains queued.",
+            Self::Enroll(_) | Self::Prepare(_) | Self::Acknowledge(_) => {
+                "Peer service is unavailable; pending delivery remains queued."
+            }
             Self::Encode(_) => "Peer hook output could not be encoded.",
         }
     }
