@@ -1,4 +1,4 @@
-#![allow(dead_code)]
+#![allow(dead_code, clippy::panic)]
 use chrono::{DateTime, TimeZone, Utc};
 use trogon_decider::{Decider, DecisionError, evaluate_decision};
 use trogon_peer::*;

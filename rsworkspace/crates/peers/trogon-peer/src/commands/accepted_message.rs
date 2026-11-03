@@ -1,5 +1,5 @@
-use super::{MessageId, PeerId, TenantId};
-use crate::MessageError;
+use super::domain::{MessageId, PeerId, TenantId};
+use super::{evolve_error::EvolveError, message_error::MessageError, message_rules, state_values};
 use trogonai_proto::peers::{state_v1alpha1::PeerState, v1alpha1 as proto};
 #[derive(Debug, Clone)]
 pub struct AcceptedMessage {
@@ -9,17 +9,14 @@ pub struct AcceptedMessage {
 }
 impl AcceptedMessage {
     pub fn from_sender_history(state: &PeerState, id: &MessageId) -> Result<Self, MessageError> {
-        let enrollment = state
-            .enrollment
-            .as_option()
-            .ok_or(super::super::EvolveError::MissingEnrollment)?;
-        let identity = super::super::state::parse_enrollment(enrollment)?;
+        let enrollment = state.enrollment.as_option().ok_or(EvolveError::MissingEnrollment)?;
+        let identity = state_values::parse_enrollment(enrollment)?;
         let entry = state
             .outbox
             .iter()
             .find(|entry| entry.message.message_id.as_deref() == Some(id.as_str()))
             .ok_or(MessageError::InvalidTransition)?;
-        super::super::message_rules::outbox_entry(entry)?;
+        message_rules::outbox_entry(entry)?;
         if entry.message.sender_peer_id.as_deref() != Some(identity.peer_id().as_str())
             || entry.message.collaboration_ref != enrollment.collaboration_ref
         {

@@ -1,3 +1,4 @@
+use super::accepted_message::AcceptedMessage;
 use super::domain::*;
 use super::{EvolveError, MessageError, state};
 use chrono::{DateTime, Utc};
@@ -35,15 +36,14 @@ impl Decider for DisposeMessage {
         state::evolve(state, event)
     }
     fn decide(state: &PeerState, command: &Self) -> Result<Decision<Self>, MessageError> {
-        super::message_rules::recipient_evidence(state, &command.evidence, command.now)?;
+        super::intake_guard::recipient_evidence(state, &command.evidence, command.now)?;
         if let Some(entry) = state
             .inbox
             .iter()
             .find(|e| e.message.message_id == command.evidence.message.message_id)
+            && entry.message.as_option() != Some(&command.evidence.message)
         {
-            if entry.message.as_option() != Some(&command.evidence.message) {
-                return Err(MessageError::Conflict);
-            }
+            return Err(MessageError::Conflict);
         }
         if let Some(receipt) = state
             .dispositions

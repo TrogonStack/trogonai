@@ -132,48 +132,6 @@ pub(super) fn fold_accepted(state: &mut PeerState, event: &proto::PeerMessageAcc
     Ok(())
 }
 
-pub(super) fn recipient_evidence(
-    state: &PeerState,
-    evidence: &AcceptedMessage,
-    now: chrono::DateTime<chrono::Utc>,
-) -> Result<(), super::MessageError> {
-    let enrollment = state.enrollment.as_option().ok_or(EvolveError::MissingEnrollment)?;
-    let identity = state::parse_enrollment(enrollment)?;
-    if identity.peer_id() != &evidence.recipient {
-        return Err(super::MessageError::RecipientMismatch);
-    }
-    if identity.owner().tenant() != &evidence.tenant {
-        return Err(super::MessageError::TenantMismatch);
-    }
-    if enrollment.collaboration_ref != evidence.message.collaboration_ref {
-        return Err(super::MessageError::CollaborationMismatch);
-    }
-    let accepted = state::read_time(evidence.message.accepted_at.as_option(), "accepted_at")?;
-    if now < accepted || !(-62_135_596_800..=253_402_300_799).contains(&now.timestamp()) {
-        return Err(super::MessageError::InvalidTransition);
-    }
-    Ok(())
-}
-pub(super) fn prior_intake(state: &PeerState, evidence: &AcceptedMessage) -> Result<(), super::MessageError> {
-    let prior = state
-        .inbox
-        .iter()
-        .find(|e| e.message.message_id == evidence.message.message_id);
-    if prior.is_some_and(|e| e.message.as_option() != Some(&evidence.message)) {
-        return Err(super::MessageError::Conflict);
-    }
-    if let Some(receipt) = state
-        .dispositions
-        .iter()
-        .find(|r| r.message_id == evidence.message.message_id)
-    {
-        return Err(super::MessageError::AlreadyDisposed(Box::new(receipt.clone())));
-    }
-    if let Some(entry) = prior {
-        return Err(super::MessageError::AlreadyIntaken(Box::new(entry.clone())));
-    }
-    Ok(())
-}
 pub(super) fn pending_inbox(state: &PeerState) -> Result<(usize, u64), EvolveError> {
     let mut count = 0;
     let mut bytes = 0;
@@ -215,11 +173,11 @@ pub(super) fn make_receipt(
 }
 pub(super) fn validate_receipt(receipt: &proto::RecipientReceipt) -> Result<proto::PreparationOutcome, EvolveError> {
     value(
-        MessageId::new(state::required(&receipt.message_id, "receipt.message_id")?),
+        MessageId::new(state_values::required(&receipt.message_id, "receipt.message_id")?),
         "receipt.message_id",
     )?;
     value(
-        PeerId::parse(state::required(
+        PeerId::parse(state_values::required(
             &receipt.recipient_peer_id,
             "receipt.recipient_peer_id",
         )?),
@@ -228,7 +186,7 @@ pub(super) fn validate_receipt(receipt: &proto::RecipientReceipt) -> Result<prot
     if receipt.recipient_revision.unwrap_or(0) == 0 {
         return Err(EvolveError::InvalidMessageTransition);
     }
-    state::read_time(receipt.decided_at.as_option(), "receipt.decided_at")?;
+    state_values::read_time(receipt.decided_at.as_option(), "receipt.decided_at")?;
     let outcome = receipt
         .outcome
         .and_then(|o| o.as_known())
@@ -236,7 +194,7 @@ pub(super) fn validate_receipt(receipt: &proto::RecipientReceipt) -> Result<prot
     match outcome {
         proto::PreparationOutcome::PREPARATION_OUTCOME_BATCH_PREPARED => {
             value(
-                BatchId::new(state::required(&receipt.batch_id, "receipt.batch_id")?),
+                BatchId::new(state_values::required(&receipt.batch_id, "receipt.batch_id")?),
                 "receipt.batch_id",
             )?;
         }
@@ -249,7 +207,7 @@ pub(super) fn validate_receipt(receipt: &proto::RecipientReceipt) -> Result<prot
 }
 pub(super) fn fold_intake(state: &mut PeerState, event: &proto::PeerMessageIntakeRecorded) -> Result<(), EvolveError> {
     let enrollment = state.enrollment.as_option().ok_or(EvolveError::MissingEnrollment)?;
-    state::parse_enrollment(enrollment)?;
+    state_values::parse_enrollment(enrollment)?;
     let entry = event
         .entry
         .as_option()
@@ -284,7 +242,7 @@ pub(super) fn fold_intake(state: &mut PeerState, event: &proto::PeerMessageIntak
 pub(super) fn fold_receipt(state: &mut PeerState, receipt: &proto::RecipientReceipt) -> Result<(), EvolveError> {
     let outcome = validate_receipt(receipt)?;
     let enrollment = state.enrollment.as_option().ok_or(EvolveError::MissingEnrollment)?;
-    state::parse_enrollment(enrollment)?;
+    state_values::parse_enrollment(enrollment)?;
     let next = u64::try_from(state.dispositions.len())
         .ok()
         .and_then(|n| n.checked_add(1));
@@ -302,9 +260,9 @@ pub(super) fn fold_receipt(state: &mut PeerState, receipt: &proto::RecipientRece
         if entry.disposition.is_set() {
             return Err(EvolveError::InvalidMessageTransition);
         }
-        let at = state::read_time(receipt.decided_at.as_option(), "receipt.decided_at")?;
-        let accepted = state::read_time(entry.message.accepted_at.as_option(), "accepted_at")?;
-        let expires = state::read_time(entry.message.expires_at.as_option(), "expires_at")?;
+        let at = state_values::read_time(receipt.decided_at.as_option(), "receipt.decided_at")?;
+        let accepted = state_values::read_time(entry.message.accepted_at.as_option(), "accepted_at")?;
+        let expires = state_values::read_time(entry.message.expires_at.as_option(), "expires_at")?;
         if at < accepted
             || (outcome == proto::PreparationOutcome::PREPARATION_OUTCOME_EXPIRED && at < expires)
             || (outcome == proto::PreparationOutcome::PREPARATION_OUTCOME_BATCH_PREPARED && at >= expires)

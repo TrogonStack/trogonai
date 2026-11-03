@@ -1,3 +1,4 @@
+use super::accepted_message::AcceptedMessage;
 use super::domain::*;
 use super::{EvolveError, MessageError, state};
 use chrono::{DateTime, Utc};
@@ -30,8 +31,8 @@ impl Decider for IntakeMessage {
         state::evolve(state, event)
     }
     fn decide(state: &PeerState, command: &Self) -> Result<Decision<Self>, MessageError> {
-        super::message_rules::recipient_evidence(state, &command.evidence, command.now)?;
-        super::message_rules::prior_intake(state, &command.evidence)?;
+        super::intake_guard::recipient_evidence(state, &command.evidence, command.now)?;
+        super::intake_guard::prior_intake(state, &command.evidence)?;
         let expires = state::read_time(command.evidence.message.expires_at.as_option(), "expires_at")?;
         if command.now >= expires {
             return Err(MessageError::RequiresDisposition);
