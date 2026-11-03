@@ -6,8 +6,28 @@ use super::domain::{CollaborationRef, ConnectorId, EnrollmentIdentity, PeerId};
 use super::state::{self, EvolveError};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("peer attachment replacement is not implemented")]
-pub struct AttachError;
+pub enum AttachError {
+    #[error("peer attachment replacement is not implemented")]
+    NotImplemented,
+    #[error("peer communication identity is not enrolled")]
+    MissingEnrollment,
+    #[error("peer enrollment identity does not match")]
+    IdentityMismatch,
+    #[error("collaboration reference cannot change for an enrolled identity")]
+    CollaborationMismatch,
+    #[error("the same connector is already attached")]
+    AlreadyAttached,
+    #[error("another connector holds the active attachment")]
+    InUse,
+    #[error("service time precedes the last attachment observation")]
+    ClockRegression,
+    #[error("attachment generation cannot advance")]
+    GenerationOverflow,
+    #[error("attachment deadline is outside the supported timestamp range")]
+    LeaseDeadlineOverflow,
+    #[error("peer attachment state is invalid: {0}")]
+    InvalidState(#[from] EvolveError),
+}
 
 #[derive(Debug, Clone)]
 pub struct Attach {
@@ -63,6 +83,6 @@ impl Decider for Attach {
         state::evolve(state, event)
     }
     fn decide(_state: &Self::State, _command: &Self) -> Result<Decision<Self>, Self::DecideError> {
-        Err(AttachError)
+        Err(AttachError::NotImplemented)
     }
 }
