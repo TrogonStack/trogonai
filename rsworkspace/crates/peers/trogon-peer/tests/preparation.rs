@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used)]
 mod support;
 use support::*;
-use trogon_decider::{Decider, WritePrecondition, evaluate_decision};
+use trogon_decider::{Decider, WritePrecondition, evaluate_decision, testing::TestCase};
 use trogon_peer::*;
 use trogonai_proto::peers::{PeerEventCase, v1alpha1 as proto};
 
@@ -147,7 +147,6 @@ fn malformed_prepared_batch_cannot_rewrite_winners() {
 
 #[test]
 fn renderer_plan_and_command_binding_match_the_persisted_batch() {
-    use trogon_decider::testing::TestCase;
     let command = prepare(&[3, 1], 73, 3);
     assert_eq!(command.owner(), identity("recipient").owner());
     assert_eq!(command.attachment(), &reference("recipient", 1));

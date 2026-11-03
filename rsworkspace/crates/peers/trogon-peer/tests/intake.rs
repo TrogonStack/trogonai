@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used)]
 mod support;
 use support::*;
+use trogon_decider::{Decider, testing::TestCase};
 use trogon_peer::*;
 use trogonai_proto::peers::v1alpha1 as proto;
 
@@ -138,7 +139,6 @@ fn malformed_intake_and_receipt_history_is_refused() {
 
 #[test]
 fn intake_binding_uses_the_recipient_from_trusted_sender_history() {
-    use trogon_decider::{Decider, testing::TestCase};
     let command = intake(0, 17);
     assert_eq!(command.evidence().tenant(), identity("sender").owner().tenant());
     assert_eq!(command.evidence().metadata().content_size_bytes, Some(17));
@@ -211,7 +211,6 @@ fn intake_requires_valid_service_time_after_acceptance_and_consistent_sender_his
 
 #[test]
 fn disposal_binding_cannot_override_different_metadata_already_in_the_inbox() {
-    use trogon_decider::{Decider, testing::TestCase};
     let command = DisposeMessage::new(evidence(0, 2), TerminalDisposition::Unavailable, time(3));
     assert_eq!(command.evidence().metadata().content_size_bytes, Some(2));
     assert_eq!(command.disposition(), TerminalDisposition::Unavailable);

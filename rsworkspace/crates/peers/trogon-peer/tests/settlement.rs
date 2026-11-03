@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used)]
 mod support;
 use support::*;
-use trogon_decider::{Decider, WritePrecondition, evaluate_decision};
+use trogon_decider::{Decider, WritePrecondition, evaluate_decision, testing::TestCase};
 use trogon_peer::*;
 use trogonai_proto::peers::{PeerEventCase, v1alpha1 as proto};
 
@@ -237,7 +237,6 @@ fn malformed_ack_and_settlement_events_or_internal_proofs_are_refused() {
 
 #[test]
 fn acknowledgment_binding_routes_only_to_its_attachment_history() {
-    use trogon_decider::testing::TestCase;
     let command = acknowledge("batch", 4);
     assert_eq!(command.owner(), identity("recipient").owner());
     assert_eq!(command.attachment(), &reference("recipient", 1));
@@ -251,7 +250,6 @@ fn acknowledgment_binding_routes_only_to_its_attachment_history() {
 
 #[test]
 fn settlement_binding_rejects_another_sender_or_foreign_tenant_receipt() {
-    use trogon_decider::testing::TestCase;
     let recipient = run(inbox(&[0], 1), &prepare(&[0], 20, 3));
     let command = settle(&recipient, 0);
     assert_eq!(command.sender(), identity("sender").peer_id());
