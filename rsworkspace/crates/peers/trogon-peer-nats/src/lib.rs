@@ -39,3 +39,8 @@ mod rpc_admission;
 mod rpc_operation;
 pub use rpc_admission::PeerRpcAdmission;
 pub use rpc_operation::PeerRpcOperation;
+
+mod rpc_client;
+mod rpc_client_error;
+pub use rpc_client::PeerRpcClient;
+pub use rpc_client_error::PeerRpcClientError;
