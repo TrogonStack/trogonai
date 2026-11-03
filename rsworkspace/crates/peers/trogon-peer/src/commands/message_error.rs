@@ -2,6 +2,18 @@ use super::{HeartbeatError, state::EvolveError};
 use trogonai_proto::peers::v1alpha1 as proto;
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum MessageError {
+    #[error("recipient mismatch")]
+    RecipientMismatch,
+    #[error("tenant mismatch")]
+    TenantMismatch,
+    #[error("recipient pending quota exhausted; intake deferred")]
+    DeferIntake,
+    #[error("recipient disposition is required")]
+    RequiresDisposition,
+    #[error("message already durably intaken")]
+    AlreadyIntaken(Box<proto::InboxEntry>),
+    #[error("message already disposed")]
+    AlreadyDisposed(Box<proto::RecipientReceipt>),
     #[error("invalid message transition")]
     InvalidTransition,
     #[error("invalid state: {0}")]

@@ -68,3 +68,6 @@ pub fn send(index: usize, seconds: i64, size: u32) -> SendMessage {
         time(seconds),
     )
 }
+
+pub fn evidence(index: usize, size: u32) -> AcceptedMessage { AcceptedMessage::from_sender_history(&run(enrolled("sender",0),&send(index,1,size)), &MessageId::new(format!("message_{index}")).unwrap()).unwrap() }
+pub fn intake(index: usize, size: u32) -> IntakeMessage { IntakeMessage::new(evidence(index,size),time(2)) }
