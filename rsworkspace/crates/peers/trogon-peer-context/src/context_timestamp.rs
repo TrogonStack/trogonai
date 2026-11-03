@@ -1,6 +1,5 @@
 use buffa::json_helpers::wkt::{MAX_TIMESTAMP_SECS, MIN_TIMESTAMP_SECS};
 use buffa_types::google::protobuf::Timestamp;
-use serde_json::Value;
 
 use crate::PeerContextError;
 
@@ -16,7 +15,7 @@ impl<'a> ContextTimestamp<'a> {
         Ok(Self(timestamp))
     }
 
-    pub(crate) fn to_json(&self) -> Result<Value, PeerContextError> {
-        serde_json::to_value(self.0).map_err(PeerContextError::Encode)
+    pub(crate) fn as_wire(&self) -> &Timestamp {
+        self.0
     }
 }

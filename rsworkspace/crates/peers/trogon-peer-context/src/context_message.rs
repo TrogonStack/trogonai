@@ -1,7 +1,7 @@
-use serde_json::{Value, json};
 use trogon_peer::{CollaborationRef, PeerId};
 use trogonai_proto::peers::v1alpha1::PreparedMessage;
 
+use crate::context_message_presentation::ContextMessagePresentation;
 use crate::context_timestamp::ContextTimestamp;
 use crate::{MAX_MESSAGE_BYTES, PeerContextError};
 
@@ -64,15 +64,15 @@ impl<'a> ContextMessage<'a> {
         &self.collaboration_ref
     }
 
-    pub(crate) fn to_json(&self) -> Result<Value, PeerContextError> {
-        Ok(json!({
-            "message_id": self.message_id,
-            "sender_peer_id": self.sender_peer_id.as_str(),
-            "recipient_peer_id": self.recipient_peer_id.as_str(),
-            "collaboration_ref": self.collaboration_ref.as_str(),
-            "accepted_at": self.accepted_at.to_json()?,
-            "text": self.text,
-        }))
+    pub(crate) fn presentation(&self) -> ContextMessagePresentation<'_> {
+        ContextMessagePresentation {
+            message_id: self.message_id,
+            sender_peer_id: self.sender_peer_id.as_str(),
+            recipient_peer_id: self.recipient_peer_id.as_str(),
+            collaboration_ref: self.collaboration_ref.as_str(),
+            accepted_at: self.accepted_at.as_wire(),
+            text: self.text,
+        }
     }
 }
 
