@@ -202,3 +202,136 @@ fn exact_retry_does_not_require_a_new_representable_lifetime() {
         .when(retry)
         .then_error(MessageError::AlreadyAccepted(Box::new(original)));
 }
+
+#[test]
+fn send_binding_matches_the_metadata_committed_by_the_command() {
+    let command = send(0, 1, 17);
+    assert_eq!(command.owner(), identity("sender").owner());
+    assert_eq!(command.attachment(), &reference("sender", 1));
+    assert_eq!(command.stream_id(), command.attachment().peer_id());
+    assert_eq!(command.recipient(), identity("recipient").peer_id());
+    assert_eq!(command.collaboration().as_str(), "collaboration");
+    let state = run(enrolled("sender", 0), &command);
+    let message = &state.outbox[0].message;
+    assert_eq!(
+        message.content_ref.as_deref(),
+        Some(command.content().reference().as_str())
+    );
+    assert_eq!(message.content_size_bytes, Some(command.content().size()));
+    assert_eq!(
+        message.content_digest.as_deref(),
+        Some(command.content().semantic_fingerprint())
+    );
+}
+
+#[test]
+fn new_acceptance_rejects_wrong_scope_reused_message_id_and_backwards_outbox_time() {
+    let state = run(enrolled("sender", 0), &send(0, 2, 1));
+    let wrong_scope = SendMessage::new(
+        identity("sender").owner().clone(),
+        reference("sender", 1),
+        IdempotencyKey::new("unused").unwrap(),
+        MessageId::new("unused").unwrap(),
+        identity("recipient").peer_id().clone(),
+        CollaborationRef::new("foreign_scope").unwrap(),
+        content(1, 1),
+        None,
+        time(3),
+    );
+    assert_eq!(error(state.clone(), &wrong_scope), MessageError::CollaborationMismatch);
+    let reused_id = SendMessage::new(
+        identity("sender").owner().clone(),
+        reference("sender", 1),
+        IdempotencyKey::new("unused").unwrap(),
+        MessageId::new("message_0").unwrap(),
+        identity("recipient").peer_id().clone(),
+        CollaborationRef::new("collaboration").unwrap(),
+        content(1, 1),
+        None,
+        time(3),
+    );
+    assert_eq!(error(state.clone(), &reused_id), MessageError::Conflict);
+    assert_eq!(
+        error(state, &send(1, 1, 1)),
+        MessageError::Guard(HeartbeatError::ClockRegression)
+    );
+}
+
+fn acceptance(entry: proto::OutboxEntry) -> proto::PeerEvent {
+    proto::PeerEvent {
+        event: Some(
+            proto::PeerMessageAccepted {
+                entry: buffa::MessageField::some(entry),
+            }
+            .into(),
+        ),
+    }
+}
+
+#[test]
+fn acceptance_replay_validates_each_identifier_before_semantic_digest() {
+    let entry = run(enrolled("sender", 0), &send(0, 1, 1)).outbox.remove(0);
+    for field in [
+        "message_id",
+        "sender_peer_id",
+        "collaboration_ref",
+        "content_ref",
+        "idempotency_key",
+    ] {
+        let mut changed = entry.clone();
+        let mut metadata = changed.message.as_option().unwrap().clone();
+        match field {
+            "message_id" => metadata.message_id = Some("invalid id".to_owned()),
+            "sender_peer_id" => metadata.sender_peer_id = Some("invalid".to_owned()),
+            "collaboration_ref" => metadata.collaboration_ref = Some("invalid\nreference".to_owned()),
+            "content_ref" => metadata.content_ref = Some("invalid ref".to_owned()),
+            _ => changed.idempotency_key = Some("invalid key".to_owned()),
+        }
+        changed.message = buffa::MessageField::some(metadata);
+        assert!(
+            matches!(trogon_peer::commands::state::evolve(enrolled("sender", 0), &acceptance(changed)), Err(EvolveError::InvalidValue {field: actual, ..}) if actual == field)
+        );
+    }
+}
+
+#[test]
+fn intact_accepted_metadata_cannot_be_replayed_to_a_different_sender_or_lease() {
+    let entry = run(enrolled("sender", 0), &send(0, 1, 1)).outbox.remove(0);
+    assert_eq!(
+        trogon_peer::commands::state::evolve(enrolled("other_sender", 0), &acceptance(entry.clone())),
+        Err(EvolveError::InvalidMessageTransition)
+    );
+    let state = run(enrolled("sender", 0), &send(0, 1, 1));
+    assert_eq!(
+        trogon_peer::commands::state::evolve(state, &acceptance(entry.clone())),
+        Err(EvolveError::InvalidMessageTransition)
+    );
+    assert_eq!(
+        trogon_peer::commands::state::evolve(enrolled("sender", 2), &acceptance(entry.clone())),
+        Err(EvolveError::InvalidMessageTransition)
+    );
+    let detached = run(
+        enrolled("sender", 0),
+        &Detach::new(identity("sender").owner().clone(), reference("sender", 1), time(0)),
+    );
+    assert_eq!(
+        trogon_peer::commands::state::evolve(detached, &acceptance(entry)),
+        Err(EvolveError::InvalidMessageTransition)
+    );
+}
+
+#[test]
+fn replay_enforces_acceptance_order_and_rate_even_for_otherwise_valid_facts() {
+    let first = run(enrolled("sender", 0), &send(0, 2, 1));
+    let earlier = run(enrolled("sender", 0), &send(1, 1, 1)).outbox.remove(0);
+    assert_eq!(
+        trogon_peer::commands::state::evolve(first, &acceptance(earlier)),
+        Err(EvolveError::InvalidMessageTransition)
+    );
+    let state = (0..10).fold(enrolled("sender", 0), |state, i| run(state, &send(i, 1, 1)));
+    let eleventh = run(enrolled("sender", 0), &send(10, 2, 1)).outbox.remove(0);
+    assert_eq!(
+        trogon_peer::commands::state::evolve(state, &acceptance(eleventh)),
+        Err(EvolveError::InvalidMessageTransition)
+    );
+}
