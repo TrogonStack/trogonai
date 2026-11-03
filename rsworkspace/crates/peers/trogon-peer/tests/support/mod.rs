@@ -79,3 +79,6 @@ pub fn evidence(index: usize, size: u32) -> AcceptedMessage {
 pub fn intake(index: usize, size: u32) -> IntakeMessage {
     IntakeMessage::new(evidence(index, size), time(2))
 }
+
+pub fn prepare(indices: &[usize], size: usize, seconds: i64) -> PrepareBatch { PrepareBatch::new(identity("recipient").owner().clone(),reference("recipient",1),BatchId::new("batch").unwrap(),TrustedBatchPlan::from_renderer(indices.iter().map(|i|MessageId::new(format!("message_{i}")).unwrap()).collect(),size).unwrap(),time(seconds)) }
+pub fn inbox(indices: &[usize], size: u32) -> PeerState { indices.iter().fold(enrolled("recipient",0),|state,i|run(state,&intake(*i,size))) }
