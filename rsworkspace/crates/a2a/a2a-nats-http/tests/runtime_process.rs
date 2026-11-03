@@ -123,6 +123,7 @@ async fn gateway_routing_requires_a_well_formed_unexpired_caller() -> Result<(),
         let mut settings = vec![
             ("A2A_AGENT_ID", "worker"),
             ("NATS_URL", server.address()),
+            ("NATS_TLS_DISABLED", "true"),
             ("A2A_USE_GATEWAY", " On "),
         ];
         if let Some(caller) = caller.as_deref() {
@@ -147,6 +148,7 @@ async fn startup_reports_an_occupied_http_listener() -> Result<(), FixtureError>
     RuntimeProcess::start(&[
         ("A2A_AGENT_ID", "worker"),
         ("NATS_URL", server.address()),
+        ("NATS_TLS_DISABLED", "true"),
         ("A2A_HTTP_BIND", &address),
     ])?
     .failure("IO error")
@@ -166,6 +168,7 @@ async fn serves_http_and_gracefully_stops_in_direct_and_gateway_modes() -> Resul
         let mut settings = vec![
             ("A2A_AGENT_ID", "worker"),
             ("NATS_URL", server.address()),
+            ("NATS_TLS_DISABLED", "true"),
             ("A2A_HTTP_BIND", &bind),
         ];
         if gateway {

@@ -26,6 +26,13 @@ pub enum SettingError {
     NoSeedFound,
     #[error("must be set together with {0}")]
     MissingCompanion(&'static str),
+    #[error("cannot be combined with {0}")]
+    ConflictsWith(&'static str),
+    #[error("`{value}` is not one of {}", accepted.join(", "))]
+    UnrecognizedValue {
+        value: String,
+        accepted: &'static [&'static str],
+    },
 }
 
 fn split_scheme(raw: &str) -> Option<(&str, &str)> {

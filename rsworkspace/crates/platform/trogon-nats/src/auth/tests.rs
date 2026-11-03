@@ -25,15 +25,21 @@ fn from_url_convenience() {
 
     assert_eq!(config.servers, vec!["nats://custom:4222"]);
     assert!(matches!(config.auth, NatsAuth::None));
-    assert!(!config.tls.is_configured());
+    assert_eq!(config.tls, Ok(NatsTls::default()));
 }
 
 #[test]
 fn with_tls_attaches_tls() {
-    let tls = NatsTls::new(None, None, Location::parse("/ca.pem"));
-    let config = NatsConfig::from_url("nats://x:4222").with_tls(tls.clone());
+    let tls = NatsTls::Enabled {
+        ca: Location::parse("/ca.pem"),
+        client_cert: None,
+    };
 
-    assert_eq!(config.tls, tls);
+    assert_eq!(NatsConfig::from_url("nats://x:4222").with_tls(tls.clone()).tls, Ok(tls));
+    assert_eq!(
+        NatsConfig::from_url("nats://x:4222").with_tls(NatsTls::Disabled).tls,
+        Ok(NatsTls::Disabled)
+    );
 }
 
 #[test]

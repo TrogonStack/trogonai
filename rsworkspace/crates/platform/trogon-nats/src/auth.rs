@@ -1,7 +1,7 @@
 use std::fmt;
 
 use crate::credential_value::{CredentialValue, Location, NKeySeed};
-use crate::tls::NatsTls;
+use crate::tls::{NatsTls, TlsMisconfiguration};
 
 /// NATS authentication method, chosen exclusively; see
 /// [`NatsSettings`](crate::settings::NatsSettings) for the precedence.
@@ -53,11 +53,14 @@ impl NatsAuth {
     }
 }
 
+/// `tls` keeps a misconfiguration as it was read, so
+/// [`connect`](crate::connect()) and [`connect_once`](crate::connect_once())
+/// report it instead of connecting some other way.
 #[derive(Debug, Clone)]
 pub struct NatsConfig {
     pub servers: Vec<String>,
     pub auth: NatsAuth,
-    pub tls: NatsTls,
+    pub tls: Result<NatsTls, TlsMisconfiguration>,
 }
 
 impl NatsConfig {
@@ -65,7 +68,7 @@ impl NatsConfig {
         Self {
             servers,
             auth,
-            tls: NatsTls::default(),
+            tls: Ok(NatsTls::default()),
         }
     }
 
@@ -74,7 +77,7 @@ impl NatsConfig {
     }
 
     pub fn with_tls(mut self, tls: NatsTls) -> Self {
-        self.tls = tls;
+        self.tls = Ok(tls);
         self
     }
 }

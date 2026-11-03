@@ -9,7 +9,7 @@ workspace = true
 
 [dependencies]
 thiserror = { workspace = true }
-async-nats = { workspace = true, features = ["ring", "nkeys", "jetstream", "kv", "object-store", "server_2_10", "server_2_11", "server_2_12"] }
+async-nats = { workspace = true, features = ["nkeys", "jetstream", "kv", "object-store", "server_2_10", "server_2_11", "server_2_12"] }
 bytes = { workspace = true }
 nkeys = { workspace = true }
 futures = { workspace = true }
@@ -22,13 +22,18 @@ tokio = { workspace = true, features = ["time", "io-util", "fs"] }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
-trogon-std = { workspace = true }
+trogon-std = { workspace = true, features = ["tls"] }
 uuid = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
 testcontainers-modules = { workspace = true, optional = true }
+rcgen = { version = "=0.14.8", default-features = false, features = ["aws_lc_rs", "pem"], optional = true }
+tempfile = { workspace = true, optional = true }
 
 [dev-dependencies]
+rcgen = { version = "=0.14.8", default-features = false, features = ["aws_lc_rs", "pem"] }
+# Links ring next to aws-lc-rs so tests/tls_handshake.rs always meets the two-provider panic that connect prevents.
+rustls = { workspace = true, features = ["ring"] }
 tempfile = { workspace = true }
 testcontainers-modules = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
@@ -37,4 +42,9 @@ trogon-std = { workspace = true, features = ["test-support"] }
 
 [features]
 default = []
-test-support = ["dep:testcontainers-modules"]
+test-support = ["dep:rcgen", "dep:tempfile", "dep:testcontainers-modules"]
+
+[[test]]
+name = "tls_handshake"
+path = "tests/tls_handshake.rs"
+required-features = ["test-support"]

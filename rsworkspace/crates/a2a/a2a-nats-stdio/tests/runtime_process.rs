@@ -77,6 +77,7 @@ async fn connected_runtime_reports_parse_errors_and_drains_output_on_eof() -> Re
             ("A2A_AGENT_ID", "worker"),
             ("A2A_PREFIX", "tenant"),
             ("NATS_URL", server.address()),
+            ("NATS_TLS_DISABLED", "true"),
             ("A2A_OPERATION_TIMEOUT_SECS", "1"),
         ],
         b"invalid json\n",
@@ -96,7 +97,11 @@ async fn connected_runtime_reports_parse_errors_and_drains_output_on_eof() -> Re
 async fn closed_parent_output_causes_a_nonzero_runtime_exit() -> Result<(), FixtureError> {
     let server = CoreTestServer::start().await;
     let output = run_process(
-        &[("A2A_AGENT_ID", "worker"), ("NATS_URL", server.address())],
+        &[
+            ("A2A_AGENT_ID", "worker"),
+            ("NATS_URL", server.address()),
+            ("NATS_TLS_DISABLED", "true"),
+        ],
         b"invalid json\n",
         ParentOutput::Closed,
     )

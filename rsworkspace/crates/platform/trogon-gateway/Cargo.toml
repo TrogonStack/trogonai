@@ -15,7 +15,7 @@ path = "src/main.rs"
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 trogon-telemetry = { workspace = true }
-async-nats = { workspace = true, features = ["ring", "jetstream"] }
+async-nats = { workspace = true, features = ["jetstream"] }
 axum = { workspace = true }
 base64 = "0.22"
 buffa = { workspace = true }

@@ -19,7 +19,7 @@ use grpc_nats_micro::{
     SubjectPrefix, SubjectPrefixInput,
 };
 use trogon_nats::test_support::CoreTestServer;
-use trogon_nats::{NatsConfig, RequestClient};
+use trogon_nats::{NatsConfig, NatsTls, RequestClient};
 use trogonai_proto::google::rpc::{Code, ErrorInfo, Status};
 use trogonai_proto::grpc_nats_micro::v1::{FailRequest, FailResponse, SayRequest, SayResponse};
 use trogonai_proto::nats::micro::v1alpha1::{ContentType as ProtoContentType, ServiceOptions};
@@ -46,7 +46,8 @@ const FAIL_DETAIL_DOMAIN: &str = "grpc-nats-micro.conformance";
 /// [`trogon_nats::connect`], so the conformance run exercises the configured
 /// connect path rather than a raw `async_nats` client.
 async fn connect(server: &CoreTestServer) -> Result<async_nats::Client, trogon_nats::ConnectError> {
-    trogon_nats::connect(&NatsConfig::from_url(server.address()), CONNECT_TIMEOUT).await
+    let config = NatsConfig::from_url(server.address()).with_tls(NatsTls::Disabled);
+    trogon_nats::connect(&config, CONNECT_TIMEOUT).await
 }
 
 struct SayHandler;
