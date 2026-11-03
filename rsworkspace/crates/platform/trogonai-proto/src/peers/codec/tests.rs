@@ -114,10 +114,8 @@ fn unknown_event_types_are_skipped_without_decoding_their_payload() {
 
 #[test]
 fn malformed_known_event_payload_retains_the_decode_error() {
-    let decoded = <v1alpha1::PeerEvent as EventDecode>::decode(EventData::new(
-        v1alpha1::PeerEnrolled::FULL_NAME,
-        b"\0",
-    ));
+    let decoded =
+        <v1alpha1::PeerEvent as EventDecode>::decode(EventData::new(v1alpha1::PeerEnrolled::FULL_NAME, b"\0"));
     let error = decoded.unwrap_err();
 
     assert!(matches!(error, PeerEventPayloadError::Decode(_)));
