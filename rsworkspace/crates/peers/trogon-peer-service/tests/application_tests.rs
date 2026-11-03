@@ -92,3 +92,76 @@ async fn explicit_reconciliation_intakes_from_trusted_history_without_settling_e
     );
     Ok(())
 }
+
+#[tokio::test]
+async fn prepared_assignment_replays_cached_exact_payload_and_frame_over_reconstruction() -> TestResult {
+    let f = Fixture::new().await?;
+    f.intake("key", "<untrusted> & \"quoted\"").await?;
+    let first = f.app().prepare_batch(&f.bob, f.prepare()).await?;
+    assert!(first.batch.is_set());
+    assert_eq!(first.messages[0].text.as_deref(), Some("<untrusted> & \"quoted\""));
+    let cached = f
+        .cache
+        .records
+        .lock()
+        .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?
+        .values()
+        .next()
+        .cloned()
+        .ok_or(trogon_peer_service::PeerPortError::Integrity)?;
+    assert!(cached.frame().contains("\\u003c"));
+    f.content
+        .bodies
+        .lock()
+        .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?
+        .clear();
+    let replay = f.app().prepare_batch(&f.bob, f.prepare()).await?;
+    assert_eq!(first, replay);
+    Ok(())
+}
+
+#[tokio::test]
+async fn cache_failure_does_not_commit_preparation_and_frame_corruption_fails_closed() -> TestResult {
+    let f = Fixture::new().await?;
+    f.intake("key", "payload").await?;
+    let before = f.store.appends.load(Ordering::SeqCst);
+    f.cache.fail_insert.store(true, Ordering::SeqCst);
+    assert!(f.app().prepare_batch(&f.bob, f.prepare()).await.is_err());
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), before);
+    f.cache.fail_insert.store(false, Ordering::SeqCst);
+    let first = f.app().prepare_batch(&f.bob, f.prepare()).await?;
+    {
+        let mut records = f
+            .cache
+            .records
+            .lock()
+            .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?;
+        for record in records.values_mut() {
+            *record = trogon_peer_service::PreparedPresentation::from_port(
+                record.batch().clone(),
+                record.messages().to_vec(),
+                "incompatible frame".into(),
+            );
+        }
+    }
+    let unavailable = f.app().prepare_batch(&f.bob, f.prepare()).await?;
+    assert_eq!(unavailable.batch, first.batch);
+    assert!(unavailable.messages.is_empty());
+    assert_eq!(
+        unavailable.content_availability.and_then(|v| v.as_known()),
+        Some(proto::ContentAvailability::CONTENT_AVAILABILITY_RETRY_UNAVAILABLE)
+    );
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), before + 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn escaped_rendering_selects_fitting_oldest_prefix_before_preparation() -> TestResult {
+    let f = Fixture::new().await?;
+    let first = f.intake("first", &"<".repeat(900)).await?;
+    f.intake("second", &"<".repeat(900)).await?;
+    let prepared = f.app().prepare_batch(&f.bob, f.prepare()).await?;
+    assert_eq!(prepared.messages.len(), 1);
+    assert_eq!(prepared.messages[0].metadata, first.message);
+    Ok(())
+}
