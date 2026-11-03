@@ -92,8 +92,11 @@ the CONNECT target (Decision 4). It does not terminate TLS by default. After
 the tunnel opens it reads the TLS ClientHello and requires the SNI to equal
 the CONNECT host, so a client cannot ask for one permitted host and speak to
 another (domain fronting). A mismatch, or a first record that is not a
-ClientHello, closes the tunnel and is audited. A tunnel to a non-TLS port has
-no SNI to compare, and the exact permit alone decides it.
+ClientHello, closes the tunnel and is audited. The proxy has already answered
+`200` by then, so `SNI_MISMATCH` reaches the audit trail and never a status
+line. A tunnel to a non-TLS port has no SNI to compare, and neither does an IP
+literal CONNECT host, because a ClientHello cannot carry an address as its
+server name (RFC 6066); in both cases the exact permit alone decides it.
 
 TLS is intercepted, terminated and re-originated, for exactly one reason and
 exactly one set of hosts: a destination that has a credential binding. For
@@ -200,7 +203,10 @@ never the contents of the policy.
 
 | Condition | Status | Examples of `CODE` |
 | --- | --- | --- |
-| Policy denies: no permit, a forbidden address, an SNI that does not match, a blocked evaluation target, a credential that exists but cannot be released | 403 | `NO_PERMIT`, `ADDRESS_FORBIDDEN`, `SNI_MISMATCH`, `EVALUATION_TARGET_BLOCKED`, `RELEASE_DENIED` |
+| The request is not one well-formed, bounded CONNECT head | 400 | `BAD_REQUEST` |
+| The method is not CONNECT | 405 with `Allow: CONNECT` | `METHOD_NOT_ALLOWED` |
+| Policy denies: no permit, a forbidden address, a blocked evaluation target, a credential that exists but cannot be released | 403 | `NO_PERMIT`, `ADDRESS_FORBIDDEN`, `EVALUATION_TARGET_BLOCKED`, `RELEASE_DENIED` |
+| The destination is permitted but cannot be resolved or reached | 502 | `UPSTREAM_UNREACHABLE` |
 | The policy snapshot is stale or unavailable, the secrets service is unavailable, or the audit queue is full | 503 with `Retry-After` | `POLICY_STALE`, `POLICY_UNAVAILABLE`, `SECRETS_UNAVAILABLE`, `AUDIT_UNAVAILABLE` |
 | A rate or budget refusal | 429 | reserved, not emitted by this record |
 
@@ -208,7 +214,10 @@ Operational unavailability is never reported as a security denial
 ([ADR#0079](./0079-external-secret-sources.md) Decision 5), so an agent and an
 operator can tell "you may not" from "we cannot decide right now". A missing or
 invalid client certificate fails the TLS handshake before any HTTP exists, so
-that cause is audited and cannot be returned as a status. A throttled secrets
+that cause cannot be returned as a status. An SNI that does not match is found
+after the tunnel opened (Decision 2), so it is audited as `SNI_MISMATCH` and
+the connection is cut. An unreachable upstream is 502 and not 503, because the
+proxy did decide and it is the destination that failed. A throttled secrets
 service is reported as 503 until a later ADR defines the 429 contract.
 
 Every decision, allow and deny, emits one audit event with the decision
