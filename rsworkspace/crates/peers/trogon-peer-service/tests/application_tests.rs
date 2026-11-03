@@ -212,3 +212,53 @@ async fn application_ack_is_backend_owned_once_and_distinct_from_sender_settleme
     );
     Ok(())
 }
+
+#[tokio::test]
+async fn authorized_roster_paginates_membership_and_observes_liveness_with_service_time() -> TestResult {
+    let f = Fixture::new().await?;
+    let first = f
+        .app()
+        .roster(
+            &f.alice,
+            proto::RosterRequest {
+                attachment: f.a.clone().into(),
+                page_size: Some(1),
+                ..Default::default()
+            },
+        )
+        .await?;
+    assert_eq!(first.peers.len(), 1);
+    let second = f
+        .app()
+        .roster(
+            &f.alice,
+            proto::RosterRequest {
+                attachment: f.a.clone().into(),
+                page_size: Some(1),
+                page_token: first.next_page_token,
+            },
+        )
+        .await?;
+    assert_eq!(second.peers.len(), 1);
+    assert_ne!(first.peers[0].peer_id, second.peers[0].peer_id);
+    assert!(!first.peers[0].active_at.is_set());
+    let before = f.store.reads.load(Ordering::SeqCst);
+    let catalog_calls = f.catalog.calls.load(Ordering::SeqCst);
+    f.policy.deny.store(true, Ordering::SeqCst);
+    assert!(
+        f.app()
+            .roster(
+                &f.alice,
+                proto::RosterRequest {
+                    attachment: f.a.clone().into(),
+                    page_size: Some(1),
+                    ..Default::default()
+                }
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(f.store.reads.load(Ordering::SeqCst), before);
+    assert_eq!(f.catalog.calls.load(Ordering::SeqCst), catalog_calls);
+    Ok(())
+}
