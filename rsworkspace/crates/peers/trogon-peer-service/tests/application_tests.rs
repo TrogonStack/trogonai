@@ -1,4 +1,6 @@
 use std::sync::atomic::Ordering;
+use trogon_peer::{MessageId, PeerId};
+use trogon_peer_service::WorkLimit;
 mod support;
 use support::*;
 use trogonai_proto::peers::v1alpha1 as proto;
@@ -57,8 +59,6 @@ async fn denied_acceptance_touches_no_store_content_cache_or_catalog() -> TestRe
 
 #[tokio::test]
 async fn explicit_reconciliation_intakes_from_trusted_history_without_settling_early() -> TestResult {
-    use trogon_peer::{MessageId, PeerId};
-    use trogon_peer_service::WorkLimit;
     let f = Fixture::new().await?;
     let sent = f.app().send(&f.alice, f.send("key", "pending")).await?;
     let id = MessageId::new(
