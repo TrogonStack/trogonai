@@ -1,0 +1,621 @@
+# Vendored subset of the OpenTelemetry GenAI semantic conventions.
+#
+# Source:  https://github.com/open-telemetry/semantic-conventions-genai
+# Pinned:  commit 9d1e748280e64cf5688d7f348bf86be24c3fce12 (main, 2026-11-02),
+#          registry schema gen-ai-dev/1.42.0-dev, which depends on the core
+#          semantic conventions v1.45.0.
+# Files:   model/gen-ai/registry.yaml, spans.yaml, metrics.yaml,
+#          token-metrics.yaml
+#
+# GenAI conventions moved out of open-telemetry/semantic-conventions before
+# v1.42.0 (the core repository now carries only deprecated stubs under
+# model/gen-ai/), and the new repository has no release tag yet, so the pin is a
+# commit. Replace it with the first tagged release when one exists. Every
+# definition below is stability `development` upstream and may change on a bump.
+#
+# Vendoring rules:
+# - Upstream attribute keys, enum values, metric names, units, instruments and
+#   stability values are kept verbatim. Nothing is renamed to fit the local
+#   naming policy; the policy exempts the `gen_ai.` namespace instead.
+# - Upstream ships these in the `definition/2` file format. They are translated
+#   here to the `groups:` format the rest of this registry uses. Upstream span
+#   types such as `gen_ai.client.inference` become groups `span.<type>`.
+# - Only the first-slice subset is vendored: inference, agent invocation and tool
+#   execution spans, their attributes, and the duration and token histograms.
+# - Prompt and completion content attributes (`gen_ai.input.messages`,
+#   `gen_ai.output.messages`, `gen_ai.system_instructions`,
+#   `gen_ai.tool.definitions`, `gen_ai.tool.call.arguments`,
+#   `gen_ai.tool.call.result` and their `*_ref` variants) are deliberately NOT
+#   vendored. Content capture stays off by default and no span or metric in this
+#   registry requires it. If a later change vendors them, they must be `opt_in`
+#   and documented as sensitive.
+# - Well-known vendor members of `gen_ai.provider.name` are not vendored, so the
+#   attribute is an open string here. Values for third-party providers follow
+#   the upstream enum values.
+# - `error.type`, `server.address` and `server.port` are the shared definitions
+#   in common.yaml, not redefined here.
+# - Prose is trimmed: product links and vendor-specific notes are dropped.
+#
+# Span names are patterns upstream (`{gen_ai.operation.name} {gen_ai.request.model}`),
+# so span groups here carry a `span_name` code-generation annotation that the
+# Rust template turns into an operation constant plus a name-formatting helper.
+groups:
+  - id: registry.gen_ai
+    type: attribute_group
+    display_name: GenAI Attributes
+    brief: Vendored subset of the OpenTelemetry GenAI attribute registry.
+    attributes:
+      - id: gen_ai.provider.name
+        type: string
+        stability: development
+        brief: The Generative AI provider as identified by the client or server instrumentation.
+        note: |
+          The attribute SHOULD be set based on the instrumentation's best knowledge
+          and may differ from the actual upstream provider. For example, a client SDK
+          may be configured against a proxy or hosting platform that transparently
+          relays requests to a different provider.
+
+          Upstream defines a well-known value enum for third-party providers. It is not
+          vendored; use the upstream value for a provider when one exists.
+        examples: ["example-provider"]
+      - id: gen_ai.operation.name
+        type:
+          members:
+            - id: chat
+              value: "chat"
+              brief: Chat completion operation.
+              stability: development
+            - id: invoke_agent
+              value: "invoke_agent"
+              brief: Invoke GenAI agent.
+              stability: development
+            - id: execute_tool
+              value: "execute_tool"
+              brief: Execute a tool.
+              stability: development
+        stability: development
+        brief: The name of the operation being performed.
+        note: >
+          Upstream defines further operation members (embeddings, retrieval, memory
+          and workflow operations, and others). Only the members used by the vendored
+          spans are listed.
+      - id: gen_ai.request.model
+        type: string
+        stability: development
+        brief: The name of the GenAI model a request is being made to.
+        examples: ["gpt-4"]
+      - id: gen_ai.response.id
+        type: string
+        stability: development
+        brief: The unique identifier for the completion.
+        examples: ["chatcmpl-123"]
+      - id: gen_ai.response.model
+        type: string
+        stability: development
+        brief: The name of the model that generated the response.
+        examples: ["gpt-4-0613"]
+      - id: gen_ai.response.finish_reasons
+        type: string[]
+        stability: development
+        brief: Array of reasons the model stopped generating tokens, corresponding to each generation received.
+        note: |
+          Values correspond to generations in the same order as the returned
+          choices/candidates.
+
+          Each position SHOULD contain the finish reason for the corresponding
+          choice/candidate. If a finish reason was expected but not received, for
+          example because generation failed, was cancelled, or a stream ended before
+          the final event, instrumentations SHOULD report `error` for that position
+          instead of omitting it.
+
+          `error` indicates that the generation ended abnormally, whether reported
+          by the provider or inferred by the instrumentation.
+        examples: [["stop"], ["stop", "length"]]
+      - id: gen_ai.usage.input_tokens
+        type: int
+        stability: development
+        brief: The total number of input (prompt) tokens across all modalities.
+        note: |
+          This value SHOULD include cached tokens and input tokens of all modalities.
+          Instrumentations SHOULD make a best effort to populate this value, using a total
+          provided by the provider when available or, depending on the provider API,
+          by summing different token types parsed from the provider output.
+
+          When the provider reports both billed token counts and model-consumed
+          token counts, instrumentations SHOULD report the billed count so the
+          value matches the units the customer is charged for.
+
+          Detailed usage attributes are subsets of this total. For example,
+          `gen_ai.usage.cache_read.input_tokens` is included in it.
+        examples: [100]
+      - id: gen_ai.usage.output_tokens
+        type: int
+        stability: development
+        brief: The total number of output (completion) tokens across all modalities.
+        note: |
+          This value SHOULD include reasoning tokens and tokens of all modalities.
+
+          When the provider reports both billed token counts and model-consumed
+          token counts, instrumentations SHOULD report the billed count so the
+          value matches the units the customer is charged for.
+        examples: [180]
+      - id: gen_ai.usage.cache_read.input_tokens
+        type: int
+        stability: development
+        brief: The number of input tokens served from a provider-managed cache.
+        note: The value SHOULD be included in `gen_ai.usage.input_tokens`.
+        examples: [50]
+      - id: gen_ai.usage.cache_write.input_tokens
+        type: int
+        stability: development
+        brief: The number of input tokens written to a provider-managed cache.
+        note: The value SHOULD be included in `gen_ai.usage.input_tokens`.
+        examples: [25]
+      - id: gen_ai.usage.reasoning.output_tokens
+        type: int
+        stability: development
+        brief: The number of output tokens used for reasoning (e.g. chain-of-thought, extended thinking).
+        note: The value SHOULD be included in `gen_ai.usage.output_tokens`.
+        examples: [50]
+      - id: gen_ai.conversation.id
+        type: string
+        stability: development
+        brief: The unique identifier for a conversation (session, thread), used to store and correlate messages within this conversation.
+        note: |
+          Instrumentations SHOULD populate conversation id when they have an identifier
+          for the conversation readily available for a given operation.
+
+          When no identifier for the conversation is available, instrumentations SHOULD NOT
+          populate conversation id. For example, a new UUID, a trace identifier, or a hash
+          of request content SHOULD NOT be used as a fallback value.
+        examples: ["conv_5j66UpCpwteGg4YSxUnt7lPY"]
+      - id: gen_ai.agent.id
+        type: string
+        stability: development
+        brief: The unique and stable identifier of the GenAI hosted agent resource.
+        note: >
+          It's NOT RECOMMENDED to record in-memory agent instance ids on this attribute due to their transient nature.
+        examples: ["asst_5j66UpCpwteGg4YSxUnt7lPY"]
+      - id: gen_ai.agent.name
+        type: string
+        stability: development
+        brief: Human-readable name of the GenAI agent provided by the application.
+        examples: ["Math Tutor", "Fiction Writer"]
+      - id: gen_ai.agent.version
+        type: string
+        stability: development
+        brief: The version of the GenAI agent.
+        examples: ["1.0.0", "2025-05-01"]
+      - id: gen_ai.tool.name
+        type: string
+        stability: development
+        brief: Name of the tool utilized by the agent.
+        examples: ["Flights"]
+      - id: gen_ai.tool.call.id
+        type: string
+        stability: development
+        brief: The tool call identifier supplied by the model or provider.
+        note: |
+          This attribute SHOULD be set to the identifier received from the model or provider
+          if and only if one was supplied.
+        examples: ["call_mszuSIzqtI65i1wAUOE8w5H4"]
+      - id: gen_ai.tool.type
+        type: string
+        stability: development
+        brief: Type of the tool utilized by the agent.
+        note: >
+          Extension: A tool executed on the agent-side to directly call external APIs.
+          Function: A tool executed on the client-side, where the agent generates parameters
+          for a predefined function, and the client executes the logic.
+          Datastore: A tool used by the agent to access and query structured or unstructured
+          external data for retrieval-augmented tasks or knowledge updates.
+        examples: ["function", "extension", "datastore"]
+
+  # Spans. Upstream span types keep their ids (`span.` prefix added for this
+  # registry's group-id convention). Wire names are patterns, see `span_name`.
+  - id: span.gen_ai.client.inference
+    type: span
+    span_kind: client
+    stability: development
+    brief: >-
+      A logical client call to a Generative AI model or service that generates a
+      response or requests a tool call based on the input prompt.
+    note: |
+      **Span name** SHOULD be `{gen_ai.operation.name} {gen_ai.request.model}`.
+
+      **Span kind** SHOULD be `CLIENT` and MAY be set to `INTERNAL` on spans representing
+      call to models running in the same process.
+    annotations:
+      code_generation:
+        span_name:
+          operation: chat
+          target: gen_ai.request.model
+    attributes:
+      - ref: gen_ai.operation.name
+        requirement_level: required
+      - ref: gen_ai.provider.name
+        requirement_level: required
+      - ref: gen_ai.request.model
+        requirement_level:
+          conditionally_required: If available.
+      - ref: server.address
+        requirement_level: recommended
+      - ref: server.port
+        requirement_level:
+          conditionally_required: If `server.address` is set.
+      - ref: gen_ai.usage.input_tokens
+        requirement_level: recommended
+      - ref: gen_ai.usage.output_tokens
+        requirement_level: recommended
+      - ref: gen_ai.usage.cache_read.input_tokens
+        requirement_level:
+          recommended: When available and non-zero.
+      - ref: gen_ai.usage.cache_write.input_tokens
+        requirement_level:
+          recommended: When available and non-zero.
+      - ref: gen_ai.usage.reasoning.output_tokens
+        requirement_level:
+          recommended: When available and non-zero.
+      - ref: gen_ai.response.id
+        requirement_level: recommended
+      - ref: gen_ai.response.model
+        requirement_level: recommended
+      - ref: gen_ai.response.finish_reasons
+        requirement_level: recommended
+      - ref: gen_ai.conversation.id
+        requirement_level:
+          conditionally_required: If and only if the instrumented library has one readily available, or the user application provides one through OpenTelemetry context or library-specific mechanisms.
+      - ref: error.type
+        requirement_level:
+          conditionally_required: If the operation ended in an error.
+
+  - id: span.gen_ai.invoke_agent.client
+    type: span
+    span_kind: client
+    stability: development
+    brief: GenAI agent invocation over a remote service.
+    note: |
+      **Span name** SHOULD be `invoke_agent {gen_ai.agent.name}` if `gen_ai.agent.name` is readily available.
+      When `gen_ai.agent.name` is not available, it SHOULD be `invoke_agent`.
+
+      The `gen_ai.operation.name` SHOULD be `invoke_agent`.
+    annotations:
+      code_generation:
+        span_name:
+          operation: invoke_agent
+          target: gen_ai.agent.name
+    attributes:
+      - ref: gen_ai.operation.name
+        requirement_level: required
+      - ref: gen_ai.provider.name
+        requirement_level: required
+      - ref: gen_ai.agent.name
+        requirement_level:
+          conditionally_required: When available.
+      - ref: gen_ai.agent.id
+        requirement_level:
+          conditionally_required: If applicable.
+      - ref: gen_ai.agent.version
+        requirement_level:
+          conditionally_required: When available.
+      - ref: gen_ai.request.model
+        requirement_level:
+          recommended: If applicable.
+      - ref: server.address
+        requirement_level: recommended
+      - ref: server.port
+        requirement_level:
+          conditionally_required: If `server.address` is set.
+      - ref: gen_ai.usage.input_tokens
+        requirement_level: recommended
+      - ref: gen_ai.usage.output_tokens
+        requirement_level: recommended
+      - ref: gen_ai.usage.cache_read.input_tokens
+        requirement_level:
+          recommended: When available and non-zero.
+      - ref: gen_ai.usage.cache_write.input_tokens
+        requirement_level:
+          recommended: When available and non-zero.
+      - ref: gen_ai.response.finish_reasons
+        requirement_level: recommended
+      - ref: gen_ai.conversation.id
+        requirement_level:
+          conditionally_required: If and only if the instrumented library has one readily available, or the user application provides one through OpenTelemetry context or library-specific mechanisms.
+      - ref: error.type
+        requirement_level:
+          conditionally_required: If the operation ended in an error.
+
+  - id: span.gen_ai.invoke_agent.internal
+    type: span
+    span_kind: internal
+    stability: development
+    brief: GenAI agent invocation within the same process.
+    note: |
+      **Span name** SHOULD be `invoke_agent {gen_ai.agent.name}` if `gen_ai.agent.name` is readily available.
+      When `gen_ai.agent.name` is not available, it SHOULD be `invoke_agent`.
+
+      The `gen_ai.operation.name` SHOULD be `invoke_agent`.
+    annotations:
+      code_generation:
+        span_name:
+          operation: invoke_agent
+          target: gen_ai.agent.name
+    attributes:
+      - ref: gen_ai.operation.name
+        requirement_level: required
+      - ref: gen_ai.agent.name
+        requirement_level:
+          conditionally_required: When available.
+      - ref: gen_ai.request.model
+        requirement_level:
+          recommended: If applicable.
+        note: >
+          This attribute SHOULD be populated if and only if the instrumented
+          library allows to set only a single model per agent. It SHOULD NOT
+          be populated for agents that support multiple models or dynamic selection.
+      - ref: gen_ai.usage.input_tokens
+        requirement_level: recommended
+      - ref: gen_ai.usage.output_tokens
+        requirement_level: recommended
+      - ref: gen_ai.response.finish_reasons
+        requirement_level: recommended
+      - ref: gen_ai.conversation.id
+        requirement_level:
+          conditionally_required: If and only if the instrumented library has one readily available, or the user application provides one through OpenTelemetry context or library-specific mechanisms.
+      - ref: error.type
+        requirement_level:
+          conditionally_required: If the operation ended in an error.
+
+  - id: span.gen_ai.execute_tool.internal
+    type: span
+    span_kind: internal
+    stability: development
+    brief: Tool execution.
+    note: |
+      **Span name** SHOULD be `execute_tool {gen_ai.tool.name}`.
+
+      `gen_ai.operation.name` SHOULD be `execute_tool`. The tool arguments and result
+      are content and are not part of the vendored subset.
+    annotations:
+      code_generation:
+        span_name:
+          operation: execute_tool
+          target: gen_ai.tool.name
+    attributes:
+      - ref: gen_ai.operation.name
+        requirement_level: required
+      - ref: gen_ai.tool.name
+        requirement_level: required
+      - ref: gen_ai.tool.call.id
+        requirement_level:
+          conditionally_required: If and only if the model or provider supplied a tool call identifier.
+      - ref: gen_ai.tool.type
+        requirement_level:
+          recommended: If available.
+      - ref: gen_ai.agent.name
+        brief: The human-readable name of the agent executing the tool.
+        requirement_level:
+          conditionally_required: When applicable.
+      - ref: gen_ai.conversation.id
+        requirement_level:
+          conditionally_required: If available.
+      - ref: error.type
+        requirement_level:
+          conditionally_required: If the operation ended in an error.
+
+  # Metrics. Names, instruments and units are upstream's. The bucket boundaries
+  # are the upstream advisory ExplicitBucketBoundaries, written as floats so the
+  # generated Rust compiles against `Vec<f64>`.
+  - id: metric.gen_ai.client.operation.duration
+    type: metric
+    metric_name: gen_ai.client.operation.duration
+    instrument: histogram
+    unit: "s"
+    stability: development
+    brief: GenAI operation duration.
+    note: >
+      This metric SHOULD NOT be reported for inference or embeddings operations;
+      use `gen_ai.client.inference.duration` or `gen_ai.client.embeddings.duration` instead.
+    annotations:
+      code_generation:
+        metric_value_type: double
+        histogram_boundaries: [0.01, 0.02, 0.04, 0.08, 0.16, 0.32, 0.64, 1.28, 2.56, 5.12, 10.24, 20.48, 40.96, 81.92]
+    attributes:
+      - ref: gen_ai.operation.name
+        requirement_level: required
+      - ref: gen_ai.provider.name
+        requirement_level:
+          conditionally_required: If the operation involves a call to a GenAI provider.
+      - ref: gen_ai.request.model
+        requirement_level:
+          conditionally_required: If available.
+      - ref: gen_ai.response.model
+        requirement_level: recommended
+      - ref: server.address
+        requirement_level: recommended
+      - ref: server.port
+        requirement_level:
+          conditionally_required: If `server.address` is set.
+      - ref: error.type
+        requirement_level:
+          conditionally_required: If the operation ended in an error.
+
+  - id: metric.gen_ai.client.inference.duration
+    type: metric
+    metric_name: gen_ai.client.inference.duration
+    instrument: histogram
+    unit: "s"
+    stability: development
+    brief: GenAI client inference operation duration.
+    note: |
+      Represents the end-to-end duration of a model inference operation,
+      measured from when the client issues the inference request to when the
+      response is fully received or the operation ends with an error or cancellation.
+
+      When this metric is reported alongside a `gen_ai.client.inference`
+      span, the metric value SHOULD be the same as the span duration.
+    annotations:
+      code_generation:
+        metric_value_type: double
+        histogram_boundaries: [0.01, 0.02, 0.04, 0.08, 0.16, 0.32, 0.64, 1.28, 2.56, 5.12, 10.24, 20.48, 40.96, 81.92]
+    attributes:
+      - ref: gen_ai.operation.name
+        requirement_level: required
+      - ref: gen_ai.provider.name
+        requirement_level: required
+      - ref: gen_ai.request.model
+        requirement_level:
+          conditionally_required: If available.
+      - ref: gen_ai.response.model
+        requirement_level: recommended
+      - ref: server.address
+        requirement_level: recommended
+      - ref: server.port
+        requirement_level:
+          conditionally_required: If `server.address` is set.
+      - ref: error.type
+        requirement_level:
+          conditionally_required: If the operation ended in an error.
+
+  - id: metric.gen_ai.client.inference.operation.input_tokens
+    type: metric
+    metric_name: gen_ai.client.inference.operation.input_tokens
+    instrument: histogram
+    unit: "{token}"
+    stability: development
+    brief: The number of input (prompt) tokens used per inference operation.
+    note: |
+      This metric SHOULD be reported when an operation involves the usage
+      of tokens and the count is readily available.
+
+      When systems report both used tokens and billable tokens, instrumentation MUST report billable tokens.
+
+      Instrumentations SHOULD record this metric for each inference operation,
+      including failed ones. The recorded value SHOULD match the token count
+      returned by the provider, or `0` if the response was not received or
+      did not contain token usage.
+    annotations:
+      code_generation:
+        metric_value_type: int
+        histogram_boundaries: [1.0, 4.0, 16.0, 64.0, 256.0, 1024.0, 4096.0, 16384.0, 65536.0, 262144.0, 1048576.0, 4194304.0, 16777216.0, 67108864.0]
+    attributes:
+      - ref: gen_ai.operation.name
+        requirement_level: required
+      - ref: gen_ai.provider.name
+        requirement_level: required
+      - ref: gen_ai.request.model
+        requirement_level:
+          conditionally_required: If available.
+      - ref: gen_ai.response.model
+        requirement_level: recommended
+      - ref: server.address
+        requirement_level: recommended
+      - ref: server.port
+        requirement_level:
+          conditionally_required: If `server.address` is set.
+      - ref: error.type
+        requirement_level:
+          conditionally_required: If the operation ended in an error.
+
+  - id: metric.gen_ai.client.inference.operation.output_tokens
+    type: metric
+    metric_name: gen_ai.client.inference.operation.output_tokens
+    instrument: histogram
+    unit: "{token}"
+    stability: development
+    brief: The number of output (completion) tokens used per inference operation.
+    note: |
+      This metric SHOULD be reported when an operation involves the usage
+      of tokens and the count is readily available.
+
+      When systems report both used tokens and billable tokens, instrumentation MUST report billable tokens.
+
+      Instrumentations SHOULD record this metric for each inference operation,
+      including failed ones. The recorded value SHOULD match the token count
+      returned by the provider, or `0` if the response was not received or
+      did not contain token usage.
+    annotations:
+      code_generation:
+        metric_value_type: int
+        histogram_boundaries: [1.0, 4.0, 16.0, 64.0, 256.0, 1024.0, 4096.0, 16384.0, 65536.0, 262144.0, 1048576.0, 4194304.0, 16777216.0, 67108864.0]
+    attributes:
+      - ref: gen_ai.operation.name
+        requirement_level: required
+      - ref: gen_ai.provider.name
+        requirement_level: required
+      - ref: gen_ai.request.model
+        requirement_level:
+          conditionally_required: If available.
+      - ref: gen_ai.response.model
+        requirement_level: recommended
+      - ref: server.address
+        requirement_level: recommended
+      - ref: server.port
+        requirement_level:
+          conditionally_required: If `server.address` is set.
+      - ref: error.type
+        requirement_level:
+          conditionally_required: If the operation ended in an error.
+
+  - id: metric.gen_ai.invoke_agent.duration
+    type: metric
+    metric_name: gen_ai.invoke_agent.duration
+    instrument: histogram
+    unit: "s"
+    stability: development
+    brief: >-
+      The end-to-end duration of a single in-process agent invocation,
+      from the moment the invocation starts until the agent emits
+      the last chunk of its final response or terminates with an error.
+    note: |
+      If instrumentation can only measure a single provider-facing client
+      operation (for example, one model API call),
+      `gen_ai.client.operation.duration` SHOULD be used instead.
+
+      When this metric is reported alongside a `gen_ai.invoke_agent.internal`
+      span, the metric value SHOULD be the same as the span duration.
+    annotations:
+      code_generation:
+        metric_value_type: double
+        histogram_boundaries: [0.1, 0.2, 0.4, 0.8, 1.6, 3.2, 6.4, 12.8, 25.6, 51.2, 102.4, 204.8, 409.6]
+    attributes:
+      - ref: gen_ai.agent.name
+        requirement_level:
+          conditionally_required: When available.
+      - ref: gen_ai.request.model
+        requirement_level:
+          recommended: If applicable.
+      - ref: error.type
+        requirement_level:
+          conditionally_required: If the operation ended in an error.
+
+  - id: metric.gen_ai.execute_tool.duration
+    type: metric
+    metric_name: gen_ai.execute_tool.duration
+    instrument: histogram
+    unit: "s"
+    stability: development
+    brief: The duration of a single tool execution.
+    note: |
+      Instrumentation that can reliably bound a single tool call SHOULD
+      record this metric for every tool execution they can observe.
+
+      When this metric is reported alongside a `gen_ai.execute_tool` span,
+      the metric value SHOULD be the same as the span duration.
+    annotations:
+      code_generation:
+        metric_value_type: double
+        histogram_boundaries: [0.01, 0.02, 0.04, 0.08, 0.16, 0.32, 0.64, 1.28, 2.56, 5.12, 10.24, 20.48, 40.96, 81.92]
+    attributes:
+      - ref: gen_ai.tool.name
+        requirement_level: required
+      - ref: gen_ai.tool.type
+        requirement_level:
+          recommended: If available.
+      - ref: gen_ai.agent.name
+        brief: The human-readable name of the agent executing the tool.
+        requirement_level:
+          conditionally_required: When applicable.
+      - ref: error.type
+        requirement_level:
+          conditionally_required: If the operation ended in an error.
