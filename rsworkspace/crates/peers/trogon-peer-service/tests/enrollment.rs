@@ -245,3 +245,20 @@ async fn expired_connector_replacement_fences_generation_and_preserves_peer_iden
         Some("replacement")
     );
 }
+
+impl CommandAuthorizer<trogon_peer::Attach> for EnrollmentPolicy {
+    fn authorize(
+        &self,
+        principal: &CommandPrincipal,
+        command: &trogon_peer::Attach,
+    ) -> Result<(), AuthorizationDeniedError> {
+        if command.identity().owner() != &self.owner
+            || command.collaboration() != &self.collaboration
+            || principal.kind() != PrincipalKind::Agent
+            || principal.id().as_str() != self.owner.caller().as_str()
+        {
+            return Err(AuthorizationDeniedError::new("resume outside configured grant"));
+        }
+        Ok(())
+    }
+}
