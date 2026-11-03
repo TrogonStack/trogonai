@@ -34,3 +34,8 @@ pub use peer_request_error::PeerRequestError;
 pub use peer_request_timeout::{PeerRequestTimeout, PeerRequestTimeoutError};
 pub use peer_requester::PeerRequester;
 pub use peer_requester_config::PeerRequesterConfig;
+
+mod rpc_admission;
+mod rpc_operation;
+pub use rpc_admission::PeerRpcAdmission;
+pub use rpc_operation::PeerRpcOperation;
