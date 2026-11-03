@@ -260,6 +260,67 @@ async fn history(store: &PeerJetStreamStore, peer: &PeerId) -> TestResult<PeerSt
     Ok(state)
 }
 
+fn synthetic_host(evidence: &Path, events: &[Value]) -> TestResult<Host> {
+    let stream = events
+        .iter()
+        .map(serde_json::to_string)
+        .collect::<Result<Vec<_>, _>>()?
+        .join("\n");
+    let mut child = Command::new("sh")
+        .args(["-c", r#"read -r prompt; printf '%s\n' "$1"; read -r closed"#, "fixture"])
+        .arg(stream)
+        .kill_on_drop(true)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()?;
+    Ok(Host {
+        input: child.stdin.take(),
+        output: BufReader::new(child.stdout.take().ok_or("fixture stdout absent")?).lines(),
+        child,
+        stderr: tokio::spawn(async { Ok(()) }),
+        evidence: evidence.join("stream.internal.trogonai.md"),
+        events: Vec::new(),
+        session: "fixture".into(),
+        prompts: 0,
+    })
+}
+
+#[tokio::test]
+async fn verifier_rejects_completion_without_native_initialization() -> TestResult {
+    let evidence = tempfile::tempdir()?;
+    let mut host = synthetic_host(
+        evidence.path(),
+        &[json!({
+            "type":"result", "subtype":"success", "is_error":false, "result":"READY"
+        })],
+    )?;
+    let result = host.prompt("Reply READY.").await;
+    host.stop().await?;
+    assert!(result.is_err(), "completion without native initialization was accepted");
+    Ok(())
+}
+
+#[tokio::test]
+async fn verifier_accepts_completion_after_validated_native_inventory() -> TestResult {
+    let evidence = tempfile::tempdir()?;
+    let tools: Vec<_> = ["peer_roster", "peer_send", "peer_status", "peer_acknowledge_batch"]
+        .map(|name| format!("{TOOL_PREFIX}{name}"))
+        .into();
+    let mut host = synthetic_host(
+        evidence.path(),
+        &[
+            json!({"type":"system", "subtype":"init", "session_id":"fixture",
+            "mcp_servers":[{"name":"plugin:trogon-peer:peer", "status":"connected"}], "tools":tools}),
+            json!({"type":"result", "subtype":"success", "is_error":false, "result":"READY"}),
+        ],
+    )?;
+    let result = host.prompt("Reply READY.").await;
+    host.stop().await?;
+    assert_eq!(result?["result"], "READY");
+    Ok(())
+}
+
 fn grant(fixture: &Fixture, owner: &TrustedPeerOwner, session: &str) -> TestResult<PeerId> {
     let identity = EnrollmentIdentity::new(
         owner.clone(),
