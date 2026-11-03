@@ -1,8 +1,10 @@
+use std::time::Duration;
+
 use axum::body::to_bytes;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::Response;
 use futures_util::StreamExt;
-use trogon_nats::AdvancedMockNatsClient;
+use trogon_nats::{AdvancedMockNatsClient, NatsConfig};
 use trogon_std::env::{ReadEnv, SystemEnv};
 
 use a2a_nats::constants::GATEWAY_CALLER_ID_HTTP;
@@ -163,8 +165,10 @@ async fn nats_transport_live_requires_nats_server() {
     if env.var("A2A_SMOKE_COMPOSE").as_deref() != Ok("1") {
         panic!("set A2A_SMOKE_COMPOSE=1 to run live compose-network bridge smoke");
     }
-    let url = env.var("NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".into());
-    let client = async_nats::connect(url).await.expect("live NATS connect");
+    let nats = NatsConfig::from_env(&env);
+    let client = trogon_nats::connect_once(&nats, nats.auth.clone(), Duration::from_secs(5))
+        .await
+        .expect("live NATS connect");
     let _ = client;
     let bridge_addr = env
         .var("BRIDGE_LISTEN_ADDR")

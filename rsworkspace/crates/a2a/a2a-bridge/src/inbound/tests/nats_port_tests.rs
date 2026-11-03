@@ -1,11 +1,24 @@
 use axum::body::{Body, to_bytes};
 use axum::http::Request;
 use tower::ServiceExt;
-use trogon_nats::test_support::{CoreTestServer, JetStreamTestServer};
+use trogon_nats::test_support::{CoreTestServer, JetStreamTestServer, TlsTestServer};
+use trogon_nats::{Location, NatsTls};
 
 use super::*;
 
 const WAIT: Duration = Duration::from_secs(5);
+
+fn plaintext(address: &str) -> NatsConfig {
+    NatsConfig::from_url(address).with_tls(NatsTls::Disabled)
+}
+
+fn no_servers() -> NatsConfig {
+    NatsConfig::new(Vec::new(), NatsAuth::None)
+}
+
+async fn gateway_client(config: &NatsConfig) -> async_nats::Client {
+    trogon_nats::connect(config, WAIT).await.unwrap()
+}
 
 async fn caller_jwt() -> BridgeUserJwt {
     StubAuthCalloutMint::fixture()
@@ -18,10 +31,10 @@ async fn caller_jwt() -> BridgeUserJwt {
 #[tokio::test]
 async fn unary_port_preserves_headers_payload_and_gateway_reply() {
     let server = CoreTestServer::start().await;
-    let client = async_nats::connect(server.address()).await.unwrap();
+    let client = gateway_client(&plaintext(server.address())).await;
     let mut gateway = client.subscribe("a2a.v1.gateway.planner.message.send").await.unwrap();
     client.flush().await.unwrap();
-    let port = AsyncNatsTokenGatewayUnary::from_single_url(server.address(), WAIT);
+    let port = AsyncNatsTokenGatewayUnary::new(plaintext(server.address()), WAIT);
     let jwt = caller_jwt().await;
     let mut headers = async_nats::HeaderMap::new();
     headers.insert(REQ_ID_HEADER, "caller-request");
@@ -49,10 +62,10 @@ async fn unary_port_preserves_headers_payload_and_gateway_reply() {
 #[tokio::test]
 async fn unary_port_bounds_a_gateway_request_that_never_replies() {
     let server = CoreTestServer::start().await;
-    let client = async_nats::connect(server.address()).await.unwrap();
+    let client = gateway_client(&plaintext(server.address())).await;
     let mut gateway = client.subscribe("gateway.stalled").await.unwrap();
     client.flush().await.unwrap();
-    let port = AsyncNatsTokenGatewayUnary::new(vec![server.address().to_owned()], Duration::from_millis(100));
+    let port = AsyncNatsTokenGatewayUnary::new(plaintext(server.address()), Duration::from_millis(100));
     let jwt = caller_jwt().await;
     let (reply, request) = tokio::join!(
         port.unary_request_gateway(&jwt, "gateway.stalled", async_nats::HeaderMap::new(), Bytes::new()),
@@ -67,14 +80,114 @@ async fn unary_port_reports_no_responder_and_invalid_connection_configuration() 
     let server = CoreTestServer::start().await;
     let jwt = caller_jwt().await;
     for port in [
-        AsyncNatsTokenGatewayUnary::from_single_url(server.address(), WAIT),
-        AsyncNatsTokenGatewayUnary::new(Vec::new(), Duration::from_millis(100)),
+        AsyncNatsTokenGatewayUnary::new(plaintext(server.address()), WAIT),
+        AsyncNatsTokenGatewayUnary::new(no_servers(), Duration::from_millis(100)),
     ] {
         let error = port
             .unary_request_gateway(&jwt, "gateway.missing", async_nats::HeaderMap::new(), Bytes::new())
             .await;
         assert!(matches!(error, Err(BridgeError::NatsPublish(_))));
     }
+}
+
+#[tokio::test]
+async fn unary_port_authenticates_as_the_caller_rather_than_as_the_bridge() {
+    let jwt = caller_jwt().await;
+    let server = CoreTestServer::start_requiring_token(jwt.as_str()).await;
+    let token = |secret: &str| NatsAuth::Token(CredentialValue::Literal(SecretString::new(secret).unwrap()));
+    let responder = gateway_client(
+        &NatsConfig::new(vec![server.address().to_owned()], token(jwt.as_str())).with_tls(NatsTls::Disabled),
+    )
+    .await;
+    let mut gateway = responder.subscribe("gateway.guarded").await.unwrap();
+    responder.flush().await.unwrap();
+    let bridge =
+        NatsConfig::new(vec![server.address().to_owned()], token("bridge-service-token")).with_tls(NatsTls::Disabled);
+    let port = AsyncNatsTokenGatewayUnary::new(bridge, WAIT);
+    let (reply, ()) = tokio::join!(
+        port.unary_request_gateway(&jwt, "gateway.guarded", async_nats::HeaderMap::new(), Bytes::new()),
+        async {
+            let request = tokio::time::timeout(WAIT, gateway.next()).await.unwrap().unwrap();
+            responder
+                .publish(request.reply.unwrap(), Bytes::from_static(b"granted"))
+                .await
+                .unwrap();
+        },
+    );
+    assert_eq!(reply.unwrap(), Bytes::from_static(b"granted"));
+
+    let stranger = BridgeUserJwt::new("other.caller.jwt").unwrap();
+    let rejected = port
+        .unary_request_gateway(&stranger, "gateway.guarded", async_nats::HeaderMap::new(), Bytes::new())
+        .await;
+    assert!(
+        matches!(&rejected, Err(BridgeError::NatsPublish(message)) if message.contains("authorization violation")),
+        "{rejected:?}"
+    );
+}
+
+#[tokio::test]
+async fn caller_connections_refuse_a_plaintext_server_unless_tls_is_disabled() {
+    let server = JetStreamTestServer::start().await;
+    server
+        .jetstream()
+        .await
+        .create_stream(a2a_nats::nats::subjects::A2aStream::Events.config(&default_a2a_prefix()))
+        .await
+        .unwrap();
+    let responder = server.client().await;
+    let mut gateway = responder.subscribe("gateway.guarded").await.unwrap();
+    responder.flush().await.unwrap();
+    let default_tls = NatsConfig::from_url(server.address());
+    let jwt = caller_jwt().await;
+
+    let reply = AsyncNatsTokenGatewayUnary::new(default_tls.clone(), WAIT)
+        .unary_request_gateway(&jwt, "gateway.guarded", async_nats::HeaderMap::new(), Bytes::new())
+        .await;
+    let stream = AsyncNatsTokenTaskJetstream::new(default_tls, WAIT)
+        .task_event_payload_stream(
+            &jwt,
+            &default_a2a_prefix(),
+            SseConsumePlan::TasksResubscribe {
+                task_id: A2aTaskId::new("task-1").unwrap(),
+                last_seq: 0,
+            },
+        )
+        .await;
+
+    assert!(matches!(reply, Err(BridgeError::NatsPublish(_))));
+    assert!(matches!(stream, Err(BridgeError::JetStreamConsume(_))));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), gateway.next())
+            .await
+            .is_err(),
+        "no request may reach a server that was not reached over TLS"
+    );
+}
+
+#[tokio::test]
+async fn unary_port_verifies_the_server_against_the_configured_ca() {
+    let server = TlsTestServer::start().await;
+    let trusting = NatsConfig::from_url(server.address()).with_tls(NatsTls::Enabled {
+        ca: Some(Location::Path(server.ca())),
+        client_cert: None,
+    });
+    let responder = gateway_client(&trusting).await;
+    let mut gateway = responder.subscribe("gateway.sealed").await.unwrap();
+    responder.flush().await.unwrap();
+    let port = AsyncNatsTokenGatewayUnary::new(trusting, WAIT);
+    let jwt = caller_jwt().await;
+    let (reply, ()) = tokio::join!(
+        port.unary_request_gateway(&jwt, "gateway.sealed", async_nats::HeaderMap::new(), Bytes::new()),
+        async {
+            let request = tokio::time::timeout(WAIT, gateway.next()).await.unwrap().unwrap();
+            responder
+                .publish(request.reply.unwrap(), Bytes::from_static(b"sealed"))
+                .await
+                .unwrap();
+        },
+    );
+    assert_eq!(reply.unwrap(), Bytes::from_static(b"sealed"));
 }
 
 async fn publish_event(js: &async_nats::jetstream::Context, request: Option<&str>, body: &'static [u8]) {
@@ -100,7 +213,7 @@ async fn live_task_stream_forwards_only_events_for_its_request_and_acknowledges_
     publish_event(&js, Some("other-request"), b"other").await;
     publish_event(&js, None, b"uncorrelated").await;
     publish_event(&js, Some("my-request"), b"mine").await;
-    let port = AsyncNatsTokenTaskJetstream::from_single_url(server.address(), WAIT);
+    let port = AsyncNatsTokenTaskJetstream::new(plaintext(server.address()), WAIT);
     let mut payloads = port
         .task_event_payload_stream(
             &caller_jwt().await,
@@ -152,7 +265,7 @@ async fn resumed_task_stream_replays_after_the_checkpoint_without_request_demult
     publish_event(&js, Some("request-1"), b"before-checkpoint").await;
     publish_event(&js, Some("request-2"), b"after-checkpoint").await;
     publish_event(&js, None, b"uncorrelated-after-checkpoint").await;
-    let port = AsyncNatsTokenTaskJetstream::new(vec![server.address().to_owned()], WAIT);
+    let port = AsyncNatsTokenTaskJetstream::new(plaintext(server.address()), WAIT);
     let mut payloads = port
         .task_event_payload_stream(
             &caller_jwt().await,
@@ -182,8 +295,8 @@ async fn resumed_task_stream_replays_after_the_checkpoint_without_request_demult
 async fn task_stream_reports_missing_stream_and_invalid_connection_configuration() {
     let server = JetStreamTestServer::start().await;
     for port in [
-        AsyncNatsTokenTaskJetstream::from_single_url(server.address(), WAIT),
-        AsyncNatsTokenTaskJetstream::new(Vec::new(), Duration::from_millis(100)),
+        AsyncNatsTokenTaskJetstream::new(plaintext(server.address()), WAIT),
+        AsyncNatsTokenTaskJetstream::new(no_servers(), Duration::from_millis(100)),
     ] {
         let result = port
             .task_event_payload_stream(
