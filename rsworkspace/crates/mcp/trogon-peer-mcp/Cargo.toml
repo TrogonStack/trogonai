@@ -30,6 +30,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
+tempfile = { workspace = true }
 buffa = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "io-util", "test-util"] }
 trogon-std = { workspace = true, features = ["test-support"] }
