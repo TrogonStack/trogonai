@@ -134,8 +134,12 @@ hold never releases an owner's hold.
 
 A hold has a scope:
 
-- `NEW_WORK` refuses new Sessions of the subject and new delegations into it.
-  Running Sessions finish on their own terms.
+- `NEW_WORK` refuses new Sessions of the subject and new delegations into it,
+  meaning a delegation whose callee is the subject or sits under it, whatever
+  the dispatching Session is doing. Running Sessions finish on their own
+  terms. A running Session under the hold may still dispatch, but the Session
+  it starts has the held subject in its lineage (Decision 3), so its admission
+  is refused.
 - `ALL_PROTECTED_ACTIONS` refuses the same, and every running Session under
   the hold fails closed at its next protected action, evaluated within the
   bound of Decision 7: a model request, a tool call, or a delegation
@@ -247,11 +251,15 @@ defines how stale that projection may be.
   closed: it refuses new admissions and protected actions, and it does not
   fall back to the last projection it held or to any default. What it does
   with work already in flight is that point's own record to state.
-- **Offline and static sources.** A point may load its bindings from a bundle
-  or snapshot with no live connection to the policy streams, on the same
-  terms. Such a source is a bounded-stale source whose staleness is measured
-  from when its producer last vouched for it, and a source that cannot show
+- **Offline and static sources.** A point may load its bindings from an
+  export of the policy streams with no live connection to them, on the same
+  terms. Such an export is a bounded-stale source whose staleness is measured
+  from when its producer last vouched for it, and an export that cannot show
   that is past the bound. Offline operation is not an exemption from the bound.
+  A source an operator writes by hand is not a projection of the policy
+  streams at all: it carries no binding revisions, a point that uses it records
+  the source instead of a `PolicyRuleRef`, and it cannot claim the bound or
+  live revocation. Request-rule bundles follow the same split.
 
 [ADR#0049](./0049-revocation-latency-target.md) measures credential
 invalidation. This Decision borrows its numbers for policy projections and
