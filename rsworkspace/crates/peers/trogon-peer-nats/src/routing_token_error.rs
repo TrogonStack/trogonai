@@ -1,4 +1,6 @@
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+use trogon_nats::SubjectTokenViolationError;
+
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum RoutingTokenError {
     #[error("routing token must not be empty")]
     Empty,
@@ -6,4 +8,6 @@ pub enum RoutingTokenError {
     TooLong,
     #[error("routing token contains an unsupported character")]
     InvalidCharacter,
+    #[error("routing token is not a valid NATS token: {0}")]
+    Nats(#[source] SubjectTokenViolationError),
 }

@@ -8,6 +8,7 @@ mod peer_principal;
 mod peer_reply_subject;
 mod peer_route;
 mod peer_tenant;
+mod routing_token;
 mod routing_token_error;
 
 pub use peer_account::PeerAccount;

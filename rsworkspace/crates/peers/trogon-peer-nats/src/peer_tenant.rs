@@ -1,14 +1,15 @@
 use crate::RoutingTokenError;
+use crate::routing_token::RoutingToken;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PeerTenant(String);
+pub struct PeerTenant(RoutingToken);
 
 impl PeerTenant {
     pub fn new(value: impl Into<String>) -> Result<Self, RoutingTokenError> {
-        Ok(Self(value.into()))
+        RoutingToken::new(value.into()).map(Self)
     }
 
     pub fn as_str(&self) -> &str {
-        &self.0
+        self.0.as_str()
     }
 }

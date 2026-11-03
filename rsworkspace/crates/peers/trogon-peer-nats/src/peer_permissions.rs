@@ -1,4 +1,4 @@
-use crate::{PeerAccount, PeerConnectionId, PeerIngressError, PeerPrincipal};
+use crate::{PeerAccount, PeerConnectionId, PeerIngress, PeerIngressError, PeerMethod, PeerPrincipal, PeerRoute};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PeerPermissions {
@@ -8,13 +8,23 @@ pub struct PeerPermissions {
 
 impl PeerPermissions {
     pub fn for_connection(
-        _account: &PeerAccount,
-        _principal: &PeerPrincipal,
-        _connection: &PeerConnectionId,
+        account: &PeerAccount,
+        principal: &PeerPrincipal,
+        connection: &PeerConnectionId,
     ) -> Result<Self, PeerIngressError> {
+        let ingress = PeerIngress::new(account.clone());
+        let publish_allow = PeerMethod::ALL
+            .into_iter()
+            .map(|method| ingress.subject(&PeerRoute::new(principal.clone(), method)))
+            .collect::<Result<_, _>>()?;
         Ok(Self {
-            publish_allow: Vec::new(),
-            subscribe_allow: Vec::new(),
+            publish_allow,
+            subscribe_allow: vec![format!(
+                "_INBOX.{}.{}.{}.>",
+                principal.tenant().as_str(),
+                principal.caller().as_str(),
+                connection.as_str(),
+            )],
         })
     }
 

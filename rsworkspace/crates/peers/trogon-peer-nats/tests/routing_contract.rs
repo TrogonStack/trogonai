@@ -93,7 +93,10 @@ fn principal_tokens_exclude_controls_separators_and_wildcards() {
     for invalid in ["", "a.b", "a*", "a>", "a b", "a\0b", "a\u{7f}b", "a/b", "é"] {
         assert!(PeerTenant::new(invalid).is_err(), "accepted tenant {invalid:?}");
         assert!(PeerCaller::new(invalid).is_err(), "accepted caller {invalid:?}");
-        assert!(PeerConnectionId::new(invalid).is_err(), "accepted connection {invalid:?}");
+        assert!(
+            PeerConnectionId::new(invalid).is_err(),
+            "accepted connection {invalid:?}"
+        );
     }
     assert!(PeerTenant::new("x".repeat(129)).is_err());
     assert!(PeerCaller::new("x".repeat(129)).is_err());
@@ -119,7 +122,10 @@ fn reply_destination_is_confined_to_authenticated_tenant_and_caller() {
         "_R_.broker_generated.import_reply",
         "tenant_a.peer.v1.caller_b.PeerService.Send",
     ] {
-        assert!(PeerReplySubject::parse_for(&owner, invalid).is_err(), "accepted {invalid:?}");
+        assert!(
+            PeerReplySubject::parse_for(&owner, invalid).is_err(),
+            "accepted {invalid:?}"
+        );
     }
 }
 
