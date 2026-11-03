@@ -1,5 +1,6 @@
 use crate::{
     attachment_input::attachment,
+    constants::MAX_BATCH_ID_BYTES,
     content_ports::ContentSeal,
     identity_ports::MessageIdGenerator,
     message_text::MessageText,
@@ -12,7 +13,8 @@ use crate::{
 };
 use buffa::MessageField;
 use trogon_decider_runtime::{CommandAuthorizer, CommandError, StreamAppend, StreamRead};
-use trogon_peer::{IdempotencyKey, MessageError, MessageId, PeerId, SendMessage, TrustedPeerOwner};
+use trogon_peer::{BatchId, IdempotencyKey, MessageError, MessageId, PeerId, SendMessage, TrustedPeerOwner};
+use trogon_peer_context::PeerContext;
 use trogonai_proto::{convert::timestamp_from_datetime, peers::v1alpha1 as proto};
 impl<S, P, C, Content, Cache, Ids, Catalog> PeerApplication<S, P, C, Content, Cache, Ids, Catalog>
 where
@@ -41,20 +43,49 @@ where
         if self.collaboration(&target)? != collaboration {
             return Err(PeerApplicationError::Scope);
         }
+        let message_id = self.ids.message_id()?;
+        let accepted_at = self.clock.now();
+        if !sender
+            .outbox
+            .iter()
+            .any(|entry| entry.idempotency_key.as_deref() == Some(key.as_str()))
+        {
+            let batch_id = BatchId::new("b".repeat(MAX_BATCH_ID_BYTES))?;
+            let batch = proto::PeerBatch {
+                batch_id: Some(batch_id.as_str().to_owned()),
+                message_ids: vec![message_id.as_str().to_owned()],
+                prepared_at: MessageField::some(timestamp_from_datetime(&accepted_at)),
+                ..Default::default()
+            };
+            let message = proto::PreparedMessage {
+                metadata: MessageField::some(proto::MessageMetadata {
+                    message_id: Some(message_id.as_str().to_owned()),
+                    sender_peer_id: Some(reference.peer_id().to_string()),
+                    recipient_peer_id: Some(recipient.to_string()),
+                    collaboration_ref: Some(collaboration.as_str().to_owned()),
+                    content_size_bytes: Some(text.as_str().len() as u32),
+                    accepted_at: MessageField::some(timestamp_from_datetime(&accepted_at)),
+                    ..Default::default()
+                }),
+                text: Some(text.as_str().to_owned()),
+            };
+            PeerContext::render(&batch, &[message])?;
+        }
         let binding = self.content.seal(&scope, &text).await?;
         if binding.tenant() != owner.tenant() || binding.content().size() as usize != text.as_str().len() {
             return Err(PeerApplicationError::Scope);
         }
+        self.live(owner, &reference, &sender)?;
         let command = SendMessage::new(
             owner.clone(),
             reference,
             key.clone(),
-            self.ids.message_id()?,
+            message_id,
             recipient,
             collaboration,
             binding.content().clone(),
             reply,
-            self.clock.now(),
+            accepted_at,
         );
         let message = match self.execute_message(owner, &command).await {
             Ok(state) => state
