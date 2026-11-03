@@ -1,11 +1,30 @@
 use std::fmt;
 
+use sha2::{Digest, Sha256};
+
+use super::{InstallationId, NativeSessionId, TrustedPeerOwner};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PeerId(String);
 
 impl PeerId {
-    pub(crate) fn pending() -> Self {
-        Self("0000000000000000000000000000000000000000000000000000000000000000".to_owned())
+    pub(crate) fn derive(
+        owner: &TrustedPeerOwner,
+        installation: &InstallationId,
+        native_session: &NativeSessionId,
+    ) -> Self {
+        let mut digest = Sha256::new();
+        for value in [
+            "trogon/peers/enrollment/v1",
+            owner.tenant().as_str(),
+            owner.caller().as_str(),
+            installation.as_str(),
+            native_session.as_str(),
+        ] {
+            digest.update((value.len() as u32).to_be_bytes());
+            digest.update(value.as_bytes());
+        }
+        Self(hex::encode(digest.finalize()))
     }
 
     pub fn as_str(&self) -> &str {
