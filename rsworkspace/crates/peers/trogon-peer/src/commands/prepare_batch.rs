@@ -12,6 +12,18 @@ pub struct PrepareBatch {
     now: DateTime<Utc>,
 }
 impl PrepareBatch {
+    pub fn owner(&self) -> &TrustedPeerOwner {
+        &self.owner
+    }
+    pub fn attachment(&self) -> &AttachmentRef {
+        &self.attachment
+    }
+    pub fn batch_id(&self) -> &BatchId {
+        &self.batch_id
+    }
+    pub fn plan(&self) -> &TrustedBatchPlan {
+        &self.plan
+    }
     pub fn new(
         owner: TrustedPeerOwner,
         attachment: AttachmentRef,

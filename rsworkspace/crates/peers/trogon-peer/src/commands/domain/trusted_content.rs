@@ -6,6 +6,15 @@ pub struct TrustedContent {
     pub(crate) digest: Vec<u8>,
 }
 impl TrustedContent {
+    pub fn reference(&self) -> &SealedContentRef {
+        &self.reference
+    }
+    pub fn size(&self) -> u32 {
+        self.size
+    }
+    pub fn semantic_fingerprint(&self) -> &[u8] {
+        &self.digest
+    }
     pub fn from_sealed_port(
         reference: SealedContentRef,
         size: u32,
