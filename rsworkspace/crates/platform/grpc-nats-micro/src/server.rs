@@ -4,8 +4,6 @@
 //! `respond`, because micro's error-respond helper cannot carry a body (see
 //! [`reply_error`]).
 
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use async_nats::service::ServiceExt as _;
@@ -22,25 +20,7 @@ use crate::content_type_input::ContentTypeInput;
 use crate::service_fault::ServiceFault;
 use crate::status_codec::{self, Outcome};
 
-/// Decodes a request payload and produces a reply payload for one endpoint.
-///
-/// The handler receives the request bytes already isolated from NATS
-/// transport concerns and returns the success reply body pre-encoded in
-/// `content_type`, or a [`ServiceFault`] to report on the micro error
-/// channel.
-/// Pre-encoding the success body here (rather than a typed message) keeps
-/// this trait's signature independent of any one request/response message
-/// pair, so one registration loop can dispatch to endpoints with unrelated
-/// message types. The trait is boxed-future based (rather than `impl
-/// Future`) so `Box<dyn EndpointHandler>` values with different concrete
-/// request/response types can share one `Vec` in [`serve`].
-pub trait EndpointHandler: Send + Sync {
-    fn handle<'a>(
-        &'a self,
-        request_bytes: &'a [u8],
-        content_type: ContentType,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, ServiceFault>> + Send + 'a>>;
-}
+pub use crate::endpoint_handler::EndpointHandler;
 
 #[derive(Debug, Error)]
 pub enum ServeError {
@@ -70,13 +50,42 @@ pub async fn serve(
     content_type_policy: ServiceOptions,
     handlers: Vec<Box<dyn EndpointHandler>>,
 ) -> Result<async_nats::service::Service, ServeError> {
+    let handlers = handlers.into_iter().map(RegisteredHandler::Legacy).collect();
+    serve_registered(client, binding, content_type_policy, handlers).await
+}
+
+pub struct AdmittedEndpoint {
+    pub subject: crate::ServerSubjectPattern,
+    pub admission: Box<dyn crate::EndpointAdmission>,
+}
+
+enum RegisteredHandler {
+    Legacy(Box<dyn EndpointHandler>),
+    Admitted(AdmittedEndpoint),
+}
+
+pub async fn serve_admitted(
+    client: &Client,
+    binding: &ServiceBinding,
+    content_type_policy: ServiceOptions,
+    endpoints: Vec<AdmittedEndpoint>,
+) -> Result<async_nats::service::Service, ServeError> {
+    let handlers = endpoints.into_iter().map(RegisteredHandler::Admitted).collect();
+    serve_registered(client, binding, content_type_policy, handlers).await
+}
+
+async fn serve_registered(
+    client: &Client,
+    binding: &ServiceBinding,
+    content_type_policy: ServiceOptions,
+    handlers: Vec<RegisteredHandler>,
+) -> Result<async_nats::service::Service, ServeError> {
     if binding.endpoints().len() != handlers.len() {
         return Err(ServeError::HandlerCount {
             endpoints: binding.endpoints().len(),
             handlers: handlers.len(),
         });
     }
-
     let mut builder = client.service_builder();
     if let Some(description) = binding.description() {
         builder = builder.description(description);
@@ -94,7 +103,11 @@ pub async fn serve(
 
     let content_type_policy = Arc::new(content_type_policy);
     for (endpoint, handler) in binding.endpoints().iter().zip(handlers) {
-        let subject = endpoint.subject().as_str().to_string();
+        let subject = match &handler {
+            RegisteredHandler::Legacy(_) => endpoint.subject().as_str(),
+            RegisteredHandler::Admitted(endpoint) => endpoint.subject.as_str(),
+        }
+        .to_owned();
         // Name the endpoint after the rpc method (ADR 0016 §2). Micro
         // otherwise derives the name from the full subject, so `$SRV.INFO`
         // and `$SRV.STATS` would report the dotted subject instead of the
@@ -110,7 +123,20 @@ pub async fn serve(
         let content_type_policy = content_type_policy.clone();
         tokio::spawn(async move {
             while let Some(request) = micro_endpoint.next().await {
-                dispatch(&client, &request, &content_type_policy, handler.as_ref()).await;
+                match &handler {
+                    RegisteredHandler::Legacy(handler) => {
+                        dispatch(&client, &request, &content_type_policy, handler.as_ref()).await
+                    }
+                    RegisteredHandler::Admitted(endpoint) => {
+                        dispatch_admitted(
+                            &client,
+                            &request.message,
+                            &content_type_policy,
+                            endpoint.admission.as_ref(),
+                        )
+                        .await
+                    }
+                }
             }
         });
     }
@@ -118,26 +144,35 @@ pub async fn serve(
     Ok(service)
 }
 
+/// Admission is the only path to negotiation, execution and either reply channel.
 pub async fn dispatch_admitted<P: PublishClient>(
     client: &P,
     message: &async_nats::Message,
     policy: &ServiceOptions,
-    _admission: &dyn crate::EndpointAdmission,
+    admission: &dyn crate::EndpointAdmission,
 ) {
-    let (content_type, outcome) =
-        resolve(message.headers.as_ref(), &message.payload, policy, &PlaceholderHandler).await;
-    let fault = outcome.err().unwrap_or_else(|| ServiceFault::internal("unimplemented"));
-    let _ = reply_error(client, message.reply.clone(), fault, content_type).await;
-}
-
-struct PlaceholderHandler;
-impl EndpointHandler for PlaceholderHandler {
-    fn handle<'a>(
-        &'a self,
-        _request_bytes: &'a [u8],
-        _content_type: ContentType,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, ServiceFault>> + Send + 'a>> {
-        Box::pin(async { Err(ServiceFault::internal("unimplemented")) })
+    let metadata = crate::RequestMetadata {
+        subject: message.subject.as_str(),
+        reply: message.reply.as_ref().map(|reply| reply.as_str()),
+    };
+    let Some(handler) = admission.admit(metadata) else {
+        return;
+    };
+    let Some(reply) = message.reply.clone() else {
+        return;
+    };
+    let (content_type, outcome) = resolve(message.headers.as_ref(), &message.payload, policy, handler.as_ref()).await;
+    match outcome {
+        Ok(body) => {
+            let mut headers = HeaderMap::new();
+            headers.insert(HEADER_CONTENT_TYPE, content_type.header_value());
+            let published = client.publish_with_headers(reply, headers, body.into()).await;
+            warn_if_undelivered(published, ReplyKind::Success);
+        }
+        Err(fault) => {
+            let published = reply_error(client, Some(reply), fault, content_type).await;
+            let _ = published.inspect_err(warn_unencodable);
+        }
     }
 }
 
@@ -186,14 +221,14 @@ async fn resolve(
             let outcome = handler.handle(payload, content_type).await;
             (content_type, outcome)
         }
-        Err(error) => {
+        Err(_error) => {
             let rejection_content_type = requested
                 .as_ref()
                 .and_then(ContentType::from_input)
                 .unwrap_or(ContentType::Protobuf);
             (
                 rejection_content_type,
-                Err(ServiceFault::invalid_argument(error.to_string())),
+                Err(ServiceFault::invalid_argument("unsupported request encoding")),
             )
         }
     }
