@@ -596,7 +596,7 @@ async fn wire_results(adapter: PeerMcp<Backend>, requests: Vec<CallToolRequestPa
     });
     let client = ().serve(client_transport).await.expect("client handshake");
     let tools = client.list_all_tools().await.expect("list tools");
-    assert_eq!(tools.len(), 5);
+    assert_eq!(tools.len(), 6);
     assert!(tools.iter().any(|tool| tool.name == "peer_prompt_hook"));
     let mut results = Vec::new();
     for request in requests {
@@ -798,6 +798,7 @@ async fn lifecycle_heartbeats_only_bound_attachments_and_terminal_detach_stops_t
     tokio::time::advance(std::time::Duration::from_secs(6)).await;
     assert!(calls.lock().expect("calls").is_empty());
     adapter.invoke(prompt("native_b", "stable")).await.expect("bind");
+    tokio::task::yield_now().await;
     for _ in 0..2 {
         tokio::time::advance(std::time::Duration::from_secs(2)).await;
         tokio::task::yield_now().await;
@@ -891,5 +892,9 @@ fn lifecycle_detach_schema_is_exact() {
     let schema = serde_json::to_value(tool.input_schema).expect("schema");
     assert_eq!(schema["additionalProperties"], false);
     assert_eq!(schema["properties"].as_object().expect("properties").len(), 2);
-    assert_eq!(schema["properties"]["hook_event_name"]["enum"], json!(["SessionEnd"]));
+    assert_eq!(
+        schema["properties"]["hook_event_name"]["$ref"],
+        json!("#/$defs/DetachHookEvent")
+    );
+    assert_eq!(schema["$defs"]["DetachHookEvent"]["enum"], json!(["SessionEnd"]));
 }

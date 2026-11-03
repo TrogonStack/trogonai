@@ -30,3 +30,7 @@ pub use peer_mcp_error::PeerMcpError;
 
 mod availability_observation;
 pub use availability_observation::AvailabilityObservation;
+
+mod detach_hook_event;
+mod detach_hook_input;
+mod detach_tool;

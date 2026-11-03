@@ -1,5 +1,11 @@
 #[derive(Debug, thiserror::Error)]
 pub enum PeerMcpError {
+    #[error("peer connector is terminally detached")]
+    Detached,
+    #[error("peer detach outcome was not confirmed")]
+    Detach(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("peer detach deadline elapsed")]
+    DetachDeadline,
     #[error("native prompt deadline elapsed; remote outcome is uncertain")]
     PromptDeadline,
     #[error("peer connector has not enrolled a native session")]
@@ -47,6 +53,10 @@ pub enum PeerMcpError {
 impl PeerMcpError {
     pub(crate) fn public_message(&self) -> &'static str {
         match self {
+            Self::Detached => "Peer connector is detached; start a new connector runtime.",
+            Self::Detach(_) | Self::DetachDeadline => {
+                "Peer detach was not confirmed; lease expiry remains the fallback."
+            }
             Self::PromptDeadline => {
                 "Peer hook deadline elapsed; retry the same prompt identity. Remote outcome is uncertain."
             }
