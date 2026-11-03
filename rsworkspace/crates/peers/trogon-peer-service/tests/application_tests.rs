@@ -1,3 +1,4 @@
+use std::sync::atomic::Ordering;
 mod support;
 use support::*;
 use trogonai_proto::peers::v1alpha1 as proto;
@@ -35,7 +36,6 @@ async fn durable_acceptance_survives_reconstruction_and_exact_retry_with_new_con
 
 #[tokio::test]
 async fn denied_acceptance_touches_no_store_content_cache_or_catalog() -> TestResult {
-    use std::sync::atomic::Ordering;
     let f = Fixture::new().await?;
     let before = (
         f.store.reads.load(Ordering::SeqCst),

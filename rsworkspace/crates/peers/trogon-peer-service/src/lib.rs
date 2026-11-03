@@ -47,3 +47,5 @@ pub use presentation_key::PresentationKey;
 pub use presentation_ports::{PresentationInsert, PresentationOrphan, PresentationRead};
 pub use scoped_peer_store::ScopedPeerStore;
 pub use work_limit::WorkLimit;
+mod application_scope;
+mod messaging;

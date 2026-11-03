@@ -30,20 +30,6 @@ impl<S, P, C, Content, Cache, Ids, Catalog> PeerApplication<S, P, C, Content, Ca
 where
     S: StreamRead<PeerId> + StreamAppend<PeerId>,
 {
-    pub async fn send(
-        &self,
-        _owner: &TrustedPeerOwner,
-        _request: proto::SendRequest,
-    ) -> ApplicationResult<proto::SendResponse, S> {
-        Err(PeerApplicationError::NotImplemented)
-    }
-    pub async fn status(
-        &self,
-        _owner: &TrustedPeerOwner,
-        _request: proto::StatusRequest,
-    ) -> ApplicationResult<proto::StatusResponse, S> {
-        Err(PeerApplicationError::NotImplemented)
-    }
     pub async fn reconcile(
         &self,
         _owner: &TrustedPeerOwner,
