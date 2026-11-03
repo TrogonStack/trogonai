@@ -327,6 +327,32 @@ async fn verifier_accepts_completion_after_validated_native_inventory() -> TestR
     Ok(())
 }
 
+#[tokio::test]
+async fn verifier_rejects_incomplete_result_error_metadata() -> TestResult {
+    let tools: Vec<_> = ["peer_roster", "peer_send", "peer_status", "peer_acknowledge_batch"]
+        .map(|name| format!("{TOOL_PREFIX}{name}"))
+        .into();
+    for flag in [None, Some(Value::Null), Some(json!("false"))] {
+        let evidence = tempfile::tempdir()?;
+        let mut result = json!({"type":"result", "subtype":"success", "result":"READY"});
+        if let Some(flag) = flag {
+            result["is_error"] = flag;
+        }
+        let mut host = synthetic_host(
+            evidence.path(),
+            &[
+                json!({"type":"system", "subtype":"init", "session_id":"fixture",
+                "mcp_servers":[{"name":"plugin:trogon-peer:peer", "status":"connected"}], "tools":tools}),
+                result,
+            ],
+        )?;
+        let result = host.prompt("Reply READY.").await;
+        host.stop().await?;
+        assert!(result.is_err(), "incomplete result error metadata was accepted");
+    }
+    Ok(())
+}
+
 fn grant(fixture: &Fixture, owner: &TrustedPeerOwner, session: &str) -> TestResult<PeerId> {
     let identity = EnrollmentIdentity::new(
         owner.clone(),
