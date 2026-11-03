@@ -15,6 +15,12 @@ impl PeerRequestTimeout {
     pub const MAX: Duration = Duration::from_secs(2);
 
     pub fn new(timeout: Duration) -> Result<Self, PeerRequestTimeoutError> {
+        if timeout.is_zero() {
+            return Err(PeerRequestTimeoutError::Zero);
+        }
+        if timeout > Self::MAX {
+            return Err(PeerRequestTimeoutError::TooLong);
+        }
         Ok(Self(timeout))
     }
 
