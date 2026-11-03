@@ -46,6 +46,12 @@ async fn startup_preserves_enabled_policy_configuration_failures() {
         ("A2A_GATEWAY_TIER1_DECLARATIVE_ENABLED", |error| {
             matches!(error, RuntimeError::Tier1DeclarativeConfig(_))
         }),
+        ("A2A_GATEWAY_TIER3_REDACTION_ENABLED", |error| {
+            matches!(error, RuntimeError::PolicyStack(_))
+        }),
+        ("A2A_GATEWAY_TIER2_CEL_ENABLED", |error| {
+            matches!(error, RuntimeError::PolicyStack(_))
+        }),
     ];
     for (setting, expected) in cases {
         let env = InMemoryEnv::new();
