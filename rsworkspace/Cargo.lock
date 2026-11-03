@@ -7523,7 +7523,9 @@ dependencies = [
 name = "trogon-peer-mcp"
 version = "0.1.0"
 dependencies = [
+ "async-nats",
  "buffa",
+ "futures",
  "grpc-nats-micro",
  "rmcp",
  "schemars 1.2.1",
@@ -7532,10 +7534,12 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
+ "trogon-decider-runtime",
  "trogon-nats",
  "trogon-peer",
  "trogon-peer-context",
  "trogon-peer-nats",
+ "trogon-peer-service",
  "trogon-std",
  "trogonai-proto",
  "uuid",

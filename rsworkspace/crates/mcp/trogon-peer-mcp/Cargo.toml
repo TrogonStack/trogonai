@@ -13,7 +13,7 @@ rmcp = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["sync", "time", "macros"] }
+tokio = { workspace = true, features = ["sync", "time", "macros", "io-std", "rt-multi-thread", "signal"] }
 trogon-peer = { path = "../../peers/trogon-peer" }
 trogon-peer-context = { path = "../../peers/trogon-peer-context" }
 trogonai-proto = { path = "../../platform/trogonai-proto", features = ["peers"] }
@@ -26,7 +26,16 @@ trogon-peer-nats = { path = "../../peers/trogon-peer-nats" }
 trogon-std = { workspace = true }
 uuid = { workspace = true }
 
+tracing = { workspace = true }
+
+tracing-subscriber = { workspace = true }
+
 [dev-dependencies]
 buffa = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "io-util", "test-util"] }
 trogon-std = { workspace = true, features = ["test-support"] }
+trogon-peer-nats = { path = "../../peers/trogon-peer-nats", features = ["test-support"] }
+trogon-peer-service = { path = "../../peers/trogon-peer-service", features = ["test-support"] }
+trogon-decider-runtime = { workspace = true }
+async-nats = { workspace = true }
+futures = { workspace = true }
