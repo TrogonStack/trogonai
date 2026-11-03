@@ -106,6 +106,7 @@ bytes = "=1.12.1"
 base64 = "=0.23.1"
 buffa = { version = "=0.9.2", features = ["json"] }
 buffa-types = { version = "=0.9.2", features = ["json"] }
+buffa-descriptor = { version = "=0.9.2" }
 futures = "=0.3.34"
 futures-util = "=0.3.34"
 tokio = "=1.53.1"

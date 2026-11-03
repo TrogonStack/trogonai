@@ -16,9 +16,7 @@ inputs:
       - proto/trogonai/evaluation
       - proto/trogonai/gateway/credentials/commands
       - proto/trogonai/library
-      - proto/trogonai/model_access
       - proto/trogonai/platform
-      - proto/trogonai/policy
       - proto/trogonai/projects
       - proto/trogonai/session
       - proto/trogonai/usage
@@ -27,6 +25,7 @@ plugins:
   - local: protoc-gen-buffa
     out: rsworkspace/crates/platform/trogonai-proto/src/gen
     include_imports: true
+    strategy: all
     opt:
       - json=true
       - unknown_fields=false
