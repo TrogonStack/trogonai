@@ -148,7 +148,7 @@ fn detached_attachment_can_be_replaced_without_waiting_for_its_old_lease() {
     let mut expected = detached.clone();
     expected.attachment = MessageField::some(next.clone());
     expected.availability = Some(proto::PeerAvailability::PEER_AVAILABILITY_READY.into());
-    TestCase::<Attach>::new()
+    let reattached = TestCase::<Attach>::new()
         .given_state(detached.clone())
         .when(Attach::new(
             identity(),
@@ -164,7 +164,9 @@ fn detached_attachment_can_be_replaced_without_waiting_for_its_old_lease() {
                 .into(),
             ),
         }])
-        .then_state(expected);
+        .then_state(expected)
+        .resulting_state()
+        .clone();
     let heartbeat = Heartbeat::new(
         identity().owner().clone(),
         reference("old_connector", 1),
@@ -173,8 +175,16 @@ fn detached_attachment_can_be_replaced_without_waiting_for_its_old_lease() {
     );
     TestCase::<Heartbeat>::new()
         .given_state(detached)
-        .when(heartbeat)
+        .when(heartbeat.clone())
         .then_error(HeartbeatError::Inactive);
+    TestCase::<Detach>::new()
+        .given_state(reattached.clone())
+        .when(command("old_connector", 1, now))
+        .then_error(DetachError::Fenced);
+    TestCase::<Heartbeat>::new()
+        .given_state(reattached)
+        .when(heartbeat)
+        .then_error(HeartbeatError::Fenced);
 }
 
 #[test]
@@ -199,4 +209,38 @@ fn detach_checks_service_time_but_can_retire_its_own_expired_lease() {
             ),
         }])
         .then_state(detached_state(before, now));
+}
+
+#[test]
+fn detach_replay_rejects_another_generation_or_backwards_time() {
+    let start = Utc.with_ymd_and_hms(2026, 11, 2, 12, 0, 0).unwrap();
+    let before = state(start);
+    for mutation in 0..3 {
+        let mut event = proto::PeerDetached {
+            attachment: before.attachment.attachment.clone(),
+            detached_at: MessageField::some(timestamp_from_datetime(&(start + chrono::Duration::seconds(1)))),
+        };
+        match mutation {
+            0 => {
+                event.attachment = MessageField::some(proto::AttachmentRef {
+                    peer_id: Some(identity().peer_id().to_string()),
+                    connector_id: Some("old_connector".to_owned()),
+                    generation: Some(2),
+                })
+            }
+            1 => {
+                event.detached_at = MessageField::some(timestamp_from_datetime(&(start - chrono::Duration::seconds(1))))
+            }
+            _ => event.detached_at = MessageField::default(),
+        }
+        assert!(
+            trogon_peer::commands::state::evolve(
+                before.clone(),
+                &proto::PeerEvent {
+                    event: Some(event.into())
+                }
+            )
+            .is_err()
+        );
+    }
 }
