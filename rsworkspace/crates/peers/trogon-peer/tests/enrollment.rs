@@ -2,10 +2,10 @@
 
 use buffa::MessageField;
 use chrono::{TimeZone, Utc};
-use trogon_decider::testing::TestCase;
+use trogon_decider::{Decider, evaluate_decision, testing::TestCase};
 use trogon_peer::{
-    CallerId, CollaborationRef, ConnectorId, Enroll, EnrollmentIdentity, InstallationId, NativeSessionId,
-    PeerDisplayName, TenantId, TrustedPeerOwner,
+    CallerId, CollaborationRef, ConnectorId, Enroll, EnrollError, EnrollmentIdentity, EvolveError, InstallationId,
+    NativeSessionId, PeerDisplayName, TenantId, TrustedPeerOwner,
 };
 use trogonai_proto::convert::timestamp_from_datetime;
 use trogonai_proto::peers::{state_v1alpha1::PeerState, v1alpha1 as proto};
@@ -22,12 +22,18 @@ fn fresh_enrollment_records_trusted_owner_and_a_ten_second_attachment() {
         NativeSessionId::new("session_alpha").unwrap(),
     );
     let command = Enroll::new(
-        identity,
+        identity.clone(),
         ConnectorId::new("connector_alpha").unwrap(),
         CollaborationRef::new("collaboration_alpha").unwrap(),
         PeerDisplayName::new("Review").unwrap(),
         now,
     );
+    assert_eq!(command.identity(), &identity);
+    assert_eq!(command.stream_id(), identity.peer_id());
+    assert_eq!(command.connector_id().as_str(), "connector_alpha");
+    assert_eq!(command.collaboration().as_str(), "collaboration_alpha");
+    assert_eq!(command.display_name().as_str(), "Review");
+    assert_eq!(command.now(), now);
     let peer_id = "181a9e9b0706e955720fad504bf947d1752ae3ddae5406402d21146e69f55fac";
     let enrollment = proto::PeerEnrollment {
         peer_id: Some(peer_id.to_owned()),
@@ -80,4 +86,37 @@ fn fresh_enrollment_records_trusted_owner_and_a_ten_second_attachment() {
         });
     assert_eq!(result.stream_id(), peer_id);
     assert!(!result.resulting_state().active_at.is_set());
+}
+
+#[test]
+fn an_enrolled_identity_cannot_be_created_twice_by_command_or_replayed_fact() {
+    let identity = EnrollmentIdentity::new(
+        TrustedPeerOwner::new(TenantId::new("tenant").unwrap(), CallerId::new("caller").unwrap()),
+        InstallationId::new("installation").unwrap(),
+        NativeSessionId::new("session").unwrap(),
+    );
+    let command = Enroll::new(
+        identity,
+        ConnectorId::new("connector").unwrap(),
+        CollaborationRef::new("collaboration").unwrap(),
+        PeerDisplayName::new("Peer").unwrap(),
+        Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+    );
+    let (state, _) = evaluate_decision(Enroll::initial_state(), &command).unwrap();
+    TestCase::<Enroll>::new()
+        .given_state(state.clone())
+        .when(command)
+        .then_error(EnrollError::AlreadyEnrolled);
+    let duplicate = proto::PeerEvent {
+        event: Some(
+            proto::PeerEnrolled {
+                enrollment: state.enrollment.clone(),
+            }
+            .into(),
+        ),
+    };
+    assert_eq!(
+        trogon_peer::commands::state::evolve(state, &duplicate),
+        Err(EvolveError::AlreadyEnrolled)
+    );
 }

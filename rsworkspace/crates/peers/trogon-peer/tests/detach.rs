@@ -2,7 +2,7 @@
 
 use buffa::MessageField;
 use chrono::{DateTime, TimeZone, Utc};
-use trogon_decider::testing::TestCase;
+use trogon_decider::{Decider, testing::TestCase};
 use trogon_peer::{
     Attach, AttachmentRef, CallerId, CollaborationRef, ConnectorId, Detach, DetachError, EnrollmentIdentity, Heartbeat,
     HeartbeatError, InstallationId, NativeSessionId, PeerId, PeerObservation, TenantId, TrustedPeerOwner,
@@ -243,4 +243,26 @@ fn detach_replay_rejects_another_generation_or_backwards_time() {
             .is_err()
         );
     }
+}
+
+#[test]
+fn detach_binding_fences_a_missing_history_and_rejects_an_unrepresentable_service_time() {
+    let start = Utc.with_ymd_and_hms(2026, 11, 2, 12, 0, 0).unwrap();
+    let command = command("old_connector", 1, start);
+    assert_eq!(command.owner(), identity().owner());
+    assert_eq!(command.attachment(), &reference("old_connector", 1));
+    assert_eq!(command.stream_id(), command.attachment().peer_id());
+    assert_eq!(command.now(), start);
+    TestCase::<Detach>::new()
+        .given_no_history()
+        .when(command)
+        .then_error(DetachError::MissingEnrollment);
+    TestCase::<Detach>::new()
+        .given_state(state(start))
+        .when(Detach::new(
+            identity().owner().clone(),
+            reference("old_connector", 1),
+            DateTime::<Utc>::MAX_UTC,
+        ))
+        .then_error(DetachError::TimestampRange);
 }
