@@ -775,3 +775,84 @@ async fn connect_does_not_warn_when_tls_is_on() {
 
     assert_eq!(tls_disabled_warnings(&events), 0);
 }
+
+/// Every field this crate records on its spans and events, so a test can prove
+/// that a value never reaches any of them, not just the one event it expects.
+#[derive(Clone, Default)]
+struct RecordedFields(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+
+struct FieldText<'a>(&'a mut Vec<String>);
+
+impl tracing::field::Visit for FieldText<'_> {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        self.0.push(format!("{}={value:?}", field.name()));
+    }
+}
+
+impl RecordedFields {
+    fn install(&self) -> DefaultGuard {
+        use tracing_subscriber::layer::SubscriberExt;
+        use tracing_subscriber::util::SubscriberInitExt;
+
+        tracing_subscriber::registry()
+            .with(LevelFilter::TRACE)
+            .with(self.clone())
+            .set_default()
+    }
+
+    fn fields(&self) -> Vec<String> {
+        self.0.lock().expect("recorded fields are not poisoned").clone()
+    }
+
+    fn record(&self, metadata: &tracing::Metadata<'_>, record: impl FnOnce(&mut FieldText<'_>)) {
+        if metadata.target().starts_with(env!("CARGO_CRATE_NAME")) {
+            record(&mut FieldText(
+                &mut self.0.lock().expect("recorded fields are not poisoned"),
+            ));
+        }
+    }
+}
+
+impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for RecordedFields {
+    fn on_new_span(
+        &self,
+        attrs: &tracing::span::Attributes<'_>,
+        _id: &tracing::span::Id,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        self.record(attrs.metadata(), |fields| attrs.record(fields));
+    }
+
+    fn on_event(&self, event: &tracing::Event<'_>, _ctx: tracing_subscriber::layer::Context<'_, S>) {
+        self.record(event.metadata(), |fields| event.record(fields));
+    }
+}
+
+#[tokio::test]
+async fn connect_once_keeps_server_userinfo_out_of_every_span_and_event() {
+    let server = CoreTestServer::start().await;
+    let address = format!("nats://test-user:redaction-test-secret@{}", server.address());
+    let config = NatsConfig::from_url(&address).with_tls(NatsTls::Disabled);
+    let _registered = keep_another_subscriber_registered(LevelFilter::WARN);
+    let recorded = RecordedFields::default();
+    let _guard = recorded.install();
+
+    let client = connect_once(&config, NatsAuth::None, PLAINTEXT_CONNECT_TIMEOUT)
+        .await
+        .unwrap();
+    client.flush().await.unwrap();
+
+    let fields = recorded.fields();
+    let logged_servers: Vec<&String> = fields.iter().filter(|field| field.starts_with("servers=")).collect();
+    assert!(logged_servers.len() >= 4, "{fields:?}");
+    assert!(
+        logged_servers.iter().all(|field| field.contains(server.address())),
+        "{fields:?}"
+    );
+    assert!(
+        fields
+            .iter()
+            .all(|field| !field.contains("test-user") && !field.contains("redaction-test-secret")),
+        "{fields:?}"
+    );
+}

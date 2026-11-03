@@ -183,15 +183,16 @@ async fn prepare(config: &NatsConfig) -> Result<ConnectOptions, ConnectError> {
         return Err(ConnectError::NoServers);
     }
     let tls = tls(config)?;
+    let servers = servers_for_logging(&config.servers);
     info!(
-        servers = ?config.servers,
+        servers = ?servers,
         auth = %config.auth.description(),
         tls = %tls.description(),
         "Connecting to NATS"
     );
     if *tls == NatsTls::Disabled {
         warn!(
-            servers = ?config.servers,
+            servers = ?servers,
             "NATS TLS is disabled, which is only for tests and local debugging"
         );
     }
@@ -203,7 +204,7 @@ fn connected(config: &NatsConfig, result: Result<Client, async_nats::ConnectErro
     match result {
         Ok(client) => {
             info!(
-                servers = ?config.servers,
+                servers = ?servers_for_logging(&config.servers),
                 auth = %config.auth.description(),
                 "Connected to NATS"
             );
@@ -290,7 +291,7 @@ fn log_connect_failure_to_facade(error: &async_nats::ConnectError, config: &Nats
 
 /// Returns before any server answers and keeps dialing, then reconnecting, in
 /// the background, so it only fails on settings it cannot use.
-#[instrument(name = NATS_CONNECT, skip(config), fields(servers = ?config.servers, auth = %config.auth.description(), timeout_secs = ?connection_timeout.as_secs()))]
+#[instrument(name = NATS_CONNECT, skip(config), fields(servers = ?servers_for_logging(&config.servers), auth = %config.auth.description(), timeout_secs = ?connection_timeout.as_secs()))]
 pub async fn connect(config: &NatsConfig, connection_timeout: Duration) -> Result<Client, ConnectError> {
     let opts = prepare(config).await?;
     let result = apply_reconnect_options(opts, connection_timeout)
@@ -309,7 +310,7 @@ pub async fn connect(config: &NatsConfig, connection_timeout: Duration) -> Resul
 ///
 /// Give a caller's token as [`CredentialValue::Literal`] so it is never read as
 /// a `file://` or `env://` reference.
-#[instrument(name = NATS_CONNECT, skip(config, auth), fields(servers = ?config.servers, auth = %auth.description(), timeout_secs = ?connection_timeout.as_secs()))]
+#[instrument(name = NATS_CONNECT, skip(config, auth), fields(servers = ?servers_for_logging(&config.servers), auth = %auth.description(), timeout_secs = ?connection_timeout.as_secs()))]
 pub async fn connect_once(
     config: &NatsConfig,
     auth: NatsAuth,
