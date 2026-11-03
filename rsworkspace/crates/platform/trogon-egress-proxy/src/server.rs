@@ -38,37 +38,62 @@ impl Server {
         self.listener.local_addr()
     }
 
-    pub fn proxy(&self) -> &Proxy {
-        &self.proxy
-    }
-
     /// Accepts connections until `shutdown` is cancelled. Tunnels still open
     /// at that point are closed.
     pub async fn run(self, shutdown: CancellationToken) {
-        let mut connections = JoinSet::new();
-        loop {
-            tokio::select! {
-                () = shutdown.cancelled() => break,
-                Some(_) = connections.join_next(), if !connections.is_empty() => {}
-                accepted = self.listener.accept() => match accepted {
-                    Ok((stream, peer)) => {
-                        connections.spawn(serve_connection(
-                            self.acceptor.clone(),
-                            Arc::clone(&self.proxy),
-                            Arc::clone(&self.trust_domain),
-                            stream,
-                            peer,
-                        ));
-                    }
-                    Err(error) => {
-                        tracing::warn!(error = %error, "accept failed");
-                        tokio::time::sleep(ACCEPT_ERROR_BACKOFF).await;
-                    }
-                },
-            }
-        }
-        connections.shutdown().await;
+        accept_loop(
+            &self.listener,
+            &self.acceptor,
+            &self.proxy,
+            &self.trust_domain,
+            shutdown,
+        )
+        .await;
     }
+}
+
+/// Where connections come from. A seam so a test can make `accept` fail, which
+/// a real listener only does when the process is out of descriptors.
+trait Accept {
+    fn accept(&self) -> impl Future<Output = io::Result<(TcpStream, SocketAddr)>> + Send;
+}
+
+impl Accept for TcpListener {
+    fn accept(&self) -> impl Future<Output = io::Result<(TcpStream, SocketAddr)>> + Send {
+        TcpListener::accept(self)
+    }
+}
+
+async fn accept_loop<L: Accept>(
+    listener: &L,
+    acceptor: &TlsAcceptor,
+    proxy: &Arc<Proxy>,
+    trust_domain: &Arc<TrustDomain>,
+    shutdown: CancellationToken,
+) {
+    let mut connections = JoinSet::new();
+    loop {
+        tokio::select! {
+            () = shutdown.cancelled() => break,
+            Some(_) = connections.join_next(), if !connections.is_empty() => {}
+            accepted = listener.accept() => match accepted {
+                Ok((stream, peer)) => {
+                    connections.spawn(serve_connection(
+                        acceptor.clone(),
+                        Arc::clone(proxy),
+                        Arc::clone(trust_domain),
+                        stream,
+                        peer,
+                    ));
+                }
+                Err(error) => {
+                    tracing::warn!(error = %error, "accept failed");
+                    tokio::time::sleep(ACCEPT_ERROR_BACKOFF).await;
+                }
+            },
+        }
+    }
+    connections.shutdown().await;
 }
 
 async fn serve_connection(
@@ -99,3 +124,6 @@ async fn serve_connection(
     };
     proxy.serve(tls, &agent).await;
 }
+
+#[cfg(test)]
+mod tests;

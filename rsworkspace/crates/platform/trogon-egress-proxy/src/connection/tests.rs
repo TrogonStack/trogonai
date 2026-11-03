@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::Mutex;
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream, ReadBuf};
 use tokio::net::TcpListener;
 
 use super::*;
@@ -43,6 +45,39 @@ impl Resolver for Names {
             .get(host.as_str())
             .cloned()
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "unknown name"))
+    }
+}
+
+/// A resolver that never answers.
+struct Stalled;
+
+#[async_trait]
+impl Resolver for Stalled {
+    async fn resolve(&self, _: &HostName) -> io::Result<Vec<IpAddr>> {
+        std::future::pending().await
+    }
+}
+
+/// A connection whose reads fail, as a reset peer's would.
+struct Reset;
+
+impl AsyncRead for Reset {
+    fn poll_read(self: Pin<&mut Self>, _: &mut Context<'_>, _: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
+        Poll::Ready(Err(io::ErrorKind::ConnectionReset.into()))
+    }
+}
+
+impl AsyncWrite for Reset {
+    fn poll_write(self: Pin<&mut Self>, _: &mut Context<'_>, bytes: &[u8]) -> Poll<io::Result<usize>> {
+        Poll::Ready(Ok(bytes.len()))
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Poll::Ready(Ok(()))
     }
 }
 
@@ -95,15 +130,30 @@ fn proxy(snapshot: Arc<dyn PolicySnapshot>, names: &[(&str, &str)], non_tls: &[u
             .map(|(name, ip)| ((*name).to_owned(), vec![ip.parse().expect("ip")]))
             .collect(),
     );
+    proxy_with(snapshot, resolver, limits(), non_tls)
+}
+
+fn proxy_with(
+    snapshot: Arc<dyn PolicySnapshot>,
+    resolver: impl Resolver + 'static,
+    limits: Limits,
+    non_tls: &[u16],
+) -> (Proxy, Arc<Recorder>) {
     let recorder = Arc::new(Recorder::default());
     let proxy = Proxy::new(
         snapshot,
         Arc::new(resolver),
         recorder.clone(),
-        limits(),
+        limits,
         non_tls.iter().map(|p| NonZeroU16::new(*p).expect("port")).collect(),
     );
     (proxy, recorder)
+}
+
+async fn read_to_end(mut client: DuplexStream) -> Vec<u8> {
+    let mut received = Vec::new();
+    client.read_to_end(&mut received).await.expect("read");
+    received
 }
 
 async fn echo_upstream() -> u16 {
@@ -272,6 +322,64 @@ async fn a_name_that_does_not_resolve_gets_502() {
     .await;
     assert_refusal(&response, "502", "UPSTREAM_UNREACHABLE");
     assert_eq!(audit.events()[0].2, Decision::Refused(Fault::UpstreamUnreachable));
+}
+
+#[tokio::test]
+async fn a_name_that_resolves_to_nothing_gets_502() {
+    let resolver = Names(HashMap::from([("example.com".to_owned(), Vec::new())]));
+    let (proxy, audit) = proxy_with(snapshot(&["example.com:443".to_owned()]), resolver, limits(), &[]);
+    let response = exchange(&proxy, |client| {
+        send_and_read_all(client, b"CONNECT example.com:443 HTTP/1.1\r\n\r\n".to_vec())
+    })
+    .await;
+    assert_refusal(&response, "502", "UPSTREAM_UNREACHABLE");
+    assert_eq!(audit.events()[0].2, Decision::Refused(Fault::UpstreamUnreachable));
+}
+
+#[tokio::test]
+async fn a_resolver_that_never_answers_is_cut_off_with_502() {
+    let limits = Limits {
+        connect_timeout: Duration::from_millis(50),
+        ..limits()
+    };
+    let (proxy, audit) = proxy_with(snapshot(&["example.com:443".to_owned()]), Stalled, limits, &[]);
+    let response = exchange(&proxy, |client| {
+        send_and_read_all(client, b"CONNECT example.com:443 HTTP/1.1\r\n\r\n".to_vec())
+    })
+    .await;
+    assert_refusal(&response, "502", "UPSTREAM_UNREACHABLE");
+    assert_eq!(audit.events()[0].2, Decision::Refused(Fault::UpstreamUnreachable));
+}
+
+#[tokio::test]
+async fn a_client_that_sends_no_head_in_time_is_closed_without_an_answer() {
+    let limits = Limits {
+        head_timeout: Duration::from_millis(50),
+        ..limits()
+    };
+    let (proxy, audit) = proxy_with(snapshot(&["example.com:443".to_owned()]), Names::default(), limits, &[]);
+    let received = exchange(&proxy, read_to_end).await;
+    assert!(received.is_empty(), "{}", text(&received));
+    assert!(audit.events().is_empty());
+}
+
+#[tokio::test]
+async fn a_client_that_hangs_up_before_the_head_is_closed_without_an_answer() {
+    let (proxy, audit) = proxy(snapshot(&["example.com:443".to_owned()]), &[], &[]);
+    let received = exchange(&proxy, |mut client| async move {
+        client.write_all(b"CONNECT exam").await.expect("write");
+        Vec::new()
+    })
+    .await;
+    assert!(received.is_empty());
+    assert!(audit.events().is_empty());
+}
+
+#[tokio::test]
+async fn a_connection_that_fails_while_the_head_is_read_ends_without_a_decision() {
+    let (proxy, audit) = proxy(snapshot(&["example.com:443".to_owned()]), &[], &[]);
+    proxy.serve(Reset, &agent()).await;
+    assert!(audit.events().is_empty());
 }
 
 #[tokio::test]

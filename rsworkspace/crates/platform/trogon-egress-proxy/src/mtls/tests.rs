@@ -2,6 +2,8 @@ use rcgen::{
     BasicConstraints, CertificateParams, CertifiedIssuer, DistinguishedName, DnType, ExtendedKeyUsagePurpose, IsCa,
     KeyPair, KeyUsagePurpose, SanType, string::Ia5String,
 };
+use rustls::internal::msgs::codec::{Codec, Reader};
+use rustls::pki_types::PrivatePkcs8KeyDer;
 
 use super::*;
 
@@ -115,6 +117,54 @@ fn loading_reports_missing_empty_and_keyless_files() {
     assert!(matches!(read_certificates(&empty), Err(TlsError::NoCertificate { .. })));
     assert!(matches!(read_private_key(&empty), Err(TlsError::NoPrivateKey { .. })));
     assert!(matches!(read_private_key(&missing), Err(TlsError::Unreadable { .. })));
+}
+
+#[test]
+fn a_path_that_opens_but_cannot_be_read_is_unreadable() {
+    let dir = tempfile::tempdir().expect("dir");
+
+    assert!(matches!(
+        read_certificates(dir.path()),
+        Err(TlsError::Unreadable { .. })
+    ));
+    assert!(matches!(read_private_key(dir.path()), Err(TlsError::Unreadable { .. })));
+}
+
+#[test]
+fn a_trust_anchor_that_is_not_a_certificate_is_refused_and_named() {
+    let anchors = vec![CertificateDer::from(vec![0u8; 8])];
+    let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(Vec::new()));
+
+    let error = server_config(Vec::new(), key, anchors, Path::new("anchors.pem"), domain()).expect_err("refused");
+
+    assert!(
+        matches!(&error, TlsError::InvalidTrustAnchor { path, .. } if path == Path::new("anchors.pem")),
+        "{error:?}"
+    );
+}
+
+/// A signature structure as it appears on the wire: scheme, length, bytes.
+fn forged_signature() -> DigitallySignedStruct {
+    let wire = [0x04, 0x03, 0x00, 0x04, 1, 2, 3, 4];
+    DigitallySignedStruct::read(&mut Reader::init(&wire)).expect("signature structure")
+}
+
+#[test]
+fn a_forged_handshake_signature_is_refused_in_both_protocol_versions() {
+    let anchor = ca("anchor");
+    let leaf = client_leaf(&anchor, &["spiffe://trogon.example/agent/agent-1"]);
+    let verifier = verifier(&anchor);
+
+    assert!(
+        verifier
+            .verify_tls12_signature(b"transcript", &leaf, &forged_signature())
+            .is_err()
+    );
+    assert!(
+        verifier
+            .verify_tls13_signature(b"transcript", &leaf, &forged_signature())
+            .is_err()
+    );
 }
 
 #[test]

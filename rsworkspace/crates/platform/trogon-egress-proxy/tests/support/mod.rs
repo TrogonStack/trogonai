@@ -80,6 +80,21 @@ impl Pki {
         self.client(&[&format!("spiffe://{TRUST_DOMAIN}/agent/{agent}")])
     }
 
+    /// A complete configuration over fresh files in `dir`. Listens on `listen`
+    /// and enforces `policy`; every other setting is the default.
+    pub fn config(&self, dir: &std::path::Path, policy: &str, listen: std::net::SocketAddr) -> Config {
+        let policy_file: PathBuf = dir.join("policy.toml");
+        std::fs::write(&policy_file, policy).expect("write");
+        Config {
+            listen,
+            policy_file,
+            tls: self.write_server_files(dir),
+            trust_domain: TrustDomain::new(TRUST_DOMAIN).expect("trust domain"),
+            non_tls_ports: Vec::new(),
+            limits: Limits::default(),
+        }
+    }
+
     fn write_server_files(&self, dir: &std::path::Path) -> TlsFiles {
         let mut params = CertificateParams::new(vec!["localhost".to_owned()]).expect("params");
         params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
@@ -149,24 +164,15 @@ impl Harness {
     pub async fn start(setup: Setup<'_>) -> Self {
         let dir = tempfile::tempdir().expect("dir");
         let pki = Pki::new("test-ca");
-        let policy_file: PathBuf = dir.path().join("policy.toml");
-        std::fs::write(&policy_file, setup.policy).expect("write");
-        let tls = pki.write_server_files(dir.path());
-
-        let config = Config {
-            listen: "127.0.0.1:0".parse().expect("addr"),
-            policy_file,
-            tls,
-            trust_domain: TrustDomain::new(TRUST_DOMAIN).expect("trust domain"),
-            non_tls_ports: setup
-                .non_tls_ports
-                .iter()
-                .map(|port| std::num::NonZeroU16::new(*port).expect("port"))
-                .collect(),
-            limits: Limits {
-                first_record_timeout: Duration::from_secs(1),
-                ..Limits::default()
-            },
+        let mut config = pki.config(dir.path(), setup.policy, "127.0.0.1:0".parse().expect("addr"));
+        config.non_tls_ports = setup
+            .non_tls_ports
+            .iter()
+            .map(|port| std::num::NonZeroU16::new(*port).expect("port"))
+            .collect();
+        config.limits = Limits {
+            first_record_timeout: Duration::from_secs(1),
+            ..Limits::default()
         };
         let resolver = Names(
             setup

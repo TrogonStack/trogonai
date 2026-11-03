@@ -59,10 +59,9 @@ where
     let mut scanned = 0;
     loop {
         if let Some(position) = find(&buffer[scanned..], HEAD_TERMINATOR) {
+            // Reads are capped at `max_head - buffer.len()`, so a terminator
+            // found in the buffer already ends inside the limit.
             let head_end = scanned + position + HEAD_TERMINATOR.len();
-            if head_end > max_head {
-                return Err(RequestError::HeadTooLarge { max: max_head });
-            }
             let request = parse_head(&buffer[..head_end])?;
             return Ok((request, buffer.split_off(head_end)));
         }

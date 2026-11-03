@@ -75,3 +75,10 @@ fn status_line_is_well_formed() {
     assert!(text(Fault::UpstreamUnreachable).starts_with("HTTP/1.1 502 Bad Gateway\r\n"));
     assert!(text(Fault::MethodNotAllowed).starts_with("HTTP/1.1 405 Method Not Allowed\r\n"));
 }
+
+#[test]
+fn display_is_the_code() {
+    for fault in ALL {
+        assert_eq!(fault.to_string(), fault.code());
+    }
+}

@@ -65,10 +65,6 @@ impl Proxy {
         }
     }
 
-    pub fn snapshot(&self) -> &dyn PolicySnapshot {
-        self.snapshot.as_ref()
-    }
-
     pub fn limits(&self) -> &Limits {
         &self.limits
     }
@@ -193,10 +189,12 @@ impl Proxy {
     /// Tries the validated addresses in order; nothing else is ever dialed.
     async fn dial(&self, targets: &[SocketAddr]) -> Option<(TcpStream, SocketAddr)> {
         for target in targets {
-            match timeout(self.limits.connect_timeout, TcpStream::connect(target)).await {
-                Ok(Ok(stream)) => return Some((stream, *target)),
-                Ok(Err(error)) => tracing::debug!(error = %error, "upstream connect failed"),
-                Err(_) => tracing::debug!("upstream connect timed out"),
+            let attempt = timeout(self.limits.connect_timeout, TcpStream::connect(target))
+                .await
+                .unwrap_or_else(|_| Err(io::ErrorKind::TimedOut.into()));
+            match attempt {
+                Ok(stream) => return Some((stream, *target)),
+                Err(error) => tracing::debug!(error = %error, "upstream connect failed"),
             }
         }
         None
