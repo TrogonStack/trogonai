@@ -134,7 +134,7 @@ pub(super) fn guard_live_attachment<'a>(
 ) -> Result<&'a proto::PeerAttachment, HeartbeatError> {
     let enrollment = state.enrollment.as_option().ok_or(HeartbeatError::MissingEnrollment)?;
     let identity = state::parse_enrollment(enrollment)?;
-    if identity.owner() != &*owner {
+    if identity.owner() != owner {
         return Err(HeartbeatError::OwnerMismatch);
     }
     let previous = state.attachment.as_option().ok_or(HeartbeatError::Inactive)?;

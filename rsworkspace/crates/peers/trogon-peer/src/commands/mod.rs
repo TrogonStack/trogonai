@@ -1,6 +1,8 @@
 pub mod domain;
 mod enroll;
+mod evolve_error;
 pub mod state;
+mod state_values;
 
 pub use enroll::{Enroll, EnrollError};
 pub use state::EvolveError;

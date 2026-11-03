@@ -1,7 +1,4 @@
-use super::{
-    domain::*,
-    state::{self, EvolveError},
-};
+use super::{domain::*, evolve_error::EvolveError, state_values};
 use sha2::{Digest, Sha256};
 use trogonai_proto::peers::{state_v1alpha1::PeerState, v1alpha1 as proto};
 
@@ -10,23 +7,23 @@ fn value<T>(result: Result<T, PeerValueError>, field: &'static str) -> Result<T,
 }
 pub(super) fn metadata(message: &proto::MessageMetadata) -> Result<(), EvolveError> {
     value(
-        MessageId::new(state::required(&message.message_id, "message_id")?),
+        MessageId::new(state_values::required(&message.message_id, "message_id")?),
         "message_id",
     )?;
     value(
-        PeerId::parse(state::required(&message.sender_peer_id, "sender_peer_id")?),
+        PeerId::parse(state_values::required(&message.sender_peer_id, "sender_peer_id")?),
         "sender_peer_id",
     )?;
     value(
-        PeerId::parse(state::required(&message.recipient_peer_id, "recipient_peer_id")?),
+        PeerId::parse(state_values::required(&message.recipient_peer_id, "recipient_peer_id")?),
         "recipient_peer_id",
     )?;
     value(
-        CollaborationRef::new(state::required(&message.collaboration_ref, "collaboration_ref")?),
+        CollaborationRef::new(state_values::required(&message.collaboration_ref, "collaboration_ref")?),
         "collaboration_ref",
     )?;
     let reference = value(
-        SealedContentRef::new(state::required(&message.content_ref, "content_ref")?),
+        SealedContentRef::new(state_values::required(&message.content_ref, "content_ref")?),
         "content_ref",
     )?;
     value(
@@ -44,8 +41,8 @@ pub(super) fn metadata(message: &proto::MessageMetadata) -> Result<(), EvolveErr
     if let Some(reply) = &message.reply_to_message_id {
         value(MessageId::new(reply), "reply_to_message_id")?;
     }
-    let accepted = state::read_time(message.accepted_at.as_option(), "accepted_at")?;
-    let expires = state::read_time(message.expires_at.as_option(), "expires_at")?;
+    let accepted = state_values::read_time(message.accepted_at.as_option(), "accepted_at")?;
+    let expires = state_values::read_time(message.expires_at.as_option(), "expires_at")?;
     if expires - accepted != chrono::Duration::hours(1) {
         return Err(EvolveError::InvalidMessageTransition);
     }
@@ -70,7 +67,7 @@ pub(super) fn semantic_digest(message: &proto::MessageMetadata) -> Vec<u8> {
 }
 pub(super) fn outbox_entry(entry: &proto::OutboxEntry) -> Result<(), EvolveError> {
     value(
-        IdempotencyKey::new(state::required(&entry.idempotency_key, "idempotency_key")?),
+        IdempotencyKey::new(state_values::required(&entry.idempotency_key, "idempotency_key")?),
         "idempotency_key",
     )?;
     let message = entry
@@ -85,7 +82,7 @@ pub(super) fn outbox_entry(entry: &proto::OutboxEntry) -> Result<(), EvolveError
 }
 pub(super) fn fold_accepted(state: &mut PeerState, event: &proto::PeerMessageAccepted) -> Result<(), EvolveError> {
     let enrollment = state.enrollment.as_option().ok_or(EvolveError::MissingEnrollment)?;
-    state::parse_enrollment(enrollment)?;
+    state_values::parse_enrollment(enrollment)?;
     let entry = event
         .entry
         .as_option()
@@ -100,11 +97,11 @@ pub(super) fn fold_accepted(state: &mut PeerState, event: &proto::PeerMessageAcc
     {
         return Err(EvolveError::InvalidMessageTransition);
     }
-    let now = state::read_time(entry.message.accepted_at.as_option(), "accepted_at")?;
+    let now = state_values::read_time(entry.message.accepted_at.as_option(), "accepted_at")?;
     let attachment = state.attachment.as_option().ok_or(EvolveError::InvalidAttachment)?;
-    state::validate_attachment(enrollment, attachment)?;
-    let observed = state::read_time(attachment.observed_at.as_option(), "observed_at")?;
-    let expires = state::read_time(attachment.expires_at.as_option(), "expires_at")?;
+    state_values::validate_attachment(enrollment, attachment)?;
+    let observed = state_values::read_time(attachment.observed_at.as_option(), "observed_at")?;
+    let expires = state_values::read_time(attachment.expires_at.as_option(), "expires_at")?;
     if now < observed
         || now >= expires
         || attachment.status.and_then(|s| s.as_known()) != Some(proto::AttachmentStatus::ATTACHMENT_STATUS_ATTACHED)
@@ -120,7 +117,7 @@ pub(super) fn fold_accepted(state: &mut PeerState, event: &proto::PeerMessageAcc
             count += 1;
             bytes += u64::from(old.message.content_size_bytes.unwrap_or(0));
         }
-        let accepted = state::read_time(old.message.accepted_at.as_option(), "accepted_at")?;
+        let accepted = state_values::read_time(old.message.accepted_at.as_option(), "accepted_at")?;
         if accepted > now {
             return Err(EvolveError::InvalidMessageTransition);
         }

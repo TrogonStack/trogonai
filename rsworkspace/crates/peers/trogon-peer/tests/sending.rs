@@ -1,5 +1,6 @@
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used, clippy::panic)]
 mod support;
+use chrono::TimeZone;
 use support::*;
 use trogon_decider::{Decider, WritePrecondition};
 use trogon_peer::*;
@@ -173,7 +174,6 @@ fn malformed_acceptance_events_are_rejected_on_replay() {
 
 #[test]
 fn exact_retry_does_not_require_a_new_representable_lifetime() {
-    use chrono::TimeZone;
     let state = run(enrolled("sender", 0), &send(0, 1, 1));
     let original = state.outbox[0].clone();
     let now = chrono::Utc.with_ymd_and_hms(9999, 12, 31, 23, 59, 30).unwrap();
