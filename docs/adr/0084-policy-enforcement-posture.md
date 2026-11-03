@@ -110,7 +110,9 @@ the layer's own refusal code (`-32803` for Tier-1 declarative) and an audit
 record whose rule is `gateway.tier1.declarative.no_match_default_deny`. A bundle
 has no field that sets an allow for unmatched requests. A policy that wants
 broad access states it as a visible catch-all allow rule with an id, which the
-audit record then names. The same holds for a permit-shaped binding of
+audit record then names. A catch-all allow only means the layer does not
+refuse; it never admits an action that a policy binding governs and no permit
+grants. The same holds for a permit-shaped binding of
 [ADR#0071](./0071-policy-bindings-on-a-subject-entitlements-ceilings-and-holds.md):
 absence is denial in every layer that consumes it.
 
