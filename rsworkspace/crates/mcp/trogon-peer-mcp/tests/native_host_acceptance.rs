@@ -153,6 +153,12 @@ impl Host {
                 }
                 if result {
                     require(
+                        self.events
+                            .iter()
+                            .any(|event| event["type"] == "system" && event["subtype"] == "init"),
+                        "host completion preceded validated initialization",
+                    )?;
+                    require(
                         event["subtype"] == "success",
                         "host did not complete prompt successfully",
                     )?;
