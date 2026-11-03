@@ -1,0 +1,39 @@
+[package]
+name = "trogon-egress-proxy"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Agent egress proxy: an mTLS HTTP CONNECT forward proxy that admits tunnels by exact destination"
+publish = false
+
+[lib]
+name = "trogon_egress_proxy"
+path = "src/lib.rs"
+
+[[bin]]
+name = "trogon-egress-proxy"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
+rustls = { workspace = true }
+rustls-pemfile = { workspace = true }
+rustls-pki-types = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "io-util", "time", "sync"] }
+tokio-rustls = { workspace = true }
+tokio-util = { workspace = true }
+toml = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["fmt", "env-filter"] }
+trogon-std = { workspace = true, features = ["signal"] }
+x509-parser = { workspace = true }
+
+[dev-dependencies]
+rcgen = { version = "=0.14.8", default-features = false, features = ["aws_lc_rs", "pem"] }
+tempfile = { workspace = true }

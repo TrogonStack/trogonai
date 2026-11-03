@@ -1,0 +1,145 @@
+use rcgen::{
+    BasicConstraints, CertificateParams, CertifiedIssuer, DistinguishedName, DnType, ExtendedKeyUsagePurpose, IsCa,
+    KeyPair, KeyUsagePurpose, SanType, string::Ia5String,
+};
+
+use super::*;
+
+fn domain() -> TrustDomain {
+    TrustDomain::new("trogon.example").expect("trust domain")
+}
+
+fn ca(name: &str) -> CertifiedIssuer<'static, KeyPair> {
+    let mut params = CertificateParams::default();
+    params.distinguished_name = DistinguishedName::new();
+    params.distinguished_name.push(DnType::CommonName, name);
+    params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+    params.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::CrlSign];
+    CertifiedIssuer::self_signed(params, KeyPair::generate().expect("key")).expect("ca")
+}
+
+fn client_leaf(issuer: &CertifiedIssuer<'static, KeyPair>, uris: &[&str]) -> CertificateDer<'static> {
+    let mut params = CertificateParams::default();
+    params.distinguished_name = DistinguishedName::new();
+    params.subject_alt_names = uris
+        .iter()
+        .map(|uri| SanType::URI(Ia5String::try_from(*uri).expect("ia5")))
+        .collect();
+    params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
+    let key = KeyPair::generate().expect("key");
+    params.signed_by(&key, issuer).expect("leaf").der().clone()
+}
+
+fn verifier(anchor: &CertifiedIssuer<'static, KeyPair>) -> SingleAgentVerifier {
+    let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+    let mut roots = RootCertStore::empty();
+    roots.add(anchor.der().clone()).expect("root");
+    let inner = WebPkiClientVerifier::builder_with_provider(Arc::new(roots), provider)
+        .build()
+        .expect("verifier");
+    SingleAgentVerifier {
+        inner,
+        trust_domain: domain(),
+    }
+}
+
+fn now() -> UnixTime {
+    UnixTime::now()
+}
+
+#[test]
+fn accepts_a_leaf_from_the_anchor_with_one_agent_uri() {
+    let anchor = ca("anchor");
+    let leaf = client_leaf(&anchor, &["spiffe://trogon.example/agent/agent-1"]);
+    assert!(verifier(&anchor).verify_client_cert(&leaf, &[], now()).is_ok());
+}
+
+#[test]
+fn refuses_a_leaf_from_another_ca() {
+    let anchor = ca("anchor");
+    let stranger = ca("stranger");
+    let leaf = client_leaf(&stranger, &["spiffe://trogon.example/agent/agent-1"]);
+    assert!(verifier(&anchor).verify_client_cert(&leaf, &[], now()).is_err());
+}
+
+#[test]
+fn refuses_zero_two_and_foreign_uris() {
+    let anchor = ca("anchor");
+    let verifier = verifier(&anchor);
+    for uris in [
+        vec![],
+        vec![
+            "spiffe://trogon.example/agent/agent-1",
+            "spiffe://trogon.example/agent/agent-2",
+        ],
+        vec!["spiffe://other.example/agent/agent-1"],
+        vec!["https://trogon.example/agent/agent-1"],
+    ] {
+        let leaf = client_leaf(&anchor, &uris);
+        assert!(
+            verifier.verify_client_cert(&leaf, &[], now()).is_err(),
+            "{uris:?} must be refused"
+        );
+    }
+}
+
+#[test]
+fn client_authentication_is_mandatory() {
+    let anchor = ca("anchor");
+    let verifier = verifier(&anchor);
+    assert!(verifier.offer_client_auth());
+    assert!(verifier.client_auth_mandatory());
+}
+
+#[test]
+fn peer_agent_reads_the_first_certificate() {
+    let anchor = ca("anchor");
+    let leaf = client_leaf(&anchor, &["spiffe://trogon.example/agent/agent-1"]);
+    let chain = [leaf, anchor.der().clone()];
+    assert_eq!(
+        peer_agent(Some(&chain), &domain()),
+        Ok(AgentId::new("agent-1").expect("agent"))
+    );
+    assert_eq!(peer_agent(None, &domain()), Err(PeerIdentityError::NoUriSan));
+    assert_eq!(peer_agent(Some(&[]), &domain()), Err(PeerIdentityError::NoUriSan));
+}
+
+#[test]
+fn loading_reports_missing_empty_and_keyless_files() {
+    let dir = tempfile::tempdir().expect("dir");
+    let missing = dir.path().join("missing.pem");
+    let empty = dir.path().join("empty.pem");
+    std::fs::write(&empty, "").expect("write");
+
+    assert!(matches!(read_certificates(&missing), Err(TlsError::Unreadable { .. })));
+    assert!(matches!(read_certificates(&empty), Err(TlsError::NoCertificate { .. })));
+    assert!(matches!(read_private_key(&empty), Err(TlsError::NoPrivateKey { .. })));
+    assert!(matches!(read_private_key(&missing), Err(TlsError::Unreadable { .. })));
+}
+
+#[test]
+fn a_full_configuration_loads_from_pem_files() {
+    let dir = tempfile::tempdir().expect("dir");
+    let anchor = ca("anchor");
+    let mut params = CertificateParams::new(vec!["proxy.example".to_owned()]).expect("params");
+    params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+    let key = KeyPair::generate().expect("key");
+    let server = params.signed_by(&key, &anchor).expect("server");
+
+    let files = TlsFiles {
+        certificate_chain: dir.path().join("server.pem"),
+        private_key: dir.path().join("server.key"),
+        client_trust_anchors: dir.path().join("ca.pem"),
+    };
+    std::fs::write(&files.certificate_chain, server.pem()).expect("write");
+    std::fs::write(&files.private_key, key.serialize_pem()).expect("write");
+    std::fs::write(&files.client_trust_anchors, anchor.pem()).expect("write");
+
+    assert!(load_server_config(&files, domain()).is_ok());
+
+    std::fs::write(&files.client_trust_anchors, "").expect("write");
+    assert!(matches!(
+        load_server_config(&files, domain()),
+        Err(TlsError::NoCertificate { .. })
+    ));
+}
