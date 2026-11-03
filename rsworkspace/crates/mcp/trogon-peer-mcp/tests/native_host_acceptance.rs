@@ -163,7 +163,7 @@ impl Host {
                         "host did not complete prompt successfully",
                     )?;
                     require(
-                        event["is_error"] != true,
+                        event["is_error"] == false,
                         "host returned an error; consult retained result event",
                     )?;
                     return Ok(event);
