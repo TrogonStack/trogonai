@@ -30,7 +30,10 @@ impl StreamRead<PeerId> for ObservedStore {
     async fn read_stream(&self, request: ReadStreamRequest<'_, PeerId>) -> Result<ReadStreamResponse, Self::Error> {
         self.reads.fetch_add(1, Ordering::SeqCst);
         self.inner
-            .read_stream(ReadStreamRequest { stream_id: request.stream_id.as_str(), from: request.from })
+            .read_stream(ReadStreamRequest {
+                stream_id: request.stream_id.as_str(),
+                from: request.from,
+            })
             .await
     }
 }
@@ -81,7 +84,9 @@ impl CommandAuthorizer<Enroll> for EnrollmentPolicy {
             || principal.kind() != PrincipalKind::Agent
             || principal.id().as_str() != self.owner.caller().as_str()
         {
-            return Err(AuthorizationDeniedError::new("enrollment is outside the configured grant"));
+            return Err(AuthorizationDeniedError::new(
+                "enrollment is outside the configured grant",
+            ));
         }
         Ok(())
     }
@@ -128,13 +133,22 @@ async fn authorized_enrollment_persists_core_events_with_trusted_owner_and_servi
         NativeSessionId::new("session_alpha").unwrap(),
     );
 
-    let response = service.enroll(&owner(), request("collaboration_alpha")).await.expect("enroll authorized peer");
+    let response = service
+        .enroll(&owner(), request("collaboration_alpha"))
+        .await
+        .expect("enroll authorized peer");
 
     assert_eq!(response.peer_id.as_deref(), Some(expected_identity.peer_id().as_str()));
     assert_eq!(response.attachment.attachment.peer_id, response.peer_id);
     assert_eq!(response.attachment.attachment.generation, Some(1));
-    assert_eq!(response.attachment.attachment.connector_id.as_deref(), Some("connector_alpha"));
-    assert_eq!(response.attachment.observed_at.as_option(), Some(&timestamp_from_datetime(&now())));
+    assert_eq!(
+        response.attachment.attachment.connector_id.as_deref(),
+        Some("connector_alpha")
+    );
+    assert_eq!(
+        response.attachment.observed_at.as_option(),
+        Some(&timestamp_from_datetime(&now()))
+    );
     assert_eq!(
         response.attachment.expires_at.as_option(),
         Some(&timestamp_from_datetime(&(now() + chrono::Duration::seconds(10))))
@@ -155,7 +169,11 @@ async fn authorized_enrollment_persists_core_events_with_trusted_owner_and_servi
         .await
         .expect("inspect persisted core enrollment");
     assert_eq!(read.events.len(), 2);
-    let enrolled = read.events[0].decode::<proto::PeerEvent>().unwrap().into_decoded().unwrap();
+    let enrolled = read.events[0]
+        .decode::<proto::PeerEvent>()
+        .unwrap()
+        .into_decoded()
+        .unwrap();
     assert!(matches!(
         enrolled.event,
         Some(PeerEventCase::PeerEnrolled(ref fact))
@@ -163,7 +181,11 @@ async fn authorized_enrollment_persists_core_events_with_trusted_owner_and_servi
                 && fact.enrollment.caller_id.as_deref() == Some("caller_alpha")
                 && fact.enrollment.native_session_id.as_deref() == Some("session_alpha")
     ));
-    let attached = read.events[1].decode::<proto::PeerEvent>().unwrap().into_decoded().unwrap();
+    let attached = read.events[1]
+        .decode::<proto::PeerEvent>()
+        .unwrap()
+        .into_decoded()
+        .unwrap();
     assert!(matches!(attached.event, Some(PeerEventCase::PeerAttached(_))));
 }
 
@@ -178,7 +200,9 @@ async fn collaboration_denial_precedes_every_store_read_and_write() {
 
     assert!(matches!(
         result,
-        Err(EnrollServiceError::Execution(CommandError::Unauthorized(UnauthorizedError::Denied(_))))
+        Err(EnrollServiceError::Execution(CommandError::Unauthorized(
+            UnauthorizedError::Denied(_)
+        )))
     ));
     assert_eq!(observed_principals.lock().unwrap().len(), 1);
     assert_eq!(store.reads.load(Ordering::SeqCst), 0);

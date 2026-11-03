@@ -12,7 +12,7 @@ chrono = { version = "0.4", default-features = false, features = ["std"] }
 thiserror = { workspace = true }
 trogon-decider-runtime = { workspace = true }
 trogon-peer = { path = "../trogon-peer" }
-trogonai-proto = { workspace = true, features = ["peers", "chrono"] }
+trogonai-proto = { workspace = true, features = ["peers-runtime", "chrono"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

@@ -19,8 +19,8 @@ pub type EnrollExecutionError<ReadError, AppendError> = CommandError<
 
 #[derive(Debug, thiserror::Error)]
 pub enum EnrollServiceError<ReadError, AppendError> {
-    #[error("peer enrollment service is not implemented")]
-    NotImplemented,
+    #[error("peer enrollment field {field} is missing")]
+    MissingInput { field: EnrollmentField },
     #[error("invalid peer enrollment field {field}: {source}")]
     InvalidInput {
         field: EnrollmentField,
