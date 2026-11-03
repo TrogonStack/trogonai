@@ -36,6 +36,41 @@ async fn client(
     ))
 }
 
+macro_rules! check {
+    ($client:ident, $incoming:ident, $responder:ident, $encoding:ident, $method:ident, $request:ident, $response:ident, $terminal:literal) => {{
+        let serve = async {
+            let message = tokio::time::timeout(Duration::from_secs(2), $incoming.next())
+                .await?
+                .ok_or("no request")?;
+            assert_eq!(
+                message.subject.as_str(),
+                concat!("tenant.peer.v1.alice.PeerService.", $terminal)
+            );
+            assert_eq!(
+                message
+                    .headers
+                    .as_ref()
+                    .and_then(|h| h.get(HEADER_CONTENT_TYPE))
+                    .map(|h| h.as_str()),
+                Some($encoding.header_value())
+            );
+            let _: proto::$request = $encoding.decode(&message.payload)?;
+            let reply = message.reply.ok_or("missing reply")?;
+            assert_eq!(reply.as_str().split('.').count(), 5);
+            assert!(reply.as_str().starts_with("_INBOX.tenant.alice.connection."));
+            let mut headers = async_nats::HeaderMap::new();
+            headers.insert(HEADER_CONTENT_TYPE, $encoding.header_value());
+            $responder
+                .publish_with_headers(reply, headers, $encoding.encode(&proto::$response::default())?.into())
+                .await?;
+            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+        };
+        let request = proto::$request::default();
+        let (response, served) = tokio::join!($client.$method(&request), serve);
+        assert!(response.is_ok(), "typed $client did not return a successful response");
+        served?;
+    }};
+}
 #[tokio::test]
 async fn typed_operations_preserve_route_encoding_and_exact_reply() -> TestResult {
     let broker = JetStreamTestServer::start_with_atomic_batches().await;
@@ -44,56 +79,81 @@ async fn typed_operations_preserve_route_encoding_and_exact_reply() -> TestResul
     responder.flush().await?;
     for encoding in [ContentType::Protobuf, ContentType::Json] {
         let client = client(&broker, encoding).await?;
-        macro_rules! check {
-            ($method:ident, $request:ident, $response:ident, $terminal:literal) => {{
-                let serve = async {
-                    let message = tokio::time::timeout(Duration::from_secs(2), incoming.next())
-                        .await?
-                        .ok_or("no request")?;
-                    assert_eq!(
-                        message.subject.as_str(),
-                        concat!("tenant.peer.v1.alice.PeerService.", $terminal)
-                    );
-                    assert_eq!(
-                        message
-                            .headers
-                            .as_ref()
-                            .and_then(|h| h.get(HEADER_CONTENT_TYPE))
-                            .map(|h| h.as_str()),
-                        Some(encoding.header_value())
-                    );
-                    let _: proto::$request = encoding.decode(&message.payload)?;
-                    let reply = message.reply.ok_or("missing reply")?;
-                    assert_eq!(reply.as_str().split('.').count(), 5);
-                    assert!(reply.as_str().starts_with("_INBOX.tenant.alice.connection."));
-                    let mut headers = async_nats::HeaderMap::new();
-                    headers.insert(HEADER_CONTENT_TYPE, encoding.header_value());
-                    responder
-                        .publish_with_headers(
-                            reply,
-                            headers,
-                            encoding.encode(&proto::$response::default())?.into(),
-                        )
-                        .await?;
-                    Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
-                };
-                let request = proto::$request::default();
-                let (response, served) = tokio::join!(client.$method(&request), serve);
-                assert!(
-                    response.is_ok(),
-                    "typed client did not return a successful response"
-                );
-                served?;
-            }};
-        }
-        check!(enroll, EnrollRequest, EnrollResponse, "Enroll");
-        check!(heartbeat, HeartbeatRequest, HeartbeatResponse, "Heartbeat");
-        check!(detach, DetachRequest, DetachResponse, "Detach");
-        check!(roster, RosterRequest, RosterResponse, "Roster");
-        check!(send, SendRequest, SendResponse, "Send");
-        check!(status, StatusRequest, StatusResponse, "Status");
-        check!(prepare_batch, PrepareBatchRequest, PrepareBatchResponse, "PrepareBatch");
         check!(
+            client,
+            incoming,
+            responder,
+            encoding,
+            enroll,
+            EnrollRequest,
+            EnrollResponse,
+            "Enroll"
+        );
+        check!(
+            client,
+            incoming,
+            responder,
+            encoding,
+            heartbeat,
+            HeartbeatRequest,
+            HeartbeatResponse,
+            "Heartbeat"
+        );
+        check!(
+            client,
+            incoming,
+            responder,
+            encoding,
+            detach,
+            DetachRequest,
+            DetachResponse,
+            "Detach"
+        );
+        check!(
+            client,
+            incoming,
+            responder,
+            encoding,
+            roster,
+            RosterRequest,
+            RosterResponse,
+            "Roster"
+        );
+        check!(
+            client,
+            incoming,
+            responder,
+            encoding,
+            send,
+            SendRequest,
+            SendResponse,
+            "Send"
+        );
+        check!(
+            client,
+            incoming,
+            responder,
+            encoding,
+            status,
+            StatusRequest,
+            StatusResponse,
+            "Status"
+        );
+        check!(
+            client,
+            incoming,
+            responder,
+            encoding,
+            prepare_batch,
+            PrepareBatchRequest,
+            PrepareBatchResponse,
+            "PrepareBatch"
+        );
+        check!(
+            client,
+            incoming,
+            responder,
+            encoding,
             acknowledge_batch,
             AcknowledgeBatchRequest,
             AcknowledgeBatchResponse,

@@ -6,6 +6,4 @@ pub enum PeerRpcClientError {
     Request(#[from] crate::peer_request_error::PeerRequestError),
     #[error("peer reply failed")]
     Reply(#[from] grpc_nats_micro::ReplyError),
-    #[error("peer RPC not implemented")]
-    Unimplemented,
 }
