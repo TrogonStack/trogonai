@@ -11,6 +11,12 @@ pub enum PeerStorageBudgetError {
 
 impl PeerStorageBudget {
     pub fn new(bytes: u64) -> Result<Self, PeerStorageBudgetError> {
+        if bytes == 0 {
+            return Err(PeerStorageBudgetError::Zero);
+        }
+        if bytes > i64::MAX as u64 {
+            return Err(PeerStorageBudgetError::OutOfRange);
+        }
         Ok(Self(bytes))
     }
 

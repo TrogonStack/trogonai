@@ -8,8 +8,8 @@ use buffa::MessageField;
 use tokio::sync::Barrier;
 use trogon_decider_nats::{JetStreamStore, JetStreamStoreError, StreamSubjectResolver, SubjectScope, SubjectState};
 use trogon_decider_runtime::{
-    AppendFailure, AppendStreamRequest, Event, EventEncode, EventId, EventType, Headers, ReadFrom,
-    ReadStreamRequest, StreamAppend, StreamPosition, StreamRead, StreamWritePrecondition,
+    AppendFailure, AppendStreamRequest, Event, EventEncode, EventId, EventType, Headers, ReadFrom, ReadStreamRequest,
+    StreamAppend, StreamPosition, StreamRead, StreamWritePrecondition,
 };
 use trogon_nats::test_support::JetStreamTestServer;
 use trogon_peer::{CallerId, EnrollmentIdentity, InstallationId, NativeSessionId, PeerId, TenantId, TrustedPeerOwner};
@@ -147,13 +147,19 @@ async fn committed_atomic_batch_survives_a_new_store_handle() {
 
     let reopened = open_store(js, &config).await.expect("reopen peer store");
     let read = reopened
-        .read_stream(ReadStreamRequest { stream_id: &id, from: ReadFrom::Beginning })
+        .read_stream(ReadStreamRequest {
+            stream_id: &id,
+            from: ReadFrom::Beginning,
+        })
         .await
         .expect("read committed peer events");
 
     assert_eq!(read.current_position, Some(appended.stream_position));
     assert_eq!(read.events.len(), 2);
-    assert_eq!(read.events.iter().map(|stored| &stored.event).collect::<Vec<_>>(), events.iter().collect::<Vec<_>>());
+    assert_eq!(
+        read.events.iter().map(|stored| &stored.event).collect::<Vec<_>>(),
+        events.iter().collect::<Vec<_>>()
+    );
     for stored in read.events {
         assert!(stored.decode::<proto::PeerEvent>().unwrap().into_decoded().is_some());
     }
@@ -163,7 +169,9 @@ async fn committed_atomic_batch_survives_a_new_store_handle() {
 async fn stale_expected_position_cannot_overwrite_a_committed_event() {
     let broker = JetStreamTestServer::start_with_atomic_batches().await;
     let config = config("tenant_alpha");
-    let store = open_store(broker.jetstream().await, &config).await.expect("open peer store");
+    let store = open_store(broker.jetstream().await, &config)
+        .await
+        .expect("open peer store");
     let id = peer_id();
     let first = store
         .append_stream(AppendStreamRequest {
@@ -193,7 +201,10 @@ async fn stale_expected_position_cannot_overwrite_a_committed_event() {
     assert!(matches!(error, JetStreamStoreError::OptimisticConcurrencyConflict(_)));
     assert_eq!(store.classify_append_failure(&error), AppendFailure::WriteConflict);
     let read = store
-        .read_stream(ReadStreamRequest { stream_id: &id, from: ReadFrom::Beginning })
+        .read_stream(ReadStreamRequest {
+            stream_id: &id,
+            from: ReadFrom::Beginning,
+        })
         .await
         .expect("read after rejected append");
     assert_eq!(read.current_position, Some(second.stream_position));
@@ -204,8 +215,12 @@ async fn stale_expected_position_cannot_overwrite_a_committed_event() {
 async fn concurrent_writers_with_the_same_observed_position_contend_at_the_broker() {
     let broker = JetStreamTestServer::start_with_atomic_batches().await;
     let config = config("tenant_alpha");
-    let first_store = open_store(broker.jetstream().await, &config).await.expect("open first peer store");
-    let second_store = open_store(broker.jetstream().await, &config).await.expect("open independent peer store");
+    let first_store = open_store(broker.jetstream().await, &config)
+        .await
+        .expect("open first peer store");
+    let second_store = open_store(broker.jetstream().await, &config)
+        .await
+        .expect("open independent peer store");
     let id = peer_id();
     let initial = first_store
         .append_stream(AppendStreamRequest {
@@ -257,14 +272,30 @@ async fn concurrent_writers_with_the_same_observed_position_contend_at_the_broke
     );
     assert_ne!(left_result.is_ok(), right_result.is_ok());
     let (winner, conflict, winner_id, loser_id) = if left_result.is_ok() {
-        (left_result.unwrap(), right_result.unwrap_err(), event(2).id, event(3).id)
+        (
+            left_result.unwrap(),
+            right_result.unwrap_err(),
+            event(2).id,
+            event(3).id,
+        )
     } else {
-        (right_result.unwrap(), left_result.unwrap_err(), event(3).id, event(2).id)
+        (
+            right_result.unwrap(),
+            left_result.unwrap_err(),
+            event(3).id,
+            event(2).id,
+        )
     };
-    assert!(matches!(conflict, JetStreamStoreError::OptimisticConcurrencyConflict(_)));
+    assert!(matches!(
+        conflict,
+        JetStreamStoreError::OptimisticConcurrencyConflict(_)
+    ));
     assert_eq!(left.classify_append_failure(&conflict), AppendFailure::WriteConflict);
     let read = first_store
-        .read_stream(ReadStreamRequest { stream_id: &id, from: ReadFrom::Beginning })
+        .read_stream(ReadStreamRequest {
+            stream_id: &id,
+            from: ReadFrom::Beginning,
+        })
         .await
         .expect("read after broker contention");
     assert_eq!(read.current_position, Some(winner.stream_position));
@@ -280,7 +311,9 @@ async fn exhausted_byte_budget_rejects_new_writes_without_evicting_committed_eve
         PeerTenant::new("tenant_alpha").unwrap(),
         PeerStorageBudget::new(2_048).unwrap(),
     );
-    let store = open_store(broker.jetstream().await, &config).await.expect("open bounded peer store");
+    let store = open_store(broker.jetstream().await, &config)
+        .await
+        .expect("open bounded peer store");
     let id = peer_id();
     let mut committed = Vec::new();
     let mut position = None;
@@ -309,18 +342,26 @@ async fn exhausted_byte_budget_rejects_new_writes_without_evicting_committed_eve
     assert!(!committed.is_empty());
     assert!(rejected, "the finite byte budget must reject an append");
     let read = store
-        .read_stream(ReadStreamRequest { stream_id: &id, from: ReadFrom::Beginning })
+        .read_stream(ReadStreamRequest {
+            stream_id: &id,
+            from: ReadFrom::Beginning,
+        })
         .await
         .expect("read retained events after capacity rejection");
     assert_eq!(read.current_position, position);
-    assert_eq!(read.events.into_iter().map(|stored| stored.event).collect::<Vec<_>>(), committed);
+    assert_eq!(
+        read.events.into_iter().map(|stored| stored.event).collect::<Vec<_>>(),
+        committed
+    );
 }
 
 #[tokio::test]
 async fn distinct_tenant_stores_do_not_read_or_write_each_others_subjects() {
     let broker = JetStreamTestServer::start_with_atomic_batches().await;
     let js = broker.jetstream().await;
-    let alpha = open_store(js.clone(), &config("tenant_alpha")).await.expect("open alpha store");
+    let alpha = open_store(js.clone(), &config("tenant_alpha"))
+        .await
+        .expect("open alpha store");
     let beta = open_store(js, &config("tenant_beta")).await.expect("open beta store");
     let id = peer_id();
     alpha
@@ -332,22 +373,27 @@ async fn distinct_tenant_stores_do_not_read_or_write_each_others_subjects() {
         .await
         .expect("append alpha event");
     let empty = beta
-        .read_stream(ReadStreamRequest { stream_id: &id, from: ReadFrom::Beginning })
+        .read_stream(ReadStreamRequest {
+            stream_id: &id,
+            from: ReadFrom::Beginning,
+        })
         .await
         .expect("read beta before its append");
     assert!(empty.events.is_empty());
     assert_eq!(empty.current_position, None);
 
-    beta
-        .append_stream(AppendStreamRequest {
-            stream_id: &id,
-            stream_write_precondition: StreamWritePrecondition::NoStream,
-            events: vec![event(2)],
-        })
-        .await
-        .expect("append beta event");
+    beta.append_stream(AppendStreamRequest {
+        stream_id: &id,
+        stream_write_precondition: StreamWritePrecondition::NoStream,
+        events: vec![event(2)],
+    })
+    .await
+    .expect("append beta event");
     let read = alpha
-        .read_stream(ReadStreamRequest { stream_id: &id, from: ReadFrom::Beginning })
+        .read_stream(ReadStreamRequest {
+            stream_id: &id,
+            from: ReadFrom::Beginning,
+        })
         .await
         .expect("read alpha after beta append");
     assert_eq!(read.events.len(), 1);
@@ -371,10 +417,15 @@ async fn opening_an_evicting_stream_fails_without_reconfiguring_it() {
         allow_atomic_publish: true,
         ..Default::default()
     };
-    js.create_stream(unsafe_config).await.expect("create existing evicting stream");
+    js.create_stream(unsafe_config)
+        .await
+        .expect("create existing evicting stream");
 
     let result = open_store(js.clone(), &config).await;
-    assert!(matches!(result, Err(PeerStoreError::UnsafeConfig(PeerStreamConfigMismatch::Discard))));
+    assert!(matches!(
+        result,
+        Err(PeerStoreError::UnsafeConfig(PeerStreamConfigMismatch::Discard))
+    ));
     let existing = js.get_stream(config.stream_name()).await.expect("read existing stream");
     assert_eq!(existing.cached_info().config.discard, DiscardPolicy::Old);
 }

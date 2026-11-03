@@ -1,6 +1,7 @@
 use async_nats::jetstream;
 use trogon_decider_nats::{
     StreamStoreError, StreamSubject, StreamSubjectResolver, SubjectScope, SubjectScopeError, SubjectState,
+    subject_current_position,
 };
 use trogon_peer::PeerId;
 
@@ -8,8 +9,6 @@ use crate::PeerTenant;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PeerSubjectError {
-    #[error("peer event subject resolution is not implemented")]
-    Unimplemented,
     #[error("peer event scope is invalid: {0}")]
     Scope(#[from] SubjectScopeError),
     #[error("peer event subject is invalid: {0}")]
@@ -34,8 +33,9 @@ impl PeerSubjectResolver {
         &self.tenant
     }
 
-    pub fn subject(&self, _peer_id: &PeerId) -> Result<StreamSubject, PeerSubjectError> {
-        Err(PeerSubjectError::Unimplemented)
+    pub fn subject(&self, peer_id: &PeerId) -> Result<StreamSubject, PeerSubjectError> {
+        StreamSubject::new(format!("{}.peer.v1.peer.{peer_id}.events", self.tenant.as_str()))
+            .map_err(PeerSubjectError::Subject)
     }
 }
 
@@ -48,9 +48,14 @@ impl StreamSubjectResolver<PeerId> for PeerSubjectResolver {
 
     async fn resolve_subject_state(
         &self,
-        _events_stream: &jetstream::stream::Stream,
-        _stream_id: &PeerId,
+        events_stream: &jetstream::stream::Stream,
+        stream_id: &PeerId,
     ) -> Result<SubjectState, Self::Error> {
-        Err(PeerSubjectError::Unimplemented)
+        let subject = self.subject(stream_id)?;
+        let current_position = subject_current_position(events_stream, &subject).await?;
+        Ok(SubjectState {
+            subject,
+            current_position,
+        })
     }
 }
