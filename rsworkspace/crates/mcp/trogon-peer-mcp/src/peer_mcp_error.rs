@@ -1,4 +1,4 @@
-#[derive(Debug, thiserror::Error)]
+#[derive(thiserror::Error)]
 pub enum PeerMcpError {
     #[error("peer connector is terminally detached")]
     Detached,
@@ -12,7 +12,7 @@ pub enum PeerMcpError {
     Unbound,
     #[error("peer connector cannot switch native sessions")]
     NativeSessionChanged,
-    #[error("peer tool arguments are invalid: {0}")]
+    #[error("peer tool arguments are invalid")]
     InvalidArguments(#[source] serde_json::Error),
     #[error("peer backend returned an invalid delivery batch")]
     InvalidBatch(#[source] trogon_peer_context::PeerContextError),
@@ -83,5 +83,11 @@ impl PeerMcpError {
             Self::Roster(_) | Self::Status(_) => "Peer metadata is unavailable.",
             Self::Encode(_) => "Peer hook output could not be encoded.",
         }
+    }
+}
+
+impl std::fmt::Debug for PeerMcpError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(self, formatter)
     }
 }
