@@ -105,7 +105,12 @@ fn replacement_does_not_report_the_previous_connectors_blocked_condition() {
         .given_state(before)
         .when(command("new_connector", "collaboration", now))
         .then([proto::PeerEvent {
-            event: Some(proto::PeerAttached { attachment: MessageField::some(next) }.into()),
+            event: Some(
+                proto::PeerAttached {
+                    attachment: MessageField::some(next),
+                }
+                .into(),
+            ),
         }])
         .then_state(expected);
 }

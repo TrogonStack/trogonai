@@ -97,6 +97,7 @@ pub fn evolve(mut state: PeerState, event: &proto::PeerEvent) -> Result<PeerStat
             }
             state.attachment = MessageField::some(attachment.clone());
             state.availability = Some(proto::PeerAvailability::PEER_AVAILABILITY_READY.into());
+            state.condition = None;
         }
         PeerEventCase::PeerHeartbeatRecorded(event) => {
             let enrollment = state.enrollment.as_option().ok_or(EvolveError::MissingEnrollment)?;
