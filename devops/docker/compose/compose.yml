@@ -153,6 +153,40 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
+  # Subscribes to the A2A ingress wildcard in PLATFORM and forwards a request
+  # to its agent only once the Tier-1 declarative bundle mounted below allows
+  # it. The issuer public key that verifies forwarded caller JWTs is in the
+  # gateway.env that nats-bootstrap writes. A bundle directory that is missing
+  # keeps the gateway from booting, so edit the bundle and restart rather than
+  # unmount it. See services/a2a-gateway/README.md.
+  a2a-gateway:
+    build:
+      context: ../../../rsworkspace
+      dockerfile: ../devops/docker/compose/services/a2a-gateway/Dockerfile
+    entrypoint:
+      - /bin/sh
+      - -c
+      - set -a && . /run/secrets/nats/gateway.env && set +a && exec /usr/local/bin/a2a-gateway
+    environment:
+      <<: *nats-client-env
+      A2A_GATEWAY_TIER1_DECLARATIVE_ENABLED: "true"
+      A2A_GATEWAY_TIER1_BUNDLE_DIR: "/etc/a2a-gateway/policy"
+      RUST_LOG: "${RUST_LOG:-info}"
+    volumes:
+      - ./services/a2a-gateway/policy:/etc/a2a-gateway/policy:ro
+      - type: volume
+        source: dev_secrets
+        target: /run/secrets/nats
+        read_only: true
+        volume:
+          subpath: clients/a2a-gateway
+    depends_on:
+      nats:
+        condition: service_healthy
+      nats-account-push:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
   trogon-gateway:
     build:
       context: ../../..

@@ -25,6 +25,9 @@ CALLOUT_KEYS_DIR="$CALLOUT_DIR/keys"
 # Where the callout container mounts its directory, so the references in
 # callout.env resolve there.
 CALLOUT_MOUNT=/run/secrets/nats
+# The gateway verifies the user JWTs the callout mints for tenant DEV, so its
+# gateway.env names that tenant's issuer public key. It never holds the seed.
+GATEWAY_DIR="$CLIENTS_DIR/a2a-gateway"
 
 umask 077
 
@@ -149,7 +152,7 @@ SYS sys 0
 AUTH auth-callout 1000
 PLATFORM trogon-gateway 1000
 PLATFORM decider-host 0
-PLATFORM a2a-gateway 0
+PLATFORM a2a-gateway 1000
 PLATFORM a2a-bridge 0
 PLATFORM acp-nats 0
 PLATFORM mcp-nats 0
@@ -211,6 +214,13 @@ AUTH_CALLOUT_XKEY_SEED=file://$CALLOUT_MOUNT/keys/callout-xkey.nk
 AUTH_CALLOUT_MTLS_TRUST_ANCHORS=$CALLOUT_MOUNT/ca.pem
 CALLOUT
 install_env_file "$CALLOUT_DIR/callout.env"
+
+if ! tenant_dev_public=$(nk -inkey "$CALLOUT_KEYS_DIR/tenant-dev.nk" -pubout); then
+  echo "nats-bootstrap: the callout holds no tenant-dev seed to derive the caller JWT issuer key from" >&2
+  exit 1
+fi
+printf 'A2A_GATEWAY_CALLER_JWT_ISSUER_KEYS=%s\n' "$tenant_dev_public" > "$GATEWAY_DIR/gateway.env"
+install_env_file "$GATEWAY_DIR/gateway.env"
 
 printf 'AUTH_CALLOUT_XKEY_PUBLIC=%s\n' "$xkey" > "$CLIENTS_DIR/a2a-bridge/bridge.env"
 install_env_file "$CLIENTS_DIR/a2a-bridge/bridge.env"
