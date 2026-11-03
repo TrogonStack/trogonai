@@ -22,6 +22,7 @@ trogon-nats = { path = "../../platform/trogon-nats" }
 trogon-peer = { path = "../trogon-peer" }
 
 [dev-dependencies]
+trogon-peer-service = { path = "../trogon-peer-service", features = ["test-support"] }
 futures = { workspace = true }
 buffa-types = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
