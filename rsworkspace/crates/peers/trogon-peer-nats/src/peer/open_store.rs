@@ -2,7 +2,8 @@ use async_nats::jetstream::{self, stream};
 use trogon_decider_nats::{JetStreamStore, ensure_bucket, ensure_stream};
 
 use super::{
-    PeerSnapshotConfigMismatch, PeerStoreConfig, PeerStoreError, PeerStreamConfigMismatch, PeerSubjectResolver,
+    PeerSnapshotConfigMismatchError, PeerStoreConfig, PeerStoreError, PeerStreamConfigMismatchError,
+    PeerSubjectResolver,
 };
 
 pub async fn open_store(
@@ -19,42 +20,45 @@ pub async fn open_store(
     Ok(JetStreamStore::builder(context, events, snapshots).with_subject_resolver(resolver))
 }
 
-fn validate_event_stream(required: &stream::Config, actual: &stream::Config) -> Result<(), PeerStreamConfigMismatch> {
+fn validate_event_stream(
+    required: &stream::Config,
+    actual: &stream::Config,
+) -> Result<(), PeerStreamConfigMismatchError> {
     if actual.discard != stream::DiscardPolicy::New {
-        return Err(PeerStreamConfigMismatch::Discard);
+        return Err(PeerStreamConfigMismatchError::Discard);
     }
     if actual.retention != stream::RetentionPolicy::Limits {
-        return Err(PeerStreamConfigMismatch::Retention);
+        return Err(PeerStreamConfigMismatchError::Retention);
     }
     if actual.max_bytes != required.max_bytes {
-        return Err(PeerStreamConfigMismatch::MaxBytes);
+        return Err(PeerStreamConfigMismatchError::MaxBytes);
     }
     if !actual.max_age.is_zero() {
-        return Err(PeerStreamConfigMismatch::MaxAge);
+        return Err(PeerStreamConfigMismatchError::MaxAge);
     }
     if actual.max_messages != -1 {
-        return Err(PeerStreamConfigMismatch::MaxMessages);
+        return Err(PeerStreamConfigMismatchError::MaxMessages);
     }
     if actual.max_messages_per_subject != -1 {
-        return Err(PeerStreamConfigMismatch::MaxMessagesPerSubject);
+        return Err(PeerStreamConfigMismatchError::MaxMessagesPerSubject);
     }
     if !actual.allow_atomic_publish {
-        return Err(PeerStreamConfigMismatch::AtomicPublish);
+        return Err(PeerStreamConfigMismatchError::AtomicPublish);
     }
     if actual.subjects != required.subjects {
-        return Err(PeerStreamConfigMismatch::Subjects);
+        return Err(PeerStreamConfigMismatchError::Subjects);
     }
     if actual.storage != stream::StorageType::File {
-        return Err(PeerStreamConfigMismatch::Storage);
+        return Err(PeerStreamConfigMismatchError::Storage);
     }
     if actual.allow_rollup {
-        return Err(PeerStreamConfigMismatch::Rollup);
+        return Err(PeerStreamConfigMismatchError::Rollup);
     }
     if actual.allow_message_ttl {
-        return Err(PeerStreamConfigMismatch::MessageTtl);
+        return Err(PeerStreamConfigMismatchError::MessageTtl);
     }
     if actual.mirror.is_some() || actual.sources.as_ref().is_some_and(|sources| !sources.is_empty()) {
-        return Err(PeerStreamConfigMismatch::Sources);
+        return Err(PeerStreamConfigMismatchError::Sources);
     }
     Ok(())
 }
@@ -62,30 +66,30 @@ fn validate_event_stream(required: &stream::Config, actual: &stream::Config) -> 
 fn validate_snapshots(
     required: &jetstream::kv::Config,
     actual: &stream::Config,
-) -> Result<(), PeerSnapshotConfigMismatch> {
+) -> Result<(), PeerSnapshotConfigMismatchError> {
     if actual.max_messages_per_subject != required.history {
-        return Err(PeerSnapshotConfigMismatch::History);
+        return Err(PeerSnapshotConfigMismatchError::History);
     }
     if actual.max_bytes != required.max_bytes {
-        return Err(PeerSnapshotConfigMismatch::MaxBytes);
+        return Err(PeerSnapshotConfigMismatchError::MaxBytes);
     }
     if actual.max_message_size != required.max_value_size {
-        return Err(PeerSnapshotConfigMismatch::MaxValueSize);
+        return Err(PeerSnapshotConfigMismatchError::MaxValueSize);
     }
     if !actual.max_age.is_zero() {
-        return Err(PeerSnapshotConfigMismatch::MaxAge);
+        return Err(PeerSnapshotConfigMismatchError::MaxAge);
     }
     if actual.storage != required.storage {
-        return Err(PeerSnapshotConfigMismatch::Storage);
+        return Err(PeerSnapshotConfigMismatchError::Storage);
     }
     if actual.subjects != [format!("$KV.{}.>", required.bucket)] {
-        return Err(PeerSnapshotConfigMismatch::Subjects);
+        return Err(PeerSnapshotConfigMismatchError::Subjects);
     }
     if actual.discard != stream::DiscardPolicy::New {
-        return Err(PeerSnapshotConfigMismatch::Discard);
+        return Err(PeerSnapshotConfigMismatchError::Discard);
     }
     if actual.mirror.is_some() || actual.sources.as_ref().is_some_and(|sources| !sources.is_empty()) {
-        return Err(PeerSnapshotConfigMismatch::Sources);
+        return Err(PeerSnapshotConfigMismatchError::Sources);
     }
     Ok(())
 }

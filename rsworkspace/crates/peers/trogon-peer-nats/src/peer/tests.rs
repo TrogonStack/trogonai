@@ -17,7 +17,7 @@ use trogonai_proto::peers::v1alpha1 as proto;
 use uuid::Uuid;
 
 use super::{
-    PeerStorageBudget, PeerStorageBudgetError, PeerStoreConfig, PeerStoreError, PeerStreamConfigMismatch,
+    PeerStorageBudget, PeerStorageBudgetError, PeerStoreConfig, PeerStoreError, PeerStreamConfigMismatchError,
     PeerSubjectError, PeerSubjectResolver, open_store,
 };
 use crate::PeerTenant;
@@ -413,7 +413,7 @@ async fn opening_an_evicting_stream_fails_without_reconfiguring_it() {
     let result = open_store(js.clone(), &config).await;
     assert!(matches!(
         result,
-        Err(PeerStoreError::UnsafeConfig(PeerStreamConfigMismatch::Discard))
+        Err(PeerStoreError::UnsafeConfig(PeerStreamConfigMismatchError::Discard))
     ));
     let existing = js.get_stream(config.stream_name()).await.expect("read existing stream");
     assert_eq!(existing.cached_info().config.discard, DiscardPolicy::Old);
