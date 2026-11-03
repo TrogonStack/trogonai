@@ -51,6 +51,14 @@ where
         })
     }
 
+    pub async fn run_heartbeat(&self, _availability: crate::AvailabilityObservation) {
+        std::future::pending::<()>().await;
+    }
+
+    pub async fn shutdown(&self) -> Result<(), PeerMcpError> {
+        Ok(())
+    }
+
     pub async fn invoke(&self, request: CallToolRequestParams) -> Result<CallToolResult, PeerMcpError> {
         match request.name.as_ref() {
             "peer_prompt_hook" => {
