@@ -119,11 +119,14 @@ observation time and the actual lease expiry. Catalog membership, durable inboxe
 and historical activity survive expiry and detach. There are no live all-peer
 watchers or additional workflow owners.
 
-Broker ingress, the executable adapter, reconciliation and heartbeat scheduling,
-native detach hooks, content and presentation infrastructure, retention workers,
-and real host acceptance must be composed by the runtime owner. These tests
-prove application behavior over the existing `InMemoryStore` through typed
-adapters. They do not establish a broker or native-host exchange.
+`trogon-peer-nats` supplies the authenticated RPC adapter and typed client,
+including a concrete composition of these application surfaces and scoped
+JetStream storage. The executable adapter, reconciliation and heartbeat
+scheduling, native detach hooks, content and presentation infrastructure,
+retention workers and real host acceptance remain runtime responsibilities.
+This crate's tests prove application behavior over the existing `InMemoryStore`.
+Its disposable fixtures are exposed through `test-support` for broker integration
+tests; they do not supply production content or policy defaults.
 
 ## Verification
 
