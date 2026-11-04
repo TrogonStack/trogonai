@@ -3,8 +3,8 @@
 use chrono::{DateTime, Utc};
 use trogon_decider::Decider;
 use trogon_peer::{
-    CallerId, CollaborationRef, ConnectorId, Enroll, EnrollError, EnrollmentIdentity, InstallationId,
-    NativeSessionId, PeerDisplayName, TenantId, TrustedPeerOwner,
+    CallerId, CollaborationRef, ConnectorId, Enroll, EnrollError, EnrollmentIdentity, InstallationId, NativeSessionId,
+    PeerDisplayName, TenantId, TrustedPeerOwner,
 };
 
 fn command(now: DateTime<Utc>) -> Enroll {
