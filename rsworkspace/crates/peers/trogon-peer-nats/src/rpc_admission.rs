@@ -14,14 +14,7 @@ pub struct PeerRpcAdmission<B> {
 }
 impl<B> EndpointAdmission for PeerRpcAdmission<B>
 where
-    B: PeerRpcOperation<proto::EnrollRequest, Response = proto::EnrollResponse>
-        + PeerRpcOperation<proto::HeartbeatRequest, Response = proto::HeartbeatResponse>
-        + PeerRpcOperation<proto::DetachRequest, Response = proto::DetachResponse>
-        + PeerRpcOperation<proto::RosterRequest, Response = proto::RosterResponse>
-        + PeerRpcOperation<proto::SendRequest, Response = proto::SendResponse>
-        + PeerRpcOperation<proto::StatusRequest, Response = proto::StatusResponse>
-        + PeerRpcOperation<proto::PrepareBatchRequest, Response = proto::PrepareBatchResponse>
-        + PeerRpcOperation<proto::AcknowledgeBatchRequest, Response = proto::AcknowledgeBatchResponse>,
+    B: crate::rpc_backend::PeerRpcBackend,
 {
     fn admit(&self, metadata: RequestMetadata<'_>) -> Option<Box<dyn EndpointHandler + '_>> {
         let route = self.ingress.parse(metadata.subject).ok()?;
@@ -47,14 +40,7 @@ struct AuthorizedHandler<'a, B> {
 }
 impl<B> EndpointHandler for AuthorizedHandler<'_, B>
 where
-    B: PeerRpcOperation<proto::EnrollRequest, Response = proto::EnrollResponse>
-        + PeerRpcOperation<proto::HeartbeatRequest, Response = proto::HeartbeatResponse>
-        + PeerRpcOperation<proto::DetachRequest, Response = proto::DetachResponse>
-        + PeerRpcOperation<proto::RosterRequest, Response = proto::RosterResponse>
-        + PeerRpcOperation<proto::SendRequest, Response = proto::SendResponse>
-        + PeerRpcOperation<proto::StatusRequest, Response = proto::StatusResponse>
-        + PeerRpcOperation<proto::PrepareBatchRequest, Response = proto::PrepareBatchResponse>
-        + PeerRpcOperation<proto::AcknowledgeBatchRequest, Response = proto::AcknowledgeBatchResponse>,
+    B: crate::rpc_backend::PeerRpcBackend,
 {
     fn handle<'a>(
         &'a self,
