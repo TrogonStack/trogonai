@@ -1,0 +1,78 @@
+edition = "2024";
+
+package trogonai.connections.types.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/connections/types/v1alpha1/proxy.proto";
+
+// How the granted scopes were established. Requested scopes never prove what
+// was granted (ADR#0092 Decision 4). Unspecified and unknown values are invalid.
+enum ScopeEvidence {
+  SCOPE_EVIDENCE_UNSPECIFIED = 0;
+  // The token response listed the granted scope.
+  SCOPE_EVIDENCE_PROVIDER_REPORTED = 1;
+  // A provider call the release declares established the granted scope.
+  SCOPE_EVIDENCE_PROBED = 2;
+  // The response omitted scope, which RFC 6749 defines as a grant equal to the
+  // request, and the release documents that omission (ADR#0094 Decision 12).
+  SCOPE_EVIDENCE_DOCUMENTED_OMISSION = 3;
+}
+
+// One exact provider-side resource a grant covers, as the provider names it.
+// Opaque, compared whole, and never personal data. ADR#0092 Decision 4 names
+// resource refs without a shape; this is the smallest one.
+message ProviderResourceRef {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// What the provider actually granted. It is captured at exchange, lowered by a
+// refresh that reports a narrower grant, and grows only through an
+// authorization attempt (ADR#0092 Decision 4, ADR#0094 Decision 12). Admission
+// and the executors read it from the Connection projection.
+message GrantedAuthority {
+  option (buf.validate.message).cel = {
+    id: "granted_authority.scopes_unique"
+    message: "granted scopes must be unique"
+    expression: "this.scopes.map(s, s.value).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "granted_authority.resource_refs_unique"
+    message: "granted resource refs must be unique"
+    expression: "this.resource_refs.map(r, r.value).unique()"
+  };
+  repeated ProviderScope scopes = 1;
+  repeated ProviderResourceRef resource_refs = 2;
+  ScopeEvidence evidence = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+// The immutable release and granted-authority bound recorded at admission.
+// scopes are the actual credential scope set observed, not a promise that an
+// HTTP proxy can attenuate a token or classify provider API actions. Each use
+// requires the current credential scopes to be a subset of this set and meets
+// the release restrictions, these planned restrictions and the live permit.
+// This message never copies the live permit's policy (ADR#0096 Decisions 1-4).
+message AuthorityCeiling {
+  reserved 1;
+  reserved operations;
+
+  option (buf.validate.message).cel = {
+    id: "authority_ceiling.scopes_unique"
+    message: "ceiling scopes must be unique"
+    expression: "this.scopes.map(s, s.value).unique()"
+  };
+  repeated ProviderScope scopes = 2;
+  // Present for HTTP proxy use when the release narrows requests. Absent means
+  // no planned restriction beyond the fixed destination; a present ruleset
+  // must admit the request. Live permit restrictions are intersected at use.
+  HttpRequestRestrictions http_requests = 3;
+}

@@ -1,0 +1,106 @@
+[
+  {
+    "name": "preregistered MCP client requires protected resource metadata",
+    "type": "trogonai.connections.authorization_attempts.v1alpha1.AuthorizationRequest",
+    "valid": false,
+    "violations": ["MCP authorization requires pinned protected resource metadata"],
+    "message": {
+      "authority": {},
+      "resource": {"value": "https://mcp.example.invalid/service"},
+      "redirectUri": {"value": "https://console.example.invalid/connections/oauth/callback"},
+      "expectedIssuer": {"value": "https://issuer.example.invalid/tenant"},
+      "responseIssuerRequired": true,
+      "discovery": {
+        "authorizationServerMetadataDigest": {
+          "algorithm": "sha256",
+          "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        }
+      }
+    }
+  },
+  {
+    "name": "MCP client cannot omit every discovery pin",
+    "type": "trogonai.connections.authorization_attempts.v1alpha1.AuthorizationRequest",
+    "valid": false,
+    "violations": ["MCP authorization requires pinned protected resource metadata"],
+    "message": {
+      "authority": {},
+      "resource": {"value": "https://mcp.example.invalid/service"},
+      "redirectUri": {"value": "https://console.example.invalid/connections/oauth/callback"},
+      "expectedIssuer": {"value": "https://issuer.example.invalid/tenant"},
+      "responseIssuerRequired": true
+    }
+  },
+  {
+    "name": "MCP client pins resource and authorization server metadata",
+    "type": "trogonai.connections.authorization_attempts.v1alpha1.AuthorizationRequest",
+    "valid": true,
+    "message": {
+      "authority": {},
+      "resource": {"value": "https://mcp.example.invalid/service"},
+      "redirectUri": {"value": "https://console.example.invalid/connections/oauth/callback"},
+      "expectedIssuer": {"value": "https://issuer.example.invalid/tenant"},
+      "responseIssuerRequired": true,
+      "discovery": {
+        "authorizationServerMetadataDigest": {
+          "algorithm": "sha256",
+          "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        },
+        "protectedResourceMetadataDigest": {
+          "algorithm": "sha256",
+          "value": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="
+        }
+      }
+    }
+  },
+  {
+    "name": "MCP protected resource pin cannot mask malformed authorization server pin",
+    "type": "trogonai.connections.authorization_attempts.v1alpha1.AuthorizationRequest",
+    "valid": false,
+    "message": {
+      "authority": {},
+      "resource": {"value": "https://mcp.example.invalid/service"},
+      "redirectUri": {"value": "https://console.example.invalid/connections/oauth/callback"},
+      "expectedIssuer": {"value": "https://issuer.example.invalid/tenant"},
+      "responseIssuerRequired": true,
+      "discovery": {
+        "authorizationServerMetadataDigest": {
+          "algorithm": "sha256",
+          "value": "AA=="
+        },
+        "protectedResourceMetadataDigest": {
+          "algorithm": "sha256",
+          "value": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="
+        }
+      }
+    }
+  },
+  {
+    "name": "non-MCP curated authorization needs no discovery pin",
+    "type": "trogonai.connections.authorization_attempts.v1alpha1.AuthorizationRequest",
+    "valid": true,
+    "message": {
+      "authority": {},
+      "redirectUri": {"value": "https://console.example.invalid/connections/oauth/callback"},
+      "expectedIssuer": {"value": "https://issuer.example.invalid/tenant"},
+      "responseIssuerRequired": false
+    }
+  },
+  {
+    "name": "non-MCP authorization server discovery needs no resource pin",
+    "type": "trogonai.connections.authorization_attempts.v1alpha1.AuthorizationRequest",
+    "valid": true,
+    "message": {
+      "authority": {},
+      "redirectUri": {"value": "https://console.example.invalid/connections/oauth/callback"},
+      "expectedIssuer": {"value": "https://issuer.example.invalid/tenant"},
+      "responseIssuerRequired": true,
+      "discovery": {
+        "authorizationServerMetadataDigest": {
+          "algorithm": "sha256",
+          "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        }
+      }
+    }
+  }
+]
