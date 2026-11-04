@@ -36,3 +36,6 @@ pub fn mint_test_user_jwt(caller_id: &str, audience_account: &str, ttl: Duration
     let issued_at = std::time::SystemTime::now();
     claims.mint(&material, &subject, issued_at, ttl).expect("mint test jwt")
 }
+
+#[cfg(test)]
+mod tests;

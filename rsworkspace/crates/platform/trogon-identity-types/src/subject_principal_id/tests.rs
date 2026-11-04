@@ -169,3 +169,10 @@ fn a_credential_whose_id_already_has_the_hashed_form_is_refused() {
         Err(SubjectPrincipalIdError::AlreadyHashed)
     );
 }
+
+#[test]
+fn a_subject_principal_id_reads_as_the_token_it_renders() {
+    let token = mapped("caller_01");
+
+    assert_eq!(AsRef::<str>::as_ref(&token), "caller_01");
+}

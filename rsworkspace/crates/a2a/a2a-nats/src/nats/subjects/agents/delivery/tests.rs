@@ -169,3 +169,11 @@ fn parse_rejects_an_unknown_method() {
         );
     }
 }
+
+#[test]
+fn the_nats_subject_is_the_rendered_delivery_subject() {
+    use async_nats::subject::ToSubject;
+
+    let subject = AgentDeliverySubject::new(&prefix(), &agent(), &caller(), A2aMethod::MessageSend);
+    assert_eq!(subject.to_subject().as_str(), subject.to_string());
+}
