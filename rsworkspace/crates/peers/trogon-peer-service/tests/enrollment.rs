@@ -208,3 +208,57 @@ async fn collaboration_denial_precedes_every_store_read_and_write() {
     assert_eq!(store.reads.load(Ordering::SeqCst), 0);
     assert_eq!(store.appends.load(Ordering::SeqCst), 0);
 }
+
+#[tokio::test]
+async fn repeated_prompt_resumes_same_live_connector_without_replacing_attachment() {
+    let store = ObservedStore::default();
+    let service = PeerService::new(store.clone(), policy(), FixedClock(now()));
+    let first = service.enroll(&owner(), request("collaboration_alpha")).await.unwrap();
+    let resumed = service.enroll(&owner(), request("collaboration_alpha")).await;
+    assert!(resumed.is_ok(), "same live connector must resume: {resumed:?}");
+    assert_eq!(first, resumed.unwrap());
+    assert_eq!(store.appends.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn expired_connector_replacement_fences_generation_and_preserves_peer_identity() {
+    let store = ObservedStore::default();
+    let first = PeerService::new(store.clone(), policy(), FixedClock(now()))
+        .enroll(&owner(), request("collaboration_alpha"))
+        .await
+        .unwrap();
+    let mut replacement = request("collaboration_alpha");
+    replacement.connector_id = Some("replacement".into());
+    let resumed = PeerService::new(
+        store.clone(),
+        policy(),
+        FixedClock(now() + chrono::Duration::seconds(10)),
+    )
+    .enroll(&owner(), replacement)
+    .await;
+    assert!(resumed.is_ok(), "expired connector must allow replacement: {resumed:?}");
+    let resumed = resumed.unwrap();
+    assert_eq!(resumed.peer_id, first.peer_id);
+    assert_eq!(resumed.attachment.attachment.generation, Some(2));
+    assert_eq!(
+        resumed.attachment.attachment.connector_id.as_deref(),
+        Some("replacement")
+    );
+}
+
+impl CommandAuthorizer<trogon_peer::Attach> for EnrollmentPolicy {
+    fn authorize(
+        &self,
+        principal: &CommandPrincipal,
+        command: &trogon_peer::Attach,
+    ) -> Result<(), AuthorizationDeniedError> {
+        if command.identity().owner() != &self.owner
+            || command.collaboration() != &self.collaboration
+            || principal.kind() != PrincipalKind::Agent
+            || principal.id().as_str() != self.owner.caller().as_str()
+        {
+            return Err(AuthorizationDeniedError::new("resume outside configured grant"));
+        }
+        Ok(())
+    }
+}
