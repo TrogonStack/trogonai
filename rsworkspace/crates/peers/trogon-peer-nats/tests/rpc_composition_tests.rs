@@ -40,3 +40,46 @@ async fn malformed_application_inputs_produce_sanitized_canonical_status() -> Te
     assert!(error.status().details.is_empty());
     Ok(())
 }
+
+#[tokio::test]
+async fn service_discovery_registers_the_annotated_methods_and_queue() -> TestResult {
+    let fixture = Fixture::new().await?;
+    let backend = std::sync::Arc::new(PeerRpcApplication::new(
+        PeerService::new(fixture.store.clone(), fixture.policy.clone(), fixture.clock.clone()),
+        fixture.app(),
+    ));
+    let broker = trogon_nats::test_support::JetStreamTestServer::start_with_atomic_batches().await;
+    let client = broker.client().await;
+    let account = trogon_peer_nats::PeerAccount::SharedFixture {
+        tenant: trogon_peer_nats::PeerTenant::new("tenant")?,
+    };
+    let _service = trogon_peer_nats::serve_peer_rpc(&client, account, backend).await?;
+    let response = client.request("$SRV.INFO.PeerService", Vec::new().into()).await?;
+    let info: serde_json::Value = serde_json::from_slice(&response.payload)?;
+    assert_eq!(info["version"], "0.1.0");
+    assert_eq!(info["description"], "Coordinates enrolled peer communication");
+    let endpoints = info["endpoints"].as_array().ok_or("no endpoints")?;
+    assert_eq!(endpoints.len(), 8);
+    let mut names = Vec::new();
+    for endpoint in endpoints {
+        let name = endpoint["name"].as_str().ok_or("no method")?;
+        assert_eq!(endpoint["subject"], format!("tenant.peer.v1.*.PeerService.{name}"));
+        assert_eq!(endpoint["queue_group"], "q");
+        names.push(name);
+    }
+    names.sort_unstable();
+    assert_eq!(
+        names,
+        [
+            "AcknowledgeBatch",
+            "Detach",
+            "Enroll",
+            "Heartbeat",
+            "PrepareBatch",
+            "Roster",
+            "Send",
+            "Status"
+        ]
+    );
+    Ok(())
+}
