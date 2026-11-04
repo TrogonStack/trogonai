@@ -183,7 +183,7 @@ impl CommandAuthorizer<PeerAccess> for PolicyFixture {
     }
 }
 macro_rules! owner_policy { ($($cmd:ty),*) => { $(impl CommandAuthorizer<$cmd> for PolicyFixture { fn authorize(&self, p: &CommandPrincipal, c: &$cmd) -> Result<(), AuthorizationDeniedError> { self.peer(p, c.owner(), c.attachment().peer_id()) } })* }; }
-owner_policy!(Heartbeat, Detach, SendMessage, PrepareBatch, AcknowledgeBatch);
+owner_policy!(Heartbeat, Detach);
 impl CommandAuthorizer<IntakeMessage> for PolicyFixture {
     fn authorize(&self, p: &CommandPrincipal, c: &IntakeMessage) -> Result<(), AuthorizationDeniedError> {
         self.evidence(p, c.evidence().tenant(), c.evidence().metadata())
@@ -191,7 +191,11 @@ impl CommandAuthorizer<IntakeMessage> for PolicyFixture {
 }
 impl CommandAuthorizer<DisposeMessage> for PolicyFixture {
     fn authorize(&self, p: &CommandPrincipal, c: &DisposeMessage) -> Result<(), AuthorizationDeniedError> {
-        self.evidence(p, c.evidence().tenant(), c.evidence().metadata())
+        match c.disposition() {
+            TerminalDisposition::Expired | TerminalDisposition::Unavailable => {
+                self.evidence(p, c.evidence().tenant(), c.evidence().metadata())
+            }
+        }
     }
 }
 impl PolicyFixture {
@@ -274,12 +278,21 @@ impl ContentOpen for DisposableContentFixture {
         if binding.tenant() != scope.owner().tenant() {
             return Err(PeerPortError::Denied);
         }
-        Ok(self
+        let text = self
             .bodies
             .lock()
             .map_err(|_| PeerPortError::Unavailable)?
             .get(binding.content().reference().as_str())
-            .cloned())
+            .cloned();
+        if let Some(text) = &text {
+            let fingerprints = self.fingerprints.lock().map_err(|_| PeerPortError::Unavailable)?;
+            if text.as_str().len() != binding.content().size() as usize
+                || fingerprints.get(text.as_str()).map(Vec::as_slice) != Some(binding.content().semantic_fingerprint())
+            {
+                return Err(PeerPortError::Integrity);
+            }
+        }
+        Ok(text)
     }
 }
 #[derive(Clone, Default)]
@@ -594,6 +607,46 @@ impl CommandAuthorizer<Attach> for IsolatedEnrollmentFixture {
             || p.id().as_str() != self.0.caller().as_str()
         {
             return Err(AuthorizationDeniedError::new("outside isolated resume"));
+        }
+        Ok(())
+    }
+}
+
+impl CommandAuthorizer<SendMessage> for PolicyFixture {
+    fn authorize(&self, p: &CommandPrincipal, c: &SendMessage) -> Result<(), AuthorizationDeniedError> {
+        self.peer(p, c.owner(), c.attachment().peer_id())?;
+        if c.collaboration().as_str() != "shared"
+            || !c.content().reference().as_str().starts_with("disposable-")
+            || c.content().size() > 2048
+            || c.content().semantic_fingerprint().len() != 32
+            || !self
+                .grants
+                .lock()
+                .map_err(|_| AuthorizationDeniedError::new("grant unavailable"))?
+                .contains_key(c.recipient().as_str())
+        {
+            return Err(AuthorizationDeniedError::new("message metadata outside fixture grant"));
+        }
+        Ok(())
+    }
+}
+impl CommandAuthorizer<PrepareBatch> for PolicyFixture {
+    fn authorize(&self, p: &CommandPrincipal, c: &PrepareBatch) -> Result<(), AuthorizationDeniedError> {
+        self.peer(p, c.owner(), c.attachment().peer_id())?;
+        if c.batch_id().as_str() == "denied"
+            || c.plan().message_ids().is_empty()
+            || c.plan().rendered_utf8_bytes() > 8192
+        {
+            return Err(AuthorizationDeniedError::new("plan outside fixture grant"));
+        }
+        Ok(())
+    }
+}
+impl CommandAuthorizer<AcknowledgeBatch> for PolicyFixture {
+    fn authorize(&self, p: &CommandPrincipal, c: &AcknowledgeBatch) -> Result<(), AuthorizationDeniedError> {
+        self.peer(p, c.owner(), c.attachment().peer_id())?;
+        if c.batch_id().as_str() == "denied" {
+            return Err(AuthorizationDeniedError::new("batch outside fixture grant"));
         }
         Ok(())
     }

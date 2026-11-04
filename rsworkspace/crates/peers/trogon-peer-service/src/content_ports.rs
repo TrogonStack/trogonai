@@ -10,6 +10,8 @@ pub trait ContentSeal: Send + Sync {
         text: &MessageText,
     ) -> impl Future<Output = Result<ContentBinding, PeerPortError>> + Send;
 }
+/// Authenticate the scoped reference and verify its exact UTF-8 byte size and stable semantic fingerprint before returning text.
+/// `None` means authorized, confirmed absence or erasure. Infrastructure and key-service failures must return an error, leaving obligations retryable.
 pub trait ContentOpen: Send + Sync {
     fn open(
         &self,
