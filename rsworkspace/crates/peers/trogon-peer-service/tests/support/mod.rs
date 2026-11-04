@@ -9,6 +9,8 @@ use trogon_peer::*;
 use trogon_peer_service::*;
 use trogonai_proto::peers::v1alpha1 as proto;
 
+pub mod fixed_batch_id;
+
 pub type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 #[derive(Clone)]
 pub struct StoreFixture {
