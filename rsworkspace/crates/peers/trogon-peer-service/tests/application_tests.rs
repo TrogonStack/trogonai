@@ -165,3 +165,50 @@ async fn escaped_rendering_selects_fitting_oldest_prefix_before_preparation() ->
     assert_eq!(prepared.messages[0].metadata, first.message);
     Ok(())
 }
+
+#[tokio::test]
+async fn application_ack_is_backend_owned_once_and_distinct_from_sender_settlement() -> TestResult {
+    let f = Fixture::new().await?;
+    let sent = f.intake("key", "act on this").await?;
+    let prepared = f.app().prepare_batch(&f.bob, f.prepare()).await?;
+    let sender = PeerId::parse(
+        f.a.peer_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    assert!(!f.history(&sender).await?.outbox[0].settlement.is_set());
+    let id = MessageId::new(
+        sent.message
+            .message_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    f.app().reconcile(&f.alice, &sender, &[id], WorkLimit::new(1)?).await?;
+    assert!(f.history(&sender).await?.outbox[0].settlement.is_set());
+    let ack = proto::AcknowledgeBatchRequest {
+        attachment: f.b.clone().into(),
+        batch_id: prepared.batch.batch_id.clone(),
+    };
+    assert!(f.app().acknowledge_batch(&f.alice, ack.clone()).await.is_err());
+    let before = f.store.appends.load(Ordering::SeqCst);
+    let acknowledged = f.app().acknowledge_batch(&f.bob, ack.clone()).await?;
+    assert!(acknowledged.batch.acknowledged_at.is_set());
+    assert_eq!(f.app().acknowledge_batch(&f.bob, ack).await?, acknowledged);
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), before + 1);
+    assert!(!f.app().prepare_batch(&f.bob, f.prepare()).await?.batch.is_set());
+    let status = f
+        .app()
+        .status(
+            &f.alice,
+            proto::StatusRequest {
+                attachment: f.a.clone().into(),
+                idempotency_key: Some("key".into()),
+            },
+        )
+        .await?;
+    assert_eq!(
+        status.status.and_then(|v| v.as_known()),
+        Some(proto::MessageStatus::MESSAGE_STATUS_APPLICATION_ACKNOWLEDGED)
+    );
+    Ok(())
+}
