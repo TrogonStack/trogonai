@@ -95,7 +95,9 @@ impl Decider for Enroll {
             .checked_add_signed(chrono::Duration::seconds(10))
             .filter(|at| (-62_135_596_800..=253_402_300_799).contains(&at.timestamp()))
             .ok_or(EnrollError::LeaseDeadlineOverflow)?;
-        if !(-62_135_596_800..=253_402_300_799).contains(&command.now.timestamp()) {
+        if !(-62_135_596_800..=253_402_300_799).contains(&command.now.timestamp())
+            || command.now.timestamp_subsec_nanos() >= 1_000_000_000
+        {
             return Err(EnrollError::LeaseDeadlineOverflow);
         }
         let identity = &command.identity;
