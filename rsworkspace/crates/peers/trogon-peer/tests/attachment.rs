@@ -181,3 +181,57 @@ fn replacement_replay_rejects_gaps_and_overlap_with_a_live_attachment() {
         assert!(trogon_peer::commands::state::evolve(state(start), &event).is_err());
     }
 }
+
+fn enrollment_history(start: DateTime<Utc>) -> [proto::PeerEvent; 2] {
+    let initial = state(start);
+    [
+        proto::PeerEvent {
+            event: Some(
+                proto::PeerEnrolled {
+                    enrollment: initial.enrollment,
+                }
+                .into(),
+            ),
+        },
+        proto::PeerEvent {
+            event: Some(
+                proto::PeerAttached {
+                    attachment: initial.attachment,
+                }
+                .into(),
+            ),
+        },
+    ]
+}
+
+#[test]
+fn attachment_timestamp_preserves_valid_nanoseconds() {
+    let start = DateTime::from_timestamp(1_483_228_779, 0).unwrap();
+    for nanos in [0, 999_999_999] {
+        let now = DateTime::from_timestamp(1_483_228_799, nanos).unwrap();
+        let next = attachment(&identity(), "new_connector", 2, now);
+        TestCase::<Attach>::new()
+            .given(enrollment_history(start))
+            .when(command("new_connector", "collaboration", now))
+            .then([proto::PeerEvent {
+                event: Some(
+                    proto::PeerAttached {
+                        attachment: MessageField::some(next),
+                    }
+                    .into(),
+                ),
+            }]);
+    }
+}
+
+#[test]
+fn attachment_timestamp_rejects_leap_seconds_before_protobuf_conversion() {
+    let start = DateTime::from_timestamp(1_483_228_779, 0).unwrap();
+    for nanos in [1_000_000_000, 1_500_000_000, 1_999_999_999] {
+        let now = DateTime::from_timestamp(1_483_228_799, nanos).unwrap();
+        TestCase::<Attach>::new()
+            .given(enrollment_history(start))
+            .when(command("new_connector", "collaboration", now))
+            .then_error(AttachError::LeaseDeadlineOverflow);
+    }
+}
