@@ -12,6 +12,12 @@ pub enum PeerMcpError {
     InvalidConfig(#[source] trogon_peer::PeerValueError),
     #[error("native hook identity is invalid")]
     InvalidHostIdentity(#[source] trogon_peer::PeerValueError),
+    #[error("peer model operation input is invalid")]
+    InvalidModelInput(#[source] trogon_peer::PeerValueError),
+    #[error("peer backend returned invalid operation metadata")]
+    InvalidMetadata,
+    #[error("peer backend metadata could not be encoded")]
+    MetadataEncoding(#[source] serde_json::Error),
     #[error("peer backend returned an invalid enrollment")]
     InvalidEnrollment,
     #[error("peer backend returned an invalid enrollment identity")]
@@ -26,6 +32,14 @@ pub enum PeerMcpError {
     Enroll(#[source] Box<dyn std::error::Error + Send + Sync>),
     #[error("peer batch preparation failed")]
     Prepare(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("peer batch acknowledgment failed")]
+    Acknowledge(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("peer roster query failed")]
+    Roster(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("peer send outcome was not confirmed")]
+    Send(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("peer status query failed")]
+    Status(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
 impl PeerMcpError {
@@ -35,7 +49,10 @@ impl PeerMcpError {
             Self::NativeSessionChanged => {
                 "This connector belongs to another native session; reconnect it for this session."
             }
-            Self::InvalidArguments(_) | Self::InvalidHostIdentity(_) => "Peer tool arguments are invalid.",
+            Self::InvalidArguments(_) | Self::InvalidHostIdentity(_) | Self::InvalidModelInput(_) => {
+                "Peer tool arguments are invalid."
+            }
+            Self::InvalidMetadata | Self::MetadataEncoding(_) => "Peer service returned invalid operation metadata.",
             Self::InvalidBatch(_) => "Peer service returned an invalid delivery assignment.",
             Self::InvalidConfig(_) => "Peer connector configuration is invalid.",
             Self::InvalidEnrollment | Self::InvalidEnrollmentIdentity(_) => {
@@ -46,6 +63,9 @@ impl PeerMcpError {
                 "Peer batch retry content is unavailable; its original preparation record is retained."
             }
             Self::Enroll(_) | Self::Prepare(_) => "Peer service is unavailable; pending delivery remains queued.",
+            Self::Acknowledge(_) => "Peer application acknowledgment was not confirmed; retry the same batch.",
+            Self::Send(_) => "Peer send outcome was not confirmed; retry with the same idempotency key.",
+            Self::Roster(_) | Self::Status(_) => "Peer metadata is unavailable.",
             Self::Encode(_) => "Peer hook output could not be encoded.",
         }
     }
