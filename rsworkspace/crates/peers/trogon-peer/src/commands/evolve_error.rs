@@ -8,8 +8,6 @@ pub enum EvolveError {
     InvalidMessageTransition,
     #[error("peer event has no event case")]
     MissingEvent,
-    #[error("peer event case is not supported by the enrollment fold")]
-    UnsupportedEvent,
     #[error("peer enrollment already exists")]
     AlreadyEnrolled,
     #[error("peer attachment already exists")]
