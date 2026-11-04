@@ -526,3 +526,75 @@ pub enum AppendFixtureError {
     #[error("fixture lost append response")]
     LostResponse,
 }
+impl Fixture {
+    pub async fn add_peer(&self, name: &str) -> TestResult<(TrustedPeerOwner, proto::AttachmentRef)> {
+        let owner = TrustedPeerOwner::new(self.alice.tenant().clone(), CallerId::new(name)?);
+        let service = PeerService::new(self.store.clone(), self.policy.clone(), self.clock.clone());
+        let reference = service
+            .enroll(&owner, Self::enrollment(name))
+            .await?
+            .attachment
+            .attachment
+            .clone()
+            .into_option()
+            .ok_or(PeerPortError::Integrity)?;
+        let id = PeerId::parse(reference.peer_id.clone().ok_or(PeerPortError::Integrity)?)?;
+        self.policy
+            .grants
+            .lock()
+            .map_err(|_| PeerPortError::Unavailable)?
+            .insert(id.to_string(), owner.clone());
+        self.catalog
+            .peers
+            .lock()
+            .map_err(|_| PeerPortError::Unavailable)?
+            .push(id);
+        Ok((owner, reference))
+    }
+    pub async fn advance_and_resume(&mut self, elapsed: chrono::Duration) -> TestResult {
+        *self.clock.time.lock().map_err(|_| PeerPortError::Unavailable)? += elapsed;
+        let service = PeerService::new(self.store.clone(), self.policy.clone(), self.clock.clone());
+        self.a = service
+            .enroll(&self.alice, Self::enrollment("alice"))
+            .await?
+            .attachment
+            .attachment
+            .clone()
+            .into_option()
+            .ok_or(PeerPortError::Integrity)?;
+        self.b = service
+            .enroll(&self.bob, Self::enrollment("bob"))
+            .await?
+            .attachment
+            .attachment
+            .clone()
+            .into_option()
+            .ok_or(PeerPortError::Integrity)?;
+        Ok(())
+    }
+}
+pub struct IsolatedEnrollmentFixture(pub TrustedPeerOwner);
+impl CommandAuthorizer<Enroll> for IsolatedEnrollmentFixture {
+    fn authorize(&self, p: &CommandPrincipal, c: &Enroll) -> Result<(), AuthorizationDeniedError> {
+        if c.identity().owner() != &self.0
+            || c.collaboration().as_str() != "isolated"
+            || p.kind() != PrincipalKind::Agent
+            || p.id().as_str() != self.0.caller().as_str()
+        {
+            return Err(AuthorizationDeniedError::new("outside isolated enrollment"));
+        }
+        Ok(())
+    }
+}
+impl CommandAuthorizer<Attach> for IsolatedEnrollmentFixture {
+    fn authorize(&self, p: &CommandPrincipal, c: &Attach) -> Result<(), AuthorizationDeniedError> {
+        if c.identity().owner() != &self.0
+            || c.collaboration().as_str() != "isolated"
+            || p.kind() != PrincipalKind::Agent
+            || p.id().as_str() != self.0.caller().as_str()
+        {
+            return Err(AuthorizationDeniedError::new("outside isolated resume"));
+        }
+        Ok(())
+    }
+}

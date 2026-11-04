@@ -370,3 +370,24 @@ impl CommandAuthorizer<trogon_peer::Detach> for EnrollmentPolicy {
         )
     }
 }
+
+#[tokio::test]
+async fn second_live_connector_is_refused_and_different_native_identity_gets_a_new_peer() {
+    let store = ObservedStore::default();
+    let service = PeerService::new(store.clone(), policy(), FixedClock(now()));
+    let first = service.enroll(&owner(), request("collaboration_alpha")).await.unwrap();
+    let mut competing = request("collaboration_alpha");
+    competing.connector_id = Some("other_connector".into());
+    assert!(matches!(
+        service.enroll(&owner(), competing).await,
+        Err(EnrollServiceError::Attach(CommandError::Decide(
+            trogon_peer::AttachError::InUse
+        )))
+    ));
+    let mut other_session = request("collaboration_alpha");
+    other_session.native_session_id = Some("other_native_session".into());
+    let different = service.enroll(&owner(), other_session).await.unwrap();
+    assert_ne!(first.peer_id, different.peer_id);
+    assert_eq!(first.attachment.attachment.generation, Some(1));
+    assert_eq!(different.attachment.attachment.generation, Some(1));
+}
