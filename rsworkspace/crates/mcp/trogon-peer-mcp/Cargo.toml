@@ -13,11 +13,14 @@ rmcp = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["sync", "time"] }
+tokio = { workspace = true, features = ["sync", "time", "macros"] }
 trogon-peer = { path = "../../peers/trogon-peer" }
 trogon-peer-context = { path = "../../peers/trogon-peer-context" }
 trogonai-proto = { path = "../../platform/trogonai-proto", features = ["peers"] }
 
+tokio-util = { workspace = true }
+
 [dev-dependencies]
 buffa = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "io-util", "test-util"] }
+
