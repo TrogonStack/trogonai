@@ -19,3 +19,4 @@ trogonai-proto = { path = "../../platform/trogonai-proto", features = ["peers", 
 
 [dev-dependencies]
 trogon-decider = { path = "../../decider/trogon-decider", features = ["test-support"] }
+trogon-decider-runtime = { path = "../../decider/trogon-decider-runtime" }
