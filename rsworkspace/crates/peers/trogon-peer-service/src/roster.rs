@@ -77,11 +77,14 @@ where
             let live = state.attachment.status.and_then(|v| v.as_known())
                 == Some(proto::AttachmentStatus::ATTACHMENT_STATUS_ATTACHED)
                 && now < expires;
+            if !live {
+                continue;
+            }
             peers.push(proto::PeerPresence {
                 peer_id: state.enrollment.peer_id.clone(),
                 display_name: state.enrollment.display_name.clone(),
-                availability: if live { state.availability } else { None },
-                condition: if live { state.condition } else { None },
+                availability: state.availability,
+                condition: state.condition,
                 delivery_capability: Some(proto::DeliveryCapability::DELIVERY_CAPABILITY_ON_USER_PROMPT.into()),
                 observed_at: MessageField::some(timestamp_from_datetime(&now)),
                 expires_at: state.attachment.expires_at.clone(),
