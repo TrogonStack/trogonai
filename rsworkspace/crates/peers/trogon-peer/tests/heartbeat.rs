@@ -2,7 +2,7 @@
 
 use buffa::MessageField;
 use chrono::{DateTime, TimeZone, Utc};
-use trogon_decider::testing::TestCase;
+use trogon_decider::{Decider, testing::TestCase};
 use trogon_peer::{
     AttachmentRef, CallerId, ConnectorId, EnrollmentIdentity, Heartbeat, HeartbeatError, InstallationId,
     NativeSessionId, PeerId, PeerObservation, TenantId, TrustedPeerOwner,
@@ -261,5 +261,60 @@ fn heartbeat_replay_rejects_unknown_observations_or_loss_of_progress() {
             )
             .is_err()
         );
+    }
+}
+
+#[test]
+fn heartbeat_binding_exposes_the_same_owner_and_attachment_that_guard_the_write() {
+    let now = Utc.with_ymd_and_hms(2026, 11, 2, 12, 0, 0).unwrap();
+    let command = heartbeat("old_connector", 1, now, Some(now));
+    assert_eq!(command.owner(), identity().owner());
+    assert_eq!(command.attachment(), &reference("old_connector", 1));
+    assert_eq!(command.stream_id(), command.attachment().peer_id());
+    assert_eq!(command.now(), now);
+    assert_eq!(command.observation().active_at(), Some(now));
+    assert_eq!(
+        command.observation().availability(),
+        proto::PeerAvailability::PEER_AVAILABILITY_BUSY
+    );
+    TestCase::<Heartbeat>::new()
+        .given_no_history()
+        .when(command)
+        .then_error(HeartbeatError::MissingEnrollment);
+}
+
+#[test]
+fn heartbeat_replay_cannot_renew_at_the_expiry_boundary_or_change_generation() {
+    let start = Utc.with_ymd_and_hms(2026, 11, 2, 12, 0, 0).unwrap();
+    for (generation, seconds) in [(2, 1), (1, 10)] {
+        let event = proto::PeerEvent {
+            event: Some(
+                proto::PeerHeartbeatRecorded {
+                    attachment: MessageField::some(attachment(
+                        &identity(),
+                        "old_connector",
+                        generation,
+                        start + chrono::Duration::seconds(seconds),
+                    )),
+                    availability: Some(proto::PeerAvailability::PEER_AVAILABILITY_READY.into()),
+                    ..Default::default()
+                }
+                .into(),
+            ),
+        };
+        assert_eq!(
+            trogon_peer::commands::state::evolve(state(start), &event),
+            Err(trogon_peer::EvolveError::InvalidAttachment)
+        );
+    }
+}
+
+#[test]
+fn observation_rejects_activity_outside_the_wire_timestamp_range() {
+    for at in [DateTime::<Utc>::MIN_UTC, DateTime::<Utc>::MAX_UTC] {
+        assert!(matches!(
+            PeerObservation::new(proto::PeerAvailability::PEER_AVAILABILITY_READY, None, Some(at)),
+            Err(trogon_peer::PeerObservationError::InvalidActivity)
+        ));
     }
 }

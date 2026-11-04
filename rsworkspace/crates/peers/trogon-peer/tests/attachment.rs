@@ -72,6 +72,10 @@ fn an_expired_attachment_advances_generation_without_replacing_mailbox_history()
         CollaborationRef::new("collaboration").unwrap(),
         now,
     );
+    assert_eq!(command.identity(), &identity());
+    assert_eq!(command.connector_id().as_str(), "new_connector");
+    assert_eq!(command.collaboration().as_str(), "collaboration");
+    assert_eq!(command.now(), now);
     let mut expected = before.clone();
     expected.attachment = MessageField::some(next.clone());
     expected.availability = Some(proto::PeerAvailability::PEER_AVAILABILITY_READY.into());
