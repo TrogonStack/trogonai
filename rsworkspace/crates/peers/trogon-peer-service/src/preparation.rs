@@ -151,10 +151,11 @@ where
                     .ok_or(PeerApplicationError::Scope)?;
                 self.replay(owner, reference.peer_id(), &winner, batch).await
             }
-            Err(error) => {
+            Err(CommandError::Decide(error)) => {
                 self.cache.orphan(&key).await?;
-                Err(PeerApplicationError::Message(error))
+                Err(PeerApplicationError::Message(CommandError::Decide(error)))
             }
+            Err(error) => Err(PeerApplicationError::Message(error)),
         }
     }
     async fn replay(
