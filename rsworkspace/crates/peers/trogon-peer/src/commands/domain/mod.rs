@@ -41,3 +41,6 @@ pub use sealed_content_ref::SealedContentRef;
 
 mod trusted_content;
 pub use trusted_content::TrustedContent;
+
+mod terminal_disposition;
+pub use terminal_disposition::TerminalDisposition;
