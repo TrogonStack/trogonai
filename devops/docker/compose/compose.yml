@@ -1,21 +1,103 @@
 name: trogonai
 
+# Every NATS client reaches the server the way a deployed one must: TLS against
+# the dev CA, a client certificate, and an nsc-issued creds file. Each client
+# mounts only its own directory of the dev_secrets volume at /run/secrets/nats.
+x-nats-client-env: &nats-client-env
+  NATS_URL: "tls://nats:4222"
+  NATS_CREDS: "/run/secrets/nats/nats.creds"
+  NATS_CA: "/run/secrets/nats/ca.pem"
+  NATS_CERT: "/run/secrets/nats/client.pem"
+  NATS_KEY: "/run/secrets/nats/client-key.pem"
+
 services:
+  # Runs to completion on every `up`: creates the dev operator, the SYS, AUTH,
+  # PLATFORM and DEV accounts, and a creds file per NATS client, keeping any
+  # that already exist. See services/nats/bootstrap.sh.
+  nats-bootstrap:
+    image: natsio/nats-box:0.20.1
+    entrypoint:
+      - /bin/sh
+      - /bootstrap/bootstrap.sh
+    network_mode: none
+    volumes:
+      - ./services/nats:/bootstrap:ro
+      - dev_secrets:/secrets
+    restart: on-failure:3
+
+  # Runs to completion on every `up`: issues the dev CA, the NATS and Postgres
+  # server certificates, and a client certificate for every NATS client
+  # nats-bootstrap created. See services/pki/bootstrap.sh.
+  pki-bootstrap:
+    image: alpine/openssl:3.5.9
+    entrypoint:
+      - /bin/sh
+      - /bootstrap/bootstrap.sh
+    network_mode: none
+    volumes:
+      - ./services/pki:/bootstrap:ro
+      - dev_secrets:/secrets
+    depends_on:
+      nats-bootstrap:
+        condition: service_completed_successfully
+    restart: on-failure:3
+
   nats:
     image: nats:2.14.2-alpine
     command:
-      - "--jetstream"
-      - "--store_dir=/data"
-      - "--http_port=8222"
+      - "nats-server"
+      - "--config"
+      - "/etc/nats/nats-server.conf"
+    ports:
+      - "127.0.0.1:${NATS_PORT:-4222}:4222"
     volumes:
+      - ./services/nats/nats-server.conf:/etc/nats/nats-server.conf:ro
+      - type: volume
+        source: dev_secrets
+        target: /etc/nats/secrets
+        read_only: true
+        volume:
+          subpath: nats-server
       - nats_data:/data
+    depends_on:
+      pki-bootstrap:
+        condition: service_completed_successfully
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8222/healthz"]
+      test: ["CMD", "env", "SSL_CERT_FILE=/etc/nats/secrets/ca.pem", "wget", "-qO-", "https://localhost:8222/healthz"]
       interval: 5s
       timeout: 3s
       start_period: 5s
       retries: 3
+
+  # Runs to completion on every `up`: onboards the AUTH, PLATFORM and DEV
+  # accounts by pushing their JWTs as the system account, the way a deployment
+  # onboards an account. Clients of those accounts wait for it.
+  nats-account-push:
+    image: natsio/nats-box:0.20.1
+    entrypoint:
+      - /bin/sh
+      - /bootstrap/push-accounts.sh
+    environment:
+      <<: *nats-client-env
+    volumes:
+      - ./services/nats:/bootstrap:ro
+      - type: volume
+        source: dev_secrets
+        target: /run/secrets/nats
+        read_only: true
+        volume:
+          subpath: clients/sys
+      - type: volume
+        source: dev_secrets
+        target: /accounts
+        read_only: true
+        volume:
+          subpath: accounts
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: on-failure:3
 
   trogon-gateway:
     build:
@@ -28,8 +110,8 @@ services:
       - path: .env
         required: false
     environment:
-      TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET: "${TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET:-local-dev-secret}"
-      NATS_URL: "nats://nats:4222"
+      <<: *nats-client-env
+      TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET: "${TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET:?set it in devops/docker/compose/.env, for example with `openssl rand -hex 32`}"
       OPENBAO_ADDR: "http://openbao:8200"
       OPENBAO_TOKEN: "${OPENBAO_DEV_ROOT_TOKEN:-local-dev-root-token}"
       OPENBAO_ALLOW_PLAINTEXT: "true"
@@ -37,9 +119,17 @@ services:
       TROGON_GATEWAY_PORT: "${TROGON_GATEWAY_PORT:-8080}"
     volumes:
       - ./services/trogon-gateway/gateway.toml:/etc/trogon-gateway/gateway.toml:ro
+      - type: volume
+        source: dev_secrets
+        target: /run/secrets/nats
+        read_only: true
+        volume:
+          subpath: clients/trogon-gateway
     depends_on:
       nats:
         condition: service_healthy
+      nats-account-push:
+        condition: service_completed_successfully
       openbao:
         condition: service_healthy
       openbao-bootstrap:
@@ -54,9 +144,22 @@ services:
 
   # Backing store for the optional Postgres schedules read-model projection
   # (SCHEDULER_PROJECTION_BACKEND=postgres). The default NATS KV projection does
-  # not need this service.
+  # not need this service. Network clients must use TLS (services/postgres/
+  # pg_hba.conf) and should verify the server against the dev CA.
   postgres:
     image: postgres:17-alpine
+    command:
+      - "postgres"
+      - "-c"
+      - "ssl=on"
+      - "-c"
+      - "ssl_cert_file=/run/secrets/postgres/server.pem"
+      - "-c"
+      - "ssl_key_file=/run/secrets/postgres/server-key.pem"
+      - "-c"
+      - "ssl_ca_file=/run/secrets/postgres/ca.pem"
+      - "-c"
+      - "hba_file=/etc/postgresql/pg_hba.conf"
     environment:
       POSTGRES_USER: "${POSTGRES_USER:-trogon}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-trogon}"
@@ -65,6 +168,16 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./services/postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - type: volume
+        source: dev_secrets
+        target: /run/secrets/postgres
+        read_only: true
+        volume:
+          subpath: postgres-server
+    depends_on:
+      pki-bootstrap:
+        condition: service_completed_successfully
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-trogon} -d ${POSTGRES_DB:-trogon_scheduler}"]
@@ -84,11 +197,19 @@ services:
     environment:
       PGHOST: postgres
       PGPASSWORD: "${POSTGRES_PASSWORD:-trogon}"
+      PGSSLMODE: verify-full
+      PGSSLROOTCERT: /run/secrets/dev-ca/ca.pem
       POSTGRES_USER: "${POSTGRES_USER:-trogon}"
       POSTGRES_DB: "${POSTGRES_DB:-trogon_scheduler}"
       OPENBAO_POSTGRES_DB: "${OPENBAO_POSTGRES_DB:-openbao}"
     volumes:
       - ./services/postgres/ensure-openbao-database.sh:/scripts/ensure-openbao-database.sh:ro
+      - type: volume
+        source: dev_secrets
+        target: /run/secrets/dev-ca
+        read_only: true
+        volume:
+          subpath: ca
     depends_on:
       postgres:
         condition: service_healthy
@@ -105,13 +226,19 @@ services:
       - path: .env
         required: false
     environment:
-      BAO_PG_CONNECTION_URL: "postgres://${POSTGRES_USER:-trogon}:${POSTGRES_PASSWORD:-trogon}@postgres:5432/${OPENBAO_POSTGRES_DB:-openbao}?sslmode=disable"
+      BAO_PG_CONNECTION_URL: "postgres://${POSTGRES_USER:-trogon}:${POSTGRES_PASSWORD:-trogon}@postgres:5432/${OPENBAO_POSTGRES_DB:-openbao}?sslmode=verify-full&sslrootcert=/run/secrets/dev-ca/ca.pem"
       BAO_STATIC_SEAL_KEY: "${OPENBAO_STATIC_SEAL_KEY:-bG9jYWwtZGV2LW9ubHktc2VhbC1rZXktMzJieXRlcyE=}"
       BAO_LOG_LEVEL: "${OPENBAO_LOG_LEVEL:-info}"
     # No published port: OrbStack routes to the container directly at
     # http://openbao.trogonai.orb.local:8200.
     volumes:
       - ./services/openbao/openbao.hcl:/openbao/config/openbao.hcl:ro
+      - type: volume
+        source: dev_secrets
+        target: /run/secrets/dev-ca
+        read_only: true
+        volume:
+          subpath: ca
     depends_on:
       openbao-database:
         condition: service_completed_successfully
@@ -153,6 +280,27 @@ services:
         condition: service_started
     restart: on-failure:3
 
+  # The nats CLI as the PLATFORM developer identity, for example
+  # `docker compose run --rm nats-box nats sub '>'`.
+  nats-box:
+    image: natsio/nats-box:0.20.1
+    environment:
+      <<: *nats-client-env
+    volumes:
+      - type: volume
+        source: dev_secrets
+        target: /run/secrets/nats
+        read_only: true
+        volume:
+          subpath: clients/nats-cli
+    depends_on:
+      nats-account-push:
+        condition: service_completed_successfully
+    profiles:
+      - tools
+
+  # Publishes the gateway on a public ngrok URL, so anyone holding the URL
+  # reaches it. Start it only while a provider needs to call in.
   ngrok:
     image: ngrok/ngrok:3.39.6-alpine
     env_file:
@@ -164,6 +312,7 @@ services:
       - /bin/sh
       - -c
       - |
+        echo "ngrok: WARNING: this exposes the local stack to the public internet; anyone with the tunnel URL can reach trogon-gateway." >&2
         cat > /tmp/ngrok.yml <<EOF
         version: 3
         tunnels:
@@ -180,5 +329,9 @@ services:
       - dev
 
 volumes:
+  # Keys, JWTs and certificates written by nats-bootstrap and pki-bootstrap.
+  # `docker compose down -v` discards them together with nats_data, which
+  # matters: the JetStream store is encrypted with a key that lives here.
+  dev_secrets:
   nats_data:
   postgres_data:

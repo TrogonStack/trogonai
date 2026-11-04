@@ -60,6 +60,7 @@ trogon-semconv = { path = "crates/platform/trogon-semconv" }
 trogon-service-config = { path = "crates/platform/trogon-service-config" }
 trogon-std = { path = "crates/platform/trogon-std" }
 trogonai-proto = { path = "crates/platform/trogonai-proto" }
+trogon-egress-proxy = { path = "crates/platform/trogon-egress-proxy" }
 trogon-policy-eval = { path = "crates/policy/trogon-policy-eval" }
 trogon-policy-cel = { path = "crates/policy/trogon-policy-cel" }
 trogon-channel = { path = "crates/channel/trogon-channel" }
@@ -112,13 +113,14 @@ buffa-types = { version = "=0.9.2", features = ["json"] }
 futures = "=0.3.34"
 futures-util = "=0.3.34"
 tokio = "=1.53.1"
+tokio-rustls = { version = "=0.26.4", default-features = false, features = ["aws_lc_rs"] }
 tokio-util = "=0.7.19"
 tokio-tungstenite = "=0.29.0"
 tower = "=0.5.3"
 tower-http = { version = "=0.7.1", features = ["trace"] }
 
 # Database
-sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "macros", "migrate", "postgres", "chrono", "json"] }
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls-aws-lc-rs", "macros", "migrate", "postgres", "chrono", "json"] }
 
 # Telegram
 teloxide = { version = "=0.17.0", default-features = false, features = ["macros", "webhooks-axum", "rustls"] }

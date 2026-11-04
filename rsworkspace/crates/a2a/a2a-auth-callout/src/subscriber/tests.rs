@@ -260,3 +260,47 @@ async fn replicas_in_one_queue_dispatch_each_authorization_request_once() {
     fixture.stop().await;
     tokio::time::timeout(WAIT, replica).await.unwrap().unwrap().unwrap();
 }
+
+#[tokio::test]
+async fn subscriber_stays_unready_while_no_server_has_accepted_its_connection() {
+    // The client keeps dialing in the background, so the subscription is only queued
+    // until a server answers. Ready would claim a callout that cannot answer anyone.
+    let unreachable = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap();
+    let client = async_nats::ConnectOptions::new()
+        .retry_on_initial_connect()
+        .connect(format!("nats://{unreachable}"))
+        .await
+        .unwrap();
+    let signer = KeyPair::new_server();
+    let callout = KeyPair::new_account();
+    let wire = AuthCalloutWireCodec::new(
+        NkeyPublic::parse(signer.public_key()).unwrap(),
+        NkeySeed::parse(callout.seed().unwrap()).unwrap(),
+        None,
+        None,
+    )
+    .unwrap();
+    let dispatcher = RecordingDispatcher {
+        outcome: DispatchOutcome::Grant,
+        jwt: MintedUserJwt::new(
+            nats_jwt_rs::user::User::new_claims("subscriber-test".into(), KeyPair::new_user().public_key())
+                .encode(&callout)
+                .unwrap(),
+        )
+        .unwrap(),
+        calls: Arc::new(AtomicUsize::new(0)),
+    };
+    let readiness = tempfile::tempdir().unwrap();
+    let env = SubscriberEnv {
+        readiness: readiness.path().join("ready"),
+    };
+    let task = tokio::spawn(async move { Subscriber::new(client, dispatcher, wire).run(&env).await });
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    assert!(!readiness.path().join("ready").exists());
+    task.abort();
+}

@@ -1,6 +1,7 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 use {
+    a2a_auth_callout::constants::NATS_CONNECT_TIMEOUT,
     a2a_auth_callout::credentials::mtls::MTlsVerifier,
     a2a_auth_callout::credentials::mtls::{TrustAnchorPem, X509MtlsVerifier},
     a2a_auth_callout::credentials::oidc::{JwksOidcVerifier, OidcIssuerUrl, OidcVerifier},
@@ -13,6 +14,7 @@ use {
     std::sync::Arc,
     std::time::Duration,
     tracing::{info, warn},
+    trogon_nats::NatsConfig,
     trogon_std::env::{ReadEnv, SystemEnv},
 };
 
@@ -30,6 +32,11 @@ fn split_env_list(env: &impl ReadEnv, name: &str) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn nats_config(env: &impl ReadEnv) -> Option<NatsConfig> {
+    let config = NatsConfig::from_env(env);
+    (!config.servers.is_empty()).then_some(config)
 }
 
 fn env_required(env: &impl ReadEnv, name: &'static str) -> Result<String, AuthCalloutError> {
@@ -91,7 +98,10 @@ async fn main() {
 
     let env = SystemEnv;
 
-    let nats_url = env.var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
+    let Some(nats) = nats_config(&env) else {
+        tracing::error!("NATS_URL must list at least one server");
+        std::process::exit(1);
+    };
     let signing_key_source = match signing_key_source_from_env(&env) {
         Ok(s) => s,
         Err(e) => {
@@ -177,16 +187,14 @@ async fn main() {
         std::process::exit(1);
     }
 
-    info!(nats_url = %nats_url, accounts = ?allowed_accounts, "connecting to NATS for auth callout");
+    info!(nats_url = %nats.servers.join(","), accounts = ?allowed_accounts, "connecting to NATS for auth callout");
 
-    let connect_opts = match (env.var("NATS_USER").ok(), env.var("NATS_PASSWORD").ok()) {
-        (Some(user), Some(password)) => async_nats::ConnectOptions::new().user_and_password(user, password),
-        _ => async_nats::ConnectOptions::new(),
-    };
-    let client = connect_opts.connect(&nats_url).await.unwrap_or_else(|e| {
-        tracing::error!(error = %e, "failed to connect to NATS");
-        std::process::exit(1);
-    });
+    let client = trogon_nats::connect(&nats, NATS_CONNECT_TIMEOUT)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::error!(error = %e, "failed to connect to NATS");
+            std::process::exit(1);
+        });
 
     let dispatcher = CalloutDispatcher::new(CalloutDispatcherConfig {
         signing_key_source,

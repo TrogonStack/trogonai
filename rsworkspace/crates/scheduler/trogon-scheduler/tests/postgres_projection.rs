@@ -6,10 +6,12 @@ use std::collections::HashSet;
 use buffa::MessageField;
 use buffa_types::google::protobuf::{Duration, Timestamp};
 use sqlx::Row;
+use sqlx::postgres::PgPoolOptions;
 use trogon_scheduler::{
-    GetScheduleCommand, ListSchedulesCommand, PostgresSchedulesProjection, ScheduleId, projection_queries,
+    GetScheduleCommand, ListSchedulesCommand, PostgresSchedulesProjection, PostgresUrl, ScheduleId, projection_queries,
     projections_v1,
 };
+use trogon_std::env::InMemoryEnv;
 
 fn fixture_schedule_id(label: &str) -> String {
     match label {
@@ -482,4 +484,25 @@ async fn future_schema_discriminators_do_not_hide_supported_rows() {
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].id, fixture_schedule_id("ok"));
     }
+}
+
+#[tokio::test]
+async fn connect_refuses_a_server_without_tls_unless_tls_is_disabled_explicitly() {
+    let (_container, address) = postgres::start_server().await;
+
+    let verified = PostgresUrl::parse(&address, &InMemoryEnv::new()).unwrap();
+    let Err(error) = PostgresSchedulesProjection::connect(&verified, PgPoolOptions::new().max_connections(1)).await
+    else {
+        panic!("verify-full must refuse a server that does not offer TLS");
+    };
+    let refusal = std::error::Error::source(&error).and_then(|source| source.downcast_ref::<sqlx::Error>());
+    assert!(
+        matches!(refusal, Some(sqlx::Error::Tls(reason)) if reason.to_string() == "server does not support TLS"),
+        "verify-full must reach the TLS upgrade and be refused by the server: {error}"
+    );
+
+    let disabled = PostgresUrl::parse(&format!("{address}?sslmode=disable"), &InMemoryEnv::new()).unwrap();
+    PostgresSchedulesProjection::connect(&disabled, PgPoolOptions::new().max_connections(1))
+        .await
+        .expect("an explicit sslmode=disable connects without TLS");
 }

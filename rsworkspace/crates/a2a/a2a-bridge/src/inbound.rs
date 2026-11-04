@@ -22,6 +22,8 @@ use futures_util::stream::{self, BoxStream, Stream};
 use serde::Serialize;
 use serde_json::{Map, Value};
 use tracing::warn;
+use trogon_nats::{CredentialValue, NatsAuth, NatsConfig};
+use trogon_std::secret_string::{EmptySecretError, SecretString};
 
 use a2a_nats::RequestId;
 use a2a_nats::constants::{GATEWAY_CALLER_ID_HEADER, GATEWAY_CALLER_ID_HTTP, REQ_ID_HEADER};
@@ -187,24 +189,83 @@ pub trait GatewayUnaryPublish: Send + Sync {
     ) -> Result<Bytes, BridgeError>;
 }
 
+#[derive(Debug, thiserror::Error)]
+enum CallerConnectError {
+    #[error(transparent)]
+    EmptyToken(#[from] EmptySecretError),
+    #[error(transparent)]
+    Failed(#[from] trogon_nats::ConnectError),
+    #[error("Failed to connect to NATS within {0:?}")]
+    TimedOut(Duration),
+}
+
+/// How long a per-request caller connection may take to come up, across every
+/// configured server rather than per server. A distinct type
+/// from [`GatewayRpcTimeout`] so a reply budget cannot be passed where a connect
+/// budget belongs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CallerConnectTimeout(Duration);
+
+impl CallerConnectTimeout {
+    #[must_use]
+    pub const fn new(timeout: Duration) -> Self {
+        Self(timeout)
+    }
+
+    #[must_use]
+    pub const fn get(self) -> Duration {
+        self.0
+    }
+}
+
+/// How long a gateway request may wait for its reply once the caller connection is up.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GatewayRpcTimeout(Duration);
+
+impl GatewayRpcTimeout {
+    #[must_use]
+    pub const fn new(timeout: Duration) -> Self {
+        Self(timeout)
+    }
+
+    #[must_use]
+    pub const fn get(self) -> Duration {
+        self.0
+    }
+}
+
+async fn connect_as_caller(
+    nats: &NatsConfig,
+    caller_jwt: &BridgeUserJwt,
+    timeout: CallerConnectTimeout,
+) -> Result<async_nats::Client, CallerConnectError> {
+    let token = CredentialValue::Literal(SecretString::new(caller_jwt.as_str())?);
+    // connect_once applies its timeout to each server in turn, so a list of
+    // stalled servers would otherwise hold the caller for a multiple of it.
+    tokio::time::timeout(
+        timeout.get(),
+        trogon_nats::connect_once(nats, NatsAuth::Token(token), timeout.get()),
+    )
+    .await
+    .map_err(|_| CallerConnectError::TimedOut(timeout.get()))?
+    .map_err(CallerConnectError::from)
+}
+
 #[derive(Clone)]
 pub struct AsyncNatsTokenGatewayUnary {
-    servers: Arc<[String]>,
-    timeout: Duration,
+    nats: Arc<NatsConfig>,
+    connect_timeout: CallerConnectTimeout,
+    rpc_timeout: GatewayRpcTimeout,
 }
 
 impl AsyncNatsTokenGatewayUnary {
     #[must_use]
-    pub fn new(servers: Vec<String>, timeout: Duration) -> Self {
+    pub fn new(nats: NatsConfig, connect_timeout: CallerConnectTimeout, rpc_timeout: GatewayRpcTimeout) -> Self {
         Self {
-            servers: servers.into_boxed_slice().into(),
-            timeout,
+            nats: Arc::new(nats),
+            connect_timeout,
+            rpc_timeout,
         }
-    }
-
-    #[must_use]
-    pub fn from_single_url(server: impl Into<String>, timeout: Duration) -> Self {
-        Self::new(vec![server.into()], timeout)
     }
 }
 
@@ -217,10 +278,7 @@ impl GatewayUnaryPublish for AsyncNatsTokenGatewayUnary {
         headers: async_nats::HeaderMap,
         payload: Bytes,
     ) -> Result<Bytes, BridgeError> {
-        let client = async_nats::ConnectOptions::new()
-            .connection_timeout(self.timeout)
-            .token(caller_jwt.as_str().to_owned())
-            .connect(&self.servers[..])
+        let client = connect_as_caller(&self.nats, caller_jwt, self.connect_timeout)
             .await
             .map_err(|e| BridgeError::NatsPublish(e.to_string()))?;
         // request_with_headers itself has no deadline — without this
@@ -228,11 +286,11 @@ impl GatewayUnaryPublish for AsyncNatsTokenGatewayUnary {
         // request indefinitely and the configured RPC timeout is silently
         // ignored.
         tokio::time::timeout(
-            self.timeout,
+            self.rpc_timeout.get(),
             client.request_with_headers(subject.to_owned(), headers, payload),
         )
         .await
-        .map_err(|_| BridgeError::NatsPublish(format!("gateway RPC exceeded {:?}", self.timeout)))?
+        .map_err(|_| BridgeError::NatsPublish(format!("gateway RPC exceeded {:?}", self.rpc_timeout.get())))?
         .map_err(|e| BridgeError::NatsPublish(e.to_string()))
         .map(|reply| reply.payload)
     }
@@ -333,29 +391,21 @@ impl TaskJetStreamPort for StubTaskJetStreamPort {
 
 #[derive(Clone)]
 pub struct AsyncNatsTokenTaskJetstream {
-    servers: Arc<[String]>,
-    timeout: Duration,
+    nats: Arc<NatsConfig>,
+    connect_timeout: CallerConnectTimeout,
 }
 
 impl AsyncNatsTokenTaskJetstream {
     #[must_use]
-    pub fn new(servers: Vec<String>, timeout: Duration) -> Self {
+    pub fn new(nats: NatsConfig, connect_timeout: CallerConnectTimeout) -> Self {
         Self {
-            servers: servers.into_boxed_slice().into(),
-            timeout,
+            nats: Arc::new(nats),
+            connect_timeout,
         }
     }
 
-    #[must_use]
-    pub fn from_single_url(server: impl Into<String>, timeout: Duration) -> Self {
-        Self::new(vec![server.into()], timeout)
-    }
-
     async fn connect_caller_client(&self, jwt: &BridgeUserJwt) -> Result<async_nats::Client, BridgeError> {
-        async_nats::ConnectOptions::new()
-            .connection_timeout(self.timeout)
-            .token(jwt.as_str().to_owned())
-            .connect(&self.servers[..])
+        connect_as_caller(&self.nats, jwt, self.connect_timeout)
             .await
             .map_err(|e| BridgeError::JetStreamConsume(e.to_string()))
     }

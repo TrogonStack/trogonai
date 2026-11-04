@@ -10,6 +10,7 @@ use axum::http::{Request, StatusCode};
 use bytes::Bytes;
 use futures_util::StreamExt;
 use tower::ServiceExt;
+use trogon_nats::NatsTls;
 use trogon_nats::test_support::CoreTestServer;
 use trogon_std::env::InMemoryEnv;
 use trogon_std::log_capture::{CapturedLogs, LogLevel};
@@ -21,9 +22,11 @@ enum TestError {
     #[error(transparent)]
     Bridge(#[from] BridgeError),
     #[error(transparent)]
+    Bootstrap(#[from] BootstrapError),
+    #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
-    Connect(#[from] async_nats::ConnectError),
+    Connect(#[from] trogon_nats::ConnectError),
     #[error(transparent)]
     Subscribe(#[from] async_nats::SubscribeError),
     #[error(transparent)]
@@ -66,21 +69,65 @@ impl Write for LogCapture {
 }
 
 fn rpc_request() -> Result<Request<Body>, TestError> {
+    rpc_request_with(r#"{"jsonrpc":"2.0","id":"bootstrap-request","method":"message/send","params":{}}"#)
+}
+
+fn rpc_request_with(body: &str) -> Result<Request<Body>, TestError> {
     Ok(Request::post("/")
         .header("authorization", "Bearer caller-fixture")
         .header("x-a2a-agent-id", "planner")
-        .body(Body::from(
-            r#"{"jsonrpc":"2.0","id":"bootstrap-request","method":"message/send","params":{}}"#,
-        ))?)
+        .body(Body::from(body.to_owned()))?)
 }
 
-#[test]
-fn nats_server_list_normalizes_each_address_without_losing_tls() {
-    assert_eq!(
-        parse_nats_servers(" , localhost:4222, nats://second:4222, tls://third:4443, ,"),
-        ["nats://localhost:4222", "nats://second:4222", "tls://third:4443"]
-    );
-    assert!(parse_nats_servers(" , , ").is_empty());
+struct StallingProxy {
+    address: String,
+    accepting: tokio::task::JoinHandle<()>,
+}
+
+impl StallingProxy {
+    async fn start(upstream: &str, relayed_connections: usize) -> Result<Self, TestError> {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?.to_string();
+        let upstream = upstream.to_owned();
+        let accepting = tokio::spawn(async move {
+            let mut stalled = Vec::new();
+            let mut relayed = 0;
+            while let Ok((mut inbound, _)) = listener.accept().await {
+                if relayed < relayed_connections {
+                    relayed += 1;
+                    let upstream = upstream.clone();
+                    tokio::spawn(async move {
+                        if let Ok(mut outbound) = tokio::net::TcpStream::connect(upstream).await {
+                            let _ = tokio::io::copy_bidirectional(&mut inbound, &mut outbound).await;
+                        }
+                    });
+                } else {
+                    stalled.push(inbound);
+                }
+            }
+        });
+        Ok(Self { address, accepting })
+    }
+}
+
+impl Drop for StallingProxy {
+    fn drop(&mut self) {
+        self.accepting.abort();
+    }
+}
+
+async fn answer_next_request(
+    client: &async_nats::Client,
+    subscription: &mut async_nats::Subscriber,
+    reply: Bytes,
+) -> Result<(), TestError> {
+    let request = tokio::time::timeout(Duration::from_secs(5), subscription.next())
+        .await?
+        .ok_or(TestError::MissingMessage)?;
+    client
+        .publish(request.reply.ok_or(TestError::MissingMessage)?, reply)
+        .await?;
+    Ok(())
 }
 
 #[test]
@@ -127,7 +174,7 @@ async fn run_rejects_invalid_configuration_before_serving() {
     env.set("NATS_URL", " , ");
     assert!(matches!(
         run(&env, std::future::pending()).await,
-        Err(BootstrapError::Bridge(_))
+        Err(BootstrapError::NoNatsServers)
     ));
 }
 
@@ -153,7 +200,11 @@ async fn run_completes_after_controlled_shutdown() {
 async fn stub_bootstrap_returns_an_explicit_authentication_failure() -> Result<(), TestError> {
     let env = InMemoryEnv::new();
     env.set("AUTH_CALLOUT_NATS_URL", "nats://auth:4222");
-    let state = bootstrap_stub_transport(&env, "nats://unused:4222", resolve_a2a_prefix(&env)?);
+    let state = bootstrap_stub_transport(
+        &env,
+        &NatsConfig::from_url("nats://unused:4222"),
+        resolve_a2a_prefix(&env)?,
+    );
     let response = gateway_router(state).oneshot(rpc_request()?).await?;
     assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
     let payload: serde_json::Value = serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await?)?;
@@ -168,8 +219,13 @@ async fn stub_bootstrap_returns_an_explicit_authentication_failure() -> Result<(
 async fn nats_bootstrap_reports_connection_failure() -> Result<(), TestError> {
     let env = InMemoryEnv::new();
     env.set("BRIDGE_CONNECT_TIMEOUT_SECS", "0");
-    let result = bootstrap_nats_transport(&env, "invalid://endpoint", resolve_a2a_prefix(&env)?).await;
-    assert!(matches!(result, Err(BridgeError::NatsPublish(_))));
+    let result = bootstrap_nats_transport(
+        &env,
+        &NatsConfig::from_url("invalid://endpoint"),
+        resolve_a2a_prefix(&env)?,
+    )
+    .await;
+    assert!(matches!(result, Err(BootstrapError::NatsConnect(_))));
     Ok(())
 }
 
@@ -183,9 +239,15 @@ async fn bootstrap_diagnostics_reach_the_log_facade_before_tracing_initializatio
     env.set("BRIDGE_CONNECT_TIMEOUT_SECS", "2");
     env.set("BRIDGE_AUTH_MINT_TIMEOUT_SECS", "3");
     env.set("BRIDGE_GATEWAY_RPC_TIMEOUT_SECS", "4");
-    let _stub = bootstrap_stub_transport(&env, " nats://stub:4222 ", resolve_a2a_prefix(&env)?);
+    env.set("NATS_URL", " nats://stub:4222 ");
+    let _stub = bootstrap_stub_transport(&env, &NatsConfig::from_env(&env), resolve_a2a_prefix(&env)?);
     let server = CoreTestServer::start().await;
-    let _state = bootstrap_nats_transport(&env, server.address(), resolve_a2a_prefix(&env)?).await?;
+    let _state = bootstrap_nats_transport(
+        &env,
+        &NatsConfig::from_url(server.address()).with_tls(NatsTls::Disabled),
+        resolve_a2a_prefix(&env)?,
+    )
+    .await?;
 
     let records = logs.records();
     let stub = records
@@ -218,7 +280,11 @@ async fn nats_bootstrap_wires_mint_subject_tenant_and_gateway_namespace() -> Res
         .finish();
     let _subscriber = tracing::subscriber::set_default(subscriber);
     let server = CoreTestServer::start().await;
-    let client = async_nats::connect(server.address()).await?;
+    let client = trogon_nats::connect(
+        &NatsConfig::from_url(server.address()).with_tls(NatsTls::Disabled),
+        Duration::from_secs(5),
+    )
+    .await?;
     let caller = CallerHttpsAuth::new("Bearer fixture");
     let jwt = StubAuthCalloutMint::fixture()?.mint(&caller).await?;
     let mint_reply = serde_json::to_vec(&BridgeMintResponse {
@@ -231,9 +297,11 @@ async fn nats_bootstrap_wires_mint_subject_tenant_and_gateway_namespace() -> Res
         (Some("   "), "a2a.bridge.auth.callout.request", Some("")),
     ] {
         let env = InMemoryEnv::new();
+        env.set("NATS_URL", server.address());
+        env.set("NATS_TLS_DISABLED", "true");
         env.set(ENV_A2A_PREFIX, "tenant");
         env.set("BRIDGE_CONNECT_TIMEOUT_SECS", "2");
-        env.set("BRIDGE_AUTH_MINT_TIMEOUT_SECS", "2");
+        env.set("BRIDGE_AUTH_MINT_TIMEOUT_SECS", "10");
         env.set("BRIDGE_GATEWAY_RPC_TIMEOUT_SECS", "2");
         if configured_subject == Some("  custom.mint  ") {
             env.set("NATS_USER", "fixture");
@@ -248,7 +316,7 @@ async fn nats_bootstrap_wires_mint_subject_tenant_and_gateway_namespace() -> Res
         let mut mint = client.subscribe(expected_subject).await?;
         let mut gateway = client.subscribe("tenant.v1.gateway.planner.message.send").await?;
         client.flush().await?;
-        let state = bootstrap_nats_transport(&env, server.address(), resolve_a2a_prefix(&env)?).await?;
+        let state = bootstrap_nats_transport(&env, &NatsConfig::from_env(&env), resolve_a2a_prefix(&env)?).await?;
         let handle_request = gateway_router(state).oneshot(rpc_request()?);
         let serve_wire = async {
             let request = tokio::time::timeout(Duration::from_secs(5), mint.next())
@@ -292,7 +360,83 @@ async fn nats_bootstrap_wires_mint_subject_tenant_and_gateway_namespace() -> Res
     assert!(output.contains("a2a-bridge NATS transports wired"));
     assert!(output.contains("prefix=tenant"));
     assert!(output.contains("connect_timeout_secs=2"));
-    assert!(output.contains("mint_wire_secs=2"));
+    assert!(output.contains("mint_wire_secs=10"));
     assert!(output.contains("gateway_rpc_secs=2"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn nats_bootstrap_bounds_caller_connections_by_the_connect_timeout_not_the_gateway_rpc_timeout()
+-> Result<(), TestError> {
+    // The first thread to reach a log callsite fixes its interest for the whole process, so a thread
+    // without a subscriber would silence it for the tests that capture those logs.
+    let _logs = tracing::subscriber::set_default(
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::INFO)
+            .with_writer(std::io::sink)
+            .finish(),
+    );
+    let server = CoreTestServer::start().await;
+    let client = trogon_nats::connect(
+        &NatsConfig::from_url(server.address()).with_tls(NatsTls::Disabled),
+        Duration::from_secs(5),
+    )
+    .await?;
+    let jwt = StubAuthCalloutMint::fixture()?
+        .mint(&CallerHttpsAuth::new("Bearer fixture"))
+        .await?;
+    let mint_reply = Bytes::from(serde_json::to_vec(&BridgeMintResponse {
+        user_jwt: jwt.as_str().to_owned(),
+    })?);
+    let gateway_reply = Bytes::from_static(br#"{"jsonrpc":"2.0","id":"bootstrap-request","result":{}}"#);
+    let mut mint = client.subscribe("a2a.bridge.auth.callout.request").await?;
+    let mut gateway = client.subscribe("a2a.v1.gateway.planner.>").await?;
+    client.flush().await?;
+
+    for (body, relayed_connections, failure) in [
+        (
+            r#"{"jsonrpc":"2.0","id":"bootstrap-request","method":"message/send","params":{}}"#,
+            1,
+            "NATS gateway publish failed",
+        ),
+        (
+            r#"{"jsonrpc":"2.0","id":"bootstrap-request","method":"tasks/resubscribe","params":{"id":"task-1"}}"#,
+            2,
+            "JetStream SSE consumer attach failed",
+        ),
+    ] {
+        let proxy = StallingProxy::start(server.address(), relayed_connections).await?;
+        let env = InMemoryEnv::new();
+        env.set("NATS_URL", &proxy.address);
+        env.set("NATS_TLS_DISABLED", "true");
+        env.set("BRIDGE_CONNECT_TIMEOUT_SECS", "2");
+        env.set("BRIDGE_AUTH_MINT_TIMEOUT_SECS", "10");
+        env.set("BRIDGE_GATEWAY_RPC_TIMEOUT_SECS", "3600");
+        let state = bootstrap_nats_transport(&env, &NatsConfig::from_env(&env), resolve_a2a_prefix(&env)?).await?;
+
+        let handle_request = tokio::time::timeout(
+            Duration::from_secs(30),
+            gateway_router(state).oneshot(rpc_request_with(body)?),
+        );
+        let serve_wire = async {
+            answer_next_request(&client, &mut mint, mint_reply.clone()).await?;
+            if relayed_connections > 1 {
+                answer_next_request(&client, &mut gateway, gateway_reply.clone()).await?;
+            }
+            Ok::<(), TestError>(())
+        };
+        let (response, wire) = tokio::join!(handle_request, serve_wire);
+        wire?;
+        let response = response??;
+
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        let payload: serde_json::Value = serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await?)?;
+        assert!(
+            payload["error"]
+                .as_str()
+                .is_some_and(|message| message.starts_with(failure)),
+            "{payload}"
+        );
+    }
     Ok(())
 }

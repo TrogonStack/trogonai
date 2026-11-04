@@ -31,6 +31,8 @@ pub const NATS_JWT_PREFIX: &[u8] = b"eyJ";
 /// Default minted user JWT TTL, in seconds, for the `a2a-auth-callout` binary.
 pub const DEFAULT_USER_JWT_TTL_SECS: u64 = 300;
 
+pub const NATS_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Signature algorithms an inbound OIDC ID token may assert.
 ///
 /// Scoped to the RSA family because [`crate::credentials::oidc`] only builds

@@ -20,6 +20,7 @@ workspace = true
 [dependencies]
 a2a-auth-callout = { workspace = true }
 a2a-nats = { workspace = true }
+trogon-nats = { workspace = true }
 trogon-std = { workspace = true }
 async-nats = { workspace = true, features = ["jetstream"] }
 async-trait = { workspace = true }
@@ -39,7 +40,7 @@ a2a = { workspace = true }
 futures-util = { workspace = true }
 nkeys = { workspace = true }
 serde_json = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-std = { workspace = true, features = ["test-support"] }
 tower = { workspace = true, features = ["util"] }
