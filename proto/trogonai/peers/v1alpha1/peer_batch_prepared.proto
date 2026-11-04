@@ -1,0 +1,12 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+import "trogonai/peers/v1alpha1/peer_batch.proto";
+import "trogonai/peers/v1alpha1/recipient_receipt.proto";
+
+// The batch and all of its winning preparation receipts commit together.
+message PeerBatchPrepared {
+  PeerBatch batch = 1;
+  repeated RecipientReceipt receipts = 2;
+}

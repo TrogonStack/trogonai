@@ -1,0 +1,12 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+import "trogonai/peers/v1alpha1/message_metadata.proto";
+import "trogonai/peers/v1alpha1/recipient_receipt.proto";
+
+message InboxEntry {
+  MessageMetadata message = 1;
+  uint64 intake_ordinal = 2;
+  RecipientReceipt disposition = 3;
+}

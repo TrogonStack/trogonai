@@ -1,0 +1,9 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+import "trogonai/peers/v1alpha1/message_metadata.proto";
+
+message SendResponse {
+  MessageMetadata message = 1;
+}

@@ -1,0 +1,11 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+import "trogonai/peers/v1alpha1/attachment_ref.proto";
+
+// The authenticated hook is the only body-delivery path for this enrollment.
+message PrepareBatchRequest {
+  AttachmentRef attachment = 1;
+  string prompt_id = 2;
+}
