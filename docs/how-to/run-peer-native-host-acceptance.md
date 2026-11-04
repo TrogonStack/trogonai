@@ -55,5 +55,5 @@ no host insertion. The fixture uses a static trusted test clock, disposable
 content and presentation ports, and an ephemeral broker. It establishes no lease
 timing, crash durability, production sealing, full CI or coverage threshold.
 
-See the [connector reference](../../rsworkspace/crates/mcp/trogon-peer-mcp/README.md)
-and [native plugin package](../../plugins/claude/peer/README.md).
+See the [connector reference](https://github.com/TrogonStack/trogonai/blob/f79784cdbc412209668c858ce990e117579c78a0/rsworkspace/crates/mcp/trogon-peer-mcp/README.md)
+and [native plugin package](https://github.com/TrogonStack/trogonai/blob/f79784cdbc412209668c858ce990e117579c78a0/plugins/claude/peer/README.md).
