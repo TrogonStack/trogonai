@@ -8,6 +8,18 @@ use super::{InstallationId, NativeSessionId, TrustedPeerOwner};
 pub struct PeerId(String);
 
 impl PeerId {
+    pub fn parse(value: impl Into<String>) -> Result<Self, super::PeerValueError> {
+        let value = value.into();
+        if value.len() != 64
+            || !value
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return Err(super::PeerValueError::InvalidPeerId);
+        }
+        Ok(Self(value))
+    }
+
     pub(crate) fn derive(
         owner: &TrustedPeerOwner,
         installation: &InstallationId,
