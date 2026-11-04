@@ -7521,6 +7521,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-peer-mcp"
+version = "0.1.0"
+dependencies = [
+ "buffa",
+ "rmcp",
+ "schemars 1.2.1",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "trogon-peer",
+ "trogon-peer-context",
+ "trogonai-proto",
+]
+
+[[package]]
 name = "trogon-peer-nats"
 version = "0.1.0"
 dependencies = [
