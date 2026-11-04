@@ -143,18 +143,34 @@ bundle at generation plus one, and appends exactly one of Committed,
 `CredentialRefreshRejected{reason}` or `CredentialRefreshOutcomeUnknown`. Only a
 committed generation reaches an executor.
 
-A recovery worker settles OutcomeUnknown in order. First, custody: a current
-bundle carrying the operation id and fence yields the same Committed, idempotent
-on the id. Second, provider evidence: only a release documenting stable refresh
-tokens or an open reuse grace permits a new operation. Otherwise the credential
-is ReconnectRequired (`REFRESH_OUTCOME_LOST`), the family is denied, and provider
-revocation becomes cleanup debt. A lease expiry or local timeout never
-redispatches, since neither shows the provider did not rotate.
+A response is not settled until its replacement is durably attributable.
+Failure to seal or CAS-write a replacement after provider I/O, including key or
+OpenBao unavailability and a write conflict, keeps the operation unsettled as
+OutcomeUnknown. It cannot become `CredentialRefreshRejected` or release the
+old generation for another ordinary refresh. An unchanged old KV version says
+nothing about whether the provider already consumed its refresh credential.
+Pre-dispatch key/lease/storage failures use the broker's typed failure arm before
+`CredentialRefreshDispatched`; they create no dispatched operation to settle.
+The legacy key/write rejection enum values retain their wire identities but are
+excluded from dispatched rejection commands, events and responses.
+
+A recovery worker settles OutcomeUnknown in order. First, custody: a durable
+candidate carrying this exact operation id and fence, at the expected successor
+generation, yields the same Committed, idempotent on the id. A CAS winner is not
+attributable merely because its version changed; its operation, fence and
+committed lineage must match. Second, provider evidence: only a release
+documenting stable refresh tokens or an open reuse grace permits a new recovery
+operation. Otherwise the credential is ReconnectRequired (`REFRESH_OUTCOME_LOST`),
+the family is denied, and provider revocation becomes cleanup debt. A lease
+expiry, local timeout or failed write never redispatches by itself, since none
+shows the provider did not rotate.
 
 | Failure window | Settlement |
 | --- | --- |
 | Dispatched, process dies or response lost | OutcomeUnknown, then the order above |
-| Bundle written, Committed append lost | Recovery finds the operation id and appends it |
+| Provider may have consumed the generation, replacement seal/CAS write fails | OutcomeUnknown; family remains held; no ordinary rejection or redispatch |
+| CAS conflict or write acknowledgement lost | Attribute the exact durable operation/fence/successor candidate; otherwise retain OutcomeUnknown |
+| Bundle written, Committed append lost | Recovery finds the exact operation, fence and generation and appends it |
 | Committed appended, reply lost | Caller resolves the current generation |
 | Claim or lease expired during HTTP | Nothing; the operation stays unsettled |
 | Stale worker writes after settlement | CAS and the fence refuse it; attribution kept for cleanup |
@@ -480,21 +496,62 @@ grant cannot resolve a staged bundle and refresh cannot reach it. Only an
 attempt reference (Decision 5) opens its access token, and its refresh token never
 leaves custody.
 
-The usable marker is promotion. After the connections service commits
-ActivateConnection, custody opens the staged bundle, re-seals it under the
-connection's `SecretRef`, and CAS-writes it to the connection's token set at
-generation 1, then appends the generation to the credential stream and destroys
-the staged path. Promotion is idempotent on the attempt id, and a reconciler
-finishes it after a crash between activation and promotion. A reconnect stages
-beside the live token set and never touches it: the live tokens keep working
-until promotion replaces them with the generation it read plus one, so a failed
-or abandoned reconnect changes nothing.
+The usable marker is promotion. Before `ActivateConnection` or
+`CompleteReconnect`, custody first commits `ProtectStagePromotion` under
+`StreamUnchanged` on the staged credential stream. Dispatch verifies the captured
+attempt, exact staged version, claim Held for the fresh target or Bound to the
+reconnect target, target connection and intended
+authorization generation before recording that immutable binding. The receipt
+identifies the binding and the protection append's stream revision. The
+connection command must carry it in `AuthorizationRecord`; dispatch verifies
+the authoritative protection event and current staged fold, not the caller's
+assertion. The schema checks local equality and presence, while those live reads
+and stream preconditions remain implementation obligations.
 
-A staged bundle is destroyed, every version, when its attempt is aborted, fails
-(including `ACCOUNT_ALREADY_CONNECTED`), is lost, or expires. The platform does
-not call the provider to revoke a discarded stage. A failed destroy is cleanup
-debt, aged by `secrets.cleanup.debt.age` (Decision 9), and an orphan sweep
-destroys stages whose attempt is terminal or past its expiry.
+Protection and `CloseStage(discarded)` serialize on that same staged stream.
+If discard commits first, the stage is Retired and protection/activation are
+refused. If protection commits first, every discard is refused. A stale absence
+read, expired lease, terminal attempt or elapsed probe/consent deadline cannot
+clear the marker. Protected material is retained only for idempotent promotion
+and recovery; it does not permit new identity probes or ordinary staged resolves
+after their expiry. Unknown activation outcomes remain held and record cleanup
+debt. An automatic abort is not supported by this marker: releasing a protected
+stage would require a separately specified authoritative target/attempt fence
+that makes every late activation impossible, not a cross-service absence check.
+
+After the connections service commits activation or reconnect carrying that
+exact receipt, custody opens the protected staged bundle, re-seals it under the
+connection's `SecretRef`, and CAS-writes the live token set at generation 1 for a
+fresh target or the generation read plus one for a reconnect. It then appends
+`PromoteTokenBundle`, verifies the live result, and closes the stage as promoted
+before destroying its versions. Promotion is idempotent on the attempt id. A
+reconciler finishes it after a crash between activation and promotion even when
+the probe/consent deadline has passed. An unpromoted reconnect leaves the previous
+live generation unchanged.
+
+An unprotected stage may be discarded only with authoritative terminal-attempt
+evidence for Failed, Expired or Cancelled, including its exact stream revision.
+The close command verifies that evidence and the absence of protection under
+the staged-stream CAS; Completed is never discard evidence. A lost outcome must
+first be reconciled to an authoritative terminal attempt. An expired timestamp
+alone merely wakes reconciliation and never authorizes destruction. The
+platform does not call the provider to revoke a discarded stage. Failed cleanup
+or unavailable authority is durable debt, aged by `secrets.cleanup.debt.age`
+(Decision 9), and the sweep retries those checks without deleting uncertain
+material.
+
+The acceptance harness must exercise the following interleavings against real
+attempt, stage and connection adapters; descriptor fixtures prove only their
+local message constraints:
+
+| Interleaving | Required result |
+| --- | --- |
+| Activation commits just before the consent deadline; process dies before promotion; sweep runs after expiry | Protection survives; no discard; recovery promotes exactly once |
+| Reconnect commits then promotion acknowledgement is lost across expiry | Exact protected attempt recovers; previous and successor generations are attributed without a second exchange |
+| Sweep and protection race at the same staged revision | One CAS wins; discard excludes all later protection/activation, protection excludes all discard |
+| Attempt is terminal but a protected activation outcome is unknown | No discard from terminality or absence; hold and cleanup debt persist |
+| Unprotected terminal attempt has verifiable revision and no concurrent protection | Discard retires the stage; only then may destruction proceed |
+| Provider rotates, then replacement seal/write or acknowledgement fails | Old generation stays held; recover an attributable candidate or require reconnect |
 
 ## Alternatives Considered
 
@@ -541,8 +598,9 @@ secrets service and single-flight would span every executor.
 - A customer managed tenant can shred its token sets by destroying its key, and a
   key outage suspends that tenant's refresh instead of failing each connection.
 - Every refresh depends on a sealing lease before dispatch.
-- A reconnect never touches the live token set until promotion, and an abandoned
-  attempt leaves only a staged bundle that cleanup destroys.
+- A reconnect never touches the live token set until promotion. An abandoned
+  unprotected stage is discarded only on authoritative terminal evidence;
+  promotion-protected uncertainty remains held for recovery and cleanup debt.
 - Amends ADR 0083 Decision 1: KV values stay outside the veto except token sets
   and registration secrets. It adds the `token-set` layout to Decision 3 and the
   store kind to Decision 4, and Decision 8 now erases them too.

@@ -37,6 +37,16 @@ message State {
 // configuration bytes from the event, never a re-encoding. Nothing here is
 // material or personal data (ADR#0092 Decisions 8 and 9).
 message Connection {
+  option (buf.validate.message).cel = {
+    id: "connection_state.stage_promotion_target"
+    message: "attempt authorization protection matches the connection and custody parent"
+    expression: "!has(this.authorization) || !has(this.authorization.stage_promotion_protection) || (this.authorization.stage_promotion_protection.binding.connection_id == this.id && this.authorization.stage_promotion_protection.binding.attempt_ref.resource_parent == this.resource_parent)"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_state.attempt_for_oauth"
+    message: "OAuth, MCP and app installation configuration require an attempt authorization"
+    expression: "!has(this.configuration) || ((has(this.configuration.configuration.authentication.oauth_authorization_grant) || has(this.configuration.configuration.authentication.mcp_oauth) || has(this.configuration.configuration.authentication.app_installation)) == has(this.authorization.attempt_id))"
+  };
   reserved 2;
   reserved project_id;
 

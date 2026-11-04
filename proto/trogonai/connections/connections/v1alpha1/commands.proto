@@ -70,12 +70,19 @@ message ReserveConnection {
 // the claim receipt, the granted authority, the bindings and
 // authorization_generation 1 (ADR#0092 Decision 4). The configuration's
 // release and app must equal the reservation's pins. For an OAuth or MCP
-// method the attempt is named; dispatch verified that it completed for this
-// connection and that the claim is Bound to it (ADR#0094 Decision 5). A
+// method the captured attempt is named; dispatch verifies its exact durable
+// stage-promotion protection and that the claim is Bound to this connection.
+// CompleteAuthorization follows activation and promotion, never precedes them
+// (ADR#0094 Decision 5, ADR#0095 Decision 12). A
 // non-empty missing_optional_scopes records SCOPES_REDUCED (ADR#0094
 // Decision 12). An MCP method records the protected resource metadata and the
 // owner's acknowledgement of its endpoint origins (ADR#0092 Decision 10, R19).
 message ActivateConnection {
+  option (buf.validate.message).cel = {
+    id: "activateconnection.stage_promotion_target"
+    message: "authorization protection requires this exact connection and custody parent"
+    expression: "!has(this.authorization.stage_promotion_protection) || (this.authorization.stage_promotion_protection.binding.connection_id == this.connection_id && this.authorization.stage_promotion_protection.binding.attempt_ref.resource_parent == this.resource_parent)"
+  };
   option (buf.validate.message).cel = {
     id: "activate_connection.first_generation"
     message: "activation records authorization generation 1"
@@ -110,8 +117,15 @@ message ActivateConnection {
 // grant is new; a non-empty missing_optional_scopes records SCOPES_REDUCED
 // again. A refreshed MCP snapshot is recorded when present; its endpoint
 // origins must equal the acknowledged set, since a reconnect carries no new
-// acknowledgement.
+// acknowledgement. Dispatch verifies the exact stage-promotion protection in
+// custody before this append; the receipt cannot expire or be discarded while
+// promotion is unresolved (ADR#0095 Decision 12).
 message CompleteReconnect {
+  option (buf.validate.message).cel = {
+    id: "completereconnect.stage_promotion_target"
+    message: "authorization protection requires this exact connection and custody parent"
+    expression: "!has(this.authorization.stage_promotion_protection) || (this.authorization.stage_promotion_protection.binding.connection_id == this.connection_id && this.authorization.stage_promotion_protection.binding.attempt_ref.resource_parent == this.resource_parent)"
+  };
   trogonai.connections.types.v1alpha1.ConnectionId connection_id = 1 [features.field_presence = LEGACY_REQUIRED];
   AuthorizationRecord authorization = 2 [features.field_presence = LEGACY_REQUIRED];
   McpProtectedResource mcp_protected_resource = 3;

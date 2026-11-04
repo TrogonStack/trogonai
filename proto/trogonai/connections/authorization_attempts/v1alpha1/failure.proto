@@ -104,8 +104,9 @@ message AuthorizationFailure {
   // Residuals the failure leaves at the provider, derived by the decider, never
   // supplied by the caller: UNKNOWN_EXCHANGE_GRANT for EXCHANGE_OUTCOME_LOST
   // (ADR#0094 Decision 4), and DISCARDED_BUNDLE for every reason that follows a
-  // staged bundle, which is destroyed locally without a provider revoke
-  // (ADR#0094 Decision 5, ADR#0095 Decision 12).
+  // staged bundle. Unprotected material is destroyed locally without a provider
+  // revoke; protected promotion material remains held for recovery or an
+  // authoritative abort fence (ADR#0094 Decision 5, ADR#0095 Decision 12).
   repeated trogonai.connections.types.v1alpha1.CleanupObligationKind cleanup_obligations = 3 [(buf.validate.field).repeated.items.enum = {
     defined_only: true
     not_in: [0]

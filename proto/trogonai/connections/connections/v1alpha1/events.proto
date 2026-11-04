@@ -87,6 +87,16 @@ message ConnectionReserved {
 // carries from here on.
 message ConnectionActivated {
   option (buf.validate.message).cel = {
+    id: "connection_activated.attempt_for_oauth"
+    message: "the OAuth, MCP and app installation methods name their attempt"
+    expression: "(has(this.configuration.configuration.authentication.oauth_authorization_grant) || has(this.configuration.configuration.authentication.mcp_oauth) || has(this.configuration.configuration.authentication.app_installation)) == has(this.authorization.attempt_id)"
+  };
+  option (buf.validate.message).cel = {
+    id: "connectionactivated.stage_promotion_target"
+    message: "authorization protection requires this exact connection and custody parent"
+    expression: "!has(this.authorization.stage_promotion_protection) || (this.authorization.stage_promotion_protection.binding.connection_id == this.connection_id && this.authorization.stage_promotion_protection.binding.attempt_ref.resource_parent == this.resource_parent)"
+  };
+  option (buf.validate.message).cel = {
     id: "connection_activated.first_generation"
     message: "activation records authorization generation 1"
     expression: "this.authorization.authorization_generation == 1u"
@@ -112,6 +122,11 @@ message ConnectionActivated {
 // one and the generation is the recorded one plus one; both were decided, and
 // the first is repeated here so a reader sees it without the prior event.
 message ConnectionReconnected {
+  option (buf.validate.message).cel = {
+    id: "connectionreconnected.stage_promotion_target"
+    message: "authorization protection requires this exact connection and custody parent"
+    expression: "!has(this.authorization.stage_promotion_protection) || (this.authorization.stage_promotion_protection.binding.connection_id == this.connection_id && this.authorization.stage_promotion_protection.binding.attempt_ref.resource_parent == this.resource_parent)"
+  };
   option (buf.validate.message).cel = {
     id: "connection_reconnected.later_generation"
     message: "a reconnect records a generation after the first"

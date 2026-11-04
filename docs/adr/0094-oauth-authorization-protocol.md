@@ -215,9 +215,14 @@ next begins:
 | Run the release's identity probe with the staged access token | trusted executor | ProviderAccount observed |
 | Capture the granted authority and compare it (Decision 12) | connections service | granted authority on the attempt |
 | HoldProviderAccount | connections service | claim Held |
+| ProtectStagePromotion | secrets service | immutable attempt/stage/target binding and protection receipt |
 | ActivateConnection | connections service | configuration, bindings, claim Bound, `authorization_generation` |
 | Promote the staged bundle to the connection's token set | custody | compare-and-set write |
 | CompleteAuthorization | connections service | Completed |
+
+For a reconnect, verify the connection's existing Bound claim instead of taking
+a new hold. Protection still precedes `CompleteReconnect`, and its exact receipt
+is carried by the activation or reconnect authorization record.
 
 The identity probe runs in the trusted executor, never in the broker. The
 executor resolves the staged access token through `ResolveForTrustedUse` under
@@ -245,8 +250,8 @@ of one token as revocation of the whole grant the existing connection also uses.
 The discarded token is recorded as a residual until it expires. If a crash
 splits activation from promoting the staged bundle and CompleteAuthorization, a
 reconciler finishes both from the durable events. The staging rules, meaning the
-attempt-keyed path, the promotion at activation, and the destruction of a bundle
-whose attempt is lost, aborted, or expired, belong to
+attempt-keyed path, protection before activation, idempotent promotion, and the
+terminal-attempt and protection checks governing discard, belong to
 [ADR#0095](./0095-connection-credential-custody-and-refresh.md).
 
 ### 6. Reconnect keeps the ConnectionId, requires the same account, and re-consents
@@ -418,9 +423,11 @@ fails does not fall through to a guess:
 1. Make an unauthenticated request to the MCP URL and parse `WWW-Authenticate`
    for `resource_metadata` and `scope`.
 2. Without `resource_metadata`, request RFC 9728 metadata at
-   `/.well-known/oauth-protected-resource/<path>`, then at the root form. None
-   found means failure, or a preregistered app if the principal supplied one. The
-   platform never assumes the MCP origin is the authorization server.
+   `/.well-known/oauth-protected-resource/<path>`, then at the root form. If no
+   valid protected resource metadata is available, refuse onboarding, including
+   when the principal supplied a preregistered app. Client registration does not
+   establish which authorization server the resource accepts. The platform never
+   assumes the MCP origin is the authorization server.
 3. Require the metadata `resource` to match the MCP URL, or to be a path prefix
    of it on the same origin for the root form. A mismatch is refused.
 4. For each listed authorization server in order, fetch its metadata at the
@@ -433,6 +440,16 @@ fails does not fall through to a guess:
 7. Use the first authorization server that passes, record the choice with the
    protected resource metadata on the Connection, and refuse the connection if
    none passes.
+
+Every MCP `AuthorizationRequest` pins both the selected authorization-server
+metadata and the protected resource metadata. The schema requires the latter
+whenever the request carries an MCP `resource`, independently of registration
+mode. A digest's presence does not prove the document's validity: the fetcher
+must validate the resource binding and authorization-server membership before
+recording it. Dispatch determines the MCP requirement from the resolved target
+and requires its exact canonical resource; omitting a request field cannot turn
+an MCP target into ordinary OAuth. Preregistration remains a client-registration
+choice after these discovery checks, never an alternative to them.
 
 ### 10. Registration follows specification priority, and discovery is kept as a snapshot
 

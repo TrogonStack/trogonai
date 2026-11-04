@@ -114,8 +114,10 @@ message AuthorizationCompleted {
   trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
 }
 
-// Terminal. Nothing activates; a staged bundle is destroyed locally and its
-// residual is recorded, not hidden (ADR#0094 Decisions 4 and 5).
+// Terminal. Unprotected staged material is discarded with terminal evidence;
+// a promotion-protected stage remains held until attributable recovery or an
+// authoritative abort fence. The residual is recorded, not hidden
+// (ADR#0094 Decisions 4 and 5, ADR#0095 Decision 12).
 message AuthorizationFailed {
   trogonai.connections.types.v1alpha1.AuthorizationAttemptId attempt_id = 1 [features.field_presence = LEGACY_REQUIRED];
   AuthorizationFailure failure = 2 [features.field_presence = LEGACY_REQUIRED];

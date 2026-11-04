@@ -10,10 +10,12 @@
     "offline_cases_are_component_decisions": "omitting offline_access alone does not authorize the rest of a product flow",
     "registration_uncertainty": "no blind retry of an ambiguous registration POST",
     "revision_scope": "authorization is pinned separately from transport and session behavior",
-    "client_material_issuer": "issuer of any client material proposed for reuse; null means no existing material is proposed"
+    "client_material_issuer": "issuer of any client material proposed for reuse; null means no existing material is proposed",
+    "resource_metadata": "required before MCP authorization for every registration mechanism, including preregistration; a digest pin is not proof of metadata validation"
   },
   "sources": [
     "https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization",
+    "https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization/authorization-server-discovery",
     "https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization/client-registration",
     "https://www.rfc-editor.org/rfc/rfc9207.html",
     "https://openid.net/specs/openid-connect-core-1_0.html#OfflineAccess"
@@ -1092,6 +1094,97 @@
         "transport_revision_after": "2025-11-25",
         "session_profile_after": "explicit-transport-profile",
         "whole_mcp_conformance_claim_allowed": false
+      }
+    },
+    {
+      "id": "mcp-preregistered-app-does-not-replace-resource-metadata",
+      "kind": "authorization_request_pins",
+      "input": {
+        "registration_mechanism": "preregistered",
+        "authorization_request": {
+          "authority": {},
+          "resource": {
+            "value": "https://mcp.example.invalid/service"
+          },
+          "redirectUri": {
+            "value": "https://console.example.invalid/connections/oauth/callback"
+          },
+          "expectedIssuer": {
+            "value": "https://issuer.example.invalid/tenant"
+          },
+          "responseIssuerRequired": true,
+          "discovery": {
+            "authorizationServerMetadataDigest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            }
+          }
+        }
+      },
+      "expected": {
+        "schema_valid": false,
+        "decision": "refuse_missing_protected_resource_metadata",
+        "metadata_validation_proven": false
+      }
+    },
+    {
+      "id": "mcp-preregistered-app-without-discovery-is-refused",
+      "kind": "authorization_request_pins",
+      "input": {
+        "registration_mechanism": "preregistered",
+        "authorization_request": {
+          "authority": {},
+          "resource": {
+            "value": "https://mcp.example.invalid/service"
+          },
+          "redirectUri": {
+            "value": "https://console.example.invalid/connections/oauth/callback"
+          },
+          "expectedIssuer": {
+            "value": "https://issuer.example.invalid/tenant"
+          },
+          "responseIssuerRequired": true
+        }
+      },
+      "expected": {
+        "schema_valid": false,
+        "decision": "refuse_missing_protected_resource_metadata",
+        "metadata_validation_proven": false
+      }
+    },
+    {
+      "id": "mcp-preregistered-app-pins-both-metadata-documents",
+      "kind": "authorization_request_pins",
+      "input": {
+        "registration_mechanism": "preregistered",
+        "authorization_request": {
+          "authority": {},
+          "resource": {
+            "value": "https://mcp.example.invalid/service"
+          },
+          "redirectUri": {
+            "value": "https://console.example.invalid/connections/oauth/callback"
+          },
+          "expectedIssuer": {
+            "value": "https://issuer.example.invalid/tenant"
+          },
+          "responseIssuerRequired": true,
+          "discovery": {
+            "authorizationServerMetadataDigest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            },
+            "protectedResourceMetadataDigest": {
+              "algorithm": "sha256",
+              "value": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="
+            }
+          }
+        }
+      },
+      "expected": {
+        "schema_valid": true,
+        "decision": "discovery_pins_present",
+        "metadata_validation_proven": false
       }
     }
   ]

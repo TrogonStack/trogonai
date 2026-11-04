@@ -146,8 +146,9 @@ message CompleteAuthorization {
 // Any non-terminal phase, constrained per reason (see AuthorizationFailureReason).
 // REQUIRED_SCOPE_NOT_GRANTED and ACCOUNT_MISMATCH are decided only by
 // CaptureGrantedAuthority. The decider derives the cleanup obligations. A
-// failure after a staged bundle triggers its local destruction in custody
-// (ADR#0095 Decision 12).
+// failure requests local discard of an unprotected staged bundle in custody.
+// A protected stage is retained as cleanup debt until promotion or an
+// authoritative abort fence; failure alone never releases it (ADR#0095 Decision 12).
 message FailAuthorization {
   option (buf.validate.message).cel = {
     id: "fail_authorization.provider_error"

@@ -7,6 +7,7 @@ import "trogonai/connections/types/v1alpha1/account.proto";
 import "trogonai/connections/types/v1alpha1/authority.proto";
 import "trogonai/connections/types/v1alpha1/binding.proto";
 import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/connections/types/v1alpha1/stage.proto";
 
 // What one completed authorization gave the connection: the account, the
 // claim receipt, the granted authority, the binding set and the
@@ -18,6 +19,11 @@ import "trogonai/connections/types/v1alpha1/identity.proto";
 // grouping them. One message serves activation and reconnect alike, so the
 // fold keeps exactly one current record.
 message AuthorizationRecord {
+  option (buf.validate.message).cel = {
+    id: "authorization_record.stage_promotion_protection"
+    message: "attempt authorization requires its exact stage promotion protection"
+    expression: "has(this.attempt_id) == has(this.stage_promotion_protection) && (!has(this.stage_promotion_protection) || (this.stage_promotion_protection.binding.attempt_ref.attempt_id == this.attempt_id && this.stage_promotion_protection.binding.authorization_generation == this.authorization_generation))"
+  };
   option (buf.validate.message).cel = {
     id: "authorization_record.claim_with_account"
     message: "a claim receipt accompanies a provider account and nothing else"
@@ -55,11 +61,15 @@ message AuthorizationRecord {
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).uint64.gt = 0
   ];
-  // The AuthorizationAttempt that completed, for the OAuth, MCP and app
-  // installation methods. Absent for a method the owner completes by
+  // The captured AuthorizationAttempt being activated, for the OAuth, MCP
+  // and app installation methods. It completes after protected promotion.
+  // Absent for a method the owner completes by
   // submitting a credential, which runs no attempt.
   trogonai.connections.types.v1alpha1.AuthorizationAttemptId attempt_id = 6;
   // The requested optional scopes the grant lacks. Non-empty records the
   // SCOPES_REDUCED health reason with the record (ADR#0094 Decision 12, R7).
   repeated trogonai.connections.types.v1alpha1.ProviderScope missing_optional_scopes = 7;
+  // Dispatch verifies the immutable protection append in custody. A payload
+  // receipt alone grants nothing. Required exactly for attempt-based consent.
+  trogonai.connections.types.v1alpha1.StagePromotionProtection stage_promotion_protection = 8;
 }

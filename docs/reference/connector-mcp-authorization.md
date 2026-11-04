@@ -12,6 +12,19 @@ revision through `McpSpecificationRevision`.
 Use the discovery order and network protections in
 [ADR#0094](../adr/0094-oauth-authorization-protocol.md). Validate protected
 resource metadata and authorization-server issuer before using any endpoint.
+If neither a usable challenge metadata URL nor the well-known discovery sequence
+produces a valid protected resource document, refuse onboarding even when an
+issuer-specific preregistered app is available. Registration provides a client
+identity at an authorization server; it does not establish the resource's
+accepted authorization servers.
+
+An MCP `AuthorizationRequest` carries `resource` and pins both metadata digests.
+The schema checks that the protected resource pin is present. The fetcher must
+still validate the actual document, match its resource identity and select the
+issuer from its advertised authorization servers; a digest alone proves none of
+those semantic checks. Dispatch identifies MCP from the resolved target and
+requires its canonical resource, so omitting `resource` cannot bypass discovery.
+
 Keep each preregistered or dynamically registered app's credentials bound to
 its exact issuer and pinned snapshot. An updated resource document selecting a
 different authorization server cannot reuse another issuer's client secret,
@@ -164,16 +177,18 @@ reviewed identity strategy in
 `PROBE_UNSUPPORTED` before account claim or activation. Do not infer a stable
 provider identity from arbitrary MCP tool output or an unverified token payload.
 
-Conformance cases must cover a prior requested scope that was not granted,
+Conformance cases must cover absent resource metadata with a preregistered app,
+a prior requested scope that was not granted,
 ceiling changes, conditional offline access, absent refresh material, every
 issuer-presence combination on both success/error callbacks, encoded issuer
 values, cross-issuer credential reuse, web/native registration separation and
-significant trailing-slash round trips. A compiled-schema regression covers
-URI shape only. Runtime callback ordering, HTTP requests, custody behavior and
-provider interoperability require their own acceptance tests.
+significant trailing-slash round trips. Compiled-schema regressions cover URI
+shape and required MCP metadata pins. Actual document/resource/issuer checks,
+callback ordering, HTTP requests, custody behavior and provider interoperability
+require their own acceptance tests.
 
 [Synthetic authorization conformance cases](/connector-fixtures/connector-mcp-authorization-v1.json)
-record positive and negative inputs with expected scope, issuer, refresh,
-registration and revision-pin decisions. They are normative cases for future
+record positive and negative inputs with expected discovery-pin, scope, issuer,
+refresh, registration and revision-pin decisions. They are normative cases for future
 real client tests. Parsing the fixture or checking its internal expectations
 does not prove an OAuth flow, callback ordering or runtime enforcement.
