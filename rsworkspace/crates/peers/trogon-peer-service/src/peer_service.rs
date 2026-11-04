@@ -2,23 +2,23 @@ use trogon_decider_runtime::{
     CommandAuthorizer, CommandExecution, CommandPrincipal, PrincipalId, PrincipalKind, StreamAppend, StreamRead,
 };
 use trogon_peer::{
-    CollaborationRef, ConnectorId, Enroll, EnrollmentIdentity, InstallationId, NativeSessionId, PeerDisplayName,
-    PeerId, TrustedPeerOwner,
+    Attach, AttachError, CollaborationRef, ConnectorId, Enroll, EnrollError, EnrollmentIdentity, InstallationId,
+    NativeSessionId, PeerDisplayName, PeerId, TrustedPeerOwner,
 };
 use trogonai_proto::peers::v1alpha1;
 
 use crate::{EnrollResult, EnrollServiceError, EnrollmentField, PeerClock};
 
 pub struct PeerService<Store, Authorizer, Clock> {
-    store: Store,
-    authorizer: Authorizer,
-    clock: Clock,
+    pub(crate) store: Store,
+    pub(crate) authorizer: Authorizer,
+    pub(crate) clock: Clock,
 }
 
 impl<Store, Authorizer, Clock> PeerService<Store, Authorizer, Clock>
 where
     Store: StreamRead<PeerId> + StreamAppend<PeerId>,
-    Authorizer: CommandAuthorizer<Enroll> + Send + Sync,
+    Authorizer: CommandAuthorizer<Enroll> + CommandAuthorizer<Attach> + Send + Sync,
     Clock: PeerClock,
 {
     pub fn new(store: Store, authorizer: Authorizer, clock: Clock) -> Self {
@@ -75,14 +75,39 @@ where
         let command = Enroll::new(identity, connector, collaboration, display_name, self.clock.now());
         let principal = CommandPrincipal::new(PrincipalKind::Agent, PrincipalId::new(owner.caller().as_str())?);
         let result = CommandExecution::new(&self.store, &command)
-            .with_principal(principal)
+            .with_principal(principal.clone())
             .with_authorizer(&self.authorizer)
             .execute()
-            .await
-            .map_err(EnrollServiceError::Execution)?;
+            .await;
+        let state = match result {
+            Ok(result) => result.state,
+            Err(trogon_decider_runtime::CommandError::Decide(EnrollError::AlreadyEnrolled)) => {
+                let attach = Attach::new(
+                    command.identity().clone(),
+                    command.connector_id().clone(),
+                    command.collaboration().clone(),
+                    self.clock.now(),
+                );
+                match CommandExecution::new(&self.store, &attach)
+                    .with_principal(principal)
+                    .with_authorizer(&self.authorizer)
+                    .execute()
+                    .await
+                {
+                    Ok(result) => result.state,
+                    Err(trogon_decider_runtime::CommandError::Decide(AttachError::AlreadyAttached)) => {
+                        crate::history::load(&self.store, command.identity().peer_id())
+                            .await
+                            .map_err(EnrollServiceError::History)?
+                    }
+                    Err(error) => return Err(EnrollServiceError::Attach(error)),
+                }
+            }
+            Err(error) => return Err(EnrollServiceError::Execution(error)),
+        };
         Ok(v1alpha1::EnrollResponse {
-            peer_id: result.state.enrollment.peer_id.clone(),
-            attachment: result.state.attachment,
+            peer_id: state.enrollment.peer_id.clone(),
+            attachment: state.attachment,
         })
     }
 }
