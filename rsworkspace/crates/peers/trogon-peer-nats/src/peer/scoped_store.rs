@@ -4,15 +4,20 @@ use trogon_decider_runtime::{
     AppendFailure, AppendStreamRequest, AppendStreamResponse, ReadStreamRequest, ReadStreamResponse, StreamAppend,
     StreamRead,
 };
-use trogon_peer::{PeerId, PeerValueError, TenantId};
+use trogon_peer::{PeerId, TenantId};
 use trogon_peer_service::ScopedPeerStore;
 
+#[derive(Clone)]
 pub struct PeerJetStreamStore {
     inner: JetStreamStore<PeerSubjectResolver>,
     tenant: TenantId,
 }
 impl PeerJetStreamStore {
-    pub fn new(inner: JetStreamStore<PeerSubjectResolver>) -> Result<Self, PeerValueError> {
+    pub async fn open(
+        context: async_nats::jetstream::Context,
+        config: &super::peer_store_config::PeerStoreConfig,
+    ) -> Result<Self, super::peer_store_error::PeerStoreError> {
+        let inner = super::open_store::open_store(context, config).await?;
         let tenant = TenantId::new(inner.subject_resolver().tenant().as_str())?;
         Ok(Self { inner, tenant })
     }
