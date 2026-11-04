@@ -7528,6 +7528,7 @@ dependencies = [
  "futures",
  "grpc-nats-micro",
  "rmcp",
+ "rustix 1.1.4",
  "schemars 1.2.1",
  "serde",
  "serde_json",

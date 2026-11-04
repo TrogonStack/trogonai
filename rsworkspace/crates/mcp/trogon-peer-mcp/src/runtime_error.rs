@@ -2,6 +2,8 @@ use std::fmt;
 
 #[derive(thiserror::Error)]
 pub enum RuntimeError {
+    #[error("cancellable peer stdio is unavailable")]
+    Stdio(#[source] std::io::Error),
     #[error("peer connection startup deadline elapsed")]
     StartupDeadline,
     #[error("peer connection failed")]
