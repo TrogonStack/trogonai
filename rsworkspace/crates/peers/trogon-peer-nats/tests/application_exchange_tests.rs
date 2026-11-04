@@ -4,7 +4,7 @@ mod support;
 use grpc_nats_micro::{ContentType, ReplyError, constants::HEADER_CONTENT_TYPE};
 use std::{sync::atomic::Ordering, time::Duration};
 use support::{
-    broker::{Broker, TestResult},
+    broker::{Broker, TestResult, observed_barrier},
     constants::PROBE_TIMEOUT,
 };
 use trogon_decider_runtime::{ReadFrom, ReadStreamRequest, StreamRead};
@@ -78,7 +78,7 @@ async fn authenticated_two_peer_rpc_preserves_durable_exchange_replay_ack_and_se
     let store = PeerJetStreamStore::open(async_nats::jetstream::new(service.clone()), &config).await?;
     let backend = application::compose(store.clone(), &fixture);
     let registration = serve_peer_rpc(&service, account()?, backend.clone()).await?;
-    service.flush().await?;
+    observed_barrier(&service).await?;
     let enrolled = alice.enroll(&Fixture::enrollment("alice")).await?;
     let recipient = bob.enroll(&Fixture::enrollment("bob")).await?;
     assert_eq!(enrolled.attachment.attachment.as_option(), Some(&fixture.a));
@@ -117,7 +117,7 @@ async fn authenticated_two_peer_rpc_preserves_durable_exchange_replay_ack_and_se
     let recipient_id = PeerId::parse(recipient.peer_id.clone().ok_or("no recipient")?)?;
     let unsafe_reply = "_INBOX.tenant.bob.one.unsafe";
     let mut unsafe_responses = service.subscribe(unsafe_reply).await?;
-    service.flush().await?;
+    observed_barrier(&service).await?;
     service.publish(unsafe_reply, vec![1].into()).await?;
     assert!(
         tokio::time::timeout(PROBE_TIMEOUT, futures::StreamExt::next(&mut unsafe_responses))
@@ -179,7 +179,7 @@ async fn authenticated_two_peer_rpc_preserves_durable_exchange_replay_ack_and_se
     assert!(!history(&store, &sender_id).await?.outbox[0].settlement.is_set());
     let prepare = fixture.prepare();
     let mut lost_reply_observer = service.subscribe("_INBOX.tenant.bob.one.lost").await?;
-    service.flush().await?;
+    observed_barrier(&service).await?;
     let mut headers = async_nats::HeaderMap::new();
     headers.insert(HEADER_CONTENT_TYPE, ContentType::Protobuf.header_value());
     bob_connection
@@ -218,6 +218,7 @@ async fn authenticated_two_peer_rpc_preserves_durable_exchange_replay_ack_and_se
         &fixture,
     );
     let _registration = serve_peer_rpc(&service, account()?, backend.clone()).await?;
+    observed_barrier(&service).await?;
     let prepared = bob.prepare_batch(&prepare).await?;
     assert_eq!(prepared, discarded);
     assert_eq!(
