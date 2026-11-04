@@ -7543,6 +7543,7 @@ dependencies = [
  "async-nats",
  "buffa",
  "buffa-types",
+ "futures",
  "thiserror 2.0.21",
  "tokio",
  "trogon-decider-nats",
