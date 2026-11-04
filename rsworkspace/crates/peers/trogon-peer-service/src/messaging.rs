@@ -1,6 +1,6 @@
 use crate::{
     attachment_input::attachment,
-    constants::MAX_BATCH_ID_BYTES,
+    constants::{MAX_BATCH_ID_BYTES, MAX_TIMESTAMP_NANOS},
     content_ports::ContentSeal,
     identity_ports::MessageIdGenerator,
     message_text::MessageText,
@@ -44,17 +44,18 @@ where
             return Err(PeerApplicationError::Scope);
         }
         let message_id = self.ids.message_id()?;
-        let accepted_at = self.clock.now();
         if !sender
             .outbox
             .iter()
             .any(|entry| entry.idempotency_key.as_deref() == Some(key.as_str()))
         {
             let batch_id = BatchId::new("b".repeat(MAX_BATCH_ID_BYTES))?;
+            let mut admission_at = timestamp_from_datetime(&self.clock.now());
+            admission_at.nanos = MAX_TIMESTAMP_NANOS;
             let batch = proto::PeerBatch {
                 batch_id: Some(batch_id.as_str().to_owned()),
                 message_ids: vec![message_id.as_str().to_owned()],
-                prepared_at: MessageField::some(timestamp_from_datetime(&accepted_at)),
+                prepared_at: MessageField::some(admission_at.clone()),
                 ..Default::default()
             };
             let message = proto::PreparedMessage {
@@ -64,7 +65,7 @@ where
                     recipient_peer_id: Some(recipient.to_string()),
                     collaboration_ref: Some(collaboration.as_str().to_owned()),
                     content_size_bytes: Some(text.as_str().len() as u32),
-                    accepted_at: MessageField::some(timestamp_from_datetime(&accepted_at)),
+                    accepted_at: MessageField::some(admission_at),
                     ..Default::default()
                 }),
                 text: Some(text.as_str().to_owned()),
@@ -76,6 +77,7 @@ where
             return Err(PeerApplicationError::Scope);
         }
         self.live(owner, &reference, &sender)?;
+        let accepted_at = self.clock.now();
         let command = SendMessage::new(
             owner.clone(),
             reference,

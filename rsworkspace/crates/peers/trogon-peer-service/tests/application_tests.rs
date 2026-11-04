@@ -1,9 +1,107 @@
+use chrono::Timelike;
 use std::sync::atomic::Ordering;
 use trogon_peer::{MessageId, PeerId};
 use trogon_peer_service::WorkLimit;
 mod support;
 use support::*;
 use trogonai_proto::peers::v1alpha1 as proto;
+
+#[tokio::test]
+async fn send_acceptance_uses_current_service_time_after_a_heartbeat_during_seal() -> TestResult {
+    let f = Fixture::new().await?;
+    let seal = support::advancing_seal::AdvancingSeal {
+        fixture: &f,
+        elapsed: chrono::Duration::seconds(1),
+        heartbeat: Some(proto::HeartbeatRequest {
+            attachment: f.a.clone().into(),
+            availability: Some(proto::PeerAvailability::PEER_AVAILABILITY_BUSY.into()),
+            ..Default::default()
+        }),
+    };
+    let app = trogon_peer_service::PeerApplication::new(
+        f.store.clone(),
+        f.policy.clone(),
+        f.clock.clone(),
+        seal,
+        f.cache.clone(),
+        f.ids.clone(),
+        f.catalog.clone(),
+    );
+    let sent = app
+        .send(
+            &f.alice,
+            f.send("heartbeat_during_seal", "concurrent activity is valid"),
+        )
+        .await?;
+    let now = *f
+        .clock
+        .time
+        .lock()
+        .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?;
+    assert_eq!(
+        sent.message.accepted_at.as_option(),
+        Some(&trogonai_proto::convert::timestamp_from_datetime(&now))
+    );
+    let sender = PeerId::parse(
+        f.a.peer_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    let state = f.history(&sender).await?;
+    assert_eq!(
+        state.attachment.observed_at.as_option(),
+        sent.message.accepted_at.as_option()
+    );
+    assert_eq!(state.outbox.len(), 1);
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), 1);
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    let retry = app
+        .send(
+            &f.alice,
+            f.send("heartbeat_during_seal", "concurrent activity is valid"),
+        )
+        .await?;
+    assert_eq!(retry, sent);
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends + 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn send_acceptance_still_denies_a_lease_that_expires_during_seal() -> TestResult {
+    let f = Fixture::new().await?;
+    let seal = support::advancing_seal::AdvancingSeal {
+        fixture: &f,
+        elapsed: chrono::Duration::seconds(10),
+        heartbeat: None,
+    };
+    let app = trogon_peer_service::PeerApplication::new(
+        f.store.clone(),
+        f.policy.clone(),
+        f.clock.clone(),
+        seal,
+        f.cache.clone(),
+        f.ids.clone(),
+        f.catalog.clone(),
+    );
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    assert!(matches!(
+        app.send(&f.alice, f.send("expired_during_seal", "must remain fenced"))
+            .await,
+        Err(trogon_peer_service::PeerApplicationError::Evidence(
+            trogon_peer::MessageError::Guard(trogon_peer::HeartbeatError::Expired)
+        ))
+    ));
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    let sender = PeerId::parse(
+        f.a.peer_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    assert!(f.history(&sender).await?.outbox.is_empty());
+    Ok(())
+}
 
 #[tokio::test]
 async fn send_render_admission_rejects_unrenderable_new_content_before_sealing_or_acceptance() -> TestResult {
@@ -34,6 +132,9 @@ async fn send_render_admission_reserves_full_batch_identity_and_preserves_exact_
         .time
         .lock()
         .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?;
+    let admission_at = now
+        .with_nanosecond(999_999_999)
+        .ok_or(trogon_peer_service::PeerPortError::Integrity)?;
     let mut batch = proto::PeerBatch {
         batch_id: Some(trogon_peer::BatchId::new("b".repeat(128))?.as_str().to_owned()),
         message_ids: vec!["message-0".into()],
@@ -46,7 +147,7 @@ async fn send_render_admission_reserves_full_batch_identity_and_preserves_exact_
             sender_peer_id: f.a.peer_id.clone(),
             recipient_peer_id: f.b.peer_id.clone(),
             collaboration_ref: Some("shared".into()),
-            accepted_at: trogonai_proto::convert::timestamp_from_datetime(&now).into(),
+            accepted_at: trogonai_proto::convert::timestamp_from_datetime(&admission_at).into(),
             ..Default::default()
         }
         .into(),
