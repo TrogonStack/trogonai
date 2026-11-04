@@ -97,6 +97,7 @@ pub fn evolve(mut state: PeerState, event: &proto::PeerEvent) -> Result<PeerStat
             }
             state.attachment = MessageField::some(attachment.clone());
             state.availability = Some(proto::PeerAvailability::PEER_AVAILABILITY_READY.into());
+            state.condition = None;
         }
         PeerEventCase::PeerHeartbeatRecorded(event) => {
             let enrollment = state.enrollment.as_option().ok_or(EvolveError::MissingEnrollment)?;
@@ -145,6 +146,26 @@ pub fn evolve(mut state: PeerState, event: &proto::PeerEvent) -> Result<PeerStat
             state.availability = event.availability;
             state.condition = event.condition;
             state.active_at = event.active_at.clone();
+        }
+        PeerEventCase::PeerDetached(event) => {
+            let enrollment = state.enrollment.as_option().ok_or(EvolveError::MissingEnrollment)?;
+            let previous = state.attachment.as_option().ok_or(EvolveError::InvalidAttachment)?;
+            validate_attachment(enrollment, previous)?;
+            let at = read_time(event.detached_at.as_option(), "attachment.detached_at")?;
+            let observed = read_time(previous.observed_at.as_option(), "attachment.observed_at")?;
+            if previous.status.and_then(|status| status.as_known())
+                != Some(proto::AttachmentStatus::ATTACHMENT_STATUS_ATTACHED)
+                || event.attachment != previous.attachment
+                || at < observed
+            {
+                return Err(EvolveError::InvalidAttachment);
+            }
+            state.attachment = MessageField::some(proto::PeerAttachment {
+                attachment: previous.attachment.clone(),
+                status: Some(proto::AttachmentStatus::ATTACHMENT_STATUS_DETACHED.into()),
+                observed_at: event.detached_at.clone(),
+                expires_at: event.detached_at.clone(),
+            });
         }
         _ => return Err(EvolveError::UnsupportedEvent),
     }
