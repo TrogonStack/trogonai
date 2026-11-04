@@ -262,3 +262,40 @@ async fn authorized_roster_paginates_membership_and_observes_liveness_with_servi
     assert_eq!(f.catalog.calls.load(Ordering::SeqCst), catalog_calls);
     Ok(())
 }
+
+#[tokio::test]
+async fn contending_preparers_return_the_same_winner_and_track_the_losing_cache_record() -> TestResult {
+    let f = Fixture::new().await?;
+    f.intake("key", "one winner").await?;
+    *f.store
+        .append_barrier
+        .lock()
+        .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)? =
+        Some(std::sync::Arc::new(tokio::sync::Barrier::new(2)));
+    let left = f.app();
+    let right = f.app();
+    let (left, right) = tokio::join!(
+        left.prepare_batch(&f.bob, f.prepare()),
+        right.prepare_batch(&f.bob, f.prepare())
+    );
+    let left = left?;
+    let right = right?;
+    assert_eq!(left, right);
+    assert_eq!(
+        f.cache
+            .records
+            .lock()
+            .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?
+            .len(),
+        2
+    );
+    assert_eq!(
+        f.cache
+            .orphans
+            .lock()
+            .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?
+            .len(),
+        1
+    );
+    Ok(())
+}
