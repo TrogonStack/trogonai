@@ -25,7 +25,10 @@ pub enum ConnectError {
         #[source]
         error: SettingError,
     },
-    #[error("Failed to connect to NATS servers {servers:?}: {error}")]
+    /// The message names only the kind of failure. The servers, and a source that
+    /// can name one such as a TLS hostname mismatch, stay out of it because
+    /// callers forward it to remote clients; `connect` and `connect_once` log both.
+    #[error("Failed to connect to NATS: {}", error.kind())]
     ConnectionFailed {
         servers: Vec<String>,
         #[source]
