@@ -52,6 +52,15 @@ keyed construction rather than expose an unkeyed content hash. `ContentOpen`
 must authenticate that same binding before returning text. Confirmed absence or
 erasure is distinct from an infrastructure or key-service failure.
 
+New sends must fit a single escaped context before content sealing. Admission
+uses the generated message ID and authorized provenance, reserving the maximum
+valid batch-ID width and nine fractional timestamp digits. This is a byte bound;
+the reservation timestamp is never persisted. Actual acceptance time is sampled
+after sealing and attachment checks, so a heartbeat during sealing does not make
+the send command use an earlier time. Existing accepted keys still reach the
+content port and core semantic conflict checks before returning the original
+receipt.
+
 ADR 0083 sealing and key-service infrastructure are not implemented here.
 There is no plaintext fallback. `DisposableContentFixture` exists only in tests;
 its in-memory text and allocated semantic tokens do not implement sealing or
@@ -105,9 +114,10 @@ apply to catalog candidates, so a restricted page can be empty and still have a
 continuation. A full last page can be followed by an empty terminal page.
 
 Catalog membership, lease liveness and historical activity remain separate.
-Rows use service observation time and the actual lease expiry; inactive members
-retain historical activity without claiming live availability. There are no
-live all-peer watchers or additional workflow owners.
+The live roster excludes expired and detached attachments. Rows use service
+observation time and the actual lease expiry. Catalog membership, durable inboxes
+and historical activity survive expiry and detach. There are no live all-peer
+watchers or additional workflow owners.
 
 Broker ingress, the executable adapter, reconciliation and heartbeat scheduling,
 native detach hooks, content and presentation infrastructure, retention workers,
