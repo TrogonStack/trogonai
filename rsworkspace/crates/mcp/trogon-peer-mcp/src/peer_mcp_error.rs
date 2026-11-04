@@ -1,5 +1,7 @@
 #[derive(Debug, thiserror::Error)]
 pub enum PeerMcpError {
+    #[error("native prompt deadline elapsed; remote outcome is uncertain")]
+    PromptDeadline,
     #[error("peer connector has not enrolled a native session")]
     Unbound,
     #[error("peer connector cannot switch native sessions")]
@@ -45,6 +47,9 @@ pub enum PeerMcpError {
 impl PeerMcpError {
     pub(crate) fn public_message(&self) -> &'static str {
         match self {
+            Self::PromptDeadline => {
+                "Peer hook deadline elapsed; retry the same prompt identity. Remote outcome is uncertain."
+            }
             Self::Unbound => "Peer connector has not enrolled a native session.",
             Self::NativeSessionChanged => {
                 "This connector belongs to another native session; reconnect it for this session."
