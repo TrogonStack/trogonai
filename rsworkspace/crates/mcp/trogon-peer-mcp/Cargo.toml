@@ -1,0 +1,23 @@
+[package]
+name = "trogon-peer-mcp"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+schemars = "=1.2.1"
+rmcp = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+trogon-peer = { path = "../../peers/trogon-peer" }
+trogon-peer-context = { path = "../../peers/trogon-peer-context" }
+trogonai-proto = { path = "../../platform/trogonai-proto", features = ["peers"] }
+
+[dev-dependencies]
+buffa = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "io-util"] }
