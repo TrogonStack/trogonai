@@ -2,7 +2,7 @@
 
 use buffa::MessageField;
 use chrono::{TimeZone, Utc};
-use trogon_decider::testing::TestCase;
+use trogon_decider::{Decider, testing::TestCase};
 use trogon_peer::{
     CallerId, CollaborationRef, ConnectorId, Enroll, EnrollmentIdentity, InstallationId, NativeSessionId,
     PeerDisplayName, TenantId, TrustedPeerOwner,
@@ -22,12 +22,18 @@ fn fresh_enrollment_records_trusted_owner_and_a_ten_second_attachment() {
         NativeSessionId::new("session_alpha").unwrap(),
     );
     let command = Enroll::new(
-        identity,
+        identity.clone(),
         ConnectorId::new("connector_alpha").unwrap(),
         CollaborationRef::new("collaboration_alpha").unwrap(),
         PeerDisplayName::new("Review").unwrap(),
         now,
     );
+    assert_eq!(command.identity(), &identity);
+    assert_eq!(command.stream_id(), identity.peer_id());
+    assert_eq!(command.connector_id().as_str(), "connector_alpha");
+    assert_eq!(command.collaboration().as_str(), "collaboration_alpha");
+    assert_eq!(command.display_name().as_str(), "Review");
+    assert_eq!(command.now(), now);
     let peer_id = "181a9e9b0706e955720fad504bf947d1752ae3ddae5406402d21146e69f55fac";
     let enrollment = proto::PeerEnrollment {
         peer_id: Some(peer_id.to_owned()),
