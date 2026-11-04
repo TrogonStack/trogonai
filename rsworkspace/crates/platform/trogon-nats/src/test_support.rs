@@ -219,6 +219,27 @@ impl TlsTestServer {
     }
 
     async fn start_with(clients: ClientCertificates) -> Self {
+        Self::start_configured(clients, None).await
+    }
+
+    /// Test-only configuration for authenticated atomic JetStream fixtures. TLS remains mandatory.
+    pub async fn start_with_configuration(configuration: &str) -> Self {
+        Self::start_configured(ClientCertificates::NotRequested, Some(configuration)).await
+    }
+
+    pub async fn connect_options(
+        &self,
+        auth: crate::NatsAuth,
+    ) -> Result<async_nats::ConnectOptions, crate::ConnectError> {
+        trogon_std::tls::install_default_crypto_provider();
+        let config = NatsConfig::new(vec![self.address().to_owned()], auth).with_tls(NatsTls::Enabled {
+            ca: Some(crate::Location::Path(self.ca())),
+            client_cert: None,
+        });
+        build_options(&config, &SystemEnv).await
+    }
+
+    async fn start_configured(clients: ClientCertificates, configuration: Option<&str>) -> Self {
         let certificates = TestCertificates::generate();
         let files = tempfile::tempdir().expect("create a directory for TLS test files");
         for (name, pem) in [
@@ -231,7 +252,18 @@ impl TlsTestServer {
 
         let mut command = vec!["--tlscert", SERVER_CERT, "--tlskey", SERVER_KEY];
         command.extend(clients.server_flags());
-        let request = image(command)
+        let request = match configuration {
+            None => image(command),
+            Some(configuration) => {
+                let configuration =
+                    format!("{configuration}\ntls {{cert_file: \"{SERVER_CERT}\", key_file: \"{SERVER_KEY}\"}}\n");
+                Nats::default()
+                    .with_tag(ATOMIC_BATCH_NATS_IMAGE_TAG)
+                    .with_cmd(["--config", "/tls/server.conf"])
+                    .with_copy_to("/tls/server.conf", configuration.into_bytes())
+            }
+        };
+        let request = request
             .with_copy_to(SERVER_CERT, certificates.server.cert.into_bytes())
             .with_copy_to(SERVER_KEY, certificates.server.key.into_bytes())
             .with_copy_to(SERVER_CLIENT_CA, certificates.ca.into_bytes());
