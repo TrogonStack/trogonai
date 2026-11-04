@@ -21,3 +21,8 @@ pub use peer_id::PeerId;
 pub use peer_value_error::PeerValueError;
 pub use tenant_id::TenantId;
 pub use trusted_peer_owner::TrustedPeerOwner;
+
+mod attachment_ref;
+mod peer_observation;
+pub use attachment_ref::AttachmentRef;
+pub use peer_observation::{PeerObservation, PeerObservationError};
