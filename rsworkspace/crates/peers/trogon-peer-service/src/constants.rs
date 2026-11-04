@@ -6,4 +6,3 @@ pub(crate) const CONFLICT_RETRY_LIMIT: ConflictRetryLimit = ConflictRetryLimit::
 pub(crate) const MAX_HISTORY_EVENTS: u64 = PEER_REPLAY_LIMIT.as_u64();
 pub(crate) const DEFAULT_ROSTER_PAGE: u32 = 32;
 pub(crate) const MAX_WORK: usize = 64;
-pub(crate) const MAX_PROMPT_ID_BYTES: usize = 128;
