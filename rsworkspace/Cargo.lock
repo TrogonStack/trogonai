@@ -7560,6 +7560,7 @@ dependencies = [
  "trogon-decider-runtime",
  "trogon-nats",
  "trogon-peer",
+ "trogon-peer-nats",
  "trogon-peer-service",
  "trogonai-proto",
  "uuid",
