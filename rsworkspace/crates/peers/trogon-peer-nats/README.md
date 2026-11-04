@@ -1,9 +1,9 @@
 # Peer NATS routing and storage
 
-This crate defines peer request subjects, connector permissions, and the durable
-peer event-store adapter.
-It does not connect to a broker, mint credentials, authorize collaboration
-membership, or implement the peer service.
+This crate provides the peer RPC binding, typed client, connector permission
+profile and tenant-scoped event-store adapter. The runtime supplies an
+authenticated TLS connection, credential admission and application dependencies.
+Collaboration and command authorization remain injected application policies.
 
 The request grammar is:
 
@@ -56,8 +56,8 @@ The service/method suffix follows
 ## Request transport
 
 `PeerRequester` accepts an already connected client and fixed typed account,
-caller, connection and timeout settings. Each call accepts only a method and
-payload. It derives the route, builds a fresh exact reply subject, and validates
+caller, connection and timeout settings. Calls accept a method and payload, with
+an optional header map for the shared RPC codecs. It derives the route, builds a fresh exact reply subject, and validates
 that reply with `PeerReplySubject` before sending. An explicit SDK request inbox
 preserves this shape without using the default request multiplexer.
 
@@ -70,14 +70,47 @@ effects were absent.
 This per-RPC bound is separate from the host hook's two-second total budget.
 An adapter that performs enrollment and batch preparation needs an end-to-end
 hook deadline across those calls. The requester does not add authentication or
-prove that the broker applied the supplied permission profile. The broker tests
-observe routing and reply shape, rather than authorization enforcement.
+prove that the broker applied the supplied permission profile.
+
+## RPC binding and composition
+
+`serve_peer_rpc` registers the annotated `PeerService` through `grpc-nats-micro`.
+Discovery preserves its version, description, RPC names and default queue group.
+The service annotation restricts requests to protobuf. The shared binding also
+supports canonical JSON, including readable JSON policy-rejection statuses.
+
+The shared metadata admission seam receives the delivered subject and reply
+before negotiation, decoding, handler execution or either response channel.
+`PeerRpcAdmission` validates those values through `PeerIngress` and
+`PeerReplySubject`. Missing or unsafe routing drops the request without a reply.
+Headers cannot establish the owner. The admitted handler derives
+`TrustedPeerOwner` from the subject principal and dispatches a typed
+`PeerRpcOperation<Request>`.
+
+`PeerRpcApplication` composes the existing `PeerService` and `PeerApplication`.
+Their command runtime maps the connector caller to an `Agent` principal and
+requires both application and core command authorization. Store, policy, clock,
+content, prepared presentations, IDs and catalog remain mandatory injections.
+Reconciliation stays an explicit bounded application operation, outside the RPC
+inventory. Application outcomes such as `RETRY_UNAVAILABLE` remain successful
+response bodies. Typed failures map to fixed canonical statuses without exposing
+request text, references, fingerprints or backend diagnostics.
+
+`PeerRpcClient` supplies typed methods for the annotated RPCs over `PeerRequester`.
+It encodes requests with `Content-Type` and uses the shared reply decoder, which
+honors the reply's encoding and treats `Nats-Service-Error-Code` as authoritative.
+Complete `google.rpc.Status` details reach the caller. It performs no automatic
+retry and never changes an idempotency key after a timeout.
 
 ## Durable peer histories
 
 `peer::open_store` takes an existing JetStream context and a tenant-specific
 `PeerStoreConfig`. It composes the shared decider `JetStreamStore`, including
-its atomic append and expected-position checks. Event subjects are
+its atomic append and expected-position checks. `PeerJetStreamStore::open` wraps
+that validated open path for the service's `ScopedPeerStore` contract. Its tenant
+comes from the actual immutable subject resolver; callers cannot attach an
+unrelated scope label or bypass resource validation through its constructor.
+Event subjects are
 `{tenant}.peer.v1.peer.{peer_id}.events`; only the service accesses them.
 
 A positive finite `PeerStorageBudget` bounds the file-backed event stream.
@@ -92,7 +125,28 @@ that resource. Initial provisioning uses the shared get-before-create helpers;
 use one trusted provisioner until concurrent first creation with divergent
 settings has its own exclusion contract.
 
-The tests exercise atomic replay after reopening, stale and concurrent writers,
-tenant separation, full-store rejection, and refusal of an existing evicting
-stream. They do not establish broker authorization, sealed content storage, or
-native-host delivery.
+## Broker evidence and limits
+
+Testcontainers fixtures exercise atomic replay after reopening, stale and
+concurrent writers, tenant separation, full-store rejection and unsafe-resource
+refusal. A TLS fixture generates disposable certificates and nkey credentials.
+Its explicit shared account applies distinct connection grants and checks actual
+broker permission errors for impersonation, other connections' reply inboxes,
+raw stream and KV access, consumer creation/update, pull and direct-get. Each
+protected API has a privileged positive control. This is not an operator/import
+topology proof.
+
+The application exchange uses the actual binding, typed client and JetStream
+store. Content, presentation, catalog and policy adapters are disposable fixtures
+exposed only by `test-support`. They do not implement ADR 0083 sealing or durable
+production cache retention. The exchange checks durable send, explicit trusted
+reconciliation, lost-reply replay through reconstruction, application
+acknowledgment and separate sender settlement/status. Scope and recipient
+capacity failures remain closed. These tests do not prove native-host insertion,
+model comprehension, production readiness or long-lived checkpoint recovery.
+
+Run the focused broker suite serially when container startup capacity is limited:
+
+```sh
+MISE_EXEC_AUTO_INSTALL=false mise exec -- cargo test -p trogon-peer-nats -- --test-threads=1
+```
