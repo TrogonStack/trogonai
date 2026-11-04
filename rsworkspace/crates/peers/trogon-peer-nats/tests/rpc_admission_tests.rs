@@ -1,7 +1,7 @@
 use grpc_nats_micro::{ContentType, ServiceFault, constants::HEADER_ERROR_CODE};
 use std::sync::{
     Arc,
-    atomic::{AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 use trogon_nats::AdvancedMockNatsClient;
 use trogon_peer::TrustedPeerOwner;
@@ -9,7 +9,7 @@ use trogon_peer_nats::{PeerAccount, PeerIngress, PeerMethod, PeerRpcAdmission, P
 use trogonai_proto::{nats::micro::v1alpha1::ServiceOptions, peers::v1alpha1 as proto};
 
 #[derive(Default)]
-struct Backend(AtomicUsize);
+struct Backend(AtomicUsize, AtomicBool);
 macro_rules! operation {
     ($request:ident, $response:ident) => {
         impl PeerRpcOperation<proto::$request> for Backend {
@@ -22,6 +22,9 @@ macro_rules! operation {
                 assert_eq!(owner.caller().as_str(), "alice");
                 assert_eq!(owner.tenant().as_str(), "tenant");
                 self.0.fetch_add(1, Ordering::SeqCst);
+                if self.1.load(Ordering::SeqCst) {
+                    return Err(ServiceFault::internal("peer backend failed"));
+                }
                 Ok(proto::$response::default())
             }
         }
@@ -120,5 +123,45 @@ async fn invalid_metadata_drops_before_decoding_negotiation_or_backend() -> Test
         }
     }
     assert_eq!(backend.0.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn admitted_decode_negotiation_and_backend_errors_only_publish_to_validated_reply() -> TestResult {
+    let backend = Arc::new(Backend::default());
+    let admission = admission(backend.clone())?;
+    for (encoding, payload, code, calls) in [
+        ("application/unsafe", vec![255], "3", 0),
+        ("application/protobuf", vec![255], "3", 0),
+        ("application/json", b"{malformed".to_vec(), "3", 0),
+        ("application/protobuf", Vec::new(), "13", 1),
+    ] {
+        backend.1.store(true, Ordering::SeqCst);
+        let client = AdvancedMockNatsClient::new();
+        let message = message(
+            "tenant.peer.v1.alice.PeerService.Enroll",
+            Some("_INBOX.tenant.alice.connection.nonce"),
+            encoding,
+            payload,
+        );
+        grpc_nats_micro::server::dispatch_admitted(&client, &message, &ServiceOptions::default(), &admission).await;
+        assert_eq!(client.published_messages(), ["_INBOX.tenant.alice.connection.nonce"]);
+        assert_eq!(
+            client.published_headers()[0].get(HEADER_ERROR_CODE).map(|h| h.as_str()),
+            Some(code)
+        );
+        assert_eq!(backend.0.load(Ordering::SeqCst), calls);
+    }
+    // Even a backend configured to fail is unreachable when the reply is unsafe.
+    let client = AdvancedMockNatsClient::new();
+    let message = message(
+        "tenant.peer.v1.alice.PeerService.Enroll",
+        Some("_INBOX.tenant.bob.connection.nonce"),
+        "application/protobuf",
+        Vec::new(),
+    );
+    grpc_nats_micro::server::dispatch_admitted(&client, &message, &ServiceOptions::default(), &admission).await;
+    assert!(client.published_messages().is_empty());
+    assert_eq!(backend.0.load(Ordering::SeqCst), 1);
     Ok(())
 }
