@@ -6,6 +6,135 @@ use support::*;
 use trogonai_proto::peers::v1alpha1 as proto;
 
 #[tokio::test]
+async fn send_render_admission_rejects_unrenderable_new_content_before_sealing_or_acceptance() -> TestResult {
+    let f = Fixture::new().await?;
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    assert!(matches!(
+        f.app().send(&f.alice, f.send("unrenderable", &"<".repeat(2048))).await,
+        Err(trogon_peer_service::PeerApplicationError::Context(
+            trogon_peer_context::PeerContextError::ContractViolation
+        ))
+    ));
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    let sender = PeerId::parse(
+        f.a.peer_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    assert!(f.history(&sender).await?.outbox.is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn send_render_admission_reserves_full_batch_identity_and_preserves_exact_retries() -> TestResult {
+    let f = Fixture::new().await?;
+    let now = *f
+        .clock
+        .time
+        .lock()
+        .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?;
+    let mut batch = proto::PeerBatch {
+        batch_id: Some(trogon_peer::BatchId::new("b".repeat(128))?.as_str().to_owned()),
+        message_ids: vec!["message-0".into()],
+        prepared_at: trogonai_proto::convert::timestamp_from_datetime(&now).into(),
+        ..Default::default()
+    };
+    let mut candidate = proto::PreparedMessage {
+        metadata: proto::MessageMetadata {
+            message_id: Some("message-0".into()),
+            sender_peer_id: f.a.peer_id.clone(),
+            recipient_peer_id: f.b.peer_id.clone(),
+            collaboration_ref: Some("shared".into()),
+            accepted_at: trogonai_proto::convert::timestamp_from_datetime(&now).into(),
+            ..Default::default()
+        }
+        .into(),
+        text: None,
+    };
+    let mut fitting = None;
+    for suffix in 0..=848 {
+        let text = format!("{}{}", "<".repeat(1200), "a".repeat(suffix));
+        candidate.text = Some(text.clone());
+        candidate
+            .metadata
+            .as_option_mut()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?
+            .content_size_bytes = Some(text.len() as u32);
+        if trogon_peer_context::PeerContext::render(&batch, std::slice::from_ref(&candidate)).is_err() {
+            break;
+        }
+        fitting = Some(text);
+    }
+    let fitting = fitting.ok_or(trogon_peer_service::PeerPortError::Integrity)?;
+    assert!(fitting.len() < 2048);
+    let oversized = format!("{fitting}a");
+    candidate.text = Some(oversized.clone());
+    candidate
+        .metadata
+        .as_option_mut()
+        .ok_or(trogon_peer_service::PeerPortError::Integrity)?
+        .content_size_bytes = Some(oversized.len() as u32);
+    assert!(trogon_peer_context::PeerContext::render(&batch, std::slice::from_ref(&candidate)).is_err());
+    batch.batch_id = Some("batch-1".into());
+    assert!(trogon_peer_context::PeerContext::render(&batch, &[candidate]).is_ok());
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    assert!(matches!(
+        f.app()
+            .send(&f.alice, f.send("too_large_future_batch", &oversized))
+            .await,
+        Err(trogon_peer_service::PeerApplicationError::Context(
+            trogon_peer_context::PeerContextError::ContractViolation
+        ))
+    ));
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    let accepted = f.app().send(&f.alice, f.send("tight_fit", &fitting)).await?;
+    f.ids.0.store(usize::MAX - 1, Ordering::SeqCst);
+    let retry = f.app().send(&f.alice, f.send("tight_fit", &fitting)).await?;
+    assert_eq!(retry, accepted);
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends + 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn send_render_admission_keeps_normal_and_fitting_escaped_exchange_metadata_exact() -> TestResult {
+    for text in ["a".repeat(2048), "<".repeat(1000)] {
+        let f = Fixture::new().await?;
+        let accepted = f.intake("fits", &text).await?;
+        let prepared = f.app().prepare_batch(&f.bob, f.prepare()).await?;
+        assert_eq!(prepared.messages.len(), 1);
+        assert_eq!(prepared.messages[0].metadata, accepted.message);
+        assert_eq!(prepared.messages[0].text.as_deref(), Some(text.as_str()));
+        let mut worst_batch = prepared
+            .batch
+            .into_option()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?;
+        worst_batch.batch_id = Some(trogon_peer::BatchId::new("b".repeat(128))?.as_str().to_owned());
+        assert!(trogon_peer_context::PeerContext::render(&worst_batch, &prepared.messages).is_ok());
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn send_render_admission_keeps_existing_key_semantic_conflicts_owned_by_core() -> TestResult {
+    let f = Fixture::new().await?;
+    let accepted = f.app().send(&f.alice, f.send("accepted", "original")).await?;
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    let seals = f.content.calls.load(Ordering::SeqCst);
+    assert!(matches!(
+        f.app().send(&f.alice, f.send("accepted", &"<".repeat(2048))).await,
+        Err(trogon_peer_service::PeerApplicationError::Message(
+            trogon_decider_runtime::CommandError::Decide(trogon_peer::MessageError::Conflict)
+        ))
+    ));
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), seals + 1);
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    assert_eq!(f.app().send(&f.alice, f.send("accepted", "original")).await?, accepted);
+    Ok(())
+}
+
+#[tokio::test]
 async fn durable_acceptance_survives_reconstruction_and_exact_retry_with_new_content_location() -> TestResult {
     let f = Fixture::new().await?;
     let sent = f
