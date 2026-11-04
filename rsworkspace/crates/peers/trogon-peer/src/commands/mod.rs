@@ -10,3 +10,6 @@ pub use attach::{Attach, AttachError};
 
 mod heartbeat;
 pub use heartbeat::{Heartbeat, HeartbeatError};
+
+mod detach;
+pub use detach::{Detach, DetachError};
