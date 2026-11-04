@@ -1,15 +1,11 @@
-use crate::constants::MAX_PROMPT_ID_BYTES;
-use trogon_peer::PeerValueError;
+use trogon_peer::{NativeSessionId, PeerValueError};
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PromptId(String);
+pub struct PromptId(NativeSessionId);
 impl PromptId {
     pub fn new(value: String) -> Result<Self, PeerValueError> {
-        if value.is_empty() || value.len() > MAX_PROMPT_ID_BYTES || value.chars().any(char::is_control) {
-            return Err(PeerValueError::InvalidBatchPlan);
-        }
-        Ok(Self(value))
+        NativeSessionId::new(value).map(Self)
     }
     pub fn as_str(&self) -> &str {
-        &self.0
+        self.0.as_str()
     }
 }

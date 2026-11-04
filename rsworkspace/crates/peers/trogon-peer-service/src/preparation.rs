@@ -38,7 +38,11 @@ where
         request: proto::PrepareBatchRequest,
     ) -> ApplicationResult<proto::PrepareBatchResponse, S> {
         let reference = attachment(request.attachment.as_option().ok_or(PeerApplicationError::Input)?)?;
-        let _prompt = PromptId::new(request.prompt_id.ok_or(PeerApplicationError::Input)?)?;
+        let _prompt = request
+            .prompt_id
+            .filter(|value| !value.is_empty())
+            .map(PromptId::new)
+            .transpose()?;
         let scope = self.authorize(owner, reference.peer_id(), PeerOperation::Prepare)?;
         let state = self.load(owner, reference.peer_id()).await?;
         self.live(owner, &reference, &state)?;
