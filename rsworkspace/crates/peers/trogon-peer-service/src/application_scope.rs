@@ -1,5 +1,5 @@
 use crate::{
-    constants::MAX_HISTORY_EVENTS,
+    constants::{CONFLICT_RETRY_LIMIT, PEER_REPLAY_LIMIT},
     execution_error::ExecutionError,
     peer_access::PeerAccess,
     peer_application::{ApplicationResult, PeerApplication},
@@ -9,8 +9,8 @@ use crate::{
     scoped_peer_store::ScopedPeerStore,
 };
 use trogon_decider_runtime::{
-    CommandAuthorizer, CommandExecution, CommandPrincipal, Decider, PrincipalId, PrincipalKind, ReplayLimit,
-    StreamAppend, StreamRead,
+    CommandAuthorizer, CommandExecution, CommandPrincipal, Decider, PrincipalId, PrincipalKind, StreamAppend,
+    StreamRead,
 };
 use trogon_peer::{AttachmentRef, CollaborationRef, MessageError, PeerId, TrustedPeerOwner, guard_live_attachment};
 use trogonai_proto::peers::{state_v1alpha1::PeerState, v1alpha1 as proto};
@@ -93,15 +93,11 @@ where
                 ))
             })?,
         );
-        let limit = ReplayLimit::try_new(MAX_HISTORY_EVENTS).map_err(|_| {
-            trogon_decider_runtime::CommandError::Unauthorized(trogon_decider_runtime::UnauthorizedError::Denied(
-                trogon_decider_runtime::AuthorizationDeniedError::new("invalid replay bound"),
-            ))
-        })?;
         Ok(CommandExecution::new(&self.store, command)
             .with_principal(principal)
             .with_authorizer(&self.policy)
-            .with_replay_limit(limit)
+            .with_replay_limit(PEER_REPLAY_LIMIT)
+            .with_conflict_retry(CONFLICT_RETRY_LIMIT)
             .execute()
             .await?
             .state)
