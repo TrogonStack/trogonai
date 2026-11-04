@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used)]
 mod support;
 use support::*;
-use trogon_decider::{Decider, WritePrecondition, evaluate_decision};
+use trogon_decider::{Decider, WritePrecondition, evaluate_decision, testing::TestCase};
 use trogon_peer::*;
 use trogonai_proto::peers::{PeerEventCase, v1alpha1 as proto};
 
@@ -233,4 +233,161 @@ fn malformed_ack_and_settlement_events_or_internal_proofs_are_refused() {
         }
         assert!(commands::state::evolve(sender.clone(), &event).is_err());
     }
+}
+
+#[test]
+fn acknowledgment_binding_routes_only_to_its_attachment_history() {
+    let command = acknowledge("batch", 4);
+    assert_eq!(command.owner(), identity("recipient").owner());
+    assert_eq!(command.attachment(), &reference("recipient", 1));
+    assert_eq!(command.stream_id(), command.attachment().peer_id());
+    assert_eq!(command.batch_id().as_str(), "batch");
+    TestCase::<AcknowledgeBatch>::new()
+        .given_no_history()
+        .when(command)
+        .then_error(MessageError::Guard(HeartbeatError::MissingEnrollment));
+}
+
+#[test]
+fn settlement_binding_rejects_another_sender_or_foreign_tenant_receipt() {
+    let recipient = run(inbox(&[0], 1), &prepare(&[0], 20, 3));
+    let command = settle(&recipient, 0);
+    assert_eq!(command.sender(), identity("sender").peer_id());
+    assert_eq!(command.stream_id(), command.sender());
+    assert_eq!(command.evidence().tenant(), identity("recipient").owner().tenant());
+    assert_eq!(command.evidence().receipt(), &recipient.dispositions[0]);
+    TestCase::<SettleMessage>::new()
+        .given_no_history()
+        .when(command)
+        .then_error(MessageError::InvalidState(EvolveError::MissingEnrollment));
+    assert_eq!(
+        error(enrolled("other_sender", 0), &settle(&recipient, 0)),
+        MessageError::RecipientMismatch
+    );
+    let foreign = EnrollmentIdentity::new(
+        TrustedPeerOwner::new(
+            TenantId::new("foreign_tenant").unwrap(),
+            CallerId::new("caller").unwrap(),
+        ),
+        InstallationId::new("installation").unwrap(),
+        NativeSessionId::new("recipient").unwrap(),
+    );
+    let mut foreign_history = run(
+        commands::state::initial_state(),
+        &Enroll::new(
+            foreign.clone(),
+            ConnectorId::new("connector").unwrap(),
+            CollaborationRef::new("collaboration").unwrap(),
+            PeerDisplayName::new("Peer").unwrap(),
+            time(0),
+        ),
+    );
+    let mut receipt = recipient.dispositions[0].clone();
+    receipt.recipient_peer_id = Some(foreign.peer_id().to_string());
+    receipt.outcome = Some(proto::PreparationOutcome::PREPARATION_OUTCOME_UNAVAILABLE.into());
+    receipt.batch_id = None;
+    foreign_history = trogon_peer::commands::state::evolve(
+        foreign_history,
+        &proto::PeerEvent {
+            event: Some(
+                proto::PeerMessageDisposed {
+                    receipt: buffa::MessageField::some(receipt),
+                }
+                .into(),
+            ),
+        },
+    )
+    .unwrap();
+    let foreign_evidence =
+        AuthoritativeReceipt::from_recipient_history(&foreign_history, &MessageId::new("message_0").unwrap()).unwrap();
+    assert_eq!(
+        error(
+            run(enrolled("sender", 0), &send(0, 1, 1)),
+            &SettleMessage::new(identity("sender").peer_id().clone(), foreign_evidence)
+        ),
+        MessageError::TenantMismatch
+    );
+}
+
+#[test]
+fn prepared_receipt_evidence_requires_matching_batch_membership_time_and_inbox() {
+    let state = run(inbox(&[0], 1), &prepare(&[0], 20, 3));
+    for mutation in 0..3 {
+        let mut corrupt = state.clone();
+        match mutation {
+            0 => corrupt.batches[0].message_ids.clear(),
+            1 => {
+                corrupt.batches[0].prepared_at =
+                    buffa::MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&time(4)))
+            }
+            _ => corrupt.inbox.clear(),
+        }
+        assert!(matches!(
+            AuthoritativeReceipt::from_recipient_history(&corrupt, &MessageId::new("message_0").unwrap()),
+            Err(MessageError::InvalidTransition)
+        ));
+    }
+}
+
+#[test]
+fn replay_rejects_duplicate_settlement_and_acknowledgment_before_preparation() {
+    let before = run(inbox(&[0], 1), &prepare(&[0], 20, 3));
+    let ack_event = |seconds| proto::PeerEvent {
+        event: Some(
+            proto::PeerBatchAcknowledged {
+                batch_id: Some("batch".to_owned()),
+                acknowledged_at: buffa::MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&time(
+                    seconds,
+                ))),
+            }
+            .into(),
+        ),
+    };
+    assert_eq!(
+        commands::state::evolve(before.clone(), &ack_event(2)),
+        Err(EvolveError::InvalidMessageTransition)
+    );
+    let acknowledged = run(before.clone(), &acknowledge("batch", 4));
+    assert_eq!(
+        commands::state::evolve(acknowledged, &ack_event(5)),
+        Err(EvolveError::InvalidMessageTransition)
+    );
+    let sender = run(enrolled("sender", 0), &send(0, 1, 1));
+    let (settled, events) = evaluate_decision(sender, &settle(&before, 0)).unwrap();
+    assert_eq!(
+        commands::state::evolve(settled, events.iter().next().unwrap()),
+        Err(EvolveError::InvalidMessageTransition)
+    );
+}
+
+#[test]
+fn acknowledgment_replay_cannot_use_an_expired_or_detached_attachment() {
+    let before = run(inbox(&[0], 1), &prepare(&[0], 20, 3));
+    let event = |seconds| proto::PeerEvent {
+        event: Some(
+            proto::PeerBatchAcknowledged {
+                batch_id: Some("batch".to_owned()),
+                acknowledged_at: buffa::MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&time(
+                    seconds,
+                ))),
+            }
+            .into(),
+        ),
+    };
+    assert_eq!(
+        commands::state::evolve(before.clone(), &event(10)),
+        Err(EvolveError::InvalidMessageTransition)
+    );
+    let detached = run(
+        before,
+        &Detach::new(
+            identity("recipient").owner().clone(),
+            reference("recipient", 1),
+            time(4),
+        ),
+    );
+    assert_eq!(
+        commands::state::evolve(detached, &event(5)),
+        Err(EvolveError::InvalidMessageTransition)
+    );
 }
