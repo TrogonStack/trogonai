@@ -7567,6 +7567,7 @@ dependencies = [
  "trogon-decider-runtime",
  "trogon-peer",
  "trogon-peer-context",
+ "trogon-peer-service",
  "trogonai-proto",
 ]
 
