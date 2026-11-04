@@ -89,3 +89,8 @@ future implementation work.
 - [ADR#0081: Every NATS Connection Uses TLS Unless Explicitly Disabled, and Clients Enter Operator-Mode Accounts Only Through Platform Credentials or the Auth Callout](./0081-nats-tls-by-default-and-operator-mode-admission.md)
 - [ADR#0082: Inside the Bus the Principal Is Derived from the Subject, and Proof of Possession Is Enforced Only at the External Edge](./0082-bus-principal-from-subject-and-edge-proof-of-possession.md)
 - [ADR#0083: Credential Material, Claim-Check Blobs, and Sensitive Tenant Streams Under a Customer Managed Key Are Sealed in an Owned AEAD Envelope, and Nothing Else Is](./0083-sealed-content-envelope.md)
+- [ADR#0092: A Third-Party Connection Is a Consented Provider Authority Pinned to an Immutable Connector Release and Provider App, and Its Aggregates Hold Only Secret References (Draft)](./0092-third-party-connection-model.md)
+- [ADR#0093: A Connection's Custody Project Is Separate from Its Logical Owner, Person-Owned Use Needs an Explicit Revocable Delegation, and Every Owner Kind Has an Offboarding Cascade (Draft)](./0093-connection-ownership-and-delegation.md)
+- [ADR#0094: The Platform Authorizes Third-Party Connections as an OAuth Client Through a Single-Use, Write-Ahead Attempt, and Fetches Untrusted Discovery Data Outside Custody (Draft)](./0094-oauth-authorization-protocol.md)
+- [ADR#0095: Each Connection's OAuth Token Set Is One Sealed, CAS-Written OpenBao Secret, Refreshed Only Through a Write-Ahead Credential Transaction (Draft)](./0095-connection-credential-custody-and-refresh.md)
+- [ADR#0096: An Agent Uses a Connection Through an Authorized HTTP Proxy That Injects Credentials Held by Custody (Draft)](./0096-connection-use-by-agents.md)

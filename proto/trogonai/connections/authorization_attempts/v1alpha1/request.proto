@@ -1,0 +1,95 @@
+edition = "2024";
+
+package trogonai.connections.authorization_attempts.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/connections/types/v1alpha1/digest.proto";
+import "trogonai/connections/types/v1alpha1/discovery.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+
+// The non-secret parameters of one authorization request, fixed at
+// BeginAuthorization (ADR#0094 Decision 1). The authorize URL itself, the PKCE
+// challenge and the signed state are never recorded, because each is derived
+// from material or carries it.
+message AuthorizationRequest {
+  RequestedAuthority authority = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The RFC 8707 resource, present for an MCP connection only. It is sent on
+  // the authorize and code exchange requests even when the authorization server
+  // ignores it (ADR#0094 Decision 11).
+  trogonai.connections.types.v1alpha1.CanonicalResourceUri resource = 2;
+  // The exact redirect URI sent; the exchange sends the same string (ADR#0094
+  // Decision 7).
+  RedirectUri redirect_uri = 3 [features.field_presence = LEGACY_REQUIRED];
+  // The issuer of the pinned ProviderApp. The callback's iss must equal it when
+  // present (RFC 9207, ADR#0094 Decision 7).
+  trogonai.connections.types.v1alpha1.Issuer expected_issuer = 4 [features.field_presence = LEGACY_REQUIRED];
+  // True when the issuer's metadata advertises
+  // authorization_response_iss_parameter_supported, so a callback without iss
+  // is refused (ADR#0094 Decision 7).
+  bool response_issuer_required = 5 [features.field_presence = LEGACY_REQUIRED];
+  // Absent for a curated release whose endpoints come from the release itself
+  // (ADR#0094 Decision 10).
+  DiscoveryPin discovery = 6;
+}
+
+// The scope requested, split by the release's required and optional marks so
+// the granted set can be compared without the release (ADR#0094 Decision 12).
+// Values are already normalized by the release's declared normalization. The
+// union is the scope parameter sent; both empty means scope was omitted, which
+// ADR#0094 Decision 11 allows when no challenge and no scopes_supported exist.
+// For MCP step-up the union is the previous attempt's requested scopes plus
+// the challenge, all checked against current ceilings (ADR#0094 Decision 6). ADR#0094 names "requested authority" and
+// "requested scope" without shapes; this one message is the smallest that
+// serves both.
+message RequestedAuthority {
+  option (buf.validate.message).cel = {
+    id: "requested_authority.required_unique"
+    message: "required scopes must be unique"
+    expression: "this.required_scopes.map(s, s.value).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "requested_authority.optional_unique"
+    message: "optional scopes must be unique"
+    expression: "this.optional_scopes.map(s, s.value).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "requested_authority.disjoint"
+    message: "a scope is either required or optional, never both"
+    expression: "!this.required_scopes.exists(r, this.optional_scopes.exists(o, o.value == r.value))"
+  };
+
+  // A grant lacking any of these fails the attempt and nothing activates.
+  repeated trogonai.connections.types.v1alpha1.ProviderScope required_scopes = 1;
+  // A grant lacking only these activates with SCOPES_REDUCED.
+  repeated trogonai.connections.types.v1alpha1.ProviderScope optional_scopes = 2;
+}
+
+// One exact redirect URI, compared as a whole string. The environment's single
+// registered callback URI, or a loopback URI in local development, never a
+// caller-supplied value (ADR#0094 Decision 7). RFC 6749 Section 3.1.2 forbids a
+// fragment.
+message RedirectUri {
+  option (buf.validate.message).cel = {
+    id: "redirect_uri.no_fragment"
+    message: "a redirect URI has no fragment"
+    expression: "!this.value.contains('#')"
+  };
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.uri = true
+  ];
+}
+
+// The discovery snapshots this attempt reads endpoints from. The exchange reads
+// them from the pinned snapshot and never from a fresh fetch, so a server
+// cannot re-point the token endpoint after consent (ADR#0094 Decision 10).
+// Digests are pinned rather than the bytes, which the ProviderApp and the
+// Connection already record.
+message DiscoveryPin {
+  // The authorization server metadata snapshot recorded on the ProviderApp.
+  trogonai.connections.types.v1alpha1.Digest authorization_server_metadata_digest = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The MCP protected resource metadata snapshot recorded on the Connection.
+  // Absent when the principal supplied a preregistered app instead of a
+  // discovered one (ADR#0094 Decision 9).
+  trogonai.connections.types.v1alpha1.Digest protected_resource_metadata_digest = 2;
+}

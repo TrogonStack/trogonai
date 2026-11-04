@@ -1,0 +1,65 @@
+edition = "2024";
+
+package trogonai.connections.connections.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/connections/types/v1alpha1/account.proto";
+import "trogonai/connections/types/v1alpha1/authority.proto";
+import "trogonai/connections/types/v1alpha1/binding.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+
+// What one completed authorization gave the connection: the account, the
+// claim receipt, the granted authority, the binding set and the
+// authorization_generation (ADR#0092 Decision 4). Activation records the
+// first; a reconnect records the next on the same id (ADR#0094 Decision 6).
+// It holds no material: bindings name SecretRefs only.
+//
+// ADR-silent shape: the ADR lists these facts on the activation event without
+// grouping them. One message serves activation and reconnect alike, so the
+// fold keeps exactly one current record.
+message AuthorizationRecord {
+  option (buf.validate.message).cel = {
+    id: "authorization_record.claim_with_account"
+    message: "a claim receipt accompanies a provider account and nothing else"
+    expression: "has(this.provider_account) == has(this.account_claim_id)"
+  };
+  option (buf.validate.message).cel = {
+    id: "authorization_record.binding_roles_unique"
+    message: "one binding per credential role"
+    expression: "this.bindings.map(b, b.role.value).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "authorization_record.missing_scopes_unique"
+    message: "missing optional scopes must be unique"
+    expression: "this.missing_optional_scopes.map(s, s.value).unique()"
+  };
+
+  // The account the identity probe observed, a USER subject by fingerprint
+  // only (ADR#0092 Decision 9). Absent only when the pinned release declares
+  // no identity probe, such as an API credential the provider cannot
+  // attribute.
+  trogonai.connections.types.v1alpha1.ProviderAccount provider_account = 1;
+  // The ProviderAccountClaim the connection holds Bound (ADR#0094
+  // Decision 5). Present exactly when the account is.
+  trogonai.connections.types.v1alpha1.ProviderAccountClaimId account_claim_id = 2;
+  // What the provider granted, never what was requested. For a method without
+  // scopes it carries DOCUMENTED_OMISSION evidence and no scopes.
+  trogonai.connections.types.v1alpha1.GrantedAuthority granted_authority = 3 [features.field_presence = LEGACY_REQUIRED];
+  // One binding per credential role the pinned release declares. Empty for the
+  // none method.
+  repeated trogonai.connections.types.v1alpha1.CredentialBinding bindings = 4;
+  // 1 at activation; a reconnect records the previous value plus one
+  // (ADR#0094 Decision 6, R25). Every grant pins it, so a reconnect fails open
+  // grants with CONNECTION_SUPERSEDED (ADR#0096 Decision 4).
+  uint64 authorization_generation = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  // The AuthorizationAttempt that completed, for the OAuth, MCP and app
+  // installation methods. Absent for a method the owner completes by
+  // submitting a credential, which runs no attempt.
+  trogonai.connections.types.v1alpha1.AuthorizationAttemptId attempt_id = 6;
+  // The requested optional scopes the grant lacks. Non-empty records the
+  // SCOPES_REDUCED health reason with the record (ADR#0094 Decision 12, R7).
+  repeated trogonai.connections.types.v1alpha1.ProviderScope missing_optional_scopes = 7;
+}

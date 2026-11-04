@@ -1,0 +1,113 @@
+edition = "2024";
+
+package trogonai.connections.authorization_attempts.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/connections/types/v1alpha1/cleanup.proto";
+
+// Why an attempt failed. Each value names the phases it is valid from; any
+// other combination is refused. "Captured" means CaptureGrantedAuthority was
+// recorded. Unspecified and unknown values are invalid.
+enum AuthorizationFailureReason {
+  AUTHORIZATION_FAILURE_REASON_UNSPECIFIED = 0;
+  // The callback carried an OAuth error instead of a code, the principal's
+  // refusal included. Valid from CallbackClaimed: an error response is claimed
+  // like a code, under the same single-use, principal and binding checks
+  // (ADR#0094 Decisions 1 and 7).
+  AUTHORIZATION_FAILURE_REASON_PROVIDER_AUTHORIZATION_ERROR = 1;
+  // The token endpoint answered with an OAuth error. Valid from Exchanging,
+  // before capture. The code is spent and never retried (ADR#0094 Decision 4).
+  AUTHORIZATION_FAILURE_REASON_PROVIDER_EXCHANGE_REJECTED = 2;
+  // The code or the verifier was lost before the exchange was sent. Valid from
+  // CallbackClaimed, and from Exchanging before capture when the broker shows
+  // nothing was sent (ADR#0094 Decision 4).
+  AUTHORIZATION_FAILURE_REASON_EXCHANGE_INPUT_LOST = 3;
+  // Reconciliation found no staged bundle after an unknown outcome, so the code
+  // is presumed spent. Valid from OutcomeUnknown before capture. Records an
+  // UNKNOWN_EXCHANGE_GRANT obligation (ADR#0094 Decision 4).
+  AUTHORIZATION_FAILURE_REASON_EXCHANGE_OUTCOME_LOST = 4;
+  // The identity probe could not establish the provider account. Valid from
+  // Exchanging or OutcomeUnknown, before capture. ADR#0094 names no reason for
+  // a failed probe; this is the smallest addition that lets such an attempt
+  // end instead of waiting for its reaper.
+  AUTHORIZATION_FAILURE_REASON_IDENTITY_PROBE_FAILED = 5;
+  // The grant lacks a scope the release marks as required, so nothing
+  // activates. Decided only by CaptureGrantedAuthority (ADR#0094 Decision 12).
+  AUTHORIZATION_FAILURE_REASON_REQUIRED_SCOPE_NOT_GRANTED = 6;
+  // A reconnect probed a different account than the connection's Bound claim.
+  // Decided only by CaptureGrantedAuthority (ADR#0094 Decision 6).
+  AUTHORIZATION_FAILURE_REASON_ACCOUNT_MISMATCH = 7;
+  // Another connection holds the account's claim. Valid after capture, for a
+  // fresh target only. The active duplicate is not touched (ADR#0094 Decision
+  // 5).
+  AUTHORIZATION_FAILURE_REASON_ACCOUNT_ALREADY_CONNECTED = 8;
+  // The connection's authorization_generation moved past the expected one, so
+  // a stale tab cannot reconnect over a newer consent. Valid after capture, for
+  // a reconnect only (ADR#0094 Decision 6 states the refusal; the name is new).
+  AUTHORIZATION_FAILURE_REASON_AUTHORIZATION_GENERATION_STALE = 9;
+  // The Connection refused activation for another reason, such as the target
+  // having been revoked or aborted, or the pinned release or app having lost
+  // standing. Valid after capture. ADR#0094 is silent here; this is the
+  // smallest reason that ends the attempt.
+  AUTHORIZATION_FAILURE_REASON_ACTIVATION_REFUSED = 10;
+  // The state signing key version this attempt's state was signed with was
+  // revoked for compromise; the principal starts again. Valid from
+  // AwaitingConsent or CallbackClaimed (ADR#0094 Decision 2).
+  AUTHORIZATION_FAILURE_REASON_STATE_SIGNING_KEY_REVOKED = 11;
+}
+
+// A provider OAuth error normalized to the RFC 6749 Section 4.1.2.1 and 5.2
+// registries and RFC 8707. The provider's text is never stored, because it is
+// provider-controlled and may echo the code or other material (ADR#0094
+// Decision 1). Unspecified and unknown values are invalid.
+enum ProviderOauthError {
+  PROVIDER_OAUTH_ERROR_UNSPECIFIED = 0;
+  PROVIDER_OAUTH_ERROR_INVALID_REQUEST = 1;
+  PROVIDER_OAUTH_ERROR_UNAUTHORIZED_CLIENT = 2;
+  PROVIDER_OAUTH_ERROR_ACCESS_DENIED = 3;
+  PROVIDER_OAUTH_ERROR_UNSUPPORTED_RESPONSE_TYPE = 4;
+  PROVIDER_OAUTH_ERROR_INVALID_SCOPE = 5;
+  PROVIDER_OAUTH_ERROR_SERVER_ERROR = 6;
+  PROVIDER_OAUTH_ERROR_TEMPORARILY_UNAVAILABLE = 7;
+  PROVIDER_OAUTH_ERROR_INVALID_CLIENT = 8;
+  PROVIDER_OAUTH_ERROR_INVALID_GRANT = 9;
+  PROVIDER_OAUTH_ERROR_UNSUPPORTED_GRANT_TYPE = 10;
+  PROVIDER_OAUTH_ERROR_INVALID_TARGET = 11;
+  // Any value outside the registries above.
+  PROVIDER_OAUTH_ERROR_OTHER = 12;
+}
+
+// The recorded end of a failed attempt.
+message AuthorizationFailure {
+  option (buf.validate.message).cel = {
+    id: "authorization_failure.provider_error"
+    message: "a provider error is recorded exactly for the provider error reasons"
+    expression: "(this.reason == 1 || this.reason == 2) == has(this.provider_error)"
+  };
+  option (buf.validate.message).cel = {
+    id: "authorization_failure.obligations_unique"
+    message: "cleanup obligations must be unique"
+    expression: "this.cleanup_obligations.unique()"
+  };
+
+  AuthorizationFailureReason reason = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  ProviderOauthError provider_error = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // Residuals the failure leaves at the provider, derived by the decider, never
+  // supplied by the caller: UNKNOWN_EXCHANGE_GRANT for EXCHANGE_OUTCOME_LOST
+  // (ADR#0094 Decision 4), and DISCARDED_BUNDLE for every reason that follows a
+  // staged bundle, which is destroyed locally without a provider revoke
+  // (ADR#0094 Decision 5, ADR#0095 Decision 12).
+  repeated trogonai.connections.types.v1alpha1.CleanupObligationKind cleanup_obligations = 3 [(buf.validate.field).repeated.items.enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
