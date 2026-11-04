@@ -122,6 +122,9 @@ impl Decider for Attach {
             .generation
             .and_then(|generation| generation.checked_add(1))
             .ok_or(AttachError::GenerationOverflow)?;
+        if command.now.timestamp_subsec_nanos() >= 1_000_000_000 {
+            return Err(AttachError::LeaseDeadlineOverflow);
+        }
         let expires_at = command
             .now
             .checked_add_signed(chrono::Duration::seconds(10))
