@@ -28,8 +28,15 @@ fn require(condition: bool, message: &'static str) -> TestResult {
     if condition { Ok(()) } else { Err(message.into()) }
 }
 
-fn host_command(_env: &impl ReadEnv) -> Command {
-    Command::new("claude")
+fn host_command(env: &impl ReadEnv) -> Command {
+    match env.var_os("PEER_ACCEPTANCE_PROFILE") {
+        Some(profile) => {
+            let mut command = Command::new("trg");
+            command.args(["exec", "run", "--name"]).arg(profile).arg("--");
+            command
+        }
+        None => Command::new("claude"),
+    }
 }
 
 #[test]
@@ -522,6 +529,12 @@ async fn installed_host_next_prompt_context() -> TestResult {
         "sender":sender_cleanup.as_ref().map_err(|error|error.to_string()),
         "recipient":recipient_cleanup.as_ref().map_err(|error|error.to_string()),
         "registration":registration_cleanup.as_ref().map_err(|error|error.to_string()),
+        "sender_exit":sender.child.try_wait()?.map(|status|json!({
+            "success":status.success(), "code":status.code(), "status":status.to_string(),
+        })),
+        "recipient_exit":recipient.child.try_wait()?.map(|status|json!({
+            "success":status.success(), "code":status.code(), "status":status.to_string(),
+        })),
     });
     std::fs::write(
         evidence.join("cleanup.internal.trogonai.md"),
