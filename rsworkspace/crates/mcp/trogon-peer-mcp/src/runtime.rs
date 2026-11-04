@@ -14,6 +14,7 @@ use crate::backend::{
     AcknowledgePeerBatch, DetachPeer, EnrollPeer, HeartbeatPeer, PreparePeerBatch, ReadPeerMessageStatus,
     ReadPeerRoster, SendPeerMessage,
 };
+use crate::observed_transport::ObservedTransport;
 use crate::peer_mcp::PeerMcp;
 use crate::rpc_peer_backend::RpcPeerBackend;
 use crate::runtime_config::RuntimeConfig;
@@ -63,22 +64,28 @@ where
 {
     tokio::pin!(shutdown);
     let cancellation = CancellationToken::new();
+    let closed = CancellationToken::new();
+    let transport = ObservedTransport::new(transport.into_transport(), closed.clone());
     let service = tokio::select! {
         biased;
         _ = &mut shutdown => return adapter.shutdown().await.map_err(RuntimeError::Connector),
         service = adapter.clone().serve_with_ct(transport, cancellation.clone()) => service.map_err(|error| RuntimeError::Initialize(Box::new(error)))?,
     };
     let waiting = service.waiting();
-    let heartbeat = async {
-        adapter.run_heartbeat(availability).await;
-        std::future::pending::<()>().await;
-    };
-    tokio::pin!(waiting, heartbeat);
-    let completed = tokio::select! {
-        biased;
-        _ = &mut shutdown => None,
-        result = &mut waiting => Some(result),
-        _ = &mut heartbeat => None,
+    tokio::pin!(waiting);
+    let completed = {
+        let heartbeat = async {
+            adapter.run_heartbeat(availability).await;
+            std::future::pending::<()>().await;
+        };
+        tokio::pin!(heartbeat);
+        tokio::select! {
+            biased;
+            _ = &mut shutdown => None,
+            _ = closed.cancelled() => None,
+            result = &mut waiting => Some(result),
+            _ = &mut heartbeat => None,
+        }
     };
     cancellation.cancel();
     let detached = adapter.shutdown().await;
