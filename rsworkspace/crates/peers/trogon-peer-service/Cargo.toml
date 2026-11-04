@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 buffa = { workspace = true }
+trogon-peer-context = { path = "../trogon-peer-context" }
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 thiserror = { workspace = true }
 trogon-decider-runtime = { workspace = true }
