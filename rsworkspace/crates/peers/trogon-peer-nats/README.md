@@ -1,6 +1,7 @@
-# Peer NATS routing
+# Peer NATS routing and storage
 
-This crate defines the peer request subjects and connector permission profile.
+This crate defines peer request subjects, connector permissions, and the durable
+peer event-store adapter.
 It does not connect to a broker, mint credentials, authorize collaboration
 membership, or implement the peer service.
 
@@ -50,3 +51,28 @@ The broker and callout rules come from
 and [ADR 0082](../../../../docs/adr/0082-bus-principal-from-subject-and-edge-proof-of-possession.md).
 The service/method suffix follows
 [ADR 0016](../../../../docs/adr/0016-protobuf-rpc-over-nats-micro-binding.md).
+
+
+## Durable peer histories
+
+`peer::open_store` takes an existing JetStream context and a tenant-specific
+`PeerStoreConfig`. It composes the shared decider `JetStreamStore`, including
+its atomic append and expected-position checks. Event subjects are
+`{tenant}.peer.v1.peer.{peer_id}.events`; only the service accesses them.
+
+A positive finite `PeerStorageBudget` bounds the file-backed event stream.
+Limits retention, discard-new behavior, and disabled age/count eviction preserve
+accepted history when capacity is exhausted. Full storage rejects writes.
+A separately bounded snapshot KV bucket retains one revision per key. Snapshots
+are optional runtime accelerators; they do not replace authoritative history.
+
+Opening an existing resource checks its storage, subject scope, capacity and
+retention settings and fails on unsafe configuration. It does not reconfigure
+that resource. Initial provisioning uses the shared get-before-create helpers;
+use one trusted provisioner until concurrent first creation with divergent
+settings has its own exclusion contract.
+
+The tests exercise atomic replay after reopening, stale and concurrent writers,
+tenant separation, full-store rejection, and refusal of an existing evicting
+stream. They do not establish broker authorization, sealed content storage, or
+native-host delivery.

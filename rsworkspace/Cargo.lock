@@ -7524,8 +7524,17 @@ dependencies = [
 name = "trogon-peer-nats"
 version = "0.1.0"
 dependencies = [
+ "async-nats",
+ "buffa",
+ "buffa-types",
  "thiserror 2.0.21",
+ "tokio",
+ "trogon-decider-nats",
+ "trogon-decider-runtime",
  "trogon-nats",
+ "trogon-peer",
+ "trogonai-proto",
+ "uuid",
 ]
 
 [[package]]
