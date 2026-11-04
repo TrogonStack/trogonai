@@ -158,15 +158,19 @@ where
             if current.detach_confirmed() {
                 return Ok(());
             }
-            if let Some(attachment) = current.attachment() {
+            let attachment = current.attachment().cloned();
+            drop(binding);
+            if let Some(attachment) = attachment {
                 self.backend
                     .detach(v1::DetachRequest {
-                        attachment: crate::model_tools::wire_attachment(attachment).into(),
+                        attachment: crate::model_tools::wire_attachment(&attachment).into(),
                     })
                     .await
                     .map_err(|error| PeerMcpError::Detach(Box::new(error)))?;
             }
-            current.confirm_detach();
+            if let Some(current) = self.binding.lock().await.as_mut() {
+                current.confirm_detach();
+            }
             Ok(())
         })
         .await
