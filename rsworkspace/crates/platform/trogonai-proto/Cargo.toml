@@ -18,6 +18,7 @@ schedules = ["dep:buffa", "dep:buffa-types", "dep:serde", "dep:trogon-decider", 
 # excludes the decider/scheduler domain deps so the binding does not couple to them.
 grpc-nats-micro = ["dep:buffa", "dep:buffa-types", "dep:serde"]
 peers = ["dep:buffa", "dep:buffa-types", "dep:serde", "dep:trogon-decider"]
+peers-runtime = ["peers", "dep:trogon-decider-runtime"]
 runtime-snapshot = ["schedules", "dep:trogon-decider-runtime"]
 runtime-host = ["schedules", "dep:trogon-decider-runtime"]
 decider = ["dep:buffa", "dep:buffa-types", "dep:serde", "chrono"]
