@@ -952,3 +952,48 @@ async fn runtime_terminal_hook_response_and_repeats_survive_heartbeat_completion
     client.cancel().await.expect("close");
     server.await.expect("runtime task").expect("runtime shutdown");
 }
+
+#[tokio::test]
+async fn lifecycle_stale_enrollment_cannot_replace_a_newer_generation() {
+    let backend = backend(Default::default());
+    let response = backend.enrollment.clone();
+    response
+        .lock()
+        .expect("response")
+        .attachment
+        .as_option_mut()
+        .expect("lease")
+        .attachment
+        .as_option_mut()
+        .expect("attachment")
+        .generation = Some(2);
+    let calls = backend.calls.clone();
+    let adapter = PeerMcp::new(backend, config()).expect("config");
+    adapter
+        .invoke(prompt("native_b", "initial"))
+        .await
+        .expect("bind generation two");
+    response
+        .lock()
+        .expect("response")
+        .attachment
+        .as_option_mut()
+        .expect("lease")
+        .attachment
+        .as_option_mut()
+        .expect("attachment")
+        .generation = Some(1);
+    assert!(matches!(
+        adapter.invoke(prompt("native_b", "later")).await,
+        Err(PeerMcpError::InvalidEnrollment)
+    ));
+    adapter
+        .invoke(detach("native_b"))
+        .await
+        .expect("detach retained generation");
+    let calls = calls.lock().expect("calls");
+    let Some(ObservedCall::Detach(request)) = calls.last() else {
+        panic!("detach");
+    };
+    assert_eq!(request.attachment.generation, Some(2));
+}
