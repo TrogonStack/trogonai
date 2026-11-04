@@ -44,3 +44,6 @@ pub use trusted_content::TrustedContent;
 
 mod terminal_disposition;
 pub use terminal_disposition::TerminalDisposition;
+
+mod trusted_batch_plan;
+pub use trusted_batch_plan::TrustedBatchPlan;

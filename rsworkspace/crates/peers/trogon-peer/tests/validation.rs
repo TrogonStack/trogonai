@@ -188,16 +188,16 @@ fn enrollment_rejects_unrepresentable_lease_deadlines_without_panicking() {
 }
 
 #[test]
-fn replay_rejects_absent_or_unhandled_event_cases() {
+fn replay_rejects_absent_or_malformed_event_cases() {
     assert_eq!(
         evolve(initial_state(), &proto::PeerEvent::default()),
         Err(EvolveError::MissingEvent)
     );
-    let unsupported = proto::PeerEvent {
+    let malformed = proto::PeerEvent {
         event: Some(PeerEventCase::from(proto::PeerBatchPrepared::default())),
     };
     assert_eq!(
-        evolve(initial_state(), &unsupported),
-        Err(EvolveError::UnsupportedEvent)
+        evolve(initial_state(), &malformed),
+        Err(EvolveError::MissingField { field: "batch" })
     );
 }
