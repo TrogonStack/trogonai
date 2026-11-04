@@ -73,7 +73,7 @@ async fn explicit_reconciliation_intakes_from_trusted_history_without_settling_e
             .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
     )?;
     f.app()
-        .reconcile(&f.alice, &sender, &[id.clone()], WorkLimit::new(1)?)
+        .reconcile(&f.alice, &sender, std::slice::from_ref(&id), WorkLimit::new(1)?)
         .await?;
     f.app().reconcile(&f.alice, &sender, &[id], WorkLimit::new(1)?).await?;
     let status = f
@@ -398,7 +398,7 @@ async fn infrastructure_failure_stays_retryable_but_confirmed_unavailability_has
     f.content.fail_open.store(true, Ordering::SeqCst);
     assert!(
         f.app()
-            .reconcile(&f.alice, &sender, &[id.clone()], WorkLimit::new(1)?)
+            .reconcile(&f.alice, &sender, std::slice::from_ref(&id), WorkLimit::new(1)?)
             .await
             .is_err()
     );
@@ -511,7 +511,7 @@ async fn recipient_overflow_defers_intake_without_deleting_inbox_or_settling_sen
                     .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
             )?;
             f.app()
-                .reconcile(&owner, &sender, &[id.clone()], WorkLimit::new(1)?)
+                .reconcile(&owner, &sender, std::slice::from_ref(&id), WorkLimit::new(1)?)
                 .await?;
             last = Some((owner.clone(), sender, id));
         }
