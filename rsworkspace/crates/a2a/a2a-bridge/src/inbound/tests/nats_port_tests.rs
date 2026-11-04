@@ -139,6 +139,40 @@ async fn caller_connections_give_up_on_a_silent_server_at_the_connect_timeout_ra
     assert!(matches!(stream, Err(BridgeError::JetStreamConsume(_))));
 }
 
+#[tokio::test(start_paused = true)]
+async fn caller_connections_spend_one_connect_timeout_across_every_silent_server() {
+    let silent = [
+        SilentServer::start().await,
+        SilentServer::start().await,
+        SilentServer::start().await,
+    ];
+    let servers = silent.iter().map(|server| server.address.clone()).collect();
+    let config = NatsConfig::new(servers, NatsAuth::None).with_tls(NatsTls::Disabled);
+    let connect = CallerConnectTimeout::new(Duration::from_secs(10));
+    let jwt = caller_jwt().await;
+
+    let started = tokio::time::Instant::now();
+    let reply = AsyncNatsTokenGatewayUnary::new(config, connect, UNREACHABLE_RPC)
+        .unary_request_gateway(&jwt, "gateway.silent", async_nats::HeaderMap::new(), Bytes::new())
+        .await;
+
+    assert!(matches!(reply, Err(BridgeError::NatsPublish(_))), "{reply:?}");
+    assert!(started.elapsed() < connect.get() * 2, "{:?}", started.elapsed());
+}
+
+#[test]
+fn caller_connection_failures_leave_the_failure_detail_out_of_the_message() {
+    let error = CallerConnectError::from(trogon_nats::ConnectError::ConnectionFailed {
+        servers: vec!["nats://nats.internal.example:4222".to_owned()],
+        error: async_nats::ConnectError::with_source(
+            async_nats::ConnectErrorKind::Tls,
+            std::io::Error::other("certificate not valid for name \"nats.internal.example\""),
+        ),
+    });
+
+    assert_eq!(error.to_string(), "Failed to connect to NATS: TLS error");
+}
+
 #[tokio::test]
 async fn unary_port_reports_no_responder_and_invalid_connection_configuration() {
     let server = CoreTestServer::start().await;
