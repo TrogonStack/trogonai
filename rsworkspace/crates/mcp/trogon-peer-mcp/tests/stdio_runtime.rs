@@ -16,6 +16,7 @@ use trogon_peer_nats::test_support::{
 };
 use trogon_peer_nats::{PeerAccount, PeerTenant, serve_peer_rpc};
 use trogon_peer_service::{WorkLimit, test_support::Fixture};
+use trogon_std::env::{ReadEnv, SystemEnv};
 use trogonai_proto::peers::state_v1alpha1::PeerState;
 use trogonai_proto::peers::v1alpha1 as v1;
 
@@ -31,6 +32,11 @@ impl StdioPeer {
         let mut command = Command::new(env!("CARGO_BIN_EXE_trogon-peer-mcp"));
         command
             .env_clear()
+            .envs(
+                SystemEnv
+                    .var_os("LLVM_PROFILE_FILE")
+                    .map(|profile| ("LLVM_PROFILE_FILE", profile)),
+            )
             .kill_on_drop(true)
             .env("RUST_LOG", "trace")
             .env("NATS_URL", broker.server.address())
@@ -272,6 +278,11 @@ async fn executable_sigterm_detaches_bound_generation_without_durable_erasure() 
 async fn executable_invalid_settings_keep_stdout_empty_and_diagnostics_static() -> TestResult {
     let output = Command::new(env!("CARGO_BIN_EXE_trogon-peer-mcp"))
         .env_clear()
+        .envs(
+            SystemEnv
+                .var_os("LLVM_PROFILE_FILE")
+                .map(|profile| ("LLVM_PROFILE_FILE", profile)),
+        )
         .output()
         .await?;
     assert!(!output.status.success());
