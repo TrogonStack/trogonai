@@ -1,5 +1,7 @@
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PeerValueError {
+    #[error("content must contain 1 to 2048 UTF-8 bytes and a 32-byte digest")]
+    InvalidContent,
     #[error("peer identifier must contain exactly 64 lowercase hexadecimal characters")]
     InvalidPeerId,
     #[error("attachment generation must be positive")]
