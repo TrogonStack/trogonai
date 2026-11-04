@@ -72,7 +72,7 @@ impl Decider for Enroll {
     type DecideError = EnrollError;
     type EvolveError = EvolveError;
 
-    const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
+    const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::NoStream;
 
     fn stream_id(&self) -> &Self::StreamId {
         self.identity.peer_id()
