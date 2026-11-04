@@ -1,6 +1,3 @@
-use std::fmt;
-use std::str::FromStr;
-
 use crate::constants::{MAX_HOST_BYTES, MAX_HOST_LABEL_BYTES};
 
 /// Why a string cannot be an exact egress host.
@@ -114,18 +111,4 @@ fn validate(value: &str) -> Result<(), EgressHostNameError> {
         }
     }
     Ok(())
-}
-
-impl fmt::Display for EgressHostName {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl FromStr for EgressHostName {
-    type Err = EgressHostNameError;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        Self::new(value)
-    }
 }

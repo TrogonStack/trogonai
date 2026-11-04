@@ -2,8 +2,10 @@
 
 mod common;
 
+use std::time::Duration;
+
 use common::{cause_of, engine, gateway_facts};
-use trogon_policy_cel::{CelVerdict, FactValue, RefusalCause, RequestFacts, RuntimeErrorKind};
+use trogon_policy_cel::{CelVerdict, FactValue, FactsLimitError, RefusalCause, RequestFacts, RuntimeErrorKind};
 
 /// What a rule over the gateway facts is expected to do.
 enum Expect {
@@ -64,6 +66,23 @@ fn a_rule_passes_only_when_it_is_the_boolean_true() {
         ("an integer is not a boolean", "request.port", NotBoolean("an integer")),
         ("a string is not a boolean", "request.method", NotBoolean("a string")),
         ("null is not a boolean", "null", NotBoolean("null")),
+        (
+            "an unsigned integer is not a boolean",
+            "1u",
+            NotBoolean("an unsigned integer"),
+        ),
+        ("a float is not a boolean", "1.5", NotBoolean("a float")),
+        ("bytes are not a boolean", r#"b"x""#, NotBoolean("bytes")),
+        (
+            "a method named but not called is not a boolean",
+            "request.method.size",
+            NotBoolean("a function"),
+        ),
+        (
+            "a duration is not a boolean",
+            r#"duration("1s")"#,
+            NotBoolean("a value of another type"),
+        ),
         ("a list is not a boolean", "request.tags", NotBoolean("a list")),
         ("a map is not a boolean", "caller", NotBoolean("a map")),
         ("a missing field", "request.nope == 1", Runtime(MissingField)),
@@ -72,6 +91,11 @@ fn a_rule_passes_only_when_it_is_the_boolean_true() {
             "an unknown function",
             "frobnicate(request.port)",
             Runtime(UndeclaredReference),
+        ),
+        (
+            "a method called without its target",
+            r#"startsWith("a")"#,
+            Runtime(Function),
         ),
         ("a type mismatch", r#"request.port + "x" == 1"#, Runtime(TypeMismatch)),
         ("division by zero", "request.port / 0 == 1", Runtime(Arithmetic)),
@@ -98,6 +122,62 @@ fn a_rule_passes_only_when_it_is_the_boolean_true() {
             Runtime(kind) => assert_eq!(cause_of(verdict), RefusalCause::Runtime(kind), "{label}"),
             Panicked => assert_eq!(cause_of(verdict), RefusalCause::Panicked, "{label}"),
         }
+    }
+}
+
+#[test]
+fn a_rule_can_read_null_and_boolean_facts() {
+    let facts = RequestFacts::new().with(
+        common::fact_name("flags"),
+        FactValue::map([("on", FactValue::Bool(true)), ("unset", FactValue::Null)]),
+    );
+    let verdict = engine(&[("r", "flags.on && flags.unset == null")]).evaluate(&facts);
+    assert_eq!(verdict, CelVerdict::Pass);
+}
+
+#[test]
+fn every_way_a_rule_can_fail_reads_as_a_sentence() {
+    let cases = [
+        (RefusalCause::False, "the rule evaluated to false"),
+        (
+            RefusalCause::NotBoolean { found: "a list" },
+            "the rule evaluated to a list, not a boolean",
+        ),
+        (
+            RefusalCause::Runtime(MissingField),
+            "the rule failed while running: the rule reads a field the facts do not have",
+        ),
+        (RefusalCause::Panicked, "the interpreter failed on the rule"),
+        (
+            RefusalCause::TimedOut {
+                limit: Duration::from_millis(50),
+            },
+            "evaluation took longer than 50ms",
+        ),
+        (
+            RefusalCause::FactsRejected(FactsLimitError::NestedTooDeep { limit: 8 }),
+            "the facts were rejected: facts nest deeper than 8 levels",
+        ),
+    ];
+    for (cause, text) in cases {
+        assert_eq!(cause.to_string(), text);
+    }
+}
+
+#[test]
+fn every_class_of_runtime_failure_says_what_went_wrong() {
+    let cases = [
+        (UndeclaredReference, "the rule references a name that is not defined"),
+        (MissingField, "the rule reads a field the facts do not have"),
+        (
+            TypeMismatch,
+            "the rule applied an operation to a value of the wrong type",
+        ),
+        (Arithmetic, "the rule failed in arithmetic"),
+        (Function, "a function rejected its arguments"),
+    ];
+    for (kind, text) in cases {
+        assert_eq!(kind.to_string(), text);
     }
 }
 

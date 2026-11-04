@@ -63,17 +63,6 @@ impl Chain {
     pub fn contains(&self, subject: &Subject) -> bool {
         self.iter().any(|candidate| candidate == subject)
     }
-
-    /// Returns how many distinct subjects the chain holds.
-    pub fn len(&self) -> usize {
-        1 + self.rest.len()
-    }
-
-    /// Always false: a chain holds at least one subject. Present so `len`
-    /// does not stand alone.
-    pub fn is_empty(&self) -> bool {
-        false
-    }
 }
 
 impl<'a> IntoIterator for &'a Chain {

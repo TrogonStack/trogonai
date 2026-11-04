@@ -21,7 +21,7 @@ pub(crate) fn static_cost(expression: &Expression, limits: &CelLimits) -> Result
     let mut survey = Survey::default();
     survey.visit(expression, 1)?;
     let length_bound = survey.length_bound(limits.max_collection_len());
-    cost_of(expression, length_bound, 1)
+    cost_of(expression, length_bound)
 }
 
 /// What the first pass learns about the sizes a rule can build.
@@ -59,17 +59,16 @@ impl Survey {
     }
 }
 
-fn cost_of(expression: &Expression, length_bound: u64, depth: usize) -> Result<u64, CompileError> {
-    if depth > MAX_EXPRESSION_DEPTH {
-        return Err(CompileError::TooDeep {
-            limit: MAX_EXPRESSION_DEPTH,
-        });
-    }
-    let below = |child: &Expression| cost_of(child, length_bound, depth + 1);
+/// Prices a rule the survey already accepted, so its depth is within the limit
+/// and it holds no construct the interpreter cannot run.
+fn cost_of(expression: &Expression, length_bound: u64) -> Result<u64, CompileError> {
+    let below = |child: &Expression| cost_of(child, length_bound);
     match &expression.expr {
         Expr::Literal(_) | Expr::Ident(_) => Ok(NODE_COST),
         Expr::Select(select) => Ok(NODE_COST.saturating_add(below(&select.operand)?)),
-        Expr::List(_) | Expr::Map(_) => {
+        // `children` refuses a struct or an unspecified expression, so those
+        // never reach a price.
+        Expr::List(_) | Expr::Map(_) | Expr::Struct(_) | Expr::Unspecified => {
             let mut total = NODE_COST;
             for child in children(expression)? {
                 total = total.saturating_add(below(child)?);
@@ -95,7 +94,6 @@ fn cost_of(expression: &Expression, length_bound: u64, depth: usize) -> Result<u
                 .saturating_add(per_iteration.saturating_mul(length_bound))
                 .saturating_add(below(&comprehension.result)?))
         }
-        Expr::Struct(_) | Expr::Unspecified => Err(unsupported(&expression.expr)),
     }
 }
 
@@ -162,3 +160,6 @@ fn children(expression: &Expression) -> Result<Vec<&Expression>, CompileError> {
         Expr::Struct(_) | Expr::Unspecified => Err(unsupported(&expression.expr)),
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -110,6 +110,8 @@ fn cost_is_a_static_upper_bound_with_known_weights() {
         ("true", 1),
         ("request.port", 2),
         ("request.port == 443", 2 + 2 + 1),
+        // A map literal is a node over its keys and values, then selected.
+        (r#"{"a": 1}.a == 1"#, 2 + (1 + (1 + (1 + 1))) + 1),
         ("request.port == 443 && caller.depth < 3", 2 + (2 + 2 + 1) + (2 + 2 + 1)),
         (r#"request.host.startsWith("api.")"#, 8 + 2 + 1),
         (r#"request.host.matches("^api")"#, 64 + 2 + 1),

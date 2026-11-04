@@ -24,11 +24,6 @@ impl DelegationPermission {
     pub fn covers(&self, callee: &Callee) -> bool {
         self.targets.iter().any(|target| target.covers(callee))
     }
-
-    /// Iterates the targets in sorted order.
-    pub fn targets(&self) -> impl Iterator<Item = &DelegationTarget> {
-        self.targets.iter()
-    }
 }
 
 impl FromIterator<DelegationTarget> for DelegationPermission {

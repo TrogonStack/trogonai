@@ -1,5 +1,3 @@
-use std::fmt;
-
 /// Why a number cannot be a port.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum PortError {
@@ -36,11 +34,5 @@ impl TryFrom<u32> for Port {
     fn try_from(value: u32) -> Result<Self, Self::Error> {
         let narrowed = u16::try_from(value).map_err(|_| PortError::OutOfRange(value))?;
         Self::new(narrowed)
-    }
-}
-
-impl fmt::Display for Port {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
     }
 }

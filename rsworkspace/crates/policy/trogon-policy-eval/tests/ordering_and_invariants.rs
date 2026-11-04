@@ -2,12 +2,15 @@
 
 mod common;
 
+use std::time::Duration;
+
 use common::{
     agent, chain, chain_of_a, egress, egress_permission, enforce, fresh_now, hold, model_ceiling, model_use, node,
     rule_ref, view,
 };
 use trogon_policy_eval::{
-    Decision, Effective, HoldName, HoldScope, Narrowing, Phase, PolicySnapshot, Refusal, Request, RuleKind, RuleName,
+    Decision, Effective, EvaluatorError, HoldName, HoldScope, Narrowing, Phase, PolicySnapshot, Refusal, Request,
+    RuleKind, RuleName,
 };
 
 fn rule(name: &str) -> RuleName {
@@ -195,6 +198,34 @@ fn a_model_request_does_not_read_permits() {
     );
     // 3 ceilings and 3 hold histories.
     assert_eq!(decision.consulted().len(), 6);
+}
+
+#[test]
+fn every_refusal_reads_as_a_sentence_naming_what_refused() {
+    let ceiling = rule_ref(RuleKind::ModelCeiling, agent("a"), 3);
+    let cases = [
+        (
+            Refusal::NoPermit(RuleKind::DelegationPermission),
+            "no delegation permission covers the request",
+        ),
+        (
+            Refusal::CeilingExcludes(ceiling),
+            "the model ceiling of agent a at revision 3 excludes the request",
+        ),
+        (
+            Refusal::RequestRuleDenied(rule("no-exfil")),
+            "request rule no-exfil refused the request",
+        ),
+        (
+            Refusal::EvaluatorError(EvaluatorError::SnapshotFromTheFuture {
+                by: Duration::from_secs(2),
+            }),
+            "the evaluator could not decide: policy snapshot is stamped 2s in the future",
+        ),
+    ];
+    for (refusal, text) in cases {
+        assert_eq!(refusal.to_string(), text);
+    }
 }
 
 #[test]

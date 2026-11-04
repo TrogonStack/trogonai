@@ -8,7 +8,7 @@ use common::{agent, chain, node};
 use trogon_policy_eval::{
     AgentId, Callee, Chain, ChainError, DelegationTarget, EgressHostName, EgressHostNameError, HoldName,
     IdentifierError, Phase, Port, PortError, Request, RequestError, RuleName, RuleNameError, StalenessBudget,
-    StalenessBudgetError, StreamRevision,
+    StalenessBudgetError, StreamRevision, Subject,
 };
 
 #[test]
@@ -186,6 +186,21 @@ fn identifiers_are_exact_and_case_sensitive() {
 }
 
 #[test]
+fn egress_host_reads_back_as_stored() {
+    assert_eq!(common::host("api.example.com").as_str(), "api.example.com");
+}
+
+#[test]
+fn a_subject_is_built_from_either_identity_and_names_which_it_is() {
+    let from_agent = Subject::from(common::agent_id("a"));
+    let from_node = Subject::from(common::node_id("team"));
+    assert_eq!(from_agent, agent("a"));
+    assert_eq!(from_node, node("team"));
+    assert_eq!(from_agent.to_string(), "agent a");
+    assert_eq!(from_node.to_string(), "node team");
+}
+
+#[test]
 fn rule_names_reject_empty_whitespace_only_oversized_and_control_values() {
     assert_eq!(RuleName::new(""), Err(RuleNameError::Empty));
     assert_eq!(RuleName::new("   "), Err(RuleNameError::Empty));
@@ -214,7 +229,6 @@ fn chain_is_non_empty_deduplicated_and_nearest_first() {
     let subjects: Vec<_> = built.iter().cloned().collect();
     assert_eq!(subjects, vec![agent("a"), node("team"), node("org")]);
     assert_eq!(built.subject(), &agent("a"));
-    assert_eq!(built.len(), 3);
     assert!(built.contains(&node("org")));
     assert!(!built.contains(&node("other")));
 }

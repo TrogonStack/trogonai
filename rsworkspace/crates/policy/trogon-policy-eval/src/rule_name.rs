@@ -58,11 +58,3 @@ impl fmt::Display for RuleName {
         f.write_str(&self.0)
     }
 }
-
-impl std::str::FromStr for RuleName {
-    type Err = RuleNameError;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        Self::new(value)
-    }
-}

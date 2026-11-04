@@ -25,11 +25,6 @@ impl ModelCeiling {
     pub fn admits(&self, model: &ModelId) -> bool {
         self.models.contains(model)
     }
-
-    /// Iterates the admitted models in sorted order.
-    pub fn models(&self) -> impl Iterator<Item = &ModelId> {
-        self.models.iter()
-    }
 }
 
 impl FromIterator<ModelId> for ModelCeiling {

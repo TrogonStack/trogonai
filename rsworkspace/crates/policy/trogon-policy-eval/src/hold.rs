@@ -23,11 +23,6 @@ impl Hold {
         &self.name
     }
 
-    /// How far the hold reaches.
-    pub fn scope(&self) -> HoldScope {
-        self.scope
-    }
-
     /// Returns whether the hold refuses an action by a held subject's own
     /// Session, or by a Session in the lineage of the work, in this phase.
     pub fn refuses_in(&self, phase: Phase) -> bool {

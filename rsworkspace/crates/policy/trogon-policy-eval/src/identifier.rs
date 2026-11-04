@@ -70,12 +70,6 @@ macro_rules! identifier_type {
                 Self::new(value)
             }
         }
-
-        impl AsRef<str> for $name {
-            fn as_ref(&self) -> &str {
-                self.as_str()
-            }
-        }
     };
 }
 

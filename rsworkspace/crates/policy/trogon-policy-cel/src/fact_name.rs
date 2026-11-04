@@ -1,5 +1,4 @@
 use std::borrow::Borrow;
-use std::fmt;
 
 use crate::constants::{MAX_FACT_NAME_BYTES, RESERVED_WORDS};
 
@@ -71,22 +70,8 @@ impl FactName {
     }
 }
 
-impl fmt::Display for FactName {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
 impl Borrow<str> for FactName {
     fn borrow(&self) -> &str {
         &self.0
-    }
-}
-
-impl std::str::FromStr for FactName {
-    type Err = FactNameError;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        Self::new(value)
     }
 }

@@ -39,6 +39,22 @@ fn dry_run_admits_what_enforce_would_refuse_and_records_it() {
 }
 
 #[test]
+fn an_evaluator_reports_the_mode_and_budget_it_was_built_with() {
+    let budget = StalenessBudget::new(secs(60)).expect("within the ceiling");
+    let evaluator = Evaluator::new(EnforcementMode::DryRun, budget);
+    assert_eq!(evaluator.mode(), EnforcementMode::DryRun);
+    assert_eq!(evaluator.staleness_budget(), budget);
+}
+
+#[test]
+fn modes_have_stable_names_for_configuration_and_logs() {
+    assert_eq!(EnforcementMode::DryRun.as_str(), "dry_run");
+    assert_eq!(EnforcementMode::Enforce.as_str(), "enforce");
+    assert_eq!(EnforcementMode::DryRun.to_string(), "dry_run");
+    assert_eq!(EnforcementMode::Enforce.to_string(), "enforce");
+}
+
+#[test]
 fn both_modes_agree_when_nothing_refuses() {
     let request = egress(chain_of_a(), "example.com", 443);
     for evaluator in [enforce(), common::dry_run()] {

@@ -142,28 +142,44 @@ impl Evaluator {
 }
 
 fn check_permit(snapshot: &PolicySnapshot, request: &Request, findings: &mut Findings) {
-    let Some(kind) = request.action().required_permit() else {
-        return;
-    };
-    let mut covered = false;
-    for subject in request.own_chain() {
-        findings.consulted.insert(snapshot.rule_ref(kind, subject));
-        covered |= permit_covers(snapshot, subject, request.action());
-    }
-    if !covered {
-        findings.refusals.push(Refusal::NoPermit(kind));
+    match request.action() {
+        Action::EgressConnect { host, port } => {
+            require_permit(request, RuleKind::EgressPermission, snapshot, findings, |subject| {
+                snapshot
+                    .egress_permission(subject)
+                    .is_some_and(|permission| permission.covers(host, *port))
+            })
+        }
+        Action::Delegate { callee } => {
+            require_permit(request, RuleKind::DelegationPermission, snapshot, findings, |subject| {
+                snapshot
+                    .delegation_permission(subject)
+                    .is_some_and(|permission| permission.covers(callee))
+            })
+        }
+        // Model selection has no permit here: ADR#0032 authorizes models
+        // through a connection's allowed models and ADR#0071 Decision 5 makes
+        // the ceiling a narrowing of that grant, not a second copy of it. The
+        // permit for a model selection is the connection's own list, which is
+        // checked where the connection is resolved.
+        Action::ModelUse { .. } => {}
     }
 }
 
-fn permit_covers(snapshot: &PolicySnapshot, subject: &Subject, action: &Action) -> bool {
-    match action {
-        Action::EgressConnect { host, port } => snapshot
-            .egress_permission(subject)
-            .is_some_and(|permission| permission.covers(host, *port)),
-        Action::Delegate { callee } => snapshot
-            .delegation_permission(subject)
-            .is_some_and(|permission| permission.covers(callee)),
-        Action::ModelUse { .. } => false,
+fn require_permit(
+    request: &Request,
+    kind: RuleKind,
+    snapshot: &PolicySnapshot,
+    findings: &mut Findings,
+    covers: impl Fn(&Subject) -> bool,
+) {
+    let mut covered = false;
+    for subject in request.own_chain() {
+        findings.consulted.insert(snapshot.rule_ref(kind, subject));
+        covered |= covers(subject);
+    }
+    if !covered {
+        findings.refusals.push(Refusal::NoPermit(kind));
     }
 }
 

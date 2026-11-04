@@ -123,6 +123,7 @@ fn run(rule: &CompiledRule, context: &Context<'_>) -> Result<(), RefusalCause> {
     }
 }
 
+// `run` settles a boolean before it asks, so no arm names one.
 fn kind_of(value: &Value) -> &'static str {
     match value {
         Value::List(_) => "a list",
@@ -133,7 +134,6 @@ fn kind_of(value: &Value) -> &'static str {
         Value::Float(_) => "a float",
         Value::String(_) => "a string",
         Value::Bytes(_) => "bytes",
-        Value::Bool(_) => "a boolean",
         Value::Null => "null",
         _ => "a value of another type",
     }

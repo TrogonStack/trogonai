@@ -27,11 +27,6 @@ impl EgressPermission {
             .iter()
             .any(|destination| destination.matches(host, port))
     }
-
-    /// Iterates the destinations in sorted order.
-    pub fn destinations(&self) -> impl Iterator<Item = &EgressDestination> {
-        self.destinations.iter()
-    }
 }
 
 impl FromIterator<EgressDestination> for EgressPermission {
