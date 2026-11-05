@@ -1237,6 +1237,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "buffa-descriptor"
+version = "0.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b7dd79a6898e70dac8adae959c8ad2cae51ed96397935c91c996280cedcb55e"
+dependencies = [
+ "buffa",
+ "rustversion",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "buffa-types"
 version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7694,6 +7706,7 @@ name = "trogonai-proto"
 version = "0.1.0"
 dependencies = [
  "buffa",
+ "buffa-descriptor",
  "buffa-types",
  "chrono",
  "serde",
