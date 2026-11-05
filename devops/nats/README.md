@@ -355,6 +355,28 @@ runs [provision-kv.sh](../docker/compose/services/nats/provision-kv.sh) as the
 PLATFORM user `kv-provisioner` once the accounts are pushed, and fails when the
 bucket already exists with another history or maximum age.
 
+## Provision the audit streams
+
+Platform audit records go to two PLATFORM streams that the writers publish to
+but never create (ADR#0086 Decision 2): `AUDIT` takes
+`platform.v1.audit.{decision,credential,change,integrity}.>` and
+`AUDIT_CHECKPOINT` takes `platform.v1.audit.checkpoint.>`. Both use file
+storage, limits retention, `discard: new` so a full stream refuses a write and
+does not drop the oldest record, `deny_delete`, `deny_purge`, a two minute
+duplicate window and no `max_age`, with three replicas in production. Create
+them as a PLATFORM user with `trogon_audit::ensure_audit_streams`, or with
+[provision-audit.sh](../docker/compose/services/nats/provision-audit.sh) and
+`AUDIT_REPLICAS=3`.
+
+Both fail on a stream that already exists with a configuration that would
+weaken the trail, naming the field, and neither edits it: an operator decides
+whether to replace it.
+
+The local stack creates them with one replica on every `up`.
+nats-audit-provision runs the script as the PLATFORM user `audit-provisioner`
+once the accounts are pushed. `provision-audit.test.sh` checks it against a
+stand-in `nats`.
+
 ## Where production keys live
 
 Production NATS material lives in OpenBao. The deployment reads it with its

@@ -1,0 +1,61 @@
+#!/bin/sh
+# Creates the PLATFORM audit streams that writers publish to but never create
+# (ADR#0086 Decision 2), the way a deployment provisions them before those
+# writers start. Runs on every `up` and creates only what is missing, then
+# fails when a stream keeps a configuration that would weaken the audit trail:
+# one that drops the oldest record when full, allows deleting or purging, or
+# expires on a timer. It never edits an existing stream.
+#
+# Mirrors trogon_audit::AuditStream, the check the Rust provisioning applies.
+set -eu
+
+# One replica in the dev compose; production runs three.
+REPLICAS=${AUDIT_REPLICAS:-1}
+
+# Fails unless the stream keeps `expected` for `field`, the jq filter reading it.
+require() {
+  stream=$1 field=$2 expected=$3 filter=$4
+  actual=$(printf '%s' "$info" | jq -r "$filter")
+  if [ "$actual" != "$expected" ]; then
+    echo "nats-audit-provision: $stream keeps $field $actual, but audit requires $expected" >&2
+    return 1
+  fi
+}
+
+# Fails when the jq filter, read against the stream, is true.
+refuse_when() {
+  stream=$1 problem=$2 filter=$3
+  if [ "$(printf '%s' "$info" | jq -r "$filter")" = true ]; then
+    echo "nats-audit-provision: $stream $problem" >&2
+    return 1
+  fi
+}
+
+# stream and its subjects, comma separated.
+ensure_stream() {
+  stream=$1 subjects=$2
+  if ! info=$(nats stream info "$stream" --json 2>/dev/null); then
+    nats stream add "$stream" --subjects "$subjects" --storage file --retention limits \
+      --discard new --replicas "$REPLICAS" --dupe-window 2m --max-age=-1 \
+      --max-msgs=-1 --max-bytes=-1 --max-msg-size=-1 --max-msgs-per-subject=-1 \
+      --deny-delete --deny-purge --no-allow-rollup --defaults >/dev/null
+    info=$(nats stream info "$stream" --json)
+  fi
+  require "$stream" storage file '.config.storage'
+  require "$stream" retention limits '.config.retention'
+  require "$stream" discard new '.config.discard'
+  refuse_when "$stream" "allows deleting a record, but audit requires deny_delete" '.config.deny_delete != true'
+  refuse_when "$stream" "allows purging records, but audit requires deny_purge" '.config.deny_purge != true'
+  refuse_when "$stream" "expires records by max age, but audit requires none" '.config.max_age != 0'
+  refuse_when "$stream" "limits the records kept per subject, but audit requires no limit" '(.config.max_msgs_per_subject // -1) > 0'
+  refuse_when "$stream" "lets a record set its own expiry, but audit requires message TTL off" '.config.allow_msg_ttl // false'
+  refuse_when "$stream" "keeps a duplicate window under 2 minutes, but audit requires at least 2" '.config.duplicate_window < 120000000000'
+  refuse_when "$stream" "keeps fewer than $REPLICAS replicas, but the deployment asked for $REPLICAS" ".config.num_replicas < $REPLICAS"
+  for subject in $(printf '%s' "$subjects" | tr ',' ' '); do
+    refuse_when "$stream" "lacks subject $subject, but audit publishes to it" "(.config.subjects // []) | index(\"$subject\") == null"
+  done
+  echo "nats-audit-provision: $stream keeps $subjects on $REPLICAS replica(s)"
+}
+
+ensure_stream AUDIT "platform.v1.audit.decision.>,platform.v1.audit.credential.>,platform.v1.audit.change.>,platform.v1.audit.integrity.>"
+ensure_stream AUDIT_CHECKPOINT "platform.v1.audit.checkpoint.>"
