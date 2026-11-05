@@ -1,3 +1,4 @@
+mod constants;
 pub mod domain;
 mod enroll;
 pub mod state;

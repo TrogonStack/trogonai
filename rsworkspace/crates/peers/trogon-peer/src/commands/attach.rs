@@ -7,6 +7,7 @@ use trogonai_proto::peers::{
     v1alpha1::{self as proto, PeerEvent},
 };
 
+use super::constants::ATTACHMENT_LEASE;
 use super::domain::{CollaborationRef, ConnectorId, EnrollmentIdentity, PeerId};
 use super::state::{self, EvolveError};
 
@@ -127,8 +128,8 @@ impl Decider for Attach {
         }
         let expires_at = command
             .now
-            .checked_add_signed(chrono::Duration::seconds(10))
-            .filter(|at| (-62_135_596_800..=253_402_300_799).contains(&at.timestamp()))
+            .checked_add_signed(ATTACHMENT_LEASE)
+            .filter(|at| state::timestamp_seconds_supported(at.timestamp()))
             .ok_or(AttachError::LeaseDeadlineOverflow)?;
         let attachment = proto::PeerAttachment {
             attachment: MessageField::some(proto::AttachmentRef {
