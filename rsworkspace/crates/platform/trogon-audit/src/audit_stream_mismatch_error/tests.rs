@@ -25,6 +25,10 @@ fn each_message_names_the_rule_and_the_stream() {
             "stream 'AUDIT' must deny purging records",
         ),
         (
+            AuditStreamMismatchError::NoAck { stream },
+            "stream 'AUDIT' must acknowledge publishes",
+        ),
+        (
             AuditStreamMismatchError::MaxAge { stream },
             "stream 'AUDIT' must not expire records by age",
         ),

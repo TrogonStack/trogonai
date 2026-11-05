@@ -65,7 +65,7 @@ stream_json AUDIT_CHECKPOINT "$checkpoint_subjects" > "$workdir/created-AUDIT_CH
 provision
 [ "$status" -eq 0 ] || fail "a missing stream was not created: $(cat "$workdir/err")"
 [ "$(cut -d' ' -f1 "$workdir/added" | tr '\n' ' ')" = "AUDIT AUDIT_CHECKPOINT " ] || fail "expected both streams to be added"
-for flag in "--storage file" "--retention limits" "--discard new" "--deny-delete" "--deny-purge" "--max-age=-1" "--dupe-window 2m" "--replicas 1"; do
+for flag in "--storage file" "--retention limits" "--discard new" "--deny-delete" "--deny-purge" "--ack" "--max-age=-1" "--dupe-window 2m" "--replicas 1"; do
   grep -q -- "$flag" "$workdir/added" || fail "the created streams lack $flag"
 done
 grep -q "platform.v1.audit.checkpoint.>" "$workdir/added" || fail "AUDIT_CHECKPOINT lacks its subject"
@@ -93,6 +93,7 @@ refuses "keeps retention interest" '.config.retention = "interest"'
 refuses "keeps discard old" '.config.discard = "old"'
 refuses "requires deny_delete" '.config.deny_delete = false'
 refuses "requires deny_purge" '.config.deny_purge = false'
+refuses "publishes without acknowledging" '.config.no_ack = true'
 refuses "expires records by max age" '.config.max_age = 3600000000000'
 refuses "limits the records kept per subject" '.config.max_msgs_per_subject = 1'
 refuses "requires message TTL off" '.config.allow_msg_ttl = true'

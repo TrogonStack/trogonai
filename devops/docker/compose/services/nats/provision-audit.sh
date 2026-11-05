@@ -60,7 +60,7 @@ ensure_stream() {
     nats stream add "$stream" --subjects "$subjects" --storage file --retention limits \
       --discard new --replicas "$REPLICAS" --dupe-window 2m --max-age=-1 \
       --max-msgs=-1 --max-bytes=-1 --max-msg-size=-1 --max-msgs-per-subject=-1 \
-      --deny-delete --deny-purge --no-allow-rollup --defaults >/dev/null
+      --deny-delete --deny-purge --no-allow-rollup --ack --defaults >/dev/null
     read_stream "$stream"
   fi
   if [ -n "$(error_code)" ]; then
@@ -72,6 +72,7 @@ ensure_stream() {
   require "$stream" discard new '.config.discard'
   refuse_when "$stream" "allows deleting a record, but audit requires deny_delete" '.config.deny_delete != true'
   refuse_when "$stream" "allows purging records, but audit requires deny_purge" '.config.deny_purge != true'
+  refuse_when "$stream" "publishes without acknowledging, but audit requires acks" '.config.no_ack // false'
   refuse_when "$stream" "expires records by max age, but audit requires none" '.config.max_age != 0'
   refuse_when "$stream" "limits the records kept per subject, but audit requires no limit" '(.config.max_msgs_per_subject // -1) > 0'
   refuse_when "$stream" "lets a record set its own expiry, but audit requires message TTL off" '.config.allow_msg_ttl // false'

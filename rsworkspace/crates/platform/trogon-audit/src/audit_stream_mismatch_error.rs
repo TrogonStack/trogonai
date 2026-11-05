@@ -14,6 +14,8 @@ pub enum AuditStreamMismatchError {
     DenyDelete { stream: &'static str },
     #[error("stream '{stream}' must deny purging records")]
     DenyPurge { stream: &'static str },
+    #[error("stream '{stream}' must acknowledge publishes")]
+    NoAck { stream: &'static str },
     #[error("stream '{stream}' must not expire records by age")]
     MaxAge { stream: &'static str },
     #[error("stream '{stream}' must not let a record set its own expiry")]

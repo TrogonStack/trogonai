@@ -99,7 +99,7 @@ fn the_configuration_it_creates_is_one_it_accepts() {
 #[test]
 fn refuses_each_way_a_stream_could_weaken_the_guarantees() {
     type Weaken = fn(&mut Config);
-    let cases: [(Weaken, AuditStreamMismatchError); 10] = [
+    let cases: [(Weaken, AuditStreamMismatchError); 11] = [
         (
             |c| c.storage = StorageType::Memory,
             AuditStreamMismatchError::Storage { stream: "AUDIT" },
@@ -120,6 +120,7 @@ fn refuses_each_way_a_stream_could_weaken_the_guarantees() {
             |c| c.deny_purge = false,
             AuditStreamMismatchError::DenyPurge { stream: "AUDIT" },
         ),
+        (|c| c.no_ack = true, AuditStreamMismatchError::NoAck { stream: "AUDIT" }),
         (
             |c| c.max_age = Duration::from_secs(3600),
             AuditStreamMismatchError::MaxAge { stream: "AUDIT" },

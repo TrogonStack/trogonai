@@ -19,6 +19,8 @@
 //!   makes a full stream evict the oldest record where `discard: new` refuses
 //!   the write;
 //! - lose them on a restart (anything but file storage);
+//! - publish without acknowledging (`no_ack`), so the writer could never learn
+//!   a record was kept and would time out on every one;
 //! - let an operator or a compromised client remove them (`deny_delete` and
 //!   `deny_purge` off);
 //! - lose them with a node (fewer replicas than the deployment asked for);
@@ -121,6 +123,9 @@ impl AuditStream {
         }
         if !actual.deny_purge {
             return Err(AuditStreamMismatchError::DenyPurge { stream });
+        }
+        if actual.no_ack {
+            return Err(AuditStreamMismatchError::NoAck { stream });
         }
         if !actual.max_age.is_zero() {
             return Err(AuditStreamMismatchError::MaxAge { stream });
