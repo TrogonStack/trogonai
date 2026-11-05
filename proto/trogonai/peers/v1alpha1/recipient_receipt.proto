@@ -1,0 +1,16 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/peers/v1alpha1/preparation_outcome.proto";
+
+// The sender settles capacity only from an authoritative recipient receipt.
+message RecipientReceipt {
+  string message_id = 1;
+  string recipient_peer_id = 2;
+  PreparationOutcome outcome = 3;
+  string batch_id = 4;
+  uint64 recipient_revision = 5;
+  google.protobuf.Timestamp decided_at = 6;
+}

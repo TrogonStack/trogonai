@@ -1,0 +1,13 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+import "trogonai/peers/v1alpha1/attachment_ref.proto";
+
+// Lookup by the sender's original key avoids resending after a lost receipt.
+message StatusRequest {
+  reserved attachment;
+
+  AttachmentRef attachment_ref = 1;
+  string idempotency_key = 2;
+}

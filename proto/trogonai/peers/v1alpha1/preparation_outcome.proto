@@ -1,0 +1,11 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+// Exactly one recipient decision wins. Preparation is not host insertion.
+enum PreparationOutcome {
+  PREPARATION_OUTCOME_UNSPECIFIED = 0;
+  PREPARATION_OUTCOME_BATCH_PREPARED = 1;
+  PREPARATION_OUTCOME_EXPIRED = 2;
+  PREPARATION_OUTCOME_UNAVAILABLE = 3;
+}

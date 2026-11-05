@@ -1,0 +1,30 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+import "trogonai/peers/v1alpha1/peer_attached.proto";
+import "trogonai/peers/v1alpha1/peer_batch_acknowledged.proto";
+import "trogonai/peers/v1alpha1/peer_batch_prepared.proto";
+import "trogonai/peers/v1alpha1/peer_detached.proto";
+import "trogonai/peers/v1alpha1/peer_enrolled.proto";
+import "trogonai/peers/v1alpha1/peer_heartbeat_recorded.proto";
+import "trogonai/peers/v1alpha1/peer_message_accepted.proto";
+import "trogonai/peers/v1alpha1/peer_message_disposed.proto";
+import "trogonai/peers/v1alpha1/peer_message_intake_recorded.proto";
+import "trogonai/peers/v1alpha1/peer_message_settled.proto";
+
+// The peer stream owns both attachment fencing and communication effects.
+message PeerEvent {
+  oneof event {
+    PeerEnrolled peer_enrolled = 1;
+    PeerAttached peer_attached = 2;
+    PeerHeartbeatRecorded peer_heartbeat_recorded = 3;
+    PeerDetached peer_detached = 4;
+    PeerMessageAccepted peer_message_accepted = 5;
+    PeerMessageIntakeRecorded peer_message_intake_recorded = 6;
+    PeerBatchPrepared peer_batch_prepared = 7;
+    PeerBatchAcknowledged peer_batch_acknowledged = 8;
+    PeerMessageDisposed peer_message_disposed = 9;
+    PeerMessageSettled peer_message_settled = 10;
+  }
+}

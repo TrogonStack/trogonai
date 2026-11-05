@@ -1,0 +1,40 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+import "trogon/nats/micro/v1alpha1/options.proto";
+import "trogonai/peers/v1alpha1/acknowledge_batch_request.proto";
+import "trogonai/peers/v1alpha1/acknowledge_batch_response.proto";
+import "trogonai/peers/v1alpha1/detach_request.proto";
+import "trogonai/peers/v1alpha1/detach_response.proto";
+import "trogonai/peers/v1alpha1/enroll_request.proto";
+import "trogonai/peers/v1alpha1/enroll_response.proto";
+import "trogonai/peers/v1alpha1/heartbeat_request.proto";
+import "trogonai/peers/v1alpha1/heartbeat_response.proto";
+import "trogonai/peers/v1alpha1/prepare_batch_request.proto";
+import "trogonai/peers/v1alpha1/prepare_batch_response.proto";
+import "trogonai/peers/v1alpha1/roster_request.proto";
+import "trogonai/peers/v1alpha1/roster_response.proto";
+import "trogonai/peers/v1alpha1/send_request.proto";
+import "trogonai/peers/v1alpha1/send_response.proto";
+import "trogonai/peers/v1alpha1/status_request.proto";
+import "trogonai/peers/v1alpha1/status_response.proto";
+
+// Internal NATS-backed service. The subject binds tenant and caller before the
+// protobuf request is decoded; application inputs cannot override that identity.
+service PeerService {
+  option (trogon.nats.micro.v1alpha1.service) = {
+    version: "0.1.0"
+    description: "Coordinates enrolled peer communication"
+    content_type: CONTENT_TYPE_PROTOBUF
+  };
+
+  rpc Enroll(EnrollRequest) returns (EnrollResponse);
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  rpc Detach(DetachRequest) returns (DetachResponse);
+  rpc Roster(RosterRequest) returns (RosterResponse);
+  rpc Send(SendRequest) returns (SendResponse);
+  rpc Status(StatusRequest) returns (StatusResponse);
+  rpc PrepareBatch(PrepareBatchRequest) returns (PrepareBatchResponse);
+  rpc AcknowledgeBatch(AcknowledgeBatchRequest) returns (AcknowledgeBatchResponse);
+}

@@ -1,0 +1,11 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+enum PeerAvailability {
+  PEER_AVAILABILITY_UNSPECIFIED = 0;
+  PEER_AVAILABILITY_READY = 1;
+  PEER_AVAILABILITY_BUSY = 2;
+  PEER_AVAILABILITY_BLOCKED = 3;
+  PEER_AVAILABILITY_DRAINING = 4;
+}
