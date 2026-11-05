@@ -25,6 +25,8 @@ fn run(policy_file: &Path) -> Output {
         .arg(policy_file)
         .args(["--tls-cert", "unused-server.pem", "--tls-key", "unused-server.key"])
         .args(["--client-ca", "unused-ca.pem", "--trust-domain", "trogon.example"])
+        .args(["--tenant", "acme", "--project", "payments", "--instance", "egress-1"])
+        .args(["--nats-url", "nats://127.0.0.1:1"])
         .env_remove("RUST_LOG")
         .output()
         .expect("binary runs")
@@ -32,6 +34,68 @@ fn run(policy_file: &Path) -> Output {
 
 fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
+}
+
+#[test]
+fn a_missing_audit_setting_is_a_startup_failure() {
+    let dir = tempfile::tempdir().expect("dir");
+    let policy = dir.path().join("policy.toml");
+    std::fs::write(&policy, POLICY).expect("write");
+    let output = Command::new(env!("CARGO_BIN_EXE_trogon-egress-proxy"))
+        .arg("--policy-file")
+        .arg(&policy)
+        .args([
+            "--tls-cert",
+            "a",
+            "--tls-key",
+            "b",
+            "--client-ca",
+            "c",
+            "--trust-domain",
+            "trogon.example",
+        ])
+        .env_remove("NATS_URL")
+        .env_remove("TROGON_EGRESS_TENANT")
+        .env_remove("TROGON_EGRESS_PROJECT")
+        .env_remove("TROGON_EGRESS_INSTANCE")
+        .output()
+        .expect("binary runs");
+    assert!(!output.status.success());
+    let stderr = stderr(&output);
+    assert!(stderr.contains("--tenant"), "{stderr}");
+}
+
+#[test]
+fn a_malformed_audit_setting_is_a_startup_failure() {
+    let dir = tempfile::tempdir().expect("dir");
+    let policy = dir.path().join("policy.toml");
+    std::fs::write(&policy, POLICY).expect("write");
+    let output = Command::new(env!("CARGO_BIN_EXE_trogon-egress-proxy"))
+        .arg("--policy-file")
+        .arg(&policy)
+        .args([
+            "--tls-cert",
+            "a",
+            "--tls-key",
+            "b",
+            "--client-ca",
+            "c",
+            "--trust-domain",
+            "trogon.example",
+        ])
+        .args([
+            "--tenant",
+            "not a tenant",
+            "--project",
+            "payments",
+            "--instance",
+            "egress-1",
+        ])
+        .args(["--nats-url", "nats://127.0.0.1:1"])
+        .output()
+        .expect("binary runs");
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("invalid tenant"), "{}", stderr(&output));
 }
 
 #[test]
@@ -93,6 +157,19 @@ async fn a_listen_address_that_is_taken_is_a_startup_failure() {
     };
     assert_eq!(named, address);
     assert_eq!(source.kind(), std::io::ErrorKind::AddrInUse);
+}
+
+#[tokio::test]
+async fn a_configured_audit_stream_that_does_not_answer_does_not_stop_startup() {
+    let dir = tempfile::tempdir().expect("dir");
+    let config = startable(dir.path());
+    assert_eq!(config.audit.nats.servers, ["nats://127.0.0.1:1"]);
+
+    let server = tokio::time::timeout(std::time::Duration::from_secs(20), start(config))
+        .await
+        .expect("startup does not wait for the stream")
+        .unwrap_or_else(|error| panic!("{error:?}"));
+    assert!(server.local_addr().is_ok());
 }
 
 #[tokio::test]

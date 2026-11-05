@@ -6,26 +6,35 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use buffa::Message;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream, ReadBuf};
 use tokio::net::TcpListener;
+use tokio::sync::oneshot;
+use tokio_util::sync::CancellationToken;
+use trogon_audit::{AuditName, AuditWriter, MemorySink, SealedRecord, SinkError, WriterConfig, WriterId};
+use trogon_nats::NatsToken;
+use trogonai_proto::platform::audit::v1::AuditRecord;
 
 use super::*;
 use crate::policy_snapshot::SnapshotVerdict;
 use crate::policy_source::PolicySource;
 use crate::static_snapshot::StaticSnapshot;
+use crate::writer_audit::WriterAudit;
 
 type Record = (Option<String>, Option<IpAddr>, Decision);
 
 #[derive(Default)]
 struct Recorder(Mutex<Vec<Record>>);
 
+#[async_trait]
 impl AuditSink for Recorder {
-    fn record(&self, event: &AuditEvent<'_>) {
+    async fn record(&self, event: &AuditEvent<'_>) -> Result<(), AuditError> {
         self.0.lock().expect("lock").push((
             event.destination.map(ToString::to_string),
             event.resolved_address,
             event.decision,
         ));
+        Ok(())
     }
 }
 
@@ -435,13 +444,17 @@ async fn a_tls_port_tunnel_is_cut_when_the_first_bytes_are_not_a_client_hello() 
     let request = format!("CONNECT upstream.test:{port} HTTP/1.1\r\n\r\nGET / HTTP/1.1\r\n\r\n");
     let response = exchange(&proxy, |client| send_and_read_all(client, request.into_bytes())).await;
     assert_eq!(text(&response), "HTTP/1.1 200 Connection Established\r\n\r\n");
+    let address: Option<IpAddr> = Some("127.0.0.1".parse().expect("ip"));
     assert_eq!(
         audit.events(),
-        vec![(
-            Some(format!("upstream.test:{port}")),
-            Some("127.0.0.1".parse().expect("ip")),
-            Decision::Refused(Fault::SniMismatch)
-        )]
+        vec![
+            (Some(format!("upstream.test:{port}")), address, Decision::Permitted),
+            (
+                Some(format!("upstream.test:{port}")),
+                address,
+                Decision::Refused(Fault::SniMismatch)
+            ),
+        ]
     );
 }
 
@@ -456,7 +469,8 @@ async fn a_tunnel_that_never_sends_a_first_record_is_cut() {
     let request = format!("CONNECT upstream.test:{port} HTTP/1.1\r\n\r\n");
     let response = exchange(&proxy, |client| send_and_read_all(client, request.into_bytes())).await;
     assert_eq!(text(&response), "HTTP/1.1 200 Connection Established\r\n\r\n");
-    assert_eq!(audit.events()[0].2, Decision::Refused(Fault::SniMismatch));
+    let decisions: Vec<Decision> = audit.events().into_iter().map(|event| event.2).collect();
+    assert_eq!(decisions, [Decision::Permitted, Decision::Refused(Fault::SniMismatch)]);
 }
 
 #[tokio::test]
@@ -477,4 +491,197 @@ async fn configured_non_tls_ports_skip_the_sni_check() {
     .await;
     assert_eq!(text(&received), "HTTP/1.1 200 Connection Established\r\n\r\nPING");
     assert_eq!(audit.events()[0].2, Decision::Permitted);
+}
+
+/// A proxy whose decisions go through the real writer into `sink`.
+fn audited_proxy(allow: &[String], names: &[(&str, &str)], non_tls: &[u16], sink: &MemorySink) -> Proxy {
+    let writer = AuditWriter::new(
+        sink.clone(),
+        WriterId::new("egress-proxy:test").expect("writer"),
+        WriterConfig::default(),
+    );
+    let audit = WriterAudit::new(
+        writer,
+        AuditName::new("acme").expect("tenant"),
+        NatsToken::new("payments").expect("project"),
+    );
+    let resolver = Names(
+        names
+            .iter()
+            .map(|(name, ip)| ((*name).to_owned(), vec![ip.parse().expect("ip")]))
+            .collect(),
+    );
+    Proxy::new(
+        snapshot(allow),
+        Arc::new(resolver),
+        Arc::new(audit),
+        limits(),
+        non_tls.iter().map(|p| NonZeroU16::new(*p).expect("port")).collect(),
+    )
+}
+
+fn decoded(record: &SealedRecord) -> AuditRecord {
+    AuditRecord::decode_from_slice(record.payload()).expect("a stored record is an audit record")
+}
+
+fn decision_of(record: &SealedRecord) -> (String, Option<String>) {
+    let message = decoded(record);
+    let decision = format!("{:?}", message.attribution.decision);
+    (decision, message.attribution.reason_code.clone())
+}
+
+/// An upstream that accepts one connection and reports how many bytes it was
+/// sent before the proxy closed it.
+async fn counting_upstream() -> (u16, oneshot::Receiver<usize>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let port = listener.local_addr().expect("addr").port();
+    let (sender, receiver) = oneshot::channel();
+    tokio::spawn(async move {
+        let Ok((mut stream, _)) = listener.accept().await else {
+            return;
+        };
+        let mut received = Vec::new();
+        let _ = stream.read_to_end(&mut received).await;
+        let _ = sender.send(received.len());
+    });
+    (port, receiver)
+}
+
+#[tokio::test]
+async fn a_permit_is_stored_before_the_client_is_told_the_tunnel_is_open() {
+    let port = echo_upstream().await;
+    let sink = MemorySink::new();
+    let proxy = audited_proxy(&[format!("127.0.0.1:{port}")], &[], &[], &sink);
+    let request = format!("CONNECT 127.0.0.1:{port} HTTP/1.1\r\n\r\n");
+    let stored_when_established = Arc::new(Mutex::new(Vec::new()));
+    exchange(&proxy, |mut client| {
+        let sink = sink.clone();
+        let observed = stored_when_established.clone();
+        async move {
+            client.write_all(request.as_bytes()).await.expect("write");
+            let mut established = vec![0u8; 39];
+            client.read_exact(&mut established).await.expect("read");
+            assert_eq!(text(&established), "HTTP/1.1 200 Connection Established\r\n\r\n");
+            *observed.lock().expect("lock") = sink.stored();
+            Vec::new()
+        }
+    })
+    .await;
+    let stored = stored_when_established.lock().expect("lock").clone();
+    assert_eq!(stored.len(), 1, "the permit was stored by the time 200 arrived");
+    let (decision, reason) = decision_of(&stored[0]);
+    assert!(decision.contains("ALLOW"), "{decision}");
+    assert_eq!(reason, None);
+}
+
+#[tokio::test]
+async fn a_permit_that_cannot_be_recorded_gets_503_and_the_upstream_sees_no_byte() {
+    let (port, upstream_received) = counting_upstream().await;
+    let sink = MemorySink::new();
+    sink.fail_all(SinkError::Unreachable);
+    let proxy = audited_proxy(&[format!("127.0.0.1:{port}")], &[], &[], &sink);
+    let request = format!("CONNECT 127.0.0.1:{port} HTTP/1.1\r\n\r\nearly bytes");
+    let response = exchange(&proxy, |client| send_and_read_all(client, request.into_bytes())).await;
+    assert_refusal(&response, "503", "AUDIT_UNAVAILABLE");
+    let response = text(&response);
+    assert!(response.contains("retry-after: 5\r\n"), "{response}");
+    assert!(!response.contains("200 Connection Established"), "{response}");
+    assert_eq!(upstream_received.await.expect("upstream closed"), 0);
+    assert!(sink.stored().is_empty());
+    assert_eq!(
+        sink.attempts(),
+        1,
+        "the refusal for audit being down is not itself recorded"
+    );
+}
+
+#[tokio::test]
+async fn a_request_with_no_permit_is_still_refused_with_403_when_audit_is_down() {
+    let sink = MemorySink::new();
+    sink.fail_all(SinkError::Unreachable);
+    let proxy = audited_proxy(&["example.com:443".to_owned()], &[], &[], &sink);
+    let response = exchange(&proxy, |client| {
+        send_and_read_all(client, b"CONNECT other.example:443 HTTP/1.1\r\n\r\n".to_vec())
+    })
+    .await;
+    assert_refusal(&response, "403", "NO_PERMIT");
+    assert!(sink.attempts() >= 1, "the refusal was still offered to the stream");
+    assert!(sink.stored().is_empty());
+}
+
+#[tokio::test]
+async fn a_refusal_is_stored_with_its_reason_when_audit_is_up() {
+    let sink = MemorySink::new();
+    let proxy = audited_proxy(&["example.com:443".to_owned()], &[], &[], &sink);
+    let response = exchange(&proxy, |client| {
+        send_and_read_all(client, b"CONNECT other.example:443 HTTP/1.1\r\n\r\n".to_vec())
+    })
+    .await;
+    assert_refusal(&response, "403", "NO_PERMIT");
+    let stored = sink.stored();
+    assert_eq!(stored.len(), 1);
+    let (decision, reason) = decision_of(&stored[0]);
+    assert!(decision.contains("DENY"), "{decision}");
+    assert_eq!(reason.as_deref(), Some("no_permit"));
+}
+
+#[tokio::test]
+async fn an_sni_mismatch_leaves_the_permit_that_opened_the_tunnel_and_a_refusal() {
+    let port = echo_upstream().await;
+    let sink = MemorySink::new();
+    let proxy = audited_proxy(
+        &[format!("upstream.test:{port}"), format!("127.0.0.1:{port}")],
+        &[("upstream.test", "127.0.0.1")],
+        &[],
+        &sink,
+    );
+    let request = format!("CONNECT upstream.test:{port} HTTP/1.1\r\n\r\nGET / HTTP/1.1\r\n\r\n");
+    let response = exchange(&proxy, |client| send_and_read_all(client, request.into_bytes())).await;
+    assert_eq!(text(&response), "HTTP/1.1 200 Connection Established\r\n\r\n");
+    let stored = sink.stored();
+    assert_eq!(stored.len(), 2);
+    let (first, first_reason) = decision_of(&stored[0]);
+    assert!(first.contains("ALLOW"), "{first}");
+    assert_eq!(first_reason, None);
+    let (second, second_reason) = decision_of(&stored[1]);
+    assert!(second.contains("DENY"), "{second}");
+    assert_eq!(second_reason.as_deref(), Some("sni_mismatch"));
+}
+
+#[tokio::test]
+async fn no_header_value_reaches_a_record() {
+    let canary = "canary-8c1f6f1e-header-value";
+    let port = echo_upstream().await;
+    let sink = MemorySink::new();
+    let proxy = audited_proxy(
+        &[format!("upstream.test:{port}"), format!("127.0.0.1:{port}")],
+        &[("upstream.test", "127.0.0.1")],
+        &[],
+        &sink,
+    );
+    let request = format!(
+        "CONNECT upstream.test:{port} HTTP/1.1\r\nProxy-Authorization: Bearer {canary}\r\nX-Api-Key: {canary}\r\n\r\n"
+    );
+    exchange(&proxy, |client| send_and_read_all(client, request.into_bytes())).await;
+
+    let refused = format!("CONNECT other.example:443 HTTP/1.1\r\nAuthorization: {canary}\r\n\r\n");
+    exchange(&proxy, |client| send_and_read_all(client, refused.into_bytes())).await;
+
+    let stored = sink.stored();
+    assert_eq!(stored.len(), 3);
+    for record in &stored {
+        let payload = String::from_utf8_lossy(record.payload()).into_owned();
+        let headers = format!("{:?}", record.headers());
+        assert!(!payload.contains(canary), "{payload}");
+        assert!(!headers.contains(canary), "{headers}");
+    }
+}
+
+#[tokio::test]
+async fn the_proxy_hands_out_the_audit_it_records_to() {
+    let (proxy, audit) = proxy(snapshot(&["example.com:443".to_owned()]), &[], &[]);
+    let shutdown = CancellationToken::new();
+    shutdown.cancel();
+    proxy.audit().run(shutdown).await;
+    assert!(audit.events().is_empty());
 }
