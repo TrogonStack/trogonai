@@ -122,15 +122,15 @@ fn mailbox_and_roster_collections_charge_even_empty_elements_against_decode_limi
 #[test]
 fn attachment_fragments_merge_while_later_scalar_values_replace_earlier_values() {
     let first = assert_json_codec::<proto::SendRequest>(json!({
-        "attachment": {"peerId": "peer_alpha", "connectorId": "connector_old"},
+        "attachmentRef": {"peerId": "peer_alpha", "connectorId": "connector_old"},
         "recipientPeerId": "peer_beta", "idempotencyKey": "send_original", "text": "first"
     }));
     let second = assert_json_codec::<proto::SendRequest>(json!({
-        "attachment": {"connectorId": "connector_alpha", "generation": "7"},
+        "attachmentRef": {"connectorId": "connector_alpha", "generation": "7"},
         "idempotencyKey": "send_current", "text": "second"
     }));
     let expected = assert_json_codec::<proto::SendRequest>(json!({
-        "attachment": fixtures::attachment_ref(), "recipientPeerId": "peer_beta",
+        "attachmentRef": fixtures::attachment_ref(), "recipientPeerId": "peer_beta",
         "idempotencyKey": "send_current", "text": "second"
     }));
     assert_wire_codec(&[first.encode_to_vec(), second.encode_to_vec()].concat(), &expected);

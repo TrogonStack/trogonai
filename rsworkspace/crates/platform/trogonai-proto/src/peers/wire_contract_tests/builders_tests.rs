@@ -38,7 +38,7 @@ fn identity_builders_match_wire_fields_and_replace_only_the_selected_value() {
         .with_display_name("Review");
     assert_builder(enrollment, fixtures::enrollment());
     let attachment: proto::PeerAttachment = nested(json!({
-        "attachment": fixtures::attachment_ref(), "observedAt": fixtures::OBSERVED, "expiresAt": fixtures::LEASE_END
+        "attachmentRef": fixtures::attachment_ref(), "observedAt": fixtures::OBSERVED, "expiresAt": fixtures::LEASE_END
     }));
     assert_builder(
         attachment.with_status(proto::AttachmentStatus::ATTACHMENT_STATUS_ATTACHED),
@@ -156,17 +156,17 @@ fn enrollment_and_query_builders_match_their_public_rpc_contracts() {
         json!({"peerId": "peer_alpha", "attachment": fixtures::attachment()}),
     );
     let heartbeat: proto::HeartbeatRequest =
-        nested(json!({"attachment": fixtures::attachment_ref(), "activeAt": fixtures::OBSERVED}));
+        nested(json!({"attachmentRef": fixtures::attachment_ref(), "activeAt": fixtures::OBSERVED}));
     assert_builder(
         heartbeat
             .with_availability(proto::PeerAvailability::PEER_AVAILABILITY_BLOCKED)
             .with_condition(proto::PeerCondition::PEER_CONDITION_INPUT),
-        json!({"attachment": fixtures::attachment_ref(), "availability": "PEER_AVAILABILITY_BLOCKED", "condition": "PEER_CONDITION_INPUT", "activeAt": fixtures::OBSERVED}),
+        json!({"attachmentRef": fixtures::attachment_ref(), "availability": "PEER_AVAILABILITY_BLOCKED", "condition": "PEER_CONDITION_INPUT", "activeAt": fixtures::OBSERVED}),
     );
-    let roster: proto::RosterRequest = nested(json!({"attachment": fixtures::attachment_ref()}));
+    let roster: proto::RosterRequest = nested(json!({"attachmentRef": fixtures::attachment_ref()}));
     assert_builder(
         roster.with_page_size(16).with_page_token("cursor_current"),
-        json!({"attachment": fixtures::attachment_ref(), "pageSize": 16, "pageToken": "cursor_current"}),
+        json!({"attachmentRef": fixtures::attachment_ref(), "pageSize": 16, "pageToken": "cursor_current"}),
     );
     let roster: proto::RosterResponse = nested(json!({"peers": [fixtures::presence()]}));
     assert_builder(
@@ -177,7 +177,7 @@ fn enrollment_and_query_builders_match_their_public_rpc_contracts() {
 
 #[test]
 fn message_rpc_builders_keep_target_retry_key_and_batch_coordinates() {
-    let send: proto::SendRequest = nested(json!({"attachment": fixtures::attachment_ref()}));
+    let send: proto::SendRequest = nested(json!({"attachmentRef": fixtures::attachment_ref()}));
     let send = send
         .with_recipient_peer_id("peer_beta")
         .with_idempotency_key("send_outgoing")
@@ -185,12 +185,12 @@ fn message_rpc_builders_keep_target_retry_key_and_batch_coordinates() {
         .with_reply_to_message_id("message_previous");
     assert_builder(
         send,
-        json!({"attachment": fixtures::attachment_ref(), "recipientPeerId": "peer_beta", "idempotencyKey": "send_outgoing", "text": "hello peer", "replyToMessageId": "message_previous"}),
+        json!({"attachmentRef": fixtures::attachment_ref(), "recipientPeerId": "peer_beta", "idempotencyKey": "send_outgoing", "text": "hello peer", "replyToMessageId": "message_previous"}),
     );
-    let status: proto::StatusRequest = nested(json!({"attachment": fixtures::attachment_ref()}));
+    let status: proto::StatusRequest = nested(json!({"attachmentRef": fixtures::attachment_ref()}));
     assert_builder(
         status.with_idempotency_key("send_outgoing"),
-        json!({"attachment": fixtures::attachment_ref(), "idempotencyKey": "send_outgoing"}),
+        json!({"attachmentRef": fixtures::attachment_ref(), "idempotencyKey": "send_outgoing"}),
     );
     let status: proto::StatusResponse =
         nested(json!({"message": fixtures::metadata(), "observedAt": fixtures::PREPARED}));
@@ -198,20 +198,20 @@ fn message_rpc_builders_keep_target_retry_key_and_batch_coordinates() {
         status.with_status(proto::MessageStatus::MESSAGE_STATUS_BATCH_PREPARED),
         json!({"message": fixtures::metadata(), "status": "MESSAGE_STATUS_BATCH_PREPARED", "observedAt": fixtures::PREPARED}),
     );
-    let prepare: proto::PrepareBatchRequest = nested(json!({"attachment": fixtures::attachment_ref()}));
+    let prepare: proto::PrepareBatchRequest = nested(json!({"attachmentRef": fixtures::attachment_ref()}));
     assert_builder(
         prepare.with_prompt_id("prompt_alpha"),
-        json!({"attachment": fixtures::attachment_ref(), "promptId": "prompt_alpha"}),
+        json!({"attachmentRef": fixtures::attachment_ref(), "promptId": "prompt_alpha"}),
     );
     let prepared: proto::PrepareBatchResponse = nested(json!({"batch": fixtures::batch()}));
     assert_builder(
         prepared.with_content_availability(proto::ContentAvailability::CONTENT_AVAILABILITY_RETRY_UNAVAILABLE),
         json!({"batch": fixtures::batch(), "contentAvailability": "CONTENT_AVAILABILITY_RETRY_UNAVAILABLE"}),
     );
-    let acknowledge: proto::AcknowledgeBatchRequest = nested(json!({"attachment": fixtures::attachment_ref()}));
+    let acknowledge: proto::AcknowledgeBatchRequest = nested(json!({"attachmentRef": fixtures::attachment_ref()}));
     assert_builder(
         acknowledge.with_batch_id("batch_local"),
-        json!({"attachment": fixtures::attachment_ref(), "batchId": "batch_local"}),
+        json!({"attachmentRef": fixtures::attachment_ref(), "batchId": "batch_local"}),
     );
 }
 

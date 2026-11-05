@@ -12,7 +12,7 @@ pub(super) fn attachment_ref() -> Value {
 
 pub(super) fn attachment() -> Value {
     json!({
-        "attachment": attachment_ref(), "status": "ATTACHMENT_STATUS_ATTACHED",
+        "attachmentRef": attachment_ref(), "status": "ATTACHMENT_STATUS_ATTACHED",
         "observedAt": OBSERVED, "expiresAt": LEASE_END
     })
 }
@@ -114,7 +114,7 @@ pub(super) fn events() -> Vec<Value> {
         json!({"peerEnrolled": {"enrollment": enrollment()}}),
         json!({"peerAttached": {"attachment": attachment()}}),
         json!({"peerHeartbeatRecorded": {"attachment": attachment(), "availability": "PEER_AVAILABILITY_BLOCKED", "condition": "PEER_CONDITION_RATE_LIMIT", "activeAt": OBSERVED}}),
-        json!({"peerDetached": {"attachment": attachment_ref(), "detachedAt": LEASE_END}}),
+        json!({"peerDetached": {"attachmentRef": attachment_ref(), "detachedAt": LEASE_END}}),
         json!({"peerMessageAccepted": {"entry": outbox()}}),
         json!({"peerMessageIntakeRecorded": {"entry": inbox("message_incoming_one", 7)}}),
         json!({"peerBatchPrepared": {"batch": batch(), "receipts": [incoming_receipt("message_incoming_one", 11), incoming_receipt("message_incoming_two", 12)]}}),

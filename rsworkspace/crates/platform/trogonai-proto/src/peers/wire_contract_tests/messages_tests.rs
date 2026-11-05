@@ -36,7 +36,7 @@ fn identity_and_presence_views_keep_owner_attachment_and_activity_distinct() {
         proto::PeerAttachmentOwnedView,
         fixtures::attachment(),
         |handle| {
-            assert_eq!(handle.attachment().as_option().unwrap().generation, Some(7));
+            assert_eq!(handle.attachment_ref().as_option().unwrap().generation, Some(7));
             assert_eq!(
                 handle.status().and_then(|status| status.as_known()),
                 Some(proto::AttachmentStatus::ATTACHMENT_STATUS_ATTACHED)
@@ -196,7 +196,10 @@ fn peer_state_retention_keeps_mailbox_order_and_attachment_fence_together() {
         fixtures::state(),
         |handle| {
             assert_eq!(handle.enrollment().as_option().unwrap().peer_id, Some("peer_alpha"));
-            assert_eq!(handle.attachment().as_option().unwrap().attachment.generation, Some(7));
+            assert_eq!(
+                handle.attachment().as_option().unwrap().attachment_ref.generation,
+                Some(7)
+            );
             assert_eq!(
                 handle.availability().and_then(|value| value.as_known()),
                 Some(proto::PeerAvailability::PEER_AVAILABILITY_BLOCKED)
@@ -229,7 +232,7 @@ fn wire_presence_preserves_zero_empty_values_and_empty_nested_messages() {
     assert_eq!(present.generation, Some(0));
     assert_eq!(present.peer_id.as_deref(), Some(""));
     assert_ne!(absent, present);
-    assert_json_codec::<proto::PeerAttachment>(json!({"attachment": {}, "status": "ATTACHMENT_STATUS_UNSPECIFIED"}));
+    assert_json_codec::<proto::PeerAttachment>(json!({"attachmentRef": {}, "status": "ATTACHMENT_STATUS_UNSPECIFIED"}));
     assert_json_codec::<proto::MessageMetadata>(json!({"contentSizeBytes": 0, "contentDigest": ""}));
     assert_json_codec::<proto::InboxEntry>(json!({"message": {}, "intakeOrdinal": "0", "disposition": {}}));
     assert_json_codec::<proto::OutboxEntry>(

@@ -5,12 +5,16 @@
 #[derive(::serde::Serialize, ::serde::Deserialize)]
 #[serde(default)]
 pub struct PeerDetached {
-    /// Field 1: `attachment`
+    /// Field 1: `attachment_ref`
     #[serde(
-        rename = "attachment",
+        rename = "attachmentRef",
+        alias = "attachment_ref",
         skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
     )]
-    pub attachment: ::buffa::MessageField<AttachmentRef, ::buffa::Inline<AttachmentRef>>,
+    pub attachment_ref: ::buffa::MessageField<
+        AttachmentRef,
+        ::buffa::Inline<AttachmentRef>,
+    >,
     /// Field 2: `detached_at`
     #[serde(
         rename = "detachedAt",
@@ -25,7 +29,7 @@ pub struct PeerDetached {
 impl ::core::fmt::Debug for PeerDetached {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("PeerDetached")
-            .field("attachment", &self.attachment)
+            .field("attachment_ref", &self.attachment_ref)
             .field("detached_at", &self.detached_at)
             .finish()
     }
@@ -57,9 +61,9 @@ impl ::buffa::Message for PeerDetached {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u64;
-        if self.attachment.is_set() {
+        if self.attachment_ref.is_set() {
             let __slot = __cache.reserve();
-            let inner_size = self.attachment.compute_size(__cache);
+            let inner_size = self.attachment_ref.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
                 += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
@@ -82,13 +86,13 @@ impl ::buffa::Message for PeerDetached {
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        if self.attachment.is_set() {
+        if self.attachment_ref.is_set() {
             ::buffa::types::put_len_delimited_header(
                 1u32,
                 u64::from(__cache.consume_next()),
                 buf,
             );
-            self.attachment.write_to(__cache, buf);
+            self.attachment_ref.write_to(__cache, buf);
         }
         if self.detached_at.is_set() {
             ::buffa::types::put_len_delimited_header(
@@ -116,7 +120,7 @@ impl ::buffa::Message for PeerDetached {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 ::buffa::Message::merge_length_delimited(
-                    self.attachment.get_or_insert_default(),
+                    self.attachment_ref.get_or_insert_default(),
                     buf,
                     ctx,
                 )?;
@@ -139,7 +143,7 @@ impl ::buffa::Message for PeerDetached {
         ::core::result::Result::Ok(())
     }
     fn clear(&mut self) {
-        self.attachment = ::buffa::MessageField::none();
+        self.attachment_ref = ::buffa::MessageField::none();
         self.detached_at = ::buffa::MessageField::none();
     }
 }
