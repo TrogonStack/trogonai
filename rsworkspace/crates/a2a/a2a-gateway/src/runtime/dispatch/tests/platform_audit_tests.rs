@@ -11,7 +11,7 @@ use trogon_nats::test_support::JetStreamTestServer;
 use trogonai_proto::platform::audit::v1::{AuditDecision, AuditRecord};
 
 use super::RejectingGate;
-use super::fixture::{AUDIT_PROJECT, DispatchFixture, RecordingTier1, TestResult, receive, request};
+use super::fixture::{AUDIT_PROJECT, DispatchFixture, RecordingOwner, RecordingTier1, TestResult, receive, request};
 use crate::policy::spicedb_tier1::Tier1AuthorizeOutcome;
 use crate::policy::tier2::DenyAllTier2Evaluator;
 use crate::policy::tier3_redaction::Tier3RedactionDecision;
@@ -193,6 +193,36 @@ async fn nothing_is_recorded_on_the_platform_path_when_it_is_off() -> TestResult
     fixture.dispatch(request("message.send", json!({}))).await;
     receive(&mut fixture.agents).await?;
     fixture.audit("ok").await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn no_owner_tuple_is_written_when_the_allow_record_cannot_be_stored() -> TestResult {
+    let mut fixture = DispatchFixture::new().await?;
+    let (sink, _writer) = fixture.enable_memory_audit();
+    let owner = Arc::new(RecordingOwner::default());
+    fixture.tier1 = Arc::new(RecordingTier1::new(Tier1AuthorizeOutcome::Allowed { zed_token: None }));
+    fixture.owner = Some(owner.clone());
+    sink.fail_all(SinkError::Unreachable);
+    fixture.dispatch(request("message.send", json!({"id": "task-1"}))).await;
+    fixture.denied(-32804, json!("request-7")).await?;
+    assert!(owner.calls.lock().expect("owner calls").is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_owner_tuple_is_written_once_the_allow_record_is_stored() -> TestResult {
+    let mut fixture = DispatchFixture::new().await?;
+    let (sink, _writer) = fixture.enable_memory_audit();
+    let owner = Arc::new(RecordingOwner::default());
+    fixture.tier1 = Arc::new(RecordingTier1::new(Tier1AuthorizeOutcome::Allowed { zed_token: None }));
+    fixture.owner = Some(owner.clone());
+    fixture.dispatch(request("message.send", json!({"id": "task-1"}))).await;
+    receive(&mut fixture.agents).await?;
+    assert_eq!(only(&sink).subject(), subject("allow"));
+    let calls = owner.calls.lock().expect("owner calls").clone();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].resource_id.as_str(), "bot:task-1");
     Ok(())
 }
 

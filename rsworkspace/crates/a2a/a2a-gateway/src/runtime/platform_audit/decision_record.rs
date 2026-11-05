@@ -29,9 +29,7 @@ use trogon_nats::NatsToken;
 use super::audit_error::AuditError;
 use super::audit_names::name_of;
 use super::decision_event::{AllowedLayers, DecisionEvent, Verdict};
-
-const TIER1_LAYER: &str = "tier1_spicedb";
-const TIER3_LAYER: &str = "tier3";
+use crate::constants::{AUDIT_LAYER_TIER1_SPICEDB, AUDIT_LAYER_TIER3};
 
 pub(crate) fn decision_record(
     event: &DecisionEvent<'_>,
@@ -97,7 +95,7 @@ fn allowed_layers(layers: AllowedLayers<'_>) -> Result<Vec<LayerFacts>, AuditErr
     let mut verdicts = Vec::with_capacity(2);
     if layers.tier1_spicedb {
         let mut tier1 = LayerFacts::new(
-            AuditName::new(TIER1_LAYER)?,
+            AuditName::new(AUDIT_LAYER_TIER1_SPICEDB)?,
             DecisionOutcome::Allow(Enforcement::Enforce),
         );
         // A token that is not one a record may carry is left off: the layer still
@@ -109,7 +107,7 @@ fn allowed_layers(layers: AllowedLayers<'_>) -> Result<Vec<LayerFacts>, AuditErr
     }
     if layers.tier3 {
         verdicts.push(LayerFacts::new(
-            AuditName::new(TIER3_LAYER)?,
+            AuditName::new(AUDIT_LAYER_TIER3)?,
             DecisionOutcome::Allow(Enforcement::Enforce),
         ));
     }

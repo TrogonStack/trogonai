@@ -258,6 +258,7 @@ async fn dispatch_routed<E: ReadEnv>(
     let headers_owned = without_identity_headers(&inbound_headers);
     let caller_spicedb = CallerSpiceDbSubject::from(&caller);
     let mut tier1_zed_token: Option<String> = None;
+    let mut pending_owner: Option<Tier1OwnerTuple> = None;
 
     if tier1.is_enabled() {
         match run_tier1_spicedb(
@@ -282,8 +283,9 @@ async fn dispatch_routed<E: ReadEnv>(
         )
         .await
         {
-            Tier1SpiceDbStepOutcome::Allow { zed_token } => {
+            Tier1SpiceDbStepOutcome::Allow { zed_token, owner } => {
                 tier1_zed_token = zed_token;
+                pending_owner = owner;
             }
             Tier1SpiceDbStepOutcome::Denied => {
                 tracing::Span::current().record(ATTR_ROUTING_OUTCOME, ROUTING_TIER1_DENIED);
@@ -614,6 +616,18 @@ async fn dispatch_routed<E: ReadEnv>(
         return;
     }
 
+    // The ownership tuple is a policy change, so it is written only after the allow
+    // that authorises it is stored. A request refused above leaves none behind.
+    if let Some(owner) = pending_owner
+        && let Some(emitter) = tier1_owner
+        && let Err(error) = emitter.emit_owner(&owner).await
+    {
+        warn!(
+            error = %error,
+            "gateway tier-1 owner tuple write failed -- dispatch continues",
+        );
+    }
+
     // Anchor the streaming pump before the agent can publish anything: the pump is
     // spawned after the forward and creates its consumer asynchronously, so the
     // start position has to be read from this side of the publish.
@@ -800,7 +814,12 @@ async fn handle_ingress_routing_failure(
 }
 
 enum Tier1SpiceDbStepOutcome {
-    Allow { zed_token: Option<String> },
+    Allow {
+        zed_token: Option<String>,
+        /// The ownership tuple a `message/send` creates. It is a policy change, so it
+        /// is emitted only once the allow record is stored.
+        owner: Option<Tier1OwnerTuple>,
+    },
     Denied,
 }
 
@@ -856,17 +875,12 @@ async fn run_tier1_spicedb<'a, E: ReadEnv>(
     };
     match tier1.authorize(&session, &principal, &tuple).await {
         Tier1AuthorizeOutcome::Allowed { zed_token } => {
-            if matches!(method, A2aMethod::MessageSend)
-                && let Some(emitter) = tier1_owner
-                && let Some(owner) = owner_tuple_for_message_send(agent_id, &params, caller_spicedb)
-                && let Err(error) = emitter.emit_owner(&owner).await
-            {
-                warn!(
-                    error = %error,
-                    "gateway tier-1 owner tuple write failed -- dispatch continues",
-                );
-            }
-            Tier1SpiceDbStepOutcome::Allow { zed_token }
+            let owner = if matches!(method, A2aMethod::MessageSend) && tier1_owner.is_some() {
+                owner_tuple_for_message_send(agent_id, &params, caller_spicedb)
+            } else {
+                None
+            };
+            Tier1SpiceDbStepOutcome::Allow { zed_token, owner }
         }
         Tier1AuthorizeOutcome::Denied | Tier1AuthorizeOutcome::TransportError => {
             run_tier1_deny(

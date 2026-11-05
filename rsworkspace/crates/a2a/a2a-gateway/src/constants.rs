@@ -121,6 +121,11 @@ pub const ENV_GATEWAY_AUDIT_INSTANCE: &str = "A2A_GATEWAY_AUDIT_INSTANCE";
 pub(crate) const AUDIT_WRITER_ID_PREFIX: &str = "a2a-gateway:";
 #[cfg(feature = "spicedb")]
 pub(crate) const AUDIT_LOG_TARGET: &str = "a2a_gateway_audit";
+/// Names of the layers an allow record says evaluated the request.
+#[cfg(feature = "spicedb")]
+pub(crate) const AUDIT_LAYER_TIER1_SPICEDB: &str = "tier1_spicedb";
+#[cfg(feature = "spicedb")]
+pub(crate) const AUDIT_LAYER_TIER3: &str = "tier3";
 /// Prefix of the name that stands in for an identifier an audit name cannot spell.
 #[cfg(feature = "spicedb")]
 pub(crate) const AUDIT_DIGEST_NAME_PREFIX: &str = "sha256:";
