@@ -179,6 +179,38 @@ async fn different_transition_ids_both_publish() {
 }
 
 #[tokio::test]
+async fn callers_sharing_a_task_id_each_get_their_own_dead_letter() {
+    let js = RecordingPublisher::default();
+    let dedup = PushDlqDedupGate::with_capacity(32);
+    let prefix = A2aPrefix::new("a2a".to_string()).unwrap();
+    let task_id = A2aTaskId::new("task-1").unwrap();
+    let alice = PushDlqSubject::new(
+        &prefix,
+        &SubjectPrincipal::from_tokens("person", "alice").unwrap(),
+        &task_id,
+    );
+    let bob = PushDlqSubject::new(
+        &prefix,
+        &SubjectPrincipal::from_tokens("person", "bob").unwrap(),
+        &task_id,
+    );
+    let config = sample_config();
+    let transition = StatusTransitionId::from_terminal(TerminalPushTaskState::Failed);
+    let err = DispatchError::InvalidTarget(PushNotificationTargetError::UnknownScheme { raw: "bad".into() });
+
+    publish_push_delivery_failure(&js, &alice, &config, br#"{}"#, &err, transition.clone(), &dedup).await;
+    publish_push_delivery_failure(&js, &bob, &config, br#"{}"#, &err, transition, &dedup).await;
+
+    let published = js.publishes.lock().unwrap();
+    let msg_ids: Vec<String> = published
+        .iter()
+        .map(|(_, headers, _)| headers.get(NATS_MSG_ID_HEADER).expect("msg id").to_string())
+        .collect();
+    assert_eq!(published.len(), 2);
+    assert_ne!(msg_ids[0], msg_ids[1]);
+}
+
+#[tokio::test]
 async fn publish_sets_nats_msg_id_header() {
     let js = RecordingPublisher::default();
     let dedup = PushDlqDedupGate::with_capacity(32);
@@ -199,7 +231,7 @@ async fn publish_sets_nats_msg_id_header() {
     assert_eq!(published.len(), 1);
     assert_eq!(
         published[0].1.get(NATS_MSG_ID_HEADER).unwrap().as_str(),
-        "3:dlq|6:task-1|6:failed|27:https://example.com/webhook"
+        "3:dlq|12:person.alice|6:task-1|6:failed|27:https://example.com/webhook"
     );
 }
 

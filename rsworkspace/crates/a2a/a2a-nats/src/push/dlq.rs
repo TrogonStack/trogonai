@@ -15,7 +15,7 @@ use crate::push::status_transition_id::StatusTransitionId;
 
 /// JSON envelope for terminal push delivery failures (`schema`: **`a2a.v1.push.dlq/v1`**).
 ///
-/// `idempotency_key` is deterministic: `{task_id}:{status_transition_id}:{target_url}`.
+/// `idempotency_key` is deterministic over the caller, `task_id`, `status_transition_id` and `target_url`.
 #[derive(Serialize)]
 pub struct PushDlqMessageV1<'a> {
     pub schema: &'static str,
@@ -45,7 +45,12 @@ pub async fn publish_push_delivery_failure<J>(
     J: trogon_nats::jetstream::JetStreamPublisher + Clone + Send + Sync,
 {
     let task_id = dead_letter.task_id();
-    let idempotency_key = PushIdempotencyKey::derive_dlq(task_id, &status_transition_id, config.url.as_str());
+    let idempotency_key = PushIdempotencyKey::derive_dlq(
+        dead_letter.caller(),
+        task_id,
+        &status_transition_id,
+        config.url.as_str(),
+    );
 
     let config_id_str = config.id.as_deref().unwrap_or("");
     if !dedup.try_acquire(&idempotency_key) {

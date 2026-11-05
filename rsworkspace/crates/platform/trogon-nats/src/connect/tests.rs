@@ -419,6 +419,37 @@ fn connect_error_display_connection_failed_names_no_server() {
     assert_eq!(err.to_string(), "Failed to connect to NATS: timed out");
 }
 
+#[test]
+fn connection_failures_name_only_the_kind_of_failure_and_log_the_detail() {
+    let _registered = keep_another_subscriber_registered(LevelFilter::WARN);
+    let events = CapturedEvents::new();
+    let _guard = events.install(LevelFilter::WARN);
+    let config = NatsConfig::from_url("nats://nats.internal.example:4222");
+    let detail = "certificate not valid for name \"nats.internal.example\"";
+
+    let err = connected(
+        &config,
+        Err(async_nats::ConnectError::with_source(
+            ConnectErrorKind::Tls,
+            std::io::Error::other(detail),
+        )),
+    )
+    .unwrap_err();
+
+    assert_eq!(err.to_string(), "Failed to connect to NATS: TLS error");
+    let failure = events
+        .events()
+        .into_iter()
+        .find(|event| event.message() == Some(CONNECT_FAILURE_WARNING))
+        .expect("the failure is logged where the connection was made");
+    assert!(
+        failure
+            .field("error")
+            .is_some_and(|error| error.contains("nats.internal.example")),
+        "{failure:?}"
+    );
+}
+
 /// While a single subscriber is registered, `tracing` settles a callsite's interest from whichever
 /// thread reaches it first, so a concurrent test that captures nothing would switch the callsite off
 /// for the test that does. A second registered subscriber keeps that from happening.
@@ -452,7 +483,7 @@ async fn connect_once_logs_the_servers_it_could_not_reach_instead_of_naming_them
         panic!("expected a connection failure, got {err:?}");
     };
     assert_eq!(*servers, config.servers);
-    assert_eq!(err.to_string(), format!("Failed to connect to NATS: {error}"));
+    assert_eq!(err.to_string(), format!("Failed to connect to NATS: {}", error.kind()));
     let failure = events
         .events()
         .into_iter()

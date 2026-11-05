@@ -160,6 +160,16 @@ fn unreadable_principal_has_a_distinct_audit_rule() {
 }
 
 #[test]
+fn caller_jwt_that_names_no_principal_is_audited_as_unreadable() {
+    let unreadable = a2a_auth_callout::subject_principal_from_minted_jwt("not-a-jwt").unwrap_err();
+
+    let rejection = ForwardedCallerJwtError::PrincipalUnreadable(unreadable);
+
+    assert_eq!(rejection.audit_rule(), "gateway.caller_jwt.principal_unreadable");
+    assert_eq!(rejection.to_string(), "forwarded caller JWT names no principal");
+}
+
+#[test]
 fn caller_jwt_header_is_checked_whatever_its_case() {
     let issuer = Issuer::new();
     let headers = headers_with("a2a-caller-jwt", &issuer.mint(PrincipalKind::Person, "bob"));
