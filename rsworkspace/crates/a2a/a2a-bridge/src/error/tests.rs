@@ -20,3 +20,13 @@ fn source_for_deserialize() {
 fn source_for_missing_authorization_none() {
     assert!(BridgeError::MissingAuthorization.source().is_none());
 }
+
+#[test]
+fn a_refused_caller_credential_reads_as_a_mint_failure_with_its_cause() {
+    let e = BridgeError::MintCredential(a2a_auth_callout::BridgeCredentialError::NoCalloutXkey);
+    assert_eq!(
+        e.to_string(),
+        "auth callout mint failed: no callout xkey is configured, so no caller credential can cross the mint exchange"
+    );
+    assert!(e.source().is_some());
+}

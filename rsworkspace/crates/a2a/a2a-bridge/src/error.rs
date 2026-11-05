@@ -19,6 +19,8 @@ pub enum BridgeError {
     Mint(String),
     #[error("minted user JWT names no caller principal: {0}")]
     MintedPrincipal(#[source] a2a_auth_callout::jwt::JwtError),
+    #[error("auth callout mint failed: {0}")]
+    MintCredential(#[source] a2a_auth_callout::BridgeCredentialError),
     #[error("NATS gateway publish failed: {0}")]
     NatsPublish(String),
     #[error("JetStream SSE consumer attach failed: {0}")]
