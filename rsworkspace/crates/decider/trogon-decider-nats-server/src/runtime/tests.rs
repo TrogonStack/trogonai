@@ -111,6 +111,41 @@ fn fault_reason(reply: &CommandReply) -> String {
         .reason
 }
 
+/// The checked-in schedules decider, built by `mise run artifacts:wasm-components`.
+fn schedules_module() -> WasmDeciderModule {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm");
+    let bytes = std::fs::read(&path).unwrap_or_else(|error| {
+        panic!(
+            "build trogon_schedules_decider.wasm for wasm32-unknown-unknown first (expected {}): {error}",
+            path.display()
+        )
+    });
+    WasmDeciderModule::load(engine(), &bytes).expect("the schedules fixture loads")
+}
+
+#[test]
+fn a_routed_command_runs_for_the_principal_its_subject_named() {
+    let registry = DeciderRegistry::builder()
+        .register(schedules_module())
+        .expect("the schedules fixture registers")
+        .build_handle();
+    let router = CommandRouter::new(endpoint(), Arc::new(registry));
+
+    let routed = router
+        .route(PRINCIPAL_SUBJECT, &request(CREATE_SCHEDULE).encode_to_vec(), None)
+        .expect("the schedules module claims CreateSchedule");
+
+    assert_eq!(
+        routed.principal(),
+        &endpoint()
+            .derive_principal(PRINCIPAL_SUBJECT)
+            .expect("the subject names a principal")
+    );
+    assert_eq!(routed.request().command().type_, CREATE_SCHEDULE);
+    assert!(format!("{routed:?}").contains("principal"));
+}
+
 #[test]
 fn a_command_no_module_claims_is_unroutable() {
     let reply = router()
