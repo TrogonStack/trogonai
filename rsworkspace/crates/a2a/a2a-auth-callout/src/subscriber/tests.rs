@@ -8,7 +8,7 @@ use tokio::task::JoinHandle;
 use trogon_nats::test_support::CoreTestServer;
 
 use super::*;
-use crate::admission_keys::AccountSigningKey;
+use crate::admission_keys::{AccountSigningKey, AuthAccount};
 use crate::error::CredentialError;
 use crate::jwt::MintedUserJwt;
 use crate::wire::ServerAuthRequestClaims;
@@ -275,15 +275,12 @@ async fn subscriber_stays_unready_while_no_server_has_accepted_its_connection() 
         .connect(format!("nats://{unreachable}"))
         .await
         .unwrap();
-    let signer = KeyPair::new_server();
     let callout = KeyPair::new_account();
     let wire = AuthCalloutWireCodec::new(
-        NkeyPublic::parse(signer.public_key()).unwrap(),
-        NkeySeed::parse(callout.seed().unwrap()).unwrap(),
+        AuthAccount::parse(&KeyPair::new_account().public_key()).unwrap(),
+        AccountSigningKey::from_seed(&callout.seed().unwrap()).unwrap(),
         None,
-        None,
-    )
-    .unwrap();
+    );
     let dispatcher = RecordingDispatcher {
         outcome: DispatchOutcome::Grant,
         jwt: MintedUserJwt::new(
