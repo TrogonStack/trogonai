@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Mutex;
@@ -11,8 +12,12 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream, ReadBuf};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
-use trogon_audit::{AuditName, AuditWriter, MemorySink, SealedRecord, SinkError, WriterConfig, WriterId};
+use trogon_audit::{
+    AuditName, AuditStream, AuditWriter, JetStreamSink, MemorySink, SealedRecord, SinkError, WriterConfig, WriterId,
+    ensure_audit_stream,
+};
 use trogon_nats::NatsToken;
+use trogon_nats::test_support::JetStreamTestServer;
 use trogonai_proto::platform::audit::v1::AuditRecord;
 
 use super::*;
@@ -495,8 +500,18 @@ async fn configured_non_tls_ports_skip_the_sni_check() {
 
 /// A proxy whose decisions go through the real writer into `sink`.
 fn audited_proxy(allow: &[String], names: &[(&str, &str)], non_tls: &[u16], sink: &MemorySink) -> Proxy {
+    audited_proxy_over(sink.clone(), allow, names, non_tls)
+}
+
+/// The same proxy over any sink, such as a real stream.
+fn audited_proxy_over<S: trogon_audit::AuditSink>(
+    sink: S,
+    allow: &[String],
+    names: &[(&str, &str)],
+    non_tls: &[u16],
+) -> Proxy {
     let writer = AuditWriter::new(
-        sink.clone(),
+        sink,
         WriterId::new("egress-proxy:test").expect("writer"),
         WriterConfig::default(),
     );
@@ -684,4 +699,35 @@ async fn the_proxy_hands_out_the_audit_it_records_to() {
     shutdown.cancel();
     proxy.audit().run(shutdown).await;
     assert!(audit.events().is_empty());
+}
+
+/// The proxy and the audit crate against a real JetStream server, with the
+/// stream provisioned the way an operator provisions it.
+#[tokio::test]
+async fn a_refused_connect_is_stored_as_a_deny_decision_on_the_audit_stream() {
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
+    ensure_audit_stream(&js, AuditStream::Audit, NonZeroUsize::MIN)
+        .await
+        .expect("provision AUDIT");
+    let proxy = audited_proxy_over(
+        JetStreamSink::with_defaults(js.clone()),
+        &["example.com:443".to_owned()],
+        &[],
+        &[],
+    );
+
+    let response = exchange(&proxy, |client| {
+        send_and_read_all(client, b"CONNECT other.example:443 HTTP/1.1\r\n\r\n".to_vec())
+    })
+    .await;
+
+    assert_refusal(&response, "403", "NO_PERMIT");
+    let stream = js.get_stream("AUDIT").await.expect("AUDIT");
+    assert_eq!(stream.cached_info().state.messages, 1);
+    let stored = stream.get_raw_message(1).await.expect("the stored decision");
+    assert_eq!(stored.subject.as_str(), "platform.v1.audit.decision.payments.deny");
+    let record = AuditRecord::decode_from_slice(&stored.payload).expect("an audit record");
+    assert!(format!("{:?}", record.attribution.decision).contains("DENY"));
+    assert_eq!(record.attribution.reason_code.as_deref(), Some("no_permit"));
 }
