@@ -20,7 +20,9 @@ use trogon_std::env::ReadEnv;
 use crate::policy::error::PolicyError;
 use crate::policy::tier2::{NoopTier2Evaluator, Tier2CelEvaluator};
 use crate::policy::tier2_cel::{CelCompileError, RealTier2CelEvaluator, Tier2CompiledBundle};
-use crate::policy::tier3_redaction::load_tier3_manifests_from_bundle;
+use crate::policy::tier3_redaction::{
+    Tier3ManifestLoadError, load_tier3_manifest_from_bundle, load_tier3_manifests_from_bundle,
+};
 use crate::policy::wasmtime_substrate::{Tier2State, WasmtimeSubstrate};
 use crate::policy::{NoopTier3RedactionGate, RealTier3RedactionGate, Tier3RedactionGate, Tier3SkillManifest};
 use crate::runtime::env::{Tier3SigningKey, gateway_tier2_cel_enabled, gateway_tier3_signing_pubkey};
@@ -68,6 +70,12 @@ impl GatewayPolicyStack {
 /// with a layer the operator believes is enforcing but is not.
 #[derive(Debug, thiserror::Error)]
 pub enum PolicyStackError {
+    #[error("{ENV_TIER3_REDACTION_ENABLED} is enabled but skill {skill_id} has no usable manifest")]
+    Tier3Manifest {
+        skill_id: SkillId,
+        #[source]
+        source: Tier3ManifestLoadError,
+    },
     #[error("{enabled_by} is enabled but {ENV_POLICY_BUNDLE_DIR} is unset or blank")]
     BundleDirRequired { enabled_by: &'static str },
     #[error("policy bundle directory {} (from {ENV_POLICY_BUNDLE_DIR}) cannot be read", bundle_dir.display())]
@@ -115,7 +123,9 @@ pub enum PolicyStackError {
 /// [`PolicyStackError`] and the gateway refuses to start: a missing or
 /// blank bundle directory, an unusable signing pubkey, a substrate that
 /// cannot load, a Tier-2 bundle that fails to compile or holds no rules,
-/// and a policy skill that is invalid or fails to preload.
+/// and a policy skill that is invalid or fails to preload. Enabled Tier-3
+/// also requires every preloaded skill to have a readable JSON manifest
+/// with a usable `json_path`; otherwise boot fails with the skill identifier.
 ///
 /// Reads:
 /// - `A2A_GATEWAY_POLICY_BUNDLE_DIR` -- root of the policy bundle layout
@@ -162,7 +172,21 @@ pub fn gateway_policy_stack_from_env<E: ReadEnv>(env: &E) -> Result<GatewayPolic
         })?;
 
     let loaded_skills = preload_skills_from_env(env, &substrate)?;
-    let tier3_manifests = load_tier3_manifests_from_bundle(&bundle_path, &loaded_skills);
+    let tier3_manifests = if tier3_enabled {
+        loaded_skills
+            .iter()
+            .map(|skill_id| {
+                load_tier3_manifest_from_bundle(&bundle_path, skill_id)
+                    .map(|manifest| (skill_id.clone(), manifest))
+                    .map_err(|source| PolicyStackError::Tier3Manifest {
+                        skill_id: skill_id.clone(),
+                        source,
+                    })
+            })
+            .collect::<Result<_, _>>()?
+    } else {
+        load_tier3_manifests_from_bundle(&bundle_path, &loaded_skills)
+    };
     let tier3_gate: Arc<dyn Tier3RedactionGate> = if tier3_enabled {
         let invoker = substrate.clone() as Arc<dyn crate::policy::tier3_redaction::Tier3PartInvoker>;
         Arc::new(RealTier3RedactionGate::new(invoker))
