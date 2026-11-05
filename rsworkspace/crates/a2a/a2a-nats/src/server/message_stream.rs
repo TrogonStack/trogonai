@@ -6,9 +6,7 @@ use trogon_nats::jetstream::JetStreamPublisher;
 use trogon_semconv::span::A2A_SERVER_MESSAGE_STREAM;
 
 use crate::a2a_prefix::A2aPrefix;
-use crate::constants::{
-    GATEWAY_CALLER_ID_HEADER, GATEWAY_PRINCIPAL_HEADER, MESSAGE_STREAM_METHOD as METHOD, REQ_ID_HEADER,
-};
+use crate::constants::{MESSAGE_STREAM_METHOD as METHOD, REQ_ID_HEADER};
 use crate::nats::subjects::tasks::TaskEventsSubject;
 use crate::req_id::ReqId;
 use crate::server::handler::{A2aError, A2aExecutor};
@@ -101,7 +99,7 @@ pub async fn handle<H, N, J>(
     }
 
     let events_subject = TaskEventsSubject::new(prefix, &task_id, caller).to_string();
-    let event_headers = event_headers(headers, &req_id);
+    let event_headers = event_headers(&req_id);
     while let Some(item) = events.next().await {
         let event = match item {
             Ok(event) => event,
@@ -135,16 +133,11 @@ pub async fn handle<H, N, J>(
 ///
 /// The subject names the task and its caller but not the request, so `Trogon-Req-Id`
 /// is what tells concurrent subscribers of that task apart (ADR#0055) without every
-/// hop having to parse the body. The caller headers still ride along as routing hints;
-/// readers take the caller from the subject (ADR#0082).
-fn event_headers(request_headers: &async_nats::header::HeaderMap, req_id: &ReqId) -> async_nats::header::HeaderMap {
+/// hop having to parse the body. No caller header rides along: the subject is the only
+/// place an event names its caller (ADR#0082).
+fn event_headers(req_id: &ReqId) -> async_nats::header::HeaderMap {
     let mut headers = async_nats::header::HeaderMap::new();
     headers.insert(REQ_ID_HEADER, req_id.as_str());
-    for name in [GATEWAY_CALLER_ID_HEADER, GATEWAY_PRINCIPAL_HEADER] {
-        if let Some(value) = request_headers.get(name) {
-            headers.insert(name, value.as_str());
-        }
-    }
     headers
 }
 

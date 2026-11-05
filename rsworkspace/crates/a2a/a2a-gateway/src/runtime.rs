@@ -24,13 +24,12 @@ use crate::gw_ingress_stream::{
     GatewayStreamingIngressConfig, StreamingIngressGate, gateway_streaming_ingress_enabled,
 };
 #[cfg(feature = "spicedb")]
-use crate::jwt_caller_identity::{JwtHeaderCallerIdentitySource, gateway_caller_identity_policy, gateway_jwt_audience};
+use crate::ingress_identity::{ForwardedCallerJwtVerifier, gateway_jwt_audience};
 #[cfg(feature = "spicedb")]
 use crate::policy::spicedb_tier1::Tier1SpiceDbConfig;
 #[cfg(feature = "spicedb")]
 use crate::policy::tier1_declarative::Tier1DeclarativeConfig;
 
-pub mod aauth_env;
 pub mod audit_publish;
 #[cfg(feature = "spicedb")]
 pub mod dispatch;
@@ -67,10 +66,6 @@ pub enum RuntimeError {
     #[cfg(feature = "spicedb")]
     #[error("gateway signing key source: {0}")]
     SigningKeySource(#[from] a2a_auth_callout::AuthCalloutError),
-
-    #[cfg(feature = "spicedb")]
-    #[error("AAuth config: {0}")]
-    AAuthConfig(#[from] crate::runtime::aauth_env::AAuthEnvError),
 }
 
 /// Resolve config from `args` + `env` and run the gateway.
@@ -94,13 +89,12 @@ pub async fn run_with_config<E: ReadEnv>(config: Config, nats_config: NatsConfig
     let client = trogon_nats::connect(&nats_config, connect_timeout).await?;
 
     let policy_stack = crate::runtime::policy_stack::gateway_policy_stack_from_env(env);
-    let caller_identity_policy = gateway_caller_identity_policy(env);
-    let signing_key_source = signing_key_source_from_env(env)?;
-    let jwt_audience = gateway_jwt_audience(env, config.a2a_prefix.as_str());
-    let message_caller_identity = JwtHeaderCallerIdentitySource::new(signing_key_source, jwt_audience);
+    let caller_jwt = ForwardedCallerJwtVerifier::new(
+        signing_key_source_from_env(env)?,
+        gateway_jwt_audience(env, config.a2a_prefix.as_str()),
+    );
     let tier1_layer = Tier1SpiceDbConfig::from_env(env).await?;
     let tier1_declarative_layer = Tier1DeclarativeConfig::from_env(env)?;
-    let aauth = aauth_env::gateway_aauth_from_env(env)?;
 
     let gateway_subject_string = config.gateway_subscribe_subject().to_string();
     let gateway_subject = async_nats::Subject::from(gateway_subject_string.as_str());
@@ -136,10 +130,8 @@ pub async fn run_with_config<E: ReadEnv>(config: Config, nats_config: NatsConfig
             tier1_layer.gate.as_ref(),
             tier1_layer.owner_emitter.as_ref(),
             tier1_declarative_layer.gate.as_ref(),
-            aauth.as_ref(),
             &policy_stack,
-            &message_caller_identity,
-            caller_identity_policy,
+            &caller_jwt,
             streaming_ingress_enabled,
             streaming_ingress_config,
             &streaming_ingress_gate,

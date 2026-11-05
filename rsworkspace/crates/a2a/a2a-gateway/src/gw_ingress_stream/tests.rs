@@ -2,6 +2,10 @@ use trogon_std::env::InMemoryEnv;
 
 use super::*;
 
+fn principal(kind: &str, id: &str) -> SubjectPrincipal {
+    SubjectPrincipal::from_tokens(kind, id).expect("principal")
+}
+
 #[test]
 fn resubscribe_params_parse_full_shape() {
     let params = serde_json::json!({"id": "task-1", "last_seq": 41});
@@ -93,18 +97,6 @@ fn resubscribe_params_garbage_payload_is_deserialize_error() {
 }
 
 #[test]
-fn caller_key_rejects_empty() {
-    assert!(matches!(CallerKey::new(""), Err(CallerKeyError::Empty)));
-    assert!(matches!(CallerKey::new("   "), Err(CallerKeyError::Empty)));
-}
-
-#[test]
-fn caller_key_trims_whitespace() {
-    let key = CallerKey::new("  bot  ").expect("trims");
-    assert_eq!(key.as_str(), "bot");
-}
-
-#[test]
 fn streaming_max_ack_pending_floors_at_one() {
     assert_eq!(StreamingMaxAckPending::new(0).as_i64(), 1);
     assert_eq!(StreamingMaxAckPending::new(-5).as_i64(), 1);
@@ -158,7 +150,7 @@ fn config_from_env_clamps_zero_to_one() {
 #[test]
 fn caller_inflight_gate_enforces_limit_and_releases_on_drop() {
     let gate = std::sync::Arc::new(CallerInflightGate::new(2));
-    let caller = CallerKey::new("caller-a").unwrap();
+    let caller = principal("person", "caller-a");
     let first = gate.clone().try_acquire(&caller).expect("first");
     let second = gate.clone().try_acquire(&caller).expect("second");
     assert!(gate.clone().try_acquire(&caller).is_none(), "limit hit");
@@ -175,12 +167,26 @@ fn streaming_ingress_gate_shares_state_across_clones() {
     let cfg =
         GatewayStreamingIngressConfig::new(StreamingMaxAckPending::new(32), StreamingMaxInflightPerCaller::new(1));
     let gate = StreamingIngressGate::new(cfg);
-    let caller = CallerKey::new("caller-a").unwrap();
+    let caller = principal("person", "caller-a");
     let permit = gate.try_acquire(&caller).expect("first");
     // Cloning the gate (Arc-clone) does not give the caller a fresh bucket.
     assert!(gate.clone().try_acquire(&caller).is_none());
     drop(permit);
     assert!(gate.try_acquire(&caller).is_some());
+}
+
+#[test]
+fn streaming_ingress_gate_gives_each_subject_principal_its_own_bucket() {
+    let cfg =
+        GatewayStreamingIngressConfig::new(StreamingMaxAckPending::new(32), StreamingMaxInflightPerCaller::new(1));
+    let gate = StreamingIngressGate::new(cfg);
+    let person = principal("person", "alice");
+    let _held = gate.try_acquire(&person).expect("first stream");
+
+    assert!(gate.try_acquire(&principal("person", "alice")).is_none());
+    assert!(gate.try_acquire(&principal("agent", "alice")).is_some());
+    assert!(gate.try_acquire(&principal("service", "alice")).is_some());
+    assert!(gate.try_acquire(&principal("person", "bob")).is_some());
 }
 
 #[test]
@@ -246,8 +252,10 @@ fn streaming_ingress_kind_resubscribe_requires_task_id_by_type() {
 
 #[test]
 fn streaming_ingress_spawn_error_carries_caller() {
-    let err = StreamingIngressSpawnError::PerCallerLimit { caller: "bot".into() };
-    assert!(format!("{err}").contains("bot"));
+    let err = StreamingIngressSpawnError::PerCallerLimit {
+        caller: principal("agent", "bot"),
+    };
+    assert!(format!("{err}").contains("agent.bot"));
 }
 
 #[test]
@@ -259,7 +267,7 @@ fn caller_inflight_gate_recovers_from_poisoned_lock() {
         panic!("poison the lock on purpose");
     })
     .join();
-    let caller = CallerKey::new("caller-a").unwrap();
+    let caller = principal("person", "caller-a");
     // The poison-recovery branch returns the inner guard so the gate keeps
     // serving instead of cascading the panic to every caller.
     let permit = gate.try_acquire(&caller).expect("recovers from poison");
@@ -277,8 +285,7 @@ fn try_acquire_streaming_permit_passes_when_capacity_available() {
             last_seq: 0,
         },
         reply: async_nats::Subject::from_static("reply.x"),
-        caller_key: CallerKey::new("bot").unwrap(),
-        caller: SubjectPrincipal::from_tokens("person", "bot").unwrap(),
+        caller: principal("person", "bot"),
     };
     let permit = try_acquire_streaming_permit(&gate, &spawn).expect("first permit");
     drop(permit);
@@ -295,12 +302,13 @@ fn try_acquire_streaming_permit_returns_per_caller_limit_when_full() {
             last_seq: 0,
         },
         reply: async_nats::Subject::from_static("reply.x"),
-        caller_key: CallerKey::new("bot").unwrap(),
-        caller: SubjectPrincipal::from_tokens("person", "bot").unwrap(),
+        caller: principal("person", "bot"),
     };
     let _held = try_acquire_streaming_permit(&gate, &spawn).expect("first");
     let err = try_acquire_streaming_permit(&gate, &spawn).expect_err("second");
-    assert!(matches!(err, StreamingIngressSpawnError::PerCallerLimit { ref caller } if caller == "bot"));
+    assert!(
+        matches!(err, StreamingIngressSpawnError::PerCallerLimit { ref caller } if *caller == principal("person", "bot"))
+    );
 }
 
 #[tokio::test]
@@ -329,11 +337,11 @@ fn caller_inflight_gate_drop_removes_empty_bucket() {
     // Once a caller drops back to zero permits, the bucket key is removed —
     // important to avoid an unbounded HashMap grow under churn.
     let gate = std::sync::Arc::new(CallerInflightGate::new(1));
-    let caller = CallerKey::new("bot").unwrap();
+    let caller = principal("person", "bot");
     let permit = gate.clone().try_acquire(&caller).expect("permit");
-    assert!(gate.inflight.lock().unwrap().contains_key("bot"));
+    assert!(gate.inflight.lock().unwrap().contains_key(&caller));
     drop(permit);
-    assert!(!gate.inflight.lock().unwrap().contains_key("bot"));
+    assert!(!gate.inflight.lock().unwrap().contains_key(&caller));
 }
 mod startup_tests;
 
