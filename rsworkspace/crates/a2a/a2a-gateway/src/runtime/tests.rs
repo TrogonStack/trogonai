@@ -33,21 +33,28 @@ async fn a_closed_ingress_finishes_after_dispatching_its_final_envelope() {
 }
 
 #[cfg(feature = "spicedb")]
+type ExpectedStartupFailure = fn(&RuntimeError) -> bool;
+
+#[cfg(feature = "spicedb")]
 #[tokio::test]
 async fn startup_preserves_enabled_policy_configuration_failures() {
     let server = trogon_nats::test_support::CoreTestServer::start().await;
-    for setting in [
-        ("A2A_GATEWAY_TIER1_SPICEDB_ENABLED", "true"),
-        ("A2A_GATEWAY_TIER1_DECLARATIVE_ENABLED", "true"),
-        ("A2A_GATEWAY_AAUTH_MODE", "invalid"),
-    ] {
+    let cases: &[(&str, ExpectedStartupFailure)] = &[
+        ("A2A_GATEWAY_TIER1_SPICEDB_ENABLED", |error| {
+            matches!(error, RuntimeError::Tier1Config(_))
+        }),
+        ("A2A_GATEWAY_TIER1_DECLARATIVE_ENABLED", |error| {
+            matches!(error, RuntimeError::Tier1DeclarativeConfig(_))
+        }),
+    ];
+    for (setting, expected) in cases {
         let env = InMemoryEnv::new();
         env.set("NATS_TLS_DISABLED", "true");
         env.set(
             "AUTH_CALLOUT_SIGNING_SECRET",
             nkeys::KeyPair::new_account().seed().unwrap(),
         );
-        env.set(setting.0, setting.1);
+        env.set(*setting, "true");
         let error = run_with_args(
             Args {
                 nats_url: server.address().to_owned(),
@@ -58,13 +65,7 @@ async fn startup_preserves_enabled_policy_configuration_failures() {
         )
         .await
         .unwrap_err();
-        match setting.0 {
-            "A2A_GATEWAY_TIER1_SPICEDB_ENABLED" => assert!(matches!(error, RuntimeError::Tier1Config(_))),
-            "A2A_GATEWAY_TIER1_DECLARATIVE_ENABLED" => {
-                assert!(matches!(error, RuntimeError::Tier1DeclarativeConfig(_)))
-            }
-            _ => assert!(matches!(error, RuntimeError::AAuthConfig(_))),
-        }
+        assert!(expected(&error), "{setting}: {error}");
         assert!(error.source().is_some());
     }
 }

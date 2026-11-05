@@ -26,7 +26,6 @@ cargo run -p a2a-nats-http
 | **`A2A_TASK_TIMEOUT_SECS`** | no | _(library)_ | Streaming-related timeouts. |
 | **`A2A_CONNECT_TIMEOUT_SECS`** | no | _(library)_ | NATS dial timeout. |
 | **`A2A_MAX_CONCURRENT_CLIENT_TASKS`** | no | **`256`** | `Bridge` concurrent streaming task semaphore (`apply_timeout_overrides`). **`0`** normalizes to **`1`**. |
-| **`A2A_PUSH_DLQ_CALLER_SEGMENT`** | no | **`_`** | Push DLQ **`{caller_id}`** subject segment (`apply_timeout_overrides`). |
 | **`A2A_USE_GATEWAY`** | no | off | Truthy (**`1`**, **`true`**, **`yes`**, **`on`**) ⇒ unary / bootstrap publishes on **`{prefix}.v1.gateway.{agent_id}.{kind}.{id}.{method}`** for **`a2a-gateway`** to forward. Tenancy follows the NATS **`Connection`/`Account`** (see [A2A architecture §Decisions](../../../../docs/a2a/explanation/architecture.md)); there is **no `A2A_TENANT` subject knob**. |
 
 Ingress auth/policy/audit hooks are **`[P]`** (see [A2A architecture §Decisions](../../../../docs/a2a/explanation/architecture.md)).
