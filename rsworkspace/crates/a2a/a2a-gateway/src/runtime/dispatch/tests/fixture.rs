@@ -15,7 +15,9 @@ use bytes::Bytes;
 use futures::StreamExt;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
+use trogon_audit::{AuditName, AuditWriter, JetStreamSink, MemorySink, WriterConfig, WriterId};
 use trogon_identity_types::PrincipalKind;
+use trogon_nats::NatsToken;
 use trogon_nats::test_support::{CoreTestServer, JetStreamTestServer};
 use trogon_std::env::InMemoryEnv;
 
@@ -30,7 +32,22 @@ use crate::policy::spicedb_tier1::{
 };
 use crate::policy::tier1_declarative::{NoopTier1DeclarativeGate, Tier1DeclarativeGate};
 use crate::runtime::dispatch::dispatch_gateway_ingress;
+use crate::runtime::platform_audit::{DecisionAudit, WriterAudit};
 use crate::runtime::policy_stack::GatewayPolicyStack;
+
+pub const AUDIT_PROJECT: &str = "payments";
+
+fn audit_writer_id() -> WriterId {
+    WriterId::new("a2a-gateway:test").expect("writer id")
+}
+
+fn audit_tenant() -> AuditName {
+    AuditName::new("acme").expect("tenant")
+}
+
+fn audit_project() -> NatsToken {
+    NatsToken::new(AUDIT_PROJECT).expect("project")
+}
 
 pub type TestResult<T = ()> = Result<T, FixtureError>;
 
@@ -90,6 +107,8 @@ pub struct DispatchFixture<S = CoreTestServer> {
     pub owner: Option<Arc<dyn OwnerTupleEmitter>>,
     pub declarative: Arc<dyn Tier1DeclarativeGate>,
     pub policy: GatewayPolicyStack,
+    /// The platform audit path; `None` until a test turns one on.
+    pub platform_audit: Option<Arc<dyn DecisionAudit>>,
     signing: Arc<StaticSigningKeySource>,
     caller_jwt: ForwardedCallerJwtVerifier,
     pub shutdown: CancellationToken,
@@ -157,6 +176,7 @@ impl<S> DispatchFixture<S> {
             owner: None,
             declarative: Arc::new(NoopTier1DeclarativeGate),
             policy: GatewayPolicyStack::noop(),
+            platform_audit: None,
             signing,
             caller_jwt,
             shutdown: CancellationToken::new(),
@@ -164,6 +184,27 @@ impl<S> DispatchFixture<S> {
             streaming_config,
             streaming_gate: StreamingIngressGate::new(streaming_config),
         })
+    }
+
+    /// Routes the platform audit records into memory, where a test can make the
+    /// sink fail and recover, and returns the sink with the writer to drain.
+    pub fn enable_memory_audit(&mut self) -> (MemorySink, AuditWriter<MemorySink>) {
+        let sink = MemorySink::new();
+        let writer = AuditWriter::new(sink.clone(), audit_writer_id(), WriterConfig::default());
+        self.platform_audit = Some(Arc::new(WriterAudit::new(
+            writer.clone(),
+            audit_tenant(),
+            audit_project(),
+        )));
+        (sink, writer)
+    }
+
+    /// Routes the platform audit records through the JetStream sink of this
+    /// fixture's broker, as the gateway does in production.
+    pub fn enable_jetstream_audit(&mut self) {
+        let sink = JetStreamSink::with_defaults(async_nats::jetstream::new(self.client.clone()));
+        let writer = AuditWriter::new(sink, audit_writer_id(), WriterConfig::default());
+        self.platform_audit = Some(Arc::new(WriterAudit::new(writer, audit_tenant(), audit_project())));
     }
 
     pub async fn dispatch(&self, message: Message) {
@@ -178,6 +219,7 @@ impl<S> DispatchFixture<S> {
             self.streaming_enabled,
             self.streaming_config,
             &self.streaming_gate,
+            self.platform_audit.as_deref(),
             self.shutdown.clone(),
             &self.env,
             message,

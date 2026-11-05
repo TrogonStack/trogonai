@@ -21,9 +21,9 @@ use a2a_nats::A2aMethod;
 use a2a_nats::audit::envelope::{AuditEnvelope, AuditEnvelopeFields, AuditOutcome, Tier1Decision, Tier3Decision};
 use a2a_nats::nats::subjects::gateway::GatewayIngressSubject;
 use a2a_nats::{
-    ingress_gateway_deadline_exceeded_response_bytes, ingress_gateway_declarative_denied_response_bytes,
-    ingress_gateway_policy_denied_response_bytes, ingress_gateway_tier3_refused_response_bytes,
-    ingress_invalid_request_response_bytes,
+    ingress_gateway_audit_unavailable_response_bytes, ingress_gateway_deadline_exceeded_response_bytes,
+    ingress_gateway_declarative_denied_response_bytes, ingress_gateway_policy_denied_response_bytes,
+    ingress_gateway_tier3_refused_response_bytes, ingress_invalid_request_response_bytes,
 };
 use async_nats::HeaderMap;
 use bytes::Bytes;
@@ -54,6 +54,7 @@ use crate::runtime::audit_publish::spawn_gateway_audit_publish;
 use crate::runtime::env::{
     gateway_audit_publish_enabled, json_rpc_audit_req_id, json_rpc_params, unary_deadline_for_method, unix_epoch_ms,
 };
+use crate::runtime::platform_audit::{AllowedLayers, DecisionAudit, DecisionSite, DenyReason, declared_read_only};
 use crate::runtime::policy_stack::GatewayPolicyStack;
 use crate::runtime::reply::reply_error;
 use crate::runtime::streaming::maybe_spawn_streaming_ingress_pump;
@@ -62,10 +63,10 @@ use crate::runtime::tier1_denial::{Tier1DenialCtx, deny_tier1};
 
 use crate::constants::MESSAGE_STREAM_METHOD_DOTS;
 use crate::constants::{
-    ATTR_AGENT_SUBJECT, ATTR_CALLER_ID, ATTR_ROUTING_OUTCOME, ENV_GATEWAY_JWT_AUDIENCE, ROUTING_CALLER_JWT_REJECTED,
-    ROUTING_DEADLINE_EXCEEDED, ROUTING_FORWARD_FAILED, ROUTING_FORWARDED, ROUTING_IGNORED_NO_REPLY,
-    ROUTING_INGRESS_ERROR, ROUTING_POLICY_DENIED, ROUTING_TIER1_DENIED, ROUTING_TIER3_ENGINE_ERROR,
-    ROUTING_TIER3_REFUSED, SPAN_GATEWAY_INGRESS_DISPATCH,
+    ATTR_AGENT_SUBJECT, ATTR_CALLER_ID, ATTR_ROUTING_OUTCOME, ENV_GATEWAY_JWT_AUDIENCE, ROUTING_AUDIT_UNAVAILABLE,
+    ROUTING_CALLER_JWT_REJECTED, ROUTING_DEADLINE_EXCEEDED, ROUTING_FORWARD_FAILED, ROUTING_FORWARDED,
+    ROUTING_IGNORED_NO_REPLY, ROUTING_INGRESS_ERROR, ROUTING_POLICY_DENIED, ROUTING_TIER1_DENIED,
+    ROUTING_TIER3_ENGINE_ERROR, ROUTING_TIER3_REFUSED, SPAN_GATEWAY_INGRESS_DISPATCH,
 };
 
 /// Run a single ingress envelope through the full gateway dispatch
@@ -77,6 +78,11 @@ use crate::constants::{
 /// owner-relationship tuples back to SpiceDB; passing it as
 /// `Option<&Arc<...>>` keeps the dispatch path from holding an
 /// extra reference cycle on the gate that owns the emitter.
+///
+/// `platform_audit` is the awaited, durable record path. A deny is recorded after
+/// its reply and stands whatever the record's fate. An allow of a method not
+/// declared read-only is recorded before it is forwarded, and is refused with
+/// `-32804` when the record cannot be taken.
 #[allow(clippy::too_many_arguments)]
 pub async fn dispatch_gateway_ingress<E: ReadEnv>(
     client: &async_nats::Client,
@@ -89,6 +95,7 @@ pub async fn dispatch_gateway_ingress<E: ReadEnv>(
     streaming_ingress_enabled: bool,
     streaming_ingress_config: GatewayStreamingIngressConfig,
     streaming_ingress_gate: &StreamingIngressGate,
+    platform_audit: Option<&dyn DecisionAudit>,
     shutdown: CancellationToken,
     env: &E,
     msg: async_nats::Message,
@@ -137,6 +144,7 @@ pub async fn dispatch_gateway_ingress<E: ReadEnv>(
                     streaming_ingress_enabled,
                     streaming_ingress_config,
                     streaming_ingress_gate,
+                    platform_audit,
                     shutdown,
                     env,
                     &msg,
@@ -167,6 +175,7 @@ async fn dispatch_routed<E: ReadEnv>(
     streaming_ingress_enabled: bool,
     streaming_ingress_config: GatewayStreamingIngressConfig,
     streaming_ingress_gate: &StreamingIngressGate,
+    platform_audit: Option<&dyn DecisionAudit>,
     shutdown: CancellationToken,
     env: &E,
     msg: &async_nats::Message,
@@ -190,6 +199,17 @@ async fn dispatch_routed<E: ReadEnv>(
     let audit_enabled = gateway_audit_publish_enabled(env);
     let method_slashes = method_dots.replace('.', "/");
     let _unary_deadline_guard = unary_deadline_for_method(env, method_dots.as_str());
+    let site = DecisionSite {
+        audit: platform_audit,
+        caller: &caller,
+        agent_id: &agent_id,
+        method: method_slashes.as_str(),
+        read_only: declared_read_only(&method),
+        trace_id: trace_id.as_str(),
+        request_id: json_rpc_audit_req_id(payload.as_ref()),
+        request_bytes: payload.len(),
+        started_mono,
+    };
 
     if let Err(rejection) = caller_jwt.check(&inbound_headers, &caller) {
         tracing::Span::current().record(ATTR_ROUTING_OUTCOME, ROUTING_CALLER_JWT_REJECTED);
@@ -230,6 +250,8 @@ async fn dispatch_routed<E: ReadEnv>(
                 ),
             ),
         );
+        site.deny(DenyReason::CallerJwtRejected, &[rejection.audit_rule().into()])
+            .await;
         return;
     }
 
@@ -255,6 +277,7 @@ async fn dispatch_routed<E: ReadEnv>(
             started_wall_ms,
             started_mono,
             trace_id.as_str(),
+            &site,
             env,
         )
         .await
@@ -319,6 +342,11 @@ async fn dispatch_routed<E: ReadEnv>(
                     ),
                 ),
             );
+            site.deny(
+                DenyReason::Tier1Declarative,
+                &[format!("gateway.tier1.declarative.denied.{}", rule.as_str())],
+            )
+            .await;
             return;
         }
     }
@@ -377,6 +405,8 @@ async fn dispatch_routed<E: ReadEnv>(
                         ),
                     ),
                 );
+                site.deny(DenyReason::Tier2, &[format!("gateway.tier2.{}", rule.as_str())])
+                    .await;
                 return;
             }
         }
@@ -400,6 +430,11 @@ async fn dispatch_routed<E: ReadEnv>(
                 "tier-3 ingress payload not valid JSON",
             );
             reply_error(client, reply, HeaderMap::new(), body).await;
+            site.deny(
+                DenyReason::Tier3PayloadInvalid,
+                &["gateway.tier3.payload_invalid".into()],
+            )
+            .await;
             return;
         }
     };
@@ -461,6 +496,11 @@ async fn dispatch_routed<E: ReadEnv>(
                     ),
                 ),
             );
+            site.deny(
+                DenyReason::Tier3Refused,
+                &[format!("gateway.tier3.refused.{}", rule.as_str())],
+            )
+            .await;
             return;
         }
         Tier3RedactionDecision::Error { rule, kind } => {
@@ -507,6 +547,8 @@ async fn dispatch_routed<E: ReadEnv>(
                     ),
                 ),
             );
+            site.deny(DenyReason::Tier3EngineError, &["gateway.tier3.engine_error".into()])
+                .await;
             return;
         }
     }
@@ -518,6 +560,59 @@ async fn dispatch_routed<E: ReadEnv>(
         reply = %reply,
         "gateway forwarding to agent subject",
     );
+
+    // The allow is written, and acknowledged where its class requires it, before
+    // anything is forwarded: a request that cannot be recorded must not take effect.
+    let rules_fired = build_rules_fired(tier1, policy, &tier3_rewrites, env);
+    let allowed = AllowedLayers {
+        tier1_spicedb: tier1.is_enabled(),
+        tier1_consistency_token: tier1_zed_token.as_deref(),
+        tier3: gateway_tier3_redaction_enabled(env),
+    };
+    if let Err(error) = site.allow(allowed, &rules_fired).await {
+        tracing::Span::current().record(ATTR_ROUTING_OUTCOME, ROUTING_AUDIT_UNAVAILABLE);
+        warn!(
+            ingress.subject = %ingress_subject,
+            agent_subject = %agent_subject,
+            routing_outcome = "audit_unavailable",
+            error = %error,
+            "gateway could not record the decision; refusing the request unforwarded",
+        );
+        let body = ingress_gateway_audit_unavailable_response_bytes(
+            &headers_owned,
+            payload.as_ref(),
+            "audit record unavailable",
+        );
+        reply_error(client, reply, HeaderMap::new(), body).await;
+        spawn_gateway_audit_publish(
+            audit_enabled,
+            client.clone(),
+            config.a2a_prefix.clone(),
+            agent_id.clone(),
+            AuditEnvelope::new(
+                &agent_id,
+                method_slashes.clone(),
+                json_rpc_audit_req_id(payload.as_ref()),
+                started_wall_ms,
+                elapsed_ms(started_mono),
+                AuditOutcome::Err {
+                    code: -32_804,
+                    message: "audit record unavailable".into(),
+                },
+                Some(payload.as_ref()),
+                enrich_audit_caller(
+                    AuditEnvelopeFields {
+                        trace_id: Some(trace_id.clone()),
+                        rules_fired: Some(rules_fired),
+                        zed_token_snapshot: tier1_zed_token.clone(),
+                        ..Default::default()
+                    },
+                    &caller,
+                ),
+            ),
+        );
+        return;
+    }
 
     // Anchor the streaming pump before the agent can publish anything: the pump is
     // spawned after the forward and creates its consumer asynchronously, so the
@@ -539,7 +634,6 @@ async fn dispatch_routed<E: ReadEnv>(
     )
     .await;
 
-    let rules_fired = build_rules_fired(tier1, policy, &tier3_rewrites, env);
     let (rewrites, stream_consumer) = merge_forward_audit_rewrites(
         &tier3_rewrites,
         ingress_subject,
@@ -728,6 +822,7 @@ async fn run_tier1_spicedb<'a, E: ReadEnv>(
     started_wall_ms: u64,
     started_mono: Instant,
     trace_id: &'a str,
+    site: &DecisionSite<'_>,
     env: &E,
 ) -> Tier1SpiceDbStepOutcome {
     let publisher_account = env
@@ -752,6 +847,7 @@ async fn run_tier1_spicedb<'a, E: ReadEnv>(
                 started_wall_ms,
                 started_mono,
                 caller,
+                site,
                 "tier-1 resource tuple derivation failed",
             )
             .await;
@@ -785,6 +881,7 @@ async fn run_tier1_spicedb<'a, E: ReadEnv>(
                 started_wall_ms,
                 started_mono,
                 caller,
+                site,
                 "tier-1 SpiceDB denied ingress",
             )
             .await;
@@ -803,6 +900,7 @@ async fn run_tier1_spicedb<'a, E: ReadEnv>(
                 started_wall_ms,
                 started_mono,
                 caller,
+                site,
                 "tier-1 resource tuple derivation failed",
             )
             .await;
@@ -824,6 +922,7 @@ async fn run_tier1_deny<'a>(
     started_wall_ms: u64,
     started_mono: Instant,
     caller: &'a SubjectPrincipal,
+    site: &'a DecisionSite<'a>,
     message: &'a str,
 ) {
     let body = ingress_gateway_policy_denied_response_bytes(&HeaderMap::new(), payload.as_ref(), message);
@@ -837,6 +936,7 @@ async fn run_tier1_deny<'a>(
         started_wall_ms,
         started_mono,
         caller,
+        site: Some(site),
     };
     deny_tier1(client, reply, body, ctx, message).await;
 }

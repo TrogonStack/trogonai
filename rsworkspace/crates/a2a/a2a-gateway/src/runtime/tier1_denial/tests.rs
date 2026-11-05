@@ -75,6 +75,7 @@ fn ctx<'a>(
         started_wall_ms: 1_700_000_000_000,
         started_mono: Instant::now(),
         caller,
+        site: None,
     }
 }
 

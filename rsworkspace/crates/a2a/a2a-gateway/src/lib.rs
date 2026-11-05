@@ -32,7 +32,6 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 pub mod agent_card_surface;
-pub mod audit_ingress;
 pub mod caller_jwt_header;
 pub mod config;
 pub mod constants;

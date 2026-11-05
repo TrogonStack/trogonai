@@ -34,6 +34,8 @@ pub mod audit_publish;
 #[cfg(feature = "spicedb")]
 pub mod dispatch;
 pub mod env;
+#[cfg(feature = "spicedb")]
+pub mod platform_audit;
 pub mod policy_stack;
 pub mod reply;
 pub mod streaming;
@@ -66,6 +68,10 @@ pub enum RuntimeError {
     #[cfg(feature = "spicedb")]
     #[error("gateway signing key source: {0}")]
     SigningKeySource(#[from] a2a_auth_callout::AuthCalloutError),
+
+    #[cfg(feature = "spicedb")]
+    #[error("gateway platform audit config: {0}")]
+    PlatformAudit(#[from] crate::runtime::platform_audit::PlatformAuditConfigError),
 }
 
 /// Resolve config from `args` + `env` and run the gateway.
@@ -95,6 +101,7 @@ pub async fn run_with_config<E: ReadEnv>(config: Config, nats_config: NatsConfig
     );
     let tier1_layer = Tier1SpiceDbConfig::from_env(env).await?;
     let tier1_declarative_layer = Tier1DeclarativeConfig::from_env(env)?;
+    let platform_audit = crate::runtime::platform_audit::jetstream_audit_from_env(env, &client)?;
 
     let gateway_subject_string = config.gateway_subscribe_subject().to_string();
     let gateway_subject = async_nats::Subject::from(gateway_subject_string.as_str());
@@ -123,6 +130,13 @@ pub async fn run_with_config<E: ReadEnv>(config: Config, nats_config: NatsConfig
     let streaming_ingress_enabled = gateway_streaming_ingress_enabled(env);
     let streaming_ingress_gate = StreamingIngressGate::new(streaming_ingress_config);
 
+    // The audit writer drains for as long as the gateway serves and settles after
+    // the ingress loop ends, so a refusal still being written is not lost.
+    let audit_drain = platform_audit.clone().map(|audit| {
+        let audit_shutdown = shutdown.clone();
+        tokio::spawn(async move { audit.run(audit_shutdown).await })
+    });
+
     receive_ingress(ingress, &config.a2a_prefix, shutdown.clone(), |msg| {
         crate::runtime::dispatch::dispatch_gateway_ingress(
             &client,
@@ -135,12 +149,20 @@ pub async fn run_with_config<E: ReadEnv>(config: Config, nats_config: NatsConfig
             streaming_ingress_enabled,
             streaming_ingress_config,
             &streaming_ingress_gate,
+            platform_audit.as_deref(),
             shutdown.clone(),
             env,
             msg,
         )
     })
     .await;
+
+    shutdown.cancel();
+    if let Some(drain) = audit_drain
+        && let Err(error) = drain.await
+    {
+        warn!(%error, "gateway audit drain task ended abnormally");
+    }
 
     info!(prefix = %config.a2a_prefix, "A2A gateway shutdown complete");
     Ok(())

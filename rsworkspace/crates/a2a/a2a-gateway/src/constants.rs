@@ -89,6 +89,8 @@ pub(crate) const ROUTING_FORWARDED: &str = "forwarded";
 #[cfg(feature = "spicedb")]
 pub(crate) const ROUTING_FORWARD_FAILED: &str = "forward_failed";
 #[cfg(feature = "spicedb")]
+pub(crate) const ROUTING_AUDIT_UNAVAILABLE: &str = "audit_unavailable";
+#[cfg(feature = "spicedb")]
 pub(crate) const ROUTING_DEADLINE_EXCEEDED: &str = "deadline_exceeded";
 #[cfg(feature = "spicedb")]
 pub(crate) const ROUTING_INGRESS_ERROR: &str = "ingress_error";
@@ -101,6 +103,27 @@ pub const ENV_GATEWAY_TIER2_CEL_ENABLED: &str = "A2A_GATEWAY_TIER2_CEL_ENABLED";
 pub const ENV_GATEWAY_TIER3_SIGNING_PUBKEY: &str = "A2A_GATEWAY_TIER3_SIGNING_PUBKEY";
 pub const ENV_GATEWAY_AUDIT_PUBLISH: &str = "A2A_GATEWAY_AUDIT_PUBLISH";
 pub const ENV_GATEWAY_UNARY_DEADLINE_SECS: &str = "A2A_GATEWAY_UNARY_DEADLINE_SECS";
+
+// --- runtime/platform_audit ---
+
+/// The tenant every platform audit record names. The gateway serves one tenant per
+/// process until a verified credential carries it.
+#[cfg(feature = "spicedb")]
+pub const ENV_GATEWAY_AUDIT_TENANT: &str = "A2A_GATEWAY_AUDIT_TENANT";
+/// The project every platform audit record names, and the project token of its subject.
+#[cfg(feature = "spicedb")]
+pub const ENV_GATEWAY_AUDIT_PROJECT: &str = "A2A_GATEWAY_AUDIT_PROJECT";
+/// Names this replica. It becomes the audit writer id, so records say which process
+/// wrote them and a restarted replica is the same writer.
+#[cfg(feature = "spicedb")]
+pub const ENV_GATEWAY_AUDIT_INSTANCE: &str = "A2A_GATEWAY_AUDIT_INSTANCE";
+#[cfg(feature = "spicedb")]
+pub(crate) const AUDIT_WRITER_ID_PREFIX: &str = "a2a-gateway:";
+#[cfg(feature = "spicedb")]
+pub(crate) const AUDIT_LOG_TARGET: &str = "a2a_gateway_audit";
+/// Prefix of the name that stands in for an identifier an audit name cannot spell.
+#[cfg(feature = "spicedb")]
+pub(crate) const AUDIT_DIGEST_NAME_PREFIX: &str = "sha256:";
 
 /// Method-dots string for the unary `message/send`. Shared by
 /// `runtime::env` (unary deadline lookup) and `runtime::dispatch`

@@ -23,6 +23,7 @@ use trogon_nats::PublishClient;
 
 use crate::runtime::audit_publish::spawn_gateway_audit_publish;
 use crate::runtime::env::json_rpc_audit_req_id;
+use crate::runtime::platform_audit::{DecisionSite, DenyReason};
 use crate::runtime::reply::reply_error;
 use crate::runtime::tier1::enrich_audit_caller;
 
@@ -40,12 +41,16 @@ pub struct Tier1DenialCtx<'a> {
     pub started_wall_ms: u64,
     pub started_mono: Instant,
     pub caller: &'a SubjectPrincipal,
+    /// Where the platform audit record of the denial goes, when platform audit is on.
+    pub site: Option<&'a DecisionSite<'a>>,
 }
 
 /// Reply to the caller with the pre-built JSON-RPC denied envelope
 /// `body` and (if `audit_enabled`) publish a matching `-32801` audit
 /// envelope. Best-effort on both sides -- a publish failure surfaces
-/// only as a warning so other ingress requests stay served.
+/// only as a warning so other ingress requests stay served. The platform audit
+/// record follows the reply and is awaited; the denial stands whether or not it
+/// is taken.
 ///
 /// The body is built by the caller (typically via
 /// `ingress_gateway_policy_denied_response_bytes`) so this helper has
@@ -89,6 +94,10 @@ where
             ),
         ),
     );
+    if let Some(site) = ctx.site {
+        site.deny(DenyReason::Tier1Spicedb, &["gateway.tier1.spicedb_denied".into()])
+            .await;
+    }
 }
 
 #[cfg(test)]
