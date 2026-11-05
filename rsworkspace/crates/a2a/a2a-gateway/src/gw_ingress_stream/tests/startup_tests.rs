@@ -12,6 +12,10 @@ fn config() -> GatewayStreamingIngressConfig {
     GatewayStreamingIngressConfig::new(StreamingMaxAckPending::new(1), StreamingMaxInflightPerCaller::new(1))
 }
 
+fn principal() -> SubjectPrincipal {
+    SubjectPrincipal::from_tokens("person", "alice").expect("principal")
+}
+
 fn spawn(caller: &CallerKey) -> StreamingIngressSpawn {
     StreamingIngressSpawn {
         kind: StreamingIngressKind::TasksResubscribe {
@@ -21,6 +25,7 @@ fn spawn(caller: &CallerKey) -> StreamingIngressSpawn {
         },
         reply: "_INBOX.startup".into(),
         caller_key: caller.clone(),
+        caller: principal(),
     }
 }
 
@@ -40,7 +45,7 @@ async fn event_head_tracks_persisted_events_and_missing_storage_is_not_a_cursor(
     .await
     .expect("events stream");
     assert_eq!(events_stream_last_seq(&client, &prefix).await, Some(0));
-    let subject = TaskEventsSubject::new(&prefix, &A2aTaskId::new("task-1").expect("task")).to_string();
+    let subject = TaskEventsSubject::new(&prefix, &A2aTaskId::new("task-1").expect("task"), &principal()).to_string();
     let ack = js
         .publish(subject, bytes::Bytes::from_static(b"stored event"))
         .await

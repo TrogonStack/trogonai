@@ -1,7 +1,8 @@
-//! A2A method inferred from the last dotted tokens of a NATS subject.
+//! A2A method named by the dotted terminal tokens of a request subject.
 //!
-//! The agent subscribes to `{prefix}.v1.agents.{agent_id}.>` and dispatches based on
-//! the suffix after `{prefix}.v1.agents.{agent_id}`.
+//! Gateway ingress and agent delivery subjects end in the method's dotted form
+//! (`message.send`, `tasks.get`, `card`, …); the subject types in
+//! [`crate::nats::subjects`] parse and render it through this type.
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum A2aMethod {
@@ -19,6 +20,20 @@ pub enum A2aMethod {
 }
 
 impl A2aMethod {
+    pub const ALL: [Self; 11] = [
+        Self::MessageSend,
+        Self::MessageStream,
+        Self::TasksGet,
+        Self::TasksList,
+        Self::TasksCancel,
+        Self::TasksResubscribe,
+        Self::PushNotificationSet,
+        Self::PushNotificationGet,
+        Self::PushNotificationList,
+        Self::PushNotificationDelete,
+        Self::AgentCard,
+    ];
+
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::MessageSend => "message/send",
@@ -51,22 +66,8 @@ impl A2aMethod {
         }
     }
 
-    /// Resolve the method from the full NATS subject string and the known
-    /// `{prefix}.v1.agents.{agent_id}` byte-length component.
-    pub fn from_subject(subject: &str, prefix_len: usize) -> Option<Self> {
-        let suffix = subject.get(prefix_len..)?.strip_prefix('.')?;
-        Self::from_dotted_suffix(suffix)
-    }
-
-    /// Resolve the method from the already-extracted dotted-suffix form
-    /// (e.g. `"message.send"`, `"tasks.get"`, `"card"`).
-    ///
-    /// Callers that have already split a subject into its
-    /// `{prefix}.v1.agents.{agent_id}.{method_dots}` parts — for example,
-    /// [`crate::gateway_ingress::gateway_ingress_agent_and_method_dots`]
-    /// returns `method_dots` as a `&str` — should use this entry point
-    /// instead of rebuilding a full subject just to call
-    /// [`A2aMethod::from_subject`].
+    /// Resolve the method from its dotted subject terminal (e.g. `"message.send"`,
+    /// `"tasks.get"`, `"card"`).
     pub fn from_dotted_suffix(suffix: &str) -> Option<Self> {
         match suffix {
             "message.send" => Some(Self::MessageSend),
@@ -82,6 +83,12 @@ impl A2aMethod {
             "card" => Some(Self::AgentCard),
             _ => None,
         }
+    }
+
+    /// Resolve the method from its JSON-RPC name (e.g. `"message/send"`,
+    /// `"tasks/pushNotificationConfig/set"`), the inverse of [`Self::as_str`].
+    pub fn from_jsonrpc_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|method| method.as_str() == name)
     }
 }
 
