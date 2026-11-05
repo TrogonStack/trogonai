@@ -43,6 +43,7 @@ jsonrpc-nats = { path = "crates/platform/jsonrpc-nats" }
 trogon-nats = { path = "crates/platform/trogon-nats" }
 trogon-aauth-sdk = { path = "crates/aauth/trogon-aauth-sdk" }
 trogon-aauth-verify = { path = "crates/aauth/trogon-aauth-verify" }
+trogon-audit = { path = "crates/platform/trogon-audit" }
 trogon-decider = { path = "crates/decider/trogon-decider" }
 trogon-decider-nats = { path = "crates/decider/trogon-decider-nats" }
 trogon-decider-nats-server = { path = "crates/decider/trogon-decider-nats-server" }

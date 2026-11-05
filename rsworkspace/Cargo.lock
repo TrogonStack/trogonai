@@ -7165,6 +7165,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-audit"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "buffa",
+ "buffa-types",
+ "bytes",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "trogon-nats",
+ "trogon-std",
+ "trogonai-proto",
+ "uuid",
+]
+
+[[package]]
 name = "trogon-channel"
 version = "0.1.0"
 dependencies = [
@@ -7392,7 +7411,9 @@ dependencies = [
 name = "trogon-egress-proxy"
 version = "0.1.0"
 dependencies = [
+ "async-nats",
  "async-trait",
+ "buffa",
  "clap",
  "rcgen",
  "rustls",
@@ -7407,7 +7428,10 @@ dependencies = [
  "toml 1.1.8+spec-1.1.0",
  "tracing",
  "tracing-subscriber",
+ "trogon-audit",
+ "trogon-nats",
  "trogon-std",
+ "trogonai-proto",
  "x509-parser",
 ]
 

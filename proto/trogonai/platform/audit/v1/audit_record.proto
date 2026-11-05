@@ -1,0 +1,81 @@
+edition = "2024";
+
+package trogonai.platform.audit.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "trogon/hierarchy/v1alpha1/node.proto";
+import "trogonai/platform/audit/v1/act_chain_entry.proto";
+import "trogonai/platform/audit/v1/attribution.proto";
+import "trogonai/platform/audit/v1/audit_actor.proto";
+import "trogonai/platform/audit/v1/audit_class.proto";
+import "trogonai/platform/audit/v1/change.proto";
+import "trogonai/platform/audit/v1/credential_use.proto";
+import "trogonai/platform/audit/v1/gateway_decision.proto";
+import "trogonai/platform/audit/v1/integrity.proto";
+import "trogonai/projects/projects/v1alpha1/identity.proto";
+
+// AuditRecord is the one envelope every platform audit record shares.
+//
+// A decision at an enforcing point, a credential release or injection, and a
+// policy or credential change all use it, so a reader asks one stream the
+// question "what did this agent do". The typed detail is the oneof at the end.
+//
+// Nothing here carries a secret, token, prompt, tool argument, header value or
+// body. That is structural rather than a review rule: no field of any message
+// in this package has a type that could hold one, and there is no free-text
+// field a caller fills.
+message AuditRecord {
+  option (buf.validate.message).cel = {
+    id: "audit_record.attribution_on_decisions_and_credentials"
+    message: "a decision or credential record carries its attribution"
+    expression: "has(this.change) || has(this.attribution)"
+  };
+
+  // A UUIDv7. It is also the decision identifier and the Nats-Msg-Id the sink
+  // deduplicates on.
+  string record_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.uuid = true
+  ];
+  // Set by the surface's declaration and the record's kind, never chosen by a
+  // caller.
+  AuditClass class = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // When the writer observed the event.
+  google.protobuf.Timestamp occurred_at = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+  // When the writer handed the record to the sink.
+  google.protobuf.Timestamp recorded_at = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+  trogon.hierarchy.v1alpha1.NodeId tenant = 5 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.projects.projects.v1alpha1.ProjectId project = 6 [features.field_presence = LEGACY_REQUIRED];
+  AuditActor actor = 7 [features.field_presence = LEGACY_REQUIRED];
+  // The delegation chain behind the actor, bounded at the verifier's maximum
+  // depth.
+  repeated ActChainEntry act_chain = 8 [(buf.validate.field).repeated.max_items = 16];
+  // The W3C trace id, for correlation with traces.
+  string trace_id = 9 [(buf.validate.field).string.pattern = "^[0-9a-f]{32}$"];
+  // The id the surface uses for the request.
+  string request_id = 10;
+  Attribution attribution = 11;
+  // Filled by the sink when it accepts the record.
+  Integrity integrity = 12;
+
+  oneof detail {
+    option (buf.validate.oneof).required = true;
+
+    GatewayDecision gateway_decision = 13;
+    CredentialUse credential_use = 14;
+    Change change = 15;
+  }
+}
