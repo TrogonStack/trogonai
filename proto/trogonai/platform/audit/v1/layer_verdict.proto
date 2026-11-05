@@ -1,0 +1,53 @@
+edition = "2024";
+
+package trogonai.platform.audit.v1;
+
+import "buf/validate/validate.proto";
+import "trogonai/platform/audit/v1/audit_decision.proto";
+import "trogonai/platform/audit/v1/enforcement_mode.proto";
+
+// LayerVerdict is what one policy layer of a point decided.
+//
+// A point evaluates its layers independently and each may be enforcing or in
+// DryRun, so the record keeps one verdict per layer rather than only the
+// combined outcome. The A2A adapter maps its Tier-1 and Tier-3 decisions, the
+// rules fired and the SpiceDB consistency token into these.
+message LayerVerdict {
+  option (buf.validate.message).cel = {
+    id: "layer_verdict.would_deny_is_dry_run"
+    message: "only a layer in DRY_RUN reports a would-be denial"
+    expression: "!this.would_deny || this.enforcement_mode == trogonai.platform.audit.v1.EnforcementMode.ENFORCEMENT_MODE_DRY_RUN"
+  };
+
+  // A closed name owned by the surface, such as a tier or a policy plane. Never
+  // free text.
+  string layer = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  AuditDecision decision = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  EnforcementMode enforcement_mode = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // Set when this layer was in DryRun and would have refused.
+  bool would_deny = 4 [features.field_presence = LEGACY_REQUIRED];
+  // A closed code owned by the surface. The error message a layer produced is
+  // not carried, because it can echo content.
+  string reason_code = 5;
+  // The ids of the rules this layer fired.
+  repeated string rule_ids = 6;
+  // The authorization store's consistency token the layer evaluated against, so
+  // a past decision can be reconstructed at that snapshot. Opaque; compared as a
+  // whole.
+  string consistency_token = 7;
+}

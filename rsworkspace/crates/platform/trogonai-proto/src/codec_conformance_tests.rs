@@ -21,6 +21,8 @@ mod retained_fixture;
 mod transport_retained_tests;
 mod wire_boundary_tests;
 
+#[cfg(feature = "audit")]
+mod audit_tests;
 #[cfg(all(feature = "decider", feature = "schedules"))]
 mod decider_retained_tests;
 #[cfg(all(feature = "decider", feature = "schedules"))]
