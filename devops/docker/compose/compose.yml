@@ -100,6 +100,30 @@ services:
         condition: service_healthy
     restart: on-failure:3
 
+  # Runs to completion on every `up`: creates the PLATFORM key-value buckets
+  # that workloads open but never create, such as the AAUTH_REPLAY bucket an
+  # a2a-bridge in enforce refuses to start without (ADR#0082 Decision 4). See
+  # services/nats/provision-kv.sh.
+  nats-kv-provision:
+    image: natsio/nats-box:0.20.1
+    entrypoint:
+      - /bin/sh
+      - /bootstrap/provision-kv.sh
+    environment:
+      <<: *nats-client-env
+    volumes:
+      - ./services/nats:/bootstrap:ro
+      - type: volume
+        source: dev_secrets
+        target: /run/secrets/nats
+        read_only: true
+        volume:
+          subpath: clients/kv-provisioner
+    depends_on:
+      nats-account-push:
+        condition: service_completed_successfully
+    restart: on-failure:3
+
   # Admits a client that connects without a user JWT and names the DEV account
   # as its user into DEV, once its client certificate chains to the dev CA. Its
   # settings, file references to its signing seeds included, are the

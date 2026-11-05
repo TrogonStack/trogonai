@@ -277,7 +277,7 @@ async fn subscriber_stays_unready_while_no_server_has_accepted_its_connection() 
         .unwrap();
     let callout = KeyPair::new_account();
     let wire = AuthCalloutWireCodec::new(
-        AuthAccount::parse(&KeyPair::new_account().public_key()).unwrap(),
+        AuthAccount::parse(&callout.public_key()).unwrap(),
         AccountSigningKey::from_seed(&callout.seed().unwrap()).unwrap(),
         None,
     );

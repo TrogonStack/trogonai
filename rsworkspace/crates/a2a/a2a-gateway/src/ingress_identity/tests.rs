@@ -153,6 +153,13 @@ fn caller_jwt_from_another_issuer_is_rejected() {
 }
 
 #[test]
+fn unreadable_principal_has_a_distinct_audit_rule() {
+    let rejection = ForwardedCallerJwtError::PrincipalUnreadable(JwtError::Decode("missing caller".into()));
+
+    assert_eq!(rejection.audit_rule(), "gateway.caller_jwt.principal_unreadable");
+}
+
+#[test]
 fn caller_jwt_that_names_no_principal_is_audited_as_unreadable() {
     let unreadable = a2a_auth_callout::subject_principal_from_minted_jwt("not-a-jwt").unwrap_err();
 

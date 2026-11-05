@@ -4,6 +4,7 @@ use a2a_auth_callout::{CallerId, subject_principal_from_minted_jwt};
 use a2a_nats::{A2aAgentId, AgentIdError};
 use trogon_identity_types::SubjectPrincipal;
 
+use crate::edge_identity::{BearerSubjectError, CredentialSubject};
 use crate::error::BridgeError;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -43,6 +44,27 @@ impl CallerHttpsAuth {
 
     pub fn into_inner(self) -> String {
         self.0
+    }
+
+    /// The bearer token exactly as the mint path forwards it to the auth
+    /// callout, so what the edge binds is what the callout mints for.
+    #[must_use]
+    pub fn bearer_token(&self) -> Option<&str> {
+        let (scheme, token) = self.0.split_once(' ')?;
+        scheme.eq_ignore_ascii_case("Bearer").then_some(token)
+    }
+
+    /// The issuer and subject the bearer token names, read without verifying
+    /// it: the auth callout verifies the token, and the edge only has to know
+    /// whose it is.
+    ///
+    /// # Errors
+    ///
+    /// [`BearerSubjectError`] when the credential is not a bearer JWT naming a
+    /// non-empty issuer and subject.
+    pub fn bearer_subject(&self) -> Result<CredentialSubject, BearerSubjectError> {
+        let token = self.bearer_token().ok_or(BearerSubjectError::NotBearer)?;
+        CredentialSubject::from_unverified_jwt(token)
     }
 }
 

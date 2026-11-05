@@ -181,11 +181,10 @@ async fn json_mint_client_without_a_callout_xkey_refuses_before_the_exchange() {
 async fn json_mint_client_refuses_an_authorization_header_without_a_bearer_token() {
     let wire = Arc::new(CapturingWire::default());
     let client = sealing_client(wire.clone());
-    let err = client
-        .mint(&CallerHttpsAuth::new("Basic dXNlcjpwYXNz"))
-        .await
-        .unwrap_err();
-    assert!(matches!(err, BridgeError::Mint(_)));
+    for authorization in ["Basic dXNlcjpwYXNz", "Bearer"] {
+        let err = client.mint(&CallerHttpsAuth::new(authorization)).await.unwrap_err();
+        assert!(matches!(err, BridgeError::Mint(_)), "{authorization}");
+    }
     assert!(wire.payloads().is_empty());
 }
 
@@ -202,6 +201,23 @@ async fn json_mint_client_seals_the_caller_token_to_the_callout_xkey() {
     let payloads = wire.payloads();
     assert_eq!(payloads.len(), 1);
     assert!(!String::from_utf8_lossy(&payloads[0]).contains("fixture-token"));
+    let envelope: BridgeMintRequest = serde_json::from_slice(&payloads[0]).unwrap();
+    let opened = envelope.sealed_credential.unwrap().open(&callout).unwrap();
+    assert!(matches!(opened, BridgeCredential::BearerToken(token) if token.as_str() == "fixture-token"));
+}
+
+#[tokio::test]
+async fn json_mint_client_forwards_a_mixed_case_bearer_token() {
+    let callout = harness_callout_xkey();
+    let wire = Arc::new(CapturingWire::default());
+    let client = AuthCalloutJsonMintClient::new(wire.clone(), "subject").sealing_to(callout.public_key());
+    client
+        .mint(&CallerHttpsAuth::new("bEaReR fixture-token"))
+        .await
+        .expect("mixed-case bearer scheme");
+
+    let payloads = wire.payloads();
+    assert_eq!(payloads.len(), 1);
     let envelope: BridgeMintRequest = serde_json::from_slice(&payloads[0]).unwrap();
     let opened = envelope.sealed_credential.unwrap().open(&callout).unwrap();
     assert!(matches!(opened, BridgeCredential::BearerToken(token) if token.as_str() == "fixture-token"));
