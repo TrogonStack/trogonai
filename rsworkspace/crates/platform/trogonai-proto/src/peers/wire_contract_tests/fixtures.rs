@@ -33,11 +33,18 @@ pub(super) fn presence() -> Value {
     })
 }
 
+pub(super) fn content_ref() -> Value {
+    json!({
+        "storageRef": {"value": "content_outgoing"},
+        "digest": {"algorithm": "sha256", "value": DIGEST}
+    })
+}
+
 pub(super) fn metadata() -> Value {
     json!({
         "messageId": "message_outgoing", "senderPeerId": "peer_alpha", "recipientPeerId": "peer_beta",
-        "collaborationRef": "collaboration_alpha", "contentRef": "content_outgoing", "contentSizeBytes": 10,
-        "contentDigest": DIGEST, "acceptedAt": OBSERVED, "expiresAt": "2026-11-02T13:00:00Z",
+        "collaborationRef": "collaboration_alpha", "contentRef": content_ref(), "contentSizeBytes": 10,
+        "acceptedAt": OBSERVED, "expiresAt": "2026-11-02T13:00:00Z",
         "replyToMessageId": "message_previous"
     })
 }
@@ -47,7 +54,7 @@ pub(super) fn incoming_metadata(id: &str) -> Value {
     value["messageId"] = json!(id);
     value["senderPeerId"] = json!("peer_beta");
     value["recipientPeerId"] = json!("peer_alpha");
-    value["contentRef"] = json!(format!("content_{id}"));
+    value["contentRef"]["storageRef"]["value"] = json!(format!("content_{id}"));
     value
 }
 

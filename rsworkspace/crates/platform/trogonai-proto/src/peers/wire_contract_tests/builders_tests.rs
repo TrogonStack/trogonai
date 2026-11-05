@@ -59,16 +59,14 @@ fn identity_builders_match_wire_fields_and_replace_only_the_selected_value() {
 #[test]
 fn message_builders_keep_the_content_reference_digest_and_reply_provenance() {
     let metadata: proto::MessageMetadata = nested(json!({
-        "acceptedAt": fixtures::OBSERVED, "expiresAt": "2026-11-02T13:00:00Z"
+        "contentRef": fixtures::content_ref(), "acceptedAt": fixtures::OBSERVED, "expiresAt": "2026-11-02T13:00:00Z"
     }));
     let metadata = metadata
         .with_message_id("message_outgoing")
         .with_sender_peer_id("peer_alpha")
         .with_recipient_peer_id("peer_beta")
         .with_collaboration_ref("collaboration_alpha")
-        .with_content_ref("content_outgoing")
         .with_content_size_bytes(10)
-        .with_content_digest(vec![0; 32])
         .with_reply_to_message_id("message_previous");
     assert_builder(metadata, fixtures::metadata());
     assert_builder(
@@ -226,13 +224,33 @@ fn scalar_builders_preserve_present_zero_and_empty_values_instead_of_absence() {
     assert_eq!(zero.generation, Some(0));
     assert_ne!(zero.encode_to_vec(), absent.encode_to_vec());
     assert_builder(zero, json!({"peerId": "", "connectorId": "", "generation": "0"}));
-    let empty = proto::MessageMetadata::default()
-        .with_content_size_bytes(0)
-        .with_content_digest(Vec::<u8>::new());
-    assert_eq!(empty.content_digest, Some(Vec::new()));
-    assert_builder(empty, json!({"contentSizeBytes": 0, "contentDigest": ""}));
+    let empty = proto::MessageMetadata::default().with_content_size_bytes(0);
+    assert_builder(empty, json!({"contentSizeBytes": 0}));
+    let empty_digest = proto::Digest::default().with_value(Vec::<u8>::new());
+    assert_eq!(empty_digest.value, Some(Vec::new()));
+    assert_builder(empty_digest, json!({"value": ""}));
     assert_builder(
         state::PeerState::default().with_next_intake_ordinal(0),
         json!({"nextIntakeOrdinal": "0"}),
     );
+}
+
+#[test]
+fn claim_check_construction_keeps_the_storage_locator_and_digest_together() {
+    let locator = proto::StorageLocator::default()
+        .with_value("discarded")
+        .with_value("content_outgoing");
+    let digest = proto::Digest::default()
+        .with_algorithm("sha256")
+        .with_value(vec![0; 32]);
+    assert_builder(locator.clone(), json!({"value": "content_outgoing"}));
+    assert_builder(
+        digest.clone(),
+        json!({"algorithm": "sha256", "value": fixtures::DIGEST}),
+    );
+    let reference = proto::ClaimCheck {
+        storage_ref: buffa::MessageField::some(locator),
+        digest: buffa::MessageField::some(digest),
+    };
+    assert_builder(reference, fixtures::content_ref());
 }

@@ -112,6 +112,17 @@ fn registered_identity_and_presence_messages_keep_diagnostic_identity_and_proto_
 #[test]
 fn registered_mailbox_messages_keep_provenance_and_order_in_diagnostics_and_proto_json() {
     let registry = registry();
+    public_contract::<proto::StorageLocator>(&registry, json!({"value": "content_outgoing"}), &["content_outgoing"]);
+    public_contract::<proto::Digest>(
+        &registry,
+        json!({"algorithm": "sha256", "value": fixtures::DIGEST}),
+        &["sha256"],
+    );
+    public_contract::<proto::ClaimCheck>(
+        &registry,
+        fixtures::content_ref(),
+        &["content_outgoing", "sha256", "storage_ref"],
+    );
     public_contract::<proto::MessageMetadata>(
         &registry,
         fixtures::metadata(),

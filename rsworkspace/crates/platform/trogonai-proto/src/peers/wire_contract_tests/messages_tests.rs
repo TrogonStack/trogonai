@@ -86,9 +86,12 @@ fn message_views_keep_durable_metadata_separate_from_erasable_text() {
             assert_eq!(handle.sender_peer_id(), Some("peer_alpha"));
             assert_eq!(handle.recipient_peer_id(), Some("peer_beta"));
             assert_eq!(handle.collaboration_ref(), Some("collaboration_alpha"));
-            assert_eq!(handle.content_ref(), Some("content_outgoing"));
+            let metadata = handle.to_owned_message();
+            let reference = metadata.content_ref.as_option().unwrap();
+            assert_eq!(reference.storage_ref.value.as_deref(), Some("content_outgoing"));
+            assert_eq!(reference.digest.algorithm.as_deref(), Some("sha256"));
+            assert_eq!(reference.digest.value.as_deref(), Some(&[0; 32][..]));
             assert_eq!(handle.content_size_bytes(), Some(10));
-            assert_eq!(handle.content_digest(), Some(&[0; 32][..]));
             assert_eq!(handle.reply_to_message_id(), Some("message_previous"));
             assert_eq!(
                 handle.expires_at().as_option().unwrap().seconds - handle.accepted_at().as_option().unwrap().seconds,
@@ -233,7 +236,9 @@ fn wire_presence_preserves_zero_empty_values_and_empty_nested_messages() {
     assert_eq!(present.peer_id.as_deref(), Some(""));
     assert_ne!(absent, present);
     assert_json_codec::<proto::PeerAttachment>(json!({"attachmentRef": {}, "status": "ATTACHMENT_STATUS_UNSPECIFIED"}));
-    assert_json_codec::<proto::MessageMetadata>(json!({"contentSizeBytes": 0, "contentDigest": ""}));
+    assert_json_codec::<proto::MessageMetadata>(
+        json!({"contentSizeBytes": 0, "contentRef": {"digest": {"value": ""}}}),
+    );
     assert_json_codec::<proto::InboxEntry>(json!({"message": {}, "intakeOrdinal": "0", "disposition": {}}));
     assert_json_codec::<proto::OutboxEntry>(
         json!({"idempotencyKey": "", "semanticDigest": "", "message": {}, "settlement": {}}),
@@ -257,4 +262,36 @@ fn wire_presence_preserves_zero_empty_values_and_empty_nested_messages() {
                 && state.dispositions.is_empty()
         );
     }
+}
+
+#[test]
+fn stored_content_reference_views_preserve_locator_and_digest_as_one_value() {
+    retained_message!(
+        proto::StorageLocator,
+        proto::StorageLocatorOwnedView,
+        json!({"value": "content_outgoing"}),
+        |handle| {
+            assert_eq!(handle.value(), Some("content_outgoing"));
+        }
+    );
+    retained_message!(
+        proto::Digest,
+        proto::DigestOwnedView,
+        json!({"algorithm": "sha256", "value": fixtures::DIGEST}),
+        |handle| {
+            assert_eq!(handle.algorithm(), Some("sha256"));
+            assert_eq!(handle.value(), Some(&[0; 32][..]));
+        }
+    );
+    retained_message!(
+        proto::ClaimCheck,
+        proto::ClaimCheckOwnedView,
+        fixtures::content_ref(),
+        |handle| {
+            let reference = handle.to_owned_message();
+            assert_eq!(reference.storage_ref.value.as_deref(), Some("content_outgoing"));
+            assert_eq!(reference.digest.algorithm.as_deref(), Some("sha256"));
+            assert_eq!(reference.digest.value.as_deref(), Some(&[0; 32][..]));
+        }
+    );
 }

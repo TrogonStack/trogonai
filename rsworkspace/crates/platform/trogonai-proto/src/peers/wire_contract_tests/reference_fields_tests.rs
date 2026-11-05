@@ -39,9 +39,7 @@ fn content_reference_binds_the_locator_and_digest_in_one_json_value() {
 
 #[test]
 fn retired_content_fields_do_not_decode_as_a_structured_reference() {
-    let legacy = [
-        0x0a, 3, b'm', b's', b'g', 0x2a, 3, b'o', b'l', b'd', 0x3a, 2, 0, 1,
-    ];
+    let legacy = [0x0a, 3, b'm', b's', b'g', 0x2a, 3, b'o', b'l', b'd', 0x3a, 2, 0, 1];
     let expected = proto::MessageMetadata::default().with_message_id("msg");
     assert_wire_codec(&legacy, &expected);
 }
