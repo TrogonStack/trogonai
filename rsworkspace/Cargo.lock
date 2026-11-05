@@ -7509,6 +7509,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-policy-cel"
+version = "0.1.0"
+dependencies = [
+ "cel-interpreter",
+ "cel-parser",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tracing",
+ "trogon-policy-eval",
+ "trogon-std",
+]
+
+[[package]]
+name = "trogon-policy-eval"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.21",
+ "trogon-decider-runtime",
+ "trogon-std",
+]
+
+[[package]]
 name = "trogon-provider-gateway"
 version = "0.0.1"
 dependencies = [

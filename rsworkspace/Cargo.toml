@@ -61,6 +61,8 @@ trogon-service-config = { path = "crates/platform/trogon-service-config" }
 trogon-std = { path = "crates/platform/trogon-std" }
 trogonai-proto = { path = "crates/platform/trogonai-proto" }
 trogon-egress-proxy = { path = "crates/platform/trogon-egress-proxy" }
+trogon-policy-eval = { path = "crates/policy/trogon-policy-eval" }
+trogon-policy-cel = { path = "crates/policy/trogon-policy-cel" }
 trogon-channel = { path = "crates/channel/trogon-channel" }
 channel-bridge-telegram = { path = "crates/channel/channel-bridge-telegram" }
 
@@ -69,6 +71,7 @@ a2a = { package = "a2a-lf", version = "=0.3.0" }
 
 # CEL interpreter for Tier-2 declarative policy rules
 cel-interpreter = "=0.10.0"
+cel-parser = "=0.10.1"
 
 # ACP
 # Any bump must follow the upgrade ritual in docs/architecture/acp-conformance.md.
