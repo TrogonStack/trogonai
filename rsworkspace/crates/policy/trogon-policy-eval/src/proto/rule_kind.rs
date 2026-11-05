@@ -9,13 +9,13 @@ impl TryFrom<proto::PolicyRuleKind> for RuleKind {
     /// Maps the kinds this evaluator reads. Budgets, rate limits, and
     /// connection permissions are real kinds in the schema that no
     /// enforcement point evaluates here, so they are refused rather than
-    /// folded into a kind they are not. The schema has no egress permission
-    /// kind, so [`RuleKind::EgressPermission`] has no counterpart to read.
+    /// folded into a kind they are not.
     fn try_from(value: proto::PolicyRuleKind) -> Result<Self, Self::Error> {
         match value {
             proto::PolicyRuleKind::POLICY_RULE_KIND_HOLD => Ok(Self::Hold),
             proto::PolicyRuleKind::POLICY_RULE_KIND_MODEL_CEILING => Ok(Self::ModelCeiling),
             proto::PolicyRuleKind::POLICY_RULE_KIND_DELEGATION_PERMISSION => Ok(Self::DelegationPermission),
+            proto::PolicyRuleKind::POLICY_RULE_KIND_EGRESS_PERMISSION => Ok(Self::EgressPermission),
             proto::PolicyRuleKind::POLICY_RULE_KIND_UNSPECIFIED => Err(ProtoConversionError::UnknownEnumValue {
                 enumeration: "PolicyRuleKind",
                 value: value as i32,

@@ -155,6 +155,10 @@ fn rule_kind_converts_the_kinds_the_evaluator_reads() {
         RuleKind::try_from(Kind::DelegationPermission),
         Ok(RuleKind::DelegationPermission)
     );
+    assert_eq!(
+        RuleKind::try_from(Kind::EgressPermission),
+        Ok(RuleKind::EgressPermission)
+    );
 }
 
 #[test]
