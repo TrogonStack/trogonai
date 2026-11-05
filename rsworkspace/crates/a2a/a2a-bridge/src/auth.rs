@@ -5,11 +5,14 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
-use a2a_auth_callout::{BridgeMintRequest, BridgeMintResponse};
+use a2a_auth_callout::credentials::oidc::BearerToken;
+use a2a_auth_callout::{
+    BridgeCredential, BridgeCredentialError, BridgeMintRequest, BridgeMintResponse, SealedBridgeCredential, XkeyPublic,
+};
 
-#[cfg(test)]
-pub(crate) use callout_mint::harness_callout_dispatcher;
 pub use callout_mint::{BridgeTenantAccount, InProcessCalloutDispatcherMintWire};
+#[cfg(test)]
+pub(crate) use callout_mint::{harness_callout_dispatcher, harness_callout_xkey};
 
 use crate::error::BridgeError;
 use crate::identity::{BridgeUserJwt, CallerHttpsAuth};
@@ -47,7 +50,7 @@ impl StubAuthCalloutMint {
     pub fn fixture() -> Result<Self, BridgeError> {
         // A real compact JWT shape (header.payload.signature) so the
         // dev/test stub satisfies the same gate production tokens go
-        // through — keeps the smuggling-prevention invariant intact
+        // through, which keeps the smuggling-prevention invariant intact
         // even on fixture paths.
         Self::new(
             "eyJhbGciOiJub25lIn0.eyJzdWIiOiJoYXJuZXNzIiwiY2FsbGVyX2lkIjoiaGFybmVzcyIsInByaW5jaXBhbF9raW5kIjoicGVyc29uIn0.sig",
@@ -105,6 +108,7 @@ pub struct AuthCalloutJsonMintClient<W: AuthMintWire> {
     wire: Arc<W>,
     mint_subject: Arc<str>,
     tenant_account: Option<BridgeTenantAccount>,
+    callout_xkey: Option<XkeyPublic>,
 }
 
 impl<W: AuthMintWire + 'static> AuthCalloutJsonMintClient<W> {
@@ -123,7 +127,32 @@ impl<W: AuthMintWire + 'static> AuthCalloutJsonMintClient<W> {
             wire,
             mint_subject: mint_subject.into(),
             tenant_account,
+            callout_xkey: None,
         }
+    }
+
+    /// Without the callout xkey the caller's credential has nothing to be
+    /// sealed to, so every mint is refused before it reaches the bus.
+    #[must_use]
+    pub fn sealing_to(self, callout_xkey: XkeyPublic) -> Self {
+        Self {
+            callout_xkey: Some(callout_xkey),
+            ..self
+        }
+    }
+
+    fn sealed_credential(&self, caller_auth: &CallerHttpsAuth) -> Result<SealedBridgeCredential, BridgeError> {
+        let callout_xkey = self
+            .callout_xkey
+            .as_ref()
+            .ok_or(BridgeError::MintCredential(BridgeCredentialError::NoCalloutXkey))?;
+        let token = caller_auth
+            .as_str()
+            .strip_prefix("Bearer ")
+            .or_else(|| caller_auth.as_str().strip_prefix("bearer "))
+            .ok_or_else(|| BridgeError::Mint("the Authorization header presents no bearer token".into()))?;
+        SealedBridgeCredential::seal(&BridgeCredential::BearerToken(BearerToken::new(token)), callout_xkey)
+            .map_err(BridgeError::MintCredential)
     }
 
     #[must_use]
@@ -135,21 +164,14 @@ impl<W: AuthMintWire + 'static> AuthCalloutJsonMintClient<W> {
 #[async_trait]
 impl<W: AuthMintWire + 'static> AuthCalloutClient for AuthCalloutJsonMintClient<W> {
     async fn mint(&self, caller_auth: &CallerHttpsAuth) -> Result<BridgeUserJwt, BridgeError> {
-        let bearer_jwt = caller_auth
-            .as_str()
-            .strip_prefix("Bearer ")
-            .or_else(|| caller_auth.as_str().strip_prefix("bearer "))
-            .map(str::to_owned);
         let envelope = BridgeMintRequest {
-            user_nkey: None,
-            user_jwt: bearer_jwt,
             account: self.tenant_account.as_ref().map(|a| a.as_str().to_owned()),
-            client_info: None,
-            connect_opts: None,
+            sealed_credential: Some(self.sealed_credential(caller_auth)?),
+            ..BridgeMintRequest::default()
         };
         let bytes = serde_json::to_vec(&envelope).map_err(|e: serde_json::Error| BridgeError::Serialize(e))?;
         // The wire impl owns the deadline (e.g. AsyncNatsAuthMintWire's
-        // request_timeout) — wrapping a fixed 30s timeout here would
+        // request_timeout). Wrapping a fixed 30s timeout here would
         // mask longer wire configs and surface a different error
         // message on short timeouts.
         let reply = self
