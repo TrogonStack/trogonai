@@ -14,6 +14,9 @@
 //!   class. No caller chooses a class.
 //! - [`AuditSink`] is the port; [`JetStreamSink`] publishes with `Nats-Msg-Id`
 //!   set to the record id and waits for the acknowledgement.
+//! - [`AuditStream`] is the configuration of the `AUDIT` and `AUDIT_CHECKPOINT`
+//!   streams, and [`ensure_audit_stream`] creates them or validates an existing
+//!   one. An operator or the dev compose runs it; a writer never does.
 //! - [`AuditWriter`] refuses an action whose must-audit record it cannot store,
 //!   buffers the record of a refusal, and queues best-effort records.
 //!
@@ -27,6 +30,8 @@
 pub mod actor;
 pub mod audit_name;
 pub mod audit_sink;
+pub mod audit_stream;
+pub mod audit_stream_mismatch_error;
 pub mod audit_subject;
 pub mod audit_unavailable_error;
 pub mod audit_writer;
@@ -43,6 +48,8 @@ pub mod decision_outcome;
 pub mod decision_terminal;
 pub mod disposition;
 pub mod enforcement;
+pub mod ensure_audit_stream;
+pub mod ensure_audit_stream_error;
 pub mod failure_reason;
 pub mod integrity_terminal;
 pub mod jetstream_sink;
@@ -72,6 +79,8 @@ pub mod memory_sink;
 pub use actor::Actor;
 pub use audit_name::{AuditName, AuditNameError};
 pub use audit_sink::AuditSink;
+pub use audit_stream::AuditStream;
+pub use audit_stream_mismatch_error::AuditStreamMismatchError;
 pub use audit_subject::AuditSubject;
 pub use audit_unavailable_error::AuditUnavailableError;
 pub use audit_writer::AuditWriter;
@@ -87,6 +96,8 @@ pub use decision_outcome::DecisionOutcome;
 pub use decision_terminal::DecisionTerminal;
 pub use disposition::Disposition;
 pub use enforcement::Enforcement;
+pub use ensure_audit_stream::{ensure_audit_stream, ensure_audit_streams};
+pub use ensure_audit_stream_error::EnsureAuditStreamError;
 pub use failure_reason::FailureReason;
 pub use integrity_terminal::IntegrityTerminal;
 pub use jetstream_sink::JetStreamSink;

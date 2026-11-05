@@ -53,6 +53,11 @@ pub const CONSISTENCY_TOKEN_PUNCTUATION: &str = "+/=-_.:~";
 
 pub const RECORD_ID_UUID_VERSION: usize = 7;
 
+/// The streams that hold the records (ADR#0086 Decision 2).
+pub const STREAM_AUDIT: &str = "AUDIT";
+pub const STREAM_AUDIT_CHECKPOINT: &str = "AUDIT_CHECKPOINT";
+pub const STREAM_DUPLICATE_WINDOW: Duration = Duration::from_secs(120);
+
 /// A lost ack is retried inside the stream's duplicate window (two minutes), so
 /// three attempts of a couple of seconds stay well within it.
 pub const DEFAULT_ACK_TIMEOUT: Duration = Duration::from_secs(2);

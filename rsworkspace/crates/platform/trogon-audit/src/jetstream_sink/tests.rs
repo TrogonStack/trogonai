@@ -224,3 +224,5 @@ async fn an_unacknowledged_attempt_reaches_the_log_facade_when_no_subscriber_is_
     assert!(line.message.contains(&record.id().to_string()));
     assert!(line.message.contains("timeout"));
 }
+
+mod against_a_stream;
