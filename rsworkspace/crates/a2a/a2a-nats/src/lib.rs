@@ -42,9 +42,9 @@ pub use context_id::{A2aContextId, ContextIdError};
 pub use error::{AGENT_UNAVAILABLE, TASK_NOT_CANCELABLE, TASK_NOT_FOUND};
 pub use gateway_ingress::{
     gateway_ingress_subject_from_agent_subject, ingress_error_response_wire,
-    ingress_gateway_aauth_denied_response_bytes, ingress_gateway_deadline_exceeded_response_bytes,
-    ingress_gateway_declarative_denied_response_bytes, ingress_gateway_policy_denied_response_bytes,
-    ingress_gateway_tier3_refused_response_bytes, ingress_invalid_request_response_bytes,
+    ingress_gateway_deadline_exceeded_response_bytes, ingress_gateway_declarative_denied_response_bytes,
+    ingress_gateway_policy_denied_response_bytes, ingress_gateway_tier3_refused_response_bytes,
+    ingress_invalid_request_response_bytes,
 };
 pub use jsonrpc::extract_request_id;
 pub use jsonrpc_nats::{RequestId, ResponseId};

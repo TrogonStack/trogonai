@@ -1,52 +1,45 @@
 //! `{prefix}.v1.gateway.{agent}.{kind}.{id}.{method}` ingress dispatch orchestrator.
 //!
 //! Runs each ingress request through the full policy stack in
-//! order: caller-identity resolution -> Tier-1 SpiceDB ->
+//! order: forwarded caller JWT check -> Tier-1 SpiceDB ->
 //! Tier-1 declarative -> Tier-2 CEL -> Tier-3 redaction. Each
 //! denial path replies on the caller inbox with the matching
 //! JSON-RPC error code and publishes an audit envelope; the
 //! allow path forwards to `{prefix}.v1.agents.{agent}.{kind}.{id}.{method}`
 //! and (when configured) spawns a streaming pump for stream-shaped
-//! methods. Both write the principal the ingress subject carried and no
-//! other, so a header or payload can never re-attribute a relayed request
-//! (ADR#0082).
+//! methods. A subject that names no caller never reaches a tier. Every
+//! tier, audit and forward sees the principal the ingress subject carried
+//! and no other, so a header or payload can never re-attribute a relayed
+//! request (ADR#0082).
 
 #![cfg(feature = "spicedb")]
 
 use std::sync::Arc;
 use std::time::Instant;
 
-use a2a_auth_callout::SpiceDbSubject;
 use a2a_nats::A2aMethod;
 use a2a_nats::audit::envelope::{AuditEnvelope, AuditEnvelopeFields, AuditOutcome, Tier1Decision, Tier3Decision};
 use a2a_nats::nats::subjects::gateway::GatewayIngressSubject;
 use a2a_nats::{
-    ingress_error_response_wire, ingress_gateway_deadline_exceeded_response_bytes,
-    ingress_gateway_declarative_denied_response_bytes, ingress_gateway_policy_denied_response_bytes,
-    ingress_gateway_tier3_refused_response_bytes, ingress_invalid_request_response_bytes,
+    ingress_gateway_deadline_exceeded_response_bytes, ingress_gateway_declarative_denied_response_bytes,
+    ingress_gateway_policy_denied_response_bytes, ingress_gateway_tier3_refused_response_bytes,
+    ingress_invalid_request_response_bytes,
 };
 use async_nats::HeaderMap;
 use bytes::Bytes;
 use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, debug, error, info, warn};
-use trogon_identity_types::aauth::headers as aauth_headers;
+use trogon_identity_types::SubjectPrincipal;
 use trogon_std::env::ReadEnv;
 use uuid::Uuid;
 
-use crate::aauth::{AAuthMode, GatewayAAuthIngress};
 use crate::config::Config;
-use crate::gw_ingress_stream::{
-    CallerKey, GatewayStreamingIngressConfig, StreamingIngressGate, events_stream_last_seq,
-};
-use crate::jwt_caller_identity::{
-    GatewayCallerIdentityPolicy, JwtHeaderCallerIdentitySource, gateway_audit_caller_attribution,
-    resolve_gateway_caller_identity,
-};
-use a2a_nats::catalog::import_gate::SpiceDbPrincipal;
-
+use crate::gw_ingress_stream::{GatewayStreamingIngressConfig, StreamingIngressGate, events_stream_last_seq};
+use crate::ingress_identity::{ForwardedCallerJwtVerifier, without_identity_headers};
+use crate::policy::CallerSpiceDbSubject;
 use crate::policy::spicedb_tier1::{
     OwnerTupleEmitter, SpiceDbTier1Gate, Tier1AuthorizeOutcome, Tier1OwnerTuple, derive_tuple,
-    tier1_principal_from_caller, tier1_session_from_principal,
+    tier1_principal_from_caller, tier1_session_from_caller,
 };
 use crate::policy::tier1_declarative::{
     Tier1DeclarativeDecision, Tier1DeclarativeGate, tier1_declarative_audit_rule_fired,
@@ -57,7 +50,6 @@ use crate::policy::tier3_redaction::{
     Tier3EvaluationContext, Tier3RedactionDecision, gateway_tier3_redaction_enabled, merge_forward_audit_rewrites,
     tier3_redaction_audit_rewrites,
 };
-use crate::runtime::aauth_env::{GatewayCallerIdentity, aauth_deny_rule_fired, gateway_caller_identity_after_aauth};
 use crate::runtime::audit_publish::spawn_gateway_audit_publish;
 use crate::runtime::env::{
     gateway_audit_publish_enabled, json_rpc_audit_req_id, json_rpc_params, unary_deadline_for_method, unix_epoch_ms,
@@ -70,10 +62,10 @@ use crate::runtime::tier1_denial::{Tier1DenialCtx, deny_tier1};
 
 use crate::constants::MESSAGE_STREAM_METHOD_DOTS;
 use crate::constants::{
-    ANONYMOUS_CALLER_SLUG, ATTR_AAUTH_AGENT_ID, ATTR_AGENT_SUBJECT, ATTR_CALLER_ID, ATTR_ROUTING_OUTCOME,
-    ENV_GATEWAY_JWT_AUDIENCE, ROUTING_AAUTH_DENIED, ROUTING_DEADLINE_EXCEEDED, ROUTING_FORWARD_FAILED,
-    ROUTING_FORWARDED, ROUTING_IGNORED_NO_REPLY, ROUTING_INGRESS_ERROR, ROUTING_POLICY_DENIED, ROUTING_TIER1_DENIED,
-    ROUTING_TIER3_ENGINE_ERROR, ROUTING_TIER3_REFUSED, SPAN_GATEWAY_INGRESS_DISPATCH,
+    ATTR_AGENT_SUBJECT, ATTR_CALLER_ID, ATTR_ROUTING_OUTCOME, ENV_GATEWAY_JWT_AUDIENCE, ROUTING_CALLER_JWT_REJECTED,
+    ROUTING_DEADLINE_EXCEEDED, ROUTING_FORWARD_FAILED, ROUTING_FORWARDED, ROUTING_IGNORED_NO_REPLY,
+    ROUTING_INGRESS_ERROR, ROUTING_POLICY_DENIED, ROUTING_TIER1_DENIED, ROUTING_TIER3_ENGINE_ERROR,
+    ROUTING_TIER3_REFUSED, SPAN_GATEWAY_INGRESS_DISPATCH,
 };
 
 /// Run a single ingress envelope through the full gateway dispatch
@@ -92,10 +84,8 @@ pub async fn dispatch_gateway_ingress<E: ReadEnv>(
     tier1: &dyn SpiceDbTier1Gate,
     tier1_owner: Option<&Arc<dyn OwnerTupleEmitter>>,
     tier1_declarative: &dyn Tier1DeclarativeGate,
-    aauth: Option<&GatewayAAuthIngress>,
     policy: &GatewayPolicyStack,
-    message_caller_identity: &JwtHeaderCallerIdentitySource,
-    caller_identity_policy: GatewayCallerIdentityPolicy,
+    caller_jwt: &ForwardedCallerJwtVerifier,
     streaming_ingress_enabled: bool,
     streaming_ingress_config: GatewayStreamingIngressConfig,
     streaming_ingress_gate: &StreamingIngressGate,
@@ -105,14 +95,6 @@ pub async fn dispatch_gateway_ingress<E: ReadEnv>(
 ) {
     let ingress_subject = msg.subject.as_str().to_owned();
     let reply_present = msg.reply.is_some();
-    let headers_for_identity = msg.headers.clone().unwrap_or_default();
-    let caller_identity = resolve_gateway_caller_identity(
-        message_caller_identity,
-        &msg,
-        &headers_for_identity,
-        caller_identity_policy,
-    );
-    let (audit_caller_id, audit_caller_source) = gateway_audit_caller_attribution(caller_identity);
 
     let span = tracing::info_span!(
         SPAN_GATEWAY_INGRESS_DISPATCH,
@@ -121,7 +103,6 @@ pub async fn dispatch_gateway_ingress<E: ReadEnv>(
         caller_id = tracing::field::Empty,
         agent_subject = tracing::field::Empty,
         routing_outcome = tracing::field::Empty,
-        aauth_agent_id = tracing::field::Empty,
     );
 
     async {
@@ -151,8 +132,8 @@ pub async fn dispatch_gateway_ingress<E: ReadEnv>(
                     tier1,
                     tier1_owner,
                     tier1_declarative,
-                    aauth,
                     policy,
+                    caller_jwt,
                     streaming_ingress_enabled,
                     streaming_ingress_config,
                     streaming_ingress_gate,
@@ -162,8 +143,6 @@ pub async fn dispatch_gateway_ingress<E: ReadEnv>(
                     reply,
                     ingress_subject.as_str(),
                     ingress,
-                    audit_caller_id,
-                    audit_caller_source,
                 )
                 .await;
             }
@@ -183,8 +162,8 @@ async fn dispatch_routed<E: ReadEnv>(
     tier1: &dyn SpiceDbTier1Gate,
     tier1_owner: Option<&Arc<dyn OwnerTupleEmitter>>,
     tier1_declarative: &dyn Tier1DeclarativeGate,
-    aauth: Option<&GatewayAAuthIngress>,
     policy: &GatewayPolicyStack,
+    caller_jwt: &ForwardedCallerJwtVerifier,
     streaming_ingress_enabled: bool,
     streaming_ingress_config: GatewayStreamingIngressConfig,
     streaming_ingress_gate: &StreamingIngressGate,
@@ -194,14 +173,14 @@ async fn dispatch_routed<E: ReadEnv>(
     reply: async_nats::Subject,
     ingress_subject: &str,
     ingress: GatewayIngressSubject,
-    mut audit_caller_id: String,
-    mut audit_caller_source: Option<String>,
 ) {
+    let caller = ingress.caller().clone();
+    tracing::Span::current().record(ATTR_CALLER_ID, tracing::field::display(&caller));
     let agent_id = ingress.agent_id().clone();
     let method = ingress.method().clone();
     let method_dots = method.as_dotted_suffix().to_owned();
     let agent_subject = ingress.agent_delivery().to_string();
-    let mut headers_owned = msg.headers.clone().unwrap_or_default();
+    let inbound_headers = msg.headers.clone().unwrap_or_default();
     tracing::Span::current().record(ATTR_AGENT_SUBJECT, tracing::field::display(&agent_subject));
 
     let mut payload: Bytes = msg.payload.clone();
@@ -212,127 +191,51 @@ async fn dispatch_routed<E: ReadEnv>(
     let method_slashes = method_dots.replace('.', "/");
     let _unary_deadline_guard = unary_deadline_for_method(env, method_dots.as_str());
 
-    let mut caller_slug = caller_slug_from_audit_id(audit_caller_id.as_str());
-    let mut tier1_zed_token: Option<String> = None;
-    // Carries the verified `aa-auth+jwt`'s `jti` past the AAuth block below so
-    // it can be attached as the forwarded message's `AAuth-Access` header
-    // (draft "AAuth-Access Response Header") once the allow path is reached.
-    let mut aauth_access_jti: Option<String> = None;
-
-    // AAuth verifies caller identity before any authorization tier runs --
-    // authentication must precede authorization.
-    if let Some(aauth) = aauth
-        && aauth.mode != AAuthMode::Off
-    {
-        let header_pairs: Vec<(String, String)> = headers_owned
-            .iter()
-            .flat_map(|(name, values)| values.iter().map(move |value| (name.to_string(), value.to_string())))
-            .collect();
-        let auth_token = headers_owned
-            .get(aauth_headers::NATS_AUTH_TOKEN)
-            .map(std::string::ToString::to_string);
-        match aauth
-            .resolve_nats(
-                ingress_subject,
-                Some(reply.as_str()),
-                payload.as_ref(),
-                &header_pairs,
-                auth_token.as_deref(),
-                method_dots.as_str(),
-            )
-            .await
-        {
-            Ok(resolution) => {
-                if let Some(agent_id) = resolution.agent_id.as_deref() {
-                    tracing::Span::current().record(ATTR_AAUTH_AGENT_ID, agent_id);
-                }
-                // A verified `aa-auth+jwt` principal supersedes the
-                // JWT-header caller identity for everything downstream
-                // (Tier-1 authorization + audit attribution). Absent a
-                // principal, the agent authenticated on its own behalf and
-                // the existing caller identity is left untouched.
-                let identity = gateway_caller_identity_after_aauth(
-                    GatewayCallerIdentity {
-                        audit_caller_id,
-                        audit_caller_source,
-                        caller_slug,
+    if let Err(rejection) = caller_jwt.check(&inbound_headers, &caller) {
+        tracing::Span::current().record(ATTR_ROUTING_OUTCOME, ROUTING_CALLER_JWT_REJECTED);
+        warn!(
+            ingress.subject = %ingress_subject,
+            caller_id = %caller,
+            rule = rejection.audit_rule(),
+            reason = %rejection,
+            routing_outcome = "caller_jwt_rejected",
+            "gateway rejected a forwarded caller JWT that does not prove the subject principal",
+        );
+        let body =
+            ingress_invalid_request_response_bytes(&inbound_headers, payload.as_ref(), "forwarded caller JWT rejected");
+        reply_error(client, reply, HeaderMap::new(), body).await;
+        spawn_gateway_audit_publish(
+            audit_enabled,
+            client.clone(),
+            config.a2a_prefix.clone(),
+            agent_id.clone(),
+            AuditEnvelope::new(
+                &agent_id,
+                method_slashes.clone(),
+                json_rpc_audit_req_id(payload.as_ref()),
+                started_wall_ms,
+                elapsed_ms(started_mono),
+                AuditOutcome::Err {
+                    code: -32_600,
+                    message: "forwarded caller JWT rejected".into(),
+                },
+                Some(payload.as_ref()),
+                enrich_audit_caller(
+                    AuditEnvelopeFields {
+                        trace_id: Some(trace_id.clone()),
+                        rules_fired: Some(vec![rejection.audit_rule().into()]),
+                        ..Default::default()
                     },
-                    resolution.principal.as_deref(),
-                );
-                audit_caller_id = identity.audit_caller_id;
-                audit_caller_source = identity.audit_caller_source;
-                caller_slug = identity.caller_slug;
-                aauth_access_jti = resolution.auth_jti;
-            }
-            Err(deny) => {
-                tracing::Span::current().record(ATTR_ROUTING_OUTCOME, ROUTING_AAUTH_DENIED);
-                warn!(
-                    ingress.subject = %ingress_subject,
-                    agent_subject = %agent_subject,
-                    routing_outcome = ROUTING_AAUTH_DENIED,
-                    reason = %deny.reason,
-                    "gateway aauth verification rejected ingress envelope",
-                );
-                // Emit the full wire encoding: body is authoritative (ADR#0056);
-                // derived Jsonrpc-Id / Jsonrpc-Error-Code projections stay for
-                // routing and metrics so clients that only inspect headers still
-                // see -32118.
-                let encoded = ingress_error_response_wire(
-                    &headers_owned,
-                    payload.as_ref(),
-                    deny.code,
-                    "aauth verification rejected envelope",
-                    None,
-                );
-                let mut reply_headers = encoded.headers;
-                if let Some((name, value)) = deny.to_requirement_header() {
-                    reply_headers.insert(name.as_str(), value.as_str());
-                }
-                reply_error(client, reply, reply_headers, encoded.body).await;
-                spawn_gateway_audit_publish(
-                    audit_enabled,
-                    client.clone(),
-                    config.a2a_prefix.clone(),
-                    agent_id.clone(),
-                    AuditEnvelope::new(
-                        &agent_id,
-                        method_slashes.clone(),
-                        json_rpc_audit_req_id(payload.as_ref()),
-                        started_wall_ms,
-                        elapsed_ms(started_mono),
-                        AuditOutcome::Err {
-                            code: -32_118,
-                            message: "aauth verification rejected envelope".into(),
-                        },
-                        Some(payload.as_ref()),
-                        enrich_audit_caller(
-                            AuditEnvelopeFields {
-                                trace_id: Some(trace_id.clone()),
-                                rules_fired: Some(vec![aauth_deny_rule_fired(&deny.reason).to_string()]),
-                                ..Default::default()
-                            },
-                            audit_caller_id.as_str(),
-                            &audit_caller_source,
-                        ),
-                    ),
-                );
-                return;
-            }
-        }
+                    &caller,
+                ),
+            ),
+        );
+        return;
     }
 
-    // AAuth-Access (draft "AAuth-Access Response Header"): once an
-    // `aa-auth+jwt` has been verified, the resource echoes back an opaque
-    // access identifier -- here, the auth token's `jti` -- so the forwarded
-    // agent can correlate this delivery with the access grant that produced
-    // it. Absent a verified auth token, no header is attached.
-    if let Some(jti) = aauth_access_jti.as_deref() {
-        headers_owned.insert(aauth_headers::ACCESS, jti);
-    }
-
-    if audit_caller_id != ANONYMOUS_CALLER_SLUG {
-        tracing::Span::current().record(ATTR_CALLER_ID, audit_caller_id.as_str());
-    }
+    let headers_owned = without_identity_headers(&inbound_headers);
+    let caller_spicedb = CallerSpiceDbSubject::from(&caller);
+    let mut tier1_zed_token: Option<String> = None;
 
     if tier1.is_enabled() {
         match run_tier1_spicedb(
@@ -346,9 +249,8 @@ async fn dispatch_routed<E: ReadEnv>(
             method_slashes.as_str(),
             &headers_owned,
             payload.as_ref(),
-            caller_slug.as_deref(),
-            audit_caller_id.as_str(),
-            &audit_caller_source,
+            &caller,
+            &caller_spicedb,
             audit_enabled,
             started_wall_ms,
             started_mono,
@@ -369,13 +271,8 @@ async fn dispatch_routed<E: ReadEnv>(
 
     let mut _tier1_declarative_audit: Option<String> = None;
     if tier1_declarative.is_enabled()
-        && let Some(declarative_ctx) = tier1_declarative_context_from_ingress(
-            method_dots.as_str(),
-            &agent_id,
-            Some(audit_caller_id.as_str()),
-            config.a2a_prefix.as_str(),
-            ingress_subject,
-        )
+        && let Some(declarative_ctx) =
+            tier1_declarative_context_from_ingress(method_dots.as_str(), &agent_id, &caller_spicedb, ingress_subject)
     {
         let decision = tier1_declarative.evaluate(&declarative_ctx);
         _tier1_declarative_audit = Some(tier1_declarative_audit_rule_fired(&decision));
@@ -418,8 +315,7 @@ async fn dispatch_routed<E: ReadEnv>(
                             zed_token_snapshot: tier1_zed_token.clone(),
                             ..Default::default()
                         },
-                        audit_caller_id.as_str(),
-                        &audit_caller_source,
+                        &caller,
                     ),
                 ),
             );
@@ -430,7 +326,7 @@ async fn dispatch_routed<E: ReadEnv>(
     if let Some(substrate) = policy.substrate.as_ref()
         && let Some(evaluator) = substrate.tier2.evaluator()
     {
-        let caller_subject = SpiceDbSubject::new(audit_caller_id.as_str());
+        let caller_subject = caller_spicedb.to_spicedb_subject();
         let eval_ctx = tier2_evaluation_context_from_ingress(
             method,
             &agent_id,
@@ -477,8 +373,7 @@ async fn dispatch_routed<E: ReadEnv>(
                                 rules_fired: Some(vec![format!("gateway.tier2.{}", rule.as_str())]),
                                 ..Default::default()
                             },
-                            audit_caller_id.as_str(),
-                            &audit_caller_source,
+                            &caller,
                         ),
                     ),
                 );
@@ -490,7 +385,7 @@ async fn dispatch_routed<E: ReadEnv>(
     let mut tier3_rewrites = Vec::new();
     let mut tier3_ctx = match Tier3EvaluationContext::from_json_rpc_payload(
         method_slashes.clone(),
-        caller_slug.clone(),
+        Some(caller.to_string()),
         payload.as_ref(),
         policy.tier3_manifests.clone(),
     ) {
@@ -514,7 +409,7 @@ async fn dispatch_routed<E: ReadEnv>(
             if !tier3_rewrites.is_empty() {
                 info!(
                     count = tier3_rewrites.len(),
-                    caller_id = caller_slug.as_deref().unwrap_or(""),
+                    caller_id = %caller,
                     method = %method_slashes,
                     "gateway tier-3 redaction applied before forward",
                 );
@@ -525,7 +420,7 @@ async fn dispatch_routed<E: ReadEnv>(
             tracing::Span::current().record(ATTR_ROUTING_OUTCOME, ROUTING_TIER3_REFUSED);
             warn!(
                 skill_id = %rule,
-                caller_id = caller_slug.as_deref().unwrap_or(""),
+                caller_id = %caller,
                 method = %method_slashes,
                 reason = %reason.as_str(),
                 routing_outcome = "tier3_refused",
@@ -554,13 +449,16 @@ async fn dispatch_routed<E: ReadEnv>(
                         message: format!("tier-3 skill refused: {}", reason.as_str()),
                     },
                     Some(payload.as_ref()),
-                    AuditEnvelopeFields {
-                        trace_id: Some(trace_id.clone()),
-                        rules_fired: Some(vec![format!("gateway.tier3.refused.{}", rule.as_str())]),
-                        rewrites: tier3_redaction_audit_rewrites(&tier3_rewrites),
-                        tier3_decision: Some(Tier3Decision::Refuse),
-                        ..Default::default()
-                    },
+                    enrich_audit_caller(
+                        AuditEnvelopeFields {
+                            trace_id: Some(trace_id.clone()),
+                            rules_fired: Some(vec![format!("gateway.tier3.refused.{}", rule.as_str())]),
+                            rewrites: tier3_redaction_audit_rewrites(&tier3_rewrites),
+                            tier3_decision: Some(Tier3Decision::Refuse),
+                            ..Default::default()
+                        },
+                        &caller,
+                    ),
                 ),
             );
             return;
@@ -569,7 +467,7 @@ async fn dispatch_routed<E: ReadEnv>(
             tracing::Span::current().record(ATTR_ROUTING_OUTCOME, ROUTING_TIER3_ENGINE_ERROR);
             error!(
                 skill_id = %rule,
-                caller_id = caller_slug.as_deref().unwrap_or(""),
+                caller_id = %caller,
                 method = %method_slashes,
                 kind = %kind.as_str(),
                 routing_outcome = "tier3_engine_error",
@@ -597,13 +495,16 @@ async fn dispatch_routed<E: ReadEnv>(
                         message: "tier-3 redaction engine error".into(),
                     },
                     Some(payload.as_ref()),
-                    AuditEnvelopeFields {
-                        trace_id: Some(trace_id.clone()),
-                        rules_fired: Some(vec!["gateway.tier3.engine_error".into()]),
-                        rewrites: tier3_redaction_audit_rewrites(&tier3_rewrites),
-                        tier3_decision: Some(Tier3Decision::Error),
-                        ..Default::default()
-                    },
+                    enrich_audit_caller(
+                        AuditEnvelopeFields {
+                            trace_id: Some(trace_id.clone()),
+                            rules_fired: Some(vec!["gateway.tier3.engine_error".into()]),
+                            rewrites: tier3_redaction_audit_rewrites(&tier3_rewrites),
+                            tier3_decision: Some(Tier3Decision::Error),
+                            ..Default::default()
+                        },
+                        &caller,
+                    ),
                 ),
             );
             return;
@@ -638,7 +539,7 @@ async fn dispatch_routed<E: ReadEnv>(
     )
     .await;
 
-    let rules_fired = build_rules_fired(tier1, policy, &tier3_rewrites, env, aauth.map(|a| a.mode));
+    let rules_fired = build_rules_fired(tier1, policy, &tier3_rewrites, env);
     let (rewrites, stream_consumer) = merge_forward_audit_rewrites(
         &tier3_rewrites,
         ingress_subject,
@@ -650,7 +551,7 @@ async fn dispatch_routed<E: ReadEnv>(
     match disposition {
         ForwardDisposition::Ok => {
             tracing::Span::current().record(ATTR_ROUTING_OUTCOME, ROUTING_FORWARDED);
-            if streaming_ingress_enabled && let Ok(caller_key) = CallerKey::new(audit_caller_id.as_str()) {
+            if streaming_ingress_enabled {
                 let _ = maybe_spawn_streaming_ingress_pump(
                     client,
                     &config.a2a_prefix,
@@ -661,8 +562,7 @@ async fn dispatch_routed<E: ReadEnv>(
                     &headers_owned,
                     payload.as_ref(),
                     reply.clone(),
-                    caller_key,
-                    ingress.caller().clone(),
+                    caller.clone(),
                     events_last_seq,
                 );
             }
@@ -690,8 +590,7 @@ async fn dispatch_routed<E: ReadEnv>(
                             tier3_decision: gateway_tier3_redaction_enabled(env).then_some(Tier3Decision::Allow),
                             ..Default::default()
                         },
-                        audit_caller_id.as_str(),
-                        &audit_caller_source,
+                        &caller,
                     ),
                 ),
             );
@@ -731,8 +630,7 @@ async fn dispatch_routed<E: ReadEnv>(
                             zed_token_snapshot: tier1_zed_token.clone(),
                             ..Default::default()
                         },
-                        audit_caller_id.as_str(),
-                        &audit_caller_source,
+                        &caller,
                     ),
                 ),
             );
@@ -777,8 +675,7 @@ async fn dispatch_routed<E: ReadEnv>(
                             zed_token_snapshot: tier1_zed_token.clone(),
                             ..Default::default()
                         },
-                        audit_caller_id.as_str(),
-                        &audit_caller_source,
+                        &caller,
                     ),
                 ),
             );
@@ -825,9 +722,8 @@ async fn run_tier1_spicedb<'a, E: ReadEnv>(
     method_slashes: &'a str,
     _headers_owned: &HeaderMap,
     payload: &'a [u8],
-    caller_slug: Option<&str>,
-    audit_caller_id: &'a str,
-    audit_caller_source: &'a Option<String>,
+    caller: &'a SubjectPrincipal,
+    caller_spicedb: &CallerSpiceDbSubject,
     audit_enabled: bool,
     started_wall_ms: u64,
     started_mono: Instant,
@@ -837,28 +733,9 @@ async fn run_tier1_spicedb<'a, E: ReadEnv>(
     let publisher_account = env
         .var(ENV_GATEWAY_JWT_AUDIENCE)
         .unwrap_or_else(|_| config.a2a_prefix.as_str().to_owned());
-    let caller_slug_str = caller_slug.unwrap_or("");
-    let principal = tier1_principal_from_caller(caller_slug_str, publisher_account.as_str());
+    let principal = tier1_principal_from_caller(caller_spicedb);
+    let session = tier1_session_from_caller(caller, publisher_account.as_str());
     let payload_bytes = Bytes::copy_from_slice(payload);
-    let Some(session) = tier1_session_from_principal(&principal, publisher_account.as_str()) else {
-        run_tier1_deny(
-            client,
-            reply,
-            config,
-            agent_id,
-            method_slashes,
-            &payload_bytes,
-            trace_id,
-            audit_enabled,
-            started_wall_ms,
-            started_mono,
-            audit_caller_id,
-            audit_caller_source,
-            "tier-1 principal lacks session identity",
-        )
-        .await;
-        return Tier1SpiceDbStepOutcome::Denied;
-    };
     let params = json_rpc_params(payload);
     let tuple = match derive_tuple(method, agent_id, session.account(), &params) {
         Ok(tuple) => tuple,
@@ -874,8 +751,7 @@ async fn run_tier1_spicedb<'a, E: ReadEnv>(
                 audit_enabled,
                 started_wall_ms,
                 started_mono,
-                audit_caller_id,
-                audit_caller_source,
+                caller,
                 "tier-1 resource tuple derivation failed",
             )
             .await;
@@ -886,7 +762,7 @@ async fn run_tier1_spicedb<'a, E: ReadEnv>(
         Tier1AuthorizeOutcome::Allowed { zed_token } => {
             if matches!(method, A2aMethod::MessageSend)
                 && let Some(emitter) = tier1_owner
-                && let Some(owner) = owner_tuple_for_message_send(agent_id, &params, &principal)
+                && let Some(owner) = owner_tuple_for_message_send(agent_id, &params, caller_spicedb)
                 && let Err(error) = emitter.emit_owner(&owner).await
             {
                 warn!(
@@ -908,8 +784,7 @@ async fn run_tier1_spicedb<'a, E: ReadEnv>(
                 audit_enabled,
                 started_wall_ms,
                 started_mono,
-                audit_caller_id,
-                audit_caller_source,
+                caller,
                 "tier-1 SpiceDB denied ingress",
             )
             .await;
@@ -927,8 +802,7 @@ async fn run_tier1_spicedb<'a, E: ReadEnv>(
                 audit_enabled,
                 started_wall_ms,
                 started_mono,
-                audit_caller_id,
-                audit_caller_source,
+                caller,
                 "tier-1 resource tuple derivation failed",
             )
             .await;
@@ -949,8 +823,7 @@ async fn run_tier1_deny<'a>(
     audit_enabled: bool,
     started_wall_ms: u64,
     started_mono: Instant,
-    audit_caller_id: &'a str,
-    audit_caller_source: &'a Option<String>,
+    caller: &'a SubjectPrincipal,
     message: &'a str,
 ) {
     let body = ingress_gateway_policy_denied_response_bytes(&HeaderMap::new(), payload.as_ref(), message);
@@ -963,8 +836,7 @@ async fn run_tier1_deny<'a>(
         audit_enabled,
         started_wall_ms,
         started_mono,
-        audit_caller_id,
-        audit_caller_source,
+        caller,
     };
     deny_tier1(client, reply, body, ctx, message).await;
 }
@@ -972,13 +844,10 @@ async fn run_tier1_deny<'a>(
 fn owner_tuple_for_message_send(
     agent_id: &a2a_nats::A2aAgentId,
     params: &serde_json::Value,
-    principal: &SpiceDbPrincipal,
+    caller: &CallerSpiceDbSubject,
 ) -> Option<Tier1OwnerTuple> {
     let task_id = params.get("id").and_then(serde_json::Value::as_str)?;
-    let subject = principal.spicedb_subject()?;
-    let subject_str = subject.as_str();
-    let (subject_type, subject_id) = subject_str.split_once('/').unwrap_or(("user", subject_str));
-    Tier1OwnerTuple::for_task(agent_id, task_id, subject_type, subject_id).ok()
+    Tier1OwnerTuple::for_task(agent_id, task_id, caller.object_type(), caller.object_id()).ok()
 }
 
 enum ForwardDisposition {
@@ -1023,9 +892,8 @@ fn build_rules_fired<E: ReadEnv>(
     policy: &GatewayPolicyStack,
     tier3_rewrites: &[crate::policy::tier3_redaction::RedactionRewrite],
     env: &E,
-    aauth_mode: Option<crate::aauth::AAuthMode>,
 ) -> Vec<String> {
-    let mut rules_fired = Vec::with_capacity(4);
+    let mut rules_fired = Vec::with_capacity(3);
     rules_fired.push(if tier1.is_enabled() {
         "gateway.tier1.spicedb_allowed".into()
     } else {
@@ -1045,22 +913,7 @@ fn build_rules_fired<E: ReadEnv>(
     } else {
         "gateway.tier3.layer_disabled".into()
     });
-    rules_fired.push(match aauth_mode {
-        Some(AAuthMode::Enforce) => "gateway.aauth.enforced_allow".into(),
-        Some(AAuthMode::Shadow) => "gateway.aauth.shadow".into(),
-        Some(AAuthMode::Off) | None => "gateway.aauth.layer_disabled".into(),
-    });
     rules_fired
-}
-
-fn caller_slug_from_audit_id(audit_caller_id: &str) -> Option<String> {
-    Some(
-        audit_caller_id
-            .split_once('/')
-            .map(|(_, id)| id)
-            .unwrap_or(audit_caller_id)
-            .to_owned(),
-    )
 }
 
 fn elapsed_ms(started_mono: Instant) -> u64 {
