@@ -1,0 +1,115 @@
+#![cfg_attr(
+    any(test, feature = "test-support"),
+    allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)
+)]
+
+//! # trogon-audit
+//!
+//! The platform audit record's subjects, class, sink and writer
+//! (ADR#0086 Decisions 2 to 5).
+//!
+//! - [`AuditSubject`] builds `platform.v1.audit.{kind}.{scope}.{terminal}` from
+//!   validated tokens and closed terminal vocabularies.
+//! - [`Record`] is built from facts, and [`RecordKind::audit_class`] fixes its
+//!   class. No caller chooses a class.
+//! - [`AuditSink`] is the port; [`JetStreamSink`] publishes with `Nats-Msg-Id`
+//!   set to the record id and waits for the acknowledgement.
+//! - [`AuditWriter`] refuses an action whose must-audit record it cannot store,
+//!   buffers the record of a refusal, and queues best-effort records.
+//!
+//! Records hold no secret, token, prompt, tool argument, header value or body:
+//! every string is an [`AuditName`] or a [`ReasonCode`], and no API takes content.
+//!
+//! The per-writer hash chain and signed checkpoints (Decision 6), the integrity
+//! records, the OpenTelemetry counters and the surface adapters are later slices.
+
+pub mod actor;
+pub mod audit_name;
+pub mod audit_sink;
+pub mod audit_subject;
+pub mod audit_unavailable_error;
+pub mod audit_writer;
+pub mod change_facts;
+pub mod change_terminal;
+pub mod checkpoint_terminal;
+pub mod classify_publish_error;
+pub mod constants;
+pub mod credential_facts;
+pub mod credential_terminal;
+pub mod decision_facts;
+pub mod decision_outcome;
+pub mod decision_terminal;
+pub mod disposition;
+pub mod enforcement;
+pub mod failure_reason;
+pub mod integrity_terminal;
+pub mod jetstream_sink;
+pub mod layer_facts;
+pub mod obligation;
+pub mod read_only;
+pub mod reason_code;
+pub mod record;
+pub mod record_id;
+pub mod record_kind;
+pub mod record_scope;
+pub mod sealed_record;
+pub mod sink_error;
+pub mod stamp;
+pub mod stamper;
+pub mod surface;
+pub mod tls_mode;
+pub mod trace_id;
+pub mod writer_config;
+pub mod writer_id;
+pub(crate) mod writer_state;
+pub mod writer_stats;
+
+#[cfg(any(test, feature = "test-support"))]
+pub mod memory_sink;
+
+pub use actor::Actor;
+pub use audit_name::{AuditName, AuditNameError};
+pub use audit_sink::AuditSink;
+pub use audit_subject::AuditSubject;
+pub use audit_unavailable_error::AuditUnavailableError;
+pub use audit_writer::AuditWriter;
+pub use change_facts::ChangeFacts;
+pub use change_terminal::ChangeTerminal;
+pub use checkpoint_terminal::CheckpointTerminal;
+pub use classify_publish_error::ClassifyPublishError;
+pub use credential_facts::CredentialFacts;
+pub use credential_terminal::CredentialTerminal;
+pub use decision_facts::DecisionFacts;
+pub use decision_outcome::DecisionOutcome;
+pub use decision_terminal::DecisionTerminal;
+pub use disposition::Disposition;
+pub use enforcement::Enforcement;
+pub use failure_reason::FailureReason;
+pub use integrity_terminal::IntegrityTerminal;
+pub use jetstream_sink::JetStreamSink;
+pub use layer_facts::LayerFacts;
+pub use obligation::Obligation;
+pub use read_only::ReadOnly;
+pub use reason_code::{ReasonCode, ReasonCodeError};
+pub use record::Record;
+pub use record_id::{RecordId, RecordIdError};
+pub use record_kind::RecordKind;
+pub use record_scope::{ActChainTooLongError, RecordScope};
+pub use sealed_record::SealedRecord;
+pub use sink_error::SinkError;
+pub use stamp::Stamp;
+pub use stamper::Stamper;
+pub use surface::Surface;
+pub use tls_mode::TlsMode;
+pub use trace_id::{TraceId, TraceIdError};
+pub use writer_config::WriterConfig;
+pub use writer_id::WriterId;
+pub use writer_stats::WriterStats;
+
+#[cfg(any(test, feature = "test-support"))]
+pub use memory_sink::MemorySink;
+
+#[cfg(test)]
+mod fixtures;
+#[cfg(test)]
+mod redaction_canary;

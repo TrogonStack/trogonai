@@ -1,0 +1,31 @@
+use trogon_std::NowV7;
+use trogon_std::time::EpochClock;
+
+use crate::record_id::RecordId;
+use crate::stamp::Stamp;
+
+/// Mints a [`Stamp`] from the workspace clock and UUIDv7 abstractions, so tests
+/// fix both.
+#[derive(Debug, Clone)]
+pub struct Stamper<C, G> {
+    clock: C,
+    ids: G,
+}
+
+impl<C: EpochClock, G: NowV7> Stamper<C, G> {
+    pub fn new(clock: C, ids: G) -> Self {
+        Self { clock, ids }
+    }
+
+    pub fn stamp(&self) -> Stamp {
+        let now = self.clock.system_time();
+        Stamp {
+            id: RecordId::generate(&self.ids),
+            occurred_at: now,
+            recorded_at: now,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;
