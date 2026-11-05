@@ -7,7 +7,15 @@
 # expires on a timer. It never edits an existing stream.
 #
 # Mirrors trogon_audit::AuditStream, the check the Rust provisioning applies.
+#
+# The stream is read through the JetStream API rather than `nats stream info`,
+# whose failure looks the same whether the stream is missing or the server did
+# not answer. Only the API's "stream not found" leads to a create, because a
+# create against a stream that exists can rewrite it in place.
 set -eu
+
+# JetStream's error code for a stream that does not exist.
+STREAM_NOT_FOUND=10059
 
 # One replica in the dev compose; production runs three.
 REPLICAS=${AUDIT_REPLICAS:-1}
@@ -31,15 +39,33 @@ refuse_when() {
   fi
 }
 
+# Reads the stream's info into `info`, or fails when the server does not answer.
+read_stream() {
+  if ! info=$(nats req "\$JS.API.STREAM.INFO.$1" '' --raw); then
+    echo "nats-audit-provision: could not read $1, so it is left alone" >&2
+    return 1
+  fi
+}
+
+# The API error code in `info`, empty when the read succeeded.
+error_code() {
+  printf '%s' "$info" | jq -r '.error.err_code // empty'
+}
+
 # stream and its subjects, comma separated.
 ensure_stream() {
   stream=$1 subjects=$2
-  if ! info=$(nats stream info "$stream" --json 2>/dev/null); then
+  read_stream "$stream"
+  if [ "$(error_code)" = "$STREAM_NOT_FOUND" ]; then
     nats stream add "$stream" --subjects "$subjects" --storage file --retention limits \
       --discard new --replicas "$REPLICAS" --dupe-window 2m --max-age=-1 \
       --max-msgs=-1 --max-bytes=-1 --max-msg-size=-1 --max-msgs-per-subject=-1 \
       --deny-delete --deny-purge --no-allow-rollup --defaults >/dev/null
-    info=$(nats stream info "$stream" --json)
+    read_stream "$stream"
+  fi
+  if [ -n "$(error_code)" ]; then
+    echo "nats-audit-provision: reading $stream failed: $(printf '%s' "$info" | jq -r '.error.description')" >&2
+    return 1
   fi
   require "$stream" storage file '.config.storage'
   require "$stream" retention limits '.config.retention'

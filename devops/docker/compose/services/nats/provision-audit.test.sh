@@ -11,15 +11,21 @@ mkdir "$workdir/bin" "$workdir/streams"
 
 cat > "$workdir/bin/nats" <<'STUB'
 #!/bin/sh
-# nats stream info NAME --json, and nats stream add NAME ...
+# nats req '$JS.API.STREAM.INFO.NAME' '' --raw, and nats stream add NAME ...
 set -eu
-name=$3
-case "$2" in
-  info)
-    [ -f "$STUB_DIR/streams/$name.json" ] || exit 1
-    cat "$STUB_DIR/streams/$name.json"
+case "$1" in
+  req)
+    [ ! -f "$STUB_DIR/unreachable" ] || { echo "nats: error: setup failed" >&2; exit 1; }
+    [ ! -f "$STUB_DIR/api-error" ] || { cat "$STUB_DIR/api-error"; exit 0; }
+    name=${2##*.}
+    if [ -f "$STUB_DIR/streams/$name.json" ]; then
+      cat "$STUB_DIR/streams/$name.json"
+    else
+      echo '{"error":{"code":404,"err_code":10059,"description":"stream not found"}}'
+    fi
     ;;
-  add)
+  stream)
+    name=$3
     echo "$name $*" >> "$STUB_DIR/added"
     cp "$STUB_DIR/created-$name.json" "$STUB_DIR/streams/$name.json"
     ;;
@@ -38,7 +44,7 @@ audit_subjects='["platform.v1.audit.decision.>","platform.v1.audit.credential.>"
 checkpoint_subjects='["platform.v1.audit.checkpoint.>"]'
 
 reset() {
-  rm -rf "$workdir/streams" "$workdir/added"
+  rm -rf "$workdir/streams" "$workdir/added" "$workdir/unreachable" "$workdir/api-error"
   mkdir "$workdir/streams"
 }
 
@@ -108,3 +114,19 @@ status=0
 PATH="$workdir/bin:$PATH" STUB_DIR="$workdir" AUDIT_REPLICAS=3 sh "$here/provision-audit.sh" > "$workdir/out" 2> "$workdir/err" || status=$?
 [ "$status" -ne 0 ] || fail "a stream with fewer replicas than asked for was accepted"
 grep -q "keeps fewer than 3 replicas" "$workdir/err" || fail "the refusal does not name the replicas: $(cat "$workdir/err")"
+
+# A server that does not answer, or answers with anything but "stream not
+# found", leaves the stream alone instead of creating over it.
+reset
+touch "$workdir/unreachable"
+provision
+[ "$status" -ne 0 ] || fail "an unreachable server was taken for a missing stream"
+grep -q "could not read AUDIT" "$workdir/err" || fail "the failure does not name the read: $(cat "$workdir/err")"
+[ ! -f "$workdir/added" ] || fail "a stream was created while the server did not answer"
+
+reset
+echo '{"error":{"code":503,"err_code":10008,"description":"JetStream system temporarily unavailable"}}' > "$workdir/api-error"
+provision
+[ "$status" -ne 0 ] || fail "an API error was taken for a missing stream"
+grep -q "reading AUDIT failed: JetStream system temporarily unavailable" "$workdir/err" || fail "the failure does not name the API error: $(cat "$workdir/err")"
+[ ! -f "$workdir/added" ] || fail "a stream was created after an API error"
