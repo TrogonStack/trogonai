@@ -157,7 +157,8 @@ impl<S: AuditSink> AuditWriter<S> {
     /// published inline only when nothing is waiting ahead of it, so ordering holds
     /// and a refusal does not wait on a stream that is already failing.
     async fn write_standing_refusal(&self, record: SealedRecord) -> Disposition {
-        if self.state().retry.is_empty() && self.inner.sink.publish(&record).await.is_ok() {
+        let nothing_ahead = self.state().retry.is_empty();
+        if nothing_ahead && self.inner.sink.publish(&record).await.is_ok() {
             return Disposition::Stored;
         }
         self.buffer_refusal(record)

@@ -464,3 +464,14 @@ async fn diagnostics_reach_the_log_facade_when_no_subscriber_is_installed() {
     assert!(line("best-effort audit record was dropped").contains("unreachable"));
     assert!(records.iter().all(|record| !record.message.contains(marker())));
 }
+
+fn assert_send<T: Send>(_: &T) {}
+
+#[test]
+fn a_write_can_run_on_a_multi_threaded_runtime() {
+    let (writer, _sink, stamper) = setup(4, 4);
+    let refusal = writer.write(deny(&stamper));
+    let effect = writer.write(allow(&stamper));
+    assert_send(&refusal);
+    assert_send(&effect);
+}
