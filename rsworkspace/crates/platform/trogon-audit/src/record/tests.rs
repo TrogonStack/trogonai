@@ -4,6 +4,7 @@ use trogonai_proto::platform::audit::v1::audit_record::Detail;
 use trogonai_proto::platform::audit::v1::{AuditClass, AuditDecision, EnforcementMode};
 
 use super::*;
+use crate::consistency_token::ConsistencyToken;
 use crate::fixtures::{change, credential, decision_facts, deny, name, scope, scope_for, stamper};
 use crate::read_only::ReadOnly;
 use crate::reason_code::ReasonCode;
@@ -94,7 +95,7 @@ fn every_optional_fact_reaches_the_message() {
     let mut layer = LayerFacts::new(name("policy"), DecisionOutcome::Deny);
     layer.reason = Some(ReasonCode::new("no_rule").unwrap());
     layer.rule_ids = vec![name("rule-1")];
-    layer.consistency_token = Some(name("rev-12"));
+    layer.consistency_token = Some(ConsistencyToken::new("CAESAggB+/w=").unwrap());
     let mut dry = LayerFacts::new(name("tenancy"), DecisionOutcome::WouldDeny);
     dry.reason = None;
 
@@ -150,7 +151,7 @@ fn every_optional_fact_reaches_the_message() {
     assert_eq!(first.layer, "policy");
     assert_eq!(first.reason_code.as_deref(), Some("no_rule"));
     assert_eq!(first.rule_ids, vec!["rule-1".to_owned()]);
-    assert_eq!(first.consistency_token.as_deref(), Some("rev-12"));
+    assert_eq!(first.consistency_token.as_deref(), Some("CAESAggB+/w="));
     assert!(!first.would_deny);
     let second = &decision.layer_verdicts[1];
     assert!(second.would_deny);

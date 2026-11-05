@@ -34,6 +34,8 @@ pub const HEADER_SEQUENCE: &str = "Trogon-Audit-Seq";
 /// name; content does not fit in this and is rejected on character set first.
 pub const MAX_NAME_BYTES: usize = 256;
 pub const MAX_REASON_CODE_BYTES: usize = 64;
+/// Longest snapshot token a layer verdict may carry, also the proto bound.
+pub const MAX_CONSISTENCY_TOKEN_BYTES: usize = 512;
 
 /// `MAX_CHAIN_DEPTH` of `trogon-aauth-verify`, which is also the proto bound.
 pub const MAX_ACT_CHAIN_ENTRIES: usize = 16;
@@ -44,6 +46,10 @@ pub const TRACE_ID_HEX_LEN: usize = 32;
 /// `=`, `,`, `;` and control characters are absent on purpose: they are what
 /// separates a header, a query string or a body from a name.
 pub const NAME_PUNCTUATION: &str = "._:/@+-[]";
+
+/// Characters beyond ASCII alphanumerics an opaque snapshot token may hold: the
+/// base64 and base64url alphabets with their padding, plus `.`, `:` and `~`.
+pub const CONSISTENCY_TOKEN_PUNCTUATION: &str = "+/=-_.:~";
 
 pub const RECORD_ID_UUID_VERSION: usize = 7;
 
