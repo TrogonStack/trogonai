@@ -55,6 +55,12 @@ pub use crate::r#gen::trogonai::policy;
 #[cfg(feature = "model-access")]
 pub use crate::r#gen::trogonai::model_access;
 
+#[cfg(feature = "policy")]
+pub use crate::r#gen::trogonai::connections;
+
+#[cfg(feature = "policy")]
+pub use crate::r#gen::trogonai::projects;
+
 #[cfg(any(feature = "policy", feature = "model-access"))]
 pub use crate::r#gen::trogon::hierarchy;
 
