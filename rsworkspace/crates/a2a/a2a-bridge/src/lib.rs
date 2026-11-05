@@ -14,6 +14,7 @@ pub use auth::{
     AsyncNatsAuthMintWire, AuthCalloutClient, AuthCalloutJsonMintClient, BridgeTenantAccount,
     InProcessCalloutDispatcherMintWire, StubAuthCalloutClient, StubAuthCalloutMint,
 };
+pub use constants::ENV_AUTH_CALLOUT_XKEY_PUBLIC;
 pub use error::BridgeError;
 pub use identity::{BridgeAgentId, BridgeUserJwt, CallerHttpsAuth, MintedCallerId};
 pub use inbound::{
