@@ -51,7 +51,7 @@ pkcs8 = { version = "=0.10.2", features = ["pem"] }
 rand_core = { version = "=0.6.4" }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-std = { workspace = true, features = ["test-support"] }
 tower = { workspace = true, features = ["util"] }

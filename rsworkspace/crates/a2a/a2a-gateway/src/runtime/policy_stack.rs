@@ -70,6 +70,12 @@ impl GatewayPolicyStack {
 pub enum PolicyStackError {
     #[error("{enabled_by} is enabled but {ENV_POLICY_BUNDLE_DIR} is unset or blank")]
     BundleDirRequired { enabled_by: &'static str },
+    #[error("policy bundle directory {} (from {ENV_POLICY_BUNDLE_DIR}) cannot be read", bundle_dir.display())]
+    BundleDirectory {
+        bundle_dir: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("{ENV_GATEWAY_TIER3_SIGNING_PUBKEY} is set but is not a valid ed25519 public key")]
     InvalidSigningKey,
     #[error("policy bundle directory {} (from {ENV_POLICY_BUNDLE_DIR}) could not be loaded", bundle_dir.display())]
@@ -136,6 +142,10 @@ pub fn gateway_policy_stack_from_env<E: ReadEnv>(env: &E) -> Result<GatewayPolic
         };
     };
 
+    let _bundle_entries = std::fs::read_dir(&dir).map_err(|source| PolicyStackError::BundleDirectory {
+        bundle_dir: PathBuf::from(&dir),
+        source,
+    })?;
     let bundle_path = WasmBundlePath::new(&dir);
     let signing_key = gateway_tier3_signing_pubkey(env);
     if matches!(signing_key, Tier3SigningKey::Invalid) {

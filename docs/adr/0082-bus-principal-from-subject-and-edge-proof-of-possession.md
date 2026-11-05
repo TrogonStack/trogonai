@@ -274,7 +274,9 @@ identity becomes, through
 [ADR#0026](./0026-command-authorization-principal.md) Decision 4, the
 principal the callout mints into the caller's allow list.
 
-Enforce is the default in release builds. Shadow and Off are accepted only
+Once the edge integration lands, Enforce is the default in release builds;
+until then the gateway's existing AAuth layer still defaults to `off`.
+Shadow and Off are accepted only
 together with an explicit development flag that is separate from the mode
 setting, and the edge logs a warning at startup whenever it runs unenforced.
 Shadow verifies and logs as before, but it no longer admits a request as
@@ -334,8 +336,8 @@ What this changes in [ADR#0017](./0017-aauth-agent-authentication.md):
   verifies reaches the gateway only as the subject principal, and which
   verified identity becomes that principal, and which stays a hint, follows
   [ADR#0026](./0026-command-authorization-principal.md) Decision 4.
-- Decision 6. The mode no longer defaults to `off`: the edge defaults to
-  `enforce` in release builds, and `shadow` or `off` needs the development
+- Decision 6. The mode no longer defaults to `off`: once the edge
+  integration lands, the edge defaults to `enforce` in release builds, and `shadow` or `off` needs the development
   flag and logs a warning. `shadow` no longer lets a request through as
   anonymous. The layer moves from the gateway's NATS ingress to the external
   HTTP edge, and its configuration moves with it. The 60 second leeway and

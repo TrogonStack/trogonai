@@ -1,0 +1,89 @@
+edition = "2024";
+
+package trogonai.connections.admission.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/agents/agents/v1alpha1/agent_revision.proto";
+import "trogonai/agents/agents/v1alpha1/dependencies.proto";
+import "trogonai/connections/admission/v1alpha1/resolution.proto";
+import "trogonai/connections/types/v1alpha1/operation.proto";
+import "trogonai/connections/types/v1alpha1/proxy.proto";
+import "trogonai/projects/projects/v1alpha1/identity.proto";
+import "trogonai/session/sessions/v1alpha1/session_id.proto";
+
+// ResolveConnectionDeclarations runs once at Session creation and resolves
+// every connection declaration of the AgentRevision to exactly one Active
+// connection in scope or one typed failure (ADR#0096 Decision 1). The caller
+// is the Session admission path; the request names no actor because the
+// runtime envelope carries it. Permits are evaluated for the Agent as the
+// PolicySubject, from a projection no staler than the bounded-live rule of
+// ADR#0096 Decision 4. The response carries no grant and no SecretRef.
+message ResolveConnectionDeclarationsRequest {
+  option (buf.validate.message).cel = {
+    id: "resolve_connection_declarations_request.binding_names_unique"
+    message: "declaration binding names must be unique"
+    expression: "this.declarations.map(d, d.binding_name).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "resolve_connection_declarations_request.selection_names_unique"
+    message: "each declaration has at most one explicit use selection"
+    expression: "this.binding_selections.map(s, s.binding_name).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "resolve_connection_declarations_request.selections_declared"
+    message: "a use selection must name a declaration in this request"
+    expression: "this.binding_selections.all(s, this.declarations.exists(d, d.binding_name == s.binding_name))"
+  };
+  // The Session's project. The resolution scope the selectors search is the
+  // one this project authorizes (ADR#0063); the request does not widen it.
+  trogonai.projects.projects.v1alpha1.ProjectId project_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.session.sessions.v1alpha1.SessionId session_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  // The revision whose declarations these are and whose Agent is the permit
+  // subject.
+  trogonai.agents.agents.v1alpha1.AgentRevisionRef agent_revision_ref = 3 [features.field_presence = LEGACY_REQUIRED];
+  // The declarations exactly as the revision carries them: binding name,
+  // requirement and selector (provider, which equals the ConnectorId, plus
+  // labels). Reused from the Agent contract so admission cannot drift from it.
+  repeated trogonai.agents.agents.v1alpha1.ConnectionDeclaration declarations = 4 [(buf.validate.field).repeated.min_items = 1];
+  // Trusted Session deployment configuration, authorized with this admission
+  // request and frozen into the plan. It never supplies an arbitrary host,
+  // credential role, SecretRef or signing key. An omitted entry means HTTP_PROXY
+  // with the release's default destination for the active authentication role.
+  repeated ConnectionBindingSelection binding_selections = 5 [(buf.validate.field).repeated.max_items = 128];
+}
+
+message ConnectionBindingSelection {
+  option (buf.validate.message).cel = {
+    id: "connection_binding_selection.http_destination"
+    message: "an explicit API destination applies only to HTTP_PROXY"
+    expression: "!has(this.api_destination_id) || this.mode == 3"
+  };
+  string binding_name = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 128
+    }
+  ];
+  trogonai.connections.types.v1alpha1.ConnectionUseMode mode = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // Absent HTTP selection requires the unique declared default; a sole
+  // nondesignated destination is not silently promoted into the default.
+  trogonai.connections.types.v1alpha1.ApiDestinationId api_destination_id = 3;
+}
+
+// One entry per declaration, in request order. The request succeeds only when
+// no entry is failed; the plan then records every resolved and absent entry.
+message ResolveConnectionDeclarationsResponse {
+  option (buf.validate.message).cel = {
+    id: "resolve_connection_declarations_response.binding_names_unique"
+    message: "resolution binding names must be unique"
+    expression: "this.resolutions.map(r, r.binding_name).unique()"
+  };
+  repeated ConnectionResolution resolutions = 1 [(buf.validate.field).repeated.min_items = 1];
+}

@@ -126,3 +126,13 @@ fn only_the_credential_edge_refuses_an_id_already_in_hashed_form() {
         hashed.as_str()
     );
 }
+
+#[test]
+fn pairing_a_kind_with_a_mapped_id_matches_mapping_the_principal_directly() {
+    let id = SubjectPrincipalId::from(&principal_id("alice.smith"));
+
+    assert_eq!(
+        SubjectPrincipal::new(PrincipalKind::Person, id),
+        SubjectPrincipal::from_principal(PrincipalKind::Person, &principal_id("alice.smith"))
+    );
+}

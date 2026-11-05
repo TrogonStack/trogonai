@@ -442,3 +442,15 @@ fn from_env_trims_bundle_dir_whitespace_before_load() {
     let layer = Tier1DeclarativeConfig::from_env(&env).expect("padded path resolves");
     assert!(layer.gate.is_enabled());
 }
+
+#[test]
+fn layer_debug_says_whether_the_gate_is_enabled() {
+    let layer = Tier1DeclarativeConfig::from_env(&trogon_std::env::InMemoryEnv::new()).expect("noop on missing flag");
+    assert_eq!(format!("{layer:?}"), "GatewayTier1DeclarativeLayer { enabled: false }");
+}
+
+#[test]
+fn system_clock_reads_the_current_time() {
+    let before = std::time::SystemTime::now();
+    assert!(SystemTier1Clock.now() >= before);
+}
