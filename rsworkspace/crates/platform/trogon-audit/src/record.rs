@@ -230,7 +230,7 @@ fn layer_verdict(layer: &LayerFacts) -> LayerVerdict {
         would_deny: layer.outcome == DecisionOutcome::WouldDeny,
         reason_code: layer.reason.map(|reason| reason.as_str().to_owned()),
         rule_ids: layer.rule_ids.iter().map(ToString::to_string).collect(),
-        consistency_token: layer.consistency_token.as_ref().map(ToString::to_string),
+        consistency_token: layer.consistency_token.as_ref().map(|token| token.as_str().to_owned()),
     }
 }
 

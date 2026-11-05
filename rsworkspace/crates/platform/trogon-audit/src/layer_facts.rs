@@ -1,4 +1,5 @@
 use crate::audit_name::AuditName;
+use crate::consistency_token::ConsistencyToken;
 use crate::decision_outcome::DecisionOutcome;
 use crate::reason_code::ReasonCode;
 
@@ -10,7 +11,7 @@ pub struct LayerFacts {
     pub reason: Option<ReasonCode>,
     pub rule_ids: Vec<AuditName>,
     /// The consistency token the layer was evaluated at, where it has one.
-    pub consistency_token: Option<AuditName>,
+    pub consistency_token: Option<ConsistencyToken>,
 }
 
 impl LayerFacts {

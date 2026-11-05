@@ -18,7 +18,8 @@
 //!   buffers the record of a refusal, and queues best-effort records.
 //!
 //! Records hold no secret, token, prompt, tool argument, header value or body:
-//! every string is an [`AuditName`] or a [`ReasonCode`], and no API takes content.
+//! every string is an [`AuditName`], a [`ReasonCode`] or an opaque
+//! [`ConsistencyToken`], and no API takes content.
 //!
 //! The per-writer hash chain and signed checkpoints (Decision 6), the integrity
 //! records, the OpenTelemetry counters and the surface adapters are later slices.
@@ -33,6 +34,7 @@ pub mod change_facts;
 pub mod change_terminal;
 pub mod checkpoint_terminal;
 pub mod classify_publish_error;
+pub mod consistency_token;
 pub mod constants;
 pub mod credential_facts;
 pub mod credential_terminal;
@@ -77,6 +79,7 @@ pub use change_facts::ChangeFacts;
 pub use change_terminal::ChangeTerminal;
 pub use checkpoint_terminal::CheckpointTerminal;
 pub use classify_publish_error::ClassifyPublishError;
+pub use consistency_token::{ConsistencyToken, ConsistencyTokenError};
 pub use credential_facts::CredentialFacts;
 pub use credential_terminal::CredentialTerminal;
 pub use decision_facts::DecisionFacts;

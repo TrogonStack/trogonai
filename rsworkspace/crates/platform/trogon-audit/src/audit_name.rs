@@ -2,8 +2,9 @@
 //!
 //! Records hold no secret, token, prompt, tool argument, header value or body
 //! (ADR#0086 Decision 5). The record types therefore have no string field a caller
-//! fills freely: every one is an [`AuditName`], a [`ReasonCode`](crate::ReasonCode)
-//! or an identifier from the generated types. A name is short and drawn from the
+//! fills freely: every one is an [`AuditName`], a [`ReasonCode`](crate::ReasonCode),
+//! an opaque [`ConsistencyToken`](crate::ConsistencyToken) or an identifier from
+//! the generated types. A name is short and drawn from the
 //! characters a resource name, a host or a method uses, so the shapes content takes
 //! (a header line, a JSON body, a prompt, a query string) are refused at the door.
 //!
