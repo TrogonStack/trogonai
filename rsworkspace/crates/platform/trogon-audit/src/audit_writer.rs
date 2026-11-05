@@ -43,6 +43,7 @@ struct Inner<S> {
     state: Mutex<WriterState>,
     wake: Notify,
     drain_gate: tokio::sync::Mutex<()>,
+    refusal_gate: tokio::sync::Mutex<()>,
 }
 
 impl<S> Clone for AuditWriter<S> {
@@ -64,21 +65,22 @@ impl<S: AuditSink> AuditWriter<S> {
                 state: Mutex::new(WriterState::default()),
                 wake: Notify::new(),
                 drain_gate: tokio::sync::Mutex::new(()),
+                refusal_gate: tokio::sync::Mutex::new(()),
             }),
         }
     }
 
     /// Accepts a record. `Err` is returned only for a must-audit record of an act
     /// that has not happened yet, and means the act must be refused as an
-    /// operational fault: it is not stored and no record of the refused attempt
-    /// exists. A refusal's record and a best-effort record never fail the caller.
+    /// operational fault. The record is treated as not stored, though an
+    /// acknowledgement lost after the stream took it can leave a record of a
+    /// decision whose act was refused, a limit ADR#0086 states. A refusal's
+    /// record and a best-effort record never fail the caller.
     pub async fn write(&self, record: Record) -> Result<Disposition, AuditUnavailableError> {
-        let obligation = record.obligation();
-        let sealed = self.seal(record);
-        match obligation {
-            Obligation::BeforeEffect => self.write_before_effect(sealed).await,
-            Obligation::Stands => Ok(self.write_standing_refusal(sealed).await),
-            Obligation::BestEffort => Ok(self.enqueue_best_effort(sealed)),
+        match record.obligation() {
+            Obligation::BeforeEffect => self.write_before_effect(self.seal(record)).await,
+            Obligation::Stands => Ok(self.write_standing_refusal(record).await),
+            Obligation::BestEffort => Ok(self.enqueue_best_effort(self.seal(record))),
         }
     }
 
@@ -156,9 +158,14 @@ impl<S: AuditSink> AuditWriter<S> {
     }
 
     /// A refusal takes effect whether or not its record is written. The record is
-    /// published inline only when nothing is waiting ahead of it, so ordering holds
-    /// and a refusal does not wait on a stream that is already failing.
-    async fn write_standing_refusal(&self, record: SealedRecord) -> Disposition {
+    /// published inline only when nothing is waiting ahead of it, so a refusal does
+    /// not wait on a stream that is already failing. Refusals are sealed and
+    /// published one at a time, because the retry buffer only grows here: a
+    /// concurrent refusal that saw an empty buffer could otherwise be stored ahead
+    /// of an earlier one still on its way into the buffer.
+    async fn write_standing_refusal(&self, record: Record) -> Disposition {
+        let _in_order = self.inner.refusal_gate.lock().await;
+        let record = self.seal(record);
         let nothing_ahead = self.state().retry.is_empty();
         if nothing_ahead && self.inner.sink.publish(&record).await.is_ok() {
             return Disposition::Stored;

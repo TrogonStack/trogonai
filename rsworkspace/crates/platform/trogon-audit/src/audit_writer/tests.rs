@@ -159,6 +159,50 @@ async fn buffered_denies_keep_their_order() {
     assert_eq!(sequences, vec![1, 2]);
 }
 
+/// Holds the first publish open until released, then fails it, so a second
+/// write can run while the first is between its publish and the retry buffer.
+#[derive(Debug, Clone)]
+struct HeldFirstPublish {
+    inner: MemorySink,
+    release: Arc<tokio::sync::Notify>,
+    held: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl AuditSink for HeldFirstPublish {
+    async fn publish(&self, record: &SealedRecord) -> Result<(), SinkError> {
+        if !self.held.swap(true, Ordering::SeqCst) {
+            self.release.notified().await;
+            return Err(SinkError::Unreachable);
+        }
+        self.inner.publish(record).await
+    }
+}
+
+#[tokio::test]
+async fn concurrent_denies_are_stored_in_the_order_they_were_sealed() {
+    let sink = MemorySink::new();
+    let release = Arc::new(tokio::sync::Notify::new());
+    let held = HeldFirstPublish {
+        inner: sink.clone(),
+        release: Arc::clone(&release),
+        held: Arc::default(),
+    };
+    let writer = AuditWriter::new(held, writer_id(), config(4, 4));
+    let stamper = stamper();
+
+    let (first, second, ()) = tokio::join!(writer.write(deny(&stamper)), writer.write(deny(&stamper)), async {
+        tokio::task::yield_now().await;
+        release.notify_one();
+    });
+    assert_eq!(first, Ok(Disposition::Retrying));
+    assert_eq!(second, Ok(Disposition::Retrying));
+
+    writer.drain_once().await;
+
+    let sequences: Vec<u64> = sink.stored().iter().map(SealedRecord::sequence).collect();
+    assert_eq!(sequences, vec![1, 2]);
+}
+
 #[tokio::test]
 async fn a_full_retry_buffer_is_audit_degraded_and_refuses_effects() {
     let (writer, sink, stamper) = setup(4, 2);
