@@ -25,7 +25,7 @@ impl DenialCategory {
 
     pub fn from_auth_callout_error(error: &AuthCalloutError) -> Self {
         match error {
-            AuthCalloutError::Connect(_) => Self::ServiceUnavailable,
+            AuthCalloutError::Connect(_) | AuthCalloutError::Flush(_) => Self::ServiceUnavailable,
             AuthCalloutError::Subscribe(_) => Self::InternalError,
             AuthCalloutError::Deserialize(_) | AuthCalloutError::BridgeCredential(_) => Self::InvalidRequest,
             AuthCalloutError::Serialize(_) => Self::InternalError,

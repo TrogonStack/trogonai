@@ -67,6 +67,8 @@ pub enum AuthCalloutError {
     /// async_nats subscribe error so the source chain isn't lost.
     #[error("subscribe to auth callout subject failed")]
     Subscribe(#[source] async_nats::SubscribeError),
+    #[error("auth callout subscription never reached a NATS server")]
+    Flush(#[source] async_nats::client::FlushError),
     #[error("failed to deserialize auth callout request")]
     Deserialize(#[source] serde_json::Error),
     #[error("failed to serialize auth callout response")]

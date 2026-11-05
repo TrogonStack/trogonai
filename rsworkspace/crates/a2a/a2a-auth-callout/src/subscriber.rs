@@ -60,6 +60,9 @@ impl<D: AuthDispatcher> Subscriber<D> {
             .queue_subscribe(AUTH_CALLOUT_SUBJECT, queue)
             .await
             .map_err(AuthCalloutError::Subscribe)?;
+        // The client dials in the background, so the subscription is only queued
+        // until a server accepts the connection. Readiness waits for that.
+        self.client.flush().await.map_err(AuthCalloutError::Flush)?;
 
         info!(subject = AUTH_CALLOUT_SUBJECT, "auth callout subscriber started");
 
