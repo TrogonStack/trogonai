@@ -41,7 +41,8 @@ impl Server {
     /// Accepts connections until `shutdown` is cancelled. Tunnels still open
     /// at that point are closed. The audit sink's background work runs for the
     /// same span, and `run` returns only after it has flushed, so a decision
-    /// made just before shutdown is not lost with the process.
+    /// made just before shutdown, even one whose connection closed while it was
+    /// being written, is not lost with the process.
     pub async fn run(self, shutdown: CancellationToken) {
         let flush = CancellationToken::new();
         let audit = self.proxy.audit();

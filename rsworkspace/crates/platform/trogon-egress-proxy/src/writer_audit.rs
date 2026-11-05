@@ -5,9 +5,15 @@
 //! reads it off the record: a permit is acknowledged before the tunnel opens or
 //! the call returns `Err`, and a refusal is buffered and retried so it stands
 //! whether or not the stream answers (ADR#0086 Decision 4).
+//!
+//! Each write runs on a task of its own. Shutdown aborts every connection, and
+//! a refusal still being written when its connection goes must reach the retry
+//! buffer anyway, so [`WriterAudit::run`] waits for those tasks before the last
+//! flush.
 
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 use trogon_audit::{AuditName, AuditSink as Sink, AuditWriter, Disposition, Stamper};
 use trogon_nats::NatsToken;
 use trogon_std::time::SystemClock;
@@ -24,6 +30,7 @@ pub struct WriterAudit<S> {
     stamper: Stamper<SystemClock, UuidV7Generator>,
     tenant: AuditName,
     project: NatsToken,
+    in_flight: TaskTracker,
 }
 
 impl<S: Sink> WriterAudit<S> {
@@ -33,12 +40,18 @@ impl<S: Sink> WriterAudit<S> {
             stamper: Stamper::new(SystemClock, UuidV7Generator),
             tenant,
             project,
+            in_flight: TaskTracker::new(),
         }
     }
 
     async fn write(&self, event: &AuditEvent<'_>) -> Result<Disposition, AuditError> {
         let record = decision_record(event, &self.tenant, &self.project, self.stamper.stamp())?;
-        Ok(self.writer.write(record).await?)
+        let writer = self.writer.clone();
+        let write = self.in_flight.spawn(async move { writer.write(record).await });
+        let outcome = write
+            .await
+            .unwrap_or_else(|error| std::panic::resume_unwind(error.into_panic()));
+        Ok(outcome?)
     }
 }
 
@@ -51,7 +64,13 @@ impl<S: Sink> AuditSink for WriterAudit<S> {
     }
 
     async fn run(&self, shutdown: CancellationToken) {
-        self.writer.run(shutdown).await;
+        let settled = CancellationToken::new();
+        tokio::join!(self.writer.run(settled.clone()), async {
+            shutdown.cancelled().await;
+            self.in_flight.close();
+            self.in_flight.wait().await;
+            settled.cancel();
+        });
     }
 }
 

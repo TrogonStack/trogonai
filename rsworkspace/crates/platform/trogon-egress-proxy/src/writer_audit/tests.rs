@@ -1,6 +1,8 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
-use trogon_audit::{MemorySink, ReasonCode, SinkError, WriterConfig, WriterId};
+use tokio::sync::Notify;
+use trogon_audit::{MemorySink, ReasonCode, SealedRecord, SinkError, WriterConfig, WriterId};
 use trogon_std::log_capture::{CapturedEvent, CapturedEvents, CapturedLogs, LevelFilter, LogLevel};
 
 use super::*;
@@ -200,4 +202,71 @@ async fn the_decision_reaches_the_log_facade_when_no_subscriber_is_installed() {
             record.message
         );
     }
+}
+
+/// Holds every publish until released, and says when one has started.
+#[derive(Clone)]
+struct HeldSink {
+    inner: MemorySink,
+    started: Arc<Notify>,
+    release: Arc<Notify>,
+}
+
+impl trogon_audit::AuditSink for HeldSink {
+    async fn publish(&self, record: &SealedRecord) -> Result<(), SinkError> {
+        self.started.notify_one();
+        self.release.notified().await;
+        self.inner.publish(record).await
+    }
+}
+
+#[tokio::test]
+async fn a_refusal_whose_connection_is_aborted_mid_write_is_still_stored() {
+    let sink = MemorySink::new();
+    let held = HeldSink {
+        inner: sink.clone(),
+        started: Arc::default(),
+        release: Arc::default(),
+    };
+    let writer = AuditWriter::new(
+        held.clone(),
+        WriterId::new("egress-proxy:test").expect("writer"),
+        WriterConfig::default(),
+    );
+    let audit = Arc::new(WriterAudit::new(
+        writer,
+        AuditName::new("acme").expect("tenant"),
+        NatsToken::new("payments").expect("project"),
+    ));
+
+    let connection = tokio::spawn({
+        let audit = Arc::clone(&audit);
+        async move {
+            let agent = AgentId::new("agent-1").expect("agent");
+            let destination: Destination = "evil.example:443".parse().expect("destination");
+            let source = source();
+            let _ = audit
+                .record(&event(
+                    &agent,
+                    Some(&destination),
+                    &source,
+                    Decision::Refused(Fault::NoPermit),
+                ))
+                .await;
+        }
+    });
+    held.started.notified().await;
+    connection.abort();
+    assert!(connection.await.expect_err("aborted").is_cancelled());
+
+    let shutdown = CancellationToken::new();
+    shutdown.cancel();
+    let run = tokio::spawn({
+        let audit = Arc::clone(&audit);
+        async move { audit.run(shutdown).await }
+    });
+    held.release.notify_one();
+    run.await.expect("run");
+
+    assert_eq!(sink.stored().len(), 1);
 }
