@@ -287,11 +287,32 @@ async fn a_best_effort_record_the_stream_will_not_take_is_dropped_and_counted_by
 
     writer.drain_once().await;
 
-    assert_eq!(sink.stored().len(), 1);
+    assert_eq!(sink.stored().len(), 0);
     let stats = writer.stats();
     assert_eq!(stats.dropped(AuditClass::BestEffort, FailureReason::StreamFull), 1);
-    assert_eq!(stats.best_effort_queued(), 0);
+    assert_eq!(stats.best_effort_queued(), 1);
     assert!(!writer.is_degraded());
+
+    writer.drain_once().await;
+
+    assert_eq!(sink.stored().len(), 1);
+    assert_eq!(writer.stats().best_effort_queued(), 0);
+}
+
+#[tokio::test]
+async fn a_failing_stream_costs_one_best_effort_publish_per_drain() {
+    let (writer, sink, stamper) = setup(4, 4);
+    for _ in 0..3 {
+        writer.write(best_effort(&stamper)).await.unwrap();
+    }
+    sink.fail_all(SinkError::Timeout);
+
+    writer.drain_once().await;
+
+    assert_eq!(sink.attempts(), 1);
+    let stats = writer.stats();
+    assert_eq!(stats.dropped(AuditClass::BestEffort, FailureReason::Timeout), 1);
+    assert_eq!(stats.best_effort_queued(), 2);
 }
 
 #[tokio::test]

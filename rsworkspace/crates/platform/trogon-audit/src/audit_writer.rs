@@ -96,7 +96,9 @@ impl<S: AuditSink> AuditWriter<S> {
     /// Retries the buffers once: the retry buffer first and in order, then the
     /// best-effort queue. A refusal's record leaves the buffer only when it is
     /// acknowledged, and the writer leaves audit-degraded when the buffer is
-    /// empty.
+    /// empty. Either drain stops at the first failure, so a stream that is down
+    /// costs one publish per pass and never holds the next pass of the retry
+    /// buffer behind a whole queue of best-effort records.
     pub async fn drain_once(&self) {
         let _serialized = self.inner.drain_gate.lock().await;
         self.drain_retry_buffer().await;
@@ -235,6 +237,7 @@ impl<S: AuditSink> AuditWriter<S> {
                     reason = %error.reason(),
                     "a best-effort audit record was dropped"
                 );
+                return;
             }
         }
     }
