@@ -24,11 +24,21 @@ pub struct IntegrityView<'a> {
     ///
     /// Field 3: `previous_hash`
     pub previous_hash: ::core::option::Option<&'a [u8]>,
-    /// SHA-256 over the deterministic encoding of the record with this field
-    /// empty.
+    /// SHA-256 over the exact encoded bytes of the record with this field absent.
+    ///
+    /// The writer appends it after those bytes as a second occurrence of the
+    /// record's integrity field, which every protobuf decoder merges here. A
+    /// verifier strips that trailer and hashes the bytes before it, so the stored
+    /// bytes are hashed as they are and never re-serialized.
     ///
     /// Field 4: `record_hash`
     pub record_hash: ::core::option::Option<&'a [u8]>,
+    /// The chain the record belongs to, a UUIDv7. Every process start begins a new
+    /// chain under the same writer id, so a chain is named by writer id and chain
+    /// id together. It also rides in the Trogon-Audit-Chain header.
+    ///
+    /// Field 5: `chain_id`
+    pub chain_id: ::core::option::Option<&'a str>,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -108,6 +118,13 @@ impl<'a> ::buffa::MessageView<'a> for IntegrityView<'a> {
                 )?;
                 view.record_hash = Some(::buffa::types::borrow_bytes(&mut cur)?);
             }
+            5u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.chain_id = Some(::buffa::types::borrow_str(&mut cur)?);
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -132,6 +149,7 @@ impl<'a> ::buffa::MessageView<'a> for IntegrityView<'a> {
             sequence: self.sequence,
             previous_hash: self.previous_hash.map(|b| (b).to_vec()),
             record_hash: self.record_hash.map(|b| (b).to_vec()),
+            chain_id: self.chain_id.map(|s| s.to_string()),
             ..::core::default::Default::default()
         })
     }
@@ -150,6 +168,9 @@ impl<'a> ::buffa::ViewEncode<'a> for IntegrityView<'a> {
         if let Some(ref v) = self.record_hash {
             size += 1u64 + ::buffa::types::bytes_encoded_len(v) as u64;
         }
+        if let Some(ref v) = self.chain_id {
+            size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
+        }
         ::buffa::saturate_size(size)
     }
     #[allow(clippy::needless_borrow)]
@@ -167,6 +188,9 @@ impl<'a> ::buffa::ViewEncode<'a> for IntegrityView<'a> {
         }
         if let Some(ref v) = self.record_hash {
             ::buffa::types::put_shared_bytes_field(4u32, v, buf);
+        }
+        if let Some(ref v) = self.chain_id {
+            ::buffa::types::put_string_field(5u32, v, buf);
         }
     }
 }
@@ -207,6 +231,9 @@ impl<'__a> ::serde::Serialize for IntegrityView<'__a> {
         }
         if let ::core::option::Option::Some(__v) = self.record_hash {
             __map.serialize_entry("recordHash", &::buffa::json_helpers::BytesJson(__v))?;
+        }
+        if let ::core::option::Option::Some(__v) = self.chain_id {
+            __map.serialize_entry("chainId", __v)?;
         }
         __map.end()
     }
@@ -322,13 +349,26 @@ impl IntegrityOwnedView {
     pub fn previous_hash(&self) -> ::core::option::Option<&'_ [u8]> {
         self.0.reborrow().previous_hash
     }
-    /// SHA-256 over the deterministic encoding of the record with this field
-    /// empty.
+    /// SHA-256 over the exact encoded bytes of the record with this field absent.
+    ///
+    /// The writer appends it after those bytes as a second occurrence of the
+    /// record's integrity field, which every protobuf decoder merges here. A
+    /// verifier strips that trailer and hashes the bytes before it, so the stored
+    /// bytes are hashed as they are and never re-serialized.
     ///
     /// Field 4: `record_hash`
     #[must_use]
     pub fn record_hash(&self) -> ::core::option::Option<&'_ [u8]> {
         self.0.reborrow().record_hash
+    }
+    /// The chain the record belongs to, a UUIDv7. Every process start begins a new
+    /// chain under the same writer id, so a chain is named by writer id and chain
+    /// id together. It also rides in the Trogon-Audit-Chain header.
+    ///
+    /// Field 5: `chain_id`
+    #[must_use]
+    pub fn chain_id(&self) -> ::core::option::Option<&'_ str> {
+        self.0.reborrow().chain_id
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<IntegrityView<'static>>>

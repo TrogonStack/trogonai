@@ -23,7 +23,15 @@ message Integrity {
   // The hash of the previous record in the chain. Empty for the first record of
   // a chain.
   bytes previous_hash = 3 [(buf.validate.field).bytes.max_len = 32];
-  // SHA-256 over the deterministic encoding of the record with this field
-  // empty.
+  // SHA-256 over the exact encoded bytes of the record with this field absent.
+  //
+  // The writer appends it after those bytes as a second occurrence of the
+  // record's integrity field, which every protobuf decoder merges here. A
+  // verifier strips that trailer and hashes the bytes before it, so the stored
+  // bytes are hashed as they are and never re-serialized.
   bytes record_hash = 4 [(buf.validate.field).bytes.max_len = 32];
+  // The chain the record belongs to, a UUIDv7. Every process start begins a new
+  // chain under the same writer id, so a chain is named by writer id and chain
+  // id together. It also rides in the Trogon-Audit-Chain header.
+  string chain_id = 5 [(buf.validate.field).string.uuid = true];
 }

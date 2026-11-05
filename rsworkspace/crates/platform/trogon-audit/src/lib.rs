@@ -21,8 +21,10 @@
 //! every string is an [`AuditName`], a [`ReasonCode`] or an opaque
 //! [`ConsistencyToken`], and no API takes content.
 //!
-//! The per-writer hash chain and signed checkpoints (Decision 6), the integrity
-//! records, the OpenTelemetry counters and the surface adapters are later slices.
+//! The per-writer hash chain of Decision 6 has its primitives here: [`RecordHash`],
+//! [`ChainId`] and the stored form in [`record_seal`]. The writer does not chain
+//! records yet. Signed checkpoints, the integrity records, the OpenTelemetry
+//! counters and the surface adapters are later slices.
 
 pub mod actor;
 pub mod audit_name;
@@ -30,6 +32,7 @@ pub mod audit_sink;
 pub mod audit_subject;
 pub mod audit_unavailable_error;
 pub mod audit_writer;
+pub mod chain_id;
 pub mod change_facts;
 pub mod change_terminal;
 pub mod checkpoint_terminal;
@@ -51,9 +54,12 @@ pub mod obligation;
 pub mod read_only;
 pub mod reason_code;
 pub mod record;
+pub mod record_hash;
 pub mod record_id;
 pub mod record_kind;
 pub mod record_scope;
+pub mod record_seal;
+pub mod seal_error;
 pub mod sealed_record;
 pub mod sink_error;
 pub mod stamp;
@@ -75,6 +81,7 @@ pub use audit_sink::AuditSink;
 pub use audit_subject::AuditSubject;
 pub use audit_unavailable_error::AuditUnavailableError;
 pub use audit_writer::AuditWriter;
+pub use chain_id::{ChainId, ChainIdError};
 pub use change_facts::ChangeFacts;
 pub use change_terminal::ChangeTerminal;
 pub use checkpoint_terminal::CheckpointTerminal;
@@ -95,9 +102,11 @@ pub use obligation::Obligation;
 pub use read_only::ReadOnly;
 pub use reason_code::{ReasonCode, ReasonCodeError};
 pub use record::Record;
+pub use record_hash::{RecordHash, RecordHashError};
 pub use record_id::{RecordId, RecordIdError};
 pub use record_kind::RecordKind;
 pub use record_scope::{ActChainTooLongError, RecordScope};
+pub use seal_error::SealError;
 pub use sealed_record::SealedRecord;
 pub use sink_error::SinkError;
 pub use stamp::Stamp;
