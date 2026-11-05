@@ -39,8 +39,16 @@ impl Server {
     }
 
     /// Accepts connections until `shutdown` is cancelled. Tunnels still open
-    /// at that point are closed.
+    /// at that point are closed. The audit sink's background work runs for the
+    /// same span, and `run` returns only after it has flushed, so a decision
+    /// made just before shutdown is not lost with the process.
     pub async fn run(self, shutdown: CancellationToken) {
+        let flush = CancellationToken::new();
+        let audit = self.proxy.audit();
+        let drain = tokio::spawn({
+            let flush = flush.clone();
+            async move { audit.run(flush).await }
+        });
         accept_loop(
             &self.listener,
             &self.acceptor,
@@ -49,6 +57,10 @@ impl Server {
             shutdown,
         )
         .await;
+        flush.cancel();
+        if let Err(error) = drain.await {
+            tracing::warn!(error = %error, "audit drain task ended abnormally");
+        }
     }
 }
 

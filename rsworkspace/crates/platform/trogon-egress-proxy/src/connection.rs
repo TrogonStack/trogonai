@@ -9,7 +9,14 @@
 //! 4. answer `200`, then check that the first TLS record names the CONNECT
 //!    host, and only then forward bytes.
 //!
-//! Every connection ends in exactly one audit event.
+//! A tunnel is audited twice at most. The permit is recorded after the dial
+//! succeeds and before `200`, and is acknowledged first: a proxy that cannot
+//! record a permit refuses with `AUDIT_UNAVAILABLE` and forwards nothing. Every
+//! refusal is recorded too, but the refusal is sent whether or not the record
+//! is written. A client that opens a tunnel and then sends the wrong SNI has
+//! two records: the permit that opened it and the refusal that closed it. A
+//! `AUDIT_UNAVAILABLE` refusal is the one answer not recorded, because it is an
+//! operational fault of the sink itself.
 
 use std::collections::HashSet;
 use std::io;
@@ -25,6 +32,7 @@ use tokio::time::timeout;
 use crate::admission::{Admission, admit};
 use crate::agent_id::AgentId;
 use crate::audit::{AuditEvent, AuditSink, Decision};
+use crate::audit_error::AuditError;
 use crate::connect_request::{Request, RequestError, read_request};
 use crate::constants::CONNECTION_ESTABLISHED;
 use crate::destination::Destination;
@@ -67,6 +75,10 @@ impl Proxy {
 
     pub fn limits(&self) -> &Limits {
         &self.limits
+    }
+
+    pub(crate) fn audit(&self) -> Arc<dyn AuditSink> {
+        Arc::clone(&self.audit)
     }
 
     /// Serves one connection whose caller is already authenticated as `agent`.
@@ -137,6 +149,18 @@ impl Proxy {
                 .await;
         };
 
+        let resolved = Some(address.ip());
+        if self
+            .record(agent, Some(&destination), resolved, Decision::Permitted)
+            .await
+            .is_err()
+        {
+            drop(upstream);
+            return self
+                .refuse(client, agent, Some(&destination), resolved, Fault::AuditUnavailable)
+                .await;
+        }
+
         client.write_all(CONNECTION_ESTABLISHED).await?;
         client.flush().await?;
 
@@ -148,17 +172,18 @@ impl Proxy {
                     if let Err(error) = &outcome {
                         tracing::debug!(%agent, error = %error, "first record rejected");
                     }
-                    self.record(
-                        agent,
-                        Some(&destination),
-                        Some(address.ip()),
-                        Decision::Refused(Fault::SniMismatch),
-                    );
+                    let _ = self
+                        .record(
+                            agent,
+                            Some(&destination),
+                            resolved,
+                            Decision::Refused(Fault::SniMismatch),
+                        )
+                        .await;
                     return Ok(());
                 }
             }
         }
-        self.record(agent, Some(&destination), Some(address.ip()), Decision::Permitted);
 
         upstream.write_all(&pending).await?;
         copy_bidirectional(client, &mut upstream).await?;
@@ -221,19 +246,31 @@ impl Proxy {
     where
         C: AsyncWrite + Unpin,
     {
-        self.record(agent, destination, resolved, Decision::Refused(fault));
+        if fault != Fault::AuditUnavailable {
+            let _ = self
+                .record(agent, destination, resolved, Decision::Refused(fault))
+                .await;
+        }
         client.write_all(&fault.response()).await?;
         client.flush().await
     }
 
-    fn record(&self, agent: &AgentId, destination: Option<&Destination>, resolved: Option<IpAddr>, decision: Decision) {
-        self.audit.record(&AuditEvent {
-            agent,
-            destination,
-            resolved_address: resolved,
-            decision,
-            snapshot_source: self.snapshot.source(),
-        });
+    async fn record(
+        &self,
+        agent: &AgentId,
+        destination: Option<&Destination>,
+        resolved: Option<IpAddr>,
+        decision: Decision,
+    ) -> Result<(), AuditError> {
+        self.audit
+            .record(&AuditEvent {
+                agent,
+                destination,
+                resolved_address: resolved,
+                decision,
+                snapshot_source: self.snapshot.source(),
+            })
+            .await
     }
 }
 

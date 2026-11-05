@@ -47,3 +47,23 @@ pub(crate) const TLS_HANDSHAKE_CLIENT_HELLO: u8 = 1;
 pub(crate) const TLS_EXTENSION_SERVER_NAME: u16 = 0;
 
 pub(crate) const TLS_NAME_TYPE_HOST_NAME: u8 = 0;
+
+/// The `target` of a decision record whose request never named a destination
+/// (a malformed head, or a method other than CONNECT). Not `host:port`
+/// shaped, so no real destination can collide with it.
+pub(crate) const NO_DESTINATION_TARGET: &str = "no_destination";
+
+/// The `target` of a decision record whose destination is longer than an audit
+/// name may be (a 250 byte host and a port do not fit). The decision is still
+/// recorded; only the spelling of where is replaced.
+pub(crate) const DESTINATION_TOO_LONG_TARGET: &str = "destination_too_long";
+
+/// Log target of the one local line written per decision.
+pub(crate) const AUDIT_LOG_TARGET: &str = "egress_audit";
+
+/// Prefix of the writer id, ahead of the instance name.
+pub(crate) const WRITER_ID_PREFIX: &str = "egress-proxy:";
+
+/// How long the audit connection may take to be built. NATS `connect` returns
+/// before any server answers, so this bounds setup, not reachability.
+pub(crate) const AUDIT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
