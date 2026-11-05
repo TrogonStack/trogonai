@@ -126,7 +126,8 @@ services:
 
   # Runs to completion on every `up`: creates the PLATFORM audit streams, AUDIT
   # and AUDIT_CHECKPOINT, that audit writers publish to but never create
-  # (ADR#0086 Decision 2), with one replica. See services/nats/provision-audit.sh.
+  # (platform audit record proposal, PR 766, Decision 2), with one replica.
+  # See services/nats/provision-audit.sh.
   nats-audit-provision:
     image: natsio/nats-box:0.20.1
     entrypoint:

@@ -358,7 +358,9 @@ bucket already exists with another history or maximum age.
 ## Provision the audit streams
 
 Platform audit records go to two PLATFORM streams that the writers publish to
-but never create (ADR#0086 Decision 2): `AUDIT` takes
+but never create
+([platform audit record proposal](https://github.com/TrogonStack/trogonai/pull/766)
+Decision 2): `AUDIT` takes
 `platform.v1.audit.{decision,credential,change,integrity}.>` and
 `AUDIT_CHECKPOINT` takes `platform.v1.audit.checkpoint.>`. Both use file
 storage, limits retention, `discard: new` so a full stream refuses a write and
