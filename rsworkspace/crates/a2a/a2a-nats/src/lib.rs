@@ -13,6 +13,7 @@
     )
 )]
 
+pub mod a2a_method;
 pub mod a2a_prefix;
 pub mod agent_id;
 pub mod audit;
@@ -33,23 +34,20 @@ pub mod task_event;
 pub mod task_id;
 pub mod wire;
 
+pub use a2a_method::A2aMethod;
 pub use a2a_prefix::{A2aPrefix, A2aPrefixError};
 pub use agent_id::{A2aAgentId, AgentIdError};
 pub use config::{Config, DEFAULT_A2A_PREFIX, ENV_A2A_PREFIX, apply_timeout_overrides, nats_connect_timeout};
 pub use context_id::{A2aContextId, ContextIdError};
 pub use error::{AGENT_UNAVAILABLE, TASK_NOT_CANCELABLE, TASK_NOT_FOUND};
 pub use gateway_ingress::{
-    GATEWAY_INGRESS_METHOD_SUFFIXES, GatewayComposeError, GatewayIngressError, compose_gateway_ingress_subject,
-    gateway_ingress_agent_and_method, gateway_ingress_agent_and_method_dots,
     gateway_ingress_subject_from_agent_subject, ingress_error_response_wire,
     ingress_gateway_aauth_denied_response_bytes, ingress_gateway_deadline_exceeded_response_bytes,
     ingress_gateway_declarative_denied_response_bytes, ingress_gateway_policy_denied_response_bytes,
     ingress_gateway_tier3_refused_response_bytes, ingress_invalid_request_response_bytes,
-    resolve_gateway_ingress_subject,
 };
 pub use jsonrpc::extract_request_id;
 pub use jsonrpc_nats::{RequestId, ResponseId};
 pub use req_id::ReqId;
-pub use server::A2aMethod;
 pub use task_id::{A2aTaskId, TaskIdError};
 pub use trogon_nats::NatsConfig;

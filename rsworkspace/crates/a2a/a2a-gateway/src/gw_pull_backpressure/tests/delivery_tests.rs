@@ -4,12 +4,11 @@ use trogon_nats::jetstream::mocks::{AckKindSnapshot, AckKindValue};
 use trogon_std::log_capture::{CapturedEvents, LevelFilter};
 
 use super::super::*;
-use crate::gateway_test_support::{ObservedMessage, event};
+use crate::gateway_test_support::{ObservedMessage, event, event_on};
 
 fn routed_event() -> async_nats::Message {
     let mut headers = async_nats::HeaderMap::new();
     headers.insert(a2a_nats::constants::REQ_ID_HEADER, "request-1");
-    headers.insert(a2a_nats::constants::GATEWAY_CALLER_ID_HEADER, "alice");
     event(headers)
 }
 
@@ -101,7 +100,7 @@ async fn a_failed_double_ack_retires_state_without_duplicate_publication() {
     attempts.record_attempt(41);
     let message = ObservedMessage::with_failing_signals(routed_event());
     deliver(&client, &attempts, message.clone(), 41).await;
-    assert_eq!(client.published_messages(), ["a2a.v1.gateway.alice.events"]);
+    assert_eq!(client.published_messages(), ["a2a.v1.gateway.person.alice.events"]);
     assert_eq!(
         client.published_payloads(),
         [bytes::Bytes::from_static(b"event payload")]
@@ -118,7 +117,7 @@ async fn unroutable_and_backpressured_ack_failures_preserve_context_and_retry_bu
     let client = AdvancedMockNatsClient::new();
     let attempts = Arc::new(ForwardAttempts::new());
     let gate = Arc::new(CallerInflightGate::new(1));
-    let held = gate.clone().try_acquire("alice").unwrap();
+    let held = gate.clone().try_acquire("person.alice").unwrap();
     for (message, expected) in [
         (
             ObservedMessage::with_failing_signals(event(async_nats::HeaderMap::new())),
@@ -145,7 +144,7 @@ async fn unroutable_and_backpressured_ack_failures_preserve_context_and_retry_bu
         .unwrap_err();
         match error {
             PullCycleError::Ack { subject, source } => {
-                assert_eq!(subject, "a2a.v1.tasks.task-1.events");
+                assert_eq!(subject, "a2a.v1.tasks.task-1.person.alice.events");
                 assert_eq!(source.to_string(), "ack_with failed");
             }
             error => panic!("unexpected error: {error}"),
@@ -153,10 +152,42 @@ async fn unroutable_and_backpressured_ack_failures_preserve_context_and_retry_bu
         assert_eq!(message.signals(), [AckKindSnapshot::AckWith(expected)]);
         assert!(attempts.by_sequence.lock().unwrap().is_empty());
         assert!(client.published_messages().is_empty());
-        assert!(gate.clone().try_acquire("bob").is_some());
+        assert!(gate.clone().try_acquire("person.bob").is_some());
     }
     drop(held);
-    assert!(gate.try_acquire("alice").is_some());
+    assert!(gate.try_acquire("person.alice").is_some());
+}
+
+#[tokio::test]
+async fn a_caller_header_never_redirects_an_event_away_from_its_subject_principal() {
+    let client = AdvancedMockNatsClient::new();
+    let mut headers = async_nats::HeaderMap::new();
+    headers.insert(a2a_nats::constants::REQ_ID_HEADER, "request-1");
+    headers.insert(a2a_nats::constants::GATEWAY_CALLER_ID_HEADER, "mallory");
+    headers.insert(a2a_nats::constants::GATEWAY_PRINCIPAL_HEADER, "mallory");
+    let message = ObservedMessage::new(event(headers));
+
+    deliver(&client, &Arc::new(ForwardAttempts::new()), message.clone(), 41).await;
+
+    assert_eq!(client.published_messages(), ["a2a.v1.gateway.person.alice.events"]);
+    assert_eq!(message.signals(), [AckKindSnapshot::DoubleAck]);
+}
+
+#[tokio::test]
+async fn an_event_whose_subject_names_no_principal_is_terminated_rather_than_egressed() {
+    let client = AdvancedMockNatsClient::new();
+    let mut headers = async_nats::HeaderMap::new();
+    headers.insert(a2a_nats::constants::REQ_ID_HEADER, "request-1");
+    headers.insert(a2a_nats::constants::GATEWAY_CALLER_ID_HEADER, "alice");
+    let message = ObservedMessage::new(event_on(
+        async_nats::Subject::from("a2a.v1.tasks.task-1.events"),
+        headers,
+    ));
+
+    deliver(&client, &Arc::new(ForwardAttempts::new()), message.clone(), 41).await;
+
+    assert_eq!(message.signals(), [AckKindSnapshot::AckWith(AckKindValue::Term)]);
+    assert!(client.published_messages().is_empty());
 }
 
 #[tokio::test]

@@ -41,7 +41,10 @@ async fn allowed_request_preserves_payload_headers_and_reply_route() -> TestResu
     fixture.dispatch(message).await;
 
     let forwarded = receive(&mut fixture.agents).await?;
-    assert_eq!(forwarded.subject.as_str(), "a2a.v1.agents.bot.message.send");
+    assert_eq!(
+        forwarded.subject.as_str(),
+        "a2a.v1.agents.bot.person.alice.message.send"
+    );
     assert_eq!(
         forwarded.reply.as_ref().map(async_nats::Subject::as_str),
         Some("_INBOX.dispatch")
@@ -64,7 +67,9 @@ async fn allowed_request_preserves_payload_headers_and_reply_route() -> TestResu
     );
     assert_eq!(
         audit["rewrites"],
-        json!(["ingress:a2a.v1.gateway.bot.message.send -> agent:a2a.v1.agents.bot.message.send",])
+        json!([
+            "ingress:a2a.v1.gateway.bot.person.alice.message.send -> agent:a2a.v1.agents.bot.person.alice.message.send",
+        ])
     );
 
     fixture
@@ -86,7 +91,7 @@ async fn untrusted_caller_headers_cannot_change_audit_attribution() -> TestResul
     fixture.dispatch(request("tasks.get", json!({"id": "task-1"}))).await;
     assert_eq!(
         receive(&mut fixture.agents).await?.subject.as_str(),
-        "a2a.v1.agents.bot.tasks.get"
+        "a2a.v1.agents.bot.person.alice.tasks.get"
     );
     let audit = fixture.audit("ok").await?;
     assert_eq!(audit["caller_id"], "_");
@@ -112,7 +117,12 @@ async fn requests_without_reply_inbox_are_not_dispatched_or_audited() -> TestRes
 async fn invalid_route_replies_with_correlated_invalid_request() -> TestResult {
     let diagnostics = Diagnostics::both_outputs();
     let mut fixture = DispatchFixture::new().await?;
-    for subject in ["other.v1.gateway.bot.message.send", "a2a.v1.gateway.bot.unknown"] {
+    for subject in [
+        "other.v1.gateway.bot.person.alice.message.send",
+        "a2a.v1.gateway.bot.message.send",
+        "a2a.v1.gateway.bot.robot.alice.message.send",
+        "a2a.v1.gateway.bot.person.alice.unknown",
+    ] {
         let mut message = request("message.send", json!({}));
         message.subject = subject.into();
         fixture.dispatch(message).await;
@@ -120,7 +130,7 @@ async fn invalid_route_replies_with_correlated_invalid_request() -> TestResult {
     }
     diagnostics.assert_event(
         "gateway ingress subject routing failed",
-        &[("ingress.subject", "a2a.v1.gateway.bot.unknown")],
+        &[("ingress.subject", "a2a.v1.gateway.bot.person.alice.unknown")],
     );
     Ok(())
 }
@@ -282,7 +292,7 @@ async fn declarative_policy_matches_ingress_identity_and_preserves_spicedb_snaps
                 Tier1DeclarativeMatch::new(Tier1ResourceKind::AgentMethod, "message/send", false)?,
                 Tier1DeclarativeMatch::new(
                     Tier1ResourceKind::NatsSubjectPattern,
-                    "a2a.v1.gateway.bot.message.send",
+                    "a2a.v1.gateway.bot.*.*.message.send",
                     false,
                 )?,
             ],

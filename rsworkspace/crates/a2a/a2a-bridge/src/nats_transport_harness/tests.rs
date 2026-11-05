@@ -86,7 +86,7 @@ async fn nats_transport_message_send_round_trips_caller_jwt_and_audit() {
     assert!(harness.last_caller_jwt_present());
     assert_eq!(
         harness.last_subject().as_deref(),
-        Some("a2a.v1.gateway.planner.message.send")
+        Some("a2a.v1.gateway.planner.person.bridge-harness-caller.message.send")
     );
 
     let audit_subject = nats
@@ -123,7 +123,7 @@ async fn nats_transport_tasks_resubscribe_bootstraps_sse_stream() {
     assert!(harness.last_caller_jwt_present());
     assert_eq!(
         harness.last_subject().as_deref(),
-        Some("a2a.v1.gateway.planner.tasks.resubscribe")
+        Some("a2a.v1.gateway.planner.person.bridge-harness-caller.tasks.resubscribe")
     );
 
     let mut stream = response.into_body().into_data_stream();
@@ -180,4 +180,22 @@ async fn nats_transport_live_requires_nats_server() {
         response.status().is_client_error() || response.status().is_success(),
         "bridge HTTP should respond on {bridge_addr}"
     );
+}
+
+#[tokio::test]
+async fn the_harness_gateway_rejects_a_subject_that_is_not_gateway_ingress() {
+    let harness = HarnessGatewayUnary::new(
+        AdvancedMockNatsClient::new(),
+        default_a2a_prefix(),
+        A2aAgentId::new("planner").unwrap(),
+    );
+    let jwt = BridgeUserJwt::new("h.p.s").expect("valid shape");
+
+    let error = harness
+        .unary_request_gateway(&jwt, "a2a.v1.not.ingress", async_nats::HeaderMap::new(), Bytes::new())
+        .await
+        .expect_err("non-ingress subject");
+
+    assert!(matches!(error, BridgeError::NatsPublish(_)));
+    assert_eq!(harness.last_subject().as_deref(), Some("a2a.v1.not.ingress"));
 }
