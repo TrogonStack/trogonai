@@ -1,0 +1,58 @@
+edition = "2024";
+
+package trogonai.connections.authorization_attempts.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/connections/types/v1alpha1/account.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/connections/types/v1alpha1/owner.proto";
+import "trogonai/connections/types/v1alpha1/reference.proto";
+import "trogonai/connections/types/v1alpha1/resource_parent.proto";
+
+// What one attempt authorizes: either a freshly reserved Pending connection or
+// an existing connection being reconnected, under fixed release and app pins
+// (ADR#0094 Decision 1). The pins never change during the attempt; standing of
+// the release and app is joined live, never copied here.
+message AuthorizationTarget {
+  option (buf.validate.message).cel = {
+    id: "authorization_target.app_parent"
+    message: "a project app must share the target custody parent"
+    expression: "has(this.provider_app.resource_parent.platform) || (has(this.provider_app.resource_parent.project) && this.provider_app.resource_parent.project == this.resource_parent)"
+  };
+
+  option (buf.validate.message).cel = {
+    id: "authorization_target.owner_parent"
+    message: "a project owner equals the target custody parent"
+    expression: "!has(this.owner.project) || this.owner.project.project_id == this.resource_parent.project_id"
+  };
+
+  // A fresh Pending ConnectionId, or the existing one for a reconnect, which
+  // keeps its id (ADR#0094 Decision 6).
+  trogonai.connections.types.v1alpha1.ConnectionId connection_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ConnectionOwner owner = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ConnectorReleaseRef connector_release = 3 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ProviderAppRef provider_app = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Present only for a reconnect, step-up included. Absent means the target is
+  // a fresh Pending connection.
+  Reconnect reconnect = 5;
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 6 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Reconnect expectations, copied from the target connection at
+// BeginAuthorization. A stale tab cannot reconnect over a newer consent, and a
+// different provider account fails with ACCOUNT_MISMATCH (ADR#0094 Decision 6).
+message Reconnect {
+  // The connection's authorization_generation when this attempt began. A
+  // successful reconnect completes at exactly this value plus one.
+  uint64 expected_authorization_generation = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  // The fingerprint the connection's Bound claim holds. ADR#0094 Decision 6
+  // requires the probed fingerprint to equal it; carrying it here is the
+  // smallest shape that lets the attempt decide the mismatch itself, since the
+  // decider sees no other stream. It is a keyed digest, never an account id
+  // (ADR#0093 Decision 11).
+  trogonai.connections.types.v1alpha1.ProviderAccountFingerprint expected_fingerprint = 2 [features.field_presence = LEGACY_REQUIRED];
+}

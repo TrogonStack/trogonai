@@ -115,6 +115,7 @@ pub(crate) fn harness_callout_dispatcher(caller_id: &str) -> a2a_auth_callout::d
                 data: SpiceDbPrincipal(json!({"spicedb_subject": "harness-sub"})),
                 nats_permissions: IssuedPermissions::default_for_caller(&self.caller_id),
                 caller_id: self.caller_id.clone(),
+                principal_kind: trogon_identity_types::PrincipalKind::Person,
             })
         }
     }

@@ -13,11 +13,13 @@ inputs:
     exclude_paths:
       - proto/trogonai/agents
       - proto/trogonai/catalog
+      - proto/trogonai/connections
       - proto/trogonai/evaluation
       - proto/trogonai/gateway/credentials/commands
       - proto/trogonai/library
       - proto/trogonai/platform
       - proto/trogonai/projects
+      - proto/trogonai/secrets
       - proto/trogonai/session
       - proto/trogonai/usage
       - proto/trogonai/workflows

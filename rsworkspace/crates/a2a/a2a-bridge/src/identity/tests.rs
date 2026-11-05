@@ -59,3 +59,22 @@ fn bridge_user_jwt_trims_and_into_inner() {
     assert_eq!(jwt.as_str(), "a.b.c");
     assert_eq!(jwt.into_inner(), "a.b.c");
 }
+
+#[test]
+fn bridge_user_jwt_reads_the_minted_principal_and_refuses_a_token_without_one() {
+    let minted = BridgeUserJwt::new(
+        "eyJhbGciOiJub25lIn0.eyJzdWIiOiJoYXJuZXNzIiwiY2FsbGVyX2lkIjoiaGFybmVzcyIsInByaW5jaXBhbF9raW5kIjoicGVyc29uIn0.sig",
+    )
+    .unwrap();
+    assert_eq!(
+        minted.subject_principal().unwrap(),
+        SubjectPrincipal::from_tokens("person", "harness").unwrap()
+    );
+
+    let unnamed =
+        BridgeUserJwt::new("eyJhbGciOiJub25lIn0.eyJzdWIiOiJoYXJuZXNzIiwiY2FsbGVyX2lkIjoiaGFybmVzcyJ9.sig").unwrap();
+    assert!(matches!(
+        unnamed.subject_principal(),
+        Err(BridgeError::MintedPrincipal(_))
+    ));
+}

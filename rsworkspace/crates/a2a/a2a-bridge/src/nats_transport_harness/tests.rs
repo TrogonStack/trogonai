@@ -1,8 +1,10 @@
+use std::time::Duration;
+
 use axum::body::to_bytes;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::Response;
 use futures_util::StreamExt;
-use trogon_nats::AdvancedMockNatsClient;
+use trogon_nats::{AdvancedMockNatsClient, NatsConfig};
 use trogon_std::env::{ReadEnv, SystemEnv};
 
 use a2a_nats::constants::GATEWAY_CALLER_ID_HTTP;
@@ -84,7 +86,7 @@ async fn nats_transport_message_send_round_trips_caller_jwt_and_audit() {
     assert!(harness.last_caller_jwt_present());
     assert_eq!(
         harness.last_subject().as_deref(),
-        Some("a2a.v1.gateway.planner.message.send")
+        Some("a2a.v1.gateway.planner.person.bridge-harness-caller.message.send")
     );
 
     let audit_subject = nats
@@ -121,7 +123,7 @@ async fn nats_transport_tasks_resubscribe_bootstraps_sse_stream() {
     assert!(harness.last_caller_jwt_present());
     assert_eq!(
         harness.last_subject().as_deref(),
-        Some("a2a.v1.gateway.planner.tasks.resubscribe")
+        Some("a2a.v1.gateway.planner.person.bridge-harness-caller.tasks.resubscribe")
     );
 
     let mut stream = response.into_body().into_data_stream();
@@ -155,16 +157,18 @@ async fn nats_transport_tasks_resubscribe_bootstraps_sse_stream() {
     assert!(audit_subject.is_some(), "expected resubscribe audit publish");
 }
 
-/// Live NATS smoke — run with `A2A_SMOKE_COMPOSE=1 cargo test -p a2a-bridge -- --ignored nats_transport_live`.
+/// Live NATS smoke against the `devops/docker/compose/compose.yml` stack. Run with `A2A_SMOKE_COMPOSE=1 cargo test -p a2a-bridge -- --ignored nats_transport_live`.
 #[tokio::test]
-#[ignore = "requires compose stack: A2A_SMOKE_COMPOSE=1 and NATS_URL (see devops/docker/compose/compose.a2a.smoke.yml)"]
+#[ignore = "requires the devops/docker/compose/compose.yml stack: A2A_SMOKE_COMPOSE=1, the NATS_* host variables from devops/docker/compose/.env.example, and a bridge listening on BRIDGE_LISTEN_ADDR"]
 async fn nats_transport_live_requires_nats_server() {
     let env = SystemEnv;
     if env.var("A2A_SMOKE_COMPOSE").as_deref() != Ok("1") {
         panic!("set A2A_SMOKE_COMPOSE=1 to run live compose-network bridge smoke");
     }
-    let url = env.var("NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".into());
-    let client = async_nats::connect(url).await.expect("live NATS connect");
+    let nats = NatsConfig::from_env(&env);
+    let client = trogon_nats::connect_once(&nats, nats.auth.clone(), Duration::from_secs(5))
+        .await
+        .expect("live NATS connect");
     let _ = client;
     let bridge_addr = env
         .var("BRIDGE_LISTEN_ADDR")
@@ -176,4 +180,22 @@ async fn nats_transport_live_requires_nats_server() {
         response.status().is_client_error() || response.status().is_success(),
         "bridge HTTP should respond on {bridge_addr}"
     );
+}
+
+#[tokio::test]
+async fn the_harness_gateway_rejects_a_subject_that_is_not_gateway_ingress() {
+    let harness = HarnessGatewayUnary::new(
+        AdvancedMockNatsClient::new(),
+        default_a2a_prefix(),
+        A2aAgentId::new("planner").unwrap(),
+    );
+    let jwt = BridgeUserJwt::new("h.p.s").expect("valid shape");
+
+    let error = harness
+        .unary_request_gateway(&jwt, "a2a.v1.not.ingress", async_nats::HeaderMap::new(), Bytes::new())
+        .await
+        .expect_err("non-ingress subject");
+
+    assert!(matches!(error, BridgeError::NatsPublish(_)));
+    assert_eq!(harness.last_subject().as_deref(), Some("a2a.v1.not.ingress"));
 }

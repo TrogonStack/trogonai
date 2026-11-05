@@ -1,7 +1,7 @@
 //! Runtime entry point.
 //!
 //! `run_with_args` resolves config, connects to NATS, builds the policy
-//! layers, and pumps `{prefix}.v1.gateway.>` ingress envelopes through
+//! layers, and pumps `{prefix}.v1.gateway.*.*.*.>` ingress envelopes through
 //! [`dispatch::dispatch_gateway_ingress`]. Sibling modules carry the
 //! per-tier helpers the orchestrator composes.
 
@@ -102,7 +102,7 @@ pub async fn run_with_config<E: ReadEnv>(config: Config, nats_config: NatsConfig
     let tier1_declarative_layer = Tier1DeclarativeConfig::from_env(env)?;
     let aauth = aauth_env::gateway_aauth_from_env(env)?;
 
-    let gateway_subject_string = config.gateway_subscribe_subject();
+    let gateway_subject_string = config.gateway_subscribe_subject().to_string();
     let gateway_subject = async_nats::Subject::from(gateway_subject_string.as_str());
 
     let ingress = match &config.queue_group {

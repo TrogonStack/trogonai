@@ -46,11 +46,11 @@ fn error_response(code: i32, msg: &str) -> (async_nats::HeaderMap, Bytes) {
 async fn tasks_resubscribe_returns_snapshot_and_stream() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = task_snapshot("task-resub-1");
-    nats.set_response_wire("a2a.v1.agents.test-agent.tasks.resubscribe", headers, body);
+    nats.set_response_wire("a2a.v1.agents.test-agent.person.alice.tasks.resubscribe", headers, body);
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, _tx) = MockJetStreamConsumer::new();
     js.add_consumer(consumer);
-    let client = A2aClient::new(prefix(), agent_id(), nats, js);
+    let client = A2aClient::new(prefix(), agent_id(), caller(), nats, js);
     let (snapshot, stream) = client.tasks_resubscribe(&task_id(), 42).await.unwrap();
     assert_eq!(snapshot.id, "task-resub-1");
     assert_eq!(stream.last_seq(), 42);
@@ -60,12 +60,16 @@ async fn tasks_resubscribe_returns_snapshot_and_stream() {
 async fn tasks_resubscribe_targets_gateway_subject_under_gateway_routing() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = task_snapshot("task-gw");
-    nats.set_response_wire("a2a.v1.gateway.test-agent.tasks.resubscribe", headers, body);
+    nats.set_response_wire(
+        "a2a.v1.gateway.test-agent.person.alice.tasks.resubscribe",
+        headers,
+        body,
+    );
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, _tx) = MockJetStreamConsumer::new();
     js.add_consumer(consumer);
     let jwt = MintedUserJwt::new("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjk5OTk5OTk5OTl9.signature").unwrap();
-    let client = A2aClient::new(prefix(), agent_id(), nats, js).routing_via_gateway_ingress(jwt);
+    let client = A2aClient::new(prefix(), agent_id(), caller(), nats, js).routing_via_gateway_ingress(jwt);
     let (snapshot, _stream) = client.tasks_resubscribe(&task_id(), 0).await.unwrap();
     assert_eq!(snapshot.id, "task-gw");
 }
@@ -74,11 +78,11 @@ async fn tasks_resubscribe_targets_gateway_subject_under_gateway_routing() {
 async fn tasks_resubscribe_propagates_task_not_found() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = error_response(-32001, "missing");
-    nats.set_response_wire("a2a.v1.agents.test-agent.tasks.resubscribe", headers, body);
+    nats.set_response_wire("a2a.v1.agents.test-agent.person.alice.tasks.resubscribe", headers, body);
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, _tx) = MockJetStreamConsumer::new();
     js.add_consumer(consumer);
-    let client = A2aClient::new(prefix(), agent_id(), nats, js);
+    let client = A2aClient::new(prefix(), agent_id(), caller(), nats, js);
     assert!(matches!(
         client.tasks_resubscribe(&task_id(), 0).await,
         Err(ClientError::TaskNotFound)
@@ -92,7 +96,7 @@ async fn tasks_resubscribe_propagates_transport_errors() {
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, _tx) = MockJetStreamConsumer::new();
     js.add_consumer(consumer);
-    let client = A2aClient::new(prefix(), agent_id(), nats, js);
+    let client = A2aClient::new(prefix(), agent_id(), caller(), nats, js);
     assert!(matches!(
         client.tasks_resubscribe(&task_id(), 0).await,
         Err(ClientError::Transport(_))

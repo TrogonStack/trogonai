@@ -1,0 +1,43 @@
+edition = "2024";
+
+package trogonai.connections.types.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogon/hierarchy/v1alpha1/node.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/projects/projects/v1alpha1/identity.proto";
+
+// The logical owner of a Connection: who administers and delegates it, and
+// whose departure ends it. It is fixed at creation and never transferred; a
+// different owner is a new authorization attempt (ADR#0093 Decision 1). Every
+// arm exists from the first version, and policy rejects an arm that is not
+// enabled (ADR#0093 Decision 8).
+message ConnectionOwner {
+  oneof owner {
+    option (buf.validate.oneof).required = true;
+    ProjectOwner project = 1;
+    WorkspaceOwner workspace = 2;
+    PersonOwner person = 3;
+  }
+}
+
+// The custody project is the owner, so project_id equals the custody
+// ConnectionRef.resource_parent.project_id (ADR#0093 Decisions 1 and 2).
+message ProjectOwner {
+  trogonai.projects.projects.v1alpha1.ProjectId project_id = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// The owner is a workspace node and custody is its integration project.
+// Creation is refused unless the custody project is the current integration
+// designation, and every use checks that the custody project still sits at or
+// below this node (ADR#0093 Decision 3).
+message WorkspaceOwner {
+  trogon.hierarchy.v1alpha1.NodeId workspace = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// The owner is one person. Custody confers no use: an Agent uses the
+// connection only through a delegation, which is a ConnectionPermit naming the
+// exact ConnectionId (ADR#0093 Decision 4).
+message PersonOwner {
+  PrincipalId principal_id = 1 [features.field_presence = LEGACY_REQUIRED];
+}
