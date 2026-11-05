@@ -94,3 +94,4 @@ future implementation work.
 - [ADR#0094: The Platform Authorizes Third-Party Connections as an OAuth Client Through a Single-Use, Write-Ahead Attempt, and Fetches Untrusted Discovery Data Outside Custody (Draft)](./0094-oauth-authorization-protocol.md)
 - [ADR#0095: Each Connection's OAuth Token Set Is One Sealed, CAS-Written OpenBao Secret, Refreshed Only Through a Write-Ahead Credential Transaction (Draft)](./0095-connection-credential-custody-and-refresh.md)
 - [ADR#0096: An Agent Uses a Connection Through an Authorized HTTP Proxy That Injects Credentials Held by Custody (Draft)](./0096-connection-use-by-agents.md)
+- [ADR#0097: A GitHub App Installation Is a Provider Fact Learned by Reconciliation, Bound to an Owner Only by an In-Session Claim, and Never by the Setup Redirect (Draft)](./0097-github-app-installation-lifecycle.md)
