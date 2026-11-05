@@ -49,7 +49,9 @@ pub trait DecisionAudit: Send + Sync {
     async fn record(&self, event: &DecisionEvent<'_>) -> Result<(), AuditError>;
 
     /// Background work the sink needs for as long as the gateway serves, such
-    /// as retrying buffered records. Returns once `shutdown` is cancelled and
-    /// the writes still in flight have settled.
-    async fn run(&self, _shutdown: CancellationToken) {}
+    /// as retrying buffered records. Returns once `stop` is cancelled and the
+    /// writes still in flight have settled. Cancel `stop` only after the last
+    /// [`DecisionAudit::record`] call has been made, or a record made later
+    /// misses the final flush.
+    async fn run(&self, _stop: CancellationToken) {}
 }

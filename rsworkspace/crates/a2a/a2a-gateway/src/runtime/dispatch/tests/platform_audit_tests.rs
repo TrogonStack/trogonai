@@ -8,6 +8,7 @@ use buffa::{EnumValue, Message};
 use serde_json::{Value, json};
 use trogon_audit::{MemorySink, SealedRecord, SinkError};
 use trogon_nats::test_support::JetStreamTestServer;
+use trogonai_proto::platform::audit::v1::audit_record::Detail;
 use trogonai_proto::platform::audit::v1::{AuditDecision, AuditRecord};
 
 use super::RejectingGate;
@@ -26,6 +27,13 @@ fn only(sink: &MemorySink) -> SealedRecord {
     let mut stored = sink.stored();
     assert_eq!(stored.len(), 1, "stored: {}", stored.len());
     stored.remove(0)
+}
+
+fn target(record: &SealedRecord) -> String {
+    match decoded(record).detail {
+        Some(Detail::GatewayDecision(decision)) => decision.target,
+        other => panic!("not a decision: {other:?}"),
+    }
 }
 
 fn subject(outcome: &str) -> String {
@@ -278,5 +286,21 @@ async fn jetstream_without_an_audit_stream_refuses_what_must_be_recorded() -> Te
     fixture.dispatch(request("message.send", json!({}))).await;
     let body = fixture.denied(-32804, json!("request-7")).await?;
     assert_eq!(body["error"]["data"]["reason"], "audit_unavailable");
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_decision_names_the_json_rpc_method_not_its_subject_terminal() -> TestResult {
+    let mut fixture = DispatchFixture::new().await?;
+    let (sink, _writer) = fixture.enable_memory_audit();
+    fixture.dispatch(request("push.set", json!({"taskId": "task-1"}))).await;
+    receive(&mut fixture.agents).await?;
+    assert_eq!(target(&only(&sink)), "tasks/pushNotificationConfig/set@bot");
+
+    let (sink, writer) = fixture.enable_memory_audit();
+    fixture.dispatch(request("card", json!({}))).await;
+    receive(&mut fixture.agents).await?;
+    writer.drain_once().await;
+    assert_eq!(target(&only(&sink)), "agent/card@bot");
     Ok(())
 }

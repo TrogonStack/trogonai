@@ -130,11 +130,13 @@ pub async fn run_with_config<E: ReadEnv>(config: Config, nats_config: NatsConfig
     let streaming_ingress_enabled = gateway_streaming_ingress_enabled(env);
     let streaming_ingress_gate = StreamingIngressGate::new(streaming_ingress_config);
 
-    // The audit writer drains for as long as the gateway serves and settles after
-    // the ingress loop ends, so a refusal still being written is not lost.
+    // The audit writer drains for as long as the gateway serves and settles only
+    // once the ingress loop has returned. The shutdown signal alone is too early:
+    // the dispatch in progress when it fires still records its decision.
+    let ingress_stopped = CancellationToken::new();
     let audit_drain = platform_audit.clone().map(|audit| {
-        let audit_shutdown = shutdown.clone();
-        tokio::spawn(async move { audit.run(audit_shutdown).await })
+        let audit_stop = ingress_stopped.clone();
+        tokio::spawn(async move { audit.run(audit_stop).await })
     });
 
     receive_ingress(ingress, &config.a2a_prefix, shutdown.clone(), |msg| {
@@ -158,6 +160,7 @@ pub async fn run_with_config<E: ReadEnv>(config: Config, nats_config: NatsConfig
     .await;
 
     shutdown.cancel();
+    ingress_stopped.cancel();
     if let Some(drain) = audit_drain
         && let Err(error) = drain.await
     {

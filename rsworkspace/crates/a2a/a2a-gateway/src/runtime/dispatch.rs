@@ -203,7 +203,7 @@ async fn dispatch_routed<E: ReadEnv>(
         audit: platform_audit,
         caller: &caller,
         agent_id: &agent_id,
-        method: method_slashes.as_str(),
+        method: method.as_str(),
         read_only: declared_read_only(&method),
         trace_id: trace_id.as_str(),
         request_id: json_rpc_audit_req_id(payload.as_ref()),
