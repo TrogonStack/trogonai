@@ -27,3 +27,6 @@ pub fn jetstream_audit_from_env<E: ReadEnv>(
     let writer = AuditWriter::new(sink, config.writer, WriterConfig::default());
     Ok(Some(Arc::new(WriterAudit::new(writer, config.tenant, config.project))))
 }
+
+#[cfg(test)]
+mod tests;

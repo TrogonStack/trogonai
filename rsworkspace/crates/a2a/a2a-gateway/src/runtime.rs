@@ -29,6 +29,8 @@ use crate::ingress_identity::{ForwardedCallerJwtVerifier, gateway_jwt_audience};
 use crate::policy::spicedb_tier1::Tier1SpiceDbConfig;
 #[cfg(feature = "spicedb")]
 use crate::policy::tier1_declarative::Tier1DeclarativeConfig;
+#[cfg(feature = "spicedb")]
+use crate::runtime::platform_audit::AuditDrain;
 
 pub mod audit_publish;
 #[cfg(feature = "spicedb")]
@@ -130,14 +132,7 @@ pub async fn run_with_config<E: ReadEnv>(config: Config, nats_config: NatsConfig
     let streaming_ingress_enabled = gateway_streaming_ingress_enabled(env);
     let streaming_ingress_gate = StreamingIngressGate::new(streaming_ingress_config);
 
-    // The audit writer drains for as long as the gateway serves and settles only
-    // once the ingress loop has returned. The shutdown signal alone is too early:
-    // the dispatch in progress when it fires still records its decision.
-    let ingress_stopped = CancellationToken::new();
-    let audit_drain = platform_audit.clone().map(|audit| {
-        let audit_stop = ingress_stopped.clone();
-        tokio::spawn(async move { audit.run(audit_stop).await })
-    });
+    let audit_drain = AuditDrain::start(platform_audit.clone());
 
     receive_ingress(ingress, &config.a2a_prefix, shutdown.clone(), |msg| {
         crate::runtime::dispatch::dispatch_gateway_ingress(
@@ -160,12 +155,7 @@ pub async fn run_with_config<E: ReadEnv>(config: Config, nats_config: NatsConfig
     .await;
 
     shutdown.cancel();
-    ingress_stopped.cancel();
-    if let Some(drain) = audit_drain
-        && let Err(error) = drain.await
-    {
-        warn!(%error, "gateway audit drain task ended abnormally");
-    }
+    audit_drain.settle().await;
 
     info!(prefix = %config.a2a_prefix, "A2A gateway shutdown complete");
     Ok(())

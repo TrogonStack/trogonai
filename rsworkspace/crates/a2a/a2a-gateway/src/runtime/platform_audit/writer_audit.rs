@@ -89,9 +89,10 @@ fn log(event: &DecisionEvent<'_>, outcome: &Result<Disposition, AuditError>) {
         Err(AuditError::Unavailable(error)) => ("unavailable", error.reason().as_str()),
         Err(AuditError::Name(_) | AuditError::Reason(_)) => ("unavailable", "unrecordable"),
     };
+    let agent = event.agent_id.as_str();
     tracing::info!(
         target: AUDIT_LOG_TARGET,
-        agent = %event.agent_id.as_str(),
+        agent,
         method = event.method,
         decision,
         audit,

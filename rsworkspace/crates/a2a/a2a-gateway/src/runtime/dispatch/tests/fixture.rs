@@ -15,14 +15,17 @@ use bytes::Bytes;
 use futures::StreamExt;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
-use trogon_audit::{AuditName, AuditWriter, JetStreamSink, MemorySink, WriterConfig, WriterId};
+use trogon_audit::{AuditName, AuditWriter, MemorySink, WriterConfig, WriterId};
 use trogon_identity_types::PrincipalKind;
 use trogon_nats::NatsToken;
 use trogon_nats::test_support::{CoreTestServer, JetStreamTestServer};
 use trogon_std::env::InMemoryEnv;
 
 use crate::config::{Args, Config, config_from_args};
-use crate::constants::ENV_GATEWAY_AUDIT_PUBLISH;
+use crate::constants::{
+    AUDIT_WRITER_ID_PREFIX, ENV_GATEWAY_AUDIT_INSTANCE, ENV_GATEWAY_AUDIT_PROJECT, ENV_GATEWAY_AUDIT_PUBLISH,
+    ENV_GATEWAY_AUDIT_TENANT,
+};
 use crate::gw_ingress_stream::{
     GatewayStreamingIngressConfig, StreamingIngressGate, StreamingMaxAckPending, StreamingMaxInflightPerCaller,
 };
@@ -32,17 +35,19 @@ use crate::policy::spicedb_tier1::{
 };
 use crate::policy::tier1_declarative::{NoopTier1DeclarativeGate, Tier1DeclarativeGate};
 use crate::runtime::dispatch::dispatch_gateway_ingress;
-use crate::runtime::platform_audit::{DecisionAudit, WriterAudit};
+use crate::runtime::platform_audit::{DecisionAudit, WriterAudit, jetstream_audit_from_env};
 use crate::runtime::policy_stack::GatewayPolicyStack;
 
 pub const AUDIT_PROJECT: &str = "payments";
+const AUDIT_TENANT: &str = "acme";
+const AUDIT_INSTANCE: &str = "test";
 
 fn audit_writer_id() -> WriterId {
-    WriterId::new("a2a-gateway:test").expect("writer id")
+    WriterId::new(format!("{AUDIT_WRITER_ID_PREFIX}{AUDIT_INSTANCE}")).expect("writer id")
 }
 
 fn audit_tenant() -> AuditName {
-    AuditName::new("acme").expect("tenant")
+    AuditName::new(AUDIT_TENANT).expect("tenant")
 }
 
 fn audit_project() -> NatsToken {
@@ -199,12 +204,13 @@ impl<S> DispatchFixture<S> {
         (sink, writer)
     }
 
-    /// Routes the platform audit records through the JetStream sink of this
-    /// fixture's broker, as the gateway does in production.
+    /// Builds the platform audit writer the way the gateway does at start, over
+    /// the stream this fixture's connection reaches.
     pub fn enable_jetstream_audit(&mut self) {
-        let sink = JetStreamSink::with_defaults(async_nats::jetstream::new(self.client.clone()));
-        let writer = AuditWriter::new(sink, audit_writer_id(), WriterConfig::default());
-        self.platform_audit = Some(Arc::new(WriterAudit::new(writer, audit_tenant(), audit_project())));
+        self.env.set(ENV_GATEWAY_AUDIT_TENANT, AUDIT_TENANT);
+        self.env.set(ENV_GATEWAY_AUDIT_PROJECT, AUDIT_PROJECT);
+        self.env.set(ENV_GATEWAY_AUDIT_INSTANCE, AUDIT_INSTANCE);
+        self.platform_audit = jetstream_audit_from_env(&self.env, &self.client).expect("platform audit settings");
     }
 
     pub async fn dispatch(&self, message: Message) {

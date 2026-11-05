@@ -17,6 +17,7 @@
 //! The legacy `a2a-nats` envelope keeps publishing beside these records, best
 //! effort, for deployments that still read `{prefix}.v1.audit.{agent}.{outcome}`.
 
+mod audit_drain;
 mod audit_error;
 mod audit_names;
 mod config;
@@ -31,6 +32,7 @@ mod writer_audit;
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 
+pub use audit_drain::AuditDrain;
 pub use audit_error::AuditError;
 pub use config::{PlatformAuditConfig, PlatformAuditConfigError};
 pub use decision_event::{AllowedLayers, DecisionEvent, Verdict};
