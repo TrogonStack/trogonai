@@ -43,7 +43,7 @@ message LayerVerdict {
   bool would_deny = 4 [features.field_presence = LEGACY_REQUIRED];
   // A closed code owned by the surface. The error message a layer produced is
   // not carried, because it can echo content.
-  string reason_code = 5;
+  string reason_code = 5 [(buf.validate.field).string.max_len = 64];
   // The ids of the rules this layer fired.
   repeated string rule_ids = 6;
   // The authorization store's consistency token the layer evaluated against, so
