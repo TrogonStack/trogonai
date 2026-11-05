@@ -49,5 +49,5 @@ message LayerVerdict {
   // The authorization store's consistency token the layer evaluated against, so
   // a past decision can be reconstructed at that snapshot. Opaque; compared as a
   // whole.
-  string consistency_token = 7;
+  string consistency_token = 7 [(buf.validate.field).string.max_len = 512];
 }
