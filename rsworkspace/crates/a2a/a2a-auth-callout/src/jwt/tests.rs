@@ -569,3 +569,51 @@ fn minted_user_jwt_debug_does_not_leak_the_token() {
     assert!(!dbg.contains("ppp"), "{dbg}");
     assert!(dbg.contains("<redacted>"), "{dbg}");
 }
+
+fn claims_naming(caller: &str, kind: PrincipalKind) -> UserJwtClaims {
+    let caller_id = CallerId::new(caller).unwrap();
+    UserJwtClaims {
+        kid: KeyVersion::new("test").unwrap(),
+        sub: ExternalSubject::new("alice").unwrap(),
+        aud: AccountName::new("tenant-acme"),
+        data: SpiceDbPrincipal(json!({})),
+        nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
+        caller_id,
+        principal_kind: kind,
+    }
+}
+
+#[test]
+fn the_claims_name_the_principal_a_reader_of_the_minted_jwt_reads() {
+    let issuer_seed = KeyPair::new_account().seed().expect("issuer seed");
+    let material = MintingMaterial::new(
+        SigningKey::from_seed(&issuer_seed).unwrap().keypair().clone(),
+        KeyVersion::new("test").unwrap(),
+    );
+    let user = KeyPair::new_user();
+    let subject = UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(user.public_key()).unwrap());
+    for (caller, kind) in [
+        ("caller-from-claims", PrincipalKind::Service),
+        ("jos\u{e9}", PrincipalKind::Person),
+    ] {
+        let claims = claims_naming(caller, kind);
+        let token = claims
+            .mint_for_test_ttl(&material, &subject, Duration::from_secs(3600))
+            .unwrap();
+        assert_eq!(
+            claims.subject_principal().unwrap(),
+            subject_principal_from_minted_jwt(token.as_str()).unwrap()
+        );
+    }
+}
+
+#[test]
+fn the_claims_refuse_a_caller_id_that_already_takes_the_hashed_form() {
+    let hashed =
+        SubjectPrincipal::from_credential(PrincipalKind::Person, &PrincipalId::new("alice.smith").unwrap()).unwrap();
+    let claims = claims_naming(hashed.id().as_str(), PrincipalKind::Person);
+    assert!(matches!(
+        claims.subject_principal(),
+        Err(JwtError::InvalidSubjectPrincipal(_))
+    ));
+}

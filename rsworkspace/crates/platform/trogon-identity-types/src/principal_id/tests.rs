@@ -1,4 +1,5 @@
 use super::{PrincipalId, PrincipalIdError};
+use std::borrow::Borrow;
 
 #[test]
 fn every_way_of_naming_a_principal_id_names_the_same_one() {
@@ -9,6 +10,8 @@ fn every_way_of_naming_a_principal_id_names_the_same_one() {
     assert_eq!(PrincipalId::try_from("agent-1".to_owned()), Ok(expected.clone()));
     assert_eq!(expected.to_string().parse::<PrincipalId>(), Ok(expected.clone()));
     assert_eq!(expected.as_str(), "agent-1");
+    assert_eq!(Borrow::<str>::borrow(&expected), "agent-1");
+    assert_eq!(AsRef::<str>::as_ref(&expected), "agent-1");
 }
 
 #[test]

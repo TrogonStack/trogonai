@@ -1,5 +1,7 @@
 pub(crate) const AGENT_ID_HEADER: &str = "x-a2a-agent-id";
 
+pub const ENV_AUTH_CALLOUT_XKEY_PUBLIC: &str = "AUTH_CALLOUT_XKEY_PUBLIC";
+
 /// JSON-RPC 2.0 reserved code for a server-side failure.
 pub(crate) const INTERNAL_ERROR: i32 = -32603;
 

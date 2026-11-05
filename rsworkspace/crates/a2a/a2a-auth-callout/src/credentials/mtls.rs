@@ -198,8 +198,6 @@ impl X509MtlsVerifier {
         let namespace = CallerNamespace::Mtls;
         let caller_id = derive_caller_id(namespace, sub.as_str(), account)
             .map_err(|e| CredentialError::InvalidCredentials(format!("caller_id derivation failed: {e}")))?;
-
-        let nats_permissions = crate::permissions::IssuedPermissions::default_for_caller(&caller_id);
         Ok(UserJwtClaims {
             kid: crate::signing_key_source::unminted_placeholder(),
             sub,
@@ -207,7 +205,7 @@ impl X509MtlsVerifier {
             data,
             caller_id,
             principal_kind: namespace.principal_kind(),
-            nats_permissions,
+            nats_permissions: crate::permissions::IssuedPermissions::none(),
         })
     }
 }

@@ -12,8 +12,9 @@ x-nats-client-env: &nats-client-env
 
 services:
   # Runs to completion on every `up`: creates the dev operator, the SYS, AUTH,
-  # PLATFORM and DEV accounts, and a creds file per NATS client, keeping any
-  # that already exist. See services/nats/bootstrap.sh.
+  # PLATFORM and DEV accounts, a creds file per NATS client and the auth
+  # callout's signing seeds, keeping any that already exist. See
+  # services/nats/bootstrap.sh.
   nats-bootstrap:
     image: natsio/nats-box:0.20.1
     entrypoint:
@@ -98,6 +99,35 @@ services:
       nats:
         condition: service_healthy
     restart: on-failure:3
+
+  # Admits a client that connects without a user JWT and names the DEV account
+  # as its user into DEV, once its client certificate chains to the dev CA. Its
+  # settings, file references to its signing seeds included, are the
+  # callout.env that nats-bootstrap writes.
+  a2a-auth-callout:
+    build:
+      context: ../../../rsworkspace
+      dockerfile: ../devops/docker/compose/services/a2a-auth-callout/Dockerfile
+    entrypoint:
+      - /bin/sh
+      - -c
+      - set -a && . /run/secrets/nats/callout.env && set +a && exec /usr/local/bin/a2a-auth-callout
+    environment:
+      <<: *nats-client-env
+      RUST_LOG: "${RUST_LOG:-info}"
+    volumes:
+      - type: volume
+        source: dev_secrets
+        target: /run/secrets/nats
+        read_only: true
+        volume:
+          subpath: clients/auth-callout
+    depends_on:
+      nats:
+        condition: service_healthy
+      nats-account-push:
+        condition: service_completed_successfully
+    restart: unless-stopped
 
   trogon-gateway:
     build:

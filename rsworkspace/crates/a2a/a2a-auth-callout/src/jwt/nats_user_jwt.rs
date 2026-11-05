@@ -105,7 +105,7 @@ pub(crate) fn mint_nats_user_jwt(
             version: 2,
             tags: None,
         },
-        issuer_account: Some(material.issuer_public()),
+        issuer_account: material.issuer_account().map(|tenant| tenant.as_str().to_owned()),
         ..Default::default()
     };
     let perm_claims = NatsPermissionClaims::from(&claims.nats_permissions);

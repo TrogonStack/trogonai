@@ -169,7 +169,6 @@ impl ApiKeyVerifier for HmacApiKeyVerifier {
         let namespace = CallerNamespace::ApiKey;
         let caller_id = derive_caller_id(namespace, entry.external_subject.as_str(), &entry.audience)
             .map_err(ApiKeyError::CallerIdDerivation)?;
-        let nats_permissions = crate::permissions::IssuedPermissions::default_for_caller(&caller_id);
         Ok(UserJwtClaims {
             kid: crate::signing_key_source::unminted_placeholder(),
             sub: entry.external_subject.clone(),
@@ -177,7 +176,7 @@ impl ApiKeyVerifier for HmacApiKeyVerifier {
             data: entry.spicedb_principal.clone(),
             caller_id,
             principal_kind: namespace.principal_kind(),
-            nats_permissions,
+            nats_permissions: crate::permissions::IssuedPermissions::none(),
         })
     }
 }
