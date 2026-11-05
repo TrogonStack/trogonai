@@ -65,13 +65,13 @@ pub use crate::r#gen::trogonai::session;
 #[cfg(feature = "policy")]
 pub use crate::r#gen::trogonai::connections;
 
-#[cfg(any(feature = "policy", feature = "audit"))]
+#[cfg(feature = "policy")]
 pub use crate::r#gen::trogonai::projects;
 
-#[cfg(any(feature = "policy", feature = "model-access", feature = "audit"))]
+#[cfg(any(feature = "policy", feature = "model-access"))]
 pub use crate::r#gen::trogon::hierarchy;
 
-#[cfg(any(feature = "policy", feature = "model-access", feature = "audit"))]
+#[cfg(any(feature = "policy", feature = "model-access"))]
 pub use crate::r#gen::trogonai::agents;
 
 #[cfg(feature = "grpc-nats-micro")]
