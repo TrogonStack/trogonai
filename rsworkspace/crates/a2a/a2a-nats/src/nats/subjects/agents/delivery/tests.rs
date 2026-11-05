@@ -1,3 +1,4 @@
+use async_nats::subject::ToSubject;
 use trogon_identity_types::{PrincipalId, PrincipalKind, PrincipalKindError, SubjectPrincipalIdError};
 
 use super::*;
@@ -168,4 +169,10 @@ fn parse_rejects_an_unknown_method() {
             "{subject}"
         );
     }
+}
+
+#[test]
+fn the_nats_subject_is_the_rendered_delivery_subject() {
+    let subject = AgentDeliverySubject::new(&prefix(), &agent(), &caller(), A2aMethod::MessageSend);
+    assert_eq!(subject.to_subject().as_str(), subject.to_string());
 }

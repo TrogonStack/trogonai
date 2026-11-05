@@ -181,3 +181,21 @@ async fn nats_transport_live_requires_nats_server() {
         "bridge HTTP should respond on {bridge_addr}"
     );
 }
+
+#[tokio::test]
+async fn the_harness_gateway_rejects_a_subject_that_is_not_gateway_ingress() {
+    let harness = HarnessGatewayUnary::new(
+        AdvancedMockNatsClient::new(),
+        default_a2a_prefix(),
+        A2aAgentId::new("planner").unwrap(),
+    );
+    let jwt = BridgeUserJwt::new("h.p.s").expect("valid shape");
+
+    let error = harness
+        .unary_request_gateway(&jwt, "a2a.v1.not.ingress", async_nats::HeaderMap::new(), Bytes::new())
+        .await
+        .expect_err("non-ingress subject");
+
+    assert!(matches!(error, BridgeError::NatsPublish(_)));
+    assert_eq!(harness.last_subject().as_deref(), Some("a2a.v1.not.ingress"));
+}

@@ -68,6 +68,11 @@ done
 nsc generate creds --account SYS --name sys --output-file sys.creds
 ```
 
+These users carry no publish or subscribe restrictions, and
+[ADR#0081](../../docs/adr/0081-nats-tls-by-default-and-operator-mode-admission.md) gives each workload its own allow lists. Do not hand them
+to a deployment until each one is issued with those allow lists; see
+[Open decisions](#open-decisions).
+
 Configure AUTH for the auth callout. The callout's own user bypasses the
 callout, and `--curve generate` creates the xkey the server encrypts callout
 requests to. nsc keeps the xkey seed in its keystore under the xkey's public
@@ -140,11 +145,34 @@ Check the result before the server starts:
 nats-server -t -c /etc/nats/nats-server.conf
 ```
 
+## Push the platform accounts
+
+Once the server runs, push AUTH and PLATFORM as `sys`. Until then the server
+knows only SYS, and every PLATFORM workload is refused:
+
+```sh
+for account in AUTH PLATFORM; do
+  nats --server tls://nats.example.internal:4222 \
+    --tlsca ca.pem --tlscert pusher.pem --tlskey pusher-key.pem --creds sys.creds \
+    request '$SYS.REQ.CLAIMS.UPDATE' "$(nsc describe account --name "$account" --raw)" \
+    --raw --timeout 5s
+done
+```
+
+Each reply carries `"code":200` and `"message":"jwt updated"` under `data`.
+Anything else means the server rejected the JWT, and the reply says why.
+
 ## Onboard an account
 
 An account is signed with nsc and pushed to the running server, which keeps it
 in its resolver directory. Onboarding needs no restart and no configuration
 change.
+
+A tenant account has no users of its own. [ADR#0081](../../docs/adr/0081-nats-tls-by-default-and-operator-mode-admission.md) admits its
+callers only through the auth callout and has it import what PLATFORM exports
+for it. Neither exists yet, so an onboarded tenant account admits no one until
+the callout works and PLATFORM exports its subjects; see
+[Open decisions](#open-decisions).
 
 ```sh
 nsc add account --name ACME
@@ -180,8 +208,7 @@ for account in ACME AUTH; do
 done
 ```
 
-Each reply carries `"code":200` and `"message":"jwt updated"` under `data`.
-Anything else means the server rejected the JWT, and the reply says why.
+The replies read as in [Push the platform accounts](#push-the-platform-accounts).
 
 `nsc push` does the same. It takes a `nats://` URL, and the connection is
 still TLS because the server accepts nothing else:
@@ -193,15 +220,15 @@ nsc push --account ACME --account-jwt-server-url nats://nats.example.internal:42
 
 An account the callout serves gets no users of its own; check it the way
 [Run the auth callout](#run-the-auth-callout) does. Any other account gets its
-users the same way as PLATFORM's. Confirm the server serves the account by
-connecting as one of them:
+users the same way as PLATFORM's. Confirm the server's resolver holds the
+account. The reply is the account JWT the server stored, and an empty reply
+means it holds none:
 
 ```sh
-nsc add user --account ACME --name acme-worker
-nsc generate creds --account ACME --name acme-worker --output-file acme-worker.creds
 nats --server tls://nats.example.internal:4222 \
-  --tlsca ca.pem --tlscert client.pem --tlskey client-key.pem --creds acme-worker.creds \
-  account info
+  --tlsca ca.pem --tlscert pusher.pem --tlskey pusher-key.pem --creds sys.creds \
+  request "\$SYS.REQ.ACCOUNT.$(nsc describe account --name ACME --json | jq -r .sub).CLAIMS.LOOKUP" '' \
+  --raw --timeout 5s
 ```
 
 Every later change to an account, such as its limits, signing keys or user
@@ -356,7 +383,10 @@ untested on a cluster.
 
 1. Stop every client of the server.
 2. While the server still runs under the old key, save every durable consumer,
-   connected as a user of its account:
+   connected as a user of its account. A consumer whose saved
+   `num_ack_pending` is above 0 may have messages acked out of order above
+   its ack floor, and those are delivered again after this path. Take the
+   backup path instead when such a consumer cannot take the duplicates:
 
    ```sh
    nats --server tls://nats.example.internal:4222 \
@@ -368,9 +398,13 @@ untested on a cluster.
    `prev_key` to the old one, then start the server.
 4. Check that the log shows `Restored <n> messages for stream` for every
    stream, and `Error adding consumer` for every consumer the server removed.
-5. In each saved file, set `config.deliver_policy` to `by_start_sequence` and
-   `config.opt_start_seq` to one more than `ack_floor.stream_seq`, so the
-   consumer does not replay the stream. Then create it again as the same user:
+5. In each saved file for a consumer on a limits or interest stream, set
+   `config.deliver_policy` to `by_start_sequence` and `config.opt_start_seq`
+   to one more than `ack_floor.stream_seq`, so the consumer does not replay
+   the stream. Leave a consumer on a work-queue stream at `deliver_policy`
+   `all`: the server accepts no other policy there, and the stream already
+   removed every acked message. Then create each consumer again as the same
+   user:
 
    ```sh
    nats --server tls://nats.example.internal:4222 \
@@ -430,9 +464,10 @@ TLS is never disabled in a deployed environment. nats-server.conf has no
 plaintext listener, and a deployment never adds one:
 
 - No `allow_non_tls`, no `http_port`, and no websocket `no_tls`. Monitoring
-  stays on `https_port`.
-- `https_port` does not ask for a client certificate, so keep it off client
-  networks.
+  stays on HTTPS.
+- The monitoring listener does not ask for a client certificate, so it binds
+  to `127.0.0.1`. A deployment that scrapes it from elsewhere binds it to an
+  interface only the scraper reaches, never a client network.
 - A cluster, gateway or leafnode block gets its own `tls` block with
   `verify: true`, and a websocket or MQTT block gets its own `tls` block. Route
   and gateway certificates carry both the serverAuth and clientAuth extended
@@ -452,8 +487,10 @@ plaintext listener, and a deployment never adds one:
 - Moving the callout's signing behind OpenBao Transit. Until then its seeds
   are files the deployment renders, and `AUTH_CALLOUT_SIGNING_KEY_SOURCE=vault`
   is refused.
-- Subject permissions per workload. PLATFORM users are issued without publish
-  or subscribe restrictions.
+- What PLATFORM exports to tenant accounts, and the imports each tenant
+  account carries.
+- Subject permissions per workload. Until each PLATFORM user is issued with
+  its own allow lists, its credentials stay out of a deployment.
 - How a direct caller learns the `{kind}.{id}` its grants name, which it needs
   for its inbox prefix and its task events.
 - A per-caller inbox prefix for the users the callout mints for an A2A bridge.

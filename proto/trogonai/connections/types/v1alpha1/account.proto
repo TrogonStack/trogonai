@@ -1,0 +1,95 @@
+edition = "2024";
+
+package trogonai.connections.types.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// The kind of provider subject that consented. A different subject kind is a
+// different Connection (ADR#0092 Decision 4). Only USER is a person, and its
+// provider ids are personal data kept out of every stream (ADR#0092 Decision
+// 9). Unspecified and unknown values are invalid.
+enum ProviderSubjectKind {
+  PROVIDER_SUBJECT_KIND_UNSPECIFIED = 0;
+  PROVIDER_SUBJECT_KIND_USER = 1;
+  PROVIDER_SUBJECT_KIND_APP = 2;
+  PROVIDER_SUBJECT_KIND_BOT = 3;
+  PROVIDER_SUBJECT_KIND_SERVICE = 4;
+}
+
+// A keyed fingerprint of one provider account, computed in custody with a key
+// no other service holds, over the tenant, custody project, owner, provider,
+// issuer, app boundary, canonical resource, subject kind and the exact account,
+// subject, organization, workspace and installation components. An
+// unkeyed digest is refused because provider account ids are guessable.
+// This is the canonical fingerprint fixed when custody first allocates the
+// claim. Rotated lookup aliases resolve back to it, so key rotation changes
+// neither the claim stream nor reconnect equality. See the account identity
+// reference for framing, registry fencing and key-retirement prerequisites.
+message ProviderAccountFingerprint {
+  // Raw HMAC-SHA256 output.
+  bytes value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.len = 32
+  ];
+  // Generation of the custody fingerprint key that produced value, in the
+  // manner of the per-generation naming keys of ADR#0083 Decision 6.
+  // Canonical fingerprints compare by generation and value. Their generation
+  // can remain in history after that computation key is retired; custody
+  // resolves current lookup aliases before returning this value. The key is
+  // held by custody alone and is not named by a tenant KeyRef.
+  uint32 generation = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32.gt = 0
+  ];
+}
+
+// Decoded sealed probe input or an erasable profile field only. This type must
+// never enter a command, event, snapshot, public read model, audit or log.
+// The release selects the attributes; omitted and present values are distinct.
+message ProviderAccountIdentityInput {
+  ProviderIdentityComponent account_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ProviderIdentityComponent subject_id = 2;
+  ProviderIdentityComponent organization_id = 3;
+  ProviderIdentityComponent workspace_id = 4;
+  ProviderIdentityComponent installation_id = 5;
+}
+
+// Opaque provider identity, preserved exactly. No trimming, case folding,
+// Unicode normalization, numeric coercion or inference from an email/label.
+message ProviderIdentityComponent {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 512
+      max_bytes: 2048
+      pattern: "^[^\\x00-\\x1f\\x7f]+$"
+    }
+  ];
+}
+
+// The provider account a Connection consented with, holding the least personal
+// data that still identifies it (ADR#0092 Decision 9). It never holds a display
+// name or any provider id of a USER subject; those live in the erasable provider
+// account profile, which the stream references by the fingerprint (ADR#0093
+// Decision 11). Non-person ids are opaque provider ids and are optional.
+message ProviderAccount {
+  option (buf.validate.message).cel = {
+    id: "provider_account.user_subject_ids"
+    message: "a USER subject carries no provider ids"
+    expression: "this.subject_kind != 1 || (!has(this.account_id) && !has(this.organization_id) && !has(this.workspace_id) && !has(this.installation_id))"
+  };
+  ProviderSubjectKind subject_kind = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  ProviderAccountFingerprint fingerprint = 2 [features.field_presence = LEGACY_REQUIRED];
+  // The non-person subject itself, such as a bot or app account.
+  string account_id = 3 [(buf.validate.field).string.min_len = 1];
+  string organization_id = 4 [(buf.validate.field).string.min_len = 1];
+  string workspace_id = 5 [(buf.validate.field).string.min_len = 1];
+  string installation_id = 6 [(buf.validate.field).string.min_len = 1];
+}

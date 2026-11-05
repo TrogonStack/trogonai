@@ -1,0 +1,63 @@
+edition = "2024";
+
+package trogonai.connections.account_claims.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/connections/account_claims/v1alpha1/lifecycle.proto";
+import "trogonai/connections/types/v1alpha1/account.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/connections/types/v1alpha1/resource_parent.proto";
+
+// Each concrete event records immutable resource containment. Replay verifies
+// resource_parent against the stream route and genesis; a parent mismatch is
+// invalid history, never a resource move.
+
+// An unset or unknown event rejects replay, as does an invalid transition;
+// skipping one could let two connections bind one account. Actor identity and
+// occurrence time come from the event envelope. These events carry the keyed
+// fingerprint and opaque ids, never an account id, a display name or any other
+// personal data (ADR#0092 Decision 9, ADR#0093 Decision 11).
+message ProviderAccountClaimEvent {
+  oneof event {
+    option (buf.validate.oneof).required = true;
+
+    ProviderAccountHeld held = 1;
+    ProviderAccountBound bound = 2;
+    ProviderAccountReleased released = 3;
+  }
+}
+
+// Genesis under NoStream, or appended At revision to a Released stream with the
+// same fingerprint. The claim is Held by connection_id.
+message ProviderAccountHeld {
+  trogonai.connections.types.v1alpha1.ProviderAccountClaimId claim_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ProviderAccountFingerprint fingerprint = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ConnectionId connection_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.AuthorizationAttemptId attempt_id = 4 [features.field_presence = LEGACY_REQUIRED];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 5 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Held to Bound. The holder activated.
+message ProviderAccountBound {
+  trogonai.connections.types.v1alpha1.ProviderAccountClaimId claim_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ConnectionId connection_id = 2 [features.field_presence = LEGACY_REQUIRED];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Held or Bound to Released. The holder ended, and the account may be held
+// again.
+message ProviderAccountReleased {
+  trogonai.connections.types.v1alpha1.ProviderAccountClaimId claim_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ConnectionId connection_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  ProviderAccountReleaseReason reason = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 4 [features.field_presence = LEGACY_REQUIRED];
+}

@@ -620,3 +620,10 @@ fn tier1_authorize_outcome_variants_compare_by_value() {
         Tier1AuthorizeOutcome::DeriveFailed
     );
 }
+
+#[test]
+fn live_gate_debug_does_not_expose_its_client() {
+    let client = Arc::new(FakeBulkClient::new(vec![]));
+    let gate = LiveSpiceDbTier1Gate::new(client, SpiceDbTier1SessionCache::new(ZedTokenTtl::from_secs(60)));
+    assert_eq!(format!("{gate:?}"), "LiveSpiceDbTier1Gate { .. }");
+}
