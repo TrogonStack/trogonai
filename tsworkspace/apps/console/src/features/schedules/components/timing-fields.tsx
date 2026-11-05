@@ -6,6 +6,7 @@ import { DateTimePicker } from '@/components/ui/date-time-picker';
 import { Input } from '@/components/ui/input';
 
 import { intervalUnits, secondsToUnit, unitToSeconds } from '../builders';
+import { exactInstant } from '../exception-dates';
 
 export function InstantField({
   id,
@@ -21,7 +22,8 @@ export function InstantField({
   error?: string;
 }) {
   const [precise, setPrecise] = useState(() => value !== '' && (!value.endsWith('Z') || /\.\d+/.test(value)));
-  const pickerValue = value && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString().slice(0, 19) : '';
+  const instant = exactInstant(value);
+  const pickerValue = instant ? instant.iso.slice(0, 19) : '';
   return (
     <div className="flex flex-col gap-2">
       <FieldShell
@@ -49,7 +51,7 @@ export function InstantField({
             value={pickerValue}
             onChange={(fields) => onChange(`${fields}Z`)}
             zoneLabel="UTC"
-            invalid={Boolean(error)}
+            invalid={Boolean(error) || Boolean(value && !instant)}
             describedBy={error ? `${id}-error` : `${id}-hint`}
           />
         )}
@@ -76,18 +78,23 @@ export function IntervalField({
         return converted !== '' && !converted.includes('.');
       })?.value ?? '1',
   );
-  const amount = secondsToUnit(value, unit);
+  const [editing, setEditing] = useState<{ seconds: string; unit: string; amount: string }>();
+  const amount = editing?.seconds === value && editing.unit === unit ? editing.amount : secondsToUnit(value, unit);
   return (
     <div className="flex flex-col gap-3">
       <div className="grid gap-4 sm:grid-cols-2">
         <FieldShell id="interval-amount" label="Repeat every" error={error}>
           <Input
             id="interval-amount"
-            type="number"
-            step="any"
-            min="0"
+            type="text"
+            inputMode="decimal"
             value={amount}
-            onChange={(event) => onChange(unitToSeconds(event.target.value, unit))}
+            onChange={(event) => {
+              const amount = event.target.value;
+              const seconds = unitToSeconds(amount, unit);
+              setEditing({ seconds, unit, amount });
+              onChange(seconds);
+            }}
             aria-invalid={Boolean(error)}
           />
         </FieldShell>
@@ -97,7 +104,10 @@ export function IntervalField({
           value={unit}
           options={intervalUnits}
           onChange={(next) => {
-            if (secondsToUnit(value, next) !== '') setUnit(next);
+            if (secondsToUnit(value, next) !== '') {
+              setUnit(next);
+              setEditing(undefined);
+            }
           }}
           hint="Changing units preserves the exact duration."
         />
@@ -114,6 +124,7 @@ export function IntervalField({
             value={value}
             onChange={(seconds) => {
               setUnit('1');
+              setEditing(undefined);
               onChange(seconds);
             }}
             error={error}

@@ -86,9 +86,9 @@ describe('guided schedule controls', () => {
       return <IntervalField value={value} onChange={onChange} />;
     }
     render(<Harness />);
-    expect(screen.getByLabelText('Repeat every')).toHaveValue(5);
+    expect(screen.getByLabelText('Repeat every')).toHaveDisplayValue('5');
     await user.selectOptions(screen.getByLabelText('Interval unit'), '1');
-    expect(screen.getByLabelText('Repeat every')).toHaveValue(300);
+    expect(screen.getByLabelText('Repeat every')).toHaveDisplayValue('300');
     await user.clear(screen.getByLabelText('Repeat every'));
     await user.type(screen.getByLabelText('Repeat every'), '90');
     expect(screen.getByText(/90 seconds between fires/)).toBeInTheDocument();
@@ -102,6 +102,56 @@ describe('guided schedule controls', () => {
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     await user.click(screen.getByRole('button', { name: 'Use precise ISO input' }));
     expect(screen.getByLabelText('Instant')).toHaveValue('2027-01-01T09:00:00.123456789Z');
+    expect(change).not.toHaveBeenCalled();
+  });
+  it('keeps fractional interval edits intact while converting their units', async () => {
+    const user = userEvent.setup();
+    function Harness() {
+      const [value, onChange] = useState('300');
+      return <IntervalField value={value} onChange={onChange} />;
+    }
+    render(<Harness />);
+    const amount = screen.getByLabelText('Repeat every');
+    await user.clear(amount);
+    await user.type(amount, '1.');
+    expect(amount).toHaveDisplayValue('1.');
+    await user.type(amount, '5');
+    expect(screen.getByRole('status')).toHaveTextContent('90 seconds between fires');
+    await user.selectOptions(screen.getByLabelText('Interval unit'), '1');
+    expect(amount).toHaveDisplayValue('90');
+    await user.clear(amount);
+    await user.type(amount, '0.000000001');
+    expect(screen.getByRole('status')).toHaveTextContent('0.000000001 seconds between fires');
+  });
+  it.each(['2027-01-01T09:00:00', '2027-02-30T09:00:00Z'])(
+    'does not interpret an invalid or timezone-less instant as UTC: %s',
+    async (value) => {
+      const user = userEvent.setup();
+      const change = vi.fn();
+      render(<InstantField id="test-instant" label="Instant" value={value} onChange={change} />);
+      if (screen.queryByRole('button', { name: 'Use UTC date picker' })) {
+        await user.click(screen.getByRole('button', { name: 'Use UTC date picker' }));
+      }
+      const picker = screen.getByRole('button', { name: 'Instant' });
+      expect(picker).toHaveTextContent('Choose date and time');
+      expect(picker).toHaveAttribute('aria-invalid', 'true');
+      await user.click(picker);
+      expect(screen.getByRole('button', { name: 'Apply date and time' })).toBeDisabled();
+      await user.click(screen.getByRole('button', { name: 'Cancel' }));
+      await user.click(screen.getByRole('button', { name: 'Use precise ISO input' }));
+      expect(screen.getByLabelText('Instant')).toHaveValue(value);
+      expect(change).not.toHaveBeenCalled();
+    },
+  );
+  it('converts explicit timestamp offsets to UTC without rewriting the source', async () => {
+    const user = userEvent.setup();
+    const change = vi.fn();
+    const value = '2027-01-01T09:00:00.123456789+02:00';
+    render(<InstantField id="test-instant" label="Instant" value={value} onChange={change} />);
+    await user.click(screen.getByRole('button', { name: 'Use UTC date picker' }));
+    expect(screen.getByRole('button', { name: 'Instant' })).toHaveTextContent('2027-01-01 · 07:00:00 UTC');
+    await user.click(screen.getByRole('button', { name: 'Use precise ISO input' }));
+    expect(screen.getByLabelText('Instant')).toHaveValue(value);
     expect(change).not.toHaveBeenCalled();
   });
   it('submits guided rules and date exceptions through the canonical form draft', async () => {

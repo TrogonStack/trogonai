@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 
@@ -40,7 +40,9 @@ describe('fake scheduling GUI', () => {
   });
   it('creates a paused interval with delivery and static content', async () => {
     const user = userEvent.setup();
-    renderApp('/schedules/new');
+    await act(async () => {
+      await renderApp('/schedules/new').router.load();
+    });
     const subject = await screen.findByLabelText('Destination subject');
     await user.type(subject, 'jobs.test.created');
     await user.selectOptions(screen.getByLabelText('Initial status'), 'paused');

@@ -388,7 +388,7 @@ export function ExceptionDates({ id, label, value, onChange, opposingValue = '',
                 }}
                 aria-invalid={Boolean(inputError)}
                 aria-describedby={inputError ? `${id}-add-error` : undefined}
-                className={precise ? 'font-mono text-xs' : ''}
+                className="font-mono text-xs"
               />
             ) : (
               <DateTimePicker
