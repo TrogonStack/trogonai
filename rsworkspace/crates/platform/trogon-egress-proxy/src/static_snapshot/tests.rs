@@ -60,6 +60,15 @@ fn permits_exactly_the_listed_destinations_per_agent() {
 }
 
 #[test]
+fn canonical_application_identity_is_preserved_as_the_policy_principal() {
+    let id = "did:key:z6MkhaXgBZDvotDkL5257faiztiGi2sfKfzvuU5TVndZqquw";
+    let policy = format!("[agents.\"{id}\"]\nallow = [\"api.example.com:443\"]\n");
+    let snapshot = load(&policy).expect("canonical application identities are valid policy principals");
+    assert_eq!(verdict(&snapshot, id, "api.example.com:443"), SnapshotVerdict::Permitted);
+    assert_eq!(verdict(&snapshot, "agent-1", "api.example.com:443"), SnapshotVerdict::NotPermitted);
+}
+
+#[test]
 fn anything_else_is_not_permitted() {
     let snapshot = load(VALID).expect("valid policy");
     for (who, raw) in [
