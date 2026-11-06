@@ -96,6 +96,7 @@ pub mod writer_id;
 pub mod writer_identity;
 pub(crate) mod writer_state;
 pub mod writer_stats;
+pub mod workload_peer_facts;
 
 #[cfg(any(test, feature = "test-support"))]
 pub mod chain_builder;
@@ -160,6 +161,7 @@ pub use writer_config::WriterConfig;
 pub use writer_id::WriterId;
 pub use writer_identity::WriterIdentity;
 pub use writer_stats::WriterStats;
+pub use workload_peer_facts::{WorkloadPeerEvidenceFacts, WorkloadPeerFactsError, WorkloadPeerScopeError};
 
 #[cfg(any(test, feature = "test-support"))]
 pub use chain_builder::ChainBuilder;

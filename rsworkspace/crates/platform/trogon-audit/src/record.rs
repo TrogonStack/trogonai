@@ -40,6 +40,7 @@ use crate::stamp::Stamp;
 use crate::surface::Surface;
 use crate::tls_mode::TlsMode;
 use crate::writer_identity::WriterIdentity;
+use crate::workload_peer_facts::{WorkloadPeerEvidenceFacts, WorkloadPeerScopeError};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Record {
@@ -50,6 +51,15 @@ pub struct Record {
 }
 
 impl Record {
+    pub fn authenticated_workload_decision(
+        _scope: RecordScope,
+        _facts: DecisionFacts,
+        _peer: WorkloadPeerEvidenceFacts,
+        _stamp: Stamp,
+    ) -> Result<Self, WorkloadPeerScopeError> {
+        Err(WorkloadPeerScopeError)
+    }
+
     pub fn credential_activation(
         scope: RecordScope,
         facts: CredentialActivationFacts,
@@ -278,6 +288,7 @@ fn layer_verdict(layer: &LayerFacts) -> LayerVerdict {
 
 fn gateway_decision(facts: &DecisionFacts) -> GatewayDecision {
     GatewayDecision {
+        workload_peer: MessageField::none(),
         surface: EnumValue::from(gateway_surface(facts.surface)),
         target: facts.target.to_string(),
         request_bytes: facts.request_bytes,

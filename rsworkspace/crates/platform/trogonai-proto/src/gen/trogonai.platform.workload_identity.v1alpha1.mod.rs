@@ -2,6 +2,7 @@
 
 include!("trogonai.platform.workload_identity.v1alpha1.workload_role.rs");
 include!("trogonai.platform.workload_identity.v1alpha1.registration_binding.rs");
+include!("trogonai.platform.workload_identity.v1alpha1.workload_peer_evidence.rs");
 include!("trogonai.platform.workload_identity.v1alpha1.credential_activation.rs");
 include!("trogonai.platform.workload_identity.v1alpha1.registration_snapshot.rs");
 #[allow(
@@ -25,6 +26,9 @@ pub mod __buffa {
             "trogonai.platform.workload_identity.v1alpha1.registration_binding.__view.rs"
         );
         include!(
+            "trogonai.platform.workload_identity.v1alpha1.workload_peer_evidence.__view.rs"
+        );
+        include!(
             "trogonai.platform.workload_identity.v1alpha1.credential_activation.__view.rs"
         );
         include!(
@@ -34,6 +38,7 @@ pub mod __buffa {
     /// Register this package's `Any` type entries and extension entries.
     pub fn register_types(reg: &mut ::buffa::type_registry::TypeRegistry) {
         reg.register_json_any(super::__REGISTRATION_BINDING_JSON_ANY);
+        reg.register_json_any(super::__WORKLOAD_PEER_EVIDENCE_JSON_ANY);
         reg.register_json_any(super::__CREDENTIAL_ACTIVATION_JSON_ANY);
         reg.register_json_any(super::__REGISTRATION_SNAPSHOT_JSON_ANY);
     }
@@ -42,6 +47,10 @@ pub mod __buffa {
 pub use self::__buffa::view::RegistrationBindingView;
 #[doc(inline)]
 pub use self::__buffa::view::RegistrationBindingOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::WorkloadPeerEvidenceView;
+#[doc(inline)]
+pub use self::__buffa::view::WorkloadPeerEvidenceOwnedView;
 #[doc(inline)]
 pub use self::__buffa::view::CredentialActivationView;
 #[doc(inline)]
