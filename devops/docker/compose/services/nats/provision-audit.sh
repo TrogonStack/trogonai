@@ -76,6 +76,7 @@ ensure_stream() {
   refuse_when "$stream" "expires records by max age, but audit requires none" '.config.max_age != 0'
   refuse_when "$stream" "limits the records kept per subject, but audit requires no limit" '(.config.max_msgs_per_subject // -1) > 0'
   refuse_when "$stream" "lets a record set its own expiry, but audit requires message TTL off" '.config.allow_msg_ttl // false'
+  refuse_when "$stream" "lets a publish roll up stored records, but audit requires rollup off" '.config.allow_rollup_hdrs // false'
   refuse_when "$stream" "keeps a duplicate window under 2 minutes, but audit requires at least 2" '.config.duplicate_window < 120000000000'
   refuse_when "$stream" "keeps fewer than $REPLICAS replicas, but the deployment asked for $REPLICAS" ".config.num_replicas < $REPLICAS"
   for subject in $(printf '%s' "$subjects" | tr ',' ' '); do

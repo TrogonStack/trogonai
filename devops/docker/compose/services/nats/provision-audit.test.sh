@@ -97,6 +97,7 @@ refuses "publishes without acknowledging" '.config.no_ack = true'
 refuses "expires records by max age" '.config.max_age = 3600000000000'
 refuses "limits the records kept per subject" '.config.max_msgs_per_subject = 1'
 refuses "requires message TTL off" '.config.allow_msg_ttl = true'
+refuses "lets a publish roll up stored records" '.config.allow_rollup_hdrs = true'
 refuses "keeps a duplicate window under 2 minutes" '.config.duplicate_window = 30000000000'
 refuses "lacks subject platform.v1.audit.change.>" '.config.subjects |= map(select(. != "platform.v1.audit.change.>"))'
 

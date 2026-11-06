@@ -20,6 +20,8 @@ pub enum AuditStreamMismatchError {
     MaxAge { stream: &'static str },
     #[error("stream '{stream}' must not let a record set its own expiry")]
     MessageTtl { stream: &'static str },
+    #[error("stream '{stream}' must not let a publish roll up and remove stored records")]
+    Rollup { stream: &'static str },
     #[error("stream '{stream}' must not limit the records kept per subject")]
     MaxMessagesPerSubject { stream: &'static str },
     #[error("stream '{stream}' must keep a duplicate window of two minutes or longer")]

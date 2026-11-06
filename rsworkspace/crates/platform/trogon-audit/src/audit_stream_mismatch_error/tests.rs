@@ -37,6 +37,10 @@ fn each_message_names_the_rule_and_the_stream() {
             "stream 'AUDIT' must not let a record set its own expiry",
         ),
         (
+            AuditStreamMismatchError::Rollup { stream },
+            "stream 'AUDIT' must not let a publish roll up and remove stored records",
+        ),
+        (
             AuditStreamMismatchError::MaxMessagesPerSubject { stream },
             "stream 'AUDIT' must not limit the records kept per subject",
         ),
