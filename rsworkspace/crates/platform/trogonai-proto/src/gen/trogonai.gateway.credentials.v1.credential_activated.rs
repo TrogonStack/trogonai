@@ -11,10 +11,20 @@ pub struct CredentialActivated {
         CredentialMetadata,
         ::buffa::Inline<CredentialMetadata>,
     >,
+    /// Field 2: `storage_locator`
+    #[serde(
+        rename = "storageLocator",
+        alias = "storage_locator",
+        with = "::buffa::json_helpers::proto_string"
+    )]
+    pub storage_locator: ::buffa::alloc::string::String,
 }
 impl ::core::fmt::Debug for CredentialActivated {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-        f.debug_struct("CredentialActivated").field("metadata", &self.metadata).finish()
+        f.debug_struct("CredentialActivated")
+            .field("metadata", &self.metadata)
+            .field("storage_locator", &self.storage_locator)
+            .finish()
     }
 }
 impl CredentialActivated {
@@ -52,6 +62,7 @@ impl ::buffa::Message for CredentialActivated {
                 += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
                     + inner_size as u64;
         }
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.storage_locator) as u64;
         ::buffa::saturate_size(size)
     }
     fn write_to(
@@ -69,6 +80,7 @@ impl ::buffa::Message for CredentialActivated {
             );
             self.metadata.write_to(__cache, buf);
         }
+        ::buffa::types::put_string_field(2u32, &self.storage_locator, buf);
     }
     fn merge_field(
         &mut self,
@@ -92,6 +104,13 @@ impl ::buffa::Message for CredentialActivated {
                     ctx,
                 )?;
             }
+            2u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::types::merge_string(&mut self.storage_locator, buf)?;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -100,6 +119,7 @@ impl ::buffa::Message for CredentialActivated {
     }
     fn clear(&mut self) {
         self.metadata = ::buffa::MessageField::none();
+        self.storage_locator.clear();
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for CredentialActivated {

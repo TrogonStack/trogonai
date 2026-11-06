@@ -1184,12 +1184,20 @@ pub struct FailedCredentialWriteState {
     /// Field 2: `reason`
     #[serde(rename = "reason", with = "::buffa::json_helpers::proto_string")]
     pub reason: ::buffa::alloc::string::String,
+    /// Field 3: `owner_id`
+    #[serde(
+        rename = "ownerId",
+        alias = "owner_id",
+        with = "::buffa::json_helpers::proto_string"
+    )]
+    pub owner_id: ::buffa::alloc::string::String,
 }
 impl ::core::fmt::Debug for FailedCredentialWriteState {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("FailedCredentialWriteState")
             .field("credential_id", &self.credential_id)
             .field("reason", &self.reason)
+            .field("owner_id", &self.owner_id)
             .finish()
     }
 }
@@ -1222,6 +1230,7 @@ impl ::buffa::Message for FailedCredentialWriteState {
         let mut size = 0u64;
         size += 1u64 + ::buffa::types::string_encoded_len(&self.credential_id) as u64;
         size += 1u64 + ::buffa::types::string_encoded_len(&self.reason) as u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.owner_id) as u64;
         ::buffa::saturate_size(size)
     }
     fn write_to(
@@ -1233,6 +1242,7 @@ impl ::buffa::Message for FailedCredentialWriteState {
         use ::buffa::Enumeration as _;
         ::buffa::types::put_string_field(1u32, &self.credential_id, buf);
         ::buffa::types::put_string_field(2u32, &self.reason, buf);
+        ::buffa::types::put_string_field(3u32, &self.owner_id, buf);
     }
     fn merge_field(
         &mut self,
@@ -1259,6 +1269,13 @@ impl ::buffa::Message for FailedCredentialWriteState {
                 )?;
                 ::buffa::types::merge_string(&mut self.reason, buf)?;
             }
+            3u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::types::merge_string(&mut self.owner_id, buf)?;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -1268,6 +1285,7 @@ impl ::buffa::Message for FailedCredentialWriteState {
     fn clear(&mut self) {
         self.credential_id.clear();
         self.reason.clear();
+        self.owner_id.clear();
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for FailedCredentialWriteState {

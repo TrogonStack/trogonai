@@ -1809,6 +1809,8 @@ pub struct FailedCredentialWriteStateView<'a> {
     pub credential_id: &'a str,
     /// Field 2: `reason`
     pub reason: &'a str,
+    /// Field 3: `owner_id`
+    pub owner_id: &'a str,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -1828,6 +1830,14 @@ Distinguishes a field that was absent from one explicitly encoded with its defau
     #[inline]
     pub const fn has_reason(&self) -> bool {
         self.__buffa_required_seen_0 & 2u64 != 0
+    }
+    /**Whether required field `owner_id` was present on the wire.
+
+Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
+    #[must_use]
+    #[inline]
+    pub const fn has_owner_id(&self) -> bool {
+        self.__buffa_required_seen_0 & 4u64 != 0
     }
 }
 impl<'a> ::buffa::MessageView<'a> for FailedCredentialWriteStateView<'a> {
@@ -1874,6 +1884,14 @@ impl<'a> ::buffa::MessageView<'a> for FailedCredentialWriteStateView<'a> {
                 view.reason = ::buffa::types::borrow_str(&mut cur)?;
                 view.__buffa_required_seen_0 |= 2u64;
             }
+            3u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.owner_id = ::buffa::types::borrow_str(&mut cur)?;
+                view.__buffa_required_seen_0 |= 4u64;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -1902,6 +1920,7 @@ impl<'a> ::buffa::MessageView<'a> for FailedCredentialWriteStateView<'a> {
         ::core::result::Result::Ok(super::super::FailedCredentialWriteState {
             credential_id: self.credential_id.to_string(),
             reason: self.reason.to_string(),
+            owner_id: self.owner_id.to_string(),
             ..::core::default::Default::default()
         })
     }
@@ -1914,6 +1933,7 @@ impl<'a> ::buffa::ViewEncode<'a> for FailedCredentialWriteStateView<'a> {
         let mut size = 0u64;
         size += 1u64 + ::buffa::types::string_encoded_len(&self.credential_id) as u64;
         size += 1u64 + ::buffa::types::string_encoded_len(&self.reason) as u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.owner_id) as u64;
         ::buffa::saturate_size(size)
     }
     #[allow(clippy::needless_borrow)]
@@ -1926,6 +1946,7 @@ impl<'a> ::buffa::ViewEncode<'a> for FailedCredentialWriteStateView<'a> {
         use ::buffa::Enumeration as _;
         ::buffa::types::put_string_field(1u32, &self.credential_id, buf);
         ::buffa::types::put_string_field(2u32, &self.reason, buf);
+        ::buffa::types::put_string_field(3u32, &self.owner_id, buf);
     }
 }
 /// Serializes this view as protobuf JSON.
@@ -1951,6 +1972,9 @@ impl<'__a> ::serde::Serialize for FailedCredentialWriteStateView<'__a> {
         }
         {
             __map.serialize_entry("reason", self.reason)?;
+        }
+        {
+            __map.serialize_entry("ownerId", self.owner_id)?;
         }
         __map.end()
     }
@@ -2056,6 +2080,11 @@ impl FailedCredentialWriteStateOwnedView {
     #[must_use]
     pub fn reason(&self) -> &'_ str {
         self.0.reborrow().reason
+    }
+    /// Field 3: `owner_id`
+    #[must_use]
+    pub fn owner_id(&self) -> &'_ str {
+        self.0.reborrow().owner_id
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<FailedCredentialWriteStateView<'static>>>

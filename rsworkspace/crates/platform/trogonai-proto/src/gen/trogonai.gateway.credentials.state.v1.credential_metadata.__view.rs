@@ -11,12 +11,10 @@ pub struct CredentialMetadataView<'a> {
     pub status: ::core::option::Option<
         ::buffa::EnumValue<super::super::super::super::v1::CredentialStatus>,
     >,
-    /// Field 3: `storage_backend`
-    pub storage_backend: ::core::option::Option<
-        ::buffa::EnumValue<super::super::StorageBackend>,
-    >,
     /// Field 4: `fingerprint`
     pub fingerprint: &'a str,
+    /// Field 5: `storage_locator`
+    pub storage_locator: &'a str,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -36,6 +34,14 @@ Distinguishes a field that was absent from one explicitly encoded with its defau
     #[inline]
     pub const fn has_fingerprint(&self) -> bool {
         self.__buffa_required_seen_0 & 1u64 != 0
+    }
+    /**Whether required field `storage_locator` was present on the wire.
+
+Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
+    #[must_use]
+    #[inline]
+    pub const fn has_storage_locator(&self) -> bool {
+        self.__buffa_required_seen_0 & 2u64 != 0
     }
 }
 impl<'a> ::buffa::MessageView<'a> for CredentialMetadataView<'a> {
@@ -96,15 +102,6 @@ impl<'a> ::buffa::MessageView<'a> for CredentialMetadataView<'a> {
                     ::buffa::EnumValue::from(::buffa::types::decode_int32(&mut cur)?),
                 );
             }
-            3u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::Varint,
-                )?;
-                view.storage_backend = Some(
-                    ::buffa::EnumValue::from(::buffa::types::decode_int32(&mut cur)?),
-                );
-            }
             4u32 => {
                 ::buffa::encoding::check_wire_type(
                     tag,
@@ -112,6 +109,14 @@ impl<'a> ::buffa::MessageView<'a> for CredentialMetadataView<'a> {
                 )?;
                 view.fingerprint = ::buffa::types::borrow_str(&mut cur)?;
                 view.__buffa_required_seen_0 |= 1u64;
+            }
+            5u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.storage_locator = ::buffa::types::borrow_str(&mut cur)?;
+                view.__buffa_required_seen_0 |= 2u64;
             }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
@@ -143,8 +148,8 @@ impl<'a> ::buffa::MessageView<'a> for CredentialMetadataView<'a> {
                 None => ::buffa::MessageField::none(),
             },
             status: self.status,
-            storage_backend: self.storage_backend,
             fingerprint: self.fingerprint.to_string(),
+            storage_locator: self.storage_locator.to_string(),
             ..::core::default::Default::default()
         })
     }
@@ -166,10 +171,8 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialMetadataView<'a> {
         if let Some(ref v) = self.status {
             size += 1u64 + ::buffa::types::int32_encoded_len(v.to_i32()) as u64;
         }
-        if let Some(ref v) = self.storage_backend {
-            size += 1u64 + ::buffa::types::int32_encoded_len(v.to_i32()) as u64;
-        }
         size += 1u64 + ::buffa::types::string_encoded_len(&self.fingerprint) as u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.storage_locator) as u64;
         ::buffa::saturate_size(size)
     }
     #[allow(clippy::needless_borrow)]
@@ -191,10 +194,8 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialMetadataView<'a> {
         if let Some(ref v) = self.status {
             ::buffa::types::put_int32_field(2u32, v.to_i32(), buf);
         }
-        if let Some(ref v) = self.storage_backend {
-            ::buffa::types::put_int32_field(3u32, v.to_i32(), buf);
-        }
         ::buffa::types::put_string_field(4u32, &self.fingerprint, buf);
+        ::buffa::types::put_string_field(5u32, &self.storage_locator, buf);
     }
 }
 /// Serializes this view as protobuf JSON.
@@ -223,11 +224,11 @@ impl<'__a> ::serde::Serialize for CredentialMetadataView<'__a> {
         if let ::core::option::Option::Some(ref __v) = self.status {
             __map.serialize_entry("status", __v)?;
         }
-        if let ::core::option::Option::Some(ref __v) = self.storage_backend {
-            __map.serialize_entry("storageBackend", __v)?;
-        }
         {
             __map.serialize_entry("fingerprint", self.fingerprint)?;
+        }
+        {
+            __map.serialize_entry("storageLocator", self.storage_locator)?;
         }
         __map.end()
     }
@@ -342,17 +343,15 @@ impl CredentialMetadataOwnedView {
     > {
         self.0.reborrow().status
     }
-    /// Field 3: `storage_backend`
-    #[must_use]
-    pub fn storage_backend(
-        &self,
-    ) -> ::core::option::Option<::buffa::EnumValue<super::super::StorageBackend>> {
-        self.0.reborrow().storage_backend
-    }
     /// Field 4: `fingerprint`
     #[must_use]
     pub fn fingerprint(&self) -> &'_ str {
         self.0.reborrow().fingerprint
+    }
+    /// Field 5: `storage_locator`
+    #[must_use]
+    pub fn storage_locator(&self) -> &'_ str {
+        self.0.reborrow().storage_locator
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<CredentialMetadataView<'static>>>
