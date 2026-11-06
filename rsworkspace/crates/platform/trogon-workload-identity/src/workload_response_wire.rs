@@ -47,6 +47,9 @@ impl WorkloadResponseWire {
             }
             let svid =
                 X509Svid::parse_from_der(&entry.x509_svid, &entry.x509_svid_key).map_err(|_| MaterialError::Profile)?;
+            if svid.spiffe_id().to_string() != entry.spiffe_id {
+                return Err(MaterialError::Identity);
+            }
             let bundle = X509Bundle::parse_from_der(svid.spiffe_id().trust_domain().clone(), &entry.bundle)
                 .map_err(|_| MaterialError::Certificate)?;
             bundles.add_bundle(bundle);
