@@ -21,13 +21,11 @@ workspace = true
 # Enables the SpiceDB-backed Tier-1 gate. Off by default so
 # deployments without an external authoriser don't pay the
 # authzed/tonic/moka compile cost.
-# It also carries the platform audit writer: the decisions the gateway enforces are
-# only made on this path, so the writer is built with it.
-spicedb = ["a2a-nats/spicedb", "dep:async-trait", "dep:authzed", "dep:sha2", "dep:tonic", "dep:trogon-audit"]
+spicedb = ["a2a-nats/spicedb", "dep:authzed", "dep:tonic"]
 
 [dependencies]
 a2a = { workspace = true }
-async-trait = { workspace = true, optional = true }
+async-trait = { workspace = true }
 authzed = { workspace = true, optional = true }
 tonic = { workspace = true, optional = true }
 a2a-auth-callout = { workspace = true }
@@ -41,7 +39,7 @@ clap = { workspace = true, features = ["derive", "env"] }
 futures = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-sha2 = { workspace = true, optional = true }
+sha2 = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "time"] }
@@ -49,7 +47,7 @@ tokio-util = { workspace = true, features = ["rt"] }
 toml = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["fmt", "env-filter"] }
-trogon-audit = { workspace = true, optional = true }
+trogon-audit = { workspace = true }
 trogon-identity-types = { workspace = true }
 trogon-nats = { workspace = true }
 trogon-std = { workspace = true, features = ["signal", "uuid"] }

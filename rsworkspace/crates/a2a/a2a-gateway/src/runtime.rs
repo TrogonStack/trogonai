@@ -5,45 +5,30 @@
 //! [`dispatch::dispatch_gateway_ingress`]. Sibling modules carry the
 //! per-tier helpers the orchestrator composes.
 
+use a2a_auth_callout::signing_key_source_from_env;
 use a2a_nats::NatsConfig;
+use futures::StreamExt;
+use tokio_util::sync::CancellationToken;
+use tracing::{info, warn};
 use trogon_std::env::ReadEnv;
 
 use crate::config::{Args, Config, ConfigError, config_from_args};
-
-#[cfg(feature = "spicedb")]
-use a2a_auth_callout::signing_key_source_from_env;
-#[cfg(feature = "spicedb")]
-use futures::StreamExt;
-#[cfg(feature = "spicedb")]
-use tokio_util::sync::CancellationToken;
-#[cfg(feature = "spicedb")]
-use tracing::{info, warn};
-
-#[cfg(feature = "spicedb")]
 use crate::gw_ingress_stream::{
     GatewayStreamingIngressConfig, StreamingIngressGate, gateway_streaming_ingress_enabled,
 };
-#[cfg(feature = "spicedb")]
 use crate::ingress_identity::{ForwardedCallerJwtVerifier, gateway_jwt_audience};
-#[cfg(feature = "spicedb")]
-use crate::policy::spicedb_tier1::Tier1SpiceDbConfig;
-#[cfg(feature = "spicedb")]
+use crate::policy::Tier1SpiceDbConfig;
 use crate::policy::tier1_declarative::Tier1DeclarativeConfig;
-#[cfg(feature = "spicedb")]
 use crate::runtime::platform_audit::AuditDrain;
 
 pub mod audit_publish;
-#[cfg(feature = "spicedb")]
 pub mod dispatch;
 pub mod env;
-#[cfg(feature = "spicedb")]
 pub mod platform_audit;
 pub mod policy_stack;
 pub mod reply;
 pub mod streaming;
-#[cfg(feature = "spicedb")]
 pub mod tier1;
-#[cfg(feature = "spicedb")]
 pub mod tier1_denial;
 
 #[derive(Debug, thiserror::Error)]
@@ -54,27 +39,21 @@ pub enum RuntimeError {
     #[error("policy stack: {0}")]
     PolicyStack(#[from] crate::runtime::policy_stack::PolicyStackError),
 
-    #[cfg(feature = "spicedb")]
     #[error("NATS connect: {0}")]
     NatsConnect(#[from] trogon_nats::ConnectError),
 
-    #[cfg(feature = "spicedb")]
     #[error("gateway subscribe: {0}")]
     Subscribe(#[from] async_nats::client::SubscribeError),
 
-    #[cfg(feature = "spicedb")]
     #[error("tier-1 SpiceDB config: {0}")]
-    Tier1Config(#[from] crate::policy::spicedb_tier1::Tier1SpiceDbBuildError),
+    Tier1Config(#[from] crate::policy::Tier1SpiceDbBuildError),
 
-    #[cfg(feature = "spicedb")]
     #[error("tier-1 declarative config: {0}")]
     Tier1DeclarativeConfig(#[from] crate::policy::tier1_declarative::Tier1DeclarativeBuildError),
 
-    #[cfg(feature = "spicedb")]
     #[error("gateway signing key source: {0}")]
     SigningKeySource(#[from] a2a_auth_callout::AuthCalloutError),
 
-    #[cfg(feature = "spicedb")]
     #[error("gateway platform audit config: {0}")]
     PlatformAudit(#[from] crate::runtime::platform_audit::PlatformAuditConfigError),
 }
@@ -85,16 +64,6 @@ pub async fn run_with_args<E: ReadEnv>(args: Args, env: &E) -> Result<(), Runtim
     run_with_config(config, nats_config, env).await
 }
 
-#[cfg(not(feature = "spicedb"))]
-pub async fn run_with_config<E: ReadEnv>(
-    _config: Config,
-    _nats_config: NatsConfig,
-    _env: &E,
-) -> Result<(), RuntimeError> {
-    Ok(())
-}
-
-#[cfg(feature = "spicedb")]
 pub async fn run_with_config<E: ReadEnv>(config: Config, nats_config: NatsConfig, env: &E) -> Result<(), RuntimeError> {
     let connect_timeout = a2a_nats::nats_connect_timeout(env);
     let client = trogon_nats::connect(&nats_config, connect_timeout).await?;
@@ -164,7 +133,6 @@ pub async fn run_with_config<E: ReadEnv>(config: Config, nats_config: NatsConfig
     Ok(())
 }
 
-#[cfg(feature = "spicedb")]
 async fn receive_ingress<S, F, D>(
     mut ingress: S,
     prefix: &a2a_nats::A2aPrefix,

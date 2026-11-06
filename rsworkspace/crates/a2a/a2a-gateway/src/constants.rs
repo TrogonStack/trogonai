@@ -37,7 +37,6 @@ pub const DEFAULT_FETCH_HEARTBEAT_SECS: u64 = 5;
 pub const DEFAULT_INACTIVE_THRESHOLD_SECS: u64 = 300;
 pub const DEFAULT_MAX_INFLIGHT_PER_CALLER: usize = 32;
 
-#[cfg(feature = "spicedb")]
 /// How long shutdown waits for the platform audit sink's last flush before it
 /// abandons it, so a stream that hangs mid-publish cannot keep the process up.
 pub(crate) const AUDIT_SETTLE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -69,36 +68,21 @@ pub const ENV_GATEWAY_JWT_AUDIENCE: &str = "A2A_GATEWAY_JWT_AUDIENCE";
 
 // --- runtime/dispatch.rs ---
 
-#[cfg(feature = "spicedb")]
 pub(crate) const SPAN_GATEWAY_INGRESS_DISPATCH: &str = "gateway.ingress.dispatch";
-#[cfg(feature = "spicedb")]
 pub(crate) const ATTR_CALLER_ID: &str = "caller_id";
-#[cfg(feature = "spicedb")]
 pub(crate) const ATTR_AGENT_SUBJECT: &str = "agent_subject";
-#[cfg(feature = "spicedb")]
 pub(crate) const ATTR_ROUTING_OUTCOME: &str = "routing_outcome";
 
-#[cfg(feature = "spicedb")]
 pub(crate) const ROUTING_IGNORED_NO_REPLY: &str = "ignored_no_reply";
-#[cfg(feature = "spicedb")]
 pub(crate) const ROUTING_TIER1_DENIED: &str = "tier1_denied";
-#[cfg(feature = "spicedb")]
 pub(crate) const ROUTING_POLICY_DENIED: &str = "policy_denied";
-#[cfg(feature = "spicedb")]
 pub(crate) const ROUTING_TIER3_REFUSED: &str = "tier3_refused";
-#[cfg(feature = "spicedb")]
 pub(crate) const ROUTING_TIER3_ENGINE_ERROR: &str = "tier3_engine_error";
-#[cfg(feature = "spicedb")]
 pub(crate) const ROUTING_FORWARDED: &str = "forwarded";
-#[cfg(feature = "spicedb")]
 pub(crate) const ROUTING_FORWARD_FAILED: &str = "forward_failed";
-#[cfg(feature = "spicedb")]
 pub(crate) const ROUTING_AUDIT_UNAVAILABLE: &str = "audit_unavailable";
-#[cfg(feature = "spicedb")]
 pub(crate) const ROUTING_DEADLINE_EXCEEDED: &str = "deadline_exceeded";
-#[cfg(feature = "spicedb")]
 pub(crate) const ROUTING_INGRESS_ERROR: &str = "ingress_error";
-#[cfg(feature = "spicedb")]
 pub(crate) const ROUTING_CALLER_JWT_REJECTED: &str = "caller_jwt_rejected";
 
 // --- runtime/env.rs ---
@@ -112,35 +96,25 @@ pub const ENV_GATEWAY_UNARY_DEADLINE_SECS: &str = "A2A_GATEWAY_UNARY_DEADLINE_SE
 
 /// The tenant every platform audit record names. The gateway serves one tenant per
 /// process until a verified credential carries it.
-#[cfg(feature = "spicedb")]
 pub const ENV_GATEWAY_AUDIT_TENANT: &str = "A2A_GATEWAY_AUDIT_TENANT";
 /// The project every platform audit record names, and the project token of its subject.
-#[cfg(feature = "spicedb")]
 pub const ENV_GATEWAY_AUDIT_PROJECT: &str = "A2A_GATEWAY_AUDIT_PROJECT";
 /// Names this replica. It becomes the audit writer id, so records say which process
 /// wrote them and a restarted replica is the same writer.
-#[cfg(feature = "spicedb")]
 pub const ENV_GATEWAY_AUDIT_INSTANCE: &str = "A2A_GATEWAY_AUDIT_INSTANCE";
-#[cfg(feature = "spicedb")]
 pub(crate) const AUDIT_WRITER_ID_PREFIX: &str = "a2a-gateway:";
-#[cfg(feature = "spicedb")]
 /// The component token the gateway's own integrity records, such as the chain
 /// reset that opens every chain, are published under.
 pub(crate) const AUDIT_COMPONENT: &str = "a2a_gateway";
-#[cfg(feature = "spicedb")]
 pub(crate) const AUDIT_LOG_TARGET: &str = "a2a_gateway_audit";
 /// Names of the layers an allow record says evaluated the request.
-#[cfg(feature = "spicedb")]
 pub(crate) const AUDIT_LAYER_TIER1_SPICEDB: &str = "tier1_spicedb";
-#[cfg(feature = "spicedb")]
 pub(crate) const AUDIT_LAYER_TIER3: &str = "tier3";
 /// Prefix of the name that stands in for an identifier an audit name cannot spell.
-#[cfg(feature = "spicedb")]
 pub(crate) const AUDIT_DIGEST_NAME_PREFIX: &str = "sha256:";
 
 /// Method-dots string for the unary `message/send`. Shared by
-/// `runtime::env` (unary deadline lookup) and `runtime::dispatch`
-/// (`spicedb` builds).
+/// `runtime::env` (unary deadline lookup) and `runtime::dispatch`.
 pub(crate) const MESSAGE_SEND_METHOD_DOTS: &str = "message.send";
 
 // --- runtime/streaming.rs ---
@@ -164,10 +138,12 @@ pub const ENV_TIER1_BUNDLE_DIR: &str = "A2A_GATEWAY_TIER1_BUNDLE_DIR";
 
 pub const TIER1_BUNDLE_EXTENSION: &str = "tier1.toml";
 
+// --- policy/tier1_gate.rs ---
+
+pub const ENV_TIER1_SPICEDB_ENABLED: &str = "A2A_GATEWAY_TIER1_SPICEDB_ENABLED";
+
 // --- policy/spicedb_tier1.rs ---
 
-#[cfg(feature = "spicedb")]
-pub const ENV_TIER1_SPICEDB_ENABLED: &str = "A2A_GATEWAY_TIER1_SPICEDB_ENABLED";
 #[cfg(feature = "spicedb")]
 pub const ENV_TIER1_SPICEDB_ENDPOINT: &str = "A2A_GATEWAY_TIER1_SPICEDB_ENDPOINT";
 #[cfg(feature = "spicedb")]

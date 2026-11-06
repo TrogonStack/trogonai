@@ -1,5 +1,3 @@
-#![cfg(feature = "spicedb")]
-
 use std::io;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::Duration;

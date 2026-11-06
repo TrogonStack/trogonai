@@ -15,7 +15,7 @@ use super::RejectingGate;
 use super::fixture::{
     AUDIT_PROJECT, DispatchFixture, RecordingOwner, RecordingTier1, TestResult, audit_writer_id, receive, request,
 };
-use crate::policy::spicedb_tier1::Tier1AuthorizeOutcome;
+use crate::policy::tier1_gate::Tier1AuthorizeOutcome;
 use crate::policy::tier2::DenyAllTier2Evaluator;
 use crate::policy::tier3_redaction::Tier3RedactionDecision;
 use crate::policy::wasmtime_substrate::{Tier2State, WasmtimeSubstrate};
@@ -146,7 +146,7 @@ async fn every_tier_records_its_own_reason_when_it_denies() -> TestResult {
     fixture.tier1 = Arc::new(RecordingTier1::new(Tier1AuthorizeOutcome::Denied));
     fixture.dispatch(request("message.send", json!({"id": "task-1"}))).await;
     fixture.denied(-32801, json!("request-7")).await?;
-    fixture.tier1 = Arc::new(crate::policy::spicedb_tier1::NoopSpiceDbTier1Gate);
+    fixture.tier1 = Arc::new(crate::policy::NoopSpiceDbTier1Gate);
 
     let directory = tempfile::tempdir()?;
     fixture.policy.substrate = Some(Arc::new(WasmtimeSubstrate::try_new_with_tier2(
