@@ -104,7 +104,7 @@ In prose, because field numbers and validation belong to the proto review:
 | `record_id` | A UUIDv7, also the decision identifier ADR 0085 names and the `Nats-Msg-Id` of Decision 3. The workspace already enables `v7`. |
 | `class` | `MUST` or `BEST_EFFORT`, set by the table in Decision 3, never chosen by a caller. |
 | `occurred_at`, `recorded_at` | When the writer observed the event, and when it handed the record to the sink. Their names follow [ADR#0069](./0069-event-envelope-records-issuer-and-times.md) if it lands first. |
-| `tenant`, `project` | Required. The tenant is what the subject carries ([ADR#0081](./0081-nats-tls-by-default-and-operator-mode-admission.md) Decision 3) and the project is the anchor of [ADR#0046](./0046-project-anchored-resource-hierarchy.md). |
+| `tenant`, `project` | Required, as payload fields and not as a subject token for the tenant (Decision 2). The project is the anchor of [ADR#0046](./0046-project-anchored-resource-hierarchy.md). A writer is configured with the one tenant and project it serves, and its own `start` and `chain_reset` records carry those with an `unattributed` actor. A writer that serves several tenants needs a verified source for them and is not designed here. |
 | `actor` | `AuditActor`, below. |
 | `act_chain` | The delegation chain behind the actor, bounded at 16 entries, which is `MAX_CHAIN_DEPTH` in `trogon-aauth-verify`. `flatten_act_chain` already produces it and no consumer writes it. |
 | `trace_id`, `request_id` | The W3C trace id, for correlation with traces, and the id the surface uses for the request. |
@@ -180,12 +180,16 @@ proxy, not an instance, which would churn with every restart.
 
 ADR 0055 defines the prefix as `[{tenant}.]{protocol}` and has no protocol for a
 family that spans them, since the A2A gateway, the egress proxy and the secrets
-service write into it. The prefix here is the fixed token `platform`, with the
-tenant leading inside `PLATFORM` as in ADR 0081 Decision 3. That keeps the
-family disjoint from the legacy A2A emitter's
-`a2a.v1.audit.{agent_id}.{ok|err|lifecycle}`, and a tenant account can import
-the records whose leading key is its own. The read path through that import is
-not designed here. ADR 0055 is still a draft, so this is a request that it note
+service write into it. The prefix here is the fixed token `platform` and the
+subject carries no tenant token: the tenant is the `tenant` field of the record.
+This family is written by platform workloads inside `PLATFORM` and is not tenant
+traffic, so it does not take the account-key leading token that ADR 0081
+Decision 3 gives to subjects a tenant account imports, and the publish grant
+below is on `platform.v1.audit.>` exactly. The prefix keeps the family disjoint
+from the legacy A2A emitter's `a2a.v1.audit.{agent_id}.{ok|err|lifecycle}`.
+A tenant account therefore cannot import these records through
+`account_token_position`, and the read path for tenants, which would need a
+tenant-keyed subject or a projection, is not designed here. ADR 0055 is still a draft, so this is a request that it note
 `platform` as a prefix token and `audit` as an operational root with these kinds.
 `ingress_audit_subject` is deleted, and the live A2A emitter stops publishing
 decisions when the adapter replaces it; task lifecycle records are not a decision
@@ -256,10 +260,13 @@ is in DryRun.
   structured local log line.
 - **A deny stands.** A deny takes effect whether or not its record is written.
   The record goes to a bounded retry buffer and is retried with the same message
-  id. When the buffer is full the writer is audit-degraded: it refuses every
-  action that would need a `MUST` record before an effect, until the buffer
-  drains, and keeps denying what it denies. A deny that cannot be buffered is
-  dropped and counted in a counter that pages. This is the one place a `MUST`
+  id. The writer is audit-degraded while the chain's head, a `MUST` record not yet
+  acknowledged (Decision 6), is waiting for a retry, and while the buffer has been
+  full and has not drained. A degraded writer refuses every action that would need
+  a `MUST` record before an effect, and keeps denying what it denies. A deny
+  behind a blocked head waits in the buffer and takes its sequence when the head
+  is stored, so the chain has no gap. A deny that cannot be buffered is dropped,
+  takes no sequence, and is counted in a counter that pages. This is the one place a `MUST`
   record can be lost, and the limit is stated in Consequences.
 - **A full stream is the same refusal.** `discard: new` returns a publish error
   that the sink maps to a distinct reason, so a full stream and an unreachable one
