@@ -11,8 +11,10 @@ use bytes::Bytes;
 use trogon_nats::{NatsAuth, NatsConfig, NatsTls, connect_once_with_reconnect_quarantine};
 
 use crate::constants::{OPERATION_TIMEOUT, RECONNECT_QUARANTINE};
+use crate::expected_registration_append::ExpectedRegistrationAppend;
 use crate::registration_connection::RegistrationConnection;
 use crate::registration_plane::RegistrationPlane;
+use crate::scoped_registration_message::ScopedRegistrationMessage;
 use crate::{RegistrationError, RegistrationRole, StreamProfile};
 
 #[derive(Debug)]
@@ -122,7 +124,11 @@ impl RegistrationBroker {
         Ok(info)
     }
 
-    pub(crate) async fn read(&self, plane: RegistrationPlane, sequence: u64) -> Result<Bytes, RegistrationError> {
+    pub(crate) async fn read(
+        &self,
+        plane: RegistrationPlane,
+        sequence: u64,
+    ) -> Result<ScopedRegistrationMessage, RegistrationError> {
         self.connection.check()?;
         let stream = if plane == RegistrationPlane::Live {
             &self.live
@@ -139,10 +145,7 @@ impl RegistrationBroker {
         } else {
             self.profile.control_subject()
         };
-        if message.subject.as_str() != subject || message.sequence != sequence {
-            return Err(RegistrationError::HeadChanged);
-        }
-        Ok(message.payload)
+        ScopedRegistrationMessage::new(&subject, sequence, message)
     }
 
     pub(crate) async fn require_head(
@@ -154,7 +157,7 @@ impl RegistrationBroker {
         let info = self.inspect(plane).await?;
         if info.state.last_sequence != sequence
             || info.state.messages != 1
-            || self.read(plane, sequence).await? != *payload
+            || self.read(plane, sequence).await?.into_payload() != *payload
         {
             return Err(RegistrationError::HeadChanged);
         }
@@ -171,10 +174,7 @@ impl RegistrationBroker {
         if info.state.last_sequence != expected {
             return Err(RegistrationError::HeadChanged);
         }
-        let next = expected
-            .checked_add(1)
-            .and_then(NonZeroU64::new)
-            .ok_or(RegistrationError::Revision)?;
+        let expected_append = ExpectedRegistrationAppend::new(&info.config.name, expected)?;
         self.connection.check()?;
         let subject = if plane == RegistrationPlane::Live {
             self.profile.live_subject()
@@ -195,9 +195,7 @@ impl RegistrationBroker {
         self.connection.check()?;
         let ack = ack.await.map_err(RegistrationError::Publish)?;
         self.connection.check()?;
-        if ack.duplicate || ack.stream != info.config.name || ack.sequence != next.get() {
-            return Err(RegistrationError::HeadChanged);
-        }
+        let next = expected_append.acknowledge(&ack)?;
         self.require_head(plane, next.get(), &payload).await?;
         Ok(next)
     }

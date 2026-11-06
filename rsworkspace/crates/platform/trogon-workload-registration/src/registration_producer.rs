@@ -3,11 +3,13 @@ use std::time::Instant;
 use trogon_audit::{AuditSink, AuditWriter, JetStreamSink};
 use trogon_nats::NatsConfig;
 
+use crate::approved_withdrawal::ApprovedWithdrawal;
 use crate::constants::OPERATION_TIMEOUT;
 use crate::publication_kind::PublicationKind;
 use crate::registration_audit::{change, production_writer};
 use crate::registration_broker::{RegistrationBroker, bounded, connect};
 use crate::registration_head::RegistrationHead;
+use crate::registration_head_observation::RegistrationHeadObservation;
 use crate::registration_plane::RegistrationPlane;
 use crate::{
     ApprovedRegistration, ProducerConfig, ProducerStatus, PublicationReceipt, RegistrationError, RegistrationRole,
@@ -89,15 +91,8 @@ impl<S: AuditSink> RegistrationProducer<S> {
             bounded(deadline, async {
                 initial.check_current()?;
                 let control_sequence = broker.append(RegistrationPlane::Control, 0, initial.payload()).await?;
-                audit
-                    .write(change(
-                        &config,
-                        &initial,
-                        control_sequence,
-                        PublicationKind::GrantIntent,
-                    )?)
-                    .await
-                    .map_err(RegistrationError::Audit)?;
+                let intent = change(&config, &initial, control_sequence, PublicationKind::GrantIntent)?;
+                audit.write(intent).await.map_err(RegistrationError::Audit)?;
                 broker.check_connection()?;
                 initial.check_current()?;
                 let live_sequence = broker.append(RegistrationPlane::Live, 0, initial.payload()).await?;
@@ -161,15 +156,8 @@ impl<S: AuditSink> RegistrationProducer<S> {
                     .broker
                     .append(RegistrationPlane::Control, expected_control, next.payload())
                     .await?;
-                self.audit
-                    .write(change(
-                        &self.config,
-                        &next,
-                        control_sequence,
-                        PublicationKind::GrantIntent,
-                    )?)
-                    .await
-                    .map_err(RegistrationError::Audit)?;
+                let intent = change(&self.config, &next, control_sequence, PublicationKind::GrantIntent)?;
+                self.audit.write(intent).await.map_err(RegistrationError::Audit)?;
                 self.broker.check_connection()?;
                 self.current.check_current()?;
                 next.check_current()?;
@@ -269,32 +257,27 @@ async fn withdraw<S: AuditSink>(
 
 async fn emergency_connected<S: AuditSink>(
     context: async_nats::jetstream::Context,
-    config: &ProducerConfig,
-    denial: ApprovedRegistration,
+    denial: ApprovedWithdrawal,
     audit: &AuditWriter<S>,
 ) -> Result<PublicationReceipt, RegistrationError> {
-    if denial.config() != config {
-        return Err(RegistrationError::Scope);
-    }
-    if !denial.is_withdrawal() {
-        return Err(RegistrationError::NotWithdrawal);
-    }
+    let denial = denial.into_registration();
+    let config = denial.config();
     denial.check_current()?;
     let deadline = denial.lease().deadline();
     let broker = bounded(deadline, RegistrationBroker::open(context, StreamProfile::new(config))).await?;
     let (control_sequence, live_sequence) = bounded(deadline, async {
-        let live = broker.inspect(RegistrationPlane::Live).await?;
-        let control = broker.inspect(RegistrationPlane::Control).await?;
-        for (plane, info) in [(RegistrationPlane::Live, &live), (RegistrationPlane::Control, &control)] {
-            if info.state.messages == 1 {
-                RegistrationHead::decode(config, &broker.read(plane, info.state.last_sequence).await?)?
-                    .check_successor(&denial)?;
-            } else if (plane == RegistrationPlane::Control && info.state.last_sequence != 0) || info.state.messages != 0
-            {
-                return Err(RegistrationError::HeadChanged);
+        let live_info = broker.inspect(RegistrationPlane::Live).await?;
+        let control_info = broker.inspect(RegistrationPlane::Control).await?;
+        let live = RegistrationHeadObservation::new(RegistrationPlane::Live, &live_info.state)?;
+        let control = RegistrationHeadObservation::new(RegistrationPlane::Control, &control_info.state)?;
+        for (plane, observation) in [(RegistrationPlane::Live, &live), (RegistrationPlane::Control, &control)] {
+            if let Some(sequence) = observation.retained_sequence() {
+                let message = broker.read(plane, sequence.get()).await?;
+                let head = RegistrationHead::decode(config, &message)?;
+                head.check_successor(&denial)?;
             }
         }
-        Ok((control.state.last_sequence, live.state.last_sequence))
+        Ok((control.last_sequence(), live.last_sequence()))
     })
     .await?;
     // Preserve the acknowledged live receipt when post-denial bookkeeping fails.
@@ -307,19 +290,14 @@ pub async fn emergency_withdrawal<S: AuditSink>(
     denial: ApprovedRegistration,
     audit: &AuditWriter<S>,
 ) -> Result<PublicationReceipt, RegistrationError> {
-    denial.check_current()?;
-    if denial.config() != config {
-        return Err(RegistrationError::Scope);
-    }
-    if !denial.is_withdrawal() {
-        return Err(RegistrationError::NotWithdrawal);
-    }
+    let denial = ApprovedWithdrawal::new(config, denial)?;
+    let config = denial.registration().config();
     let context = bounded(
-        denial.lease().deadline(),
+        denial.registration().lease().deadline(),
         connect(nats, &StreamProfile::new(config), RegistrationRole::Revoker),
     )
     .await?;
-    emergency_connected(context, config, denial, audit).await
+    emergency_connected(context, denial, audit).await
 }
 
 pub async fn production_emergency_withdrawal(
@@ -327,20 +305,15 @@ pub async fn production_emergency_withdrawal(
     config: &ProducerConfig,
     denial: ApprovedRegistration,
 ) -> Result<PublicationReceipt, RegistrationError> {
-    denial.check_current()?;
-    if denial.config() != config {
-        return Err(RegistrationError::Scope);
-    }
-    if !denial.is_withdrawal() {
-        return Err(RegistrationError::NotWithdrawal);
-    }
+    let denial = ApprovedWithdrawal::new(config, denial)?;
+    let config = denial.registration().config();
     let context = bounded(
-        denial.lease().deadline(),
+        denial.registration().lease().deadline(),
         connect(nats, &StreamProfile::new(config), RegistrationRole::Revoker),
     )
     .await?;
     let audit = production_writer(context.clone(), config, RegistrationRole::Revoker)?;
-    emergency_connected(context, config, denial, &audit).await
+    emergency_connected(context, denial, &audit).await
 }
 
 #[cfg(test)]

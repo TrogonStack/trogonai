@@ -6,9 +6,9 @@ use trogon_workload_identity::constants::{MAX_BINDINGS, MAX_REGISTRATION_LIFETIM
 use trogon_workload_identity::{RegistrationBinding, WorkloadRole};
 use trogonai_proto::platform::workload_identity::v1alpha1::{RegistrationSnapshot, WorkloadRole as WireRole};
 
+use crate::scoped_registration_message::ScopedRegistrationMessage;
 use crate::{
-    ApprovedRegistration, AuthorityVersion, CanonicalAgentId, MAX_SNAPSHOT_BYTES, ProducerConfig, RegistrationError,
-    Sha256Digest,
+    ApprovedRegistration, AuthorityVersion, CanonicalAgentId, ProducerConfig, RegistrationError, Sha256Digest,
 };
 
 #[derive(Debug)]
@@ -19,10 +19,11 @@ pub(crate) struct RegistrationHead {
 }
 
 impl RegistrationHead {
-    pub(crate) fn decode(config: &ProducerConfig, payload: &[u8]) -> Result<Self, RegistrationError> {
-        if payload.len() > MAX_SNAPSHOT_BYTES {
-            return Err(RegistrationError::Bounds);
-        }
+    pub(crate) fn decode(
+        config: &ProducerConfig,
+        message: &ScopedRegistrationMessage,
+    ) -> Result<Self, RegistrationError> {
+        let payload = message.payload();
         let wire = RegistrationSnapshot::decode_from_slice(payload).map_err(RegistrationError::Decode)?;
         if wire.encode_to_vec() != payload {
             return Err(RegistrationError::NoncanonicalPayload);
