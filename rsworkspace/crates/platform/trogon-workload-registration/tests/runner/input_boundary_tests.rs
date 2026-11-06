@@ -1,6 +1,7 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use std::io::Write;
+use std::os::unix::process::CommandExt;
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
@@ -61,6 +62,19 @@ fn command_help_describes_the_public_required_configuration() {
     let help = String::from_utf8(output.stdout).expect("UTF-8 help");
     assert!(help.contains("--approval-public-key"));
     assert!(help.contains("--recovery-fence"));
+}
+
+#[test]
+fn static_help_does_not_echo_a_supplied_program_name() {
+    let output = Command::new(env!("CARGO_BIN_EXE_trogon-workload-registration"))
+        .arg0("canary-private-program-name")
+        .args(["serve", "--help"])
+        .env_clear()
+        .output()
+        .expect("read static command help");
+    assert!(output.status.success());
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("canary-private-program-name"));
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("canary-private-program-name"));
 }
 
 #[test]
