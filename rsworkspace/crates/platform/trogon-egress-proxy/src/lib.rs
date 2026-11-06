@@ -21,6 +21,7 @@ pub(crate) mod audit_budget;
 pub mod audit_capacity;
 pub mod audit_config;
 pub mod audit_error;
+pub mod audit_readiness;
 pub mod client_hello;
 pub mod config;
 pub mod connect_request;
@@ -46,6 +47,8 @@ pub mod policy_revision;
 pub mod policy_snapshot;
 pub mod policy_source;
 pub mod resolver;
+pub mod readiness;
+pub mod readiness_status;
 pub mod runtime;
 mod scoped_snapshot_key;
 mod scoped_stream;
@@ -64,6 +67,8 @@ pub use config::{Args, Config};
 pub use runtime::{StartupError, start};
 pub use scoped_snapshot_key::ScopedSnapshotKey;
 pub use server::Server;
+pub use readiness::Readiness;
+pub use readiness_status::ReadinessStatus;
 pub use snapshot_bucket::{SnapshotBucket, SnapshotBucketError};
 
 #[cfg(test)]

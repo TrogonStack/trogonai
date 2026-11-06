@@ -16,6 +16,7 @@ use crate::policy_revision::PolicyRevision;
 use crate::policy_source::PolicySource;
 
 mod budget_tests;
+mod readiness_tests;
 
 fn writer() -> WriterId {
     WriterId::new("egress-proxy:test").expect("writer")

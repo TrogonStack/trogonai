@@ -23,6 +23,9 @@ use trogonai_proto::platform::workload_identity::v1alpha1::{RegistrationBinding,
 use super::constants::{APPLICATION_ID, LOCAL_WORKLOAD, PEER_WORKLOAD};
 use super::*;
 
+#[path = "readiness.rs"]
+mod readiness;
+
 async fn exclusive_snapshot(context: &async_nats::jetstream::Context, store: &kv::Store, key: &str) -> TestResult<()> {
     let mut config = store.stream.get_info().await?.config;
     config.subjects = vec![format!("$KV.{}.{}", store.name, key)];
@@ -33,6 +36,7 @@ async fn exclusive_snapshot(context: &async_nats::jetstream::Context, store: &kv
 }
 
 struct WorkloadHarness {
+    readiness: trogon_egress_proxy::Readiness,
     _broker: TlsTestServer,
     context: async_nats::jetstream::Context,
     audit_stream: async_nats::jetstream::stream::Stream,
@@ -217,10 +221,12 @@ impl WorkloadHarness {
             limits: Limits::default(),
         })
         .await?;
+        let readiness = server.readiness();
         let address = server.local_addr()?;
         let shutdown = CancellationToken::new();
         let task = tokio::spawn(server.run(shutdown.clone()));
         Ok(Self {
+            readiness,
             _broker: broker,
             context,
             audit_stream,

@@ -60,6 +60,10 @@ impl ListenerIdentity {
 }
 
 impl Server {
+    pub fn readiness(&self) -> crate::Readiness {
+        crate::Readiness
+    }
+
     pub fn new(listener: TcpListener, tls: Arc<rustls::ServerConfig>, proxy: Proxy, trust_domain: TrustDomain) -> Self {
         Self {
             listener,
