@@ -1,9 +1,23 @@
+mod approval_key;
+mod approval_lease;
 mod approved_registration;
+mod authority_version;
+mod canonical_agent_id;
+mod constants;
 mod error;
 mod producer_config;
+mod registration_scope;
+mod scope_name;
+mod sha256_digest;
 
+pub use approval_key::ApprovalKey;
+pub use approval_lease::ApprovalLease;
 pub use approved_registration::ApprovedRegistration;
+pub use authority_version::AuthorityVersion;
+pub use canonical_agent_id::CanonicalAgentId;
+pub use constants::{MAX_SNAPSHOT_BYTES, SIGNING_CONTEXT};
 pub use error::RegistrationError;
 pub use producer_config::ProducerConfig;
-
-pub const SIGNING_CONTEXT: &[u8] = b"trogon/workload-registration/v1\0";
+pub use registration_scope::RegistrationScope;
+pub use scope_name::ScopeName;
+pub use sha256_digest::Sha256Digest;

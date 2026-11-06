@@ -7,9 +7,7 @@ use buffa::{EnumValue, Message, MessageField};
 use buffa_types::google::protobuf::Timestamp;
 use ed25519_dalek::{Signer, SigningKey};
 use trogon_workload_registration::{ApprovedRegistration, ProducerConfig, SIGNING_CONTEXT};
-use trogonai_proto::platform::workload_identity::v1alpha1::{
-    RegistrationBinding, RegistrationSnapshot, WorkloadRole,
-};
+use trogonai_proto::platform::workload_identity::v1alpha1::{RegistrationBinding, RegistrationSnapshot, WorkloadRole};
 
 fn snapshot() -> RegistrationSnapshot {
     let now = SystemTime::now();
@@ -33,8 +31,14 @@ fn snapshot() -> RegistrationSnapshot {
 }
 
 fn config(key: &SigningKey) -> ProducerConfig {
-    ProducerConfig::new("acme", "payments", "identity.example.org", NonZeroU64::MIN, key.verifying_key())
-        .expect("producer configuration")
+    ProducerConfig::new(
+        "acme",
+        "payments",
+        "identity.example.org",
+        NonZeroU64::MIN,
+        key.verifying_key(),
+    )
+    .expect("producer configuration")
 }
 
 fn signature(key: &SigningKey, payload: &[u8]) -> [u8; 64] {
@@ -53,13 +57,34 @@ fn only_fresh_exact_scoped_and_independently_signed_snapshots_are_authority() {
     assert!(ApprovedRegistration::verify(&config, &valid, &key.sign(&valid).to_bytes()).is_err());
 
     for changed in [
-        RegistrationSnapshot { tenant: "another".into(), ..snapshot() },
-        RegistrationSnapshot { recovery_fence: 2, ..snapshot() },
-        RegistrationSnapshot { registration_revision: 0, ..snapshot() },
-        RegistrationSnapshot { trust_revision: 0, ..snapshot() },
-        RegistrationSnapshot { approved_root_sha256: vec![vec![1; 31]], ..snapshot() },
-        RegistrationSnapshot { approved_root_sha256: vec![], ..snapshot() },
-        RegistrationSnapshot { approved_root_sha256: vec![vec![1; 32], vec![1; 32]], ..snapshot() },
+        RegistrationSnapshot {
+            tenant: "another".into(),
+            ..snapshot()
+        },
+        RegistrationSnapshot {
+            recovery_fence: 2,
+            ..snapshot()
+        },
+        RegistrationSnapshot {
+            registration_revision: 0,
+            ..snapshot()
+        },
+        RegistrationSnapshot {
+            trust_revision: 0,
+            ..snapshot()
+        },
+        RegistrationSnapshot {
+            approved_root_sha256: vec![vec![1; 31]],
+            ..snapshot()
+        },
+        RegistrationSnapshot {
+            approved_root_sha256: vec![],
+            ..snapshot()
+        },
+        RegistrationSnapshot {
+            approved_root_sha256: vec![vec![1; 32], vec![1; 32]],
+            ..snapshot()
+        },
         RegistrationSnapshot {
             issued_at: MessageField::some(Timestamp::from(SystemTime::now() + Duration::from_secs(30))),
             ..snapshot()
@@ -72,7 +97,10 @@ fn only_fresh_exact_scoped_and_independently_signed_snapshots_are_authority() {
             expires_at: MessageField::some(Timestamp::from(SystemTime::now() - Duration::from_secs(1))),
             ..snapshot()
         },
-        RegistrationSnapshot { bindings: vec![snapshot().bindings[0].clone(); 2], ..snapshot() },
+        RegistrationSnapshot {
+            bindings: vec![snapshot().bindings[0].clone(); 2],
+            ..snapshot()
+        },
     ] {
         let payload = changed.encode_to_vec();
         assert!(ApprovedRegistration::verify(&config, &payload, &signature(&key, &payload)).is_err());
@@ -87,16 +115,49 @@ fn only_fresh_exact_scoped_and_independently_signed_snapshots_are_authority() {
     assert!(ApprovedRegistration::verify(&config, &payload, &signature(&key, &payload)).is_ok());
 
     for (identity, tenant, project, role, application) in [
-        ("spiffe://elsewhere.example.org/service/egress", "acme", "payments", WorkloadRole::EgressProxy, None),
-        ("spiffe://identity.example.org/service/egress", "another", "payments", WorkloadRole::EgressProxy, None),
-        ("spiffe://identity.example.org/service/egress", "acme", "another", WorkloadRole::EgressProxy, None),
-        ("spiffe://identity.example.org/runtime/agent", "acme", "payments", WorkloadRole::Agent, Some("agent-1")),
-        ("spiffe://identity.example.org/service/egress", "acme", "payments", WorkloadRole::EgressProxy, Some("agent-1")),
+        (
+            "spiffe://elsewhere.example.org/service/egress",
+            "acme",
+            "payments",
+            WorkloadRole::EgressProxy,
+            None,
+        ),
+        (
+            "spiffe://identity.example.org/service/egress",
+            "another",
+            "payments",
+            WorkloadRole::EgressProxy,
+            None,
+        ),
+        (
+            "spiffe://identity.example.org/service/egress",
+            "acme",
+            "another",
+            WorkloadRole::EgressProxy,
+            None,
+        ),
+        (
+            "spiffe://identity.example.org/runtime/agent",
+            "acme",
+            "payments",
+            WorkloadRole::Agent,
+            Some("agent-1"),
+        ),
+        (
+            "spiffe://identity.example.org/service/egress",
+            "acme",
+            "payments",
+            WorkloadRole::EgressProxy,
+            Some("agent-1"),
+        ),
     ] {
         let mut changed = snapshot();
         changed.bindings = vec![RegistrationBinding {
-            spiffe_id: identity.into(), tenant: tenant.into(), project: project.into(),
-            role: EnumValue::from(role), application_id: application.map(str::to_owned),
+            spiffe_id: identity.into(),
+            tenant: tenant.into(),
+            project: project.into(),
+            role: EnumValue::from(role),
+            application_id: application.map(str::to_owned),
         }];
         let payload = changed.encode_to_vec();
         assert!(ApprovedRegistration::verify(&config, &payload, &signature(&key, &payload)).is_err());

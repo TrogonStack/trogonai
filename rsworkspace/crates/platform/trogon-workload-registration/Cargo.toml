@@ -13,6 +13,7 @@ workspace = true
 async-nats = { workspace = true }
 buffa = { workspace = true }
 buffa-types = { workspace = true }
+bs58 = "=0.5.1"
 bytes = { workspace = true }
 ed25519-dalek = { workspace = true }
 sha2 = { workspace = true }

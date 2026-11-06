@@ -2,19 +2,37 @@ use std::num::NonZeroU64;
 
 use ed25519_dalek::VerifyingKey;
 
-use crate::RegistrationError;
+use crate::{ApprovalKey, RegistrationError, RegistrationScope, ScopeName};
 
-#[derive(Debug)]
-pub struct ProducerConfig;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProducerConfig {
+    scope: RegistrationScope,
+    recovery_fence: NonZeroU64,
+    approval_key: ApprovalKey,
+}
 
 impl ProducerConfig {
     pub fn new(
-        _tenant: &str,
-        _project: &str,
-        _trust_domain: &str,
-        _recovery_fence: NonZeroU64,
-        _approval_key: VerifyingKey,
+        tenant: &str,
+        project: &str,
+        trust_domain: &str,
+        recovery_fence: NonZeroU64,
+        approval_key: VerifyingKey,
     ) -> Result<Self, RegistrationError> {
-        Ok(Self)
+        Ok(Self {
+            scope: RegistrationScope::new(ScopeName::new(tenant)?, ScopeName::new(project)?, trust_domain)?,
+            recovery_fence,
+            approval_key: ApprovalKey::new(approval_key)?,
+        })
+    }
+
+    pub fn scope(&self) -> &RegistrationScope {
+        &self.scope
+    }
+    pub fn recovery_fence(&self) -> NonZeroU64 {
+        self.recovery_fence
+    }
+    pub fn approval_key(&self) -> &ApprovalKey {
+        &self.approval_key
     }
 }

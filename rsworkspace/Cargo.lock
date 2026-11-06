@@ -7831,6 +7831,7 @@ name = "trogon-workload-registration"
 version = "0.1.0"
 dependencies = [
  "async-nats",
+ "bs58",
  "buffa",
  "buffa-types",
  "bytes",
