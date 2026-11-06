@@ -23,7 +23,7 @@ impl RegistrationSet {
         mut bindings: Vec<RegistrationBinding>,
         mut approved_roots: Vec<[u8; 32]>,
     ) -> Result<Self, RegistrationError> {
-        if bindings.len() > MAX_BINDINGS || approved_roots.is_empty() || approved_roots.len() > MAX_ROOTS {
+        if bindings.len() > MAX_BINDINGS || approved_roots.len() > MAX_ROOTS {
             return Err(RegistrationError::Bounds);
         }
         bindings.sort_by(|a, b| a.spiffe_id().cmp(b.spiffe_id()));

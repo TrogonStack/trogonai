@@ -94,7 +94,7 @@ fn governed_registration_is_bounded_and_rejects_ambiguous_identity_claims() {
     let expiry = SystemTime::now() + Duration::from_secs(300);
     for (bindings, roots) in [
         (vec![local(); crate::constants::MAX_BINDINGS + 1], vec![[1; 32]]),
-        (vec![local()], Vec::new()),
+        (vec![local()], vec![[1; 32]; crate::constants::MAX_ROOTS + 1]),
         (vec![local(), local()], vec![[1; 32]]),
         (vec![local()], vec![[1; 32], [1; 32]]),
     ] {

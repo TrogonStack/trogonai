@@ -11,8 +11,10 @@ The host runs the driver alongside its service and supplies complete
 Each set binds the configured recovery fence, monotonic registration and trust
 revisions, a finite expiry, exact workload bindings and approved root certificate
 SHA-256 fingerprints. Registration, source observations and active material share
-one activation lock. Withdrawn registration cannot be restored by replaying its
-previous revision.
+one activation lock. Empty binding or approved-root sets represent complete
+revocation and retain their registration and trust revision floors. Neither
+withdrawn registration nor withdrawn trust can be restored by replaying an
+older or equivalent generation.
 
 The driver selects the configured SPIFFE ID, validates its certificate profile,
 selected certificate paths and matching private key, and checks its bundle against
