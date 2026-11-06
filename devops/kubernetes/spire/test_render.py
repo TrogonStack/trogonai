@@ -107,8 +107,8 @@ class DeploymentTests(unittest.TestCase):
 
     def test_socket_admission_gate_is_enforced_and_never_matches_an_untrusted_default(self):
         resources = json.loads(self.render()["manifests.json"])["items"]
-        policy = next(item for item in resources if item["kind"] == "ValidatingAdmissionPolicy")
-        binding = next(item for item in resources if item["kind"] == "ValidatingAdmissionPolicyBinding")
+        policy = next(item for item in resources if item["kind"] == "ValidatingAdmissionPolicy" and item["metadata"]["name"].endswith("-identity-sockets"))
+        binding = next(item for item in resources if item["kind"] == "ValidatingAdmissionPolicyBinding" and item["metadata"]["name"].endswith("-identity-sockets"))
         self.assertEqual(policy["spec"]["failurePolicy"], "Fail")
         self.assertEqual(binding["spec"]["validationActions"], ["Deny"])
         expressions = " ".join(item["expression"] for item in policy["spec"]["validations"])

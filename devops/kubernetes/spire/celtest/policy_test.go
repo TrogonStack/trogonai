@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strings"
 	"testing"
 
 	"github.com/google/cel-go/cel"
@@ -92,7 +93,9 @@ func TestSocketAdmissionBoundary(t *testing.T) {
 		item := asMap(resource)
 		switch item["kind"] {
 		case "ValidatingAdmissionPolicy":
-			policy = item
+			if strings.HasSuffix(asMap(item["metadata"])["name"].(string), "-identity-sockets") {
+				policy = item
+			}
 		case "StatefulSet", "DaemonSet":
 			template := clone(asMap(asMap(item["spec"])["template"]))
 			asMap(template["metadata"])["namespace"] = asMap(item["metadata"])["namespace"]
@@ -122,6 +125,12 @@ func TestSocketAdmissionBoundary(t *testing.T) {
 			},
 			"changed_entrypoint": func(p map[string]any) {
 				asMap(asList(asMap(p["spec"])["containers"])[0])["command"] = []any{"/unexpected-entrypoint"}
+			},
+			"control_plane_node": func(p map[string]any) {
+				asMap(p["spec"])["nodeName"] = "identity-control-a"
+			},
+			"unapproved_exec_hook": func(p map[string]any) {
+				asMap(asList(asMap(p["spec"])["containers"])[0])["lifecycle"] = map[string]any{"postStart": map[string]any{"exec": map[string]any{"command": []any{"/unexpected-entrypoint"}}}}
 			},
 		}
 		for name, mutate := range mutations {
@@ -232,6 +241,43 @@ func TestSocketAdmissionBoundary(t *testing.T) {
 			}
 			if allowed {
 				t.Fatal("unsafe identity endpoint mount admitted")
+			}
+		})
+	}
+}
+
+func TestIdentityNamespaceBindingsStayOnApprovedNodes(t *testing.T) {
+	fixture := generated(t)
+	var policy map[string]any
+	for _, resource := range asList(fixture.Resources["items"]) {
+		item := asMap(resource)
+		if item["kind"] == "ValidatingAdmissionPolicy" && strings.HasSuffix(asMap(item["metadata"])["name"].(string), "-identity-node-bindings") {
+			policy = item
+		}
+	}
+	if policy == nil {
+		t.Fatal("protected identity namespaces have no node-binding admission guard")
+	}
+	for _, example := range []struct {
+		namespace string
+		node      string
+		allow     bool
+	}{
+		{"identity-agents", "identity-node-a", true},
+		{"identity-control", "identity-control-a", true},
+		{"trusted-supervisors", "identity-node-b", true},
+		{"identity-agents", "identity-control-a", false},
+		{"identity-control", "identity-node-a", false},
+		{"trusted-supervisors", "identity-control-a", false},
+	} {
+		t.Run(example.namespace+"/"+example.node, func(t *testing.T) {
+			binding := map[string]any{"metadata": map[string]any{"namespace": example.namespace}, "target": map[string]any{"kind": "Node", "name": example.node}}
+			allowed, err := admitted(policy, binding)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if allowed != example.allow {
+				t.Fatalf("node-binding verdict=%v, want %v", allowed, example.allow)
 			}
 		})
 	}
