@@ -1,0 +1,69 @@
+edition = "2024";
+
+package trogonai.connections.resources.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/connections/types/v1alpha1/resource_parent.proto";
+import "trogonai/policy/connection_permissions/v1alpha1/parent.proto";
+import "trogonai/secrets/v1alpha1/secret_ref.proto";
+
+// These are identity-only resource names, not configuration pins, display
+// labels or authority. Render each opaque identifier as one RFC 3986 UTF-8
+// percent-encoded path segment, using uppercase escapes and leaving unreserved
+// bytes literal. Parsing requires an exact canonical round trip; hierarchy
+// ancestors and logical owners never become path segments. Route identity and
+// the typed payload must agree before authorization or aggregate dispatch.
+
+// platform/connectors/{connector}/releases/{release}
+message ConnectorReleaseResourceName {
+  trogonai.connections.types.v1alpha1.ConnectorReleaseParent resource_parent = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ConnectorReleaseId release_id = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// platform/provider-apps/{app} or projects/{project}/provider-apps/{app}
+message ProviderAppResourceName {
+  trogonai.connections.types.v1alpha1.ProviderAppParent resource_parent = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ProviderAppId provider_app_id = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// projects/{project}/connections/{connection}
+message ConnectionResourceName {
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ConnectionId connection_id = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// projects/{project}/authorization-attempts/{attempt}. The target Connection
+// is an association inside this same custody parent, not a naming ancestor.
+message AuthorizationAttemptResourceName {
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.AuthorizationAttemptId attempt_id = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// projects/{project}/provider-account-claims/{claim}. A claim can outlive one
+// holder; naming it under a Connection would make reuse change its identity.
+message ProviderAccountClaimResourceName {
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ProviderAccountClaimId claim_id = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// projects/{project}/connection-grants/{grant}. This project is the Session's
+// project, which may differ from the connection's custody project.
+message ConnectionGrantResourceName {
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ConnectionGrantId grant_id = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// platform/credentials/{secret} or projects/{project}/credentials/{secret}.
+// The opaque SecretRef identifies material metadata and grants no read access.
+message CredentialResourceName {
+  trogonai.connections.types.v1alpha1.CredentialResourceParent resource_parent = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.secrets.v1alpha1.SecretRef secret_ref = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// agents/{agent}/connection-permissions/default or
+// nodes/{node}/connection-permissions/default. This is one policy singleton
+// per PolicySubject; it is not a child of a credential custody project.
+message ConnectionPermissionResourceName {
+  trogonai.policy.connection_permissions.v1alpha1.ConnectionPermissionParent resource_parent = 1 [features.field_presence = LEGACY_REQUIRED];
+}

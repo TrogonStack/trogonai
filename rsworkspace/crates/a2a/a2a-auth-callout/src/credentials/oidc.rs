@@ -315,16 +315,17 @@ impl JwksOidcVerifier {
         let sub = ExternalSubject::new(sub_str)
             .map_err(|e| CredentialError::InvalidCredentials(format!("invalid external subject in OIDC token: {e}")))?;
         let data = spicedb_principal_from_oidc_claims(&token_data.claims);
-        let caller_id = derive_caller_id(CallerNamespace::Oidc { issuer: &self.issuer }, sub_str, account)
+        let namespace = CallerNamespace::Oidc { issuer: &self.issuer };
+        let caller_id = derive_caller_id(namespace, sub_str, account)
             .map_err(|e| CredentialError::InvalidCredentials(format!("caller_id derivation failed: {e}")))?;
-        let nats_permissions = IssuedPermissions::default_for_caller(&caller_id);
         Ok(UserJwtClaims {
             kid: crate::signing_key_source::unminted_placeholder(),
             sub,
             aud: account.clone(),
             data,
             caller_id,
-            nats_permissions,
+            principal_kind: namespace.principal_kind(),
+            nats_permissions: IssuedPermissions::none(),
         })
     }
 }

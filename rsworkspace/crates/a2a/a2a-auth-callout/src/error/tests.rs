@@ -20,6 +20,15 @@ fn display_subscribe() {
 }
 
 #[test]
+fn display_flush() {
+    let e = AuthCalloutError::Flush(async_nats::client::FlushError::new(
+        async_nats::client::FlushErrorKind::FlushError,
+    ));
+    assert_eq!(e.to_string(), "auth callout subscription never reached a NATS server");
+    assert!(Error::source(&e).is_some());
+}
+
+#[test]
 fn display_credential_verification() {
     let e = AuthCalloutError::CredentialVerification(CredentialError::InvalidCredentials("bad token".into()));
     assert_eq!(e.to_string(), "credential verification failed: bad token");
@@ -96,4 +105,16 @@ fn display_covers_remaining_variants() {
         "auth callout wire format error: x"
     );
     assert_eq!(AuthCalloutError::Internal("x".into()).to_string(), "internal error: x");
+}
+
+#[test]
+fn admission_key_errors_keep_their_own_message_and_source() {
+    let e = AuthCalloutError::from(crate::admission_keys::AdmissionKeyError::InvalidAuthAccount(
+        crate::admission_keys::AccountPublicKeyError::NotAnAccount,
+    ));
+    assert_eq!(
+        e.to_string(),
+        "AUTH_CALLOUT_AUTH_ACCOUNT is an NKey public key that names something other than an account"
+    );
+    assert!(Error::source(&e).is_some());
 }

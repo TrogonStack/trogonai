@@ -25,9 +25,9 @@ impl DenialCategory {
 
     pub fn from_auth_callout_error(error: &AuthCalloutError) -> Self {
         match error {
-            AuthCalloutError::Connect(_) => Self::ServiceUnavailable,
+            AuthCalloutError::Connect(_) | AuthCalloutError::Flush(_) => Self::ServiceUnavailable,
             AuthCalloutError::Subscribe(_) => Self::InternalError,
-            AuthCalloutError::Deserialize(_) => Self::InvalidRequest,
+            AuthCalloutError::Deserialize(_) | AuthCalloutError::BridgeCredential(_) => Self::InvalidRequest,
             AuthCalloutError::Serialize(_) => Self::InternalError,
             AuthCalloutError::Reply(_) => Self::InternalError,
             AuthCalloutError::Jwt(_) => Self::InternalError,
@@ -37,7 +37,8 @@ impl DenialCategory {
             | AuthCalloutError::UnknownSigningKeySource(_)
             | AuthCalloutError::VaultNotConfigured
             | AuthCalloutError::KeyLoadIo { .. }
-            | AuthCalloutError::KeyLoadUtf8(_) => Self::InternalError,
+            | AuthCalloutError::KeyLoadUtf8(_)
+            | AuthCalloutError::AdmissionKeys(_) => Self::InternalError,
             AuthCalloutError::CredentialVerification(e) => Self::from_credential_error(e),
         }
     }
@@ -54,7 +55,8 @@ impl DenialCategory {
             // learn which check refused it.
             CredentialError::InvalidCredentials(_)
             | CredentialError::UnsupportedTokenAlgorithm { .. }
-            | CredentialError::JwkNotPublishedForVerification { .. } => Self::InvalidCredentials,
+            | CredentialError::JwkNotPublishedForVerification { .. }
+            | CredentialError::UnplaceablePrincipal(_) => Self::InvalidCredentials,
         }
     }
 }

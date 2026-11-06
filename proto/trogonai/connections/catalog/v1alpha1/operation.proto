@@ -1,0 +1,98 @@
+edition = "2024";
+
+package trogonai.connections.catalog.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+
+// Finite buffered HTTPS limits. Absence uses the configured platform value;
+// releases may only lower it. These validation bounds are absolute ceilings,
+// not permission to raise the platform value. Defaults and byte accounting
+// are specified in the connector HTTP transport reference.
+message ProxyLimits {
+  reserved 5;
+  reserved stream_idle_timeout;
+
+  uint32 max_request_bytes = 1 [(buf.validate.field).uint32 = {
+    gt: 0
+    lte: 1048576
+  }];
+  uint32 max_response_bytes = 2 [(buf.validate.field).uint32 = {
+    gt: 0
+    lte: 8388608
+  }];
+  google.protobuf.Duration connect_timeout = 3 [(buf.validate.field).duration = {
+    gt: {}
+    lte: {seconds: 5}
+  }];
+  // Never past the grant's expiry, whatever this says.
+  google.protobuf.Duration total_deadline = 4 [(buf.validate.field).duration = {
+    gt: {}
+    lte: {seconds: 30}
+  }];
+  uint32 max_in_flight_per_grant = 6 [(buf.validate.field).uint32 = {
+    gt: 0
+    lte: 4
+  }];
+  uint32 max_request_header_bytes = 7 [(buf.validate.field).uint32 = {
+    gt: 0
+    lte: 16384
+  }];
+  uint32 max_response_header_bytes = 8 [(buf.validate.field).uint32 = {
+    gt: 0
+    lte: 16384
+  }];
+  uint32 max_header_fields = 9 [(buf.validate.field).uint32 = {
+    gt: 0
+    lte: 128
+  }];
+  uint32 max_request_target_bytes = 10 [(buf.validate.field).uint32 = {
+    gt: 0
+    lte: 8192
+  }];
+}
+
+// The scope in which the provider counts its limit; budget counters are keyed
+// the same way (ADR#0096 Decision 8). Unspecified and unknown values are
+// invalid.
+enum QuotaScope {
+  QUOTA_SCOPE_UNSPECIFIED = 0;
+  // Per access token: counted per connection.
+  QUOTA_SCOPE_TOKEN = 1;
+  // Per provider app: counted per app, with a share per tenant.
+  QUOTA_SCOPE_PROVIDER_APP = 2;
+  // Per provider account.
+  QUOTA_SCOPE_PROVIDER_ACCOUNT = 3;
+}
+
+// One response header the proxy reads for rate limiting.
+message RateLimitHeader {
+  // An HTTP field name.
+  string header = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.pattern = "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$"
+  ];
+  RateLimitSignal signal = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+// What a rate-limit header value means. Unspecified and unknown values are
+// invalid.
+enum RateLimitSignal {
+  RATE_LIMIT_SIGNAL_UNSPECIFIED = 0;
+  RATE_LIMIT_SIGNAL_LIMIT = 1;
+  RATE_LIMIT_SIGNAL_REMAINING = 2;
+  // Seconds since the Unix epoch.
+  RATE_LIMIT_SIGNAL_RESET_AT = 3;
+  // Seconds from now.
+  RATE_LIMIT_SIGNAL_RESET_AFTER = 4;
+  // RFC 9110 Retry-After.
+  RATE_LIMIT_SIGNAL_RETRY_AFTER = 5;
+  // Milliseconds since the Unix epoch. Never parse this as RESET_AT seconds.
+  RATE_LIMIT_SIGNAL_RESET_AT_MILLISECONDS = 6;
+}

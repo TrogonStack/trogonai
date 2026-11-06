@@ -1,0 +1,20 @@
+[package]
+name = "trogon-policy-cel"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "CEL request rules for the policy evaluator: compiled once, bounded in cost and time, and able only to narrow"
+
+[lints]
+workspace = true
+
+[dependencies]
+cel-interpreter = { workspace = true }
+cel-parser = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+trogon-policy-eval = { workspace = true }
+trogon-std = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

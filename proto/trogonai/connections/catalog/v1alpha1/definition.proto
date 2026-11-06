@@ -1,0 +1,340 @@
+edition = "2024";
+
+package trogonai.connections.catalog.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/connections/catalog/v1alpha1/oauth.proto";
+import "trogonai/connections/catalog/v1alpha1/proxy_profile.proto";
+import "trogonai/connections/types/v1alpha1/account.proto";
+import "trogonai/connections/types/v1alpha1/discovery.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/policy/egress_permissions/v1alpha1/permission_policy.proto";
+
+// The immutable, reviewed description of how the platform talks to one
+// provider (ADR#0092 Decision 2). A release carries it as exact bytes plus a
+// digest; this typed form is decoded from those bytes after the digest is
+// verified and is never re-encoded to recreate them. A correction is a new
+// release, never a patch. It declares no secret: client identities live on a
+// ProviderApp and credentials behind a Connection's bindings.
+message ConnectorDefinition {
+  reserved 4;
+  reserved operations;
+  option (buf.validate.message).cel = {
+    id: "connector_definition.oauth_profile"
+    message: "an OAuth profile is present exactly when an OAuth method is declared"
+    expression: "has(this.oauth) == this.authentication_methods.exists(m, m == 1 || m == 4 || m == 7)"
+  };
+  option (buf.validate.message).cel = {
+    id: "connector_definition.mcp_profile"
+    message: "an MCP profile is present exactly when the MCP OAuth method is declared"
+    expression: "has(this.mcp) == this.authentication_methods.exists(m, m == 7)"
+  };
+  option (buf.validate.message).cel = {
+    id: "connector_definition.discovered_endpoints"
+    message: "only a per-connection MCP server discovers its endpoints and lists no egress host"
+    expression: "(has(this.mcp) && this.mcp.per_connection_server_url) == (has(this.oauth) && has(this.oauth.discovered)) && (!(has(this.mcp) && this.mcp.per_connection_server_url) || this.egress_hosts.size() == 0)"
+  };
+  option (buf.validate.message).cel = {
+    id: "connector_definition.egress_hosts_present"
+    message: "a release without a per-connection server lists at least one exact egress host"
+    expression: "(has(this.mcp) && this.mcp.per_connection_server_url) || this.egress_hosts.size() > 0"
+  };
+  option (buf.validate.message).cel = {
+    id: "connector_definition.unique_names"
+    message: "credential roles are unique by name"
+    expression: "this.credential_roles.map(r, r.role.value).unique()"
+  };
+
+  option (buf.validate.message).cel = {
+    id: "connector_definition.proxy_profile"
+    message: "ordinary HTTP authentication methods require a proxy profile"
+    expression: "has(this.proxy) == this.authentication_methods.exists(m, m != 7)"
+  };
+  option (buf.validate.message).cel = {
+    id: "connector_definition.anonymous_roles"
+    message: "an anonymous-only release binds and injects no credential"
+    expression: "!this.authentication_methods.all(m, m == 8) || (this.credential_roles.size() == 0 && this.proxy.credential_injections.size() == 0)"
+  };
+
+  option (buf.validate.message).cel = {
+    id: "connector_definition.injection_roles"
+    message: "every injection names an access credential role declared by this release"
+    expression: "!has(this.proxy) || this.proxy.credential_injections.all(i, this.credential_roles.exists(r, r.role == i.role && r.kind in [1, 2, 3]))"
+  };
+  option (buf.validate.message).cel = {
+    id: "connector_definition.injected_method"
+    message: "every authenticated HTTP method has one compatible injection role"
+    expression: "!has(this.proxy) || this.authentication_methods.all(m, m in [7, 8] || this.proxy.credential_injections.filter(i, this.credential_roles.exists(r, r.role == i.role && r.authentication_method == m)).size() == 1)"
+  };
+  option (buf.validate.message).cel = {
+    id: "connector_definition.api_destination_egress"
+    message: "every API destination must be an exact release-approved egress host"
+    expression: "!has(this.proxy) || this.proxy.api_destinations.all(d, this.egress_hosts.exists(h, h == d.upstream))"
+  };
+  option (buf.validate.message).cel = {
+    id: "connector_definition.anonymous_destination"
+    message: "anonymous API destinations exist exactly when the release supports anonymous HTTP"
+    expression: "!has(this.proxy) || (this.proxy.api_destinations.exists(d, has(d.anonymous)) == this.authentication_methods.exists(m, m == 8))"
+  };
+  option (buf.validate.message).cel = {
+    id: "connector_definition.api_destination_authentication"
+    message: "credentialed API destinations use access roles of a declared ordinary HTTP authentication method"
+    expression: "!has(this.proxy) || this.proxy.api_destinations.all(d, !has(d.credential_role) || this.credential_roles.exists(r, r.role == d.credential_role && r.kind in [1, 2, 3] && r.authentication_method != 7 && this.authentication_methods.exists(m, m == r.authentication_method)))"
+  };
+  option (buf.validate.message).cel = {
+    id: "connector_definition.injection_placement_kind"
+    message: "Basic credential bundles use Basic placement; token and API-key roles use Bearer or a reviewed header"
+    expression: "!has(this.proxy) || this.proxy.credential_injections.all(i, this.credential_roles.exists(r, r.role == i.role && (has(i.basic) ? r.kind == 3 : r.kind in [1, 2])))"
+  };
+  option (buf.validate.message).cel = {
+    id: "connector_definition.restriction_api_destination"
+    message: "HTTP restrictions name approved API destinations, never OAuth-only or probe-only egress"
+    expression: "!has(this.proxy) || !has(this.proxy.restrictions) || this.proxy.restrictions.rules.all(r, this.proxy.api_destinations.exists(d, d.upstream == r.host))"
+  };
+
+  // The methods a Connection to this provider may authenticate with. A
+  // Connection's configuration picks exactly one of them.
+  repeated AuthenticationMethod authentication_methods = 1 [(buf.validate.field).repeated = {
+    min_items: 1
+    unique: true
+    items: {
+      enum: {
+        defined_only: true
+        not_in: [0]
+      }
+    }
+  }];
+  // Present exactly when an OAuth method is declared.
+  OAuthProfile oauth = 2;
+  // The roles a Connection must bind, one CredentialBinding per role
+  // (ADR#0092 Decision 5). An OAuth connection holds one role whose single
+  // secret is the whole token set.
+  repeated CredentialRoleDefinition credential_roles = 3;
+  // The exact hosts the executors and custody may reach for this release:
+  // identities, never patterns (ADR#0092 Decision 2, ADR#0072 Decision 3).
+  // Every declared OAuth endpoint, probe and upstream host is listed
+  // here. Empty only for a per-connection MCP server, whose hosts come from
+  // the pinned discovery snapshots and the owner's acknowledgement (ADR#0092
+  // Decision 7).
+  repeated trogonai.policy.egress_permissions.v1alpha1.EgressHost egress_hosts = 5;
+  IdentityProbe identity_probe = 6 [features.field_presence = LEGACY_REQUIRED];
+  // Whether and how the provider revokes a grant, so an unsupported revoke is
+  // recorded as UNSUPPORTED and never faked (ADR#0092 Decision 2, ADR#0094
+  // Decision 13).
+  RevocationSupport revocation = 7 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // How the platform learns that the provider side uninstalled or withdrew
+  // the grant, which moves the Connection to ReconnectRequired on the same id
+  // (ADR#0092 Decision 4).
+  UninstallSignal uninstall = 8 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // True when the provider can deliver webhooks for this connector. The
+  // endpoint contract is the later webhook phase; the flag only records the
+  // capability (ADR#0092 Decision 2).
+  bool webhook_capable = 9 [features.field_presence = LEGACY_REQUIRED];
+  // Present exactly when the MCP OAuth method is declared.
+  McpProfile mcp = 10;
+  // Required for any ordinary HTTP method, including Authentication.none;
+  // absent for an MCP-only release. Publish validates every injection and
+  // restriction against the declared roles and exact egress hosts.
+  ProxyProfile proxy = 11;
+}
+
+// The ways a Connection may authenticate to this provider. The ADR names the
+// set in the Connection's Authentication oneof; this enum is its catalog-side
+// declaration. Dynamic registration is not listed because it is how an app
+// came to exist, not how a connection authenticates (ADR#0092 Decision 3).
+// Unspecified and unknown values are invalid.
+enum AuthenticationMethod {
+  AUTHENTICATION_METHOD_UNSPECIFIED = 0;
+  // OAuth 2.1 authorization code with PKCE (ADR#0094).
+  AUTHENTICATION_METHOD_OAUTH_AUTHORIZATION_CODE = 1;
+  AUTHENTICATION_METHOD_API_KEY = 2;
+  AUTHENTICATION_METHOD_BASIC = 3;
+  // RFC 6749 client credentials; the ProviderApp is the client.
+  AUTHENTICATION_METHOD_CLIENT_CREDENTIALS = 4;
+  // A service account signing its own JWT assertion.
+  AUTHENTICATION_METHOD_SERVICE_ACCOUNT_JWT = 5;
+  // An installation of a KeyedApp, such as a GitHub App installation.
+  AUTHENTICATION_METHOD_APP_INSTALLATION = 6;
+  // The MCP authorization profile pinned by McpProfile (ADR#0092 Decision 7).
+  AUTHENTICATION_METHOD_MCP_OAUTH = 7;
+  // The provider needs no credential.
+  AUTHENTICATION_METHOD_NONE = 8;
+}
+
+// One credential role a Connection binds (ADR#0092 Decision 5). It names the
+// role and what kind of secret custody keeps behind it; the secret itself is
+// only ever a SecretRef on the Connection's binding.
+message CredentialRoleDefinition {
+  option (buf.validate.message).cel = {
+    id: "credential_role_definition.method_kind"
+    message: "OAuth roles hold token sets, API-key roles hold API keys and Basic roles hold Basic bundles"
+    expression: "(!(this.authentication_method in [1, 4, 7]) || this.kind == 1) && (this.authentication_method != 2 || this.kind == 2) && (this.authentication_method != 3 || this.kind == 3)"
+  };
+  trogonai.connections.types.v1alpha1.CredentialRoleName role = 1 [features.field_presence = LEGACY_REQUIRED];
+  CredentialRoleKind kind = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // The authentication method that fills this role. A Connection binds the
+  // roles of its chosen method only.
+  AuthenticationMethod authentication_method = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+// What kind of material custody keeps behind a role. The ADR names only the
+// OAuth token set; the other values are the smallest set that covers the
+// declared authentication methods. Unspecified and unknown values are invalid.
+enum CredentialRoleKind {
+  CREDENTIAL_ROLE_KIND_UNSPECIFIED = 0;
+  // Access, refresh and ID tokens as one secret (ADR#0095 Decision 2).
+  CREDENTIAL_ROLE_KIND_OAUTH_TOKEN_SET = 1;
+  CREDENTIAL_ROLE_KIND_API_KEY = 2;
+  // A user name and password pair as one secret.
+  CREDENTIAL_ROLE_KIND_BASIC_CREDENTIAL = 3;
+  // A private key used to sign assertions.
+  CREDENTIAL_ROLE_KIND_SIGNING_KEY = 4;
+  // A webhook signing secret, bound when the webhook phase lands.
+  CREDENTIAL_ROLE_KIND_WEBHOOK_SIGNING_SECRET = 5;
+}
+
+// Which provider call yields the ProviderAccount and which fields of its
+// answer may be kept (ADR#0092 Decisions 2 and 9). The probe runs in the
+// trusted executor with the staged access token (ADR#0094 Decision 5). What
+// is not listed is never read, so captured data is reviewed with the release.
+message IdentityProbe {
+  reserved 1;
+  reserved operation;
+  option (buf.validate.message).cel = {
+    id: "identity_probe.unique_attributes"
+    message: "each account attribute is read from at most one response field"
+    expression: "this.fields.map(f, f.attribute).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "identity_probe.fingerprint_input"
+    message: "the probe yields the account identity the fingerprint is computed over"
+    expression: "this.fields.exists(f, f.attribute == 1)"
+  };
+
+  // The subject kind every account of this release has. A provider whose
+  // accounts differ in kind ships one release per kind.
+  trogonai.connections.types.v1alpha1.ProviderSubjectKind subject_kind = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  repeated IdentityProbeField fields = 3 [(buf.validate.field).repeated.min_items = 1];
+  oneof request {
+    option (buf.validate.oneof).required = true;
+    IdentityHttpGet http_get = 4;
+    IdentityGraphqlQuery graphql_query = 5;
+  }
+}
+
+// One response field the probe may read, and which account attribute it
+// fills. Any other field of the response is discarded.
+message IdentityProbeField {
+  // An RFC 6901 JSON Pointer into the decoded response of the fixed probe request.
+  string response_field = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.pattern = "^(/([^~/]|~[01])*)+$"
+  ];
+  ProviderAccountAttribute attribute = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+// The account attributes a probe may capture (ADR#0092 Decision 9). Email
+// addresses, avatar and profile URLs, phone numbers and free-text profile
+// fields have no value here and so cannot be captured. ACCOUNT_ID and
+// SUBJECT_ID of a USER subject feed only the keyed fingerprint and the
+// erasable profile, never a stream. Unspecified and unknown values are
+// invalid.
+enum ProviderAccountAttribute {
+  PROVIDER_ACCOUNT_ATTRIBUTE_UNSPECIFIED = 0;
+  // The provider's id of the account; always a fingerprint input.
+  PROVIDER_ACCOUNT_ATTRIBUTE_ACCOUNT_ID = 1;
+  // A stable subject id where the provider exposes one distinct from the
+  // account id; a fingerprint input and the reconnect continuity check.
+  PROVIDER_ACCOUNT_ATTRIBUTE_SUBJECT_ID = 2;
+  PROVIDER_ACCOUNT_ATTRIBUTE_ORGANIZATION_ID = 3;
+  PROVIDER_ACCOUNT_ATTRIBUTE_WORKSPACE_ID = 4;
+  PROVIDER_ACCOUNT_ATTRIBUTE_INSTALLATION_ID = 5;
+  // One bounded display name, captured at activation and at reconnect only,
+  // kept solely in the erasable profile (ADR#0093 Decision 11).
+  PROVIDER_ACCOUNT_ATTRIBUTE_DISPLAY_NAME = 6;
+  // The scopes the provider reports as granted, read when the OAuth profile
+  // sets scope omission to PROBE; recorded with evidence PROBED.
+  PROVIDER_ACCOUNT_ATTRIBUTE_GRANTED_SCOPES = 7;
+}
+
+// Whether the provider can revoke a grant at all, and where the endpoint comes
+// from. The cleanup worker records every call as an EffectOutcome, and an
+// UNSUPPORTED release yields that outcome without a call (ADR#0094 Decision
+// 13). Unspecified and unknown values are invalid.
+enum RevocationSupport {
+  REVOCATION_SUPPORT_UNSPECIFIED = 0;
+  // The provider offers no revocation. Tokens live until expiry and the
+  // owner removes the app in the provider's settings.
+  REVOCATION_SUPPORT_UNSUPPORTED = 1;
+  // The RFC 7009 endpoint written in the release's OAuthEndpoints.
+  REVOCATION_SUPPORT_DECLARED = 2;
+  // The revocation_endpoint of the pinned authorization server metadata,
+  // when the snapshot advertises one; otherwise UNSUPPORTED at cleanup time.
+  REVOCATION_SUPPORT_DISCOVERED = 3;
+}
+
+// How a provider-side uninstall or withdrawal becomes known. The ADR records
+// that an uninstall is a fact moving the Connection to ReconnectRequired and
+// is silent on the channel; this is the smallest set of channels. Unspecified
+// and unknown values are invalid.
+enum UninstallSignal {
+  UNINSTALL_SIGNAL_UNSPECIFIED = 0;
+  // The provider exposes no signal; a dead grant is learned at refresh or at
+  // a provider 401 that survives one forced refresh.
+  UNINSTALL_SIGNAL_NONE = 1;
+  // The provider sends a webhook; it is wired in the webhook phase.
+  UNINSTALL_SIGNAL_WEBHOOK = 2;
+  // A refresh answers invalid_grant once the grant is gone.
+  UNINSTALL_SIGNAL_INVALID_GRANT = 3;
+}
+
+// The MCP authorization profile of a release (ADR#0092 Decision 7). A generic
+// mcp release pins the specification revision and permits a per-connection
+// server URL; a curated server ships its own release with fixed hosts and
+// per_connection_server_url false.
+message McpProfile {
+  // The pinned MCP authorization specification revision; the reviewed profile is
+  // 2026-07-28, independently of the MCP transport/session version.
+  trogonai.connections.types.v1alpha1.McpSpecificationRevision specification_revision = 1 [features.field_presence = LEGACY_REQUIRED];
+  // True when the owner supplies the server URL at connect time. The hosts
+  // then come from the pinned discovery snapshots and the owner acknowledges
+  // the exact list on the Connection (ADR#0092 Decision 7, ADR#0094 Decision
+  // 10).
+  bool per_connection_server_url = 2 [features.field_presence = LEGACY_REQUIRED];
+}

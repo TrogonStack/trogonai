@@ -1,0 +1,47 @@
+{
+  "policy_id": "linear-graphql-json-v1",
+  "version": 1,
+  "request": {
+    "media_type": "application/json",
+    "methods": [
+      "POST"
+    ],
+    "path": "/graphql",
+    "body_sensitive_authorization": false
+  },
+  "response": {
+    "media_types": [
+      "application/json",
+      "application/graphql-response+json"
+    ],
+    "root": "object",
+    "max_json_depth": 32,
+    "reject_duplicate_members": true,
+    "body_bytes_preserved": true,
+    "content_encoding": "absent",
+    "credential_scan": [
+      "literal_header_values",
+      "decoded_json_strings",
+      "base64_standard_padded",
+      "base64_url_unpadded",
+      "percent_encoded_uppercase",
+      "percent_encoded_lowercase"
+    ],
+    "transformation_completeness_claim": false
+  },
+  "observations": {
+    "http_401": "AUTHENTICATION_OBSERVATION_ONLY",
+    "http_403": "AUTHORIZATION_OBSERVATION_ONLY",
+    "http_429": "RATE_LIMITED",
+    "graphql_error_code_RATELIMITED": "RATE_LIMITED",
+    "unknown_graphql_error": "PRESERVE_WITHOUT_AUTHORITY_INFERENCE",
+    "refresh_invalid_grant": "RECONNECT_REQUIRED",
+    "automatic_provider_request_retries": false
+  },
+  "admission": {
+    "requires_registered_runtime_policy_digest": true,
+    "missing_policy": "REFUSE",
+    "digest_mismatch": "REFUSE",
+    "live_provider_proof_required": true
+  }
+}
