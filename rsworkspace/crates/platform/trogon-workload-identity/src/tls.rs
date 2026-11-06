@@ -8,87 +8,12 @@ use rustls::server::WebPkiClientVerifier;
 use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
 use rustls::{ClientConfig, DigitallySignedStruct, DistinguishedName, RootCertStore, ServerConfig, SignatureScheme};
 use spiffe::SpiffeId;
-use x509_parser::prelude::{FromDer, X509Certificate};
 
-use crate::candidate::{Candidate, leaf_profile, timestamp};
-use crate::identity_store::MaterialAuthority;
+use crate::candidate::Candidate;
+use crate::certificate_validation::{leaf_profile, verify_chain};
+use crate::material_authority::MaterialAuthority;
 use crate::tls_guards::LiveResolver;
 use crate::{MaterialError, RegistrationSet};
-
-pub(crate) fn verify_chain(
-    chain: &[CertificateDer<'_>],
-    roots: &[CertificateDer<'_>],
-    now: SystemTime,
-    server: bool,
-) -> Result<SystemTime, MaterialError> {
-    let leaf = chain.first().ok_or(MaterialError::Certificate)?;
-    let (_, _, leaf_expiry) = leaf_profile(leaf, now)?;
-    let mut usable = Vec::new();
-    let mut expiries = Vec::new();
-    for root in roots {
-        let (rest, certificate) = X509Certificate::from_der(root).map_err(|_| MaterialError::Certificate)?;
-        if !rest.is_empty() {
-            return Err(MaterialError::Certificate);
-        }
-        let not_before = timestamp(certificate.validity().not_before.timestamp())?;
-        let expires_at = timestamp(certificate.validity().not_after.timestamp())?;
-        if not_before > now
-            || expires_at <= now
-            || !certificate
-                .basic_constraints()
-                .map_err(|_| MaterialError::Certificate)?
-                .is_some_and(|bc| bc.value.ca)
-            || certificate
-                .key_usage()
-                .map_err(|_| MaterialError::Certificate)?
-                .is_some_and(|usage| !usage.value.key_cert_sign())
-        {
-            continue;
-        }
-        usable.push(root.clone());
-        expiries.push(expires_at);
-    }
-    let anchors = usable
-        .iter()
-        .map(webpki::anchor_from_trusted_cert)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| MaterialError::Certificate)?;
-    let end_entity = webpki::EndEntityCert::try_from(leaf).map_err(|_| MaterialError::Certificate)?;
-    let time = UnixTime::since_unix_epoch(
-        now.duration_since(SystemTime::UNIX_EPOCH)
-            .map_err(|_| MaterialError::Profile)?,
-    );
-    let provider = rustls::crypto::aws_lc_rs::default_provider();
-    let usage = if server {
-        webpki::KeyUsage::server_auth()
-    } else {
-        webpki::KeyUsage::client_auth()
-    };
-    let path = end_entity
-        .verify_for_usage(
-            provider.signature_verification_algorithms.all,
-            &anchors,
-            &chain[1..],
-            time,
-            usage,
-            None,
-            None,
-        )
-        .map_err(|_| MaterialError::Certificate)?;
-    let mut expiry = leaf_expiry;
-    for certificate in path.intermediate_certificates() {
-        let der = certificate.der();
-        let (_, parsed) = X509Certificate::from_der(der.as_ref()).map_err(|_| MaterialError::Certificate)?;
-        expiry = expiry.min(timestamp(parsed.validity().not_after.timestamp())?);
-    }
-    let root_expiry = anchors
-        .iter()
-        .zip(expiries)
-        .find(|(anchor, _)| std::ptr::eq(*anchor, path.anchor()))
-        .map(|(_, expiry)| expiry)
-        .ok_or(MaterialError::Certificate)?;
-    Ok(expiry.min(root_expiry))
-}
 
 pub(crate) fn server_config(
     candidate: &Candidate,

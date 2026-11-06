@@ -6,7 +6,7 @@ use rustls::server::{ClientHello, ResolvesServerCert};
 use rustls::sign::{CertifiedKey, Signer, SigningKey};
 use rustls::{SignatureAlgorithm, SignatureScheme};
 
-use crate::identity_store::MaterialAuthority;
+use crate::material_authority::MaterialAuthority;
 
 #[derive(Debug)]
 pub(crate) struct LiveResolver {

@@ -9,7 +9,9 @@ use tokio::sync::watch;
 use tokio::time::Instant;
 use sha2::{Digest, Sha256};
 
-use crate::candidate::{Candidate, leaf_profile};
+use crate::candidate::Candidate;
+use crate::certificate_validation::leaf_profile;
+use crate::material_authority::{MaterialAuthority, MaterialStatus};
 use crate::constants::MAX_REGISTRATION_LIFETIME;
 use crate::{
     ActivationAudit, ActivationFact, ApplicationId, IdentityConfig, MaterialError, RegistrationError, RegistrationSet,
@@ -59,42 +61,28 @@ pub(crate) struct PendingActivation {
     material: Arc<ApprovedMaterial>,
 }
 
-#[derive(Clone)]
-pub(crate) struct MaterialAuthority {
+struct WeakMaterialStatus {
     inner: Weak<Inner>,
     activation_revision: NonZeroU64,
 }
 
-impl std::fmt::Debug for MaterialAuthority {
+impl std::fmt::Debug for WeakMaterialStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MaterialAuthority")
-            .field("activation_revision", &self.activation_revision)
-            .finish()
+        f.debug_struct("WeakMaterialStatus").field("activation_revision", &self.activation_revision).finish()
     }
 }
 
-impl MaterialAuthority {
-    fn new(store: &IdentityStore, activation_revision: NonZeroU64) -> Self {
-        Self {
-            inner: Arc::downgrade(&store.inner),
-            activation_revision,
-        }
-    }
-
-    pub fn require_current(&self) -> Result<(), rustls::Error> {
-        if self.inner.upgrade().is_some_and(|inner| {
+impl MaterialStatus for WeakMaterialStatus {
+    fn is_current(&self) -> bool {
+        self.inner.upgrade().is_some_and(|inner| {
             let store = IdentityStore { inner };
-            store
-                .material()
-                .is_some_and(|lease| lease.fact().activation_revision() == self.activation_revision)
-        }) {
-            Ok(())
-        } else {
-            Err(rustls::Error::InvalidCertificate(
-                rustls::CertificateError::ApplicationVerificationFailure,
-            ))
-        }
+            store.material().is_some_and(|lease| lease.fact().activation_revision() == self.activation_revision)
+        })
     }
+}
+
+pub struct IdentityDriver {
+    pub(crate) store: IdentityStore,
 }
 
 impl PendingActivation {
@@ -120,7 +108,7 @@ impl IdentityStore {
                 events,
             }),
         };
-        let driver = crate::IdentityDriver::new(store.clone());
+        let driver = IdentityDriver { store: store.clone() };
         (store, driver)
     }
     pub fn config(&self) -> &IdentityConfig {
@@ -251,6 +239,10 @@ impl IdentityStore {
         }
     }
 
+    fn authority(&self, activation_revision: NonZeroU64) -> MaterialAuthority {
+        MaterialAuthority::new(Arc::new(WeakMaterialStatus { inner: Arc::downgrade(&self.inner), activation_revision }))
+    }
+
     pub(crate) fn prepare(&self) -> Option<PendingActivation> {
         let mut state = self.inner.state.lock().ok()?;
         if state.exhausted {
@@ -278,7 +270,7 @@ impl IdentityStore {
         let activation_revision = NonZeroU64::new(next)?;
         let source_revision = NonZeroU64::new(state.source_revision)?;
         state.activation_revision = next;
-        let authority = MaterialAuthority::new(self, activation_revision);
+        let authority = self.authority(activation_revision);
         let tls = crate::tls::server_config(&candidate, &registration.registration, authority).ok()?;
         let fact = ActivationFact {
             binding: self.config().local.clone(),
@@ -379,7 +371,7 @@ impl MaterialLease {
         let leaf = certificates.first().ok_or(MaterialError::Identity)?;
         let now = SystemTime::now();
         let (id, _, _) = leaf_profile(leaf, now)?;
-        let expires_at = crate::tls::verify_chain(certificates, &self.material.candidate.roots, now, false)?;
+        let expires_at = crate::certificate_validation::verify_chain(certificates, &self.material.candidate.roots, now, false)?;
         let application_id = self.application_for_peer(&id).ok_or(MaterialError::Unavailable)?;
         Ok(crate::PeerEvidence { application_id, expires_at, spiffe_id: id, leaf_sha256: Sha256::digest(leaf).into() })
     }
@@ -394,7 +386,7 @@ impl MaterialLease {
             &self.material.candidate,
             &self.material.registration,
             expected_peer,
-            MaterialAuthority::new(&self.store, self.fact().activation_revision()),
+            self.store.authority(self.fact().activation_revision()),
         )
     }
     pub fn is_current(&self) -> bool {

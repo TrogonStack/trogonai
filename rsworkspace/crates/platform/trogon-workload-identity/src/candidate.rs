@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use rustls::sign::CertifiedKey;
@@ -9,9 +9,9 @@ use spiffe::{SpiffeId, X509Context};
 use tokio::time::Instant;
 use x509_parser::prelude::{FromDer, X509Certificate};
 
-use crate::constants::{MAX_CONTEXT_BYTES, MAX_IDENTITIES, MAX_ROOTS, MAX_SVID_LIFETIME};
+use crate::constants::{MAX_CONTEXT_BYTES, MAX_IDENTITIES, MAX_ROOTS};
 use crate::material_error::MaterialError;
-use crate::tls::verify_chain;
+use crate::certificate_validation::{leaf_profile, verify_chain};
 
 pub(crate) struct Candidate {
     pub certified_key: Arc<CertifiedKey>,
@@ -115,51 +115,3 @@ impl Candidate {
     }
 }
 
-pub(crate) fn timestamp(value: i64) -> Result<SystemTime, MaterialError> {
-    SystemTime::UNIX_EPOCH
-        .checked_add(Duration::from_secs(
-            u64::try_from(value).map_err(|_| MaterialError::Profile)?,
-        ))
-        .ok_or(MaterialError::Profile)
-}
-
-pub(crate) fn leaf_profile(
-    certificate: &CertificateDer<'_>,
-    now: SystemTime,
-) -> Result<(SpiffeId, SystemTime, SystemTime), MaterialError> {
-    let (rest, leaf) = X509Certificate::from_der(certificate).map_err(|_| MaterialError::Profile)?;
-    if !rest.is_empty() {
-        return Err(MaterialError::Profile);
-    }
-    let id = spiffe::cert::spiffe_id_from_der(certificate).map_err(|_| MaterialError::Identity)?;
-    if id.path().is_empty() {
-        return Err(MaterialError::Identity);
-    }
-    let basic = leaf
-        .basic_constraints()
-        .map_err(|_| MaterialError::Profile)?
-        .ok_or(MaterialError::Profile)?;
-    let usage = leaf
-        .key_usage()
-        .map_err(|_| MaterialError::Profile)?
-        .ok_or(MaterialError::Profile)?;
-    if basic.value.ca || !usage.value.digital_signature() || usage.value.key_cert_sign() || usage.value.crl_sign() {
-        return Err(MaterialError::Profile);
-    }
-    if leaf
-        .extended_key_usage()
-        .map_err(|_| MaterialError::Profile)?
-        .is_some_and(|eku| !eku.value.client_auth || !eku.value.server_auth)
-    {
-        return Err(MaterialError::Profile);
-    }
-    let not_before = timestamp(leaf.validity().not_before.timestamp())?;
-    let expires_at = timestamp(leaf.validity().not_after.timestamp())?;
-    let lifetime = expires_at
-        .duration_since(not_before)
-        .map_err(|_| MaterialError::Profile)?;
-    if not_before > now || expires_at <= now || lifetime.is_zero() || lifetime > MAX_SVID_LIFETIME {
-        return Err(MaterialError::Profile);
-    }
-    Ok((id, not_before, expires_at))
-}

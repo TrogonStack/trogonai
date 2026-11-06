@@ -2,19 +2,11 @@ use futures::StreamExt;
 use spiffe::WorkloadApiClient;
 use tokio_util::sync::CancellationToken;
 
-use crate::IdentityStore;
+use crate::IdentityDriver;
 use crate::candidate::Candidate;
 use crate::constants::{CONNECT_TIMEOUT, LIFECYCLE_POLL, RECONNECT_DELAY};
 
-pub struct IdentityDriver {
-    store: IdentityStore,
-}
-
 impl IdentityDriver {
-    pub(crate) fn new(store: IdentityStore) -> Self {
-        Self { store }
-    }
-
     pub async fn run(self, shutdown: CancellationToken) {
         tokio::join!(self.read(shutdown.clone()), self.activate(shutdown.clone()), async {
             let mut timer = tokio::time::interval(LIFECYCLE_POLL);

@@ -574,7 +574,7 @@ async fn peer_evidence_is_bounded_by_its_selected_root_instead_of_the_local_svid
     assert_eq!(*evidence.leaf_sha256(), <[u8;32]>::from(Sha256::digest(&peer_identity.certificates()[0])));
     let root = peer_ca.root();
     let (_, root) = X509Certificate::from_der(root.as_ref()).unwrap();
-    let root_expiry = crate::candidate::timestamp(root.validity().not_after.timestamp()).unwrap();
+    let root_expiry = crate::certificate_validation::timestamp(root.validity().not_after.timestamp()).unwrap();
     assert_eq!(evidence.expires_at(), root_expiry, "a peer must not inherit the server's longer-lived issuing path");
     assert!(evidence.expires_at() < server_lease.expires_at());
     shutdown.cancel();
