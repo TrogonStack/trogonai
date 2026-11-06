@@ -46,15 +46,18 @@ pub mod peer_identity;
 pub mod policy_revision;
 pub mod policy_snapshot;
 pub mod policy_source;
-pub mod resolver;
 pub mod readiness;
 pub mod readiness_status;
+pub mod resolver;
 pub mod runtime;
+mod runtime_activity;
+mod runtime_phase;
 mod scoped_snapshot_key;
 mod scoped_stream;
-mod snapshot_bucket;
 pub mod server;
+mod snapshot_bucket;
 pub mod static_snapshot;
+mod telemetry;
 pub mod trust_domain;
 pub mod workload_activation_audit;
 pub mod workload_identity_config;
@@ -64,11 +67,11 @@ pub mod writer_audit;
 
 pub use agent_id::AgentId;
 pub use config::{Args, Config};
+pub use readiness::Readiness;
+pub use readiness_status::ReadinessStatus;
 pub use runtime::{StartupError, start};
 pub use scoped_snapshot_key::ScopedSnapshotKey;
 pub use server::Server;
-pub use readiness::Readiness;
-pub use readiness_status::ReadinessStatus;
 pub use snapshot_bucket::{SnapshotBucket, SnapshotBucketError};
 
 #[cfg(test)]

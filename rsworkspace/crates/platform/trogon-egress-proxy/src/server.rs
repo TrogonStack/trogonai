@@ -28,6 +28,7 @@ pub struct Server {
     policy_driver: Option<KvPolicyDriver>,
     identity_driver: Option<IdentityDriver>,
     registration_driver: Option<RegistrationDriver>,
+    readiness: crate::Readiness,
 }
 
 #[derive(Clone)]
@@ -61,10 +62,16 @@ impl ListenerIdentity {
 
 impl Server {
     pub fn readiness(&self) -> crate::Readiness {
-        crate::Readiness
+        self.readiness.clone()
+    }
+
+    pub(crate) fn with_readiness(mut self, readiness: crate::Readiness) -> Self {
+        self.readiness = readiness;
+        self
     }
 
     pub fn new(listener: TcpListener, tls: Arc<rustls::ServerConfig>, proxy: Proxy, trust_domain: TrustDomain) -> Self {
+        let readiness = crate::Readiness::new(None, None, proxy.audit());
         Self {
             listener,
             acceptor: ListenerIdentity::Fixed(TlsAcceptor::from(tls)),
@@ -73,6 +80,7 @@ impl Server {
             policy_driver: None,
             identity_driver: None,
             registration_driver: None,
+            readiness,
         }
     }
 
@@ -84,6 +92,7 @@ impl Server {
         driver: IdentityDriver,
         registration: RegistrationDriver,
     ) -> Self {
+        let readiness = crate::Readiness::new(None, None, proxy.audit());
         Self {
             listener,
             acceptor: ListenerIdentity::Workload(identity),
@@ -92,6 +101,7 @@ impl Server {
             policy_driver: None,
             identity_driver: Some(driver),
             registration_driver: Some(registration),
+            readiness,
         }
     }
 
@@ -111,6 +121,7 @@ impl Server {
     /// made its last flush. A record still buffered when that flush fails, as
     /// it does while the stream stays down, is lost with the process.
     pub async fn run(mut self, shutdown: CancellationToken) {
+        let _activity = self.readiness.running(shutdown.clone());
         let flush = CancellationToken::new();
         let audit = self.proxy.audit();
         let drain = tokio::spawn({

@@ -64,6 +64,8 @@ pub trait AuditSink: Send + Sync {
     /// the caller ignores `Err`.
     async fn record(&self, event: &AuditEvent<'_>) -> Result<(), AuditError>;
 
+    /// Requires a fresh durable acknowledgement. An adapter without that proof
+    /// cannot make an enterprise runtime ready.
     async fn readiness(&self) -> AuditReadiness {
         AuditReadiness::Unavailable
     }

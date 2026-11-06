@@ -1,5 +1,3 @@
-use crate::audit_readiness::AuditReadiness;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReadinessStatus {
     Ready,
@@ -8,5 +6,8 @@ pub enum ReadinessStatus {
     UnsupportedProfile,
     IdentityUnavailable,
     PolicyUnavailable,
-    Audit(AuditReadiness),
+    AuditUnavailable,
+    AuditDegraded,
+    AuditOverloaded,
+    AuditTimedOut,
 }

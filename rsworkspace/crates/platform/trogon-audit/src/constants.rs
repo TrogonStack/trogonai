@@ -24,6 +24,7 @@ pub const TERMINAL_POLICY: &str = "policy";
 pub const TERMINAL_CREDENTIAL: &str = "credential";
 pub const TERMINAL_START: &str = "start";
 pub const TERMINAL_CHAIN_RESET: &str = "chain_reset";
+pub const TERMINAL_READINESS_PROBE: &str = "readiness_probe";
 pub const TERMINAL_SIGNED: &str = "signed";
 
 /// Provenance travels in headers, never in payload fields (ADR#0039).

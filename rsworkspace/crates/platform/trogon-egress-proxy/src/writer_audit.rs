@@ -12,6 +12,8 @@
 //! flush.
 
 use async_trait::async_trait;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use trogon_audit::{
@@ -25,8 +27,9 @@ use crate::audit::{AuditEvent, AuditSink, Decision};
 use crate::audit_budget::AuditBudget;
 use crate::audit_capacity::AuditCapacity;
 use crate::audit_error::AuditError;
+use crate::audit_readiness::AuditReadiness;
 use crate::connection_limit::ConnectionLimit;
-use crate::constants::AUDIT_LOG_TARGET;
+use crate::constants::{AUDIT_LOG_TARGET, AUDIT_READINESS_TIMEOUT};
 use crate::decision_record::decision_record;
 use crate::fault::Fault;
 
@@ -37,6 +40,7 @@ pub struct WriterAudit<S> {
     project: NatsToken,
     in_flight: TaskTracker,
     budget: AuditBudget,
+    readiness_probe: Arc<Mutex<()>>,
 }
 
 impl<S: Sink> WriterAudit<S> {
@@ -48,6 +52,7 @@ impl<S: Sink> WriterAudit<S> {
             project,
             in_flight: TaskTracker::new(),
             budget: AuditBudget::new(limit),
+            readiness_probe: Arc::new(Mutex::new(())),
         }
     }
 
@@ -84,6 +89,43 @@ impl<S: Sink> WriterAudit<S> {
 
 #[async_trait]
 impl<S: Sink> AuditSink for WriterAudit<S> {
+    async fn readiness(&self) -> AuditReadiness {
+        if self.writer.is_degraded() {
+            return AuditReadiness::Degraded;
+        }
+        let Ok(probe) = Arc::clone(&self.readiness_probe).try_lock_owned() else {
+            return AuditReadiness::Overloaded;
+        };
+        let tracked = self.in_flight.token();
+        let Ok(permit) = self.budget.try_acquire() else {
+            return AuditReadiness::Overloaded;
+        };
+        // A health check cannot consume the last decision slot.
+        if !self.capacity().has_capacity() {
+            return AuditReadiness::Overloaded;
+        }
+        let writer = self.writer.clone();
+        let stamp = self.stamper.stamp();
+        let write = tokio::spawn(async move {
+            let (_tracked, _permit, _probe) = (tracked, permit, probe);
+            writer.readiness_probe(stamp).await.map(|_| ())
+        });
+        match tokio::time::timeout(AUDIT_READINESS_TIMEOUT, write).await {
+            Ok(Ok(Ok(()))) if self.writer.is_degraded() => AuditReadiness::Degraded,
+            Ok(Ok(Ok(()))) if !self.capacity().has_capacity() => AuditReadiness::Overloaded,
+            Ok(Ok(Ok(()))) => AuditReadiness::Ready,
+            Err(_) => AuditReadiness::TimedOut,
+            Ok(Ok(Err(error))) => {
+                crate::telemetry::readiness::audit_unavailable(&error);
+                AuditReadiness::Unavailable
+            }
+            Ok(Err(error)) => {
+                crate::telemetry::readiness::audit_worker_failed(&error);
+                AuditReadiness::Unavailable
+            }
+        }
+    }
+
     async fn record(&self, event: &AuditEvent<'_>) -> Result<(), AuditError> {
         let outcome = self.write(event).await;
         log(event, &outcome);

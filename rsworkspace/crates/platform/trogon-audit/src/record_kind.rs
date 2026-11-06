@@ -24,7 +24,7 @@ pub enum RecordKind {
     CredentialActivation,
     /// A policy or credential change. Must-audit in every mode.
     Change,
-    /// Writer start and chain reset.
+    /// Writer lifecycle and fresh readiness acknowledgement.
     Integrity,
 }
 

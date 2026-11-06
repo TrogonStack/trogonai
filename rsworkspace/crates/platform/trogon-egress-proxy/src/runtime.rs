@@ -130,6 +130,7 @@ async fn start_with_sources(
     activation: Option<Arc<dyn ActivationAudit>>,
 ) -> Result<Server, StartupError> {
     validate_policy_transport(&config)?;
+    let mut readiness_policy = None;
     let (snapshot, policy_driver, statistics): (Arc<dyn PolicySnapshot>, _, _) = match &config.policy {
         PolicyInput::StaticFile(path) => {
             let snapshot = StaticSnapshot::load(path).map_err(StartupError::Policy)?;
@@ -151,6 +152,7 @@ async fn start_with_sources(
             let (snapshot, driver) = KvSnapshot::open(client, policy)
                 .await
                 .map_err(StartupError::LivePolicy)?;
+            readiness_policy = Some(Arc::clone(&snapshot));
             let statistics = snapshot.statistics();
             (snapshot, Some(driver), statistics)
         }
@@ -209,7 +211,9 @@ async fn start_with_sources(
                 driver,
                 registration,
             } = *workload;
+            let readiness = crate::Readiness::new(Some(identity.clone()), readiness_policy, proxy.audit());
             Server::new_workload(listener, identity, proxy, config.trust_domain, driver, registration)
+                .with_readiness(readiness)
         }
     };
     Ok(server.with_policy_driver(policy_driver))

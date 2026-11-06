@@ -9,12 +9,19 @@ async fn readiness_requires_a_fresh_integrity_ack_and_refuses_a_previously_healt
     let records = sink.stored_records();
     let genesis = sink.stored().first().expect("genesis").clone();
     let verified = verify_chain_range(
-        ChainAnchor::Genesis { writer: writer(), chain: genesis.chain() },
+        ChainAnchor::Genesis {
+            writer: writer(),
+            chain: genesis.chain(),
+        },
         records,
-    ).expect("the readiness probe preserves the hash chain");
+    )
+    .expect("the readiness probe preserves the hash chain");
     assert_eq!(verified.records(), 2);
     let probe = sink.stored().last().expect("probe").clone();
-    assert_eq!(probe.subject(), "platform.v1.audit.integrity.egress_proxy.readiness_probe");
+    assert_eq!(
+        probe.subject(),
+        "platform.v1.audit.integrity.egress_proxy.readiness_probe"
+    );
     sink.fail_all(SinkError::Unreachable);
     assert_eq!(audit.readiness().await, AuditReadiness::Unavailable);
     assert_eq!(audit.readiness().await, AuditReadiness::Degraded);
@@ -22,5 +29,9 @@ async fn readiness_requires_a_fresh_integrity_ack_and_refuses_a_previously_healt
     audit.writer.drain_once().await;
     let before = sink.stored().len();
     assert_eq!(audit.readiness().await, AuditReadiness::Ready);
-    assert_eq!(sink.stored().len(), before + 1, "recovery must acknowledge another fresh probe");
+    assert_eq!(
+        sink.stored().len(),
+        before + 1,
+        "recovery must acknowledge another fresh probe"
+    );
 }

@@ -145,6 +145,21 @@ impl Record {
         )
     }
 
+    pub(crate) fn readiness_probe(identity: &WriterIdentity, stamp: Stamp) -> Self {
+        let subject = AuditSubject::integrity(identity.component().clone(), IntegrityTerminal::ReadinessProbe);
+        Self::assemble(
+            identity.scope(),
+            stamp,
+            RecordKind::Integrity,
+            subject,
+            MessageField::none(),
+            Detail::from(WriterLifecycle {
+                kind: EnumValue::from(WriterLifecycleKind::ReadinessProbe),
+                reset_reason: None,
+            }),
+        )
+    }
+
     fn assemble(
         scope: RecordScope,
         stamp: Stamp,

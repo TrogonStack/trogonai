@@ -17,7 +17,8 @@ use trogonai_proto::platform::audit::v1::{
 use crate::constants::{
     SUBJECT_BINDING_VERSION, SUBJECT_KIND_CHANGE, SUBJECT_KIND_CREDENTIAL, SUBJECT_KIND_DECISION,
     SUBJECT_KIND_INTEGRITY, SUBJECT_PREFIX, SUBJECT_ROOT, TERMINAL_ALLOW, TERMINAL_CHAIN_RESET, TERMINAL_CREDENTIAL,
-    TERMINAL_DENY, TERMINAL_INJECT, TERMINAL_POLICY, TERMINAL_RELEASE, TERMINAL_START, TERMINAL_WOULD_DENY,
+    TERMINAL_DENY, TERMINAL_INJECT, TERMINAL_POLICY, TERMINAL_READINESS_PROBE, TERMINAL_RELEASE, TERMINAL_START,
+    TERMINAL_WOULD_DENY,
 };
 
 pub(crate) fn subject_agrees(subject: &str, record: &AuditRecord) -> bool {
@@ -90,6 +91,15 @@ fn expected(record: &AuditRecord) -> Option<(&'static str, Option<&str>, &'stati
             let terminal = match lifecycle.kind.as_known()? {
                 WriterLifecycleKind::WRITER_LIFECYCLE_KIND_START => TERMINAL_START,
                 WriterLifecycleKind::WRITER_LIFECYCLE_KIND_CHAIN_RESET => TERMINAL_CHAIN_RESET,
+                WriterLifecycleKind::WRITER_LIFECYCLE_KIND_READINESS_PROBE => {
+                    if record.class.as_known()? != AuditClass::Must
+                        || record.attribution.as_option().is_some()
+                        || lifecycle.reset_reason.is_some()
+                    {
+                        return None;
+                    }
+                    TERMINAL_READINESS_PROBE
+                }
                 WriterLifecycleKind::WRITER_LIFECYCLE_KIND_UNSPECIFIED => return None,
             };
             Some((SUBJECT_KIND_INTEGRITY, None, terminal))
