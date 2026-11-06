@@ -76,8 +76,7 @@ fn invalid_arguments_fail_without_echoing_supplied_values() {
 
 #[test]
 fn controller_input_rejects_regular_files_before_any_broker_operation() {
-    let file = std::fs::File::open(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"))
-        .expect("existing regular file");
+    let file = std::fs::File::open(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml")).expect("existing regular file");
     let output = configured("serve")
         .stdin(file)
         .output()
@@ -103,7 +102,10 @@ fn truncated_controller_frame_cannot_become_an_approval() {
 #[test]
 fn a_complete_frame_requires_an_independent_valid_signature_before_effect() {
     let payload = b"canary-private-controller-input";
-    let mut bytes = u32::try_from(payload.len()).expect("wire length").to_be_bytes().to_vec();
+    let mut bytes = u32::try_from(payload.len())
+        .expect("wire length")
+        .to_be_bytes()
+        .to_vec();
     bytes.extend_from_slice(&[0; 64]);
     bytes.extend_from_slice(payload);
     let output = send_frame(&bytes);
