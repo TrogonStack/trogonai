@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "workload_reply_prefix_tests.rs"]
+mod reply_prefix_tests;
+
 const WORKLOAD_ARGS: [&str; 23] = [
     "trogon-egress-proxy",
     "--policy-bucket",

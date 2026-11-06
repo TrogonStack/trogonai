@@ -1,5 +1,7 @@
 use std::num::NonZeroU64;
 
+use trogon_nats::{DottedNatsToken, SubjectTokenViolationError};
+
 use trogon_workload_identity::{
     IdentityConfig, RegistrationBinding, RegistrationError, UnixEndpoint, UnixEndpointError, WorkloadRole,
 };
@@ -13,6 +15,7 @@ pub struct WorkloadIdentityConfig {
     pub(crate) identity: IdentityConfig,
     registration_bucket: SnapshotBucket,
     registration_key: ScopedSnapshotKey,
+    reply_inbox_prefix: DottedNatsToken,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -25,6 +28,8 @@ pub enum WorkloadIdentityConfigError {
     TrustDomain,
     #[error("registration bucket is not a bounded NATS bucket name")]
     Bucket(#[source] SnapshotBucketError),
+    #[error("workload reply inbox prefix is not a bounded NATS namespace")]
+    ReplyPrefix(#[source] SubjectTokenViolationError),
 }
 
 impl WorkloadIdentityConfig {
@@ -50,10 +55,12 @@ impl WorkloadIdentityConfig {
         }
         let registration_bucket =
             SnapshotBucket::new(registration_bucket).map_err(WorkloadIdentityConfigError::Bucket)?;
+        let reply_inbox_prefix = DottedNatsToken::new("_INBOX").map_err(WorkloadIdentityConfigError::ReplyPrefix)?;
         Ok(Self {
             identity: IdentityConfig::new(endpoint, local, recovery_fence),
             registration_bucket,
             registration_key: ScopedSnapshotKey::new(audit.identity.tenant(), audit.identity.project()),
+            reply_inbox_prefix,
         })
     }
 
@@ -67,5 +74,9 @@ impl WorkloadIdentityConfig {
 
     pub fn registration_key(&self) -> &str {
         self.registration_key.as_str()
+    }
+
+    pub fn reply_inbox_prefix(&self) -> &DottedNatsToken {
+        &self.reply_inbox_prefix
     }
 }
