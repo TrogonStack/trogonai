@@ -123,6 +123,7 @@ impl Server {
     pub async fn run(mut self, shutdown: CancellationToken) {
         let _activity = self.readiness.running(shutdown.clone());
         let flush = CancellationToken::new();
+        let _flush_on_drop = flush.clone().drop_guard();
         let audit = self.proxy.audit();
         let drain = tokio::spawn({
             let flush = flush.clone();
