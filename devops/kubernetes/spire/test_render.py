@@ -119,6 +119,9 @@ class DeploymentTests(unittest.TestCase):
 
     def test_refuses_unsafe_or_ambiguous_deployment_inputs(self):
         mutations = [
+            lambda c: c.update(environment=[]),
+            lambda c: c.update(node_names=[{}, {}, {}]),
+            lambda c: c.update(api_server_cidrs=[42]),
             lambda c: c.update(server_replicas=1),
             lambda c: c.update(recovery_epoch=0),
             lambda c: c.update(trust_domain=c["other_environment_trust_domain"]),
