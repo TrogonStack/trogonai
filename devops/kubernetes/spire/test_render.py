@@ -58,11 +58,11 @@ class DeploymentTests(unittest.TestCase):
         self.assertNotIn("hostNetwork", agent["spec"]["template"]["spec"])
         server_config = json.loads(files["server.conf"])
         plugins = server_config["plugins"]
-        self.assertEqual(set(plugins["NodeAttestor"]), {"k8s_psat"})
-        kms = plugins["KeyManager"]["aws_kms"]["plugin_data"]
+        self.assertEqual(set(plugins["NodeAttestor"][0]), {"k8s_psat"})
+        kms = plugins["KeyManager"][0]["aws_kms"]["plugin_data"]
         self.assertTrue(kms["enable_tag_based_key_discovery"])
         self.assertNotIn("access_key_id", kms)
-        database = plugins["DataStore"]["sql"]["plugin_data"]
+        database = plugins["DataStore"][0]["sql"]["plugin_data"]
         self.assertIn("sslmode=verify-full", database["connection_string"])
         self.assertIn("connect_timeout=5", database["connection_string"])
         self.assertTrue(database["disable_migration"])
@@ -70,7 +70,7 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(server_config["server"]["default_x509_svid_ttl"], "1h")
         self.assertEqual(server_config["server"]["tls_config"]["min_tls_version"], "VersionTLS13")
         agent_config = json.loads(files["agent.conf"])
-        attestor = agent_config["plugins"]["WorkloadAttestor"]["k8s"]["plugin_data"]
+        attestor = agent_config["plugins"]["WorkloadAttestor"][0]["k8s"]["plugin_data"]
         self.assertFalse(attestor["skip_kubelet_verification"])
         self.assertFalse(attestor["disable_container_selectors"])
         self.assertFalse(attestor["use_anonymous_authentication"])
@@ -78,7 +78,7 @@ class DeploymentTests(unittest.TestCase):
 
     def test_registration_requires_the_actual_supervisor_container(self):
         files = self.render()
-        entries = json.loads(files["registrations.json"])
+        entries = json.loads(files["registrations.json"])["entries"]
         workload = entries[1]
         self.assertFalse(workload["admin"])
         self.assertEqual(workload["x509_svid_ttl"], 3600)
@@ -88,11 +88,22 @@ class DeploymentTests(unittest.TestCase):
         self.assertIn(("k8s", "container-image:" + registration["container_image"]), selectors)
         self.assertIn(("unix", "uid:10001"), selectors)
         self.assertEqual(workload["parent_id"], entries[0]["spiffe_id"])
-        self.assertTrue(entries[0]["node"])
+        self.assertEqual(entries[0]["parent_id"], "spiffe://production.identity.example.org/spire/server")
         self.assertIn("epoch-1", entries[0]["spiffe_id"])
-        mapping = json.loads(files["governed-registration.json"])
+        mapping = json.loads(files["registration-plan.json"])
         self.assertEqual(mapping["recovery_epoch"], 1)
         self.assertEqual(mapping["registrations"][0]["tenant"], registration["tenant"])
+
+    def test_application_identity_is_independent_of_the_transport_path(self):
+        config = configuration()
+        workload = config["registrations"][0]
+        workload.pop("agent_id", None)
+        workload["role"] = "agent"
+        workload["application_id"] = "did:key:z6MkiTBz1ymuepAQ4UdtEKAAk1r94sSZ73KSXtrcfT3qQKVp"
+        files = self.render(config)
+        plan = json.loads(files["registration-plan.json"])
+        self.assertEqual(plan["registrations"][0]["application_id"], workload["application_id"])
+        self.assertEqual(plan["registrations"][0]["spiffe_id"], workload["spiffe_id"])
 
     def test_socket_admission_gate_is_enforced_and_never_matches_an_untrusted_default(self):
         resources = json.loads(self.render()["manifests.json"])["items"]
