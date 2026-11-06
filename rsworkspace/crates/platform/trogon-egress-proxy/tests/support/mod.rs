@@ -92,7 +92,7 @@ impl Pki {
         Config {
             listen,
             policy: PolicyInput::StaticFile(policy_file),
-            tls: self.write_server_files(dir),
+            tls: trogon_egress_proxy::config::TlsInput::Files(self.write_server_files(dir)),
             trust_domain: TrustDomain::new(TRUST_DOMAIN).expect("trust domain"),
             audit: audit_config(),
             non_tls_ports: Vec::new(),
