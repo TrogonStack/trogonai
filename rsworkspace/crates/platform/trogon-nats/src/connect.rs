@@ -301,6 +301,23 @@ pub async fn connect(config: &NatsConfig, connection_timeout: Duration) -> Resul
     connected(config, result)
 }
 
+pub async fn connect_with_inbox_prefix(
+    config: &NatsConfig,
+    connection_timeout: Duration,
+    _inbox_prefix: &crate::DottedNatsToken,
+) -> Result<Client, ConnectError> {
+    connect(config, connection_timeout).await
+}
+
+pub async fn connect_once_with_inbox_prefix(
+    config: &NatsConfig,
+    auth: NatsAuth,
+    connection_timeout: Duration,
+    _inbox_prefix: &crate::DottedNatsToken,
+) -> Result<Client, ConnectError> {
+    connect_once(config, auth, connection_timeout).await
+}
+
 /// Makes a single pass over the servers with `auth` in place of the configured
 /// authentication and fails once that pass does, for a connection that serves
 /// one request. TLS follows the same settings as [`connect`].

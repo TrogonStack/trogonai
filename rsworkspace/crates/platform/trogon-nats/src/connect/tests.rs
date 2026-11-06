@@ -1,4 +1,6 @@
 use async_nats::connection::State;
+
+mod inbox_prefix;
 use async_nats::{ClientError, ConnectErrorKind, ServerError};
 
 use super::*;
