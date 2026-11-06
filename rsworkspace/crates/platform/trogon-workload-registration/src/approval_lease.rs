@@ -42,6 +42,10 @@ impl ApprovalLease {
         self.expires_at
     }
 
+    pub fn deadline(&self) -> Instant {
+        self.deadline
+    }
+
     pub fn check_current(&self) -> Result<(), RegistrationError> {
         let instant = Instant::now();
         let now = SystemTime::now();

@@ -1,5 +1,7 @@
 #[derive(Debug, thiserror::Error)]
 pub enum RegistrationError {
+    #[error("protected registration publication is unavailable")]
+    NotImplemented,
     #[error("registration scope name is invalid")]
     ScopeName,
     #[error("registration project is not a supported subject token")]

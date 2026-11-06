@@ -15,11 +15,13 @@ buffa = { workspace = true }
 buffa-types = { workspace = true }
 bs58 = "=0.5.1"
 bytes = { workspace = true }
+clap = { workspace = true }
 ed25519-dalek = { workspace = true }
+hex = { workspace = true }
 sha2 = { workspace = true }
 spiffe = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["rt", "time", "sync"] }
+tokio = { workspace = true, features = ["rt", "time", "sync", "macros", "rt-multi-thread", "net", "io-util", "signal"] }
 trogon-audit = { workspace = true }
 trogon-nats = { workspace = true }
 trogon-std = { workspace = true }
@@ -27,7 +29,7 @@ trogon-workload-identity = { workspace = true }
 trogonai-proto = { workspace = true, features = ["audit"] }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util", "process"] }
 trogon-audit = { workspace = true, features = ["test-support"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-std = { workspace = true, features = ["test-support"] }
