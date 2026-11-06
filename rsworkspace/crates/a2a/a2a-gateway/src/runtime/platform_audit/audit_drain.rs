@@ -44,8 +44,9 @@ impl AuditDrain {
             Ok(Err(error)) => warn!(%error, "gateway audit drain task ended abnormally"),
             Err(_) => {
                 task.abort();
+                let timeout_secs = AUDIT_SETTLE_TIMEOUT.as_secs();
                 warn!(
-                    timeout_secs = AUDIT_SETTLE_TIMEOUT.as_secs(),
+                    timeout_secs,
                     "gateway audit drain did not settle in time and was abandoned"
                 );
             }
