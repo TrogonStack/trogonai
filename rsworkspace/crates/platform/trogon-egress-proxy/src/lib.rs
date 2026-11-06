@@ -47,8 +47,9 @@ pub mod policy_snapshot;
 pub mod policy_source;
 pub mod resolver;
 pub mod runtime;
-mod scoped_key;
+mod scoped_snapshot_key;
 mod scoped_stream;
+mod snapshot_bucket;
 pub mod server;
 pub mod static_snapshot;
 pub mod trust_domain;
@@ -61,7 +62,9 @@ pub mod writer_audit;
 pub use agent_id::AgentId;
 pub use config::{Args, Config};
 pub use runtime::{StartupError, start};
+pub use scoped_snapshot_key::ScopedSnapshotKey;
 pub use server::Server;
+pub use snapshot_bucket::{SnapshotBucket, SnapshotBucketError};
 
 #[cfg(test)]
 mod live_policy_tests;

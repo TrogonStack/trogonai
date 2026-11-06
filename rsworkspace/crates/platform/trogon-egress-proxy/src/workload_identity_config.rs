@@ -5,15 +5,14 @@ use trogon_workload_identity::{
 };
 
 use crate::audit_config::AuditConfig;
-use crate::constants::LIVE_POLICY_MAX_BUCKET_BYTES;
-use crate::scoped_key::scoped_key;
 use crate::trust_domain::TrustDomain;
+use crate::{ScopedSnapshotKey, SnapshotBucket, SnapshotBucketError};
 
 #[derive(Debug, Clone)]
 pub struct WorkloadIdentityConfig {
     pub(crate) identity: IdentityConfig,
-    pub(crate) registration_bucket: String,
-    pub(crate) registration_key: String,
+    registration_bucket: SnapshotBucket,
+    registration_key: ScopedSnapshotKey,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -25,7 +24,7 @@ pub enum WorkloadIdentityConfigError {
     #[error("workload identity is outside the configured trust domain")]
     TrustDomain,
     #[error("registration bucket is not a bounded NATS bucket name")]
-    Bucket,
+    Bucket(#[source] SnapshotBucketError),
 }
 
 impl WorkloadIdentityConfig {
@@ -49,18 +48,12 @@ impl WorkloadIdentityConfig {
         if local.spiffe_id().trust_domain().to_string() != trust_domain.as_str() {
             return Err(WorkloadIdentityConfigError::TrustDomain);
         }
-        if registration_bucket.is_empty()
-            || registration_bucket.len() > LIVE_POLICY_MAX_BUCKET_BYTES
-            || !registration_bucket
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-        {
-            return Err(WorkloadIdentityConfigError::Bucket);
-        }
+        let registration_bucket =
+            SnapshotBucket::new(registration_bucket).map_err(WorkloadIdentityConfigError::Bucket)?;
         Ok(Self {
             identity: IdentityConfig::new(endpoint, local, recovery_fence),
-            registration_bucket: registration_bucket.to_owned(),
-            registration_key: scoped_key(audit.identity.tenant(), audit.identity.project()),
+            registration_bucket,
+            registration_key: ScopedSnapshotKey::new(audit.identity.tenant(), audit.identity.project()),
         })
     }
 
@@ -69,10 +62,10 @@ impl WorkloadIdentityConfig {
     }
 
     pub fn registration_bucket(&self) -> &str {
-        &self.registration_bucket
+        self.registration_bucket.as_str()
     }
 
     pub fn registration_key(&self) -> &str {
-        &self.registration_key
+        self.registration_key.as_str()
     }
 }

@@ -91,7 +91,7 @@ impl KvSnapshot {
         let connection = ConnectionIdentity::current(&client)?;
         let store = timeout(
             LIVE_POLICY_REQUEST_TIMEOUT,
-            async_nats::jetstream::new(client.clone()).get_key_value(&config.bucket),
+            async_nats::jetstream::new(client.clone()).get_key_value(config.bucket()),
         )
         .await
         .map_err(|_| LivePolicyError::Timeout)?
@@ -105,7 +105,7 @@ impl KvSnapshot {
         let (changed, _) = watch::channel(());
         let snapshot = Arc::new(Self {
             source: PolicySource::NatsKv {
-                bucket: config.bucket.clone(),
+                bucket: config.bucket().to_owned(),
                 incarnation: config.incarnation,
             },
             config,
