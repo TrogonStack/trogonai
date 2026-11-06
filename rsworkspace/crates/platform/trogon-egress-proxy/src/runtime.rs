@@ -19,7 +19,7 @@ use trogon_std::uuid::UuidV7Generator;
 
 use crate::audit::AuditSink;
 use crate::audit_config::AuditConfig;
-use crate::config::{Config, PolicyInput};
+use crate::config::{Config, PolicyInput, TlsInput};
 use crate::connection::Proxy;
 use crate::constants::AUDIT_CONNECT_TIMEOUT;
 use crate::live_policy::{KvPolicyConfig, KvSnapshot, LivePolicyError, PolicyTransportError};
@@ -48,6 +48,8 @@ impl EnforcementMode {
 
 #[derive(Debug, thiserror::Error)]
 pub enum StartupError {
+    #[error("workload identity requires an activation audit adapter")]
+    ActivationAuditRequired,
     #[error("no usable policy, refusing to start")]
     Policy(#[source] SnapshotError),
     #[error("no usable live policy, refusing to start")]
@@ -118,7 +120,10 @@ pub async fn start_with(
             (snapshot, Some(driver), statistics)
         }
     };
-    let tls = load_server_config(&config.tls, config.trust_domain.clone()).map_err(StartupError::Tls)?;
+    let tls = match &config.tls {
+        TlsInput::Files(files) => load_server_config(files, config.trust_domain.clone()).map_err(StartupError::Tls)?,
+        TlsInput::Workload(_) => return Err(StartupError::ActivationAuditRequired),
+    };
     let listener = TcpListener::bind(config.listen)
         .await
         .map_err(|source| StartupError::Bind {

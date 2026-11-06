@@ -14,11 +14,11 @@ fn config(policy_file: &Path) -> Config {
     Config {
         listen: "127.0.0.1:0".parse().expect("addr"),
         policy: PolicyInput::StaticFile(policy_file.to_owned()),
-        tls: TlsFiles {
+        tls: crate::config::TlsInput::Files(TlsFiles {
             certificate_chain: "unused-server.pem".into(),
             private_key: "unused-server.key".into(),
             client_trust_anchors: "unused-ca.pem".into(),
-        },
+        }),
         trust_domain: TrustDomain::new("trogon.example").expect("trust domain"),
         audit: AuditConfig {
             nats: NatsConfig::from_url("nats://127.0.0.1:1"),
