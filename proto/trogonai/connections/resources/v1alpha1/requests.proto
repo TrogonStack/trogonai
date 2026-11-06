@@ -1,0 +1,418 @@
+edition = "2024";
+
+package trogonai.connections.resources.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/connections/account_claims/v1alpha1/commands.proto";
+import "trogonai/connections/authorization_attempts/v1alpha1/commands.proto";
+import "trogonai/connections/catalog/v1alpha1/commands.proto";
+import "trogonai/connections/connections/v1alpha1/commands.proto";
+import "trogonai/connections/grants/v1alpha1/commands.proto";
+import "trogonai/connections/provider_apps/v1alpha1/commands.proto";
+import "trogonai/connections/resources/v1alpha1/names.proto";
+import "trogonai/connections/resources/v1alpha1/resources.proto";
+import "trogonai/connections/types/v1alpha1/resource_parent.proto";
+import "trogonai/policy/connection_permissions/v1alpha1/commands.proto";
+import "trogonai/policy/connection_permissions/v1alpha1/parent.proto";
+import "trogonai/secrets/credentials/v1alpha1/commands.proto";
+
+// Parent-bound request shapes, not declarations that every aggregate is a
+// public browser service. The documented caller class authenticates before
+// route, request parent and command parent are compared. Project parents must
+// match the caller's authenticated project context and live administration
+// authority. Platform parents require an explicit platform role; an empty
+// platform marker never substitutes for authorization. Policy parents require
+// live authority on the exact Agent/node plus owner-side rights for permits.
+// Unknown and unauthorized resources use the same external failure shape.
+//
+// Public create/list collection parent differs from hierarchy NodeId placement.
+// No request can move a resource or reinterpret its logical owner. This surface
+// does not define browser start-connect/redirect or upload secret material.
+
+// Pagination is over one exact resource type and parent, in bytewise opaque-id
+// order. Default page size is 50 and maximum is 200. A cursor is nonsecret,
+// integrity-protected server metadata bound to caller identity/tenant, parent,
+// resource type, ordering and read snapshot; it grants no access. Every page
+// rechecks live authorization. Changed/expired cursor context is refused, never
+// silently restarted or broadened to another parent.
+message ResourcePageRequest {
+  uint32 page_size = 1 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 200
+  }];
+  string page_token = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 4096
+    pattern: "^[A-Za-z0-9_-]+$"
+  }];
+}
+
+// Platform catalog maintainers only.
+message CreateConnectorReleaseRequest {
+  option (buf.validate.message).cel = {
+    id: "create_connector_release.parent_matches_command"
+    message: "request parent must equal the immutable command resource parent"
+    expression: "this.parent == this.command.resource_parent"
+  };
+  trogonai.connections.types.v1alpha1.ConnectorReleaseParent parent = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.catalog.v1alpha1.PublishConnectorRelease command = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message CreateConnectorReleaseResponse {
+  ConnectorReleaseResourceName resource = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint64 stream_revision = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+}
+
+message ListConnectorReleasesRequest {
+  trogonai.connections.types.v1alpha1.ConnectorReleaseParent parent = 1 [features.field_presence = LEGACY_REQUIRED];
+  ResourcePageRequest page = 2;
+}
+
+message ListConnectorReleasesResponse {
+  option (buf.validate.message).cel = {
+    id: "list_connector_release.one_parent"
+    message: "every result must belong to the requested parent"
+    expression: "this.resources.all(r, r.resource.resource_parent == this.parent)"
+  };
+  trogonai.connections.types.v1alpha1.ConnectorReleaseParent parent = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated ConnectorReleaseResource resources = 2 [(buf.validate.field).repeated.max_items = 200];
+  string next_page_token = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 4096
+    pattern: "^[A-Za-z0-9_-]+$"
+  }];
+}
+
+message GetConnectorReleaseRequest {
+  ConnectorReleaseResourceName resource = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message GetConnectorReleaseResponse {
+  ConnectorReleaseResource resource = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Platform operator for platform scope; project admin for project scope.
+message CreateProviderAppRequest {
+  option (buf.validate.message).cel = {
+    id: "create_provider_app.parent_matches_command"
+    message: "request parent must equal the immutable command resource parent"
+    expression: "this.parent == this.command.resource_parent"
+  };
+  trogonai.connections.types.v1alpha1.ProviderAppParent parent = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.provider_apps.v1alpha1.ReserveProviderApp command = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message CreateProviderAppResponse {
+  ProviderAppResourceName resource = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint64 stream_revision = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+}
+
+message ListProviderAppsRequest {
+  trogonai.connections.types.v1alpha1.ProviderAppParent parent = 1 [features.field_presence = LEGACY_REQUIRED];
+  ResourcePageRequest page = 2;
+}
+
+message ListProviderAppsResponse {
+  option (buf.validate.message).cel = {
+    id: "list_provider_app.one_parent"
+    message: "every result must belong to the requested parent"
+    expression: "this.resources.all(r, r.resource.resource_parent == this.parent)"
+  };
+  trogonai.connections.types.v1alpha1.ProviderAppParent parent = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated ProviderAppResource resources = 2 [(buf.validate.field).repeated.max_items = 200];
+  string next_page_token = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 4096
+    pattern: "^[A-Za-z0-9_-]+$"
+  }];
+}
+
+message GetProviderAppRequest {
+  ProviderAppResourceName resource = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message GetProviderAppResponse {
+  ProviderAppResource resource = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Project-authorized management path; logical owner rules still apply.
+message CreateConnectionRequest {
+  option (buf.validate.message).cel = {
+    id: "create_connection.parent_matches_command"
+    message: "request parent must equal the immutable command resource parent"
+    expression: "this.parent == this.command.resource_parent"
+  };
+  trogonai.connections.types.v1alpha1.ProjectResourceParent parent = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.connections.v1alpha1.ReserveConnection command = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message CreateConnectionResponse {
+  ConnectionResourceName resource = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint64 stream_revision = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+}
+
+message ListConnectionsRequest {
+  trogonai.connections.types.v1alpha1.ProjectResourceParent parent = 1 [features.field_presence = LEGACY_REQUIRED];
+  ResourcePageRequest page = 2;
+}
+
+message ListConnectionsResponse {
+  option (buf.validate.message).cel = {
+    id: "list_connection.one_parent"
+    message: "every result must belong to the requested parent"
+    expression: "this.resources.all(r, r.resource.resource_parent == this.parent)"
+  };
+  trogonai.connections.types.v1alpha1.ProjectResourceParent parent = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated ConnectionResource resources = 2 [(buf.validate.field).repeated.max_items = 200];
+  string next_page_token = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 4096
+    pattern: "^[A-Za-z0-9_-]+$"
+  }];
+}
+
+message GetConnectionRequest {
+  ConnectionResourceName resource = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message GetConnectionResponse {
+  ConnectionResource resource = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Trusted connections service only; capsule and callback bindings are server-generated.
+message CreateAuthorizationAttemptRequest {
+  option (buf.validate.message).cel = {
+    id: "create_authorization_attempt.parent_matches_command"
+    message: "request parent must equal the immutable command resource parent"
+    expression: "this.parent == this.command.resource_parent"
+  };
+  trogonai.connections.types.v1alpha1.ProjectResourceParent parent = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.authorization_attempts.v1alpha1.BeginAuthorization command = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message CreateAuthorizationAttemptResponse {
+  AuthorizationAttemptResourceName resource = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint64 stream_revision = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+}
+
+message ListAuthorizationAttemptsRequest {
+  trogonai.connections.types.v1alpha1.ProjectResourceParent parent = 1 [features.field_presence = LEGACY_REQUIRED];
+  ResourcePageRequest page = 2;
+}
+
+message ListAuthorizationAttemptsResponse {
+  option (buf.validate.message).cel = {
+    id: "list_authorization_attempt.one_parent"
+    message: "every result must belong to the requested parent"
+    expression: "this.resources.all(r, r.resource.resource_parent == this.parent)"
+  };
+  trogonai.connections.types.v1alpha1.ProjectResourceParent parent = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated AuthorizationAttemptResource resources = 2 [(buf.validate.field).repeated.max_items = 200];
+  string next_page_token = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 4096
+    pattern: "^[A-Za-z0-9_-]+$"
+  }];
+}
+
+message GetAuthorizationAttemptRequest {
+  AuthorizationAttemptResourceName resource = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message GetAuthorizationAttemptResponse {
+  AuthorizationAttemptResource resource = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Trusted connections service only, NoStream creation; re-hold uses the domain command path.
+message CreateProviderAccountClaimRequest {
+  option (buf.validate.message).cel = {
+    id: "create_provider_account_claim.parent_matches_command"
+    message: "request parent must equal the immutable command resource parent"
+    expression: "this.parent == this.command.resource_parent"
+  };
+  trogonai.connections.types.v1alpha1.ProjectResourceParent parent = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.account_claims.v1alpha1.HoldProviderAccount command = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message CreateProviderAccountClaimResponse {
+  ProviderAccountClaimResourceName resource = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint64 stream_revision = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+}
+
+message ListProviderAccountClaimsRequest {
+  trogonai.connections.types.v1alpha1.ProjectResourceParent parent = 1 [features.field_presence = LEGACY_REQUIRED];
+  ResourcePageRequest page = 2;
+}
+
+message ListProviderAccountClaimsResponse {
+  option (buf.validate.message).cel = {
+    id: "list_provider_account_claim.one_parent"
+    message: "every result must belong to the requested parent"
+    expression: "this.resources.all(r, r.resource.resource_parent == this.parent)"
+  };
+  trogonai.connections.types.v1alpha1.ProjectResourceParent parent = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated ProviderAccountClaimResource resources = 2 [(buf.validate.field).repeated.max_items = 200];
+  string next_page_token = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 4096
+    pattern: "^[A-Za-z0-9_-]+$"
+  }];
+}
+
+message GetProviderAccountClaimRequest {
+  ProviderAccountClaimResourceName resource = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message GetProviderAccountClaimResponse {
+  ProviderAccountClaimResource resource = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Trusted Session coordinator only; parent is the Session project, not connection custody.
+message CreateConnectionGrantRequest {
+  option (buf.validate.message).cel = {
+    id: "create_connection_grant.parent_matches_command"
+    message: "request parent must equal the immutable command resource parent"
+    expression: "this.parent == this.command.resource_parent"
+  };
+  trogonai.connections.types.v1alpha1.ProjectResourceParent parent = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.grants.v1alpha1.PrepareConnectionGrant command = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message CreateConnectionGrantResponse {
+  ConnectionGrantResourceName resource = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint64 stream_revision = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+}
+
+message ListConnectionGrantsRequest {
+  trogonai.connections.types.v1alpha1.ProjectResourceParent parent = 1 [features.field_presence = LEGACY_REQUIRED];
+  ResourcePageRequest page = 2;
+}
+
+message ListConnectionGrantsResponse {
+  option (buf.validate.message).cel = {
+    id: "list_connection_grant.one_parent"
+    message: "every result must belong to the requested parent"
+    expression: "this.resources.all(r, r.resource.resource_parent == this.parent)"
+  };
+  trogonai.connections.types.v1alpha1.ProjectResourceParent parent = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated ConnectionGrantResource resources = 2 [(buf.validate.field).repeated.max_items = 200];
+  string next_page_token = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 4096
+    pattern: "^[A-Za-z0-9_-]+$"
+  }];
+}
+
+message GetConnectionGrantRequest {
+  ConnectionGrantResourceName resource = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message GetConnectionGrantResponse {
+  ConnectionGrantResource resource = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Custody only, after the matching material write. This is not a material-upload API.
+message CreateCredentialRequest {
+  option (buf.validate.message).cel = {
+    id: "create_credential.parent_matches_command"
+    message: "request parent must equal the immutable command resource parent"
+    expression: "this.parent == this.command.resource_parent"
+  };
+  trogonai.connections.types.v1alpha1.CredentialResourceParent parent = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.secrets.credentials.v1alpha1.EstablishCredential command = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message CreateCredentialResponse {
+  CredentialResourceName resource = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint64 stream_revision = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+}
+
+message ListCredentialsRequest {
+  trogonai.connections.types.v1alpha1.CredentialResourceParent parent = 1 [features.field_presence = LEGACY_REQUIRED];
+  ResourcePageRequest page = 2;
+}
+
+message ListCredentialsResponse {
+  option (buf.validate.message).cel = {
+    id: "list_credential.one_parent"
+    message: "every result must belong to the requested parent"
+    expression: "this.resources.all(r, r.resource.resource_parent == this.parent)"
+  };
+  trogonai.connections.types.v1alpha1.CredentialResourceParent parent = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated CredentialResource resources = 2 [(buf.validate.field).repeated.max_items = 200];
+  string next_page_token = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 4096
+    pattern: "^[A-Za-z0-9_-]+$"
+  }];
+}
+
+message GetCredentialRequest {
+  CredentialResourceName resource = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message GetCredentialResponse {
+  CredentialResource resource = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Authorized policy management or the verified provisioning operation; owner-side authority remains required.
+message CreateConnectionPermissionRequest {
+  option (buf.validate.message).cel = {
+    id: "create_connection_permission.parent_matches_command"
+    message: "request parent must equal the immutable command resource parent"
+    expression: "this.parent == this.command.resource_parent"
+  };
+  trogonai.policy.connection_permissions.v1alpha1.ConnectionPermissionParent parent = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.policy.connection_permissions.v1alpha1.InitializeConnectionPermission command = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message CreateConnectionPermissionResponse {
+  ConnectionPermissionResourceName resource = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint64 stream_revision = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+}
+
+message ListConnectionPermissionsRequest {
+  trogonai.policy.connection_permissions.v1alpha1.ConnectionPermissionParent parent = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ListConnectionPermissionsResponse {
+  option (buf.validate.message).cel = {
+    id: "list_connection_permission.one_parent"
+    message: "every result must belong to the requested parent"
+    expression: "this.resources.all(r, r.resource.resource_parent == this.parent)"
+  };
+  trogonai.policy.connection_permissions.v1alpha1.ConnectionPermissionParent parent = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated ConnectionPermissionResource resources = 2 [(buf.validate.field).repeated.max_items = 1];
+}
+
+message GetConnectionPermissionRequest {
+  ConnectionPermissionResourceName resource = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message GetConnectionPermissionResponse {
+  ConnectionPermissionResource resource = 1 [features.field_presence = LEGACY_REQUIRED];
+}

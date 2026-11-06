@@ -10,9 +10,10 @@ date: 2026-08-08
 > **Amended by [ADR#0082](./0082-bus-principal-from-subject-and-edge-proof-of-possession.md)
 > (2026-10-31).** The A2A gateway ingress, agent delivery, task event and
 > caller-scoped egress subjects carry the caller's principal as `{kind}.{id}`,
-> the position that decision fixes. Responders and stream consumers wildcard
-> it, a caller's grant names its own, and its id token is exempt from the
-> lower_snake rule.
+> the position that decision fixes. Shared responders and all-callers stream
+> consumers wildcard it, caller-scoped consumers bind it to their own
+> principal, a caller's grant names its own, and its id token is exempt from
+> the lower_snake rule.
 
 ## Context
 
@@ -372,10 +373,11 @@ replay that emits the same notification.
   Decision 1 fixes: right after the agent on gateway ingress and agent
   delivery, after the task on task events, and as the whole entity of the
   caller-scoped egress `a2a.v1.gateway.{kind}.{id}.events`. A caller's grant
-  names its own position, and responders and consumers wildcard it: the
-  gateway subscribes `a2a.v1.gateway.*.*.*.>`, an agent subscribes
-  `a2a.v1.agents.{agent_id}.*.*.>`, and the task event stream captures
-  `a2a.v1.tasks.*.*.*.events`. A caller is a long-lived entity, so the
+  names its own position, and shared responders and all-callers consumers
+  wildcard it: the gateway subscribes `a2a.v1.gateway.*.*.*.>`, an agent
+  subscribes `a2a.v1.agents.{agent_id}.*.*.>`, and the task event stream
+  captures `a2a.v1.tasks.*.*.*.events`. A consumer that serves one caller
+  binds it instead, filtering on `a2a.v1.tasks.*.{kind}.{id}.events`. A caller is a long-lived entity, so the
   position stays within the cardinality rule, and it spends two of the 16
   tokens under Limits.
 - Within a shared account, reply inboxes use a per-tenant inbox prefix so replies

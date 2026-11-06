@@ -497,3 +497,10 @@ fn spicedb_import_gate_build_error_lifts_into_tier1_error() {
     let from = Tier1SpiceDbBuildError::from(SpiceDbImportGateBuildError::Connect("bad".into()));
     assert!(matches!(from, Tier1SpiceDbBuildError::Connect(_)));
 }
+
+#[test]
+fn live_gate_debug_does_not_expose_its_client() {
+    let client = Arc::new(FakeBulkClient::new(vec![]));
+    let gate = LiveSpiceDbTier1Gate::new(client, SpiceDbTier1SessionCache::new(ZedTokenTtl::from_secs(60)));
+    assert_eq!(format!("{gate:?}"), "LiveSpiceDbTier1Gate { .. }");
+}

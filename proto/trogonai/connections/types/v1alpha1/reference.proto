@@ -1,0 +1,71 @@
+edition = "2024";
+
+package trogonai.connections.types.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/connections/types/v1alpha1/digest.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/connections/types/v1alpha1/resource_parent.proto";
+
+// Pins one immutable release. The digest covers the exact stored bytes of the
+// ConnectorDefinition, never a re-encoding (ADR#0092 Decision 2). Release
+// standing is joined live and never copied onto a reference (ADR#0092
+// Decision 10).
+message ConnectorReleaseRef {
+  reserved 1;
+  reserved connector_id;
+
+  ConnectorReleaseId release_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  Digest definition_digest = 3 [features.field_presence = LEGACY_REQUIRED];
+  ConnectorReleaseParent resource_parent = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Locates one ProviderApp stream: the platform scope for a platform-managed
+// app, or the customer project that owns the app (ADR#0092 Decision 1). App
+// standing is joined live and never copied onto a reference (ADR#0092
+// Decision 10). The resource parent selects the platform or project namespace.
+message ProviderAppRef {
+  reserved 1, 2;
+  reserved platform, project;
+
+  ProviderAppId provider_app_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  ProviderAppParent resource_parent = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Pins one admitted Connection configuration (ADR#0092 Decision 4). A token
+// rotation behind a binding leaves it unchanged; UpgradeConnector keeps the id
+// and yields a new reference.
+message ConnectionRef {
+  reserved 1;
+  reserved project_id;
+
+  ConnectionId connection_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Covers the exact stored configuration bytes, never a re-encoding.
+  Digest configuration_digest = 3 [features.field_presence = LEGACY_REQUIRED];
+  ConnectorReleaseRef connector_release_ref = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Custody, not logical ownership or permission to use the connection.
+  ProjectResourceParent resource_parent = 5 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Locates one ConnectionGrant stream. The grant stream lives with the Session,
+// in the Session's project, not in the custody project of the connection
+// (ADR#0096 Decision 2).
+message ConnectionGrantRef {
+  reserved 1;
+  reserved project_id;
+
+  ConnectionGrantId grant_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  // The Session project; it may differ from connection custody.
+  ProjectResourceParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Locates one AuthorizationAttempt stream in its custody project (ADR#0092
+// Decision 1). A staged-bundle resolve for the identity probe is scoped to it
+// (ADR#0094 Decision 5).
+message AuthorizationAttemptRef {
+  reserved 1;
+  reserved project_id;
+
+  AuthorizationAttemptId attempt_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  ProjectResourceParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}

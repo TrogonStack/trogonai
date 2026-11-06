@@ -1,11 +1,12 @@
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use sqlx::ConnectOptions;
 use sqlx::postgres::PgConnectOptions;
 use trogon_std::env::ReadEnv;
 use url::Url;
 
+use super::postgres_root_cert::PostgresRootCert;
 use super::postgres_tls::{PostgresTls, PostgresTlsError};
 use crate::constants::{
     ENV_PGSSLMODE, ENV_PGSSLROOTCERT, POSTGRES_URL_SCHEMES, SSL_MODE_QUERY_KEYS, SSL_ROOT_CERT_QUERY_KEYS,
@@ -15,7 +16,7 @@ use crate::constants::{
 pub struct PostgresUrl {
     options: PgConnectOptions,
     tls: PostgresTls,
-    root_cert: Option<PathBuf>,
+    root_cert: Option<PostgresRootCert>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -47,19 +48,21 @@ impl PostgresUrl {
             },
         };
         let root_cert = last_query_value(&url, &SSL_ROOT_CERT_QUERY_KEYS)
-            .map(PathBuf::from)
+            .map(|path| PostgresRootCert::File(PathBuf::from(path)))
             .or_else(|| {
                 env.var_os(ENV_PGSSLROOTCERT)
-                    .filter(|path| !path.is_empty())
-                    .map(PathBuf::from)
+                    .filter(|value| !value.is_empty())
+                    .map(PostgresRootCert::from_env)
             });
 
         let mut options = PgConnectOptions::from_url(&url)
             .map_err(PostgresUrlError::Unusable)?
             .ssl_mode(tls.into());
-        if let Some(path) = &root_cert {
-            options = options.ssl_root_cert(path);
-        }
+        options = match &root_cert {
+            Some(PostgresRootCert::File(path)) => options.ssl_root_cert(path),
+            Some(PostgresRootCert::Pem(pem)) => options.ssl_root_cert_from_pem(pem.clone().into_bytes()),
+            None => options,
+        };
 
         Ok(Self {
             options,
@@ -72,8 +75,8 @@ impl PostgresUrl {
         self.tls
     }
 
-    pub fn root_cert(&self) -> Option<&Path> {
-        self.root_cert.as_deref()
+    pub const fn root_cert(&self) -> Option<&PostgresRootCert> {
+        self.root_cert.as_ref()
     }
 
     pub(crate) const fn connect_options(&self) -> &PgConnectOptions {

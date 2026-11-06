@@ -140,10 +140,13 @@ fn from_env_rejects_tier3_enabled_without_bundle_dir() {
 }
 
 #[test]
-fn policy_stack_error_messages_name_the_env_vars() {
+fn policy_stack_error_names_the_enabling_setting() {
     let env = InMemoryEnv::new();
     env.set(ENV_TIER3_REDACTION_ENABLED, "true");
-    let message = boot_error(&env).to_string();
-    assert!(message.contains(ENV_TIER3_REDACTION_ENABLED));
-    assert!(message.contains(ENV_POLICY_BUNDLE_DIR));
+    assert!(matches!(
+        boot_error(&env),
+        PolicyStackError::BundleDirRequired {
+            enabled_by: ENV_TIER3_REDACTION_ENABLED
+        }
+    ));
 }

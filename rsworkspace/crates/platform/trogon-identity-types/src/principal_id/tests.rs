@@ -33,3 +33,11 @@ fn a_principal_id_keeps_characters_a_subject_token_cannot_carry() {
 
     assert_eq!(id.as_str(), "alice.smith@example.com");
 }
+
+#[test]
+fn a_set_of_principal_ids_is_searchable_by_the_plain_string() {
+    let ids: std::collections::HashSet<PrincipalId> = [PrincipalId::new("agent-1").expect("valid principal id")].into();
+
+    assert!(ids.contains("agent-1"));
+    assert!(!ids.contains("agent-2"));
+}

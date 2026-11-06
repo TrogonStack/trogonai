@@ -1820,6 +1820,36 @@ async fn verify_fails_closed_when_the_nonce_record_cannot_be_looked_up() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn verify_leaves_the_same_signed_request_retryable_after_a_nonce_store_failure() {
+    let (fixture, jwt, jwks) = agent("k1");
+    let pem = challenge_key_pem();
+    let issuing = nonce_verifier(
+        jwks.clone(),
+        1000,
+        InMemoryReplayStore::default(),
+        &pem,
+        NonceRequirement::Required,
+    );
+    let blind = nonce_verifier(
+        jwks,
+        1000,
+        LookupFailingReplayStore::default(),
+        &pem,
+        NonceRequirement::Required,
+    );
+    let challenge = challenge(&issuing, &fixture, &jwt, 1000).await;
+    let req = nonce_request(&fixture, &jwt, 1000, Some(challenge.nonce()));
+
+    for _ in 0..2 {
+        let err = blind.verify(&req).await.unwrap_err();
+        assert!(
+            matches!(err, HttpPopError::Backend(ReplayError::MutexPoisoned)),
+            "got {err:?}"
+        );
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn verify_refuses_a_replayed_request_before_demanding_a_nonce() {
     let (fixture, jwt, jwks) = agent("k1");
     let verifier = nonce_verifier(
@@ -1852,9 +1882,9 @@ async fn verify_records_an_issued_nonce_for_its_lifetime_plus_the_skew_on_either
 
     let records = store.records.lock().expect("records lock");
     assert_eq!(records.len(), 2);
-    assert!(records[0].0.starts_with("jti."));
-    assert!(records[1].0.starts_with("nonce."));
-    assert_eq!(records[1].1, 120);
+    assert!(records[0].0.starts_with("nonce."));
+    assert_eq!(records[0].1, 120);
+    assert!(records[1].0.starts_with("jti."));
 }
 
 #[tokio::test(flavor = "current_thread")]

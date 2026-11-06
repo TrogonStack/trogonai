@@ -51,6 +51,28 @@ fn enabled_redaction_with_a_bundle_dir_boots_a_real_gate() {
 }
 
 #[test]
+fn from_env_rejects_an_unusable_bundle_directory() {
+    let root = tempfile::tempdir().unwrap();
+    let file = root.path().join("file");
+    std::fs::write(&file, "not a directory").unwrap();
+    for path in [root.path().join("missing"), file] {
+        for redaction in [false, true] {
+            let env = InMemoryEnv::new();
+            env.set(ENV_POLICY_BUNDLE_DIR, path.to_string_lossy());
+            if redaction {
+                env.set(ENV_TIER3_REDACTION_ENABLED, "true");
+            }
+            let error = boot_error(&env);
+            assert!(matches!(
+                &error,
+                PolicyStackError::BundleDirectory { bundle_dir, .. } if bundle_dir == &path
+            ));
+            assert!(std::error::Error::source(&error).is_some());
+        }
+    }
+}
+
+#[test]
 fn configured_cel_rules_control_ingress_and_broken_reloads_deny() {
     let root = tempfile::tempdir().unwrap();
     std::fs::create_dir(root.path().join("tier2")).unwrap();

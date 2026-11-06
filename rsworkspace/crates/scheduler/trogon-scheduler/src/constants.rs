@@ -146,6 +146,10 @@ pub(crate) const ENV_PGSSLROOTCERT: &str = "PGSSLROOTCERT";
 pub(crate) const SSL_MODE_QUERY_KEYS: [&str; 2] = ["sslmode", "ssl-mode"];
 #[cfg(feature = "postgres")]
 pub(crate) const SSL_ROOT_CERT_QUERY_KEYS: [&str; 3] = ["sslrootcert", "ssl-root-cert", "ssl-ca"];
+#[cfg(feature = "postgres")]
+pub(crate) const PEM_BEGIN_MARKER: &str = "-----BEGIN CERTIFICATE-----";
+#[cfg(feature = "postgres")]
+pub(crate) const PEM_END_MARKER: &str = "-----END CERTIFICATE-----";
 
 // commands::schedule_next_occurrence
 /// Occurrences whose due instant is at most this far in the past are still armed,

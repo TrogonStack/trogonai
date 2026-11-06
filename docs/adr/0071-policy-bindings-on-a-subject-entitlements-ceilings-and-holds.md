@@ -7,6 +7,9 @@ date: 2026-10-18
 
 # ADR#0071: What an Agent May Reach, How Far It May Go, and Whether It May Run at All Are Policy Bindings on a Subject
 
+> **Proposed connector refinement:** [ADR#0093](./0093-connection-ownership-and-delegation.md) remains a draft. Connection permissions add owner-side administration and exact-Agent personal delegation without inheriting Session authority. This note does not change either ADR's status.
+
+
 ## Context
 
 [ADR#0025](./0025-agent-definition-data-ownership.md) settles that an Agent's

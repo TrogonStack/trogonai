@@ -25,9 +25,11 @@ pub enum ConnectError {
         #[source]
         error: SettingError,
     },
-    #[error("Failed to connect to NATS: {error}")]
+    /// The message names only the kind of failure. The servers, and a source that
+    /// can name one such as a TLS hostname mismatch, stay out of it because
+    /// callers forward it to remote clients; `connect` and `connect_once` log both.
+    #[error("Failed to connect to NATS: {}", error.kind())]
     ConnectionFailed {
-        /// Kept out of the message because callers forward it to remote clients.
         servers: Vec<String>,
         #[source]
         error: async_nats::ConnectError,
@@ -184,10 +186,12 @@ async fn prepare(config: &NatsConfig) -> Result<ConnectOptions, ConnectError> {
     }
     let tls = tls(config)?;
     let servers = servers_for_logging(&config.servers);
+    let auth = config.auth.description();
+    let transport = tls.description();
     info!(
         servers = ?servers,
-        auth = %config.auth.description(),
-        tls = %tls.description(),
+        auth,
+        tls = transport,
         "Connecting to NATS"
     );
     if *tls == NatsTls::Disabled {
@@ -201,13 +205,10 @@ async fn prepare(config: &NatsConfig) -> Result<ConnectOptions, ConnectError> {
 }
 
 fn connected(config: &NatsConfig, result: Result<Client, async_nats::ConnectError>) -> Result<Client, ConnectError> {
+    let auth = config.auth.description();
     match result {
         Ok(client) => {
-            info!(
-                servers = ?servers_for_logging(&config.servers),
-                auth = %config.auth.description(),
-                "Connected to NATS"
-            );
+            info!(servers = ?servers_for_logging(&config.servers), auth, "Connected to NATS");
             Ok(client)
         }
         Err(e) => {

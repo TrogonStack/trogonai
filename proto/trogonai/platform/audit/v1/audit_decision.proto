@@ -1,0 +1,14 @@
+edition = "2024";
+
+package trogonai.platform.audit.v1;
+
+// AuditDecision is whether the act was allowed to proceed.
+//
+// It is the effective outcome. A refusal that a layer in DryRun only reported
+// is recorded as ALLOW with would_deny set, because nothing was enforced.
+// Unspecified and unknown values are invalid.
+enum AuditDecision {
+  AUDIT_DECISION_UNSPECIFIED = 0;
+  AUDIT_DECISION_ALLOW = 1;
+  AUDIT_DECISION_DENY = 2;
+}

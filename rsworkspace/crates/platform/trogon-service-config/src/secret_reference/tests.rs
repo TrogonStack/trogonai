@@ -3,6 +3,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use clap::Parser;
+use clap::builder::{TypedValueParser, ValueParserFactory};
 
 use super::*;
 
@@ -132,6 +133,18 @@ fn parser_without_an_argument_still_redacts_the_rejected_value() {
 
     assert_eq!(error.kind(), ErrorKind::ValueValidation);
     assert_eq!(error.get(ContextKind::InvalidValue), None);
+}
+
+#[test]
+fn parser_rejection_without_an_arg_never_repeats_the_value() {
+    let parser = <SecretReference as ValueParserFactory>::value_parser();
+    let err = parser
+        .parse_ref(&clap::Command::new("cli"), None, OsStr::new("hunter2"))
+        .unwrap_err();
+
+    assert_eq!(err.kind(), ErrorKind::ValueValidation);
+    assert_eq!(err.get(ContextKind::InvalidArg), None);
+    assert_eq!(err.get(ContextKind::InvalidValue), None);
 }
 
 #[cfg(unix)]

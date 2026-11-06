@@ -76,18 +76,20 @@ impl TypedValueParser for SecretReferenceParser {
         arg: Option<&clap::Arg>,
         value: &OsStr,
     ) -> Result<Self::Value, clap::Error> {
-        SecretReference::try_from(value).map_err(|error| {
-            let message = match arg {
-                Some(arg) => format!("invalid value for '{arg}': {error}"),
-                None => error.to_string(),
-            };
-            let mut rejection = clap::Error::raw(ErrorKind::ValueValidation, message).format(&mut cmd.clone());
-            if let Some(arg) = arg {
-                rejection.insert(ContextKind::InvalidArg, ContextValue::String(arg.to_string()));
-            }
-            rejection
-        })
+        SecretReference::try_from(value).map_err(|error| rejection(cmd, arg, error))
     }
+}
+
+fn rejection(cmd: &clap::Command, arg: Option<&clap::Arg>, error: SecretReferenceError) -> clap::Error {
+    let message = match arg {
+        Some(arg) => format!("invalid value for '{arg}': {error}"),
+        None => error.to_string(),
+    };
+    let mut rejection = clap::Error::raw(ErrorKind::ValueValidation, message).format(&mut cmd.clone());
+    if let Some(arg) = arg {
+        rejection.insert(ContextKind::InvalidArg, ContextValue::String(arg.to_string()));
+    }
+    rejection
 }
 
 impl ValueParserFactory for SecretReference {
