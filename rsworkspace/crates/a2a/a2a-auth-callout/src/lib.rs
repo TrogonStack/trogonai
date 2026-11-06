@@ -14,6 +14,8 @@
 pub mod account_resolver;
 pub mod admission_keys;
 pub mod bridge_mint;
+pub mod bridge_mint_responder;
+pub mod bridge_mint_subscriber;
 pub mod caller_jwt_header;
 pub mod constants;
 pub mod credentials;
@@ -38,9 +40,11 @@ pub use admission_keys::{
 };
 
 pub use bridge_mint::{
-    BridgeClientInfo, BridgeCredential, BridgeCredentialError, BridgeMintRequest, BridgeMintResponse,
-    SealedBridgeCredential,
+    BridgeClientInfo, BridgeCredential, BridgeCredentialError, BridgeMintRefusal, BridgeMintReply, BridgeMintRequest,
+    BridgeMintResponse, SealedBridgeCredential,
 };
+pub use bridge_mint_responder::{BridgeMintResponder, bridge_mint_subject, dispatch_bridge_mint};
+pub use bridge_mint_subscriber::BridgeMintSubscriber;
 pub use caller_jwt_header::CallerJwtHeaderValue;
 pub use constants::CALLER_JWT_HEADER_NAME;
 pub use denial_category::DenialCategory;
