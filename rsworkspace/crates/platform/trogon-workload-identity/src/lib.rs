@@ -11,6 +11,7 @@ mod material_error;
 mod material_authority;
 mod peer_evidence;
 mod registration;
+mod time_observation;
 mod tls;
 mod tls_guards;
 mod unix_endpoint;

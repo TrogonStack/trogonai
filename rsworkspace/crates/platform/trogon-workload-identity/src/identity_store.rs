@@ -116,7 +116,8 @@ impl IdentityStore {
     }
 
     pub fn replace_registration(&self, registration: RegistrationSet) -> Result<(), RegistrationError> {
-        let now = SystemTime::now();
+        let observation = crate::time_observation::TimeObservation::now();
+        let now = observation.wall();
         let remaining = match registration.expires_at().duration_since(now) {
             Ok(remaining) => remaining,
             Err(_) => {
@@ -162,10 +163,11 @@ impl IdentityStore {
                 return Ok(());
             }
         }
+        let deadline = observation.deadline(registration.expires_at()).map_err(|_| RegistrationError::Freshness)?;
         state.high_watermark = Some(registration.clone());
         state.registration = grants_local.then_some(RegistrationLease {
             registration,
-            deadline: Instant::now() + remaining,
+            deadline,
         });
         state.active = None;
         self.signal(&mut state);

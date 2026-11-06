@@ -84,7 +84,8 @@ impl Candidate {
             .iter()
             .map(|certificate| CertificateDer::from(certificate.as_bytes().to_vec()))
             .collect();
-        let now = SystemTime::now();
+        let observation = crate::time_observation::TimeObservation::now();
+        let now = observation.wall();
         let leaf = chain.first().ok_or(MaterialError::Identity)?;
         let (_, not_before, _) = leaf_profile(leaf, now)?;
         let expires_at = verify_chain(&chain, &roots, now, false)?.min(verify_chain(&chain, &roots, now, true)?);
@@ -95,7 +96,7 @@ impl Candidate {
         let provider = rustls::crypto::aws_lc_rs::default_provider();
         let certified_key = CertifiedKey::from_der(chain, key, &provider).map_err(|_| MaterialError::Key)?;
         certified_key.keys_match().map_err(|_| MaterialError::Key)?;
-        let remaining = expires_at.duration_since(now).map_err(|_| MaterialError::Profile)?;
+        let deadline = observation.deadline(expires_at).map_err(|_| MaterialError::Profile)?;
         Ok(Self {
             certified_key: Arc::new(certified_key),
             roots,
@@ -105,7 +106,7 @@ impl Candidate {
             bundle_sha256,
             not_before,
             expires_at,
-            deadline: Instant::now() + remaining,
+            deadline,
         })
     }
 
