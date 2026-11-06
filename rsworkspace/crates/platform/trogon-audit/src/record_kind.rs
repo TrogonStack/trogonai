@@ -20,6 +20,8 @@ pub enum RecordKind {
     /// A release or an injection. Must-audit in every mode, because the effect
     /// happens whether or not a layer is in DryRun.
     CredentialUse,
+    /// A public workload credential activation intent, before platform use.
+    CredentialActivation,
     /// A policy or credential change. Must-audit in every mode.
     Change,
     /// Writer start and chain reset.
@@ -34,7 +36,7 @@ impl RecordKind {
                 read_only,
                 break_glass,
             } => decision_class(outcome, read_only, break_glass),
-            Self::CredentialUse | Self::Change | Self::Integrity => AuditClass::Must,
+            Self::CredentialUse | Self::CredentialActivation | Self::Change | Self::Integrity => AuditClass::Must,
         }
     }
 

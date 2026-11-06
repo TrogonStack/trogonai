@@ -51,11 +51,22 @@ pub struct Record {
 
 impl Record {
     pub fn credential_activation(
-        _scope: RecordScope,
-        _facts: CredentialActivationFacts,
-        _stamp: Stamp,
+        scope: RecordScope,
+        facts: CredentialActivationFacts,
+        stamp: Stamp,
     ) -> Result<Self, ActivationScopeError> {
-        Err(ActivationScopeError)
+        if !facts.matches_scope(scope.tenant.as_str(), scope.project.as_str()) {
+            return Err(ActivationScopeError);
+        }
+        let subject = AuditSubject::change(scope.project.clone(), ChangeTerminal::Credential);
+        Ok(Self::assemble(
+            scope,
+            stamp,
+            RecordKind::CredentialActivation,
+            subject,
+            credential_attribution(),
+            Detail::from(facts.into_message()),
+        ))
     }
 
     pub fn decision(scope: RecordScope, facts: DecisionFacts, stamp: Stamp) -> Self {

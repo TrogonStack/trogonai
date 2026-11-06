@@ -70,19 +70,105 @@ fn activation_facts_do_not_rely_on_inert_schema_annotations() {
 fn activation_facts_refuse_unsupported_authority_and_validity() {
     let original = activation();
     let invalid = [
-        (CredentialActivation { binding: MessageField::none(), ..original.clone() }, ActivationFactsError::Binding),
-        (CredentialActivation { source_revision: 0, ..original.clone() }, ActivationFactsError::Generation),
-        (CredentialActivation { recovery_fence: 0, ..original.clone() }, ActivationFactsError::Generation),
-        (CredentialActivation { registration_revision: 0, ..original.clone() }, ActivationFactsError::Generation),
-        (CredentialActivation { trust_revision: 0, ..original.clone() }, ActivationFactsError::Generation),
-        (CredentialActivation { activation_revision: 0, ..original.clone() }, ActivationFactsError::Generation),
-        (CredentialActivation { bundle_sha256: vec![1; 33], ..original.clone() }, ActivationFactsError::Fingerprint),
-        (CredentialActivation { leaf_sha256: vec![], ..original.clone() }, ActivationFactsError::Fingerprint),
-        (CredentialActivation { not_before: MessageField::none(), ..original.clone() }, ActivationFactsError::Validity),
-        (CredentialActivation { expires_at: MessageField::none(), ..original.clone() }, ActivationFactsError::Validity),
-        (CredentialActivation { expires_at: original.not_before.clone(), ..original.clone() }, ActivationFactsError::Validity),
-        (CredentialActivation { expires_at: MessageField::some(Timestamp { seconds: 1_800_003_601, nanos: 0, ..Default::default() }), ..original.clone() }, ActivationFactsError::Validity),
-        (CredentialActivation { not_before: MessageField::some(Timestamp { seconds: 1_800_000_000, nanos: -1, ..Default::default() }), ..original.clone() }, ActivationFactsError::Validity),
+        (
+            CredentialActivation {
+                binding: MessageField::none(),
+                ..original.clone()
+            },
+            ActivationFactsError::Binding,
+        ),
+        (
+            CredentialActivation {
+                source_revision: 0,
+                ..original.clone()
+            },
+            ActivationFactsError::Generation,
+        ),
+        (
+            CredentialActivation {
+                recovery_fence: 0,
+                ..original.clone()
+            },
+            ActivationFactsError::Generation,
+        ),
+        (
+            CredentialActivation {
+                registration_revision: 0,
+                ..original.clone()
+            },
+            ActivationFactsError::Generation,
+        ),
+        (
+            CredentialActivation {
+                trust_revision: 0,
+                ..original.clone()
+            },
+            ActivationFactsError::Generation,
+        ),
+        (
+            CredentialActivation {
+                activation_revision: 0,
+                ..original.clone()
+            },
+            ActivationFactsError::Generation,
+        ),
+        (
+            CredentialActivation {
+                bundle_sha256: vec![1; 33],
+                ..original.clone()
+            },
+            ActivationFactsError::Fingerprint,
+        ),
+        (
+            CredentialActivation {
+                leaf_sha256: vec![],
+                ..original.clone()
+            },
+            ActivationFactsError::Fingerprint,
+        ),
+        (
+            CredentialActivation {
+                not_before: MessageField::none(),
+                ..original.clone()
+            },
+            ActivationFactsError::Validity,
+        ),
+        (
+            CredentialActivation {
+                expires_at: MessageField::none(),
+                ..original.clone()
+            },
+            ActivationFactsError::Validity,
+        ),
+        (
+            CredentialActivation {
+                expires_at: original.not_before.clone(),
+                ..original.clone()
+            },
+            ActivationFactsError::Validity,
+        ),
+        (
+            CredentialActivation {
+                expires_at: MessageField::some(Timestamp {
+                    seconds: 1_800_003_601,
+                    nanos: 0,
+                    ..Default::default()
+                }),
+                ..original.clone()
+            },
+            ActivationFactsError::Validity,
+        ),
+        (
+            CredentialActivation {
+                not_before: MessageField::some(Timestamp {
+                    seconds: 1_800_000_000,
+                    nanos: -1,
+                    ..Default::default()
+                }),
+                ..original.clone()
+            },
+            ActivationFactsError::Validity,
+        ),
     ];
     for (message, expected) in invalid {
         assert_eq!(CredentialActivationFacts::try_from(message), Err(expected));
@@ -93,16 +179,41 @@ fn activation_facts_refuse_unsupported_authority_and_validity() {
 fn activation_binding_refuses_role_and_identity_confusion() {
     let mut message = activation();
     for binding in [
-        RegistrationBinding { role: EnumValue::from(WorkloadRole::Agent), application_id: None, ..(*message.binding).clone() },
-        RegistrationBinding { role: EnumValue::from(WorkloadRole::Unspecified), ..(*message.binding).clone() },
-        RegistrationBinding { role: EnumValue::from(999), ..(*message.binding).clone() },
-        RegistrationBinding { application_id: Some("unexpected-agent".into()), ..(*message.binding).clone() },
-        RegistrationBinding { spiffe_id: "https://example.test/proxy".into(), ..(*message.binding).clone() },
-        RegistrationBinding { tenant: "another tenant".into(), ..(*message.binding).clone() },
-        RegistrationBinding { project: String::new(), ..(*message.binding).clone() },
+        RegistrationBinding {
+            role: EnumValue::from(WorkloadRole::Agent),
+            application_id: None,
+            ..(*message.binding).clone()
+        },
+        RegistrationBinding {
+            role: EnumValue::from(WorkloadRole::Unspecified),
+            ..(*message.binding).clone()
+        },
+        RegistrationBinding {
+            role: EnumValue::from(999),
+            ..(*message.binding).clone()
+        },
+        RegistrationBinding {
+            application_id: Some("unexpected-agent".into()),
+            ..(*message.binding).clone()
+        },
+        RegistrationBinding {
+            spiffe_id: "https://example.test/proxy".into(),
+            ..(*message.binding).clone()
+        },
+        RegistrationBinding {
+            tenant: "another tenant".into(),
+            ..(*message.binding).clone()
+        },
+        RegistrationBinding {
+            project: String::new(),
+            ..(*message.binding).clone()
+        },
     ] {
         message.binding = MessageField::some(binding);
-        assert_eq!(CredentialActivationFacts::try_from(message.clone()), Err(ActivationFactsError::Binding));
+        assert_eq!(
+            CredentialActivationFacts::try_from(message.clone()),
+            Err(ActivationFactsError::Binding)
+        );
     }
 }
 

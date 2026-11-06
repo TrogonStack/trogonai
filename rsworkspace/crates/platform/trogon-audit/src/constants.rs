@@ -41,6 +41,14 @@ pub const MAX_CONSISTENCY_TOKEN_BYTES: usize = 512;
 /// `MAX_CHAIN_DEPTH` of `trogon-aauth-verify`, which is also the proto bound.
 pub const MAX_ACT_CHAIN_ENTRIES: usize = 16;
 
+pub const MAX_WORKLOAD_SPIFFE_ID_BYTES: usize = 2048;
+pub const MAX_WORKLOAD_SCOPE_BYTES: usize = 128;
+pub const MAX_WORKLOAD_APPLICATION_ID_BYTES: usize = 256;
+pub const WORKLOAD_PUBLIC_FINGERPRINT_BYTES: usize = 32;
+pub const MAX_ACTIVATION_VALIDITY_SECONDS: i64 = 3600;
+pub const MAX_PROTOBUF_TIMESTAMP_SECONDS: i64 = 253_402_300_799;
+pub const NANOSECONDS_PER_SECOND: i128 = 1_000_000_000;
+
 pub const TRACE_ID_HEX_LEN: usize = 32;
 
 /// Characters beyond ASCII alphanumerics that a name may hold. Whitespace, quotes,

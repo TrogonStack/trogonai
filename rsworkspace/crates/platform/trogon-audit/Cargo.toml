@@ -25,6 +25,7 @@ buffa = { workspace = true }
 buffa-types = { workspace = true }
 bytes = { workspace = true }
 sha2 = { workspace = true }
+spiffe = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["macros", "sync", "time", "rt"] }
 tokio-util = { workspace = true }

@@ -18,7 +18,7 @@ message RegistrationBinding {
     (buf.validate.field).string = {
       min_len: 1
       max_len: 2048
-      pattern: "^spiffe://[a-z0-9][a-z0-9.-]*/"
+      pattern: "^spiffe://"
     }
   ];
   string tenant = 2 [

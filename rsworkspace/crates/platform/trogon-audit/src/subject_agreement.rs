@@ -5,9 +5,10 @@
 //! project, except on an integrity subject, whose scope is the writer's
 //! component, which the payload does not name.
 
+use crate::credential_activation_facts::CredentialActivationFacts;
 use trogonai_proto::platform::audit::v1::audit_record::Detail;
 use trogonai_proto::platform::audit::v1::{
-    AuditDecision, AuditRecord, ChangeKind, CredentialUseKind, WriterLifecycleKind,
+    AuditClass, AuditDecision, AuditRecord, ChangeKind, CredentialUseKind, EnforcementMode, WriterLifecycleKind,
 };
 
 use crate::constants::{
@@ -35,7 +36,19 @@ pub(crate) fn subject_agrees(subject: &str, record: &AuditRecord) -> bool {
 fn expected(record: &AuditRecord) -> Option<(&'static str, Option<&str>, &'static str)> {
     let project = Some(record.project.value.as_str());
     match record.detail.as_ref()? {
-        Detail::CredentialActivation(_) => None,
+        Detail::CredentialActivation(activation) => {
+            let facts = CredentialActivationFacts::try_from(activation.as_ref().clone()).ok()?;
+            let attribution = record.attribution.as_option()?;
+            if !facts.matches_scope(&record.tenant.value, &record.project.value)
+                || record.class.as_known()? != AuditClass::Must
+                || attribution.decision.as_known()? != AuditDecision::AUDIT_DECISION_ALLOW
+                || attribution.enforcement_mode.as_known()? != EnforcementMode::ENFORCEMENT_MODE_ENFORCE
+                || attribution.would_deny
+            {
+                return None;
+            }
+            Some((SUBJECT_KIND_CHANGE, project, TERMINAL_CREDENTIAL))
+        }
         Detail::GatewayDecision(_) => Some((SUBJECT_KIND_DECISION, project, decision_terminal(record)?)),
         Detail::CredentialUse(credential) => {
             let terminal = match credential.kind.as_known()? {
