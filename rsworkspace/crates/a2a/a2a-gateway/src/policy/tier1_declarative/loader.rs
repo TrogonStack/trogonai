@@ -10,6 +10,11 @@ use super::bundle::{
 
 #[derive(Debug, thiserror::Error)]
 pub enum Tier1DeclarativeLoadError {
+    /// The configured directory does not exist. An empty bundle would
+    /// default-allow every request, so a layer the operator turned on
+    /// must fail at boot instead.
+    #[error("bundle dir {} does not exist", path.display())]
+    BundleDirMissing { path: PathBuf },
     /// An existing path was configured but it is not a directory. We
     /// surface a typed error here so the runtime fails fast at boot
     /// instead of falling through to default-allow with no rules loaded.
@@ -67,16 +72,19 @@ struct MatchToml {
 impl Tier1DeclarativeBundle {
     /// Load all `*.tier1.toml` bundles from the configured directory.
     ///
-    /// A missing directory yields an empty bundle so operators can stage
-    /// the path before populating it. An existing path that is *not* a
-    /// directory is a misconfiguration and fails fast — without that
+    /// A missing directory, or an existing path that is *not* a
+    /// directory, is a misconfiguration and fails fast; without that
     /// check the runtime would silently default-allow every request.
+    /// An existing directory with no `*.tier1.toml` files is a valid
+    /// empty bundle.
     pub fn load_from_dir(bundle_dir: impl AsRef<Path>) -> Result<Self, Tier1DeclarativeLoadError> {
         let bundle_dir = bundle_dir.as_ref();
         let mut rules = Vec::new();
 
         if !bundle_dir.exists() {
-            return Ok(Self::new(rules));
+            return Err(Tier1DeclarativeLoadError::BundleDirMissing {
+                path: bundle_dir.to_path_buf(),
+            });
         }
         if !bundle_dir.is_dir() {
             return Err(Tier1DeclarativeLoadError::NotDirectory {
