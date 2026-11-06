@@ -1,6 +1,7 @@
 import unittest
 import copy
 import json
+import re
 from pathlib import Path
 from unittest.mock import patch
 
@@ -43,6 +44,23 @@ class ReleaseTrustTests(unittest.TestCase):
 class DeploymentTests(unittest.TestCase):
     def render(self, config=None):
         return render(config or configuration(), lambda image: [])
+
+    def test_pinned_issuer_backdating_keeps_generated_svid_validity_within_the_consumer_ceiling(self):
+        files = self.render()
+        server = json.loads(files["server.conf"])["server"]
+        entries = json.loads(files["registrations.json"])["entries"]
+        requested = []
+        for field in ["default_x509_svid_ttl", "agent_ttl"]:
+            duration = re.fullmatch(r"([0-9]+)([smh])", server[field])
+            self.assertIsNotNone(duration, "the generated duration must use an explicit supported unit")
+            amount, unit = duration.groups()
+            requested.append((field, int(amount) * {"s": 1, "m": 60, "h": 3600}[unit]))
+        requested.extend((entry["spiffe_id"], entry["x509_svid_ttl"]) for entry in entries)
+        # The pinned issuer backdates NotBefore without shortening the requested TTL.
+        for source, ttl_seconds in requested:
+            with self.subTest(source=source):
+                self.assertGreater(ttl_seconds, 0)
+                self.assertLessEqual(ttl_seconds + 10, 3600, "the complete X.509 validity must fit the consumer ceiling")
 
     def test_secure_profile_renders_real_issuer_and_attestor_boundaries(self):
         files = self.render()
