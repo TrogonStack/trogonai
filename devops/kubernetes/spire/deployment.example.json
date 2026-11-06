@@ -1,0 +1,43 @@
+{
+  "environment": "production",
+  "trust_domain": "production.identity.example.org",
+  "other_environment_trust_domain": "nonproduction.identity.example.org",
+  "namespace": "identity-control",
+  "agent_namespace": "identity-agents",
+  "cluster": "production-eu1",
+  "recovery_epoch": 1,
+  "server_replicas": 3,
+  "storage_class": "encrypted-retained",
+  "aws_region": "eu-west-1",
+  "server_role_arn": "arn:aws:iam::111122223333:role/identity-server",
+  "key_admin_role_arn": "arn:aws:iam::111122223333:role/identity-key-administrator",
+  "oidc_provider_arn": "arn:aws:iam::111122223333:oidc-provider/oidc.eks.eu-west-1.amazonaws.com/id/EXAMPLE",
+  "api_server_cidrs": ["10.96.0.1/32"],
+  "aws_endpoint_cidrs": ["10.42.1.10/32", "10.42.1.11/32", "10.42.1.12/32"],
+  "node_names": ["identity-node-a", "identity-node-b", "identity-node-c"],
+  "node_cidrs": ["10.42.2.10/32", "10.42.2.11/32", "10.42.2.12/32"],
+  "bootstrap_bundle_configmap": "identity-bootstrap-bundle",
+  "kubelet_ca_configmap": "identity-kubelet-ca",
+  "database": {
+    "host": "identity-db.database.example.org",
+    "name": "identity",
+    "user": "identity_server",
+    "client_secret": "identity-database-client",
+    "root_ca_configmap": "identity-database-ca",
+    "cidrs": ["10.42.3.10/32", "10.42.3.11/32"]
+  },
+  "registrations": [
+    {
+      "spiffe_id": "spiffe://production.identity.example.org/platform/egress",
+      "tenant": "example-tenant",
+      "project": "example-project",
+      "role": "egress",
+      "agent_id": "example-agent",
+      "namespace": "trusted-supervisors",
+      "service_account": "egress-supervisor",
+      "container": "supervisor",
+      "container_image": "registry.example.org/platform/egress@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "uid": 10001
+    }
+  ]
+}
