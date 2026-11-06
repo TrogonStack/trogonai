@@ -93,6 +93,10 @@ impl Default for TestCa {
 }
 
 impl TestIdentity {
+    pub fn with_reported_id(mut self, id: &str) -> Self {
+        self.id = id.to_owned();
+        self
+    }
     pub fn id(&self) -> &str {
         &self.id
     }
