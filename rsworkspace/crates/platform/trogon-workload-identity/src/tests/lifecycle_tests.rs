@@ -1,6 +1,53 @@
 use super::*;
 
 #[tokio::test]
+async fn scoped_revocation_keeps_its_generation_floor_without_a_local_grant() {
+    let ca = TestCa::new();
+    let fixture = WorkloadApiFixture::start(vec![ca.issue(LOCAL_ID, Duration::from_secs(600))]).await;
+    let (store, driver) = IdentityStore::new(IdentityConfig::new(fixture.endpoint(), local(), revision(1)), Arc::new(Recorder::default()));
+    let original = registration(&ca);
+    let snapshot = |value, bindings| RegistrationSet::new(revision(1), revision(value), revision(1), original.expires_at(), bindings, original.approved_roots().to_vec()).unwrap();
+    store.replace_registration(snapshot(2, vec![local(), peer()])).unwrap();
+    let shutdown = CancellationToken::new();
+    let task = tokio::spawn(driver.run(shutdown.clone()));
+    let lease = material(&store).await;
+    let revoked = store.replace_registration(snapshot(100, vec![peer()]));
+    assert!(!lease.is_current());
+    assert!(store.material().is_none());
+    assert_eq!(store.replace_registration(snapshot(50, vec![local(), peer()])), Err(RegistrationError::Revision), "a newer complete revocation must fence older local reintroduction");
+    assert!(revoked.is_ok(), "a scoped revocation is valid projection data");
+    store.replace_registration(snapshot(101, vec![local(), peer()])).unwrap();
+    assert_eq!(material(&store).await.fact().registration_revision(), revision(101));
+    shutdown.cancel();
+    task.await.unwrap();
+    fixture.stop().await;
+}
+
+#[tokio::test]
+async fn scoped_empty_revocation_keeps_its_generation_floor() {
+    let ca = TestCa::new();
+    let fixture = WorkloadApiFixture::start(vec![ca.issue(LOCAL_ID, Duration::from_secs(600))]).await;
+    let (store, driver) = IdentityStore::new(IdentityConfig::new(fixture.endpoint(), local(), revision(1)), Arc::new(Recorder::default()));
+    let original = registration(&ca);
+    let snapshot = |value, bindings| RegistrationSet::new(revision(1), revision(value), revision(1), original.expires_at(), bindings, original.approved_roots().to_vec());
+    store.replace_registration(snapshot(2, vec![local(), peer()]).unwrap()).unwrap();
+    let shutdown = CancellationToken::new();
+    let task = tokio::spawn(driver.run(shutdown.clone()));
+    let lease = material(&store).await;
+    let empty = snapshot(100, Vec::new());
+    assert!(empty.is_ok(), "an empty complete snapshot represents revocation, not malformed data");
+    store.replace_registration(empty.unwrap()).unwrap();
+    assert!(!lease.is_current());
+    assert_eq!(store.replace_registration(snapshot(50, vec![local(), peer()]).unwrap()), Err(RegistrationError::Revision));
+    store.replace_registration(snapshot(101, vec![local(), peer()]).unwrap()).unwrap();
+    assert_eq!(material(&store).await.fact().registration_revision(), revision(101));
+    shutdown.cancel();
+    task.await.unwrap();
+    fixture.stop().await;
+}
+
+
+#[tokio::test]
 async fn reconnect_cannot_reactivate_a_withdrawn_snapshot_without_new_governed_authority() {
     let ca = TestCa::new();
     let identity = ca.issue(LOCAL_ID, Duration::from_secs(600));
