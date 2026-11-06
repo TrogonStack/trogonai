@@ -13,8 +13,8 @@ impl TimeObservation {
     }
 
     fn with_clock(read_wall: impl FnOnce() -> SystemTime) -> Self {
-        let wall = read_wall();
         let monotonic = Instant::now();
+        let wall = read_wall();
         Self { wall, monotonic }
     }
 
