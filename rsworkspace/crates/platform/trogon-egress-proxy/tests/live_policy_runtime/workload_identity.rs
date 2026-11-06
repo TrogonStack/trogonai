@@ -236,7 +236,7 @@ impl WorkloadHarness {
             policy_key: policy.key().into(),
             workload_api,
             client_api,
-            client_identity: client_identity,
+            client_identity,
             connector,
             address,
             shutdown,
@@ -351,9 +351,12 @@ async fn production_workload_profile_authenticates_and_audits_without_static_tls
     );
     let decision = harness.decision("deny").await?;
     let Some(Detail::GatewayDecision(decision)) = decision.detail else {
-        panic!("missing decision");
+        return Err(io::Error::other("missing decision").into());
     };
-    let peer = decision.workload_peer.as_option().expect("authenticated peer evidence");
+    let peer = decision
+        .workload_peer
+        .as_option()
+        .ok_or_else(|| io::Error::other("missing authenticated peer evidence"))?;
     assert_eq!(peer.peer_binding.spiffe_id, PEER_WORKLOAD);
     assert_eq!(peer.peer_binding.application_id.as_deref(), Some(APPLICATION_ID));
     assert_eq!(peer.registration_revision, 1);
@@ -383,7 +386,7 @@ async fn production_registration_removal_closes_idle_and_forwarding_workload_ses
     assert_eq!(support::read_exactly(&mut active, 8).await, b"approved");
     let allow = harness.decision("allow").await?;
     let Some(Detail::GatewayDecision(decision)) = allow.detail else {
-        panic!("missing decision");
+        return Err(io::Error::other("missing decision").into());
     };
     assert_eq!(
         decision.workload_peer.peer_binding.application_id.as_deref(),
@@ -506,7 +509,7 @@ async fn production_trust_replacement_retires_old_sessions_and_accepts_only_new_
     assert!(old.is_err(), "a cached TLS config must lose its retired authority");
     let decision = harness.decision("deny").await?;
     let Some(Detail::GatewayDecision(decision)) = decision.detail else {
-        panic!("missing decision");
+        return Err(io::Error::other("missing decision").into());
     };
     assert_eq!(decision.workload_peer.registration_revision, 2);
     assert_eq!(decision.workload_peer.trust_revision, 2);
