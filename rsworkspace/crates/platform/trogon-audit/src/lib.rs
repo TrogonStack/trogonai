@@ -27,8 +27,14 @@
 //! The per-writer hash chain of Decision 6 has its primitives here: [`RecordHash`],
 //! [`ChainId`] and the stored form in [`record_seal`]. [`verify_chain_range`]
 //! checks one chain read back from the stream, offline, and [`verify_chains`]
-//! splits a range that interleaves writers into its chains. Resuming a chain
-//! across restarts, signed checkpoints, the remaining integrity records, the
+//! splits a range that interleaves writers into its chains.
+//!
+//! A chain cannot show that its tail was deleted, so a [`CheckpointWriter`]
+//! signs the writer's acknowledged head as a detached JWS through a
+//! [`CheckpointSigner`] and stores it on `AUDIT_CHECKPOINT` through a
+//! [`CheckpointSink`]. [`verify_checkpoint`] checks one against a
+//! [`VerifiedChainHead`] under a set of [`TrustedKeys`]. Resuming a chain across
+//! restarts, a key-management signer, the remaining integrity records, the
 //! OpenTelemetry counters and the surface adapters are later slices.
 
 pub mod actor;
@@ -49,7 +55,18 @@ pub(crate) mod chain_walk;
 pub mod chains_verification;
 pub mod change_facts;
 pub mod change_terminal;
+pub mod checkpoint_config;
+pub mod checkpoint_draft;
+pub mod checkpoint_id;
+pub(crate) mod checkpoint_jws;
+pub mod checkpoint_sign_error;
+pub mod checkpoint_signature;
+pub mod checkpoint_signer;
+pub mod checkpoint_sink;
+pub mod checkpoint_stats;
 pub mod checkpoint_terminal;
+pub mod checkpoint_verification_error;
+pub mod checkpoint_writer;
 pub mod classify_publish_error;
 pub mod consistency_token;
 pub mod constants;
@@ -61,11 +78,15 @@ pub mod decision_terminal;
 pub mod disposition;
 pub mod enforcement;
 pub mod failure_reason;
+pub(crate) mod head_watch;
 pub mod integrity_terminal;
 pub mod jetstream_sink;
+pub mod key_id;
 pub mod layer_facts;
+pub mod local_checkpoint_signer;
 pub mod obligation;
 pub(crate) mod pending_record;
+pub(crate) mod protected_header;
 pub mod read_only;
 pub mod reason_code;
 pub mod record;
@@ -76,6 +97,7 @@ pub mod record_scope;
 pub mod record_seal;
 pub mod seal_error;
 pub mod sealed_record;
+pub mod signed_checkpoint;
 pub mod sink_error;
 pub mod stamp;
 pub mod stamper;
@@ -83,12 +105,16 @@ pub mod stored_ack;
 pub mod stored_audit_record;
 pub(crate) mod subject_agreement;
 pub mod surface;
+pub mod time_bounds;
 pub mod tls_mode;
 pub mod trace_id;
+pub mod trusted_keys;
 pub mod verified_chain_head;
 pub mod verified_chain_range;
+pub mod verified_checkpoint;
 pub mod verify_chain_range;
 pub mod verify_chains;
+pub mod verify_checkpoint;
 pub mod writer_config;
 pub mod writer_id;
 pub mod writer_identity;
@@ -116,7 +142,17 @@ pub use chain_verification_error::ChainVerificationError;
 pub use chains_verification::ChainsVerification;
 pub use change_facts::ChangeFacts;
 pub use change_terminal::ChangeTerminal;
+pub use checkpoint_config::CheckpointConfig;
+pub use checkpoint_draft::CheckpointDraft;
+pub use checkpoint_id::{CheckpointId, CheckpointIdError};
+pub use checkpoint_sign_error::CheckpointSignError;
+pub use checkpoint_signature::CheckpointSignature;
+pub use checkpoint_signer::CheckpointSigner;
+pub use checkpoint_sink::CheckpointSink;
+pub use checkpoint_stats::CheckpointStats;
 pub use checkpoint_terminal::CheckpointTerminal;
+pub use checkpoint_verification_error::CheckpointVerificationError;
+pub use checkpoint_writer::CheckpointWriter;
 pub use classify_publish_error::ClassifyPublishError;
 pub use consistency_token::{ConsistencyToken, ConsistencyTokenError};
 pub use credential_facts::CredentialFacts;
@@ -129,7 +165,9 @@ pub use enforcement::Enforcement;
 pub use failure_reason::FailureReason;
 pub use integrity_terminal::IntegrityTerminal;
 pub use jetstream_sink::JetStreamSink;
+pub use key_id::{KeyId, KeyIdError};
 pub use layer_facts::LayerFacts;
+pub use local_checkpoint_signer::LocalCheckpointSigner;
 pub use obligation::Obligation;
 pub use read_only::ReadOnly;
 pub use reason_code::{ReasonCode, ReasonCodeError};
@@ -140,18 +178,23 @@ pub use record_kind::RecordKind;
 pub use record_scope::{ActChainTooLongError, RecordScope};
 pub use seal_error::SealError;
 pub use sealed_record::SealedRecord;
+pub use signed_checkpoint::SignedCheckpoint;
 pub use sink_error::SinkError;
 pub use stamp::Stamp;
 pub use stamper::Stamper;
 pub use stored_ack::StoredAck;
 pub use stored_audit_record::StoredAuditRecord;
 pub use surface::Surface;
+pub use time_bounds::TimeBounds;
 pub use tls_mode::TlsMode;
 pub use trace_id::{TraceId, TraceIdError};
+pub use trusted_keys::TrustedKeys;
 pub use verified_chain_head::VerifiedChainHead;
 pub use verified_chain_range::VerifiedChainRange;
+pub use verified_checkpoint::VerifiedCheckpoint;
 pub use verify_chain_range::verify_chain_range;
 pub use verify_chains::verify_chains;
+pub use verify_checkpoint::verify_checkpoint;
 pub use writer_config::WriterConfig;
 pub use writer_id::WriterId;
 pub use writer_identity::WriterIdentity;
