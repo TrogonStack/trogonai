@@ -373,6 +373,10 @@ impl RegistrationLease {
 }
 
 impl MaterialLease {
+    /// The TLS handshake must have authenticated this exact certificate chain.
+    pub fn peer_evidence_from_certificates(&self, certificates: &[CertificateDer<'_>]) -> Result<crate::PeerEvidence, MaterialError> {
+        Ok(crate::PeerEvidence { application_id: self.peer_identity_from_certificates(certificates)?, expires_at: self.expires_at() })
+    }
     pub fn server_config(&self) -> Arc<ServerConfig> {
         Arc::clone(&self.material.tls)
     }

@@ -8,6 +8,7 @@ use futures::StreamExt;
 use rustls::pki_types::ServerName;
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
+use x509_parser::prelude::{FromDer, X509Certificate};
 
 use crate::constants::TEST_TIMEOUT;
 use crate::test_support::{TestCa, WorkloadApiFixture};
@@ -539,6 +540,37 @@ async fn cached_server_configuration_refuses_handshakes_after_registration_lease
     tokio::time::sleep_until(server_lease.deadline()).await;
     assert!(handshake(server_config, client_config).is_err());
     assert!(!server_lease.is_current());
+    shutdown.cancel();
+    server_task.await.unwrap();
+    client_task.await.unwrap();
+    fixture.stop().await;
+}
+
+#[tokio::test]
+async fn peer_evidence_is_bounded_by_its_selected_root_instead_of_the_local_svid_path() {
+    let local_ca = TestCa::new();
+    let peer_ca = TestCa::with_lifetime(Duration::from_secs(60));
+    let roots = [local_ca.root(), peer_ca.root()];
+    let peer_identity = peer_ca.issue(PEER_ID, Duration::from_secs(600)).with_bundle(&roots);
+    let fixture = WorkloadApiFixture::start(vec![local_ca.issue(LOCAL_ID, Duration::from_secs(600)).with_bundle(&roots), peer_identity.clone()]).await;
+    let (server, server_driver) = IdentityStore::new(IdentityConfig::new(fixture.endpoint(), local(), revision(1)), Arc::new(Recorder::default()));
+    let (client, client_driver) = IdentityStore::new(IdentityConfig::new(fixture.endpoint(), peer(), revision(1)), Arc::new(Recorder::default()));
+    let registration = RegistrationSet::new(revision(1), revision(1), revision(1), SystemTime::now() + Duration::from_secs(300), vec![local(), peer()], vec![local_ca.root_sha256(), peer_ca.root_sha256()]).unwrap();
+    server.replace_registration(registration.clone()).unwrap();
+    client.replace_registration(registration).unwrap();
+    let shutdown = CancellationToken::new();
+    let server_task = tokio::spawn(server_driver.run(shutdown.clone()));
+    let client_task = tokio::spawn(client_driver.run(shutdown.clone()));
+    let server_lease = material(&server).await;
+    let client_lease = material(&client).await;
+    assert!(handshake(server_lease.server_config(), client_lease.client_config(&spiffe::SpiffeId::new(LOCAL_ID).unwrap()).unwrap()).is_ok());
+    let evidence = server_lease.peer_evidence_from_certificates(&peer_identity.certificates()).unwrap();
+    assert_eq!(evidence.application_id().as_str(), "agent-1");
+    let root = peer_ca.root();
+    let (_, root) = X509Certificate::from_der(root.as_ref()).unwrap();
+    let root_expiry = crate::candidate::timestamp(root.validity().not_after.timestamp()).unwrap();
+    assert_eq!(evidence.expires_at(), root_expiry, "a peer must not inherit the server's longer-lived issuing path");
+    assert!(evidence.expires_at() < server_lease.expires_at());
     shutdown.cancel();
     server_task.await.unwrap();
     client_task.await.unwrap();

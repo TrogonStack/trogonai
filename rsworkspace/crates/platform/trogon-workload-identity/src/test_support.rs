@@ -37,6 +37,14 @@ pub struct TestIdentity {
 }
 
 impl TestCa {
+    pub fn with_lifetime(lifetime: Duration) -> Self {
+        let mut params = CertificateParams::default();
+        params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        params.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::CrlSign];
+        params.not_before = time::OffsetDateTime::now_utc() - time::Duration::seconds(1);
+        params.not_after = time::OffsetDateTime::now_utc() + time::Duration::try_from(lifetime).expect("CA lifetime");
+        Self(CertifiedIssuer::self_signed(params, KeyPair::generate().expect("CA key")).expect("CA"))
+    }
     pub fn new() -> Self {
         let mut params = CertificateParams::default();
         params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
