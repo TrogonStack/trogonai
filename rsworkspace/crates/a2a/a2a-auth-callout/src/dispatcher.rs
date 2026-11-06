@@ -22,6 +22,13 @@ pub trait AuthDispatcher: Send + Sync + 'static {
     async fn dispatch(&self, request: ServerAuthRequestClaims) -> Result<MintedUserJwt, AuthCalloutError>;
 }
 
+#[async_trait::async_trait]
+impl<D: AuthDispatcher + ?Sized> AuthDispatcher for Arc<D> {
+    async fn dispatch(&self, request: ServerAuthRequestClaims) -> Result<MintedUserJwt, AuthCalloutError> {
+        self.as_ref().dispatch(request).await
+    }
+}
+
 pub struct CalloutDispatcherConfig {
     pub tenant_signing_keys: TenantSigningKeys,
     pub user_jwt_ttl: Duration,

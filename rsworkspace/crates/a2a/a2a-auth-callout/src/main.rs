@@ -7,7 +7,7 @@ use {
     a2a_auth_callout::credentials::mtls::{TrustAnchorPem, X509MtlsVerifier},
     a2a_auth_callout::credentials::oidc::{JwksOidcVerifier, OidcIssuerUrl, OidcVerifier},
     a2a_auth_callout::dispatcher::{CalloutDispatcher, CalloutDispatcherConfig},
-    a2a_auth_callout::{AuthCalloutWireCodec, Subscriber},
+    a2a_auth_callout::{AuthCalloutWireCodec, BridgeMintResponder, BridgeMintSubscriber, Subscriber},
     a2a_nats::{A2aPrefix, A2aPrefixError, DEFAULT_A2A_PREFIX, ENV_A2A_PREFIX},
     std::sync::Arc,
     std::time::Duration,
@@ -159,30 +159,52 @@ async fn main() {
             std::process::exit(1);
         });
 
-    let dispatcher = CalloutDispatcher::new(CalloutDispatcherConfig {
+    let dispatcher = Arc::new(CalloutDispatcher::new(CalloutDispatcherConfig {
         tenant_signing_keys: admission_keys.tenant_signing_keys().clone(),
         user_jwt_ttl,
         a2a_prefix,
         oidc,
         mtls,
         api_key: None,
+    }));
+    // The bridge mints its per-caller users over this subject, so a callout
+    // that did not answer it would leave every bridge caller refused. It
+    // verifies through the same dispatcher as the server callout. Installed
+    // before the server subscriber flushes, so one flush covers both.
+    let bridge_mint = BridgeMintSubscriber::subscribe(
+        client.clone(),
+        BridgeMintResponder::new(Arc::clone(&dispatcher), admission_keys.callout_xkey().cloned()),
+        &env,
+    )
+    .await
+    .unwrap_or_else(|e| {
+        tracing::error!(error = %e, "failed to subscribe to the bridge mint subject");
+        std::process::exit(1);
     });
+    let bridge_mint_subject = bridge_mint.subject().to_owned();
+    let bridge_mint_task = tokio::spawn(bridge_mint.serve());
     let subscriber = Subscriber::new(client, dispatcher, wire);
 
-    info!("auth callout subscriber running");
+    info!(bridge_mint_subject = %bridge_mint_subject, "auth callout subscriber running");
 
     // `Subscriber::run` returns `Ok(())` when the NATS subscription closes
     // (connection drop, shutdown, etc.) — that is never a healthy steady
     // state for this process, so exit non-zero in both arms so the
     // orchestrator restarts the pod instead of treating the silent exit
     // as a clean shutdown.
-    match subscriber.run(&env).await {
-        Ok(()) => {
-            tracing::error!("auth callout subscriber exited cleanly; NATS subscription closed");
-            std::process::exit(1);
-        }
-        Err(e) => {
-            tracing::error!(error = %e, "auth callout subscriber exited with error");
+    tokio::select! {
+        result = subscriber.run(&env) => match result {
+            Ok(()) => {
+                tracing::error!("auth callout subscriber exited cleanly; NATS subscription closed");
+                std::process::exit(1);
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "auth callout subscriber exited with error");
+                std::process::exit(1);
+            }
+        },
+        _ = bridge_mint_task => {
+            tracing::error!("bridge mint subscriber exited; NATS subscription closed");
             std::process::exit(1);
         }
     }

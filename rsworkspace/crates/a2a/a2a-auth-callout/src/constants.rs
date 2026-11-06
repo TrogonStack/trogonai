@@ -17,6 +17,13 @@ pub(crate) const VERSION_PREVIOUS: &str = "previous";
 /// NATS subject the server uses for auth callout requests.
 pub(crate) const AUTH_CALLOUT_SUBJECT: &str = "$SYS.REQ.USER.AUTH";
 
+/// Subject the bridge sends its mint requests to, and the callout answers on,
+/// unless `AUTH_CALLOUT_MINT_SUBJECT` names another.
+pub const DEFAULT_BRIDGE_MINT_SUBJECT: &str = "a2a.bridge.auth.callout.request";
+
+/// Environment variable that overrides [`DEFAULT_BRIDGE_MINT_SUBJECT`] on both sides.
+pub const BRIDGE_MINT_SUBJECT_VAR: &str = "AUTH_CALLOUT_MINT_SUBJECT";
+
 pub(crate) const DEFAULT_DENIAL_TTL: Duration = Duration::from_secs(60);
 
 /// JWT `aud` on authorization **request** claims (`nats-server` `AuthRequestSubject`).

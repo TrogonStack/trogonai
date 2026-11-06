@@ -52,5 +52,40 @@ impl fmt::Debug for BridgeMintResponse {
     }
 }
 
+/// Internal bridge mint refusal (JSON). Carries only the opaque denial
+/// category, so a refused caller learns no more than a refused server
+/// connection does.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BridgeMintRefusal {
+    pub refusal: String,
+}
+
+impl BridgeMintRefusal {
+    pub fn new(category: impl Into<String>) -> Self {
+        Self {
+            refusal: category.into(),
+        }
+    }
+}
+
+/// What the callout answers on the bridge mint subject: a user JWT, or a
+/// refusal and never both.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum BridgeMintReply {
+    Minted(BridgeMintResponse),
+    Refused(BridgeMintRefusal),
+}
+
+impl BridgeMintReply {
+    /// The reply as the JSON the bridge decodes. Both variants hold only
+    /// strings, so encoding cannot fail; the empty fallback would fail the
+    /// bridge's decode at once instead of leaving it waiting out its timeout.
+    pub fn to_payload(&self) -> Vec<u8> {
+        serde_json::to_vec(self).unwrap_or_default()
+    }
+}
+
 #[cfg(test)]
 mod tests;

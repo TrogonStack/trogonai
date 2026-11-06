@@ -2,8 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use a2a_auth_callout::dispatcher::AuthDispatcher;
-use a2a_auth_callout::wire::ServerAuthRequestClaims;
-use a2a_auth_callout::{AuthCalloutError, BridgeMintRequest, BridgeMintResponse, CalloutXkey};
+use a2a_auth_callout::{AuthCalloutError, BridgeMintRequest, BridgeMintResponse, CalloutXkey, dispatch_bridge_mint};
 use async_trait::async_trait;
 
 use super::{AuthMintWire, BytesPayload};
@@ -81,16 +80,12 @@ impl AuthMintWire for InProcessCalloutDispatcherMintWire {
         if request.account.is_none() {
             request.account = Some(self.tenant.as_str().to_owned());
         }
-        let claims =
-            ServerAuthRequestClaims::from_bridge_mint(request, self.callout_xkey.as_ref()).map_err(|e| match e {
+        let user_jwt = dispatch_bridge_mint(self.dispatcher.as_ref(), self.callout_xkey.as_ref(), request)
+            .await
+            .map_err(|e| match e {
                 AuthCalloutError::BridgeCredential(refused) => BridgeError::MintCredential(refused),
                 other => BridgeError::Mint(other.to_string()),
             })?;
-        let user_jwt = self
-            .dispatcher
-            .dispatch(claims)
-            .await
-            .map_err(|e| BridgeError::Mint(e.to_string()))?;
         let response = BridgeMintResponse {
             user_jwt: user_jwt.as_str().to_owned(),
         };
