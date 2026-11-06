@@ -282,3 +282,6 @@ impl WorkloadApiFixture {
         let _ = self.task.await;
     }
 }
+
+#[cfg(test)]
+mod tests;

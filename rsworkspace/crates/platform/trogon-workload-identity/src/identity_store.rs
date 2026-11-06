@@ -441,3 +441,6 @@ impl MaterialLease {
         Ok(self.peer_evidence_from_certificates(certificates)?.application_id().clone())
     }
 }
+
+#[cfg(test)]
+mod tests;

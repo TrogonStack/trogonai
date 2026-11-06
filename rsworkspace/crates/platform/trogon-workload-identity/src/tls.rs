@@ -215,3 +215,6 @@ impl ServerCertVerifier for RegisteredServerVerifier {
 fn refused(_: MaterialError) -> rustls::Error {
     rustls::Error::InvalidCertificate(rustls::CertificateError::ApplicationVerificationFailure)
 }
+
+#[cfg(test)]
+mod tests;

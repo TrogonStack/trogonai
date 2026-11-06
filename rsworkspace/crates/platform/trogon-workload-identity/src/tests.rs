@@ -6,23 +6,23 @@ use std::time::{Duration, SystemTime};
 use async_trait::async_trait;
 use futures::StreamExt;
 use rustls::pki_types::ServerName;
+use sha2::{Digest, Sha256};
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 use x509_parser::prelude::{FromDer, X509Certificate};
-use sha2::{Digest, Sha256};
 
 use crate::constants::TEST_TIMEOUT;
 use crate::test_support::{TestCa, WorkloadApiFixture};
 use crate::*;
 
-const LOCAL_ID: &str = "spiffe://example.org/service/egress";
-const PEER_ID: &str = "spiffe://example.org/runtime/workload-1";
+pub(crate) const LOCAL_ID: &str = "spiffe://example.org/service/egress";
+pub(crate) const PEER_ID: &str = "spiffe://example.org/runtime/workload-1";
 
 mod lifecycle_tests;
 mod validation_tests;
 
 #[derive(Default)]
-struct Recorder(Mutex<Vec<ActivationFact>>);
+pub(crate) struct Recorder(Mutex<Vec<ActivationFact>>);
 
 #[async_trait]
 impl ActivationAudit for Recorder {
@@ -32,16 +32,16 @@ impl ActivationAudit for Recorder {
     }
 }
 
-fn local() -> RegistrationBinding {
+pub(crate) fn local() -> RegistrationBinding {
     RegistrationBinding::new(LOCAL_ID, "tenant", "project", WorkloadRole::EgressProxy, None).unwrap()
 }
-fn peer() -> RegistrationBinding {
+pub(crate) fn peer() -> RegistrationBinding {
     RegistrationBinding::new(PEER_ID, "tenant", "project", WorkloadRole::Agent, Some("agent-1")).unwrap()
 }
-fn revision(value: u64) -> NonZeroU64 {
+pub(crate) fn revision(value: u64) -> NonZeroU64 {
     NonZeroU64::new(value).unwrap()
 }
-fn registration(ca: &TestCa) -> RegistrationSet {
+pub(crate) fn registration(ca: &TestCa) -> RegistrationSet {
     RegistrationSet::new(
         revision(1),
         revision(1),
@@ -53,7 +53,7 @@ fn registration(ca: &TestCa) -> RegistrationSet {
     .unwrap()
 }
 
-async fn material(store: &IdentityStore) -> MaterialLease {
+pub(crate) async fn material(store: &IdentityStore) -> MaterialLease {
     tokio::time::timeout(TEST_TIMEOUT, async {
         loop {
             if let Some(material) = store.material() {
@@ -95,7 +95,8 @@ async fn supported_sdk_reads_real_unix_workload_stream() {
 #[tokio::test]
 async fn verified_material_activates_only_with_exact_registration_and_durable_record() {
     let ca = TestCa::new();
-    let fixture = WorkloadApiFixture::start(vec![ca.issue(LOCAL_ID, Duration::from_secs(600))]).await;
+    let identity = ca.issue(LOCAL_ID, Duration::from_secs(600));
+    let fixture = WorkloadApiFixture::start(vec![identity.clone()]).await;
     let audit = Arc::new(Recorder::default());
     let (store, driver) = IdentityStore::new(
         IdentityConfig::new(fixture.endpoint(), local(), revision(1)),
@@ -114,6 +115,27 @@ async fn verified_material_activates_only_with_exact_registration_and_durable_re
         "agent-1"
     );
     assert_eq!(audit.0.lock().unwrap().len(), 1);
+    let recorded = audit.0.lock().unwrap()[0].clone();
+    assert_eq!(recorded.binding(), store.config().local());
+    assert_eq!(recorded.recovery_fence(), store.config().recovery_fence());
+    assert_eq!(recorded.trust_revision(), lease.registration().trust_revision());
+    assert!(recorded.not_before() <= SystemTime::now());
+    assert_eq!(recorded.expires_at(), lease.expires_at());
+    assert_eq!(
+        *recorded.leaf_sha256(),
+        <[u8; 32]>::from(Sha256::digest(&identity.certificates()[0]))
+    );
+    let provider = rustls::crypto::aws_lc_rs::default_provider();
+    let key = provider.key_provider.load_private_key(identity.private_key()).unwrap();
+    assert_eq!(
+        *recorded.public_key_sha256(),
+        <[u8; 32]>::from(Sha256::digest(key.public_key().unwrap()))
+    );
+    assert_eq!(
+        *recorded.bundle_sha256(),
+        <[u8; 32]>::from(Sha256::digest(ca.root_sha256()))
+    );
+    assert_eq!(store.config().endpoint().as_uri(), fixture.endpoint().as_uri());
     store.withdraw_registration();
     assert!(!lease.is_current());
     assert!(store.material().is_none());
@@ -140,7 +162,7 @@ impl ActivationAudit for HeldAudit {
     }
 }
 
-async fn until(mut condition: impl FnMut() -> bool) {
+pub(crate) async fn until(mut condition: impl FnMut() -> bool) {
     tokio::time::timeout(TEST_TIMEOUT, async {
         while !condition() {
             tokio::task::yield_now().await;
@@ -235,7 +257,10 @@ async fn invalid_key_unapproved_root_and_excessive_lifetime_never_activate() {
     }
 }
 
-fn handshake(server: Arc<rustls::ServerConfig>, client: Arc<rustls::ClientConfig>) -> Result<(), rustls::Error> {
+pub(crate) fn handshake(
+    server: Arc<rustls::ServerConfig>,
+    client: Arc<rustls::ClientConfig>,
+) -> Result<(), rustls::Error> {
     let mut server = rustls::ServerConnection::new(server)?;
     let mut client = rustls::ClientConnection::new(client, ServerName::try_from("unrelated.example").unwrap())?;
     for _ in 0..16 {
@@ -460,6 +485,10 @@ async fn cached_tls_configurations_cannot_authenticate_after_credential_withdraw
         .client_auth_cert_resolver
         .resolve(&[], &[rustls::SignatureScheme::ECDSA_NISTP256_SHA256])
         .expect("active client key");
+    assert!(!format!("{:?}", client_config.client_auth_cert_resolver).contains("BEGIN PRIVATE KEY"));
+    resolved_key
+        .keys_match()
+        .expect("live signing wrapper preserves exact certificate and key matching");
     let signer = resolved_key
         .key
         .choose_scheme(&[rustls::SignatureScheme::ECDSA_NISTP256_SHA256])
@@ -556,10 +585,28 @@ async fn peer_evidence_is_bounded_by_its_selected_root_instead_of_the_local_svid
     let peer_ca = TestCa::with_lifetime(Duration::from_secs(60));
     let roots = [local_ca.root(), peer_ca.root()];
     let peer_identity = peer_ca.issue(PEER_ID, Duration::from_secs(600)).with_bundle(&roots);
-    let fixture = WorkloadApiFixture::start(vec![local_ca.issue(LOCAL_ID, Duration::from_secs(600)).with_bundle(&roots), peer_identity.clone()]).await;
-    let (server, server_driver) = IdentityStore::new(IdentityConfig::new(fixture.endpoint(), local(), revision(1)), Arc::new(Recorder::default()));
-    let (client, client_driver) = IdentityStore::new(IdentityConfig::new(fixture.endpoint(), peer(), revision(1)), Arc::new(Recorder::default()));
-    let registration = RegistrationSet::new(revision(1), revision(1), revision(1), SystemTime::now() + Duration::from_secs(300), vec![local(), peer()], vec![local_ca.root_sha256(), peer_ca.root_sha256()]).unwrap();
+    let fixture = WorkloadApiFixture::start(vec![
+        local_ca.issue(LOCAL_ID, Duration::from_secs(600)).with_bundle(&roots),
+        peer_identity.clone(),
+    ])
+    .await;
+    let (server, server_driver) = IdentityStore::new(
+        IdentityConfig::new(fixture.endpoint(), local(), revision(1)),
+        Arc::new(Recorder::default()),
+    );
+    let (client, client_driver) = IdentityStore::new(
+        IdentityConfig::new(fixture.endpoint(), peer(), revision(1)),
+        Arc::new(Recorder::default()),
+    );
+    let registration = RegistrationSet::new(
+        revision(1),
+        revision(1),
+        revision(1),
+        SystemTime::now() + Duration::from_secs(300),
+        vec![local(), peer()],
+        vec![local_ca.root_sha256(), peer_ca.root_sha256()],
+    )
+    .unwrap();
     server.replace_registration(registration.clone()).unwrap();
     client.replace_registration(registration).unwrap();
     let shutdown = CancellationToken::new();
@@ -567,15 +614,38 @@ async fn peer_evidence_is_bounded_by_its_selected_root_instead_of_the_local_svid
     let client_task = tokio::spawn(client_driver.run(shutdown.clone()));
     let server_lease = material(&server).await;
     let client_lease = material(&client).await;
-    assert!(handshake(server_lease.server_config(), client_lease.client_config(&spiffe::SpiffeId::new(LOCAL_ID).unwrap()).unwrap()).is_ok());
-    let evidence = server_lease.peer_evidence_from_certificates(&peer_identity.certificates()).unwrap();
+    assert!(
+        handshake(
+            server_lease.server_config(),
+            client_lease
+                .client_config(&spiffe::SpiffeId::new(LOCAL_ID).unwrap())
+                .unwrap()
+        )
+        .is_ok()
+    );
+    let evidence = server_lease
+        .peer_evidence_from_certificates(&peer_identity.certificates())
+        .unwrap();
+    assert_eq!(
+        server_lease
+            .peer_identity_from_certificates(&peer_identity.certificates())
+            .unwrap(),
+        *evidence.application_id()
+    );
     assert_eq!(evidence.application_id().as_str(), "agent-1");
     assert_eq!(evidence.spiffe_id().to_string(), PEER_ID);
-    assert_eq!(*evidence.leaf_sha256(), <[u8;32]>::from(Sha256::digest(&peer_identity.certificates()[0])));
+    assert_eq!(
+        *evidence.leaf_sha256(),
+        <[u8; 32]>::from(Sha256::digest(&peer_identity.certificates()[0]))
+    );
     let root = peer_ca.root();
     let (_, root) = X509Certificate::from_der(root.as_ref()).unwrap();
     let root_expiry = crate::certificate_validation::timestamp(root.validity().not_after.timestamp()).unwrap();
-    assert_eq!(evidence.expires_at(), root_expiry, "a peer must not inherit the server's longer-lived issuing path");
+    assert_eq!(
+        evidence.expires_at(),
+        root_expiry,
+        "a peer must not inherit the server's longer-lived issuing path"
+    );
     assert!(evidence.expires_at() < server_lease.expires_at());
     shutdown.cancel();
     server_task.await.unwrap();

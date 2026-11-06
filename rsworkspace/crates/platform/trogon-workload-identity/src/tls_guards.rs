@@ -103,3 +103,6 @@ impl Signer for LiveSigner {
         self.signer.scheme()
     }
 }
+
+#[cfg(test)]
+mod tests;

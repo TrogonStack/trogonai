@@ -33,6 +33,7 @@ tokio-stream = { version = "=0.1.18", features = ["net"], optional = true }
 time = { workspace = true, optional = true }
 
 [dev-dependencies]
+rustls = { workspace = true, features = ["tls12"] }
 rcgen = { version = "=0.14.8", default-features = false, features = ["aws_lc_rs", "pem"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "test-util", "io-util"] }
