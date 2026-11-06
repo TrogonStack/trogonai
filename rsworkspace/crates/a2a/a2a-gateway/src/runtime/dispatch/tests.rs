@@ -13,12 +13,12 @@ use trogon_identity_types::PrincipalKind;
 
 use crate::constants::{ENV_GATEWAY_JWT_AUDIENCE, ENV_TIER3_REDACTION_ENABLED};
 use crate::gateway_test_support::Diagnostics;
-use crate::policy::spicedb_tier1::Tier1AuthorizeOutcome;
 use crate::policy::tier1_declarative::RealTier1DeclarativeGate;
 use crate::policy::tier1_declarative::bundle::{
     Tier1DeclarativeBundle, Tier1DeclarativeEffect, Tier1DeclarativeMatch, Tier1DeclarativeRule,
     Tier1DeclarativeRuleId, Tier1ResourceKind,
 };
+use crate::policy::tier1_gate::{OwnerEmitError, Tier1AuthorizeOutcome};
 use crate::policy::tier2::{DenyAllTier2Evaluator, NoopTier2Evaluator};
 use crate::policy::tier3_redaction::{
     RedactionRewrite, RewriteKind, Tier3EngineError, Tier3EvaluationContext, Tier3RedactionDecision,
@@ -302,7 +302,7 @@ async fn owner_write_failure_preserves_authorized_forwarding() -> TestResult {
     let mut fixture = DispatchFixture::new().await?;
     fixture.tier1 = Arc::new(RecordingTier1::new(Tier1AuthorizeOutcome::Allowed { zed_token: None }));
     let owner = Arc::new(RecordingOwner {
-        failure: Some(tonic::Status::unavailable("test outage")),
+        failure: Some(OwnerEmitError::new("test outage")),
         ..Default::default()
     });
     fixture.owner = Some(owner.clone());

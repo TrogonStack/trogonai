@@ -25,10 +25,11 @@ use crate::gw_ingress_stream::{
     GatewayStreamingIngressConfig, StreamingIngressGate, StreamingMaxAckPending, StreamingMaxInflightPerCaller,
 };
 use crate::ingress_identity::ForwardedCallerJwtVerifier;
-use crate::policy::spicedb_tier1::{
-    NoopSpiceDbTier1Gate, OwnerTupleEmitter, SpiceDbTier1Gate, Tier1AuthorizeOutcome, Tier1OwnerTuple, Tier1SessionKey,
-};
 use crate::policy::tier1_declarative::{NoopTier1DeclarativeGate, Tier1DeclarativeGate};
+use crate::policy::tier1_gate::{
+    NoopSpiceDbTier1Gate, OwnerEmitError, OwnerTupleEmitter, SpiceDbTier1Gate, Tier1AuthorizeOutcome, Tier1OwnerTuple,
+    Tier1SessionKey,
+};
 use crate::runtime::dispatch::dispatch_gateway_ingress;
 use crate::runtime::policy_stack::GatewayPolicyStack;
 
@@ -316,13 +317,13 @@ impl SpiceDbTier1Gate for RecordingTier1 {
 
 #[derive(Default)]
 pub struct RecordingOwner {
-    pub failure: Option<tonic::Status>,
+    pub failure: Option<OwnerEmitError>,
     pub calls: Mutex<Vec<Tier1OwnerTuple>>,
 }
 
 #[async_trait::async_trait]
 impl OwnerTupleEmitter for RecordingOwner {
-    async fn emit_owner(&self, owner: &Tier1OwnerTuple) -> Result<(), tonic::Status> {
+    async fn emit_owner(&self, owner: &Tier1OwnerTuple) -> Result<(), OwnerEmitError> {
         self.calls.lock().expect("owner calls").push(owner.clone());
         self.failure.clone().map_or(Ok(()), Err)
     }
