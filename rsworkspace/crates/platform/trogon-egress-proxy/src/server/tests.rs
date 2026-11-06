@@ -327,3 +327,64 @@ async fn a_certificate_naming_no_agent_gets_no_answer() {
     assert_eq!(decisions.count(), 1, "only the named agent was admitted to a decision");
     stop(shutdown, task).await;
 }
+
+#[tokio::test]
+async fn an_established_tunnel_closes_when_the_authenticated_certificate_expires() {
+    let upstream = TcpListener::bind("127.0.0.1:0").await.expect("upstream");
+    let port = upstream.local_addr().expect("upstream address").port();
+    let upstream_task = tokio::spawn(async move {
+        let (mut stream, _) = upstream.accept().await.expect("accept upstream");
+        let mut bytes = Vec::new();
+        stream.read_to_end(&mut bytes).await.expect("upstream closes");
+    });
+    let pki = Pki::new();
+    let snapshot = StaticSnapshot::from_toml(
+        PolicySource::StaticFile {
+            path: "test-policy.toml".into(),
+        },
+        &format!("[agents.agent-1]\nallow = [\"127.0.0.1:{port}\"]\n"),
+    )
+    .expect("snapshot");
+    let proxy = Proxy::new(
+        Arc::new(snapshot),
+        Arc::new(SystemResolver),
+        Arc::new(Decisions::default()),
+        Limits::default(),
+        Default::default(),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let server = Server::new(
+        listener,
+        Arc::new(pki.strict_config()),
+        proxy,
+        TrustDomain::new(TRUST_DOMAIN).expect("domain"),
+    );
+    let address = server.local_addr().expect("address");
+    let shutdown = CancellationToken::new();
+    let task = tokio::spawn(server.run(shutdown.clone()));
+    let mut params = CertificateParams::default();
+    params.subject_alt_names = vec![SanType::URI(
+        Ia5String::try_from("spiffe://trogon.example/agent/agent-1").expect("uri"),
+    )];
+    params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
+    params.not_after = (std::time::SystemTime::now() + Duration::from_secs(2)).into();
+    let identity = pki.issue(params);
+    let tcp = TcpStream::connect(address).await.expect("connect");
+    let mut stream = pki
+        .connector(identity)
+        .connect(ServerName::try_from("localhost").expect("name"), tcp)
+        .await
+        .expect("handshake");
+    stream
+        .write_all(format!("CONNECT 127.0.0.1:{port} HTTP/1.1\r\n\r\n").as_bytes())
+        .await
+        .expect("request");
+    let mut established = vec![0; 39];
+    stream.read_exact(&mut established).await.expect("established");
+    assert_eq!(established, b"HTTP/1.1 200 Connection Established\r\n\r\n");
+    let mut rest = Vec::new();
+    let closed = timeout(Duration::from_secs(4), stream.read_to_end(&mut rest)).await;
+    stop(shutdown, task).await;
+    upstream_task.await.expect("upstream task");
+    assert!(closed.is_ok(), "an established tunnel cannot outlive its certificate");
+}

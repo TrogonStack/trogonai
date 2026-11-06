@@ -40,6 +40,11 @@ impl DenialCategory {
             | AuthCalloutError::KeyLoadUtf8(_)
             | AuthCalloutError::AdmissionKeys(_) => Self::InternalError,
             AuthCalloutError::CredentialVerification(e) => Self::from_credential_error(e),
+            AuthCalloutError::TenantAdmission(
+                crate::tenant_admission::TenantAdmissionError::NotMember
+                | crate::tenant_admission::TenantAdmissionError::AudienceMismatch,
+            ) => Self::InvalidCredentials,
+            AuthCalloutError::TenantAdmission(_) => Self::ServiceUnavailable,
         }
     }
 
@@ -58,6 +63,8 @@ impl DenialCategory {
             // exist so this side can count them apart, not so a caller can
             // learn which check refused it.
             CredentialError::InvalidCredentials(_)
+            | CredentialError::OidcIssuer(_)
+            | CredentialError::OidcDiscovery(_)
             | CredentialError::UnsupportedCriticalHeader
             | CredentialError::ProtectedHeaderEncoding(_)
             | CredentialError::ProtectedHeaderJson(_)

@@ -314,9 +314,10 @@ account, and the xkey seed from nsc's keystore. Then start it with:
 | `AUTH_CALLOUT_AUTH_ACCOUNT` | The AUTH account's public key |
 | `AUTH_CALLOUT_RESPONSE_SIGNING_KEY` | `file:///<dir>/auth-response.nk` |
 | `AUTH_CALLOUT_TENANT_SIGNING_KEYS` | `<tenant account public key>=file:///<dir>/<tenant>-callout.nk`, comma separated, with an entry for every allowed account |
+| `AUTH_CALLOUT_TENANT_MEMBERSHIPS` | Required path to the trusted caller-to-tenant JSON registry described in the [callout reference](../../rsworkspace/crates/a2a/a2a-auth-callout/README.md#tenant-admission-authority) |
 | `AUTH_CALLOUT_XKEY_SEED` | `file:///<dir>/callout-xkey.nk` |
 | `AUTH_CALLOUT_MTLS_TRUST_ANCHORS` | The path of the CA bundle that issues callers' client certificates |
-| `AUTH_CALLOUT_OIDC_ISSUER`, `AUTH_CALLOUT_OIDC_AUDIENCES` | The OIDC issuer whose tokens the callout accepts, and the audiences a token must carry |
+| `AUTH_CALLOUT_OIDC_ISSUER`, `AUTH_CALLOUT_OIDC_AUDIENCES` | Exact HTTPS OIDC issuer whose tokens the callout accepts, and the audiences a token must carry |
 | `A2A_PREFIX` | The A2A subject prefix the gateway and the agents use, `a2a` unless set |
 | `AUTH_CALLOUT_MINT_SUBJECT` | The subject the callout answers A2A bridge mint requests on, `a2a.bridge.auth.callout.request` unless set. It must match [the export](#export-the-bridge-mint-service) |
 
@@ -325,7 +326,11 @@ must be a `file://` reference. `env` custody reads `env://` references and is
 for development only, and `vault` is refused until signing moves behind
 OpenBao Transit. The callout refuses to start without a verifier, so set the
 trust anchors, the OIDC issuer, or both. `AUTH_CALLOUT_USER_JWT_TTL_SECS` sets
-how long a minted user stays valid, 300 seconds unless set.
+the configured maximum validity of a minted user, 300 seconds unless set;
+verified OIDC or certificate-path expiry can shorten it. Admission also requires
+an explicit membership permit. An unavailable, malformed or missing registry
+refuses new mints rather than reusing old membership state. Update it atomically
+through a trusted administrative boundary; workloads cannot write it.
 
 The callout grants a caller only the A2A subjects that name it as
 `{kind}.{id}`, under `A2A_PREFIX`, and the server denies every other subject.
@@ -381,9 +386,12 @@ The local compose stack runs the callout this way. nats-bootstrap writes its
 settings to `clients/auth-callout/callout.env` in the `dev_secrets` volume,
 next to its seeds under `keys/`, and the matching xkey public key to
 `clients/a2a-bridge/bridge.env`, with the DEV account's public key as
-`BRIDGE_TENANT_ACCOUNT`. The callout trusts the dev CA, so any dev
-client certificate admits a caller into DEV, whose public key nats-bootstrap
-logs as `nats-bootstrap: account DEV <key>`:
+`BRIDGE_TENANT_ACCOUNT`. The callout trusts the dev CA and initially admits only
+the `CN=nats-cli` client identity into DEV through `tenant-memberships.json`.
+Bootstrap creates that registry only when absent and preserves operator removals
+and invalid updates across restarts. A valid dev certificate without an explicit
+membership fails admission. DEV's public key is logged as
+`nats-bootstrap: account DEV <key>`:
 
 ```sh
 docker compose --profile tools run --rm -e NATS_CREDS= nats-box \

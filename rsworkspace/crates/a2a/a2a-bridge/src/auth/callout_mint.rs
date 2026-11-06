@@ -138,9 +138,17 @@ pub(crate) fn harness_callout_dispatcher(caller_id: &str) -> (Arc<CalloutDispatc
         AccountSigningKey::from_seed(&nkeys::KeyPair::new_account().seed().expect("harness signing seed"))
             .expect("harness signing key");
     let bridge_tenant = BridgeTenantAccount::new(tenant.as_str()).expect("harness bridge tenant");
+    let tenant_admission = a2a_auth_callout::tenant_admission::TenantMemberships::new([
+        a2a_auth_callout::tenant_admission::TenantMembership::new(
+            tenant.clone(),
+            trogon_identity_types::SubjectPrincipal::from_tokens("person", caller_id).expect("harness principal"),
+        ),
+    ])
+    .expect("harness tenant membership");
     let tenant_signing_keys = TenantSigningKeys::new([(tenant, signing_key)]).expect("harness tenant signing keys");
     let dispatcher = CalloutDispatcher::new(CalloutDispatcherConfig {
         tenant_signing_keys,
+        tenant_admission: Arc::new(tenant_admission),
         user_jwt_ttl: Duration::from_secs(60),
         a2a_prefix: a2a_nats::A2aPrefix::new(a2a_nats::DEFAULT_A2A_PREFIX).expect("harness prefix"),
         oidc: Some(oidc),

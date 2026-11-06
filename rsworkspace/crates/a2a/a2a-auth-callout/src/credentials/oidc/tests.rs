@@ -201,7 +201,7 @@ async fn discover_fetches_jwks_via_wiremock() {
         .respond_with(wiremock::ResponseTemplate::new(200).set_body_raw(jwk_body.to_string(), "application/json"))
         .mount(&mock_srv)
         .await;
-    let issuer = OidcIssuerUrl::parse(mock_srv.uri()).unwrap();
+    let issuer = OidcIssuerUrl::loopback_for_test(mock_srv.uri());
     let v = JwksOidcVerifier::discover(issuer, vec!["aud".into()])
         .await
         .expect("discover");
@@ -223,21 +223,15 @@ async fn discover_rejects_jwks_uri_outside_issuer_origin() {
         ))
         .mount(&mock_srv)
         .await;
-    let issuer = OidcIssuerUrl::parse(mock_srv.uri()).unwrap();
+    let issuer = OidcIssuerUrl::loopback_for_test(mock_srv.uri());
     let res = JwksOidcVerifier::discover(issuer, vec!["aud".into()]).await;
     let Err(err) = res else {
         panic!("expected origin mismatch error");
     };
-    let AuthCalloutError::CredentialVerification(CredentialError::InvalidCredentials(msg)) = err else {
-        panic!("expected jwks_uri origin mismatch");
-    };
-    assert_eq!(
-        msg,
-        format!(
-            "OIDC jwks_uri \"https://attacker.example.com/jwks\" is outside issuer origin {:?}",
-            mock_srv.uri()
-        )
-    );
+    assert!(matches!(
+        err,
+        AuthCalloutError::CredentialVerification(CredentialError::OidcDiscovery(OidcDiscoveryError::JwksLocation))
+    ));
 }
 
 #[tokio::test]
@@ -251,22 +245,15 @@ async fn discover_rejects_mismatched_issuer_claim() {
         ))
         .mount(&mock_srv)
         .await;
-    let issuer = OidcIssuerUrl::parse(mock_srv.uri()).unwrap();
+    let issuer = OidcIssuerUrl::loopback_for_test(mock_srv.uri());
     let res = JwksOidcVerifier::discover(issuer, vec!["aud".into()]).await;
     let Err(err) = res else {
         panic!("expected issuer mismatch error");
     };
-    let AuthCalloutError::CredentialVerification(CredentialError::InvalidCredentials(msg)) = err else {
-        panic!("expected issuer mismatch");
-    };
-    assert_eq!(
-        msg,
-        format!(
-            "OIDC discovery issuer mismatch: configured={:?} discovered={:?}",
-            mock_srv.uri(),
-            "https://other.example.com"
-        )
-    );
+    assert!(matches!(
+        err,
+        AuthCalloutError::CredentialVerification(CredentialError::OidcDiscovery(OidcDiscoveryError::IssuerMismatch))
+    ));
 }
 
 #[test]
@@ -274,6 +261,26 @@ fn oidc_client_id_rejects_empty_and_whitespace() {
     assert!(OidcClientId::new("").is_err());
     assert!(OidcClientId::new("   ").is_err());
     assert!(OidcClientId::new("good-client").is_ok());
+}
+
+#[test]
+fn issuer_requires_authenticated_https_transport() {
+    for issuer in [
+        "http://idp.example.com",
+        "http://127.0.0.1:8080",
+        "file:///issuer",
+        "https://user:password@idp.example.com",
+        "https://idp.example.com?key=example",
+        "https://idp.example.com#fragment",
+    ] {
+        assert!(OidcIssuerUrl::parse(issuer).is_err(), "accepted {issuer}");
+    }
+}
+
+#[test]
+fn issuer_preserves_exact_protocol_identity() {
+    let issuer = "https://idp.example.com/tenant/";
+    assert_eq!(OidcIssuerUrl::parse(issuer).unwrap().as_str(), issuer);
 }
 
 #[test]
@@ -301,20 +308,16 @@ fn same_origin_normalizes_default_ports() {
 }
 
 #[test]
-fn oidc_issuer_url_strips_trailing_slashes_and_rejects_empty() {
+fn oidc_issuer_url_preserves_trailing_slashes_and_rejects_empty() {
     let url = OidcIssuerUrl::parse("https://idp.example.com///").unwrap();
-    assert_eq!(url.as_str(), "https://idp.example.com");
-
-    let err = OidcIssuerUrl::parse("///").unwrap_err();
+    assert_eq!(url.as_str(), "https://idp.example.com///");
     assert!(matches!(
-        err,
-        AuthCalloutError::CredentialVerification(CredentialError::InvalidCredentials(_))
+        OidcIssuerUrl::parse("///"),
+        Err(OidcIssuerUrlError::InvalidUrl(_))
     ));
-
-    let err_empty = OidcIssuerUrl::parse("").unwrap_err();
     assert!(matches!(
-        err_empty,
-        AuthCalloutError::CredentialVerification(CredentialError::InvalidCredentials(_))
+        OidcIssuerUrl::parse(""),
+        Err(OidcIssuerUrlError::InvalidUrl(_))
     ));
 }
 
@@ -326,7 +329,6 @@ fn oidc_client_id_as_str_returns_value() {
 
 #[test]
 fn same_origin_returns_false_when_candidate_has_no_scheme() {
-    // No "://" separator → url_origin returns None → same_origin returns false.
     assert!(!super::same_origin("no-scheme", "https://idp.example.com"));
 }
 
@@ -337,7 +339,6 @@ fn same_origin_returns_false_when_expected_has_no_scheme() {
 
 #[test]
 fn same_origin_returns_false_for_empty_host() {
-    // scheme://... with no host component → url_origin returns None.
     assert!(!super::same_origin("https:///path", "https://idp.example.com"));
 }
 
@@ -671,3 +672,4 @@ fn bearer_token_debug_does_not_leak_the_assertion() {
     assert!(dbg.contains("<redacted>"), "{dbg}");
     assert_eq!(token.as_str(), "hhh.ppp.sss");
 }
+mod transport;

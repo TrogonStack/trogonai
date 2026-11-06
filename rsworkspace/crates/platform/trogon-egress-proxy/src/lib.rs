@@ -34,6 +34,7 @@ pub mod host_name;
 pub mod limits;
 pub mod mtls;
 pub mod peer_certificate;
+pub mod peer_identity;
 pub mod policy_snapshot;
 pub mod policy_source;
 pub mod resolver;

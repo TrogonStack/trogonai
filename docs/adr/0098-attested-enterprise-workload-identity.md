@@ -20,10 +20,12 @@ verification from live authority. [ADR#0053](./0053-external-oidc-federation-sur
 describes external workload federation and explicitly defers runtime attestation.
 The connection drafts separately govern provider consent, custody and use.
 
-The egress proxy already verifies a certificate and evaluates destination policy
-separately. It loads TLS files and a static policy snapshot at startup; its
-provisional SPIFFE-shaped alias does not supply attestation, automatic rotation
-or live reauthorization of an established tunnel. The NATS callout's existing
+The egress proxy verifies a certificate and evaluates destination policy
+separately. It loads TLS files and a static policy snapshot at startup. Finite
+certificate-bound sessions and policy reevaluation protect established tunnels,
+but this static source does not supply live policy updates across connections.
+Its provisional SPIFFE-shaped alias does not supply attestation or automatic
+rotation. The NATS callout's existing
 mTLS identity is a certificate DN or fingerprint, not a SPIFFE identity.
 These foundations must not be advertised as the enterprise profile below.
 
@@ -144,6 +146,13 @@ is evaluated against its injected clock, not a second implicit system clock.
 These implementations accept integer Unix-second dates in their supported
 timestamp range. Fractional dates are an unsupported profile encoding, not a
 claim that every JWT standard prohibits fractional NumericDate values.
+
+OIDC discovery uses authenticated HTTPS and exact issuer identity. A trailing
+slash is part of that identity; endpoint construction cannot normalize the
+configured issuer or a token's issuer claim. Discovery and JWKS responses require
+successful HTTP status and bounded bodies, including chunked responses. Redirects
+are refused, and JWKS locations stay on the issuer's origin without URL
+credentials, query or fragment.
 
 Validate the certificate path using the standard TLS verifier, including CA,
 usage, path-length, validity and critical-extension constraints. SPIFFE-aware

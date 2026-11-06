@@ -38,6 +38,7 @@ trogon-std = { workspace = true, features = ["signal", "uuid"] }
 x509-parser = { workspace = true }
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 buffa = { workspace = true }
 rcgen = { version = "=0.14.8", default-features = false, features = ["aws_lc_rs", "pem"] }
 tempfile = { workspace = true }

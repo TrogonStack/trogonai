@@ -10,6 +10,10 @@ use crate::jwt::JwtError;
 /// substring-matching the error message.
 #[derive(Debug, thiserror::Error)]
 pub enum CredentialError {
+    #[error("OIDC issuer configuration is invalid")]
+    OidcIssuer(#[source] crate::credentials::oidc::OidcIssuerUrlError),
+    #[error("OIDC discovery failed")]
+    OidcDiscovery(#[source] crate::credentials::oidc::OidcDiscoveryError),
     #[error("OIDC critical protected headers are unsupported")]
     UnsupportedCriticalHeader,
     #[error("OIDC protected header encoding is invalid")]
@@ -127,6 +131,8 @@ pub enum AuthCalloutError {
     KeyLoadUtf8(#[source] std::str::Utf8Error),
     #[error(transparent)]
     AdmissionKeys(#[from] AdmissionKeyError),
+    #[error(transparent)]
+    TenantAdmission(#[from] crate::tenant_admission::TenantAdmissionError),
     #[error(transparent)]
     BridgeCredential(#[from] BridgeCredentialError),
 }

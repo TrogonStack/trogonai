@@ -9,12 +9,26 @@ a claim that a production SPIRE integration exists in this repository.
 
 | Boundary | Foundation | Enterprise gate |
 | --- | --- | --- |
-| Egress workload identity | TLS certificate validation and provisional agent URI mapping | Workload API integration, authorized identity mapping and credential/bundle rotation |
-| Egress authorization | Separate exact-destination admission using a static snapshot | Live policy and status with bounded staleness and established-tunnel termination |
-| NATS admission | Operator accounts, platform credentials and credential-verifying auth callout | Authoritative caller-to-tenant admission binding and explicit SPIFFE profile if selected; legacy DN-based mTLS is not that profile |
-| AAuth issuance | Person and Access Server libraries with injected policies | Bounded token lifetimes, deferred-request revalidation, real consent/policy and durable bounded operation |
+| Egress workload identity | TLS certificate validation, provisional agent URI mapping and finite certificate-bound sessions | Workload API integration, authorized identity mapping and credential/bundle rotation |
+| Egress authorization | Separate exact-destination admission, post-wait checks and periodic session reevaluation using a static snapshot | Live policy and status with bounded staleness across connections |
+| NATS admission | Operator accounts, verified credentials and required explicit caller-to-tenant membership authority | Governed membership operations and explicit SPIFFE profile if selected; legacy DN-based mTLS is not that profile |
+| AAuth issuance | Person and Access Server libraries with bounded validity, deferred-request revalidation and injected policies | Real consent/policy adapters and durable bounded operation |
 | External federation | Draft ADR0053 exact-match issuer/subject/audience design | Attested assertion issuer, provider registration and real exchange acceptance |
 | Provider access | Draft connector custody, grant, relay and recovery contracts | Implemented custody/relay plus provider and isolation acceptance |
+
+The callout binary requires a bounded operator-managed membership registry and
+reads it again before every mint. Removing an entry prevents new admission;
+missing or invalid authority cannot reuse a cached permit. This is an explicit
+trusted configuration adapter, not a deployed HA membership control plane.
+Existing broker credentials remain subject to their own expiry and the separate
+revocation contract.
+
+Egress sessions end at the earlier presented-certificate expiry or a 330-second
+monotonic ceiling. Destination and selected-address policy are checked after
+waits and every five seconds while forwarding. A static snapshot remains static:
+closing a session does not make a removed permit disappear across reconnects.
+The presented-chain deadline does not track absent trust anchors or implement
+Workload API bundle withdrawal.
 
 ## Attestation and registration
 
@@ -103,14 +117,14 @@ Implementation:
 - [ ] Independently check operation, tenant, destination, caller role, binding,
   audience and live grant after authentication. Reevaluate policy on a deferred
   request and recheck time-dependent input authority immediately before minting.
-- [ ] Require authoritative caller-to-tenant account admission before minting a
+- [x] Require authoritative caller-to-tenant account admission before minting a
   broker credential. Signing-key availability and a tenant-scoped identity hash
   do not establish membership; absent admission authority refuses the mint.
 - [ ] Keep workload federation separate from delegated user consent; intersect
   relevant policy and delegation before granting on-behalf-of authority.
-- [ ] Bound AAuth output validity by the agent and any bound subagent/upstream
+- [x] Bound AAuth output validity by the agent and any bound subagent/upstream
   delegation, independently of a resource challenge's exchange deadline.
-- [ ] Bound derived broker user JWTs by verified OIDC/certificate-path expiry
+- [x] Bound derived broker user JWTs by verified OIDC/certificate-path expiry
   as well as configured admission TTL, and recheck expiry immediately before
   minting. Preserve finite evidence separately from serialized identity claims.
 - [ ] Bound pending state, retention, replay protection and concurrency in the
@@ -120,21 +134,24 @@ Verification:
 
 - [ ] A valid certificate without the requested permit still fails. Tenant,
   role, binding, audience, grant generation and holder-key substitutions fail.
-- [ ] A valid OIDC or mTLS caller without membership cannot obtain a configured
+- [x] A valid OIDC or mTLS caller without membership cannot obtain a configured
   tenant account's broker credential by naming that account. Test identity
   namespacing and account admission as distinct boundaries.
-- [ ] Advance the clock while a request awaits claims, interaction or approval;
+- [x] Advance the clock while a request awaits claims, interaction or approval;
   expired inputs cannot produce a fresh grant. A slow policy cannot mint past
   the authority it evaluated.
-- [ ] Auth token expiry never exceeds the applicable agent/delegation validity;
+- [x] Auth token expiry never exceeds the applicable agent/delegation validity;
   a short resource challenge alone does not unnecessarily shorten the grant.
-- [ ] A source expiring during credential verification or dispatcher work cannot
+- [x] A source expiring during credential verification or dispatcher work cannot
   mint a fresh broker JWT. A shorter selected intermediate/root expiry also
   bounds admission, while a shorter configured TTL remains effective.
-- [ ] Reject future not-before dates under the selected clock policy, malformed
+- [x] Reject future not-before dates under the selected clock policy, malformed
   present date claims and unsupported critical JOSE extensions. Cover dates
   within a decoder's default leeway, exact activation/expiry and numeric limits;
   optional absent claims remain compatible with the reviewed protocol profile.
+- [x] Require HTTPS issuer configuration, exact issuer matching, successful
+  discovery/JWKS status and bounded responses, including chunked bodies. Reject
+  cross-origin or credential-bearing JWKS URLs and redirect responses.
 - [ ] Missing, revoked or narrowed user consent cannot be recovered from an
   earlier workload-authentication success or cached policy decision.
 

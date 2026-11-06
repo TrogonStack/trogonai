@@ -2,6 +2,27 @@ use super::*;
 use crate::bridge_mint::BridgeCredentialError;
 
 #[test]
+fn tenant_membership_denial_is_opaque_and_authority_failure_is_unavailable() {
+    use crate::tenant_admission::TenantAdmissionError;
+    for error in [TenantAdmissionError::NotMember, TenantAdmissionError::AudienceMismatch] {
+        assert_eq!(
+            DenialCategory::from_auth_callout_error(&error.into()),
+            DenialCategory::InvalidCredentials
+        );
+    }
+    for error in [
+        TenantAdmissionError::Busy,
+        TenantAdmissionError::Timeout,
+        TenantAdmissionError::TooLarge,
+    ] {
+        assert_eq!(
+            DenialCategory::from_auth_callout_error(&error.into()),
+            DenialCategory::ServiceUnavailable
+        );
+    }
+}
+
+#[test]
 fn each_auth_callout_error_variant_maps_to_category() {
     assert_eq!(
         DenialCategory::from_auth_callout_error(&AuthCalloutError::Connect("x".into())),

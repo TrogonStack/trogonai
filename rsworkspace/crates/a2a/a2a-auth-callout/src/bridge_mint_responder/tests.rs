@@ -18,6 +18,7 @@ use crate::jwt::{
     AudienceAccount, CallerId, ExternalSubject, SpiceDbPrincipal, UserJwtClaims, decode_nats_user_payload,
 };
 use crate::permissions::IssuedPermissions;
+use crate::tenant_admission::{TenantMembership, TenantMemberships};
 
 const GOOD_TOKEN: &str = "good.bearer.token";
 
@@ -88,6 +89,19 @@ impl Fixture {
         let signing_public = signing_key.public_key();
         let dispatcher = CalloutDispatcher::new(CalloutDispatcherConfig {
             tenant_signing_keys: TenantSigningKeys::new([(tenant.clone(), signing_key)]).unwrap(),
+            tenant_admission: Arc::new(
+                TenantMemberships::new([
+                    TenantMembership::new(
+                        tenant.clone(),
+                        trogon_identity_types::SubjectPrincipal::from_tokens("person", "alice").unwrap(),
+                    ),
+                    TenantMembership::new(
+                        tenant.clone(),
+                        trogon_identity_types::SubjectPrincipal::from_tokens("service", "svc").unwrap(),
+                    ),
+                ])
+                .unwrap(),
+            ),
             user_jwt_ttl: Duration::from_secs(60),
             a2a_prefix: A2aPrefix::new("a2a").unwrap(),
             oidc: Some(Arc::new(TokenVerifier)),

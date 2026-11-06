@@ -14,7 +14,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::connection::Proxy;
 use crate::constants::ACCEPT_ERROR_BACKOFF;
-use crate::mtls::peer_agent;
+use crate::peer_identity::PeerIdentity;
 use crate::trust_domain::TrustDomain;
 
 pub struct Server {
@@ -129,14 +129,17 @@ async fn serve_connection(
             return;
         }
     };
-    let agent = match peer_agent(tls.get_ref().1.peer_certificates(), &trust_domain) {
-        Ok(agent) => agent,
+    let identity = match PeerIdentity::from_verified_certificates(
+        tls.get_ref().1.peer_certificates().unwrap_or_default(),
+        &trust_domain,
+    ) {
+        Ok(identity) => identity,
         Err(error) => {
             tracing::warn!(%peer, error = %error, "client certificate names no agent");
             return;
         }
     };
-    proxy.serve(tls, &agent).await;
+    proxy.serve(tls, &identity).await;
 }
 
 #[cfg(test)]

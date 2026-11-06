@@ -7,6 +7,7 @@ use {
     a2a_auth_callout::credentials::mtls::{TrustAnchorPem, X509MtlsVerifier},
     a2a_auth_callout::credentials::oidc::{JwksOidcVerifier, OidcIssuerUrl, OidcVerifier},
     a2a_auth_callout::dispatcher::{CalloutDispatcher, CalloutDispatcherConfig},
+    a2a_auth_callout::tenant_admission::{ENV_TENANT_MEMBERSHIPS, FileTenantAdmission, TenantAdmission},
     a2a_auth_callout::{AuthCalloutWireCodec, BridgeMintResponder, BridgeMintSubscriber, Subscriber},
     a2a_nats::{A2aPrefix, A2aPrefixError, DEFAULT_A2A_PREFIX, ENV_A2A_PREFIX},
     std::sync::Arc,
@@ -42,6 +43,17 @@ fn resolve_a2a_prefix(env: &impl ReadEnv) -> Result<A2aPrefix, A2aPrefixError> {
 fn nats_config(env: &impl ReadEnv) -> Option<NatsConfig> {
     let config = NatsConfig::from_env(env);
     (!config.servers.is_empty()).then_some(config)
+}
+
+async fn build_tenant_admission(
+    env: &impl ReadEnv,
+) -> Result<Arc<dyn TenantAdmission>, a2a_auth_callout::AuthCalloutError> {
+    let path = env
+        .var(ENV_TENANT_MEMBERSHIPS)
+        .map_err(|_| a2a_auth_callout::AuthCalloutError::MissingEnvVar(ENV_TENANT_MEMBERSHIPS))?;
+    let authority = FileTenantAdmission::new(path);
+    authority.validate().await?;
+    Ok(Arc::new(authority))
 }
 
 async fn build_oidc_verifier(env: &impl ReadEnv) -> Option<Arc<dyn OidcVerifier>> {
@@ -99,6 +111,13 @@ async fn main() {
         Ok(keys) => keys,
         Err(e) => {
             tracing::error!(error = %e, "invalid admission key configuration");
+            std::process::exit(1);
+        }
+    };
+    let tenant_admission = match build_tenant_admission(&env).await {
+        Ok(authority) => authority,
+        Err(error) => {
+            tracing::error!(error = %error, "invalid tenant admission authority");
             std::process::exit(1);
         }
     };
@@ -161,6 +180,7 @@ async fn main() {
 
     let dispatcher = Arc::new(CalloutDispatcher::new(CalloutDispatcherConfig {
         tenant_signing_keys: admission_keys.tenant_signing_keys().clone(),
+        tenant_admission,
         user_jwt_ttl,
         a2a_prefix,
         oidc,

@@ -8,7 +8,9 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use a2a_nats::{A2aPrefixError, ENV_A2A_PREFIX};
 
-use super::{build_mtls_verifier, build_oidc_verifier, nats_config, resolve_a2a_prefix, split_env_list};
+use super::{
+    build_mtls_verifier, build_oidc_verifier, build_tenant_admission, nats_config, resolve_a2a_prefix, split_env_list,
+};
 
 #[derive(Debug, thiserror::Error)]
 enum FixtureError {
@@ -22,6 +24,31 @@ enum FixtureError {
     MissingVerifier,
     #[error("configured NATS servers were discarded")]
     MissingNatsConfig,
+}
+
+#[tokio::test]
+async fn tenant_admission_is_required_and_validated_before_use() -> Result<(), FixtureError> {
+    use a2a_auth_callout::tenant_admission::{ENV_TENANT_MEMBERSHIPS, TenantAdmissionError};
+    let env = InMemoryEnv::new();
+    assert!(matches!(
+        build_tenant_admission(&env).await,
+        Err(AuthCalloutError::MissingEnvVar(ENV_TENANT_MEMBERSHIPS))
+    ));
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("memberships.json");
+    env.set(ENV_TENANT_MEMBERSHIPS, path.to_string_lossy().into_owned());
+    assert!(matches!(
+        build_tenant_admission(&env).await,
+        Err(AuthCalloutError::TenantAdmission(TenantAdmissionError::Read(_)))
+    ));
+    std::fs::write(&path, b"invalid")?;
+    assert!(matches!(
+        build_tenant_admission(&env).await,
+        Err(AuthCalloutError::TenantAdmission(TenantAdmissionError::Json(_)))
+    ));
+    std::fs::write(&path, br#"{"version":1,"memberships":[]}"#)?;
+    assert!(build_tenant_admission(&env).await.is_ok());
+    Ok(())
 }
 
 #[test]
@@ -93,20 +120,20 @@ async fn oidc_remains_disabled_without_an_issuer_or_audience() {
 }
 
 #[tokio::test]
-async fn oidc_discovery_enables_a_matching_local_issuer() {
+async fn oidc_discovery_refuses_a_plaintext_issuer_before_network_io() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/.well-known/openid-configuration"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "issuer": server.uri(), "jwks_uri": format!("{}/jwks", server.uri())
         })))
-        .expect(1)
+        .expect(0)
         .mount(&server)
         .await;
     let env = InMemoryEnv::new();
     env.set("AUTH_CALLOUT_OIDC_ISSUER", server.uri());
     env.set("AUTH_CALLOUT_OIDC_AUDIENCES", " client-a, client-b ");
-    assert!(build_oidc_verifier(&env).await.is_some());
+    assert!(build_oidc_verifier(&env).await.is_none());
 }
 
 #[tokio::test]
@@ -115,11 +142,14 @@ async fn oidc_discovery_failure_disables_the_verifier() {
     Mock::given(method("GET"))
         .and(path("/.well-known/openid-configuration"))
         .respond_with(ResponseTemplate::new(503).set_body_string("unavailable"))
-        .expect(1)
+        .expect(0)
         .mount(&server)
         .await;
     let env = InMemoryEnv::new();
-    env.set("AUTH_CALLOUT_OIDC_ISSUER", server.uri());
+    env.set(
+        "AUTH_CALLOUT_OIDC_ISSUER",
+        server.uri().replacen("http://", "https://", 1),
+    );
     env.set("AUTH_CALLOUT_OIDC_AUDIENCES", "client");
     assert!(build_oidc_verifier(&env).await.is_none());
 }

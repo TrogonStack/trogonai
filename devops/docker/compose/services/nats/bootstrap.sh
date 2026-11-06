@@ -12,6 +12,7 @@
 set -eu
 
 . /bootstrap/install-seed.sh
+. /bootstrap/install-memberships.sh
 
 SECRETS=/secrets
 NSC_HOME="$SECRETS/nsc"
@@ -242,11 +243,15 @@ for account in AUTH PLATFORM DEV; do
   cp "$STORE/accounts/$account/$account.jwt" "$ACCOUNTS_DIR/$account.jwt"
 done
 
+install_tenant_memberships "$CALLOUT_DIR/tenant-memberships.json" \
+  "$(account_key DEV)" "$(stat -c %u "$CALLOUT_DIR")"
+
 cat > "$CALLOUT_DIR/callout.env" <<CALLOUT
 AUTH_CALLOUT_SIGNING_KEY_SOURCE=file
 AUTH_CALLOUT_AUTH_ACCOUNT=$(account_key AUTH)
 AUTH_CALLOUT_RESPONSE_SIGNING_KEY=file://$CALLOUT_MOUNT/keys/auth-response.nk
 AUTH_CALLOUT_TENANT_SIGNING_KEYS=$(account_key DEV)=file://$CALLOUT_MOUNT/keys/tenant-dev.nk
+AUTH_CALLOUT_TENANT_MEMBERSHIPS=$CALLOUT_MOUNT/tenant-memberships.json
 AUTH_CALLOUT_XKEY_SEED=file://$CALLOUT_MOUNT/keys/callout-xkey.nk
 AUTH_CALLOUT_MTLS_TRUST_ANCHORS=$CALLOUT_MOUNT/ca.pem
 CALLOUT

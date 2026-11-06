@@ -144,6 +144,61 @@ async fn dispatch_does_not_outlive_oidc_source_expiry() {
 }
 
 #[tokio::test]
+async fn dispatch_refuses_oidc_caller_without_a_tenant_membership_binding() {
+    let tenant = Tenant::generate();
+    let other = Tenant::generate();
+    let server = FixtureServer::generate();
+    let (verifier, token, _) = oidc(7200);
+    let mut config = config_with(Some(verifier), None, None, &[&tenant, &other]);
+    config.tenant_admission = Arc::new(fixture_memberships(&[&tenant]));
+    let dispatcher = CalloutDispatcher::new(config);
+    assert!(
+        dispatcher
+            .dispatch(tenant.request(&server, |claims| {
+                claims.nats.connect_opts.auth_token = Some(token.clone());
+            }))
+            .await
+            .is_ok()
+    );
+    let request = other.request(&server, |claims| {
+        claims.nats.connect_opts.auth_token = Some(token.clone());
+    });
+    assert!(
+        dispatcher.dispatch(request).await.is_err(),
+        "a verified OIDC identity and a configured tenant signing key do not prove membership"
+    );
+}
+
+#[tokio::test]
+async fn dispatch_refuses_mtls_caller_without_a_tenant_membership_binding() {
+    let tenant = Tenant::generate();
+    let other = Tenant::generate();
+    let server = FixtureServer::generate();
+    let (verifier, chain, _) = certificate(CertificateLifetimes {
+        leaf: 1800,
+        intermediate: None,
+        anchor: 3600,
+    });
+    let chain: Vec<_> = chain.iter().map(String::as_str).collect();
+    let mut config = config_with(None, Some(verifier), None, &[&tenant, &other]);
+    config.tenant_admission = Arc::new(fixture_memberships(&[&tenant]));
+    let dispatcher = CalloutDispatcher::new(config);
+    let request = |tenant: &Tenant| {
+        tenant.request(&server, |claims| {
+            claims.nats.connect_opts.auth_token = None;
+            claims.nats.client_tls = Some(verified_client_tls(&chain));
+        })
+    };
+    assert!(dispatcher.dispatch(request(&tenant)).await.is_ok());
+    assert!(matches!(
+        dispatcher.dispatch(request(&other)).await,
+        Err(AuthCalloutError::TenantAdmission(
+            crate::tenant_admission::TenantAdmissionError::NotMember
+        ))
+    ));
+}
+
+#[tokio::test]
 async fn dispatch_refuses_expired_oidc_source() {
     let tenant = Tenant::generate();
     let server = FixtureServer::generate();

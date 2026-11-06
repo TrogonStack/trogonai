@@ -15,6 +15,7 @@ use crate::error::{AuthCalloutError, CredentialError};
 use crate::jwt::{AccountName, MintedUserJwt, UserJwtClaims, UserJwtSubject};
 use crate::permissions::CallerGrant;
 use crate::signing_key_source::MintingMaterial;
+use crate::tenant_admission::{TenantAdmission, TenantAdmissionDecision, TenantAdmissionError, TenantAdmissionRequest};
 use crate::wire::ServerAuthRequestClaims;
 use crate::{CredentialExpiry, VerifiedCredential};
 
@@ -55,6 +56,7 @@ impl<D: AuthDispatcher + ?Sized> AuthDispatcher for Arc<D> {
 
 pub struct CalloutDispatcherConfig {
     pub tenant_signing_keys: TenantSigningKeys,
+    pub tenant_admission: Arc<dyn TenantAdmission>,
     pub user_jwt_ttl: Duration,
     pub a2a_prefix: A2aPrefix,
     pub oidc: Option<Arc<dyn OidcVerifier>>,
@@ -136,6 +138,9 @@ impl<C: EpochClock> AuthDispatcher for CalloutDispatcher<C> {
             }
         };
         let (claims, validity) = verified.into_parts();
+        if claims.aud != account {
+            return Err(TenantAdmissionError::AudienceMismatch.into());
+        }
         let principal = claims
             .subject_principal()
             .map_err(CredentialError::UnplaceablePrincipal)?;
@@ -147,7 +152,16 @@ impl<C: EpochClock> AuthDispatcher for CalloutDispatcher<C> {
 
         let user_nkey = request.user_nkey()?;
         let user_subject = UserJwtSubject::from_user_nkey(user_nkey);
-        let material = MintingMaterial::on_behalf_of(signing_key, tenant);
+        let material = MintingMaterial::on_behalf_of(signing_key, tenant.clone());
+        if self
+            .config
+            .tenant_admission
+            .authorize(TenantAdmissionRequest::new(&tenant, &principal))
+            .await?
+            == TenantAdmissionDecision::Deny
+        {
+            return Err(TenantAdmissionError::NotMember.into());
+        }
         let issued_at = self.clock.system_time();
         let ttl = match validity {
             AdmissionValidity::Source(expiry) => expiry

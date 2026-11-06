@@ -25,10 +25,17 @@ pub mod denial_claims;
 pub mod denial_reason;
 pub mod dispatcher;
 pub mod error;
+mod file_tenant_admission;
 pub mod jwt;
 pub mod permissions;
 pub mod signing_key_source;
 pub mod subscriber;
+pub mod tenant_admission;
+mod tenant_admission_decision;
+mod tenant_admission_error;
+mod tenant_admission_request;
+mod tenant_membership;
+mod tenant_memberships;
 mod verified_credential;
 pub mod wire;
 
@@ -71,3 +78,8 @@ pub use subscriber::{DenialPublisherConfig, Subscriber};
 pub use verified_credential::VerifiedCredential;
 pub use wire::AuthCalloutWireCodec;
 pub use wire::{NkeyPublic, XkeyPublic};
+
+pub use tenant_admission::{
+    FileTenantAdmission, TenantAdmission, TenantAdmissionDecision, TenantAdmissionError, TenantAdmissionRequest,
+    TenantMembership, TenantMemberships,
+};
