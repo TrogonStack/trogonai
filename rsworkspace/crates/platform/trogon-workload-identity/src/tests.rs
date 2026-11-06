@@ -415,3 +415,31 @@ async fn changed_registration_cancels_pending_activation_and_requires_new_audit(
     task.await.unwrap();
     fixture.stop().await;
 }
+
+#[tokio::test]
+async fn cached_tls_configurations_cannot_authenticate_after_credential_withdrawal() {
+    let ca = TestCa::new();
+    let fixture = WorkloadApiFixture::start(vec![ca.issue(LOCAL_ID, Duration::from_secs(600)), ca.issue(PEER_ID, Duration::from_secs(600))]).await;
+    let (server, server_driver) = IdentityStore::new(IdentityConfig::new(fixture.endpoint(), local(), revision(1)), Arc::new(Recorder::default()));
+    let (client, client_driver) = IdentityStore::new(IdentityConfig::new(fixture.endpoint(), peer(), revision(1)), Arc::new(Recorder::default()));
+    server.replace_registration(registration(&ca)).unwrap();
+    let original = registration(&ca);
+    client.replace_registration(original.clone()).unwrap();
+    let shutdown = CancellationToken::new();
+    let server_task = tokio::spawn(server_driver.run(shutdown.clone()));
+    let client_task = tokio::spawn(client_driver.run(shutdown.clone()));
+    let server_config = material(&server).await.server_config();
+    let client_config = material(&client).await.client_config(&spiffe::SpiffeId::new(LOCAL_ID).unwrap()).unwrap();
+    assert!(handshake(Arc::clone(&server_config), Arc::clone(&client_config)).is_ok());
+    client.withdraw_registration();
+    assert!(handshake(Arc::clone(&server_config), client_config).is_err(), "cached client configuration must not reuse withdrawn private-key authority");
+    client.replace_registration(RegistrationSet::new(revision(1), revision(2), revision(1), original.expires_at(), original.bindings().to_vec(), original.approved_roots().to_vec()).unwrap()).unwrap();
+    let client_config = material(&client).await.client_config(&spiffe::SpiffeId::new(LOCAL_ID).unwrap()).unwrap();
+    assert!(handshake(Arc::clone(&server_config), Arc::clone(&client_config)).is_ok());
+    server.withdraw_registration();
+    assert!(handshake(server_config, client_config).is_err(), "cached server configuration must not reuse withdrawn private-key authority");
+    shutdown.cancel();
+    server_task.await.unwrap();
+    client_task.await.unwrap();
+    fixture.stop().await;
+}
