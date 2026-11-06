@@ -6,7 +6,7 @@ use rcgen::{BasicConstraints, CertificateParams, CertifiedIssuer, ExtendedKeyUsa
 use serde_json::{Value, json};
 use tempfile::TempDir;
 use testcontainers_modules::testcontainers::ImageExt;
-use tokio::time::{sleep, timeout};
+use tokio::time::{MissedTickBehavior, interval, timeout};
 use uuid::Uuid;
 
 use super::{IssuedCertificate, SERVER_NAMES, TestServer, image};
@@ -154,7 +154,10 @@ impl TlsJetStreamCluster {
             .expect("connect to verified TLS cluster");
         let context = async_nats::jetstream::new(client);
         timeout(WAIT, async {
+            let mut polls = interval(Duration::from_millis(50));
+            polls.set_missed_tick_behavior(MissedTickBehavior::Delay);
             loop {
+                polls.tick().await;
                 let result = context
                     .create_stream(Config {
                         name: QUORUM_STREAM.into(),
@@ -179,7 +182,6 @@ impl TlsJetStreamCluster {
                         break;
                     }
                 }
-                sleep(Duration::from_millis(50)).await;
             }
         })
         .await
