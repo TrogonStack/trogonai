@@ -85,7 +85,7 @@ class DeploymentTests(unittest.TestCase):
         self.assertIn("connect_timeout=5", database["connection_string"])
         self.assertTrue(database["disable_migration"])
         self.assertTrue(server_config["server"]["audit_log_enabled"])
-        self.assertEqual(server_config["server"]["default_x509_svid_ttl"], "1h")
+        self.assertEqual(server_config["server"]["default_x509_svid_ttl"], "3590s")
         self.assertEqual(server_config["server"]["tls_config"]["min_tls_version"], "VersionTLS13")
         agent_config = json.loads(files["agent.conf"])
         attestor = agent_config["plugins"]["WorkloadAttestor"][0]["k8s"]["plugin_data"]
@@ -99,7 +99,7 @@ class DeploymentTests(unittest.TestCase):
         entries = json.loads(files["registrations.json"])["entries"]
         workload = entries[1]
         self.assertFalse(workload["admin"])
-        self.assertEqual(workload["x509_svid_ttl"], 3600)
+        self.assertEqual(workload["x509_svid_ttl"], 3590)
         selectors = {(item["type"], item["value"]) for item in workload["selectors"]}
         registration = configuration()["registrations"][0]
         self.assertIn(("k8s", "container-name:supervisor"), selectors)

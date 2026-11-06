@@ -148,6 +148,16 @@ with the reviewed deployment receipt. Inspect `manifests.json`, the SPIRE
 configurations, IAM policies, registrations and supervisor patches together.
 Rendering grants no cluster or cloud authority and does not deploy anything.
 
+The consumer caps an X.509 SVID's complete `NotAfter - NotBefore` validity at
+3600 seconds. Pinned SPIRE 1.16.0
+[backdates `NotBefore` by 10 seconds](https://github.com/spiffe/spire/blob/872c1d55b4d5ac7fc1bf05f0760f2ca740ab37aa/pkg/server/credtemplate/builder.go#L44-L47)
+while [setting `NotAfter` to issuance time plus the requested TTL](https://github.com/spiffe/spire/blob/872c1d55b4d5ac7fc1bf05f0760f2ca740ab37aa/pkg/server/credtemplate/builder.go#L545-L554),
+subject to an issuer expiration cap. The profile requests `3590s` for the server
+default and agent TTLs and 3590 seconds in every registration entry, keeping total
+validity within the consumer ceiling. A requested TTL of 3600 seconds could
+produce 3610 seconds of validity and be refused. Recheck the pinned issuer's
+backdating behavior when upgrading SPIRE.
+
 Validate the exact generated `server.conf` and `agent.conf` with their pinned
 SPIRE binaries using `validate -config`. The server also requires `-expandEnv`
 and its nonsecret `SPIRE_SERVER_ID`. Validate the manifests against Kubernetes

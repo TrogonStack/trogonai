@@ -8,6 +8,9 @@ SOCKET_DIRECTORY = "/run/platform-spire/sockets"
 SOCKET_PATH = SOCKET_DIRECTORY + "/api.sock"
 SERVER_SOCKET = "/run/spire/admin/api.sock"
 DATABASE_DIRECTORY = "/run/spire/database"
+MAX_X509_SVID_VALIDITY_SECONDS = 3600
+SPIRE_NOT_BEFORE_CUSHION_SECONDS = 10
+REQUESTED_X509_SVID_TTL_SECONDS = MAX_X509_SVID_VALIDITY_SECONDS - SPIRE_NOT_BEFORE_CUSHION_SECONDS
 
 
 def fields(value, expected):
@@ -163,7 +166,8 @@ def server_config(config):
         "server": {
             "trust_domain": config["trust_domain"], "bind_address": "0.0.0.0", "bind_port": 8081,
             "socket_path": SERVER_SOCKET, "data_dir": "/var/lib/spire", "log_level": "INFO", "log_format": "json",
-            "audit_log_enabled": True, "default_x509_svid_ttl": "1h", "agent_ttl": "1h", "ca_ttl": "24h",
+            "audit_log_enabled": True, "default_x509_svid_ttl": f"{REQUESTED_X509_SVID_TTL_SECONDS}s",
+            "agent_ttl": f"{REQUESTED_X509_SVID_TTL_SECONDS}s", "ca_ttl": "24h",
             "ca_key_type": "ec-p256", "tls_config": {"min_tls_version": "VersionTLS13"},
         },
         "plugins": {
@@ -220,12 +224,12 @@ def registrations(config):
         "selectors": [selector("k8s_psat", value) for value in [
             "cluster:" + config["cluster"], "agent_ns:" + config["agent_namespace"], "agent_sa:spire-agent",
             f"agent_node_label:{POOL_LABEL}:{config['cluster']}",
-        ]], "admin": False, "downstream": False, "x509_svid_ttl": 3600,
+        ]], "admin": False, "downstream": False, "x509_svid_ttl": REQUESTED_X509_SVID_TTL_SECONDS,
     }]
     for registration in config["registrations"]:
         entries.append({
             "parent_id": parent, "spiffe_id": registration["spiffe_id"], "admin": False,
-            "downstream": False, "x509_svid_ttl": 3600,
+            "downstream": False, "x509_svid_ttl": REQUESTED_X509_SVID_TTL_SECONDS,
             "selectors": [selector("k8s", prefix + ":" + registration[key]) for prefix, key in [
                 ("ns", "namespace"), ("sa", "service_account"), ("container-name", "container"), ("container-image", "container_image"),
             ]] + [selector("unix", "uid:" + str(registration["uid"]))],
