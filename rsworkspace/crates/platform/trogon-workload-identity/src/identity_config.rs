@@ -11,9 +11,19 @@ pub struct IdentityConfig {
 
 impl IdentityConfig {
     pub fn new(endpoint: UnixEndpoint, local: RegistrationBinding, recovery_fence: NonZeroU64) -> Self {
-        Self { endpoint, local, recovery_fence }
+        Self {
+            endpoint,
+            local,
+            recovery_fence,
+        }
     }
-    pub fn endpoint(&self) -> &UnixEndpoint { &self.endpoint }
-    pub fn local(&self) -> &RegistrationBinding { &self.local }
-    pub fn recovery_fence(&self) -> NonZeroU64 { self.recovery_fence }
+    pub fn endpoint(&self) -> &UnixEndpoint {
+        &self.endpoint
+    }
+    pub fn local(&self) -> &RegistrationBinding {
+        &self.local
+    }
+    pub fn recovery_fence(&self) -> NonZeroU64 {
+        self.recovery_fence
+    }
 }

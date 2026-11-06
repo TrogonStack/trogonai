@@ -16,8 +16,9 @@ test-support = ["dep:rcgen", "dep:tempfile", "dep:tonic", "dep:tonic-prost", "de
 async-trait = { workspace = true }
 futures = { workspace = true }
 rustls = { workspace = true }
+rustls-webpki = { workspace = true }
 sha2 = { workspace = true }
-spiffe = { workspace = true }
+spiffe = { workspace = true, features = ["workload-api-x509"] }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros", "net", "time", "sync"] }
 tokio-util = { workspace = true, features = ["rt"] }

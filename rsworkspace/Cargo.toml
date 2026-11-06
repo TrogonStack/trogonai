@@ -197,7 +197,7 @@ rustls-pemfile = "=2.2.0"
 rustls-pki-types = { version = "=1.15.1", default-features = false, features = ["std"] }
 rustls-webpki = { version = "=0.103.16", default-features = false, features = ["std", "alloc", "ring"] }
 x509-parser = "=0.18.1"
-spiffe = { version = "=0.19.0", default-features = false, features = ["workload-api-x509"] }
+spiffe = { version = "=0.19.0", default-features = false }
 
 [profile.release]
 lto = "thin"

@@ -1,7 +1,8 @@
 use spiffe::transport::Endpoint;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
-pub struct UnixEndpoint(Endpoint);
+pub struct UnixEndpoint(PathBuf);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("workload identity requires an explicit absolute Unix socket endpoint")]
@@ -10,13 +11,16 @@ pub struct UnixEndpointError;
 impl UnixEndpoint {
     pub fn new(value: &str) -> Result<Self, UnixEndpointError> {
         match Endpoint::parse(value) {
-            Ok(endpoint @ Endpoint::Unix(_)) => Ok(Self(endpoint)),
+            Ok(Endpoint::Unix(path)) => Ok(Self(path)),
             _ => Err(UnixEndpointError),
         }
     }
 
     pub fn endpoint(&self) -> Endpoint {
-        self.0.clone()
+        Endpoint::Unix(self.0.clone())
+    }
+    pub fn as_uri(&self) -> String {
+        format!("unix://{}", self.0.display())
     }
 }
 
