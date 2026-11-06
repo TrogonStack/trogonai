@@ -1,0 +1,13 @@
+edition = "2024";
+
+package trogonai.platform.workload_identity.v1alpha1;
+
+import "trogonai/platform/workload_identity/v1alpha1/workload_role.proto";
+
+message RegistrationBinding {
+  string spiffe_id = 1;
+  string tenant = 2;
+  string project = 3;
+  WorkloadRole role = 4;
+  string application_id = 5;
+}

@@ -1,0 +1,18 @@
+edition = "2024";
+
+package trogonai.platform.workload_identity.v1alpha1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/platform/workload_identity/v1alpha1/registration_binding.proto";
+
+message RegistrationSnapshot {
+  string tenant = 1;
+  string project = 2;
+  uint64 recovery_fence = 3;
+  uint64 registration_revision = 4;
+  uint64 trust_revision = 5;
+  google.protobuf.Timestamp issued_at = 6;
+  google.protobuf.Timestamp expires_at = 7;
+  repeated RegistrationBinding bindings = 8;
+  repeated bytes approved_root_sha256 = 9;
+}

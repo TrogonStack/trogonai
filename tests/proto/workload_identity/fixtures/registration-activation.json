@@ -1,0 +1,142 @@
+{
+  "templates": {
+    "snapshot": {
+      "type": "trogonai.platform.workload_identity.v1alpha1.RegistrationSnapshot",
+      "payload": {
+        "tenant": "tenant_1",
+        "project": "project_1",
+        "recoveryFence": "1",
+        "registrationRevision": "2",
+        "trustRevision": "3",
+        "issuedAt": "2030-01-01T00:00:00Z",
+        "expiresAt": "2030-01-01T00:05:00Z",
+        "bindings": [
+          {
+            "spiffeId": "spiffe://example.test/proxy",
+            "tenant": "tenant_1",
+            "project": "project_1",
+            "role": 1
+          }
+        ],
+        "approvedRootSha256": [
+          "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+        ]
+      }
+    },
+    "activation": {
+      "type": "trogonai.platform.workload_identity.v1alpha1.CredentialActivation",
+      "payload": {
+        "binding": {
+          "spiffeId": "spiffe://example.test/proxy",
+          "tenant": "tenant_1",
+          "project": "project_1",
+          "role": 1
+        },
+        "recoveryFence": "1",
+        "registrationRevision": "2",
+        "trustRevision": "3",
+        "sourceRevision": "4",
+        "activationRevision": "4",
+        "leafSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+        "publicKeySha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+        "bundleSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+        "notBefore": "2030-01-01T00:00:00Z",
+        "expiresAt": "2030-01-01T01:00:00Z"
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "finite registration snapshot",
+      "template": "snapshot"
+    },
+    {
+      "name": "bounded activation intent",
+      "template": "activation"
+    },
+    {
+      "name": "registration cannot cross tenant",
+      "template": "snapshot",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/bindings/0/tenant",
+          "value": "tenant_2"
+        }
+      ],
+      "violations": [
+        "registration_snapshot.scope"
+      ]
+    },
+    {
+      "name": "agent requires application identity",
+      "template": "snapshot",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/bindings/0/role",
+          "value": 2
+        }
+      ],
+      "violations": [
+        "registration_binding.application_identity"
+      ]
+    },
+    {
+      "name": "registration cannot lease past backstop",
+      "template": "snapshot",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/expiresAt",
+          "value": "2030-01-01T00:05:31Z"
+        }
+      ],
+      "violations": [
+        "registration_snapshot.lease"
+      ]
+    },
+    {
+      "name": "activation cannot exceed one hour",
+      "template": "activation",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/expiresAt",
+          "value": "2030-01-01T01:00:01Z"
+        }
+      ],
+      "violations": [
+        "credential_activation.lifetime"
+      ]
+    },
+    {
+      "name": "activation requires exact fingerprint",
+      "template": "activation",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/leafSha256",
+          "value": "AA=="
+        }
+      ],
+      "violations": [
+        "bytes.len"
+      ]
+    },
+    {
+      "name": "registration requires approved roots",
+      "template": "snapshot",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/approvedRootSha256",
+          "value": []
+        }
+      ],
+      "violations": [
+        "repeated.min_items"
+      ]
+    }
+  ]
+}
