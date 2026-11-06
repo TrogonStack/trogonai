@@ -100,3 +100,13 @@ pub(crate) const LIVE_POLICY_TEST_WAIT: Duration = Duration::from_secs(5);
 pub(crate) const LIVE_POLICY_TEST_POLL: Duration = Duration::from_millis(20);
 #[cfg(test)]
 pub(crate) const LIVE_POLICY_TUNNEL_TEST_WAIT: Duration = Duration::from_secs(8);
+
+pub(crate) const READINESS_READY_RESPONSE: &[u8] = b"HTTP/1.1 200 OK\r\nContent-Length: 6\r\nContent-Type: text/plain\r\nCache-Control: no-store\r\nConnection: close\r\n\r\nready\n";
+pub(crate) const READINESS_UNAVAILABLE_RESPONSE: &[u8] = b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 12\r\nContent-Type: text/plain\r\nCache-Control: no-store\r\nConnection: close\r\n\r\nunavailable\n";
+pub(crate) const READINESS_NOT_FOUND_RESPONSE: &[u8] =
+    b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n";
+pub(crate) const READINESS_MALFORMED_RESPONSE: &[u8] =
+    b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n";
+pub(crate) const READINESS_TOO_LARGE_RESPONSE: &[u8] = b"HTTP/1.1 431 Request Header Fields Too Large\r\nContent-Length: 0\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n";
+pub(crate) const READINESS_TIMED_OUT_RESPONSE: &[u8] =
+    b"HTTP/1.1 408 Request Timeout\r\nContent-Length: 0\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n";

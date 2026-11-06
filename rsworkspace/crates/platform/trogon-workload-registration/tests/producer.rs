@@ -7,13 +7,13 @@ use buffa::{EnumValue, Message, MessageField};
 use buffa_types::google::protobuf::Timestamp;
 use ed25519_dalek::{Signer, SigningKey};
 use serde_json::json;
-use trogon_audit::{AuditName, AuditWriter, MemorySink, Stamper, WriterConfig, WriterId, WriterIdentity};
+use trogon_audit::{AuditName, AuditWriter, MemorySink, SinkError, Stamper, WriterConfig, WriterId, WriterIdentity};
 use trogon_nats::test_support::TlsJetStreamCluster;
 use trogon_nats::{NatsConfig, NatsToken, connect_once};
 use trogon_std::{SystemClock, UuidV7Generator};
 use trogon_workload_registration::{
-    ApprovedRegistration, ProducerConfig, ProducerStatus, RegistrationProducer, RegistrationRole, StreamProfile,
-    approval_signing_bytes, emergency_withdrawal, provision_streams,
+    ApprovedRegistration, ProducerConfig, ProducerStatus, RegistrationError, RegistrationProducer, RegistrationRole,
+    StreamProfile, approval_signing_bytes, emergency_withdrawal, provision_streams,
 };
 use trogonai_proto::platform::workload_identity::v1alpha1::{RegistrationBinding, RegistrationSnapshot, WorkloadRole};
 
@@ -194,9 +194,6 @@ fn resign(config: &ProducerConfig, snapshot: &RegistrationSnapshot) -> ApprovedR
 
 #[tokio::test]
 async fn protected_lifecycle_refuses_unaudited_grants_cancelled_owners_and_malformed_streams() {
-    use trogon_audit::SinkError;
-    use trogon_workload_registration::RegistrationError;
-
     let key = SigningKey::from_bytes(&[7; 32]);
     let configs: Vec<_> = (1..=4)
         .map(|fence| {

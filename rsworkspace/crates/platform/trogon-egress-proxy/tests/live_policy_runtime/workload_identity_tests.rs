@@ -23,8 +23,8 @@ use trogonai_proto::platform::workload_identity::v1alpha1::{RegistrationBinding,
 use super::constants::{APPLICATION_ID, LOCAL_WORKLOAD, PEER_WORKLOAD};
 use super::*;
 
-#[path = "readiness.rs"]
-mod readiness;
+#[path = "readiness_tests.rs"]
+mod readiness_tests;
 
 async fn exclusive_snapshot(context: &async_nats::jetstream::Context, store: &kv::Store, key: &str) -> TestResult<()> {
     let mut config = store.stream.get_info().await?.config;

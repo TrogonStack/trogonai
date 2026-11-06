@@ -7,7 +7,6 @@ use crate::audit::AuditSink;
 use crate::audit_readiness::AuditReadiness;
 use crate::live_policy::KvSnapshot;
 use crate::readiness_status::ReadinessStatus;
-use crate::runtime_activity::RuntimeActivity;
 use crate::runtime_phase::RuntimePhase;
 
 #[derive(Clone)]
@@ -23,11 +22,6 @@ struct ReadinessState {
 }
 
 impl Readiness {
-    /// Serves status-only HTTP probes on a separately restricted listener.
-    pub async fn serve(self, listener: tokio::net::TcpListener, shutdown: CancellationToken) {
-        crate::readiness_http::serve(self, listener, shutdown).await;
-    }
-
     pub(crate) fn new(
         identity: Option<IdentityStore>,
         policy: Option<Arc<KvSnapshot>>,
@@ -43,11 +37,10 @@ impl Readiness {
         }
     }
 
-    pub(crate) fn running(&self, shutdown: CancellationToken) -> RuntimeActivity {
+    pub(crate) fn set_running(&self, shutdown: CancellationToken) {
         if let Ok(mut phase) = self.inner.phase.lock() {
             *phase = RuntimePhase::Running(shutdown);
         }
-        RuntimeActivity::new(self.clone())
     }
 
     pub(crate) fn stopped(&self) {

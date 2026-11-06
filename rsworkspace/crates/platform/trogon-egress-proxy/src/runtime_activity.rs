@@ -1,7 +1,16 @@
+use tokio_util::sync::CancellationToken;
+
 use crate::Readiness;
 
 pub(crate) struct RuntimeActivity {
     readiness: Readiness,
+}
+
+impl Readiness {
+    pub(crate) fn running(&self, shutdown: CancellationToken) -> RuntimeActivity {
+        self.set_running(shutdown);
+        RuntimeActivity::new(self.clone())
+    }
 }
 
 impl RuntimeActivity {

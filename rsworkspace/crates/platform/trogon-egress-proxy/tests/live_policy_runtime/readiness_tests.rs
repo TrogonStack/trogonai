@@ -1,8 +1,8 @@
 use super::*;
 use trogon_egress_proxy::{Readiness, ReadinessStatus};
 
-#[path = "readiness_endpoint.rs"]
-mod endpoint;
+#[path = "readiness_endpoint_tests.rs"]
+mod readiness_endpoint_tests;
 
 async fn status_eventually(readiness: &Readiness, expected: ReadinessStatus) -> TestResult<()> {
     let result = tokio::time::timeout(WAIT, async {

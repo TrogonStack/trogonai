@@ -5,7 +5,10 @@ use trogon_nats::DottedNatsToken;
 fn workload_reply_inboxes_are_typed_and_bound_to_the_registration_bucket() {
     for bucket in ["WORKLOAD_REGISTRATIONS".to_owned(), "B".repeat(64)] {
         let mut arguments = WORKLOAD_ARGS;
-        let at = arguments.iter().position(|value| *value == "--registration-bucket").expect("bucket argument");
+        let at = arguments
+            .iter()
+            .position(|value| *value == "--registration-bucket")
+            .expect("bucket argument");
         arguments[at + 1] = &bucket;
         let config = workload_config(&arguments).expect("bounded workload configuration");
         let TlsInput::Workload(workload) = config.tls else {

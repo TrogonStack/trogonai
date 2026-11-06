@@ -10,20 +10,19 @@ use tokio_util::sync::CancellationToken;
 
 use crate::constants::{
     ACCEPT_ERROR_BACKOFF, READINESS_HEAD_BYTES, READINESS_HEAD_TIMEOUT, READINESS_HTTP_CONNECTIONS,
-    READINESS_HTTP_TIMEOUT,
+    READINESS_HTTP_TIMEOUT, READINESS_MALFORMED_RESPONSE as MALFORMED, READINESS_NOT_FOUND_RESPONSE as NOT_FOUND,
+    READINESS_READY_RESPONSE as READY, READINESS_TIMED_OUT_RESPONSE as TIMED_OUT,
+    READINESS_TOO_LARGE_RESPONSE as TOO_LARGE, READINESS_UNAVAILABLE_RESPONSE as UNAVAILABLE,
 };
 use crate::readiness_request::ReadinessRequest;
 use crate::{Readiness, ReadinessStatus};
 
-const READY: &[u8] = b"HTTP/1.1 200 OK\r\nContent-Length: 6\r\nContent-Type: text/plain\r\nCache-Control: no-store\r\nConnection: close\r\n\r\nready\n";
-const UNAVAILABLE: &[u8] = b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 12\r\nContent-Type: text/plain\r\nCache-Control: no-store\r\nConnection: close\r\n\r\nunavailable\n";
-const NOT_FOUND: &[u8] =
-    b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n";
-const MALFORMED: &[u8] =
-    b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n";
-const TOO_LARGE: &[u8] = b"HTTP/1.1 431 Request Header Fields Too Large\r\nContent-Length: 0\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n";
-const TIMED_OUT: &[u8] =
-    b"HTTP/1.1 408 Request Timeout\r\nContent-Length: 0\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n";
+impl Readiness {
+    /// Serves status-only HTTP probes on a separately restricted listener.
+    pub async fn serve(self, listener: TcpListener, shutdown: CancellationToken) {
+        serve(self, listener, shutdown).await;
+    }
+}
 
 pub(crate) async fn serve(readiness: Readiness, listener: TcpListener, shutdown: CancellationToken) {
     let slots = Arc::new(Semaphore::new(READINESS_HTTP_CONNECTIONS));
