@@ -43,8 +43,11 @@ check `is_current`, and select `changed` and `deadline` alongside network work.
 TLS configuration callbacks protect new handshakes; the caller closes connections
 that already exist. `peer_evidence_from_certificates` takes the chain authenticated
 by that handshake and returns the exact transport identity, public leaf fingerprint,
-registered application identity and selected peer path expiry. That expiry can be
-shorter than the local credential's expiry and must also bound the session.
+registered application identity, selected peer path expiry and a monotonic deadline
+anchored before path validation. The caller must carry that deadline into its
+session bound; a later wall-clock sample can extend the path lifetime after a
+rollback. The actual path expiry remains available for audit evidence. The peer
+path may expire before the local credential and must also bound the session.
 
 Activation fingerprints use SHA-256 of leaf certificate DER, leaf
 SubjectPublicKeyInfo DER, and the concatenation of sorted root DER SHA-256 hashes.

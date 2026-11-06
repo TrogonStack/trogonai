@@ -380,7 +380,8 @@ impl MaterialLease {
         certificates: &[CertificateDer<'_>],
     ) -> Result<crate::PeerEvidence, MaterialError> {
         let leaf = certificates.first().ok_or(MaterialError::Identity)?;
-        let now = SystemTime::now();
+        let observation = crate::time_observation::TimeObservation::now();
+        let now = observation.wall();
         let (id, _, _) = leaf_profile(leaf, now)?;
         let expires_at = crate::certificate_validation::verify_chain(
             certificates,
@@ -388,10 +389,12 @@ impl MaterialLease {
             now,
             crate::certificate_use::CertificateUse::Client,
         )?;
+        let deadline = observation.deadline(expires_at).map_err(|_| MaterialError::Profile)?;
         let application_id = self.application_for_peer(&id).ok_or(MaterialError::Unavailable)?;
         Ok(crate::PeerEvidence {
             application_id,
             expires_at,
+            deadline,
             spiffe_id: id,
             leaf_sha256: Sha256::digest(leaf).into(),
         })

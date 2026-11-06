@@ -652,6 +652,7 @@ async fn peer_evidence_is_bounded_by_its_selected_root_instead_of_the_local_svid
         "a peer must not inherit the server's longer-lived issuing path"
     );
     assert!(evidence.expires_at() < server_lease.expires_at());
+    assert!(evidence.deadline() < server_lease.deadline());
     shutdown.cancel();
     server_task.await.unwrap();
     client_task.await.unwrap();

@@ -107,7 +107,7 @@ impl PeerIdentity {
         .map_err(WorkloadPeerIdentityError::Evidence)?;
         let mut identity = Self::with_clock(agent, peer.expires_at().min(lease.expires_at()), read_wall)
             .map_err(WorkloadPeerIdentityError::Validity)?;
-        identity.deadline = identity.deadline.min(lease.deadline());
+        identity.deadline = identity.deadline.min(lease.deadline()).min(peer.deadline());
         if !lease.is_current() {
             return Err(WorkloadPeerIdentityError::Material(MaterialError::Unavailable));
         }
