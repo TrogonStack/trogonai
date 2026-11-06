@@ -146,10 +146,8 @@ impl PeerIdentity {
         expires_at: SystemTime,
         read_wall: impl FnOnce() -> SystemTime,
     ) -> Result<Self, PeerIdentityError> {
-        Self::at(agent, expires_at, read_wall())
-    }
-
-    fn at(agent: AgentId, expires_at: SystemTime, now: SystemTime) -> Result<Self, PeerIdentityError> {
+        let observed = Instant::now();
+        let now = read_wall();
         let remaining = expires_at
             .duration_since(now)
             .ok()
@@ -158,9 +156,14 @@ impl PeerIdentity {
         Ok(Self {
             agent,
             expires_at,
-            deadline: Instant::now() + remaining.min(MAX_SESSION_LIFETIME),
+            deadline: observed + remaining.min(MAX_SESSION_LIFETIME),
             workload: None,
         })
+    }
+
+    #[cfg(test)]
+    fn at(agent: AgentId, expires_at: SystemTime, now: SystemTime) -> Result<Self, PeerIdentityError> {
+        Self::with_clock(agent, expires_at, || now)
     }
 
     pub fn agent(&self) -> &AgentId {
