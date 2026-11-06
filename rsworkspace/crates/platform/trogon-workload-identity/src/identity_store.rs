@@ -7,6 +7,7 @@ use rustls::{ClientConfig, ServerConfig};
 use spiffe::SpiffeId;
 use tokio::sync::watch;
 use tokio::time::Instant;
+use sha2::{Digest, Sha256};
 
 use crate::candidate::{Candidate, leaf_profile};
 use crate::constants::MAX_REGISTRATION_LIFETIME;
@@ -375,7 +376,12 @@ impl RegistrationLease {
 impl MaterialLease {
     /// The TLS handshake must have authenticated this exact certificate chain.
     pub fn peer_evidence_from_certificates(&self, certificates: &[CertificateDer<'_>]) -> Result<crate::PeerEvidence, MaterialError> {
-        Ok(crate::PeerEvidence { application_id: self.peer_identity_from_certificates(certificates)?, expires_at: self.expires_at() })
+        let leaf = certificates.first().ok_or(MaterialError::Identity)?;
+        let now = SystemTime::now();
+        let (id, _, _) = leaf_profile(leaf, now)?;
+        let expires_at = crate::tls::verify_chain(certificates, &self.material.candidate.roots, now, false)?;
+        let application_id = self.application_for_peer(&id).ok_or(MaterialError::Unavailable)?;
+        Ok(crate::PeerEvidence { application_id, expires_at, spiffe_id: id, leaf_sha256: Sha256::digest(leaf).into() })
     }
     pub fn server_config(&self) -> Arc<ServerConfig> {
         Arc::clone(&self.material.tls)
@@ -438,8 +444,6 @@ impl MaterialLease {
         &self,
         certificates: &[CertificateDer<'_>],
     ) -> Result<ApplicationId, MaterialError> {
-        let leaf = certificates.first().ok_or(MaterialError::Identity)?;
-        let (id, _, _) = leaf_profile(leaf, SystemTime::now())?;
-        self.application_for_peer(&id).ok_or(MaterialError::Unavailable)
+        Ok(self.peer_evidence_from_certificates(certificates)?.application_id().clone())
     }
 }

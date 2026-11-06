@@ -9,6 +9,7 @@ use rustls::pki_types::ServerName;
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 use x509_parser::prelude::{FromDer, X509Certificate};
+use sha2::{Digest, Sha256};
 
 use crate::constants::TEST_TIMEOUT;
 use crate::test_support::{TestCa, WorkloadApiFixture};
@@ -16,6 +17,9 @@ use crate::*;
 
 const LOCAL_ID: &str = "spiffe://example.org/service/egress";
 const PEER_ID: &str = "spiffe://example.org/runtime/workload-1";
+
+mod lifecycle_tests;
+mod validation_tests;
 
 #[derive(Default)]
 struct Recorder(Mutex<Vec<ActivationFact>>);
@@ -566,6 +570,8 @@ async fn peer_evidence_is_bounded_by_its_selected_root_instead_of_the_local_svid
     assert!(handshake(server_lease.server_config(), client_lease.client_config(&spiffe::SpiffeId::new(LOCAL_ID).unwrap()).unwrap()).is_ok());
     let evidence = server_lease.peer_evidence_from_certificates(&peer_identity.certificates()).unwrap();
     assert_eq!(evidence.application_id().as_str(), "agent-1");
+    assert_eq!(evidence.spiffe_id().to_string(), PEER_ID);
+    assert_eq!(*evidence.leaf_sha256(), <[u8;32]>::from(Sha256::digest(&peer_identity.certificates()[0])));
     let root = peer_ca.root();
     let (_, root) = X509Certificate::from_der(root.as_ref()).unwrap();
     let root_expiry = crate::candidate::timestamp(root.validity().not_after.timestamp()).unwrap();
