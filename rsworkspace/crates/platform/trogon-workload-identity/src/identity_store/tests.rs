@@ -7,7 +7,7 @@ use tokio_util::sync::CancellationToken;
 use super::*;
 use crate::constants::TEST_TIMEOUT;
 use crate::test_support::{TestCa, WorkloadApiFixture};
-use crate::tests::{LOCAL_ID, Recorder, local, material, registration, revision, until};
+use crate::tests::{LOCAL_ID, PEER_ID, Recorder, handshake, local, material, peer, registration, revision, until};
 use crate::{ActivationAuditError, ActivationFact};
 
 #[tokio::test]
@@ -197,4 +197,74 @@ fn poisoned_host_state_refuses_late_source_and_durable_activation_callbacks() {
     assert!(store.material().is_none());
     assert!(store.prepare().is_none());
     assert_eq!(store.source_revision(), u64::MAX);
+}
+
+#[tokio::test]
+async fn monotonic_expiry_retires_active_material_and_notifies_without_source_withdrawal() {
+    let ca = TestCa::new();
+    let fixture = WorkloadApiFixture::start(vec![
+        ca.issue(LOCAL_ID, Duration::from_secs(600)),
+        ca.issue(PEER_ID, Duration::from_secs(600)),
+    ])
+    .await;
+    let audit = Arc::new(Recorder::default());
+    let (server, server_driver) = IdentityStore::new(
+        IdentityConfig::new(fixture.endpoint(), local(), revision(1)),
+        audit.clone(),
+    );
+    let (client, client_driver) = IdentityStore::new(
+        IdentityConfig::new(fixture.endpoint(), peer(), revision(1)),
+        Arc::new(Recorder::default()),
+    );
+    let original = registration(&ca);
+    let short = RegistrationSet::new(
+        revision(1),
+        revision(1),
+        revision(1),
+        SystemTime::now() + Duration::from_secs(30),
+        original.bindings().to_vec(),
+        original.approved_roots().to_vec(),
+    )
+    .unwrap();
+    server.replace_registration(short.clone()).unwrap();
+    client.replace_registration(original).unwrap();
+    let shutdown = CancellationToken::new();
+    let server_task = tokio::spawn(server_driver.run(shutdown.clone()));
+    let client_task = tokio::spawn(client_driver.run(shutdown.clone()));
+    let server_lease = material(&server).await;
+    let client_lease = material(&client).await;
+    let cached_server = server_lease.server_config();
+    let cached_client = client_lease.client_config(local().spiffe_id()).unwrap();
+    assert!(handshake(cached_server.clone(), cached_client.clone()).is_ok());
+    let mut events = server.inner.events.subscribe();
+    let before = *events.borrow_and_update();
+    let source = server.source_revision();
+    server.expire();
+    assert!(!events.has_changed().unwrap());
+
+    tokio::time::pause();
+    tokio::time::advance(server_lease.deadline().saturating_duration_since(Instant::now()) + Duration::from_nanos(1))
+        .await;
+    server.expire();
+    assert!(events.has_changed().unwrap());
+    events.changed().await.unwrap();
+    assert_eq!(*events.borrow_and_update(), before + 1);
+    assert_eq!(server.source_revision(), source);
+    assert!(short.expires_at() > SystemTime::now());
+    assert_eq!(audit.count(), 1);
+    assert!(server.material().is_none());
+    assert!(!server_lease.is_current());
+    assert!(client_lease.is_current());
+    assert!(handshake(cached_server, cached_client).is_err());
+    server.expire();
+    assert!(
+        !events.has_changed().unwrap(),
+        "retired material cannot emit another cleanup event"
+    );
+
+    tokio::time::resume();
+    shutdown.cancel();
+    server_task.await.unwrap();
+    client_task.await.unwrap();
+    fixture.stop().await;
 }

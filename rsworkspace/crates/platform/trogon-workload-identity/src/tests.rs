@@ -30,6 +30,12 @@ mod wire_identity_tests;
 #[derive(Default)]
 pub(crate) struct Recorder(Mutex<Vec<ActivationFact>>);
 
+impl Recorder {
+    pub(crate) fn count(&self) -> usize {
+        self.0.lock().unwrap().len()
+    }
+}
+
 #[async_trait]
 impl ActivationAudit for Recorder {
     async fn record(&self, fact: &ActivationFact) -> Result<(), ActivationAuditError> {
