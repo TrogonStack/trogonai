@@ -9,7 +9,10 @@ pub struct UnixEndpointError;
 
 impl UnixEndpoint {
     pub fn new(value: &str) -> Result<Self, UnixEndpointError> {
-        Endpoint::parse(value).map(Self).map_err(|_| UnixEndpointError)
+        match Endpoint::parse(value) {
+            Ok(endpoint @ Endpoint::Unix(_)) => Ok(Self(endpoint)),
+            _ => Err(UnixEndpointError),
+        }
     }
 
     pub fn endpoint(&self) -> Endpoint {
