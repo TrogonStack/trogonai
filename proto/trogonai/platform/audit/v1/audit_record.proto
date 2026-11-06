@@ -29,6 +29,11 @@ import "trogonai/projects/projects/v1alpha1/identity.proto";
 // field a caller fills.
 message AuditRecord {
   option (buf.validate.message).cel = {
+    id: "audit_record.credential_activation_scope"
+    message: "credential activation is must-audit under its exact registered scope"
+    expression: "!has(this.credential_activation) || (this.class == 1 && this.credential_activation.binding.tenant == this.tenant.value && this.credential_activation.binding.project == this.project.value && has(this.attribution) && this.attribution.decision == 1 && this.attribution.enforcement_mode == 1 && !this.attribution.would_deny)"
+  };
+  option (buf.validate.message).cel = {
     id: "audit_record.attribution_on_decisions_and_credentials"
     message: "a decision or credential record carries its attribution"
     expression: "has(this.change) || has(this.writer_lifecycle) || has(this.attribution)"
