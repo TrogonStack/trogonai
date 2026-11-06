@@ -34,6 +34,16 @@ fn workload_identity_configuration_requires_no_static_private_key() {
     Args::try_parse_from(WORKLOAD_ARGS).expect("a complete Workload API profile needs no static TLS files");
 }
 
+#[test]
+fn directly_modified_arguments_cannot_bypass_the_complete_identity_profile() {
+    let mut args = Args::try_parse_from(WORKLOAD_ARGS).expect("complete profile");
+    args.workload_spiffe_id = None;
+    let env = InMemoryEnv::new();
+    env.set("NATS_CERT", "client.pem");
+    env.set("NATS_KEY", "client.key");
+    assert!(matches!(Config::resolve(args, &env), Err(ConfigError::TlsSource)));
+}
+
 fn workload_config(arguments: &[&str]) -> Result<Config, ConfigError> {
     let env = InMemoryEnv::new();
     env.set("NATS_CERT", "/run/fixture/client.pem");

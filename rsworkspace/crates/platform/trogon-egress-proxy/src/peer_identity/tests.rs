@@ -74,9 +74,23 @@ async fn rollback_after_peer_path_verification_cannot_restart_its_lifetime() {
     .await
     .expect("approved material");
     let began = Instant::now();
-    let observed = PeerIdentity::from_workload_certificates_with_clock(&peer.certificates(), lease, || {
+    let observed = PeerIdentity::from_workload_certificates_with_clock(&peer.certificates(), lease.clone(), || {
         wall - Duration::from_secs(30)
     });
+    let inspected = observed.as_ref().expect("authenticated peer");
+    let debug = format!("{inspected:?}");
+    assert!(debug.contains("agent-1"));
+    assert!(debug.contains(peer_id));
+    assert!(!debug.contains("PRIVATE KEY"));
+    assert!(!debug.contains("key_der"));
+    let withdrawn = PeerIdentity::from_workload_certificates_with_clock(&peer.certificates(), lease, || {
+        identity.withdraw_registration();
+        wall
+    });
+    assert!(matches!(
+        withdrawn,
+        Err(WorkloadPeerIdentityError::Material(MaterialError::Unavailable))
+    ));
     shutdown.cancel();
     task.await.expect("identity driver");
     fixture.stop().await;
@@ -140,6 +154,7 @@ fn a_long_certificate_cannot_extend_the_session_backstop() {
         &TrustDomain::new("trogon.example").expect("domain"),
     )
     .expect("identity");
+    assert!(format!("{peer:?}").contains("workload_peer: None"));
     assert!(peer.deadline() >= now + MAX_SESSION_LIFETIME);
     assert!(peer.deadline() <= Instant::now() + MAX_SESSION_LIFETIME);
 }

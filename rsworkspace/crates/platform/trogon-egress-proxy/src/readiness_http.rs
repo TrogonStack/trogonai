@@ -25,6 +25,20 @@ impl Readiness {
 }
 
 pub(crate) async fn serve(readiness: Readiness, listener: TcpListener, shutdown: CancellationToken) {
+    serve_listener(readiness, listener, shutdown).await;
+}
+
+trait ReadinessListener {
+    fn accept(&self) -> impl std::future::Future<Output = io::Result<(TcpStream, std::net::SocketAddr)>> + Send;
+}
+
+impl ReadinessListener for TcpListener {
+    async fn accept(&self) -> io::Result<(TcpStream, std::net::SocketAddr)> {
+        TcpListener::accept(self).await
+    }
+}
+
+async fn serve_listener(readiness: Readiness, listener: impl ReadinessListener, shutdown: CancellationToken) {
     let slots = Arc::new(Semaphore::new(READINESS_HTTP_CONNECTIONS));
     let mut workers = JoinSet::new();
     loop {
@@ -39,11 +53,6 @@ pub(crate) async fn serve(readiness: Readiness, listener: TcpListener, shutdown:
             accepted = listener.accept() => match accepted {
                 Ok((stream, _)) => {
                     let accepted_at = Instant::now();
-                    while let Some(result) = workers.try_join_next() {
-                        if let Err(error) = result {
-                            crate::telemetry::readiness::http_worker_failed(&error);
-                        }
-                    }
                     let Ok(permit) = Arc::clone(&slots).try_acquire_owned() else {
                         drop(stream);
                         continue;
@@ -69,6 +78,9 @@ pub(crate) async fn serve(readiness: Readiness, listener: TcpListener, shutdown:
     }
     workers.shutdown().await;
 }
+
+#[cfg(test)]
+mod tests;
 
 async fn connection(readiness: &Readiness, mut stream: TcpStream, head_deadline: Instant) -> io::Result<()> {
     let request = match timeout_at(head_deadline, read_head(&mut stream)).await {

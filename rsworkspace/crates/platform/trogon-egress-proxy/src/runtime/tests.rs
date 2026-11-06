@@ -100,6 +100,38 @@ fn the_only_mode_is_enforce() {
 }
 
 #[tokio::test]
+async fn direct_workload_runtime_configuration_cannot_select_static_policy_or_another_scope() {
+    let dir = tempfile::tempdir().expect("directory");
+    let mut configured = config(&dir.path().join("unused.toml"));
+    configured.tls = TlsInput::Workload(
+        crate::workload_identity_config::WorkloadIdentityConfig::new(
+            "unix:///run/identity/api.sock",
+            "spiffe://trogon.example/service/egress",
+            "REGISTRATIONS",
+            std::num::NonZeroU64::MIN,
+            &configured.trust_domain,
+            &configured.audit,
+        )
+        .expect("workload profile"),
+    );
+    assert!(matches!(
+        start(configured.clone()).await,
+        Err(StartupError::WorkloadPolicyRequired)
+    ));
+    configured.policy = PolicyInput::NatsKv(
+        KvPolicyConfig::new(
+            "POLICIES",
+            configured.audit.identity.tenant().clone(),
+            configured.audit.identity.project().clone(),
+            std::num::NonZeroU64::MIN,
+        )
+        .expect("policy scope"),
+    );
+    configured.trust_domain = TrustDomain::new("other.example").expect("other domain");
+    assert!(matches!(start(configured).await, Err(StartupError::WorkloadScope)));
+}
+
+#[tokio::test]
 async fn direct_runtime_configuration_cannot_bypass_live_transport_requirements() {
     let dir = tempfile::tempdir().unwrap();
     let mut config = config(&dir.path().join("unused.toml"));

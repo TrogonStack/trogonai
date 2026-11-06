@@ -265,3 +265,29 @@ fn projection_bytes_are_bounded_before_protobuf_decoding() {
         Err(RegistrationProjectionError::TooLarge)
     ));
 }
+
+#[test]
+fn projection_bounds_sets_and_preserves_a_governed_supervisor_without_an_application() {
+    let now = SystemTime::now();
+    let original = snapshot(now);
+    for message in [
+        RegistrationSnapshot {
+            bindings: vec![original.bindings[0].clone(); trogon_workload_identity::constants::MAX_BINDINGS + 1],
+            ..original.clone()
+        },
+        RegistrationSnapshot {
+            approved_root_sha256: vec![vec![1; 32]; trogon_workload_identity::constants::MAX_ROOTS + 1],
+            ..original.clone()
+        },
+    ] {
+        assert!(matches!(
+            decode_registration(&message.encode_to_vec(), &config(), now),
+            Err(RegistrationProjectionError::Registration(RegistrationError::Bounds))
+        ));
+    }
+    let mut supervisor = original;
+    supervisor.bindings[0].role = EnumValue::from(WireRole::Supervisor);
+    let checked = decode_registration(&supervisor.encode_to_vec(), &config(), now).expect("governed supervisor");
+    assert_eq!(checked.bindings()[0].role(), WorkloadRole::Supervisor);
+    assert!(checked.bindings()[0].application_id().is_none());
+}

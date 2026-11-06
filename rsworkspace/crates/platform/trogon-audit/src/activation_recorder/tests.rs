@@ -45,6 +45,7 @@ fn activation() -> CredentialActivation {
 fn activation_record_preserves_facts_and_requires_storage_before_effect() {
     let message = activation();
     let facts = CredentialActivationFacts::try_from(message.clone()).unwrap();
+    assert_eq!(facts.message(), &message);
     let record = Record::credential_activation(scope(), facts, stamper().stamp()).unwrap();
     assert_eq!(record.message().class, EnumValue::from(AuditClass::Must));
     assert_eq!(record.obligation(), Obligation::BeforeEffect);

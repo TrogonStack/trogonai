@@ -63,13 +63,9 @@ fn authenticated_records_distinguish_runtimes_that_share_one_application_identit
     second.peer_binding.as_option_mut().unwrap().spiffe_id = "spiffe://example.test/runtime/two".into();
     second.peer_leaf_sha256 = vec![2; 32];
     let facts = || decision_facts(DecisionOutcome::Allow(Enforcement::Enforce), ReadOnly::Undeclared);
-    let first_record = Record::authenticated_workload_decision(
-        scope(),
-        facts(),
-        WorkloadPeerEvidenceFacts::try_from(first.clone()).unwrap(),
-        stamper().stamp(),
-    )
-    .unwrap();
+    let inspected = WorkloadPeerEvidenceFacts::try_from(first.clone()).unwrap();
+    assert_eq!(inspected.message(), &first);
+    let first_record = Record::authenticated_workload_decision(scope(), facts(), inspected, stamper().stamp()).unwrap();
     let second_record = Record::authenticated_workload_decision(
         scope(),
         facts(),

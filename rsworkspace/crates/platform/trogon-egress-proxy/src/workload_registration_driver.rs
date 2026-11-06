@@ -244,3 +244,6 @@ fn validate_stream(info: &Info, subject: &str) -> Result<(), RegistrationSourceE
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;

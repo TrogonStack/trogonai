@@ -58,6 +58,10 @@ struct WorkloadHarness {
 
 impl WorkloadHarness {
     async fn start(policy_text: &str) -> TestResult<Self> {
+        Self::start_with_application(policy_text, APPLICATION_ID).await
+    }
+
+    async fn start_with_application(policy_text: &str, application: &str) -> TestResult<Self> {
         let broker = TlsTestServer::start_jetstream_verifying_clients().await;
         let env = InMemoryEnv::new();
         env.set("NATS_URL", format!("nats://{}", broker.address()));
@@ -127,7 +131,7 @@ impl WorkloadHarness {
                             tenant: "acme".into(),
                             project: "payments".into(),
                             role: EnumValue::from(WorkloadRole::Agent),
-                            application_id: Some(APPLICATION_ID.into()),
+                            application_id: Some(application.into()),
                         },
                     ],
                     approved_root_sha256: vec![ca.root_sha256().to_vec()],
@@ -156,13 +160,7 @@ impl WorkloadHarness {
         let client_api = WorkloadApiFixture::start(vec![peer]).await;
         let client_config = IdentityConfig::new(
             client_api.endpoint(),
-            RuntimeBinding::new(
-                PEER_WORKLOAD,
-                "acme",
-                "payments",
-                RuntimeRole::Agent,
-                Some(APPLICATION_ID),
-            )?,
+            RuntimeBinding::new(PEER_WORKLOAD, "acme", "payments", RuntimeRole::Agent, Some(application))?,
             NonZeroU64::MIN,
         );
         let client_writer_identity = WriterIdentity::new(
@@ -361,6 +359,30 @@ async fn production_workload_profile_authenticates_and_audits_without_static_tls
     assert_eq!(peer.peer_binding.application_id.as_deref(), Some(APPLICATION_ID));
     assert_eq!(peer.registration_revision, 1);
     assert_eq!(peer.peer_leaf_sha256.len(), 32);
+    harness.stop().await
+}
+
+#[tokio::test]
+async fn an_authenticated_application_outside_the_proxy_bound_is_refused_before_dispatch() -> TestResult<()> {
+    let events = CapturedEvents::new();
+    let _capture = events.install(LevelFilter::WARN);
+    let harness = WorkloadHarness::start_with_application("", &"a".repeat(129)).await?;
+    let mut client = harness.connect().await?;
+    let _ = client.write_all(b"GET / HTTP/1.1\r\n\r\n").await;
+    closed(&mut client).await?;
+    assert!(
+        events
+            .events()
+            .iter()
+            .any(|event| event.message() == Some("workload peer refused"))
+    );
+    assert!(
+        harness
+            .audit_stream
+            .get_last_raw_message_by_subject("platform.v1.audit.decision.payments.deny")
+            .await
+            .is_err()
+    );
     harness.stop().await
 }
 

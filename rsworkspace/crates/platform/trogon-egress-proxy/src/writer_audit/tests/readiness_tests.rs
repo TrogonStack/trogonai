@@ -1,6 +1,30 @@
 use super::*;
 use crate::audit_readiness::AuditReadiness;
 
+#[derive(Clone)]
+struct PanickingSink;
+
+impl Sink for PanickingSink {
+    async fn publish(&self, _: &SealedRecord) -> Result<StoredAck, SinkError> {
+        panic!("fixture audit storage panic");
+    }
+}
+
+#[tokio::test]
+async fn a_panicking_storage_worker_cannot_make_readiness_healthy_or_leak_capacity() {
+    let audit = audit_over(PanickingSink);
+    let events = CapturedEvents::new();
+    let _capture = events.install(LevelFilter::WARN);
+    assert_eq!(audit.readiness().await, AuditReadiness::Unavailable);
+    assert_eq!(audit.capacity().in_flight(), 0);
+    assert!(
+        events
+            .events()
+            .iter()
+            .any(|event| event.message() == Some("audit readiness worker ended abnormally"))
+    );
+}
+
 #[tokio::test]
 async fn cancelled_and_timed_out_readiness_probes_keep_one_worker_until_actual_completion() {
     let (audit, sink) = audit();
