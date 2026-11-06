@@ -34,9 +34,9 @@ original image trusted or permit a deployment-renderer fallback.
 
 Use a dedicated cluster and trust domain for each environment. Production and
 nonproduction have distinct roots, registrations, databases, IAM roles and
-platform recovery fences. The global socket admission policy deliberately
-protects the selected identity plane across namespaces; this profile does not
-place another environment's issuer on the same cluster.
+platform recovery fences. The global admission policy deliberately protects
+the selected identity plane across namespaces; this profile does not place
+another environment's issuer on the same cluster.
 
 Prepare the following outside the workload identity plane:
 
@@ -149,11 +149,37 @@ in the selected cluster. Check the admission policy's type-checking status
 before admitting workloads. Local CEL tests cover expression behavior; they
 cannot prove the cluster installed or enforced the policy.
 
-Install and test the fail-closed admission policy before starting trusted
-supervisors. Keep pod creation, workload controllers, ephemeral-container
-injection, service-account token creation and namespace policy changes restricted
-to the appropriate operators. Workload users cannot administer the issuer or
-the dedicated supervisor namespaces.
+Inventory every existing and controller-managed pod before installing the
+fail-closed admission policy. Its process baseline applies cluster-wide:
+nonroot identities, a read-only root filesystem, no added Linux capabilities,
+no privilege escalation, RuntimeDefault seccomp, and no host or shared process
+namespaces. The exact generated SPIRE agent profile is the only host-privilege
+exception. A namespace label or service account alone cannot grant that exception.
+Privileged CNI, CSI, monitoring and other system components are part of the
+trusted infrastructure boundary. Their current pods do not make their
+replacement pods admissible. Before rollout, develop separately reviewed and
+tested exact infrastructure profiles and prove that node replacement, storage,
+networking and controller recovery still work. Do not add namespace-wide bypasses
+or relax the workload baseline to make an infrastructure rollout pass.
+
+Admission does not evict existing pods. Remove or replace any pre-existing
+pod that can reach node identity state, control-plane credentials or host
+processes outside an approved infrastructure profile before enabling issuance.
+Protect PV provisioning, storage classes, CSI drivers and node filesystems:
+admitting a PVC or CSI volume does not inspect its backing storage or prove it
+cannot expose host state. Prove these independent storage controls as part of
+the same acceptance gate.
+
+Install and test the policies before starting trusted supervisors. Keep pod
+and workload-controller mutation, exec and attach, ephemeral-container injection,
+service-account token creation, node binding and namespace policy changes
+restricted to the appropriate operators. Protect the referenced ConfigMaps,
+Secrets, admission policies and bindings with the same change-control boundary.
+Workload users cannot administer the issuer or the dedicated supervisor
+namespaces. Check both direct `spec.nodeName` selection and the `pods/binding`
+and legacy `bindings` APIs: issuer, agent and supervisor namespaces may select
+only their configured node-name allowlists. Protect node labels and node-pool
+membership independently.
 
 The server runs as a nonroot process with a read-only root filesystem, private
 administrative socket, projected API and AWS tokens, and retained per-replica
@@ -170,9 +196,12 @@ actual health signal for that complete join, including failure on withdrawal
 or audit degradation, before routing production traffic.
 
 The node agent is a trusted host service. It runs as root with host PID access
-and `SYS_PTRACE` for process attestation. Its protected agent namespace is a
-deliberate privileged admission exception, not a rootless or tenant-safe
-isolation boundary. It has no host networking, container-runtime socket, static
+and `SYS_PTRACE` for process attestation. The admission exception binds its
+namespace, service account, immutable image, entrypoint, arguments, environment,
+probe commands, required security controls, volume sources, mounts and approved
+node placement. Extra containers, lifecycle commands and host mounts are refused.
+Its namespace remains a trusted administrative boundary. It has no host
+networking, container-runtime socket, static
 join token or access to the server's control-plane nodes. Prove the selected
 kernel, runtime and security policy allow accurate process attestation with
 these permissions before enabling the profile.
@@ -184,12 +213,16 @@ prevents changing the directory; it still permits connecting to its Unix socket.
 Do not mount the socket, node data directory, service-account token or SVID key
 into an untrusted guest, sidecar, init container or ephemeral container.
 
-The admission policy rejects root and ancestor host mounts, socket access by
-unregistered callers, mutable-image substitutions, writable socket mounts and
-untrusted container mounts. Dedicated supervisor namespaces additionally refuse
-privileged companions, extra Linux capabilities, shared host/process namespaces
-and unrelated host mounts. Their Pod Security exemption exists only to permit
-the exact socket host mount under this stricter policy.
+The admission policy denies ordinary host volumes globally. It therefore
+rejects root, ancestor and alternate host paths without relying on pathname
+normalization. The only ordinary host-volume exception is the exact socket
+directory for a registered supervisor, mounted read-only at the canonical path
+by its registered container. Unregistered callers, mutable-image substitutions,
+writable socket mounts and untrusted container mounts are refused. The global
+process baseline also refuses privileged companions, extra Linux capabilities
+and shared host/process namespaces outside the exact SPIRE agent profile.
+Supervisor namespaces use a Pod Security exemption only to permit the exact
+socket host mount under this stricter policy.
 
 For the egress consumer, configure the explicit workload profile:
 

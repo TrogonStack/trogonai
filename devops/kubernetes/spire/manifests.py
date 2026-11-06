@@ -180,13 +180,103 @@ def network_policies(config):
     return resources
 
 
+def matching_fields(path, expected):
+    if isinstance(expected, dict):
+        clauses = []
+        for key, value in expected.items():
+            child = path + "." + key
+            match = matching_fields(child, value)
+            if key == "readOnly" and value is False:
+                clauses.append(f"(!has({child}) || ({match}))")
+            else:
+                clauses.append(f"(has({child}) && ({match}))")
+        return " && ".join(clauses) or "true"
+    if isinstance(expected, list):
+        clauses = [f"{path}.size() == {len(expected)}"]
+        clauses += [matching_fields(f"{path}[{index}]", value) for index, value in enumerate(expected)]
+        return " && ".join("(" + clause + ")" for clause in clauses)
+    return f"{path} == {json.dumps(expected)}"
+
+
+def protected_namespaces(config):
+    return {config["namespace"]: config["server_node_names"], config["agent_namespace"]: config["node_names"],
+            **{registration["namespace"]: config["node_names"] for registration in config["registrations"]}}
+
+
 def socket_policy(config, images):
     quote = json.dumps
-    agent_identity = (
-        f"object.metadata.namespace == {quote(config['agent_namespace'])} && "
-        "object.spec.serviceAccountName == 'spire-agent' && object.spec.containers.size() == 1 && "
-        f"object.spec.containers[0].name == 'agent' && object.spec.containers[0].image == {quote(images['agent'])}"
+    container = "object.spec.containers[0]"
+    expected_agent = agent(config, images)["spec"]["template"]["spec"]
+    expected_container = expected_agent["containers"][0]
+    no_host_namespaces = " && ".join(
+        f"(!has(object.spec.{field}) || !object.spec.{field})"
+        for field in ["hostPID", "hostIPC", "hostNetwork", "shareProcessNamespace"]
     )
+    no_mount_overlays = " && ".join([
+        "(!has(m.subPath) || m.subPath == '')", "(!has(m.subPathExpr) || m.subPathExpr == '')",
+        "(!has(m.mountPropagation) || m.mountPropagation == 'None')",
+    ])
+    agent_identity = " && ".join([
+        f"object.metadata.namespace == {quote(config['agent_namespace'])}",
+        "object.spec.serviceAccountName == 'spire-agent'", "object.spec.containers.size() == 1",
+        f"{container}.name == 'agent'", f"{container}.image == {quote(images['agent'])}",
+    ])
+    privileges = " && ".join([
+        matching_fields("object.spec.securityContext", expected_agent["securityContext"]),
+        f"has({container}.securityContext)", matching_fields(container + ".securityContext", expected_container["securityContext"]),
+        f"(!has({container}.securityContext.privileged) || !{container}.securityContext.privileged)",
+        f"(!has({container}.securityContext.runAsUser) || {container}.securityContext.runAsUser == 0)",
+        f"(!has({container}.securityContext.runAsGroup) || {container}.securityContext.runAsGroup == 0)",
+        f"(!has({container}.securityContext.runAsNonRoot) || !{container}.securityContext.runAsNonRoot)",
+        f"(!has({container}.securityContext.procMount) || {container}.securityContext.procMount == 'Default')",
+        f"(!has({container}.securityContext.seccompProfile) || {container}.securityContext.seccompProfile.type == 'RuntimeDefault')",
+        "(!has(object.spec.securityContext.sysctls) || object.spec.securityContext.sysctls.size() == 0)",
+        "has(object.spec.hostPID) && object.spec.hostPID",
+        "(!has(object.spec.hostIPC) || !object.spec.hostIPC)",
+        "(!has(object.spec.hostNetwork) || !object.spec.hostNetwork)",
+        "(!has(object.spec.shareProcessNamespace) || !object.spec.shareProcessNamespace)",
+        "has(object.spec.automountServiceAccountToken) && !object.spec.automountServiceAccountToken",
+    ])
+    process = matching_fields(container, {key: expected_container[key] for key in
+        ["command", "args", "env", "livenessProbe", "readinessProbe", "startupProbe"]})
+    process += " && " + " && ".join([
+        f"!has({container}.lifecycle)",
+        f"(!has({container}.envFrom) || {container}.envFrom.size() == 0)",
+        f"(!has({container}.ports) || {container}.ports.size() == 0)",
+        f"(!has({container}.volumeDevices) || {container}.volumeDevices.size() == 0)",
+        "(!has(object.spec.initContainers) || object.spec.initContainers.size() == 0)",
+        "(!has(object.spec.ephemeralContainers) || object.spec.ephemeralContainers.size() == 0)",
+    ])
+    placement = " && ".join([
+        "(!has(object.spec.nodeName) || object.spec.nodeName == '' || variables.agentNodes.exists(n, n == object.spec.nodeName))",
+        "has(object.spec.affinity) && has(object.spec.affinity.nodeAffinity)",
+        "has(object.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution)",
+        "object.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms.size() > 0",
+        "object.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms.all(t, "
+        "has(t.matchFields) && t.matchFields.exists(f, f.key == 'metadata.name' && f.operator == 'In' && "
+        "f.values.size() > 0 && f.values.all(n, variables.agentNodes.exists(approved, approved == n))))",
+    ])
+    variables = [
+        {"name": "agentNodes", "expression": quote(config["node_names"])},
+        {"name": "agentIdentity", "expression": agent_identity},
+        {"name": "agentPrivileges", "expression": "variables.agentIdentity && has(object.spec.securityContext) && " + privileges},
+        {"name": "agentProcess", "expression": "variables.agentIdentity && " + process},
+        {"name": "agentPlacement", "expression": "variables.agentIdentity && " + placement},
+        {"name": "agentVolumeShape", "expression": "variables.agentIdentity && has(object.spec.volumes) && "
+            f"object.spec.volumes.size() == {len(expected_agent['volumes'])}"},
+        {"name": "agentMounts", "expression": "variables.agentIdentity && " +
+            matching_fields(container, {"volumeMounts": expected_container["volumeMounts"]}) +
+            f" && {container}.volumeMounts.all(m, {no_mount_overlays})"},
+    ]
+    volume_checks = []
+    for index, volume in enumerate(expected_agent["volumes"]):
+        name = "agentVolume" + str(index)
+        variables.append({"name": name, "expression": "variables.agentVolumeShape && " + matching_fields(f"object.spec.volumes[{index}]", volume)})
+        volume_checks.append("variables." + name)
+    variables.append({"name": "isAgent", "expression": " && ".join([
+        "variables.agentIdentity", "variables.agentPrivileges", "variables.agentProcess", "variables.agentPlacement",
+        "variables.agentMounts", *volume_checks,
+    ])})
     supervisors = []
     for registration in config["registrations"]:
         supervisors.append("(" + " && ".join([
@@ -195,68 +285,63 @@ def socket_policy(config, images):
             "object.spec.containers.exists(c, " + " && ".join([
                 f"c.name == {quote(registration['container'])}", f"c.image == {quote(registration['container_image'])}",
                 "has(c.securityContext)", f"has(c.securityContext.runAsUser) && c.securityContext.runAsUser == {registration['uid']}",
-                "has(c.securityContext.allowPrivilegeEscalation) && !c.securityContext.allowPrivilegeEscalation",
-                "(!has(c.securityContext.privileged) || !c.securityContext.privileged)",
             ]) + ")",
-            "(!has(object.spec.hostPID) || !object.spec.hostPID)",
-            "(!has(object.spec.hostNetwork) || !object.spec.hostNetwork)",
-            "(!has(object.spec.shareProcessNamespace) || !object.spec.shareProcessNamespace)",
         ]) + ")")
-    protected = [SOCKET_DIRECTORY, "/var/lib/platform-spire"]
-    sensitive = " || ".join(
-        f"v.hostPath.path == '/' || v.hostPath.path == {quote(path)} || "
-        f"{quote(path)}.startsWith(v.hostPath.path + '/') || v.hostPath.path.startsWith({quote(path + '/')})"
-        for path in protected
-    )
-    variables = [
-        {"name": "isAgent", "expression": agent_identity},
+    variables.extend([
         {"name": "isSupervisor", "expression": " || ".join(supervisors)},
-        {"name": "sensitiveVolumes", "expression": "has(object.spec.volumes) ? object.spec.volumes.filter(v, has(v.hostPath) && (" + sensitive + ")).map(v, v.name) : []"},
-        {"name": "supervisorNamespace", "expression": quote(sorted({r["namespace"] for r in config["registrations"]})) + ".exists(n, n == object.metadata.namespace)"},
-    ]
+        {"name": "hostVolumes", "expression": "has(object.spec.volumes) ? object.spec.volumes.filter(v, has(v.hostPath)).map(v, v.name) : []"},
+    ])
     permitted_mounts = " || ".join(
         f"(object.metadata.namespace == {quote(r['namespace'])} && object.spec.serviceAccountName == {quote(r['service_account'])} && c.name == {quote(r['container'])})"
         for r in config["registrations"]
     )
-    validations = [
-        {"expression": "!has(object.spec.volumes) || object.spec.volumes.all(v, !variables.sensitiveVolumes.exists(n, n == v.name) || "
-            f"(variables.isAgent && (v.hostPath.path == {quote(SOCKET_DIRECTORY)} || v.hostPath.path == {quote('/var/lib/platform-spire/epoch-' + str(config['recovery_epoch']))})) || "
-            f"(variables.isSupervisor && v.hostPath.path == {quote(SOCKET_DIRECTORY)} && has(v.hostPath.type) && v.hostPath.type == 'Directory'))",
-         "message": "Only the admitted node agent or trusted supervisor may mount identity endpoints."},
-        {"expression": "variables.isAgent || object.spec.containers.all(c, !has(c.volumeMounts) || c.volumeMounts.all(m, "
-            "!variables.sensitiveVolumes.exists(n, n == m.name) || "
-            f"(has(m.readOnly) && m.readOnly && ({permitted_mounts}))))",
-         "message": "Identity sockets may be mounted only read-only into the admitted supervisor container."},
-        {"expression": "!has(object.spec.initContainers) || object.spec.initContainers.all(c, !has(c.volumeMounts) || "
-            "c.volumeMounts.all(m, !variables.sensitiveVolumes.exists(n, n == m.name)))",
-         "message": "Init containers cannot mount identity sockets or node credentials."},
-        {"expression": "!has(object.spec.ephemeralContainers) || object.spec.ephemeralContainers.all(c, !has(c.volumeMounts) || "
-            "c.volumeMounts.all(m, !variables.sensitiveVolumes.exists(n, n == m.name)))",
-         "message": "Ephemeral containers cannot mount identity sockets or node credentials."},
-    ]
+    def inherited(field, condition):
+        return f"(has(c.securityContext.{field}) ? c.securityContext.{field}{condition} : " \
+            f"(has(object.spec.securityContext) && has(object.spec.securityContext.{field}) && object.spec.securityContext.{field}{condition}))"
+    seccomp = "(has(c.securityContext.seccompProfile) ? c.securityContext.seccompProfile.type == 'RuntimeDefault' : " \
+        "(has(object.spec.securityContext) && has(object.spec.securityContext.seccompProfile) && object.spec.securityContext.seccompProfile.type == 'RuntimeDefault'))"
     safe_container = " && ".join([
-        "has(c.securityContext)", "has(c.securityContext.runAsNonRoot) && c.securityContext.runAsNonRoot",
-        "has(c.securityContext.runAsUser) && c.securityContext.runAsUser > 0",
+        "has(c.securityContext)", inherited("runAsNonRoot", " == true"), inherited("runAsUser", " > 0"),
         "has(c.securityContext.allowPrivilegeEscalation) && !c.securityContext.allowPrivilegeEscalation",
         "has(c.securityContext.readOnlyRootFilesystem) && c.securityContext.readOnlyRootFilesystem",
         "(!has(c.securityContext.privileged) || !c.securityContext.privileged)",
         "has(c.securityContext.capabilities) && has(c.securityContext.capabilities.drop) && c.securityContext.capabilities.drop.exists(cap, cap == 'ALL')",
         "(!has(c.securityContext.capabilities.add) || c.securityContext.capabilities.add.size() == 0)",
-        "(!has(c.securityContext.procMount) || c.securityContext.procMount == 'Default')",
-        "has(c.securityContext.seccompProfile) && c.securityContext.seccompProfile.type == 'RuntimeDefault'",
+        "(!has(c.securityContext.procMount) || c.securityContext.procMount == 'Default')", seccomp,
+        "(!has(c.securityContext.windowsOptions) || !has(c.securityContext.windowsOptions.hostProcess) || !c.securityContext.windowsOptions.hostProcess)",
     ])
     safe_pod = " && ".join([
-        "(!has(object.spec.hostPID) || !object.spec.hostPID)",
-        "(!has(object.spec.hostIPC) || !object.spec.hostIPC)",
-        "(!has(object.spec.hostNetwork) || !object.spec.hostNetwork)",
-        "(!has(object.spec.shareProcessNamespace) || !object.spec.shareProcessNamespace)",
+        no_host_namespaces, "(!has(object.spec.os) || object.spec.os.name == 'linux')",
+        "(!has(object.spec.securityContext) || !has(object.spec.securityContext.sysctls) || object.spec.securityContext.sysctls.size() == 0)",
         "object.spec.containers.all(c, " + safe_container + ")",
         "(!has(object.spec.initContainers) || object.spec.initContainers.all(c, " + safe_container + "))",
         "(!has(object.spec.ephemeralContainers) || object.spec.ephemeralContainers.all(c, " + safe_container + "))",
-        "(!has(object.spec.volumes) || object.spec.volumes.all(v, !has(v.hostPath) || variables.sensitiveVolumes.exists(n, n == v.name)))",
     ])
-    validations.append({"expression": "!variables.supervisorNamespace || (" + safe_pod + ")",
-        "message": "Supervisor namespaces prohibit privileged companions, host namespaces and unrelated host mounts."})
+    safe_volumes = " || ".join("has(v." + kind + ")" for kind in
+        ["configMap", "csi", "downwardAPI", "emptyDir", "ephemeral", "persistentVolumeClaim", "projected", "secret"])
+    direct_nodes = " && ".join(
+        f"(object.metadata.namespace != {quote(namespace)} || !has(object.spec.nodeName) || object.spec.nodeName == '' || "
+        f"{quote(nodes)}.exists(n, n == object.spec.nodeName))" for namespace, nodes in protected_namespaces(config).items()
+    )
+    validations = [
+        {"expression": "variables.isAgent || (" + safe_pod + ")",
+         "message": "Pods require nonroot isolated processes; only the exact SPIRE agent profile has host privileges."},
+        {"expression": "variables.isAgent || !has(object.spec.volumes) || object.spec.volumes.all(v, "
+            f"(!has(v.hostPath) && ({safe_volumes})) || (variables.isSupervisor && has(v.hostPath) && "
+            f"v.hostPath.path == {quote(SOCKET_DIRECTORY)} && has(v.hostPath.type) && v.hostPath.type == 'Directory'))",
+         "message": "Host volumes are denied globally except the exact agent profile and admitted supervisor socket."},
+        {"expression": "variables.isAgent || object.spec.containers.all(c, !has(c.volumeMounts) || c.volumeMounts.all(m, "
+            "!variables.hostVolumes.exists(n, n == m.name) || "
+            f"(has(m.readOnly) && m.readOnly && m.mountPath == {quote(SOCKET_DIRECTORY)} && {no_mount_overlays} && ({permitted_mounts}))))",
+         "message": "Only the admitted supervisor container receives its canonical read-only socket mount."},
+        {"expression": "!has(object.spec.initContainers) || object.spec.initContainers.all(c, !has(c.volumeMounts) || "
+            "c.volumeMounts.all(m, !variables.hostVolumes.exists(n, n == m.name)))",
+         "message": "Init containers cannot mount host identity endpoints."},
+        {"expression": "!has(object.spec.ephemeralContainers) || object.spec.ephemeralContainers.all(c, !has(c.volumeMounts) || "
+            "c.volumeMounts.all(m, !variables.hostVolumes.exists(n, n == m.name)))",
+         "message": "Ephemeral containers cannot mount host identity endpoints."},
+        {"expression": direct_nodes, "message": "Identity namespaces cannot select nodes outside their approved pool."},
+    ]
     name = config["namespace"] + "-identity-sockets"
     policy = resource("admissionregistration.k8s.io/v1", "ValidatingAdmissionPolicy", name, spec={
         "failurePolicy": "Fail", "matchConstraints": {"resourceRules": [{"apiGroups": [""], "apiVersions": ["v1"],
@@ -265,7 +350,19 @@ def socket_policy(config, images):
     })
     binding = resource("admissionregistration.k8s.io/v1", "ValidatingAdmissionPolicyBinding", name,
         spec={"policyName": name, "validationActions": ["Deny"]})
-    return [policy, binding]
+    node_name = config["namespace"] + "-identity-node-bindings"
+    expression = " && ".join(
+        f"(object.metadata.namespace != {quote(namespace)} || {quote(nodes)}.exists(n, n == object.target.name))"
+        for namespace, nodes in protected_namespaces(config).items()
+    )
+    node_policy = resource("admissionregistration.k8s.io/v1", "ValidatingAdmissionPolicy", node_name, spec={
+        "failurePolicy": "Fail", "matchConstraints": {"resourceRules": [{"apiGroups": [""], "apiVersions": ["v1"],
+            "operations": ["CREATE"], "resources": ["pods/binding", "bindings"]}]},
+        "variables": [], "validations": [{"expression": expression, "message": "Identity bindings require an approved node."}],
+    })
+    node_binding = resource("admissionregistration.k8s.io/v1", "ValidatingAdmissionPolicyBinding", node_name,
+        spec={"policyName": node_name, "validationActions": ["Deny"]})
+    return [policy, binding, node_policy, node_binding]
 
 
 def supervisor_patches(config):
