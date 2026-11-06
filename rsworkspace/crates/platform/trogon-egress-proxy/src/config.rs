@@ -1,13 +1,13 @@
 //! Command line and environment configuration, validated into typed values.
 //!
 //! There is deliberately no switch that turns enforcement off or that starts
-//! without a policy (ADR#0084): the policy file is required. Audit is required
+//! without a policy (ADR#0084): an explicit policy source is required. Audit is required
 //! for the same reason (ADR#0085 Decision 5): the tenant, the project, the
 //! instance name and the NATS servers have no default, and the NATS connection
 //! settings are read the way every NATS client here reads them.
 
 use std::net::SocketAddr;
-use std::num::NonZeroU16;
+use std::num::{NonZeroU16, NonZeroU64};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -19,6 +19,7 @@ use trogon_std::env::{ReadEnv, SystemEnv};
 use crate::audit_config::AuditConfig;
 use crate::constants::{AUDIT_COMPONENT, MIN_HEAD_BYTES, WRITER_ID_PREFIX};
 use crate::limits::Limits;
+use crate::live_policy::{KvPolicyConfig, PolicyConfigError, PolicyTransportError};
 use crate::mtls::TlsFiles;
 use crate::trust_domain::{TrustDomain, TrustDomainError};
 
@@ -32,9 +33,27 @@ pub struct Args {
     #[arg(long, env = "TROGON_EGRESS_LISTEN", default_value = "127.0.0.1:3128")]
     pub listen: SocketAddr,
 
-    /// Static policy snapshot (TOML). The proxy refuses to start without it.
-    #[arg(long, env = "TROGON_EGRESS_POLICY_FILE")]
-    pub policy_file: PathBuf,
+    /// Explicit static compatibility policy (TOML).
+    #[arg(
+        long,
+        env = "TROGON_EGRESS_POLICY_FILE",
+        required_unless_present = "policy_bucket",
+        conflicts_with = "policy_bucket"
+    )]
+    pub policy_file: Option<PathBuf>,
+
+    /// Existing bounded NATS KV policy bucket. Uses the configured tenant/project key.
+    #[arg(
+        long,
+        env = "TROGON_EGRESS_POLICY_BUCKET",
+        requires = "policy_incarnation",
+        conflicts_with = "policy_file"
+    )]
+    pub policy_bucket: Option<String>,
+
+    /// Independently provisioned producer incarnation. Never adopted from the bucket.
+    #[arg(long, env = "TROGON_EGRESS_POLICY_INCARNATION", requires = "policy_bucket")]
+    pub policy_incarnation: Option<NonZeroU64>,
 
     /// PEM certificate chain the proxy presents, leaf first.
     #[arg(long, env = "TROGON_EGRESS_TLS_CERT")]
@@ -90,7 +109,7 @@ pub struct Args {
 #[derive(Debug, Clone)]
 pub struct Config {
     pub listen: SocketAddr,
-    pub policy_file: PathBuf,
+    pub policy: PolicyInput,
     pub tls: TlsFiles,
     pub trust_domain: TrustDomain,
     pub audit: AuditConfig,
@@ -98,8 +117,20 @@ pub struct Config {
     pub limits: Limits,
 }
 
+#[derive(Debug, Clone)]
+pub enum PolicyInput {
+    StaticFile(PathBuf),
+    NatsKv(KvPolicyConfig),
+}
+
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum ConfigError {
+    #[error("select exactly one policy source and configure its incarnation")]
+    PolicySource,
+    #[error("invalid live policy configuration")]
+    LivePolicy(#[source] PolicyConfigError),
+    #[error("live policy transport is not authenticated")]
+    LivePolicyTransport(#[source] PolicyTransportError),
     #[error("invalid trust domain")]
     TrustDomain(#[source] TrustDomainError),
     #[error("invalid tenant")]
@@ -133,6 +164,22 @@ impl Config {
     pub fn resolve<E: ReadEnv>(args: Args, env: &E) -> Result<Self, ConfigError> {
         let trust_domain = TrustDomain::new(&args.trust_domain).map_err(ConfigError::TrustDomain)?;
         let audit = audit_config(&args, env)?;
+        let policy = match (&args.policy_file, &args.policy_bucket, args.policy_incarnation) {
+            (Some(path), None, None) => PolicyInput::StaticFile(path.clone()),
+            (None, Some(bucket), Some(incarnation)) => PolicyInput::NatsKv(
+                KvPolicyConfig::new(
+                    bucket,
+                    audit.identity.tenant().clone(),
+                    audit.identity.project().clone(),
+                    incarnation,
+                )
+                .map_err(ConfigError::LivePolicy)?,
+            ),
+            _ => return Err(ConfigError::PolicySource),
+        };
+        if matches!(policy, PolicyInput::NatsKv(_)) {
+            KvPolicyConfig::validate_transport(&audit.nats).map_err(ConfigError::LivePolicyTransport)?;
+        }
         let non_tls_ports = args
             .non_tls_ports
             .iter()
@@ -146,7 +193,7 @@ impl Config {
         }
         Ok(Self {
             listen: args.listen,
-            policy_file: args.policy_file,
+            policy,
             tls: TlsFiles {
                 certificate_chain: args.tls_cert,
                 private_key: args.tls_key,

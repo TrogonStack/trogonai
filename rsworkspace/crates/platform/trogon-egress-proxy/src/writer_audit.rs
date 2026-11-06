@@ -87,7 +87,9 @@ fn log(event: &AuditEvent<'_>, outcome: &Result<Disposition, AuditError>) {
     let (audit, failure) = match outcome {
         Ok(disposition) => (disposition_name(*disposition), "-"),
         Err(AuditError::Unavailable(error)) => ("unavailable", error.reason().as_str()),
-        Err(AuditError::Name(_) | AuditError::Reason(_)) => ("unavailable", "unrecordable"),
+        Err(AuditError::Name(_) | AuditError::Reason(_) | AuditError::PolicyEvidence) => {
+            ("unavailable", "unrecordable")
+        }
     };
     tracing::info!(
         target: AUDIT_LOG_TARGET,
@@ -97,6 +99,7 @@ fn log(event: &AuditEvent<'_>, outcome: &Result<Disposition, AuditError>) {
         decision = decision.as_str(),
         fault = decision.fault().map_or("-", Fault::code),
         snapshot_source = %event.snapshot_source,
+        projection_revision = event.policy_revision.map(|revision| revision.generation.get()),
         audit,
         audit_failure = failure,
         "egress decision"

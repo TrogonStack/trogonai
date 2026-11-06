@@ -68,6 +68,7 @@ fn event<'a>(
         resolved_address: destination.map(|_| "93.184.216.34".parse().expect("ip")),
         decision,
         snapshot_source: source,
+        policy_revision: None,
     }
 }
 

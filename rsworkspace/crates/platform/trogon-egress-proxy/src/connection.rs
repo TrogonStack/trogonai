@@ -22,7 +22,7 @@ use std::collections::HashSet;
 use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::num::NonZeroU16;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, copy_bidirectional};
 use tokio::net::TcpStream;
@@ -43,7 +43,9 @@ use crate::first_record::read_first_record;
 use crate::host_name::HostName;
 use crate::limits::Limits;
 use crate::peer_identity::PeerIdentity;
+use crate::policy_revision::PolicyRevision;
 use crate::policy_snapshot::PolicySnapshot;
+use crate::policy_snapshot::SnapshotVerdict;
 use crate::resolver::Resolver;
 
 struct EndedAuthority {
@@ -140,6 +142,7 @@ impl<Clock: EpochClock> Proxy<Clock> {
                     ended.destination.as_ref(),
                     ended.address,
                     Decision::Refused(ended.fault),
+                    None,
                 ),
             )
             .await;
@@ -182,16 +185,39 @@ impl<Clock: EpochClock> Proxy<Clock> {
             return self.refuse(client, agent, Some(&destination), None, fault).await;
         }
 
-        let candidates = match self.candidates(&destination).await {
+        let selected = OnceLock::new();
+        tokio::select! {
+            biased;
+            fault = self.monitor_policy(peer, &destination) => Ok(Some(EndedAuthority {
+                destination: Some(destination.clone()), address: selected.get().copied(), fault,
+            })),
+            result = self.run_authorized(client, peer, &destination, leftover, &selected) => result,
+        }
+    }
+
+    async fn run_authorized<C>(
+        &self,
+        client: &mut C,
+        peer: &PeerIdentity,
+        destination: &Destination,
+        leftover: Vec<u8>,
+        selected: &OnceLock<IpAddr>,
+    ) -> io::Result<Option<EndedAuthority>>
+    where
+        C: AsyncRead + AsyncWrite + Unpin,
+    {
+        let agent = peer.agent();
+
+        let candidates = match self.candidates(destination).await {
             Some(candidates) => candidates,
             None => {
                 return self
-                    .refuse(client, agent, Some(&destination), None, Fault::UpstreamUnreachable)
+                    .refuse(client, agent, Some(destination), None, Fault::UpstreamUnreachable)
                     .await;
             }
         };
-        if let Err(fault) = self.check_request_authority(peer, &destination) {
-            return self.refuse(client, agent, Some(&destination), None, fault).await;
+        if let Err(fault) = self.check_request_authority(peer, destination) {
+            return self.refuse(client, agent, Some(destination), None, fault).await;
         }
         let targets = match dial_targets(
             self.snapshot.as_ref(),
@@ -201,33 +227,51 @@ impl<Clock: EpochClock> Proxy<Clock> {
             self.clock.system_time(),
         ) {
             Ok(targets) => targets,
-            Err(fault) => return self.refuse(client, agent, Some(&destination), None, fault).await,
+            Err(fault) => return self.refuse(client, agent, Some(destination), None, fault).await,
         };
-        let dialled = match self.dial(peer, &destination, &targets).await {
+        let dialled = match self.dial(peer, destination, &targets).await {
             Ok(dialled) => dialled,
-            Err(fault) => return self.refuse(client, agent, Some(&destination), None, fault).await,
+            Err(fault) => return self.refuse(client, agent, Some(destination), None, fault).await,
         };
         let Some((mut upstream, address)) = dialled else {
             return self
-                .refuse(client, agent, Some(&destination), None, Fault::UpstreamUnreachable)
+                .refuse(client, agent, Some(destination), None, Fault::UpstreamUnreachable)
                 .await;
         };
 
         let resolved = Some(address.ip());
+        let _ = selected.set(address.ip());
+        let policy_revision = match self.observe_authority(peer, destination, address) {
+            Ok(revision) => revision,
+            Err(fault) => {
+                drop(upstream);
+                return self.refuse(client, agent, Some(destination), resolved, fault).await;
+            }
+        };
         if self
-            .record(agent, Some(&destination), resolved, Decision::Permitted)
+            .record(agent, Some(destination), resolved, Decision::Permitted, policy_revision)
             .await
             .is_err()
         {
             drop(upstream);
             return self
-                .refuse(client, agent, Some(&destination), resolved, Fault::AuditUnavailable)
+                .refuse(client, agent, Some(destination), resolved, Fault::AuditUnavailable)
                 .await;
         }
 
-        if let Err(fault) = self.check_authority(peer, &destination, address) {
+        if !self
+            .snapshot
+            .revision_is_current(policy_revision, self.clock.system_time())
+        {
             drop(upstream);
-            return self.refuse(client, agent, Some(&destination), resolved, fault).await;
+            return self
+                .refuse(client, agent, Some(destination), resolved, Fault::PolicyUnavailable)
+                .await;
+        }
+
+        if let Err(fault) = self.check_authority(peer, destination, address) {
+            drop(upstream);
+            return self.refuse(client, agent, Some(destination), resolved, fault).await;
         }
 
         let tunnel = async {
@@ -235,7 +279,7 @@ impl<Clock: EpochClock> Proxy<Clock> {
             client.flush().await?;
 
             let mut pending = leftover;
-            if let Some(expected) = self.expected_sni(&destination) {
+            if let Some(expected) = self.expected_sni(destination) {
                 match read_first_record(client, pending, self.limits.first_record_timeout).await {
                     Ok((requested, record)) if requested == *expected => pending = record,
                     outcome => {
@@ -246,7 +290,7 @@ impl<Clock: EpochClock> Proxy<Clock> {
                     }
                 }
             }
-            if let Err(fault) = self.check_authority(peer, &destination, address) {
+            if let Err(fault) = self.check_authority(peer, destination, address) {
                 return Ok(Some(fault));
             }
             upstream.write_all(&pending).await?;
@@ -255,11 +299,11 @@ impl<Clock: EpochClock> Proxy<Clock> {
         };
         let fault = tokio::select! {
             biased;
-            fault = self.monitor_authority(peer, &destination, address) => Some(fault),
+            fault = self.monitor_authority(peer, destination, address) => Some(fault),
             result = tunnel => result?,
         };
         Ok(fault.map(|fault| EndedAuthority {
-            destination: Some(destination),
+            destination: Some(destination.clone()),
             address: resolved,
             fault,
         }))
@@ -274,6 +318,38 @@ impl<Clock: EpochClock> Proxy<Clock> {
             return Err(fault);
         }
         Ok(())
+    }
+
+    fn observe_authority(
+        &self,
+        peer: &PeerIdentity,
+        destination: &Destination,
+        address: SocketAddr,
+    ) -> Result<Option<PolicyRevision>, Fault> {
+        let now = self.clock.system_time();
+        if !peer.is_current(now) {
+            return Err(Fault::AuthorityExpired);
+        }
+        let observed = self.snapshot.observe(peer.agent(), destination, now);
+        match observed.verdict {
+            SnapshotVerdict::Permitted => {}
+            SnapshotVerdict::NotPermitted => return Err(Fault::NoPermit),
+            SnapshotVerdict::Unavailable => return Err(Fault::PolicyUnavailable),
+        }
+        dial_targets(
+            self.snapshot.as_ref(),
+            peer.agent(),
+            destination.port(),
+            &[address.ip()],
+            now,
+        )?;
+        if !self
+            .snapshot
+            .revision_is_current(observed.revision, self.clock.system_time())
+        {
+            return Err(Fault::PolicyUnavailable);
+        }
+        Ok(observed.revision)
     }
 
     fn check_authority(
@@ -300,6 +376,39 @@ impl<Clock: EpochClock> Proxy<Clock> {
         loop {
             checks.tick().await;
             if let Err(fault) = self.check_authority(peer, destination, address) {
+                return fault;
+            }
+        }
+    }
+
+    async fn monitor_policy(&self, peer: &PeerIdentity, destination: &Destination) -> Fault {
+        let mut updates = self.snapshot.subscribe();
+        let mut checks = interval(POLICY_RECHECK_INTERVAL);
+        checks.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        loop {
+            let observed = self
+                .snapshot
+                .observe(peer.agent(), destination, self.clock.system_time());
+            match observed.verdict {
+                SnapshotVerdict::Permitted => {}
+                SnapshotVerdict::NotPermitted => return Fault::NoPermit,
+                SnapshotVerdict::Unavailable => return Fault::PolicyUnavailable,
+            }
+            let deadline = observed.deadline.unwrap_or(peer.deadline());
+            tokio::select! {
+                biased;
+                changed = async {
+                    match updates.as_mut() {
+                        Some(updates) => updates.changed().await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    if changed.is_err() { return Fault::PolicyUnavailable; }
+                },
+                () = sleep_until(deadline) => {},
+                _ = checks.tick() => {},
+            }
+            if let Err(fault) = self.check_request_authority(peer, destination) {
                 return fault;
             }
         }
@@ -372,7 +481,7 @@ impl<Clock: EpochClock> Proxy<Clock> {
     {
         if fault != Fault::AuditUnavailable {
             let _ = self
-                .record(agent, destination, resolved, Decision::Refused(fault))
+                .record(agent, destination, resolved, Decision::Refused(fault), None)
                 .await;
         }
         client.write_all(&fault.response()).await?;
@@ -385,6 +494,7 @@ impl<Clock: EpochClock> Proxy<Clock> {
         destination: Option<&Destination>,
         resolved: Option<IpAddr>,
         decision: Decision,
+        policy_revision: Option<PolicyRevision>,
     ) -> Result<(), AuditError> {
         self.audit
             .record(&AuditEvent {
@@ -393,6 +503,7 @@ impl<Clock: EpochClock> Proxy<Clock> {
                 resolved_address: resolved,
                 decision,
                 snapshot_source: self.snapshot.source(),
+                policy_revision,
             })
             .await
     }

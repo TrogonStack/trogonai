@@ -276,6 +276,7 @@ async fn the_accept_loop_outlives_failed_accepts() {
         acceptor,
         proxy,
         trust_domain,
+        ..
     } = server;
     let failures = Arc::new(AtomicUsize::new(2));
     let flaky = Flaky {

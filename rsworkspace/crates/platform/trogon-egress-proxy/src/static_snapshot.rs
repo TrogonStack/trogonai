@@ -53,10 +53,18 @@ impl StaticSnapshot {
     }
 
     pub fn from_toml(source: PolicySource, text: &str) -> Result<Self, SnapshotError> {
+        Self::parse(source, text, false)
+    }
+
+    pub(crate) fn from_live_toml(source: PolicySource, text: &str) -> Result<Self, SnapshotError> {
+        Self::parse(source, text, true)
+    }
+
+    fn parse(source: PolicySource, text: &str, allow_empty: bool) -> Result<Self, SnapshotError> {
         let wire: FileWire = toml::from_str(text).map_err(|error| SnapshotError::Unparsable {
             source: Box::new(error),
         })?;
-        if wire.agents.is_empty() {
+        if wire.agents.is_empty() && !allow_empty {
             return Err(SnapshotError::NoAgents);
         }
         let mut permits = HashMap::with_capacity(wire.agents.len());
@@ -65,7 +73,7 @@ impl StaticSnapshot {
                 agent: raw_agent.clone(),
                 source,
             })?;
-            if entry.allow.is_empty() {
+            if entry.allow.is_empty() && !allow_empty {
                 return Err(SnapshotError::EmptyPermitList { agent });
             }
             let mut destinations = HashSet::with_capacity(entry.allow.len());
@@ -96,6 +104,13 @@ impl StaticSnapshot {
 impl PolicySnapshot for StaticSnapshot {
     fn source(&self) -> &PolicySource {
         &self.source
+    }
+
+    fn agent_count(&self) -> usize {
+        self.agent_count()
+    }
+    fn permit_count(&self) -> usize {
+        self.permit_count()
     }
 
     fn lookup(&self, agent: &AgentId, destination: &Destination, _now: SystemTime) -> SnapshotVerdict {

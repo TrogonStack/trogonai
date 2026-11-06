@@ -18,6 +18,13 @@ pub enum PolicySource {
 }
 
 impl PolicySource {
+    pub fn audit_name(&self) -> String {
+        match self {
+            Self::StaticFile { .. } => self.kind().to_owned(),
+            Self::NatsKv { bucket, incarnation } => format!("nats_kv:{bucket}:{incarnation}"),
+        }
+    }
+
     pub fn kind(&self) -> &'static str {
         match self {
             Self::StaticFile { .. } => "static_file",
