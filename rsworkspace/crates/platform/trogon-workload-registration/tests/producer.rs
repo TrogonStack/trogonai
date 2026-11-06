@@ -12,8 +12,8 @@ use trogon_nats::test_support::TlsJetStreamCluster;
 use trogon_nats::{NatsConfig, NatsToken, connect_once};
 use trogon_std::{SystemClock, UuidV7Generator};
 use trogon_workload_registration::{
-    ApprovedRegistration, ProducerConfig, ProducerStatus, RegistrationProducer, RegistrationRole, SIGNING_CONTEXT,
-    StreamProfile, emergency_withdrawal, provision_streams,
+    ApprovedRegistration, ProducerConfig, ProducerStatus, RegistrationProducer, RegistrationRole, StreamProfile,
+    approval_signing_bytes, emergency_withdrawal, provision_streams,
 };
 use trogonai_proto::platform::workload_identity::v1alpha1::{RegistrationBinding, RegistrationSnapshot, WorkloadRole};
 
@@ -41,7 +41,7 @@ fn approved(config: &ProducerConfig, revision: u64, issued: SystemTime, withdraw
     };
     let key = SigningKey::from_bytes(&[7; 32]);
     let payload = snapshot.encode_to_vec();
-    let signature = key.sign(&[SIGNING_CONTEXT, &payload].concat()).to_bytes();
+    let signature = key.sign(&approval_signing_bytes(config, &payload)).to_bytes();
     ApprovedRegistration::verify(config, &payload, &signature).expect("independent fresh signed approval")
 }
 

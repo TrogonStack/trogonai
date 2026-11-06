@@ -3,6 +3,7 @@ use trogon_nats::{DottedNatsToken, NatsToken};
 use trogon_workload_identity::constants::MAX_REGISTRATION_LIFETIME;
 
 use crate::constants::{MAX_STREAM_BYTES, STREAM_DUPLICATE_WINDOW};
+use crate::registration_plane::RegistrationPlane;
 use crate::{MAX_SNAPSHOT_BYTES, ProducerConfig, RegistrationError, RegistrationRole, Sha256Digest};
 
 #[derive(Debug, Clone)]
@@ -113,8 +114,8 @@ impl StreamProfile {
         }
     }
 
-    pub(crate) fn validate(&self, actual: &Config, live: bool) -> Result<(), RegistrationError> {
-        let expected = if live {
+    pub(crate) fn validate(&self, actual: &Config, plane: RegistrationPlane) -> Result<(), RegistrationError> {
+        let expected = if plane == RegistrationPlane::Live {
             self.live_config()
         } else {
             self.control_config()

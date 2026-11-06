@@ -6,6 +6,7 @@ use trogon_audit::{
 };
 use trogon_std::{SystemClock, UuidV7Generator};
 
+use crate::publication_kind::PublicationKind;
 use crate::{ApprovedRegistration, ProducerConfig, RegistrationError, RegistrationRole, StreamProfile};
 
 pub(crate) fn production_writer(
@@ -32,7 +33,7 @@ pub(crate) fn change(
     config: &ProducerConfig,
     registration: &ApprovedRegistration,
     sequence: NonZeroU64,
-    withdrawal: bool,
+    kind: PublicationKind,
 ) -> Result<Record, RegistrationError> {
     let profile = StreamProfile::new(config);
     let scope = RecordScope::new(
@@ -49,13 +50,13 @@ pub(crate) fn change(
     let facts = ChangeFacts {
         kind: ChangeTerminal::Policy,
         resource_name: AuditName::new(profile.live_bucket()).map_err(RegistrationError::AuditName)?,
-        event_type: AuditName::new(if withdrawal {
+        event_type: AuditName::new(if kind == PublicationKind::Withdrawal {
             "workload_registration_withdrawal"
         } else {
             "workload_registration_grant_intent"
         })
         .map_err(RegistrationError::AuditName)?,
-        source_stream: AuditName::new(if withdrawal {
+        source_stream: AuditName::new(if kind == PublicationKind::Withdrawal {
             profile.live_config().name
         } else {
             profile.control_config().name

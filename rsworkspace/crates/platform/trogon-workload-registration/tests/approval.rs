@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime};
 use buffa::{EnumValue, Message, MessageField};
 use buffa_types::google::protobuf::Timestamp;
 use ed25519_dalek::{Signer, SigningKey};
-use trogon_workload_registration::{ApprovedRegistration, ProducerConfig, SIGNING_CONTEXT};
+use trogon_workload_registration::{ApprovedRegistration, ProducerConfig, approval_signing_bytes};
 use trogonai_proto::platform::workload_identity::v1alpha1::{RegistrationBinding, RegistrationSnapshot, WorkloadRole};
 
 fn snapshot() -> RegistrationSnapshot {
@@ -42,7 +42,7 @@ fn config(key: &SigningKey) -> ProducerConfig {
 }
 
 fn signature(key: &SigningKey, payload: &[u8]) -> [u8; 64] {
-    key.sign(&[SIGNING_CONTEXT, payload].concat()).to_bytes()
+    key.sign(&approval_signing_bytes(&config(key), payload)).to_bytes()
 }
 
 #[test]
@@ -182,8 +182,13 @@ fn empty_withdrawal_approval_cannot_cross_configured_trust_domains() {
     let key = SigningKey::from_bytes(&[7; 32]);
     let source = config(&key);
     let other_domain = ProducerConfig::new(
-        "acme", "payments", "other.example.org", NonZeroU64::MIN, key.verifying_key(),
-    ).expect("independent configured trust domain");
+        "acme",
+        "payments",
+        "other.example.org",
+        NonZeroU64::MIN,
+        key.verifying_key(),
+    )
+    .expect("independent configured trust domain");
     let mut withdrawal = snapshot();
     withdrawal.bindings.clear();
     let payload = withdrawal.encode_to_vec();

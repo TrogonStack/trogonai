@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime};
 use buffa::{EnumValue, Message, MessageField};
 use buffa_types::google::protobuf::Timestamp;
 use ed25519_dalek::{Signer, SigningKey};
-use trogon_workload_registration::{ApprovedRegistration, CanonicalAgentId, ProducerConfig, SIGNING_CONTEXT};
+use trogon_workload_registration::{ApprovedRegistration, CanonicalAgentId, ProducerConfig, approval_signing_bytes};
 use trogonai_proto::platform::workload_identity::v1alpha1::{RegistrationBinding, RegistrationSnapshot, WorkloadRole};
 
 fn snapshot(issued_at: SystemTime, revision: u64, trust: u64, root: u8) -> RegistrationSnapshot {
@@ -40,7 +40,7 @@ fn approved(message: &RegistrationSnapshot) -> ApprovedRegistration {
     )
     .expect("producer configuration");
     let payload = message.encode_to_vec();
-    let signature = key.sign(&[SIGNING_CONTEXT, &payload].concat()).to_bytes();
+    let signature = key.sign(&approval_signing_bytes(&config, &payload)).to_bytes();
     ApprovedRegistration::verify(&config, &payload, &signature).expect("independent fresh canonical approval")
 }
 
@@ -108,7 +108,7 @@ fn a_valid_signature_does_not_bypass_protocol_binding_bounds() {
     let mut message = snapshot(SystemTime::now(), 1, 1, 1);
     message.bindings[0].spiffe_id = format!("spiffe://identity.example.org/{}", "x".repeat(2048));
     let payload = message.encode_to_vec();
-    let signature = key.sign(&[SIGNING_CONTEXT, &payload].concat()).to_bytes();
+    let signature = key.sign(&approval_signing_bytes(&config, &payload)).to_bytes();
     assert!(ApprovedRegistration::verify(&config, &payload, &signature).is_err());
 }
 

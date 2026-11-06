@@ -12,8 +12,8 @@ use trogonai_proto::platform::workload_identity::v1alpha1::{
 };
 
 use crate::{
-    ApprovalLease, AuthorityVersion, MAX_SNAPSHOT_BYTES, ProducerConfig, RegistrationError, SIGNING_CONTEXT,
-    Sha256Digest,
+    ApprovalLease, AuthorityVersion, MAX_SNAPSHOT_BYTES, ProducerConfig, RegistrationError, Sha256Digest,
+    approval_signing_bytes,
 };
 
 #[derive(Debug, Clone)]
@@ -35,7 +35,10 @@ impl ApprovedRegistration {
         config
             .approval_key()
             .verifying_key()
-            .verify_strict(&[SIGNING_CONTEXT, payload].concat(), &Signature::from_bytes(signature))
+            .verify_strict(
+                &approval_signing_bytes(config, payload),
+                &Signature::from_bytes(signature),
+            )
             .map_err(RegistrationError::Signature)?;
         let message = RegistrationSnapshot::decode_from_slice(payload).map_err(RegistrationError::Decode)?;
         if message.tenant != config.scope().tenant().as_str()

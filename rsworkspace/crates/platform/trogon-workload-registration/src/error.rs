@@ -16,6 +16,8 @@ pub enum RegistrationError {
     Publish(#[source] async_nats::jetstream::context::PublishError),
     #[error("registration stream does not enforce the protected profile")]
     StreamProfile,
+    #[error("registration authenticated connection continuity changed")]
+    ConnectionChanged,
     #[error("registration stream incarnation or acknowledged head changed")]
     HeadChanged,
     #[error("registration ownership cannot be reclaimed in this recovery fence")]

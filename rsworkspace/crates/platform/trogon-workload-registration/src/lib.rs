@@ -1,5 +1,6 @@
 mod approval_key;
 mod approval_lease;
+mod approval_signing_bytes;
 mod approved_registration;
 mod authority_version;
 mod canonical_agent_id;
@@ -7,10 +8,13 @@ mod constants;
 mod error;
 mod producer_config;
 mod producer_status;
+mod publication_kind;
 mod publication_receipt;
 mod registration_audit;
 mod registration_broker;
+mod registration_connection;
 mod registration_head;
+mod registration_plane;
 mod registration_producer;
 mod registration_role;
 mod registration_scope;
@@ -20,6 +24,7 @@ mod stream_profile;
 
 pub use approval_key::ApprovalKey;
 pub use approval_lease::ApprovalLease;
+pub use approval_signing_bytes::approval_signing_bytes;
 pub use approved_registration::ApprovedRegistration;
 pub use authority_version::AuthorityVersion;
 pub use canonical_agent_id::CanonicalAgentId;
