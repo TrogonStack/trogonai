@@ -14,6 +14,8 @@ pub enum WriterLifecycleKind {
     /// A writer began a new chain without resuming a previous one. The record
     /// states why.
     WRITER_LIFECYCLE_KIND_CHAIN_RESET = 2i32,
+    /// A readiness check requires a fresh durable acknowledgement on this chain.
+    WRITER_LIFECYCLE_KIND_READINESS_PROBE = 3i32,
 }
 impl WriterLifecycleKind {
     ///Idiomatic alias for [`Self::WRITER_LIFECYCLE_KIND_UNSPECIFIED`]; `Debug` prints the variant name.
@@ -25,6 +27,9 @@ impl WriterLifecycleKind {
     ///Idiomatic alias for [`Self::WRITER_LIFECYCLE_KIND_CHAIN_RESET`]; `Debug` prints the variant name.
     #[allow(non_upper_case_globals)]
     pub const ChainReset: Self = Self::WRITER_LIFECYCLE_KIND_CHAIN_RESET;
+    ///Idiomatic alias for [`Self::WRITER_LIFECYCLE_KIND_READINESS_PROBE`]; `Debug` prints the variant name.
+    #[allow(non_upper_case_globals)]
+    pub const ReadinessProbe: Self = Self::WRITER_LIFECYCLE_KIND_READINESS_PROBE;
 }
 impl ::core::default::Default for WriterLifecycleKind {
     fn default() -> Self {
@@ -126,6 +131,9 @@ impl ::buffa::Enumeration for WriterLifecycleKind {
             0i32 => ::core::option::Option::Some(Self::WRITER_LIFECYCLE_KIND_UNSPECIFIED),
             1i32 => ::core::option::Option::Some(Self::WRITER_LIFECYCLE_KIND_START),
             2i32 => ::core::option::Option::Some(Self::WRITER_LIFECYCLE_KIND_CHAIN_RESET),
+            3i32 => {
+                ::core::option::Option::Some(Self::WRITER_LIFECYCLE_KIND_READINESS_PROBE)
+            }
             _ => ::core::option::Option::None,
         }
     }
@@ -141,6 +149,9 @@ impl ::buffa::Enumeration for WriterLifecycleKind {
             Self::WRITER_LIFECYCLE_KIND_CHAIN_RESET => {
                 "WRITER_LIFECYCLE_KIND_CHAIN_RESET"
             }
+            Self::WRITER_LIFECYCLE_KIND_READINESS_PROBE => {
+                "WRITER_LIFECYCLE_KIND_READINESS_PROBE"
+            }
         }
     }
     fn from_proto_name(name: &str) -> ::core::option::Option<Self> {
@@ -154,6 +165,9 @@ impl ::buffa::Enumeration for WriterLifecycleKind {
             "WRITER_LIFECYCLE_KIND_CHAIN_RESET" => {
                 ::core::option::Option::Some(Self::WRITER_LIFECYCLE_KIND_CHAIN_RESET)
             }
+            "WRITER_LIFECYCLE_KIND_READINESS_PROBE" => {
+                ::core::option::Option::Some(Self::WRITER_LIFECYCLE_KIND_READINESS_PROBE)
+            }
             _ => ::core::option::Option::None,
         }
     }
@@ -162,6 +176,7 @@ impl ::buffa::Enumeration for WriterLifecycleKind {
             Self::WRITER_LIFECYCLE_KIND_UNSPECIFIED,
             Self::WRITER_LIFECYCLE_KIND_START,
             Self::WRITER_LIFECYCLE_KIND_CHAIN_RESET,
+            Self::WRITER_LIFECYCLE_KIND_READINESS_PROBE,
         ]
     }
 }
