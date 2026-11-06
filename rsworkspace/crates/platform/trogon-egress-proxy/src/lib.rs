@@ -17,6 +17,8 @@ pub mod admission;
 pub mod agent_id;
 pub mod agent_uri;
 pub mod audit;
+pub(crate) mod audit_budget;
+pub mod audit_capacity;
 pub mod audit_config;
 pub mod audit_error;
 pub mod client_hello;

@@ -22,6 +22,8 @@ use trogon_std::time::SystemClock;
 use trogon_std::uuid::UuidV7Generator;
 
 use crate::audit::{AuditEvent, AuditSink, Decision};
+use crate::audit_budget::AuditBudget;
+use crate::audit_capacity::AuditCapacity;
 use crate::audit_error::AuditError;
 use crate::connection_limit::ConnectionLimit;
 use crate::constants::AUDIT_LOG_TARGET;
@@ -34,11 +36,19 @@ pub struct WriterAudit<S> {
     tenant: AuditName,
     project: NatsToken,
     in_flight: TaskTracker,
+    budget: AuditBudget,
 }
 
 impl<S: Sink> WriterAudit<S> {
-    pub fn with_limit(writer: AuditWriter<S>, tenant: AuditName, project: NatsToken, _limit: ConnectionLimit) -> Self {
-        Self::new(writer, tenant, project)
+    pub fn with_limit(writer: AuditWriter<S>, tenant: AuditName, project: NatsToken, limit: ConnectionLimit) -> Self {
+        Self {
+            writer,
+            stamper: Stamper::new(SystemClock, UuidV7Generator),
+            tenant,
+            project,
+            in_flight: TaskTracker::new(),
+            budget: AuditBudget::new(limit),
+        }
     }
 
     pub(crate) fn activation_recorder(&self) -> ActivationRecorder<S> {
@@ -49,19 +59,22 @@ impl<S: Sink> WriterAudit<S> {
     }
 
     pub fn new(writer: AuditWriter<S>, tenant: AuditName, project: NatsToken) -> Self {
-        Self {
-            writer,
-            stamper: Stamper::new(SystemClock, UuidV7Generator),
-            tenant,
-            project,
-            in_flight: TaskTracker::new(),
-        }
+        Self::with_limit(writer, tenant, project, ConnectionLimit::default())
+    }
+
+    pub fn capacity(&self) -> AuditCapacity {
+        self.budget.capacity()
     }
 
     async fn write(&self, event: &AuditEvent<'_>) -> Result<Disposition, AuditError> {
+        let tracked = self.in_flight.token();
+        let permit = self.budget.try_acquire()?;
         let record = decision_record(event, &self.tenant, &self.project, self.stamper.stamp())?;
         let writer = self.writer.clone();
-        let write = self.in_flight.spawn(async move { writer.write(record).await });
+        let write = tokio::spawn(async move {
+            let (_tracked, _permit) = (tracked, permit);
+            writer.write(record).await
+        });
         let outcome = write
             .await
             .unwrap_or_else(|error| std::panic::resume_unwind(error.into_panic()));
@@ -81,6 +94,7 @@ impl<S: Sink> AuditSink for WriterAudit<S> {
         let settled = CancellationToken::new();
         tokio::join!(self.writer.run(settled.clone()), async {
             shutdown.cancelled().await;
+            self.budget.close();
             self.in_flight.close();
             self.in_flight.wait().await;
             settled.cancel();
