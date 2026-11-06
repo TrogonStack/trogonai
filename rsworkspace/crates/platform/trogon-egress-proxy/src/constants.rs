@@ -75,6 +75,10 @@ pub(crate) const AUDIT_COMPONENT: &str = "egress_proxy";
 /// before any server answers, so this bounds setup, not reachability.
 pub(crate) const AUDIT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 pub(crate) const AUDIT_READINESS_TIMEOUT: Duration = Duration::from_secs(1);
+pub(crate) const READINESS_HTTP_CONNECTIONS: usize = 8;
+pub(crate) const READINESS_HEAD_BYTES: usize = 1024;
+pub(crate) const READINESS_HEAD_TIMEOUT: Duration = Duration::from_secs(1);
+pub(crate) const READINESS_HTTP_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub(crate) const POLICY_RECHECK_INTERVAL: Duration = Duration::from_secs(5);
 pub(crate) const DENIAL_AUDIT_TIMEOUT: Duration = Duration::from_secs(1);

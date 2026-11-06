@@ -23,8 +23,9 @@ struct ReadinessState {
 }
 
 impl Readiness {
-    pub async fn serve(self, _listener: tokio::net::TcpListener, shutdown: CancellationToken) {
-        shutdown.cancelled().await;
+    /// Serves status-only HTTP probes on a separately restricted listener.
+    pub async fn serve(self, listener: tokio::net::TcpListener, shutdown: CancellationToken) {
+        crate::readiness_http::serve(self, listener, shutdown).await;
     }
 
     pub(crate) fn new(

@@ -31,6 +31,10 @@ use crate::workload_identity_config::{WorkloadIdentityConfig, WorkloadIdentityCo
     about = "Agent egress proxy: mTLS HTTP CONNECT by exact destination"
 )]
 pub struct Args {
+    /// Restricted HTTP readiness listener. Reports enterprise component readiness.
+    #[arg(long, env = "TROGON_EGRESS_READINESS_LISTEN", default_value = "127.0.0.1:8081")]
+    pub readiness_listen: SocketAddr,
+
     /// Address the mTLS listener binds.
     #[arg(long, env = "TROGON_EGRESS_LISTEN", default_value = "127.0.0.1:3128")]
     pub listen: SocketAddr,

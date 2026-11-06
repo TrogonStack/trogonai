@@ -4,6 +4,7 @@ use trogon_std::env::InMemoryEnv;
 use super::*;
 
 mod connection_limit_tests;
+mod readiness_listener_tests;
 mod workload_identity_tests;
 
 const REQUIRED: [&str; 19] = [

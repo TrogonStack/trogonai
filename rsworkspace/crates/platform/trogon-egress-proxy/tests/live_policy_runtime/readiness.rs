@@ -43,3 +43,31 @@ async fn enterprise_readiness_follows_real_workload_authority_and_fresh_audit_ac
     status_eventually(&harness.readiness, ReadinessStatus::IdentityUnavailable).await?;
     harness.stop().await
 }
+
+#[tokio::test]
+async fn readiness_withdraws_for_live_policy_and_governed_registration_loss() -> TestResult<()> {
+    let harness = WorkloadHarness::start("").await?;
+    status_eventually(&harness.readiness, ReadinessStatus::Ready).await?;
+    harness.policies.delete(&harness.policy_key).await?;
+    status_eventually(&harness.readiness, ReadinessStatus::PolicyUnavailable).await?;
+    harness
+        .policies
+        .put(&harness.policy_key, document(2, "")?.into())
+        .await?;
+    status_eventually(&harness.readiness, ReadinessStatus::Ready).await?;
+    harness.registry.delete(&harness.registration_key).await?;
+    status_eventually(&harness.readiness, ReadinessStatus::IdentityUnavailable).await?;
+    harness.stop().await
+}
+
+#[tokio::test]
+async fn cancelling_the_runtime_withdraws_readiness_before_background_drain() -> TestResult<()> {
+    let harness = WorkloadHarness::start("").await?;
+    status_eventually(&harness.readiness, ReadinessStatus::Ready).await?;
+    let readiness = harness.readiness.clone();
+    harness.shutdown.cancel();
+    assert_eq!(readiness.probe().await, ReadinessStatus::Stopped);
+    harness.stop().await?;
+    assert_eq!(readiness.probe().await, ReadinessStatus::Stopped);
+    Ok(())
+}

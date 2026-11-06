@@ -2,6 +2,73 @@ use super::*;
 use crate::audit_readiness::AuditReadiness;
 
 #[tokio::test]
+async fn cancelled_and_timed_out_readiness_probes_keep_one_worker_until_actual_completion() {
+    let (audit, sink) = audit();
+    sink.hold();
+    let mut probe = Box::pin(audit.readiness());
+    assert!(futures::poll!(probe.as_mut()).is_pending());
+    drop(probe);
+    assert_eq!(audit.capacity().in_flight(), 1);
+    for _ in 0..audit.capacity().limit().get() {
+        assert_eq!(audit.readiness().await, AuditReadiness::Overloaded);
+        assert_eq!(audit.capacity().in_flight(), 1);
+    }
+    sink.release();
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while audit.capacity().in_flight() != 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the real cancelled probe settles");
+    sink.hold();
+    assert_eq!(audit.readiness().await, AuditReadiness::TimedOut);
+    assert_eq!(audit.capacity().in_flight(), 1);
+    assert_eq!(audit.readiness().await, AuditReadiness::Overloaded);
+    sink.release();
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while audit.capacity().in_flight() != 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the real timed-out probe settles");
+    assert_eq!(audit.readiness().await, AuditReadiness::Ready);
+    let shutdown = CancellationToken::new();
+    shutdown.cancel();
+    audit.run(shutdown).await;
+    assert_eq!(audit.readiness().await, AuditReadiness::Overloaded);
+}
+
+#[tokio::test]
+async fn readiness_cannot_consume_the_last_decision_worker_slot() {
+    let (audit, sink) = audit();
+    sink.hold();
+    let agent = AgentId::new("agent-1").expect("agent");
+    let destination = "api.example.com:443".parse().expect("destination");
+    let policy = source();
+    let request = event(&agent, Some(&destination), &policy, Decision::Permitted);
+    let limit = audit.capacity().limit().get();
+    for _ in 1..limit {
+        let mut caller = Box::pin(audit.record(&request));
+        assert!(futures::poll!(caller.as_mut()).is_pending());
+        drop(caller);
+    }
+    assert_eq!(audit.capacity().in_flight(), limit - 1);
+    assert_eq!(audit.readiness().await, AuditReadiness::Overloaded);
+    assert_eq!(audit.capacity().in_flight(), limit - 1);
+    let mut caller = Box::pin(audit.record(&request));
+    assert!(futures::poll!(caller.as_mut()).is_pending());
+    drop(caller);
+    assert_eq!(audit.capacity().in_flight(), limit);
+    sink.release();
+    let shutdown = CancellationToken::new();
+    shutdown.cancel();
+    audit.run(shutdown).await;
+    assert_eq!(decisions(&sink).len(), limit);
+}
+
+#[tokio::test]
 async fn readiness_requires_a_fresh_integrity_ack_and_refuses_a_previously_healthy_failed_sink() {
     let (audit, sink) = audit();
     assert_eq!(audit.readiness().await, AuditReadiness::Ready);

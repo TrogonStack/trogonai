@@ -47,6 +47,8 @@ pub mod policy_revision;
 pub mod policy_snapshot;
 pub mod policy_source;
 pub mod readiness;
+mod readiness_http;
+mod readiness_request;
 pub mod readiness_status;
 pub mod resolver;
 pub mod runtime;

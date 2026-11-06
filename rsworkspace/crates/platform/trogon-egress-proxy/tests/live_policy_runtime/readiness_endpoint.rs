@@ -21,19 +21,29 @@ async fn the_http_readiness_endpoint_requires_a_current_durable_audit_backend() 
         shutdown.cancel();
         task.await?;
         harness.stop().await?;
-        panic!("the public HTTP readiness listener must answer within the bound");
+        return Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "the public HTTP readiness listener must answer within the bound",
+        )
+        .into());
     }
     let ready = first??;
     assert!(ready.starts_with(b"HTTP/1.1 200 OK\r\n"));
     assert!(ready.ends_with(b"\r\n\r\nready\n"));
-    harness.context.delete_stream(trogon_audit::constants::STREAM_AUDIT).await?;
-    let unavailable = tokio::time::timeout(WAIT,
-        http(address, b"GET /readyz HTTP/1.1\r\nHost: localhost\r\n\r\n"),
-    ).await??;
+    assert!(String::from_utf8_lossy(&ready).contains("\r\nCache-Control: no-store\r\n"));
+    assert!(String::from_utf8_lossy(&ready).contains("\r\nConnection: close\r\n"));
+    assert!(String::from_utf8_lossy(&ready).contains("\r\nContent-Length: 6\r\n"));
+    harness
+        .context
+        .delete_stream(trogon_audit::constants::STREAM_AUDIT)
+        .await?;
+    let unavailable =
+        tokio::time::timeout(WAIT, http(address, b"GET /readyz HTTP/1.1\r\nHost: localhost\r\n\r\n")).await??;
     assert!(unavailable.starts_with(b"HTTP/1.1 503 Service Unavailable\r\n"));
     assert!(unavailable.ends_with(b"\r\n\r\nunavailable\n"));
     assert!(!String::from_utf8_lossy(&unavailable).contains(LOCAL_WORKLOAD));
-    let invalid = tokio::time::timeout(WAIT, http(address, b"GET /private HTTP/1.1\r\nHost: localhost\r\n\r\n")).await??;
+    let invalid =
+        tokio::time::timeout(WAIT, http(address, b"GET /private HTTP/1.1\r\nHost: localhost\r\n\r\n")).await??;
     assert!(invalid.starts_with(b"HTTP/1.1 404 Not Found\r\n"));
     shutdown.cancel();
     task.await?;
