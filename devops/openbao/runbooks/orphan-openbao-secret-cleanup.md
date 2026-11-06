@@ -46,9 +46,11 @@ bao kv list -mount=secret trogonai/
 bao kv list -mount=secret trogonai/{owner_id}/credentials/
 ```
 
-For each path found, the credential id is the last segment, and it encodes
-`openbao:{owner}:{scope_key}:{kind}`. Look that credential id up in the
-credential event stream.
+For each path found, the last segment is the storage locator,
+`openbao:{owner}:{scope_key}:{kind}`. It is not the credential id, which is
+opaque and never appears in the path. Find the credential whose activation or
+rotation event records that `storage_locator` in the credential event stream
+for the owner.
 
 Three outcomes:
 

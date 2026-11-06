@@ -36,7 +36,8 @@ exists and is undocumented.
 `secret/data/trogonai/{owner_id}/credentials/{credential_id}` and its
 metadata at `secret/metadata/trogonai/{owner_id}/credentials/{credential_id}`,
 where `owner_id` is the project id ([ADR#0046](../../../docs/adr/0046-project-anchored-resource-hierarchy.md)) and `credential_id` is
-`openbao:{owner}:{scope_key}:{kind}`. The credential id contains `:` and
+the storage locator `openbao:{owner}:{scope_key}:{kind}` recorded on the
+credential's events, not the opaque credential id. The locator contains `:` and
 `/`, so it is not a single path segment. See
 [../policies/README.md](../policies/README.md) for why that matters to
 policy authoring.

@@ -26,9 +26,9 @@ buys no path containment.
 
 Two consequences drive the rules below:
 
-1. **The credential-id portion spans a variable number of segments.** A
-   source-scoped id (`openbao:tenant-1:discord:bot_token`) is one; an
-   integration-scoped id (`openbao:tenant-1:github/primary:webhook_secret`) is
+1. **The storage-locator portion spans a variable number of segments.** A
+   source-scoped locator (`openbao:tenant-1:discord:bot_token`) is one; an
+   integration-scoped locator (`openbao:tenant-1:github/primary:webhook_secret`) is
    two. So the credential position needs the trailing `*` glob. A
    single-segment `+` there matches nothing at all, which fails closed but
    would have made every policy silently useless.

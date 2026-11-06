@@ -1244,10 +1244,10 @@ docs/adr/0052-cloud-kms-production-seal.md.
 ### Path convention (verified in openbao_secret_store.rs)
 
 ```text
-credential_path(owner_id, credential_id)
-  = "trogonai/{owner_id}/credentials/{credential_id}"
+credential_path(owner_id, storage_locator)
+  = "trogonai/{owner_id}/credentials/{storage_locator}"
 
-credential_id (openbao_credential_id())
+storage_locator (StorageLocator::openbao())
   = "openbao:{owner_id}:{scope_key}:{kind}"
   where scope_key is either the bare source name for a source-scoped
   credential (e.g. "discord"), or "{source}/{integration_id}" for an
@@ -1262,13 +1262,19 @@ Worked example: owner_id "tenant-1", source github, integration "primary",
 kind webhook_secret:
 
 ```text
-credential_id = "openbao:tenant-1:github/primary:webhook_secret"
-path          = "trogonai/tenant-1/credentials/openbao:tenant-1:github/
-                 primary:webhook_secret"
+storage_locator = "openbao:tenant-1:github/primary:webhook_secret"
+path            = "trogonai/tenant-1/credentials/openbao:tenant-1:github/
+                   primary:webhook_secret"
 ```
 
+The credential id itself is opaque (thirty-two hex digits) and never appears
+in the path. The locator is the text the id was before it turned opaque
+([ADR#0074](../../adr/0074-credential-platform-extraction-boundary.md)
+Decision 4): the aggregate records it as adapter-private state, so paths
+written before the change keep resolving.
+
 Note owner_id appears twice in the full path, once as its own segment and
-once embedded inside credential_id; `encode_path_segment` sanitizes each
+once embedded inside the locator; `encode_path_segment` sanitizes each
 occurrence independently, so this duplication is not a correctness problem,
 just a naming quirk worth knowing about when reading raw OpenBao paths.
 
