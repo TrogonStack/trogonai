@@ -33,8 +33,8 @@ pub mod test_support;
 
 pub use account_resolver::{AccountResolverError, RequestedAccount};
 pub use admission_keys::{
-    AccountSigningKey, AdmissionKeyError, AdmissionKeys, AuthAccount, CalloutXkey, SigningKeyCustody, TenantAccount,
-    TenantSigningKeys, admission_keys_from_env,
+    AccountPublicKeyError, AccountSigningKey, AdmissionKeyError, AdmissionKeys, AuthAccount, CalloutXkey,
+    IssuerPublicKey, SigningKeyCustody, TenantAccount, TenantSigningKeys, admission_keys_from_env,
 };
 
 pub use bridge_mint::{
@@ -56,8 +56,9 @@ pub use permissions::{
     SubjectPatternError, TemplateError,
 };
 pub use signing_key_source::{
-    EnvSigningKeySource, FileSigningKeySource, KeyVersion, KeyVersionError, MintingMaterial, SigningKeyHandle,
-    SigningKeySource, StaticSigningKeySource, VaultSigningKeySource, signing_key_source_from_env,
+    EnvSigningKeySource, FileSigningKeySource, IssuerPublicKeys, IssuerPublicKeysError, KeyVersion, KeyVersionError,
+    MintingMaterial, SigningKeyHandle, SigningKeySource, StaticSigningKeySource, VaultSigningKeySource, VerifyingKey,
+    VerifyingKeySource, signing_key_source_from_env,
 };
 pub use subscriber::{DenialPublisherConfig, Subscriber};
 pub use wire::AuthCalloutWireCodec;
