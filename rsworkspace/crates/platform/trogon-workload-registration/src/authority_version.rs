@@ -28,7 +28,7 @@ impl AuthorityVersion {
     }
 
     pub(crate) fn check_successor(&self, previous: Self) -> Result<(), RegistrationError> {
-        if self.fence != previous.fence || self.registration < previous.registration || self.trust < previous.trust {
+        if self.fence != previous.fence || self.registration <= previous.registration || self.trust < previous.trust {
             return Err(RegistrationError::Revision);
         }
         Ok(())

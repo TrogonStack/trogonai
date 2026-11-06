@@ -55,10 +55,7 @@ impl ApprovedRegistration {
             started,
             now,
         )?;
-        if message.bindings.len() > MAX_BINDINGS
-            || message.approved_root_sha256.is_empty()
-            || message.approved_root_sha256.len() > MAX_ROOTS
-        {
+        if message.bindings.len() > MAX_BINDINGS || message.approved_root_sha256.len() > MAX_ROOTS {
             return Err(RegistrationError::Bounds);
         }
         let mut bindings = Vec::with_capacity(message.bindings.len());
@@ -181,10 +178,7 @@ impl ApprovedRegistration {
             return Err(RegistrationError::Revision);
         }
         self.version.check_successor(previous.version)?;
-        if (self.bindings != previous.bindings
-            && self.version.registration_revision() == previous.version.registration_revision())
-            || (self.roots != previous.roots && self.version.trust_revision() == previous.version.trust_revision())
-        {
+        if self.roots != previous.roots && self.version.trust_revision() == previous.version.trust_revision() {
             return Err(RegistrationError::Revision);
         }
         self.check_current()
