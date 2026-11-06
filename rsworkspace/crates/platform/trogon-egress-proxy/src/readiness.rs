@@ -23,6 +23,10 @@ struct ReadinessState {
 }
 
 impl Readiness {
+    pub async fn serve(self, _listener: tokio::net::TcpListener, shutdown: CancellationToken) {
+        shutdown.cancelled().await;
+    }
+
     pub(crate) fn new(
         identity: Option<IdentityStore>,
         policy: Option<Arc<KvSnapshot>>,
