@@ -86,10 +86,6 @@ pub const GENESIS_SEQUENCE: u64 = 1;
 /// continuing from the head the previous range verified.
 pub const MAX_CHAIN_RANGE_RECORDS: usize = 10_000;
 
-/// The streams that hold the records (ADR#0086 Decision 2).
-pub const STREAM_AUDIT: &str = "AUDIT";
-pub const STREAM_DUPLICATE_WINDOW: Duration = Duration::from_secs(120);
-
 /// The NATS server's default `max_payload`, which bounds a message's payload and
 /// headers together. The `AUDIT` stream sets no message size of its own, so this
 /// is the size a record must fit.
@@ -102,6 +98,11 @@ pub const SEAL_HEADROOM_BYTES: usize = 4 * 1024;
 /// Largest encoded record the writer accepts, checked before it is numbered so
 /// a record the stream would reject never takes a place in the chain.
 pub const MAX_RECORD_BYTES: usize = NATS_DEFAULT_MAX_PAYLOAD_BYTES - SEAL_HEADROOM_BYTES;
+
+/// The streams that hold the records (ADR#0086 Decision 2).
+pub const STREAM_AUDIT: &str = "AUDIT";
+pub const STREAM_AUDIT_CHECKPOINT: &str = "AUDIT_CHECKPOINT";
+pub const STREAM_DUPLICATE_WINDOW: Duration = Duration::from_secs(120);
 
 /// A lost ack is retried inside the stream's duplicate window (two minutes), so
 /// three attempts of a couple of seconds stay well within it.

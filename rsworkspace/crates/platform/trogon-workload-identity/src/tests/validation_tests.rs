@@ -101,3 +101,46 @@ fn governed_registration_is_bounded_and_rejects_ambiguous_identity_claims() {
         assert!(RegistrationSet::new(revision(1), revision(1), revision(1), expiry, bindings, roots).is_err());
     }
 }
+
+#[test]
+fn complete_registration_preserves_roles_and_binds_applications_only_to_agents() {
+    let expected = [
+        (LOCAL_ID, WorkloadRole::EgressProxy, None),
+        (PEER_ID, WorkloadRole::Agent, Some("agent-1")),
+        (
+            "spiffe://example.org/service/supervisor",
+            WorkloadRole::Supervisor,
+            None,
+        ),
+    ];
+    let bindings = expected
+        .iter()
+        .map(|(id, role, application)| RegistrationBinding::new(id, "tenant", "project", *role, *application).unwrap())
+        .collect();
+    let registration = RegistrationSet::new(
+        revision(1),
+        revision(1),
+        revision(1),
+        SystemTime::now() + Duration::from_secs(300),
+        bindings,
+        vec![[1; 32]],
+    )
+    .unwrap();
+
+    for (id, role, application) in expected {
+        let binding = registration
+            .bindings()
+            .iter()
+            .find(|binding| binding.spiffe_id().to_string() == id)
+            .unwrap();
+        assert_eq!(binding.role(), role);
+        assert_eq!(binding.tenant(), "tenant");
+        assert_eq!(binding.project(), "project");
+        assert_eq!(binding.application_id().map(ApplicationId::as_str), application);
+        let invalid_application = if application.is_some() { None } else { Some("agent-1") };
+        assert_eq!(
+            RegistrationBinding::new(id, "tenant", "project", role, invalid_application),
+            Err(RegistrationError::Binding)
+        );
+    }
+}
