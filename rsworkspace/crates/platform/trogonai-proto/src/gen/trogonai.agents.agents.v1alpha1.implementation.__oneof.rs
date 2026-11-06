@@ -38,19 +38,19 @@ pub mod agent_implementation {
             Self::Some(Implementation::from(v))
         }
     }
-    impl serde::Serialize for Implementation {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for Implementation {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::PlatformHarness(v) => {
-                    map.serialize_entry("platformHarness", v)?;
+                    map.serialize_entry("platformHarness", &**v)?;
                 }
                 Self::RegisteredExtension(v) => {
-                    map.serialize_entry("registeredExtension", v)?;
+                    map.serialize_entry("registeredExtension", &**v)?;
                 }
             }
             map.end()

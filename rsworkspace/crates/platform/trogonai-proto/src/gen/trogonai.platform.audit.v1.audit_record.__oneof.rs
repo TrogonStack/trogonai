@@ -56,25 +56,25 @@ pub mod audit_record {
             Self::Some(Detail::from(v))
         }
     }
-    impl serde::Serialize for Detail {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for Detail {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::GatewayDecision(v) => {
-                    map.serialize_entry("gatewayDecision", v)?;
+                    map.serialize_entry("gatewayDecision", &**v)?;
                 }
                 Self::CredentialUse(v) => {
-                    map.serialize_entry("credentialUse", v)?;
+                    map.serialize_entry("credentialUse", &**v)?;
                 }
                 Self::Change(v) => {
-                    map.serialize_entry("change", v)?;
+                    map.serialize_entry("change", &**v)?;
                 }
                 Self::WriterLifecycle(v) => {
-                    map.serialize_entry("writerLifecycle", v)?;
+                    map.serialize_entry("writerLifecycle", &**v)?;
                 }
             }
             map.end()
