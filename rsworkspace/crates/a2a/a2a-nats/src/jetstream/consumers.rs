@@ -1,21 +1,23 @@
 //! JetStream consumer configs for A2A task event delivery.
 //!
-//! Task event subjects are scoped to the task, not the request (ADR#0055), so a
-//! filter narrows delivery by `task_id` and concurrent subscribers of the same
-//! task are told apart in process by the `Trogon-Req-Id` header.
+//! Task event subjects are scoped to the task and to the caller the task runs for,
+//! not to the request (ADR#0055, ADR#0082), so a filter narrows delivery by
+//! `task_id` and principal, and concurrent subscribers of the same task are told
+//! apart in process by the `Trogon-Req-Id` header.
 //!
 //! Three flavors:
-//! - `stream_events_consumer`: filters on one `{task_id}` and delivers everything
-//!   from sequence 0. Used by `message/stream` once the bootstrap reply has named
-//!   the task.
+//! - `stream_events_consumer`: filters on one `{task_id}` of one caller and delivers
+//!   everything from sequence 0. Used by `message/stream` once the bootstrap reply
+//!   has named the task.
 //! - `gateway_stream_events_consumer`: the gateway never sees the bootstrap reply,
 //!   because the agent answers the caller's inbox directly, so it cannot narrow by
-//!   `task_id` and filters every task instead, demuxing on `Trogon-Req-Id`. It
-//!   starts from the stream head observed when the request was admitted, because a
-//!   filter that wide cannot afford to replay.
-//! - `resubscribe_consumer`: filters on one `{task_id}` and uses `ByStartSequence`
-//!   from a client-supplied `last_seq + 1`. Used by `tasks/resubscribe` for
-//!   reconnect-after-disconnect, skipping already-seen events without replaying.
+//!   `task_id` and filters every task of the caller instead, demuxing on
+//!   `Trogon-Req-Id`. It starts from the stream head observed when the request was
+//!   admitted, because a filter that wide cannot afford to replay.
+//! - `resubscribe_consumer`: filters on one `{task_id}` of one caller and uses
+//!   `ByStartSequence` from a client-supplied `last_seq + 1`. Used by
+//!   `tasks/resubscribe` for reconnect-after-disconnect, skipping already-seen
+//!   events without replaying.
 
 use async_nats::jetstream::consumer::pull::Config;
 
@@ -24,14 +26,16 @@ use async_nats::jetstream::consumer::pull::Config;
 pub type PullConfig = Config;
 
 use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy, ReplayPolicy};
+use trogon_identity_types::SubjectPrincipal;
 
 use crate::a2a_prefix::A2aPrefix;
 use crate::constants::INACTIVE_THRESHOLD;
-use crate::nats::subjects::subscriptions::TaskAllEventsSubject;
+use crate::nats::subjects::subscriptions::{CallerTaskEventsSubject, TaskAllEventsSubject};
 use crate::nats::subjects::tasks::TaskEventsSubject;
 use crate::task_id::A2aTaskId;
 
-/// Durable gateway egress consumer on the full task-events filter.
+/// Durable gateway egress consumer on the full task-events filter, every task of
+/// every caller.
 pub fn gateway_events_consumer(prefix: &A2aPrefix, durable_name: &str, max_ack_pending: i64) -> Config {
     Config {
         durable_name: Some(durable_name.to_string()),
@@ -49,12 +53,12 @@ pub fn gateway_events_consumer(prefix: &A2aPrefix, durable_name: &str, max_ack_p
 ///
 /// Delivery starts at the beginning of the task's history rather than at the head,
 /// because the consumer can only be created after the reply and the agent may already
-/// have published. What that replays is bounded to one task, and the reader demuxes on
-/// `Trogon-Req-Id`, so events of earlier or concurrent subscriptions to the same task
-/// are dropped instead of reaching this caller.
-pub fn stream_events_consumer(prefix: &A2aPrefix, task_id: &A2aTaskId) -> Config {
+/// have published. What that replays is bounded to one task of this caller, and the
+/// reader demuxes on `Trogon-Req-Id`, so events of earlier or concurrent subscriptions
+/// to the same task are dropped instead of reaching this caller.
+pub fn stream_events_consumer(prefix: &A2aPrefix, task_id: &A2aTaskId, caller: &SubjectPrincipal) -> Config {
     Config {
-        filter_subject: TaskEventsSubject::new(prefix, task_id).to_string(),
+        filter_subject: TaskEventsSubject::new(prefix, task_id, caller).to_string(),
         deliver_policy: DeliverPolicy::All,
         ack_policy: AckPolicy::Explicit,
         replay_policy: ReplayPolicy::Instant,
@@ -67,14 +71,19 @@ pub fn stream_events_consumer(prefix: &A2aPrefix, task_id: &A2aTaskId) -> Config
 /// Gateway-side `message/stream` consumer.
 ///
 /// Unlike [`stream_events_consumer`] this one has no `task_id` to filter on, so it
-/// sees every task's events and the pump drops what is not its request. `last_seq`
-/// is the events stream head read before the request was forwarded: delivery
-/// resumes at the next sequence, so the pump never walks and acks history that
-/// predates its own request, and nothing published after admission can slip past
-/// the consumer while it is being created.
-pub fn gateway_stream_events_consumer(prefix: &A2aPrefix, last_seq: u64, max_ack_pending: i64) -> Config {
+/// sees every task of the caller and the pump drops what is not its request.
+/// `last_seq` is the events stream head read before the request was forwarded:
+/// delivery resumes at the next sequence, so the pump never walks and acks history
+/// that predates its own request, and nothing published after admission can slip
+/// past the consumer while it is being created.
+pub fn gateway_stream_events_consumer(
+    prefix: &A2aPrefix,
+    caller: &SubjectPrincipal,
+    last_seq: u64,
+    max_ack_pending: i64,
+) -> Config {
     Config {
-        filter_subject: TaskAllEventsSubject::new(prefix).to_string(),
+        filter_subject: CallerTaskEventsSubject::new(prefix, caller).to_string(),
         deliver_policy: DeliverPolicy::ByStartSequence {
             start_sequence: last_seq.saturating_add(1),
         },
@@ -86,18 +95,24 @@ pub fn gateway_stream_events_consumer(prefix: &A2aPrefix, last_seq: u64, max_ack
     }
 }
 
-pub fn resubscribe_consumer(prefix: &A2aPrefix, task_id: &A2aTaskId, last_seq: u64) -> Config {
-    resubscribe_consumer_with_flow(prefix, task_id, last_seq, 256)
+pub fn resubscribe_consumer(
+    prefix: &A2aPrefix,
+    task_id: &A2aTaskId,
+    caller: &SubjectPrincipal,
+    last_seq: u64,
+) -> Config {
+    resubscribe_consumer_with_flow(prefix, task_id, caller, last_seq, 256)
 }
 
 pub fn resubscribe_consumer_with_flow(
     prefix: &A2aPrefix,
     task_id: &A2aTaskId,
+    caller: &SubjectPrincipal,
     last_seq: u64,
     max_ack_pending: i64,
 ) -> Config {
     Config {
-        filter_subject: TaskEventsSubject::new(prefix, task_id).to_string(),
+        filter_subject: TaskEventsSubject::new(prefix, task_id, caller).to_string(),
         deliver_policy: DeliverPolicy::ByStartSequence {
             start_sequence: last_seq.saturating_add(1),
         },

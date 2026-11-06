@@ -10,7 +10,7 @@ use async_nats::{AuthError, Client, ConnectOptions, Event};
 use nkeys::KeyPair;
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::{info, instrument, warn};
+use tracing::{Event as TraceEvent, Level, Value, info, instrument, warn};
 use trogon_semconv::span::NATS_CONNECT;
 use trogon_std::env::{ReadEnv, SystemEnv};
 use trogon_std::tls::install_default_crypto_provider;
@@ -25,7 +25,10 @@ pub enum ConnectError {
         #[source]
         error: SettingError,
     },
-    #[error("Failed to connect to NATS servers {servers:?}: {error}")]
+    /// The message names only the kind of failure. The servers, and a source that
+    /// can name one such as a TLS hostname mismatch, stay out of it because
+    /// callers forward it to remote clients; `connect` and `connect_once` log both.
+    #[error("Failed to connect to NATS: {}", error.kind())]
     ConnectionFailed {
         servers: Vec<String>,
         #[source]
@@ -182,17 +185,18 @@ async fn prepare(config: &NatsConfig) -> Result<ConnectOptions, ConnectError> {
         return Err(ConnectError::NoServers);
     }
     let tls = tls(config)?;
+    let servers = servers_for_logging(&config.servers);
     let auth = config.auth.description();
     let transport = tls.description();
     info!(
-        servers = ?config.servers,
+        servers = ?servers,
         auth,
         tls = transport,
         "Connecting to NATS"
     );
     if *tls == NatsTls::Disabled {
         warn!(
-            servers = ?config.servers,
+            servers = ?servers,
             "NATS TLS is disabled, which is only for tests and local debugging"
         );
     }
@@ -204,16 +208,11 @@ fn connected(config: &NatsConfig, result: Result<Client, async_nats::ConnectErro
     let auth = config.auth.description();
     match result {
         Ok(client) => {
-            info!(servers = ?config.servers, auth, "Connected to NATS");
+            info!(servers = ?servers_for_logging(&config.servers), auth, "Connected to NATS");
             Ok(client)
         }
         Err(e) => {
-            warn!(
-                error = %e,
-                servers = ?config.servers,
-                auth,
-                "Failed to connect to NATS"
-            );
+            log_connect_failure(&e, config);
             Err(ConnectError::ConnectionFailed {
                 servers: config.servers.clone(),
                 error: e,
@@ -222,9 +221,78 @@ fn connected(config: &NatsConfig, result: Result<Client, async_nats::ConnectErro
     }
 }
 
+fn log_connect_failure(error: &async_nats::ConnectError, config: &NatsConfig) {
+    let servers = servers_for_logging(&config.servers);
+    log_connect_failure_to_facade(error, config, &servers);
+
+    static METADATA: tracing::Metadata<'static> = tracing::metadata! {
+        name: "event crates/platform/trogon-nats/src/connect.rs:212",
+        target: module_path!(),
+        level: Level::WARN,
+        fields: &["message", "error", "servers", "auth"],
+        callsite: &CALLSITE,
+        kind: tracing::metadata::Kind::EVENT,
+    };
+    static CALLSITE: tracing::__macro_support::MacroCallsite = tracing::__macro_support::MacroCallsite::new(&METADATA);
+
+    let interest = CALLSITE.interest();
+    if interest.is_never()
+        || (interest.is_sometimes() && !tracing::dispatcher::get_default(|subscriber| subscriber.enabled(&METADATA)))
+    {
+        return;
+    }
+    let message = "Failed to connect to NATS";
+    let error = tracing::field::display(error);
+    let servers = tracing::field::debug(&servers);
+    let auth = config.auth.description();
+    let values: [Option<&dyn Value>; 4] = [Some(&message), Some(&error), Some(&servers), Some(&auth)];
+    TraceEvent::dispatch(&METADATA, &METADATA.fields().value_set_all(&values));
+}
+
+fn servers_for_logging(servers: &[String]) -> Vec<String> {
+    servers.iter().map(|server| redact_server_userinfo(server)).collect()
+}
+
+fn redact_server_userinfo(server: &str) -> String {
+    let authority_start = server.find("://").map_or(0, |scheme_end| scheme_end + 3);
+    let authority = &server[authority_start..];
+    let authority_end = authority.find(['/', '?', '#']).unwrap_or(authority.len());
+    let authority = &authority[..authority_end];
+    let Some(userinfo_end) = authority.rfind('@') else {
+        return server.to_owned();
+    };
+    let userinfo_end = authority_start + userinfo_end;
+
+    format!("{}<redacted>{}", &server[..authority_start], &server[userinfo_end..])
+}
+
+fn log_connect_failure_to_facade(error: &async_nats::ConnectError, config: &NatsConfig, servers: &[String]) {
+    if tracing::dispatcher::has_been_set() {
+        return;
+    }
+    let metadata = log::Metadata::builder()
+        .level(log::Level::Warn)
+        .target(module_path!())
+        .build();
+    let logger = log::logger();
+    if log::max_level() < log::LevelFilter::Warn || !logger.enabled(&metadata) {
+        return;
+    }
+    logger.log(
+        &log::Record::builder()
+            .metadata(metadata)
+            .args(format_args!(
+                "Failed to connect to NATS error={error} servers={:?} auth={}",
+                servers,
+                config.auth.description()
+            ))
+            .build(),
+    );
+}
+
 /// Returns before any server answers and keeps dialing, then reconnecting, in
 /// the background, so it only fails on settings it cannot use.
-#[instrument(name = NATS_CONNECT, skip(config), fields(servers = ?config.servers, auth = %config.auth.description(), timeout_secs = ?connection_timeout.as_secs()))]
+#[instrument(name = NATS_CONNECT, skip(config), fields(servers = ?servers_for_logging(&config.servers), auth = %config.auth.description(), timeout_secs = ?connection_timeout.as_secs()))]
 pub async fn connect(config: &NatsConfig, connection_timeout: Duration) -> Result<Client, ConnectError> {
     let opts = prepare(config).await?;
     let result = apply_reconnect_options(opts, connection_timeout)
@@ -243,7 +311,7 @@ pub async fn connect(config: &NatsConfig, connection_timeout: Duration) -> Resul
 ///
 /// Give a caller's token as [`CredentialValue::Literal`] so it is never read as
 /// a `file://` or `env://` reference.
-#[instrument(name = NATS_CONNECT, skip(config, auth), fields(servers = ?config.servers, auth = %auth.description(), timeout_secs = ?connection_timeout.as_secs()))]
+#[instrument(name = NATS_CONNECT, skip(config, auth), fields(servers = ?servers_for_logging(&config.servers), auth = %auth.description(), timeout_secs = ?connection_timeout.as_secs()))]
 pub async fn connect_once(
     config: &NatsConfig,
     auth: NatsAuth,

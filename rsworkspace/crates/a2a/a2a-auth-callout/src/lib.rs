@@ -12,6 +12,7 @@
 )]
 
 pub mod account_resolver;
+pub mod admission_keys;
 pub mod bridge_mint;
 pub mod caller_jwt_header;
 pub mod constants;
@@ -30,9 +31,16 @@ pub mod wire;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 
-pub use account_resolver::{AccountResolver, AccountResolverError, RequestedAccount, StaticAccountResolver};
+pub use account_resolver::{AccountResolverError, RequestedAccount};
+pub use admission_keys::{
+    AccountPublicKeyError, AccountSigningKey, AdmissionKeyError, AdmissionKeys, AuthAccount, CalloutXkey,
+    IssuerPublicKey, SigningKeyCustody, TenantAccount, TenantSigningKeys, admission_keys_from_env,
+};
 
-pub use bridge_mint::{BridgeAuthScheme, BridgeClientInfo, BridgeConnectOpts, BridgeMintRequest, BridgeMintResponse};
+pub use bridge_mint::{
+    BridgeClientInfo, BridgeCredential, BridgeCredentialError, BridgeMintRequest, BridgeMintResponse,
+    SealedBridgeCredential,
+};
 pub use caller_jwt_header::CallerJwtHeaderValue;
 pub use constants::CALLER_JWT_HEADER_NAME;
 pub use denial_category::DenialCategory;
@@ -41,15 +49,17 @@ pub use error::AuthCalloutError;
 pub use jwt::{
     AccountName, AudienceAccount, CallerId, MintedUserJwt, NatsPermissionClaims, NatsSubjectPermission, SigningKey,
     SpiceDbPrincipal, SpiceDbSubject, UserJwtClaims, UserJwtSubject, caller_id_from_minted_jwt,
-    decode_nats_user_payload,
+    decode_nats_user_payload, subject_principal_from_minted_jwt,
 };
 pub use permissions::{
-    IssuedPermissions, SubjectAclContext, SubjectAclTemplate, SubjectPattern, SubjectPatternError, TemplateError,
+    AdmissionRoute, CallerGrant, IssuedPermissions, SubjectAclContext, SubjectAclTemplate, SubjectPattern,
+    SubjectPatternError, TemplateError,
 };
 pub use signing_key_source::{
-    EnvSigningKeySource, FileSigningKeySource, KeyVersion, KeyVersionError, MintingMaterial, SigningKeyHandle,
-    SigningKeySource, StaticSigningKeySource, VaultSigningKeySource, signing_key_source_from_env,
+    EnvSigningKeySource, FileSigningKeySource, IssuerPublicKeys, IssuerPublicKeysError, KeyVersion, KeyVersionError,
+    MintingMaterial, SigningKeyHandle, SigningKeySource, StaticSigningKeySource, VaultSigningKeySource, VerifyingKey,
+    VerifyingKeySource, signing_key_source_from_env,
 };
 pub use subscriber::{DenialPublisherConfig, Subscriber};
 pub use wire::AuthCalloutWireCodec;
-pub use wire::{NkeyPublic, NkeySeed, XkeyPublic};
+pub use wire::{NkeyPublic, XkeyPublic};

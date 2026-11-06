@@ -12,7 +12,11 @@ fn config() -> GatewayStreamingIngressConfig {
     GatewayStreamingIngressConfig::new(StreamingMaxAckPending::new(1), StreamingMaxInflightPerCaller::new(1))
 }
 
-fn spawn(caller: &CallerKey) -> StreamingIngressSpawn {
+fn principal() -> SubjectPrincipal {
+    SubjectPrincipal::from_tokens("person", "alice").expect("principal")
+}
+
+fn spawn() -> StreamingIngressSpawn {
     StreamingIngressSpawn {
         kind: StreamingIngressKind::TasksResubscribe {
             req_id: ReqId::from_header("resume-request"),
@@ -20,7 +24,7 @@ fn spawn(caller: &CallerKey) -> StreamingIngressSpawn {
             last_seq: 0,
         },
         reply: "_INBOX.startup".into(),
-        caller_key: caller.clone(),
+        caller: principal(),
     }
 }
 
@@ -40,7 +44,7 @@ async fn event_head_tracks_persisted_events_and_missing_storage_is_not_a_cursor(
     .await
     .expect("events stream");
     assert_eq!(events_stream_last_seq(&client, &prefix).await, Some(0));
-    let subject = TaskEventsSubject::new(&prefix, &A2aTaskId::new("task-1").expect("task")).to_string();
+    let subject = TaskEventsSubject::new(&prefix, &A2aTaskId::new("task-1").expect("task"), &principal()).to_string();
     let ack = js
         .publish(subject, bytes::Bytes::from_static(b"stored event"))
         .await
@@ -57,20 +61,13 @@ async fn missing_stream_returns_the_callers_admission_permit() {
     let server = JetStreamTestServer::start().await;
     let client = server.client().await;
     let prefix = A2aPrefix::new("startup").expect("prefix");
-    let caller = CallerKey::new("alice").expect("caller");
+    let caller = principal();
     let gate = StreamingIngressGate::new(config());
     let permit = gate.try_acquire(&caller).expect("first request");
     assert!(gate.try_acquire(&caller).is_none());
     tokio::time::timeout(
         Duration::from_secs(5),
-        run_streaming_ingress_pump(
-            client,
-            prefix,
-            config(),
-            permit,
-            spawn(&caller),
-            CancellationToken::new(),
-        ),
+        run_streaming_ingress_pump(client, prefix, config(), permit, spawn(), CancellationToken::new()),
     )
     .await
     .expect("failed startup returns");
@@ -99,19 +96,12 @@ async fn exhausted_broker_consumer_capacity_returns_the_callers_admission_permit
         })
         .await
         .expect("reserve sole consumer slot");
-    let caller = CallerKey::new("alice").expect("caller");
+    let caller = principal();
     let gate = StreamingIngressGate::new(config());
     let permit = gate.try_acquire(&caller).expect("first request");
     tokio::time::timeout(
         Duration::from_secs(5),
-        run_streaming_ingress_pump(
-            client,
-            prefix,
-            config(),
-            permit,
-            spawn(&caller),
-            CancellationToken::new(),
-        ),
+        run_streaming_ingress_pump(client, prefix, config(), permit, spawn(), CancellationToken::new()),
     )
     .await
     .expect("rejected consumer returns");

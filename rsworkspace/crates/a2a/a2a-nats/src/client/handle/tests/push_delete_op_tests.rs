@@ -37,8 +37,8 @@ fn error_response(code: i32, msg: &str) -> (async_nats::HeaderMap, Bytes) {
 async fn push_delete_targets_agent_subject_by_default() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = ok_response();
-    nats.set_response_wire("a2a.v1.agents.test-agent.push.delete", headers, body);
-    let client = A2aClient::new(prefix(), agent_id(), nats, ());
+    nats.set_response_wire("a2a.v1.agents.test-agent.person.alice.push.delete", headers, body);
+    let client = A2aClient::new(prefix(), agent_id(), caller(), nats, ());
     client.push_delete(&delete_request("c-1")).await.unwrap();
 }
 
@@ -46,9 +46,9 @@ async fn push_delete_targets_agent_subject_by_default() {
 async fn push_delete_targets_gateway_subject_under_gateway_routing() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = ok_response();
-    nats.set_response_wire("a2a.v1.gateway.test-agent.push.delete", headers, body);
+    nats.set_response_wire("a2a.v1.gateway.test-agent.person.alice.push.delete", headers, body);
     let jwt = MintedUserJwt::new("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjk5OTk5OTk5OTl9.signature").unwrap();
-    let client = A2aClient::new(prefix(), agent_id(), nats, ()).routing_via_gateway_ingress(jwt);
+    let client = A2aClient::new(prefix(), agent_id(), caller(), nats, ()).routing_via_gateway_ingress(jwt);
     client.push_delete(&delete_request("c-gw")).await.unwrap();
 }
 
@@ -56,8 +56,8 @@ async fn push_delete_targets_gateway_subject_under_gateway_routing() {
 async fn push_delete_propagates_task_not_found() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = error_response(-32001, "missing");
-    nats.set_response_wire("a2a.v1.agents.test-agent.push.delete", headers, body);
-    let client = A2aClient::new(prefix(), agent_id(), nats, ());
+    nats.set_response_wire("a2a.v1.agents.test-agent.person.alice.push.delete", headers, body);
+    let client = A2aClient::new(prefix(), agent_id(), caller(), nats, ());
     assert!(matches!(
         client.push_delete(&delete_request("c")).await,
         Err(ClientError::TaskNotFound)
@@ -68,7 +68,7 @@ async fn push_delete_propagates_task_not_found() {
 async fn push_delete_propagates_transport_errors() {
     let nats = AdvancedMockNatsClient::new();
     nats.fail_next_request();
-    let client = A2aClient::new(prefix(), agent_id(), nats, ());
+    let client = A2aClient::new(prefix(), agent_id(), caller(), nats, ());
     assert!(matches!(
         client.push_delete(&delete_request("c")).await,
         Err(ClientError::Transport(_))
