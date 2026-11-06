@@ -19,7 +19,6 @@ use trogon_std::uuid::UuidV7Generator;
 use trogon_workload_identity::{ActivationAudit, IdentityDriver, IdentityStore};
 
 use crate::audit::AuditSink;
-use crate::audit_config::AuditConfig;
 use crate::config::{Config, PolicyInput, TlsInput};
 use crate::connection::Proxy;
 use crate::constants::AUDIT_CONNECT_TIMEOUT;
@@ -93,7 +92,7 @@ pub enum StartupError {
 /// Starts the proxy with the system resolver and the JetStream audit writer.
 pub async fn start(config: Config) -> Result<Server, StartupError> {
     validate_policy_transport(&config)?;
-    let audit = connect_audit(&config.audit).await.map_err(StartupError::Audit)?;
+    let audit = connect_audit(&config).await.map_err(StartupError::Audit)?;
     let activation = Arc::new(WorkloadActivationAudit::new(audit.activation_recorder()));
     start_with_sources(config, Arc::new(SystemResolver), Arc::new(audit), Some(activation)).await
 }
@@ -101,18 +100,32 @@ pub async fn start(config: Config) -> Result<Server, StartupError> {
 /// The audit writer over the configured stream. The drain task is not spawned
 /// here: [`Server::run`] runs it for as long as the server serves.
 async fn connect_audit(
-    config: &AuditConfig,
+    config: &Config,
 ) -> Result<WriterAudit<JetStreamSink<async_nats::jetstream::Context>>, ConnectError> {
-    let client = trogon_nats::connect(&config.nats, AUDIT_CONNECT_TIMEOUT).await?;
+    let client = connect_profile(config).await?;
     let sink = JetStreamSink::with_defaults(async_nats::jetstream::new(client));
     let stamper = Stamper::new(SystemClock, UuidV7Generator);
-    let writer = AuditWriter::new(sink, config.identity.clone(), WriterConfig::default(), &stamper);
-    let identity = &config.identity;
+    let writer = AuditWriter::new(sink, config.audit.identity.clone(), WriterConfig::default(), &stamper);
+    let identity = &config.audit.identity;
     Ok(WriterAudit::new(
         writer,
         identity.tenant().clone(),
         identity.project().clone(),
     ))
+}
+
+async fn connect_profile(config: &Config) -> Result<async_nats::Client, ConnectError> {
+    match &config.tls {
+        TlsInput::Workload(workload) => {
+            trogon_nats::connect_with_inbox_prefix(
+                &config.audit.nats,
+                AUDIT_CONNECT_TIMEOUT,
+                workload.reply_inbox_prefix(),
+            )
+            .await
+        }
+        TlsInput::Files(_) => trogon_nats::connect(&config.audit.nats, AUDIT_CONNECT_TIMEOUT).await,
+    }
 }
 
 pub async fn start_with(
@@ -146,9 +159,7 @@ async fn start_with_sources(
             } else {
                 policy.clone()
             };
-            let client = trogon_nats::connect(&config.audit.nats, AUDIT_CONNECT_TIMEOUT)
-                .await
-                .map_err(StartupError::Audit)?;
+            let client = connect_profile(&config).await.map_err(StartupError::Audit)?;
             let (snapshot, driver) = KvSnapshot::open(client, policy)
                 .await
                 .map_err(StartupError::LivePolicy)?;
@@ -164,9 +175,7 @@ async fn start_with_sources(
         TlsInput::Workload(workload) => {
             let activation = activation.ok_or(StartupError::ActivationAuditRequired)?;
             let (identity, driver) = IdentityStore::new(workload.identity().clone(), activation);
-            let client = trogon_nats::connect(&config.audit.nats, AUDIT_CONNECT_TIMEOUT)
-                .await
-                .map_err(StartupError::Audit)?;
+            let client = connect_profile(&config).await.map_err(StartupError::Audit)?;
             let registration = RegistrationDriver::open(client, workload.clone(), identity.clone())
                 .await
                 .map_err(StartupError::Registration)?;
