@@ -25,6 +25,7 @@ async fn capacity_refuses_another_request_and_shutdown_releases_the_slot() -> Te
     let (completed, mut completion) = tokio::sync::mpsc::unbounded_channel();
     relay.forward(
         client.clone(),
+        &principal(),
         "agent".into(),
         "caller".into(),
         Request::new(),
@@ -40,6 +41,7 @@ async fn capacity_refuses_another_request_and_shutdown_releases_the_slot() -> Te
     assert!(matches!(
         relay.forward(
             client.clone(),
+            &principal(),
             "agent".into(),
             "caller".into(),
             Request::new(),
@@ -47,7 +49,7 @@ async fn capacity_refuses_another_request_and_shutdown_releases_the_slot() -> Te
             shutdown.clone(),
             |_| async {},
         ),
-        Err(TryAcquireError::NoPermits)
+        Err(RelayAdmissionError::Global(TryAcquireError::NoPermits))
     ));
     shutdown.cancel();
     released(&relay).await?;
@@ -62,26 +64,31 @@ async fn expiry_and_transport_failure_release_the_slot() -> TestResult {
     let _agent = client.subscribe("agent").await?;
     client.flush().await?;
     let relay = ImportedReplyRelay::new(1);
-    relay.forward(
-        client.clone(),
-        "agent".into(),
-        "caller".into(),
-        Request::new(),
-        Duration::from_millis(10),
-        CancellationToken::new(),
-        |_| async {},
-    )?;
-    released(&relay).await?;
-    relay.forward(
-        client,
-        "missing".into(),
-        "caller".into(),
-        Request::new(),
-        Duration::from_secs(5),
-        CancellationToken::new(),
-        |_| async {},
-    )?;
-    released(&relay).await
+    for _ in 0..=DEFAULT_STREAMING_MAX_INFLIGHT {
+        relay.forward(
+            client.clone(),
+            &principal(),
+            "agent".into(),
+            "caller".into(),
+            Request::new(),
+            Duration::from_millis(10),
+            CancellationToken::new(),
+            |_| async {},
+        )?;
+        released(&relay).await?;
+        relay.forward(
+            client.clone(),
+            &principal(),
+            "missing".into(),
+            "caller".into(),
+            Request::new(),
+            Duration::from_secs(5),
+            CancellationToken::new(),
+            |_| async {},
+        )?;
+        released(&relay).await?;
+    }
+    Ok(())
 }
 
 #[tokio::test]
@@ -98,6 +105,7 @@ async fn transport_failures_reach_completion_and_release_capacity() -> TestResul
         let (completed, completion) = tokio::sync::oneshot::channel();
         relay.forward(
             client.clone(),
+            &principal(),
             subject.into(),
             reply.into(),
             Request::new(),
@@ -123,4 +131,8 @@ async fn transport_failures_reach_completion_and_release_capacity() -> TestResul
         released(&relay).await?;
     }
     Ok(())
+}
+
+fn principal() -> SubjectPrincipal {
+    SubjectPrincipal::from_tokens("person", "relay-test").expect("principal")
 }

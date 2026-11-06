@@ -44,6 +44,7 @@ pub use non_unary_relay_timeout::{NonUnaryRelayTimeout, NonUnaryRelayTimeoutErro
 pub mod policy;
 pub mod push_dlq_mirror;
 pub mod runtime;
+mod telemetry;
 
 pub use config::{Args, Config, ConfigError};
 pub use runtime::RuntimeError;

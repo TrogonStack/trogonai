@@ -644,7 +644,9 @@ async fn dispatch_routed<E: ReadEnv>(
         method_dots.as_str(),
     );
 
+    let stream_shutdown = shutdown.child_token();
     let disposition = if reply.as_str().starts_with("_R_.") {
+        let completion_stream_shutdown = stream_shutdown.clone();
         let request = async_nats::Request::new()
             .headers(headers_owned.clone())
             .payload(payload.clone());
@@ -678,6 +680,7 @@ async fn dispatch_routed<E: ReadEnv>(
         );
         match crate::runtime::imported_reply_relay::IMPORTED_REPLY_RELAY.forward(
             client.clone(),
+            &caller,
             agent_subject.clone().into(),
             reply.clone(),
             request,
@@ -688,6 +691,7 @@ async fn dispatch_routed<E: ReadEnv>(
                 let failure_reply = match outcome {
                     Ok(()) => None,
                     Err(error) => {
+                        completion_stream_shutdown.cancel();
                         warn!(error = %error, "gateway imported reply relay failed");
                         completion_audit.outcome = AuditOutcome::Err {
                             code: error.code(),
@@ -740,7 +744,7 @@ async fn dispatch_routed<E: ReadEnv>(
                     &config.a2a_prefix,
                     streaming_ingress_config,
                     streaming_ingress_gate,
-                    shutdown.clone(),
+                    stream_shutdown,
                     method_dots.as_str(),
                     &headers_owned,
                     payload.as_ref(),
@@ -1066,7 +1070,7 @@ enum ForwardError {
     #[error(transparent)]
     Publish(#[from] async_nats::client::PublishError),
     #[error(transparent)]
-    Capacity(#[from] tokio::sync::TryAcquireError),
+    Capacity(#[from] crate::runtime::imported_reply_relay::RelayAdmissionError),
 }
 
 async fn forward_to_agent<E: ReadEnv>(
